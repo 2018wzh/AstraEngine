@@ -2548,7 +2548,7 @@ mod windows {
         window: Option<&Window>,
         request: ConfirmationRequest,
     ) -> Result<ConfirmationResult, PlatformError> {
-        // Win32's original Minori dialog uses the owning game window caption
+        // Win32's original Musica dialog uses the owning game window caption
         // as its message-box caption.  Read the live parent caption at the
         // presentation boundary so the native title follows profile/window
         // composition without copying a commercial title into Family ABI or
@@ -2706,7 +2706,7 @@ mod windows {
             closed: false,
         };
 
-        // The original Minori prompt is a compact owner-modal dialog.  Keep
+        // The original Musica prompt is a compact owner-modal dialog.  Keep
         // the same base geometry at 96 DPI and scale every child from the
         // owner window's effective DPI so a high-DPI desktop does not clip
         // the Japanese labels or move the default button out of the client
@@ -3699,7 +3699,7 @@ mod windows {
         match key {
             // VK_RETURN and VK_Y accept; VK_ESCAPE and VK_N cancel.  The
             // explicit Y/N mapping matches the labels shown by the original
-            // Minori dialog and is independent of the focused child control.
+            // Musica dialog and is independent of the focused child control.
             0x0d | 0x59 => Some(ConfirmationResult::Accepted),
             0x1b | 0x4e => Some(ConfirmationResult::Cancelled),
             _ => None,

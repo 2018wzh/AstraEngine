@@ -64,18 +64,18 @@ class AstraEmuDesktopPackageTests(unittest.TestCase):
         )
         self.assertEqual(environment["RUSTFLAGS"], "-C target-feature=-crt-static")
 
-    def test_minori_distribution_compiles_only_the_explicit_video_provider(self):
+    def test_musica_distribution_compiles_only_the_explicit_video_provider(self):
         self.assertEqual(
-            build_astraemu_desktop.desktop_features("minori", "ffmpeg-vcpkg"),
+            build_astraemu_desktop.desktop_features("musica", "ffmpeg-vcpkg"),
             (
-                "astra-emu-minori/dynamic-plugin-export",
+                "astra-emu-musica/dynamic-plugin-export",
                 "astra-emu-manager/ffmpeg-vcpkg",
                 "astra-emu-cli/ffmpeg-vcpkg",
             ),
         )
         self.assertEqual(
-            build_astraemu_desktop.desktop_features("minori", "wmf"),
-            ("astra-emu-minori/dynamic-plugin-export",),
+            build_astraemu_desktop.desktop_features("musica", "wmf"),
+            ("astra-emu-musica/dynamic-plugin-export",),
         )
         self.assertEqual(
             build_astraemu_desktop.desktop_features("fvp", None),
@@ -108,8 +108,8 @@ class AstraEmuDesktopPackageTests(unittest.TestCase):
 
     def test_family_library_name_is_target_and_family_specific(self):
         self.assertEqual(
-            build_astraemu_desktop.family_library_name("minori", "x86_64-pc-windows-msvc"),
-            "astra_emu_minori.dll",
+            build_astraemu_desktop.family_library_name("musica", "x86_64-pc-windows-msvc"),
+            "astra_emu_musica.dll",
         )
         self.assertEqual(
             build_astraemu_desktop.family_library_name("fvp", "x86_64-unknown-linux-gnu"),
@@ -123,10 +123,10 @@ class AstraEmuDesktopPackageTests(unittest.TestCase):
             source.write_text("notice", encoding="utf-8")
             output = root / "output"
             output.mkdir()
-            build_astraemu_desktop.copy_notice(source, output, "MINORI_THIRD_PARTY_NOTICES.md")
-            self.assertEqual((output / "MINORI_THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8"), "notice")
+            build_astraemu_desktop.copy_notice(source, output, "MUSICA_THIRD_PARTY_NOTICES.md")
+            self.assertEqual((output / "MUSICA_THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8"), "notice")
             with self.assertRaises(SystemExit) as raised:
-                build_astraemu_desktop.copy_notice(source, output, "MINORI_THIRD_PARTY_NOTICES.md")
+                build_astraemu_desktop.copy_notice(source, output, "MUSICA_THIRD_PARTY_NOTICES.md")
             self.assertEqual(str(raised.exception), "ASTRA_EMU_DESKTOP_NOTICE_COLLISION")
 
 

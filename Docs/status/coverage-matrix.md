@@ -7,10 +7,10 @@ Load 保留完整按钮条。原版标题 Load 显示 `Auto Save`，剧情 Save/
 显示 `page #01` 的上下文差异已进入 VM：剧情入口从全局槽 20 开始，标题入口从槽 0
 开始；槽 ID 持久化映射、同点视觉和完整 save/load 路线仍为 blocking。
 
-2026 年 9 月 1 日 Minori 原版 locale coverage：mount options v3 要求日文原版变体、
+2026 年 9 月 1 日 Musica 原版 locale coverage：mount options v3 要求日文原版变体、
 严格 CP932 locale hook 和非符号链接 `perseus.exe`；PAZ/ANI/.sc 的字节边界均拒绝
 malformed input，message publisher 不再调用 translation Hook。中文 `.mys` 与本地化
-exe 仍仅是脱敏 inventory 事实，未被加入 source resolution。201 项 Minori library
+exe 仍仅是脱敏 inventory 事实，未被加入 source resolution。201 项 Musica library
 定向测试通过；该覆盖不代表完整路线、原版同点视觉、Release Sandbox 或 Windows E3。
 
 2026 年 9 月 1 日消息推进指示符 coverage：原版短消息截图确认下三角与正文同一行；
@@ -22,7 +22,7 @@ step、8 个 checkpoint、491 个提交/栅格帧和 2714112 个音频帧，diag
 
 2026 年 9 月 1 日持久化 message markup coverage：唯一的 `\\v\\a` 组合已在私有
 脚本 census 中定位；snapshot/backlog restore 现在重新解析可见文本，残留控制序列返回
-`ASTRA_EMU_MINORI_MESSAGE_CONTROL_NONCANONICAL`，不进行静默规范化。parser 与 snapshot
+`ASTRA_EMU_MUSICA_MESSAGE_CONTROL_NONCANONICAL`，不进行静默规范化。parser 与 snapshot
 回归通过；原版目标语音等待点尚未在有音频输出的环境复现，因此该保护不计入同点视觉或
 完整路线完成度。
 
@@ -46,7 +46,7 @@ E1/E2 provider 证据，不关闭同点视觉、完整路线、Release Sandbox �
 confirmation。该项是 E1 provider 行为证据，不提升 Release Sandbox、完整路线或 Windows E3。
 
 2026 年 8 月 31 日确认框覆盖：原版剧情 Game→Exit/Return title 的正文使用 ASCII `?`，
-标题页 Exit 不弹确认；Minori provider 的 Family ABI transaction 已同步文案，取消与
+标题页 Exit 不弹确认；Musica provider 的 Family ABI transaction 已同步文案，取消与
 接受仍分别恢复 wait 或进入返回标题/terminal。定向 provider 与 Host 结果校验通过；这
 不是完整路线、Release Sandbox 或 Windows E3 证据。
 
@@ -65,18 +65,18 @@ Release Sandbox 视觉验收或 Windows E3 已完成。
 视觉验收和 Windows E3 仍保持 blocking。
 
 2026 年 8 月 31 日原始尺寸 Host 回执覆盖：Windows/macOS Host 应用
-`RestoreOriginalSize` 后，Minori 在下一固定 step 清除并持久化 Family-owned
+`RestoreOriginalSize` 后，Musica 在下一固定 step 清除并持久化 Family-owned
 fullscreen 状态；菜单重开重新包含全屏项。新增 provider 回归覆盖切换全屏、原始
 尺寸和重开菜单，Host `Rejected`/`Unsupported` 仍保持 blocking。该覆盖只修复
 平台窗口状态与 Family transaction 的一致性，不提升 Release Sandbox、完整路线
 或 Windows E3 证据等级。
 
-2026 年 8 月 31 日 Family ABI v14 text-input coverage：Minori Save 的 Comment
+2026 年 8 月 31 日 Family ABI v14 text-input coverage：Musica Save 的 Comment
 提示改为 Host-owned `LegacyTextInputTransactionV1`。Windows 使用 DPI-aware
-owner-modal Win32 编辑框，Host 只返回一次有界结果；Minori 保存格式负责持久化
+owner-modal Win32 编辑框，Host 只返回一次有界结果；Musica 保存格式负责持久化
 注释，Host 不写入日志或 evidence。macOS/Linux/Web/Android/Headless 当前明确返回
 `PlatformNotImplemented`，等待各自原生应用 UI 或 typed Headless driver；不使用
-Slint overlay 或隐式 fallback。Family API/FFI、Manager、Minori 与平台校验测试
+Slint overlay 或隐式 fallback。Family API/FFI、Manager、Musica 与平台校验测试
 通过。本项是 E1/E2 接线证据，不是 Save 页面视觉 parity、Release Sandbox 或
 Windows E3 证据。
 
@@ -89,12 +89,12 @@ Family ABI transaction、`是(Y)`/`否(N)` 助记键和 owner-modal 生命周期
 
 2026 年 8 月 31 日 Release Sandbox 启动复核：Windows desktop builder 强制
 `+crt-static`，新的开发签名包已在同一 Sandbox 启动 AstraEMU Manager，VC runtime
-依赖阻断已关闭。该证据只覆盖包启动，不代表 Minori 路线、Headless E2、视觉/音频
+依赖阻断已关闭。该证据只覆盖包启动，不代表 Musica 路线、Headless E2、视觉/音频
 审查或 Windows E3 通过。
 
 2026 年 8 月 31 日 Window 菜单状态覆盖：原版窗口化时显示全屏切换、原始尺寸、
 禁用的高精度尺寸変更和抗锯齿四项；全屏时隐藏全屏切换，恢复原始尺寸后再显示。
-Minori family 按该状态发布三项/四项 transaction，并在执行前校验活动 transaction
+Musica family 按该状态发布三项/四项 transaction，并在执行前校验活动 transaction
 中的 item、启用状态和命令类型。定向菜单与命令测试通过；Linux 原生菜单、Headless
 GPU E2、Release Sandbox 视觉验收和 Windows E3 仍保持开放。
 
@@ -120,7 +120,7 @@ Windows E3；四路线、同点视觉、正式音频和 save/restore required ch
 blocking。
 
 2026 年 8 月 31 日确认框覆盖：原版 Windows Sandbox 的退出与返回标题确认框
-文案、按钮顺序和取消后的 wait 保持已记录，Minori 通过 Family ABI v14 发布，
+文案、按钮顺序和取消后的 wait 保持已记录，Musica 通过 Family ABI v14 发布，
 平台 Host 负责 native 呈现；Headless 不伪造 native dialog，只消费物理方向键、
 Enter/Space/Escape。旧路线输入中的 `runtime.awaiting_input` 观察键已经被 hard
 cut 拒绝，当前尚未以新序列完成完整 Release Sandbox 或 Windows E3，因此本项
@@ -129,21 +129,21 @@ cut 拒绝，当前尚未以新序列完成完整 Release Sandbox 或 Windows E3
 同轮的菜单窗口动作也通过 v14 typed system-command channel 传递。Windows/macOS
 Host 只在显式窗口绑定存在时执行原生全屏、原始尺寸恢复、缩放采样和帮助动作；
 Manager、Headless 和无窗口 CLI 对未绑定能力回送 `Unsupported`，不解释 item id、
-不伪造成功，也不留下 pending command。Minori 对 Host `Applied` 的 host-owned 操作
+不伪造成功，也不留下 pending command。Musica 对 Host `Applied` 的 host-owned 操作
 只释放挂起事务，不把窗口或外部进程状态写入 VM。About 图像、Linux GTK 原生菜单、
 帮助/浏览器实际启动和完整路线仍是未完成的正式验收项。
 
-2026 年 8 月 30 日 Family ABI v12 确认覆盖（历史记录）：Minori 的 `game_exit`、`game_return_title` 与 Host `window.close` 由 Family 发布有界 confirmation transaction，平台 Host 以 native confirmation provider 呈现，后续固定 step 回送 `Accepted` 或 `Cancelled`。取消保持底层 wait，接受才执行 terminal 或返回标题；重复、过期、错配和确认期间的 gameplay input 继续阻断。Manager、Release CLI、Headless 和 Minori 的定向回归通过；该结果属于当时身份的 E1/E2 接线证据，当前 v14、Release Sandbox、120 Hz 和 Windows E3 仍开放。
+2026 年 8 月 30 日 Family ABI v12 确认覆盖（历史记录）：Musica 的 `game_exit`、`game_return_title` 与 Host `window.close` 由 Family 发布有界 confirmation transaction，平台 Host 以 native confirmation provider 呈现，后续固定 step 回送 `Accepted` 或 `Cancelled`。取消保持底层 wait，接受才执行 terminal 或返回标题；重复、过期、错配和确认期间的 gameplay input 继续阻断。Manager、Release CLI、Headless 和 Musica 的定向回归通过；该结果属于当时身份的 E1/E2 接线证据，当前 v14、Release Sandbox、120 Hz 和 Windows E3 仍开放。
 
-2026 年 8 月 30 日 Minori 原生菜单 Auto 覆盖：Manager Core 现持有唯一的受限 wait 重绑规则，RuntimeWorld adapter、Manager 和 Release CLI Headless 共同只允许 `Input↔Time` 与 `Time→Time`；同批重复和其他类型继续阻断。开发签名 Release v21 通过 secondary-pointer 与方向键选择 Auto，再次选择后恢复 Normal。报告通过 371 fixed steps、36 条物理输入、9 个呈现帧、6 个 checkpoint且零 diagnostic；Auto 开启后的画面发生预期推进，关闭后继续运行 2 秒保持不变。保留画面已人工检查。该覆盖属于原生菜单 Auto 定向 E2，不关闭完整路线、Release Sandbox、120 Hz 性能门禁或 Windows E3。
+2026 年 8 月 30 日 Musica 原生菜单 Auto 覆盖：Manager Core 现持有唯一的受限 wait 重绑规则，RuntimeWorld adapter、Manager 和 Release CLI Headless 共同只允许 `Input↔Time` 与 `Time→Time`；同批重复和其他类型继续阻断。开发签名 Release v21 通过 secondary-pointer 与方向键选择 Auto，再次选择后恢复 Normal。报告通过 371 fixed steps、36 条物理输入、9 个呈现帧、6 个 checkpoint且零 diagnostic；Auto 开启后的画面发生预期推进，关闭后继续运行 2 秒保持不变。保留画面已人工检查。该覆盖属于原生菜单 Auto 定向 E2，不关闭完整路线、Release Sandbox、120 Hz 性能门禁或 Windows E3。
 
-2026 年 8 月 30 日 Minori 原生菜单 Skip 与 Control 覆盖：当前开发签名 Release CLI 用 secondary-pointer 打开 v11 family menu，并以物理方向键选择 Skip。定向报告通过 674 fixed steps、41 条物理输入和 4 个 checkpoint，未读消息在选择前、选择后及 10 秒后画面字节一致。受 pragma 门控的 Control 已加入对应 Host-owned message wait，避免发布同一 token 的替换 wait；173 项 Minori library tests 通过。独立空白进度的 Control 首路线随后通过 15636 fixed steps、28 条物理输入、251 个呈现帧和 3 个 checkpoint，结局影片自然完成，路线返回标题并退出，自然解锁数为 1，diagnostic 为空。三张保留画面已人工检查。该覆盖关闭当前身份的未读 Skip 定向 E2 和 Control 首路线 E2，不替代 Release Sandbox、120 Hz 性能门禁或 Windows E3。
+2026 年 8 月 30 日 Musica 原生菜单 Skip 与 Control 覆盖：当前开发签名 Release CLI 用 secondary-pointer 打开 v11 family menu，并以物理方向键选择 Skip。定向报告通过 674 fixed steps、41 条物理输入和 4 个 checkpoint，未读消息在选择前、选择后及 10 秒后画面字节一致。受 pragma 门控的 Control 已加入对应 Host-owned message wait，避免发布同一 token 的替换 wait；173 项 Musica library tests 通过。独立空白进度的 Control 首路线随后通过 15636 fixed steps、28 条物理输入、251 个呈现帧和 3 个 checkpoint，结局影片自然完成，路线返回标题并退出，自然解锁数为 1，diagnostic 为空。三张保留画面已人工检查。该覆盖关闭当前身份的未读 Skip 定向 E2 和 Control 首路线 E2，不替代 Release Sandbox、120 Hz 性能门禁或 Windows E3。
 
-2026 年 8 月 30 日 Minori Skip 行为覆盖：原版空白进度现场确认持久 Skip 不推进未读消息，Auto/Skip 原生菜单项也不显示勾选。runtime 现以已记录的 message read identity 约束持久 Skip；Control 快进继续使用独立 pragma gate。新增 unread/Control 回归，Minori 173 项 library tests 通过。该覆盖属于 runtime/menu E1，不提升完整路线、Sandbox 或 Windows E3。
+2026 年 8 月 30 日 Musica Skip 行为覆盖：原版空白进度现场确认持久 Skip 不推进未读消息，Auto/Skip 原生菜单项也不显示勾选。runtime 现以已记录的 message read identity 约束持久 Skip；Control 快进继续使用独立 pragma gate。新增 unread/Control 回归，Musica 173 项 library tests 通过。该覆盖属于 runtime/menu E1，不提升完整路线、Sandbox 或 Windows E3。
 
-2026 年 8 月 30 日 WMF composition 增量：AstraEMU CLI 和 Manager 现可显式选择 `wmf` 或 `ffmpeg-vcpkg`，Minori 拒绝 `disabled`、未知值和运行时 provider 切换。Windows 桌面包默认 `wmf`；构建器仅在明确选择 FFmpeg 时启用其 feature，并把选定 provider 写入脱敏 package evidence。默认与 FFmpeg feature graph 的定向编译均通过。尚未运行签名 Release WMF movie checkpoint，因此画面方向、padding crop、音频时序、fence 和原版同点 parity 仍开放。
+2026 年 8 月 30 日 WMF composition 增量：AstraEMU CLI 和 Manager 现可显式选择 `wmf` 或 `ffmpeg-vcpkg`，Musica 拒绝 `disabled`、未知值和运行时 provider 切换。Windows 桌面包默认 `wmf`；构建器仅在明确选择 FFmpeg 时启用其 feature，并把选定 provider 写入脱敏 package evidence。默认与 FFmpeg feature graph 的定向编译均通过。尚未运行签名 Release WMF movie checkpoint，因此画面方向、padding crop、音频时序、fence 和原版同点 parity 仍开放。
 
-2026 年 8 月 30 日原版影片后端复核：原版二进制明确创建 DirectShow `CLSID_FilterGraph`、`IGraphBuilder`/`IFilterGraph2` 与 windowless VMR7，关键 COM 调用失败会进入清理路径，未发现静默切换解码后端。AstraMedia 新增有界只读 COM `IStream` adapter 和显式 `astra.decode.wmf.incremental` registry provider；公开 MP4 已覆盖统一双轨 packet、seek generation 与 cancel。授权 AVI 通过统一 provider 到 EOS，共 2106 个单调 PTS 视频 packet 和 2110 个 PCM packet，未复制 encoded source 到 HGLOBAL 或 plaintext spool；固定 FFmpeg 路径仍对 7 个 concealment frame fail-fast。当前关闭公共 provider seam，不等于 Minori 生产接线、原版逐帧 parity 或 Windows E3。
+2026 年 8 月 30 日原版影片后端复核：原版二进制明确创建 DirectShow `CLSID_FilterGraph`、`IGraphBuilder`/`IFilterGraph2` 与 windowless VMR7，关键 COM 调用失败会进入清理路径，未发现静默切换解码后端。AstraMedia 新增有界只读 COM `IStream` adapter 和显式 `astra.decode.wmf.incremental` registry provider；公开 MP4 已覆盖统一双轨 packet、seek generation 与 cancel。授权 AVI 通过统一 provider 到 EOS，共 2106 个单调 PTS 视频 packet 和 2110 个 PCM packet，未复制 encoded source 到 HGLOBAL 或 plaintext spool；固定 FFmpeg 路径仍对 7 个 concealment frame fail-fast。当前关闭公共 provider seam，不等于 Musica 生产接线、原版逐帧 parity 或 Windows E3。
 
 2026 年 8 月 30 日自然鉴赏子页：复用同一隔离 writable identity，不注入解锁状态，序列化物理输入进入 `Memories`、BGM、CG、回想和影片列表。报告通过 82 fixed steps、20 个呈现帧、9 个 checkpoint、45 个资源且零 diagnostic；九张画面已检查，未见明显缺字、裁剪、拉伸、错层或残影。该证据关闭当前自然 progress 到鉴赏子页的 Headless E2 输入/呈现链路，不关闭影片实际播放、原版像素 parity、四份独立绿色路线报告或 Windows E3。原版 Sandbox session 因原程序重复异常对话框无法用于本轮同点对照。
 
@@ -151,49 +151,49 @@ Manager、Headless 和无窗口 CLI 对未绑定能力回送 `Unsupported`，不
 
 2026 年 8 月 30 日自然解锁链：在隔离 launch/writable identity 中从零顺序执行四条真实路线。Sui 通过并观察累计解锁 1；Ren 已完成 route 和结局影片，但报告因过时的累计值断言失败；Ayame 随后通过并观察累计值 3，证明 Ren 的持久化被下一 session 读取；Tohka 通过并观察 `route_complete` 与累计值 4。新标题 session 的 15 fixed step 报告通过，物理输入可进入自然出现的 `Memories`，标题和鉴赏根页两个 checkpoint 已检查且无明显视觉阻断。该证据把自然 clear 写入、跨 session 读取和标题 gate 提升到真实 Headless E2 链路，但四份独立 route report 尚未全部通过，鉴赏子页和原版视觉 parity 仍开放。未跳过的两段 WMV3 均提交 completion，FFmpeg concealment 使逐帧质量继续 blocking。
 
-2026 年 8 月 30 日消息控制回归：Minori runtime state 已硬切到 v28。IDA 确认的 `\\a`、`\\v` 与 `MsgSubCmd load` 已进入 typed parser；控制标记不会成为可见正文。voice wait 通过 AstraMedia/Symphonia 的 seekable metadata reader 读取 revision-pinned VFS stream，避免无缓存压缩包上的整文件物化。inline load 按 fixed clock 保存 pending state，并以 current/next retained texture 执行互补 alpha 交叉淡化。授权样本的定向 Ogg 探针耗时 12 ms。真实标题启动回归完成 5258 fixed steps、83 个采样帧和三个 checkpoint，diagnostic 为空，最大 `runtime_step` 为 0.553 秒；保留帧的模型检查未见新增裁剪、拉伸或图层残影。该结果属于单路线 Headless E2 回归，不关闭罕见行精确 checkpoint、原版视觉对照、其余三路线 E2 或 Windows E3。
+2026 年 8 月 30 日消息控制回归：Musica runtime state 已硬切到 v28。IDA 确认的 `\\a`、`\\v` 与 `MsgSubCmd load` 已进入 typed parser；控制标记不会成为可见正文。voice wait 通过 AstraMedia/Symphonia 的 seekable metadata reader 读取 revision-pinned VFS stream，避免无缓存压缩包上的整文件物化。inline load 按 fixed clock 保存 pending state，并以 current/next retained texture 执行互补 alpha 交叉淡化。授权样本的定向 Ogg 探针耗时 12 ms。真实标题启动回归完成 5258 fixed steps、83 个采样帧和三个 checkpoint，diagnostic 为空，最大 `runtime_step` 为 0.553 秒；保留帧的模型检查未见新增裁剪、拉伸或图层残影。该结果属于单路线 Headless E2 回归，不关闭罕见行精确 checkpoint、原版视觉对照、其余三路线 E2 或 Windows E3。
 
-2026 年 8 月 30 日流式分配回归：Minori decrypt chunk 改为消费 source-owned `Vec<u8>`，通用 Blowfish 与后续 RC4 在同一 allocation 原地执行；`MinoriEntryStream` 截断后直接保留该 buffer。定向测试覆盖 buffer identity、跨 chunk zlib checksum、multipart、movie transform、随机 range 重开与无明文 cache。它只关闭 chunk 内重复 allocation，不把合成回归升级为真实峰值内存规模证据。
+2026 年 8 月 30 日流式分配回归：Musica decrypt chunk 改为消费 source-owned `Vec<u8>`，通用 Blowfish 与后续 RC4 在同一 allocation 原地执行；`MusicaEntryStream` 截断后直接保留该 buffer。定向测试覆盖 buffer identity、跨 chunk zlib checksum、multipart、movie transform、随机 range 重开与无明文 cache。它只关闭 chunk 内重复 allocation，不把合成回归升级为真实峰值内存规模证据。
 
-2026 年 8 月 30 日 Release 路线复核：分支已 rebase 到当前 `origin/master`，官方 Minori 桌面包现在强制同时编译 Manager/CLI 的 `ffmpeg-vcpkg` binding。严格补齐 ASCII casefold VFS lookup、已观察的尾随空字段、primary Firefly fadeout，以及全包唯一的 `.panel 1 * <resource>` 形态后，当前开发签名 Release 包完成 5212 fixed steps、4382 个呈现帧、17 条物理输入和 4120576 个非静音音频帧，`route_complete`、返回标题、解锁计数 4 与零 diagnostic 成立。三个 checkpoint 已实际查看。该通过报告开始时平台进度已含四个 clear flag；三到四的自然写入另一次运行因测试尾段错误没有形成 passed report。未跳过的 WMV3 全流还出现 FFmpeg concealment 输出，故四路线自然解锁、影片质量、正式音频 review、save/restore checkpoint、Release Sandbox 和 Windows E3 仍为 blocking。
+2026 年 8 月 30 日 Release 路线复核：分支已 rebase 到当前 `origin/master`，官方 Musica 桌面包现在强制同时编译 Manager/CLI 的 `ffmpeg-vcpkg` binding。严格补齐 ASCII casefold VFS lookup、已观察的尾随空字段、primary Firefly fadeout，以及全包唯一的 `.panel 1 * <resource>` 形态后，当前开发签名 Release 包完成 5212 fixed steps、4382 个呈现帧、17 条物理输入和 4120576 个非静音音频帧，`route_complete`、返回标题、解锁计数 4 与零 diagnostic 成立。三个 checkpoint 已实际查看。该通过报告开始时平台进度已含四个 clear flag；三到四的自然写入另一次运行因测试尾段错误没有形成 passed report。未跳过的 WMV3 全流还出现 FFmpeg concealment 输出，故四路线自然解锁、影片质量、正式音频 review、save/restore checkpoint、Release Sandbox 和 Windows E3 仍为 blocking。
 
-2026 年 8 月 29 日 Minori key-file/streaming hard cut：现行 VFS 不再执行 AstraEMU Luau patch，也不建立明文 cache。旧 cache second-run 与 aggregate hash 仅保留为迁移历史，不能证明新 identity。当前已完成严格 key parser、有界私有文件、流式 PAZ reader、旧命令/schema 删除和受影响 crate 回归；当前 identity 的真实八包 full verify 已覆盖 14502 entries 和 6624958365 decoded bytes。FFmpeg 增量入口已改为 custom AVIO，120 Hz GPU Headless 完成首段真实影片全流解码与 fence；诊断路线没有形成最终 artifact 或 route-pass report，因此四路线 Headless GPU E2 与 Release CLI Sandbox 验收仍开放。
+2026 年 8 月 29 日 Musica key-file/streaming hard cut：现行 VFS 不再执行 AstraEMU Luau patch，也不建立明文 cache。旧 cache second-run 与 aggregate hash 仅保留为迁移历史，不能证明新 identity。当前已完成严格 key parser、有界私有文件、流式 PAZ reader、旧命令/schema 删除和受影响 crate 回归；当前 identity 的真实八包 full verify 已覆盖 14502 entries 和 6624958365 decoded bytes。FFmpeg 增量入口已改为 custom AVIO，120 Hz GPU Headless 完成首段真实影片全流解码与 fence；诊断路线没有形成最终 artifact 或 route-pass report，因此四路线 Headless GPU E2 与 Release CLI Sandbox 验收仍开放。
 
 The signed Manager also reached its runtime-active window in the authorized Windows Sandbox with no default audio device; Diagnostics showed no blocking diagnostic after `NullAudioLane` selection and exposes `audio_endpoint=null` for the session. This is startup/UI evidence only. The null endpoint is excluded from physical-audio evidence and the Sandbox did not yield a writable artifact, so Windows E3 and formal audio review remain open.
 
-Current AstraEMU contract identity is Family ABI v14 (`astra.emu.family_abi.v14`), a hard cut from v13. The ABI carries typed `Open`/`Select`/`Dismiss` requests, bounded menu, confirmation, and text-input Host ports, and typed system-command transaction/result pairs. Minori publishes the observed title/gameplay hierarchy, confirmation semantics, and Save comment prompt; platform Hosts present them and return typed results without interpreting family item ids, confirmation text, or command payloads. Duplicate, stale, ambiguous, active-choice, active-media, confirmation-input, and text-input conflicts remain blocking diagnostics.
+Current AstraEMU contract identity is Family ABI v14 (`astra.emu.family_abi.v14`), a hard cut from v13. The ABI carries typed `Open`/`Select`/`Dismiss` requests, bounded menu, confirmation, and text-input Host ports, and typed system-command transaction/result pairs. Musica publishes the observed title/gameplay hierarchy, confirmation semantics, and Save comment prompt; platform Hosts present them and return typed results without interpreting family item ids, confirmation text, or command payloads. Duplicate, stale, ambiguous, active-choice, active-media, confirmation-input, and text-input conflicts remain blocking diagnostics.
 
-2026-08-28 runtime follow-up: missing native audio output (`ProviderUnavailable`) now uses the shared bounded `NullAudioLane` inside `FamilyAudioService`, preserving the Kira/resampling/telemetry path without claiming physical audio. Manager emits an explicit `audio_null_device` marker and keeps that sink out of the physical `audio_non_silent` evidence bit. Minori message waits now expose every directly consumed activation edge, including `pointer.primary`; the targeted provider/Manager regressions and a Sandbox click-then-confirm run pass without duplicate-ready waits. This is startup and wait-contract evidence only; full route, formal audio review and Windows E3 remain open.
+2026-08-28 runtime follow-up: missing native audio output (`ProviderUnavailable`) now uses the shared bounded `NullAudioLane` inside `FamilyAudioService`, preserving the Kira/resampling/telemetry path without claiming physical audio. Manager emits an explicit `audio_null_device` marker and keeps that sink out of the physical `audio_non_silent` evidence bit. Musica message waits now expose every directly consumed activation edge, including `pointer.primary`; the targeted provider/Manager regressions and a Sandbox click-then-confirm run pass without duplicate-ready waits. This is startup and wait-contract evidence only; full route, formal audio review and Windows E3 remain open.
 The null sink now validates the exact stereo chunk shape and finite samples at both capacity and submit boundaries; malformed chunks fail before telemetry advances. This is a local contract regression and does not upgrade null-device runs to physical-audio coverage.
 The public `FamilyAudioService` lifecycle is also covered when `OpenAudioOutput` returns `ProviderUnavailable`: worker startup, a queued suspend command and clean shutdown complete with `null_device=true`. This closes the no-device lifecycle path only; physical audio and Windows E3 remain open.
 
-2026-08-28 startup ordering hardening: `FamilyAudioService::start_with_client` now waits for an explicit worker endpoint-selection handshake. A missing device is therefore resolved to the bounded null lane before the service is exposed; any other output-open failure is returned synchronously and the owned host is cleaned up. Focused support/Minori/Manager tests pass. This removes an asynchronous startup race but does not create physical-audio evidence.
+2026-08-28 startup ordering hardening: `FamilyAudioService::start_with_client` now waits for an explicit worker endpoint-selection handshake. A missing device is therefore resolved to the bounded null lane before the service is exposed; any other output-open failure is returned synchronously and the owned host is cleaned up. Focused support/Musica/Manager tests pass. This removes an asynchronous startup race but does not create physical-audio evidence.
 `has_physical_audible_output()` is now the shared evidence predicate; it deliberately differs from mixer-level `has_audible_output()` while a null endpoint is active, and Manager uses the physical-only API.
 
-2026-08-28 global-progress lifecycle evidence: two independent Minori provider sessions share the explicitly bound writable-file port; the first persists `REN_CLEAR`, and the second loads it before evaluating its entry script, reports one unlock, and leaves `SUI_CLEAR` unset. This closes the provider/VFS load-order regression at E1 only; natural four-route unlock, full gallery and Windows E3 remain open.
+2026-08-28 global-progress lifecycle evidence: two independent Musica provider sessions share the explicitly bound writable-file port; the first persists `REN_CLEAR`, and the second loads it before evaluating its entry script, reports one unlock, and leaves `SUI_CLEAR` unset. This closes the provider/VFS load-order regression at E1 only; natural four-route unlock, full gallery and Windows E3 remain open.
 
-2026-08-28 Control/Auto follow-up: an active Minori message may rebind its existing family wait token between `Input` and `Time`. Manager Core reuses the existing runtime await identity and Manager host replaces only the pending condition; same-kind, non-message and batch-duplicate tokens remain blocking. This closes the observed duplicate-token crash path only and does not change AstraEMU `IN_PROGRESS` or Windows E3 status.
+2026-08-28 Control/Auto follow-up: an active Musica message may rebind its existing family wait token between `Input` and `Time`. Manager Core reuses the existing runtime await identity and Manager host replaces only the pending condition; same-kind, non-message and batch-duplicate tokens remain blocking. This closes the observed duplicate-token crash path only and does not change AstraEMU `IN_PROGRESS` or Windows E3 status.
 
 2026-08-29 hard cut：此前 private-profile/cache identity 的八包 second-run 只保留为历史。当前 key-file/streaming reader 已重新完成八包 full verify；重复密文读取有合成回归，峰值内存规模验证仍保持开放。
 
-2026 年 8 月 27 日增量媒体复核：`astra-media::IncrementalMediaPlayback` 已把播放配置、单调 tick、轨道/packet 形状、视频 lead/lag、迟到策略和音频/视频 packet 预算收进公共游标；`dropped_video_packets` 只在显式 `Drop` 策略下增加。当前签名 FFmpeg Minori slice 以 3102 个 fixed step、9 个 retained frame sample、连续 movie stop/completion 和标题观察完成，报告为 `passed` 且无诊断。该结果仍是 Headless E2 provider/media 证据，不关闭完整路线、正式音频听审、gallery/cache second-run、Linux FUSE、macOS extract、Manager 实机预览或 Windows E3。
+2026 年 8 月 27 日增量媒体复核：`astra-media::IncrementalMediaPlayback` 已把播放配置、单调 tick、轨道/packet 形状、视频 lead/lag、迟到策略和音频/视频 packet 预算收进公共游标；`dropped_video_packets` 只在显式 `Drop` 策略下增加。当前签名 FFmpeg Musica slice 以 3102 个 fixed step、9 个 retained frame sample、连续 movie stop/completion 和标题观察完成，报告为 `passed` 且无诊断。该结果仍是 Headless E2 provider/media 证据，不关闭完整路线、正式音频听审、gallery/cache second-run、Linux FUSE、macOS extract、Manager 实机预览或 Windows E3。
 
 同日首路线重验：按当前 v9 typed observation 重新生成物理输入后，签名 release plugin 通过同一 FFmpeg incremental provider 完成首路线。报告为 `passed`，3,034,309 fixed steps、16,150 条物理输入、53 个 retained frame sample、31 个 checkpoint，route terminal、`route_complete`、自然 unlock count=1 和最终 Exit 均成立，diagnostic 为空。该输入没有把已删除的 observation hash 当作成功条件，也没有把过时的首 choice 等待点计入本次 checkpoint；choice 语义仍由独立真实 slice 覆盖。因此这项证据关闭当前首路线的 FFmpeg/media/terminal 自动路径，但不关闭四条自然路线、第四条路线后的完整 Memories、正式 WAV 听审、cache second-run、Linux FUSE、macOS extract、Manager 实机预览或 Windows E3。
 
-2026-08-26 media binding update: Minori AVI preview and incremental playback now use the shared AstraMedia `ffmpeg-vcpkg` provider through an explicit registry binding. The handwritten WMV3/AVI production path has been removed; missing or mismatched FFmpeg binding is blocking. A real authorized sample slice completed 60 fixed ticks with 16 presented frames, 111104 decoded audio frames, non-silent audio and zero diagnostics. After the ABI-v9 rebase, the same sample was rerun at 139 fixed ticks with five retained samples, 638 bounded VFS reads and zero diagnostics; current `title_initial`, `config` and `movie_60` artifacts were manually inspected. A subsequent release rerun with the retained Layer2D composite cache kept the same reads, samples and diagnostics while reducing total step time from about 81.9 s to 35.9 s and effect dispatch from about 48.7 s to 22.4 s; this remains a performance diagnostic, not a formal gate. This is Headless E2 media evidence only; full route, formal performance, Manager window preview and Windows E3 remain open.
+2026-08-26 media binding update: Musica AVI preview and incremental playback now use the shared AstraMedia `ffmpeg-vcpkg` provider through an explicit registry binding. The handwritten WMV3/AVI production path has been removed; missing or mismatched FFmpeg binding is blocking. A real authorized sample slice completed 60 fixed ticks with 16 presented frames, 111104 decoded audio frames, non-silent audio and zero diagnostics. After the ABI-v9 rebase, the same sample was rerun at 139 fixed ticks with five retained samples, 638 bounded VFS reads and zero diagnostics; current `title_initial`, `config` and `movie_60` artifacts were manually inspected. A subsequent release rerun with the retained Layer2D composite cache kept the same reads, samples and diagnostics while reducing total step time from about 81.9 s to 35.9 s and effect dispatch from about 48.7 s to 22.4 s; this remains a performance diagnostic, not a formal gate. This is Headless E2 media evidence only; full route, formal performance, Manager window preview and Windows E3 remain open.
 
-Manager and Headless CLI family-mounted PNG/JPEG/BMP/WebP previews now use an explicit `astra.decode.image` registry binding and bounded RGBA8 handoff. Minori ANI/SQZ previews use the explicit family-owned `astra.decode.minori.image` first-frame binding in both consumers, and family audio previews use explicit Symphonia metadata-only handoff; animation playback and unbound video remain blocking/open.
+Manager and Headless CLI family-mounted PNG/JPEG/BMP/WebP previews now use an explicit `astra.decode.image` registry binding and bounded RGBA8 handoff. Musica ANI/SQZ previews use the explicit family-owned `astra.decode.musica.image` first-frame binding in both consumers, and family audio previews use explicit Symphonia metadata-only handoff; animation playback and unbound video remain blocking/open.
 
-Manager startup uses a pure-Rust Minori idle provider and loads FVP only from an explicit family selection; the selected family is rebuilt with its validated VFS binding before launch. This is focused composition-root evidence, not Windows E3.
+Manager startup uses a pure-Rust Musica idle provider and loads FVP only from an explicit family selection; the selected family is rebuilt with its validated VFS binding before launch. This is focused composition-root evidence, not Windows E3.
 
-Minori `progress_in_background` is now exposed as a bounded provider observation and consumed by the Windows native host for Minori-only focus suspend/resume. Focused provider/CLI evidence passes; real focus/audio and Windows E3 evidence remain open.
+Musica `progress_in_background` is now exposed as a bounded provider observation and consumed by the Windows native host for Musica-only focus suspend/resume. Focused provider/CLI evidence passes; real focus/audio and Windows E3 evidence remain open.
 
 Current AstraEMU identity note: the active contract is Family ABI v14
-(`astra.emu.family_abi.v14`) with Product Runtime Provider ABI v4. Minori uses
+(`astra.emu.family_abi.v14`) with Product Runtime Provider ABI v4. Musica uses
 `Native + MultiLayer`, Host-owned surfaces, synchronous Hook, typed
 `LegacyFilterGraphV9`, typed system-menu/confirmation/system-command/text-input transactions and
-writable-file ports. CLI、Manager 和 Minori 的增量 consumer 已恢复编译，Manager
-typed filter graph 已走 WGPU，旧 Scene2D transaction consumer 已删除。Minori
+writable-file ports. CLI、Manager 和 Musica 的增量 consumer 已恢复编译，Manager
+typed filter graph 已走 WGPU，旧 Scene2D transaction consumer 已删除。Musica
 签名真实样本已通过一轮 Headless lifecycle，但 checkpoint 阶段标签与完整路线
 视觉门禁尚未闭合。ABI v8/v9/v11 E2 只作历史回归基线；本行保持 `IN_PROGRESS`。
 
@@ -203,17 +203,17 @@ TsuiNoSora 当前覆盖边界：严格 ProjectorRays codec、2527/2527 binary re
 
 RC 的 13 项 reference 已完成像素预检，全部满足各自固定门禁；`006` 仍是唯一允许绑定具名 `astra.headless_tolerance_approval.v2` 的色彩容差项。UI010 至 UI014 的系统窗几何偏差为 0 px，UI009 的选择菱形列偏差为 1 px。模型已查看全部五联图；30 张输入和 12 组稳定捕获契约均已闭合，权威 manifest 与 node map 已同步。Director movie 入口现按 Score snapshot 恢复初始可见 layer；source-bound package crypto、不透明授权目录、CLI build/bundle 与 Player bootstrap 已形成 contract/E2。商业明文、媒体签名和私有路径扫描均通过预检；最终同身份重跑和 formal signoff 尚未闭合。Windows E3 显式延期，不作为本轮 RC 门禁，状态保持 `IN_PROGRESS`。旧 synthetic story 与旧 worktree 证据不计入当前 coverage。
 
-AstraEMU 当前实现边界以 Family ABI v14 为准：Host-owned surface、retained `Layer2D`、同步 opaque Hook、UTF-8 translation companion、安全相对路径 writable-file、typed filter graph、双向 typed system-menu、one-shot confirmation、system-command 和 text-input transaction 已进入公共契约。Minori resource/text surface、CLI layer consumer、Manager Hook/Layer2D consumer、物理右键到 family system UI 的映射、退出/返回标题确认以及 Save Comment prompt 已进入 v14 主路径；旧 v13 及更早 ABI 只保留为历史记录，不能继续加载。新的真实样本 slice 已能输出不同画面与非静音音频，但尚未到 terminal，checkpoint 标签也未完全对应目标页面，下表旧 ABI 完整路线只保留为历史记录。
+AstraEMU 当前实现边界以 Family ABI v14 为准：Host-owned surface、retained `Layer2D`、同步 opaque Hook、UTF-8 translation companion、安全相对路径 writable-file、typed filter graph、双向 typed system-menu、one-shot confirmation、system-command 和 text-input transaction 已进入公共契约。Musica resource/text surface、CLI layer consumer、Manager Hook/Layer2D consumer、物理右键到 family system UI 的映射、退出/返回标题确认以及 Save Comment prompt 已进入 v14 主路径；旧 v13 及更早 ABI 只保留为历史记录，不能继续加载。新的真实样本 slice 已能输出不同画面与非静音音频，但尚未到 terminal，checkpoint 标签也未完全对应目标页面，下表旧 ABI 完整路线只保留为历史记录。
 
-2026 年 8 月 30 日系统页输入所有权增量：Family API 用规范布尔 observation 表达 family UI 是否独占物理输入，CLI 与 Manager 不再解析 Minori 页面名称。官方开发签名 Release 候选通过 Quick Save、推进、Load 页和 restore 的 2047-step Headless E2，6 个 checkpoint、非静音音频和零 diagnostic；恢复帧与保存前一致。视觉复核同时发现一组罕见 message 行末控制标记仍被当作正文，故消息视觉完整性、四路线、影片复核、Sandbox 与 E3 继续开放。
+2026 年 8 月 30 日系统页输入所有权增量：Family API 用规范布尔 observation 表达 family UI 是否独占物理输入，CLI 与 Manager 不再解析 Musica 页面名称。官方开发签名 Release 候选通过 Quick Save、推进、Load 页和 restore 的 2047-step Headless E2，6 个 checkpoint、非静音音频和零 diagnostic；恢复帧与保存前一致。视觉复核同时发现一组罕见 message 行末控制标记仍被当作正文，故消息视觉完整性、四路线、影片复核、Sandbox 与 E3 继续开放。
 
-2026 年 8 月 23 日的 consumer 增量已完成动态 loader、CLI 与 Manager 四个 Host port 组合；Minori 先执行同步 translation Hook，再以 CosmicText/Astra Renderer2D 写入文字 surface。Manager per-layer typed graph 通过公共 validator 后由 WGPU 执行，不存在 CPU fallback；旧 Scene2D transaction consumer 已删除。当前签名样本 slice 消费 42 条物理输入，提交 154 帧并输出 134144 个音频 frame，diagnostic 为 0。模型检查确认画面有标题、系统背景、正文与场景变化，也确认首个 checkpoint 是黑色过渡帧、页面标签存在错位，因此仍是受限 E2 诊断，不是完整视觉通过。
+2026 年 8 月 23 日的 consumer 增量已完成动态 loader、CLI 与 Manager 四个 Host port 组合；Musica 先执行同步 translation Hook，再以 CosmicText/Astra Renderer2D 写入文字 surface。Manager per-layer typed graph 通过公共 validator 后由 WGPU 执行，不存在 CPU fallback；旧 Scene2D transaction consumer 已删除。当前签名样本 slice 消费 42 条物理输入，提交 154 帧并输出 134144 个音频 frame，diagnostic 为 0。模型检查确认画面有标题、系统背景、正文与场景变化，也确认首个 checkpoint 是黑色过渡帧、页面标签存在错位，因此仍是受限 E2 诊断，不是完整视觉通过。
 
-2026 年 8 月 25 日脚本引用审计增量：Minori open 可显式接收 `astra.resource_audit=full`，由 Host bounded enumeration 扫描全部 `.sc`，复用 VM grammar 对 stage、character、effect、audio、movie、panel 和 chain 引用做非空/大小/revision 校验。审计只形成脱敏计数与 identity digest；普通 lazy 运行、未知 opcode、VFS enum 缺失和完整路线/人工 review 的证据边界不变。
+2026 年 8 月 25 日脚本引用审计增量：Musica open 可显式接收 `astra.resource_audit=full`，由 Host bounded enumeration 扫描全部 `.sc`，复用 VM grammar 对 stage、character、effect、audio、movie、panel 和 chain 引用做非空/大小/revision 校验。审计只形成脱敏计数与 identity digest；普通 lazy 运行、未知 opcode、VFS enum 缺失和完整路线/人工 review 的证据边界不变。
 
-2026 年 8 月 25 日消息状态增量：runtime schema 已硬切到 `astra.emu.minori.runtime_state.v24`；message completion 记录按脚本 revision、source span、message id、text hash 形成的排序 bounded read identity，并覆盖 snapshot round-trip 与重复/无序 corruption blocker。逐字 reveal 公式和原版未读 Skip 策略仍未知，不计入完整消息行为 coverage。
+2026 年 8 月 25 日消息状态增量：runtime schema 已硬切到 `astra.emu.musica.runtime_state.v24`；message completion 记录按脚本 revision、source span、message id、text hash 形成的排序 bounded read identity，并覆盖 snapshot round-trip 与重复/无序 corruption blocker。逐字 reveal 公式和原版未读 Skip 策略仍未知，不计入完整消息行为 coverage。
 
-2026 年 8 月 25 日 Manager VFS preview 增量：文本 preview 先识别 UTF-8/UTF-16 BOM，再对已知脚本/配置扩展名尝试 CP932；包含 NUL 或 malformed input 的内容保持 hex 视图，UI 显示实际编码。Manager 同时接入 Minori family mount、解密 URI range reader 和静态 runtime provider。该项只覆盖文本检测和 family mount，不替代显式 image/audio/video decode binding 或真实 Manager media preview evidence。
+2026 年 8 月 25 日 Manager VFS preview 增量：文本 preview 先识别 UTF-8/UTF-16 BOM，再对已知脚本/配置扩展名尝试 CP932；包含 NUL 或 malformed input 的内容保持 hex 视图，UI 显示实际编码。Manager 同时接入 Musica family mount、解密 URI range reader 和静态 runtime provider。该项只覆盖文本检测和 family mount，不替代显式 image/audio/video decode binding 或真实 Manager media preview evidence。
 
 同日 backlog audio 增量：`backlog_voice_playback` 关闭时，replay 保留 backlog 中的 voice identity 但不提交新的播放命令；角色 voice filter 与该 preference 均有 VM regression。全屏 Host effect、逐字速度和真实 host 音频听审仍未关闭。
 
@@ -227,13 +227,13 @@ ABI consumer implementation 基线已更新到 `635527831e89e5ff9b87ac165b5b5532
 
 2026-08-07 Windows convergence 验证已通过 workspace fmt、clippy、Headless build、workspace tests、Windows export、Headless lifecycle inventory 与 shipping graph 门禁。Shipping 平台依赖图不再携带 `astra-headless-protocol`；硬件 renderer identity 只在 Headless artifact 边界转换为 Evidence DTO。该结果不包含 10 分钟 Windowed E2 或同身份 Perfetto，因此不提升 AstraEMU 性能 evidence 等级。
 
-2026-08-12 Minori coverage 更新：签名 ABI v8 plugin 在真实八包上以相同物理输入连续完成两次标题启动的路线级 Headless E2。两次均推进 31011 fixed steps、提交并栅格化 31627 帧、消费 16947 条输入、通过 31 个 checkpoint，并覆盖 Config、backlog、用户 save/restore、真实影片、snapshot round-trip、自然 unlock、结局返回标题、最终 Exit 和零 diagnostic；VM、visual、terminal、coverage、scene、raster 与 audio identity 全部一致。独立真实脚本 slice 以严格 observation 捕获首个 choice 与进入实际分支后的 post-choice，choice 帧 hash 命中完整路线 fixed step 13928。模型检查 review bundle 要求的 frame，未发现缺字、裁剪、拉伸、影片比例错误、图层残影或人物生命周期泄漏。Kira limiter 后 output peak 为 0.989551，output overload 与 underflow 均为 0；WAV 自动量测无 full-scale sample。涉及语音的整段试听仍未完成，正式 `validate-review` 因 `ASTRA_HEADLESS_REVIEW_AUDIO_LISTEN_PENDING` 保持 blocking。该证据关闭当前单路线的 Headless 自动确定性、自然解锁和返回标题，不关闭正式模型/人工 review，也不覆盖原版只在第四条 clear route 后开放的 `Memories` 页面、Windows E3 或完整 Minori 产品体验。
+2026-08-12 Musica coverage 更新：签名 ABI v8 plugin 在真实八包上以相同物理输入连续完成两次标题启动的路线级 Headless E2。两次均推进 31011 fixed steps、提交并栅格化 31627 帧、消费 16947 条输入、通过 31 个 checkpoint，并覆盖 Config、backlog、用户 save/restore、真实影片、snapshot round-trip、自然 unlock、结局返回标题、最终 Exit 和零 diagnostic；VM、visual、terminal、coverage、scene、raster 与 audio identity 全部一致。独立真实脚本 slice 以严格 observation 捕获首个 choice 与进入实际分支后的 post-choice，choice 帧 hash 命中完整路线 fixed step 13928。模型检查 review bundle 要求的 frame，未发现缺字、裁剪、拉伸、影片比例错误、图层残影或人物生命周期泄漏。Kira limiter 后 output peak 为 0.989551，output overload 与 underflow 均为 0；WAV 自动量测无 full-scale sample。涉及语音的整段试听仍未完成，正式 `validate-review` 因 `ASTRA_HEADLESS_REVIEW_AUDIO_LISTEN_PENDING` 保持 blocking。该证据关闭当前单路线的 Headless 自动确定性、自然解锁和返回标题，不关闭正式模型/人工 review，也不覆盖原版只在第四条 clear route 后开放的 `Memories` 页面、Windows E3 或完整 Musica 产品体验。
 
-2026-08-22 Minori Config 增量：runtime state v23 覆盖 29 类已确认动作、Apply/Cancel draft、pointer hit map、滑块、四类 overlay 资源、WAV 试听和音量/静音映射；114 个 family library tests 通过。真实八包短程 Headless 以 166 fixed steps、171 帧、42 条物理输入和 6 个 checkpoint 验证 screen-effect checkmark、BGM knob 与 `BGMTest.wav` 试听，snapshot round-trip 和自动门禁通过。模型视觉审查通过；完整 WAV 未人工试听，正式 review 保持 blocking。全屏、逐字速度、视觉开关对剧情的实际影响和角色语音筛选仍无行为覆盖。
+2026-08-22 Musica Config 增量：runtime state v23 覆盖 29 类已确认动作、Apply/Cancel draft、pointer hit map、滑块、四类 overlay 资源、WAV 试听和音量/静音映射；114 个 family library tests 通过。真实八包短程 Headless 以 166 fixed steps、171 帧、42 条物理输入和 6 个 checkpoint 验证 screen-effect checkmark、BGM knob 与 `BGMTest.wav` 试听，snapshot round-trip 和自动门禁通过。模型视觉审查通过；完整 WAV 未人工试听，正式 review 保持 blocking。全屏、逐字速度、视觉开关对剧情的实际影响和角色语音筛选仍无行为覆盖。
 
-2026-08-25 Minori Config 持久化增量：在显式 `astra.writable_file.v1` storage binding 下，已应用配置使用 `astra.emu.minori.config.v1` bounded postcard envelope 保存，严格绑定 case/package/profile identity，写入采用 temporary file + atomic replace。缺失文件使用默认值；损坏、越界、矛盾 stat/read 或 identity drift 都返回 blocking diagnostic。gameplay save slot restore 保留当前 installation-scoped Config。新增 identity round-trip 回归；尚未形成真实桌面跨进程证据，因此不关闭完整 Config 或 Windows E3。
+2026-08-25 Musica Config 持久化增量：在显式 `astra.writable_file.v1` storage binding 下，已应用配置使用 `astra.emu.musica.config.v1` bounded postcard envelope 保存，严格绑定 case/package/profile identity，写入采用 temporary file + atomic replace。缺失文件使用默认值；损坏、越界、矛盾 stat/read 或 identity drift 都返回 blocking diagnostic。gameplay save slot restore 保留当前 installation-scoped Config。新增 identity round-trip 回归；尚未形成真实桌面跨进程证据，因此不关闭完整 Config 或 Windows E3。
 
-2026-08-22 Minori Auto 增量：活动消息等待支持同 token `Input`/`Time` modality 重绑定，CLI、Manager 和 RuntimeWorld mirror 保持单一权威 token，其他重复注册继续 blocking。最快 Auto 以一个 10 ms timing unit 运行。真实八包首路线在正文阶段无周期性 Enter，只在 choice active 后确认一次；运行完成 25552 fixed steps、25557 个 GPU frame、50 条物理输入、terminal、snapshot round-trip 和零 diagnostic，coverage hash 与既有完整路线一致。六个关键 checkpoint 的人工视觉检查通过。该证据只关闭持久 Auto 的首路线 Headless E2；Skip 整路线、正式音频听审、Config 剩余行为、鉴赏和 Windows E3 仍开放。
+2026-08-22 Musica Auto 增量：活动消息等待支持同 token `Input`/`Time` modality 重绑定，CLI、Manager 和 RuntimeWorld mirror 保持单一权威 token，其他重复注册继续 blocking。最快 Auto 以一个 10 ms timing unit 运行。真实八包首路线在正文阶段无周期性 Enter，只在 choice active 后确认一次；运行完成 25552 fixed steps、25557 个 GPU frame、50 条物理输入、terminal、snapshot round-trip 和零 diagnostic，coverage hash 与既有完整路线一致。六个关键 checkpoint 的人工视觉检查通过。该证据只关闭持久 Auto 的首路线 Headless E2；Skip 整路线、正式音频听审、Config 剩余行为、鉴赏和 Windows E3 仍开放。
 
 同日 Control 增量：有效 Control gate 会把活动消息同 token 重绑定为 10 ms `Time`，释放后可恢复为 `Input`；media/presentation/provider fence 保持原完成边界。真实八包首路线在正文阶段无周期性 Enter，完成 25496 fixed steps、25498 帧、28 条输入、terminal、snapshot round-trip、自然解锁和零 diagnostic，coverage hash 与既有完整路线一致。音频 master peak 为 0.989372，output overload/underflow 为 0；标题、剧情和返回标题三个 checkpoint 的人工视觉检查通过。该证据关闭 Control 首路线 E2，不替代正式音频听审或 Windows E3。
 
@@ -336,12 +336,12 @@ TsuiNoSora `stage3-gate` 当前会把 route-bound cast source map member 通过 
 | AstraEMU | [module](../modules/astra-emu.md), [family research](../emu/README.md), [runtime framework](../implementation/astraemu-legacy-runtime-framework.md), [EmulatorCore mapping](../implementation/emulator-core-state-machine.md) | [game runtime](../contracts/game-runtime-provider.md), [legacy runtime provider](../contracts/astraemu-ipc.md), [asset VFS](../contracts/asset-vfs.md), [media](../contracts/media.md), [script](../contracts/script-vn.md) | `IN_PROGRESS`：FVP hosted v5 以 pinned thin fork 的单 delta、session-owned state 和 host-bound named-audio resource port 运行；公开 dynamic Headless E2 已分别覆盖输入可见提交和 URI-only audio 的 WAV/meter 输出。2026-08-02 的授权本机安装 signed dynamic Headless E2 已通过 300 step、170 frame、snapshot round-trip、受限 VFS 账本与一个后期 checkpoint 视觉检查；另一次复用既有 12 条物理输入的 1,261 step 运行完成且无 diagnostic、产生非静音非削波 WAV，但两个转场 checkpoint 相同。随后修复 fork hosted-core 的键盘 event 转发后，4,200 step 真实确认序列显示完整标题菜单并输出非静音 WAV；5,100 step 的首个菜单项 click 已进入黑场媒体/转场阶段，输出持续非静音 WAV 且无 diagnostic，但尚未形成正文视觉或 terminal。2026-08-03 原生 10 分钟 soak 的 RFVP core p99 为 2.923 ms，adapter 长帧却达到秒级，并累计 656 次 audio underflow；对照 RFVP `0.5.0` 后确认动态纹理从原位更新退化为跨 ABI 像素传递、新 generation 和整纹理重传。通用 WGPU atlas 只有容量不足或碎片化时才 repack，当前证据尚未证明每次变化都发生全 atlas 重建。该 soak 失败，路线、完整视频/PTS、稳定 subresource update、独立 audio producer 和平台 host 均保持开放。其余既有 family ABI、RuntimeWorld、Slint/WGPU、CLI native/headless、Library v7、discovery 与 metadata work 保持不变。离线 HTTP fixture、中央兼容性数据仓、完整 UI 自动化、商业 VNDB license gate、正式平台签名、完整 media parity、Windows/Android E3 仍未完成 | `astra.emu.*` schema、Library v7 migration（play_session/compatibility_entry_cache/compatibility_sync_state）、`astra.emu.compatibility.v2` JSON Schema（VNDB 唯一权威源，(vID,rID) 版本精确） 导出、metadata snapshot/match evidence、Bangumi sync diagnostic、FVP coverage/parity、VFS audit、provider/UI/platform/translation/Luau evidence | metadata/core crate check、FVP provider unit tests 和局部 signed dynamic Headless E2 已通过；完整 workspace、真实游戏路线、真实 UI 和平台证据仍待正式门禁，不从局部结果外推 Stage 完成 | `emu.release_manifest`、`emu.provider_binding`、`emu.ui_host_identity`、`emu.metadata_license`、`emu.metadata_privacy`、`emu.fvp_coverage`、`emu.fvp_parity`、`emu.trusted_luau`、`emu.translation`、`emu.platform.*` 保持 fail-closed | [operator](../manual/operator-guide.md)、[Manager metadata](../manual/astraemu-manager-metadata.md) |
 | Headless Test Backend | [Migration 11](../migrations/headless-platform-test-backend-migration.md)、[platform host](../implementation/platform-host.md) | [media](../contracts/media.md)、[performance](../contracts/performance.md) | `E2_DONE_E3_IN_PROGRESS`：v3 GPU policy、60 Hz Runtime/120 Hz presentation cadence、稀疏提交/渲染、双流证据、lazy package、bounded cache、retained atlas、异步 timestamp/readback ring 和 Perfetto Trace Event writer 已实现；TsuiNoSora 的 800×600、1920×1080 和完整 Y 路线均已完成集显 E2 | `astra.headless_host_profile.v3`、`astra.user_input_sequence.v1`、checkpoint/artifact/run/review/preflight v2、`astra.performance_budget.v1`、`astra.performance_report.v1`、`astra.performance_trace_manifest.v1` | CPU all/checkpoints correctness、GPU policy、cadence、package range/source mutation、atlas/readback/timestamp/profiler overhead；800×600、1920×1080 与完整 Y 路线的 final E2 已冻结 | Headless 仍只形成 E2；GPU 缺硬件、软件 adapter、timestamp query 缺失、trace 或 identity 漂移、预算 blocked 都必须失败；Windows E3 仍未完成 | [operator](../manual/operator-guide.md) |
 
-补充：Minori GameView 已把舞台内真实右键接入 system-menu contract。v11 不再把右键等同于 Save：family 先发布原版层级，Host 回送选择或取消，随后才执行 Save、Load、Config、消息框或 Auto/Skip。Manager 在菜单交互期间保留底层 gameplay wait；定向回归通过。新的 v11 Release Sandbox 复测、完整路线、媒体/音频审查和 Windows E3 仍开放。
+补充：Musica GameView 已把舞台内真实右键接入 system-menu contract。v11 不再把右键等同于 Save：family 先发布原版层级，Host 回送选择或取消，随后才执行 Save、Load、Config、消息框或 Auto/Skip。Manager 在菜单交互期间保留底层 gameplay wait；定向回归通过。新的 v11 Release Sandbox 复测、完整路线、媒体/音频审查和 Windows E3 仍开放。
 
-2026-08-30 后续补充：开发签名 Release v24 通过同一 v11 hierarchy 和 82 条物理输入打开 Save、Load 与 gameplay Config，再分别返回剧情。报告为 138 fixed steps、9 个呈现帧、8 个 checkpoint、零 diagnostic；全部页面已视觉复核，页面前后的四张 gameplay PNG 字节一致。Load 与 Config 的页面所有权回归已进入 Minori tests。该证据是定向 Headless E2，不替代实际存档跨进程、退出确认、Release Sandbox、性能门禁或 Windows E3。
-2026 年 9 月 1 日 Save/Load fidelity：当前 Minori save envelope 硬切为 v3，metadata
+2026-08-30 后续补充：开发签名 Release v24 通过同一 v11 hierarchy 和 82 条物理输入打开 Save、Load 与 gameplay Config，再分别返回剧情。报告为 138 fixed steps、9 个呈现帧、8 个 checkpoint、零 diagnostic；全部页面已视觉复核，页面前后的四张 gameplay PNG 字节一致。Load 与 Config 的页面所有权回归已进入 Musica tests。该证据是定向 Headless E2，不替代实际存档跨进程、退出确认、Release Sandbox、性能门禁或 Windows E3。
+2026 年 9 月 1 日 Save/Load fidelity：当前 Musica save envelope 硬切为 v3，metadata
 包含有界本地时间、注释和 96x54 PNG 缩略图。Provider 对占用槽执行严格 identity/边界
 校验，并在 Host-owned Layer2D panel 中叠加缩略图，文本继续走日文 presentation
-通道；Save 与 Load 的底部按钮按原版首屏差异提交。新增回归后 Minori library 为
+通道；Save 与 Load 的底部按钮按原版首屏差异提交。新增回归后 Musica library 为
 194/194。该项只证明 provider/Host 对齐，完整路线、视觉 parity、Release Sandbox
 和 Windows E3 仍保持未完成。

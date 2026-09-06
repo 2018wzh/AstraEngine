@@ -2871,10 +2871,10 @@ mod tests {
     #[test]
     fn native_system_requests_validate_before_reaching_the_host() {
         let about = AboutRequest {
-            product: "Minori".into(),
+            product: "Musica".into(),
             tagline: "The brave under the summer sky.".into(),
             version: "Ver.1.0".into(),
-            copyright: "Copyright (C) 2012 minori".into(),
+            copyright: "Copyright (C) 2012 musica".into(),
         };
         about.validate().unwrap();
         let mut invalid_about = about;
@@ -2906,12 +2906,12 @@ mod tests {
         );
 
         HomepageRequest {
-            url: "http://www.minori.ph/".into(),
+            url: "http://www.musica.ph/".into(),
         }
         .validate()
         .unwrap();
         for url in [
-            "ftp://www.minori.ph/",
+            "ftp://www.musica.ph/",
             "https://user:password@example.com/",
             "https://example.com/\n",
         ] {
@@ -2944,7 +2944,7 @@ mod tests {
             HostCommand::ShowAbout {
                 window: WindowHandle::from_parts(1, 1).unwrap(),
                 request: AboutRequest {
-                    product: "Minori".into(),
+                    product: "Musica".into(),
                     tagline: "Summer".into(),
                     version: "1.0".into(),
                     copyright: "Copyright".into(),

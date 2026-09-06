@@ -9,7 +9,7 @@ build = "build.rs"
 default = []
 ffmpeg-vcpkg = [
     "astra-platform-headless/ffmpeg-vcpkg",
-    "astra-emu-minori/ffmpeg-vcpkg",
+    "astra-emu-musica/ffmpeg-vcpkg",
     "astra-media/ffmpeg-vcpkg",
 ]
 
@@ -29,7 +29,7 @@ astra-emu-family-support = { path = "../../FamilySupport/astra-emu-family-suppor
 astra-emu-manager-core = { path = "../../Manager/astra-emu-manager-core" }
 astra-emu-fvp = { path = "../../Families/astra-emu-fvp" }
 rfvp-astra-provider = { git = "https://github.com/2018wzh/rfvp.git", rev = "23ae395bcc0499f737d63759902308b30ca37800" }
-astra-emu-minori = { path = "../../Families/astra-emu-minori" }
+astra-emu-musica = { path = "../../Families/astra-emu-musica" }
 astra-headless-protocol = { path = "../../../../Engine/Source/Runtime/astra-headless-protocol" }
 astra-media = { path = "../../../../Engine/Source/Runtime/astra-media" }
 astra-media-core = { path = "../../../../Engine/Source/Runtime/astra-media-core" }

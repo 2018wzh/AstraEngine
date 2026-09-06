@@ -18,8 +18,8 @@ fn cli_writable_root(family_id: &str, game_id: Hash256) -> Result<PathBuf, Strin
 }
 
 fn runtime_locale_for_family(family_id: &str) -> &'static str {
-    if family_id == "minori" {
-        astra_emu_minori::MINORI_RUNTIME_LOCALE
+    if family_id == "musica" {
+        astra_emu_musica::MUSICA_RUNTIME_LOCALE
     } else {
         "und"
     }
@@ -54,7 +54,7 @@ use astra_emu_manager_core::{
     LiveWaitBindingKind, PendingFamilyConfirmation, PendingFamilySystemMenu, ScanLimits,
     SourceGrant,
 };
-use astra_emu_minori::{MinoriImageDecodeProvider, MinoriVfsFamilyFactory};
+use astra_emu_musica::{MusicaImageDecodeProvider, MusicaVfsFamilyFactory};
 use astra_headless_protocol::{
     ArtifactEntry, ArtifactManifest, ButtonState, CheckpointResult, Diagnostic, GamepadControl,
     InputMessage, ObservationPredicate, PhysicalInput, PointerButton, RunReport, RunStatus,
@@ -357,7 +357,7 @@ pub struct NativeLaunch {
     pub family_library: Option<PathBuf>,
     pub extension: Option<ExtensionBinding>,
     pub enable_audio: bool,
-    /// Explicit decode-provider binding used by family media paths.  Minori
+    /// Explicit decode-provider binding used by family media paths.  Musica
     /// movies require the shared AstraMedia FFmpeg provider; a missing or
     /// different binding is a hard launch error rather than an implicit
     /// decoder choice.
@@ -568,7 +568,7 @@ fn prepare_family_case(
 ) -> Result<PreparedFamilyCase, String> {
     match family_id {
         "fvp" => prepare_fvp_case(game_root, launch_profile, mount_set_id),
-        "minori" => prepare_minori_case(game_root, launch_profile, mount_set_id),
+        "musica" => prepare_musica_case(game_root, launch_profile, mount_set_id),
         _ => Err("ASTRA_EMU_CLI_FAMILY_UNSUPPORTED".into()),
     }
 }
@@ -640,20 +640,20 @@ fn normalize_fvp_pack_path(path: &str) -> Result<String, String> {
     Ok(normalized)
 }
 
-fn prepare_minori_case(
+fn prepare_musica_case(
     game_root: &Path,
     launch_profile: &Path,
     mount_set_id: &str,
 ) -> Result<PreparedFamilyCase, String> {
     let mut registry = LegacyVfsFamilyRegistry::default();
     registry
-        .register(Arc::new(MinoriVfsFamilyFactory))
+        .register(Arc::new(MusicaVfsFamilyFactory))
         .map_err(|error| error.to_string())?;
     let loaded = registry
         .load_profile(launch_profile)
         .map_err(|error| error.to_string())?;
     let mounted = registry
-        .mount("minori", game_root, &loaded)
+        .mount("musica", game_root, &loaded)
         .map_err(|error| error.to_string())?;
     let entry_uri = loaded.profile.runtime.entry_uri.clone();
     if !mounted
@@ -662,7 +662,7 @@ fn prepare_minori_case(
         .iter()
         .any(|candidate| candidate.uri == entry_uri && candidate.media_kind == "script")
     {
-        return Err("ASTRA_EMU_MINORI_ENTRY_INVALID".into());
+        return Err("ASTRA_EMU_MUSICA_ENTRY_INVALID".into());
     }
     let launch_mode = parse_family_launch_mode(&loaded.profile.runtime.launch_mode)?;
     let manifest_bytes = postcard::to_allocvec(mounted.manifest())
@@ -673,8 +673,8 @@ fn prepare_minori_case(
             .map_err(|error| error.to_string())?,
     );
     Ok(PreparedFamilyCase {
-        family_id: "minori".into(),
-        case_identity: format!("minori-{}", &package_hash.to_string()[7..23]),
+        family_id: "musica".into(),
+        case_identity: format!("musica-{}", &package_hash.to_string()[7..23]),
         package_hash,
         entry_uri,
         launch_mode,
@@ -1233,16 +1233,16 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV3,
             launch_mode: prepared.launch_mode,
         },
     )?;
-    if launch.family_id == "minori" {
+    if launch.family_id == "musica" {
         // Headless route campaigns need the same installation-scoped global
         // progress and config persistence as the native host, so the family
-        // writable-file port is explicitly bound for every Minori session.
+        // writable-file port is explicitly bound for every Musica session.
         probe.runtime.family_options.insert(
             "astra.provider.storage".into(),
             "astra.writable_file.v1".into(),
         );
     }
-    if launch.audit_all_resources && launch.family_id == "minori" {
+    if launch.audit_all_resources && launch.family_id == "musica" {
         probe
             .runtime
             .family_options
@@ -1722,8 +1722,8 @@ fn validate_video_provider_binding(family_id: &str, provider_id: &str) -> Result
     if !matches!(provider_id, "disabled" | "wmf" | "ffmpeg-vcpkg") {
         return Err("ASTRA_EMU_VIDEO_PROVIDER_UNKNOWN".into());
     }
-    if family_id == "minori" && !matches!(provider_id, "wmf" | "ffmpeg-vcpkg") {
-        return Err("ASTRA_EMU_MINORI_VIDEO_PROVIDER_REQUIRED".into());
+    if family_id == "musica" && !matches!(provider_id, "wmf" | "ffmpeg-vcpkg") {
+        return Err("ASTRA_EMU_MUSICA_VIDEO_PROVIDER_REQUIRED".into());
     }
     Ok(())
 }
@@ -2364,7 +2364,7 @@ fn probe_profile(
     case: &PreparedFamilyCase,
     request: ProbeProfileRequest<'_>,
 ) -> Result<ProbeProfile, String> {
-    if request.launch_mode == FamilyLaunchMode::Title && case.family_id != "minori" {
+    if request.launch_mode == FamilyLaunchMode::Title && case.family_id != "musica" {
         return Err("ASTRA_EMU_LAUNCH_MODE_UNSUPPORTED".into());
     }
     let (requested_stage_width, requested_stage_height) = request.stage_size;
@@ -2394,16 +2394,16 @@ fn probe_profile(
     {
         return Err("ASTRA_EMU_FAMILY_PROBE_BLOCKED".into());
     }
-    if case.family_id == "minori" {
+    if case.family_id == "musica" {
         if requested_stage_width == 0 || requested_stage_height == 0 {
-            return Err("ASTRA_EMU_MINORI_PROBE_STAGE_INVALID".into());
+            return Err("ASTRA_EMU_MUSICA_PROBE_STAGE_INVALID".into());
         }
         return Ok(ProbeProfile {
             runtime: astra_emu_manager_core::CaseRuntimeProfileRecord {
                 case_identity: case.case_identity.clone(),
                 family_id: case.family_id.clone(),
                 fixed_delta_ns: FIXED_DELTA_NS,
-                compatibility_profile: "minori.reference".into(),
+                compatibility_profile: "musica.reference".into(),
                 family_options: [
                     (
                         "astra.stage_width".into(),
@@ -2422,8 +2422,8 @@ fn probe_profile(
                         "astra.writable_file.v1".into(),
                     ),
                     (
-                        astra_emu_minori::MINORI_NLS_OPTION.into(),
-                        astra_emu_minori::MINORI_NLS_SHIFT_JIS.into(),
+                        astra_emu_musica::MUSICA_NLS_OPTION.into(),
+                        astra_emu_musica::MUSICA_NLS_SHIFT_JIS.into(),
                     ),
                 ]
                 .into_iter()
@@ -2630,18 +2630,18 @@ struct ActiveVideo {
 
 enum ActiveVideoStream {
     Native(FvpNativeVideoCursor),
-    MinoriAvi(Box<MinoriAviPlayback>),
+    MusicaAvi(Box<MusicaAviPlayback>),
     Platform(PlatformVideoCursor),
 }
 
-struct MinoriAviPlayback {
+struct MusicaAviPlayback {
     cursor: astra_media::IncrementalMediaPlayback,
     ready_outputs: Vec<astra_media::IncrementalPlaybackOutput>,
     current: Option<DecodedVideoFrame>,
     audio: Vec<FvpMovieAudioChunk>,
 }
 
-fn minori_media_error(error: MediaError) -> String {
+fn musica_media_error(error: MediaError) -> String {
     match error {
         MediaError::Diagnostics(diagnostics) => {
             let codes = diagnostics
@@ -2650,25 +2650,25 @@ fn minori_media_error(error: MediaError) -> String {
                 .collect::<Vec<_>>()
                 .join(",");
             tracing::error!(
-                event = "astra_emu_minori_media_diagnostic",
+                event = "astra_emu_musica_media_diagnostic",
                 diagnostic_count = diagnostics.len(),
                 diagnostic_codes = %codes,
-                "Minori media provider rejected an incremental packet"
+                "Musica media provider rejected an incremental packet"
             );
-            format!("ASTRA_EMU_MINORI_MEDIA_DIAGNOSTICS:{codes}")
+            format!("ASTRA_EMU_MUSICA_MEDIA_DIAGNOSTICS:{codes}")
         }
         MediaError::Message(message) => message,
     }
 }
 
-impl MinoriAviPlayback {
+impl MusicaAviPlayback {
     fn open(decoder: Box<dyn IncrementalMediaDecoder>) -> Result<Self, String> {
         Ok(Self {
             cursor: astra_media::IncrementalMediaPlayback::open(
                 decoder,
                 astra_media::IncrementalPlaybackLimits::default(),
             )
-            .map_err(minori_media_error)?,
+            .map_err(musica_media_error)?,
             ready_outputs: Vec::new(),
             current: None,
             audio: Vec::new(),
@@ -2679,7 +2679,7 @@ impl MinoriAviPlayback {
         let changed = self
             .cursor
             .advance(elapsed_us)
-            .map_err(minori_media_error)?;
+            .map_err(musica_media_error)?;
         self.cursor.drain_ready_outputs(&mut self.ready_outputs);
         for output in self.ready_outputs.drain(..) {
             match output {
@@ -2725,7 +2725,7 @@ impl MinoriAviPlayback {
     }
 
     fn close(&mut self) -> Result<(), String> {
-        self.cursor.cancel().map_err(minori_media_error)
+        self.cursor.cancel().map_err(musica_media_error)
     }
 }
 
@@ -3354,7 +3354,7 @@ impl ActiveVideoStream {
     async fn advance(&mut self, elapsed_us: u64) -> Result<bool, String> {
         match self {
             Self::Native(cursor) => cursor.advance(elapsed_us),
-            Self::MinoriAvi(cursor) => cursor.advance(elapsed_us),
+            Self::MusicaAvi(cursor) => cursor.advance(elapsed_us),
             Self::Platform(cursor) => cursor.advance(elapsed_us).await,
         }
     }
@@ -3365,7 +3365,7 @@ impl ActiveVideoStream {
                 .current
                 .as_ref()
                 .filter(|frame| frame.pts_us <= elapsed_us),
-            Self::MinoriAvi(cursor) => cursor
+            Self::MusicaAvi(cursor) => cursor
                 .current_frame()
                 .filter(|frame| frame.pts_us <= elapsed_us),
             Self::Platform(cursor) => cursor.current_frame(),
@@ -3375,14 +3375,14 @@ impl ActiveVideoStream {
     fn duration_us(&self) -> Option<u64> {
         match self {
             Self::Native(cursor) => cursor.duration_us,
-            Self::MinoriAvi(cursor) => Some(cursor.duration_us()),
+            Self::MusicaAvi(cursor) => Some(cursor.duration_us()),
             Self::Platform(cursor) => cursor.duration_us(),
         }
     }
 
     fn decoded_stream_ended(&self) -> bool {
         match self {
-            Self::MinoriAvi(cursor) => cursor.is_ended(),
+            Self::MusicaAvi(cursor) => cursor.is_ended(),
             Self::Native(_) | Self::Platform(_) => true,
         }
     }
@@ -3390,7 +3390,7 @@ impl ActiveVideoStream {
     fn drain_audio_into(&mut self, output: &mut Vec<FvpMovieAudioChunk>) {
         match self {
             Self::Native(cursor) => cursor.drain_audio_into(output),
-            Self::MinoriAvi(cursor) => cursor.drain_audio_into(output),
+            Self::MusicaAvi(cursor) => cursor.drain_audio_into(output),
             Self::Platform(_) => output.clear(),
         }
     }
@@ -3398,7 +3398,7 @@ impl ActiveVideoStream {
     async fn close(&mut self) -> Result<(), String> {
         match self {
             Self::Native(_) => Ok(()),
-            Self::MinoriAvi(cursor) => cursor.close(),
+            Self::MusicaAvi(cursor) => cursor.close(),
             Self::Platform(cursor) => cursor.close().await,
         }
     }
@@ -4236,7 +4236,7 @@ struct RuntimeDriver<'a> {
     diagnostics: BTreeSet<String>,
     active_touch: Option<u64>,
     system_resources: NativeSystemResources,
-    /// The native Control key is an explicit Minori fast-forward gesture.
+    /// The native Control key is an explicit Musica fast-forward gesture.
     /// While it is held, the host still executes every fixed tick in order,
     /// but does not sleep between ticks.  This is distinct from skipping
     /// simulation ticks and is never used by the Headless scheduler.
@@ -4434,7 +4434,7 @@ struct NativeSystemResources {
 
 impl NativeSystemResources {
     fn for_family(family_id: &str, game_root: &Path) -> Self {
-        if family_id != "minori" {
+        if family_id != "musica" {
             return Self::default();
         }
         let manual_path = game_root
@@ -4443,12 +4443,12 @@ impl NativeSystemResources {
             .then(|| game_root.join("perseus.chm"));
         Self {
             manual_path,
-            homepage_url: Some("http://www.minori.ph/".into()),
+            homepage_url: Some("http://www.musica.ph/".into()),
             about: Some(AboutRequest {
                 product: "夏空のペルセウス - The brave under the summer sky.".into(),
                 tagline: "The brave under the summer sky.".into(),
                 version: "Ver.1.0".into(),
-                copyright: "Copyright (C) 2012 minori; All rights Reserved.".into(),
+                copyright: "Copyright (C) 2012 musica; All rights Reserved.".into(),
             }),
         }
     }
@@ -4686,7 +4686,7 @@ fn route_native_event(
             window: event_window,
             focused,
         } if event_window == window => {
-            if driver.family_id == "minori" {
+            if driver.family_id == "musica" {
                 let should_suspend = !focused && !driver.progress_in_background()?;
                 Ok(NativeEventAction::Suspend(should_suspend))
             } else {
@@ -4856,7 +4856,7 @@ fn native_key_control(logical_key: Option<&str>, physical_key: &str) -> Option<&
         " " | "space" | "spacebar" => Some("space"),
         "shift" | "shiftleft" | "shiftright" => Some("shift"),
         "control" | "ctrl" | "controlleft" | "controlright" => Some("control"),
-        // Minori's shipped keyboard map reserves F5/F9 as non-modal physical
+        // Musica's shipped keyboard map reserves F5/F9 as non-modal physical
         // controls. Keep them as explicit, bounded edges even when a family
         // treats them as notifications instead of actions.
         "f5" => Some("function:5"),
@@ -5403,9 +5403,9 @@ impl<'a> RuntimeDriver<'a> {
         image_decoders
             .register(Box::new(ImageDecodeProvider))
             .map_err(|error| error.to_string())?;
-        if config.family_id == "minori" {
+        if config.family_id == "musica" {
             image_decoders
-                .register(Box::new(MinoriImageDecodeProvider))
+                .register(Box::new(MusicaImageDecodeProvider))
                 .map_err(|error| error.to_string())?;
         }
         let audio = if config.audio_enabled {
@@ -5595,7 +5595,7 @@ impl<'a> RuntimeDriver<'a> {
             } else {
                 LegacyConfirmationChoiceV1::Cancelled
             }),
-            // The original Minori confirmation labels expose Y/N mnemonics
+            // The original Musica confirmation labels expose Y/N mnemonics
             // ("是(Y)"/"否(N)"). Keep these bindings inside the active
             // confirmation transaction; they must never become ordinary
             // gameplay input when no native confirmation is pending.
@@ -5943,7 +5943,7 @@ impl<'a> RuntimeDriver<'a> {
                     PendingWait::DueStep(due) if *due <= next_step => {
                         Some((token.clone(), BTreeSet::new()))
                     }
-                    // Minori's Escape menu is allowed to interrupt a message
+                    // Musica's Escape menu is allowed to interrupt a message
                     // timer. Keep this distinct from a generic frame/presentation
                     // wait: those waits still require their own completion and
                     // cannot be silently cancelled by system UI input.
@@ -7249,11 +7249,11 @@ impl<'a> RuntimeDriver<'a> {
             .rsplit_once('.')
             .map(|(_, extension)| extension.to_ascii_lowercase())
             .ok_or_else(|| "ASTRA_EMU_HEADLESS_VIDEO_EXTENSION_MISSING".to_owned())?;
-        validate_minori_video_extension(&self.family_id, &extension)?;
-        if self.family_id == "minori" {
+        validate_musica_video_extension(&self.family_id, &extension)?;
+        if self.family_id == "musica" {
             validate_video_provider_binding(&self.family_id, &self.video_provider)?;
         }
-        let (stream, audio_stream_id, audio_stream) = if self.family_id == "minori" {
+        let (stream, audio_stream_id, audio_stream) = if self.family_id == "musica" {
             let (vfs, mount_set_id) = self.runtime.vfs_reader_binding(&self.session_id)?;
             let source = Arc::new(
                 LegacyRuntimeVfsByteSource::new(vfs, mount_set_id, resource_uri.clone())
@@ -7261,18 +7261,18 @@ impl<'a> RuntimeDriver<'a> {
             );
             let mut reader =
                 astra_byte_source::BoundedByteSourceReader::new(source, 4 * 1024 * 1024)
-                    .map_err(|_| "ASTRA_EMU_MINORI_VIDEO_READER".to_owned())?;
+                    .map_err(|_| "ASTRA_EMU_MUSICA_VIDEO_READER".to_owned())?;
             let mut header = [0_u8; 12];
             reader
                 .read_exact(&mut header)
-                .map_err(|_| "ASTRA_EMU_MINORI_VIDEO_READ".to_owned())?;
+                .map_err(|_| "ASTRA_EMU_MUSICA_VIDEO_READ".to_owned())?;
             reader
                 .seek(std::io::SeekFrom::Start(0))
-                .map_err(|_| "ASTRA_EMU_MINORI_VIDEO_READER".to_owned())?;
+                .map_err(|_| "ASTRA_EMU_MUSICA_VIDEO_READER".to_owned())?;
             if !is_avi_container_header(&header) {
-                return Err("ASTRA_EMU_MINORI_VIDEO_CONTAINER".into());
+                return Err("ASTRA_EMU_MUSICA_VIDEO_CONTAINER".into());
             }
-            let decoder = open_minori_avi_incremental_decoder(&self.video_provider, reader)?;
+            let decoder = open_musica_avi_incremental_decoder(&self.video_provider, reader)?;
             let audio_stream_id =
                 if self.audio_enabled && matches!(mode, LegacyVideoMode::ModalWithAudio) {
                     let stream_id = MOVIE_AUDIO_STREAM_BASE
@@ -7287,7 +7287,7 @@ impl<'a> RuntimeDriver<'a> {
                     None
                 };
             (
-                ActiveVideoStream::MinoriAvi(Box::new(MinoriAviPlayback::open(decoder)?)),
+                ActiveVideoStream::MusicaAvi(Box::new(MusicaAviPlayback::open(decoder)?)),
                 audio_stream_id,
                 None,
             )
@@ -7405,7 +7405,7 @@ impl<'a> RuntimeDriver<'a> {
             codec = extension,
             decoded_frame_count = match &stream {
                 ActiveVideoStream::Native(_) => 0,
-                ActiveVideoStream::MinoriAvi(_) => 0,
+                ActiveVideoStream::MusicaAvi(_) => 0,
                 ActiveVideoStream::Platform(_) => 1,
             },
             duration_us = stream.duration_us(),
@@ -7482,7 +7482,7 @@ impl<'a> RuntimeDriver<'a> {
         };
         if let Some(video) = self.video.as_ref() {
             let telemetry = match &video.stream {
-                ActiveVideoStream::MinoriAvi(stream) => Some(stream.telemetry()),
+                ActiveVideoStream::MusicaAvi(stream) => Some(stream.telemetry()),
                 _ => None,
             };
             tracing::debug!(
@@ -7506,7 +7506,7 @@ impl<'a> RuntimeDriver<'a> {
                 .ok_or_else(|| "ASTRA_EMU_NATIVE_VIDEO_MISSING".to_owned())?;
             if self.audio_enabled {
                 video.stream.drain_audio_into(&mut self.native_audio);
-            } else if let ActiveVideoStream::MinoriAvi(stream) = &mut video.stream {
+            } else if let ActiveVideoStream::MusicaAvi(stream) = &mut video.stream {
                 // The shared FFmpeg cursor may still produce audio packets
                 // for a video-only native run. Drain them at the cursor owner
                 // without handing them to an absent audio service.
@@ -7553,20 +7553,20 @@ impl<'a> RuntimeDriver<'a> {
                 .video
                 .take()
                 .ok_or_else(|| "ASTRA_EMU_NATIVE_VIDEO_MISSING".to_owned())?;
-            if let ActiveVideoStream::MinoriAvi(stream) = &completed.stream {
+            if let ActiveVideoStream::MusicaAvi(stream) = &completed.stream {
                 if stream.current_frame().is_none() {
                     let telemetry = stream.telemetry();
                     tracing::error!(
-                        event = "astra_emu_minori_avi_frame_missing",
-                        diagnostic_code = "ASTRA_EMU_MINORI_AVI_VIDEO_FRAME_MISSING",
+                        event = "astra_emu_musica_avi_frame_missing",
+                        diagnostic_code = "ASTRA_EMU_MUSICA_AVI_VIDEO_FRAME_MISSING",
                         video_packets = telemetry.video_packets,
                         audio_packets = telemetry.audio_packets,
                         decoded_frames = telemetry.decoded_frames,
                         decoded_audio_samples = telemetry.decoded_audio_samples,
                         dropped_video_packets = telemetry.dropped_video_packets,
-                        "Minori AVI stream ended without a decoded video frame"
+                        "Musica AVI stream ended without a decoded video frame"
                     );
-                    return Err("ASTRA_EMU_MINORI_AVI_VIDEO_FRAME_MISSING".into());
+                    return Err("ASTRA_EMU_MUSICA_AVI_VIDEO_FRAME_MISSING".into());
                 }
             }
             tracing::debug!(
@@ -7643,14 +7643,14 @@ fn input_or_terminal_observation(
         || pending_waits
             .values()
             .any(|wait| matches!(wait, PendingWait::Input(_)))
-        // Minori's title and system pages are interactive states owned by the
+        // Musica's title and system pages are interactive states owned by the
         // family provider. They do not install a generic Input await, but
         // physical input is still consumed by the provider on the next fixed
         // tick. Expose those pages as an input boundary while preserving the
         // media/time-wait requirement above.
-        || (family_id == "minori"
+        || (family_id == "musica"
             && observed_blackboard
-                .get("minori.system_page")
+                .get("musica.system_page")
                 .is_some_and(|page| page != "none"))
 }
 
@@ -7659,12 +7659,12 @@ fn progress_background_from_observation(
     observed: &BTreeMap<String, String>,
 ) -> Result<bool, String> {
     match observed
-        .get("minori.progress_in_background")
+        .get("musica.progress_in_background")
         .map(String::as_str)
     {
         None | Some("false") => Ok(false),
         Some("true") => Ok(true),
-        Some(_) => Err("ASTRA_EMU_MINORI_PROGRESS_BACKGROUND_OBSERVATION_INVALID".into()),
+        Some(_) => Err("ASTRA_EMU_MUSICA_PROGRESS_BACKGROUND_OBSERVATION_INVALID".into()),
     }
 }
 
@@ -7683,7 +7683,7 @@ fn matches_blackboard_observation(
         .unwrap_or(false)
 }
 
-fn open_minori_avi_incremental_decoder<R>(
+fn open_musica_avi_incremental_decoder<R>(
     provider_id: &str,
     reader: R,
 ) -> Result<Box<dyn IncrementalMediaDecoder>, String>
@@ -7699,17 +7699,17 @@ where
     };
     match provider_id {
         "wmf" => open_wmf_incremental_reader("avi", reader, budget)
-            .map_err(|_| "ASTRA_EMU_MINORI_VIDEO_WMF_OPEN".to_owned()),
+            .map_err(|_| "ASTRA_EMU_MUSICA_VIDEO_WMF_OPEN".to_owned()),
         "ffmpeg-vcpkg" => {
             #[cfg(feature = "ffmpeg-vcpkg")]
             {
                 open_ffmpeg_incremental_reader("avi", reader, budget)
-                    .map_err(|_| "ASTRA_EMU_MINORI_VIDEO_FFMPEG_OPEN".to_owned())
+                    .map_err(|_| "ASTRA_EMU_MUSICA_VIDEO_FFMPEG_OPEN".to_owned())
             }
             #[cfg(not(feature = "ffmpeg-vcpkg"))]
             {
                 let _ = reader;
-                Err("ASTRA_EMU_MINORI_VIDEO_FFMPEG_UNAVAILABLE".to_owned())
+                Err("ASTRA_EMU_MUSICA_VIDEO_FFMPEG_UNAVAILABLE".to_owned())
             }
         }
         _ => Err("ASTRA_EMU_VIDEO_PROVIDER_UNKNOWN".to_owned()),
@@ -7720,9 +7720,9 @@ fn is_avi_container_header(bytes: &[u8]) -> bool {
     bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"AVI "
 }
 
-fn validate_minori_video_extension(family_id: &str, extension: &str) -> Result<(), String> {
-    if family_id == "minori" && !extension.eq_ignore_ascii_case("avi") {
-        return Err("ASTRA_EMU_MINORI_VIDEO_CODEC_UNSUPPORTED".into());
+fn validate_musica_video_extension(family_id: &str, extension: &str) -> Result<(), String> {
+    if family_id == "musica" && !extension.eq_ignore_ascii_case("avi") {
+        return Err("ASTRA_EMU_MUSICA_VIDEO_CODEC_UNSUPPORTED".into());
     }
     Ok(())
 }
@@ -7976,8 +7976,8 @@ fn write_atomic_bytes(path: &Path, bytes: &[u8]) -> Result<(), String> {
 }
 
 fn image_decode_binding(family_id: &str, codec: &str) -> &'static str {
-    if family_id == "minori" && matches!(codec, "ani" | "sqz") {
-        "astra.decode.minori.image"
+    if family_id == "musica" && matches!(codec, "ani" | "sqz") {
+        "astra.decode.musica.image"
     } else {
         "astra.decode.image"
     }
@@ -7989,7 +7989,7 @@ fn validate_image_decode_output(
     expected_width: u32,
     expected_height: u32,
 ) -> Result<(), String> {
-    if binding == "astra.decode.minori.image" {
+    if binding == "astra.decode.musica.image" {
         let dimensions = format
             .strip_prefix("rgba8:first_frame:")
             .and_then(|value| value.split_once('x'))
@@ -8019,10 +8019,10 @@ mod native_tests {
     use astra_emu_family_api::{FamilyId, LegacySystemMenuItemV1, LegacySystemMenuTransactionV1};
 
     #[test]
-    fn runtime_locale_is_explicit_for_the_original_minori_family() {
+    fn runtime_locale_is_explicit_for_the_original_musica_family() {
         assert_eq!(
-            runtime_locale_for_family("minori"),
-            astra_emu_minori::MINORI_RUNTIME_LOCALE
+            runtime_locale_for_family("musica"),
+            astra_emu_musica::MUSICA_RUNTIME_LOCALE
         );
         assert_eq!(runtime_locale_for_family("fvp"), "und");
     }
@@ -8188,21 +8188,21 @@ mod native_tests {
     #[test]
     fn blackboard_observation_uses_typed_key_and_plain_symbol_value() {
         let observed = BTreeMap::from([
-            ("minori.choice_active".into(), "true".into()),
-            ("minori.gallery_unlock_count".into(), "1".into()),
+            ("musica.choice_active".into(), "true".into()),
+            ("musica.gallery_unlock_count".into(), "1".into()),
         ]);
 
         assert!(matches_blackboard_observation(
             &observed,
-            "blackboard.minori.choice_active.true"
+            "blackboard.musica.choice_active.true"
         ));
         assert!(matches_blackboard_observation(
             &observed,
-            "blackboard.minori.gallery_unlock_count.1"
+            "blackboard.musica.gallery_unlock_count.1"
         ));
         assert!(!matches_blackboard_observation(
             &observed,
-            "blackboard.minori.choice_active.false"
+            "blackboard.musica.choice_active.false"
         ));
     }
 
@@ -8234,11 +8234,11 @@ mod native_tests {
     }
 
     #[test]
-    fn minori_system_pages_are_input_boundaries_without_relaxing_media_waits() {
-        let pages = BTreeMap::from([(String::from("minori.system_page"), String::from("title"))]);
+    fn musica_system_pages_are_input_boundaries_without_relaxing_media_waits() {
+        let pages = BTreeMap::from([(String::from("musica.system_page"), String::from("title"))]);
         let no_waits = BTreeMap::new();
         assert!(input_or_terminal_observation(
-            "minori", false, &no_waits, &pages,
+            "musica", false, &no_waits, &pages,
         ));
         assert!(!input_or_terminal_observation(
             "fvp", false, &no_waits, &pages,
@@ -8249,7 +8249,7 @@ mod native_tests {
             PendingWait::Media(String::from("movie")),
         )]);
         assert!(!input_or_terminal_observation(
-            "minori",
+            "musica",
             false,
             &media_wait,
             &BTreeMap::new(),
@@ -8262,15 +8262,15 @@ mod native_tests {
         let observed = BTreeMap::new();
         assert!(!progress_background_from_observation(&observed).unwrap());
         let enabled = BTreeMap::from([(
-            "minori.progress_in_background".to_owned(),
+            "musica.progress_in_background".to_owned(),
             "true".to_owned(),
         )]);
         assert!(progress_background_from_observation(&enabled).unwrap());
         let malformed =
-            BTreeMap::from([("minori.progress_in_background".to_owned(), "1".to_owned())]);
+            BTreeMap::from([("musica.progress_in_background".to_owned(), "1".to_owned())]);
         assert_eq!(
             progress_background_from_observation(&malformed).unwrap_err(),
-            "ASTRA_EMU_MINORI_PROGRESS_BACKGROUND_OBSERVATION_INVALID"
+            "ASTRA_EMU_MUSICA_PROGRESS_BACKGROUND_OBSERVATION_INVALID"
         );
     }
 
@@ -8281,7 +8281,7 @@ mod native_tests {
     }
 
     #[test]
-    fn minori_avi_probe_requires_the_riff_avi_container_identity() {
+    fn musica_avi_probe_requires_the_riff_avi_container_identity() {
         assert!(is_avi_container_header(b"RIFF\x10\0\0\0AVI "));
         assert!(!is_avi_container_header(b"RIFF\x10\0\0\0WAVE"));
         assert!(!is_avi_container_header(b"JUNK\x10\0\0\0AVI "));
@@ -8289,48 +8289,48 @@ mod native_tests {
     }
 
     #[test]
-    fn minori_video_binding_rejects_non_avi_without_fvp_provider_selection() {
+    fn musica_video_binding_rejects_non_avi_without_fvp_provider_selection() {
         assert_eq!(
-            validate_minori_video_extension("minori", "wmv").unwrap_err(),
-            "ASTRA_EMU_MINORI_VIDEO_CODEC_UNSUPPORTED"
+            validate_musica_video_extension("musica", "wmv").unwrap_err(),
+            "ASTRA_EMU_MUSICA_VIDEO_CODEC_UNSUPPORTED"
         );
-        assert!(validate_minori_video_extension("minori", "AVI").is_ok());
-        assert!(validate_minori_video_extension("fvp", "wmv").is_ok());
+        assert!(validate_musica_video_extension("musica", "AVI").is_ok());
+        assert!(validate_musica_video_extension("fvp", "wmv").is_ok());
     }
 
     #[test]
-    fn minori_requires_one_explicit_supported_video_provider_binding() {
+    fn musica_requires_one_explicit_supported_video_provider_binding() {
         assert_eq!(
-            validate_video_provider_binding("minori", "disabled").unwrap_err(),
-            "ASTRA_EMU_MINORI_VIDEO_PROVIDER_REQUIRED"
+            validate_video_provider_binding("musica", "disabled").unwrap_err(),
+            "ASTRA_EMU_MUSICA_VIDEO_PROVIDER_REQUIRED"
         );
         assert_eq!(
-            validate_video_provider_binding("minori", "platform").unwrap_err(),
+            validate_video_provider_binding("musica", "platform").unwrap_err(),
             "ASTRA_EMU_VIDEO_PROVIDER_UNKNOWN"
         );
-        assert!(validate_video_provider_binding("minori", "wmf").is_ok());
-        assert!(validate_video_provider_binding("minori", "ffmpeg-vcpkg").is_ok());
+        assert!(validate_video_provider_binding("musica", "wmf").is_ok());
+        assert!(validate_video_provider_binding("musica", "ffmpeg-vcpkg").is_ok());
         assert!(validate_video_provider_binding("fvp", "disabled").is_ok());
     }
 
     #[test]
-    fn minori_family_image_codecs_use_the_explicit_family_binding() {
+    fn musica_family_image_codecs_use_the_explicit_family_binding() {
         assert_eq!(
-            image_decode_binding("minori", "ani"),
-            "astra.decode.minori.image"
+            image_decode_binding("musica", "ani"),
+            "astra.decode.musica.image"
         );
         assert_eq!(
-            image_decode_binding("minori", "sqz"),
-            "astra.decode.minori.image"
+            image_decode_binding("musica", "sqz"),
+            "astra.decode.musica.image"
         );
-        assert_eq!(image_decode_binding("minori", "png"), "astra.decode.image");
+        assert_eq!(image_decode_binding("musica", "png"), "astra.decode.image");
         assert_eq!(image_decode_binding("fvp", "ani"), "astra.decode.image");
     }
 
     #[test]
-    fn minori_first_frame_output_requires_matching_dimensions() {
+    fn musica_first_frame_output_requires_matching_dimensions() {
         assert!(validate_image_decode_output(
-            "astra.decode.minori.image",
+            "astra.decode.musica.image",
             "rgba8:first_frame:320x180",
             320,
             180,
@@ -8338,7 +8338,7 @@ mod native_tests {
         .is_ok());
         assert_eq!(
             validate_image_decode_output(
-                "astra.decode.minori.image",
+                "astra.decode.musica.image",
                 "rgba8:first_frame:320x180",
                 640,
                 360,
@@ -8347,7 +8347,7 @@ mod native_tests {
             "ASTRA_EMU_LIVE_RESOURCE_SCENE_DIMENSION_MISMATCH"
         );
         assert_eq!(
-            validate_image_decode_output("astra.decode.minori.image", "rgba8", 1, 1).unwrap_err(),
+            validate_image_decode_output("astra.decode.musica.image", "rgba8", 1, 1).unwrap_err(),
             "ASTRA_EMU_LIVE_RESOURCE_SCENE_DECODE_FORMAT"
         );
     }
@@ -8764,7 +8764,7 @@ mod native_tests {
     }
 
     #[test]
-    fn minori_time_wait_can_be_cancelled_by_escape_for_system_menu() {
+    fn musica_time_wait_can_be_cancelled_by_escape_for_system_menu() {
         let (token, condition) = live_wait_condition(
             RuntimeLiveWait {
                 sequence: 1,

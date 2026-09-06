@@ -10,7 +10,7 @@ MESSAGE_RE = re.compile(r"(message|select|voice|bgm|se|image)", re.I)
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Extract lightweight strings and command markers from decoded Minori .sc-like files.")
+    ap = argparse.ArgumentParser(description="Extract lightweight strings and command markers from decoded Musica .sc-like files.")
     ap.add_argument("file")
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args()

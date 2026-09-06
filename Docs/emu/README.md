@@ -14,7 +14,7 @@ Artemis 是 AstraEMU v1 的可用 family，其余 family 按 alpha probe profile
 | Siglus | 公开体验版或用户本地合法安装 | Siglus 研究实现与本仓 Scene.pck probe 工具 | [siglus/README.md](siglus/README.md) |
 | KrKr / KAG / TJS | 用户本地合法安装和 generated XP3 fixture | KiriKiri/KAG/TJS 公开研究资料 | [krkr/README.md](krkr/README.md) |
 | SoftPAL | 用户本地合法安装和 synthetic PAC/DAT fixture | SoftPAL 研究实现与本仓 extcall probe 工具 | [softpal/README.md](softpal/README.md) |
-| Minori | 用户本地合法安装和 synthetic PAZ fixture | Minori 研究实现与本仓 PAZ probe 工具 | [minori/README.md](minori/README.md) |
+| Musica | 用户本地合法安装和 synthetic PAZ fixture | Musica 研究实现与本仓 PAZ probe 工具 | [musica/README.md](musica/README.md) |
 
 ## 统一文档切分
 
@@ -37,4 +37,4 @@ implementation-checklist.md
 
 ## Tooling
 
-Python 研究脚本位于 `Tools/AstraEMU/`。脚本默认执行 probe/list/decompile；extract 或写文件必须显式传 `--out`。Minori PAZ 和需要 key 的格式只接受外部 `--key-file` 或用户配置，源码不内置商业 key。
+Python 研究脚本位于 `Tools/AstraEMU/`。脚本默认执行 probe/list/decompile；extract 或写文件必须显式传 `--out`。Musica PAZ 和需要 key 的格式只接受外部 `--key-file` 或用户配置，源码不内置商业 key。

@@ -508,14 +508,14 @@ mod tests {
         host.execute(
             "session.test",
             LegacyWritableFileRequestV1::CreateDir {
-                path: "minori".into(),
+                path: "musica".into(),
             },
         )
         .unwrap();
         host.execute(
             "session.test",
             LegacyWritableFileRequestV1::WriteRange {
-                path: "minori/progress.tmp".into(),
+                path: "musica/progress.tmp".into(),
                 offset: 0,
                 bytes: vec![1, 2, 3],
             },
@@ -524,8 +524,8 @@ mod tests {
         host.execute(
             "session.test",
             LegacyWritableFileRequestV1::AtomicReplace {
-                temporary_path: "minori/progress.tmp".into(),
-                destination_path: "minori/progress.bin".into(),
+                temporary_path: "musica/progress.tmp".into(),
+                destination_path: "musica/progress.bin".into(),
             },
         )
         .unwrap();
@@ -533,7 +533,7 @@ mod tests {
             .execute(
                 "session.test",
                 LegacyWritableFileRequestV1::ReadRange {
-                    path: "minori/progress.bin".into(),
+                    path: "musica/progress.bin".into(),
                     offset: 0,
                     length: 3,
                 },

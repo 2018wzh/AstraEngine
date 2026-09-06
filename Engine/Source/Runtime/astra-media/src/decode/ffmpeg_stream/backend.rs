@@ -261,7 +261,7 @@ pub(super) fn create_video_decoder(
         .map_err(|error| {
             ffmpeg_error("ASTRA_FFMPEG_STREAM_DECODER", "create video decoder", error)
         })?;
-    // WMV3 in the supplied Minori AVI tracks is CPU-bound.  Let FFmpeg use
+    // WMV3 in the supplied Musica AVI tracks is CPU-bound.  Let FFmpeg use
     // its frame worker pool while keeping frame order and the bounded packet
     // contract in AstraMedia.  The decoder still exposes one packet per read;
     // threading never becomes an implicit provider or buffering fallback.

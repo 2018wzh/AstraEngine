@@ -1864,8 +1864,8 @@ mod tests {
             opcode: 0x1b,
         }];
         assert_eq!(
-            evidence_vm_coverage_ids("minori", &trace).unwrap(),
-            vec!["minori.vm.c7.pc00000003.op1b"]
+            evidence_vm_coverage_ids("musica", &trace).unwrap(),
+            vec!["musica.vm.c7.pc00000003.op1b"]
         );
         assert_eq!(
             evidence_vm_coverage_ids("fvp", &trace).unwrap(),
@@ -1876,7 +1876,7 @@ mod tests {
             "ASTRA_EMU_FAMILY_COVERAGE_ID_INVALID"
         );
         assert_eq!(
-            evidence_vm_coverage_ids("minori/unsafe", &trace).unwrap_err(),
+            evidence_vm_coverage_ids("musica/unsafe", &trace).unwrap_err(),
             "ASTRA_EMU_FAMILY_COVERAGE_ID_INVALID"
         );
     }

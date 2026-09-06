@@ -1924,7 +1924,7 @@ mod live_zero_copy_tests {
             input_edges: Vec::new(),
             system_menu: None,
             confirmation: Some(LegacyConfirmationResultV1 {
-                confirmation_id: "minori.confirmation.game_exit.12".into(),
+                confirmation_id: "musica.confirmation.game_exit.12".into(),
                 choice: LegacyConfirmationChoiceV1::Cancelled,
                 sequence: 15,
             }),
@@ -1948,7 +1948,7 @@ mod live_zero_copy_tests {
             system_menu: None,
             confirmation: None,
             system_command: Some(LegacySystemCommandResultV1 {
-                command_id: "minori.system_command.window_fullscreen.12".into(),
+                command_id: "musica.system_command.window_fullscreen.12".into(),
                 status: LegacySystemCommandStatusV1::Applied,
                 sequence: 21,
             }),
@@ -1972,7 +1972,7 @@ mod live_zero_copy_tests {
             confirmation: None,
             system_command: None,
             text_input: Some(LegacyTextInputResultV1 {
-                prompt_id: "minori.text_input.save_comment.0.7".into(),
+                prompt_id: "musica.text_input.save_comment.0.7".into(),
                 choice: LegacyTextInputChoiceV1::Accepted,
                 value: "memo".into(),
                 sequence: 29,

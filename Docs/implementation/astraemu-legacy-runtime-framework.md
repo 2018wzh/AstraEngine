@@ -38,7 +38,7 @@ astra-emu-family-*
 
 ## Manager Modernization Layer
 
-统一管理能力放在 Manager 上，不把 RetroArch/libretro 风格 core ABI 引进 family 层。Manager 先按 `FamilyAutoProbePolicy` 调用各 family `probe`，默认顺序是 KrKr、Artemis、BGI、Siglus、SoftPAL、FVP、Minori；用户 profile 可以覆盖最终选择。probe 只记录 marker、confidence、blocker、skipped reason 和 override reason，不执行商业脚本。
+统一管理能力放在 Manager 上，不把 RetroArch/libretro 风格 core ABI 引进 family 层。Manager 先按 `FamilyAutoProbePolicy` 调用各 family `probe`，默认顺序是 KrKr、Artemis、BGI、Siglus、SoftPAL、FVP、Musica；用户 profile 可以覆盖最终选择。probe 只记录 marker、confidence、blocker、skipped reason 和 override reason，不执行商业脚本。
 
 Family ABI v8 把完整 lifecycle 和 host VFS 固定为显式 `StableAbi` wire DTO，并加入 retained ephemeral text 的显式对齐与清除语义；VFS range 每次携带 expected revision、offset、length 和 max bytes，单次读取不能超过 16 MiB。v5/v6/v7 插件与 fingerprint 硬拒绝，不退回旧 whole-file callback 或 postcard FFI envelope。FVP runtime snapshot 仍使用独立的 v7 schema，旧 v5/v6 snapshot 硬拒绝。大块 scene/encoded/PCM payload 使用 ABI-owned 引用计数 buffer；控制 effect 仍可序列化，但 bulk body 不进入 RuntimeWorld、save、replay、report 或日志。`read_session_resource` 只负责 family virtual VFS 与通用媒体 host 之间的已解析资源交付：family 负责 archive/path 语义，Manager、CLI 与共享 PlatformHost audio service 负责 decode/playback。
 
@@ -134,7 +134,7 @@ Replay 不重新读取 wall-clock、OS callback 或 provider object address。�
 | SoftPAL | `ScriptRuntime`、extcall bridge、MemDat shadow、text/sprite/audio/save state | PAL wait、extcall trace、text/sprite/audio effect、memory snapshot | extcall is action bridge; unknown extcall is classified before release |
 | FVP | HCB parser、multi-context VM、syscall mapper、thread/presentation/audio state | context trace、syscall coverage、thread wait/text/dissolve effect、snapshot | HCB basic block maps to action sequence; syscall produces presentation/audio/text/await effect |
 | Siglus | Scene package、Scene VM、form/element dispatch、Gameexe config、savepoint | scene/line trace、stage/message/audio/movie effect、selection/system wait、snapshot | instruction stream maps to basic block; missing authorized material blocks |
-| Minori | PAZ reader、`.sc` decoder、VM、presentation/audio mapper | opcode trace、resource diagnostic、presentation/audio/text effect、snapshot | command cursor maps to context; media command uses shared bridge |
+| Musica | PAZ reader、`.sc` decoder、VM、presentation/audio mapper | opcode trace、resource diagnostic、presentation/audio/text effect、snapshot | command cursor maps to context; media command uses shared bridge |
 
 ## Release Gate
 

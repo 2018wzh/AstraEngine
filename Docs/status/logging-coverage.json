@@ -257,9 +257,9 @@
       "status": "instrumented",
       "reason": "FVP provider session, step, media and snapshot lifecycle"
     },
-    "astra-emu-minori": {
+    "astra-emu-musica": {
       "status": "instrumented",
-      "reason": "Minori PAZ mount, key-file validation and streaming decrypt lifecycle"
+      "reason": "Musica PAZ mount, key-file validation and streaming decrypt lifecycle"
     },
     "astra-emu-manager-core": {
       "status": "instrumented",
@@ -289,9 +289,9 @@
       "status": "instrumented",
       "reason": "explicit native launch and headless provider/session/artifact lifecycle"
     },
-    "astra-emu-minori-cli": {
+    "astra-emu-musica-cli": {
       "status": "instrumented",
-      "reason": "Minori private scheme import and script census lifecycle"
+      "reason": "Musica private scheme import and script census lifecycle"
     },
     "astra-emu-schema": {
       "status": "not_applicable",

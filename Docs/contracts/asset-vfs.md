@@ -85,7 +85,7 @@ VFS 使用 UE 风格 mount graph，而不是一组分散 provider slot：
 | --- | --- | --- |
 | `package` | 读取 `.astrapkg` 内 cooked asset、manifest、policy bundle、ModelBundle 和 report section | 只通过 section id、offset、size、hash 和 codec 读取 |
 | `local_authorized` | 本地合法数据根、开发期 import source、私有 acceptance root | host 进程持有 root capability；manifest/report 只写 prefix、URI、hash、size 和 diagnostic |
-| `legacy_pack` | FVP `.bin`、KrKr XP3、BGI PackFile、Artemis PFS、Siglus Scene.pck、SoftPAL PAC/DAT、Minori PAZ 等旧引擎资源包 | reader 输出 entry table hash、entry id、offset、size、hash、media kind 和 diagnostic |
+| `legacy_pack` | FVP `.bin`、KrKr XP3、BGI PackFile、Artemis PFS、Siglus Scene.pck、SoftPAL PAC/DAT、Musica PAZ 等旧引擎资源包 | reader 输出 entry table hash、entry id、offset、size、hash、media kind 和 diagnostic |
 | `overlay` | patch、mod、翻译覆盖、调试替换和迁移期 NativeVN asset 覆盖 | 同一 `VfsUri` namespace 覆盖 lower layer；priority、allowlist、base hash 和 reason 必须显式声明 |
 | `memory` | Editor/Tools 的短生命周期 workspace object | 不进入 shipping package；只记录 stable object id、hash 和诊断 |
 

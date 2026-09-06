@@ -2225,7 +2225,7 @@ mod macos {
         request: ConfirmationRequest,
     ) -> Result<ConfirmationResult, PlatformError> {
         // Keep the native dialog attached to the live game window's title.
-        // Minori's original confirmation surfaces use the owner caption for
+        // Musica's original confirmation surfaces use the owner caption for
         // both return-to-title and exit prompts; using the request title as
         // the primary caption makes macOS diverge when a host changes the
         // window title during a session.  A blank owner title is the only

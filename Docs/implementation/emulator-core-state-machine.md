@@ -55,7 +55,7 @@ Patch、翻译资源、mod 和调试替换使用 `overlay` mount。没有 overla
 | KrKr | XP3、KAG source、TJS bytecode、virtual storage | `legacy_pack` for XP3，overlay for patch | KAG label/context 和 TJS bytecode 分支分开建 context；unsupported bytecode 输出 reader-required diagnostic |
 | Siglus | Scene.pck、Gameexe、`.ss`、G00/media | `legacy_pack` for Scene.pck/media | `.ss` instruction stream 映射 basic block；授权 material 缺失时阻断，不生成伪 effect |
 | SoftPAL | PAC/DAT、script VM、extcall | `legacy_pack` for PAC/DAT | extcall 是 action bridge；未知 extcall 按 recoverable 或 blocking 分类 |
-| Minori | PAZ、`.sc` script、演出命令 | `legacy_pack` for PAZ | `.sc` command cursor 映射 context；media command 走同一 presentation/audio bridge |
+| Musica | PAZ、`.sc` script、演出命令 | `legacy_pack` for PAZ | `.sc` command cursor 映射 context；media command 走同一 presentation/audio bridge |
 
 ## FVP Detailed Example
 

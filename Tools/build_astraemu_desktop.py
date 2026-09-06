@@ -32,7 +32,7 @@ SUPPORTED_TARGETS = {
 }
 SUPPORTED_FAMILIES = {
     "fvp": ("astra-emu-fvp", "astra-fvp-descriptor.json"),
-    "minori": ("astra-emu-minori", "astra-minori-descriptor.json"),
+    "musica": ("astra-emu-musica", "astra-musica-descriptor.json"),
 }
 MAX_REPORT_BYTES = 1024 * 1024
 WINDOWS_MSVC_TARGET = "x86_64-pc-windows-msvc"
@@ -86,9 +86,9 @@ def main() -> int:
     validate_hex(environment["ASTRA_EMU_FAMILY_PUBLIC_KEY_HEX"], 64, "ASTRA_EMU_FAMILY_PUBLIC_KEY_ENCODING")
 
     video_provider = args.video_provider
-    if args.family == "minori" and video_provider is None:
+    if args.family == "musica" and video_provider is None:
         video_provider = "wmf" if target == "x86_64-pc-windows-msvc" else "ffmpeg-vcpkg"
-    if args.family != "minori" and video_provider is not None:
+    if args.family != "musica" and video_provider is not None:
         fail("ASTRA_EMU_DESKTOP_VIDEO_PROVIDER_FAMILY_MISMATCH")
     environment["ASTRA_EMU_DEFAULT_VIDEO_PROVIDER"] = video_provider or "disabled"
     descriptor = cargo_build(
@@ -281,7 +281,7 @@ def cargo_build(
 def desktop_features(family_id: str, video_provider: str | None) -> tuple[str, ...]:
     family_package = SUPPORTED_FAMILIES[family_id][0]
     features = [f"{family_package}/dynamic-plugin-export"]
-    if family_id == "minori" and video_provider == "ffmpeg-vcpkg":
+    if family_id == "musica" and video_provider == "ffmpeg-vcpkg":
         # FFmpeg is an optional explicit provider. WMF is part of the Windows
         # platform build and therefore does not require a Cargo feature.
         features.extend(

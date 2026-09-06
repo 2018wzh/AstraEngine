@@ -1,0 +1,47 @@
+# Musica Runtime Family Plugin Design
+
+Musica family 通过 `LegacyRuntimeProvider` 接入 AstraEMU。Session 持有 PAZ archive set、`.sc` decoder、VM、presentation/audio mapper、external key diagnostics、writable-file save state 和 ABI v9 layer state。下面的生命周期与错误边界同时记录已落地契约和仍开放的行为证据；没有 Headless/Windows evidence 的项目不会被写成完成。
+
+## Session Modules
+
+```text
+MusicaRuntimeProvider
+MusicaProbe
+MusicaArchiveSet
+PazReader
+MusicaScriptDecoder
+MusicaVm
+MusicaPresentationMapper
+MusicaAudioMapper
+MusicaSnapshot
+```
+
+`PazReader` 只暴露 read-only bytes。`MusicaVm` 不直接打开文件；它通过 resolver 请求资源。PAZ key、exe patch、安装器保护和 hook 资料不进入公共实现。
+
+## Lifecycle
+
+`probe` 识别 PAZ 与 `.sc` script。VFS mount 在 runtime open 前读取 launch profile 指定的 `key.toml`；缺 key 或 schema 不匹配时直接阻断，不尝试提取材料。`open` 建立 archive set、script decoder、VM、presentation/audio state。`step` 推进 `.sc` 指令流，直到 message wait、choice、media wait、unsupported opcode、fault 或 halt。
+
+## Step Output
+
+Session 输出：
+
+- `TextCaptureEvent`：message hash、speaker hash、line/source ref。
+- `PresentationCommand`：背景、立绘、窗口和 transition。
+- `AudioCommand`：BGM、voice、SE、movie ref。
+- `StateMachineTrace`：script id、pc、opcode、wait reason。
+- `Diagnostic`：missing key、missing resource、unknown command/operand、decode failed。
+- `LegacySnapshotEnvelope`：VM pc、stack、variables、choice state、presentation/audio state 和 resolver fingerprint。
+
+## Error Policy
+
+| 情况 | Diagnostic | 行为 |
+| --- | --- | --- |
+| 缺少或非法 key file | `ASTRA_EMU_MUSICA_KEY_*` | 阻止 mount |
+| entry 缺失 | `ASTRA_EMU_VFS_ENTRY_MISSING` | 阻止该次读取，不生成替代资源 |
+| opcode 未识别 | `UnknownOpcode` | parser 保留 raw operand；执行核心实现前不得猜测语义 |
+| payload 解码失败 | `ASTRA_EMU_MUSICA_DECRYPT_*` | 阻止读取，不切换 provider 或算法 |
+
+## First Implementation Gate
+
+第一版只要求 boot 到首个 message、推进文本、播放 BGM/voice/SE、显示背景和立绘、处理一次 choice、save/load 回到同一 pc。

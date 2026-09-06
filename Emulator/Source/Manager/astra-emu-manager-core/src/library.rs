@@ -1406,29 +1406,29 @@ mod tests {
     }
 
     #[test]
-    fn minori_entry_uri_family_option_round_trips_and_rejects_traversal() {
+    fn musica_entry_uri_family_option_round_trips_and_rejects_traversal() {
         let mut library = Library::in_memory().unwrap();
-        scan_case(&mut library, "case-minori");
+        scan_case(&mut library, "case-musica");
         let profile = CaseRuntimeProfileRecord {
-            case_identity: "case-minori".into(),
-            family_id: "minori".into(),
+            case_identity: "case-musica".into(),
+            family_id: "musica".into(),
             fixed_delta_ns: 16_666_667,
-            compatibility_profile: "minori.reference".into(),
+            compatibility_profile: "musica.reference".into(),
             family_options: BTreeMap::from([
-                ("astra.entry_uri".into(), "minori:/scr/A01.sc".into()),
-                ("minori.nls".into(), "shift_jis".into()),
+                ("astra.entry_uri".into(), "musica:/scr/A01.sc".into()),
+                ("musica.nls".into(), "shift_jis".into()),
             ]),
         };
         library.set_case_runtime_profile(&profile).unwrap();
         assert_eq!(
-            library.case_runtime_profile("case-minori").unwrap(),
+            library.case_runtime_profile("case-musica").unwrap(),
             Some(profile.clone())
         );
 
         let mut invalid = profile;
         invalid
             .family_options
-            .insert("astra.entry_uri".into(), "minori:/scr/../sys/config".into());
+            .insert("astra.entry_uri".into(), "musica:/scr/../sys/config".into());
         assert!(matches!(
             library.set_case_runtime_profile(&invalid),
             Err(LibraryError::InvalidSymbol(key)) if key == "astra.entry_uri"

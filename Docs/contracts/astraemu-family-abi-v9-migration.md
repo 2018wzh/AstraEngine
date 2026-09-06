@@ -17,13 +17,13 @@ Layer 的 filter 使用 ABI-owned `LegacyFilterGraphV9`，节点、target 与 pa
 
 FVP 固定使用 `Ported + SingleLayer`。RFVP hosted feature 直接依赖固定 AstraEngine ABI commit；AstraEngine workspace 通过精确 Git source `[patch]` 映射到当前 path crate，并以 `cargo tree` 阻断双 package identity。`astra-emu-fvp` 只保留 dylib/root-module、build identity、descriptor、provider 构造与 shutdown、panic containment、最终错误映射和 observability 边界。
 
-Minori 固定使用 `Native + MultiLayer`，把 background、foreground/stand、effect、panel/text 映射为独立 retained layer。Siglus v8 不属于本迁移分支，必须单独迁移到 v9 后才能合并。
+Musica 固定使用 `Native + MultiLayer`，把 background、foreground/stand、effect、panel/text 映射为独立 retained layer。Siglus v8 不属于本迁移分支，必须单独迁移到 v9 后才能合并。
 
 ## 验收边界
 
-ABI milestone 只要求 ABI crates、schema generator、loader rejection、文档与格式检查通过。consumer 尚未迁移时，完整 workspace 失败是已知迁移状态，不能伪装成兼容实现。完成条件还包括 RFVP 独立构建、唯一 ABI package identity、FVP/Minori/Host product tests、Performance E2 和最终 workspace gate。Headless 只形成 E2；Windows Manager 的真实输入、画面、音频与 shutdown 仍需独立 E3。
+ABI milestone 只要求 ABI crates、schema generator、loader rejection、文档与格式检查通过。consumer 尚未迁移时，完整 workspace 失败是已知迁移状态，不能伪装成兼容实现。完成条件还包括 RFVP 独立构建、唯一 ABI package identity、FVP/Musica/Host product tests、Performance E2 和最终 workspace gate。Headless 只形成 E2；Windows Manager 的真实输入、画面、音频与 shutdown 仍需独立 E3。
 
-2026 年 8 月 23 日，动态 loader 已改为一次绑定 VFS、surface、Hook 和 writable-file 四个 Host port，注册表不再保留 VFS-only 入口。公共 support 层的有界 surface store 在 acquire 时转移唯一可写 allocation，commit 收回同一 allocation，并校验 session、fixed step、generation、geometry 和总内存预算。Product host 同时按 descriptor 强制唯一 presentation lane。CLI、Manager、FVP 与 Minori consumer 已完成 v9 编译迁移；Minori 的签名真实样本 Headless slice 已通过 lifecycle，但 checkpoint 阶段标签和完整路线视觉门禁仍未闭合。
+2026 年 8 月 23 日，动态 loader 已改为一次绑定 VFS、surface、Hook 和 writable-file 四个 Host port，注册表不再保留 VFS-only 入口。公共 support 层的有界 surface store 在 acquire 时转移唯一可写 allocation，commit 收回同一 allocation，并校验 session、fixed step、generation、geometry 和总内存预算。Product host 同时按 descriptor 强制唯一 presentation lane。CLI、Manager、FVP 与 Musica consumer 已完成 v9 编译迁移；Musica 的签名真实样本 Headless slice 已通过 lifecycle，但 checkpoint 阶段标签和完整路线视觉门禁仍未闭合。
 
 同日的 FVP consumer 清理删除了 v9 已移除的 family snapshot、text lease、session resource 和 step budget 调用。FVP Astra adapter 只保留 dylib/build identity/error 边界，RFVP provider 负责 `Ported + SingleLayer` 产品输出；没有恢复旧 scene 或宿主文字路径。
 

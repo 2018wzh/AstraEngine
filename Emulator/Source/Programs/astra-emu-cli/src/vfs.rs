@@ -8,7 +8,7 @@ use astra_emu_family_core::{LegacyCoreError, LegacyMountedVfs, LEGACY_VFS_MAX_RE
 use astra_emu_family_support::{
     extract_vfs, mount_family_vfs, verify_vfs, write_private_file_atomic, ExtractSelection,
 };
-use astra_emu_minori::MinoriVfsFamilyFactory;
+use astra_emu_musica::MusicaVfsFamilyFactory;
 use clap::{Args, Subcommand, ValueEnum};
 use encoding_rs::Encoding;
 use rfvp_astra_provider::FvpVfsFamilyFactory;
@@ -173,7 +173,7 @@ fn mount(arguments: &VfsArgs) -> Result<Arc<dyn LegacyMountedVfs>, LegacyCoreErr
         &arguments.launch_profile,
         vec![
             Arc::new(FvpVfsFamilyFactory),
-            Arc::new(MinoriVfsFamilyFactory),
+            Arc::new(MusicaVfsFamilyFactory),
         ],
     )
 }

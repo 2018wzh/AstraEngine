@@ -17,9 +17,9 @@
 
 ## AstraEMU Family Samples
 
-Minori message-control 的新增定向门禁覆盖 typed markup、voice/auto wait、inline character load、snapshot corruption 和缺失音频 duration；时长读取另由 AstraMedia metadata fixture 覆盖。仓库 Ogg 只在本地定向探针中确认容器 duration 可读，不把示例音频复制进 Minori fixture。真实商业脚本只保留聚合计数，Headless checkpoint 与原版视觉对照仍是开放验收项。
+Musica message-control 的新增定向门禁覆盖 typed markup、voice/auto wait、inline character load、snapshot corruption 和缺失音频 duration；时长读取另由 AstraMedia metadata fixture 覆盖。仓库 Ogg 只在本地定向探针中确认容器 duration 可读，不把示例音频复制进 Musica fixture。真实商业脚本只保留聚合计数，Headless checkpoint 与原版视觉对照仍是开放验收项。
 
-每个 family 使用用户本地合法数据，报告只提交 alias、hash、offset、size 和脱敏 metadata。v1 首发 family 是 FVP；其他 family 输出 alpha probe report。默认 auto-probe 顺序仍是 KrKr、Artemis、BGI、Siglus、SoftPAL、FVP、Minori，显式 case profile 始终优先。
+每个 family 使用用户本地合法数据，报告只提交 alias、hash、offset、size 和脱敏 metadata。v1 首发 family 是 FVP；其他 family 输出 alpha probe report。默认 auto-probe 顺序仍是 KrKr、Artemis、BGI、Siglus、SoftPAL、FVP、Musica，显式 case profile 始终优先。
 
 ## Scenario Format
 

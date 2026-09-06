@@ -64,9 +64,9 @@ use astra_emu_metadata::{
     match_metadata, BangumiPlayStatus, BangumiPlayUpdate, CompatibilityFetch, CoverAsset,
     MatchInput, MetadataProviderId, MetadataSearchQuery, DEFAULT_COMPATIBILITY_SOURCE_URL,
 };
-use astra_emu_minori::{
-    MinoriAviDecodeProvider, MinoriImageDecodeProvider, MinoriNls, MinoriVfsFamilyFactory,
-    MINORI_AVI_DECODE_PROVIDER_ID, MINORI_NLS_OPTION,
+use astra_emu_musica::{
+    MusicaAviDecodeProvider, MusicaImageDecodeProvider, MusicaNls, MusicaVfsFamilyFactory,
+    MUSICA_AVI_DECODE_PROVIDER_ID, MUSICA_NLS_OPTION,
 };
 use astra_emu_translation_openai_compatible::{
     SecretResolver, TranslationEndpointKind, TranslationProfile, TranslationProtocol,
@@ -102,7 +102,7 @@ use translation_runtime::{
 };
 use video_executor::{
     validate_family_video_extension, HostVideoExecutor, HostVideoFrame,
-    MINORI_VIDEO_PROVIDER_BINDING,
+    MUSICA_VIDEO_PROVIDER_BINDING,
 };
 
 #[cfg(not(target_os = "android"))]
@@ -135,8 +135,8 @@ fn platform_data_dir() -> Result<PathBuf, String> {
 }
 
 fn runtime_locale_for_family(family_id: &str) -> &'static str {
-    if family_id == "minori" {
-        astra_emu_minori::MINORI_RUNTIME_LOCALE
+    if family_id == "musica" {
+        astra_emu_musica::MUSICA_RUNTIME_LOCALE
     } else {
         "und"
     }
@@ -242,19 +242,19 @@ impl RuntimeBridge {
     fn new(vfs: Arc<VfsRegistry>) -> Result<Self, String> {
         let family_host = astra_emu_manager_core::AstraEmuFamilyHost::new(vfs.clone());
         // Keep Manager startup independent of an unselected native family.
-        // Minori's static provider is pure Rust and has no external binary
+        // Musica's static provider is pure Rust and has no external binary
         // load; the explicitly selected family is rebuilt in `ensure_family`
         // before any session opens.
-        let family = astra_emu_minori::create_static_minori_provider(family_host.services())
+        let family = astra_emu_musica::create_static_musica_provider(family_host.services())
             .map_err(|error| error.to_string())?;
         let mut provider = AstraEmuRuntimeProvider::new(family, family_host)?;
         provider.create_instance(ProviderInstanceId("astra.emu.manager.instance".into()))?;
         let mut video = HostVideoExecutor::default();
-        video.bind_family("minori");
-        video.bind_video_provider(MINORI_VIDEO_PROVIDER_BINDING);
+        video.bind_family("musica");
+        video.bind_video_provider(MUSICA_VIDEO_PROVIDER_BINDING);
         Ok(Self {
             provider,
-            family_id: "minori".into(),
+            family_id: "musica".into(),
             active: None,
             terminal: false,
             failed: false,
@@ -275,7 +275,7 @@ impl RuntimeBridge {
         family_id: &str,
         reader: Arc<dyn LegacyVfsReader>,
     ) -> Result<(), String> {
-        if family_id.is_empty() || !matches!(family_id, "fvp" | "minori") {
+        if family_id.is_empty() || !matches!(family_id, "fvp" | "musica") {
             return Err("ASTRA_EMU_FAMILY_UNSUPPORTED".into());
         }
         if self.active.is_some() {
@@ -286,7 +286,7 @@ impl RuntimeBridge {
         let family_host = astra_emu_manager_core::AstraEmuFamilyHost::new(reader);
         let family = match family_id {
             "fvp" => FamilyHostConfig::from_process()?.create_provider(family_host.services())?,
-            "minori" => astra_emu_minori::create_static_minori_provider(family_host.services())
+            "musica" => astra_emu_musica::create_static_musica_provider(family_host.services())
                 .map_err(|error| error.to_string())?,
             _ => unreachable!("family id validated above"),
         };
@@ -296,7 +296,7 @@ impl RuntimeBridge {
         self.family_id = family_id.into();
         self.video.bind_family(family_id);
         self.video
-            .bind_video_provider(MINORI_VIDEO_PROVIDER_BINDING);
+            .bind_video_provider(MUSICA_VIDEO_PROVIDER_BINDING);
         self.terminal = false;
         self.failed = false;
         self.live_scene_commits.clear();
@@ -669,14 +669,14 @@ impl RuntimeBridge {
         })
     }
 
-    fn probe_minori_profile(
+    fn probe_musica_profile(
         &self,
         case: &astra_emu_manager_core::CaseRecord,
         mount_set_id: &str,
         entry_uri: &str,
         launch_entry_explicit: bool,
     ) -> Result<CaseRuntimeProfileRecord, String> {
-        if self.family_id != "minori" {
+        if self.family_id != "musica" {
             return Err("ASTRA_EMU_FAMILY_BINDING_MISMATCH".into());
         }
         let package_hash: Hash256 = case
@@ -693,7 +693,7 @@ impl RuntimeBridge {
                 permission_policy_id: "astra.emu.desktop.user_grant.v1".into(),
                 report_sink_id: "astra.emu.manager.report".into(),
                 target: "game".into(),
-                profile: "minori-v1".into(),
+                profile: "musica-v1".into(),
             },
             LegacyProbeRequest {
                 root_mount_id: mount_set_id.into(),
@@ -701,11 +701,11 @@ impl RuntimeBridge {
                 marker_hashes: Vec::new(),
             },
         )?;
-        if report.family_id.0 != "minori"
+        if report.family_id.0 != "musica"
             || report.confidence_permyriad != 10_000
             || !report.blockers.is_empty()
         {
-            return Err("ASTRA_EMU_MINORI_PROBE_BLOCKED".into());
+            return Err("ASTRA_EMU_MUSICA_PROBE_BLOCKED".into());
         }
         let mut family_options = BTreeMap::from([
             ("astra.entry_uri".into(), entry_uri.into()),
@@ -713,7 +713,7 @@ impl RuntimeBridge {
                 "astra.family_content_hash".into(),
                 report.content_identity.to_string(),
             ),
-            // Minori resources and retained layers are authored against the
+            // Musica resources and retained layers are authored against the
             // verified 1280x720 reference stage.  The manager's FVP default
             // would reject the first message before a surface is published.
             ("astra.stage_width".into(), "1280".into()),
@@ -727,8 +727,8 @@ impl RuntimeBridge {
                 "astra.writable_file.v1".into(),
             ),
             (
-                astra_emu_minori::MINORI_NLS_OPTION.into(),
-                astra_emu_minori::MINORI_NLS_SHIFT_JIS.into(),
+                astra_emu_musica::MUSICA_NLS_OPTION.into(),
+                astra_emu_musica::MUSICA_NLS_SHIFT_JIS.into(),
             ),
         ]);
         if env::var("ASTRA_EMU_QUICK_EVIDENCE").as_deref() == Ok("1") {
@@ -736,9 +736,9 @@ impl RuntimeBridge {
         }
         Ok(CaseRuntimeProfileRecord {
             case_identity: case.case_identity.clone(),
-            family_id: "minori".into(),
+            family_id: "musica".into(),
             fixed_delta_ns: 16_666_667,
-            compatibility_profile: "minori.reference".into(),
+            compatibility_profile: "musica.reference".into(),
             family_options,
         })
     }
@@ -806,7 +806,7 @@ impl RuntimeBridge {
                 }
                 match wait {
                     PendingWait::DueStep(due) => *due <= next_step,
-                    // Escape is the Minori system-menu shortcut and may interrupt
+                    // Escape is the Musica system-menu shortcut and may interrupt
                     // a message timer. Keep frame/presentation waits separate so
                     // they cannot be cancelled by unrelated UI input.
                     PendingWait::Time(due) => {
@@ -854,12 +854,12 @@ impl RuntimeBridge {
             ));
         }
         let mut completed_input_controls = BTreeSet::new();
-        // Minori uses a primary click in the lower-right play-mode hitbox as
+        // Musica uses a primary click in the lower-right play-mode hitbox as
         // an out-of-band control while a message wait is active.  Keep that
         // edge visible to the family provider so it can distinguish the
         // toggle from an ordinary message confirmation.  Other families keep
         // the legacy host-side completion filtering.
-        let preserve_minori_play_mode_click = self.family_id == "minori";
+        let preserve_musica_play_mode_click = self.family_id == "musica";
         let mut await_results = Vec::new();
         for token_id in ready {
             let condition = active
@@ -874,7 +874,7 @@ impl RuntimeBridge {
                     // controls that completed this input wait would be a
                     // duplicate semantic completion at the provider.
                     if edge.control != "escape"
-                        && !(preserve_minori_play_mode_click && edge.control == "pointer.primary")
+                        && !(preserve_musica_play_mode_click && edge.control == "pointer.primary")
                         && keys.contains(&edge.control)
                     {
                         completed_input_controls.insert(edge.control.clone());
@@ -893,7 +893,7 @@ impl RuntimeBridge {
             std::mem::take(&mut active.pending_inputs),
             &completed_input_controls,
         );
-        if self.family_id == "minori" {
+        if self.family_id == "musica" {
             for edge in &input_edges {
                 match edge.control.as_str() {
                     "pointer.x" => active.last_pointer_x = edge.value as i32,
@@ -1025,18 +1025,18 @@ impl RuntimeBridge {
                 .ok_or_else(|| "ASTRA_EMU_RUNTIME_SESSION_NOT_ACTIVE".to_owned())?;
             active.system_ui_active = system_ui_active;
         }
-        if self.family_id == "minori" {
+        if self.family_id == "musica" {
             let mut observed_play_mode = None;
             for mutation in &live.blackboard {
-                if mutation.key != "minori.play_mode" {
+                if mutation.key != "musica.play_mode" {
                     continue;
                 }
                 let mode = match mutation.value.as_str() {
                     "normal" | "auto" | "skip" => mutation.value.clone(),
-                    _ => return Err("ASTRA_EMU_MINORI_PLAY_MODE_OBSERVATION".into()),
+                    _ => return Err("ASTRA_EMU_MUSICA_PLAY_MODE_OBSERVATION".into()),
                 };
                 if observed_play_mode.replace(mode).is_some() {
-                    return Err("ASTRA_EMU_MINORI_PLAY_MODE_DUPLICATE".into());
+                    return Err("ASTRA_EMU_MUSICA_PLAY_MODE_DUPLICATE".into());
                 }
             }
             if let Some(mode) = observed_play_mode {
@@ -1402,8 +1402,8 @@ impl RuntimeBridge {
         expected_height: u32,
     ) -> Result<Vec<u8>, String> {
         let codec = codec.to_ascii_lowercase();
-        let binding = if self.family_id == "minori" && matches!(codec.as_str(), "ani" | "sqz") {
-            astra_emu_minori::MINORI_IMAGE_DECODE_PROVIDER_ID
+        let binding = if self.family_id == "musica" && matches!(codec.as_str(), "ani" | "sqz") {
+            astra_emu_musica::MUSICA_IMAGE_DECODE_PROVIDER_ID
         } else if matches!(codec.as_str(), "png" | "bmp" | "jpg" | "jpeg" | "webp") {
             "astra.decode.image"
         } else {
@@ -1432,9 +1432,9 @@ impl RuntimeBridge {
         registry
             .register(Box::new(ImageDecodeProvider))
             .map_err(|_| "ASTRA_EMU_LIVE_RESOURCE_SCENE_PROVIDER_INVALID".to_owned())?;
-        if binding == astra_emu_minori::MINORI_IMAGE_DECODE_PROVIDER_ID {
+        if binding == astra_emu_musica::MUSICA_IMAGE_DECODE_PROVIDER_ID {
             registry
-                .register(Box::new(MinoriImageDecodeProvider))
+                .register(Box::new(MusicaImageDecodeProvider))
                 .map_err(|_| "ASTRA_EMU_LIVE_RESOURCE_SCENE_PROVIDER_INVALID".to_owned())?;
         }
         let decoded = registry
@@ -1451,7 +1451,7 @@ impl RuntimeBridge {
         let DecodeOutput::CpuBuffer { bytes, format } = decoded.output else {
             return Err("ASTRA_EMU_LIVE_RESOURCE_SCENE_CPU_BUFFER_REQUIRED".into());
         };
-        if binding == astra_emu_minori::MINORI_IMAGE_DECODE_PROVIDER_ID {
+        if binding == astra_emu_musica::MUSICA_IMAGE_DECODE_PROVIDER_ID {
             let dimensions = format
                 .strip_prefix("rgba8:first_frame:")
                 .and_then(|value| value.split_once('x'))
@@ -2001,7 +2001,7 @@ impl AstraEmuManagerController {
             .register(Arc::new(FvpVfsFamilyFactory))
             .map_err(|error| error.to_string())?;
         family_vfs_registry
-            .register(Arc::new(MinoriVfsFamilyFactory))
+            .register(Arc::new(MusicaVfsFamilyFactory))
             .map_err(|error| error.to_string())?;
         let runtime = Rc::new(RefCell::new(RuntimeBridge::new(vfs.clone())?));
         let metadata = MetadataRuntime::start()?;
@@ -2266,8 +2266,8 @@ impl AstraEmuManagerController {
     fn active_family_text_locale(&self) -> TextPreviewLocale {
         self.active_family_mount
             .as_ref()
-            .filter(|mounted| mounted.manifest().family_id == "minori")
-            .map(|_| TextPreviewLocale::MinoriJapaneseCp932)
+            .filter(|mounted| mounted.manifest().family_id == "musica")
+            .map(|_| TextPreviewLocale::MusicaJapaneseCp932)
             .unwrap_or(TextPreviewLocale::Auto)
     }
 
@@ -2293,18 +2293,18 @@ impl AstraEmuManagerController {
             .active_family_mount
             .as_ref()
             .ok_or_else(|| "ASTRA_EMU_VFS_PREVIEW_FAMILY_MOUNT_MISSING".to_owned())?;
-        if mounted.manifest().family_id != "minori" {
+        if mounted.manifest().family_id != "musica" {
             return Err("ASTRA_EMU_VFS_PREVIEW_IMAGE_PROVIDER_UNBOUND".into());
         }
         let prefix = mounted.manifest().prefix.trim_end_matches('/');
         let uri = format!("{prefix}/{}", resource.path.trim_matches('/'));
         let mut registry = DecodeProviderRegistry::default();
         registry
-            .register(Box::new(MinoriImageDecodeProvider))
+            .register(Box::new(MusicaImageDecodeProvider))
             .map_err(|_| "ASTRA_EMU_VFS_PREVIEW_IMAGE_PROVIDER_INVALID".to_owned())?;
         let profile = "astra.manager.preview.v1";
         let binding = DecodeBindingContext::shipping(
-            astra_emu_minori::MINORI_IMAGE_DECODE_PROVIDER_ID,
+            astra_emu_musica::MUSICA_IMAGE_DECODE_PROVIDER_ID,
             "astra-emu-manager",
             profile,
         );
@@ -2320,12 +2320,12 @@ impl AstraEmuManagerController {
         else {
             return Err("ASTRA_EMU_VFS_PREVIEW_IMAGE_OUTPUT_INVALID".into());
         };
-        if provider_id != astra_emu_minori::MINORI_IMAGE_DECODE_PROVIDER_ID
+        if provider_id != astra_emu_musica::MUSICA_IMAGE_DECODE_PROVIDER_ID
             || !matches!(codec.as_str(), "ani" | "sqz")
         {
             return Err("ASTRA_EMU_VFS_PREVIEW_IMAGE_OUTPUT_INVALID".into());
         }
-        let (width, height) = parse_minori_image_preview_format(&format)?;
+        let (width, height) = parse_musica_image_preview_format(&format)?;
         let pixel_count = u64::from(width)
             .checked_mul(u64::from(height))
             .ok_or_else(|| "ASTRA_EMU_VFS_PREVIEW_IMAGE_DIMENSIONS_OVERFLOW".to_owned())?;
@@ -2361,19 +2361,19 @@ impl AstraEmuManagerController {
         if media_kind == "video" {
             validate_family_video_extension(mounted.manifest().family_id.as_str(), &codec)?;
         }
-        let minori_avi =
-            mounted.manifest().family_id == "minori" && media_kind == "video" && codec == "avi";
+        let musica_avi =
+            mounted.manifest().family_id == "musica" && media_kind == "video" && codec == "avi";
         let mut registry = DecodeProviderRegistry::default();
         registry
             .register(Box::new(SymphoniaAudioDecodeProvider))
             .map_err(|_| "ASTRA_EMU_VFS_PREVIEW_AUDIO_PROVIDER_INVALID".to_owned())?;
-        if minori_avi {
+        if musica_avi {
             registry
-                .register(Box::new(MinoriAviDecodeProvider))
+                .register(Box::new(MusicaAviDecodeProvider))
                 .map_err(|_| "ASTRA_EMU_VFS_PREVIEW_VIDEO_PROVIDER_INVALID".to_owned())?;
         }
         #[cfg(target_os = "windows")]
-        if media_kind == "video" && !minori_avi {
+        if media_kind == "video" && !musica_avi {
             let provider = WindowsMediaFoundationDecodeProvider::probe()
                 .map_err(|_| "ASTRA_EMU_VFS_PREVIEW_VIDEO_PROVIDER_UNAVAILABLE".to_owned())?;
             registry
@@ -2381,13 +2381,13 @@ impl AstraEmuManagerController {
                 .map_err(|_| "ASTRA_EMU_VFS_PREVIEW_VIDEO_PROVIDER_INVALID".to_owned())?;
         }
         #[cfg(not(target_os = "windows"))]
-        if media_kind == "video" && !minori_avi {
+        if media_kind == "video" && !musica_avi {
             return Err("ASTRA_EMU_VFS_PREVIEW_VIDEO_PROVIDER_UNBOUND".into());
         }
         let provider_id = if media_kind == "audio" {
             "astra.decode.symphonia"
-        } else if minori_avi {
-            MINORI_AVI_DECODE_PROVIDER_ID
+        } else if musica_avi {
+            MUSICA_AVI_DECODE_PROVIDER_ID
         } else {
             "astra.decode.wmf"
         };
@@ -2787,7 +2787,7 @@ impl AstraEmuManagerController {
         let engine = engine
             .and_then(|value| value.into_string().ok())
             .ok_or_else(|| "ASTRA_EMU_QUICK_ENGINE_REQUIRED".to_owned())?;
-        if !matches!(engine.as_str(), "fvp" | "minori") {
+        if !matches!(engine.as_str(), "fvp" | "musica") {
             return Err("ASTRA_EMU_QUICK_ENGINE_UNSUPPORTED".into());
         }
         let game_dir = game_dir.ok_or_else(|| "ASTRA_EMU_QUICK_GAME_DIR_REQUIRED".to_owned())?;
@@ -3024,7 +3024,7 @@ fn decode_image_preview(bytes: &[u8], path: &str) -> Result<(Vec<u8>, u32, u32),
     Ok((bytes.as_slice().to_vec(), width, height))
 }
 
-fn parse_minori_image_preview_format(format: &str) -> Result<(u32, u32), String> {
+fn parse_musica_image_preview_format(format: &str) -> Result<(u32, u32), String> {
     let dimensions = format
         .strip_prefix("rgba8:first_frame:")
         .ok_or_else(|| "ASTRA_EMU_VFS_PREVIEW_IMAGE_OUTPUT_INVALID".to_owned())?;
@@ -3100,13 +3100,13 @@ fn media_preview_summary(
 }
 
 /// Decode a bounded manager preview without treating arbitrary binary data as
-/// UTF-8. Minori scripts and legacy configuration files are commonly encoded
+/// UTF-8. Musica scripts and legacy configuration files are commonly encoded
 /// as CP932, while newer metadata is UTF-8; BOMs always take precedence. The
 /// function returns `None` for binary data so the caller can render a hex view.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TextPreviewLocale {
     Auto,
-    MinoriJapaneseCp932,
+    MusicaJapaneseCp932,
 }
 
 fn decode_text_preview(
@@ -3117,11 +3117,11 @@ fn decode_text_preview(
     let has_bom = bytes.starts_with(&[0xef, 0xbb, 0xbf])
         || bytes.starts_with(&[0xff, 0xfe])
         || bytes.starts_with(&[0xfe, 0xff]);
-    // The original Minori payload is a CP932 byte stream.  Apply the bound
+    // The original Musica payload is a CP932 byte stream.  Apply the bound
     // before trying generic UTF-8 so a byte sequence that happens to be
     // valid UTF-8 cannot silently change the displayed text.  BOM-marked
     // metadata remains explicit and takes precedence below.
-    if !has_bom && locale == TextPreviewLocale::MinoriJapaneseCp932 && is_legacy_text_path(path) {
+    if !has_bom && locale == TextPreviewLocale::MusicaJapaneseCp932 && is_legacy_text_path(path) {
         return decode_cp932_strict(bytes).map(|text| ("shift_jis".into(), text));
     }
     let (encoding, payload) = if bytes.starts_with(&[0xef, 0xbb, 0xbf]) {
@@ -3143,7 +3143,7 @@ fn decode_text_preview(
 }
 
 fn decode_cp932_strict(bytes: &[u8]) -> Option<String> {
-    astra_emu_minori::MinoriLocaleHook::japanese_cp932()
+    astra_emu_musica::MusicaLocaleHook::japanese_cp932()
         .decode(bytes)
         .ok()
 }
@@ -3209,11 +3209,11 @@ fn family_id_for_case(
                 .rsplit('/')
                 .next()
                 .is_some_and(|name| name.eq_ignore_ascii_case("scr.paz"))
-                .then_some("minori".to_owned())
+                .then_some("musica".to_owned())
         })
         .or_else(|| profile.map(|value| value.family_id.clone()))
         .unwrap_or_else(|| "fvp".to_owned());
-    if !matches!(family_id.as_str(), "fvp" | "minori") {
+    if !matches!(family_id.as_str(), "fvp" | "musica") {
         return Err("ASTRA_EMU_FAMILY_UNSUPPORTED".into());
     }
     Ok(family_id)
@@ -3222,7 +3222,7 @@ fn family_id_for_case(
 fn default_case_profile(case_identity: String, family_id: &str) -> CaseRuntimeProfileRecord {
     let compatibility_profile = match family_id {
         "fvp" => "rfvp-v1",
-        "minori" => "minori.reference",
+        "musica" => "musica.reference",
         _ => unreachable!("family id validated before default profile creation"),
     };
     CaseRuntimeProfileRecord {
@@ -3234,9 +3234,9 @@ fn default_case_profile(case_identity: String, family_id: &str) -> CaseRuntimePr
     }
 }
 
-fn minori_launch_profile_error(error: astra_emu_family_core::LegacyCoreError) -> String {
+fn musica_launch_profile_error(error: astra_emu_family_core::LegacyCoreError) -> String {
     if error.code() == "ASTRA_EMU_VFS_OPTIONS_SCHEMA" {
-        "ASTRA_EMU_MINORI_LAUNCH_PROFILE_STALE".to_owned()
+        "ASTRA_EMU_MUSICA_LAUNCH_PROFILE_STALE".to_owned()
     } else {
         error.to_string()
     }
@@ -3625,8 +3625,8 @@ impl ManagerController for AstraEmuManagerController {
             .map_err(|error| error.to_string())?
             .flatten()
             .and_then(|profile| {
-                let option = if profile.family_id == "minori" {
-                    MINORI_NLS_OPTION
+                let option = if profile.family_id == "musica" {
+                    MUSICA_NLS_OPTION
                 } else {
                     "fvp.nls"
                 };
@@ -4153,8 +4153,8 @@ impl ManagerController for AstraEmuManagerController {
         if profile.family_id != family_id {
             return Err("ASTRA_EMU_EXPLICIT_PROFILE_BINDING_MISMATCH".into());
         }
-        let option = if family_id == "minori" {
-            MINORI_NLS_OPTION
+        let option = if family_id == "musica" {
+            MUSICA_NLS_OPTION
         } else {
             "fvp.nls"
         };
@@ -4626,11 +4626,11 @@ impl ManagerController for AstraEmuManagerController {
         };
         let mut family_mount = None;
         let mut family_reader = None;
-        let (entry_uri, launch_entry_explicit) = if family_id == "minori" {
+        let (entry_uri, launch_entry_explicit) = if family_id == "musica" {
             let loaded = self
                 .family_vfs_registry
-                .load_profile(&game_root.join("astraemu.minori.launch.yaml"))
-                .map_err(minori_launch_profile_error)?;
+                .load_profile(&game_root.join("astraemu.musica.launch.yaml"))
+                .map_err(musica_launch_profile_error)?;
             let entry_uri = loaded.profile.runtime.entry_uri.clone();
             let launch_entry_explicit = match loaded.profile.runtime.launch_mode.as_str() {
                 "direct" => true,
@@ -4639,15 +4639,15 @@ impl ManagerController for AstraEmuManagerController {
             };
             let mounted = self
                 .family_vfs_registry
-                .mount("minori", &game_root, &loaded)
-                .map_err(minori_launch_profile_error)?;
+                .mount("musica", &game_root, &loaded)
+                .map_err(musica_launch_profile_error)?;
             if !mounted
                 .manifest()
                 .entries
                 .iter()
                 .any(|entry| entry.media_kind == "script" && entry.uri == entry_uri)
             {
-                return Err("ASTRA_EMU_MINORI_ENTRY_INVALID".into());
+                return Err("ASTRA_EMU_MUSICA_ENTRY_INVALID".into());
             }
             let adapter = Arc::new(
                 LegacyMountedVfsReaderAdapter::new(&mount_set_id, mounted.clone())
@@ -4656,7 +4656,7 @@ impl ManagerController for AstraEmuManagerController {
             self.runtime
                 .try_borrow_mut()
                 .map_err(|_| "ASTRA_EMU_RUNTIME_BORROW_CONFLICT".to_owned())?
-                .ensure_family("minori", adapter.clone())?;
+                .ensure_family("musica", adapter.clone())?;
             family_mount = Some(mounted);
             family_reader = Some(adapter);
             (entry_uri, launch_entry_explicit)
@@ -4668,12 +4668,12 @@ impl ManagerController for AstraEmuManagerController {
             (case.relative_path.clone(), true)
         };
         self.vfs.bind(&mount_set_id, &grant.platform_token)?;
-        let (mut detected, pack_paths) = if family_id == "minori" {
+        let (mut detected, pack_paths) = if family_id == "musica" {
             let detected = self
                 .runtime
                 .try_borrow()
                 .map_err(|_| "ASTRA_EMU_RUNTIME_BORROW_CONFLICT".to_owned())?
-                .probe_minori_profile(&case, &mount_set_id, &entry_uri, launch_entry_explicit)
+                .probe_musica_profile(&case, &mount_set_id, &entry_uri, launch_entry_explicit)
                 .inspect_err(|_| {
                     self.vfs.unbind(&mount_set_id);
                 })?;
@@ -4708,7 +4708,7 @@ impl ManagerController for AstraEmuManagerController {
             detected.fixed_delta_ns = explicit.fixed_delta_ns;
             detected.compatibility_profile = explicit.compatibility_profile;
             let mut explicit_options = explicit.family_options;
-            if family_id == "minori" {
+            if family_id == "musica" {
                 // These values are derived from the freshly mounted PAZ and
                 // are not user policy.  Do not let a profile persisted by an
                 // older probe overwrite the current content identity or the
@@ -4724,22 +4724,22 @@ impl ManagerController for AstraEmuManagerController {
             }
             detected.family_options.extend(explicit_options);
         }
-        if family_id == "minori" {
-            match detected.family_options.get(MINORI_NLS_OPTION) {
-                Some(value) => match MinoriNls::parse(value) {
+        if family_id == "musica" {
+            match detected.family_options.get(MUSICA_NLS_OPTION) {
+                Some(value) => match MusicaNls::parse(value) {
                     Ok(nls) if nls.is_currently_supported() => {}
                     Ok(_) => {
                         self.vfs.unbind(&mount_set_id);
-                        return Err("ASTRA_EMU_MINORI_NLS_UNSUPPORTED".into());
+                        return Err("ASTRA_EMU_MUSICA_NLS_UNSUPPORTED".into());
                     }
                     Err(_) => {
                         self.vfs.unbind(&mount_set_id);
-                        return Err("ASTRA_EMU_MINORI_NLS_INVALID".into());
+                        return Err("ASTRA_EMU_MUSICA_NLS_INVALID".into());
                     }
                 },
                 None => {
                     self.vfs.unbind(&mount_set_id);
-                    return Err("ASTRA_EMU_MINORI_NLS_MISSING".into());
+                    return Err("ASTRA_EMU_MUSICA_NLS_MISSING".into());
                 }
             }
         }
@@ -4998,8 +4998,8 @@ impl Drop for AstraEmuManagerController {
 }
 
 fn quick_entry_is_valid(engine: &str, value: &str) -> bool {
-    if engine == "minori" && value.starts_with("minori:/") {
-        let path = &value["minori:/".len()..];
+    if engine == "musica" && value.starts_with("musica:/") {
+        let path = &value["musica:/".len()..];
         return !path.is_empty()
             && !path.starts_with('/')
             && !path.contains('\\')
@@ -5017,7 +5017,7 @@ fn quick_entry_is_valid(engine: &str, value: &str) -> bool {
 }
 
 fn quick_entry_matches(engine: &str, requested: &str, case_path: &str) -> bool {
-    (engine == "minori" && requested.starts_with("minori:/"))
+    (engine == "musica" && requested.starts_with("musica:/"))
         || case_path.replace('\\', "/") == requested
 }
 
@@ -5054,7 +5054,7 @@ fn run_application() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
     let (stage_width, stage_height) =
-        if env::var("ASTRA_EMU_QUICK_ENGINE").as_deref() == Ok("minori") {
+        if env::var("ASTRA_EMU_QUICK_ENGINE").as_deref() == Ok("musica") {
             (1280, 720)
         } else {
             (1024, 768)
@@ -5173,7 +5173,7 @@ mod manager_tests {
 
     use super::{
         decode_image_preview, decode_text_preview, default_case_profile, family_id_for_case,
-        fvp_pack_paths_option, media_preview_summary, minori_launch_profile_error, parse_glossary,
+        fvp_pack_paths_option, media_preview_summary, musica_launch_profile_error, parse_glossary,
         pending_wait_can_rebind, quick_entry_is_valid, quick_entry_matches, refresh_cover_cache,
         retain_non_completed_input_edges, runtime_locale_for_family, system_menu_open_requested,
         system_ui_activity_from_blackboard, PendingWait, TextPreviewLocale,
@@ -5182,32 +5182,32 @@ mod manager_tests {
     struct MemorySource(BTreeMap<String, Vec<u8>>);
 
     #[test]
-    fn runtime_locale_is_explicit_for_the_original_minori_family() {
+    fn runtime_locale_is_explicit_for_the_original_musica_family() {
         assert_eq!(
-            runtime_locale_for_family("minori"),
-            astra_emu_minori::MINORI_RUNTIME_LOCALE
+            runtime_locale_for_family("musica"),
+            astra_emu_musica::MUSICA_RUNTIME_LOCALE
         );
         assert_eq!(runtime_locale_for_family("fvp"), "und");
     }
 
     #[test]
-    fn minori_nls_profile_infers_family_before_creating_default_profile() {
+    fn musica_nls_profile_infers_family_before_creating_default_profile() {
         let case = astra_emu_manager_core::CaseRecord {
-            case_identity: "case-minori".into(),
+            case_identity: "case-musica".into(),
             source_id: "source".into(),
             relative_path: "game/scr.paz".into(),
             content_hash: "sha256:case".into(),
             modified_ns: 1,
             byte_size: 1,
-            title: "Minori".into(),
+            title: "Musica".into(),
             family_override: None,
         };
         let family_id = family_id_for_case(&case, None).unwrap();
-        assert_eq!(family_id, "minori");
+        assert_eq!(family_id, "musica");
         let profile = default_case_profile(case.case_identity.clone(), &family_id);
-        assert_eq!(profile.family_id, "minori");
-        assert_eq!(profile.compatibility_profile, "minori.reference");
-        assert_eq!(family_id_for_case(&case, Some(&profile)).unwrap(), "minori");
+        assert_eq!(profile.family_id, "musica");
+        assert_eq!(profile.compatibility_profile, "musica.reference");
+        assert_eq!(family_id_for_case(&case, Some(&profile)).unwrap(), "musica");
     }
 
     #[test]
@@ -5227,14 +5227,14 @@ mod manager_tests {
     }
 
     #[test]
-    fn stale_minori_launch_profile_has_stable_diagnostic() {
+    fn stale_musica_launch_profile_has_stable_diagnostic() {
         let error = astra_emu_family_core::LegacyCoreError::invalid(
             "ASTRA_EMU_VFS_OPTIONS_SCHEMA",
             "family options schema does not match the factory",
         );
         assert_eq!(
-            minori_launch_profile_error(error),
-            "ASTRA_EMU_MINORI_LAUNCH_PROFILE_STALE"
+            musica_launch_profile_error(error),
+            "ASTRA_EMU_MUSICA_LAUNCH_PROFILE_STALE"
         );
     }
 
@@ -5314,15 +5314,15 @@ mod manager_tests {
     }
 
     #[test]
-    fn minori_quick_launch_accepts_only_canonical_vfs_entries() {
-        assert!(quick_entry_is_valid("minori", "minori:/scr/A01.sc"));
-        assert!(!quick_entry_is_valid("minori", "minori:/scr/../sys/config"));
-        assert!(!quick_entry_is_valid("minori", "minori:\\scr\\A01.sc"));
+    fn musica_quick_launch_accepts_only_canonical_vfs_entries() {
+        assert!(quick_entry_is_valid("musica", "musica:/scr/A01.sc"));
+        assert!(!quick_entry_is_valid("musica", "musica:/scr/../sys/config"));
+        assert!(!quick_entry_is_valid("musica", "musica:\\scr\\A01.sc"));
         assert!(quick_entry_is_valid("fvp", "game/main.hcb"));
         assert!(!quick_entry_is_valid("fvp", "../game/main.hcb"));
         assert!(quick_entry_matches(
-            "minori",
-            "minori:/scr/A01.sc",
+            "musica",
+            "musica:/scr/A01.sc",
             "scr.paz"
         ));
         assert!(quick_entry_matches(
@@ -5330,7 +5330,7 @@ mod manager_tests {
             "game/main.hcb",
             "game\\main.hcb"
         ));
-        assert!(!quick_entry_matches("fvp", "minori:/scr/A01.sc", "scr.paz"));
+        assert!(!quick_entry_matches("fvp", "musica:/scr/A01.sc", "scr.paz"));
     }
 
     #[test]
@@ -5457,7 +5457,7 @@ mod manager_tests {
             decode_text_preview(
                 &japanese_utf16le,
                 "sys/message.txt",
-                TextPreviewLocale::MinoriJapaneseCp932,
+                TextPreviewLocale::MusicaJapaneseCp932,
             ),
             Some(("utf-16le".into(), "夏空".into()))
         );
@@ -5467,7 +5467,7 @@ mod manager_tests {
             decode_text_preview(
                 &encoded,
                 "scr/test.sc",
-                TextPreviewLocale::MinoriJapaneseCp932,
+                TextPreviewLocale::MusicaJapaneseCp932,
             ),
             Some(("shift_jis".into(), "夏空".into()))
         );
@@ -5478,12 +5478,12 @@ mod manager_tests {
     }
 
     #[test]
-    fn minori_text_preview_rejects_invalid_cp932_without_fallback() {
+    fn musica_text_preview_rejects_invalid_cp932_without_fallback() {
         assert_eq!(
             decode_text_preview(
                 &[0x82],
                 "scr/test.sc",
-                TextPreviewLocale::MinoriJapaneseCp932,
+                TextPreviewLocale::MusicaJapaneseCp932,
             ),
             None
         );

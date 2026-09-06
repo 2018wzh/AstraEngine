@@ -100,8 +100,8 @@ publishable = true
 audit_windows_exports = false
 
 [[artifact]]
-package = "astra-emu-minori"
-target = "astra_emu_minori"
+package = "astra-emu-musica"
+target = "astra_emu_musica"
 crate_types = ["cdylib", "rlib"]
 role = "family_plugin"
 owner = "AstraEMU"

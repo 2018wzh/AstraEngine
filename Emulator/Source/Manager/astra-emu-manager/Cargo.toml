@@ -11,7 +11,7 @@ doctest = false
 
 [features]
 default = []
-ffmpeg-vcpkg = ["astra-emu-minori/ffmpeg-vcpkg", "astra-media/ffmpeg-vcpkg"]
+ffmpeg-vcpkg = ["astra-emu-musica/ffmpeg-vcpkg", "astra-media/ffmpeg-vcpkg"]
 
 [[bin]]
 name = "astra-emu-manager"
@@ -28,7 +28,7 @@ astra-emu-family-core = { path = "../../FamilyCore/astra-emu-family-core" }
 astra-emu-family-support = { path = "../../FamilySupport/astra-emu-family-support" }
 astra-emu-fvp = { path = "../../Families/astra-emu-fvp" }
 rfvp-astra-provider = { git = "https://github.com/2018wzh/rfvp.git", rev = "23ae395bcc0499f737d63759902308b30ca37800" }
-astra-emu-minori = { path = "../../Families/astra-emu-minori" }
+astra-emu-musica = { path = "../../Families/astra-emu-musica" }
 astra-emu-metadata = { path = "../../Providers/astra-emu-metadata" }
 astra-emu-translation-openai-compatible = { path = "../../Providers/astra-emu-translation-openai-compatible" }
 astra-observability = { path = "../../../../Engine/Source/Developer/astra-observability" }

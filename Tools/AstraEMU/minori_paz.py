@@ -17,7 +17,7 @@ def load_key_file(path: str | None) -> bytes | None:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Probe Minori PAZ archives. Keys are external via --key-file; no built-in keys.")
+    ap = argparse.ArgumentParser(description="Probe Musica PAZ archives. Keys are external via --key-file; no built-in keys.")
     ap.add_argument("paz")
     ap.add_argument("--key-file", help="hex key material owned by the operator")
     ap.add_argument("--json", action="store_true")

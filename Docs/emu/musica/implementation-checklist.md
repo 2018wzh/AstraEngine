@@ -1,0 +1,464 @@
+# Musica Implementation Checklist
+
+## FVP-compatible dynamic ABI boundary (2026-09-01)
+
+- [x] Musica descriptor validation runs before the descriptor crosses the
+  dynamic Family ABI boundary.
+- [x] Descriptor, instance lifecycle, probe/open/step and shutdown share one
+  panic boundary and return `ASTRA_EMU_MUSICA_DYLIB_PANIC` on unwinding.
+- [x] The boundary does not recover with another provider or publish partial
+  output; the host receives one stable error result.
+- [x] Feature-gated regression tests cover panic conversion and descriptor
+  validation.
+
+## FVP-compatible profile encoding reservation (2026-09-01)
+
+- [x] `family_options.nls` is required by `astra.emu.musica.mount_options.v4` and is
+  stored under the `musica.nls` profile key, matching the existing FVP selector shape.
+- [x] `shift_jis`, `gbk` and `utf8` are parsed as explicit values. Only `shift_jis` is
+  currently verified for the Japanese original; reserved values and unknown values fail
+  at the Musica mount/runtime boundary with stable diagnostics.
+- [ ] GBK/UTF-8 localized content, matching password/type encoding, fonts and route
+  evidence are not implemented in this phase. There is no replacement-character or
+  implicit code-page fallback.
+
+## Profile v4 Release Headless evidence (2026-09-01)
+
+- [x] The corrected physical-input sequence completes 193 messages, 24048 fixed steps,
+  48 checkpoints, 146 submitted frames and 16758784 audio frames with an empty diagnostic
+  set under the same Release Musica binding.
+- [x] Representative black, message, background-transition and character checkpoints were
+  inspected; the output is non-empty and the Japanese text/stage layers are visible.
+- [ ] The sequence ends with an explicit shutdown rather than a natural route terminal. Same-
+  point original screenshots, four independent routes, full audio listening review, gallery
+  parity, Release Sandbox and Windows E3 remain open.
+
+## Save/load header geometry (2026-09-01)
+
+- [x] The provider uses the observed 1280x720 stage coordinates `(64,16)` for the Save/Load
+  title artwork and `(608,16)` for the page label artwork; the card grid and bottom buttons
+  remain in their separately verified positions.
+- [x] A provider regression asserts both header draw origins, so a future resource or layer
+  reorder cannot silently move the page headings back to the pre-observation positions.
+- [x] Save-page button clipping hides `Back` on every Save page, while Load retains the full
+  `Back`/`Next`/`Return` strip; this is independent of the Auto/Quick/manual page index.
+- [x] Title Load opens the observed `Auto Save` Page0, while gameplay Save/Load opens the
+  observed `page #01` Page2; the VM keeps this context selection rather than deriving it from
+  rendered labels.
+- [x] IDA confirmed the original `perseus_%04d.sav` filename expression as
+  `page * 10 + slot`: Auto Save uses Page0 (0..9), Quick Save uses Page1 (10..19),
+  and manual pages use Page2..9 (20..99). Runtime Quick Save targets slot 10.
+  Automatic-save timing and quick-slot rotation remain open behavior questions.
+
+## Message advance indicator placement (2026-09-01)
+
+- [x] The advance marker is laid out by the shared CosmicText provider as an independent
+  glyph layer positioned after the measured final body line, matching the observed inline
+  marker in the original short-message frame.
+- [x] The marker remains outside message source/backlog/voice identity, and the fallback to a
+  following line is bounded by the region line budget with a stable layout diagnostic.
+- [ ] Same-point original/emulator captures, long-line wrap parity and the remaining system
+  and route visual gates are still open.
+
+## Persisted message markup boundary (2026-09-01)
+
+- [x] Snapshot/backlog validation reparses stored visible text and rejects a retained `\\v\\a`
+  (or any other recognized control) with `ASTRA_EMU_MUSICA_MESSAGE_CONTROL_NONCANONICAL`;
+  it never silently strips markup during restore.
+- [x] Parser and snapshot regression tests cover the blocking path while the normal execution
+  path continues to keep voice/auto controls out of the visible text and backlog identity.
+- [ ] The unique real-script line still needs an original same-point checkpoint with a working
+  voice completion path; until then its timing, intermediate frame and visual parity remain
+  blocking.
+
+## Japanese-original CP932 message boundary (2026-09-01)
+
+- [x] Script operands and message markup continue to use the bound Japanese CP932
+  locale before interpreting `\\v`/`\\a` controls.
+- [x] A regression covers a CP932 multibyte character whose encoded trail byte is
+  `0x5c`; the character remains visible and the following controls remain typed as
+  voice-wait and auto-advance.
+- [ ] Chinese/localized content and translation overlay remain outside this phase;
+  same-point original screenshots and full route visual review are still open.
+
+## Original Font control observation (2026-09-01)
+
+- [x] The original Japanese build changes the Font label and sample immediately
+  when the up arrow is clicked, and retains the selected entry after `OK` and a
+  subsequent System-page reopen. The observed list includes `Malgun Gothic
+  Semilight`, `Arial Unicode MS`, and additional East-Asian entries.
+- [x] Non-Japanese host code pages can garble the native font label while the
+  game text remains readable through the strict CP932 locale hook.
+- [ ] A deterministic packaged font-provider binding for the host font list and
+  same-point visual parity is still open. This phase does not load Chinese
+  executables, `.mys` overlays, or translation text.
+
+## Original title pointer menu (2026-09-01)
+
+- [x] Stage-space pointer coordinates select the observed title rows for the base and
+  unlocked `Memories` variants; clicks outside the menu do not change the page.
+- [x] Hover uses the original `topMenu*Over.png` resource through a bounded right-side
+  scissor, and `New Game`/`System` clicks reuse the existing typed keyboard actions.
+- [x] Focus is session-local and is cleared on restore, title exit, and transition to a
+  non-title page; it is not serialized as gameplay/save state.
+- [ ] Same-point original/emulator visual comparison, Release Sandbox and Windows E3 remain
+  open; row-edge behavior beyond the observed stage regions is not independently verified.
+
+## Title-page exit transaction (2026-08-31)
+
+- [x] The provider regression `title_exit_terminates_directly_without_confirmation_transaction`
+  verifies the observed title-page Exit path terminates directly and publishes no Family ABI
+  confirmation.
+- [x] Gameplay Exit and Return-title remain separate Host-owned confirmation transactions;
+  their ASCII `?` messages and `Y`/`N` ordering are covered by the adjacent confirmation tests.
+- [ ] Release Sandbox visual review and Windows E3 remain open.
+
+## Native confirmation text (2026-08-31)
+
+- [x] The authorized original-game observation confirms ASCII `?` in the Game→Exit and
+  Game→Return title bodies, with `是(Y)` before `否(N)`; the title-page Exit action remains
+  direct termination.
+- [x] Musica publishes the exact bounded strings through the Family ABI confirmation port;
+  Host ownership, modal focus and typed result validation remain unchanged.
+- [ ] Same-point native screenshots, Release Sandbox visual review and Windows E3 remain open.
+
+## Native menu anchor handoff (2026-08-31)
+
+- [x] Release CLI now converts the Family ABI stage-space anchor to the live
+  physical client coordinate before calling the platform context-menu Host.
+  Replayed pointer input therefore opens at the same rendered location as an
+  interactive secondary click, including letterboxed window sizes.
+- [x] Windows keeps the physical anchor for `muda-win`; macOS converts that
+  physical point to a logical AppKit view point before applying the flipped-Y
+  transform. An invalid or out-of-stage anchor is a blocking diagnostic and
+  never falls back to the process cursor.
+- [x] The platform Host re-validates the native menu hierarchy before handing
+  it to the OS API: missing parents, non-submenu parents, duplicate sibling
+  order, cycles and chains deeper than four levels use one stable invalid-state
+  diagnostic.
+- [ ] Native Linux menu support, same-point original screenshots, Release
+  Sandbox visual review and Windows E3 remain open.
+
+## Manager submenu navigation (2026-08-31)
+
+- [x] The Slint Manager now carries each item's validated parent id and
+  renders only the current sibling set. Enabled submenu rows open a bounded
+  child view; the Back control returns to the published parent without
+  sending a fake command to the family.
+- [x] The adapter rechecks the active menu, submenu kind, enabled state and
+  current parent before changing the view. The mapping path revalidates the
+  Family transaction and rejects cycles, missing parents and depth beyond
+  four before UI presentation.
+- [x] The Manager Host consumes physical menu navigation keys without sending
+  them to gameplay: Up/Down cycle enabled siblings, Right/Enter/Space enters
+  an enabled submenu or resolves a command, and Left/Escape returns or
+  dismisses the root menu. Root and nested Escape behavior remains an
+  explicit Family transaction resolution.
+- [ ] Native Windows/macOS same-point screenshots, Linux native menu support,
+  Release Sandbox visual review and Windows E3 remain open.
+
+## Family ABI v14 native text-input Host split (2026-08-31)
+
+- [x] Musica Save publishes a bounded `LegacyTextInputTransactionV1` for the
+  observed Comment prompt; the Host owns presentation and returns one typed result
+  with the matching prompt id.
+- [x] Windows uses an owner-modal Win32 editor with system-DPI scaling, IME/focus
+  handling, Enter/Escape and explicit close/error paths. The returned value is
+  persisted in the v3 Musica save envelope only after `Accepted`, together with
+  the bounded local timestamp and gameplay thumbnail.
+- [x] Family API/FFI, Manager, Musica, platform validation and generated schemas
+  cover the transaction/result bounds and duplicate/stale resolution paths.
+- [x] Existing v3 slot envelopes are re-read on the first page refresh (and
+  again after a length change) so the Host prompt starts with the persisted
+-  comment, timestamp and thumbnail; malformed or identity-mismatched slots fail
+  closed.
+- [ ] macOS/Linux/Web/Android/Headless native application UI or typed driver is not
+  implemented yet; those hosts return an explicit unsupported diagnostic. Save-page
+  metadata rendering has focused provider coverage, while real visual parity,
+  Release Sandbox and Windows E3 remain open.
+
+## Windows native confirmation geometry (2026-08-31)
+
+- [x] Host-owned confirmation uses the observed compact 350×164 base at 96 DPI,
+  scales all controls from the live owner DPI (or system DPI for the windowless service
+  host), and places the standard Win32 question icon beside the Japanese message.
+- [x] Checked geometry arithmetic has focused normal-DPI and saturation regressions;
+  Family transaction, owner-modal cleanup and `是(Y)`/`否(N)` keyboard semantics remain
+  unchanged.
+- [ ] Same-point original screenshot parity, Linux native menu evidence, Release Sandbox
+  visual review and Windows E3 remain open.
+
+## Original Window menu state (2026-08-31)
+
+- [x] Windowed sessions expose fullscreen, original-size, disabled high-precision resize,
+  and antialiasing entries in the observed order; fullscreen sessions hide only the
+  fullscreen toggle and keep the remaining three entries.
+- [x] The family retains the published `LegacySystemMenuTransactionV1` until resolution,
+  then rejects an item id that was not published or is disabled/non-command before any
+  Musica command is executed.
+- [ ] Native menu evidence for Linux, complete route behavior, Headless GPU E2, Release
+  Sandbox visual review, and Windows E3 remain open.
+
+## Config fullscreen Host command (2026-08-31)
+
+- [x] Applying the Config fullscreen choice now emits a typed Family ABI
+  `LegacySystemCommandTransactionV1::SetFullscreen` instead of changing a
+  window locally inside Musica. The Host remains the only owner of the native
+  window operation and returns an explicit result on the next fixed tick.
+- [x] The family rebuilds the retained gameplay presentation while the native
+  Host applies the command, then persists the installation-scoped config only
+  after an `Applied` result. Cancel and unchanged fullscreen values do not
+  publish a command; rejected or unsupported Host results remain blocking.
+- [x] Added a provider regression covering Config draft apply, command
+  publication, suspended input, Host completion and gameplay resume. Existing
+  native-menu fullscreen and host-owned command tests still pass.
+- [ ] This is focused provider/ABI evidence only. Native fullscreen behavior
+  on each release platform, original same-point visual comparison and Windows
+  E3 remain open.
+
+## Windows Manager confirmation Host path (2026-08-31)
+
+- [x] The Windows audio/decode service host now consumes Family ABI confirmation
+  transactions on its own thread with the native Win32 modal window, so Manager
+  `game_exit`/`game_return_title` requests cannot remain pending merely because
+  Manager has no game-owned Winit window.
+- [x] The root `rfd` dependency no longer enables `common-controls-v6` (which made
+  the CLI fail before `main` on the target Windows loader). The Host-owned Win32
+  dialog keeps the live caption, custom Musica labels (`是(Y)`/`否(N)`), explicit
+  `Y`/`N`/Enter/Escape keyboard results, owner disable/restore and explicit close/error
+  handling. The service
+  path accepts no parent window and does not handle menus, fullscreen, help, About,
+  or surfaces.
+- [x] `astra-emu-cli --help` starts after the loader-boundary fix; focused
+  `astra-platform-windows` tests remain green.
+- [ ] This closes the Windows Manager service-host wiring gap only. It is not
+  native Windows Release Sandbox/E3 evidence, and Linux/Android/Web keep their
+  explicit platform capability boundaries.
+
+## Family ABI v13 native menu Host split (2026-08-31, historical identity)
+
+- [x] Confirmation and system-menu transactions use Family ABI v13 typed ports; the
+  family owns semantics while the Host owns native presentation and result delivery.
+- [x] Menu-selected window/help actions use the v13 typed system-command port. Windows and
+  macOS apply bound fullscreen/original-size, resize sampling, manual, About and homepage
+  operations through the platform Host; Manager, Headless and windowless CLI return
+  `Unsupported` explicitly.
+- [x] Windows keeps the native `muda-win`/`rfd` path, and macOS now uses AppKit `muda`
+  with flipped-view anchor conversion on the event-loop thread.
+- [x] Windows and macOS native confirmation presenters bind the dialog caption to the
+  live owner window when one exists; windowless Manager service calls retain the typed
+  Family title.
+- [x] Linux native confirmation follows the same owner-caption rule, while context menus
+  and other unavailable native window commands remain explicit unsupported capabilities.
+- [x] Release CLI selects the macOS native presenter through the same platform Host client;
+  Headless continues to use only physical navigation/confirmation input.
+- [x] Linux native CLI no longer leaves a menu transaction pending when the Wayland Host
+  lacks a GTK surface; it returns `ASTRA_EMU_PLATFORM_CONTEXT_MENU_UNSUPPORTED` explicitly.
+- [ ] About artwork parity, Linux GTK-backed native context menus, external help/browser
+  launch evidence, full-route behavior and Windows E3 remain open; no platform fallback is
+  claimed.
+
+## Original movie backend and platform decode (2026-08-30)
+
+- [x] PE/COM contract inspection confirms the original uses DirectShow Filter Graph plus windowless VMR7 and checks failing HRESULTs; it does not establish a silent decoder fallback.
+- [x] AstraMedia WMF decodes the same authorized AVI to EOS with 2106 monotonic frames and no returned decode error, while the pinned FFmpeg path blocks on 7 concealment frames.
+- [x] Add the bounded read-only COM `IStream` seam plus video/audio reader entry points; public MP4 and the authorized AVI decode both tracks directly from owned seekable readers without HGLOBAL input copies or plaintext spools.
+- [x] Add the complete `astra.decode.wmf.incremental` audio/video provider to the shared AstraMedia registry, including typed packets, media-type validation, seek generation and cancellation.
+- [x] CLI and Manager accept exactly one explicit Musica binding (`wmf` or `ffmpeg-vcpkg`); Windows packages default to WMF, the builder records the choice, and missing/ineligible providers block without switching.
+- [x] Release CLI 的开发签名候选已用 `wmf` 完成真实影片定向 Headless E2：17,371 fixed steps、32 个提交帧、零 diagnostic；影片在第 5,251 tick 打开，于第 16,387 tick 完成。保留的早段和中段画面未见上下颠倒、拉伸或边缘裁切，完整音频非静音且未削波。
+- [x] Re-run the required opening, middle and completion movie checkpoints through the Windows-default WMF binding; owner-side completion, distinct frames and bounded audio evidence all pass.
+- [ ] Capture the original at the same movie points before claiming parity. The available original title is an uncleared variant, while the current emulator checkpoint is the four-route `topMenu2` variant, so those images are intentionally not compared.
+
+## FFmpeg dependency and WMV3 quality (2026-08-30)
+
+- [x] Root vcpkg manifest pins the reviewed FFmpeg `8.1.2#3` baseline and minimal components; Windows CI installs that manifest instead of a floating port.
+- [x] Both AstraMedia FFmpeg providers reject a runtime other than `libavcodec 62.28.102`; focused version and incremental-stream tests pass against the pinned install.
+- [x] The same authorized AVI reproduces 7 damaged frames through ordinary file input, external FFmpeg and AstraMedia custom AVIO. This rules out custom AVIO as the sole cause.
+- [x] AstraMedia inspects FFmpeg `decode_error_flags` and returns `ASTRA_FFMPEG_CORRUPT_FRAME` when concealment or another decode error is present; damaged frames can no longer pass E2 as zero diagnostics.
+- [ ] Inspect required movie checkpoints against the original and define an explicit title-owned acceptance policy if the authored source requires concealment. External builds remain diagnostic evidence, not a production fallback or parity proof.
+
+## 消息控制标记（2026-08-30）
+
+- [x] 依据原程序 `CTextDrawer`/`MsgSubCmd` 静态分析实现 `\\a`、`\\v` 和 `\\x{load,...}` typed parser；未知、截断、越界和未验证子命令全部阻断。
+- [x] 控制标记不进入文字 surface 或 backlog；voice wait 使用 AstraMedia/Symphonia metadata-only probe，不为时长计算解码整段 PCM。原版正文不进入 translation Hook。
+- [x] runtime state v28 保存 voice wait、auto-advance、pending inline load 和 current/next 角色替换；AstraMedia seekable metadata fixture、授权样本 Ogg 探针与定向 Musica 回归通过。
+- [x] Release CLI 的真实标题启动回归完成 5258 fixed steps、83 个采样帧和三个 checkpoint，diagnostic 为空；最大 `runtime_step` 为 0.553 秒。该项只证明本次单路线没有回归。
+- [ ] 用真实罕见行生成 Headless required checkpoint，并与原版同点画面比较。runtime 已提交 current/next 双层和互补 alpha 交叉淡化，但当前采样没有命中中间帧，不能标视觉 parity。
+
+## 消息推进指示器（2026-08-31）
+
+- [x] Windows Sandbox 原版画面确认：消息框末尾的白色下三角是独立的推进指示器，不属于正文字符；打开右键菜单或确认框时该指示器仍由底层消息层保留。
+- [x] Musica text surface 通过现有 CosmicText/Renderer2D 路径追加独立的 `U+25BC` glyph run。正文仍以原版日文进入 backlog 和一次性 text lease，指示器只存在于本次 Host-owned raster surface；locale hook 只负责严格 CP932。
+- [x] Noto Sans JP 的显式 coverage 增加 `U+25BC`，并以真实 glyph raster 回归验证有/无指示器的 surface 输出不同；未新增手写像素绘制或字体 fallback。
+- [ ] 仍需在干净原版与同一条 Headless checkpoint 对齐指示器的出现时机、位置和动画节奏；当前实现只依据已观察到的静态消息等待画面，不宣称像素 parity。
+
+## Key-file Release 路线复核（2026-08-30）
+
+- [x] 分支已 rebase 到当前 `origin/master`。该历史条目记录 v13；现行 Family API 已硬切为 v14，旧 ABI、Luau private profile、明文 cache 和自动 key importer 没有恢复。
+- [x] 官方桌面构建器为 Musica Manager 与 CLI 固化唯一影片 binding。Windows 默认 `wmf`；只有显式选择 `ffmpeg-vcpkg` 才编译 FFmpeg feature。所选 provider 不可用时构建或启动直接失败。
+- [x] PAZ 查找使用 ASCII case-insensitive identity，并保留 manifest 的 canonical URI；大小写折叠冲突直接阻断。`.stage`/`.wait` 只接收样本已确认的单个尾随空字段，更多空字段仍阻断。
+- [x] 已确认的 `.effect fadeout` 只结束活动的 primary Firefly；没有活动 Firefly 时返回 blocking diagnostic。样本唯一的三参数 `.panel` 形态按原程序 parser 解释为 mode 1、默认过渡标记和 `sys` 自定义资源，显式未知过渡值仍阻断。
+- [x] 当前 Release 包已完成一次标题启动路线报告：5212 fixed steps、4382 个提交/栅格帧、17 条物理输入、4120576 个 48 kHz 双声道音频帧，`route_complete`、返回标题、解锁计数 4 和零 diagnostic 成立。模型检查标题、剧情与返回标题三个 checkpoint，未见缺字、裁剪、拉伸、错层或残影。
+- [x] 在独立 writable identity 中从零顺序执行四条真实路线：Sui 通过并观察累计解锁数 1；Ren 发布 `route_complete` 后仅因过时的累计值断言失败；Ayame 通过并严格观察累计值 3，证明 Ren 已持久化；Tohka 通过并严格观察 `route_complete` 与累计值 4。新标题 session 自然出现并可进入 `Memories`，两个 checkpoint 已检查。
+- [x] 相同自然解锁 identity 的鉴赏子页报告通过：82 fixed steps、20 个呈现帧、9 个 checkpoint、45 个资源、零 diagnostic；CG、BGM、回想和 Movie 列表页均已检查。
+- [ ] 以上链路不等于四份路线报告全部绿色，也不证明 Movie 列表中的资源已播放。仍需用新的空白 identity 生成四份无过时断言的独立通过报告，并完成影片 playback 与原版同点检查。
+- [ ] 全流 WMV3 诊断曾出现 FFmpeg concealment；必须用影片 checkpoint 与原版对照确认质量。正式音频听审、save/restore required checkpoint、完整 gallery、Release Sandbox 视觉验收和 Windows E3 继续保持 blocking。
+
+## Family API v12 native menu and confirmation (2026-08-30)
+
+- [x] Sandbox 观察确认右键菜单顶层 `ヘルプ (&H)`、`ゲーム (&G)` 的日文标题和助记符；
+  family transaction 已移除英文标题，Windows Host 仍只构建/呈现菜单。
+- [x] `LegacySystemMenuRequestV1`, bounded `LegacySystemMenuTransactionV1` and bounded `LegacyConfirmationTransactionV1` are part of the hard-cut Family API v12 contract and have explicit `StableAbi` wire representations.
+- [x] Manager promotes a pressed physical `pointer.secondary` edge to `Open`, carries the latest bounded pointer coordinates, and removes the duplicate pressed edge before invoking Musica.
+- [x] Musica publishes the observed title/gameplay hierarchy. Windows native uses the platform context-menu provider, Manager renders the same transaction as a Slint overlay, and Headless navigates it only through physical input records.
+- [x] `game_exit`, `game_return_title` and Host `window.close` publish one confirmation transaction; platform Host presents it through the native confirmation provider and returns a typed result on a later fixed step.
+- [x] Cancellation resumes the retained gameplay wait; acceptance enters terminal or returns title; duplicate, stale, mixed-input and missing-platform-service cases fail closed.
+- [x] Save, Load, Config, message-panel visibility and Auto/Skip are selected through the returned menu item. Ambiguous input, active choice/media, completion sharing, duplicate menus, stale results and missing services fail closed.
+- [x] 原版空白进度确认持久 Skip 在未读消息处停止；runtime 只对已有 read identity 的消息启用 Skip 快进，Control 的 pragma 路径保持独立。原生菜单中的 Auto/Skip 不显示勾选，Family transaction 也不再伪造该状态。
+- [ ] Windows E3 remains open: the Sandbox direct native run reached real scenes and completed its windowed route with audio explicitly disabled, but the WASAPI default output was unavailable and the read-only share prevented artifact recovery; no E3 artifact is claimed.
+
+## 增量游标与 FFmpeg 复核（2026 年 8 月 27 日）
+
+旧 private-profile/cache identity 下的八包 full verify 仅保留为迁移历史。当前 key-file/streaming identity 已重新完成无明文缓存的八包 full verify，并通过合成 source 计数回归确认重复 range read 会重新访问密文 source；峰值内存的独立规模门禁仍未关闭。
+
+- [x] `IncrementalMediaPlayback` 校验完整播放配置、单调 tick、轨道声明、资源标识、PTS/duration、尺寸、PCM 格式和 bounded queue；显式执行视频 lead/lag 与 `Block`/`Drop` 策略，并记录迟到帧计数。
+- [x] AstraMedia 的 WMF 与 FFmpeg provider 共用 `IncrementalMediaDecoder`/`IncrementalMediaPlayback`，完成逐 packet 解码、PCM、seek/cancel、Control 跳过和 media fence；Musica 没有保留手写 AVI/WMV decoder 或平台 fallback。
+- [x] 当前签名 release plugin 的 title→config→movie→skip→title slice 报告 `passed`：3102 fixed steps、9 个 retained frame sample、零 diagnostic；该结果只覆盖 media/provider 与标题恢复接线，不覆盖完整剧情 terminal。
+- [ ] 正式音频人工听审、完整路线与自然 unlock、gallery、Linux FUSE、macOS extract、Manager 实机预览和 Windows E3 仍未闭合；旧 cache second-run 不属于当前 key-file/streaming identity，不能替代这些门禁。
+
+## 当前媒体复核（2026-08-26）
+
+- rebase 到最新 ABI v9 `master` 后，签名动态 plugin 重新绑定 AstraMedia `ffmpeg-vcpkg`，真实授权样本 Headless slice 通过 139 fixed ticks、5 个 retained checkpoint samples、638 次有界 VFS read 和零 diagnostic；`title_initial`、`config`、`movie_60` 三张图已人工查看。该证据只关闭当前 media/provider 接线回归，不关闭完整路线、正式性能或 Windows E3。
+- 同一 FFmpeg release slice 在 CLI retained `Layer2D` composite cache 变更后重新执行：139 fixed steps、5 个 retained samples、638 次 bounded VFS read、zero diagnostic；`step_total` 从约 81.9 s 降到约 35.9 s，`effect_dispatch` 从约 48.7 s 降到约 22.4 s。缓存只在 viewport、完整 layer state 和已验证 base frame 全部相同时生效；该结果是性能诊断，不替代正式 120 Hz 或完整路线门禁。
+- profile 未绑定 `wmf`/`ffmpeg-vcpkg` 中的唯一一项、所选 feature/provider 不可用、AVI identity 不符或 codec/container 不受支持时，Musica 直接返回 blocking diagnostic；不存在 RFVP、手写 AVI/WMV、按注册顺序选择或跨 provider 重试。
+
+Musica family-mounted image previews now use explicit `astra-media` `DecodeProviderRegistry` bindings: standard PNG/JPEG/BMP/WebP use `astra.decode.image`, and ANI/SQZ use the family-owned `astra.decode.musica.image` provider for a bounded first frame. UI receives RGBA8 pixels, not paths or native handles. Family audio previews use an explicit Symphonia binding and expose metadata only. Musica AVI playback and preview bind AstraMedia's incremental `ffmpeg-vcpkg` provider; an absent or mismatched binding remains blocking.
+
+Manager startup no longer eagerly loads the unselected FVP binary. The composition root creates the pure-Rust Musica idle provider and rebuilds the selected family only after a validated mount is available; same-family rebuild is intentional because the idle and mounted VFS bindings differ.
+
+本页较早记录的 route 数字来自 ABI v9 之前的 local-private run；在当前 `635527831e89e5ff9b87ac165b5b5532e28356c6` consumer 身份上重新生成完整四路线、自然解锁和 Windows E3 evidence 前，不把它们当作当前发布证据。
+
+## 当前状态（2026-08-25）
+
+- runtime snapshot schema 当前为 `astra.emu.musica.runtime_state.v28`；message completion 记录排序 bounded read identity，voice/auto wait、pending inline load 和 current/next 交叉淡化状态同步进入 restore 校验。此前 v23/v24/v26 的条目仅用于回溯，不能作为当前 ABI/状态版本。
+
+- Manager VFS preview 已增加 UTF-8/UTF-16 BOM 与 legacy CP932 的有界编码检测，并在 UI 显示实际编码；不符合文本编码的内容继续进入 hex 视图。Manager 也已按显式 family 接入 Musica launch profile、`LegacyMountedVfsReaderAdapter` 和静态 runtime provider，family-mounted tree/文本 preview 读取解密 URI；PNG/JPEG/BMP/WebP、ANI/SQZ 首帧、音频 metadata 和 Musica AVI video 的 provider binding 已落地，非 AVI Musica video 会在 family 边界直接阻断。真实 Manager 窗口预览和 Windows E3 仍未完成；Headless media slice 已形成独立 E2 证据。
+
+- 当前 consumer 分支直接 rebase 到 ABI v9 基线 `635527831e89e5ff9b87ac165b5b5532e28356c6`，没有保留 v7/v8 兼容层。Musica 已在 `Native + MultiLayer` 主路径接通 VFS、可写 surface、严格日文 locale hook、CosmicText text layer 和 writable-file save/global-progress port；正文不调用 translation Hook，旧 scene、snapshot、text lease、session-resource 与 provider-result API 只返回 blocking diagnostic。
+- 当前签名 package 在真实八包上完成首路线、Config、backlog、save/load 和 local-private gallery 增量 E2。首路线报告为 `25499` fixed step、`13170` presented frame、`25` 条输入、`7441` coverage id、terminal true、零 diagnostic；gallery 复验为 `82` fixed step、`12` frame、`64` 条输入、9 个 checkpoint、零 diagnostic。`cgthumb` 已按真实 `128x72` 尺寸严格校验。
+- 视觉检查已覆盖标题、Memories、BGM、CG、回想、Config、backlog 和首路线选定 checkpoint；movie gallery 仍只有已验证 Memories 背景 + 有界文字层的严格近似，不能写成原版 parity。local-private global progress 不能证明四条路线自然解锁；正式人工音频 review、完整四路线和 Windows E3 仍未闭合。
+
+- 分支已同步到 Family ABI v9 基线。Musica 必须迁移为 `Native + MultiLayer`，并使用 Host-owned surface、同步 Hook 和 writable-file port；旧 scene、snapshot、text lease、session resource 与 budget API 已删除且不提供兼容层。
+- 历史 2026-08-23 ABI v9 迁移条目保留为过程记录；当前同步 Hook、CosmicText text surface 和真实 v9 E2 已由 2026-08-25 条目覆盖。
+- 授权样本仍是 8 个逻辑 archive、18 个物理 PAZ 文件和 14502 个 entry。`mov` role 含 5 个 RIFF/AVI；视频为 WMV3 1280×720、24 fps，音频为 PCM 48 kHz 双声道 16-bit。当前生产路径由 AstraMedia/FFmpeg 负责 demux、codec、resample 和 packet timing；Musica 不再依赖纯 Rust WMV/AVI decoder。真实 Headless media slice 已验证 60 fixed ticks、16 帧、111104 音频帧、非静音和零 diagnostic。
+- 签名 Musica dylib 已用同一 mount、plugin、Headless profile 和序列化物理输入连续跑完两次标题启动的真实路线。两次均推进 31011 fixed steps、提交并栅格化 31627 帧、消费 16947 条输入并最终从标题执行 Exit；snapshot round-trip、用户 save/restore、Config、backlog、真实影片、自然解锁和 31 个 checkpoint 均通过，diagnostic 为 0。新的同身份单次运行进一步推进 33490 fixed steps、呈现 34108 帧、消费 16951 条输入并通过 33 个 checkpoint，把首个 choice、实际 post-choice 分支和自然完成的不可跳过结局媒体纳入同一份通过报告。
+- 两次运行的 visual trace、runtime state trace、route terminal、coverage、audio meter、submitted scene、rasterized frame 和 audio stream hash 全部一致。输入 hash 因 local-private session id 不同而不同，不作为跨 session 一致性结论。平台全局进度通过 ordered storage request/result 原子读写；两次均严格证明自然解锁数为 1。restore 会合并同一 provider session 已确认的全局进度，不允许旧 snapshot 回滚解锁。
+- 模型复核新报告全部 33 个 required checkpoint；人物、背景、影片和日文字形没有缺失、横向裁剪、非预期拉伸、旧图层残留或未退场人物。choice 与 post-choice 已从独立真实 slice 升级为同一条完整路线证据。
+- 公共 Kira limiter 后 output peak 为 0.989551，output overload 与 underflow 均为 0。自动 E2 已闭合这条路线的结局返回标题、最终 Exit、snapshot continuation、用户 save/restore、自然解锁和 VM/视觉/音频重复运行确定性。原版 `Memories` 菜单只在第四条已确认路线后出现，因此首条路线不能形成 CG/BGM/回想 checkpoint；鉴赏完整入口、Config 行为级 E2 和 Windows E3 仍开放。当前状态不是完整产品体验或 E3。
+- Config 已按原程序 29 类 action 建立 v23 draft transaction、精确鼠标命中区、滑块换算、四类 retained texture overlay、WAV 试听和公共音量/静音映射。真实八包短程 Headless 已以物理 pointer 验证画面效果开关、BGM 滑块和 `BGMTest.wav` 试听；文字阴影另以 384 fixed steps、388 帧和 34 条输入验证关闭选项后剧情消息使用无 outline 的公共 typed text path。相关 checkpoint 的模型视觉检查通过。全屏 Host effect、逐字速度、其余视觉开关对剧情的实际影响和角色语音筛选仍待验证。
+- Config 的已应用值现在在显式 `astra.provider.storage = astra.writable_file.v1` 时按 `astra.emu.musica.config.v1` 保存到相对 writable-file root；读取严格绑定 case/package/profile identity，缺失文件使用原程序默认值，损坏、越界或 identity 漂移直接阻断。Save slot restore 保留当前 installation-scoped config，不会被旧 gameplay slot 静默覆盖；这关闭了配置跨 session 的持久化契约，但不替代全屏 Host effect、逐字速度和其余行为级证据。
+- runtime state v19 已在当时的 release plugin 上重跑同一输入序列：33490 fixed steps、34108 个呈现帧、16951 条物理输入和 33 个 required checkpoint 均通过。当前代码已硬切到 state v23；三态 play mode、Auto 入口、message voice 与 backlog voice replay 均有定向回归。活动消息现以同 token 的 `Input`/`Time` modality 重绑定响应 Auto 切换。当前签名 Release plugin 已在真实八包上用最快 Auto 持续跑完首路线：25552 fixed steps、25557 个 GPU frame、50 条物理输入、terminal、snapshot round-trip 和零 diagnostic 均通过，正文阶段没有周期性 Enter。v21 完整路线另以 33553 fixed steps、34172 帧、16957 条输入和 34 个 checkpoint 验证物理 Enter 的 backlog voice replay 不推进 VM、保留同一 message wait，并继续到 terminal。完整 WAV 的具名人工听审未完成，因此正式 review 保持 blocking。
+
+### Control 快进增量（2026-08-03）
+
+- `.pragma enable_control`/`.pragma disable_control` 与 `.pragma skip_enable`/`.pragma skip_disable` 已作为两组独立 gate 进入严格 runtime；Control pressed/released edge 与 `Normal/Auto/Skip` 互斥 play mode 绑定 session，并进入 runtime state v20 snapshot。
+- 只有脚本同时允许 Control 和 skip、且物理 Control 正被按住时才跳过已确认的 `.wait` 时间命令；Host 仍逐 tick 推进，message、media/presentation fence、provider completion 和未知 pragma 继续阻断或等待。
+- 同一签名动态 plugin 的私有 Headless control sequence 完成 300 fixed steps、54 个呈现帧、9 条输入、snapshot round-trip 和非静音音频，diagnostic 为 0；仍未 terminal。
+- focused runtime/provider tests 已通过；完整路线、演出、影片 codec 和 Windows E3 仍未闭合。
+
+## Rebase 状态（2026-08-03）
+
+本页的历史 E2 数字不覆盖本次 rebase 后复核。当前可复现的纯 Rust Headless slice 为 481 fixed steps、24 个呈现帧、27 条输入消息、snapshot round-trip 成立、diagnostic 为 0，并产生非静音音频 artifact；入口没有到达 terminal。视觉复核确认启动标题帧和末帧非空，但中段 checkpoint 尚未显示可读消息，因此不能把该 slice 写成“正文已验证”。`Firefly`、选择项和 `.effect2 SnowH` 已有局部实现与测试；它们尚未形成同一条真实 v8 Headless 路线证据。未确认的 effect、movie codec、系统页和完整路线继续保持 blocking。
+
+## 当前实现与证据
+
+| 项目 | 状态 | 证据边界 |
+| --- | --- | --- |
+| `family-core` mount/read_dir/stat/read_range/open_stream 契约与 manifest v2 | 已实现 | unit/compile；`family-api` 已硬迁移为 ABI DTO，不保留 VFS re-export |
+| PAZ v0-v2、分卷、zlib、随机读取 | 已实现 | GARbro contract + synthetic tests；真实八包 14502 个 entry 完成 decoded full verify |
+| Musica family-owned 流式解密 | 已实现 | Blowfish、RC4 skip、archive XOR、zlib、movie transform；没有 Luau callback、明文 cache 或 fallback |
+| 严格 `key.toml` 与原版 locale 边界 | 已实现 | 有界私有文件读取、八 role、hex/Blowfish 长度、CP932/movie key 约束、`perseus.exe` 原版入口、变体和 locale hook 拒绝已有 unit tests |
+| 公共 viewer tree/stat/page/search/text/hex/media binding | backend 已实现 | image/audio/video 必须显式 `DecodeProviderRegistry` binding；Manager UI 接线和真实预览验收待补 |
+| 公共 desktop verify/extract | 已实现 | Windows 八包 manifest v2 full verify 已通过；extract contract 已接入，macOS 运行证据待补 |
+| Linux foreground read-only FUSE | 代码已接入 | 缺真实 Linux FUSE 证据，不标完成 |
+| `.sc` CP932 lossless IR、CFG、unknown command、census | 已实现 | 89 文件/33728 行/33695 command/29 token，unknown opcode 0；`census-scripts` v5 另输出不含 URI/正文/operand 的逐文件序号、源 hash、大小和 opcode 计数；`select` 的 display/label pair、选择移动和跳转已进入严格 runtime |
+| ANI/SQZ container 与 `bg`/`bgm` census | adapter 已实现 | 2655 PNG、1951 ANI/6723 frames、9 SQZ/224 frames、49 Ogg 真实读取通过；渲染/播放尚未验收 |
+| Musica deterministic VM state 与 control-flow | E2 route + message E1 | 已覆盖 chain/call、label/goto/if、变量、message/select/wait、stage/character/panel、CrossFade2、Firefly、axis scroll/ScrollXF/WScroll2、BGM/SE/voice/movie/end，以及已确认的 `\\a`、`\\v`、内联 `load`；未确认 operand 继续阻断，内联 load 双层视觉 parity 待补 |
+| Musica runtime provider / `cdylib` ABI | E2 增量 | Family ABI v14 已 hard cut；共享 Host adapter、writable-file、资源/文字 surface、同步 Hook、system-menu/confirmation/system-command/text-input 与四层 `Native + MultiLayer` 已接通，受影响 library/CLI/Manager tests 通过。仍缺 Save 页面注释绘制、完整四路线与正式 Windows host evidence |
+| Musica 演出、系统 UI、完整模拟 | E2 增量 | 首路线、Config、backlog、save/load、choice、post-choice、影片和 local-private gallery checkpoint 已有增量 evidence；movie gallery 背景是严格有界近似，完整自然 unlock、正式 audio review、原版 gallery parity 与 Windows E3 仍开放 |
+| Config writable-file persistence | 已实现 | `astra.emu.musica.config.v1` identity-bound envelope、原子替换、默认值与损坏/漂移阻断有定向测试；完整跨进程桌面复验仍待补 |
+
+当前合法样本包含八个非空逻辑 archive 和 18 个物理文件。key-file/streaming identity 已完成 14,502 个 entry、43,818 个逻辑读取范围和 6,624,958,365 个 decoded bytes；89 个脚本的 payload-free census 也已在同一 identity 下通过。Linux FUSE、macOS extract、Manager media preview 和 VM 仍各自保留独立证据边界。
+
+## 下一阶段 Archive
+
+- [x] Probe game root and classify `bg/bgm/scr/st/sys/se/voice/mov`，包括 `bg.pazA` 至 `bg.pazJ`。
+- [x] 严格解析八 role `key.toml` 并在 mount 时一次性读取。
+- [x] 对八包执行 key-file/streaming identity 的 decoded full verify；当前 Release reader
+  覆盖 8 个 source、14502 个 entry、43818 个逻辑读取范围和 6624958365 个 decoded
+  bytes，aggregate hash 为 `sha256:e641854399512fea4182ebc7de845436d37d3eaef0b31d748b41c8bd23f9e64b`。
+  旧 cache/no-cache 结果只保留为迁移历史，不作为当前 identity 证据。
+- [x] 对每个 entry descriptor 校验 offset、packed size、unpacked size 和 method。
+- [x] 拒绝 path traversal 和绝对路径 entry。
+
+## Script
+
+- [x] 从 `scr.paz` 与原程序候选确认入口文件 `test.sc`；完整稳定 URI 由 launch profile 的 `runtime.entry_uri` 唯一指定，CLI 不接受 `--entry` 覆盖。
+- [x] 拆分 select、普通 voice、stand 与本轮路线用到的主要演出 operand；未知形态仍按 source span/raw operand 阻断。
+- [x] 未确认 command/operand 保留 raw bytes、source span 和 `Unknown`。
+- [x] 完成全部已确认资源引用映射；BGM/SE、message voice、movie、stage 前景/背景、stand、CrossFade2、Firefly、SnowH、panel、chain script 均复用 VM 的已验证 operand grammar。显式 `astra.resource_audit=full`（CLI `--audit-all-resources`）会先有界枚举所有 `.sc`、读取并解析引用，再逐项 stat 非空资源；缺失、短读、超限或 VFS 不支持枚举均阻断。未知 opcode/effect 仍不猜测，按执行路径阻断。
+
+## Runtime
+
+- backlog voice replay 现在尊重已应用的 `backlog_voice_playback` 开关：关闭时不提交新的播放命令，但保留 backlog 的 voice identity；角色 voice filter 与该 preference 都有 VM regression。全屏 Host effect、逐字速度和正式音频听审仍未关闭。
+
+- [x] boot 到首个 message；正文经一次性 lease、CosmicText 和 Renderer2D 形成真实 checkpoint，未进入 snapshot/report。
+- [x] 物理 Enter 推进与受 pragma 门控的 Control 快进可跑完首条剧情路线；Control 现在也会把已显示消息的同 token `Input` wait 重绑定为 10 ms `Time`，真实八包以 25496 fixed steps、25498 帧和 28 条输入跑完首路线，正文阶段没有周期性 Enter。backlog 的当前记录、滚轮导航、关闭恢复和当前记录 voice replay 已进入真实完整路线 E2；额外短程以 771 fixed steps、776 帧和 55 条输入验证两次上翻显示不同历史记录，idle tick 不再清空 retained text。Auto/Skip 三态、原版菜单命中区和等待重绑定已完成定向测试；真实八包分别在最快 Auto 与持久 Skip 下跑完首路线。
+- [x] Config 的 29 类已确认 action、Apply/Cancel transaction、pointer drag、状态 overlay、WAV 试听、音量/静音映射和 snapshot round-trip 已完成 E1。
+- [x] 真实 Config 资源完成 Headless 物理 pointer、screen-effect checkmark、BGM knob、WAV 试听和视觉审查；短程运行自动通过，正式 review 因完整 WAV 未人工试听而按协议阻断。
+- [ ] 接通全屏 Host effect、消息逐字速度、画面效果/动画效果对剧情演出的实际影响和角色语音筛选；文字阴影已接通 typed outline 并通过定向 E2，缺其余任一行为仍不得标完整 Config。
+- [x] choice 选择状态、label 跳转、三态资源、批量 option lease、居中排版和提交清除已进入 VM/provider/Host；真实脚本以严格 `musica.choice_active` observation 捕获 choice 与 post-choice checkpoint。
+- [x] provider snapshot restore 会重新绑定当前 system page、message 或 choice presentation，并清除恢复前未消费的一次性文字 lease；首个 restore output 会在需要时把 retained scene 与新文字放入同一 typed transaction，完整路线 user save/restore 已验证该 continuation。
+- [x] 显式 checkpoint 在捕获前提交待处理 Scene2D；Config 与 backlog 打开/关闭已由真实短程画面变化验证。
+- [x] 用户 save/load 后 continuation 成立；两次完整路线的 visual/runtime/terminal/coverage/audio hash 一致。
+- [x] Family system UI 通过公共 activity observation 独占物理输入；Headless Release 候选已用右键菜单完成 Quick Save、剧情推进、Load 页和 slot restore，恢复 checkpoint 与保存前画面一致，底层 message wait 在页面期间保持未完成。
+- [x] runtime 只接受原程序已确认的四个 global clear flag，并把脱敏 unlock identity 纳入 snapshot；provider 会报告 session 内 unlock count，未知 `CLEAR` 名称不参与解锁。
+- [x] global clear flag 经 ordered platform storage 原子提交并在 provider session 恢复；真实路线严格断言自然解锁数为 1，title variant 只接受四个已确认 flag。
+- [x] family snapshot 固定携带独立的 `astra.emu.musica.global_progress_snapshot.v1` section；合法的 unloaded 静止态可供 restore rollback 保存，实际 pending storage I/O 仍严格阻断。
+
+## Media
+
+- [x] 背景、立绘和系统 UI 使用 retained Scene2D 分层输出；立绘 `load/pos/keep/vis/trans` 已接入固定 tick 透明度动画、等待和 snapshot。合成脚本的 256→128→0 透明度序列已通过 Headless WGPU capture 和人工视觉检查。真实样本没有 `trans/vis`，因此该证据只关闭合成动态立绘 E2，不计入真实路线 coverage。
+- [x] BGM、SE、message voice 分通道；message voice 已按 IDA `resource[volume,pan]` 合同和 7,047 个真实 identity 全量绑定到 `voice.paz`，并通过公共 Ogg audio command 发出。完整首路线 Headless E2 已覆盖该路径；具名人工整段听审仍开放。
+- [x] backlog 当前记录的 voice replay 由原程序 Enter 路径确认；runtime 重播 stream 4 且保留原 message await，不推进 VM。真实 Headless 物理 Enter、checkpoint、后续 continuation 和 terminal 已通过；具名人工听审仍开放。
+- [x] `mov.paz` 的 5 个 RIFF/AVI 由 range-backed AstraMedia `ffmpeg-vcpkg` incremental provider 播放；缺 provider、格式漂移、短读和 fence 异常直接阻断。
+- [x] Musica AVI provider 在解析前拒绝空/超过 64 MiB 的预览输入，并校验 WMV3 尺寸、单包和 decoded RGBA 帧预算；边界测试 4/4 通过。该项不扩大 codec 覆盖或 movie parity 证据。
+- [x] decoded video 通过公共 `SceneCommand::VideoFrame` 合成；movie skip 只接受脚本明确标记为 skippable 的分支，并等待 Host 完成原 fence。
+- [x] 公共 Kira main track 使用显式 peak limiter，分别报告 pre-master 与 master-output；真实短程 output overload 和 underflow 均为 0。
+- [x] 真实 movie frame checkpoint 已确认 decoded frame、比例、剧情层文字合成和无旧帧残留；完整路线 WAV 非静音、低于 i16 full scale，master output overload/underflow 为 0。
+- [ ] 完成正式 Headless audio review；视觉 bundle 已逐项检查，WAV 的格式、时长、peak、RMS、静音区间、clipping 和声道平衡已量测，但涉及语音的整段试听尚未完成，`validate-review` 保持 blocking。
+- [ ] 为样本唯一的 `\\v\\a` 行和 26 条 inline load 增加精确 checkpoint，检查 current/next 中间帧，并与原版同点画面比较；当前单路线采样帧没有命中交叉淡化中间态。
+- [x] review protocol 强制 `full_audio` verdict 与 bundle 的完整 WAV selection；省略或失败必须在 validator 和 release preflight 阻断。私有 10 段连续听审清单覆盖全部 27260416 audio frame，但尚未据此宣称人工听审完成。
+
+## 后台进度与窗口焦点（2026-08-25）
+
+- `progress_in_background` 已进入 Musica provider 的有界 blackboard observation；默认关闭不发首 tick 边沿，持久化开启和关闭切换、load/restore 都会重新建立可消费状态。
+- Windows native host 只对 Musica 消费该 observation：失焦时按配置暂停或继续固定 tick/音频，其他 family 不改变原焦点行为；非法 observation 值直接阻断。
+- provider/CLI 定向测试通过；真实窗口焦点、音频恢复和完整路线仍需 Windows E3，不能把单元测试记为平台验收。
+
+## 2026-08-25 当前 v9 复核
+
+- [x] 重新安装 stable Rust 1.98 后，以当前 signer/trust-root 重新编译、签名并运行 Musica v9 短程；431 fixed step、27 条物理输入、13 个 submitted/rasterized frame、344576 个 audio frame、无 diagnostic，标题与场景 frame hash 不同。
+- [ ] 旧 gallery 输入在当前 mount/profile/global-progress identity 下触发 `ASTRA_EMU_HEADLESS_CHECKPOINT_AFTER_TERMINAL`，不能沿用历史 gallery report；需要重新生成匹配当前状态的物理输入并完成 required checkpoint 复核。
+- [x] 四条自然路线 + 自然 gallery unlock 已在 2026-09-05 的 Headless GPU E2 战役闭合：恋/翠/あやめ/透香四会话经 Control 快进与相对调度跑完，逐会话 `gallery_unlock_count` 1..4 断言成立，Memories 页进入有 checkpoint 画面；见 porting-log 同日条目。正式 audio review、movie gallery 原版视觉 parity、Linux FUSE、macOS extract 和 Windows E3 仍未关闭。最新 save/restore checkpoint 另发现一组罕见行末 message 控制标记仍被当作可见正文，必须先按原程序语义确认并修复，不能用静默删除代替解析。
+
+## 2026-08-26 稀疏采样回归
+
+- [x] checkpoint 捕获前物化 pending retained scene / prepared CPU layer；不推进 fixed tick，不生成替代帧。
+- [x] `frame_sample_interval=60` 的真实八包短程通过：431 fixed steps、7 frames、27 条输入、零 diagnostic；该结果不替代完整路线和平台证据。
+
+## Release Gate
+
+- [ ] 本地 case report 只包含 hash、coverage、diagnostics 和命令。
+- [ ] 不包含 payload、截图、音频、视频、完整脚本或 key。
+- [x] 完成 Musica clean Release 120 Hz GPU performance run。同一 build、package、profile、输入、adapter 与 driver identity 连续三次完成 1200 帧 warmup 和 72000 帧十分钟测量；deadline miss、audio underflow、full resync、trace dropped、稳定段 upload/readback/allocation 与 memory growth 均为 0，runtime p99 为 0.2725–0.2938 ms，presentation p99 为 0.81456–1.11064 ms。该静态标题负载不替代完整路线、影片/音频或 Windows E3。

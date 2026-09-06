@@ -65,7 +65,7 @@ fn main() {
         "cargo:rustc-env=ASTRA_EMU_FVP_FEATURE_FINGERPRINT=sha256.{}",
         hex_sha256(features.as_bytes())
     );
-    let minori_feature_set = if env::var("CARGO_CFG_FEATURE")
+    let musica_feature_set = if env::var("CARGO_CFG_FEATURE")
         .ok()
         .is_some_and(|features| features.split(',').any(|name| name == "ffmpeg-vcpkg"))
     {
@@ -73,11 +73,11 @@ fn main() {
     } else {
         "none"
     };
-    let minori_features =
-        format!("garbro=b09ee4570ccb1daf6ac56710ee8934dc0b8baeb0;features={minori_feature_set}");
+    let musica_features =
+        format!("garbro=b09ee4570ccb1daf6ac56710ee8934dc0b8baeb0;features={musica_feature_set}");
     println!(
-        "cargo:rustc-env=ASTRA_EMU_MINORI_FEATURE_FINGERPRINT=sha256.{}",
-        hex_sha256(minori_features.as_bytes())
+        "cargo:rustc-env=ASTRA_EMU_MUSICA_FEATURE_FINGERPRINT=sha256.{}",
+        hex_sha256(musica_features.as_bytes())
     );
     println!(
         "cargo:rustc-env=ASTRA_EMU_TARGET={}",

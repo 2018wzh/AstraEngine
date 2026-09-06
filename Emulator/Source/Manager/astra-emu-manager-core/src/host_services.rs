@@ -1781,7 +1781,7 @@ mod tests {
         let host = FamilyTextInputHost::default();
         let text_input = LegacyTextInputTransactionV1 {
             sequence: 7,
-            prompt_id: "minori.text_input.save_comment.0.7".into(),
+            prompt_id: "musica.text_input.save_comment.0.7".into(),
             title: "SAVE".into(),
             label: "Comment".into(),
             initial_value: String::new(),
@@ -1798,13 +1798,13 @@ mod tests {
         assert_eq!(pending.session_id, "session");
         assert_eq!(
             pending.text_input.prompt_id,
-            "minori.text_input.save_comment.0.7"
+            "musica.text_input.save_comment.0.7"
         );
         assert!(host.take_next_pending().unwrap().is_none());
         assert_eq!(
             host.resolve(
                 "session",
-                "minori.text_input.save_comment.0.7",
+                "musica.text_input.save_comment.0.7",
                 LegacyTextInputChoiceV1::Accepted,
                 "too long!",
                 9,
@@ -1815,7 +1815,7 @@ mod tests {
         );
         host.resolve(
             "session",
-            "minori.text_input.save_comment.0.7",
+            "musica.text_input.save_comment.0.7",
             LegacyTextInputChoiceV1::Cancelled,
             "",
             10,
@@ -1823,7 +1823,7 @@ mod tests {
         .unwrap();
         let result = host.take_resolution("session").unwrap().unwrap();
         assert_eq!(result.choice, LegacyTextInputChoiceV1::Cancelled);
-        assert_eq!(result.prompt_id, "minori.text_input.save_comment.0.7");
+        assert_eq!(result.prompt_id, "musica.text_input.save_comment.0.7");
         assert!(host.take_resolution("session").unwrap().is_none());
     }
 

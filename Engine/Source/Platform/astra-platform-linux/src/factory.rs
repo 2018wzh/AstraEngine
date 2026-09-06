@@ -1638,7 +1638,7 @@ mod linux {
         request: ConfirmationRequest,
     ) -> Result<ConfirmationResult, PlatformError> {
         // Keep the native prompt attached to the live game caption when a
-        // parent window is available.  Minori's original return-to-title and
+        // parent window is available.  Musica's original return-to-title and
         // exit prompts use that owner caption; service-only callers (for
         // example Manager) still carry the Family-provided title.
         let title = window

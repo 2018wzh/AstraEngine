@@ -786,7 +786,7 @@ dependencies = [
  "astra-emu-family-support",
  "astra-emu-fvp",
  "astra-emu-manager-core",
- "astra-emu-minori",
+ "astra-emu-musica",
  "astra-headless-protocol",
  "astra-media",
  "astra-media-core",
@@ -966,7 +966,7 @@ dependencies = [
  "astra-emu-manager-core",
  "astra-emu-manager-ui-slint",
  "astra-emu-metadata",
- "astra-emu-minori",
+ "astra-emu-musica",
  "astra-emu-translation-openai-compatible",
  "astra-media",
  "astra-media-core",
@@ -1057,7 +1057,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "astra-emu-minori"
+name = "astra-emu-musica"
 version = "0.1.0"
 dependencies = [
  "abi_stable",
@@ -1089,13 +1089,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "astra-emu-minori-cli"
+name = "astra-emu-musica-cli"
 version = "0.1.0"
 dependencies = [
  "astra-core",
  "astra-emu-family-core",
  "astra-emu-family-support",
- "astra-emu-minori",
+ "astra-emu-musica",
  "astra-observability",
  "clap",
  "image 0.25.10",

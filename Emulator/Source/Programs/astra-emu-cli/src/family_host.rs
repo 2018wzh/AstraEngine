@@ -111,7 +111,7 @@ impl CliFamilyHostConfig {
 
 fn validate_family_id(family_id: &str) -> Result<(), String> {
     match family_id {
-        "fvp" | "minori" => Ok(()),
+        "fvp" | "musica" => Ok(()),
         _ => Err("ASTRA_EMU_CLI_FAMILY_UNSUPPORTED".into()),
     }
 }
@@ -119,7 +119,7 @@ fn validate_family_id(family_id: &str) -> Result<(), String> {
 fn expected_feature_fingerprint(family_id: &str) -> Result<&'static str, String> {
     match family_id {
         "fvp" => Ok(env!("ASTRA_EMU_FVP_FEATURE_FINGERPRINT")),
-        "minori" => Ok(env!("ASTRA_EMU_MINORI_FEATURE_FINGERPRINT")),
+        "musica" => Ok(env!("ASTRA_EMU_MUSICA_FEATURE_FINGERPRINT")),
         _ => Err("ASTRA_EMU_CLI_FAMILY_UNSUPPORTED".into()),
     }
 }
@@ -134,9 +134,9 @@ fn platform_library_name(family_id: &str) -> Result<&'static Path, String> {
             ("fvp", true, _) => Path::new("astra_emu_fvp.dll"),
             ("fvp", false, true) => Path::new("libastra_emu_fvp.dylib"),
             ("fvp", false, false) => Path::new("libastra_emu_fvp.so"),
-            ("minori", true, _) => Path::new("astra_emu_minori.dll"),
-            ("minori", false, true) => Path::new("libastra_emu_minori.dylib"),
-            ("minori", false, false) => Path::new("libastra_emu_minori.so"),
+            ("musica", true, _) => Path::new("astra_emu_musica.dll"),
+            ("musica", false, true) => Path::new("libastra_emu_musica.dylib"),
+            ("musica", false, false) => Path::new("libastra_emu_musica.so"),
             _ => return Err("ASTRA_EMU_CLI_FAMILY_UNSUPPORTED".into()),
         },
     )

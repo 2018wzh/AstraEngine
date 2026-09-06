@@ -43,7 +43,7 @@ Decode 只能通过 `DecodeBindingContext { provider_id, target, profile, allow_
 
 Windows 的 `astra.decode.wmf.incremental` 使用只读 COM `IStream` adapter 把同一类 owned、bounded `Read + Seek + Send` source 交给 Media Foundation Source Reader。它统一输出 timestamped audio/video packet，并验证动态 media type、PTS、generation、seek、cancel 和预算。WMF 与 FFmpeg 是两个独立的显式 binding；registry 和产品 composition 不按失败顺序尝试另一项，也不把 provider error 转成静默无影片模式。
 
-宿主适配器通过 `IncrementalMediaPlayback::drain_ready_outputs` 一次性移动当前视频帧和待提交 PCM chunk 到调用方复用的缓冲区。该方法按 `(pts_us, track_order)` 稳定排序并转移所有权，不复制已解码 payload；调用方必须自行保留上一次视频帧，直到下一批提供替换帧。`take_ready_outputs` 只作为一次性分配的便利包装，热路径必须复用 `drain_ready_outputs` 的缓冲区。Manager 与 Minori Headless/CLI 均使用这条公共输出边界，family 代码不再重复维护 packet 排序或“新帧”判定。
+宿主适配器通过 `IncrementalMediaPlayback::drain_ready_outputs` 一次性移动当前视频帧和待提交 PCM chunk 到调用方复用的缓冲区。该方法按 `(pts_us, track_order)` 稳定排序并转移所有权，不复制已解码 payload；调用方必须自行保留上一次视频帧，直到下一批提供替换帧。`take_ready_outputs` 只作为一次性分配的便利包装，热路径必须复用 `drain_ready_outputs` 的缓冲区。Manager 与 Musica Headless/CLI 均使用这条公共输出边界，family 代码不再重复维护 packet 排序或“新帧”判定。
 
 FFmpeg 首帧/整段 provider 与增量 demux 都使用 `Packet::read` 的显式结果路径，不使用会丢弃非 EOF 错误的 packet iterator。底层读取、截断和格式错误统一映射为稳定 diagnostic；只有明确的 EOF 才会进入媒体结束状态。
 
@@ -79,7 +79,7 @@ allocation。相同格式的 PCM 不允许重建；worker 只在实际 mix/resam
 
 Native callback 的消费、设备错误和低水位边沿通过 `AudioWakeRegistration` 唤醒 drain/refill waiter；waiter 使用绝对 deadline，不能以 4/5 ms `sleep` 或 fixed-tick timeout 反复查询。队列满时 producer 必须背压或返回稳定 overflow，设备丢失、worker panic 和 shutdown drain/abort/join 必须成为可诊断的终态。
 
-Minori PAZ 不保留完整明文 entry。未压缩 entry 只读取覆盖请求范围的对齐密文块；packed entry 的随机范围读取从 entry 起点重新建立 decrypt + zlib 流，顺序 `open_stream` 则保留单一增量状态。影片通过 custom AVIO 把有界 `Read + Seek + Send` reader 直接交给 AstraMedia FFmpeg provider，不建立明文 spool、seek index、进程内明文 entry 或磁盘 cache。
+Musica PAZ 不保留完整明文 entry。未压缩 entry 只读取覆盖请求范围的对齐密文块；packed entry 的随机范围读取从 entry 起点重新建立 decrypt + zlib 流，顺序 `open_stream` 则保留单一增量状态。影片通过 custom AVIO 把有界 `Read + Seek + Send` reader 直接交给 AstraMedia FFmpeg provider，不建立明文 spool、seek index、进程内明文 entry 或磁盘 cache。
 
 ## FilterGraph
 

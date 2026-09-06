@@ -6,7 +6,7 @@ from common import dump_json, iter_files, magic_label, main_guard, read_bytes
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Probe a Minori game root for PAZ, MYS, executables, and visible signatures.")
+    ap = argparse.ArgumentParser(description="Probe a Musica game root for PAZ, MYS, executables, and visible signatures.")
     ap.add_argument("root")
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args()

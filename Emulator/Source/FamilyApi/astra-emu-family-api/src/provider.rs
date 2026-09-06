@@ -2388,7 +2388,7 @@ mod tests {
     fn text_input_contract_is_bounded_and_sequence_unique() {
         let transaction = LegacyTextInputTransactionV1 {
             sequence: 7,
-            prompt_id: "minori.text_input.save_comment.0.7".into(),
+            prompt_id: "musica.text_input.save_comment.0.7".into(),
             title: "SAVE".into(),
             label: "Comment".into(),
             initial_value: "memo".into(),
@@ -2433,7 +2433,7 @@ mod tests {
             sequence: 8,
         });
         duplicate.text_input = Some(LegacyTextInputResultV1 {
-            prompt_id: "minori.text_input.save_comment.0.7".into(),
+            prompt_id: "musica.text_input.save_comment.0.7".into(),
             choice: LegacyTextInputChoiceV1::Cancelled,
             value: String::new(),
             sequence: 8,
@@ -2642,7 +2642,7 @@ mod tests {
             height: 720,
             texture_resources: vec![LegacyTextureResourceV1 {
                 texture_id: 7,
-                resource_uri: "minori:/bg/title.png".into(),
+                resource_uri: "musica:/bg/title.png".into(),
                 codec: "png".into(),
                 revision: 1,
                 decoded_width: 1280,
@@ -2847,14 +2847,14 @@ mod tests {
         LegacyAudioCommandV1::LoadResource {
             stream_id: 1,
             encoding: LegacyAudioEncoding::Ogg,
-            resource_uri: "minori:/bgm/theme.ogg".into(),
+            resource_uri: "musica:/bgm/theme.ogg".into(),
         }
         .validate()
         .unwrap();
         for resource_uri in [
-            "minori:/bgm/../secret.ogg",
-            "Minori:/bgm/theme.ogg",
-            "minori:/bgm\\theme.ogg",
+            "musica:/bgm/../secret.ogg",
+            "Musica:/bgm/theme.ogg",
+            "musica:/bgm\\theme.ogg",
         ] {
             assert!(LegacyAudioCommandV1::LoadResource {
                 stream_id: 1,

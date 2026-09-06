@@ -256,7 +256,7 @@ fn windows_wmf_decode_provider_decodes_public_mp4_first_frame_to_bgra() {
 
 #[cfg(windows)]
 #[astra_headless_test::test]
-fn windows_wmf_capability_declares_avi_for_minori_movies() {
+fn windows_wmf_capability_declares_avi_for_musica_movies() {
     let provider = astra_media::WindowsMediaFoundationDecodeProvider::probe().unwrap();
     let capability = provider.capability();
     assert!(capability.kinds.contains(&DecodeKind::Video));

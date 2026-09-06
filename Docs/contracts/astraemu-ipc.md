@@ -14,7 +14,7 @@ Windows Host 使用 Win32 `muda-win` 和原生 message dialog；macOS Host 使�
 
 `LegacyTextInputTransactionV1` 用有界 title、label、初始值和按钮标签描述单行编辑语义，Host 只返回带 prompt id 的 `Accepted`/`Cancelled` 结果；文本值只在该固定 step 中传递，不进入日志、evidence 或 Family ABI 的持久状态。Windows 使用 owner-modal Win32 编辑框、系统 DPI、IME、焦点恢复和 Enter/Escape 处理。macOS、Linux、Web、Android 与 Headless 在当前版本明确返回 `PlatformNotImplemented`，要求调用方绑定各自原生应用 UI 或 Headless typed driver，不回退到 Slint、Manager overlay 或逐字节模拟。
 
-本次 ABI 契约已经落地，FVP、Minori、Manager、CLI、Headless 与平台 renderer 的 consumer 迁移仍是 `IN_PROGRESS`。v7 的 scene transaction、snapshot/save/restore、text lease、session resource presentation 与 step budget 只属于历史实现，不是当前接口能力。
+本次 ABI 契约已经落地，FVP、Musica、Manager、CLI、Headless 与平台 renderer 的 consumer 迁移仍是 `IN_PROGRESS`。v7 的 scene transaction、snapshot/save/restore、text lease、session resource presentation 与 step budget 只属于历史实现，不是当前接口能力。
 
 ## Descriptor
 
@@ -33,7 +33,7 @@ pub struct LegacyFamilyPluginDescriptor {
 }
 ```
 
-descriptor 必须通过 plugin fingerprint、capability、permission、license 和 family feature gate。只接受 `Native + MultiLayer` 和 `Ported + SingleLayer`；FVP 固定使用 `Ported + SingleLayer`，Minori 固定使用 `Native + MultiLayer`。错误组合必须在 session 创建前阻断。
+descriptor 必须通过 plugin fingerprint、capability、permission、license 和 family feature gate。只接受 `Native + MultiLayer` 和 `Ported + SingleLayer`；FVP 固定使用 `Ported + SingleLayer`，Musica 固定使用 `Native + MultiLayer`。错误组合必须在 session 创建前阻断。
 
 Product runtime descriptor 必须声明唯一 `PresentationLane::{Scene2D, Layer2D}`。AstraVN 使用 `Scene2D`，AstraEMU 使用 `Layer2D`，单个 session 禁止混用。
 
@@ -76,7 +76,7 @@ Family ABI v14 对 descriptor、instance、probe、open、step、surface、Hook�
 
 `LegacySystemMenuTransactionV1` 最多包含 64 项，菜单深度最多为 4。重复 id、重复 sibling order、无效 parent、空 submenu、不可选 item 或错配 menu id 都会阻断。Windows native host 通过平台 context-menu provider 显示菜单；Manager 使用同一 transaction 构建 Slint overlay；Headless 只接受序列化物理方向键、确认键和取消键，不提供语义化选项快捷命令。菜单选中的窗口、帮助和关于操作会生成有界 `LegacySystemCommandTransactionV1`；Host 只按 typed kind 选择原生平台能力，结果在下一固定 step 以 `LegacySystemCommandResultV1` 回传。Family 不接收窗口句柄、URL 或本地路径，也不依赖通用事件字符串。
 
-Family 可以根据当前游戏状态发布不同的菜单项集合。Minori 的窗口化菜单发布全屏切换、
+Family 可以根据当前游戏状态发布不同的菜单项集合。Musica 的窗口化菜单发布全屏切换、
 原始尺寸、禁用的高精度尺寸変更和抗锯齿项；全屏状态隐藏全屏切换项，Host 不应自行
 补回未发布的命令。Family 在消费 `Select` 前会再次核对活动 transaction 中的 item、
 启用状态和 `Command` 类型，Host 的同类校验不能替代这一层边界。
@@ -102,7 +102,7 @@ Host 按 `z_index` 排序，相同 z 按稳定 `Layer2DId` 排序。越界 damag
 
 Extension ABI v1 的通用 Hook 只识别 family/game/hook/invocation identity 与 opaque owned bytes，Host 不解释 payload。translation companion 只定义 UTF-8 request/response。Manager、CLI 与 Headless 按 `(family_id, family_game_id)` 持有显式启用状态、唯一 provider id 与 `u32 timeout_ms`；默认 2000 ms，0 表示立即超时。
 
-Hook 必须发生在 framebuffer acquire 之前。未绑定时交给 core 处理；FVP 与 Minori 使用原文。成功结果由 family core 完成字体 fallback、shaping、换行和绘制。timeout、认证、限流、网络、协议、缺字或布局失败时保留原文并返回 typed diagnostic。没有异步 completion、晚到结果、翻译 cache、文本 hash或 Host overlay；正文、secret 和 payload 不进入日志、SQLite、report 或 package。
+Hook 必须发生在 framebuffer acquire 之前。未绑定时交给 core 处理；FVP 与 Musica 使用原文。成功结果由 family core 完成字体 fallback、shaping、换行和绘制。timeout、认证、限流、网络、协议、缺字或布局失败时保留原文并返回 typed diagnostic。没有异步 completion、晚到结果、翻译 cache、文本 hash或 Host overlay；正文、secret 和 payload 不进入日志、SQLite、report 或 package。
 
 ## 原生存档文件
 
@@ -150,7 +150,7 @@ pub struct EmuFilterPresetBinding {
 }
 ```
 
-默认 auto probe 顺序是 KrKr、Artemis、BGI、Siglus、SoftPAL、FVP、Minori。用户 profile 可以覆盖最终 family。AstraEMU 不执行通用 Luau patch 或 decoder callback；family 的私有配置由严格 launch profile 与安全相对 private file 交给对应 factory。旧 Lua/TJS 只描述 family 内部 legacy 事实，不构成 Host 脚本接口。缺少配置、schema 不匹配或 private file 越界时直接阻断启动，不允许无补丁回退。
+默认 auto probe 顺序是 KrKr、Artemis、BGI、Siglus、SoftPAL、FVP、Musica。用户 profile 可以覆盖最终 family。AstraEMU 不执行通用 Luau patch 或 decoder callback；family 的私有配置由严格 launch profile 与安全相对 private file 交给对应 factory。旧 Lua/TJS 只描述 family 内部 legacy 事实，不构成 Host 脚本接口。缺少配置、schema 不匹配或 private file 越界时直接阻断启动，不允许无补丁回退。
 
 Text dump 默认只写 hash、长度、source ref 和 speaker metadata；用户本地 opt-in 后才能保存全文 dump。翻译 overlay 是非权威 UI 状态，不进入 replay hash。Filter preset 复用 `FilterGraph`；family 缺少 layer metadata 时，只启用 final-frame preset 并输出 diagnostic。
 
@@ -233,7 +233,7 @@ Patch、翻译覆盖和本地调试替换走 `overlay` mount。未声明 overlay
 
 ## Family 顺序
 
-v1 首发 family 是 FVP。Artemis 与 KrKr/KAG/TJS、BGI/Ethornell、SoftPAL、Siglus、Minori 作为后续 family。所有 family 复用同一 `LegacyRuntimeProvider` contract、VFS mount contract 和 release gate；私有格式知识留在 family session 内，不反向扩展 EngineCore 对象模型。
+v1 首发 family 是 FVP。Artemis 与 KrKr/KAG/TJS、BGI/Ethornell、SoftPAL、Siglus、Musica 作为后续 family。所有 family 复用同一 `LegacyRuntimeProvider` contract、VFS mount contract 和 release gate；私有格式知识留在 family session 内，不反向扩展 EngineCore 对象模型。
 
 ## Report
 

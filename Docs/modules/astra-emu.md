@@ -52,19 +52,19 @@ Family 内部可以把 VM 映射为私有 scheduler、context、basic-block 和 
 | 4 | BGI/Ethornell | BURIKO/DSC/BCS/BP 生态和公开参考实现 |
 | 5 | SoftPAL | PAC/DAT、extcall 和传统脚本 VM 研究 |
 | 6 | Siglus | Scene.pck、Gameexe、`.ss`、G00/media 研究 |
-| 7 | Minori | PAZ + `.sc` 脚本研究 |
+| 7 | Musica | PAZ + `.sc` 脚本研究 |
 
-FVP 是 v1 首发 family；自动探测顺序仍按 KrKr、Artemis、BGI、Siglus、SoftPAL、FVP、Minori 固定，用户 profile 的显式 family binding 始终优先。首版只装载官方随包 native provider：桌面和 Android 使用签名动态库，iOS 使用相同 registration contract 的静态 registry；不支持第三方安装、远程 catalog 或运行时下载 native code。
+FVP 是 v1 首发 family；自动探测顺序仍按 KrKr、Artemis、BGI、Siglus、SoftPAL、FVP、Musica 固定，用户 profile 的显式 family binding 始终优先。首版只装载官方随包 native provider：桌面和 Android 使用签名动态库，iOS 使用相同 registration contract 的静态 registry；不支持第三方安装、远程 catalog 或运行时下载 native code。
 
 仓库内 CI 只运行 synthetic fixture、固定 golden 和 regression，不联网获取 RFVP。`Tools/verify_fvp_parity.py` 仅用于本地受控对照，要求固定的 0.5.0 revision，并输出 `astra.frame_parity_report.v1`。现有 synthetic trace 覆盖 40 个 opcode、HCB header、Variant 运算、stack/call frame、context wait 和 syscall 参数顺序。本地授权样本已经在 Enter down/up 和 snapshot restore continuation 场景下完成 188 帧 CPU RGBA 逐像素对照；同一签名构建连续两次运行的 visual/state trace 均一致。另一次独立全资源审计覆盖 58 个资源、约 8.18 GB，按 4 MiB 上限完成且没有 revision/hash 漂移。checkpoint retention 的本地运行仍约为 27.1 至 31.2 秒；这不是预热一次、测量五次的正式性能报告，也未达到相对 RFVP 参考的 1.25 倍门禁。semantic/media 和正式性能对照仍是 local-private 门禁。两类证据都不能替代 Windows/Android E3。Linux/macOS/iOS 只验证 package/provider/host compile 与注册契约，状态保持开放。
 
 每个 family 的实现级调研、格式说明、脚本演出拆解和工具命令放在 [../emu/README.md](../emu/README.md)。研究页可以保留旧引擎原始术语；产品 contract 以本页和 [AstraEMU Legacy Runtime Provider Contract](../contracts/astraemu-ipc.md) 为准。
 
-## Minori key file / streaming decode
+## Musica key file / streaming decode
 
-Minori 的生产路径不再使用 AstraEMU Luau patch、decoder callback 或明文 cache。Launch Profile 只接受游戏根目录下安全相对的 `key.toml`，mount 时严格解析 `astra.emu.minori.keys.v1`，随后由 family-owned Rust reader 进行 index、entry、RC4/Blowfish、zlib 和 multipart 的有界流式解密。密钥只在 mount session 内存中存在，不进入 VFS namespace、日志、报告、save/replay 或 cache；文件缺失、schema/role/key 不匹配和源读取错误直接阻断。
+Musica 的生产路径不再使用 AstraEMU Luau patch、decoder callback 或明文 cache。Launch Profile 只接受游戏根目录下安全相对的 `key.toml`，mount 时严格解析 `astra.emu.musica.keys.v1`，随后由 family-owned Rust reader 进行 index、entry、RC4/Blowfish、zlib 和 multipart 的有界流式解密。密钥只在 mount session 内存中存在，不进入 VFS namespace、日志、报告、save/replay 或 cache；文件缺失、schema/role/key 不匹配和源读取错误直接阻断。
 
-Luau policy 仍是 AstraVN/AstraRPG 的产品边界，不属于 Minori 解密主路径。AstraEMU Manager 只保留平台 Host 的输入、窗口、媒体 provider、翻译 Hook 和 Family ABI 组合；不得把 Luau patch 或任意脚本解释器作为 Minori fallback。
+Luau policy 仍是 AstraVN/AstraRPG 的产品边界，不属于 Musica 解密主路径。AstraEMU Manager 只保留平台 Host 的输入、窗口、媒体 provider、翻译 Hook 和 Family ABI 组合；不得把 Luau patch 或任意脚本解释器作为 Musica fallback。
 
 ## Text / Translation / Filter
 

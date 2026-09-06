@@ -6,7 +6,7 @@
 
 ## 通用 VFS
 
-FVP 与 Minori 共用 `astra-emu-cli vfs` 和 `LegacyVfsFamilyRegistry`。FVP launch profile 必须显式列出根目录 `.bin` archive；这比 rfvp 扫描 `*.bin` 后跳过解析失败文件更严格，避免损坏包或误识别被静默隐藏。旧 mount profile 与 `private_patch` 字段均会被严格 schema 阻断。示例只描述格式，不是商业样本清单：
+FVP 与 Musica 共用 `astra-emu-cli vfs` 和 `LegacyVfsFamilyRegistry`。FVP launch profile 必须显式列出根目录 `.bin` archive；这比 rfvp 扫描 `*.bin` 后跳过解析失败文件更严格，避免损坏包或误识别被静默隐藏。旧 mount profile 与 `private_patch` 字段均会被严格 schema 阻断。示例只描述格式，不是商业样本清单：
 
 ```yaml
 schema: astra.emu.family_launch_profile.v1

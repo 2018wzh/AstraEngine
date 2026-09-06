@@ -71,7 +71,7 @@ enum CliCommand {
         /// Enable native audio. Overlay-free visual acceptance is muted by default.
         #[arg(long, default_value_t = false)]
         enable_audio: bool,
-        /// Explicit media decode provider. Minori accepts one bound WMF or FFmpeg provider.
+        /// Explicit media decode provider. Musica accepts one bound WMF or FFmpeg provider.
         #[arg(long, default_value = DEFAULT_VIDEO_PROVIDER, value_parser = ["disabled", "wmf", "ffmpeg-vcpkg"])]
         video_provider: String,
         /// Write a local-private Perfetto Trace Event file for this native Windows run.
@@ -278,8 +278,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn old_minori_command_is_not_accepted() {
-        assert!(Cli::try_parse_from(["astra-emu-cli", "minori"]).is_err());
+    fn old_musica_command_is_not_accepted() {
+        assert!(Cli::try_parse_from(["astra-emu-cli", "musica"]).is_err());
     }
 
     #[test]
@@ -306,7 +306,7 @@ mod tests {
             "astra-emu-cli",
             "headless",
             "--family",
-            "minori",
+            "musica",
             "--game-dir",
             "game",
             "--input",
@@ -319,7 +319,7 @@ mod tests {
             "astra-emu-cli",
             "headless",
             "--family",
-            "minori",
+            "musica",
             "--game-dir",
             "game",
             "--launch-profile",
@@ -335,7 +335,7 @@ mod tests {
             "astra-emu-cli",
             "run",
             "--family",
-            "minori",
+            "musica",
             "--game-dir",
             "game",
             "--mount-profile",
@@ -346,13 +346,13 @@ mod tests {
             "astra-emu-cli",
             "run",
             "--family",
-            "minori",
+            "musica",
             "--game-dir",
             "game",
             "--launch-profile",
             "launch.yaml",
             "--entry",
-            "minori:/scr/main.sc"
+            "musica:/scr/main.sc"
         ])
         .is_err());
     }

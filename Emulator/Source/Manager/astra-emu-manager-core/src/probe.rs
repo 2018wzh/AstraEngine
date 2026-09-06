@@ -6,7 +6,7 @@ use astra_emu_family_api::{
 use thiserror::Error;
 
 pub const DEFAULT_PROBE_ORDER: [&str; 7] = [
-    "krkr", "artemis", "bgi", "siglus", "softpal", "fvp", "minori",
+    "krkr", "artemis", "bgi", "siglus", "softpal", "fvp", "musica",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]

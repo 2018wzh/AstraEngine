@@ -94,8 +94,8 @@ const SOFTPAL_SUPPORT: &[DiscoveryMarker] = &[
 ];
 const FVP_ENTRY: &[DiscoveryMarker] = &[DiscoveryMarker::Extension("hcb")];
 const FVP_SUPPORT: &[DiscoveryMarker] = &[DiscoveryMarker::Extension("hcb")];
-const MINORI_ENTRY: &[DiscoveryMarker] = &[DiscoveryMarker::FileName("scr.paz")];
-const MINORI_SUPPORT: &[DiscoveryMarker] = &[DiscoveryMarker::Extension("paz")];
+const MUSICA_ENTRY: &[DiscoveryMarker] = &[DiscoveryMarker::FileName("scr.paz")];
+const MUSICA_SUPPORT: &[DiscoveryMarker] = &[DiscoveryMarker::Extension("paz")];
 
 pub const DEFAULT_DISCOVERY_DESCRIPTORS: [FamilyDiscoveryDescriptor; 7] = [
     FamilyDiscoveryDescriptor {
@@ -135,9 +135,9 @@ pub const DEFAULT_DISCOVERY_DESCRIPTORS: [FamilyDiscoveryDescriptor; 7] = [
         max_markers_per_root: 64,
     },
     FamilyDiscoveryDescriptor {
-        family_id: "minori",
-        entry_markers: MINORI_ENTRY,
-        supporting_markers: MINORI_SUPPORT,
+        family_id: "musica",
+        entry_markers: MUSICA_ENTRY,
+        supporting_markers: MUSICA_SUPPORT,
         max_markers_per_root: 32,
     },
 ];
