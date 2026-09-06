@@ -93,23 +93,57 @@
 - 渲染时对当前消息文本做字形覆盖检查（fontdb 的 coverage 查询），缺字形
   产生有界 diagnostic 并阻断提交，不允许豆腐块静默上屏。
 
-### P4 密钥来源扩展（Yorino 前置）
+### P4 密钥来源扩展（Yorino 前置）：GARbro scheme 导入
 
-- 现状只接受 `key.toml`。扩展为 launch profile 显式声明密钥来源类型：
-  `key_file`（现状）与后续按逆向结论新增的来源（引擎内嵌 key 的提取物，
-  落在本地私有文件，形态与 key.toml 同构）。
-- 仓库不提交任何商业游戏的 key；密钥文件与 `.astraemu-local` 一样属于
-  本地私有目录。逆向 Yorino key 来源是独立任务，其结论只落在 research
-  文档的结构描述与本地提取脚本，不落 key 值。
+- 实证：GARbro 仓库本体不含 key 值。Minori（引擎名 Musica）的 PAZ 密钥存于
+  社区分发的 scheme 数据库：`GARbroDB` 魔数 + zlib + .NET BinaryFormatter
+  序列化的 `SchemeDataBase`，其中 `SchemeMap["Musica"]` 携带
+  `MusicaScheme{KnownSchemes: signature→PazScheme{Version, ArcKeys:
+  档案名→PazKey{IndexKey, DataKey}, TypeKeys: png/ogg/sc/avi 类型密码},
+  KnownTitles: 标题→scheme}`。格式逻辑在 `ArcFormats/Musica/ArcPAZ.cs`。
+- 本仓已有实现存量：硬化版两阶段 NRBF reader（634 行）与 CMVS importer
+  （465 行，`GARbroDB` 解包 → NRBF 图遍历 → 类型化私有 profile 落盘）
+  完整存活于 `codex/astraemu-cmvs-runtime` 分支的
+  `FamilySupport/astra-emu-garbro-nrbf` 与 `astra-emu-cmvs-cli/src/importer.rs`，
+  本分支的 `garbro_nrbf` 空目录是移植时的残留目录。P4 = 移植该 crate 到
+  FamilySupport，并按 `astra-emu-cmvs/src/scheme.rs` 的模式写 Minori 版
+  importer。
+- importer 形态：`astra-emu-minori-cli import-garbro-scheme --scheme-db
+  <db> --title <title> --game-dir <root>`，把 `ArcKeys` 按档案名映射为
+  八角色 scheme、`TypeKeys` 并入角色 scheme（现有 `MinoriPazDecryptor`
+  的 entry RC4 key 推导已经对齐 GARbro 语义），输出与 `key.toml` 同构的
+  本地私有密钥文件，并生成 launch/mount profile 引用它。若目标游戏同时
+  存在 `key.toml`，两者一致性校验失败即阻断。
+- 仓库不提交 key 值与 scheme 数据库；导入产物与 `.astraemu-local` 同级，
+  属于本地私有目录。Charter 的"纯 Rust 两阶段 NRBF reader、禁 .NET
+  BinaryFormatter"边界由移植的 reader 自身满足（含前向引用两阶段解析、
+  节点/深度/解压预算）。
 
-### P5 容器格式审计（.mys / .acr）
+### P5 私有容器（.mys / .acr）：Luau 驱动的索引 Hook
 
-- `perseus_chs.mys` 与 `.acr` 各自需要独立格式审计：header 布局、加密
-  （如有）、索引与 entry 语义，按 GARbro 既有事实 + 静态逆向，写成
-  research 文档后再进 `astra-emu-minori` 的 archive factory。禁止启发式
-  扫描与 fallback 解析（与 PAZ 审计同标准）。
-- Perseus 汉化若 `.mys` 审计成本过高，可先以 Yorino 样本闭环 P1-P4
-  （覆盖档案 + GBK + 字体），Perseus 链路后置。
+运行时载体已存在：`family-support/src/private_profile.rs` 提供沙箱化
+mlua VM（仅 TABLE/STRING/BUFFER 标准库、禁 io/os/load/debug/package、
+8 MiB 内存 + 100 万指令 + 2 秒墙钟预算），当前暴露
+`astra.family.register_private_profile{id, schema, payload}`，CMVS 用它
+在挂载时携带私有 scheme（data-only）。扩展设计在此通道上分两级：
+
+- **数据级（现有形态，.acr 首选）**：`.acr` 头部为明文结构（计数/偏移/
+  hash 表），格式审计后在 Rust 实现 reader；Luau 仅作为私有参数载体
+  （与 CMVS 相同），不参与解析。适合结构稳定、无自定义字节变换的容器。
+- **索引级（新扩展，.mys / 未知变体）**：新增
+  `astra.family.register_container_hook{id, schema, code}`，`code` 是一个
+  Luau 函数 `parse(header: buffer) → entries`，在挂载时执行**一次**，输入
+  为有界的容器头部字节（buffer），输出为有界的 entry 描述表（名称以原始
+  字节传递，解码仍由 Rust 的 NLS hook 完成）。Rust 侧在调用前校验容器
+  magic 与 hook/schema id，调用后校验 entry 表预算（条目数、总长度、
+  偏移单调性），再按表构建 VFS 视图。
+- **数据路径不进 Luau**：逐 entry 的数据解密/解压固定走 Rust 原语
+  （Blowfish/RC4/XOR/zlib 或审计后新增的纯 Rust 原语），与 PAZ 路径的
+  fail-closed 审计口径一致；hook 结果按（容器 hash, hook hash）缓存，
+  不逐 entry 重复执行。整容器数据解密交给 Luau 的方案被拒绝：性能
+  （百 MB 级数据过 VM）、审计性与既有宪章红线都不允许。
+- 沙箱预算沿用现有四项（patch 字节、内存、指令、墙钟），外加输出表
+  预算；hook 执行失败、超预算、输出形状不符一律 blocking，无 fallback。
 
 ### P6 补丁脚本兼容性验证
 
