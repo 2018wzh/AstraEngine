@@ -8,9 +8,9 @@ use std::{
 use astra_core::Hash256;
 use astra_emu_family_support::mount_family_vfs;
 use astra_emu_musica::{
-    parse_audio_resource_spec, parse_sc, MusicaAniArchive, MusicaSqzArchive,
-    MusicaVfsFamilyFactory, ScCensus, ScLineKind, ScOpcodeCatalog, ScOperand, ScScript,
-    MAX_ENTRY_BYTES,
+    parse_audio_resource_spec, parse_sc_with_locale, MusicaAniArchive, MusicaLocaleHook,
+    MusicaSqzArchive, MusicaVfsFamilyFactory, ScCensus, ScLineKind, ScOpcodeCatalog, ScOperand,
+    ScScript, MAX_ENTRY_BYTES, MUSICA_LOCALE_HOOK_GBK_ID, MUSICA_LOCALE_HOOK_ID,
 };
 use clap::{Parser, Subcommand};
 use serde::Serialize;
@@ -117,11 +117,29 @@ fn mount_musica(
     )?)
 }
 
+fn census_locale_hook(
+    profile: &std::path::Path,
+) -> Result<MusicaLocaleHook, Box<dyn std::error::Error>> {
+    let text = std::fs::read_to_string(profile)?;
+    let nls = text
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("nls: "))
+        .unwrap_or("shift_jis")
+        .trim();
+    let hook_id = match nls {
+        "gbk" => MUSICA_LOCALE_HOOK_GBK_ID,
+        _ => MUSICA_LOCALE_HOOK_ID,
+    };
+    MusicaLocaleHook::from_id(hook_id)
+        .map_err(|error| Box::new(error) as Box<dyn std::error::Error>)
+}
+
 fn census(
     game_dir: &std::path::Path,
     profile: &std::path::Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let vfs = mount_musica(game_dir, profile)?;
+    let locale_hook = census_locale_hook(profile)?;
     let catalog = ScOpcodeCatalog::observed_musica();
     let mut scripts = Vec::new();
     let mut script_entries = Vec::new();
@@ -132,7 +150,7 @@ fn census(
         .filter(|entry| entry.media_kind == "script")
     {
         let bytes = vfs.read_range(&entry.uri, 0, entry.decoded_size)?.bytes;
-        let script = parse_sc(&bytes, &catalog)?;
+        let script = parse_sc_with_locale(&bytes, &catalog, locale_hook)?;
         script_entries.push(ScriptCensusEntry::from_script(
             script_entries.len() as u64,
             entry.decoded_size,

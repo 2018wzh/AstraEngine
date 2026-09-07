@@ -81,6 +81,7 @@ fn archive_from_parts(root: &Path, bytes: &[u8], split: usize) -> ArchiveSource 
         });
     }
     ArchiveSource {
+        rc4_skip_crc: true,
         role: "scr".into(),
         parts,
         version: 0,
@@ -114,13 +115,16 @@ fn v1_and_v2_rc4_chunks_resume_at_absolute_offsets() {
         rc4_transform(version, &entry, &mut transformed);
         let encrypted = blowfish_encrypt(DATA_KEY, &transformed);
         for (start, end) in [(0usize, 32usize), (16, 72), (64, 96)] {
-            let decoded = decryptor
-                .decrypt_entry_chunk(
+            let mut decoded = decryptor
+                .decrypt_entry_chunk_blowfish(
                     version,
                     &entry,
                     start as u64,
                     encrypted[start..end].to_vec(),
                 )
+                .unwrap();
+            decryptor
+                .apply_entry_rc4_stateless(version, true, &entry, start as u64, &mut decoded)
                 .unwrap();
             assert_eq!(decoded, plain[start..end]);
         }
@@ -147,7 +151,7 @@ fn entry_chunk_transform_reuses_the_owned_source_buffer() {
     let source_allocation = encrypted.as_ptr();
 
     let decoded = decryptor
-        .decrypt_entry_chunk(0, &entry, 0, encrypted)
+        .decrypt_entry_chunk_blowfish(0, &entry, 0, encrypted)
         .unwrap();
 
     assert_eq!(decoded, plain);
@@ -177,7 +181,7 @@ fn movie_v0_substitution_and_v1_periodic_rc4_are_range_stable() {
         .collect::<Vec<_>>();
     assert_eq!(
         decryptor
-            .decrypt_entry_chunk(0, &entry, 47, encrypted_v0[47..233].to_vec())
+            .decrypt_entry_chunk_blowfish(0, &entry, 47, encrypted_v0[47..233].to_vec())
             .unwrap(),
         plain[47..233]
     );
@@ -196,12 +200,16 @@ fn movie_v0_substitution_and_v1_periodic_rc4_are_range_stable() {
         .enumerate()
         .map(|(index, byte)| byte ^ keystream[index])
         .collect::<Vec<_>>();
-    assert_eq!(
+    let decoded = {
+        let mut bytes = decryptor
+            .decrypt_entry_chunk_blowfish(1, &entry, 73, encrypted_v1[73..291].to_vec())
+            .unwrap();
         decryptor
-            .decrypt_entry_chunk(1, &entry, 73, encrypted_v1[73..291].to_vec())
-            .unwrap(),
-        plain[73..291]
-    );
+            .apply_entry_rc4_stateless(1, true, &entry, 73, &mut bytes)
+            .unwrap();
+        bytes
+    };
+    assert_eq!(decoded, plain[73..291]);
 }
 
 #[test]
@@ -229,6 +237,7 @@ fn multipart_zlib_stream_is_incremental_and_enforces_decoded_size() {
         video_key: None,
     };
     let raw = MusicaEntryStream {
+        rc4: None,
         archive,
         entry: entry.clone(),
         decryptor: decryptor(BTreeMap::new()),
@@ -286,9 +295,15 @@ fn v2_zlib_stream_preserves_checksum_across_decrypt_chunks() {
     let encrypted = blowfish_encrypt(DATA_KEY, &padded);
     for (index, chunk) in encrypted.chunks(STREAM_CHUNK_BYTES as usize).enumerate() {
         let offset = index as u64 * STREAM_CHUNK_BYTES;
-        let decoded = decryptor(BTreeMap::from([("sc".into(), "pw".into())]))
-            .decrypt_entry_chunk(2, &entry, offset, chunk.to_vec())
-            .unwrap();
+        let decoded = {
+            let mut bytes = decryptor(BTreeMap::from([("sc".into(), "pw".into())]))
+                .decrypt_entry_chunk_blowfish(2, &entry, offset, chunk.to_vec())
+                .unwrap();
+            decryptor(BTreeMap::from([("sc".into(), "pw".into())]))
+                .apply_entry_rc4_stateless(2, true, &entry, offset, &mut bytes)
+                .unwrap();
+            bytes
+        };
         assert!(
             decoded == expected_padded[offset as usize..offset as usize + chunk.len()],
             "decrypt chunk {index} did not preserve the Blowfish block stream"
@@ -297,6 +312,7 @@ fn v2_zlib_stream_preserves_checksum_across_decrypt_chunks() {
     let mut archive = archive_from_parts(root.path(), &encrypted, encrypted.len() / 2 + 3);
     archive.version = 2;
     let raw = MusicaEntryStream {
+        rc4: None,
         archive,
         entry: entry.clone(),
         decryptor: decryptor(BTreeMap::from([("sc".into(), "pw".into())])),
@@ -342,6 +358,7 @@ fn decoded_zero_padding_is_bounded_and_nonzero_padding_is_rejected() {
             video_key: None,
         };
         let raw = MusicaEntryStream {
+            rc4: None,
             archive,
             entry: entry.clone(),
             decryptor: decryptor(BTreeMap::new()),

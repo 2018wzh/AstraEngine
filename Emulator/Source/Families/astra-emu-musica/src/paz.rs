@@ -32,6 +32,7 @@ const STREAM_CHUNK_BYTES: u64 = 64 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct PazArchiveConfig {
+    pub rc4_skip_crc: bool,
     pub role: String,
     pub path: PathBuf,
     pub game_root: PathBuf,
@@ -126,7 +127,57 @@ impl MusicaPazDecryptor {
         Ok(bytes)
     }
 
-    fn decrypt_entry_chunk(
+    /// Stateless RC4 layer for random-access reads: keys per call and drops
+    /// keystream bytes up to the requested offset. The sequential stream
+    /// path keeps a single keyed cipher instead (see `MusicaEntryStream`).
+    fn apply_entry_rc4_stateless(
+        &self,
+        version: u8,
+        rc4_skip_crc: bool,
+        entry: &PazEntryDescriptor,
+        absolute_offset: u64,
+        bytes: &mut [u8],
+    ) -> Result<(), PazError> {
+        if version == 0 {
+            return Ok(());
+        }
+        let scheme = self.scheme(&entry.archive_role)?;
+        if let Some(password) = password_for_entry(entry, scheme) {
+            let key = entry_key_material_with_locale(entry, Some(password), self.locale_hook)?;
+            let mut cipher = Rc4::new_from_slice(&key).map_err(|_| {
+                error(
+                    "ASTRA_EMU_MUSICA_RC4_KEY",
+                    "entry RC4 key length is invalid",
+                )
+            })?;
+            let version_skip = if version >= 2 && rc4_skip_crc {
+                (crc32(&key) >> 12 & 0xff) as u64
+            } else {
+                0
+            };
+            let skip = version_skip
+                .checked_add(absolute_offset)
+                .ok_or_else(|| error("ASTRA_EMU_MUSICA_RC4_SKIP", "entry RC4 offset overflowed"))?;
+            let mut remaining = skip;
+            let mut discarded = [0u8; 64 * 1024];
+            while remaining != 0 {
+                let count =
+                    usize::try_from(remaining.min(discarded.len() as u64)).map_err(|_| {
+                        error("ASTRA_EMU_MUSICA_RC4_SKIP", "entry RC4 skip is too large")
+                    })?;
+                cipher.apply_keystream(&mut discarded[..count]);
+                discarded[..count].fill(0);
+                remaining -= count as u64;
+            }
+            cipher.apply_keystream(bytes);
+        }
+        Ok(())
+    }
+
+    /// Stateless Blowfish layer (and the mov byte-table transform). RC4 is
+    /// applied by the caller: the sequential stream keeps one keyed cipher,
+    /// while random access re-keys per call and drops keystream bytes.
+    fn decrypt_entry_chunk_blowfish(
         &self,
         version: u8,
         entry: &PazEntryDescriptor,
@@ -196,43 +247,13 @@ impl MusicaPazDecryptor {
         }
 
         blowfish_decrypt_in_place(&scheme.data_key, &mut bytes)?;
-        if version > 0 {
-            if let Some(password) = password_for_entry(entry, scheme) {
-                let key = entry_key_material_with_locale(entry, Some(password), self.locale_hook)?;
-                let mut cipher = Rc4::new_from_slice(&key).map_err(|_| {
-                    error(
-                        "ASTRA_EMU_MUSICA_RC4_KEY",
-                        "entry RC4 key length is invalid",
-                    )
-                })?;
-                let version_skip = if version >= 2 {
-                    (crc32(&key) >> 12 & 0xff) as u64
-                } else {
-                    0
-                };
-                let skip = version_skip.checked_add(absolute_offset).ok_or_else(|| {
-                    error("ASTRA_EMU_MUSICA_RC4_SKIP", "entry RC4 offset overflowed")
-                })?;
-                let mut remaining = skip;
-                let mut discarded = [0u8; 64 * 1024];
-                while remaining != 0 {
-                    let count =
-                        usize::try_from(remaining.min(discarded.len() as u64)).map_err(|_| {
-                            error("ASTRA_EMU_MUSICA_RC4_SKIP", "entry RC4 skip is too large")
-                        })?;
-                    cipher.apply_keystream(&mut discarded[..count]);
-                    discarded[..count].fill(0);
-                    remaining -= count as u64;
-                }
-                cipher.apply_keystream(&mut bytes);
-            }
-        }
         Ok(bytes)
     }
 }
 
 #[derive(Clone)]
 struct ArchiveSource {
+    rc4_skip_crc: bool,
     role: String,
     parts: Vec<ArchivePart>,
     version: u8,
@@ -309,6 +330,7 @@ impl MusicaMountedVfs {
                 ));
             }
             let mut source = ArchiveSource {
+                rc4_skip_crc: config.rc4_skip_crc,
                 role: config.role.clone(),
                 parts,
                 version: config.version,
@@ -424,6 +446,7 @@ impl MusicaMountedVfs {
             encrypted_position: 0,
             pending: Vec::new(),
             pending_position: 0,
+            rc4: None,
         };
         let inner = if entry.descriptor.packed {
             MusicaDecodedInner::Zlib(ZlibDecoder::new(raw))
@@ -480,12 +503,21 @@ impl MusicaMountedVfs {
         let mut encrypted =
             read_source_range(archive, encrypted_offset, encrypted_end - encrypted_start)?;
         xor_byte(&mut encrypted, archive.xor_key);
-        let decoded = self.decryptor.decrypt_entry_chunk(
+        let mut decoded = self.decryptor.decrypt_entry_chunk_blowfish(
             archive.version,
             &entry.descriptor,
             encrypted_start,
             encrypted,
         )?;
+        if entry.descriptor.archive_role != "mov" {
+            self.decryptor.apply_entry_rc4_stateless(
+                archive.version,
+                archive.rc4_skip_crc,
+                &entry.descriptor,
+                encrypted_start,
+                &mut decoded,
+            )?;
+        }
         let stored_end = entry.descriptor.stored_size.min(decoded.len() as u64);
         let local_start = offset.saturating_sub(encrypted_start);
         let local_end = end.saturating_sub(encrypted_start).min(stored_end);
@@ -767,6 +799,11 @@ struct MusicaEntryStream {
     encrypted_position: u64,
     pending: Vec<u8>,
     pending_position: usize,
+    /// RC4 keyed once per entry and advanced continuously across chunks.
+    /// Random access still goes through the stateless
+    /// `decrypt_entry_chunk` (which re-keys and drops keystream bytes);
+    /// the sequential path must not pay that quadratic cost per chunk.
+    rc4: Option<(Rc4, u64)>,
 }
 
 impl Read for MusicaEntryStream {
@@ -799,6 +836,53 @@ impl Read for MusicaEntryStream {
 }
 
 impl MusicaEntryStream {
+    /// RC4 keyed once at entry position zero, then advanced continuously.
+    /// The seed material and the v2 CRC skip are identical to the stateless
+    /// `decrypt_entry_chunk` path.
+    fn apply_stream_rc4(&mut self, rc4_skip_crc: bool, bytes: &mut [u8]) -> Result<(), PazError> {
+        if let Some((cipher, consumed)) = self.rc4.as_mut() {
+            if *consumed == self.encrypted_position {
+                cipher.apply_keystream(bytes);
+                *consumed += bytes.len() as u64;
+                return Ok(());
+            }
+        }
+        let scheme = self.decryptor.scheme(&self.entry.archive_role)?;
+        if let Some(password) = password_for_entry(&self.entry, scheme) {
+            let key = entry_key_material_with_locale(
+                &self.entry,
+                Some(password),
+                self.decryptor.locale_hook(),
+            )?;
+            let mut cipher = Rc4::new_from_slice(&key).map_err(|_| {
+                error(
+                    "ASTRA_EMU_MUSICA_RC4_KEY",
+                    "entry RC4 key length is invalid",
+                )
+            })?;
+            let version_skip = if self.archive.version >= 2 && rc4_skip_crc {
+                (crc32(&key) >> 12 & 0xff) as u64
+            } else {
+                0
+            };
+            let mut remaining = version_skip + self.encrypted_position;
+            let mut discarded = [0u8; 64 * 1024];
+            while remaining != 0 {
+                let count =
+                    usize::try_from(remaining.min(discarded.len() as u64)).map_err(|_| {
+                        error("ASTRA_EMU_MUSICA_RC4_SKIP", "entry RC4 skip is too large")
+                    })?;
+                cipher.apply_keystream(&mut discarded[..count]);
+                discarded[..count].fill(0);
+                remaining -= count as u64;
+            }
+            cipher.apply_keystream(bytes);
+            self.rc4 = Some((cipher, self.encrypted_position + bytes.len() as u64));
+            return Ok(());
+        }
+        Ok(())
+    }
+
     fn fill_pending(&mut self) -> Result<(), PazError> {
         let remaining = self.entry.aligned_size - self.encrypted_position;
         let mut count = remaining.min(STREAM_CHUNK_BYTES);
@@ -823,12 +907,15 @@ impl MusicaEntryStream {
             })?;
         let mut encrypted = read_source_range(&self.archive, offset, count)?;
         xor_byte(&mut encrypted, self.archive.xor_key);
-        let mut decoded = self.decryptor.decrypt_entry_chunk(
+        let mut decoded = self.decryptor.decrypt_entry_chunk_blowfish(
             self.archive.version,
             &self.entry,
             self.encrypted_position,
             encrypted,
         )?;
+        if !self.entry.archive_role.eq_ignore_ascii_case("mov") {
+            self.apply_stream_rc4(self.archive.rc4_skip_crc, &mut decoded)?;
+        }
         let output_end = self
             .entry
             .stored_size

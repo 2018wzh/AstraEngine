@@ -1,4 +1,4 @@
-use encoding_rs::SHIFT_JIS;
+use encoding_rs::{GBK, SHIFT_JIS};
 use thiserror::Error;
 
 /// The only text locale accepted by the original Natsuzora installation.
@@ -9,6 +9,8 @@ use thiserror::Error;
 /// byte boundary.
 pub const MUSICA_ORIGINAL_VARIANT_ID: &str = "natsuzora-no-perseus.original-ja";
 pub const MUSICA_LOCALE_HOOK_ID: &str = "astra.emu.musica.locale.ja-jp.cp932.v1";
+/// Simplified-Chinese GBK hook id backed by the eden* official Chinese data.
+pub const MUSICA_LOCALE_HOOK_GBK_ID: &str = "astra.emu.musica.locale.zh-hans.gbk.v1";
 /// Profile option used by the Musica launch profile to select the source text
 /// encoding.  The value names intentionally match the FVP profile contract so
 /// the manager can expose one consistent selector across legacy families.
@@ -26,11 +28,10 @@ pub const MUSICA_RUNTIME_LOCALE: &str = "ja-JP";
 
 /// Encoding values that may be persisted in a Musica launch profile.
 ///
-/// Only Shift JIS is currently implemented for the verified Japanese source.
-/// The other values are deliberately represented here so a profile can be
-/// selected before the localized source contract is implemented.  Mounting a
-/// profile with one of those reserved values is a hard error; it never falls
-/// back to CP932 or to replacement decoding.
+/// Shift JIS covers the verified Japanese sources; GBK covers the eden*
+/// official Chinese data and GBK-encoded patch scripts.  UTF-8 stays
+/// reserved: mounting a profile with a reserved value is a hard error and
+/// never falls back to another encoding or replacement decoding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MusicaNls {
     ShiftJis,
@@ -57,12 +58,28 @@ impl MusicaNls {
     }
 
     pub const fn is_currently_supported(self) -> bool {
-        matches!(self, Self::ShiftJis)
+        matches!(self, Self::ShiftJis | Self::Gbk)
+    }
+
+    /// The locale hook id that must accompany this NLS selection.
+    pub const fn locale_hook_id(self) -> &'static str {
+        match self {
+            Self::ShiftJis => MUSICA_LOCALE_HOOK_ID,
+            Self::Gbk => MUSICA_LOCALE_HOOK_GBK_ID,
+            Self::Utf8 => "",
+        }
     }
 }
 
+/// Locale/code-page hook selected by the launch profile NLS option.
+///
+/// The hook is the only authority for byte conversion at the family boundary;
+/// it never falls back to replacement decoding or to the system code page.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct MusicaLocaleHook;
+pub enum MusicaLocaleHook {
+    JapaneseCp932,
+    SimplifiedChineseGbk,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum MusicaLocaleError {
@@ -70,37 +87,53 @@ pub enum MusicaLocaleError {
     UnsupportedHook,
     #[error("ASTRA_EMU_MUSICA_NLS: unsupported text encoding")]
     UnsupportedEncoding,
-    #[error("ASTRA_EMU_MUSICA_LOCALE_DECODE: bytes are not valid CP932")]
+    #[error("ASTRA_EMU_MUSICA_LOCALE_DECODE: bytes are not valid in the selected encoding")]
     Decode,
-    #[error("ASTRA_EMU_MUSICA_LOCALE_ENCODE: text cannot be encoded as CP932")]
+    #[error("ASTRA_EMU_MUSICA_LOCALE_ENCODE: text cannot be encoded in the selected encoding")]
     Encode,
 }
 
 impl MusicaLocaleHook {
     pub const fn japanese_cp932() -> Self {
-        Self
+        Self::JapaneseCp932
+    }
+
+    pub const fn simplified_chinese_gbk() -> Self {
+        Self::SimplifiedChineseGbk
     }
 
     pub fn from_id(id: &str) -> Result<Self, MusicaLocaleError> {
-        (id == MUSICA_LOCALE_HOOK_ID)
-            .then_some(Self::japanese_cp932())
-            .ok_or(MusicaLocaleError::UnsupportedHook)
+        match id {
+            MUSICA_LOCALE_HOOK_ID => Ok(Self::JapaneseCp932),
+            MUSICA_LOCALE_HOOK_GBK_ID => Ok(Self::SimplifiedChineseGbk),
+            _ => Err(MusicaLocaleError::UnsupportedHook),
+        }
     }
 
     pub const fn id(self) -> &'static str {
-        MUSICA_LOCALE_HOOK_ID
+        match self {
+            Self::JapaneseCp932 => MUSICA_LOCALE_HOOK_ID,
+            Self::SimplifiedChineseGbk => MUSICA_LOCALE_HOOK_GBK_ID,
+        }
     }
 
     pub fn decode(self, bytes: &[u8]) -> Result<String, MusicaLocaleError> {
-        SHIFT_JIS
-            .decode_without_bom_handling_and_without_replacement(bytes)
-            .map(|value| value.into_owned())
-            .ok_or(MusicaLocaleError::Decode)
+        let (decoded, _, had_errors) = match self {
+            Self::JapaneseCp932 => SHIFT_JIS.decode(bytes),
+            Self::SimplifiedChineseGbk => GBK.decode(bytes),
+        };
+        if had_errors {
+            return Err(MusicaLocaleError::Decode);
+        }
+        Ok(decoded.into_owned())
     }
 
     pub fn encode(self, text: &str) -> Result<Vec<u8>, MusicaLocaleError> {
-        let (encoded, _, malformed) = SHIFT_JIS.encode(text);
-        if malformed {
+        let (encoded, _, had_errors) = match self {
+            Self::JapaneseCp932 => SHIFT_JIS.encode(text),
+            Self::SimplifiedChineseGbk => GBK.encode(text),
+        };
+        if had_errors {
             return Err(MusicaLocaleError::Encode);
         }
         Ok(encoded.into_owned())
@@ -146,10 +179,10 @@ mod tests {
     }
 
     #[test]
-    fn nls_profile_values_match_fvp_and_only_shift_jis_is_live() {
+    fn nls_profile_values_match_fvp_and_shift_jis_gbk_are_live() {
         for (value, expected, supported) in [
             (MUSICA_NLS_SHIFT_JIS, MusicaNls::ShiftJis, true),
-            (MUSICA_NLS_GBK, MusicaNls::Gbk, false),
+            (MUSICA_NLS_GBK, MusicaNls::Gbk, true),
             (MUSICA_NLS_UTF8, MusicaNls::Utf8, false),
         ] {
             let parsed = MusicaNls::parse(value).unwrap();

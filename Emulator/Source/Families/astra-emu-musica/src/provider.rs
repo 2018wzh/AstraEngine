@@ -58,16 +58,16 @@ use crate::text_surface::{
 #[cfg(test)]
 use crate::MusicaCharacterReplacementState;
 use crate::{
-    collect_resource_references, message_voice_wait_resources, parse_sc, MusicaAudioCommand,
-    MusicaAudioEncoding, MusicaAxisScrollFrame, MusicaCharacterFrame, MusicaCharacterState,
-    MusicaChoicePresentation, MusicaConfigAudioBus, MusicaConfigChange, MusicaConfigControl,
-    MusicaConfigState, MusicaEffectFrame, MusicaExecutedCommand, MusicaImageDecodeProvider,
-    MusicaLinearScrollFrame, MusicaLocaleHook, MusicaMessageMarkupError, MusicaMovieState,
-    MusicaPlayMode, MusicaRuntimeError, MusicaRuntimeState, MusicaScreenShakeFrame,
-    MusicaScrollXfFrame, MusicaSecondaryEffectFrame, MusicaStageCommand, MusicaStageLayer,
-    MusicaStandLayer, MusicaSystemPage, MusicaVm, MusicaVmEvent, MusicaWScroll2Frame,
-    MusicaWaitState, ScOpcodeCatalog, MUSICA_CHOICE_PRESENTATION_SCHEMA,
-    MUSICA_IMAGE_DECODE_PROVIDER_ID, MUSICA_MAX_RESOURCE_AUDIT_SCRIPTS,
+    collect_resource_references, message_voice_wait_resources, parse_sc, parse_sc_with_locale,
+    MusicaAudioCommand, MusicaAudioEncoding, MusicaAxisScrollFrame, MusicaCharacterFrame,
+    MusicaCharacterState, MusicaChoicePresentation, MusicaConfigAudioBus, MusicaConfigChange,
+    MusicaConfigControl, MusicaConfigState, MusicaEffectFrame, MusicaExecutedCommand,
+    MusicaImageDecodeProvider, MusicaLinearScrollFrame, MusicaLocaleHook, MusicaMessageMarkupError,
+    MusicaMovieState, MusicaNls, MusicaPlayMode, MusicaRuntimeError, MusicaRuntimeState,
+    MusicaScreenShakeFrame, MusicaScrollXfFrame, MusicaSecondaryEffectFrame, MusicaStageCommand,
+    MusicaStageLayer, MusicaStandLayer, MusicaSystemPage, MusicaVm, MusicaVmEvent,
+    MusicaWScroll2Frame, MusicaWaitState, ScOpcodeCatalog, MUSICA_CHOICE_PRESENTATION_SCHEMA,
+    MUSICA_IMAGE_DECODE_PROVIDER_ID, MUSICA_MAX_RESOURCE_AUDIT_SCRIPTS, MUSICA_NLS_OPTION,
 };
 use crate::{MusicaAniArchive, MusicaSqzArchive};
 
@@ -701,11 +701,13 @@ struct ActiveMusicaTextInput {
     max_bytes: u32,
 }
 
-#[derive(Default)]
 pub struct MusicaRuntimeProvider {
     vfs: Option<Arc<dyn LegacyVfsReader>>,
     host_services: Option<LegacyFamilyHostServicesV9>,
     sessions: BTreeMap<String, MusicaSession>,
+    /// Locale binding selected at open time from the mount options; used for
+    /// script parsing so the text encoding is one profile-driven decision.
+    locale_hook: MusicaLocaleHook,
 }
 
 impl MusicaRuntimeProvider {
@@ -714,6 +716,7 @@ impl MusicaRuntimeProvider {
             vfs: Some(vfs),
             host_services: None,
             sessions: BTreeMap::new(),
+            locale_hook: MusicaLocaleHook::japanese_cp932(),
         }
     }
 
@@ -722,6 +725,7 @@ impl MusicaRuntimeProvider {
             vfs: Some(Arc::clone(&host_services.vfs)),
             host_services: Some(host_services),
             sessions: BTreeMap::new(),
+            locale_hook: MusicaLocaleHook::japanese_cp932(),
         }
     }
 
@@ -808,7 +812,12 @@ impl LegacyRuntimeProvider for MusicaRuntimeProvider {
                     "probe requires one unambiguous Musica entry script",
                 )
             })?;
-        let (_, identity, _) = load_script_uri(self.vfs()?, &request.root_mount_id, candidate)?;
+        let (_, identity, _) = load_script_uri(
+            self.vfs()?,
+            &request.root_mount_id,
+            candidate,
+            self.locale_hook,
+        )?;
         let marker_match =
             request.marker_hashes.is_empty() || request.marker_hashes.contains(&identity);
         Ok(LegacyProbeReport {
@@ -846,8 +855,12 @@ impl LegacyRuntimeProvider for MusicaRuntimeProvider {
         }
         validate_script_uri(&request.script_uri)?;
         let profile_fingerprint = profile_fingerprint(ctx, &request)?;
-        let (script_uri, script_hash, script) =
-            load_script_uri(self.vfs()?, &ctx.mount_set_id, &request.script_uri)?;
+        let (script_uri, script_hash, script) = load_script_uri(
+            self.vfs()?,
+            &ctx.mount_set_id,
+            &request.script_uri,
+            self.locale_hook,
+        )?;
         let entry_script_uri = script_uri.clone();
         match request
             .family_options
@@ -857,7 +870,7 @@ impl LegacyRuntimeProvider for MusicaRuntimeProvider {
             None => {}
             Some("full") => {
                 let (resource_count, audit_hash) =
-                    audit_script_resources(self.vfs()?, &ctx.mount_set_id)?;
+                    audit_script_resources(self.vfs()?, &ctx.mount_set_id, self.locale_hook)?;
                 tracing::info!(
                     target: "astra_emu_musica::resource",
                     event = "astra_emu_musica_script_resource_audit_completed",
@@ -955,6 +968,27 @@ impl LegacyRuntimeProvider for MusicaRuntimeProvider {
                 ));
             }
         };
+        let locale_hook = request
+            .family_options
+            .get(MUSICA_NLS_OPTION)
+            .map(String::as_str)
+            .map(MusicaNls::parse)
+            .transpose()
+            .map_err(|_| {
+                invalid(
+                    "ASTRA_EMU_MUSICA_NLS_INVALID",
+                    "Musica profile nls must be shift_jis, gbk, or utf8",
+                )
+            })?
+            .unwrap_or(MusicaNls::ShiftJis)
+            .locale_hook_id();
+        let locale_hook = MusicaLocaleHook::from_id(locale_hook).map_err(|_| {
+            invalid(
+                "ASTRA_EMU_MUSICA_LOCALE_HOOK",
+                "Musica requires a known locale hook id",
+            )
+        })?;
+        self.locale_hook = locale_hook;
         let global_progress_enabled = match request
             .family_options
             .get(MUSICA_GLOBAL_PROGRESS_OPTION)
@@ -1579,7 +1613,7 @@ impl MusicaRuntimeProvider {
                     _ => unreachable!("gallery start action was matched above"),
                 };
                 let (script_uri, script_hash, script) =
-                    load_script(&vfs, &session.mount_set_id, target)?;
+                    load_script(&vfs, &session.mount_set_id, target, self.locale_hook)?;
                 session
                     .vm
                     .set_system_page(MusicaSystemPage::None, 0)
@@ -1602,8 +1636,12 @@ impl MusicaRuntimeProvider {
                 action = MusicaSystemUiAction::StartGame;
             }
             if action == MusicaSystemUiAction::StartGame && title_start {
-                let (script_uri, script_hash, script) =
-                    load_script_uri(&vfs, &session.mount_set_id, &session.entry_script_uri)?;
+                let (script_uri, script_hash, script) = load_script_uri(
+                    &vfs,
+                    &session.mount_set_id,
+                    &session.entry_script_uri,
+                    self.locale_hook,
+                )?;
                 replace_vm_script(
                     &vfs,
                     &session.mount_set_id,
@@ -1677,6 +1715,7 @@ impl MusicaRuntimeProvider {
                         session,
                         slot,
                         input.tick_index,
+                        self.locale_hook,
                     )?;
                     return gameplay_resume_output(session, &vfs, &input, restore_audio);
                 }
@@ -2326,8 +2365,8 @@ impl MusicaRuntimeProvider {
             _ => None,
         };
         if let Some(target) = chain_target.as_deref() {
-            let switch_result = load_script(&vfs, &session.mount_set_id, target).and_then(
-                |(script_uri, script_hash, script)| {
+            let switch_result = load_script(&vfs, &session.mount_set_id, target, self.locale_hook)
+                .and_then(|(script_uri, script_hash, script)| {
                     replace_vm_script(
                         &vfs,
                         &session.mount_set_id,
@@ -2336,8 +2375,7 @@ impl MusicaRuntimeProvider {
                         script_hash,
                         script,
                     )
-                },
-            );
+                });
             if let Err(error) = switch_result {
                 session.poisoned = true;
                 return Err(error);
@@ -3174,7 +3212,12 @@ impl MusicaRuntimeProvider {
                 "test checkpoint script does not match the mounted VFS",
             ));
         }
-        let script = parse_sc(&bytes, &ScOpcodeCatalog::observed_musica()).map_err(script_error)?;
+        let script = parse_sc_with_locale(
+            &bytes,
+            &ScOpcodeCatalog::observed_musica(),
+            self.locale_hook,
+        )
+        .map_err(script_error)?;
         let session = self
             .sessions
             .get_mut(&session_id.0)
@@ -5153,15 +5196,17 @@ fn load_script(
     vfs: &Arc<dyn LegacyVfsReader>,
     mount_set_id: &str,
     target: &str,
+    locale_hook: MusicaLocaleHook,
 ) -> Result<(String, Hash256, crate::ScScript), LegacyProviderError> {
     let script_uri = format!("musica:/scr/{target}");
-    load_script_uri(vfs, mount_set_id, &script_uri)
+    load_script_uri(vfs, mount_set_id, &script_uri, locale_hook)
 }
 
 fn load_script_uri(
     vfs: &Arc<dyn LegacyVfsReader>,
     mount_set_id: &str,
     script_uri: &str,
+    locale_hook: MusicaLocaleHook,
 ) -> Result<(String, Hash256, crate::ScScript), LegacyProviderError> {
     validate_script_uri(script_uri)?;
     let source = vfs
@@ -5186,7 +5231,8 @@ fn load_script_uri(
         &mut include_stack,
         &mut expanded_bytes,
     )?;
-    let script = parse_sc(&bytes, &ScOpcodeCatalog::observed_musica()).map_err(script_error)?;
+    let script = parse_sc_with_locale(&bytes, &ScOpcodeCatalog::observed_musica(), locale_hook)
+        .map_err(script_error)?;
     Ok((script_uri.to_owned(), script_hash, script))
 }
 
@@ -5260,6 +5306,7 @@ fn replace_vm_script(
 fn audit_script_resources(
     vfs: &Arc<dyn LegacyVfsReader>,
     mount_set_id: &str,
+    locale_hook: MusicaLocaleHook,
 ) -> Result<(u64, Hash256), LegacyProviderError> {
     let scripts = vfs
         .enumerate_by_extension(
@@ -5297,12 +5344,13 @@ fn audit_script_resources(
                 "a script entry is empty or exceeds the bounded source size",
             ));
         }
-        let (_, _, script) = load_script_uri(vfs, mount_set_id, &listed.uri).map_err(|_| {
-            invalid(
-                "ASTRA_EMU_MUSICA_RESOURCE_AUDIT_SCRIPT_READ",
-                "a script entry could not be read consistently",
-            )
-        })?;
+        let (_, _, script) =
+            load_script_uri(vfs, mount_set_id, &listed.uri, locale_hook).map_err(|_| {
+                invalid(
+                    "ASTRA_EMU_MUSICA_RESOURCE_AUDIT_SCRIPT_READ",
+                    "a script entry could not be read consistently",
+                )
+            })?;
         let script_references = collect_resource_references(&script).map_err(runtime_error)?;
         identity.extend_from_slice(Hash256::from_sha256(listed.uri.as_bytes()).as_bytes());
         identity.extend_from_slice(&listed.stat.len.to_le_bytes());
@@ -6552,6 +6600,7 @@ fn load_slot(
     session: &mut MusicaSession,
     slot: u32,
     host_tick: u64,
+    locale_hook: MusicaLocaleHook,
 ) -> Result<(), LegacyProviderError> {
     validate_save_slot(slot)?;
     if session.vm.state().system_ui.page != MusicaSystemPage::Load {
@@ -6609,7 +6658,8 @@ fn load_slot(
                 "load script URI is invalid",
             )
         })?;
-    let (script_uri, script_hash, script) = load_script(vfs, &session.mount_set_id, target)?;
+    let (script_uri, script_hash, script) =
+        load_script(vfs, &session.mount_set_id, target, locale_hook)?;
     if script_uri != envelope.script_uri || script_hash != envelope.script_hash {
         return Err(invalid(
             "ASTRA_EMU_MUSICA_LOAD_SLOT_SCRIPT",
@@ -12285,7 +12335,13 @@ mod tests {
                 ),
             ]),
         });
-        let (_, _, expanded) = load_script(&reader, "mount.test", "root.sc").unwrap();
+        let (_, _, expanded) = load_script(
+            &reader,
+            "mount.test",
+            "root.sc",
+            MusicaLocaleHook::japanese_cp932(),
+        )
+        .unwrap();
         assert_eq!(expanded.lines.len(), 2);
 
         let cycle_reader: Arc<dyn LegacyVfsReader> = Arc::new(MemoryReader {
@@ -12294,7 +12350,13 @@ mod tests {
                 ("musica:/scr/b.sc".into(), b".include a.sc\r\n".to_vec()),
             ]),
         });
-        let error = load_script(&cycle_reader, "mount.test", "a.sc").unwrap_err();
+        let error = load_script(
+            &cycle_reader,
+            "mount.test",
+            "a.sc",
+            MusicaLocaleHook::japanese_cp932(),
+        )
+        .unwrap_err();
         assert_eq!(error.code(), "ASTRA_EMU_MUSICA_SCRIPT_INCLUDE_CYCLE");
     }
 
@@ -12306,7 +12368,13 @@ mod tests {
                 b".include \x82.sc\r\n".to_vec(),
             )]),
         });
-        let error = load_script(&reader, "mount.test", "root.sc").unwrap_err();
+        let error = load_script(
+            &reader,
+            "mount.test",
+            "root.sc",
+            MusicaLocaleHook::japanese_cp932(),
+        )
+        .unwrap_err();
         assert_eq!(error.code(), "ASTRA_EMU_MUSICA_SCRIPT_INCLUDE_OPERAND");
     }
 
@@ -12366,7 +12434,9 @@ mod tests {
                 ("musica:/voice/voice.ogg".into(), vec![3]),
             ]),
         });
-        let (count, digest) = audit_script_resources(&reader, "mount.test").unwrap();
+        let (count, digest) =
+            audit_script_resources(&reader, "mount.test", MusicaLocaleHook::japanese_cp932())
+                .unwrap();
         assert_eq!(count, 3);
         assert_ne!(digest, Hash256::from_sha256(&[]));
 
@@ -12376,7 +12446,9 @@ mod tests {
                 b".stage * missing.png 0 0\r\n".to_vec(),
             )]),
         });
-        let error = audit_script_resources(&missing, "mount.test").unwrap_err();
+        let error =
+            audit_script_resources(&missing, "mount.test", MusicaLocaleHook::japanese_cp932())
+                .unwrap_err();
         assert_eq!(error.code(), "ASTRA_EMU_MUSICA_RESOURCE_AUDIT_MISSING");
     }
 
@@ -12424,7 +12496,16 @@ mod tests {
         assert_eq!(session.save_slot_comments.get(&7), Some(&"memo".to_owned()));
         session.vm.close_gameplay_system_page().unwrap();
         session.vm.open_load_page().unwrap();
-        load_slot(&writable, &vfs, &session_id, session, 7, 2).unwrap();
+        load_slot(
+            &writable,
+            &vfs,
+            &session_id,
+            session,
+            7,
+            2,
+            MusicaLocaleHook::japanese_cp932(),
+        )
+        .unwrap();
         assert_eq!(session.vm.state().system_ui.page, MusicaSystemPage::None);
         assert_eq!(session.vm.state().fixed_tick, 2);
         assert!(session.vm.state().wait.is_some());

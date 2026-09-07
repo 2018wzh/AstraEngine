@@ -21,6 +21,10 @@ use crate::{
 pub const MUSICA_KEY_FILE_SCHEMA: &str = "astra.emu.musica.keys.v1";
 pub const MAX_KEY_FILE_BYTES: u64 = 64 * 1024;
 
+/// eden* official (Steam) variant id: CP932 Japanese engine with GBK Chinese
+/// script content and a no-CRC-skip PAZ v2 entry pipeline.
+pub const EDEN_VARIANT_ID: &str = "eden.original.multi";
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct MusicaFamilyOptions {
@@ -32,6 +36,11 @@ pub struct MusicaFamilyOptions {
     pub nls: String,
     pub paz_version: u8,
     pub index_size_xor: u32,
+    /// PAZ v2 entry streams derive an RC4 skip count from the key CRC32.
+    /// Later Musica titles (eden*) keep the same index and entry pipeline but
+    /// drop this skip step; the variant is selected explicitly per profile.
+    #[serde(default)]
+    pub rc4_skip_crc: bool,
     pub key_file: PathBuf,
     pub archive_roles: Vec<String>,
 }
@@ -113,9 +122,15 @@ impl LegacyVfsFamilyFactory for MusicaVfsFamilyFactory {
         let locale_hook = MusicaLocaleHook::from_id(&options.locale_hook).map_err(|_| {
             invalid(
                 "ASTRA_EMU_MUSICA_LOCALE_HOOK",
-                "Musica requires the Japanese CP932 locale hook",
+                "Musica requires a known locale hook id",
             )
         })?;
+        if locale_hook.id() != nls.locale_hook_id() {
+            return Err(invalid(
+                "ASTRA_EMU_MUSICA_LOCALE_NLS_MISMATCH",
+                "the selected locale hook does not match the NLS encoding",
+            ));
+        }
         validate_original_entrypoint(&context.game_root)?;
         let key_bytes =
             read_private_file(&context.game_root, &options.key_file, MAX_KEY_FILE_BYTES)?;
@@ -142,6 +157,7 @@ impl LegacyVfsFamilyFactory for MusicaVfsFamilyFactory {
                 game_root: context.game_root.clone(),
                 version: options.paz_version,
                 index_size_xor: options.index_size_xor,
+                rc4_skip_crc: options.rc4_skip_crc,
             })
             .collect();
         Ok(Arc::new(MusicaMountedVfs::mount(
@@ -245,8 +261,9 @@ fn validate_options(options: &MusicaFamilyOptions) -> Result<(), LegacyCoreError
         .iter()
         .map(String::as_str)
         .collect::<BTreeSet<_>>();
-    if options.content_variant != MUSICA_ORIGINAL_VARIANT_ID
-        || options.locale_hook != MUSICA_LOCALE_HOOK_ID
+    let known_variants = [MUSICA_ORIGINAL_VARIANT_ID, EDEN_VARIANT_ID];
+    if !known_variants.contains(&options.content_variant.as_str())
+        || MusicaLocaleHook::from_id(&options.locale_hook).is_err()
         || MusicaNls::parse(&options.nls).is_err()
         || options.paz_version > 2
         || options.key_file.as_os_str().is_empty()
@@ -267,7 +284,21 @@ fn validate_options(options: &MusicaFamilyOptions) -> Result<(), LegacyCoreError
 }
 
 fn validate_original_entrypoint(game_root: &std::path::Path) -> Result<(), LegacyCoreError> {
-    let entrypoint = game_root.join("perseus.exe");
+    let entrypoint = [
+        "perseus.exe",
+        "eden_en.exe",
+        "ef_first_AA.exe",
+        "ef_latter_en_AA.exe",
+    ]
+    .iter()
+    .map(|name| game_root.join(name))
+    .find(|path| path.is_file())
+    .ok_or_else(|| {
+        invalid(
+            "ASTRA_EMU_MUSICA_ORIGINAL_ENTRYPOINT",
+            "a known Musica entrypoint (perseus.exe or eden_en.exe) is required",
+        )
+    })?;
     let metadata = std::fs::symlink_metadata(&entrypoint).map_err(|_| {
         invalid(
             "ASTRA_EMU_MUSICA_ORIGINAL_ENTRYPOINT",
@@ -360,6 +391,7 @@ mod tests {
     #[test]
     fn family_options_require_exact_roles_and_safe_key_path() {
         let valid = MusicaFamilyOptions {
+            rc4_skip_crc: true,
             content_variant: MUSICA_ORIGINAL_VARIANT_ID.into(),
             locale_hook: MUSICA_LOCALE_HOOK_ID.into(),
             nls: crate::MUSICA_NLS_SHIFT_JIS.into(),
@@ -385,6 +417,7 @@ mod tests {
     #[test]
     fn family_options_reject_localized_variant_and_non_japanese_hook() {
         let mut options = MusicaFamilyOptions {
+            rc4_skip_crc: true,
             content_variant: MUSICA_ORIGINAL_VARIANT_ID.into(),
             locale_hook: MUSICA_LOCALE_HOOK_ID.into(),
             nls: crate::MUSICA_NLS_SHIFT_JIS.into(),
@@ -418,6 +451,7 @@ mod tests {
     #[test]
     fn family_options_reserve_non_japanese_nls_without_fallback() {
         let options = MusicaFamilyOptions {
+            rc4_skip_crc: true,
             content_variant: MUSICA_ORIGINAL_VARIANT_ID.into(),
             locale_hook: MUSICA_LOCALE_HOOK_ID.into(),
             nls: "gbk".into(),
@@ -439,6 +473,7 @@ mod tests {
     fn mount_blocks_reserved_nls_before_reading_private_game_files() {
         let root = tempfile::tempdir().unwrap();
         let options = MusicaFamilyOptions {
+            rc4_skip_crc: true,
             content_variant: MUSICA_ORIGINAL_VARIANT_ID.into(),
             locale_hook: MUSICA_LOCALE_HOOK_ID.into(),
             nls: crate::MUSICA_NLS_GBK.into(),
