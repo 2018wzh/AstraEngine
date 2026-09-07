@@ -20,7 +20,6 @@ use blowfish::Blowfish;
 use flate2::read::ZlibDecoder;
 use rc4::{Rc4, StreamCipher};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 type PazError = LegacyCoreError;
 
@@ -347,8 +346,11 @@ impl MusicaMountedVfs {
             prepared.push((config, source, parsed));
         }
         for (config, mut source, parsed) in prepared {
-            let source_hash = hash_parts(&source.parts)?;
-            source.hash = source_hash;
+            // The mount identity is structural (role, byte length, part
+            // layout); hashing whole multi-GB archives on every mount was a
+            // fixed cost on all CLI paths. Content evidence stays the job of
+            // the explicit `verify` command.
+            source.hash = source_identity(&source);
             let archive_index = archives.len();
             for entry in parsed {
                 let uri = format!(
@@ -578,12 +580,6 @@ impl LegacyMountedVfs for MusicaMountedVfs {
     fn validate_sources(&self) -> Result<(), PazError> {
         for archive in &self.archives {
             verify_source_unchanged(archive)?;
-            if hash_parts(&archive.parts)? != archive.hash {
-                return Err(error(
-                    "ASTRA_EMU_MUSICA_SOURCE_CHANGED",
-                    "archive content changed after mount",
-                ));
-            }
         }
         Ok(())
     }
@@ -1227,58 +1223,23 @@ fn read_source_range(
     Ok(output)
 }
 
-fn hash_parts(parts: &[ArchivePart]) -> Result<Hash256, PazError> {
-    let mut source_hasher = Sha256::new();
-    let mut buffer = vec![0u8; 1024 * 1024];
-    for part in parts {
-        let file = File::open(&part.path).map_err(|_| {
-            error(
-                "ASTRA_EMU_MUSICA_ARCHIVE_OPEN",
-                "PAZ archive cannot be opened",
-            )
-        })?;
-        let mut file = file.take(part.length.checked_add(1).ok_or_else(|| {
-            error(
-                "ASTRA_EMU_MUSICA_ARCHIVE_SIZE",
-                "archive part bound overflowed",
-            )
-        })?);
-        let mut part_bytes = 0u64;
-        loop {
-            let count = file.read(&mut buffer).map_err(|_| {
-                error(
-                    "ASTRA_EMU_MUSICA_ARCHIVE_READ",
-                    "PAZ archive hash read failed",
-                )
-            })?;
-            if count == 0 {
-                break;
-            }
-            part_bytes += count as u64;
-            source_hasher.update(&buffer[..count]);
-        }
-        if part_bytes != part.length {
-            return Err(error(
-                "ASTRA_EMU_MUSICA_SOURCE_CHANGED",
-                "archive part size changed while hashing",
-            ));
-        }
+fn source_identity(source: &ArchiveSource) -> Hash256 {
+    let mut material = Vec::new();
+    material.extend_from_slice(source.role.as_bytes());
+    material.extend_from_slice(&source.length.to_le_bytes());
+    material.extend_from_slice(&(source.parts.len() as u64).to_le_bytes());
+    for part in &source.parts {
+        material.extend_from_slice(&part.length.to_le_bytes());
+        material.extend_from_slice(
+            &part
+                .modified
+                .and_then(|time| time.duration_since(SystemTime::UNIX_EPOCH).ok())
+                .map(|duration| duration.as_nanos() as u64)
+                .unwrap_or(0)
+                .to_le_bytes(),
+        );
     }
-    for part in parts {
-        let metadata = fs::metadata(&part.path).map_err(|_| {
-            error(
-                "ASTRA_EMU_MUSICA_SOURCE_CHANGED",
-                "archive part disappeared while hashing",
-            )
-        })?;
-        if metadata.len() != part.length || metadata.modified().ok() != part.modified {
-            return Err(error(
-                "ASTRA_EMU_MUSICA_SOURCE_CHANGED",
-                "archive metadata changed while hashing",
-            ));
-        }
-    }
-    Ok(Hash256::from_bytes(source_hasher.finalize().into()))
+    Hash256::from_sha256(&material)
 }
 
 fn verify_source_unchanged(source: &ArchiveSource) -> Result<(), PazError> {

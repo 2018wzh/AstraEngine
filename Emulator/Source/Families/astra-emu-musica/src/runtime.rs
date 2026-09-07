@@ -12,7 +12,7 @@ use crate::{
     ScOperand, ScScript, SourceSpan,
 };
 
-pub const MUSICA_RUNTIME_STATE_SCHEMA: &str = "astra.emu.musica.runtime_state.v28";
+pub const MUSICA_RUNTIME_STATE_SCHEMA: &str = "astra.emu.musica.runtime_state.v29";
 
 /// Maximum number of script files accepted by the explicit resource-reference
 /// audit.  The audit is an opt-in mount/open policy; the normal runtime keeps
@@ -69,6 +69,10 @@ pub(crate) const MUSICA_BGM_STREAM_ID: u32 = 0;
 pub struct MusicaRuntimeState {
     pub schema: String,
     pub script_uri: String,
+    /// Language gating for ef*-style `[j]`/`[e]` per-line guards.  `None`
+    /// keeps the original single-language behaviour; `Some('j')`/`Some('e')`
+    /// skips guarded lines whose tag does not match.
+    pub script_language: Option<char>,
     pub script_hash: Hash256,
     pub pc_line: u32,
     pub variables: BTreeMap<String, i64>,
@@ -1216,6 +1220,7 @@ impl MusicaVm {
             schema: MUSICA_RUNTIME_STATE_SCHEMA.into(),
             script_uri,
             script_hash,
+            script_language: None,
             pc_line: 0,
             variables: BTreeMap::new(),
             global_variables: BTreeMap::new(),
@@ -2200,6 +2205,12 @@ impl MusicaVm {
     /// Update the physical Control key state. Text/timer fast-forward additionally
     /// requires `.pragma enable_control`; a modal movie uses its own script-owned
     /// `skippable` flag before the provider may turn the held key into a stop.
+    /// Selects the ef*-style per-line language gate.  `None` restores the
+    /// original single-language behaviour.
+    pub fn set_script_language(&mut self, language: Option<char>) {
+        self.state.script_language = language;
+    }
+
     pub fn set_control_pressed(&mut self, pressed: bool) {
         self.state.system_ui.control_pressed = pressed;
     }
@@ -2861,6 +2872,15 @@ impl MusicaVm {
                 .pc_line
                 .checked_add(1)
                 .ok_or(MusicaRuntimeError::Overflow)?;
+            if let Some(guard) = line.language_guard {
+                if self
+                    .state
+                    .script_language
+                    .is_some_and(|active| active != guard)
+                {
+                    continue;
+                }
+            }
             let ScLineKind::Command { command } = &line.kind else {
                 continue;
             };

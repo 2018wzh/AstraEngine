@@ -61,6 +61,11 @@ pub struct ScLine {
     pub span: SourceSpan,
     pub raw: Vec<u8>,
     pub kind: ScLineKind,
+    /// `[j]`/`[e]` per-line language guard from the ef* official scripts.
+    /// `None` executes under every language; `Some('j')`/`Some('e')` execute
+    /// only when the session's script language matches.  The guard sits
+    /// before the command token and is excluded from `raw`.
+    pub language_guard: Option<char>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -237,7 +242,7 @@ pub fn parse_sc_with_locale(
             offset: cursor as u64,
             length: u32::try_from(raw.len()).map_err(|_| ScParseError::SourceInvariant(cursor))?,
         };
-        let kind = parse_line(logical, span, ordinal, catalog, locale_hook)?;
+        let (kind, language_guard) = parse_line(logical, span, ordinal, catalog, locale_hook)?;
         if matches!(kind, ScLineKind::Command { .. }) {
             ordinal = ordinal
                 .checked_add(1)
@@ -247,6 +252,7 @@ pub fn parse_sc_with_locale(
             span,
             raw: raw.to_vec(),
             kind,
+            language_guard,
         });
         cursor = end;
     }
@@ -389,30 +395,53 @@ fn parse_line(
     ordinal: u32,
     catalog: &ScOpcodeCatalog,
     locale_hook: MusicaLocaleHook,
-) -> Result<ScLineKind, ScParseError> {
+) -> Result<(ScLineKind, Option<char>), ScParseError> {
+    let mut language_guard = None;
     let start = logical
         .iter()
         .position(|byte| !matches!(byte, b' ' | b'\t'));
     let Some(start) = start else {
-        return Ok(ScLineKind::Blank);
+        return Ok((ScLineKind::Blank, None));
     };
-    let trimmed = &logical[start..];
+    let mut cursor = start;
+    // ef*-style per-line language guard: `[j]` or `[e]` immediately before
+    // the command token.  Any other bracketed prefix fails closed as Unknown.
+    if logical[cursor] == b'[' {
+        let Some(close) = logical[cursor..]
+            .iter()
+            .position(|byte| *byte == b']')
+            .map(|relative| cursor + relative)
+        else {
+            return Ok((ScLineKind::Unknown, None));
+        };
+        let guard = match &logical[cursor + 1..close] {
+            b"j" | b"J" => Some('j'),
+            b"e" | b"E" => Some('e'),
+            _ => return Ok((ScLineKind::Unknown, None)),
+        };
+        language_guard = guard;
+        cursor = close + 1;
+        while matches!(logical.get(cursor), Some(b' ') | Some(b'\t')) {
+            cursor += 1;
+        }
+    }
+    let trimmed = &logical[cursor..];
     if trimmed.starts_with(b";") || trimmed.starts_with(b"#") || trimmed.starts_with(b"//") {
-        return Ok(ScLineKind::Comment);
+        return Ok((ScLineKind::Comment, language_guard));
     }
     if !trimmed.starts_with(b".") {
-        return Ok(ScLineKind::Unknown);
+        return Ok((ScLineKind::Unknown, language_guard));
     }
     let token_end = trimmed[1..]
         .iter()
         .position(|byte| !byte.is_ascii_alphanumeric() && *byte != b'_')
         .map_or(trimmed.len(), |relative| relative + 1);
     if token_end == 1 {
-        return Ok(ScLineKind::Unknown);
+        return Ok((ScLineKind::Unknown, language_guard));
     }
     let opcode_bytes = &trimmed[1..token_end];
     if !opcode_bytes[0].is_ascii_alphabetic() && opcode_bytes[0] != b'_' {
-        return Ok(ScLineKind::Unknown);
+        return Ok((ScLineKind::Unknown, language_guard));
     }
     let opcode = std::str::from_utf8(opcode_bytes)
         .map_err(|_| ScParseError::OperandSchema(span.offset as usize))?
@@ -435,17 +464,20 @@ fn parse_line(
             locale_hook,
         )
     })?;
-    Ok(ScLineKind::Command {
-        command: ScCommand {
-            ordinal,
-            opcode,
-            known: spec.is_some(),
-            span,
-            raw_operands,
-            operands,
-            control_flow,
+    Ok((
+        ScLineKind::Command {
+            command: ScCommand {
+                ordinal,
+                opcode,
+                raw_operands,
+                span,
+                operands,
+                control_flow,
+                known: spec.is_some(),
+            },
         },
-    })
+        language_guard,
+    ))
 }
 
 fn classify_operand(value: String) -> ScOperand {
@@ -742,5 +774,23 @@ mod tests {
         assert_eq!(markup.visible_text, "表");
         assert!(markup.waits_for_voice());
         assert!(markup.auto_advance());
+    }
+    #[test]
+    fn language_guards_parse_into_line_metadata() {
+        let catalog = ScOpcodeCatalog::observed_musica();
+        let script = parse_sc(b"[j].wait 10\r\n[e].wait 20\r\n.wait 30\r\n", &catalog).unwrap();
+        let guards: Vec<_> = script.lines.iter().map(|l| l.language_guard).collect();
+        assert_eq!(guards, vec![Some('j'), Some('e'), None]);
+        match &script.lines[0].kind {
+            ScLineKind::Command { command } => assert_eq!(command.opcode, "wait"),
+            other => panic!("unexpected line kind: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unknown_bracket_without_close_is_unknown() {
+        let catalog = ScOpcodeCatalog::observed_musica();
+        let script = parse_sc(b"[j.wait 10\r\n", &catalog).unwrap();
+        assert!(matches!(script.lines[0].kind, ScLineKind::Unknown));
     }
 }

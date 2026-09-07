@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     MusicaLocaleHook, MusicaMountedVfs, MusicaNls, MusicaPazDecryptor, PazArchiveConfig,
-    PazRoleScheme, MUSICA_FAMILY_OPTIONS_SCHEMA, MUSICA_LOCALE_HOOK_ID, MUSICA_ORIGINAL_VARIANT_ID,
+    PazRoleScheme, MUSICA_FAMILY_OPTIONS_SCHEMA, MUSICA_ORIGINAL_VARIANT_ID,
     REQUIRED_ARCHIVE_ROLES,
 };
 
@@ -323,6 +323,7 @@ mod tests {
     use astra_emu_family_core::LegacyOpaqueFamilyConfig;
 
     use super::*;
+    use crate::MUSICA_LOCALE_HOOK_ID;
 
     fn key_file() -> MusicaKeyFile {
         MusicaKeyFile {

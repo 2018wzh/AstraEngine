@@ -33,4 +33,4 @@ pub const MUSICA_READER_ID: &str = "astra.emu.musica.paz.v5";
 /// Retained as the family format identity required by the legacy factory ABI;
 /// it is not a registry, callback or manifest provider identity.
 pub const MUSICA_FAMILY_OPTIONS_SCHEMA: &str = "astra.emu.musica.mount_options.v4";
-pub const MUSICA_SCRIPT_IR_SCHEMA: &str = "astra.emu.musica.script_ir.v2";
+pub const MUSICA_SCRIPT_IR_SCHEMA: &str = "astra.emu.musica.script_ir.v3";

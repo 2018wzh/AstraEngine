@@ -58,7 +58,7 @@ use crate::text_surface::{
 #[cfg(test)]
 use crate::MusicaCharacterReplacementState;
 use crate::{
-    collect_resource_references, message_voice_wait_resources, parse_sc, parse_sc_with_locale,
+    collect_resource_references, message_voice_wait_resources, parse_sc_with_locale,
     MusicaAudioCommand, MusicaAudioEncoding, MusicaAxisScrollFrame, MusicaCharacterFrame,
     MusicaCharacterState, MusicaChoicePresentation, MusicaConfigAudioBus, MusicaConfigChange,
     MusicaConfigControl, MusicaConfigState, MusicaEffectFrame, MusicaExecutedCommand,
@@ -913,10 +913,15 @@ impl LegacyRuntimeProvider for MusicaRuntimeProvider {
         );
         let message_voice_durations =
             decode_message_voice_durations(self.vfs()?, &ctx.mount_set_id, &script)?;
+        let script_language = match self.locale_hook {
+            MusicaLocaleHook::JapaneseCp932 => Some('j'),
+            MusicaLocaleHook::SimplifiedChineseGbk => Some('e'),
+        };
         let mut vm = MusicaVm::new(script_uri, script_hash, script, request.session_seed)
             .map_err(runtime_error)?;
         vm.set_message_voice_durations(message_voice_durations)
             .map_err(runtime_error)?;
+        vm.set_script_language(script_language);
         if title_launch {
             vm.begin_title_launch().map_err(runtime_error)?;
             tracing::debug!(
@@ -11622,6 +11627,7 @@ fn invalid(code: &'static str, message: &'static str) -> LegacyProviderError {
 
 #[cfg(test)]
 mod tests {
+    use crate::parse_sc;
     use astra_byte_source::{ByteRange, ByteSourceStat, RangeReadResult, SourceRevision};
     use astra_emu_family_api::{
         LegacyAwaitResult, LegacyInputEdge, LegacyReplayMode, LegacySystemMenuActionV1,
