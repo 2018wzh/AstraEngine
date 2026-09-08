@@ -181,47 +181,166 @@ fn elapsed_ms(duration: Duration) -> u64 {
 }
 
 fn parse_responses_output(value: &Value) -> Result<String, TranslationError> {
+    validate_response_status(value)?;
+
+    let mut output = String::new();
+    let mut saw_output = false;
+    if let Some(items) = value.get("output").and_then(Value::as_array) {
+        for item in items {
+            let item_type = item.get("type").and_then(Value::as_str);
+            if matches!(item_type, Some("refusal")) {
+                return Err(TranslationError::Protocol(
+                    "provider response contains refusal",
+                ));
+            }
+            if matches!(item_type, Some("reasoning" | "tool_call" | "function_call")) {
+                continue;
+            }
+            let Some(parts) = item.get("content").and_then(Value::as_array) else {
+                continue;
+            };
+            for part in parts {
+                let part_type = part.get("type").and_then(Value::as_str);
+                if matches!(part_type, Some("refusal")) {
+                    return Err(TranslationError::Protocol(
+                        "provider response contains refusal",
+                    ));
+                }
+                if matches!(part_type, Some("reasoning" | "tool_call" | "function_call")) {
+                    continue;
+                }
+                // Responses uses `output_text`; accepting an omitted type keeps
+                // compatibility with older OpenAI-compatible gateways while
+                // still excluding explicit reasoning/tool parts.
+                if part_type.is_some_and(|kind| kind != "output_text" && kind != "text") {
+                    continue;
+                }
+                let Some(text) = part.get("text").and_then(Value::as_str) else {
+                    return Err(TranslationError::Protocol(
+                        "Responses output_text part is invalid",
+                    ));
+                };
+                saw_output = true;
+                output.push_str(text);
+            }
+        }
+    }
+    if saw_output {
+        return Ok(output);
+    }
+    // Some compatible gateways expose the already-concatenated form only.
     if let Some(text) = value.get("output_text").and_then(Value::as_str) {
         return Ok(text.to_owned());
     }
-    value
-        .get("output")
-        .and_then(Value::as_array)
-        .and_then(|items| {
-            items.iter().find_map(|item| {
-                item.get("content")
-                    .and_then(Value::as_array)
-                    .and_then(|parts| {
-                        parts.iter().find_map(|part| {
-                            part.get("text").and_then(Value::as_str).map(str::to_owned)
-                        })
-                    })
-            })
-        })
-        .ok_or(TranslationError::Protocol(
-            "Responses response omitted output text",
-        ))
+    Err(TranslationError::Protocol(
+        "Responses response omitted output text",
+    ))
 }
 
 fn parse_chat_output(value: &Value) -> Result<String, TranslationError> {
-    let content = value
-        .pointer("/choices/0/message/content")
+    validate_response_status(value)?;
+    let choice = value
+        .get("choices")
+        .and_then(Value::as_array)
+        .and_then(|choices| choices.first())
         .ok_or(TranslationError::Protocol(
-            "Chat Completions response omitted message content",
+            "Chat Completions response omitted choices",
         ))?;
+    if let Some(finish_reason) = choice.get("finish_reason").and_then(Value::as_str) {
+        match finish_reason {
+            "stop" => {}
+            "length" => {
+                return Err(TranslationError::Protocol(
+                    "Chat Completions response is incomplete",
+                ));
+            }
+            "content_filter" => {
+                return Err(TranslationError::Protocol(
+                    "Chat Completions response contains refusal",
+                ));
+            }
+            "tool_calls" | "function_call" => {
+                return Err(TranslationError::Protocol(
+                    "Chat Completions response contains tool call",
+                ));
+            }
+            _ => {
+                return Err(TranslationError::Protocol(
+                    "Chat Completions response has invalid finish reason",
+                ));
+            }
+        }
+    }
+    let message = choice.get("message").ok_or(TranslationError::Protocol(
+        "Chat Completions response omitted message",
+    ))?;
+    if message
+        .get("refusal")
+        .and_then(Value::as_str)
+        .is_some_and(|refusal| !refusal.is_empty())
+    {
+        return Err(TranslationError::Protocol(
+            "Chat Completions response contains refusal",
+        ));
+    }
+    let content = message.get("content").ok_or(TranslationError::Protocol(
+        "Chat Completions response omitted message content",
+    ))?;
     if let Some(text) = content.as_str() {
         return Ok(text.to_owned());
     }
-    content
-        .as_array()
-        .and_then(|parts| {
-            parts
-                .iter()
-                .find_map(|part| part.get("text").and_then(Value::as_str).map(str::to_owned))
-        })
-        .ok_or(TranslationError::Protocol(
+    let Some(parts) = content.as_array() else {
+        return Err(TranslationError::Protocol(
+            "Chat Completions content has no text",
+        ));
+    };
+    let mut output = String::new();
+    let mut saw_output = false;
+    for part in parts {
+        let part_type = part.get("type").and_then(Value::as_str);
+        if matches!(part_type, Some("refusal")) {
+            return Err(TranslationError::Protocol(
+                "Chat Completions response contains refusal",
+            ));
+        }
+        if matches!(part_type, Some("reasoning" | "tool_call" | "function_call")) {
+            continue;
+        }
+        if part_type.is_some_and(|kind| kind != "text" && kind != "output_text") {
+            continue;
+        }
+        let Some(text) = part.get("text").and_then(Value::as_str) else {
+            return Err(TranslationError::Protocol(
+                "Chat Completions text part is invalid",
+            ));
+        };
+        saw_output = true;
+        output.push_str(text);
+    }
+    if saw_output {
+        Ok(output)
+    } else {
+        Err(TranslationError::Protocol(
             "Chat Completions content has no text",
         ))
+    }
+}
+
+fn validate_response_status(value: &Value) -> Result<(), TranslationError> {
+    if value.get("error").is_some() {
+        return Err(TranslationError::Protocol(
+            "provider response contains an error",
+        ));
+    }
+    match value.get("status").and_then(Value::as_str) {
+        None | Some("completed") => Ok(()),
+        Some("incomplete") => Err(TranslationError::Protocol(
+            "provider response is incomplete",
+        )),
+        Some(_) => Err(TranslationError::Protocol(
+            "provider response has invalid status",
+        )),
+    }
 }
 
 #[cfg(test)]
@@ -239,5 +358,77 @@ mod tests {
         let malformed = serde_json::json!({"error":{"message":"private body"}});
         let error = parse_chat_output(&malformed).unwrap_err();
         assert!(!error.to_string().contains("private body"));
+    }
+
+    #[test]
+    fn responses_concatenate_output_text_and_skip_reasoning_and_tools() {
+        let value = serde_json::json!({
+            "status": "completed",
+            "output": [
+                {"type": "reasoning", "summary": [{"text": "ignore"}]},
+                {"type": "message", "content": [
+                    {"type": "output_text", "text": "你"},
+                    {"type": "output_text", "text": "好"}
+                ]},
+                {"type": "function_call", "name": "ignore"}
+            ]
+        });
+        assert_eq!(parse_responses_output(&value).unwrap(), "你好");
+    }
+
+    #[test]
+    fn responses_reject_refusal_and_incomplete_results() {
+        let refusal = serde_json::json!({
+            "status": "completed",
+            "output": [{"type": "message", "content": [{
+                "type": "refusal", "refusal": "no"
+            }]}]
+        });
+        assert!(matches!(
+            parse_responses_output(&refusal),
+            Err(TranslationError::Protocol(
+                "provider response contains refusal"
+            ))
+        ));
+        let incomplete = serde_json::json!({"status": "incomplete", "output": []});
+        assert!(matches!(
+            parse_responses_output(&incomplete),
+            Err(TranslationError::Protocol(
+                "provider response is incomplete"
+            ))
+        ));
+    }
+
+    #[test]
+    fn chat_content_parts_are_concatenated_and_tool_or_refusal_is_rejected() {
+        let value = serde_json::json!({
+            "choices": [{"finish_reason": "stop", "message": {"content": [
+                {"type": "text", "text": "你"},
+                {"type": "reasoning", "text": "ignore"},
+                {"type": "text", "text": "好"}
+            ]}}]
+        });
+        assert_eq!(parse_chat_output(&value).unwrap(), "你好");
+
+        let tool = serde_json::json!({
+            "choices": [{"finish_reason": "tool_calls", "message": {"content": null}}]
+        });
+        assert!(matches!(
+            parse_chat_output(&tool),
+            Err(TranslationError::Protocol(
+                "Chat Completions response contains tool call"
+            ))
+        ));
+        let refusal = serde_json::json!({
+            "choices": [{"finish_reason": "stop", "message": {
+                "refusal": "no", "content": null
+            }}]
+        });
+        assert!(matches!(
+            parse_chat_output(&refusal),
+            Err(TranslationError::Protocol(
+                "Chat Completions response contains refusal"
+            ))
+        ));
     }
 }

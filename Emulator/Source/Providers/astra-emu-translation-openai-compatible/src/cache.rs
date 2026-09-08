@@ -14,6 +14,7 @@ use crate::{
 struct CacheEntry {
     current_text: String,
     translated: String,
+    char_cost: usize,
 }
 
 /// FIFO cache scoped to one live game session. It intentionally has no
@@ -50,8 +51,14 @@ impl TranslationSessionCache {
     }
 
     pub fn insert(&mut self, current_text: String, translated: String) {
-        let entry_chars = translated.chars().count();
-        if self.max_entries == 0 || entry_chars > self.max_chars {
+        let char_cost = current_text
+            .chars()
+            .count()
+            .checked_add(translated.chars().count());
+        let Some(char_cost) = char_cost else {
+            return;
+        };
+        if self.max_entries == 0 || char_cost > self.max_chars {
             return;
         }
         if let Some(index) = self
@@ -60,21 +67,22 @@ impl TranslationSessionCache {
             .position(|entry| entry.current_text == current_text)
         {
             if let Some(old) = self.entries.remove(index) {
-                self.chars = self.chars.saturating_sub(old.translated.chars().count());
+                self.chars = self.chars.saturating_sub(old.char_cost);
             }
         }
         while self.entries.len() >= self.max_entries
-            || self.chars.saturating_add(entry_chars) > self.max_chars
+            || self.chars.saturating_add(char_cost) > self.max_chars
         {
             let Some(old) = self.entries.pop_front() else {
                 break;
             };
-            self.chars = self.chars.saturating_sub(old.translated.chars().count());
+            self.chars = self.chars.saturating_sub(old.char_cost);
         }
-        self.chars = self.chars.saturating_add(entry_chars);
+        self.chars = self.chars.saturating_add(char_cost);
         self.entries.push_back(CacheEntry {
             current_text,
             translated,
+            char_cost,
         });
     }
 
@@ -179,7 +187,7 @@ mod tests {
 
     #[test]
     fn cache_is_bounded_and_clears_without_serialization() {
-        let mut cache = TranslationSessionCache::new(2, 5);
+        let mut cache = TranslationSessionCache::new(2, 6);
         cache.insert("a".into(), "aa".into());
         cache.insert("b".into(), "bb".into());
         cache.insert("c".into(), "cc".into());
@@ -188,5 +196,19 @@ mod tests {
         assert_eq!(cache.get("c"), Some("cc"));
         cache.clear();
         assert!(cache.is_empty());
+    }
+
+    #[test]
+    fn cache_character_budget_counts_source_and_translation() {
+        let mut cache = TranslationSessionCache::new(8, 5);
+        cache.insert("source".into(), "x".into());
+        assert!(cache.is_empty());
+
+        cache.insert("ab".into(), "cde".into());
+        assert_eq!(cache.get("ab"), Some("cde"));
+
+        cache.insert("f".into(), "gh".into());
+        assert!(cache.get("ab").is_none());
+        assert_eq!(cache.get("f"), Some("gh"));
     }
 }

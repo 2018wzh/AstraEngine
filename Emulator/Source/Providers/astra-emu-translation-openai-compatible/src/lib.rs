@@ -19,6 +19,7 @@ mod model;
 mod prompt;
 #[cfg(not(target_os = "android"))]
 mod secret;
+mod service;
 mod transport;
 
 pub use cache::{TranslationSession, TranslationSessionCache};
@@ -30,6 +31,7 @@ pub use model::{
 pub use prompt::build_prompt;
 #[cfg(not(target_os = "android"))]
 pub use secret::PlatformSecretStore;
+pub use service::{AsyncTranslationService, TranslationPoll, TranslationServiceError};
 pub use transport::OpenAiCompatibleTranslationProvider;
 
 #[cfg(test)]

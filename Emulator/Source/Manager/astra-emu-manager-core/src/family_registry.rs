@@ -11,7 +11,7 @@ use crate::family::{
     FamilyCapability, FamilyPluginDescriptor, FamilyPluginRegistry, FamilyProbeReport,
     FamilyProbeSelection,
 };
-use crate::family_loader::{FamilyLoadError, LoadedFamilyPlugin};
+use crate::family_loader::{host_owned_error, FamilyLoadError, LoadedFamilyPlugin};
 
 /// Runtime registry used by Manager and CLI. Static and dynamic providers are
 /// registered through the same descriptor validation and probe-selection path.
@@ -40,10 +40,10 @@ impl FamilyProviderRegistry {
     {
         let descriptor = provider
             .descriptor()
-            .map_err(|_| FamilyLoadError::Descriptor)?;
+            .map_err(|error| FamilyLoadError::DescriptorError(host_owned_error(error)))?;
         descriptor
             .validate()
-            .map_err(|_| FamilyLoadError::Descriptor)?;
+            .map_err(|error| FamilyLoadError::DescriptorError(host_owned_error(error)))?;
         let manager = manager_descriptor(&descriptor)?;
         let plugin_id = manager.plugin_id.clone();
         if self.providers.contains_key(&plugin_id) {
@@ -79,12 +79,14 @@ impl FamilyProviderRegistry {
         preferred_plugin_id: Option<&str>,
         preferred_family_id: Option<&str>,
     ) -> Result<FamilyProbeSelection, FamilyLoadError> {
-        request.validate().map_err(|_| FamilyLoadError::Probe)?;
+        request
+            .validate()
+            .map_err(|error| FamilyLoadError::ProbeError(host_owned_error(error)))?;
         let mut reports = Vec::new();
         for (plugin_id, provider) in &self.providers {
             let Some(report) = provider
                 .probe(request.clone())
-                .map_err(|_| FamilyLoadError::Probe)?
+                .map_err(|error| FamilyLoadError::ProbeError(host_owned_error(error)))?
             else {
                 continue;
             };
@@ -98,7 +100,7 @@ impl FamilyProviderRegistry {
         }
         self.descriptors
             .select_probe(reports, preferred_plugin_id, preferred_family_id)
-            .map_err(|_| FamilyLoadError::Policy)
+            .map_err(|error| FamilyLoadError::PolicyError(error.to_string()))
     }
 
     pub fn open_selected(
@@ -113,14 +115,14 @@ impl FamilyProviderRegistry {
                 &candidate.report.plugin_id,
                 &candidate.report.game_id,
             )
-            .map_err(|_| FamilyLoadError::Policy)?;
+            .map_err(|error| FamilyLoadError::PolicyError(error.to_string()))?;
         let provider = self
             .providers
             .get_mut(&checked.report.plugin_id)
             .ok_or(FamilyLoadError::Provider)?;
         provider
             .open(request)
-            .map_err(|_| FamilyLoadError::Provider)
+            .map_err(|error| FamilyLoadError::ProviderError(host_owned_error(error)))
     }
 }
 

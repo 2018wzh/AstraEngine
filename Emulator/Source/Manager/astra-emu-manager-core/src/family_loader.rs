@@ -20,7 +20,7 @@ use abi_stable::{
 use astra_emu_family_api::{
     AdvanceRequest, AdvanceResponse, AstraFamilyModuleRef, FamilyDescriptor as AbiDescriptor,
     FamilyError, FamilyModuleBox, FamilyOpen, FamilyProvider, FamilyResult, FamilySession,
-    FrameConsumer, FrameConsumerBox, FrameInfo, FrameView, FrameVisitor, OpenRequest, OpenResponse,
+    FrameConsumer, FrameConsumerRef, FrameView, FrameVisitor, OpenRequest, OpenResponse,
     ProbeReport, ProbeRequest, SessionRequest,
 };
 use thiserror::Error;
@@ -40,14 +40,70 @@ pub enum FamilyLoadError {
     ModuleInitialization,
     #[error("ASTRA_EMU_FAMILY_LOAD_DESCRIPTOR")]
     Descriptor,
+    #[error("ASTRA_EMU_FAMILY_LOAD_DESCRIPTOR: {0}")]
+    DescriptorError(FamilyError),
     #[error("ASTRA_EMU_FAMILY_LOAD_DUPLICATE_PLUGIN")]
     DuplicatePlugin,
     #[error("ASTRA_EMU_FAMILY_LOAD_PROVIDER")]
     Provider,
+    #[error("ASTRA_EMU_FAMILY_LOAD_PROVIDER: {0}")]
+    ProviderError(FamilyError),
     #[error("ASTRA_EMU_FAMILY_LOAD_PROBE")]
     Probe,
+    #[error("ASTRA_EMU_FAMILY_LOAD_PROBE: {0}")]
+    ProbeError(FamilyError),
     #[error("ASTRA_EMU_FAMILY_LOAD_POLICY")]
     Policy,
+    #[error("ASTRA_EMU_FAMILY_LOAD_POLICY: {0}")]
+    PolicyError(String),
+}
+
+impl FamilyLoadError {
+    /// Stable code suitable for a Manager diagnostic or UI status line.
+    pub fn diagnostic_code(&self) -> &str {
+        match self {
+            Self::InvalidPath => "ASTRA_EMU_FAMILY_LOAD_PATH",
+            Self::Library => "ASTRA_EMU_FAMILY_LOAD_LIBRARY",
+            Self::AbiLayout => "ASTRA_EMU_FAMILY_LOAD_ABI",
+            Self::ModuleInitialization => "ASTRA_EMU_FAMILY_LOAD_MODULE",
+            Self::Descriptor => "ASTRA_EMU_FAMILY_LOAD_DESCRIPTOR",
+            Self::DescriptorError(error) => error.code(),
+            Self::DuplicatePlugin => "ASTRA_EMU_FAMILY_LOAD_DUPLICATE_PLUGIN",
+            Self::Provider => "ASTRA_EMU_FAMILY_LOAD_PROVIDER",
+            Self::ProviderError(error) => error.code(),
+            Self::Probe => "ASTRA_EMU_FAMILY_LOAD_PROBE",
+            Self::ProbeError(error) => error.code(),
+            Self::Policy => "ASTRA_EMU_FAMILY_LOAD_POLICY",
+            Self::PolicyError(message) => message
+                .split_once(':')
+                .map(|(code, _)| code)
+                .filter(|code| code.starts_with("ASTRA_"))
+                .unwrap_or("ASTRA_EMU_FAMILY_LOAD_POLICY"),
+        }
+    }
+
+    /// Bounded human text for the Manager UI. Raw foreign payloads and paths
+    /// are normalized before they enter a `FamilyLoadError`.
+    pub fn human_message(&self) -> &str {
+        match self {
+            Self::DescriptorError(error) | Self::ProviderError(error) | Self::ProbeError(error) => {
+                error.message.as_str()
+            }
+            Self::PolicyError(message) => message
+                .split_once(':')
+                .map(|(_, message)| message.trim())
+                .unwrap_or("family policy rejected the operation"),
+            Self::InvalidPath => "the selected family module path is invalid",
+            Self::Library => "the family module could not be loaded",
+            Self::AbiLayout => "the family module ABI does not match this host",
+            Self::ModuleInitialization => "the family module could not initialize",
+            Self::Descriptor => "the family module descriptor is invalid",
+            Self::DuplicatePlugin => "a family module with this plugin ID is already loaded",
+            Self::Provider => "the selected family provider is unavailable",
+            Self::Probe => "family probing failed",
+            Self::Policy => "family policy rejected the operation",
+        }
+    }
 }
 
 /// The only object that owns a raw library handle. Every ABI object created by
@@ -98,10 +154,10 @@ impl LoadedFamilyPlugin {
         let descriptor = module
             .descriptor()
             .into_result()
-            .map_err(|_| FamilyLoadError::Descriptor)?;
+            .map_err(|error| FamilyLoadError::DescriptorError(host_owned_error(error)))?;
         descriptor
             .validate()
-            .map_err(|_| FamilyLoadError::Descriptor)?;
+            .map_err(|error| FamilyLoadError::DescriptorError(host_owned_error(error)))?;
         let descriptor = host_owned_descriptor(descriptor);
         let manager_descriptor = manager_descriptor(&descriptor)?;
 
@@ -226,16 +282,15 @@ impl FamilySession for LoadedFamilySession {
     }
 
     fn visit_frame(&self, visitor: &mut dyn FrameVisitor) -> FamilyResult<()> {
-        let frames = Rc::new(std::cell::RefCell::new(Vec::new()));
-        let callback_error = Rc::new(std::cell::RefCell::new(None));
-        let bridge = FrameForwarder {
-            frames: Rc::clone(&frames),
-            callback_error: Rc::clone(&callback_error),
+        let mut bridge = FrameForwarder {
+            visitor,
+            frame_count: 0,
+            callback_error: None,
         };
-        // The ABI callback is erased as owned data, but it never carries the
-        // caller's borrowed visitor. It copies each synchronous frame into a
-        // host-owned buffer; the visitor runs only after the ABI call returns.
-        let consumer: FrameConsumerBox = FrameConsumerBox::from_value(bridge, TD_Opaque);
+        // `FrameConsumerRef` is tied to this stack borrow and can only be used
+        // for the synchronous `frame` call. No foreign frame bytes or callback
+        // object survive the call, so unloading remains guarded by `inner`.
+        let consumer: FrameConsumerRef<'_> = FrameConsumerRef::from_ptr(&mut bridge, TD_Opaque);
         let result = self
             .inner
             .module
@@ -247,15 +302,10 @@ impl FamilySession for LoadedFamilySession {
             )
             .into_result()
             .map_err(host_owned_error);
+        if let Some(error) = bridge.callback_error.take() {
+            return Err(host_owned_error(error));
+        }
         result?;
-        if let Some(error) = callback_error.borrow_mut().take() {
-            return Err(error);
-        }
-        let collected = frames.borrow_mut().drain(..).collect::<Vec<_>>();
-        for frame in collected {
-            let view = FrameView::from_slice(&frame.pixels, frame.info)?;
-            visitor.accept(view)?;
-        }
         Ok(())
     }
 
@@ -297,70 +347,80 @@ impl Drop for LoadedFamilySession {
     }
 }
 
-struct CollectedFrame {
-    info: FrameInfo,
-    pixels: Vec<u8>,
+struct FrameForwarder<'a> {
+    visitor: &'a mut dyn FrameVisitor,
+    frame_count: usize,
+    callback_error: Option<FamilyError>,
 }
 
-struct FrameForwarder {
-    frames: Rc<std::cell::RefCell<Vec<CollectedFrame>>>,
-    callback_error: Rc<std::cell::RefCell<Option<FamilyError>>>,
-}
-
-impl FrameConsumer for FrameForwarder {
+impl FrameConsumer for FrameForwarder<'_> {
     fn accept(&mut self, frame: FrameView<'_>) -> astra_emu_family_api::FfiFamilyResult<()> {
-        if !self.frames.borrow().is_empty() {
-            let error = FamilyError::invalid(
+        if self.frame_count != 0 {
+            return self.error(FamilyError::invalid(
                 "ASTRA_EMU_FAMILY_FRAME_COUNT",
                 "family emitted more than one frame",
-            );
-            *self.callback_error.borrow_mut() = Some(error.clone());
-            return astra_emu_family_api::FfiFamilyResult::RErr(error);
+            ));
         }
         let required = match frame.info.required_bytes() {
             Some(required) => required,
             None => {
-                let error = FamilyError::invalid(
+                return self.error(FamilyError::invalid(
                     "ASTRA_EMU_FAMILY_FRAME_SIZE",
                     "frame size does not fit host usize",
-                );
-                *self.callback_error.borrow_mut() = Some(error.clone());
-                return astra_emu_family_api::FfiFamilyResult::RErr(error);
+                ))
             }
         };
         if let Err(error) = frame.info.validate() {
-            *self.callback_error.borrow_mut() = Some(error.clone());
-            return astra_emu_family_api::FfiFamilyResult::RErr(error);
+            return self.error(error);
         }
         let pixels = frame.as_slice();
         if pixels.len() < required {
-            let error = FamilyError::invalid(
+            return self.error(FamilyError::invalid(
                 "ASTRA_EMU_FAMILY_FRAME_BYTES",
                 "frame pixels are shorter than stride times height",
-            );
-            *self.callback_error.borrow_mut() = Some(error.clone());
-            return astra_emu_family_api::FfiFamilyResult::RErr(error);
+            ));
         }
-        let mut owned = Vec::new();
-        if owned.try_reserve_exact(required).is_err() {
-            let error = FamilyError::invalid(
-                "ASTRA_EMU_FAMILY_FRAME_ALLOC",
-                "host could not reserve frame storage",
-            );
-            *self.callback_error.borrow_mut() = Some(error.clone());
-            return astra_emu_family_api::FfiFamilyResult::RErr(error);
+        self.frame_count = 1;
+        match self.visitor.accept(frame) {
+            Ok(()) => astra_emu_family_api::FfiFamilyResult::ROk(()),
+            Err(error) => self.error(error),
         }
-        owned.extend_from_slice(&pixels[..required]);
-        self.frames.borrow_mut().push(CollectedFrame {
-            info: frame.info,
-            pixels: owned,
-        });
-        astra_emu_family_api::FfiFamilyResult::ROk(())
     }
 }
 
-fn host_owned_error(error: FamilyError) -> FamilyError {
-    FamilyError::new(error.code().to_owned(), error.message.as_str().to_owned())
+impl FrameForwarder<'_> {
+    fn error(&mut self, error: FamilyError) -> astra_emu_family_api::FfiFamilyResult<()> {
+        if self.callback_error.is_none() {
+            self.callback_error = Some(error.clone());
+        }
+        astra_emu_family_api::FfiFamilyResult::RErr(error)
+    }
+}
+
+pub(crate) fn host_owned_error(error: FamilyError) -> FamilyError {
+    FamilyError::new(
+        error.code().to_owned(),
+        host_owned_message(error.message.as_str()),
+    )
+}
+
+fn host_owned_message(message: &str) -> String {
+    const MAX_MESSAGE_CHARS: usize = 512;
+    let message = message.lines().next().unwrap_or_default().trim();
+    if message.is_empty()
+        || message.starts_with('/')
+        || message.starts_with('\\')
+        || message.contains(":\\")
+        || message.contains(":/")
+        || message.contains("://")
+    {
+        return "family operation failed".into();
+    }
+    message
+        .chars()
+        .filter(|character| !character.is_control())
+        .take(MAX_MESSAGE_CHARS)
+        .collect()
 }
 
 fn host_owned_descriptor(descriptor: AbiDescriptor) -> AbiDescriptor {
@@ -398,5 +458,48 @@ fn host_owned_open_response(response: OpenResponse) -> OpenResponse {
         session_id: response.session_id.as_str().to_owned().into(),
         frame: response.frame,
         audio_format: response.audio_format,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use astra_emu_family_api::{FamilyResult, FrameAlpha, FrameFormat, FrameInfo};
+
+    struct CountingVisitor(usize);
+
+    impl FrameVisitor for CountingVisitor {
+        fn accept(&mut self, _frame: FrameView<'_>) -> FamilyResult<()> {
+            self.0 += 1;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn frame_forwarder_latches_errors_when_plugin_ignores_callback_failure() {
+        let info = FrameInfo {
+            width: 1,
+            height: 1,
+            stride: 4,
+            format: FrameFormat::Rgba8Srgb {
+                alpha: FrameAlpha::Opaque,
+            },
+        };
+        let mut visitor = CountingVisitor(0);
+        let mut bridge = FrameForwarder {
+            visitor: &mut visitor,
+            frame_count: 0,
+            callback_error: None,
+        };
+        let first = FrameView::from_slice(&[0, 0, 0, 255], info).unwrap();
+        assert!(bridge.accept(first).into_result().is_ok());
+        let second = FrameView::from_slice(&[0, 0, 0, 255], info).unwrap();
+        assert!(bridge.accept(second).into_result().is_err());
+        assert_eq!(
+            bridge.callback_error.as_ref().map(FamilyError::code),
+            Some("ASTRA_EMU_FAMILY_FRAME_COUNT")
+        );
+        drop(bridge);
+        assert_eq!(visitor.0, 1);
     }
 }
