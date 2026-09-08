@@ -867,14 +867,6 @@ name = "astra-emu-family-api"
 version = "0.1.0"
 dependencies = [
  "abi_stable",
- "astra-byte-source",
- "astra-core",
- "postcard",
- "proptest",
- "schemars",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
 ]
 
 [[package]]

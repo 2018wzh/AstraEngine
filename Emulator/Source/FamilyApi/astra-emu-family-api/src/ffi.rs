@@ -1,272 +1,172 @@
-use crate::{
-    FfiByteRange, FfiByteSourceStat, FfiFamilyPluginDescriptor, FfiOpenRequest, FfiProbeReport,
-    FfiProbeRequest, FfiRangeReadResult, FfiRuntimeHostCtx, FfiShutdownReport, FfiStepInput,
-    FfiStepOutput, FfiVfsListedFile, LegacyProviderError,
-};
-use abi_stable::{
-    library::RootModule,
-    sabi_types::VersionStrings,
-    std_types::{RResult, RString},
-    StableAbi,
-};
+#[path = "audio.rs"]
+mod audio;
+#[path = "descriptor.rs"]
+mod descriptor;
+#[path = "frame.rs"]
+mod frame;
+#[path = "input.rs"]
+mod input;
+#[path = "lifecycle.rs"]
+mod lifecycle;
+#[path = "text.rs"]
+mod text;
 
-/// The v9 wire contract makes surface, Hook, writable-file and bulk ownership explicit.
-/// v7/v8 modules are intentionally rejected by the loader; there is no shim.
-pub const LEGACY_FAMILY_ABI_FINGERPRINT: &str = "astra.emu.family_abi.v9";
+pub use audio::*;
+pub use descriptor::*;
+pub use frame::*;
+pub use input::*;
+pub use lifecycle::*;
+pub use text::*;
 
-#[repr(C)]
-#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
-pub struct FfiLegacyError {
-    pub code: RString,
-    pub message: RString,
-}
-
-impl From<LegacyProviderError> for FfiLegacyError {
-    fn from(value: LegacyProviderError) -> Self {
-        Self {
-            code: value.code().into(),
-            message: value.message().into(),
-        }
-    }
-}
-
-impl From<FfiLegacyError> for LegacyProviderError {
-    fn from(value: FfiLegacyError) -> Self {
-        Self::remote(value.code.to_string(), value.message.to_string())
-    }
-}
-
-pub type FfiLegacyResult<T> = RResult<T, FfiLegacyError>;
-
-pub fn ffi_result<T, U>(result: Result<T, LegacyProviderError>) -> FfiLegacyResult<U>
-where
-    T: Into<U>,
-{
-    match result {
-        Ok(value) => RResult::ROk(value.into()),
-        Err(error) => RResult::RErr(error.into()),
-    }
-}
-
-pub fn native_result<T, U>(result: FfiLegacyResult<T>) -> Result<U, LegacyProviderError>
-where
-    T: Into<U>,
-{
-    match result {
-        RResult::ROk(value) => Ok(value.into()),
-        RResult::RErr(error) => Err(error.into()),
-    }
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
-pub struct FfiProviderInstanceRequest {
-    pub instance_id: RString,
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
-pub struct FfiProbeCall {
-    pub instance_id: RString,
-    pub ctx: FfiRuntimeHostCtx,
-    pub request: FfiProbeRequest,
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
-pub struct FfiOpenCall {
-    pub instance_id: RString,
-    pub ctx: FfiRuntimeHostCtx,
-    pub request: FfiOpenRequest,
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, PartialEq, StableAbi)]
-pub struct FfiStepCall {
-    pub instance_id: RString,
-    pub ctx: FfiRuntimeHostCtx,
-    pub session_id: RString,
-    pub input: FfiStepInput,
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
-pub struct FfiSessionCall {
-    pub instance_id: RString,
-    pub ctx: FfiRuntimeHostCtx,
-    pub session_id: RString,
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
-pub struct FfiVfsStatCall {
-    pub mount_set_id: RString,
-    pub uri: RString,
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
-pub struct FfiVfsRangeCall {
-    pub mount_set_id: RString,
-    pub uri: RString,
-    pub expected_revision: u64,
-    pub range: FfiByteRange,
-    pub max_bytes: u64,
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
-pub struct FfiVfsEnumerateCall {
-    pub mount_set_id: RString,
-    pub root: RString,
-    pub extension_without_dot: RString,
-    pub max_entries: u32,
-}
-
-pub type FfiDescriptor = extern "C" fn() -> FfiLegacyResult<FfiFamilyPluginDescriptor>;
-pub type FfiCreateInstance =
-    extern "C" fn(FfiLegacyHostServices, FfiProviderInstanceRequest) -> FfiLegacyResult<()>;
-pub type FfiDestroyInstance = extern "C" fn(FfiProviderInstanceRequest) -> FfiLegacyResult<()>;
-pub type FfiProbe = extern "C" fn(FfiProbeCall) -> FfiLegacyResult<FfiProbeReport>;
-pub type FfiOpen = extern "C" fn(FfiOpenCall) -> FfiLegacyResult<RString>;
-pub type FfiStep = extern "C" fn(FfiStepCall) -> FfiLegacyResult<FfiStepOutput>;
-pub type FfiShutdown = extern "C" fn(FfiSessionCall) -> FfiLegacyResult<FfiShutdownReport>;
-
-pub type FfiVfsStat = extern "C" fn(RString, FfiVfsStatCall) -> FfiLegacyResult<FfiByteSourceStat>;
-pub type FfiVfsReadRange =
-    extern "C" fn(RString, FfiVfsRangeCall) -> FfiLegacyResult<FfiRangeReadResult>;
-pub type FfiVfsEnumerate =
-    extern "C" fn(
-        RString,
-        FfiVfsEnumerateCall,
-    ) -> FfiLegacyResult<abi_stable::std_types::RVec<FfiVfsListedFile>>;
-
-#[repr(C)]
-#[derive(Clone, StableAbi)]
-pub struct FfiLegacyHostServices {
-    pub host_token: RString,
-    #[sabi(unsafe_opaque_field)]
-    pub stat_vfs: FfiVfsStat,
-    #[sabi(unsafe_opaque_field)]
-    pub read_vfs_range: FfiVfsReadRange,
-    #[sabi(unsafe_opaque_field)]
-    pub enumerate_vfs: FfiVfsEnumerate,
-    #[sabi(unsafe_opaque_field)]
-    pub acquire_surface: crate::FfiAcquireSurfaceV9,
-    #[sabi(unsafe_opaque_field)]
-    pub commit_surface: crate::FfiCommitSurfaceV9,
-    #[sabi(unsafe_opaque_field)]
-    pub invoke_hook: crate::FfiInvokeHookV1,
-    #[sabi(unsafe_opaque_field)]
-    pub writable_file: crate::FfiWritableFileV1,
-}
-
-impl core::fmt::Debug for FfiLegacyHostServices {
-    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        formatter
-            .debug_struct("FfiLegacyHostServices")
-            .field("host_token", &"redacted")
-            .finish()
-    }
-}
-
-#[repr(C)]
-#[derive(StableAbi)]
-#[sabi(kind(Prefix(
-    prefix_ref = AstraLegacyFamilyModuleRef,
-    prefix_fields = AstraLegacyFamilyModulePrefix
-)))]
-#[sabi(missing_field(panic))]
-pub struct AstraLegacyFamilyModule {
-    #[sabi(unsafe_opaque_field)]
-    pub descriptor: FfiDescriptor,
-    #[sabi(unsafe_opaque_field)]
-    pub create_instance: FfiCreateInstance,
-    #[sabi(unsafe_opaque_field)]
-    pub destroy_instance: FfiDestroyInstance,
-    #[sabi(unsafe_opaque_field)]
-    pub probe: FfiProbe,
-    #[sabi(unsafe_opaque_field)]
-    pub open: FfiOpen,
-    #[sabi(unsafe_opaque_field)]
-    pub step: FfiStep,
-    #[sabi(unsafe_opaque_field)]
-    #[sabi(last_prefix_field)]
-    #[sabi(unsafe_opaque_field)]
-    pub shutdown: FfiShutdown,
-}
-
-impl RootModule for AstraLegacyFamilyModuleRef {
-    abi_stable::declare_root_module_statics! {AstraLegacyFamilyModuleRef}
-
-    const BASE_NAME: &'static str = "astra_legacy_family_module";
-    const NAME: &'static str = "astra-legacy-family";
-    const VERSION_STRINGS: VersionStrings = abi_stable::package_version_strings!();
-}
+pub(crate) use lifecycle::{validate_dimensions, validate_window_size};
 
 #[cfg(test)]
 mod tests {
+    use abi_stable::std_types::{RNone, ROption, RSome, RVec};
+
     use super::*;
-    use crate::{FamilyId, FfiOwnedBytes, LegacyFamilyPluginDescriptor};
+    use crate::{FAMILY_ABI_FINGERPRINT, FAMILY_API_SCHEMA};
 
-    #[test]
-    fn v9_descriptor_round_trips_through_typed_wire() {
-        let descriptor = LegacyFamilyPluginDescriptor {
-            family_id: FamilyId("fvp".into()),
+    fn descriptor(capabilities: Vec<FamilyCapability>) -> FamilyDescriptor {
+        FamilyDescriptor {
+            family_id: "fvp".into(),
             plugin_id: "astra.emu.fvp".into(),
-            provider_id: "astra.emu.fvp.runtime".into(),
-            core_kind: crate::LegacyFamilyCoreKind::Ported,
-            presentation_mode: crate::LegacyFamilyPresentationMode::SingleLayer,
-            engine_version: "0.1.0".into(),
-            rustc_fingerprint: "rustc.stable".into(),
-            feature_fingerprint: "fvp.test".into(),
-            abi_fingerprint: LEGACY_FAMILY_ABI_FINGERPRINT.into(),
-            supported_formats: vec!["fvp.hcb".into()],
-            permissions: vec!["vfs.read".into()],
-            report_redaction: "astra.emu.redaction.v1".into(),
-            license: "MPL-2.0".into(),
-        };
-        let decoded: LegacyFamilyPluginDescriptor =
-            FfiFamilyPluginDescriptor::from(descriptor.clone()).into();
-        assert_eq!(decoded, descriptor);
-    }
-
-    #[test]
-    fn v9_error_preserves_code_without_serialization() {
-        let ffi = FfiLegacyError::from(LegacyProviderError::invalid("TEST_CODE", "message"));
-        let error = LegacyProviderError::from(ffi);
-        assert_eq!(error.code(), "TEST_CODE");
-        assert_eq!(error.message(), "message");
-    }
-
-    #[test]
-    fn v7_and_v8_descriptors_are_rejected_without_a_shim() {
-        for fingerprint in ["astra.emu.family_abi.v7", "astra.emu.family_abi.v8"] {
-            let descriptor = LegacyFamilyPluginDescriptor {
-                family_id: FamilyId("fvp".into()),
-                plugin_id: "astra.emu.fvp".into(),
-                provider_id: "astra.emu.fvp.runtime".into(),
-                core_kind: crate::LegacyFamilyCoreKind::Ported,
-                presentation_mode: crate::LegacyFamilyPresentationMode::SingleLayer,
-                engine_version: "0.1.0".into(),
-                rustc_fingerprint: "rustc.stable".into(),
-                feature_fingerprint: "fvp.test".into(),
-                abi_fingerprint: fingerprint.into(),
-                supported_formats: vec!["fvp.hcb".into()],
-                permissions: vec!["vfs.read".into()],
-                report_redaction: "astra.emu.redaction.v1".into(),
-                license: "MPL-2.0".into(),
-            };
-            let error = descriptor.validate().unwrap_err();
-            assert_eq!(error.code(), "ASTRA_EMU_FAMILY_ABI_FINGERPRINT");
+            abi_fingerprint: FAMILY_ABI_FINGERPRINT.into(),
+            version: "0.1.0".into(),
+            capabilities: capabilities.into(),
+            supported_formats: vec!["fvp.hcb".into()].into(),
         }
     }
 
     #[test]
-    fn owned_resource_bytes_cross_ffi_without_reallocation() {
-        let bytes = vec![1_u8, 2, 3, 4, 5];
-        let allocation = bytes.as_ptr();
-        let bytes = FfiOwnedBytes::new(bytes).into_bytes();
-        assert_eq!(bytes.as_ptr(), allocation);
+    fn descriptor_requires_cpu_frame_and_rejects_duplicates() {
+        assert_eq!(
+            descriptor(vec![]).validate().unwrap_err().code(),
+            "ASTRA_EMU_FAMILY_CAPABILITIES"
+        );
+        assert_eq!(
+            descriptor(vec![FamilyCapability::CpuFrame, FamilyCapability::CpuFrame])
+                .validate()
+                .unwrap_err()
+                .code(),
+            "ASTRA_EMU_FAMILY_DUPLICATE_CAPABILITY"
+        );
+        descriptor(vec![FamilyCapability::CpuFrame])
+            .validate()
+            .unwrap();
+    }
+
+    #[test]
+    fn probe_no_match_is_a_normal_result_and_game_id_accepts_unicode() {
+        let no_match: ROption<ProbeReport> = RNone;
+        assert!(no_match.is_none());
+        ProbeReport {
+            family_id: "fvp".into(),
+            game_id: "樱花萌放".into(),
+            format: "fvp.hcb".into(),
+            confidence_permyriad: 10_000,
+        }
+        .validate()
+        .unwrap();
+    }
+
+    #[test]
+    fn frame_view_is_synchronous_and_checks_actual_bytes() {
+        let info = FrameInfo {
+            width: 2,
+            height: 2,
+            stride: 8,
+            format: FrameFormat::Rgba8Srgb {
+                alpha: FrameAlpha::Opaque,
+            },
+        };
+        assert_eq!(info.required_bytes(), Some(16));
+        assert_eq!(
+            FrameView::from_slice(&[0_u8; 15], info).unwrap_err().code(),
+            "ASTRA_EMU_FAMILY_FRAME_BYTES"
+        );
+        let view = FrameView::from_slice(&[1_u8; 16], info).unwrap();
+        assert_eq!(view.as_slice().len(), 16);
+    }
+
+    #[test]
+    fn pcm_validation_rejects_non_finite_float_and_bad_alignment() {
+        let format = PcmFormatSpec {
+            sample_rate: 48_000,
+            channels: 2,
+            format: PcmFormat::F32,
+        };
+        assert_eq!(
+            PcmChunk::F32(vec![f32::NAN, 0.0].into())
+                .validate(format)
+                .unwrap_err()
+                .code(),
+            "ASTRA_EMU_FAMILY_PCM_VALUE"
+        );
+        assert_eq!(
+            PcmChunk::F32(vec![0.0].into())
+                .validate(format)
+                .unwrap_err()
+                .code(),
+            "ASTRA_EMU_FAMILY_PCM_ALIGNMENT"
+        );
+    }
+
+    #[test]
+    fn open_audio_declaration_requires_explicit_format() {
+        let response = OpenResponse {
+            session_id: "session".into(),
+            frame: FrameInfo {
+                width: 1,
+                height: 1,
+                stride: 4,
+                format: FrameFormat::Rgba8Srgb {
+                    alpha: FrameAlpha::Opaque,
+                },
+            },
+            audio_format: RNone,
+        };
+        assert_eq!(
+            response
+                .validate_for_descriptor(&descriptor(vec![
+                    FamilyCapability::CpuFrame,
+                    FamilyCapability::PcmAudio
+                ]))
+                .unwrap_err()
+                .code(),
+            "ASTRA_EMU_FAMILY_AUDIO_DECLARATION"
+        );
+        let configured = OpenResponse {
+            audio_format: RSome(PcmFormatSpec {
+                sample_rate: 48_000,
+                channels: 2,
+                format: PcmFormat::I16,
+            }),
+            ..response
+        };
+        assert_eq!(
+            configured
+                .validate_for_descriptor(&descriptor(vec![FamilyCapability::CpuFrame]))
+                .unwrap_err()
+                .code(),
+            "ASTRA_EMU_FAMILY_AUDIO_DECLARATION"
+        );
+    }
+
+    #[test]
+    fn elapsed_zero_is_valid_and_text_poll_is_typed() {
+        AdvanceRequest {
+            session_id: "session".into(),
+            elapsed_ns: 0,
+            events: RVec::new(),
+        }
+        .validate()
+        .unwrap();
+        assert!(matches!(TextPollResult::Pending, TextPollResult::Pending));
+        assert!(matches!(
+            TextPollResult::Cancelled,
+            TextPollResult::Cancelled
+        ));
+        assert_eq!(FAMILY_API_SCHEMA, "astra.emu.independent_family_api.v1");
     }
 }

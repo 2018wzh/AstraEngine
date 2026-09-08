@@ -1,20 +1,16 @@
-//! Stable, renderer-neutral contract between AstraEMU and legacy family providers.
+//! Stable ABI for an AstraEMU family running its own complete game runtime.
+//!
+//! The API deliberately contains no VFS, package, RuntimeWorld, renderer
+//! backend, device handle, or product save type. A family receives a game
+//! directory, consumes ordered input/window events, owns execution and
+//! native persistence, and exposes one borrowed CPU frame plus an optional
+//! fixed-format audio sink.
 
 mod ffi;
-mod ffi_host;
-mod ffi_wire;
-mod input_key;
-mod provider;
-mod scheduler;
-mod v9;
 
 pub use ffi::*;
-pub use ffi_host::*;
-pub use ffi_wire::*;
-pub use input_key::*;
-pub use provider::*;
-pub use scheduler::*;
-pub use v9::*;
 
-pub const LEGACY_FAMILY_API_SCHEMA: &str = "astra.emu.family_api.v9";
-pub const LEGACY_EFFECT_SCHEMA: &str = "astra.emu.legacy_effect.v2";
+/// Machine-readable schema name for this independent host contract.
+pub const FAMILY_API_SCHEMA: &str = "astra.emu.independent_family_api.v1";
+/// ABI identity is intentionally distinct from every historical family ABI.
+pub const FAMILY_ABI_FINGERPRINT: &str = "astra.emu.independent_family_abi.v1";

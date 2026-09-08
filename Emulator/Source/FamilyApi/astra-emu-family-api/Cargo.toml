@@ -13,13 +13,3 @@ path = "src/bin/schema.rs"
 
 [dependencies]
 abi_stable.workspace = true
-astra-core = { path = "../../../../Engine/Source/Runtime/astra-core" }
-astra-byte-source = { path = "../../../../Engine/Source/Runtime/astra-byte-source", features = ["ffi"] }
-postcard.workspace = true
-schemars.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-thiserror.workspace = true
-
-[dev-dependencies]
-proptest.workspace = true
