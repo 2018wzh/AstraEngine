@@ -126,9 +126,36 @@ impl<R: SecretResolver + ?Sized> TranslationSession<R> {
         &self,
         request: &TranslationRequest,
     ) -> Result<TranslationResult, TranslationError> {
-        request.validate()?;
-        let generation = {
+        let expected_generation = {
             let state = self.state.lock().expect("translation cache mutex poisoned");
+            state.generation
+        };
+        self.translate_at_generation(request, expected_generation)
+            .await
+    }
+
+    pub(crate) fn generation(&self) -> u64 {
+        self.state
+            .lock()
+            .expect("translation cache mutex poisoned")
+            .generation
+    }
+
+    /// Translate only when the caller still owns the captured session
+    /// generation. The generation is checked before reading the cache and
+    /// again before publishing a provider result so a request that starts
+    /// after a reset cannot read or populate the new game's cache.
+    pub(crate) async fn translate_at_generation(
+        &self,
+        request: &TranslationRequest,
+        expected_generation: u64,
+    ) -> Result<TranslationResult, TranslationError> {
+        request.validate()?;
+        {
+            let state = self.state.lock().expect("translation cache mutex poisoned");
+            if state.generation != expected_generation {
+                return Err(TranslationError::SessionReset);
+            }
             if let Some(translated) = state.cache.get(&request.current.text) {
                 return Ok(TranslationResult {
                     translated: translated.to_owned(),
@@ -138,11 +165,10 @@ impl<R: SecretResolver + ?Sized> TranslationSession<R> {
                     cache_hit: true,
                 });
             }
-            state.generation
-        };
+        }
         let result = self.provider.translate(request).await?;
         let mut state = self.state.lock().expect("translation cache mutex poisoned");
-        if state.generation != generation {
+        if state.generation != expected_generation {
             return Err(TranslationError::SessionReset);
         }
         state

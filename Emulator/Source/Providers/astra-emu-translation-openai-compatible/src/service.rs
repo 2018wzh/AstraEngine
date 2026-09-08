@@ -54,9 +54,9 @@ struct ServiceState {
 /// Host-side asynchronous translation service for one live game session.
 ///
 /// It owns the bounded source context and the non-persistent translation
-/// cache. Every spawned request captures the service generation; a reset or
-/// configuration change marks all older requests cancelled and prevents a
-/// late response from being published into the new session.
+/// cache. Every spawned request captures the service and cache generations; a
+/// reset or configuration change discards older requests and prevents a late
+/// response from being published into the new session.
 pub struct AsyncTranslationService<R: ?Sized> {
     session: Arc<TranslationSession<R>>,
     handle: tokio::runtime::Handle,
@@ -65,11 +65,12 @@ pub struct AsyncTranslationService<R: ?Sized> {
 
 impl<R: crate::SecretResolver + ?Sized + 'static> AsyncTranslationService<R> {
     pub fn new(session: Arc<TranslationSession<R>>, handle: tokio::runtime::Handle) -> Self {
+        let generation = session.generation();
         Self {
             session,
             handle,
             state: Arc::new(Mutex::new(ServiceState {
-                generation: 0,
+                generation,
                 requests: HashMap::new(),
                 context: VecDeque::new(),
                 context_chars: 0,
@@ -104,11 +105,12 @@ impl<R: crate::SecretResolver + ?Sized + 'static> AsyncTranslationService<R> {
             .validate()
             .map_err(TranslationServiceError::InvalidRequest)?;
         append_context(&mut state, current);
-        let generation = state.generation;
+        let service_generation = state.generation;
+        let cache_generation = self.session.generation();
         state.requests.insert(
             request_id.clone(),
             RequestEntry {
-                generation,
+                generation: service_generation,
                 state: TranslationPoll::Pending,
                 abort: None,
             },
@@ -119,12 +121,16 @@ impl<R: crate::SecretResolver + ?Sized + 'static> AsyncTranslationService<R> {
         let shared = Arc::clone(&self.state);
         let task_id = request_id.clone();
         let abort = self.handle.spawn(async move {
-            let result = session.translate(&request).await;
+            let result = session
+                .translate_at_generation(&request, cache_generation)
+                .await;
             let mut state = shared.lock().expect("translation service mutex poisoned");
             let Some(entry) = state.requests.get_mut(&task_id) else {
                 return;
             };
-            if entry.generation != generation || !matches!(entry.state, TranslationPoll::Pending) {
+            if entry.generation != service_generation
+                || !matches!(entry.state, TranslationPoll::Pending)
+            {
                 return;
             }
             entry.state = match result {
@@ -139,7 +145,9 @@ impl<R: crate::SecretResolver + ?Sized + 'static> AsyncTranslationService<R> {
             .lock()
             .expect("translation service mutex poisoned");
         if let Some(entry) = state.requests.get_mut(&request_id) {
-            if entry.generation == generation && matches!(entry.state, TranslationPoll::Pending) {
+            if entry.generation == service_generation
+                && matches!(entry.state, TranslationPoll::Pending)
+            {
                 entry.abort = Some(abort_handle);
                 return Ok(());
             }
@@ -169,7 +177,7 @@ impl<R: crate::SecretResolver + ?Sized + 'static> AsyncTranslationService<R> {
     }
 
     /// Cancel a request. A cancelled request remains pollable until its
-    /// terminal state is consumed, which makes reset and shutdown observable.
+    /// terminal state is consumed.
     pub fn cancel(&self, request_id: &str) -> Result<(), TranslationServiceError> {
         validate_request_id(request_id)?;
         let mut state = self
@@ -188,8 +196,10 @@ impl<R: crate::SecretResolver + ?Sized + 'static> AsyncTranslationService<R> {
         Ok(())
     }
 
-    /// Invalidate all in-flight requests and clear both source context and
-    /// translated results for the current game session.
+    /// Invalidate all requests and clear both source context and translated
+    /// results for the current game session. Request IDs from the previous
+    /// session are discarded rather than retained as pollable terminal
+    /// entries, so they cannot return stale text or consume new capacity.
     pub fn reset(&self) {
         let mut state = self
             .state
@@ -203,10 +213,8 @@ impl<R: crate::SecretResolver + ?Sized + 'static> AsyncTranslationService<R> {
             if let Some(abort) = entry.abort.take() {
                 abort.abort();
             }
-            if matches!(entry.state, TranslationPoll::Pending) {
-                entry.state = TranslationPoll::Cancelled;
-            }
         }
+        state.requests.clear();
         state.context.clear();
         state.context_chars = 0;
         self.session.clear();
@@ -298,11 +306,66 @@ mod tests {
     }
 
     #[test]
-    fn reset_marks_pending_requests_cancelled_and_clears_cache() {
+    fn reset_discards_old_results_and_releases_capacity() {
         let (_runtime, service) = service();
-        service.submit("one", TranslationSegment::new("x")).unwrap();
+        {
+            let mut state = service
+                .state
+                .lock()
+                .expect("translation service mutex poisoned");
+            let generation = state.generation;
+            state.requests.insert(
+                "ready".into(),
+                RequestEntry {
+                    generation,
+                    state: TranslationPoll::Ready(TranslationResult {
+                        translated: "old text".into(),
+                        provider_identity: "test".into(),
+                        latency_ms: 0,
+                        sent_segment_count: 1,
+                        cache_hit: false,
+                    }),
+                    abort: None,
+                },
+            );
+        }
         service.reset();
-        assert_eq!(service.poll("one").unwrap(), TranslationPoll::Cancelled);
+        assert_eq!(
+            service.poll("ready"),
+            Err(TranslationServiceError::UnknownRequest)
+        );
+        assert_eq!(service.cache_len(), 0);
+
+        for index in 0..32 {
+            service
+                .submit(format!("request-{index}"), TranslationSegment::new("x"))
+                .unwrap();
+            service.reset();
+        }
+        assert!(service
+            .state
+            .lock()
+            .expect("translation service mutex poisoned")
+            .requests
+            .is_empty());
+    }
+
+    #[test]
+    fn reset_generation_blocks_request_started_after_reset_from_populating_cache() {
+        let (runtime, service) = service();
+        let expected_generation = service.session.generation();
+        service.reset();
+        let session = Arc::clone(&service.session);
+        let request = TranslationRequest::plain("old text", []);
+        let result = runtime.block_on(async move {
+            // Model a task that was submitted before reset but does not begin
+            // its first poll until the new session is already active.
+            tokio::task::yield_now().await;
+            session
+                .translate_at_generation(&request, expected_generation)
+                .await
+        });
+        assert_eq!(result, Err(TranslationError::SessionReset));
         assert_eq!(service.cache_len(), 0);
     }
 }
