@@ -14,7 +14,7 @@ use super::{
         validate_game_path, validate_symbol, FamilyDescriptor, FamilyError, FamilyResult,
         FfiFamilyResult, ProbeReport, ProbeRequest,
     },
-    frame::{FrameConsumerBox, FrameInfo, FrameVisitor},
+    frame::{FrameConsumerRef, FrameInfo, FrameVisitor},
     input::{validate_events, FamilyEvent, WindowState},
     text::TextReplacementServiceBox,
 };
@@ -153,7 +153,8 @@ pub trait FamilyModule {
     fn probe(&self, request: ProbeRequest) -> FfiFamilyResult<ROption<ProbeReport>>;
     fn open(&self, request: OpenRequest) -> FfiFamilyResult<OpenResponse>;
     fn advance(&self, request: AdvanceRequest) -> FfiFamilyResult<AdvanceResponse>;
-    fn frame(&self, request: SessionRequest, consumer: FrameConsumerBox) -> FfiFamilyResult<()>;
+    fn frame(&self, request: SessionRequest, consumer: FrameConsumerRef<'_>)
+        -> FfiFamilyResult<()>;
     fn close(&self, request: SessionRequest) -> FfiFamilyResult<()>;
 }
 

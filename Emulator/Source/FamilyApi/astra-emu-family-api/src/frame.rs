@@ -1,10 +1,6 @@
 #![allow(non_local_definitions)]
 
-use abi_stable::{
-    sabi_trait,
-    std_types::{RBox, RSlice},
-    StableAbi,
-};
+use abi_stable::{sabi_trait, std_types::RSlice, RMut, StableAbi};
 
 use super::{
     descriptor::{FamilyError, FamilyResult, FfiFamilyResult},
@@ -97,7 +93,12 @@ pub trait FrameConsumer {
     fn accept(&mut self, frame: FrameView<'_>) -> FfiFamilyResult<()>;
 }
 
-pub type FrameConsumerBox = FrameConsumer_TO<'static, RBox<()>>;
+/// A frame consumer borrowed for one `FamilyModule::frame` call.
+///
+/// `RMut` keeps the visitor's borrow in the generated ABI object. The family
+/// can invoke it synchronously, but cannot retain the callback after the
+/// borrowed lifetime ends.
+pub type FrameConsumerRef<'a> = FrameConsumer_TO<'a, RMut<'a, ()>>;
 
 pub trait FrameVisitor {
     fn accept(&mut self, frame: FrameView<'_>) -> FamilyResult<()>;

@@ -22,7 +22,10 @@ pub(crate) use lifecycle::{validate_dimensions, validate_window_size};
 
 #[cfg(test)]
 mod tests {
-    use abi_stable::std_types::{RNone, ROption, RSome, RVec};
+    use abi_stable::{
+        std_types::{RNone, ROption, RSome, RVec},
+        type_level::downcasting::TD_Opaque,
+    };
 
     use super::*;
     use crate::{FAMILY_ABI_FINGERPRINT, FAMILY_API_SCHEMA};
@@ -87,6 +90,59 @@ mod tests {
         );
         let view = FrameView::from_slice(&[1_u8; 16], info).unwrap();
         assert_eq!(view.as_slice().len(), 16);
+    }
+
+    struct RecordingFrameConsumer {
+        last_frame_bytes: usize,
+    }
+
+    impl FrameConsumer for RecordingFrameConsumer {
+        fn accept(&mut self, frame: FrameView<'_>) -> FfiFamilyResult<()> {
+            self.last_frame_bytes = frame.as_slice().len();
+            Ok(()).into()
+        }
+    }
+
+    fn borrow_frame_consumer<'a>(consumer: &'a mut RecordingFrameConsumer) -> FrameConsumerRef<'a> {
+        FrameConsumer_TO::from_ptr(consumer, TD_Opaque)
+    }
+
+    fn invoke_borrowed_frame_consumer<'a>(
+        consumer: FrameConsumerRef<'a>,
+        frame: FrameView<'_>,
+    ) -> FfiFamilyResult<()> {
+        let mut consumer = consumer;
+        consumer.accept(frame)
+    }
+
+    #[test]
+    fn borrowed_frame_consumer_ends_with_its_scope() {
+        let info = FrameInfo {
+            width: 1,
+            height: 1,
+            stride: 4,
+            format: FrameFormat::Rgba8Srgb {
+                alpha: FrameAlpha::Opaque,
+            },
+        };
+        let pixels = [1_u8, 2, 3, 4];
+        let mut recording = RecordingFrameConsumer {
+            last_frame_bytes: 0,
+        };
+
+        {
+            let consumer = borrow_frame_consumer(&mut recording);
+            invoke_borrowed_frame_consumer(
+                consumer,
+                FrameView::from_slice(&pixels, info).expect("frame dimensions are valid"),
+            )
+            .expect("borrowed consumer accepts the synchronous frame");
+        }
+
+        // The mutable borrow is released when the callback object leaves this
+        // scope, so the visitor can be used again immediately.
+        recording.last_frame_bytes = recording.last_frame_bytes.saturating_add(1);
+        assert_eq!(recording.last_frame_bytes, 5);
     }
 
     #[test]
