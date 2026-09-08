@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, sync::Arc};
+use std::sync::Arc;
 
 use astra_emu_translation_openai_compatible::{
     OpenAiCompatibleTranslationProvider, SecretResolver, TranslationEndpointKind, TranslationError,
@@ -24,8 +24,6 @@ async fn ecnu_responses_live_does_not_expose_credentials() {
             protocol: TranslationProtocol::Responses,
             model: "ecnu-plus".into(),
             target_language: "zh-CN".into(),
-            context_sentences: 2,
-            body_limit_bytes: 16 * 1024,
             timeout_ms: 60_000,
             secret_reference: "ECNU_API_KEY".into(),
         },
@@ -33,12 +31,10 @@ async fn ecnu_responses_live_does_not_expose_credentials() {
     )
     .unwrap();
     let result = provider
-        .translate(&TranslationRequest {
-            current: "The sky is blue.".into(),
-            recent: VecDeque::from(["A calm morning.".into()]),
-            background: None,
-            glossary: vec![],
-        })
+        .translate(&TranslationRequest::plain(
+            "The sky is blue.",
+            ["A calm morning.".to_owned()],
+        ))
         .await
         .unwrap();
     assert!(!result.translated.trim().is_empty());

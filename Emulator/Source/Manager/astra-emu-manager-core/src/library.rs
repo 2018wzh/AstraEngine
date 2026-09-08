@@ -1,161 +1,211 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    path::Path,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-};
+//! Durable Manager data for games, play records, metadata, and settings.
+//!
+//! This database is deliberately independent from a running Family. Opening
+//! a database with an old or unknown schema explicitly rebuilds the Manager
+//! tables; native game save files live below the game location and are never
+//! touched by this code.
 
-use astra_core::Hash256;
-use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
+use std::{path::Path, time::Duration};
+
+use astra_emu_translation_openai_compatible::TranslationProfile;
+use rusqlite::{params, Connection, OptionalExtension};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::input_mapping::InputMapping;
-use crate::work_settings::WorkSettings;
+use crate::{
+    family::{FamilyCapability, FamilyPluginDescriptor},
+    input_mapping::InputMapping,
+    work_settings::GameSettings,
+};
 
-const SCHEMA_VERSION: i64 = 11;
+const SCHEMA_VERSION: i64 = 1;
+const MAX_TITLE_CHARS: usize = 1_024;
+const MAX_LOCATION_BYTES: usize = 4_096;
+const MAX_METADATA_BYTES: usize = 1_048_576;
 
-#[derive(Debug, Clone, Default)]
-pub struct CancellationToken(Arc<AtomicBool>);
+const REQUIRED_TABLES: [&str; 8] = [
+    "library_game",
+    "external_identity",
+    "metadata_snapshot",
+    "play_session",
+    "manager_settings",
+    "game_settings",
+    "translation_profile",
+    "plugin_installation",
+];
 
-impl CancellationToken {
-    pub fn cancel(&self) {
-        self.0.store(true, Ordering::Release);
-    }
-
-    pub fn is_cancelled(&self) -> bool {
-        self.0.load(Ordering::Acquire)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct SourceGrant {
-    pub source_id: String,
-    pub alias: String,
-    pub platform_token: String,
-    pub token_kind: String,
-    pub active: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ScanCandidate {
-    pub source_id: String,
-    pub relative_path: String,
-    pub case_identity: String,
-    pub content_hash: String,
-    pub modified_ns: i64,
-    pub byte_size: i64,
-    pub title: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct CaseRecord {
-    pub case_identity: String,
-    pub source_id: String,
-    pub relative_path: String,
-    pub content_hash: String,
-    pub modified_ns: i64,
-    pub byte_size: i64,
-    pub title: String,
-    pub family_override: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ScanReport {
-    pub inserted: usize,
-    pub updated: usize,
-    pub unchanged: usize,
-    pub removed: usize,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct TranslationConsent {
-    pub provider_identity: String,
-    pub endpoint: String,
-    pub model: String,
-    pub granted_at_unix_ms: i64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct TranslationProfileRecord {
-    pub profile_id: String,
-    pub endpoint_kind: String,
-    pub endpoint: String,
-    pub protocol: String,
-    pub model: String,
-    pub target_language: String,
-    pub context_sentences: u8,
-    pub body_limit_bytes: u32,
-    pub timeout_ms: u64,
-    pub secret_reference: String,
-    pub background: Option<String>,
-    pub glossary: Vec<(String, String)>,
-}
-
-type TranslationProfileRow = (
-    String,
-    String,
-    String,
-    String,
-    String,
-    String,
-    u8,
-    u32,
-    i64,
-    String,
-    Option<String>,
-    String,
+const SCHEMA_SQL: &str = r#"
+CREATE TABLE library_game (
+    game_id TEXT PRIMARY KEY NOT NULL,
+    title TEXT NOT NULL,
+    user_title TEXT,
+    location TEXT NOT NULL UNIQUE,
+    family_id TEXT,
+    content_fingerprint TEXT,
+    added_at_unix_ms INTEGER NOT NULL
 );
+CREATE INDEX library_game_title ON library_game(title, game_id);
+CREATE TABLE external_identity (
+    game_id TEXT NOT NULL REFERENCES library_game(game_id) ON DELETE CASCADE,
+    provider TEXT NOT NULL,
+    remote_id TEXT NOT NULL,
+    provenance TEXT NOT NULL,
+    linked_at_unix_ms INTEGER NOT NULL,
+    PRIMARY KEY(game_id, provider),
+    UNIQUE(provider, remote_id)
+);
+CREATE TABLE metadata_snapshot (
+    game_id TEXT NOT NULL REFERENCES library_game(game_id) ON DELETE CASCADE,
+    provider TEXT NOT NULL,
+    remote_id TEXT NOT NULL,
+    metadata_json TEXT NOT NULL,
+    fetched_at_unix_ms INTEGER NOT NULL,
+    state TEXT NOT NULL,
+    PRIMARY KEY(game_id, provider)
+);
+CREATE TABLE play_session (
+    session_id TEXT PRIMARY KEY NOT NULL,
+    game_id TEXT NOT NULL REFERENCES library_game(game_id) ON DELETE CASCADE,
+    start_unix_ms INTEGER NOT NULL,
+    end_unix_ms INTEGER,
+    duration_ms INTEGER NOT NULL DEFAULT 0 CHECK(duration_ms >= 0),
+    ended_by TEXT NOT NULL DEFAULT 'active'
+);
+CREATE INDEX play_session_game_start ON play_session(game_id, start_unix_ms);
+CREATE UNIQUE INDEX one_active_play_session ON play_session((1)
+) WHERE end_unix_ms IS NULL;
+CREATE TABLE manager_settings (
+    singleton INTEGER PRIMARY KEY NOT NULL CHECK(singleton = 1),
+    input_mapping_json TEXT NOT NULL,
+    filter_preset TEXT NOT NULL
+);
+CREATE TABLE game_settings (
+    game_id TEXT PRIMARY KEY NOT NULL REFERENCES library_game(game_id) ON DELETE CASCADE,
+    settings_json TEXT NOT NULL
+);
+CREATE TABLE translation_profile (
+    singleton INTEGER PRIMARY KEY NOT NULL CHECK(singleton = 1),
+    profile_json TEXT NOT NULL
+);
+CREATE TABLE plugin_installation (
+    plugin_id TEXT PRIMARY KEY NOT NULL,
+    family_id TEXT NOT NULL,
+    location TEXT NOT NULL UNIQUE,
+    abi_fingerprint TEXT NOT NULL,
+    version TEXT NOT NULL,
+    capabilities_json TEXT NOT NULL,
+    supported_formats_json TEXT NOT NULL,
+    installed_at_unix_ms INTEGER NOT NULL
+);
+"#;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct CoverCacheRecord {
-    pub case_identity: String,
-    pub source_hash: String,
-    pub cache_relative_path: String,
-    pub image_hash: String,
-    pub width: u32,
-    pub height: u32,
-    pub byte_size: i64,
+#[serde(deny_unknown_fields)]
+pub struct GameRecord {
+    pub game_id: String,
+    pub title: String,
+    pub user_title: Option<String>,
+    pub location: String,
+    pub family_id: Option<String>,
+    pub content_fingerprint: Option<String>,
+    pub added_at_unix_ms: i64,
+}
+
+impl GameRecord {
+    pub fn display_title(&self) -> &str {
+        self.user_title.as_deref().unwrap_or(&self.title)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct SourceDiagnosticRecord {
-    pub source_id: String,
-    pub code: String,
-    pub subject_hash: String,
-    pub observed_at_unix_ms: i64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct CaseRuntimeProfileRecord {
-    pub case_identity: String,
+pub struct PluginInstallRecord {
+    pub plugin_id: String,
     pub family_id: String,
-    pub fixed_delta_ns: u64,
-    pub compatibility_profile: String,
-    pub family_options: BTreeMap<String, String>,
+    pub location: String,
+    pub abi_fingerprint: String,
+    pub version: String,
+    pub capabilities: Vec<FamilyCapability>,
+    pub supported_formats: Vec<String>,
+    pub installed_at_unix_ms: i64,
+}
+
+impl PluginInstallRecord {
+    pub fn descriptor(&self) -> FamilyPluginDescriptor {
+        FamilyPluginDescriptor {
+            family_id: self.family_id.clone(),
+            plugin_id: self.plugin_id.clone(),
+            abi_fingerprint: self.abi_fingerprint.clone(),
+            version: self.version.clone(),
+            capabilities: self.capabilities.clone(),
+            supported_formats: self.supported_formats.clone(),
+        }
+    }
+}
+
+/// A database write token that can only be created by code which has already
+/// checked a real Family module's ABI layout and descriptor. The public record
+/// remains serializable for display/reporting, but cannot be passed to the
+/// persistence API as self-reported plugin metadata.
+#[derive(Debug, Clone)]
+pub struct VerifiedPluginInstall {
+    record: PluginInstallRecord,
+}
+
+impl VerifiedPluginInstall {
+    #[allow(dead_code)]
+    pub(crate) fn from_verified_descriptor(
+        descriptor: FamilyPluginDescriptor,
+        location: String,
+        installed_at_unix_ms: i64,
+    ) -> Result<Self, LibraryError> {
+        descriptor
+            .validate()
+            .map_err(|_| LibraryError::PluginDescriptor)?;
+        validate_location(&location)?;
+        Ok(Self {
+            record: PluginInstallRecord {
+                plugin_id: descriptor.plugin_id.clone(),
+                family_id: descriptor.family_id.clone(),
+                location,
+                abi_fingerprint: descriptor.abi_fingerprint.clone(),
+                version: descriptor.version.clone(),
+                capabilities: descriptor.capabilities.clone(),
+                supported_formats: descriptor.supported_formats.clone(),
+                installed_at_unix_ms,
+            },
+        })
+    }
+
+    pub fn record(&self) -> &PluginInstallRecord {
+        &self.record
+    }
 }
 
 #[derive(Debug, Error)]
 pub enum LibraryError {
     #[error("ASTRA_EMU_LIBRARY_SQLITE: {0}")]
     Sqlite(#[from] rusqlite::Error),
-    #[error("ASTRA_EMU_LIBRARY_INVALID_SYMBOL: {0}")]
-    InvalidSymbol(String),
-    #[error("ASTRA_EMU_LIBRARY_INVALID_RELATIVE_PATH: {0}")]
-    InvalidRelativePath(String),
-    #[error("ASTRA_EMU_LIBRARY_DUPLICATE_CASE_IDENTITY: {0}")]
-    DuplicateCaseIdentity(String),
-    #[error("ASTRA_EMU_LIBRARY_SOURCE_GRANT_INACTIVE: {0}")]
-    SourceGrantInactive(String),
-    #[error("ASTRA_EMU_LIBRARY_SCAN_CANCELLED")]
-    Cancelled,
-    #[error("ASTRA_EMU_LIBRARY_SCHEMA_VERSION: found {found}, supported {supported}")]
-    SchemaVersion { found: i64, supported: i64 },
-    #[error("ASTRA_EMU_LIBRARY_INPUT_MAPPING: {0}")]
-    InputMapping(String),
+    #[error("ASTRA_EMU_LIBRARY_SCHEMA_CORRUPT")]
+    SchemaCorrupt,
+    #[error("ASTRA_EMU_LIBRARY_INVALID_ID")]
+    InvalidId,
+    #[error("ASTRA_EMU_LIBRARY_INVALID_TITLE")]
+    InvalidTitle,
+    #[error("ASTRA_EMU_LIBRARY_INVALID_LOCATION")]
+    InvalidLocation,
+    #[error("ASTRA_EMU_LIBRARY_INVALID_METADATA")]
+    InvalidMetadata,
+    #[error("ASTRA_EMU_LIBRARY_GAME_NOT_FOUND")]
+    GameNotFound,
+    #[error("ASTRA_EMU_LIBRARY_ACTIVE_SESSION")]
+    ActiveSession,
+    #[error("ASTRA_EMU_LIBRARY_SERIALIZATION")]
+    Serialization,
+    #[error("ASTRA_EMU_LIBRARY_SETTINGS")]
+    Settings,
+    #[error("ASTRA_EMU_LIBRARY_PLUGIN_DESCRIPTOR")]
+    PluginDescriptor,
 }
 
 pub struct Library {
@@ -173,1321 +223,576 @@ impl Library {
     }
 
     fn from_connection(connection: Connection) -> Result<Self, LibraryError> {
-        connection.pragma_update(None, "journal_mode", "WAL")?;
         connection.pragma_update(None, "foreign_keys", "ON")?;
-        connection.busy_timeout(std::time::Duration::from_secs(5))?;
+        connection.busy_timeout(Duration::from_secs(5))?;
         let mut library = Self { connection };
-        library.migrate()?;
-        tracing::info!(
-            event = "astra.emu.library.opened",
-            schema_version = SCHEMA_VERSION
-        );
+        library.ensure_schema()?;
         Ok(library)
     }
 
-    fn migrate(&mut self) -> Result<(), LibraryError> {
-        let tx = self
+    fn ensure_schema(&mut self) -> Result<(), LibraryError> {
+        let version: i64 = self
             .connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let mut version: i64 = tx.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        if version > SCHEMA_VERSION {
-            return Err(LibraryError::SchemaVersion {
-                found: version,
-                supported: SCHEMA_VERSION,
-            });
-        }
-        if version == 0 {
-            tx.execute_batch(
-                "CREATE TABLE source_grant (
-                    source_id TEXT PRIMARY KEY NOT NULL,
-                    alias TEXT NOT NULL,
-                    platform_token TEXT NOT NULL,
-                    token_kind TEXT NOT NULL,
-                    active INTEGER NOT NULL CHECK(active IN (0, 1))
-                 );
-                 CREATE TABLE library_case (
-                    case_identity TEXT PRIMARY KEY NOT NULL,
-                    source_id TEXT NOT NULL REFERENCES source_grant(source_id) ON DELETE RESTRICT,
-                    relative_path TEXT NOT NULL,
-                    content_hash TEXT NOT NULL,
-                    modified_ns INTEGER NOT NULL,
-                    byte_size INTEGER NOT NULL CHECK(byte_size >= 0),
-                    title TEXT NOT NULL,
-                    family_override TEXT,
-                    UNIQUE(source_id, relative_path)
-                 );
-                 CREATE INDEX library_case_hash_mtime ON library_case(content_hash, modified_ns);",
-            )?;
-            tx.execute_batch(
-                "CREATE TABLE translation_consent (
-                    singleton INTEGER PRIMARY KEY NOT NULL CHECK(singleton = 1),
-                    provider_identity TEXT NOT NULL,
-                    endpoint TEXT NOT NULL,
-                    model TEXT NOT NULL,
-                    granted_at_unix_ms INTEGER NOT NULL
-                 );
-                 ",
-            )?;
-            tx.pragma_update(None, "user_version", 1)?;
-            version = 1;
-        }
-        if version == 1 {
-            tx.execute_batch(
-                "CREATE TABLE cover_cache (
-                    case_identity TEXT PRIMARY KEY NOT NULL REFERENCES library_case(case_identity) ON DELETE CASCADE,
-                    source_hash TEXT NOT NULL,
-                    cache_relative_path TEXT NOT NULL,
-                    image_hash TEXT NOT NULL,
-                    width INTEGER NOT NULL CHECK(width > 0),
-                    height INTEGER NOT NULL CHECK(height > 0),
-                    byte_size INTEGER NOT NULL CHECK(byte_size >= 0)
-                 );
-                 CREATE TABLE source_diagnostic (
-                    source_id TEXT NOT NULL REFERENCES source_grant(source_id) ON DELETE CASCADE,
-                    code TEXT NOT NULL,
-                    subject_hash TEXT NOT NULL,
-                    observed_at_unix_ms INTEGER NOT NULL,
-                    PRIMARY KEY(source_id, code, subject_hash)
-                 );",
-            )?;
-            tx.pragma_update(None, "user_version", 2)?;
-            version = 2;
-        }
-        if version == 2 {
-            tx.execute_batch(
-                "CREATE TABLE case_runtime_profile (
-                    case_identity TEXT PRIMARY KEY NOT NULL REFERENCES library_case(case_identity) ON DELETE CASCADE,
-                    family_id TEXT NOT NULL,
-                    fixed_delta_ns INTEGER NOT NULL CHECK(fixed_delta_ns > 0),
-                    compatibility_profile TEXT NOT NULL,
-                    family_options_json TEXT NOT NULL
-                 );",
-            )?;
-            tx.pragma_update(None, "user_version", 3)?;
-            version = 3;
-        }
-        if version == 3 {
-            tx.execute_batch(
-                "CREATE TABLE translation_profile (
-                    singleton INTEGER PRIMARY KEY NOT NULL CHECK(singleton = 1),
-                    profile_id TEXT NOT NULL,
-                    endpoint_kind TEXT NOT NULL,
-                    endpoint TEXT NOT NULL,
-                    protocol TEXT NOT NULL,
-                    model TEXT NOT NULL,
-                    target_language TEXT NOT NULL,
-                    context_sentences INTEGER NOT NULL CHECK(context_sentences BETWEEN 0 AND 32),
-                    body_limit_bytes INTEGER NOT NULL CHECK(body_limit_bytes BETWEEN 1 AND 16384),
-                    timeout_ms INTEGER NOT NULL CHECK(timeout_ms BETWEEN 1000 AND 120000),
-                    secret_reference TEXT NOT NULL,
-                    background TEXT,
-                    glossary_json TEXT NOT NULL
-                 );",
-            )?;
-            tx.pragma_update(None, "user_version", 4)?;
-            version = 4;
-        }
-        if version == 4 {
-            tx.pragma_update(None, "defer_foreign_keys", true)?;
-            let legacy_cases = {
-                let mut statement = tx.prepare(
-                    "SELECT case_identity, source_id, relative_path FROM library_case
-                     WHERE case_identity LIKE 'case-sha256:%'",
-                )?;
-                let rows = statement
-                    .query_map([], |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, String>(1)?,
-                            row.get::<_, String>(2)?,
-                        ))
-                    })?
-                    .collect::<Result<Vec<_>, _>>()?;
-                rows
-            };
-            for (old_identity, source_id, relative_path) in legacy_cases {
-                let material = format!("{source_id}\0{relative_path}");
-                let new_identity = format!(
-                    "case-{}",
-                    &Hash256::from_sha256(material.as_bytes()).to_hex()[..32]
-                );
-                let collision: bool = tx.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM library_case WHERE case_identity=?1)",
-                    [&new_identity],
-                    |row| row.get(0),
-                )?;
-                if collision {
-                    return Err(LibraryError::DuplicateCaseIdentity(new_identity));
-                }
-                tx.execute(
-                    "UPDATE case_runtime_profile SET case_identity=?1 WHERE case_identity=?2",
-                    params![new_identity, old_identity],
-                )?;
-                tx.execute(
-                    "DELETE FROM cover_cache WHERE case_identity=?1",
-                    [&old_identity],
-                )?;
-                tx.execute(
-                    "UPDATE library_case SET case_identity=?1 WHERE case_identity=?2",
-                    params![new_identity, old_identity],
-                )?;
+            .pragma_query_value(None, "user_version", |row| row.get(0))?;
+        let table_count = self.user_table_count()?;
+        if version == SCHEMA_VERSION {
+            if table_count != REQUIRED_TABLES.len() || !self.required_tables_present()? {
+                return Err(LibraryError::SchemaCorrupt);
             }
-            tx.pragma_update(None, "user_version", 5)?;
-            version = 5;
+            return Ok(());
         }
-        if version == 5 {
-            crate::identity::migrate_v6(&tx)?;
-            tx.pragma_update(None, "user_version", 6)?;
-            version = 6;
+
+        if version != 0 || table_count != 0 {
+            self.rebuild_manager_tables()?;
+            tracing::warn!(
+                event = "astra.emu.library.rebuilt",
+                previous_schema_version = version,
+            );
         }
-        if version == 6 {
-            tx.execute_batch(
-                "CREATE TABLE play_session (
-                    session_id TEXT PRIMARY KEY NOT NULL,
-                    work_id TEXT NOT NULL REFERENCES library_work(work_id) ON DELETE CASCADE,
-                    case_identity TEXT NOT NULL,
-                    start_unix_ms INTEGER NOT NULL,
-                    end_unix_ms,
-                    duration_ms INTEGER NOT NULL DEFAULT 0 CHECK(duration_ms >= 0),
-                    ended_by TEXT NOT NULL DEFAULT 'active'
-                 );
-                 CREATE INDEX play_session_work_start ON play_session(work_id, start_unix_ms);
-                 CREATE TABLE compatibility_entry_cache (
-                    provider TEXT NOT NULL,
-                    remote_id TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    notes TEXT,
-                    entry_updated_unix_ms INTEGER NOT NULL,
-                    fetched_at_unix_ms INTEGER NOT NULL,
-                    PRIMARY KEY(provider, remote_id)
-                 );
-                 CREATE TABLE compatibility_sync_state (
-                    singleton INTEGER PRIMARY KEY NOT NULL CHECK(singleton = 1),
-                    source_url TEXT NOT NULL,
-                    response_hash TEXT NOT NULL,
-                    last_fetched_unix_ms INTEGER NOT NULL,
-                    diagnostic_code TEXT
-                 );",
-            )?;
-            tx.pragma_update(None, "user_version", 7)?;
-            version = 7;
-        }
-        if version == 7 {
-            tx.execute_batch(
-                "CREATE TABLE input_settings (
-                    singleton INTEGER PRIMARY KEY NOT NULL CHECK(singleton = 1),
-                    mapping_json TEXT NOT NULL
-                 );",
-            )?;
-            tx.pragma_update(None, "user_version", 8)?;
-            version = 8;
-        }
-        if version == 8 {
-            tx.execute_batch(
-                "CREATE TABLE work_settings (
-                    work_id TEXT PRIMARY KEY NOT NULL REFERENCES library_work(work_id) ON DELETE CASCADE,
-                    settings_json TEXT NOT NULL
-                 );",
-            )?;
-            tx.pragma_update(None, "user_version", 9)?;
-            version = 9;
-        }
-        if version == 9 {
-            crate::identity::migrate_v10(&tx)?;
-            tx.pragma_update(None, "user_version", 10)?;
-            version = 10;
-        }
-        if version == 10 {
-            tx.execute_batch(
-                "DROP TABLE IF EXISTS translation_cache;
-                 DROP TABLE IF EXISTS translation_cache_policy;",
-            )?;
-            tx.pragma_update(None, "user_version", 11)?;
-        }
-        tx.commit()?;
+        self.connection.execute_batch(SCHEMA_SQL)?;
+        self.connection
+            .pragma_update(None, "user_version", SCHEMA_VERSION)?;
         Ok(())
     }
 
-    /// Persist the global device-to-key input mapping.
-    pub fn save_input_mapping(&mut self, mapping: &InputMapping) -> Result<(), LibraryError> {
-        let mapping_json = serde_json::to_string(mapping)
-            .map_err(|error| LibraryError::InputMapping(error.to_string()))?;
-        self.connection.execute(
-            "INSERT INTO input_settings(singleton, mapping_json)
-             VALUES(1, ?1)
-             ON CONFLICT(singleton) DO UPDATE SET mapping_json=excluded.mapping_json",
-            params![mapping_json],
+    fn user_table_count(&self) -> Result<usize, LibraryError> {
+        let count: i64 = self.connection.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+            [],
+            |row| row.get(0),
+        )?;
+        usize::try_from(count).map_err(|_| LibraryError::SchemaCorrupt)
+    }
+
+    fn required_tables_present(&self) -> Result<bool, LibraryError> {
+        for table in REQUIRED_TABLES {
+            let present: bool = self.connection.query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
+                [table],
+                |row| row.get(0),
+            )?;
+            if !present {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    fn rebuild_manager_tables(&mut self) -> Result<(), LibraryError> {
+        self.connection.execute_batch("PRAGMA foreign_keys=OFF;")?;
+        let tables = {
+            let mut statement = self.connection.prepare(
+                "SELECT name FROM sqlite_master
+                 WHERE type='table'
+                   AND name NOT LIKE 'sqlite_%'",
+            )?;
+            let records = statement
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            records
+        };
+        for table in tables {
+            let escaped = table.replace('"', "\"\"");
+            self.connection
+                .execute_batch(&format!("DROP TABLE IF EXISTS \"{escaped}\";"))?;
+        }
+        self.connection.execute_batch(
+            "DROP INDEX IF EXISTS library_game_title;
+             DROP INDEX IF EXISTS play_session_game_start;
+             DROP INDEX IF EXISTS one_active_play_session;
+             PRAGMA user_version=0;
+             PRAGMA foreign_keys=ON;",
         )?;
         Ok(())
     }
 
-    /// Read the persisted input mapping, if one has been saved.
+    pub fn add_game(&mut self, game: &GameRecord) -> Result<(), LibraryError> {
+        validate_game(game)?;
+        self.connection.execute(
+            "INSERT INTO library_game(
+                game_id, title, user_title, location, family_id,
+                content_fingerprint, added_at_unix_ms)
+             VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT(game_id) DO UPDATE SET
+                title=excluded.title,
+                user_title=excluded.user_title,
+                location=excluded.location,
+                family_id=excluded.family_id,
+                content_fingerprint=excluded.content_fingerprint",
+            params![
+                game.game_id,
+                game.title,
+                game.user_title,
+                game.location,
+                game.family_id,
+                game.content_fingerprint,
+                game.added_at_unix_ms,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_games(&self) -> Result<Vec<GameRecord>, LibraryError> {
+        let mut statement = self.connection.prepare(
+            "SELECT game_id, title, user_title, location, family_id,
+                    content_fingerprint, added_at_unix_ms
+             FROM library_game ORDER BY title COLLATE NOCASE, game_id",
+        )?;
+        let records = statement
+            .query_map([], game_from_row)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(records)
+    }
+
+    pub fn game(&self, game_id: &str) -> Result<Option<GameRecord>, LibraryError> {
+        validate_id(game_id)?;
+        self.connection
+            .query_row(
+                "SELECT game_id, title, user_title, location, family_id,
+                        content_fingerprint, added_at_unix_ms
+                 FROM library_game WHERE game_id=?1",
+                [game_id],
+                game_from_row,
+            )
+            .optional()
+            .map_err(LibraryError::from)
+    }
+
+    pub fn remove_game(&mut self, game_id: &str) -> Result<bool, LibraryError> {
+        validate_id(game_id)?;
+        Ok(self
+            .connection
+            .execute("DELETE FROM library_game WHERE game_id=?1", [game_id])?
+            > 0)
+    }
+
+    pub fn set_game_user_title(
+        &mut self,
+        game_id: &str,
+        user_title: Option<&str>,
+    ) -> Result<(), LibraryError> {
+        validate_id(game_id)?;
+        if let Some(title) = user_title {
+            validate_title(title)?;
+        }
+        let changed = self.connection.execute(
+            "UPDATE library_game SET user_title=?2 WHERE game_id=?1",
+            params![game_id, user_title],
+        )?;
+        if changed == 0 {
+            return Err(LibraryError::GameNotFound);
+        }
+        Ok(())
+    }
+
+    pub fn set_game_family(
+        &mut self,
+        game_id: &str,
+        family_id: Option<&str>,
+    ) -> Result<(), LibraryError> {
+        validate_id(game_id)?;
+        if let Some(family_id) = family_id {
+            validate_id(family_id)?;
+        }
+        let changed = self.connection.execute(
+            "UPDATE library_game SET family_id=?2 WHERE game_id=?1",
+            params![game_id, family_id],
+        )?;
+        if changed == 0 {
+            return Err(LibraryError::GameNotFound);
+        }
+        Ok(())
+    }
+
+    pub fn save_input_mapping(&mut self, mapping: &InputMapping) -> Result<(), LibraryError> {
+        let mapping_json =
+            serde_json::to_string(mapping).map_err(|_| LibraryError::Serialization)?;
+        let filter = self.filter_preset()?.unwrap_or_else(|| "none".into());
+        self.connection.execute(
+            "INSERT INTO manager_settings(singleton, input_mapping_json, filter_preset)
+             VALUES(1, ?1, ?2)
+             ON CONFLICT(singleton) DO UPDATE SET
+                input_mapping_json=excluded.input_mapping_json",
+            params![mapping_json, filter],
+        )?;
+        Ok(())
+    }
+
     pub fn load_input_mapping(&self) -> Result<Option<InputMapping>, LibraryError> {
-        let mapping_json: Option<String> = self
+        let raw: Option<String> = self
             .connection
             .query_row(
-                "SELECT mapping_json FROM input_settings WHERE singleton=1",
+                "SELECT input_mapping_json FROM manager_settings WHERE singleton=1",
                 [],
                 |row| row.get(0),
             )
             .optional()?;
-        match mapping_json {
-            Some(mapping_json) => {
-                let mapping = serde_json::from_str(&mapping_json)
-                    .map_err(|error| LibraryError::InputMapping(error.to_string()))?;
-                Ok(Some(mapping))
-            }
-            None => Ok(None),
-        }
+        raw.map(|value| serde_json::from_str(&value).map_err(|_| LibraryError::Settings))
+            .transpose()
     }
 
-    /// Read the per-game settings overrides for a work, if any.
-    pub fn work_settings(&self, work_id: &str) -> Result<Option<WorkSettings>, LibraryError> {
-        validate_symbol(work_id)?;
-        let settings_json: Option<String> = self
+    pub fn set_filter_preset(&mut self, preset: &str) -> Result<(), LibraryError> {
+        if preset.is_empty() || preset.len() > 128 || !is_safe_identifier(preset) {
+            return Err(LibraryError::Settings);
+        }
+        let mapping = self
+            .load_input_mapping()?
+            .unwrap_or_else(crate::input_mapping::default_vn_preset);
+        let mapping_json =
+            serde_json::to_string(&mapping).map_err(|_| LibraryError::Serialization)?;
+        self.connection.execute(
+            "INSERT INTO manager_settings(singleton, input_mapping_json, filter_preset)
+             VALUES(1, ?1, ?2)
+             ON CONFLICT(singleton) DO UPDATE SET filter_preset=excluded.filter_preset",
+            params![mapping_json, preset],
+        )?;
+        Ok(())
+    }
+
+    pub fn filter_preset(&self) -> Result<Option<String>, LibraryError> {
+        self.connection
+            .query_row(
+                "SELECT filter_preset FROM manager_settings WHERE singleton=1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(LibraryError::from)
+    }
+
+    pub fn game_settings(&self, game_id: &str) -> Result<Option<GameSettings>, LibraryError> {
+        validate_id(game_id)?;
+        let raw: Option<String> = self
             .connection
             .query_row(
-                "SELECT settings_json FROM work_settings WHERE work_id=?1",
-                params![work_id],
+                "SELECT settings_json FROM game_settings WHERE game_id=?1",
+                [game_id],
                 |row| row.get(0),
             )
             .optional()?;
-        match settings_json {
-            Some(settings_json) => {
-                let settings = serde_json::from_str(&settings_json)
-                    .map_err(|error| LibraryError::InputMapping(error.to_string()))?;
-                Ok(Some(settings))
-            }
-            None => Ok(None),
-        }
-    }
-
-    /// Persist the per-game settings overrides for a work.
-    pub fn set_work_settings(
-        &mut self,
-        work_id: &str,
-        settings: &WorkSettings,
-    ) -> Result<(), LibraryError> {
-        validate_symbol(work_id)?;
-        let settings_json = serde_json::to_string(settings)
-            .map_err(|error| LibraryError::InputMapping(error.to_string()))?;
-        self.connection.execute(
-            "INSERT INTO work_settings(work_id, settings_json)
-             VALUES(?1, ?2)
-             ON CONFLICT(work_id) DO UPDATE SET settings_json=excluded.settings_json",
-            params![work_id, settings_json],
-        )?;
-        Ok(())
-    }
-
-    /// Remove all per-game settings overrides for a work.
-    pub fn clear_work_settings(&mut self, work_id: &str) -> Result<(), LibraryError> {
-        validate_symbol(work_id)?;
-        self.connection.execute(
-            "DELETE FROM work_settings WHERE work_id=?1",
-            params![work_id],
-        )?;
-        Ok(())
-    }
-
-    pub fn upsert_grant(&mut self, grant: &SourceGrant) -> Result<(), LibraryError> {
-        validate_symbol(&grant.source_id)?;
-        validate_symbol(&grant.token_kind)?;
-        self.connection.execute(
-            "INSERT INTO source_grant(source_id, alias, platform_token, token_kind, active)
-             VALUES(?1, ?2, ?3, ?4, ?5)
-             ON CONFLICT(source_id) DO UPDATE SET
-                alias=excluded.alias, platform_token=excluded.platform_token,
-                token_kind=excluded.token_kind, active=excluded.active",
-            params![
-                grant.source_id,
-                grant.alias,
-                grant.platform_token,
-                grant.token_kind,
-                grant.active
-            ],
-        )?;
-        Ok(())
-    }
-
-    pub fn apply_scan(
-        &mut self,
-        source_id: &str,
-        candidates: &[ScanCandidate],
-        cancellation: &CancellationToken,
-    ) -> Result<ScanReport, LibraryError> {
-        validate_symbol(source_id)?;
-        if cancellation.is_cancelled() {
-            return Err(LibraryError::Cancelled);
-        }
-        let active: Option<bool> = self
-            .connection
-            .query_row(
-                "SELECT active FROM source_grant WHERE source_id=?1",
-                [source_id],
-                |row| row.get(0),
-            )
-            .optional()?;
-        if active != Some(true) {
-            return Err(LibraryError::SourceGrantInactive(source_id.to_owned()));
-        }
-
-        let normalized_candidates = candidates
-            .iter()
-            .cloned()
-            .map(|mut candidate| {
-                if candidate.case_identity.starts_with("case-sha256:") {
-                    let material = format!("{}\0{}", candidate.source_id, candidate.relative_path);
-                    candidate.case_identity = format!(
-                        "case-{}",
-                        &Hash256::from_sha256(material.as_bytes()).to_hex()[..32]
-                    );
-                }
-                candidate
-            })
-            .collect::<Vec<_>>();
-        let mut identities = BTreeSet::new();
-        let mut locations = BTreeSet::new();
-        for candidate in &normalized_candidates {
-            if candidate.source_id != source_id {
-                return Err(LibraryError::SourceGrantInactive(
-                    candidate.source_id.clone(),
-                ));
-            }
-            validate_relative_path(&candidate.relative_path)?;
-            validate_symbol(&candidate.case_identity)?;
-            if !identities.insert(candidate.case_identity.clone())
-                || !locations.insert(candidate.relative_path.clone())
-            {
-                return Err(LibraryError::DuplicateCaseIdentity(
-                    candidate.case_identity.clone(),
-                ));
-            }
-        }
-
-        tracing::debug!(
-            event = "astra.emu.library.scan_apply_started",
-            source_id = %source_id,
-            record_count = normalized_candidates.len()
-        );
-        let tx = self
-            .connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        for candidate in &normalized_candidates {
-            let conflicting_source: Option<String> = tx
-                .query_row(
-                    "SELECT source_id FROM library_case WHERE case_identity=?1 AND source_id<>?2",
-                    params![candidate.case_identity, source_id],
-                    |row| row.get(0),
-                )
-                .optional()?;
-            if conflicting_source.is_some() {
-                return Err(LibraryError::DuplicateCaseIdentity(
-                    candidate.case_identity.clone(),
-                ));
-            }
-        }
-        let mut existing = BTreeMap::new();
-        {
-            let mut statement = tx.prepare(
-                "SELECT case_identity, content_hash, modified_ns, byte_size, title, relative_path
-                 FROM library_case WHERE source_id=?1",
-            )?;
-            let rows = statement.query_map([source_id], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    (
-                        row.get::<_, String>(1)?,
-                        row.get::<_, i64>(2)?,
-                        row.get::<_, i64>(3)?,
-                        row.get::<_, String>(4)?,
-                        row.get::<_, String>(5)?,
-                    ),
-                ))
-            })?;
-            for row in rows {
-                let (identity, fingerprint) = row?;
-                existing.insert(identity, fingerprint);
-            }
-        }
-
-        let mut report = ScanReport {
-            inserted: 0,
-            updated: 0,
-            unchanged: 0,
-            removed: 0,
-        };
-        for candidate in &normalized_candidates {
-            if cancellation.is_cancelled() {
-                return Err(LibraryError::Cancelled);
-            }
-            let fingerprint = (
-                candidate.content_hash.clone(),
-                candidate.modified_ns,
-                candidate.byte_size,
-                candidate.title.clone(),
-                candidate.relative_path.clone(),
-            );
-            match existing.get(&candidate.case_identity) {
-                None => report.inserted += 1,
-                Some(old) if old == &fingerprint => {
-                    report.unchanged += 1;
-                    continue;
-                }
-                Some(_) => report.updated += 1,
-            }
-            tx.execute(
-                "INSERT INTO library_case(case_identity, source_id, relative_path, content_hash,
-                    modified_ns, byte_size, title, family_override, work_id,
-                    installation_fingerprint)
-                 VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, ?8, ?9)
-                 ON CONFLICT(case_identity) DO UPDATE SET
-                    source_id=excluded.source_id, relative_path=excluded.relative_path,
-                    content_hash=excluded.content_hash, modified_ns=excluded.modified_ns,
-                    byte_size=excluded.byte_size, title=excluded.title,
-                    installation_fingerprint=excluded.installation_fingerprint",
-                params![
-                    candidate.case_identity,
-                    candidate.source_id,
-                    candidate.relative_path,
-                    candidate.content_hash,
-                    candidate.modified_ns,
-                    candidate.byte_size,
-                    candidate.title,
-                    crate::identity::work_id_for_case(&candidate.case_identity),
-                    crate::identity::installation_fingerprint(
-                        &candidate.content_hash,
-                        candidate.byte_size
-                    )
-                ],
-            )?;
-            crate::identity::ensure_work_for_candidate(&tx, candidate)?;
-        }
-        for stale_identity in existing.keys().filter(|id| !identities.contains(*id)) {
-            report.removed += tx.execute(
-                "DELETE FROM library_case WHERE source_id=?1 AND case_identity=?2",
-                params![source_id, stale_identity],
-            )?;
-        }
-        tx.commit()?;
-        Ok(report)
-    }
-
-    pub fn list_grants(&self) -> Result<Vec<SourceGrant>, LibraryError> {
-        let mut statement = self.connection.prepare(
-            "SELECT source_id, alias, platform_token, token_kind, active
-             FROM source_grant ORDER BY alias, source_id",
-        )?;
-        let rows = statement.query_map([], |row| {
-            Ok(SourceGrant {
-                source_id: row.get(0)?,
-                alias: row.get(1)?,
-                platform_token: row.get(2)?,
-                token_kind: row.get(3)?,
-                active: row.get(4)?,
-            })
-        })?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
-    }
-
-    pub fn list_cases(&self) -> Result<Vec<CaseRecord>, LibraryError> {
-        let mut statement = self.connection.prepare(
-            "SELECT case_identity, source_id, relative_path, content_hash, modified_ns,
-                    byte_size, title, family_override
-             FROM library_case ORDER BY title COLLATE NOCASE, case_identity",
-        )?;
-        let rows = statement.query_map([], case_record_from_row)?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
-    }
-
-    pub fn case(&self, case_identity: &str) -> Result<Option<CaseRecord>, LibraryError> {
-        validate_symbol(case_identity)?;
-        self.connection
-            .query_row(
-                "SELECT case_identity, source_id, relative_path, content_hash, modified_ns,
-                        byte_size, title, family_override
-                 FROM library_case WHERE case_identity=?1",
-                [case_identity],
-                case_record_from_row,
-            )
-            .optional()
-            .map_err(Into::into)
-    }
-
-    pub fn set_family_override(
-        &mut self,
-        case_identity: &str,
-        family_id: Option<&str>,
-    ) -> Result<(), LibraryError> {
-        validate_symbol(case_identity)?;
-        if let Some(family_id) = family_id {
-            validate_symbol(family_id)?;
-        }
-        let changed = self.connection.execute(
-            "UPDATE library_case SET family_override=?2 WHERE case_identity=?1",
-            params![case_identity, family_id],
-        )?;
-        if changed != 1 {
-            return Err(LibraryError::InvalidSymbol(case_identity.to_owned()));
-        }
-        Ok(())
-    }
-
-    pub fn upsert_cover_cache(&mut self, record: &CoverCacheRecord) -> Result<(), LibraryError> {
-        validate_symbol(&record.case_identity)?;
-        validate_symbol(&record.source_hash)?;
-        validate_symbol(&record.image_hash)?;
-        validate_relative_path(&record.cache_relative_path)?;
-        if record.width == 0 || record.height == 0 || record.byte_size < 0 {
-            return Err(LibraryError::InvalidSymbol("cover dimensions".into()));
-        }
-        self.connection.execute(
-            "INSERT INTO cover_cache(case_identity, source_hash, cache_relative_path, image_hash,
-                width, height, byte_size) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)
-             ON CONFLICT(case_identity) DO UPDATE SET source_hash=excluded.source_hash,
-                cache_relative_path=excluded.cache_relative_path, image_hash=excluded.image_hash,
-                width=excluded.width, height=excluded.height, byte_size=excluded.byte_size",
-            params![
-                record.case_identity,
-                record.source_hash,
-                record.cache_relative_path,
-                record.image_hash,
-                record.width,
-                record.height,
-                record.byte_size
-            ],
-        )?;
-        Ok(())
-    }
-
-    pub fn cover_cache(
-        &self,
-        case_identity: &str,
-    ) -> Result<Option<CoverCacheRecord>, LibraryError> {
-        validate_symbol(case_identity)?;
-        self.connection
-            .query_row(
-                "SELECT case_identity, source_hash, cache_relative_path, image_hash, width, height,
-                        byte_size FROM cover_cache WHERE case_identity=?1",
-                [case_identity],
-                |row| {
-                    Ok(CoverCacheRecord {
-                        case_identity: row.get(0)?,
-                        source_hash: row.get(1)?,
-                        cache_relative_path: row.get(2)?,
-                        image_hash: row.get(3)?,
-                        width: row.get(4)?,
-                        height: row.get(5)?,
-                        byte_size: row.get(6)?,
-                    })
-                },
-            )
-            .optional()
-            .map_err(Into::into)
-    }
-
-    pub fn replace_source_diagnostics(
-        &mut self,
-        source_id: &str,
-        diagnostics: &[SourceDiagnosticRecord],
-    ) -> Result<(), LibraryError> {
-        validate_symbol(source_id)?;
-        let tx = self
-            .connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        tx.execute(
-            "DELETE FROM source_diagnostic WHERE source_id=?1",
-            [source_id],
-        )?;
-        for diagnostic in diagnostics {
-            if diagnostic.source_id != source_id {
-                return Err(LibraryError::SourceGrantInactive(
-                    diagnostic.source_id.clone(),
-                ));
-            }
-            validate_symbol(&diagnostic.code)?;
-            validate_symbol(&diagnostic.subject_hash)?;
-            tx.execute(
-                "INSERT INTO source_diagnostic(source_id, code, subject_hash, observed_at_unix_ms)
-                 VALUES(?1, ?2, ?3, ?4)",
-                params![
-                    diagnostic.source_id,
-                    diagnostic.code,
-                    diagnostic.subject_hash,
-                    diagnostic.observed_at_unix_ms
-                ],
-            )?;
-        }
-        tx.commit()?;
-        Ok(())
-    }
-
-    pub fn source_diagnostics(
-        &self,
-        source_id: &str,
-    ) -> Result<Vec<SourceDiagnosticRecord>, LibraryError> {
-        validate_symbol(source_id)?;
-        let mut statement = self.connection.prepare(
-            "SELECT source_id, code, subject_hash, observed_at_unix_ms
-             FROM source_diagnostic WHERE source_id=?1 ORDER BY code, subject_hash",
-        )?;
-        let rows = statement.query_map([source_id], |row| {
-            Ok(SourceDiagnosticRecord {
-                source_id: row.get(0)?,
-                code: row.get(1)?,
-                subject_hash: row.get(2)?,
-                observed_at_unix_ms: row.get(3)?,
-            })
-        })?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
-    }
-
-    pub fn set_case_runtime_profile(
-        &mut self,
-        profile: &CaseRuntimeProfileRecord,
-    ) -> Result<(), LibraryError> {
-        validate_symbol(&profile.case_identity)?;
-        validate_symbol(&profile.family_id)?;
-        validate_symbol(&profile.compatibility_profile)?;
-        if profile.fixed_delta_ns == 0 || profile.fixed_delta_ns > i64::MAX as u64 {
-            return Err(LibraryError::InvalidSymbol("fixed_delta_ns".into()));
-        }
-        for (key, value) in &profile.family_options {
-            validate_symbol(key)?;
-            validate_symbol(value)?;
-        }
-        let options = serde_json::to_string(&profile.family_options)
-            .map_err(|_| LibraryError::InvalidSymbol("family_options".into()))?;
-        self.connection.execute(
-            "INSERT INTO case_runtime_profile(case_identity, family_id, fixed_delta_ns,
-                compatibility_profile, family_options_json) VALUES(?1, ?2, ?3, ?4, ?5)
-             ON CONFLICT(case_identity) DO UPDATE SET family_id=excluded.family_id,
-                fixed_delta_ns=excluded.fixed_delta_ns,
-                compatibility_profile=excluded.compatibility_profile,
-                family_options_json=excluded.family_options_json",
-            params![
-                profile.case_identity,
-                profile.family_id,
-                profile.fixed_delta_ns as i64,
-                profile.compatibility_profile,
-                options
-            ],
-        )?;
-        Ok(())
-    }
-
-    pub fn case_runtime_profile(
-        &self,
-        case_identity: &str,
-    ) -> Result<Option<CaseRuntimeProfileRecord>, LibraryError> {
-        validate_symbol(case_identity)?;
-        let raw: Option<(String, i64, String, String)> = self
-            .connection
-            .query_row(
-                "SELECT family_id, fixed_delta_ns, compatibility_profile, family_options_json
-                 FROM case_runtime_profile WHERE case_identity=?1",
-                [case_identity],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-            )
-            .optional()?;
-        raw.map(
-            |(family_id, fixed_delta_ns, compatibility_profile, options)| {
-                let family_options = serde_json::from_str(&options)
-                    .map_err(|_| LibraryError::InvalidSymbol("family_options_json".into()))?;
-                Ok(CaseRuntimeProfileRecord {
-                    case_identity: case_identity.to_owned(),
-                    family_id,
-                    fixed_delta_ns: u64::try_from(fixed_delta_ns)
-                        .map_err(|_| LibraryError::InvalidSymbol("fixed_delta_ns".into()))?,
-                    compatibility_profile,
-                    family_options,
-                })
-            },
-        )
+        raw.map(|value| {
+            let settings: GameSettings =
+                serde_json::from_str(&value).map_err(|_| LibraryError::Settings)?;
+            settings.validate().map_err(|_| LibraryError::Settings)?;
+            Ok(settings)
+        })
         .transpose()
     }
 
-    pub fn grant_translation_consent(
+    pub fn set_game_settings(
         &mut self,
-        consent: &TranslationConsent,
+        game_id: &str,
+        settings: &GameSettings,
     ) -> Result<(), LibraryError> {
-        validate_symbol(&consent.provider_identity)?;
-        if consent.endpoint.is_empty() || consent.model.is_empty() {
-            return Err(LibraryError::InvalidSymbol(
-                "translation endpoint/model".into(),
-            ));
+        validate_id(game_id)?;
+        if self.game(game_id)?.is_none() {
+            return Err(LibraryError::GameNotFound);
         }
+        settings.validate().map_err(|_| LibraryError::Settings)?;
+        let encoded = serde_json::to_string(settings).map_err(|_| LibraryError::Serialization)?;
         self.connection.execute(
-            "INSERT INTO translation_consent(singleton, provider_identity, endpoint, model, granted_at_unix_ms)
-             VALUES(1, ?1, ?2, ?3, ?4)
-             ON CONFLICT(singleton) DO UPDATE SET provider_identity=excluded.provider_identity,
-               endpoint=excluded.endpoint, model=excluded.model, granted_at_unix_ms=excluded.granted_at_unix_ms",
-            params![consent.provider_identity, consent.endpoint, consent.model, consent.granted_at_unix_ms],
+            "INSERT INTO game_settings(game_id, settings_json) VALUES(?1, ?2)
+             ON CONFLICT(game_id) DO UPDATE SET settings_json=excluded.settings_json",
+            params![game_id, encoded],
         )?;
         Ok(())
     }
 
-    pub fn translation_consent(&self) -> Result<Option<TranslationConsent>, LibraryError> {
-        self.connection.query_row(
-            "SELECT provider_identity, endpoint, model, granted_at_unix_ms FROM translation_consent WHERE singleton=1",
-            [],
-            |row| Ok(TranslationConsent { provider_identity: row.get(0)?, endpoint: row.get(1)?, model: row.get(2)?, granted_at_unix_ms: row.get(3)? }),
-        ).optional().map_err(Into::into)
+    pub fn clear_game_settings(&mut self, game_id: &str) -> Result<(), LibraryError> {
+        validate_id(game_id)?;
+        self.connection
+            .execute("DELETE FROM game_settings WHERE game_id=?1", [game_id])?;
+        Ok(())
     }
 
     pub fn set_translation_profile(
         &mut self,
-        profile: &TranslationProfileRecord,
+        profile: &TranslationProfile,
     ) -> Result<(), LibraryError> {
-        for value in [
-            &profile.profile_id,
-            &profile.endpoint_kind,
-            &profile.protocol,
-            &profile.secret_reference,
-        ] {
-            validate_symbol(value)?;
-        }
-        if profile.endpoint.is_empty()
-            || profile.model.is_empty()
-            || profile.target_language.is_empty()
-            || profile.context_sentences > 32
-            || profile.body_limit_bytes == 0
-            || profile.body_limit_bytes > 16 * 1024
-            || !(1_000..=120_000).contains(&profile.timeout_ms)
-            || profile
-                .background
-                .as_ref()
-                .is_some_and(|value| value.len() > 16 * 1024)
-            || profile.glossary.len() > 1024
-            || profile.glossary.iter().any(|(source, target)| {
-                source.is_empty() || target.is_empty() || source.len() > 512 || target.len() > 512
-            })
-        {
-            return Err(LibraryError::InvalidSymbol("translation_profile".into()));
-        }
-        let glossary = serde_json::to_string(&profile.glossary)
-            .map_err(|_| LibraryError::InvalidSymbol("translation_glossary".into()))?;
-        let timeout_ms = i64::try_from(profile.timeout_ms)
-            .map_err(|_| LibraryError::InvalidSymbol("translation_timeout_ms".into()))?;
+        profile.validate().map_err(|_| LibraryError::Settings)?;
+        let encoded = serde_json::to_string(profile).map_err(|_| LibraryError::Serialization)?;
         self.connection.execute(
-            "INSERT INTO translation_profile(singleton, profile_id, endpoint_kind, endpoint,
-               protocol, model, target_language, context_sentences, body_limit_bytes, timeout_ms,
-               secret_reference, background, glossary_json)
-             VALUES(1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
-             ON CONFLICT(singleton) DO UPDATE SET profile_id=excluded.profile_id,
-               endpoint_kind=excluded.endpoint_kind, endpoint=excluded.endpoint,
-               protocol=excluded.protocol, model=excluded.model,
-               target_language=excluded.target_language,
-               context_sentences=excluded.context_sentences,
-               body_limit_bytes=excluded.body_limit_bytes, timeout_ms=excluded.timeout_ms,
-               secret_reference=excluded.secret_reference, background=excluded.background,
-               glossary_json=excluded.glossary_json",
+            "INSERT INTO translation_profile(singleton, profile_json) VALUES(1, ?1)
+             ON CONFLICT(singleton) DO UPDATE SET profile_json=excluded.profile_json",
+            [encoded],
+        )?;
+        Ok(())
+    }
+
+    pub fn translation_profile(&self) -> Result<Option<TranslationProfile>, LibraryError> {
+        let encoded: Option<String> = self
+            .connection
+            .query_row(
+                "SELECT profile_json FROM translation_profile WHERE singleton=1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        encoded
+            .map(|value| serde_json::from_str(&value).map_err(|_| LibraryError::Settings))
+            .transpose()
+    }
+
+    pub fn clear_translation_profile(&mut self) -> Result<(), LibraryError> {
+        self.connection
+            .execute("DELETE FROM translation_profile WHERE singleton=1", [])?;
+        Ok(())
+    }
+
+    pub fn install_verified_plugin(
+        &mut self,
+        verified: &VerifiedPluginInstall,
+    ) -> Result<(), LibraryError> {
+        let record = verified.record();
+        let descriptor = record.descriptor();
+        descriptor
+            .validate()
+            .map_err(|_| LibraryError::PluginDescriptor)?;
+        validate_location(&record.location)?;
+        let capabilities =
+            serde_json::to_string(&record.capabilities).map_err(|_| LibraryError::Serialization)?;
+        let supported_formats = serde_json::to_string(&record.supported_formats)
+            .map_err(|_| LibraryError::Serialization)?;
+        self.connection.execute(
+            "INSERT INTO plugin_installation(
+                plugin_id, family_id, location, abi_fingerprint, version,
+                capabilities_json, supported_formats_json, installed_at_unix_ms)
+             VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             ON CONFLICT(plugin_id) DO UPDATE SET
+                family_id=excluded.family_id,
+                location=excluded.location,
+                abi_fingerprint=excluded.abi_fingerprint,
+                version=excluded.version,
+                capabilities_json=excluded.capabilities_json,
+                supported_formats_json=excluded.supported_formats_json,
+                installed_at_unix_ms=excluded.installed_at_unix_ms",
             params![
-                profile.profile_id,
-                profile.endpoint_kind,
-                profile.endpoint,
-                profile.protocol,
-                profile.model,
-                profile.target_language,
-                profile.context_sentences,
-                profile.body_limit_bytes,
-                timeout_ms,
-                profile.secret_reference,
-                profile.background,
-                glossary,
+                record.plugin_id,
+                record.family_id,
+                record.location,
+                record.abi_fingerprint,
+                record.version,
+                capabilities,
+                supported_formats,
+                record.installed_at_unix_ms,
             ],
         )?;
         Ok(())
     }
 
-    pub fn translation_profile(&self) -> Result<Option<TranslationProfileRecord>, LibraryError> {
-        let raw: Option<TranslationProfileRow> = self
-            .connection
-            .query_row(
-                "SELECT profile_id, endpoint_kind, endpoint, protocol, model, target_language,
-                    context_sentences, body_limit_bytes, timeout_ms, secret_reference, background,
-                    glossary_json FROM translation_profile WHERE singleton=1",
-                [],
-                |row| {
-                    Ok((
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
-                        row.get(4)?,
-                        row.get(5)?,
-                        row.get(6)?,
-                        row.get(7)?,
-                        row.get(8)?,
-                        row.get(9)?,
-                        row.get(10)?,
-                        row.get(11)?,
-                    ))
-                },
-            )
-            .optional()?;
-        raw.map(
-            |(
-                profile_id,
-                endpoint_kind,
-                endpoint,
-                protocol,
-                model,
-                target_language,
-                context_sentences,
-                body_limit_bytes,
-                timeout_ms,
-                secret_reference,
-                background,
-                glossary_json,
-            )| {
-                let glossary = serde_json::from_str(&glossary_json)
-                    .map_err(|_| LibraryError::InvalidSymbol("translation_glossary".into()))?;
-                Ok(TranslationProfileRecord {
-                    profile_id,
-                    endpoint_kind,
-                    endpoint,
-                    protocol,
-                    model,
-                    target_language,
-                    context_sentences,
-                    body_limit_bytes,
-                    timeout_ms: u64::try_from(timeout_ms).map_err(|_| {
-                        LibraryError::InvalidSymbol("translation_timeout_ms".into())
-                    })?,
-                    secret_reference,
-                    background,
-                    glossary,
-                })
-            },
-        )
-        .transpose()
+    pub fn list_installed_plugins(&self) -> Result<Vec<PluginInstallRecord>, LibraryError> {
+        let mut statement = self.connection.prepare(
+            "SELECT plugin_id, family_id, location, abi_fingerprint, version,
+                    capabilities_json, supported_formats_json, installed_at_unix_ms
+             FROM plugin_installation ORDER BY plugin_id",
+        )?;
+        let rows = statement.query_map([], |row| {
+            let capabilities_json: String = row.get(5)?;
+            let capabilities = serde_json::from_str(&capabilities_json).map_err(|_| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    5,
+                    rusqlite::types::Type::Text,
+                    Box::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "capabilities",
+                    )),
+                )
+            })?;
+            let formats_json: String = row.get(6)?;
+            let supported_formats = serde_json::from_str(&formats_json).map_err(|_| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    6,
+                    rusqlite::types::Type::Text,
+                    Box::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "supported formats",
+                    )),
+                )
+            })?;
+            Ok(PluginInstallRecord {
+                plugin_id: row.get(0)?,
+                family_id: row.get(1)?,
+                location: row.get(2)?,
+                abi_fingerprint: row.get(3)?,
+                version: row.get(4)?,
+                capabilities,
+                supported_formats,
+                installed_at_unix_ms: row.get(7)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(LibraryError::from)
+    }
+
+    pub fn remove_plugin(&mut self, plugin_id: &str) -> Result<bool, LibraryError> {
+        validate_id(plugin_id)?;
+        Ok(self.connection.execute(
+            "DELETE FROM plugin_installation WHERE plugin_id=?1",
+            [plugin_id],
+        )? > 0)
     }
 }
 
-fn case_record_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CaseRecord> {
-    Ok(CaseRecord {
-        case_identity: row.get(0)?,
-        source_id: row.get(1)?,
-        relative_path: row.get(2)?,
-        content_hash: row.get(3)?,
-        modified_ns: row.get(4)?,
-        byte_size: row.get(5)?,
-        title: row.get(6)?,
-        family_override: row.get(7)?,
+fn game_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<GameRecord> {
+    Ok(GameRecord {
+        game_id: row.get(0)?,
+        title: row.get(1)?,
+        user_title: row.get(2)?,
+        location: row.get(3)?,
+        family_id: row.get(4)?,
+        content_fingerprint: row.get(5)?,
+        added_at_unix_ms: row.get(6)?,
     })
 }
 
-pub(crate) fn validate_symbol(value: &str) -> Result<(), LibraryError> {
-    if value.is_empty()
-        || value.len() > 128
-        || !value
+fn validate_game(game: &GameRecord) -> Result<(), LibraryError> {
+    validate_id(&game.game_id)?;
+    validate_title(&game.title)?;
+    if let Some(user_title) = &game.user_title {
+        validate_title(user_title)?;
+    }
+    validate_location(&game.location)?;
+    if let Some(family_id) = &game.family_id {
+        validate_id(family_id)?;
+    }
+    if game
+        .content_fingerprint
+        .as_deref()
+        .is_some_and(|value| value.is_empty() || value.len() > 256 || value.contains('\0'))
+    {
+        return Err(LibraryError::InvalidId);
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_id(value: &str) -> Result<(), LibraryError> {
+    if !is_safe_identifier(value) {
+        return Err(LibraryError::InvalidId);
+    }
+    Ok(())
+}
+
+fn is_safe_identifier(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
             .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-' | b':'))
-    {
-        return Err(LibraryError::InvalidSymbol(value.to_owned()));
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_' | b':'))
+}
+
+fn validate_title(value: &str) -> Result<(), LibraryError> {
+    if value.trim().is_empty() || value.chars().count() > MAX_TITLE_CHARS || value.contains('\0') {
+        return Err(LibraryError::InvalidTitle);
     }
     Ok(())
 }
 
-pub(crate) fn validate_relative_path(value: &str) -> Result<(), LibraryError> {
-    if value.is_empty()
-        || value.len() > 4096
-        || value.starts_with('/')
-        || value.starts_with('\\')
-        || value.contains(':')
-        || value
-            .split(['/', '\\'])
-            .any(|part| part.is_empty() || part == "." || part == "..")
-    {
-        return Err(LibraryError::InvalidRelativePath(value.to_owned()));
+fn validate_location(value: &str) -> Result<(), LibraryError> {
+    if value.is_empty() || value.len() > MAX_LOCATION_BYTES || value.contains('\0') {
+        return Err(LibraryError::InvalidLocation);
     }
     Ok(())
 }
 
-/// Shared test helpers reused across core module tests (library, play record,
-/// compatibility cache). Keeps scan-based seeding in one place.
-#[cfg(test)]
-pub(crate) mod tests_support {
-    use super::*;
-
-    pub(crate) fn open_library() -> Library {
-        Library::in_memory().unwrap()
+pub(crate) fn validate_metadata(value: &str) -> Result<(), LibraryError> {
+    if value.is_empty() || value.len() > MAX_METADATA_BYTES || value.contains('\0') {
+        return Err(LibraryError::InvalidMetadata);
     }
+    Ok(())
+}
 
-    /// Scan a single case into the library and return its derived work id.
-    pub(crate) fn seed_case(library: &mut Library, case_identity: &str) -> String {
-        library
-            .upsert_grant(&SourceGrant {
-                source_id: "grant-1".into(),
-                alias: "grant-1".into(),
-                platform_token: "opaque".into(),
-                token_kind: "desktop-bookmark".into(),
-                active: true,
-            })
-            .unwrap();
-        library
-            .apply_scan(
-                "grant-1",
-                &[ScanCandidate {
-                    source_id: "grant-1".into(),
-                    relative_path: format!("{case_identity}/start.hcb"),
-                    case_identity: case_identity.into(),
-                    content_hash: format!("hash-{case_identity}"),
-                    modified_ns: 1,
-                    byte_size: 2,
-                    title: case_identity.into(),
-                }],
-                &CancellationToken::default(),
-            )
-            .unwrap();
-        library
-            .work_for_case(case_identity)
-            .unwrap()
-            .expect("work row must exist after scan")
-            .work_id
-    }
+pub(crate) fn validate_provider(value: &str) -> Result<(), LibraryError> {
+    validate_id(value)
+}
 
-    /// Link an external identity to a work (manual provenance).
-    pub(crate) fn link_identity(library: &Library, work_id: &str, provider: &str, remote_id: &str) {
-        library
-            .connection
-            .execute(
-                "INSERT INTO external_identity(
-                     work_id, provider, remote_id, provenance, verified_at_unix_ms)
-                 VALUES(?1, ?2, ?3, 'manual', 0)",
-                rusqlite::params![work_id, provider, remote_id],
-            )
-            .unwrap();
+pub(crate) fn validate_remote_id(value: &str) -> Result<(), LibraryError> {
+    if value.is_empty() || value.len() > 256 || value.contains('\0') {
+        return Err(LibraryError::InvalidId);
     }
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::family::{
+        FamilyCapability, FamilyPluginDescriptor, INDEPENDENT_FAMILY_ABI_FINGERPRINT,
+    };
+    use crate::input_mapping::default_vn_preset;
 
-    fn grant(source_id: &str) -> SourceGrant {
-        SourceGrant {
-            source_id: source_id.into(),
-            alias: source_id.into(),
-            platform_token: "opaque".into(),
-            token_kind: "desktop-bookmark".into(),
-            active: true,
-        }
-    }
-
-    fn candidate(source_id: &str, case_identity: &str, relative_path: &str) -> ScanCandidate {
-        ScanCandidate {
-            source_id: source_id.into(),
-            relative_path: relative_path.into(),
-            case_identity: case_identity.into(),
-            content_hash: format!("hash-{case_identity}"),
-            modified_ns: 1,
-            byte_size: 2,
-            title: case_identity.into(),
+    fn game(id: &str, location: &str) -> GameRecord {
+        GameRecord {
+            game_id: id.into(),
+            title: id.into(),
+            user_title: None,
+            location: location.into(),
+            family_id: Some("fvp".into()),
+            content_fingerprint: None,
+            added_at_unix_ms: 1,
         }
     }
 
     #[test]
-    fn cancelled_scan_rolls_back_transaction() {
+    fn new_schema_stores_games_and_manager_settings() {
         let mut library = Library::in_memory().unwrap();
-        library.upsert_grant(&grant("grant-1")).unwrap();
-        let cancellation = CancellationToken::default();
-        cancellation.cancel();
-        assert!(matches!(
-            library.apply_scan("grant-1", &[], &cancellation),
-            Err(LibraryError::Cancelled)
-        ));
-    }
-
-    #[test]
-    fn full_scan_removes_stale_cases_and_lists_current_records() {
-        let mut library = Library::in_memory().unwrap();
-        library.upsert_grant(&grant("grant-1")).unwrap();
-        let cancellation = CancellationToken::default();
-        let first = library
-            .apply_scan(
-                "grant-1",
-                &[
-                    candidate("grant-1", "case-a", "a/start.hcb"),
-                    candidate("grant-1", "case-b", "b/start.hcb"),
-                ],
-                &cancellation,
-            )
-            .unwrap();
-        assert_eq!((first.inserted, first.removed), (2, 0));
-
-        let second = library
-            .apply_scan(
-                "grant-1",
-                &[candidate("grant-1", "case-b", "b/start.hcb")],
-                &cancellation,
-            )
-            .unwrap();
-        assert_eq!((second.unchanged, second.removed), (1, 1));
-        let cases = library.list_cases().unwrap();
-        assert_eq!(cases.len(), 1);
-        assert_eq!(cases[0].case_identity, "case-b");
-    }
-
-    #[test]
-    fn duplicate_identity_across_grants_is_blocking_and_transactional() {
-        let mut library = Library::in_memory().unwrap();
-        library.upsert_grant(&grant("grant-1")).unwrap();
-        library.upsert_grant(&grant("grant-2")).unwrap();
-        let cancellation = CancellationToken::default();
+        assert!(library.list_games().unwrap().is_empty());
         library
-            .apply_scan(
-                "grant-1",
-                &[candidate("grant-1", "same-case", "a/start.hcb")],
-                &cancellation,
-            )
+            .add_game(&game("game-a", "user-selected-location"))
             .unwrap();
-        assert!(matches!(
-            library.apply_scan(
-                "grant-2",
-                &[candidate("grant-2", "same-case", "b/start.hcb")],
-                &cancellation,
-            ),
-            Err(LibraryError::DuplicateCaseIdentity(id)) if id == "same-case"
-        ));
-        assert_eq!(library.list_cases().unwrap()[0].source_id, "grant-1");
+        assert_eq!(
+            library.game("game-a").unwrap().unwrap().display_title(),
+            "game-a"
+        );
+        library.save_input_mapping(&default_vn_preset()).unwrap();
+        assert!(library.load_input_mapping().unwrap().is_some());
+        library.set_filter_preset("none").unwrap();
+        assert_eq!(library.filter_preset().unwrap().as_deref(), Some("none"));
     }
 
     #[test]
-    fn version_one_database_migrates_transactionally_through_translation_profile() {
+    fn old_schema_is_rebuilt_without_migration() {
         let connection = Connection::open_in_memory().unwrap();
         connection
-            .execute_batch(
-                "CREATE TABLE source_grant (
-                    source_id TEXT PRIMARY KEY NOT NULL,
-                    alias TEXT NOT NULL,
-                    platform_token TEXT NOT NULL,
-                    token_kind TEXT NOT NULL,
-                    active INTEGER NOT NULL CHECK(active IN (0, 1))
-                 );
-                 CREATE TABLE library_case (
-                    case_identity TEXT PRIMARY KEY NOT NULL,
-                    source_id TEXT NOT NULL REFERENCES source_grant(source_id) ON DELETE RESTRICT,
-                    relative_path TEXT NOT NULL,
-                    content_hash TEXT NOT NULL,
-                    modified_ns INTEGER NOT NULL,
-                    byte_size INTEGER NOT NULL CHECK(byte_size >= 0),
-                    title TEXT NOT NULL,
-                    family_override TEXT,
-                    UNIQUE(source_id, relative_path)
-                 );
-                 PRAGMA user_version=1;",
-            )
+            .execute_batch("CREATE TABLE source_grant(source_id TEXT); PRAGMA user_version=11;")
             .unwrap();
         let library = Library::from_connection(connection).unwrap();
-        let version: i64 = library
-            .connection
-            .pragma_query_value(None, "user_version", |row| row.get(0))
-            .unwrap();
-        assert_eq!(version, 11);
-        let table_count: i64 = library
-            .connection
-            .query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type='table'
-                 AND name IN ('cover_cache', 'source_diagnostic', 'case_runtime_profile',
-                    'translation_profile', 'play_session', 'compatibility_entry_cache',
-                    'compatibility_sync_state', 'input_settings', 'work_settings',
-                    'vn_release', 'case_release')",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(table_count, 11);
+        assert_eq!(library.user_table_count().unwrap(), REQUIRED_TABLES.len());
+        assert!(library.list_games().unwrap().is_empty());
     }
 
     #[test]
-    fn input_mapping_round_trips_through_the_library() {
+    fn duplicate_locations_are_rejected_and_native_location_is_untouched() {
         let mut library = Library::in_memory().unwrap();
-        assert!(library.load_input_mapping().unwrap().is_none());
-        let mapping = crate::input_mapping::default_vn_preset();
-        library.save_input_mapping(&mapping).unwrap();
-        let loaded = library.load_input_mapping().unwrap().unwrap();
-        assert_eq!(loaded, mapping);
-        // Saving again overwrites the singleton row.
-        let mut changed = mapping.clone();
-        changed.gamepad_enabled = false;
-        library.save_input_mapping(&changed).unwrap();
-        let loaded = library.load_input_mapping().unwrap().unwrap();
-        assert_eq!(loaded, changed);
+        library.add_game(&game("game-a", "same-location")).unwrap();
+        assert!(library.add_game(&game("game-b", "same-location")).is_err());
+        assert!(library.remove_game("game-a").unwrap());
+        assert!(library.game("game-a").unwrap().is_none());
     }
 
     #[test]
-    fn work_settings_round_trip_and_clear() {
+    fn only_verified_descriptor_can_be_persisted() {
         let mut library = Library::in_memory().unwrap();
-        scan_case(&mut library, "case-a");
-        let work_id = work_id_for(&library, "case-a");
-        assert!(library.work_settings(&work_id).unwrap().is_none());
-        let settings = crate::work_settings::WorkSettings {
-            input_mapping: Some(crate::input_mapping::default_vn_preset()),
-            filter_preset: Some("crt-soft".into()),
-            patch_mode: None,
-            ..Default::default()
+        let descriptor = FamilyPluginDescriptor {
+            family_id: "fvp".into(),
+            plugin_id: "astra.emu.fvp".into(),
+            abi_fingerprint: INDEPENDENT_FAMILY_ABI_FINGERPRINT.into(),
+            version: "1.0.0".into(),
+            capabilities: vec![FamilyCapability::CpuFrame],
+            supported_formats: vec!["fvp.hcb".into()],
         };
-        library.set_work_settings(&work_id, &settings).unwrap();
-        let loaded = library.work_settings(&work_id).unwrap().unwrap();
-        assert_eq!(loaded, settings);
-        library.clear_work_settings(&work_id).unwrap();
-        assert!(library.work_settings(&work_id).unwrap().is_none());
-    }
-
-    #[test]
-    fn current_schema_repairs_legacy_windows_unsafe_case_identity_on_initial_migration() {
-        let mut library = Library::in_memory().unwrap();
-        library.upsert_grant(&grant("grant-1")).unwrap();
-        let expected = format!(
-            "case-{}",
-            &Hash256::from_sha256(b"grant-1\0game/start.hcb").to_hex()[..32]
+        let verified = VerifiedPluginInstall::from_verified_descriptor(
+            descriptor,
+            "selected-plugin.dll".into(),
+            10,
+        )
+        .unwrap();
+        library.install_verified_plugin(&verified).unwrap();
+        let records = library.list_installed_plugins().unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(
+            records[0].abi_fingerprint,
+            INDEPENDENT_FAMILY_ABI_FINGERPRINT
         );
-        library
-            .apply_scan(
-                "grant-1",
-                &[candidate(
-                    "grant-1",
-                    "case-sha256:0123456789012345678",
-                    "game/start.hcb",
-                )],
-                &CancellationToken::default(),
-            )
-            .unwrap();
-        assert_eq!(library.list_cases().unwrap()[0].case_identity, expected);
-    }
-
-    #[test]
-    fn translation_profile_round_trips_without_secret_value() {
-        let mut library = Library::in_memory().unwrap();
-        let profile = TranslationProfileRecord {
-            profile_id: "ecnu.default".into(),
-            endpoint_kind: "ecnu".into(),
-            endpoint: "https://chat.ecnu.edu.cn/open/api/v1".into(),
-            protocol: "responses".into(),
-            model: "example-model".into(),
-            target_language: "zh-CN".into(),
-            context_sentences: 10,
-            body_limit_bytes: 16 * 1024,
-            timeout_ms: 30_000,
-            secret_reference: "ecnu.default".into(),
-            background: Some("sanitized background".into()),
-            glossary: vec![("Alice".into(), "爱丽丝".into())],
-        };
-        library.set_translation_profile(&profile).unwrap();
-        assert_eq!(library.translation_profile().unwrap(), Some(profile));
-    }
-
-    fn scan_case(library: &mut Library, case_identity: &str) {
-        library.upsert_grant(&grant("grant-1")).unwrap();
-        library
-            .apply_scan(
-                "grant-1",
-                &[candidate("grant-1", case_identity, "game/start.hcb")],
-                &CancellationToken::default(),
-            )
-            .unwrap();
-    }
-
-    fn work_id_for(library: &Library, case_identity: &str) -> String {
-        library
-            .work_for_case(case_identity)
-            .unwrap()
-            .expect("work row must exist after scan")
-            .work_id
-    }
-
-    #[test]
-    fn play_session_records_duration_and_aggregates_stats() {
-        let mut library = Library::in_memory().unwrap();
-        scan_case(&mut library, "case-a");
-        let work_id = work_id_for(&library, "case-a");
-
-        let session = library.start_play_session("case-a", 1_000).unwrap();
-        // Active session is not counted in settled stats.
-        assert_eq!(library.play_stats(&work_id).unwrap().session_count, 0);
-
-        library.end_play_session(&session, 6_000, "leave").unwrap();
-        let stats = library.play_stats(&work_id).unwrap();
-        assert_eq!(stats.total_duration_ms, 5_000);
-        assert_eq!(stats.session_count, 1);
-        assert_eq!(stats.last_played_unix_ms, Some(1_000));
-
-        let history = library.session_history(&work_id).unwrap();
-        assert_eq!(history.len(), 1);
-        assert_eq!(history[0].duration_ms, 5_000);
-        assert_eq!(history[0].ended_by, "leave");
-    }
-
-    #[test]
-    fn end_play_session_is_idempotent_and_clamps_negative_duration() {
-        let mut library = Library::in_memory().unwrap();
-        scan_case(&mut library, "case-a");
-        let work_id = work_id_for(&library, "case-a");
-
-        let session = library.start_play_session("case-a", 10_000).unwrap();
-        library.end_play_session(&session, 9_000, "leave").unwrap();
-        assert_eq!(library.play_stats(&work_id).unwrap().total_duration_ms, 0);
-
-        // Second end with a later timestamp must not overwrite the first.
-        library
-            .end_play_session(&session, 99_000, "shutdown")
-            .unwrap();
-        let history = library.session_history(&work_id).unwrap();
-        assert_eq!(history[0].ended_by, "leave");
-        assert_eq!(history[0].duration_ms, 0);
-
-        // Ending an unknown session is a no-op.
-        library
-            .end_play_session("psess-doesnotexist", 1, "leave")
-            .unwrap();
-    }
-
-    #[test]
-    fn settle_abandoned_sessions_closes_active_sessions_as_crash() {
-        let mut library = Library::in_memory().unwrap();
-        scan_case(&mut library, "case-a");
-        let work_id = work_id_for(&library, "case-a");
-
-        library.start_play_session("case-a", 1_000).unwrap();
-        assert_eq!(library.settle_abandoned_sessions(2_000).unwrap(), 1);
-        // Idempotent: nothing left active.
-        assert_eq!(library.settle_abandoned_sessions(3_000).unwrap(), 0);
-
-        let history = library.session_history(&work_id).unwrap();
-        assert_eq!(history[0].ended_by, "crash");
-        assert_eq!(history[0].duration_ms, 0);
-        assert_eq!(history[0].end_unix_ms, Some(2_000));
-    }
-
-    #[test]
-    fn recent_works_orders_by_last_played_desc() {
-        let mut library = Library::in_memory().unwrap();
-        library.upsert_grant(&grant("grant-1")).unwrap();
-        library
-            .apply_scan(
-                "grant-1",
-                &[
-                    candidate("grant-1", "case-a", "a/start.hcb"),
-                    candidate("grant-1", "case-b", "b/start.hcb"),
-                ],
-                &CancellationToken::default(),
-            )
-            .unwrap();
-
-        let first = library.start_play_session("case-a", 1_000).unwrap();
-        library.end_play_session(&first, 2_000, "leave").unwrap();
-        let second = library.start_play_session("case-b", 5_000).unwrap();
-        library.end_play_session(&second, 6_000, "leave").unwrap();
-
-        let recent = library.recent_works(10).unwrap();
-        assert_eq!(recent.len(), 2);
-        assert_eq!(recent[0].work_id, work_id_for(&library, "case-b"));
-        assert_eq!(recent[1].work_id, work_id_for(&library, "case-a"));
-        assert_eq!(recent[0].total_duration_ms, 1_000);
-
-        // Limit is respected.
-        assert_eq!(library.recent_works(1).unwrap().len(), 1);
+        assert_eq!(records[0].supported_formats, vec!["fvp.hcb"]);
     }
 }

@@ -994,30 +994,16 @@ dependencies = [
 name = "astra-emu-manager-core"
 version = "0.1.0"
 dependencies = [
- "abi_stable",
- "astra-byte-source",
- "astra-core",
- "astra-emu-extension-api",
- "astra-emu-family-api",
  "astra-emu-fvp",
- "astra-media-core",
- "astra-plugin",
- "astra-plugin-abi",
- "astra-runtime",
- "ed25519-dalek",
- "hex",
- "libloading 0.8.9",
- "mlua",
- "postcard",
+ "astra-emu-translation-openai-compatible",
  "rusqlite",
  "schemars",
  "serde",
  "serde_json",
- "sha2 0.10.9",
  "tempfile",
  "thiserror 1.0.69",
  "tracing",
- "windows-sys 0.61.2",
+ "uuid",
 ]
 
 [[package]]

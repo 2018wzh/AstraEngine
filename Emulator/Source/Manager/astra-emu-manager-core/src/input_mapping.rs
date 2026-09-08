@@ -1,11 +1,11 @@
 //! Configurable device-to-key input mapping.
 //!
-//! With the ABI v5 key-name input contract, the Manager owns a generic
-//! remapping layer: every device input (gamepad button, stick direction,
-//! trigger) is translated to a canonical key name before it is queued to the
-//! family runtime. [`InputMapping`] is the persisted, user-editable mapping;
-//! [`default_vn_preset`] provides a general-purpose visual-novel layout that
-//! works for engines without native gamepad support.
+//! The Manager owns a generic remapping layer: every device input (gamepad
+//! button, stick direction, trigger) is translated to a canonical key name
+//! before it is passed to the active Family. [`InputMapping`] is the
+//! persisted, user-editable mapping; [`default_vn_preset`] provides a
+//! general-purpose visual-novel layout for engines without native gamepad
+//! support.
 
 use std::collections::BTreeMap;
 
@@ -185,12 +185,9 @@ impl GamepadDeadzone {
     }
 }
 
-/// Device-to-key input mapping.
-///
-/// `gamepad` maps each configured gamepad input to a canonical ABI key name
-/// (see `astra_emu_family_api::input_key`). Inputs absent from the map are
-/// ignored. `gamepad_enabled` gates the whole gamepad pump; `deadzone` tunes
-/// stick hysteresis.
+/// Device-to-key input mapping. Inputs absent from the map are ignored.
+/// `gamepad_enabled` gates the gamepad pump; `deadzone` tunes stick
+/// hysteresis. Key names are validated by the selected Family.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct InputMapping {
     pub gamepad_enabled: bool,

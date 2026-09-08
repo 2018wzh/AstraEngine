@@ -1,80 +1,58 @@
-//! Per-game settings overrides.
-//!
-//! A work (VN title) may override a subset of the global Manager settings.
-//! Every field is optional: `None` means "inherit the global value". The
-//! overrides are persisted as JSON in the `work_settings` table and resolved
-//! on top of the global settings when a game launches.
-
-use std::collections::BTreeMap;
+//! Per-game overrides for settings owned by the Manager.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::input_mapping::InputMapping;
 
-/// Per-game settings overrides. `None` fields inherit the global settings.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct WorkSettings {
-    /// Per-game device-to-key input mapping override.
+#[serde(deny_unknown_fields)]
+pub struct GameSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_mapping: Option<InputMapping>,
-    /// Per-game filter preset override.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub filter_preset: Option<String>,
-    /// Per-game patch mode override.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub patch_mode: Option<String>,
-    /// Generic Family options override (e.g. fvp.nls). Validated against
-    /// `family_config_schema(family_id)`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub family_options: Option<BTreeMap<String, String>>,
-    /// Generic Extension options override (e.g. translate.*). Validated against
-    /// `extension_config_schema(extension_id)`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub extension_options: Option<BTreeMap<String, String>>,
+    pub translation_enabled: Option<bool>,
 }
 
-impl WorkSettings {
-    /// Whether no override is set at all.
+impl GameSettings {
     pub fn is_empty(&self) -> bool {
         self.input_mapping.is_none()
             && self.filter_preset.is_none()
-            && self.patch_mode.is_none()
-            && self.family_options.is_none()
-            && self.extension_options.is_none()
+            && self.translation_enabled.is_none()
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        if self
+            .filter_preset
+            .as_deref()
+            .is_some_and(|preset| preset.is_empty() || preset.len() > 128)
+        {
+            return Err("filter preset is invalid".into());
+        }
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::input_mapping::default_vn_preset;
 
     #[test]
-    fn empty_by_default_and_round_trips() {
-        let settings = WorkSettings::default();
+    fn empty_settings_round_trip() {
+        let settings = GameSettings::default();
         assert!(settings.is_empty());
-        let json = serde_json::to_string(&settings).unwrap();
-        let restored: WorkSettings = serde_json::from_str(&json).unwrap();
-        assert_eq!(restored, settings);
+        let encoded = serde_json::to_string(&settings).unwrap();
+        assert_eq!(
+            serde_json::from_str::<GameSettings>(&encoded).unwrap(),
+            settings
+        );
     }
 
     #[test]
-    fn input_mapping_override_round_trips() {
-        let settings = WorkSettings {
-            input_mapping: Some(default_vn_preset()),
-            ..WorkSettings::default()
-        };
-        assert!(!settings.is_empty());
-        let json = serde_json::to_string(&settings).unwrap();
-        let restored: WorkSettings = serde_json::from_str(&json).unwrap();
-        assert_eq!(restored, settings);
-        assert!(restored.input_mapping.is_some());
-    }
-
-    #[test]
-    fn absent_fields_deserialize_as_none() {
-        let restored: WorkSettings = serde_json::from_str("{}").unwrap();
-        assert!(restored.is_empty());
+    fn unknown_fields_are_rejected() {
+        let result = serde_json::from_str::<GameSettings>(r#"{"old_patch_mode":"safe"}"#);
+        assert!(result.is_err());
     }
 }
