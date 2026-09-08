@@ -994,7 +994,8 @@ dependencies = [
 name = "astra-emu-manager-core"
 version = "0.1.0"
 dependencies = [
- "astra-emu-fvp",
+ "abi_stable",
+ "astra-emu-family-api",
  "astra-emu-translation-openai-compatible",
  "rusqlite",
  "schemars",

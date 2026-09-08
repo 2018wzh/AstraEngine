@@ -8,6 +8,8 @@ license.workspace = true
 doctest = false
 
 [dependencies]
+abi_stable.workspace = true
+astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api" }
 astra-emu-translation-openai-compatible = { path = "../../Providers/astra-emu-translation-openai-compatible" }
 rusqlite.workspace = true
 schemars.workspace = true
@@ -19,4 +21,3 @@ uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
 tempfile.workspace = true
-astra-emu-fvp = { path = "../../Families/astra-emu-fvp" }

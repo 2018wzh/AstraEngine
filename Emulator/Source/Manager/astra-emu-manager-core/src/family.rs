@@ -6,7 +6,7 @@
 //! these records, validates them here, and then hands a selected candidate to
 //! the runtime host.
 
-use std::collections::BTreeMap;
+use std::collections::{btree_map::Entry, BTreeMap};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -17,8 +17,8 @@ use thiserror::Error;
 /// The Family API crate exports the same value.  Keeping the check in this
 /// policy layer means a plugin can never become selectable merely because it
 /// has a plausible family ID or a matching file extension.
-pub const INDEPENDENT_FAMILY_ABI_FINGERPRINT: &str = "astra.emu.independent_family_abi.v1";
-pub const MAX_FAMILY_ID_BYTES: usize = 128;
+pub use astra_emu_family_api::FAMILY_ABI_FINGERPRINT as INDEPENDENT_FAMILY_ABI_FINGERPRINT;
+pub const MAX_FAMILY_ID_BYTES: usize = astra_emu_family_api::MAX_SYMBOL_BYTES;
 pub const MAX_GAME_ID_BYTES: usize = 256;
 
 #[derive(
@@ -176,12 +176,13 @@ impl FamilyPluginRegistry {
         descriptor: FamilyPluginDescriptor,
     ) -> Result<(), FamilyPolicyError> {
         descriptor.validate()?;
-        if self
-            .descriptors
-            .insert(descriptor.plugin_id.clone(), descriptor)
-            .is_some()
-        {
-            return Err(FamilyPolicyError::DuplicatePlugin);
+        match self.descriptors.entry(descriptor.plugin_id.clone()) {
+            Entry::Vacant(entry) => {
+                entry.insert(descriptor);
+            }
+            Entry::Occupied(_) => {
+                return Err(FamilyPolicyError::DuplicatePlugin);
+            }
         }
         Ok(())
     }
@@ -368,6 +369,17 @@ mod tests {
         value.abi_fingerprint = INDEPENDENT_FAMILY_ABI_FINGERPRINT.into();
         value.capabilities.clear();
         assert_eq!(value.validate(), Err(FamilyPolicyError::MissingCpuFrame));
+    }
+
+    #[test]
+    fn duplicate_registration_preserves_original_descriptor() {
+        let mut registry = FamilyPluginRegistry::new();
+        registry.register(descriptor("fvp", "original")).unwrap();
+        assert_eq!(
+            registry.register(descriptor("fvp", "replacement")),
+            Err(FamilyPolicyError::DuplicatePlugin)
+        );
+        assert_eq!(registry.descriptor("fvp").unwrap().family_id, "original");
     }
 
     #[test]
