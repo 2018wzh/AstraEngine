@@ -6,31 +6,27 @@
 //! registry cannot unmap code that an active session still calls.
 
 use std::{
-    collections::BTreeMap,
     path::{Path, PathBuf},
     rc::Rc,
 };
 
 use abi_stable::{
-    abi_stability::{check_layout_compatibility_with_globals, CheckingGlobals},
-    library::{lib_header_from_raw_library, RawLibrary, RootModule},
-    sabi_types::TD_Opaque,
+    abi_stability::abi_checking::{check_layout_compatibility_with_globals, CheckingGlobals},
+    library::{lib_header_from_raw_library, RawLibrary},
+    sabi_trait::TD_Opaque,
     std_types::RString,
     StableAbi,
 };
 use astra_emu_family_api::{
-    AdvanceRequest, AdvanceResponse, AstraFamilyModuleRef, FamilyCapability as AbiCapability,
-    FamilyDescriptor as AbiDescriptor, FamilyError, FamilyModule, FamilyModuleBox,
-    FamilyOpen, FamilyProvider, FamilyResult, FamilySession, FrameConsumer, FrameConsumerBox,
-    FrameInfo, FrameView, FrameVisitor, OpenRequest, OpenResponse, ProbeReport, ProbeRequest,
-    SessionRequest,
+    AdvanceRequest, AdvanceResponse, AstraFamilyModuleRef, FamilyDescriptor as AbiDescriptor,
+    FamilyError, FamilyModuleBox, FamilyOpen, FamilyProvider, FamilyResult, FamilySession,
+    FrameConsumer, FrameConsumerBox, FrameInfo, FrameView, FrameVisitor, OpenRequest, OpenResponse,
+    ProbeReport, ProbeRequest, SessionRequest,
 };
 use thiserror::Error;
 
-use crate::family::{
-    FamilyCapability, FamilyPluginDescriptor, FamilyPluginRegistry, FamilyProbeReport,
-    FamilyProbeSelection,
-};
+use crate::family::FamilyPluginDescriptor;
+use crate::family_registry::manager_descriptor;
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum FamilyLoadError {
@@ -60,8 +56,8 @@ pub enum FamilyLoadError {
 struct LoadedModuleInner {
     module: FamilyModuleBox,
     descriptor: AbiDescriptor,
-    root: AstraFamilyModuleRef,
-    library: RawLibrary,
+    _root: AstraFamilyModuleRef,
+    _library: RawLibrary,
 }
 
 /// One dynamically loaded plugin. The `Rc` is also held by every live session.
@@ -95,10 +91,9 @@ impl LoadedFamilyPlugin {
 
         // The layout check above is the safety precondition for this call. A
         // failed initialization drops the root/module while `library` lives.
-        let root = unsafe {
-            header.init_root_module_with_unchecked_layout::<AstraFamilyModuleRef>()
-        }
-        .map_err(|_| FamilyLoadError::ModuleInitialization)?;
+        let root =
+            unsafe { header.init_root_module_with_unchecked_layout::<AstraFamilyModuleRef>() }
+                .map_err(|_| FamilyLoadError::ModuleInitialization)?;
         let module = root.service().get();
         let descriptor = module
             .descriptor()
@@ -113,8 +108,8 @@ impl LoadedFamilyPlugin {
         let inner = Rc::new(LoadedModuleInner {
             module,
             descriptor,
-            root,
-            library,
+            _root: root,
+            _library: library,
         });
         Ok(Self {
             inner,
@@ -145,7 +140,7 @@ impl FamilyProvider for LoadedFamilyPlugin {
             .probe(request)
             .into_result()
             .map_err(host_owned_error)?;
-        let Some(report) = result else {
+        let Some(report) = result.into_option() else {
             return Ok(None);
         };
         report.validate().map_err(host_owned_error)?;
@@ -252,9 +247,7 @@ impl FamilySession for LoadedFamilySession {
             )
             .into_result()
             .map_err(host_owned_error);
-        if let Err(error) = result {
-            return Err(error);
-        }
+        result?;
         if let Some(error) = callback_error.borrow_mut().take() {
             return Err(error);
         }
@@ -366,115 +359,6 @@ impl FrameConsumer for FrameForwarder {
     }
 }
 
-/// Runtime registry used by Manager and CLI. Static and dynamic providers are
-/// registered through the same descriptor validation and probe-selection path.
-pub struct FamilyProviderRegistry {
-    providers: BTreeMap<String, Box<dyn FamilyProvider>>,
-    descriptors: FamilyPluginRegistry,
-}
-
-impl Default for FamilyProviderRegistry {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl FamilyProviderRegistry {
-    pub fn new() -> Self {
-        Self {
-            providers: BTreeMap::new(),
-            descriptors: FamilyPluginRegistry::new(),
-        }
-    }
-
-    pub fn register_provider<P>(&mut self, provider: P) -> Result<(), FamilyLoadError>
-    where
-        P: FamilyProvider + 'static,
-    {
-        let descriptor = provider
-            .descriptor()
-            .map_err(|_| FamilyLoadError::Descriptor)?;
-        descriptor
-            .validate()
-            .map_err(|_| FamilyLoadError::Descriptor)?;
-        let manager = manager_descriptor(&descriptor)?;
-        let plugin_id = manager.plugin_id.clone();
-        if self.providers.contains_key(&plugin_id) {
-            return Err(FamilyLoadError::DuplicatePlugin);
-        }
-        self.descriptors
-            .register(manager)
-            .map_err(|_| FamilyLoadError::DuplicatePlugin)?;
-        self.providers.insert(plugin_id, Box::new(provider));
-        Ok(())
-    }
-
-    pub fn load_dynamic(&mut self, path: impl AsRef<Path>) -> Result<(), FamilyLoadError> {
-        self.register_provider(LoadedFamilyPlugin::load(path)?)
-    }
-
-    pub fn remove(&mut self, plugin_id: &str) -> bool {
-        self.descriptors.remove(plugin_id);
-        self.providers.remove(plugin_id).is_some()
-    }
-
-    pub fn descriptor(&self, plugin_id: &str) -> Option<&FamilyPluginDescriptor> {
-        self.descriptors.descriptor(plugin_id)
-    }
-
-    pub fn descriptors(&self) -> impl Iterator<Item = &FamilyPluginDescriptor> {
-        self.descriptors.descriptors()
-    }
-
-    pub fn probe(
-        &self,
-        request: &ProbeRequest,
-        preferred_plugin_id: Option<&str>,
-        preferred_family_id: Option<&str>,
-    ) -> Result<FamilyProbeSelection, FamilyLoadError> {
-        request.validate().map_err(|_| FamilyLoadError::Probe)?;
-        let mut reports = Vec::new();
-        for (plugin_id, provider) in &self.providers {
-            let Some(report) = provider
-                .probe(request.clone())
-                .map_err(|_| FamilyLoadError::Probe)?
-            else {
-                continue;
-            };
-            reports.push(FamilyProbeReport {
-                plugin_id: plugin_id.clone(),
-                family_id: report.family_id.to_string(),
-                game_id: report.game_id.to_string(),
-                format: report.format.to_string(),
-                confidence_permyriad: report.confidence_permyriad,
-            });
-        }
-        self.descriptors
-            .select_probe(reports, preferred_plugin_id, preferred_family_id)
-            .map_err(|_| FamilyLoadError::Policy)
-    }
-
-    pub fn open_selected(
-        &mut self,
-        candidate: &crate::family::FamilyProbeCandidate,
-        request: OpenRequest,
-    ) -> Result<FamilyOpen, FamilyLoadError> {
-        let checked = self
-            .descriptors
-            .choose_probe(
-                std::slice::from_ref(candidate),
-                &candidate.report.plugin_id,
-                &candidate.report.game_id,
-            )
-            .map_err(|_| FamilyLoadError::Policy)?;
-        let provider = self
-            .providers
-            .get_mut(&checked.report.plugin_id)
-            .ok_or(FamilyLoadError::Provider)?;
-        provider.open(request).map_err(|_| FamilyLoadError::Provider)
-    }
-}
-
 fn host_owned_error(error: FamilyError) -> FamilyError {
     FamilyError::new(error.code().to_owned(), error.message.as_str().to_owned())
 }
@@ -485,7 +369,12 @@ fn host_owned_descriptor(descriptor: AbiDescriptor) -> AbiDescriptor {
         plugin_id: descriptor.plugin_id.as_str().to_owned().into(),
         abi_fingerprint: descriptor.abi_fingerprint.as_str().to_owned().into(),
         version: descriptor.version.as_str().to_owned().into(),
-        capabilities: descriptor.capabilities.iter().copied().collect::<Vec<_>>().into(),
+        capabilities: descriptor
+            .capabilities
+            .iter()
+            .copied()
+            .collect::<Vec<_>>()
+            .into(),
         supported_formats: descriptor
             .supported_formats
             .iter()
@@ -509,110 +398,5 @@ fn host_owned_open_response(response: OpenResponse) -> OpenResponse {
         session_id: response.session_id.as_str().to_owned().into(),
         frame: response.frame,
         audio_format: response.audio_format,
-    }
-}
-
-fn manager_descriptor(
-    descriptor: &AbiDescriptor,
-) -> Result<FamilyPluginDescriptor, FamilyLoadError> {
-    let capabilities = descriptor
-        .capabilities
-        .iter()
-        .map(|capability| match capability {
-            AbiCapability::CpuFrame => FamilyCapability::CpuFrame,
-            AbiCapability::PcmAudio => FamilyCapability::PcmAudio,
-            AbiCapability::NativeSave => FamilyCapability::NativeSave,
-            AbiCapability::TextReplacement => FamilyCapability::TextReplacement,
-        })
-        .collect();
-    let result = FamilyPluginDescriptor {
-        family_id: descriptor.family_id.to_string(),
-        plugin_id: descriptor.plugin_id.to_string(),
-        abi_fingerprint: descriptor.abi_fingerprint.to_string(),
-        version: descriptor.version.to_string(),
-        capabilities,
-        supported_formats: descriptor
-            .supported_formats
-            .iter()
-            .map(ToString::to_string)
-            .collect(),
-    };
-    result.validate().map_err(|_| FamilyLoadError::Descriptor)?;
-    Ok(result)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use astra_emu_family_api::{
-        FamilyCapability as AbiCapability, FamilyDescriptor, FamilyModuleBox, FamilyResult,
-        OpenRequest, ProbeRequest,
-    };
-
-    struct ProbeProvider {
-        descriptor: FamilyDescriptor,
-        report: Option<ProbeReport>,
-    }
-
-    impl FamilyProvider for ProbeProvider {
-        fn descriptor(&self) -> FamilyResult<FamilyDescriptor> {
-            Ok(host_owned_descriptor(self.descriptor.clone()))
-        }
-
-        fn probe(&self, _request: ProbeRequest) -> FamilyResult<Option<ProbeReport>> {
-            Ok(self.report.clone().map(host_owned_probe_report))
-        }
-
-        fn open(&mut self, _request: OpenRequest) -> FamilyResult<FamilyOpen> {
-            unreachable!("probe registry test does not open sessions")
-        }
-    }
-
-    fn descriptor(plugin_id: &str, family_id: &str) -> FamilyDescriptor {
-        FamilyDescriptor {
-            family_id: family_id.into(),
-            plugin_id: plugin_id.into(),
-            abi_fingerprint: astra_emu_family_api::FAMILY_ABI_FINGERPRINT.into(),
-            version: "1.0.0".into(),
-            capabilities: vec![AbiCapability::CpuFrame].into(),
-            supported_formats: vec!["fvp.hcb".into()].into(),
-        }
-    }
-
-    fn report(family_id: &str, confidence_permyriad: u16) -> ProbeReport {
-        ProbeReport {
-            family_id: family_id.into(),
-            game_id: "game".into(),
-            format: "fvp.hcb".into(),
-            confidence_permyriad,
-        }
-    }
-
-    #[test]
-    fn static_providers_use_same_multi_probe_policy() {
-        let mut registry = FamilyProviderRegistry::new();
-        registry
-            .register_provider(ProbeProvider {
-                descriptor: descriptor("a", "fvp"),
-                report: Some(report("fvp", 8_000)),
-            })
-            .unwrap();
-        registry
-            .register_provider(ProbeProvider {
-                descriptor: descriptor("b", "fvp"),
-                report: Some(report("fvp", 9_000)),
-            })
-            .unwrap();
-        let selection = registry
-            .probe(
-                &ProbeRequest {
-                    game_path: "game".into(),
-                },
-                None,
-                None,
-            )
-            .unwrap();
-        assert!(selection.requires_user_choice());
-        assert_eq!(selection.candidates()[0].report.plugin_id, "b");
     }
 }
