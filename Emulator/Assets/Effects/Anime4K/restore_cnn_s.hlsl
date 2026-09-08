@@ -175,5 +175,3 @@ void Pass4(uint2 blockStart, uint3 threadId) {
  if(any(p>=GetOutputSize())) return;
  OUTPUT[p]=eval4(p);
 }
-
-\n

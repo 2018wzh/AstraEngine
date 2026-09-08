@@ -100,7 +100,7 @@ pub(crate) fn generate_pass_shader(
 
 pub(crate) fn uniform_size(effect: &EffectSource) -> usize {
     let raw_size = 48 + effect.parameters.len() * 4;
-    (raw_size + 15) / 16 * 16
+    raw_size.div_ceil(16) * 16
 }
 
 #[cfg(test)]

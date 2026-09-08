@@ -1,4 +1,8 @@
-use std::{collections::BTreeMap, path::Path, sync::Mutex};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
+    sync::Mutex,
+};
 use wgpu::util::DeviceExt;
 
 use super::super::{
@@ -18,12 +22,18 @@ pub(super) struct CompiledChain {
     preset: FilterPreset,
     config: FilterConfiguration,
     kind: ChainKind,
+    output_mode: OutputMode,
     scratch: Mutex<BTreeMap<(String, u32, u32), wgpu::Texture>>,
 }
 #[derive(Clone, Copy)]
 enum ChainKind {
     Single,
     Anime,
+}
+#[derive(Clone, Copy)]
+enum OutputMode {
+    Source,
+    ConfigScale,
 }
 struct CompiledPass {
     pipeline: wgpu::ComputePipeline,
@@ -122,8 +132,36 @@ impl CompiledChain {
             preset: config.preset,
             config: config.clone(),
             kind,
+            output_mode: if external_source || !matches!(config.preset, FilterPreset::Scale) {
+                OutputMode::Source
+            } else {
+                OutputMode::ConfigScale
+            },
             scratch: Mutex::new(BTreeMap::new()),
         })
+    }
+    pub(super) fn output_dimensions(
+        &self,
+        input_width: u32,
+        input_height: u32,
+    ) -> Result<(u32, u32), FilterError> {
+        if input_width == 0 || input_height == 0 {
+            return Err(FilterError::TextureDimensions);
+        }
+        match self.output_mode {
+            OutputMode::ConfigScale => {
+                FilterEngine::output_dimensions(input_width, input_height, &self.config)
+            }
+            OutputMode::Source => texture_dimensions(
+                self.stages
+                    .last()
+                    .ok_or(FilterError::Compile("effect source has no stages".into()))?,
+                "OUTPUT",
+                input_width,
+                input_height,
+                None,
+            ),
+        }
     }
     pub(super) fn apply(
         &self,
@@ -150,14 +188,42 @@ impl CompiledChain {
         {
             return Err(FilterError::TextureFormat);
         }
-        let (ow, oh) = FilterEngine::output_dimensions(input.width(), input.height(), config)?;
+        if !input.usage().contains(wgpu::TextureUsages::TEXTURE_BINDING)
+            || !output
+                .usage()
+                .contains(wgpu::TextureUsages::STORAGE_BINDING)
+        {
+            return Err(FilterError::TextureUsage);
+        }
+        let (ow, oh) = self.output_dimensions(input.width(), input.height())?;
         if output.width() != ow || output.height() != oh {
             return Err(FilterError::TextureDimensions);
         }
+        let error_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let result = self.apply_inner(device, queue, input, output, config, (ow, oh));
+        if let Some(error) = pollster::block_on(error_scope.pop()) {
+            return Err(FilterError::GpuValidation(format!(
+                "ASTRA_EMU_FILTER_WGPU_APPLY: {error}"
+            )));
+        }
+        result
+    }
+    fn apply_inner(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        input: &wgpu::Texture,
+        output: &wgpu::Texture,
+        config: &FilterConfiguration,
+        output_dimensions: (u32, u32),
+    ) -> Result<(), FilterError> {
+        let (ow, oh) = output_dimensions;
         let mut scratch = self
             .scratch
             .lock()
             .map_err(|_| FilterError::Compile("scratch resource lock poisoned".into()))?;
+        let scratch_keys = self.scratch_keys(input.width(), input.height(), ow, oh)?;
+        scratch.retain(|key, _| scratch_keys.contains(key));
         let mut current_input = input.clone();
         let mut pass_offset = 0;
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -208,8 +274,7 @@ impl CompiledChain {
                             view_formats: &[],
                         })
                     });
-                    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-                    view
+                    texture.create_view(&wgpu::TextureViewDescriptor::default())
                 };
                 names.insert(pass.output.clone(), view);
             }
@@ -347,6 +412,46 @@ impl CompiledChain {
         }
         queue.submit([encoder.finish()]);
         Ok(())
+    }
+
+    fn scratch_keys(
+        &self,
+        input_width: u32,
+        input_height: u32,
+        ow: u32,
+        oh: u32,
+    ) -> Result<BTreeSet<(String, u32, u32)>, FilterError> {
+        let mut keys = BTreeSet::new();
+        let mut stage_input = (input_width, input_height);
+        for (stage, effect) in self.stages.iter().enumerate() {
+            let pass_count = self.stage_pass_counts[stage];
+            for (index, pass) in self.passes[self.stage_pass_counts[..stage].iter().sum::<usize>()
+                ..self.stage_pass_counts[..=stage].iter().sum::<usize>()]
+                .iter()
+                .enumerate()
+            {
+                let is_last = index + 1 == pass_count;
+                let final_target = !matches!(self.kind, ChainKind::Anime) || stage == 1;
+                let dimensions = texture_dimensions(
+                    effect,
+                    &pass.output,
+                    stage_input.0,
+                    stage_input.1,
+                    if is_last && final_target {
+                        Some((ow, oh))
+                    } else {
+                        None
+                    },
+                )?;
+                if !(is_last && final_target) {
+                    keys.insert((pass.output.clone(), dimensions.0, dimensions.1));
+                }
+                if is_last && matches!(self.kind, ChainKind::Anime) && stage == 0 {
+                    stage_input = dimensions;
+                }
+            }
+        }
+        Ok(keys)
     }
 }
 

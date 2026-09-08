@@ -108,7 +108,11 @@ mod tests {
             .unwrap();
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         let anime_chain_pixels = readback(&device, &queue, &output, 34, 38);
-        assert!(anime_chain_pixels.chunks_exact(4).all(|pixel| pixel[3] == 255));
+        assert!(anime_chain_pixels
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|pixel| pixel[3] == 255));
         let anime_config = FilterConfiguration {
             preset: FilterPreset::Anime4kRestoreUpscale,
             scale: 2.0,
@@ -135,17 +139,48 @@ mod tests {
         assert_eq!(retained_pixels, anime_chain_pixels);
         let external_source =
             include_str!("../../../../../Assets/Effects/Anime4K/upscale_cnn_x2_s.hlsl");
+        let external_restore =
+            include_str!("../../../../../Assets/Effects/Anime4K/restore_cnn_s.hlsl");
+        engine
+            .reload_source(&device, external_restore, &anime_config)
+            .unwrap();
+        assert_eq!(engine.active_output_dimensions(17, 19).unwrap(), (17, 19));
+        let restore_output = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("effect-test-external-restore-output"),
+            size: wgpu::Extent3d {
+                width: 17,
+                height: 19,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        engine
+            .apply(&device, &queue, &input, &restore_output, &anime_config)
+            .unwrap();
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         engine
             .reload_source(&device, external_source, &anime_config)
             .unwrap();
+        assert_eq!(engine.active_output_dimensions(17, 19).unwrap(), (34, 38));
         engine
             .apply(&device, &queue, &input, &output, &anime_config)
             .unwrap();
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         let external_pixels = readback(&device, &queue, &output, 34, 38);
-        assert!(external_pixels.chunks_exact(4).all(|pixel| pixel[3] == 255));
         assert!(external_pixels
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|pixel| pixel[3] == 255));
+        assert!(external_pixels
+            .as_chunks::<4>()
+            .0
+            .iter()
             .any(|pixel| pixel[..3] != [0, 0, 0]));
         for pixel in [0, 33, 34 * 37, 34 * 38 - 1] {
             assert_eq!(external_pixels[pixel * 4 + 3], 255);
@@ -171,6 +206,7 @@ mod tests {
             parameters: BTreeMap::new(),
         };
         engine.reload(&device, &scale_config).unwrap();
+        assert_eq!(engine.active_output_dimensions(17, 19).unwrap(), (26, 29));
         engine
             .apply(&device, &queue, &input, &scale_output, &scale_config)
             .unwrap();

@@ -71,8 +71,12 @@ pub enum FilterError {
     CapabilityMissing,
     #[error("ASTRA_EMU_FILTER_TEXTURE_FORMAT")]
     TextureFormat,
+    #[error("ASTRA_EMU_FILTER_TEXTURE_USAGE")]
+    TextureUsage,
     #[error("ASTRA_EMU_FILTER_TEXTURE_DIMENSIONS")]
     TextureDimensions,
+    #[error("ASTRA_EMU_FILTER_WGPU_VALIDATION: {0}")]
+    GpuValidation(String),
     #[error("ASTRA_EMU_FILTER_COMPILE: {0}")]
     Compile(String),
 }
@@ -111,6 +115,24 @@ impl FilterEngine {
             return Err(FilterError::TextureDimensions);
         }
         Ok((w as u32, h as u32))
+    }
+    /// Returns the dimensions produced by the currently compiled effect.
+    ///
+    /// External format-4 sources are allowed to declare their own output
+    /// dimensions, so callers that are about to allocate a destination must
+    /// query the active chain rather than infer dimensions from the preset.
+    pub fn active_output_dimensions(
+        &self,
+        input_width: u32,
+        input_height: u32,
+    ) -> Result<(u32, u32), FilterError> {
+        if input_width == 0 || input_height == 0 {
+            return Err(FilterError::TextureDimensions);
+        }
+        self.active
+            .as_ref()
+            .map(|chain| chain.output_dimensions(input_width, input_height))
+            .unwrap_or(Ok((input_width, input_height)))
     }
     pub fn reload(
         &mut self,
@@ -169,10 +191,16 @@ impl FilterEngine {
         if matches!(config.preset, FilterPreset::None) {
             if input.format() != wgpu::TextureFormat::Rgba8Unorm
                 || output.format() != wgpu::TextureFormat::Rgba8Unorm
-                || input.width() != output.width()
-                || input.height() != output.height()
             {
                 return Err(FilterError::TextureFormat);
+            }
+            if input.width() != output.width() || input.height() != output.height() {
+                return Err(FilterError::TextureDimensions);
+            }
+            if !input.usage().contains(wgpu::TextureUsages::COPY_SRC)
+                || !output.usage().contains(wgpu::TextureUsages::COPY_DST)
+            {
+                return Err(FilterError::TextureUsage);
             }
             let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("astra.emu.effect.none-encoder"),

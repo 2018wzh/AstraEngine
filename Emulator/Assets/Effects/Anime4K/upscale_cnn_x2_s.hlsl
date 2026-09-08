@@ -200,5 +200,3 @@ void Pass5(uint2 blockStart, uint3 threadId) {
  float4 v=conv2d_last_tf.Load(int3(q,0));
  OUTPUT[p]=float4(v[c],v[c],v[c],1)+INPUT.SampleLevel(sam1,(float2(q)+0.5)*GetInputPt(),0);
 }
-
-\n
