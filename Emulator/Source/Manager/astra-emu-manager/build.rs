@@ -7,6 +7,15 @@ use std::{
 use sha2::{Digest, Sha256};
 
 fn main() {
+    for asset in [
+        "../../../Assets/Effects/dxc.lock.json",
+        "../../../Assets/Effects/Builtin/scale.hlsl",
+        "../../../Assets/Effects/Builtin/sharpen.hlsl",
+        "../../../Assets/Effects/Anime4K/restore_cnn_s.hlsl",
+        "../../../Assets/Effects/Anime4K/upscale_cnn_x2_s.hlsl",
+    ] {
+        println!("cargo:rerun-if-changed={asset}");
+    }
     let rustc = env::var_os("RUSTC").expect("ASTRA_EMU_MANAGER_BUILD_RUSTC_MISSING");
     let output = Command::new(rustc)
         .arg("-Vv")

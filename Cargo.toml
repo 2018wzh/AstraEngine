@@ -153,6 +153,7 @@ objc2-core-media = { version = "0.3.2", default-features = false }
 objc2-core-video = { version = "0.3.2", default-features = false }
 objc2-foundation = { version = "0.3.2", default-features = false }
 miette = { version = "7", features = ["fancy"] }
+naga = { version = "29", features = ["spv-in", "wgsl-out"] }
 postcard = { version = "1", features = ["alloc"] }
 proptest = "1.11.0"
 pollster = "0.4"

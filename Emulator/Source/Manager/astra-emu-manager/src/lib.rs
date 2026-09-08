@@ -3,6 +3,7 @@ mod host;
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 pub mod desktop_source;
+pub mod effects;
 pub mod family_host;
 
 extern crate self as astra_emu_manager;

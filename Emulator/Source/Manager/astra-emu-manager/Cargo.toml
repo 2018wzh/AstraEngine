@@ -36,6 +36,8 @@ tokio.workspace = true
 directories.workspace = true
 image.workspace = true
 hex.workspace = true
+naga.workspace = true
+hassle-rs = "=0.12.0"
 postcard.workspace = true
 pollster.workspace = true
 serde_json.workspace = true
