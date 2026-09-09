@@ -1,5 +1,7 @@
 # Implementation Coverage Matrix
 
+2026-09-09：独立 Host 音频源码的 8 项测试覆盖持续重采样、不规则分块、声道转换、取消唤醒、设备错误和回调跨块消费；临时测试工程的严格 Clippy 通过。完整 Manager 入口和物理设备播放尚未验证。
+
 2026-09-08：[AstraEMU 独立 Host 重构](../migrations/astraemu-independent-host.md) 已获批准，当前 `IN_PROGRESS`。本页较早的 AstraEMU RuntimeWorld、Family ABI v9、Hook、Host VFS 和统一 package/save 记录由新方案取代；不能用于宣称独立 Host 已完成。
 
 1999 原版补丁器已接入 workspace。公开测试覆盖 edition fingerprint、RIFX 资源图边界、唯一 CASt binding、script ID 大端读写、ProjectorRays hash/timeout、完整目录复制、原子清理、manifest 和发布包 hash。私有 `inspect → apply → verify` 已证明原安装目录保持只读，成品保留 `DATA/MENU.dxr` 原名，其余原文件逐项保持 hash。受控 launcher 已用 Locale Emulator Core 的 CP932/LCID `0x0411` 环境成功创建 32 位 projector，并把 Director 7 残留的 1 像素 outer frame 删除；实测 outer/client 同为 800×600，window style 为 borderless popup。标题第三按钮的完整视觉状态与路线跳转仍需形成同一轮 E3 报告，当前不计入 AstraVN Player 的 Windows E3 coverage。

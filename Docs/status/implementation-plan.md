@@ -1,5 +1,7 @@
 # Implementation Plan Status
 
+2026-09-09：独立 Host 音频执行器已合入，实际源码与真实 Family ABI 的临时测试工程通过 8 项测试和严格 Clippy。Manager 完整入口、FVP 集成及授权游戏流程仍未完成。
+
 2026-09-09：AstraEMU 旧通用 CLI、schema/evidence/E3/family-package、平台构建脚本和 iOS 宿主已移除，活动 workspace 收敛为独立 Host 所需的七个成员。Minori 核心及专用研究工具保留为 inactive 源码。下文旧 CLI/schema/report 记录属于历史；新 Host 与 FVP 的集成仍在进行。
 
 2026-09-08：[AstraEMU 独立 Host 重构](../migrations/astraemu-independent-host.md) 已获批准，当前 `IN_PROGRESS`。本页较早的 AstraEMU RuntimeWorld、Family ABI v9、Hook、Host VFS 和统一 package/save 记录由新方案取代；不能用于宣称独立 Host 已完成。

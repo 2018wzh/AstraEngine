@@ -27,7 +27,9 @@ Status: `IN_PROGRESS`
 
 ## 验证状态
 
-独立 Family ABI 的 7 个测试、Manager core 的 22 个测试和翻译服务的 12 个测试已通过，三个 crate 的严格 Clippy 检查也已通过。滤镜模块已在 GPU 上完成非均匀输入、奇数尺寸边缘和完整像素读回测试，并运行了固定版本的 Magpie 原始 Restore_S/Upscale_S 文件。外部效果尺寸处理、Slint 合成和实际游戏行为仍在集成。
+独立 Family ABI 的 7 个测试、Manager core 的 22 个测试和翻译服务的 12 个测试已通过，三个 crate 的严格 Clippy 检查也已通过。滤镜模块已在 GPU 上完成非均匀输入、奇数尺寸边缘和完整像素读回测试，并运行了固定版本的 Magpie 原始 Restore_S/Upscale_S 文件；外部效果的输出尺寸已按实际声明处理。Slint 合成和实际游戏行为仍在集成。
+
+Host 音频执行器已合入持久化重采样、跨块缓冲、取消唤醒、设备错误检查和单一有界队列。包含实际源码与真实 Family ABI 的临时测试工程通过 8 项测试和严格 Clippy；这不代表 Manager 二进制或物理音频设备已经通过测试，完整入口仍待集成。
 
 文档校验脚本已更新，235 份 Markdown 检查通过。移除 EMU 耦合后，`astra-release` 的 43 项测试通过；提交前完整检查与 Sandbox 游戏流程尚未完成。
 
