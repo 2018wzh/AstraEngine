@@ -27,6 +27,14 @@ pub struct WgpuFrameContext<'a> {
 }
 
 pub trait AstraUnderlayRenderer: 'static {
+    fn configure_filter(
+        &mut self,
+        config: &crate::effects::FilterConfiguration,
+        source: Option<&str>,
+    ) -> Result<(), String> {
+        let _ = (config, source);
+        Err("ASTRA_EMU_FILTER_RENDERER_NOT_CONFIGURED".into())
+    }
     fn setup(&mut self, context: WgpuFrameContext<'_>) -> Result<(), String>;
     fn stage_texture(&self) -> Option<wgpu::Texture> {
         None
