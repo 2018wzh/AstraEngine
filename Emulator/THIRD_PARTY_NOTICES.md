@@ -21,12 +21,19 @@
 
 发布时提供与二进制对应的 MPL-2.0 covered source、修改说明和完整许可证，可随包分发源码或提供有效的 source offer。
 
+当前 vendored source 位于 `Emulator/Source/Families/astra-emu-fvp/vendor/rfvp/`，文件级修改见该 Family 的 `MODIFICATIONS.md` 与 `THIRD_PARTY_NOTICES.md`。RFVP core 仅构建为内部使用的 `rlib`，动态插件边界由 `astra-emu-fvp` 持有。
+
 ## Noto Sans SC
 
 - Upstream: <https://github.com/google/fonts>
 - 所用字体文件随固定版本的 RFVP 源码保留，发布包包含其来源说明与完整许可证。
 - License: SIL Open Font License 1.1.
-- AstraEMU FVP 使用该字体作为跨平台、可再分发的 CJK compatibility fallback；它不冒充或再分发 Microsoft 字体。完整许可证见 `Engine/Fixtures/PublicDomainFonts/OFL-NotoSansSC.txt`。
+- AstraEMU FVP 使用该字体作为跨平台、可再分发的 CJK compatibility fallback；它不冒充或再分发 Microsoft 字体。
+- FVP 内嵌副本位于 `Emulator/Source/Families/astra-emu-fvp/vendor/rfvp/src/subsystem/resources/fonts/NotoSansSC-Variable.ttf`，随同目录的完整 `OFL.txt` 分发；副本 SHA-256 为 `a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da`。
+
+## WMV decoder
+
+FVP 使用仓库内的 `Emulator/Source/Families/na_wmv_player` 处理 ASF、WMV 和 WMA。该 crate 的跟踪历史缺少明确的来源和许可证说明，源码注释也不足以确定其许可。当前将来源和许可证记为未知，不推断为 LGPL、GPL 或 MIT；已有信息见该 crate 的 `THIRD_PARTY_NOTICES.md`。
 
 ## Anime4K
 

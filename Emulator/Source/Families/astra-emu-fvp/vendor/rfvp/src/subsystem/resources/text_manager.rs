@@ -493,7 +493,6 @@ fn system_font_dirs() -> Vec<PathBuf> {
         if let Some(windir) = std::env::var_os("WINDIR") {
             dirs.push(PathBuf::from(windir).join("Fonts"));
         }
-        dirs.push(PathBuf::from(r"C:\Windows\Fonts"));
     }
     #[cfg(target_os = "macos")]
     {

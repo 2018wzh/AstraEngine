@@ -1,46 +1,47 @@
-# RFVP Astra Family ABI v9 fork record
+# RFVP Astra Family fork record
 
-`astra-emu-fvp` consumes the RFVP fork at the exact Git revision recorded in
-`Cargo.toml`. The root workspace applies that Git source to the local
-`astra-emu-family-api` path crate, so an AstraEngine build has one Family ABI
-package identity. A standalone RFVP build resolves the same API from the pinned
-AstraEngine ABI commit and does not depend on a local absolute path or an
-environment override.
+`vendor/rfvp/` is a source snapshot of the `0.5.0` upstream commit
+`3b5ea6c96a925c12f95aef8554905e8fecbc77c3` from
+[`xmoezzz/rfvp`](https://github.com/xmoezzz/rfvp). The snapshot follows the
+`2018wzh/rfvp` hosted fork at the immutable revision
+`f4f64a5bb726c1759350a666a35e0a454b810f61`. The covered source and the complete
+MPL-2.0 text are in `vendor/rfvp/` and `vendor/rfvp/LICENSE`.
 
-The fork is based on upstream [`xmoezzz/rfvp`](https://github.com/xmoezzz/rfvp)
-0.5.0 and keeps the upstream MPL-2.0 licensing and source-offer obligations.
-The Astra hosted feature is fixed at RFVP revision
-`f4f64a5bb726c1759350a666a35e0a454b810f61`.
+The local changes to the vendored tree are limited to these areas:
 
-RFVP directly owns the `Ported + SingleLayer` Family ABI v9 provider:
+- `vendor/rfvp/Cargo.toml` removes dependencies on private Astra path crates,
+  keeps the hosted feature graph self-contained, records the local `flate2`
+  version, and builds the private RFVP core as `rlib` only. The FVP crate in
+  the parent directory is the only dynamic plugin boundary.
+- `src/host_api/audio.rs`, `src/hosted.rs`,
+  `src/audio_player/{bgm_player_host,se_player_host}.rs`, and
+  `src/no_std_core.rs` add a typed `is_playing` query and synchronize host
+  mixer completion back into RFVP's logical player state. This lets a
+  non-looping voice reach EOF without leaving a stale wait predicate.
+- `src/subsystem/resources/videoplayer_host.rs` and `src/no_std_core.rs` add a
+  typed host stop request and a completion path that clears a host-owned movie
+  without emitting a second stop operation.
+- `src/soft_render/{framebuffer,renderer}.rs` remove the private
+  `astra-byte-source` surface wrapper. Hosted rendering now exchanges a plain
+  CPU `Vec<u8>` with the FVP adapter; the adapter performs the final
+  Host-owned frame handoff.
+- `src/subsystem/resources/text_manager.rs` replaces the upstream Microsoft
+  font files with the bundled OFL-licensed Noto Sans SC font while preserving
+  RFVP's four system-font slots. The font and its license are recorded next to
+  each other under `src/subsystem/resources/fonts/`; its Windows system-font
+  scan uses the `WINDIR` environment value and has no fixed drive path.
+- `src/app.rs`, `src/rendering/gpu_prim.rs`, `src/script/context.rs`, and
+  `src/wasm_entry.rs` contain formatting-only changes from the source import.
 
-- it acquires the Host-owned writable surface before rendering and writes the
-  software renderer output into that lease without a second framebuffer path;
-- it commits `Unchanged`, rectangle, or full damage with the matching surface
-  generation;
-- it invokes the synchronous Hook at the logical text presentation point and
-  retains the original text when the Hook returns a typed failure;
-- it performs game-native persistence through the relative-path writable-file
-  Host port;
-- it produces input, wait, audio, control, and diagnostic DTOs itself.
+The AstraEngine `astra-emu-fvp/src/` files are the separate family adapter.
+They keep RFVP responsible for game state and use `NativeFileSystem` for
+relative game-file access, a direct CPU surface for frame output, the bounded
+host audio worker for mixed PCM, and the session-owned WMV playback path for
+movie duration, frame timing, and completion. The adapter does not add a
+second scene renderer, translation cache, save format, or runtime snapshot
+format.
 
-Family ABI v9 has no snapshot/restore, text lease, scene draw transaction,
-runtime content hash, or step-budget contract. The AstraEngine adapter does not
-reintroduce those APIs. The pinned fork still contains legacy hosted draw
-capture, semantic-delta, snapshot/hash and policy-limit code; that fork-side
-residue is recorded as a blocking audit in
-`Docs/emu/fvp/rfvp-fork-audit.md` and must be removed in the next fork commit.
-
-The AstraEngine `astra-emu-fvp` crate is only the dynamic-library boundary. It
-injects build identity and package metadata, constructs and shuts down the RFVP
-provider, contains panics, maps the final error, and emits boundary
-observability. It must not translate scenes, compose or copy pixels, infer
-texture generations, shape text, cache translations, implement save formats,
-or repair RFVP business state.
-
-Fork updates start from the recorded upstream base, keep changes reviewable,
-run the RFVP Astra provider tests and the AstraEngine consumer tests, and pin a
-new immutable revision. The intended full-damage pixel path remains exactly
-RFVP writing the Host lease followed by the Host upload; the current fork does
-not yet satisfy the single-path audit because its legacy capture API remains
-reachable inside the hosted core.
+The pinned RFVP source still contains historical hosted-only code that is not
+part of the v9 product contract. Its reachability audit remains in
+`Docs/emu/fvp/rfvp-fork-audit.md`; that audit is separate from the source and
+license record here.
