@@ -5,13 +5,13 @@ use std::{
 };
 
 use astra_headless_protocol::{
-    ArtifactEntry, ArtifactManifest, HEADLESS_ARTIFACT_MANIFEST_SCHEMA, RendererExecutionIdentity,
+    ArtifactEntry, ArtifactManifest, RendererExecutionIdentity, HEADLESS_ARTIFACT_MANIFEST_SCHEMA,
 };
 use astra_platform::{
     HeadlessArtifactPolicy, HeadlessArtifactRetention, HeadlessHostProfile, PlatformError,
     PlatformErrorCode,
 };
-use image::{ExtendedColorType, ImageEncoder, codecs::png::PngEncoder};
+use image::{codecs::png::PngEncoder, ExtendedColorType, ImageEncoder};
 use sha2::{Digest, Sha256};
 
 pub(crate) struct ArtifactRecorder {
