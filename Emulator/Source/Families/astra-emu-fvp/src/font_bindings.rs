@@ -83,7 +83,7 @@ fn missing_font(family_name: &str) -> FamilyError {
 mod tests {
     use super::*;
     use rfvp::subsystem::resources::text_manager::{
-        FontEnumerator, FONTFACE_MS_GOTHIC, FONTFACE_MS_MINCHO,
+        FontEnumerator, FONTFACE_CURRENT, FONTFACE_MS_GOTHIC, FONTFACE_MS_MINCHO,
     };
 
     // This is a public-domain test fixture only. Production bindings are loaded
@@ -130,6 +130,20 @@ mod tests {
         );
         assert!(fonts.get_font(FONTFACE_MS_GOTHIC).is_ok());
         assert!(fonts.get_font(FONTFACE_MS_MINCHO).is_err());
+
+        fonts.set_system_fontface_id(FONTFACE_CURRENT);
+        fonts.set_current_font_name(MS_GOTHIC);
+        let direct_gothic = fonts.get_font(FONTFACE_MS_GOTHIC).expect("Gothic face");
+        let current_gothic = fonts
+            .get_font(FONTFACE_CURRENT)
+            .expect("current Gothic face");
+        assert_eq!(
+            current_gothic.metrics('A', 16.0).advance_width,
+            direct_gothic.metrics('A', 16.0).advance_width
+        );
+
+        fonts.set_current_font_name("Unsupported face");
+        assert!(fonts.get_font(FONTFACE_CURRENT).is_err());
     }
 
     #[test]

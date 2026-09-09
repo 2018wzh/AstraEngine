@@ -1287,6 +1287,11 @@ impl FontEnumerator {
 
     fn current_font(&self) -> Result<Font> {
         let name = self.current_font_name.as_str();
+        if name.eq_ignore_ascii_case("MS Gothic")
+            || name.eq_ignore_ascii_case("\u{ff2d}\u{ff33} \u{30b4}\u{30b7}\u{30c3}\u{30af}")
+        {
+            return self.font_for_id(FONTFACE_MS_GOTHIC);
+        }
         if name.eq_ignore_ascii_case("MS Mincho") || name.eq_ignore_ascii_case("ＭＳ 明朝") {
             return self.font_for_id(FONTFACE_MS_MINCHO);
         }
@@ -1300,7 +1305,7 @@ impl FontEnumerator {
         {
             return self.font_for_id(FONTFACE_MS_PMINCHO);
         }
-        self.font_for_id(self.system_fontface_id)
+        bail!("unsupported current system font face name: {name}")
     }
 
     fn font_for_id(&self, id: i32) -> Result<Font> {
