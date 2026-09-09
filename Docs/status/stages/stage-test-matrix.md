@@ -1,5 +1,7 @@
 # Stage Test Matrix
 
+2026-09-09：AstraEMU 集成分支的 Family ABI、Manager core、翻译服务分别通过 7、22、12 项测试；联网凭据测试跳过。Headless 和 FVP 动态库构建通过，完整 workspace 与真实游戏流程仍未完成。
+
 2026-09-08：[AstraEMU 独立 Host 重构](../../migrations/astraemu-independent-host.md) 已获批准，当前 `IN_PROGRESS`。本页较早的 AstraEMU RuntimeWorld、Family ABI v9、Hook、Host VFS 和统一 package/save 记录由新方案取代；不能用于宣称独立 Host 已完成。
 
 本矩阵把 Stage 1-8 的工作项映射到测试项目。Stage 1 和 Stage 2 路径已经落在 UE 风格 workspace；Stage 3-6 仍包含未实现目标路径；Stage 7/8 是 AstraRPG planned extension，测试项先作为 `SPEC_READY` 迁移目标。

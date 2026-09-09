@@ -2,6 +2,8 @@
 
 Status: `IN_PROGRESS`
 
+2026-09-09：集成分支通过 Family ABI 7 项、Manager core 22 项和翻译服务 12 项测试，凭据相关联网测试按定义跳过；Headless 和 FVP 动态库构建通过。Manager 入口、原始字体选择及 Sandbox 游戏流程尚未完成。
+
 2026 年 9 月 8 日，用户批准 [独立 Host 重构](../../migrations/astraemu-independent-host.md)。此前 RuntimeWorld/LegacyRuntimeProvider、Family ABI v9、Extension ABI、Layer2D/Hook/VFS 相关结果不代表新 Host 已实现。本轮按普通软件开发方式实施，不新增 evidence/report 留存体系。
 
 ## 当前工作

@@ -1,5 +1,7 @@
 # Implementation Plan Status
 
+2026-09-09：集成分支通过 Family ABI 7 项、Manager core 22 项和翻译服务 12 项测试；需要真实凭据的联网测试按定义跳过。`astra-headless` 和 FVP 动态库构建通过。Manager 入口、原始字体选择、完整 workspace 检查和 Sandbox 游戏流程仍在进行。
+
 2026-09-09：独立 Host 音频执行器已合入，实际源码与真实 Family ABI 的临时测试工程通过 8 项测试和严格 Clippy。Manager 完整入口、FVP 集成及授权游戏流程仍未完成。
 
 2026-09-09：AstraEMU 旧通用 CLI、schema/evidence/E3/family-package、平台构建脚本和 iOS 宿主已移除，活动 workspace 收敛为独立 Host 所需的七个成员。Minori 核心及专用研究工具保留为 inactive 源码。下文旧 CLI/schema/report 记录属于历史；新 Host 与 FVP 的集成仍在进行。
@@ -27,7 +29,7 @@
 
 ## 当前代码快照
 
-下表中 Stage 5 的旧 v7 长段仅保留迁移前诊断。当前权威状态是 v9 consumer 已收束到 Layer2D/Hook/writable-file 主路径，正式 Performance E2、Windows E3 和完整 workspace gate 尚未关闭。
+Stage 5 的旧 v7/v9 记录仅保留迁移前诊断。当前实施边界由 ADR 0019 和独立 Host 重构方案确定。
 
 | Area | Code status | Evidence |
 | --- | --- | --- |
@@ -37,7 +39,7 @@
 | Stage 4 Editor + AI/MCP | `REOPENED_SPEC` | Editor workflow、runtime-provider-aware shell、Plugin Manager、AI provider profile、ONNX ModelBundle、Runtime Director、memory、MCP context 和 AI/MCP gate 已写入文档；`Editor/Source` 和 `Engine/Plugins/Providers/astra-ai-onnx` 尚不存在。Stage 4 因 VFS/GameRuntime contract 重开，Project Wizard、PIE、Debugger 和 Release Gate 必须读取 `RuntimeEditorMetadata`，ONNX ModelBundle、Context Pack、generated artifact 和 MCP package access 需要改为统一 VFS mount evidence |
 | Stage 6 Platform Completion | `IN_PROGRESS` | Linux、macOS host 和 packaged Player 已进入静态实现；Android 的真实 Runtime/provider Player、Vulkan/AAudio/MediaCodec/save/package/accessibility/input host services 已接通，bundle、Gradle 和 build driver 同步落地；Linux/macOS Headless portability、真实 host smoke/decode/save/resume/release evidence，以及 Android API 28/36 emulator、arm64 真机和正式同 run E3 仍 blocking；iOS 保持 `SPEC_READY` |
 | Stage 5 AstraEMU | `IN_PROGRESS` | 按 ADR 0019 重构同仓独立 Windows/FVP Host；新 ABI、Manager core、异步翻译服务和 HLSL 效果链正在实施，尚未完成集成、提交前检查和真实游戏路线 |
-> 当前身份修正：上表 Stage 5 长段以及下方 2026-08-03 至 2026-08-09 的 v5/v7、snapshot、scene delta 和 semantic hash 内容只描述迁移前历史 evidence。当前实现只接受 Family ABI v9；Family snapshot 不再存在。正式结论以 v9 Layer2D、Hook、writable-file 聚焦测试和最终 clean Release 复跑为准。
+> 历史记录说明：下方 2026-08-03 至 2026-08-09 的 v5/v7/v9、snapshot、scene delta、semantic hash、Layer2D、Hook 和 writable-file 内容描述迁移前实现，不再作为独立 Host 的契约或完成依据。
 
 > 2026-08-03 native update：同一授权输入的 4,201-step 复跑，在移除 submit 后冗余 query 后将 `media_queue` p99 从 21.95 ms 降至 16.36 ms，音频 underflow 为零。完整 `fixed_tick` Perfetto span p99 仍为 18.52 ms；原生 60 Hz gate 未通过，不能代替 10 分钟 soak 或作为修复结论。
 
