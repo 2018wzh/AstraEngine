@@ -2,7 +2,7 @@
 
 `GameRuntimeProvider` 是 packaged `Game` target 的玩法 runtime 选择层。EngineCore 仍只提供 `RuntimeWorld`、Actor/Component、StateMachine、AwaitToken、Save/Replay、Plugin、Asset/VFS、Media 和 Release Gate；具体玩法由 provider 把产品语义映射成 Runtime action、event、presentation/audio command、package section 和 release check。
 
-这个契约让 AstraVN、AstraEMU 和后续 AstraRPG 成为同级 runtime provider。AstraVN 不作为所有游戏类型的基类；它只实现 VN 语义。AstraEMU 不替换 `RuntimeWorld`；它通过 `AstraEmuRuntimeProvider` 复用 RuntimeWorld，再把旧 VM 交给 family `LegacyRuntimeProvider`。TRPG 不新增 peer provider；桌面规则书玩法落在 `AstraRpgRuntimeProvider` 的 `rpg.trpg` profile/ruleset layer。
+这个契约用于 AstraVN 和后续 AstraRPG runtime provider。AstraVN 不作为所有游戏类型的基类；它只实现 VN 语义。AstraEMU 已选择独立 Host，不再属于本契约的 runtime provider，见 [独立 Host 重构](../migrations/astraemu-independent-host.md)。TRPG 不新增 peer provider；桌面规则书玩法落在 `AstraRpgRuntimeProvider` 的 `rpg.trpg` profile/ruleset layer。
 
 ## Provider Shape
 
@@ -98,14 +98,13 @@ pub struct RuntimeEditorMetadata {
 }
 ```
 
-Editor shell 读取 metadata 后决定 Project Wizard 模板、面板可见性、Content Browser 过滤、PIE adapter、Debugger view 和 Release Gate 跳转。AstraVN 暴露 `.astra` Script、VN Graph、Timeline、System UI 和 Luau policy surface；AstraEMU 只暴露 planned case profile/probe、legacy pack VFS browser、family trace、text/translation overlay、Trusted Luau 和 FilterGraph preset；AstraRPG 暴露 planned Map、Quest、Battle/Party/Inventory、Encounter、Behavior Graph、RPG Inspector、TRPG sheet、seat 和 transcript metadata。
+Editor shell 读取 metadata 后决定 Project Wizard 模板、面板可见性、Content Browser 过滤、PIE adapter、Debugger view 和 Release Gate 跳转。AstraVN 暴露 `.astra` Script、VN Graph、Timeline、System UI 和 Luau policy surface；AstraRPG 暴露 planned Map、Quest、Battle/Party/Inventory、Encounter、Behavior Graph、RPG Inspector、TRPG sheet、seat 和 transcript metadata。AstraEMU 的资料库、插件与效果设置由独立 Slint Manager 持有。
 
 ## Peer Runtimes
 
 | Runtime provider | 产品职责 | 当前边界 |
 | --- | --- | --- |
 | `NativeVnRuntimeProvider` | `.astra` canonical story、VN Core、choice/backlog/save/read-state/voice replay、Luau policy、presentation/system UI、VN package sections 和 VN release checks | 已由 `astra-vn-runtime-provider` 落地；in-process 与 FFI 都执行真实 create/open/step/save/restore/shutdown lifecycle，session 内由 RuntimeWorld StateMachine 的 `astra.vn.step` action 推进；不成为 RPG 或 EMU 的基类 |
-| `AstraEmuRuntimeProvider` | legacy case launch、family selection、old VM step bridge、text capture、Trusted Luau patch/decode、FilterGraph preset、local case report 和 EMU release checks | 内部继续使用 family `LegacyRuntimeProvider`；family plugin 不能替换 Runtime tick、Save container 或 Release Gate |
 | `AstraRpgRuntimeProvider` | map、party、battle、inventory、quest、encounter、AI behavior、committed output、`rpg.trpg` ruleset/profile 和 RPG-specific editor metadata | planned peer runtime；TRPG 是内部 profile，不是独立 provider；没有现有实现迁移 |
 
 ## Runtime Flow

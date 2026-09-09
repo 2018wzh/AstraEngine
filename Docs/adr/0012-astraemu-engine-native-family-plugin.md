@@ -1,5 +1,8 @@
 # ADR 0012: AstraEMU engine-native family plugin
 
+Superseded：2026-09-08 被 [ADR 0019](0019-astraemu-independent-host.md) 取代。下文仅保留当时的决策背景，不是当前实现要求。
+
+
 ## Context
 
 AstraEMU 需要复用 AstraEngine Runtime、Media、Plugin 和 Release Gate。旧方案把 family core 放在独立边界，能隔离崩溃，但会形成第二套 tick、presentation、report 和 provider 管线，AstraEngine 的 StateMachine、插件诊断和 package 容器无法成为唯一验收路径。

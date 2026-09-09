@@ -168,7 +168,7 @@ pub trait ProductRuntimeProvider: StableProvider {
 }
 ```
 
-Provider 族还包括 `TextLayoutProvider`、`AudioOutputProvider`、`LuauPolicyBundleProvider`、`EditorPanelProvider`、`AiProvider`、`MCPToolProvider`、`TranslationProvider`、`VfsProvider`、`ProductRuntimeProvider`、`LegacyRuntimeProvider` 和可选 `EMUCoreBridgeProvider`。所有 trait 只传 ABI-safe value、stable id、section ref、`VfsUri` 和 capability report。Stage 3 的 AstraVN 功能 crate 负责公开 VN command、presentation command、Luau policy bundle、Graph/Timeline metadata extension id 和 `NativeVnRuntimeProvider` 绑定；`astra-vn` 只作为 Rust dylib facade 和兼容 re-export，稳定插件边界仍由 `astra-plugin-abi` 承担。
+Provider 族还包括 `TextLayoutProvider`、`AudioOutputProvider`、`LuauPolicyBundleProvider`、`EditorPanelProvider`、`AiProvider`、`MCPToolProvider`、`VfsProvider` 和 `ProductRuntimeProvider`。所有 trait 只传 ABI-safe value、stable id、section ref、`VfsUri` 和 capability report。Stage 3 的 AstraVN 功能 crate 负责公开 VN command、presentation command、Luau policy bundle、Graph/Timeline metadata extension id 和 `NativeVnRuntimeProvider` 绑定；`astra-vn` 只作为 Rust dylib facade 和兼容 re-export，稳定插件边界仍由 `astra-plugin-abi` 承担。
 
 `ProductRuntimeProvider` 的 trait 是 host/in-process 接口。跨 ABI 使用 `astra-plugin-abi` 的 `FfiRuntimeProviderRegistration` 及 typed request/result callback；不再通过 JSON、postcard 或统一 `RVec<u8>` payload 调用 provider。NativeVN FFI adapter 已实现显式 instance create/destroy 和真实 session open/step/save/restore/shutdown；活动 session 会阻断 instance destroy。
 
@@ -178,24 +178,17 @@ VFS backend provider 全部注册到同一个 `vfs_provider` slot。该 slot 允
 
 `astra-ai-onnx` provider 可以加载 package/VFS 中声明的 ORT custom op sidecar，但 sidecar 不是新的 Engine extension point。它只作为 ONNX Runtime 依赖被 provider 私有加载，必须由 ModelBundle manifest 声明平台、hash、license、加载策略和目标运行证据。sidecar 不能接收 `RuntimeWorld`、Actor 指针、Editor widget、GPU/audio native handle、provider trait object、platform file descriptor 或本地路径；需要 Engine 能力时必须另行实现普通插件/provider 并走 extension registry。
 
-`TranslationProvider` 是文本翻译专用 slot。`translate_batch` 必须实现；`translate_stream` 只在 provider capability 声明支持时使用。DeepL-style provider 可以只返回 batch 结果，LLM provider 可以 streaming 更新 AstraEMU overlay。翻译结果默认是 UI overlay 状态，不改变 Runtime replay hash。
+旧 AstraEMU 翻译 slot 与 overlay 路径已被独立 Host 的异步正文替换服务取代，不再属于本插件接口。
 
-## Legacy Runtime Provider
+## AstraEMU 独立接口
 
-```rust
-pub struct LegacyFamilyProviderRegistration {
-    pub descriptor: LegacyFamilyPluginDescriptor,
-    pub runtime: ProviderId,
-}
-```
-
-AstraEMU family plugin 使用普通 extension registry 注册，不拥有私有 loader 通道。family plugin 注册一个 `LegacyRuntimeProvider` facade；archive reader、旧脚本 VM、media bridge 和 snapshot serializer 都留在 provider session 内。`LegacyRuntimeProvider` 位于 `AstraEmuRuntimeProvider` 之下，不是新的 gameplay runtime selector。Provider 不能替换 Runtime tick、MutationLog、Save container 或 Release Gate core checks。
+AstraEMU 使用独立 Family ABI 与 Host loader，不注册 Engine extension registry。Family 负责原生 VM、媒体和存档，Host 消费最终帧与 PCM。契约见 [AstraEMU 接口](../contracts/astraemu-ipc.md)；本页的 product provider lifecycle 不适用于 Family。
 
 ## Game Runtime Provider
 
-`ProductRuntimeProvider` 是 packaged `Game` target 的玩法 runtime selector。NativeVN、AstraEMU 和后续 AstraRPG 都通过这个 slot 显式绑定；AstraVN 不作为所有玩法的基类。Provider ABI v3 的 step output 是 typed live DTO 与 control transaction；save/package/report 使用独立 persisted DTO。动态 action bytes invoke、通用 payload 与 effect envelope 已删除。
+`ProductRuntimeProvider` 是 packaged `Game` target 的玩法 runtime selector。NativeVN 和后续 AstraRPG 通过这个 slot 显式绑定；AstraVN 不作为所有玩法的基类。Provider ABI v3 的 step output 是 typed live DTO 与 control transaction；save/package/report 使用独立 persisted DTO。动态 action bytes invoke、通用 payload 与 effect envelope 已删除。
 
-`NativeVnRuntimeProvider` 包装现有 AstraVN Core、VN package sections 和 VN release checks。`AstraEmuRuntimeProvider` 包装 Manager/runtime bridge，并在内部选择 family `LegacyRuntimeProvider`。`AstraRpgRuntimeProvider` 只保留同级接入边界，当前不声明已有实现。
+`NativeVnRuntimeProvider` 包装现有 AstraVN Core、VN package sections 和 VN release checks。`AstraRpgRuntimeProvider` 只保留同级接入边界，当前不声明已有实现。
 
 ## Permissions
 

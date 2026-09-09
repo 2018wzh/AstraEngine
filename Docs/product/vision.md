@@ -17,14 +17,14 @@ AstraEngine 是 Rust + WGPU-first 的 2D/VN-first 高性能游戏引擎。它的
 - EngineCore 使用 Actor/Component + StateMachine 驱动 deterministic runtime。
 - Runtime 可脱离 Editor 完成 launch、tick、save、load、replay、diagnostics、profiling 和 release validation。
 - Asset VFS 统一 package、local authorized、legacy pack 和 overlay mount；`.astrapkg` 保留为控制面和证据面容器。
-- 玩法类型通过 gameplay runtime provider 显式绑定；AstraVN、AstraEMU 和后续 AstraRPG 是同级 runtime provider。
+- AstraVN 和后续 AstraRPG 通过 gameplay runtime provider 显式绑定；AstraEMU 使用独立 Host。
 - TRPG 玩法落在 AstraRPG 的 `rpg.trpg` profile/ruleset layer 中；不创建独立顶层 AstraTRPG runtime provider。
 - AstraVN 使用 `.astra` 作为 canonical story source，Luau policy 用于扩展和受控演出策略。
 - Editor 使用 Qt/QML + Rust core，覆盖完整 creator workflow。
 - 插件采用 Rust-facing `abi_stable` 风格 ABI，支持加载/卸载和 provider selection，不支持热重载。
 - 平台硬目标是 Windows、Linux、macOS、iOS、Android、Web；旧主机/掌机是实验模块。
 - Runtime AI 可以发布，但 Runtime 只通过受限 MCP session 调用模型；所有 committed AI output、角色记忆和玩家相关 consent 必须进入 save/replay，不允许回放时重新请求 provider。
-- AstraEMU 使用 Manager + `AstraEmuRuntimeProvider` + RuntimeWorld + in-process family plugin + `LegacyRuntimeProvider` facade，统一管理通过 auto probe 和 profile override 完成，现代化能力通过 Trusted Luau、TranslationProvider、Asset VFS 和 FilterGraph preset 接入；v1 可用 family 是 Artemis，KrKr、BGI、SoftPAL、FVP、Siglus 输出 alpha probe report 后逐步实现。
+- AstraEMU 使用 Slint Manager、独立 Host 和 in-process family plugin。Family 负责原生游戏行为与存档，Host 消费最终帧和混合 PCM，提供输入、可选异步文本替换和 HLSL 效果链。首轮接入 Windows 与 FVP，其他 family 核心源码暂不参与活动依赖图。详见 [独立 Host 重构](../migrations/astraemu-independent-host.md)。
 
 ## 非目标
 
@@ -35,4 +35,4 @@ AstraEngine 是 Rust + WGPU-first 的 2D/VN-first 高性能游戏引擎。它的
 
 ## v1 Definition
 
-v1 不是单个 crate 可编译，而是全系列可发布闭环：EngineCore native smoke、AstraVN commercial baseline、AstraEditor creator workflow、Windows/Linux/macOS/iOS/Android/Web profile gate、AI/MCP audit 和 Artemis full-flow report 都通过 Release Gate。AstraRPG 属于 Stage 7 planned extension；它达到 release gate 前不计入 v1 完成证据。
+全系列 v1 的交付范围包括 EngineCore、AstraVN、AstraEditor 与 AstraPlatform 的发布检查，以及 AstraEMU 独立 Windows Host 的 FVP 实际游戏运行与原生存档验收。AstraEMU 不再接入统一 Release Gate，也不以 Artemis 作为首发条件。AstraRPG 属于 Stage 7 planned extension；达到自身发布条件前不计入 v1 完成范围。

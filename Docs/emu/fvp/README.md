@@ -12,7 +12,7 @@
 | [script-execution.md](script-execution.md) | VM context、thread state、syscall dispatch 和 yield 流程 |
 | [presentation-and-media.md](presentation-and-media.md) | graph/text/prim/audio/movie 的表现层映射 |
 | [runtime-family-plugin.md](runtime-family-plugin.md) | AstraEMU FVP family plugin 的 session 边界和 step 输出 |
-| [thin-fork.md](thin-fork.md) | Family ABI v9 的 RFVP fork、Host surface 与薄 adapter 边界 |
+| [thin-fork.md](thin-fork.md) | 已取代的 Family ABI v9 fork 边界记录 |
 | [rfvp-fork-audit.md](rfvp-fork-audit.md) | pinned RFVP fork 的职责审计和当前阻断项 |
 | [game-observations.md](game-observations.md) | 「樱花萌放」样本观察，保留 metadata 和 hash |
 | [tooling.md](tooling.md) | disassembler、assembler、hcb2lua、lua2hcb、nvsg_pack 的使用边界 |
@@ -20,11 +20,11 @@
 
 ## 范围
 
-FVP 在 AstraEMU 中是 `Ported + SingleLayer` 的 engine-native family plugin。RFVP fork 直接实现 Family ABI v9 provider：它消费 Host input/wait/audio/control DTO，在 Hook 后取得唯一 writable surface lease，直接光栅化并提交 `Unchanged`、`Full` 或像素坐标 `Rects` damage；存档只通过 per-game writable-file Host port。AstraEngine 内的 `astra-emu-fvp` 只保留 dylib root export、build identity、descriptor、panic containment 和最终错误边界，不转换 scene、texture、text 或 save DTO。
+本轮 [独立 Host 重构](../../migrations/astraemu-independent-host.md) 要求 FVP 直接实现独立 Family ABI：接收 elapsed 与物理输入，自行持有原生文件、VM、解码、混音、字体、绘制与存档。Host 同步复制 Family 借出的最终 CPU 帧；独立音频 worker 向 Host 提交混合 PCM。不再使用 Layer2D、Hook、Host writable surface/VFS 或统一 snapshot/save。
 
-当前 pinned fork revision 为 `f4f64a5bb726c1759350a666a35e0a454b810f61`。该 revision 的 Astra adapter-facing 结构已符合上述边界，但 fork 内仍有旧 hosted semantic-delta、snapshot/restore 和策略-limit 实现；详见 [RFVP fork audit](rfvp-fork-audit.md)。在这些旧路径移除并由 fork 仓库形成单一审查提交前，FVP v9 release gate 保持 blocking。
+适配源固定为 RFVP revision `f4f64a5bb726c1759350a666a35e0a454b810f61`，旧接口审阅见 [RFVP fork audit](rfvp-fork-audit.md)。独立 adapter 正在实现，当前进度与待测游戏流程见 [Stage 5](../../status/stages/stage-5-astra-emu.md)。
 
-FVP 不改变 EngineCore 的 Actor/Component + StateMachine 权威模型，也不把 rfvp 的单 family 主循环、no_std 约束或平台 host 细节变成公共 Runtime contract。Family core 自己完成字体 fallback、shaping、换行和绘制；Host 不提供文本 overlay、翻译 cache 或 save-slot 语义。
+FVP 不改变 EngineCore 的运行模型，也不把单 Family 主循环和平台细节变成公共 Runtime contract。本轮 FVP 不声明文本替换 capability，不修改其翻译路径；游戏原生存档与系统页继续由 RFVP 持有。
 
 ## 样本基线
 

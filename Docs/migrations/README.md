@@ -1,5 +1,8 @@
 # Migration Plans
 
+2026-09-08：[AstraEMU 独立 Host 重构](astraemu-independent-host.md) 已获批准，当前 `IN_PROGRESS`。本页较早的 AstraEMU RuntimeWorld、Family ABI v9、Hook、Host VFS 和统一 package/save 记录由新方案取代；不能用于宣称独立 Host 已完成。
+
+
 本目录只记录已实现代码向新设计对齐的迁移路线。设计页可以覆盖完整未来架构；迁移页不能把尚未存在的 AstraEMU/AstraRPG 代码写成可搬迁对象。
 
 当前落地状态：migration 1–5 已完成 Provider URI Asset VFS、provider selection、AstraVN module/crate split、RuntimeWorld `astra.vn.step` action 和真实 FFI lifecycle。Migration 6 的 lossless frontend 已完成；对应 Stage 3 script work item 仍等待 formal Windows/Web Player evidence。Migration 9 只关闭 shared policy、component effects 与 async runtime host，AstraRPG 产品代码仍留 Stage 7。Migration 11 已固化到主线，尚未闭合的正式平台 evidence 继续按状态页追踪。Migration 12 已进入实施验证：Yakui、UI Blueprint、AstraText、Scene2D、component ABI 和开发期 UI CLI 已落地，状态保持 `IN_PROGRESS`，等待全量隔离门禁与 Windows/Web E3。当前生产完备度修补按 [模块能力完备度审查](module-completeness-audit-migration.md) 收束。

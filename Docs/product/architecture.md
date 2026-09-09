@@ -14,7 +14,7 @@ AstraEditor
 AstraPlatform
   desktop/mobile/web/experimental native shells and platform decode
 AstraEMU
-  manager, AstraEmuRuntimeProvider, RuntimeWorld-driven family plugins, auto probe, Trusted Luau patch/decode, text translation, FilterGraph presets
+  independent host, Slint manager, in-process family plugins, native files/save, async text service, final-frame HLSL filters
 AstraRPG
   AstraRpgRuntimeProvider, RPG core, AI simulation, rpg.trpg ruleset/profile, local-private tabletop adapters, later Server/Client protocol
 ```
@@ -52,14 +52,14 @@ Runtime 拥有 World、Scene、Actor、Component、StateMachine、EventBus、Sch
 
 ## Module Slot
 
-可替换能力通过 EngineModuleSlot 和 ExtensionRegistry 明确选择，不按加载顺序抢占。默认 slot 包括 Renderer2D、TextLayout、AudioOutput、DecodeProvider、ScriptRuntime、PresentationLibrary、`vfs_provider`、ProductRuntimeProvider、AiProvider、TranslationProvider、MCPToolProvider、AstraEMU LegacyRuntimeProvider 和可选 EMUCoreBridge。Runtime 不直接持有 AiProvider；运行时 AI 通过受限 MCP session 消费 typed Intent 和 committed output。
+可替换能力通过 EngineModuleSlot 和 ExtensionRegistry 明确选择，不按加载顺序抢占。默认 slot 包括 Renderer2D、TextLayout、AudioOutput、DecodeProvider、ScriptRuntime、PresentationLibrary、`vfs_provider`、ProductRuntimeProvider、AiProvider、TranslationProvider、MCPToolProvider。Runtime 不直接持有 AiProvider；运行时 AI 通过受限 MCP session 消费 typed Intent 和 committed output。
 
 ## 产品边界
 
-AstraVN 是原生 VN 垂直模块，通过 `NativeVnRuntimeProvider` 接入 gameplay runtime。AstraEMU 是旧 VN 兼容与现代化套件，通过 `AstraEmuRuntimeProvider` 启动 case runtime session；Manager 自身仍是 Program target。Family plugin 只注册 `LegacyRuntimeProvider`，位于 AstraEMU runtime provider 之下。自动探测、Trusted Luau、文本翻译和滤镜 preset 位于 Manager/RuntimeWorld 层；Provider session 持有旧 VM、VFS 资源解析、媒体状态和 snapshot section。NativeVN 创作流程不能依赖 EMU family plugin。
+AstraVN 是原生 VN 垂直模块，通过 `NativeVnRuntimeProvider` 接入 gameplay runtime。AstraEMU 使用同仓独立 Host 与 Slint Manager，不使用上述 RuntimeWorld/package 执行链。Family 自行读取原生文件、运行 VM、解码、混音、绘制和存档；Host 通过独立 Family ABI 消费最终帧与 PCM，并提供物理输入、窗口事件、可选异步翻译和 HLSL 滤镜。NativeVN 创作流程不依赖 EMU family。具体边界见 [ADR 0019](../adr/0019-astraemu-independent-host.md)。
 
 AstraRPG 是后续 RPG 垂直模块，通过 `AstraRpgRuntimeProvider` 接入 gameplay runtime。它负责 map、party、inventory、quest、encounter、battle、AI agent intent、committed output 和 RPG-specific editor metadata。TRPG 玩法不作为独立产品模块；规则书适配、骰子、检定、ruling、seat authority 和 transcript 都落在 AstraRPG 的 `rpg.trpg` profile 里。CP2020 等规则书适配只能作为 local-private adapter，仓库只提交 schema、manifest、hash、coverage 和 diagnostic。
 
 ## v1 验收边界
 
-全系列 v1 同时要求 EngineCore deterministic gate、NativeVN commercial baseline、UE 级 Editor workflow、六平台 profile gate、AI/MCP audit gate 和 Artemis engine-native family gate。AstraRPG 是 Stage 7 planned extension，Server/Client protocol 是 Stage 8 planned extension；二者不阻塞当前 v1 gate。任一产品线可以独立开发，但 release 口径由本仓 contracts、implementation specs 和 status matrix 统一定义。
+全系列 v1 同时要求 EngineCore deterministic gate、NativeVN commercial baseline、UE 级 Editor workflow、六平台 profile gate、AI/MCP audit gate。AstraEMU Windows/FVP 使用独立产品测试范围。AstraRPG 是 Stage 7 planned extension，Server/Client protocol 是 Stage 8 planned extension；二者不阻塞当前 v1 gate。任一产品线可以独立开发，但 release 口径由本仓 contracts、implementation specs 和 status matrix 统一定义。

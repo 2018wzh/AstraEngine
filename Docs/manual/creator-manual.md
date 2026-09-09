@@ -1,6 +1,6 @@
 # Creator Manual
 
-创作者先在 Project Wizard 选择 gameplay runtime provider。NativeVN 由 `NativeVnRuntimeProvider` 提供；旧 VN case 由独立 AstraEMU Manager 和 package-bound `AstraEmuRuntimeProvider` 打开，不进入 Editor 的 `.astra` 创作链路。AstraRPG 仍是 planned provider。选择 NativeVN 后，创作者导入资产，编写 `.astra`，选择 Luau 策略包，用 Graph/Timeline 调整演出，在 PIE 中调试，最后 Cook、Package、Release Gate。需要扩展项目时，通过 Plugin Manager 启用插件并处理依赖诊断。
+创作者先在 Project Wizard 选择 gameplay runtime provider。NativeVN 由 `NativeVnRuntimeProvider` 提供；旧 VN 由独立 AstraEMU Manager 与 Family 打开，不进入 Editor 的 `.astra` 创作链路或 product package。AstraRPG 仍是 planned provider。选择 NativeVN 后，创作者导入资产，编写 `.astra`，选择 Luau 策略包，用 Graph/Timeline 调整演出，在 PIE 中调试，最后 Cook、Package、Release Gate。需要扩展项目时，通过 Plugin Manager 启用插件并处理依赖诊断。
 
 ## 最短流程
 

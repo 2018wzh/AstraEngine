@@ -526,7 +526,7 @@ fn set_active_editor_target(
 
 ```
 NativeVnRuntimeProvider → .astra Script Editor, VN Graph, Timeline, System UI, Luau policy
-AstraEmuRuntimeProvider → (planned) legacy trace, text/translation overlay, FilterGraph preset
+AstraEMU → independent Slint Manager (outside Editor runtime provider panels)
 AstraRpgRuntimeProvider → (planned) Map, Quest, Battle, Behavior Graph
 ```
 

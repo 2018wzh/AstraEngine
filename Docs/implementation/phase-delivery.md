@@ -104,7 +104,7 @@ Expected report: `astra.editor_report.v1` with source span links for failed chec
 
 ## Stage 5：AstraEMU
 
-**闭环：** Slint Manager 启动 `AstraEmuRuntimeProvider` gameplay runtime，provider 创建并驱动 RuntimeWorld，再通过 `LegacyRuntimeProvider` family facade、auto probe、Trusted Luau、文本翻译、FilterGraph preset、legacy pack VFS mount 和 FVP family plugin 通过 gate。Artemis 与其他 family 可以停在 alpha profile，但必须有 probe report。Stage 5 当前保持 `IN_PROGRESS`：contract、Windows 本机构建和跨模块 E2 已存在，Windows/Android E3、完整 media parity 与正式签名证据仍未关闭。
+**闭环：** 独立 Slint Manager 通过 Family ABI 驱动 FVP，消费最终 CPU 帧与混合 PCM，并提供输入、窗口事件和 HLSL 效果链。Family 负责原生文件、VM、媒体与存档。Stage 5 当前为独立 Host 重构进行中；只接 Windows/FVP，其他 family 暂不进入活动依赖图，FVP 翻译不在本轮范围。实施和测试边界见 [独立 Host 重构](../migrations/astraemu-independent-host.md)。
 
 **Test IDs:** `T-S5-GAME-RUNTIME-01`、`T-S5-EMUCORE-SM-01`、`T-S5-LEGACY-VFS-01`、`T-S5-MANAGER-01`、`T-S5-MANAGER-UI-01`、`T-S5-PROGRAM-TARGET-01`、`T-S5-FAMILY-01`、`T-S5-ARTEMIS-01`、`T-S5-FVP-01`、`T-S5-GATE-01`
 
@@ -230,5 +230,5 @@ Stage 8 仍是 `SPEC_READY`，只依赖 Stage 7 的稳定 public contract。
 
 - EngineCore、AstraVN、AstraEditor、AstraPlatform、AstraEMU 都有 release profile。
 - Windows、Linux、macOS、iOS、Android、Web 通过对应 profile gate。
-- AstraEMU v1 的首发 family 是 FVP；Artemis 与其他 family 输出 alpha probe report；AstraEMU family 只通过 in-process `LegacyRuntimeProvider` 接入，外部 bridge 不得替换 RuntimeWorld lifecycle。
+- AstraEMU 首发 family 是 FVP，采用独立 in-process Family ABI；其他 family 后续接入，不再使用 RuntimeWorld lifecycle。
 - AstraRPG Stage 7 和 AstraRPG Server/Client Stage 8 是 v1 后续扩展，不作为当前 v1 release gate。

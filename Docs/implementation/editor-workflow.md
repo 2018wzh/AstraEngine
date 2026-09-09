@@ -9,7 +9,6 @@ Editor shell 固定负责窗口、layout、权限、undo、audit、Content Brows
 | Runtime | Editor surfaces |
 | --- | --- |
 | `NativeVnRuntimeProvider` | `.astra` Script Editor、VN Graph、Timeline、System UI、Luau policy、VN package/release checks |
-| `AstraEmuRuntimeProvider` | planned case profile/probe、legacy pack VFS browser、family trace、text/translation overlay、Trusted Luau、FilterGraph preset |
 | `AstraRpgRuntimeProvider` | planned Map、Quest、Battle/Party/Inventory、Behavior Graph、RPG inspector |
 
 Provider metadata 只提供 template、surface id、schema、command id、source ref、VFS locator、diagnostic 和 release check id。Editor 不接收插件 UI widget、RuntimeWorld 指针、legacy VM object、native renderer/audio handle、本地 root 或商业 payload。

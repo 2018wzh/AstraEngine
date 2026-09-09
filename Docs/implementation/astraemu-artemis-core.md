@@ -1,82 +1,9 @@
-# AstraEMU Artemis Family Plugin Blueprint
+# AstraEMU Artemis 后续接入
 
-Artemis 是 FVP v1 之后的 follow-up family blueprint，不是首发 gate。目标是通用 Artemis engine-native family plugin：覆盖 PFS/PF6/PF8、boot、text/tag、legacy Lua bridge、presentation/media、snapshot 和 local case report。当前页面描述契约与研究准备度，不代表 workspace 已有 Artemis provider。所有样例和报告只使用合法本地数据、synthetic fixtures 和脱敏 metadata。
+Artemis 是 FVP 之后的后续 Family，本轮不进入活动 workspace。PFS/PF6/PF8、boot、text/tag、legacy Lua 与 `.iet`/`.ast`/`.asb` 的研究事实可继续参考；它们不代表实现已完成。
 
-## Runtime Boundary
+未来接入必须实现 [独立 Family ABI](../contracts/astraemu-ipc.md)：Family 自行持有 VM、原生文件、媒体、最终帧和原生存档；Host 仅管理 session、输入、音频设备与最终帧滤镜。旧 RuntimeWorld/LegacyRuntimeProvider、StateMachine effect、统一 snapshot、Host VFS 和通用 Hook 设计已被取代，不作为新接入基础。
 
-```text
-AstraEMU Manager
-  -> create RuntimeWorld
-  -> enable Artemis family plugin
-  -> open LegacyRuntimeProvider session
-  -> register coarse StateMachine action adapter
-  -> tick RuntimeWorld
-  <- RuntimeEvent / PresentationCommand / AudioCommand / TextCaptureEvent
-  <- LocalCaseReport / ReleaseReport
-```
+对格式与行为的未知部分应明确报错，不能用猜测性支持或替代画面隐藏。具体源码复用、完整游戏范围和文本替换能力在授权 Artemis 实施时确定；当前只完成 FVP，端到端翻译等待 Minori。
 
-Artemis plugin 可以持有 family-private interpreter state，但推进必须通过 `LegacyRuntimeProvider.step` 和可序列化 effect list。Manager 不解析 private state，不接收商业 payload。`EMUCoreBridge` 不参与 v1 主路径。
-
-## Runtime Provider Registration
-
-```rust
-pub struct ArtemisFamilyPlugin {
-    pub descriptor: LegacyFamilyPluginDescriptor,
-    pub runtime: ArtemisRuntimeProvider,
-}
-```
-
-注册流程：
-
-1. `PluginDescriptor` 通过 fingerprint、permission、feature 和 packaged eligibility gate。
-2. `LegacyFamilyPluginDescriptor` 声明 Artemis family、PFS/PF6/PF8、`.iet`、`.ast`、`.asb` 和 legacy Lua bridge capability。
-3. ExtensionRegistry 注册 `LegacyRuntimeProvider` 和 release check。
-4. Manager 根据 project/case profile 显式启用 Artemis provider，不按加载顺序选择。
-
-## Artemis Probe
-
-```rust
-pub struct ArtemisProbeReport {
-    pub family: FamilyId,
-    pub pfs_version: Option<PfsVersion>,
-    pub entry_count: u32,
-    pub boot_script: Option<EntryHash>,
-    pub script_kinds: Vec<ScriptKind>,
-    pub media_kinds: Vec<MediaKind>,
-    pub diagnostics: Vec<Diagnostic>,
-}
-```
-
-Probe 顺序：root marker、PFS header、PF6/PF8 index、patch chain、`system.ini`、BOOT entry、script/media distribution。probe 只输出 hash、offset、entry count、format capability 和 diagnostic。
-
-## Script Execution
-
-Artemis provider session 支持 `.iet` text/tag、`.ast` table row、`.asb` probe classification 和 legacy Lua bridge。`[lua]` block 和 `calllua` 是 Artemis legacy fact；AstraVN policy 仍使用 Luau。
-
-```rust
-pub enum ArtemisActionEffect {
-    Text(TextCaptureEvent),
-    Tag(TagCommand),
-    CallLegacyLua { function: String, args_hash: Hash256 },
-    Await(AwaitToken),
-    Presentation(PresentationCommand),
-    Audio(AudioCommand),
-}
-```
-
-未知 tag、未知 ASB branch、不可序列化 legacy state 必须输出 `DONE_WITH_CONCERNS` 或 `BLOCKED`，不能伪装通过。
-
-## Snapshot
-
-Snapshot section 最少包含 script stack、current entry hash、tag queue、serializable legacy Lua state allowlist、media state ref、save variables 和 diagnostics cursor。section 使用 Astra package/save 容器和 postcard payload，不另开私有存档格式。
-
-## Release Gate
-
-```bash
-cargo test -p astra-emu-artemis artemis_pfs_probe
-cargo test -p astra-emu-artemis artemis_script_tags
-astra test run scenarios/emu/artemis_full_flow.yaml --headless --report target/reports/artemis.yaml
-cargo test -p astra-release emu_gate
-```
-
-Expected report: `emu.legacy_runtime_provider`、`plugin.extension_registry`、boot、text、choice、media command、save/load、snapshot replay、Runtime replay hash 和 redaction policy 通过；报告不包含 key、完整脚本、截图、音频采样或私有绝对路径。
+设计决策见 [ADR 0019](../adr/0019-astraemu-independent-host.md)，当前范围见 [重构方案](../migrations/astraemu-independent-host.md)。

@@ -1,7 +1,6 @@
 # RFVP Fork 与薄 Adapter（Family ABI v9）
 
-本页只描述当前 v9 边界。旧的 v5/v6/v7 hosted delta、scene packet、text
-lease、continuation snapshot 和 adapter-side compositor 不属于当前契约。
+本页保留 v9 边界的历史记录，已由 [独立 Host 重构](../../migrations/astraemu-independent-host.md) 取代。下文的 Host surface、Hook 和 writable-file 接口不再用于当前重构，不保留兼容入口。
 
 ## 结论
 

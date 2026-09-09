@@ -1,5 +1,7 @@
 # AstraEMU Family ABI v9 Migration
 
+> 历史迁移记录，已由 [独立 Host 重构](../migrations/astraemu-independent-host.md) 取代。下述接口不再用于当前 AstraEMU，也不保留兼容加载路径。
+
 Family ABI v9、Product Runtime Provider ABI v4 与 Extension ABI v1 是一次破坏性迁移。Host 和 family 必须在同一版本完成切换；仓库不提供 v7/v8 compatibility shim，也不允许一个进程同时解析 Git 与 path 两份 `astra-emu-family-api`。
 
 ## Consumer 必须修改的内容

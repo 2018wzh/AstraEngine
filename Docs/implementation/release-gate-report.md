@@ -82,7 +82,6 @@ Release profile packages must include `compiled.project` from `astra cook`; fixt
 ```bash
 cargo test -p astra-release release_report
 cargo test -p astra-release ai_mcp_gate
-cargo test -p astra-release emu_gate
 ```
 
 Expected: missing audit, provider replay, migration gap, Luau snapshot error and FVP parity/redaction failure all block release.

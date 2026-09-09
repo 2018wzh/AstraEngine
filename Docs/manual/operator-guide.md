@@ -1,6 +1,6 @@
 # Runtime / Platform Operator Guide
 
-Operator 负责构建、打包、平台适配、Release Gate、crash bundle 和 AstraEMU local case report。
+Operator 负责构建、打包、平台适配、Release Gate 与 crash bundle；AstraEMU 使用下述独立 Host 流程。
 
 ## Worktree 内 Cargo 验证
 
@@ -136,54 +136,13 @@ Windows 字形视觉回归由 `astra.windows_gpu_glyph_golden.v1` 绑定字体 r
 
 产品 release evidence 还必须提供 `astra.player_presentation_report.v1`。该报告只能由 Player command sink 完成真实平台 capture 后生成，并与 capability、host conformance、automation 的 package/profile/build/session identity 一致。缺报告、`astra.renderer.headless`、零变化像素或 identity drift 都是 `ASTRA_PLAYER_PRESENTATION_EVIDENCE` blocking；不能手工填写静态 hash 补过门禁。
 
-## AstraEMU family 发布签名
+## AstraEMU 独立 Host
 
-桌面发布包把 FVP 动态库与 `manifest.json` 放在 Manager 可执行文件旁的 `families/fvp/`。构建 Manager 时必须通过受控构建环境提供 `ASTRA_EMU_FAMILY_SIGNER_ID` 和对应的 `ASTRA_EMU_FAMILY_PUBLIC_KEY_HEX`；缺失 trust root 时产品启动会阻断。签名私钥只从短生命周期环境变量读取，不写入仓库、manifest、日志或报告。descriptor 必须取自同一 target/profile 的 FVP build-script 输出；`native-sign` 会先加载成品动态库并逐字段比对 descriptor，再生成唯一 manifest authority：
+AstraEMU 首轮提供 Windows、Slint Manager 与 FVP。构建、插件加载和游戏运行不再使用 Engine product package、签名 Family manifest、旧 CLI、Headless report 或 RuntimeWorld。旧 Android/iOS 发布流程暂不适用于本轮。
 
-`astra-emu-cli` 默认只输出 `INFO` 及以上日志。受控排障可通过 `ASTRA_LOG` 提高过滤级别；例如 `ASTRA_LOG=astra_emu_cli::runner=debug,astra_emu_fvp::provider=debug` 会记录已验证 semantic scene commit 与 hosted delta 的操作计数，不输出资源内容、商业文本或宿主路径。
+Manager 从本地安装的动态库读取独立 Family ABI descriptor，校验 ABI 和 capability；多个 probe 命中时由用户选择。游戏由 Family 直接读取原生文件和管理存档。资料库与设置使用新 schema，旧 Manager 数据重建，原生存档不迁移也不由 Host 改写。
 
-```bash
-ASTRA_EMU_FAMILY_SIGNING_KEY_HEX="${RELEASE_SIGNING_KEY}" \
-ASTRA_EMU_FAMILY_PUBLIC_KEY_HEX="${RELEASE_PUBLIC_KEY}" \
-cargo run -p astra-emu-family-package -- native-sign \
-  --binary "target/release/${ASTRA_EMU_FVP_DYLIB}" \
-  --descriptor "${FVP_BUILD_DESCRIPTOR}" \
-  --output Build/Fvp/manifest.json \
-  --target "${RUST_TARGET}" \
-  --signer-identity "${ASTRA_EMU_FAMILY_SIGNER_ID}"
-```
-
-工具会校验 PE/ELF/Mach-O target 与 architecture、ABI root module、family/plugin/provider/engine/rustc/feature/ABI identity和 binary hash，再签名 canonical postcard identity。私钥对应的 public key 必须与 Manager trust root 一致；输出已存在、输入越界、descriptor 漂移、跨 target binary 或密钥不匹配都会阻断，不覆盖旧文件。旧 `sign` 只供受控迁移验证，不应作为新发布包的 identity authority。正式包仍需由平台 packaging gate 绑定 installer code-sign identity；family manifest 只能形成局部证据。
-
-桌面分发统一由 `python Tools/build_astraemu_desktop.py --output Build/AstraEMU` 构建。该入口只接受本机 target，使用同一 release target root 构建 Manager、CLI 和 FVP，先从成品 ABI root module 校验 build-script descriptor，再生成签名 manifest，把两个 Program、动态库、manifest 和第三方 notices 原子提交到分发目录。`astra.emu.desktop_package_evidence.v1` 只记录相对文件名、hash、target、build identity 和 signer identity。`--development-ephemeral-signer` 仅用于本机 E3 调试，私钥只存在于当前进程且不会写盘；它生成的 development 包不得作为正式签名证据。
-
-同一分发目录包含 `astra-emu-cli`。`run` 用于不受 Manager/overlay 影响的原生视觉验收：它会校验显式 family、授权目录、唯一 case、签名 manifest 和动态库 identity，随后直接创建 `AstraEmuRuntimeProvider` session 与 Windows platform host。窗口只显示 family 输出的 legacy 舞台，键盘、鼠标、触摸和手柄事件按舞台宽高比映射回 runtime。该模式默认静音，避免音频设备配置影响纯视觉对照；需要同时检查原生音频时显式传入 `--enable-audio`。
-
-```bash
-astra-emu-cli run --family fvp --game-dir ./Games/Example --mount-profile ./private/fvp.mount.yaml --entry Game.hcb
-```
-
-`run` 不启动 Slint，也不读取 Manager Library、translation、patch 或 FilterGraph 配置。关闭窗口会依次 shutdown session、surface、window 和 platform host。Linux、macOS、iOS、Android 与 Web 尚未接入该原生 CLI host 时必须返回稳定的 `PLATFORM_NOT_IMPLEMENTED`，不能回退到 Manager 或 Headless 冒充原生验收。
-
-自动化入口直接复用 `AstraEmuRuntimeProvider`、`RuntimeWorld` 和 `astra-platform-headless`，不启动 Slint，也不提供产品语义快捷命令。输入必须是有序、连续且以 `Shutdown` 结束的 `astra.user_input_sequence.v1` JSONL；只接受键盘、鼠标、触摸、手柄、IME、固定 tick 推进、物理观察等待和 checkpoint。输出目录包含真实 PNG/WAV artifact manifest 与 `astra.emu.headless_run_report.v2`，报告只保留 identity/hash/count/diagnostic：
-
-```bash
-astra-emu-cli headless \
-  --family fvp \
-  --game-dir ./Games/Example \
-  --mount-profile ./private/fvp.mount.yaml \
-  --entry Game.hcb \
-  --input ./Automation/example-input.jsonl \
-  --artifacts ./Build/AstraEMU-Evidence
-```
-
-`--verify-snapshot` 会在首个 checkpoint 执行同 session save/restore round-trip；输入没有 checkpoint 时会阻断。FVP snapshot 对每张 live graph 独立压缩精确 RGBA，并校验 decoded length 与像素 hash；脚本 texture alias 不会被当作可重开的本地路径。默认 `--artifact-retention checkpoints` 只落盘具名 checkpoint PNG，但全部提交帧仍进入 frame-stream hash；逐帧图像对照需要显式使用 `--artifact-retention all`。正式本地资源审计另加 `--audit-all-resources`，它在 gameplay run 后按 4 MiB range 流式读取全部可见资源，报告只保留资源/range 数、总字节数、最大 range 和 manifest hash，不写资源名或本地路径。Headless 结果只形成 E2，不能替代真实 Windows 窗口、GPU、音频设备和输入消费 E3。
-
-Android 统一由 `python Tools/build_astraemu_android.py --abi arm64-v8a --abi x86_64` 构建。入口要求 API 36、NDK r28 以上、两种 Rust target、APK signer digest、family signer/trust root 和 Android keystore；它会检查 16 KiB ELF LOAD alignment，把每种 ABI 的动态库及双 manifest 写进 APK，执行 `apksigner verify`，最后输出不含 secret 和本地路径的 `astra.emu.android_package_evidence.v1`。缺 SDK license、签名身份或任一 ABI 都是 blocking，不能以手工复制 `.so` 代替。
-
-iOS 工程由 `Emulator/Platforms/iOS/project.yml` 生成。Xcode build phase 调用 `build_for_ios_with_cargo.bash`，分别构建 device/simulator FVP archive，使用 `static-sign` 绑定 Mach-O archive architecture、descriptor、signer 和 trust root，再把同一 registration contract 静态链接进 Manager。device archive 必须由 Xcode 的有效 signing identity 签名；simulator 构建不能外推成真机 E3。
-
-FVP 的固定行为基线是 rfvp `0.5.0` commit `3b5ea6c96a925c12f95aef8554905e8fecbc77c3`。`python Tools/verify_fvp_parity.py --reference .tmp/rfvp-reference` 只在本地受控环境运行：工具校验 reference revision，在临时 detached worktree 中执行 observer trace，并输出 `astra.frame_parity_report.v1`。CI 不联网拉取 RFVP。synthetic trace 只覆盖 parser/VM/Variant/context；实际游戏还要逐帧比较 semantic/RGBA/video PTS，并按固定音频容差检查 PCM。首差异保留前 30 帧和后 60 帧，任何自动比较失败都不能由人工审查覆盖。
+独立 Host 实现仍在本次重构中；具体命令与 Windows 游戏验证结果在集成完成后更新。本轮计划与边界见 [独立 Host 重构](../migrations/astraemu-independent-host.md)，当前进度见 [Stage 5](../status/stages/stage-5-astra-emu.md)。不生成或保留新的 EMU evidence/report 体系。
 
 ## AstraEMU 兼容性数据仓
 
@@ -231,7 +190,6 @@ Windows shipping Player 默认使用平台 writable `Saved/Logs` 与 `Saved/Cras
 | `astra.headless_review.v2` | 具名模型或人工的视觉/音频审查结果；不能覆盖自动失败 |
 | `astra.headless_preflight_link.v2` | Headless E2 与真实平台 run 的 identity 关联 |
 | `astra.plugin_report.v1` | 插件加载、卸载和 provider |
-| `astra.emu.local_case_report.v1` | AstraEMU FVP 和后续 family；只允许 alias/hash/offset/size 与稳定 diagnostic，禁止绝对路径和商业 payload |
 
 Stage 2 的 `astra package validate` 已输出 `astra.release_report.v1`，覆盖 package integrity、section bounds/hash、cook/project artifact、provider policy、media fallback policy、scenario refs、platform eligibility 和 platform report。`desktop-release`/`web-release` 缺 `compiled.project` 或 platform report 时阻断；headless/dev profile 的 platform report 可 warning。FFmpeg fallback 是 optional feature；profile 必须把缺失 FFmpeg 写成 warning 或 blocking。Release Gate check matrix 见 [Release Gate Checks Blueprint](../implementation/release-gate-checks.md)。
 

@@ -59,7 +59,7 @@ Release validator 从 package 内的 `vn.compiled_story` 执行 package-bound li
 
 ## Concurrent Session Migration
 
-Runtime 已新增 `ProductRuntimeProviderFactory`、`ProductRuntimeSession` 和 `ConcurrentProductRuntimeHost`。Factory 只持有 instance control state；`open` 返回独占 session object，每条 session 使用容量 32 的 ordered mailbox、fixed-step authority 和 poison state，不再经过全局 `ProductRuntimeHost` mutex。不同 session 可以同时进入有界 worker，同一 session 的 `step/save/restore/shutdown` 严格 FIFO、单飞。`NativeVnRuntimeProviderFactory` 与 `AstraEmuRuntimeProviderFactory` 已把每条 session 隔离到独立 `RuntimeWorld`。
+Runtime 已新增 `ProductRuntimeProviderFactory`、`ProductRuntimeSession` 和 `ConcurrentProductRuntimeHost`。Factory 只持有 instance control state；`open` 返回独占 session object，每条 session 使用容量 32 的 ordered mailbox、fixed-step authority 和 poison state，不再经过全局 `ProductRuntimeHost` mutex。不同 session 可以同时进入有界 worker，同一 session 的 `step/save/restore/shutdown` 严格 FIFO、单飞。`NativeVnRuntimeProviderFactory` 把每条 session 隔离到独立 `RuntimeWorld`。AstraEMU 已退出此执行链。
 
 `astra-headless run-batch` 从 `astra.headless_session_batch.v2` manifest 启动最多八个独立 `astra-headless run` 子进程。`worker_limit` 是允许使用的全局上限，runner 再按 job 数量与 `available_parallelism` 自动选择实际并发度，不能用高于硬件或任务数量的空额度美化利用率。串行 baseline 的单个 Session 可独占完整预算；并发阶段每个子 Session 获得 `floor(global_limit / selected_concurrency)` 个内部 worker，因此所有同时运行子进程的内部配额总和不会超过全局上限，也不会让 Session 内 worker pool 在父级并发之外再次超订阅。每条 job 声明 `route`、`replay` 或 `performance` 类型，以及独立 concurrent/serial artifact root、timeout、package/input/profile/build identity。只有 `performance` job 必须声明 performance budget、warmup 和 measurement start；route/replay job 若夹带 performance 配置会 fail closed。Runner 先生成同身份串行 baseline，再执行公平排队的 concurrent batch；报告 `astra.headless_session_batch_report.v2` 按 session id 稳定排序，记录 output identity 对比、配置上限、硬件并行度、实际并发度、串行/并发每 Session 配额、并发总容量、排队/执行时间、批次 wall time、吞吐、Session slot utilization、按子进程 kernel+user CPU time 与全局容量归一化的 worker utilization、所有 job 的串行/并行 private-memory peak 和串行 baseline；performance job 另记录每 session CPU/E2E p95/p99。Windows runner 直接按子进程 PID 采样 private bytes 与 CPU time，并把 private bytes 与 performance report 内的峰值取较大值；任一采样不受支持、失败或返回空值时 blocking，不写 `null` 冒充完成。任一 session 失败或超时不会取消已开始任务，但 identity mismatch 或任一失败会使批次最终 blocking。
 
@@ -71,11 +71,11 @@ Runtime 已新增 `ProductRuntimeProviderFactory`、`ProductRuntimeSession` 和 
 
 CosmicText shaping 使用 worker-local `FontSystem`/`SwashCache`、分片 single-flight cache；图片预取、audio/video decode 和 region preparation 从同一 `WorkerBudgetBroker` 租赁额度。静态 RGBA 在 `UploadTexture` command 取得 `Arc` 后立即从 CPU asset cache 释放，保留 manifest、hash 和尺寸；device loss 清空 texture/glyph residency与 retained draw cache，下一帧从 package manifest 重建。
 
-## AstraEMU Provider
+## AstraEMU 独立 Host
 
-`AstraEmuRuntimeProvider` 是 AstraEMU 的 gameplay runtime facade。Manager 仍是 Program target，可以负责窗口、输入、profile、overlay、文本管线和 UI；被启动的 legacy case 作为 Game target runtime session 运行。
+AstraEMU 使用独立 Slint Manager 与 Family ABI，不作为 gameplay runtime provider。游戏位置直接交给 Family，Family 自行持有 VM、原生文件、解码、混音、渲染和存档；Host 消费最终 CPU 帧与 PCM。
 
-`AstraEmuRuntimeProvider` 内部继续选择 family `LegacyRuntimeProvider`。Family provider 持有旧 VM、pack resolver、media bridge 和 snapshot serializer；它不能替换 `RuntimeWorld`、MutationLog、Save container 或 Release Gate。EMU provider 把 family step 输出转换成 Runtime effect list、AwaitToken、PresentationCommand、AudioCommand、TextCaptureEvent、snapshot section 和 local case report。
+独立 Host 不经过 RuntimeWorld、StateMachine、product package/save 或 effect transaction。当前重构范围和接口见 [独立 Host 重构](../migrations/astraemu-independent-host.md)。
 
 ## AstraRPG Provider
 
@@ -83,4 +83,4 @@ CosmicText shaping 使用 worker-local `FontSystem`/`SwashCache`、分片 single
 
 ## Migration Rule
 
-已有 AstraVN facade、VN extension manifest、package sections 和 release checks 先按 module layout 与 crate split 迁移，再由 `astra-vn-runtime-provider` 组合为 `NativeVnRuntimeProvider`。已有 plugin registry/action provider/VN extension fixture 迁移到 provider selection 口径。AstraEMU/AstraRPG 尚无实现代码，迁移文档只写未来建设计划，不列为现有代码搬迁；AstraRPG 的前置迁移见 [AstraRPG Design Alignment Migration](../migrations/astra-rpg-design-alignment-migration.md)。
+已有 AstraVN facade、VN extension manifest、package sections 和 release checks 先按 module layout 与 crate split 迁移，再由 `astra-vn-runtime-provider` 组合为 `NativeVnRuntimeProvider`。已有 plugin registry/action provider/VN extension fixture 迁移到 provider selection 口径。AstraRPG 的前置迁移见 [AstraRPG Design Alignment Migration](../migrations/astra-rpg-design-alignment-migration.md)；AstraEMU 不再沿本页的 provider 路线扩展。

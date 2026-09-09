@@ -8,7 +8,7 @@
 | [stage-2-media-package.md](stage-2-media-package.md) | Asset/Cook/Package、Asset VFS、Media provider、Migration 11 Headless test backend、Platform capability 和 release report |
 | [stage-3-astra-vn.md](stage-3-astra-vn.md) | AstraVN module layout、多功能 crate 拆分、facade-only `astra-vn` Rust dylib、`NativeVnRuntimeProvider`、`.astra`、AstraVN Core、Game target、Luau policy、standard commands、system UI、full playthrough 和 Windows/Web live player automation |
 | [stage-4-editor-ai-mcp.md](stage-4-editor-ai-mcp.md) | Editor target、Editor workflow、PIE、Release Gate UI、Runtime AI 和 MCP |
-| [stage-5-astra-emu.md](stage-5-astra-emu.md) | Program target、AstraEMU Manager、`AstraEmuRuntimeProvider`、LegacyRuntimeProvider facade、EmulatorCore 状态机映射、legacy pack VFS、auto probe、Trusted Luau、文本翻译和 FilterGraph preset |
+| [stage-5-astra-emu.md](stage-5-astra-emu.md) | 独立 Host、Slint Manager、Family ABI、Windows/FVP、原生存档、混合 PCM、异步文本服务与 HLSL 效果链 |
 | [stage-6-platform-completion.md](stage-6-platform-completion.md) | Linux、macOS、iOS 和 Android host completion、player input automation，以及 Linux/macOS Headless native portability |
 | [stage-7-astra-rpg.md](stage-7-astra-rpg.md) | `AstraRpgRuntimeProvider`、RPG core、AI Town、`rpg.trpg` profile 和 CP2020 local-private adapter |
 | [stage-8-astra-rpg-network.md](stage-8-astra-rpg-network.md) | AstraRPG Server/Client protocol、seat sync、transcript sync 和 network replay gate |

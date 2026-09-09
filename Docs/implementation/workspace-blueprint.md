@@ -1,11 +1,11 @@
 # Workspace Blueprint
 
+2026-09-08：[AstraEMU 独立 Host 重构](../migrations/astraemu-independent-host.md) 已获批准，当前 `IN_PROGRESS`。本页较早的 AstraEMU RuntimeWorld、Family ABI v9、Hook、Host VFS 和统一 package/save 记录由新方案取代；不能用于宣称独立 Host 已完成。
+
+
 AstraEngine v1 采用 UE 风格顶层代码分区和 Rust workspace。顶层目录按 `Engine/`、`Editor/`、`Emulator/`、`Examples/`、`Docs/`、`Tools/` 组织；Rust 内部仍按小 crate 开发。系列仓库可以拆分实现，但 public contract、schema 和测试命令以本蓝图为准。
 
 ## Layout
-
-The current AstraEMU boundary is Family ABI v9. Existing v6/v7 references in
-historical status rows describe migrations that preceded the v9 hard cut.
 
 | 路径 | 状态 | 职责 |
 | --- | --- | --- |
@@ -64,7 +64,7 @@ targets = [
 | `astra-package` | 2 | binary package/save container、section reader/writer、Zstd codec、crypto descriptor、plugin registry sections、`asset.vfs_manifest`、`asset.catalog` 和 package-backed VFS source | `astra-core`, `postcard`, `serde`, `zstd` | story/runtime semantics, legacy pack reader |
 | `astra-media-core` | 2/3 | Renderer2D/FilterGraph serde contract、headless CPU frame、deterministic filter executor，可被 AstraVN presentation/runtime provider crate 依赖 | `astra-core`, `serde`, `schemars` | decode/text/audio/native provider |
 | `astra-media` | 2 | TextLayout/Decode/AudioGraph providers，并 re-export `astra-media-core` 的 Renderer2D/FilterGraph traits and headless providers | `astra-media-core`, `astra-core`, `image`, `symphonia`, `cosmic-text`, optional `ffmpeg-next` via `ffmpeg-vcpkg` | VN state |
-| `astra-release` | 2/3/5 | Release Gate validators、plugin/package/VFS/provider/VN/player/AstraEMU checks、report writer | `astra-core`, `astra-asset`, `astra-package`, `astra-media`, `astra-vn`, `astra-player-core`, `astra-emu-manager-core` | Editor-only state |
+| `astra-release` | 2/3 | Release Gate validators、plugin/package/VFS/provider/VN/player checks、report writer | `astra-core`, `astra-asset`, `astra-package`, `astra-media`, `astra-vn`, `astra-player-core` | Editor-only state、独立 AstraEMU Host |
 | `astra-platform` | 2 | PlatformHost trait、PlatformCapabilityReport、SDK 状态和 token DTO | `astra-core`, `serde`, `schemars` | Runtime state、Actor 指针、native handle ownership |
 | `astra-platform-windows` | 2 | Windows capability probe 和 host adapter | `astra-platform` | non-Windows private API leaking into shared crate |
 | `astra-platform-linux` | 2 | Linux capability probe 和 host adapter | `astra-platform` | distro-specific state leaking into shared crate |
@@ -111,21 +111,13 @@ python Tools/check_dynamic_artifacts.py
 | `astra-editor-bridge` | 4 | Qt/Rust bridge、PIE/debug API、runtime provider editor metadata handoff | `astra-runtime`, `astra-vn-editor`, `astra-vn-runtime-provider`, `astra-release` | packaged runtime dependency, direct product runtime internals |
 | `astra-ai` | 4 reopened | Runtime Director、provider profile、Asset VFS-backed ONNX ModelBundle、memory ledger、Editor AI audit | `astra-core`, `astra-runtime`, `astra-package`, `astra-asset` | provider secret in replay, loose shipping sidecar |
 | `astra-mcp` | 4 | MCP tool descriptor、Context Pack、permission、audit、command allowlist | `astra-core`, `astra-plugin` | Editor widget in Runtime tools |
-| `astra-emu-family-core` | 5 in progress | in-process legacy VFS、manifest v2、opaque decrypt transport 与 family factory contract | `astra-core`, `serde`, `schemars` | ABI trait object、family key、商业 payload、本地路径 |
-| `astra-emu-family-support` | 5 in progress | 显式 factory registry、strict mount profile、Trusted Luau、private cache、viewer、verify、extract 与 Linux FUSE | `astra-emu-family-core`, `astra-media`, `mlua`, `lru` | family 解密算法、隐式 provider 选择、media fallback |
-| `astra-emu-family-api` | 5 in progress | Family ABI v9 descriptor、probe/session/step、surface lease、Layer2D、Hook、writable-file、audio/video/wait/control DTO | `astra-core`, `astra-byte-source`, `astra-media-core`, `abi_stable`, `serde` | snapshot/save slot、text lease、Manager UI、RuntimeWorld、GPU/audio native handle |
-| `astra-emu-extension-api` | 5 in progress | Extension ABI v1 descriptor/lifecycle、同步 opaque Hook 与 UTF-8 translation companion contract | `astra-emu-family-api`, `abi_stable`, `serde`, `schemars` | HTTP provider、cache、字体布局、Host overlay、save/load slot |
-| `astra-emu-manager-core` | 5 in progress | SQLite Library、probe、family loading、RuntimeWorld lifecycle、patch policy、FilterGraph 与 evidence schema | `astra-emu-family-api`, `astra-runtime`, `astra-plugin`, `rusqlite`, `mlua` | Slint、winit、wgpu、family VFS implementation |
+| `astra-emu-family-api` | 5 in progress | 独立 abi_stable descriptor/probe/session/input/window/frame/PCM/text DTO | `abi_stable` | RuntimeWorld、package、VFS、GPU/audio handle |
+| `astra-emu-manager-core` | 5 in progress | 资料库、新 schema、设置、插件安装与显式选择 | `astra-emu-family-api`, `rusqlite` | RuntimeWorld、Slint、wgpu、旧 Hook/patch |
 | `astra-emu-metadata` | 5 in progress | VNDB/Bangumi provider adapter、版本化 matcher、license/consent、受限封面与 Bangumi 收藏状态 contract | `vn`, `bangumi-api`, `reqwest`, `unicode-normalization`, `strsim` | EngineCore、RuntimeWorld、family ABI、save/replay、package |
-| `astra-emu-manager-ui-slint` | 5 in progress | Slint ViewModel adapter、desktop/mobile/large-screen layout、overlay 与 accessibility | `slint`, `astra-emu-manager-core` | public runtime/package/save/ABI 类型泄漏 |
-| `astra-emu-manager` | 5 in progress | Program target、平台授权 source、显式 family VFS composition、Slint/WGPU same-device host、FVP runtime orchestration | `astra-emu-manager-core`, `astra-emu-manager-ui-slint`, `astra-emu-family-support`, `astra-emu-fvp`, `astra-emu-minori`, `wgpu`, `winit` | family VM 私有状态、第二套 RuntimeWorld、隐式 factory 注册 |
-| `astra-emu-fvp` | 5 in progress | thin dylib/export/build identity/error boundary；pinned RFVP fork 目标为直接实现 Family ABI v9 `Ported + SingleLayer`、surface/Hook/writable-file 与 input/audio/control；fork thinness audit 当前 blocking | `astra-emu-family-api`, `rfvp-astra-provider` | framebuffer compositor、scene translator、pixel copy、snapshot、text lease、runtime semantic hash |
-| `astra-emu-translation-openai-compatible` | 5 in progress | ECNU/OpenAI-compatible Responses SSE、显式 Chat adapter、预算、熔断与平台 secret store | `reqwest`, `tokio`, `keyring` | Manager Core HTTP DTO、shipping credential persistence |
-| `astra-emu-schema` | 5 in progress | 从 Rust 真源生成 AstraEMU JSON Schema | `schemars` 与 AstraEMU contract crates | 手写 schema 真源 |
-| `astra-emu-minori` | 5 in progress | Minori PAZ v0-v2 family factory、纯 Rust decrypt、`.sc` VM、Family ABI v9 `Native + MultiLayer`、core-owned text raster 与原生 writable-file save | `astra-emu-family-core`, `astra-emu-family-support`, `astra-emu-family-api`, `cosmic-text`, `blowfish`, `rc4`, `flate2` | key、商业 payload、Luau decrypt callback、Host text presentation、save slot API 或本地路径 |
-| `astra-emu-minori-cli` | 5 in progress | 纯 Rust GARbro scheme import、data-only private profile 与 `.sc` census | `astra-emu-minori`, `astra-emu-family-support`, `flate2` | key 输出、managed helper、runtime fallback |
-| `astra-emu-evidence` | 5 in progress | 校验 runtime/family/UI/FVP/Luau/translation/六平台 continuity，生成原子 Postcard evidence sections、hash summary 和 project-relative package fragment | `astra-emu-manager-core`, `postcard`, `serde_yaml` | 商业 payload、绝对路径、secret、手填 passing evidence |
-| `astra-emu-family-package` | 5 in progress | 检查 desktop/Android dynamic descriptor 或 iOS static archive identity，重算 binary hash，并通过 secure environment key 生成 detached Ed25519 manifest | `astra-emu-manager-core`, `ed25519-dalek`, `object` | 私钥文件、未签名发布包、运行时下载 |
+| `astra-emu-manager-ui-slint` | 5 in progress | Slint ViewModel、资料库布局与操作回调 | `slint` | Family VM、设备与 runtime 状态 |
+| `astra-emu-manager` | 5 in progress | Windows 独立 Host、Slint 共享 wgpu device、PCM 设备输出、HLSL 效果链 | Manager core/UI、Family API、FVP、wgpu、cpal | RuntimeWorld、product package/save、Host VFS |
+| `astra-emu-fvp` | 5 in progress | RFVP 自有 VM/原生文件/媒体/最终帧/原生存档与独立 ABI adapter | Family API、RFVP 核心和第三方库 | 旧 Host adapter、翻译改写、统一 save/package |
+| `astra-emu-translation-openai-compatible` | 5 in progress | 异步 OpenAI-compatible service、连接测试、timeout/cancel、有限上下文与 session cache | `reqwest`, `tokio` | 持久化译文、secret/context 日志、RFVP 翻译 |
 
 ## Binaries
 
@@ -134,14 +126,11 @@ python Tools/check_dynamic_artifacts.py
 | `astra` | `astra-cli` | `astra cook`, `astra package build`, `astra package bundle`, `astra package validate`, `astra test run`, `astra report explain` |
 | `astra-headless` | `astra-headless` | `astra-headless run`、`astra-headless serve --stdio` 与 `bootstrap-test-env`；Developer/test only |
 | `astra-player` | `astra-player` | `astra-player --script <automation.json> --transcript <transcript.json>` |
-| `astra-emu-cli` | `astra-emu-cli` | `astra-emu-cli vfs --family <family> ...`；旧 `minori` 命令已删除 |
-| `astra-emu-minori-cli` | `astra-emu-minori-cli` | `import-garbro-scheme`、`census-scripts` |
 | `astra-crash-reporter` | `AstraCrashReporter` | 由 bundled Player 启动；`--self-test` 仅用于 bundle gate |
 | `astra target` | `astra-cli` | `astra target list`, `astra target validate` |
 | `astra platform` | `astra-cli` | `astra platform probe` |
 | `astra-editor` | `astra-editor-app` | Qt/QML creator editor |
-| `astra-emu-manager` | `astra-emu-manager` | legacy VN manager that creates RuntimeWorld, selects family plugin and owns overlay/filter/text pipelines |
-| `astra-emu-cli` | `astra-emu-cli` | overlay-free native family/game visual host plus physical-input JSONL automation through `astra-platform-headless` |
+| `astra-emu-manager` | `astra-emu-manager` | 独立 Windows Host 与 Slint 资料库 |
 | `astra-emu-family-*` | family crate | in-process legacy family plugin |
 
 ## Feature Rules
@@ -149,12 +138,12 @@ python Tools/check_dynamic_artifacts.py
 - Default features must build desktop core without Editor, AI provider or EMU family.
 - Game target must bind a gameplay runtime provider explicitly; `NativeVnRuntimeProvider`、`AstraEmuRuntimeProvider` 和后续 `AstraRpgRuntimeProvider` 不能靠插件加载顺序抢占。
 - `rpg.trpg` is an AstraRPG profile crate; do not create a top-level `AstraTRPG` module, standalone TRPG runtime provider or top-level `trpg.*` package section namespace.
-- `luau` enables AstraVN and AstraEMU policy host integration. Legacy family adapters may parse historical script names inside their private core.
+- `luau` enables AstraVN policy host integration. Legacy family script interpreters remain private to each Family.
 - `wgpu` is default Renderer2D provider. Platform decode features are profile-specific.
  - Migration 11 已把 Runtime/Media/Test 收束为库内 Headless：`astra-headless-test` 为 `TempDir` 隔离 + `astra-platform-headless` 离屏 `wgpu_offscreen/kira` 库内直调，`OnceLock/Mutex/JSONL/serve --stdio` 已删除；纯单元 crate（`astra-core/asset/byte-source` 等）改 `#[test]` 不再 `dev-dep astra-headless-test`。`perf-trace` 移 `astra-observability:perf-trace` 可选 feature，默认关闭。
  - `astra-headless-protocol` 的 `submitted_scene_stream_hash/rasterized_frame_stream_hash/audio_stream_hash` 已彻底删除（`schema v2→v3`），`Shipping` 仅校验 `step+seed`，`Evidence` 亦不计帧内 `blake3/postcard` 哈希。
  - 插件指纹仅 `engine_version+abi_fingerprint` blocking，`rustc/feature` 降为 `tracing::warn!`，符合 `AGENTS.md:2.2` 精简约束。
- - `astra-vn` 的 `save+editor→astra-vn-persist` 与 `commands+plugin+system→astra-vn-extension` 已规划，`astra-vn-runtime-provider` 单文件 `3501` 拟拆 `factory/session/provider/command/ffi` 四模块（`<600` 行）；`Emulator` 的 `evidence/e3/schema/family-package→astra-emu-tool` 拟合并，`na_wmv/mpeg2/anzu` 改 `cargo patch optional` 外置。
+ - `astra-vn` 的 `save+editor→astra-vn-persist` 与 `commands+plugin+system→astra-vn-extension` 已规划，`astra-vn-runtime-provider` 单文件 `3501` 拟拆 `factory/session/provider/command/ffi` 四模块（`<600` 行）。AstraEMU 旧 evidence/e3/schema/family-package 工具直接退出新 Host 主路径，不再执行此前的合并计划。
  - Target manifest is required for package validation. Missing SDK reports block native platform completion, but schema and CLI checks still run on ordinary CI.
 
 ## Verification
@@ -171,3 +160,5 @@ cargo test --workspace --features ffmpeg-vcpkg
 Expected evidence 包括 `astra.headless_test_inventory.v1`、shipping graph report，以及产品 run 的 artifact manifest/run report；旧 `astra.scenario_report.v1` 不再是 Headless 完成证据。
 
 旧 `astra test run --headless` 现在返回明确迁移错误，不再读取 YAML 或转发。`astra-headless`、`astra.headless_run_report.v2` 和 workspace tests 已成为统一实现路径；在完整 workspace test 与正式 evidence 完成前，Migration 11 仍保持 `IN_PROGRESS`。
+
+AstraEMU 旧 Extension/Hook、runtime bridge 与 evidence 工具退出活动 workspace。Minori 及其他 Family 核心源码保留为后续接入材料；辅助 crate 是否保留以核心源码实际依赖为准，不纳入当前产品构建。

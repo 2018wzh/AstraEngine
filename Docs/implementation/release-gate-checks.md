@@ -104,15 +104,6 @@ pub struct ReleaseCheckRecord {
 | platform | `platform.capability_report` | capability v2 | missing SDK/provider, invalid selected provider or invalid profile/build identity | platform、profile/build hash、declared/available/selected、diagnostic |
 | platform | `platform.host_conformance` | host conformance v1 | missing report/check、package mismatch、resource leak、device/context loss | profile/package/build/session hash、check count |
 | platform | `platform.evidence_continuity` | capability + conformance + Player automation | platform/profile/package/build/session identity discontinuity | session id、diagnostic |
-| emu | `emu.artemis_full_flow` | local case report | trace/snapshot/redaction failure | trace hash, redaction status |
-| emu | `emu.game_runtime_provider` | target manifest, `AstraEmuRuntimeProvider` descriptor, local case report | missing provider binding, provider does not create RuntimeWorld, save/replay hash missing or family bypasses provider | provider id, target id, session id, replay hash |
-| emu | `emu.legacy_runtime_provider` | family plugin report | family bypasses RuntimeWorld or missing provider session binding | family id, provider id, session id |
-| emu | `emu.vm_state_machine_trace` | family scheduler/context trace | context ordering unstable, await boundary missing, basic block not bounded, snapshot hash mismatch or fault isolation missing | family id, context count, trace hash, snapshot hash |
-| emu | `emu.legacy_pack_vfs` | legacy pack VFS report | reader identity missing, pack entry out of bounds, hash mismatch, overlay not allowed or local root/payload leaked | family id, pack alias, entry count, redaction status |
-| emu | `emu.auto_probe` | auto probe report | selected family is not reproducible or override reason missing | selected family, priority list, override reason |
-| emu | `emu.trusted_luau_policy` | trusted script report | denied capability mutates runtime or script isolation missing | script id, denied capability, isolation status |
-| emu | `emu.text_redaction` | text pipeline report | report contains full commercial text without local opt-in | text hash, source ref, dump policy |
-| emu | `emu.filter_preset` | filter preset report | preset bypasses FilterGraph validation or leaks native handle | preset id, target layer, validation status |
 
 `desktop-release` 和 `web-release` 默认要求 `compiled.project` 与 `platform.capability_report`。Release package 必须来自 `astra cook`/project 输入，`PackageBuildRequest::fixture` 只能用于 dev/headless 测试，不能冒充发布输入；`astra-cli` 产品 package 路径不得调用该 constructor。缺 platform report 时是 blocking；headless/dev profile 可降为 warning。Desktop release 缺 `windowed_smoke`、`renderer.wgpu_surface`、`decode.wmf.audio`、`decode.wmf.video_first_frame`、`audio.wasapi` 或 `save.known_folder_rw` 时必须 blocked。Web release 使用同一 check；真实浏览器缺 `browser_smoke`、`renderer.browser_context`、`decode.browser_media`、`decode.webcodecs_config`、`audio.webaudio_render`、`save.web_storage_rw` 或 `package.web_source_read` 时，check 必须是 `blocked`，不能降级成 fallback pass。
 
@@ -129,11 +120,6 @@ checks:
     status: pass
     evidence:
       state_hash: hash128:...
-  - id: emu.artemis_full_flow
-    domain: emu
-    status: blocked
-    diagnostic: ASTRA_EMU_REDACTION_FAILED
-    source_ref: null
   - id: target.manifest
     domain: target
     status: pass
@@ -170,7 +156,6 @@ checks:
 ```bash
 astra package validate target/nativevn.astrapkg --profile desktop-release --report target/release_report.yaml
 astra package bundle target/nativevn.astrapkg --profile classic --target nativevn-game --platform windows --out target/bundle/windows --format json
-astra test run scenarios/emu/artemis_full_flow.yaml --headless --report target/artemis_report.yaml
 cargo test -p astra-release release_report
 ```
 

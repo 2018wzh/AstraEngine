@@ -1,6 +1,6 @@
 # AstraEMU Third-Party Notices
 
-本文件随 AstraEMU desktop/mobile package 分发。依赖的完整许可证文本由 release packaging 从锁定依赖的 license metadata 收集；以下条目记录产品主路径中需要单独保留的来源与归因。
+本文件随 AstraEMU Windows 应用分发。发布包还需包含活动依赖的完整许可证文本；以下条目记录需要单独保留的来源与归因。
 
 ## Slint 1.17.1
 
@@ -13,17 +13,31 @@
 ## rfvp derivative used by astra-emu-fvp
 
 - Upstream: <https://github.com/xmoezzz/rfvp>
-- Fixed revision: `3b5ea6c96a925c12f95aef8554905e8fecbc77c3` (`0.5.0` tag)
+- Hosted derivative revision: `f4f64a5bb726c1759350a666a35e0a454b810f61`
 - License: Mozilla Public License 2.0.
-- Hosted derivative source: pinned `2018wzh/rfvp` `astra-hosted` revision recorded by `astra-emu-fvp`
+- Derivative source: <https://github.com/2018wzh/rfvp>
 - Astra wrapper source: `Emulator/Source/Families/astra-emu-fvp/`
-- 修改包括 host VFS、bounded deterministic stepping、effect/trace journal、snapshot isolation、fail-fast syscall coverage 与 ABI provider adapter。发布时同时分发 `MODIFICATIONS.md` 与对应 source archive/source offer；更细的文件级历史由 Git 保留。
+- 独立 Host 重构在 Family 内保留 RFVP 游戏行为，调整最终帧、混合 PCM、输入和生命周期边界。具体修改随 Family 源码记录；旧 Host VFS、effect journal 和统一 snapshot 接口不再作为产品接口。
 
-MPL-2.0 要求的 covered source 以随 release 对应的 AstraEngine source archive 或公开 source offer 提供；release gate 必须把 source archive hash/source offer identity 与 binary/package identity 绑定。
+发布时提供与二进制对应的 MPL-2.0 covered source、修改说明和完整许可证，可随包分发源码或提供有效的 source offer。
 
 ## Noto Sans SC
 
 - Upstream: <https://github.com/google/fonts>
-- Fixed revision and file hash: `Engine/Fixtures/PublicDomainFonts/manifest.json`
+- 所用字体文件随固定版本的 RFVP 源码保留，发布包包含其来源说明与完整许可证。
 - License: SIL Open Font License 1.1.
 - AstraEMU FVP 使用该字体作为跨平台、可再分发的 CJK compatibility fallback；它不冒充或再分发 Microsoft 字体。完整许可证见 `Engine/Fixtures/PublicDomainFonts/OFL-NotoSansSC.txt`。
+
+## Anime4K
+
+- Upstream: <https://github.com/bloc97/Anime4K>
+- Fixed revision: `7684e9586f8dcc738af08a1cdceb024cc184f426`
+- Copyright © 2019–2021 bloc97.
+- License: MIT.
+- 内置 Restore CNN S 与 Upscale CNN x2 S 从该版本的 GLSL shader 独立移植，随 shader 保留完整 MIT 许可证。Magpie format 4 的兼容解析与内建函数独立实现，不包含 Magpie GPL 实现代码。
+
+## DirectX Shader Compiler
+
+- Upstream: <https://github.com/microsoft/DirectXShaderCompiler>
+- Fixed version: `1.8.2502`.
+- 应用的 HLSL 编译路径使用固定版本 DXC；分发编译器时一并保留官方发行包中的许可证和第三方说明。
