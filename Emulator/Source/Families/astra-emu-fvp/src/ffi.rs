@@ -1,115 +1,167 @@
-use std::panic::{catch_unwind, AssertUnwindSafe};
-
-use abi_stable::prefix_type::PrefixTypeTrait;
-use astra_emu_family_api::{
-    ffi_result, AstraLegacyFamilyModule, AstraLegacyFamilyModuleRef, FamilyId,
-    FfiFamilyPluginDescriptor, FfiLegacyHostServices, FfiLegacyResult, FfiOpenCall, FfiProbeCall,
-    FfiProbeReport, FfiProviderInstanceRequest, FfiSessionCall, FfiShutdownReport, FfiStepCall,
-    FfiStepOutput, LegacyFamilyCoreKind, LegacyFamilyPluginDescriptor,
-    LegacyFamilyPresentationMode, LegacyProviderError, LEGACY_FAMILY_ABI_FINGERPRINT,
+use std::{
+    collections::BTreeMap,
+    panic::{catch_unwind, AssertUnwindSafe},
+    sync::Mutex,
 };
 
-fn boundary<T, U>(
-    event: &'static str,
-    action: impl FnOnce() -> Result<T, LegacyProviderError>,
-) -> FfiLegacyResult<U>
-where
-    T: Into<U>,
-{
-    match catch_unwind(AssertUnwindSafe(action)) {
-        Ok(result) => ffi_result(result),
-        Err(_) => {
-            tracing::error!(event, "RFVP provider panicked at the dylib boundary");
-            ffi_result::<T, U>(Err(LegacyProviderError::invalid(
-                "ASTRA_FVP_DYLIB_PANIC",
-                "RFVP provider panicked at the dylib boundary",
-            )))
-        }
+use abi_stable::{
+    prefix_type::PrefixTypeTrait,
+    sabi_types::Constructor,
+    std_types::{ROption, RResult},
+    type_level::downcasting::TD_Opaque,
+};
+use astra_emu_family_api::{
+    AstraFamilyModule, AstraFamilyModuleRef, FamilyError, FamilyModule, FamilyModuleBox,
+    FamilyProvider, FamilyResult, FamilySession, FrameConsumerRef, FrameVisitor, OpenRequest,
+    SessionRequest,
+};
+
+use crate::provider::{FvpProvider, FvpSession};
+
+#[derive(Default)]
+struct FvpModule {
+    provider: Mutex<FvpProvider>,
+    sessions: Mutex<BTreeMap<String, FvpSession>>,
+}
+
+impl FamilyModule for FvpModule {
+    fn descriptor(
+        &self,
+    ) -> astra_emu_family_api::FfiFamilyResult<astra_emu_family_api::FamilyDescriptor> {
+        boundary(|| self.provider.lock().map_err(lock_error)?.descriptor())
+    }
+
+    fn probe(
+        &self,
+        request: astra_emu_family_api::ProbeRequest,
+    ) -> astra_emu_family_api::FfiFamilyResult<ROption<astra_emu_family_api::ProbeReport>> {
+        boundary(|| {
+            let report = self.provider.lock().map_err(lock_error)?.probe(request)?;
+            Ok(report.into())
+        })
+    }
+
+    fn open(
+        &self,
+        request: OpenRequest,
+    ) -> astra_emu_family_api::FfiFamilyResult<astra_emu_family_api::OpenResponse> {
+        boundary(|| {
+            let (response, session) = self
+                .provider
+                .lock()
+                .map_err(lock_error)?
+                .open_session(request)?;
+            self.sessions
+                .lock()
+                .map_err(lock_error)?
+                .insert(response.session_id.to_string(), session);
+            Ok(response)
+        })
+    }
+
+    fn advance(
+        &self,
+        request: astra_emu_family_api::AdvanceRequest,
+    ) -> astra_emu_family_api::FfiFamilyResult<astra_emu_family_api::AdvanceResponse> {
+        boundary(|| {
+            request.validate()?;
+            let mut sessions = self.sessions.lock().map_err(lock_error)?;
+            let session = sessions
+                .get_mut(request.session_id.as_str())
+                .ok_or_else(|| {
+                    FamilyError::invalid(
+                        "ASTRA_EMU_FVP_SESSION",
+                        "the requested FVP session does not exist",
+                    )
+                })?;
+            session.advance(request.elapsed_ns, &request.events)
+        })
+    }
+
+    fn frame(
+        &self,
+        request: SessionRequest,
+        consumer: FrameConsumerRef<'_>,
+    ) -> astra_emu_family_api::FfiFamilyResult<()> {
+        boundary(|| {
+            request.validate()?;
+            let sessions = self.sessions.lock().map_err(lock_error)?;
+            let session = sessions
+                .get(&request.session_id.to_string())
+                .ok_or_else(|| {
+                    FamilyError::invalid(
+                        "ASTRA_EMU_FVP_SESSION",
+                        "the requested FVP session does not exist",
+                    )
+                })?;
+            let mut consumer = consumer;
+            let mut visitor = ConsumerVisitor {
+                consumer: &mut consumer,
+            };
+            session.visit_frame(&mut visitor)
+        })
+    }
+
+    fn close(&self, request: SessionRequest) -> astra_emu_family_api::FfiFamilyResult<()> {
+        boundary(|| {
+            request.validate()?;
+            let session = self
+                .sessions
+                .lock()
+                .map_err(lock_error)?
+                .remove(request.session_id.as_str())
+                .ok_or_else(|| {
+                    FamilyError::invalid(
+                        "ASTRA_EMU_FVP_SESSION",
+                        "the requested FVP session does not exist",
+                    )
+                })?;
+            Box::new(session).close()
+        })
     }
 }
 
-extern "C" fn descriptor() -> FfiLegacyResult<FfiFamilyPluginDescriptor> {
-    boundary("astra.emu.fvp.descriptor", || {
-        let descriptor = LegacyFamilyPluginDescriptor {
-            family_id: FamilyId("fvp".into()),
-            plugin_id: "astra.emu.fvp".into(),
-            provider_id: "astra.emu.family.fvp".into(),
-            core_kind: LegacyFamilyCoreKind::Ported,
-            presentation_mode: LegacyFamilyPresentationMode::SingleLayer,
-            engine_version: env!("CARGO_PKG_VERSION").into(),
-            rustc_fingerprint: env!("ASTRA_FVP_RUSTC_FINGERPRINT").into(),
-            feature_fingerprint: env!("ASTRA_FVP_FEATURE_FINGERPRINT").into(),
-            abi_fingerprint: LEGACY_FAMILY_ABI_FINGERPRINT.into(),
-            supported_formats: vec![
-                "fvp.hcb".into(),
-                "fvp.bin".into(),
-                "fvp.nvsg".into(),
-                "fvp.hzc1".into(),
-            ],
-            permissions: vec![
-                "vfs.read".into(),
-                "surface.write".into(),
-                "hook.invoke".into(),
-                "writable_file".into(),
-                "media.submit".into(),
-            ],
-            report_redaction: "astra.emu.redaction.v1".into(),
-            license: "MPL-2.0".into(),
-        };
-        descriptor.validate()?;
-        Ok(descriptor)
-    })
+struct ConsumerVisitor<'borrow, 'callback> {
+    consumer: &'borrow mut FrameConsumerRef<'callback>,
 }
 
-extern "C" fn create_instance(
-    services: FfiLegacyHostServices,
-    request: FfiProviderInstanceRequest,
-) -> FfiLegacyResult<()> {
-    boundary("astra.emu.fvp.create_instance", || {
-        rfvp_astra_provider::ffi_bridge::create_instance(services, request)
-    })
+impl FrameVisitor for ConsumerVisitor<'_, '_> {
+    fn accept(&mut self, frame: astra_emu_family_api::FrameView<'_>) -> FamilyResult<()> {
+        self.consumer.accept(frame).into_result().map_err(|_| {
+            FamilyError::invalid(
+                "ASTRA_EMU_FVP_FRAME_CONSUMER",
+                "the host frame consumer rejected the frame",
+            )
+        })
+    }
 }
 
-extern "C" fn destroy_instance(request: FfiProviderInstanceRequest) -> FfiLegacyResult<()> {
-    boundary("astra.emu.fvp.destroy_instance", || {
-        rfvp_astra_provider::ffi_bridge::destroy_instance(request)
-    })
+fn lock_error<T>(_error: std::sync::PoisonError<T>) -> FamilyError {
+    FamilyError::invalid(
+        "ASTRA_EMU_FVP_LOCK",
+        "the FVP module state lock is poisoned",
+    )
 }
 
-extern "C" fn probe(call: FfiProbeCall) -> FfiLegacyResult<FfiProbeReport> {
-    boundary("astra.emu.fvp.probe", || {
-        rfvp_astra_provider::ffi_bridge::probe(call)
-    })
+fn boundary<T>(action: impl FnOnce() -> FamilyResult<T>) -> RResult<T, FamilyError> {
+    match catch_unwind(AssertUnwindSafe(action)) {
+        Ok(result) => result.into(),
+        Err(_) => Err(FamilyError::invalid(
+            "ASTRA_EMU_FVP_PANIC",
+            "FVP panicked at the dynamic family boundary",
+        ))
+        .into(),
+    }
 }
 
-extern "C" fn open(call: FfiOpenCall) -> FfiLegacyResult<abi_stable::std_types::RString> {
-    boundary("astra.emu.fvp.open", || {
-        rfvp_astra_provider::ffi_bridge::open(call)
-    })
-}
-
-extern "C" fn step(call: FfiStepCall) -> FfiLegacyResult<FfiStepOutput> {
-    boundary("astra.emu.fvp.step", || {
-        rfvp_astra_provider::ffi_bridge::step(call)
-    })
-}
-
-extern "C" fn shutdown(call: FfiSessionCall) -> FfiLegacyResult<FfiShutdownReport> {
-    boundary("astra.emu.fvp.shutdown", || {
-        rfvp_astra_provider::ffi_bridge::shutdown(call)
-    })
+extern "C" fn construct_module() -> FamilyModuleBox {
+    astra_emu_family_api::FamilyModule_TO::from_value(FvpModule::default(), TD_Opaque)
 }
 
 #[abi_stable::export_root_module]
-pub fn astra_legacy_family_root_module() -> AstraLegacyFamilyModuleRef {
-    AstraLegacyFamilyModule {
-        descriptor,
-        create_instance,
-        destroy_instance,
-        probe,
-        open,
-        step,
-        shutdown,
+pub fn astra_fvp_family_root_module() -> AstraFamilyModuleRef {
+    AstraFamilyModule {
+        service: Constructor(construct_module),
     }
     .leak_into_prefix()
 }

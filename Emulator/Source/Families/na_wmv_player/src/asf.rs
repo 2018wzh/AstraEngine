@@ -144,7 +144,15 @@ pub struct AsfFile {
 
     pub packet_size: u32,     // upstream: s->packet_size = hdr.max_pktsize
     pub min_packet_size: u32, // upstream: hdr.min_pktsize
-    pub preroll_ms: u32,      // upstream: hdr.preroll
+    /// ASF File Properties play duration, in 100-nanosecond units.
+    ///
+    /// The value includes `preroll_ms`, as specified by the ASF media
+    /// foundation attributes. Keep the container value intact so callers can
+    /// derive an exact presentation duration without a guessed frame period.
+    pub play_duration_100ns: u64,
+    /// ASF File Properties preroll, in milliseconds. The field is a QWORD;
+    /// retaining all 64 bits prevents large values from silently wrapping.
+    pub preroll_ms: u64,
 
     is_audio_stream: [bool; 128],
     audio_descramble: [AsfAudioDescramble; 128],
@@ -173,7 +181,8 @@ impl AsfFile {
         let mut packet_count = 0u64;
         let mut min_pktsize = 0u32;
         let mut max_pktsize = 0u32;
-        let mut preroll_ms = 0u32;
+        let mut play_duration_100ns = 0u64;
+        let mut preroll_ms = 0u64;
 
         let header_end = hdr.size;
         let mut pos = 24u64 + 4 + 1 + 1;
@@ -186,11 +195,11 @@ impl AsfFile {
                 // ASFMainHeader: we follow upstream's `asf_read_file_properties`.
                 reader.seek(SeekFrom::Current(16 + 8 + 8))?; // file_id + file_size + create_time
                 packet_count = reader.read_u64::<LittleEndian>()?; // data_packets_count
-                reader.seek(SeekFrom::Current(8 + 8))?; // play_time + send_time
+                play_duration_100ns = reader.read_u64::<LittleEndian>()?;
+                reader.seek(SeekFrom::Current(8))?; // send_time
 
-                // preroll is a QWORD in ASF; upstream uses the low 32 bits.
-                preroll_ms = reader.read_u32::<LittleEndian>()?;
-                let _preroll_hi_ignored = reader.read_u32::<LittleEndian>()?;
+                // Preroll is a QWORD in ASF and is expressed in milliseconds.
+                preroll_ms = reader.read_u64::<LittleEndian>()?;
 
                 let _flags = reader.read_u32::<LittleEndian>()?;
                 min_pktsize = reader.read_u32::<LittleEndian>()?;
@@ -335,11 +344,33 @@ impl AsfFile {
             packet_count,
             packet_size: max_pktsize,
             min_packet_size: min_pktsize,
+            play_duration_100ns,
             preroll_ms,
             is_audio_stream,
             audio_descramble,
             streams: std::array::from_fn(|_| AsfStreamState::default()),
         })
+    }
+
+    /// Return the media presentation duration after ASF preroll, retaining
+    /// the container's native 100-nanosecond precision.
+    pub fn presentation_duration_100ns(&self) -> Result<u64> {
+        let preroll_100ns = self
+            .preroll_ms
+            .checked_mul(10_000)
+            .ok_or_else(|| DecoderError::InvalidData("ASF preroll conversion overflows".into()))?;
+        self.play_duration_100ns
+            .checked_sub(preroll_100ns)
+            .ok_or_else(|| {
+                DecoderError::InvalidData("ASF play duration is shorter than preroll".into())
+            })
+    }
+
+    /// Return the media presentation duration in nanoseconds.
+    pub fn presentation_duration_ns(&self) -> Result<u64> {
+        self.presentation_duration_100ns()?
+            .checked_mul(100)
+            .ok_or_else(|| DecoderError::InvalidData("ASF presentation duration overflows".into()))
     }
 
     fn descramble_audio_if_needed(&self, stream_num: u8, data: Vec<u8>) -> Vec<u8> {
@@ -693,7 +724,9 @@ impl AsfFile {
                 packet_time_start = 0;
             }
 
-            let pts_ms = packet_frag_timestamp.saturating_sub(self.preroll_ms);
+            let pts_ms = u64::from(packet_frag_timestamp)
+                .saturating_sub(self.preroll_ms)
+                .min(u64::from(u32::MAX)) as u32;
 
             if packet_obj_size == 0 {
                 // Unknown object size: emit as-is.
@@ -778,5 +811,94 @@ impl AsfFile {
         }
 
         Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Cursor;
+
+    use super::*;
+
+    fn push_u16(bytes: &mut Vec<u8>, value: u16) {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn push_u32(bytes: &mut Vec<u8>, value: u32) {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn push_u64(bytes: &mut Vec<u8>, value: u64) {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn file_properties_fixture(play_duration_100ns: u64, preroll_ms: u64) -> Vec<u8> {
+        let mut properties = Vec::new();
+        properties.extend_from_slice(&[0; 16]); // file ID
+        push_u64(&mut properties, 0); // file size
+        push_u64(&mut properties, 0); // creation time
+        push_u64(&mut properties, 0); // data packets
+        push_u64(&mut properties, play_duration_100ns);
+        push_u64(&mut properties, 0); // send duration
+        push_u64(&mut properties, preroll_ms);
+        push_u32(&mut properties, 0); // flags
+        push_u32(&mut properties, 64); // minimum packet size
+        push_u32(&mut properties, 64); // maximum packet size
+        push_u32(&mut properties, 0); // maximum bitrate
+        assert_eq!(properties.len(), 80);
+
+        let file_properties_size = 24 + properties.len() as u64;
+        let data_size = 24 + 16 + 8 + 2;
+        let header_size = 24 + 4 + 1 + 1 + file_properties_size;
+
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&GUID_ASF_HEADER.0);
+        push_u64(&mut bytes, header_size);
+        push_u32(&mut bytes, 1); // header object count
+        bytes.push(1); // reserved
+        bytes.push(2); // reserved
+        bytes.extend_from_slice(&GUID_FILE_PROPERTIES.0);
+        push_u64(&mut bytes, file_properties_size);
+        bytes.extend_from_slice(&properties);
+        bytes.extend_from_slice(&GUID_ASF_DATA.0);
+        push_u64(&mut bytes, data_size);
+        bytes.extend_from_slice(&[0; 16]); // file ID
+        push_u64(&mut bytes, 0); // data packet count
+        push_u16(&mut bytes, 0); // reserved
+        bytes
+    }
+
+    #[test]
+    fn file_properties_keep_full_duration_and_preroll() {
+        let preroll_ms = u64::from(u32::MAX) + 7;
+        let presentation_duration_100ns = 25_000_000;
+        let play_duration_100ns = preroll_ms
+            .checked_mul(10_000)
+            .and_then(|value| value.checked_add(presentation_duration_100ns))
+            .expect("fixture duration fits");
+        let mut reader = Cursor::new(file_properties_fixture(play_duration_100ns, preroll_ms));
+
+        let asf = AsfFile::open(&mut reader).expect("valid file properties fixture");
+
+        assert_eq!(asf.play_duration_100ns, play_duration_100ns);
+        assert_eq!(asf.preroll_ms, preroll_ms);
+        assert_eq!(
+            asf.presentation_duration_100ns()
+                .expect("preroll is subtracted in container units"),
+            presentation_duration_100ns
+        );
+        assert_eq!(
+            asf.presentation_duration_ns()
+                .expect("container duration converts to nanoseconds"),
+            2_500_000_000
+        );
+    }
+
+    #[test]
+    fn presentation_duration_rejects_preroll_underflow() {
+        let mut reader = Cursor::new(file_properties_fixture(10_000, 2));
+        let asf = AsfFile::open(&mut reader).expect("valid file properties fixture");
+
+        assert!(asf.presentation_duration_100ns().is_err());
     }
 }

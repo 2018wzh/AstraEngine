@@ -7,7 +7,7 @@ autobins = false
 [lib]
 name = "wmv_decoder"
 path = "src/lib.rs"
-crate-type = ["rlib", "cdylib", "staticlib"]
+crate-type = ["rlib"]
 
 [dependencies]
 byteorder = "1.5"

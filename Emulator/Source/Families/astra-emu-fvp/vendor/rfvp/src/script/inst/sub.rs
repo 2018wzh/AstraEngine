@@ -1,0 +1,32 @@
+use crate::script::opcode::Opcode;
+use crate::script::opcode::OpcodeBase;
+use alloc::format;
+use alloc::string::String;
+
+pub struct SubInst {
+    address: u32,
+}
+
+impl SubInst {
+    pub fn new(address: u32) -> Self {
+        Self { address }
+    }
+}
+
+impl OpcodeBase for SubInst {
+    fn opcode(&self) -> Opcode {
+        Opcode::Sub
+    }
+
+    fn address(&self) -> u32 {
+        self.address
+    }
+
+    fn mnemonic(&self) -> &'static str {
+        "sub"
+    }
+
+    fn disassemble(&self) -> String {
+        format!("{:8}", self.mnemonic())
+    }
+}

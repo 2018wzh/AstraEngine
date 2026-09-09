@@ -15,13 +15,21 @@ dynamic-plugin-export = []
 [dependencies]
 abi_stable.workspace = true
 astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api" }
-rfvp-astra-provider = { git = "https://github.com/2018wzh/rfvp.git", rev = "f4f64a5bb726c1759350a666a35e0a454b810f61" }
+rfvp = { path = "vendor/rfvp", default-features = false, features = ["hosted"] }
 tracing.workspace = true
+symphonia = { version = "0.5", default-features = false, features = ["ogg", "vorbis", "wav", "pcm", "mp3", "flac"] }
+wmv-decoder = { path = "../na_wmv_player", default-features = false, features = ["audio"] }
 
 [build-dependencies]
 astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api" }
 serde_json.workspace = true
 sha2.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [package.metadata.astra]
 upstream = "https://github.com/xmoezzz/rfvp"

@@ -1,6 +1,6 @@
 use std::{env, fs, path::Path, process::Command};
 
-use astra_emu_family_api::LEGACY_FAMILY_ABI_FINGERPRINT;
+use astra_emu_family_api::FAMILY_ABI_FINGERPRINT;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
@@ -55,7 +55,7 @@ fn main() {
         "engine_version": env::var("CARGO_PKG_VERSION").expect("ASTRA_FVP_VERSION_MISSING"),
         "rustc_fingerprint": rustc_fingerprint,
         "feature_fingerprint": feature_fingerprint,
-        "abi_fingerprint": LEGACY_FAMILY_ABI_FINGERPRINT,
+        "abi_fingerprint": FAMILY_ABI_FINGERPRINT,
         "supported_formats": ["fvp.hcb", "fvp.bin", "fvp.nvsg", "fvp.hzc1"],
         "permissions": ["vfs.read", "surface.write", "hook.invoke", "writable_file", "media.submit"],
         "report_redaction": "astra.emu.redaction.v1",

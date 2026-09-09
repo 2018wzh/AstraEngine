@@ -438,6 +438,11 @@ impl<R: Read + Seek> AsfWmv2Decoder<R> {
         &self.video_info
     }
 
+    /// Return the ASF presentation duration after preroll, in nanoseconds.
+    pub fn presentation_duration_ns(&self) -> Result<u64> {
+        self.asf.presentation_duration_ns()
+    }
+
     /// Decode the next video frame.
     ///
     /// Returns `Ok(None)` on end-of-stream.
