@@ -98,13 +98,3 @@ owner = "AstraEMU"
 platforms = ["windows"]
 publishable = true
 audit_windows_exports = false
-
-[[artifact]]
-package = "astra-emu-manager"
-target = "astra_emu_manager"
-crate_types = ["cdylib", "rlib"]
-role = "program_host"
-owner = "AstraEMU"
-platforms = ["windows"]
-publishable = true
-audit_windows_exports = false

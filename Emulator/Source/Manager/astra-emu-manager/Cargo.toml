@@ -6,7 +6,7 @@ license.workspace = true
 build = "build.rs"
 
 [lib]
-crate-type = ["rlib", "cdylib"]
+crate-type = ["rlib"]
 doctest = false
 
 [[bin]]
@@ -14,56 +14,30 @@ name = "astra-emu-manager"
 path = "src/bin_main.rs"
 
 [dependencies]
-abi_stable.workspace = true
 astra-emu-manager-core = { path = "../astra-emu-manager-core" }
 astra-emu-manager-ui-slint = { path = "../astra-emu-manager-ui-slint" }
-astra-core = { path = "../../../../Engine/Source/Runtime/astra-core" }
-astra-byte-source = { path = "../../../../Engine/Source/Runtime/astra-byte-source" }
-astra-emu-extension-api = { path = "../../FamilyApi/astra-emu-extension-api" }
 astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api" }
-astra-emu-family-support = { path = "../../FamilySupport/astra-emu-family-support" }
 astra-emu-fvp = { path = "../../Families/astra-emu-fvp" }
-rfvp-astra-provider = { git = "https://github.com/2018wzh/rfvp.git", rev = "f4f64a5bb726c1759350a666a35e0a454b810f61" }
-astra-emu-minori = { path = "../../Families/astra-emu-minori" }
 astra-emu-metadata = { path = "../../Providers/astra-emu-metadata" }
 astra-emu-translation-openai-compatible = { path = "../../Providers/astra-emu-translation-openai-compatible" }
 astra-observability = { path = "../../../../Engine/Source/Developer/astra-observability" }
-astra-platform = { path = "../../../../Engine/Source/Platform/astra-platform" }
-astra-plugin = { path = "../../../../Engine/Source/Runtime/astra-plugin" }
-astra-plugin-abi = { path = "../../../../Engine/Source/Runtime/astra-plugin-abi" }
-astra-media = { path = "../../../../Engine/Source/Runtime/astra-media" }
-astra-media-core = { path = "../../../../Engine/Source/Runtime/astra-media-core" }
-tokio.workspace = true
+abi_stable.workspace = true
 cpal.workspace = true
 crossbeam-channel.workspace = true
-rubato.workspace = true
+naga.workspace = true
+tokio.workspace = true
 directories.workspace = true
 image.workspace = true
-hex.workspace = true
-naga.workspace = true
-hassle-rs = "=0.12.0"
-postcard.workspace = true
 pollster.workspace = true
 serde_json.workspace = true
+rubato.workspace = true
 sha2.workspace = true
-slint = { workspace = true, features = ["std", "compat-1-2", "accessibility"] }
+slint = { workspace = true, features = ["std", "compat-1-2", "accessibility", "backend-winit", "renderer-femtovg-wgpu", "unstable-wgpu-29", "unstable-winit-030"] }
 thiserror.workspace = true
 tracing.workspace = true
-wgpu.workspace = true
 winit.workspace = true
-
-[target.'cfg(target_os = "android")'.dependencies]
-android-activity = { workspace = true, features = ["native-activity"] }
-jni.workspace = true
-ndk.workspace = true
-# Android cannot use the winit backend (slint gates femtovg/winit out of its
-# android graph), so the manager renders through the android-activity backend
-# with the wgpu-backed Skia renderer instead.
-slint = { workspace = true, features = ["backend-android-activity-06", "unstable-wgpu-29"] }
-winit = { workspace = true, features = ["android-native-activity"] }
-
-[target.'cfg(not(target_os = "android"))'.dependencies]
-slint = { workspace = true, features = ["backend-winit", "renderer-femtovg-wgpu", "unstable-wgpu-29", "unstable-winit-030"] }
+hassle-rs = "=0.12.0"
+wgpu.workspace = true
 
 [target.'cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))'.dependencies]
 gilrs = { workspace = true, features = ["wgi"] }
