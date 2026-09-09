@@ -1,15 +1,15 @@
 # RFVP Astra Family fork record
 
-`vendor/rfvp/` is a source snapshot of the `0.5.0` upstream commit
+`../../ThirdParty/rfvp/` is a source snapshot of the `0.5.0` upstream commit
 `3b5ea6c96a925c12f95aef8554905e8fecbc77c3` from
 [`xmoezzz/rfvp`](https://github.com/xmoezzz/rfvp). The snapshot follows the
 `2018wzh/rfvp` hosted fork at the immutable revision
 `f4f64a5bb726c1759350a666a35e0a454b810f61`. The covered source and the complete
-MPL-2.0 text are in `vendor/rfvp/` and `vendor/rfvp/LICENSE`.
+MPL-2.0 text are in `../../ThirdParty/rfvp/` and `../../ThirdParty/rfvp/LICENSE`.
 
 The local changes to the vendored tree are limited to these areas:
 
-- `vendor/rfvp/Cargo.toml` removes dependencies on private Astra path crates,
+- `../../ThirdParty/rfvp/Cargo.toml` removes dependencies on private Astra path crates,
   keeps the hosted feature graph self-contained, records the local `flate2`
   version, and builds the private RFVP core as `rlib` only. The FVP crate in
   the parent directory is the only dynamic plugin boundary.
@@ -25,11 +25,11 @@ The local changes to the vendored tree are limited to these areas:
   `astra-byte-source` surface wrapper. Hosted rendering now exchanges a plain
   CPU `Vec<u8>` with the FVP adapter; the adapter performs the final
   Host-owned frame handoff.
-- `src/subsystem/resources/text_manager.rs` replaces the upstream Microsoft
-  font files with the bundled OFL-licensed Noto Sans SC font while preserving
-  RFVP's four system-font slots. The font and its license are recorded next to
-  each other under `src/subsystem/resources/fonts/`; its Windows system-font
-  scan uses the `WINDIR` environment value and has no fixed drive path.
+- `src/subsystem/resources/text_manager.rs`, `src/font.rs`, and
+  `src/no_std_core.rs` keep the four original system-font slots and accept
+  host-owned bytes plus a TTC face index. No font is embedded or substituted;
+  the Astra adapter resolves exact installed family names with `fontdb`, and
+  missing optional faces fail only when selected for rendering.
 - `src/app.rs`, `src/rendering/gpu_prim.rs`, `src/script/context.rs`, and
   `src/wasm_entry.rs` contain formatting-only changes from the source import.
 

@@ -15,7 +15,8 @@ dynamic-plugin-export = []
 [dependencies]
 abi_stable.workspace = true
 astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api" }
-rfvp = { path = "vendor/rfvp", default-features = false, features = ["hosted"] }
+rfvp = { path = "../../../ThirdParty/rfvp", default-features = false, features = ["hosted"] }
+fontdb.workspace = true
 tracing.workspace = true
 symphonia = { version = "0.5", default-features = false, features = ["ogg", "vorbis", "wav", "pcm", "mp3", "flac"] }
 wmv-decoder = { path = "../na_wmv_player", default-features = false, features = ["audio"] }

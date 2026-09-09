@@ -2,11 +2,11 @@
 
 ## RFVP covered source
 
-`vendor/rfvp/` contains the MPL-2.0 covered source from
+`../../ThirdParty/rfvp/` contains the MPL-2.0 covered source from
 [`xmoezzz/rfvp`](https://github.com/xmoezzz/rfvp) `0.5.0` upstream revision
 `3b5ea6c96a925c12f95aef8554905e8fecbc77c3`, imported from the hosted fork
 `2018wzh/rfvp` revision `f4f64a5bb726c1759350a666a35e0a454b810f61`.
-The complete license text is `vendor/rfvp/LICENSE`. The file-level change
+The complete license text is `../../ThirdParty/rfvp/LICENSE`. The file-level change
 inventory is `MODIFICATIONS.md`; both it and the covered source must remain in
 the source archive or the valid source offer for a binary distribution.
 
@@ -15,20 +15,9 @@ vendored RFVP core is private and is built as `rlib`; the current adapter uses
 its hosted core with the direct CPU/native-file-system, bounded audio, and
 session-owned WMV paths described in `MODIFICATIONS.md`.
 
-## Noto Sans SC
+## System font binding
 
-The RFVP font slot at
-`vendor/rfvp/src/subsystem/resources/fonts/NotoSansSC-Variable.ttf` is the
-Noto Sans SC variable font from the
-[`google/fonts`](https://github.com/google/fonts) source revision
-`ec0464b978de222073645d6d3366f3fdf03376d8`. Its source URL is
-<https://raw.githubusercontent.com/google/fonts/ec0464b978de222073645d6d3366f3fdf03376d8/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf>.
-The vendored file has SHA-256
-`a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da`.
-
-It is licensed under the SIL Open Font License 1.1. The exact upstream OFL
-text is kept beside the font as
-`vendor/rfvp/src/subsystem/resources/fonts/OFL.txt`.
+The four original RFVP system slots are bound at Family session creation from the host installed MS Gothic, MS Mincho, MS PGothic, and MS PMincho faces. The adapter copies the selected face bytes and TTC index into the private hosted core; this repository distributes no replacement or Microsoft font file. MS Gothic is required at boot; the other slots remain optional until a game requests one.
 
 ## WMV decoder dependency
 

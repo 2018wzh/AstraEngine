@@ -21,15 +21,7 @@
 
 发布时提供与二进制对应的 MPL-2.0 covered source、修改说明和完整许可证，可随包分发源码或提供有效的 source offer。
 
-当前 vendored source 位于 `Emulator/Source/Families/astra-emu-fvp/vendor/rfvp/`，文件级修改见该 Family 的 `MODIFICATIONS.md` 与 `THIRD_PARTY_NOTICES.md`。RFVP core 仅构建为内部使用的 `rlib`，动态插件边界由 `astra-emu-fvp` 持有。
-
-## Noto Sans SC
-
-- Upstream: <https://github.com/google/fonts>
-- 所用字体文件随固定版本的 RFVP 源码保留，发布包包含其来源说明与完整许可证。
-- License: SIL Open Font License 1.1.
-- AstraEMU FVP 使用该字体作为跨平台、可再分发的 CJK compatibility fallback；它不冒充或再分发 Microsoft 字体。
-- FVP 内嵌副本位于 `Emulator/Source/Families/astra-emu-fvp/vendor/rfvp/src/subsystem/resources/fonts/NotoSansSC-Variable.ttf`，随同目录的完整 `OFL.txt` 分发；副本 SHA-256 为 `a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da`。
+当前 vendored source 位于 `Emulator/ThirdParty/rfvp/`，对应 hosted fork revision `f4f64a5bb726c1759350a666a35e0a454b810f61`；文件级变化和覆盖范围见该 Family 的 `MODIFICATIONS.md` 与 `THIRD_PARTY_NOTICES.md`。vendored RFVP core 仅作为 private `rlib` 构建，动态边界由 `astra-emu-fvp` 持有。FVP 的四个原始系统字体槽由宿主通过 `fontdb` 从已安装字体按精确 family name 绑定，仓库不再携带替代字体文件。
 
 ## WMV decoder
 

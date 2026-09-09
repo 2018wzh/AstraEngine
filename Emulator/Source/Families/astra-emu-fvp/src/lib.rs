@@ -4,6 +4,7 @@ mod audio;
 mod error;
 mod events;
 mod filesystem;
+mod font_bindings;
 mod provider;
 mod renderer;
 mod video;

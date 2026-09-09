@@ -30,7 +30,7 @@ use rfvp_bitmap::{
 };
 
 #[cfg(not(feature = "old_school"))]
-use ab_glyph::{Font as _, FontArc, PxScale, ScaleFont};
+use ab_glyph::{Font as _, FontArc, FontVec, PxScale, ScaleFont};
 #[cfg(all(feature = "no_std", not(feature = "old_school")))]
 use core_maths::CoreFloat;
 
@@ -90,6 +90,17 @@ impl Font {
     pub fn from_vec(bytes: Vec<u8>) -> Result<Self, ab_glyph::InvalidFont> {
         Ok(Self {
             inner: FontArc::try_from_vec(bytes)?,
+        })
+    }
+
+    /// Parse one face from an owned TrueType collection without collapsing it
+    /// to another face. The face index is supplied by the host font database.
+    pub fn from_vec_and_index(
+        bytes: Vec<u8>,
+        index: u32,
+    ) -> Result<Self, ab_glyph::InvalidFont> {
+        Ok(Self {
+            inner: FontVec::try_from_vec_and_index(bytes, index).map(FontArc::new)?,
         })
     }
 

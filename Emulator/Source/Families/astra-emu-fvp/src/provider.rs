@@ -16,6 +16,7 @@ use crate::{
     audio::AudioBridge,
     error, events,
     filesystem::NativeFileSystem,
+    font_bindings,
     renderer::{NullAudio, NullRenderer, SessionClock},
     video::VideoPlayback,
 };
@@ -105,6 +106,7 @@ impl FvpProvider {
         let descriptor = self.descriptor()?;
         request.validate_for_descriptor(&descriptor)?;
         let mut fs = NativeFileSystem::new(&request.game_path).map_err(error::rfvp)?;
+        let font_bindings = font_bindings::load_system_font_bindings()?;
         let hcb_paths = hcb_paths(&mut fs).map_err(error::rfvp)?;
         if hcb_paths.len() > 1 {
             return Err(error::invalid(
@@ -131,6 +133,9 @@ impl FvpProvider {
             HostedLimits::default(),
         )
         .map_err(error::rfvp)?;
+        hosted
+            .set_system_font_bindings(font_bindings)
+            .map_err(error::rfvp)?;
         {
             let mut host = SessionHost {
                 fs: &mut fs,

@@ -30,6 +30,8 @@ use crate::subsystem::global_savedata::GlobalSaveDataV1;
 #[cfg(feature = "hosted")]
 use crate::subsystem::resources::save_manager::{HostedSaveFileOperation, SaveItem};
 use crate::subsystem::resources::text_manager::FontEnumerator;
+#[cfg(feature = "hosted")]
+use crate::subsystem::resources::text_manager::SystemFontBindings;
 use crate::subsystem::resources::vfs::Vfs;
 use crate::subsystem::resources::window::Window;
 #[cfg(feature = "hosted")]
@@ -313,6 +315,8 @@ pub struct RfvpCore {
     vm_runner: Option<VmRunner>,
     #[cfg(feature = "hosted")]
     hosted_trace_capacity: usize,
+    #[cfg(feature = "hosted")]
+    pending_system_font_bindings: Option<SystemFontBindings>,
     render_cache: HostPrimRenderCache,
     hit_proxies: HitProxyTable,
     last_error: Option<RfvpError>,
@@ -336,6 +340,8 @@ impl RfvpCore {
             vm_runner: None,
             #[cfg(feature = "hosted")]
             hosted_trace_capacity: 0,
+            #[cfg(feature = "hosted")]
+            pending_system_font_bindings: None,
             render_cache: HostPrimRenderCache::new(),
             hit_proxies: HitProxyTable::default(),
             last_error: None,
@@ -418,6 +424,21 @@ impl RfvpCore {
             return Err(RfvpError::CapacityExceeded);
         }
         self.hosted_trace_capacity = capacity;
+        Ok(())
+    }
+
+    /// Binds the host-selected faces for the four original RFVP system slots.
+    /// The binding is consumed only when the next boot creates its game data;
+    /// absent optional faces remain absent and fail when that slot is used.
+    #[cfg(feature = "hosted")]
+    pub fn set_hosted_system_font_bindings(
+        &mut self,
+        bindings: SystemFontBindings,
+    ) -> RfvpResult<()> {
+        if self.run_state != RfvpCoreRunState::NotBooted {
+            return Err(RfvpError::InvalidData);
+        }
+        self.pending_system_font_bindings = Some(bindings);
         Ok(())
     }
 
@@ -795,7 +816,29 @@ impl RfvpCore {
         }
         #[cfg(not(feature = "old_school"))]
         {
-            game_data.fontface_manager = FontEnumerator::new();
+            #[cfg(feature = "hosted")]
+            {
+                let bindings = self
+                    .pending_system_font_bindings
+                    .take()
+                    .ok_or(RfvpError::InvalidData)?;
+                game_data.fontface_manager = FontEnumerator::from_system_font_bindings(bindings)
+                    .map_err(|error| {
+                        self.last_error_detail = Some(error.to_string());
+                        RfvpError::InvalidData
+                    })?;
+            }
+            #[cfg(not(feature = "hosted"))]
+            {
+                game_data.fontface_manager = FontEnumerator::new();
+            }
+            game_data
+                .fontface_manager
+                .init_fontface()
+                .map_err(|error| {
+                    self.last_error_detail = Some(error.to_string());
+                    RfvpError::InvalidData
+                })?;
         }
         game_data.vfs = vfs;
         game_data.nls = boot.nls;

@@ -680,13 +680,13 @@ fn extract_font_face_name(bytes: &[u8]) -> Option<String> {
 #[cfg(not(feature = "no_std"))]
 pub struct FontEnumerator {
     // Default fallback font used when a requested font is missing.
-    default_font: Font,
+    default_font: Option<Font>,
 
     // Built-in/system fontfaces indexed by negative ids (-4..-1).
-    sys_ms_gothic: Font,
-    sys_ms_mincho: Font,
-    sys_ms_pgothic: Font,
-    sys_ms_pmincho: Font,
+    sys_ms_gothic: Option<Font>,
+    sys_ms_mincho: Option<Font>,
+    sys_ms_pgothic: Option<Font>,
+    sys_ms_pmincho: Option<Font>,
 
     // User-loaded fonts list, 0-based id: 0..fonts.len().
     fonts: Vec<LoadedFont>,
@@ -709,22 +709,12 @@ impl Default for FontEnumerator {
 #[cfg(not(feature = "no_std"))]
 impl FontEnumerator {
     pub fn new() -> Self {
-        // Use the bundled OFL-licensed Noto fallback for every system slot.
-        // The upstream RFVP tree carried proprietary Microsoft font files; the
-        // hosted family must remain redistributable without those assets.
-        let font = Font::from_static(include_bytes!("./fonts/NotoSansSC-Variable.ttf"))
-            .expect("NotoSansSC-Variable.ttf must be valid");
-        let msgothic = font.clone();
-        let msmincho = font.clone();
-        let mspgothic = font.clone();
-        let mspmincho = font;
-
         Self {
-            default_font: msgothic.clone(),
-            sys_ms_gothic: msgothic,
-            sys_ms_mincho: msmincho,
-            sys_ms_pgothic: mspgothic,
-            sys_ms_pmincho: mspmincho,
+            default_font: None,
+            sys_ms_gothic: None,
+            sys_ms_mincho: None,
+            sys_ms_pgothic: None,
+            sys_ms_pmincho: None,
             fonts: vec![],
             system_fallback_fonts: vec![],
             system_fallback_scan_done: false,
@@ -781,6 +771,31 @@ impl FontEnumerator {
         if self.system_fallback_enabled {
             self.init_system_fallback_fonts();
         }
+
+        self.sys_ms_gothic = self
+            .fonts
+            .iter()
+            .find(|font| font.matches_name("MS Gothic"))
+            .map(|font| font.font.clone());
+        self.sys_ms_mincho = self
+            .fonts
+            .iter()
+            .find(|font| font.matches_name("MS Mincho"))
+            .map(|font| font.font.clone());
+        self.sys_ms_pgothic = self
+            .fonts
+            .iter()
+            .find(|font| font.matches_name("MS PGothic"))
+            .map(|font| font.font.clone());
+        self.sys_ms_pmincho = self
+            .fonts
+            .iter()
+            .find(|font| font.matches_name("MS PMincho"))
+            .map(|font| font.font.clone());
+        if self.sys_ms_gothic.is_none() {
+            bail!("required system font face MS Gothic is unavailable");
+        }
+        self.default_font = self.sys_ms_gothic.clone();
 
         // default: MSGOTHIC
         self.system_fontface_id = FONTFACE_MS_GOTHIC;
@@ -867,17 +882,29 @@ impl FontEnumerator {
         let cur = self.current_font_name.as_str();
         if cur.eq_ignore_ascii_case("MS Gothic") || cur.eq_ignore_ascii_case("ＭＳ ゴシック")
         {
-            return self.sys_ms_gothic.clone();
+            return self
+                .sys_ms_gothic
+                .clone()
+                .expect("MS Gothic must be initialized before text rendering");
         }
         if cur.eq_ignore_ascii_case("MS Mincho") || cur.eq_ignore_ascii_case("ＭＳ 明朝") {
-            return self.sys_ms_mincho.clone();
+            return self
+                .sys_ms_mincho
+                .clone()
+                .expect("MS Mincho must be initialized before text rendering");
         }
         if cur.eq_ignore_ascii_case("MS PGothic") || cur.eq_ignore_ascii_case("ＭＳ Ｐゴシック")
         {
-            return self.sys_ms_pgothic.clone();
+            return self
+                .sys_ms_pgothic
+                .clone()
+                .expect("MS PGothic must be initialized before text rendering");
         }
         if cur.eq_ignore_ascii_case("MS PMincho") || cur.eq_ignore_ascii_case("ＭＳ Ｐ明朝") {
-            return self.sys_ms_pmincho.clone();
+            return self
+                .sys_ms_pmincho
+                .clone()
+                .expect("MS PMincho must be initialized before text rendering");
         }
         for loaded in &self.fonts {
             if loaded.matches_name(cur) {
@@ -894,11 +921,26 @@ impl FontEnumerator {
             }
         }
         match self.system_fontface_id {
-            FONTFACE_MS_GOTHIC => self.sys_ms_gothic.clone(),
-            FONTFACE_MS_MINCHO => self.sys_ms_mincho.clone(),
-            FONTFACE_MS_PGOTHIC => self.sys_ms_pgothic.clone(),
-            FONTFACE_MS_PMINCHO => self.sys_ms_pmincho.clone(),
-            _ => self.default_font.clone(),
+            FONTFACE_MS_GOTHIC => self
+                .sys_ms_gothic
+                .clone()
+                .expect("MS Gothic must be initialized before text rendering"),
+            FONTFACE_MS_MINCHO => self
+                .sys_ms_mincho
+                .clone()
+                .expect("MS Mincho must be initialized before text rendering"),
+            FONTFACE_MS_PGOTHIC => self
+                .sys_ms_pgothic
+                .clone()
+                .expect("MS PGothic must be initialized before text rendering"),
+            FONTFACE_MS_PMINCHO => self
+                .sys_ms_pmincho
+                .clone()
+                .expect("MS PMincho must be initialized before text rendering"),
+            _ => self
+                .default_font
+                .clone()
+                .expect("default font must be initialized before text rendering"),
         }
     }
 
@@ -908,19 +950,36 @@ impl FontEnumerator {
     pub fn get_font(&self, id: i32) -> Font {
         match id {
             FONTFACE_CURRENT => self.resolve_current_font(),
-            FONTFACE_MS_GOTHIC => self.sys_ms_gothic.clone(),
-            FONTFACE_MS_MINCHO => self.sys_ms_mincho.clone(),
-            FONTFACE_MS_PGOTHIC => self.sys_ms_pgothic.clone(),
-            FONTFACE_MS_PMINCHO => self.sys_ms_pmincho.clone(),
+            FONTFACE_MS_GOTHIC => self
+                .sys_ms_gothic
+                .clone()
+                .expect("MS Gothic must be initialized before text rendering"),
+            FONTFACE_MS_MINCHO => self
+                .sys_ms_mincho
+                .clone()
+                .expect("MS Mincho must be initialized before text rendering"),
+            FONTFACE_MS_PGOTHIC => self
+                .sys_ms_pgothic
+                .clone()
+                .expect("MS PGothic must be initialized before text rendering"),
+            FONTFACE_MS_PMINCHO => self
+                .sys_ms_pmincho
+                .clone()
+                .expect("MS PMincho must be initialized before text rendering"),
             _ if id >= 0 => {
                 let idx = id as usize;
                 if idx >= self.fonts.len() {
-                    self.default_font.clone()
+                    self.default_font
+                        .clone()
+                        .expect("default font must be initialized before text rendering")
                 } else {
                     self.fonts[idx].font.clone()
                 }
             }
-            _ => self.default_font.clone(),
+            _ => self
+                .default_font
+                .clone()
+                .expect("default font must be initialized before text rendering"),
         }
     }
 
@@ -958,10 +1017,16 @@ impl FontEnumerator {
             fallbacks.push(loaded.font.clone());
         }
 
-        fallbacks.push(self.sys_ms_gothic.clone());
-        fallbacks.push(self.sys_ms_mincho.clone());
-        fallbacks.push(self.sys_ms_pgothic.clone());
-        fallbacks.push(self.sys_ms_pmincho.clone());
+        for font in [
+            &self.sys_ms_gothic,
+            &self.sys_ms_mincho,
+            &self.sys_ms_pgothic,
+            &self.sys_ms_pmincho,
+        ] {
+            if let Some(font) = font {
+                fallbacks.push(font.clone());
+            }
+        }
         FontFallbackSet::new(primary, preferred_cjk, fallbacks)
     }
 
@@ -1121,11 +1186,51 @@ impl FontEnumerator {
 }
 
 #[cfg(all(feature = "no_std", not(feature = "old_school")))]
+#[derive(Debug)]
+pub struct SystemFontFace {
+    pub family_name: String,
+    pub bytes: Vec<u8>,
+    pub face_index: u32,
+}
+
+#[cfg(all(feature = "no_std", not(feature = "old_school")))]
+#[derive(Debug, Default)]
+pub struct SystemFontBindings {
+    pub ms_gothic: Option<SystemFontFace>,
+    pub ms_mincho: Option<SystemFontFace>,
+    pub ms_pgothic: Option<SystemFontFace>,
+    pub ms_pmincho: Option<SystemFontFace>,
+}
+
+#[cfg(all(feature = "no_std", not(feature = "old_school")))]
+fn parse_system_font(
+    face: Option<SystemFontFace>,
+    expected_family: &str,
+    required: bool,
+) -> Result<Option<Font>> {
+    let Some(face) = face else {
+        if required {
+            bail!("required system font face {expected_family} is unavailable");
+        }
+        return Ok(None);
+    };
+    if face.family_name != expected_family {
+        bail!(
+            "system font face binding family mismatch: expected {expected_family}, got {}",
+            face.family_name
+        );
+    }
+    let font = Font::from_vec_and_index(face.bytes, face.face_index)
+        .map_err(|_| anyhow!("system font face {expected_family} is invalid"))?;
+    Ok(Some(font))
+}
+
+#[cfg(all(feature = "no_std", not(feature = "old_school")))]
 pub struct FontEnumerator {
-    sys_ms_gothic: Font,
-    sys_ms_mincho: Font,
-    sys_ms_pgothic: Font,
-    sys_ms_pmincho: Font,
+    sys_ms_gothic: Option<Font>,
+    sys_ms_mincho: Option<Font>,
+    sys_ms_pgothic: Option<Font>,
+    sys_ms_pmincho: Option<Font>,
     system_fontface_id: i32,
     current_font_name: String,
 }
@@ -1140,22 +1245,23 @@ impl Default for FontEnumerator {
 #[cfg(all(feature = "no_std", not(feature = "old_school")))]
 impl FontEnumerator {
     pub fn new() -> Self {
-        // The bundled OFL-licensed font replaces the upstream proprietary
-        // Microsoft font files while preserving all four RFVP font slots.
-        let font = Font::from_static(include_bytes!("./fonts/NotoSansSC-Variable.ttf"))
-            .expect("NotoSansSC-Variable.ttf must be valid");
-        let ms_gothic = font.clone();
-        let ms_mincho = font.clone();
-        let ms_pgothic = font.clone();
-        let ms_pmincho = font;
         Self {
-            sys_ms_gothic: ms_gothic,
-            sys_ms_mincho: ms_mincho,
-            sys_ms_pgothic: ms_pgothic,
-            sys_ms_pmincho: ms_pmincho,
+            sys_ms_gothic: None,
+            sys_ms_mincho: None,
+            sys_ms_pgothic: None,
+            sys_ms_pmincho: None,
             system_fontface_id: FONTFACE_MS_GOTHIC,
             current_font_name: "MS Gothic".to_string(),
         }
+    }
+
+    pub fn from_system_font_bindings(bindings: SystemFontBindings) -> Result<Self> {
+        let mut fonts = Self::new();
+        fonts.sys_ms_gothic = parse_system_font(bindings.ms_gothic, "MS Gothic", true)?;
+        fonts.sys_ms_mincho = parse_system_font(bindings.ms_mincho, "MS Mincho", false)?;
+        fonts.sys_ms_pgothic = parse_system_font(bindings.ms_pgothic, "MS PGothic", false)?;
+        fonts.sys_ms_pmincho = parse_system_font(bindings.ms_pmincho, "MS PMincho", false)?;
+        Ok(fonts)
     }
 
     pub fn set_system_font_fallback_enabled(&mut self, _enabled: bool) {}
@@ -1164,6 +1270,9 @@ impl FontEnumerator {
         self.system_fontface_id = FONTFACE_MS_GOTHIC;
         if self.current_font_name.is_empty() {
             self.current_font_name = "MS Gothic".to_string();
+        }
+        if self.sys_ms_gothic.is_none() {
+            bail!("required system font face MS Gothic is unavailable");
         }
         Ok(())
     }
@@ -1176,50 +1285,64 @@ impl FontEnumerator {
         &self.current_font_name
     }
 
-    fn current_font(&self) -> Font {
+    fn current_font(&self) -> Result<Font> {
         let name = self.current_font_name.as_str();
         if name.eq_ignore_ascii_case("MS Mincho") || name.eq_ignore_ascii_case("ＭＳ 明朝") {
-            self.sys_ms_mincho.clone()
-        } else if name.eq_ignore_ascii_case("MS PGothic")
+            return self.font_for_id(FONTFACE_MS_MINCHO);
+        }
+        if name.eq_ignore_ascii_case("MS PGothic")
             || name.eq_ignore_ascii_case("ＭＳ Ｐゴシック")
         {
-            self.sys_ms_pgothic.clone()
-        } else if name.eq_ignore_ascii_case("MS PMincho")
+            return self.font_for_id(FONTFACE_MS_PGOTHIC);
+        }
+        if name.eq_ignore_ascii_case("MS PMincho")
             || name.eq_ignore_ascii_case("ＭＳ Ｐ明朝")
         {
-            self.sys_ms_pmincho.clone()
-        } else {
-            match self.system_fontface_id {
-                FONTFACE_MS_MINCHO => self.sys_ms_mincho.clone(),
-                FONTFACE_MS_PGOTHIC => self.sys_ms_pgothic.clone(),
-                FONTFACE_MS_PMINCHO => self.sys_ms_pmincho.clone(),
-                _ => self.sys_ms_gothic.clone(),
-            }
+            return self.font_for_id(FONTFACE_MS_PMINCHO);
         }
+        self.font_for_id(self.system_fontface_id)
     }
 
-    pub fn get_font(&self, id: i32) -> Font {
+    fn font_for_id(&self, id: i32) -> Result<Font> {
         match id {
             FONTFACE_CURRENT => self.current_font(),
-            FONTFACE_MS_GOTHIC => self.sys_ms_gothic.clone(),
-            FONTFACE_MS_MINCHO => self.sys_ms_mincho.clone(),
-            FONTFACE_MS_PGOTHIC => self.sys_ms_pgothic.clone(),
-            FONTFACE_MS_PMINCHO => self.sys_ms_pmincho.clone(),
-            _ => self.sys_ms_gothic.clone(),
+            FONTFACE_MS_GOTHIC => self
+                .sys_ms_gothic
+                .clone()
+                .ok_or_else(|| anyhow!("system font face MS Gothic is unavailable")),
+            FONTFACE_MS_MINCHO => self
+                .sys_ms_mincho
+                .clone()
+                .ok_or_else(|| anyhow!("system font face MS Mincho is unavailable")),
+            FONTFACE_MS_PGOTHIC => self
+                .sys_ms_pgothic
+                .clone()
+                .ok_or_else(|| anyhow!("system font face MS PGothic is unavailable")),
+            FONTFACE_MS_PMINCHO => self
+                .sys_ms_pmincho
+                .clone()
+                .ok_or_else(|| anyhow!("system font face MS PMincho is unavailable")),
+            _ => bail!("invalid system font face id {id}"),
         }
     }
 
-    fn get_font_fallback_set(&self, id: i32) -> FontFallbackSet {
-        FontFallbackSet::new(
-            self.get_font(id),
-            Vec::new(),
-            vec![
-                self.sys_ms_gothic.clone(),
-                self.sys_ms_mincho.clone(),
-                self.sys_ms_pgothic.clone(),
-                self.sys_ms_pmincho.clone(),
-            ],
-        )
+    pub fn get_font(&self, id: i32) -> Result<Font> {
+        self.font_for_id(id)
+    }
+
+    fn get_font_fallback_set(&self, id: i32) -> Result<FontFallbackSet> {
+        let mut fallbacks = Vec::with_capacity(4);
+        for font in [
+            &self.sys_ms_gothic,
+            &self.sys_ms_mincho,
+            &self.sys_ms_pgothic,
+            &self.sys_ms_pmincho,
+        ] {
+            if let Some(font) = font {
+                fallbacks.push(font.clone());
+            }
+        }
+        Ok(FontFallbackSet::new(self.font_for_id(id)?, Vec::new(), fallbacks))
     }
 
     pub fn get_font_name(&self, id: i32) -> Option<String> {
@@ -2644,8 +2767,8 @@ impl TextItem {
             return Ok(());
         }
 
-        let main_fonts = fonts.get_font_fallback_set(self.text_font_idx1);
-        let ruby_fonts = fonts.get_font_fallback_set(self.text_font_idx2);
+        let main_fonts = fonts.get_font_fallback_set(self.text_font_idx1)?;
+        let ruby_fonts = fonts.get_font_fallback_set(self.text_font_idx2)?;
 
         let render_scale = self.effective_render_scale();
 

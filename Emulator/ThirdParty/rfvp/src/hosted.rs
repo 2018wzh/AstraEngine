@@ -31,6 +31,8 @@ pub use crate::no_std_core::{
 };
 #[cfg(feature = "hosted")]
 pub use crate::vm_runner::HostedVmTraceRecord;
+#[cfg(feature = "hosted")]
+use crate::subsystem::resources::text_manager::SystemFontBindings;
 
 /// Increment only for a deliberately incompatible hosted-core wire contract.
 pub const HOSTED_ABI_VERSION: u16 = 3;
@@ -408,6 +410,12 @@ impl HostedSession {
 
     pub fn core(&self) -> &RfvpCore {
         &self.core
+    }
+
+    /// Supplies the host-owned faces for RFVP's original system font slots.
+    /// This must be called before `boot`; no family is substituted for another.
+    pub fn set_system_font_bindings(&mut self, bindings: SystemFontBindings) -> RfvpResult<()> {
+        self.core.set_hosted_system_font_bindings(bindings)
     }
 
     pub fn limits(&self) -> HostedLimits {

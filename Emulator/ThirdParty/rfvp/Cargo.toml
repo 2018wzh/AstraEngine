@@ -9,6 +9,10 @@ repository = "https://github.com/xmoezzz/rfvp"
 readme = "README.md"
 license = "MPL-2.0"
 
+# This upstream snapshot is a private dependency of astra-emu-fvp. Keep its
+# historical default binary and feature graph outside the Astra workspace.
+[workspace]
+
 # exclude = [
 #     "src/subsystem/resources/fonts/*"
 # ]
