@@ -5,13 +5,13 @@ use std::{
 };
 
 use astra_headless_protocol::{
-    ArtifactEntry, ArtifactManifest, RendererExecutionIdentity, HEADLESS_ARTIFACT_MANIFEST_SCHEMA,
+    ArtifactEntry, ArtifactManifest, HEADLESS_ARTIFACT_MANIFEST_SCHEMA, RendererExecutionIdentity,
 };
 use astra_platform::{
     HeadlessArtifactPolicy, HeadlessArtifactRetention, HeadlessHostProfile, PlatformError,
     PlatformErrorCode,
 };
-use image::{codecs::png::PngEncoder, ExtendedColorType, ImageEncoder};
+use image::{ExtendedColorType, ImageEncoder, codecs::png::PngEncoder};
 use sha2::{Digest, Sha256};
 
 pub(crate) struct ArtifactRecorder {
@@ -517,9 +517,6 @@ fn is_hash(value: &str) -> bool {
     value
         .strip_prefix("sha256:")
         .is_some_and(|hash| hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()))
-}
-fn empty_hash() -> String {
-    astra_core::Hash256::from_sha256(&[]).to_string()
 }
 fn io_error(operation: &'static str) -> PlatformError {
     PlatformError::new(PlatformErrorCode::Io, operation, "artifact I/O failed")
