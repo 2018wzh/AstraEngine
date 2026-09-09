@@ -1,6 +1,6 @@
 # Implementation Coverage Matrix
 
-2026-09-09：AstraEMU 集成分支通过 Family ABI 7 项、Manager core 22 项和翻译服务 12 项测试，覆盖借用生命周期、显式 provider 选择、数据库重建及翻译取消与缓存隔离；联网凭据测试跳过。Headless 和 FVP 动态库构建通过，尚不代表完整 Manager 或真实游戏流程完成。
+2026-09-09：AstraEMU 集成分支通过 Family ABI 7 项、Manager core 22 项、翻译服务 12 项和 FVP 16 项测试，覆盖借用生命周期、显式 provider 选择、数据库重建、翻译取消与缓存隔离，以及原始字体槽位和原生文件操作；联网凭据测试跳过。Headless 和 FVP 动态库已完成构建，尚不代表完整 Manager 或真实游戏流程完成。
 
 2026-09-09：独立 Host 音频源码的 8 项测试覆盖持续重采样、不规则分块、声道转换、取消唤醒、设备错误和回调跨块消费；临时测试工程的严格 Clippy 通过。完整 Manager 入口和物理设备播放尚未验证。
 

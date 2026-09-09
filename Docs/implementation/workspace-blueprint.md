@@ -18,7 +18,8 @@ AstraEngine v1 采用 UE 风格顶层代码分区和 Rust workspace。顶层目�
 | `Engine/Plugins/Fixtures/` | Stage 1/3 implemented | 测试插件 fixture，覆盖真实 load/unload；`headless-presentation-provider` 覆盖 Stage 1 presentation/action provider，`vn-extension-provider` 覆盖 Stage 3 VN extension provider slots |
 | `Engine/Plugins/Providers/` | Stage 2 implemented, Stage 4 reopened | 通用 provider 插件由 Stage 1/2 registry 和 gate 管理；VFS backend provider 统一走 `vfs_provider` slot，NativeVN runtime provider 位于 AstraVN module，第三方 gameplay runtime provider、OpenAI、Ollama、ComfyUI 和 ONNX 仍是后续 provider |
 | `Editor/Source/` | Stage 4 not implemented | Qt/QML editor bridge 和应用入口 |
-| `Emulator/Source/` | Stage 5 `IN_PROGRESS` | 已接入 Family ABI v9 typed lifecycle/VFS、writable surface/Layer2D、Hook、writable-file、FVP/Minori provider boundary、修复后的 fixed-step 与 streaming archive、`AstraEmuRuntimeProvider`、RuntimeWorld bridge、SQLite Library v5、auto probe、Trusted Luau、ECNU translation、共享 PlatformHost audio、Slint Manager、共享 wgpu host、签名工具、evidence encoder、Android package 和 iOS static-registry scaffold；RFVP fork thinness、实际游戏逐帧 parity、最终原生性能、正式平台签名与 E3 仍开放 |
+| `Emulator/Source/` | Stage 5 `IN_PROGRESS` | 同仓独立 Windows/FVP Host：Family API、FVP adapter、SQLite Library、翻译服务与 Slint Manager；Host 入口和真实游戏流程仍在集成。旧 RuntimeWorld、Layer2D/Hook/VFS 和移动平台宿主不再作为活动路径 |
+| `Emulator/ThirdParty/` | private dependencies | RFVP 源码及许可证，由 FVP adapter 使用；不作为主 workspace 成员。修改说明见 [第三方源码索引](../../Emulator/ThirdParty/README.md) |
 | `Examples/` | Stage 3 in progress | 产品样例和发布样例；`Examples/NativeVN` 是可提交 commercial baseline sample，`Examples/TsuiNoSora/Docs/Title.png`、`Game.png` 作为 TsuiNoSora 视觉参考证据；`Examples/TsuiNoSora/Tools/original-patcher` 是不发布到 crates.io 的 1999 原版独立副本补丁器 |
 | `Tools/TsuiNoSora/` | Stage 3 in progress | 本地合法数据的 inventory、visual reference report 和 Asset analysis helper；输出脱敏 report，不提交商业 payload |
 

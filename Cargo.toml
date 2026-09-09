@@ -79,8 +79,6 @@ exclude = [
     "Emulator/Source/Families/na_wmv_player",
     "Emulator/ThirdParty/rfvp",
     "Emulator/Source/Families/rfvp-bitmap",
-    "Emulator/Source/Families/astra-emu-fvp/vendor/rfvp",
-    "Emulator/Source/Families/astra-emu-fvp/vendor/rfvp/uefi_app",
     "Emulator/Source/FamilyApi/astra-emu-extension-api",
     "Emulator/Source/FamilyCore/astra-emu-family-core",
     "Emulator/Source/FamilySupport/astra-emu-family-support",

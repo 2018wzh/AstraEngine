@@ -2,7 +2,9 @@
 
 Status: `IN_PROGRESS`
 
-2026-09-09：集成分支通过 Family ABI 7 项、Manager core 22 项和翻译服务 12 项测试，凭据相关联网测试按定义跳过；Headless 和 FVP 动态库构建通过。Manager 入口、原始字体选择及 Sandbox 游戏流程尚未完成。
+2026-09-09：FVP 原始系统字体绑定已合入，集成分支的 16 项 FVP 测试通过，包含已安装 MS Gothic 的实际 face 解析、字体槽位和原生文件操作。RFVP 移至 `Emulator/ThirdParty/rfvp`，不再自动加入主 workspace；生产路径不再携带 Noto 替代字体。
+
+2026-09-09：集成分支通过 Family ABI 7 项、Manager core 22 项和翻译服务 12 项测试，凭据相关联网测试按定义跳过；Headless 和 FVP 动态库已完成构建。Manager 入口及 Sandbox 游戏流程尚未完成。
 
 2026 年 9 月 8 日，用户批准 [独立 Host 重构](../../migrations/astraemu-independent-host.md)。此前 RuntimeWorld/LegacyRuntimeProvider、Family ABI v9、Extension ABI、Layer2D/Hook/VFS 相关结果不代表新 Host 已实现。本轮按普通软件开发方式实施，不新增 evidence/report 留存体系。
 

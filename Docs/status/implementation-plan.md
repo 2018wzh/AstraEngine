@@ -1,6 +1,6 @@
 # Implementation Plan Status
 
-2026-09-09：集成分支通过 Family ABI 7 项、Manager core 22 项和翻译服务 12 项测试；需要真实凭据的联网测试按定义跳过。`astra-headless` 和 FVP 动态库构建通过。Manager 入口、原始字体选择、完整 workspace 检查和 Sandbox 游戏流程仍在进行。
+2026-09-09：集成分支通过 Family ABI 7 项、Manager core 22 项、翻译服务 12 项和 FVP 16 项测试；需要真实凭据的联网测试按定义跳过。原始系统字体绑定已合入，RFVP 不再是主 workspace 成员。`astra-headless` 和 FVP 动态库已完成构建；Manager 入口、完整 workspace 检查和 Sandbox 游戏流程仍在进行。
 
 2026-09-09：独立 Host 音频执行器已合入，实际源码与真实 Family ABI 的临时测试工程通过 8 项测试和严格 Clippy。Manager 完整入口、FVP 集成及授权游戏流程仍未完成。
 
