@@ -881,6 +881,7 @@ name = "astra-emu-manager"
 version = "0.1.0"
 dependencies = [
  "android-activity 0.6.1",
+ "abi_stable",
  "astra-byte-source",
  "astra-core",
  "astra-emu-extension-api 0.1.0",
@@ -898,6 +899,8 @@ dependencies = [
  "astra-platform",
  "astra-plugin",
  "astra-plugin-abi",
+ "cpal",
+ "crossbeam-channel",
  "directories",
  "gilrs",
  "hassle-rs",
@@ -910,6 +913,7 @@ dependencies = [
  "postcard",
  "rfd",
  "rfvp-astra-provider",
+ "rubato",
  "serde_json",
  "sha2 0.10.9",
  "slint",

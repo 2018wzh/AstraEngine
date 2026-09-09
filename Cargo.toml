@@ -109,6 +109,7 @@ clap = { version = "4", features = ["derive"] }
 configparser = "3"
 cosmic-text = "=0.18.2"
 cpal = "0.17"
+crossbeam-channel = "0.5"
 kira = { version = "=0.12.2", default-features = false }
 directories = "6"
 dunce = "1"

@@ -14,6 +14,7 @@ name = "astra-emu-manager"
 path = "src/bin_main.rs"
 
 [dependencies]
+abi_stable.workspace = true
 astra-emu-manager-core = { path = "../astra-emu-manager-core" }
 astra-emu-manager-ui-slint = { path = "../astra-emu-manager-ui-slint" }
 astra-core = { path = "../../../../Engine/Source/Runtime/astra-core" }
@@ -33,6 +34,9 @@ astra-plugin-abi = { path = "../../../../Engine/Source/Runtime/astra-plugin-abi"
 astra-media = { path = "../../../../Engine/Source/Runtime/astra-media" }
 astra-media-core = { path = "../../../../Engine/Source/Runtime/astra-media-core" }
 tokio.workspace = true
+cpal.workspace = true
+crossbeam-channel.workspace = true
+rubato.workspace = true
 directories.workspace = true
 image.workspace = true
 hex.workspace = true
