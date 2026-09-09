@@ -1742,8 +1742,6 @@ version = "0.1.0"
 dependencies = [
  "astra-asset",
  "astra-core",
- "astra-emu-fvp",
- "astra-emu-manager-core",
  "astra-headless-protocol",
  "astra-headless-test",
  "astra-media",

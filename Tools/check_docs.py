@@ -112,35 +112,16 @@ REQUIRED_RELEASE_CHECK_IDS = [
     "vn.system_ui_profile",
     "plugin.extension_registry",
     "plugin.dependency_graph",
-    "emu.legacy_runtime_provider",
     "editor.plugin_manager",
     "ai.provider_profile",
     "ai.runtime_memory_policy",
     "mcp.context_permission",
 ]
-ASTRAEMU_PRIMARY_DOCS = [
-    ROOT / "AGENTS.md",
+ASTRAEMU_INDEPENDENT_HOST_DOCS = [
+    DOCS / "migrations" / "astraemu-independent-host.md",
     DOCS / "contracts" / "astraemu-ipc.md",
-    DOCS / "implementation" / "README.md",
-    DOCS / "implementation" / "astraemu-legacy-runtime-framework.md",
-    DOCS / "implementation" / "astraemu-artemis-core.md",
-    DOCS / "implementation" / "phase-delivery.md",
-    DOCS / "implementation" / "workspace-blueprint.md",
     DOCS / "modules" / "astra-emu.md",
-    DOCS / "product" / "architecture.md",
-    DOCS / "product" / "roadmap.md",
-    DOCS / "product" / "vision.md",
-    DOCS / "status" / "coverage-matrix.md",
     DOCS / "status" / "stages" / "stage-5-astra-emu.md",
-    DOCS / "status" / "stages" / "stage-test-matrix.md",
-]
-ASTRAEMU_OLD_PRIMARY_PATTERNS = [
-    "out-of-process",
-    "独立进程",
-    "shared memory",
-    "framed local RPC",
-    "Manager/core IPC",
-    "Manager/Core",
 ]
 LEGACY_LUA_PATTERNS = [
     "Lua policy",
@@ -175,7 +156,6 @@ REQUIRED_RELEASE_DOMAINS = [
     "editor",
     "ai_mcp",
     "platform",
-    "emu",
 ]
 STAGE2_PRODUCT_EVIDENCE_TERMS = [
     "Engine/Fixtures/PublicDomainMedia/manifest.json",
@@ -401,49 +381,15 @@ def check_plugin_extension_registry() -> list[str]:
     ]
 
 
-def check_astraemu_engine_native_architecture() -> list[str]:
+def check_astraemu_independent_host() -> list[str]:
     errors: list[str] = []
-    required_terms = ["RuntimeWorld", "family plugin", "LegacyRuntimeProvider"]
-    for path in ASTRAEMU_PRIMARY_DOCS:
+    for path in ASTRAEMU_INDEPENDENT_HOST_DOCS:
+        if not path.exists():
+            errors.append(f"AstraEMU independent Host doc missing: {path.relative_to(ROOT)}")
+            continue
         text = path.read_text(encoding="utf-8")
-        for pattern in ASTRAEMU_OLD_PRIMARY_PATTERNS:
-            if pattern in text:
-                errors.append(
-                    f"{path.relative_to(ROOT)} still describes old AstraEMU primary architecture: {pattern}"
-                )
-        if path.name in {"astra-emu.md", "astraemu-ipc.md", "astraemu-artemis-core.md", "stage-5-astra-emu.md"}:
-            for term in required_terms:
-                if term not in text:
-                    errors.append(
-                        f"{path.relative_to(ROOT)} missing engine-native AstraEMU term: {term}"
-                    )
-    adr9 = DOCS / "adr" / "0009-astraemu-out-of-process-core.md"
-    adr12 = DOCS / "adr" / "0012-astraemu-engine-native-family-plugin.md"
-    adr_index = (DOCS / "adr" / "README.md").read_text(encoding="utf-8")
-    if "Superseded" not in adr9.read_text(encoding="utf-8") or "0012" not in adr9.read_text(encoding="utf-8"):
-        errors.append("ADR 0009 is not marked superseded by ADR 0012")
-    if not adr12.exists():
-        errors.append("ADR 0012 is missing")
-    if "0012-astraemu-engine-native-family-plugin.md" not in adr_index:
-        errors.append("ADR index missing ADR 0012")
-    return errors
-
-
-def check_astraemu_v1_family() -> list[str]:
-    errors: list[str] = []
-    required_paths = [
-        DOCS / "implementation" / "README.md",
-        DOCS / "implementation" / "phase-delivery.md",
-        DOCS / "implementation" / "astraemu-artemis-core.md",
-        DOCS / "product" / "roadmap.md",
-        DOCS / "status" / "samples-and-tests.md",
-        DOCS / "status" / "stages" / "stage-5-astra-emu.md",
-        DOCS / "status" / "stages" / "stage-test-matrix.md",
-    ]
-    for path in required_paths:
-        text = path.read_text(encoding="utf-8")
-        if "Artemis" not in text:
-            errors.append(f"{path.relative_to(ROOT)} missing Artemis v1 family decision")
+        if "独立 Host" not in text:
+            errors.append(f"{path.relative_to(ROOT)} missing independent Host boundary")
     return errors
 
 
@@ -519,8 +465,7 @@ def main() -> int:
     errors.extend(check_advanced_sample_links())
     errors.extend(check_release_gate_matrix())
     errors.extend(check_plugin_extension_registry())
-    errors.extend(check_astraemu_v1_family())
-    errors.extend(check_astraemu_engine_native_architecture())
+    errors.extend(check_astraemu_independent_host())
     errors.extend(check_stage2_stage6_platform_split())
     errors.extend(check_stage2_product_evidence())
     if errors:

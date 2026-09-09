@@ -27,7 +27,6 @@ astra-vn-policy = { path = "../../Modules/AstraVN/astra-vn-policy" }
 astra-vn-runtime-provider = { path = "../../Modules/AstraVN/astra-vn-runtime-provider" }
 astra-vn-script = { path = "../../Modules/AstraVN/astra-vn-script" }
 astra-vn-system = { path = "../../Modules/AstraVN/astra-vn-system" }
-astra-emu-manager-core = { path = "../../../../Emulator/Source/Manager/astra-emu-manager-core" }
 postcard.workspace = true
 schemars.workspace = true
 serde.workspace = true
@@ -38,7 +37,6 @@ tokio.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-astra-emu-fvp = { path = "../../../../Emulator/Source/Families/astra-emu-fvp" }
 astra-headless-test = { path = "../astra-headless-test" }
 tempfile.workspace = true
 
