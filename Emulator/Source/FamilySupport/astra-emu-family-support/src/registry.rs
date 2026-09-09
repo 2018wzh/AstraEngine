@@ -75,8 +75,8 @@ impl LegacyVfsFamilyRegistry {
 }
 
 /// Registers the given family factories on a fresh registry, loads the mount
-/// profile and mounts the requested family in one step. Shared by the generic
-/// `astra-emu-cli vfs` command and family-specific research CLIs.
+/// profile and mounts the requested family in one step. This legacy support
+/// module remains inactive after the standalone host boundary migration.
 pub fn mount_family_vfs(
     requested_family: &str,
     game_root: &Path,

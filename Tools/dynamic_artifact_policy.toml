@@ -95,17 +95,7 @@ target = "astra_emu_fvp"
 crate_types = ["cdylib", "rlib"]
 role = "family_plugin"
 owner = "AstraEMU"
-platforms = ["windows", "linux", "macos"]
-publishable = true
-audit_windows_exports = false
-
-[[artifact]]
-package = "astra-emu-minori"
-target = "astra_emu_minori"
-crate_types = ["cdylib", "rlib"]
-role = "family_plugin"
-owner = "AstraEMU"
-platforms = ["windows", "linux", "macos"]
+platforms = ["windows"]
 publishable = true
 audit_windows_exports = false
 
@@ -115,16 +105,6 @@ target = "astra_emu_manager"
 crate_types = ["cdylib", "rlib"]
 role = "program_host"
 owner = "AstraEMU"
-platforms = ["windows", "linux", "macos"]
-publishable = true
-audit_windows_exports = false
-
-[[artifact]]
-package = "wmv-decoder"
-target = "wmv_decoder"
-crate_types = ["cdylib", "rlib", "staticlib"]
-role = "emulator_runtime"
-owner = "AstraEMU"
 platforms = ["windows"]
-publishable = false
+publishable = true
 audit_windows_exports = false

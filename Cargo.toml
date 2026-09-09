@@ -66,28 +66,25 @@ members = [
     "Engine/Plugins/Fixtures/vn-extension-provider",
     "Engine/Plugins/Fixtures/ui-component-provider",
     "Emulator/Source/FamilyApi/astra-emu-family-api",
-    "Emulator/Source/FamilyApi/astra-emu-extension-api",
-    "Emulator/Source/FamilyCore/astra-emu-family-core",
-    "Emulator/Source/FamilySupport/astra-emu-family-support",
     "Emulator/Source/Families/astra-emu-fvp",
-    "Emulator/Source/Families/astra-emu-minori",
     "Emulator/Source/Manager/astra-emu-manager-core",
     "Emulator/Source/Providers/astra-emu-translation-openai-compatible",
     "Emulator/Source/Providers/astra-emu-metadata",
     "Emulator/Source/Manager/astra-emu-manager-ui-slint",
     "Emulator/Source/Manager/astra-emu-manager",
-    "Emulator/Source/Programs/astra-emu-schema",
-    "Emulator/Source/Programs/astra-emu-evidence",
-    "Emulator/Source/Programs/astra-emu-e3",
-    "Emulator/Source/Programs/astra-emu-family-package",
-    "Emulator/Source/Programs/astra-emu-cli",
-    "Emulator/Source/Programs/astra-emu-minori-cli",
 ]
 exclude = [
     "Emulator/Source/Families/anzu-hal",
     "Emulator/Source/Families/na_mpeg2_decoder",
     "Emulator/Source/Families/na_wmv_player",
     "Emulator/Source/Families/rfvp-bitmap",
+    "Emulator/Source/Families/astra-emu-fvp/vendor/rfvp",
+    "Emulator/Source/Families/astra-emu-fvp/vendor/rfvp/uefi_app",
+    "Emulator/Source/FamilyApi/astra-emu-extension-api",
+    "Emulator/Source/FamilyCore/astra-emu-family-core",
+    "Emulator/Source/FamilySupport/astra-emu-family-support",
+    "Emulator/Source/Families/astra-emu-minori",
+    "Emulator/Source/Programs/astra-emu-minori-cli",
 ]
 
 [workspace.package]
@@ -236,6 +233,4 @@ oboe = "0.6.1"
 [patch."https://github.com/2018wzh/AstraEngine.git"]
 astra-byte-source = { path = "Engine/Source/Runtime/astra-byte-source" }
 astra-core = { path = "Engine/Source/Runtime/astra-core" }
-astra-emu-extension-api = { path = "Emulator/Source/FamilyApi/astra-emu-extension-api" }
 astra-emu-family-api = { path = "Emulator/Source/FamilyApi/astra-emu-family-api" }
-astra-emu-family-core = { path = "Emulator/Source/FamilyCore/astra-emu-family-core" }
