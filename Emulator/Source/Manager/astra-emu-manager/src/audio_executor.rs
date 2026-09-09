@@ -1,9 +1,6 @@
-use std::{
-    collections::VecDeque,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
-    },
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
 };
 
 #[path = "audio_conversion.rs"]
@@ -20,7 +17,7 @@ use audio_conversion::{pcm_chunk_samples, AudioConverter, OutputFormat};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use crossbeam_channel::{bounded, select, Receiver, Sender};
 
-const AUDIO_QUEUE_CHUNKS: usize = 16;
+const AUDIO_QUEUE_CHUNKS: usize = 4;
 const MAX_AUDIO_OUTPUT_SAMPLES: usize = MAX_AUDIO_SAMPLES_PER_CHUNK;
 
 /// Host-owned audio output. The family only sees the ABI sink; it never sees
@@ -49,7 +46,6 @@ struct HostAudioSink {
 
 struct DeviceConsumer {
     receiver: Receiver<Vec<f32>>,
-    blocks: VecDeque<Vec<f32>>,
     current: Option<Vec<f32>>,
     cursor: usize,
 }
@@ -168,7 +164,6 @@ impl HostAudioSink {
         let (producer, receiver) = bounded(AUDIO_QUEUE_CHUNKS);
         let mut consumer = DeviceConsumer {
             receiver,
-            blocks: VecDeque::with_capacity(AUDIO_QUEUE_CHUNKS),
             current: None,
             cursor: 0,
         };
@@ -364,56 +359,41 @@ fn wake_cancel_waiters_best_effort(state: &AudioState) {
 }
 
 impl DeviceConsumer {
-    fn refill(&mut self) {
-        while self.blocks.len() < AUDIO_QUEUE_CHUNKS {
-            match self.receiver.try_recv() {
-                Ok(block) => {
-                    debug_assert_eq!(self.blocks.capacity(), AUDIO_QUEUE_CHUNKS);
-                    self.blocks.push_back(block);
-                }
-                Err(_) => break,
-            }
-        }
-        if self.current.is_none() {
-            self.current = self.blocks.pop_front();
-            self.cursor = 0;
-        }
-    }
-
     fn next(&mut self) -> f32 {
         loop {
-            let Some(current) = self.current.as_ref() else {
-                return 0.0;
-            };
-            if self.cursor < current.len() {
-                let value = current[self.cursor];
-                self.cursor += 1;
-                return value;
+            if let Some(current) = self.current.as_ref() {
+                if self.cursor < current.len() {
+                    let value = current[self.cursor];
+                    self.cursor += 1;
+                    return value;
+                }
             }
-            self.current = self.blocks.pop_front();
-            self.cursor = 0;
-            if self.current.is_none() {
-                return 0.0;
+            match self.receiver.try_recv() {
+                Ok(block) => {
+                    self.current = Some(block);
+                    self.cursor = 0;
+                }
+                Err(_) => {
+                    self.current = None;
+                    return 0.0;
+                }
             }
         }
     }
 
     fn fill_f32(&mut self, output: &mut [f32]) {
-        self.refill();
         for sample in output {
             *sample = self.next();
         }
     }
 
     fn fill_i16(&mut self, output: &mut [i16]) {
-        self.refill();
         for sample in output {
             *sample = (self.next().clamp(-1.0, 1.0) * 32_767.0).round() as i16;
         }
     }
 
     fn fill_u16(&mut self, output: &mut [u16]) {
-        self.refill();
         for sample in output {
             *sample = ((self.next().clamp(-1.0, 1.0) * 0.5 + 0.5) * 65_535.0).round() as u16;
         }
@@ -531,6 +511,21 @@ mod tests {
             executor.check_health().unwrap_err(),
             "ASTRA_EMU_AUDIO_DEVICE_STREAM_FAILED"
         );
+    }
+
+    #[test]
+    fn device_consumer_advances_blocks_inside_one_callback_buffer() {
+        let (sender, receiver) = bounded(AUDIO_QUEUE_CHUNKS);
+        sender.send(vec![0.25, 0.5]).unwrap();
+        sender.send(vec![0.75]).unwrap();
+        let mut consumer = DeviceConsumer {
+            receiver,
+            current: None,
+            cursor: 0,
+        };
+        let mut output = [0.0; 4];
+        consumer.fill_f32(&mut output);
+        assert_eq!(output, [0.25, 0.5, 0.75, 0.0]);
     }
 
     #[test]

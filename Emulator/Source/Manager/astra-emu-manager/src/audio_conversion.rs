@@ -241,6 +241,7 @@ pub(super) fn pcm_chunk_samples(chunk: PcmChunk) -> Vec<f32> {
     }
 }
 
+#[cfg(test)]
 pub(super) fn convert_chunk(chunk: PcmChunk, output: OutputFormat) -> Result<Vec<f32>, String> {
     let samples = pcm_chunk_samples(chunk);
     convert_samples(
@@ -252,6 +253,7 @@ pub(super) fn convert_chunk(chunk: PcmChunk, output: OutputFormat) -> Result<Vec
     )
 }
 
+#[cfg(test)]
 pub(super) fn convert_samples(
     samples: Vec<f32>,
     source_rate: u32,
