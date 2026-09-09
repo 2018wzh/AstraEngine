@@ -16,14 +16,12 @@ use astra_emu_family_api::{
 };
 #[cfg(test)]
 use audio_conversion::{convert_chunk, convert_samples};
-use audio_conversion::{AudioConverter, OutputFormat};
+use audio_conversion::{pcm_chunk_samples, AudioConverter, OutputFormat};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use crossbeam_channel::{bounded, select, Receiver, Sender};
 
 const AUDIO_QUEUE_CHUNKS: usize = 16;
 const MAX_AUDIO_OUTPUT_SAMPLES: usize = MAX_AUDIO_SAMPLES_PER_CHUNK;
-pub(crate) const MAX_RESOURCE_BYTES: u64 =
-    astra_emu_family_support::LEGACY_AUDIO_MAX_RESOURCE_BYTES;
 
 /// Host-owned audio output. The family only sees the ABI sink; it never sees
 /// CPAL, the device callback, or a native handle. `configure` is lazy because
@@ -42,6 +40,8 @@ struct AudioState {
     stream: Mutex<Option<cpal::Stream>>,
     converter: Mutex<Option<AudioConverter>>,
 }
+
+type CancelWaiter = (Sender<()>, Receiver<()>);
 
 struct HostAudioSink {
     state: Arc<AudioState>,
@@ -109,7 +109,6 @@ impl HostAudioExecutor {
         }
     }
 
-    #[cfg(test)]
     pub(crate) fn is_configured(&self) -> bool {
         self.state
             .configured
@@ -154,7 +153,7 @@ impl HostAudioSink {
             .map_err(|_| "ASTRA_EMU_AUDIO_DEFAULT_FORMAT".to_owned())?;
         let output = OutputFormat {
             source,
-            device_rate: supported.sample_rate().0,
+            device_rate: supported.sample_rate(),
             device_channels: supported.channels(),
             device_sample_format: supported.sample_format(),
         };
@@ -247,13 +246,12 @@ impl HostAudioSink {
         if self.state.closed.load(Ordering::Acquire) {
             return Ok(AudioWriteStatus::Closed);
         }
-        let output = self
+        let output = (*self
             .state
             .configured
             .lock()
-            .map_err(|_| "ASTRA_EMU_AUDIO_CONFIG_LOCK".to_owned())?
-            .clone()
-            .ok_or_else(|| "ASTRA_EMU_AUDIO_NOT_CONFIGURED".to_owned())?;
+            .map_err(|_| "ASTRA_EMU_AUDIO_CONFIG_LOCK".to_owned())?)
+        .ok_or_else(|| "ASTRA_EMU_AUDIO_NOT_CONFIGURED".to_owned())?;
         chunk
             .validate(output.source)
             .map_err(|error| error.to_string())?;
@@ -264,7 +262,7 @@ impl HostAudioSink {
             .map_err(|_| "ASTRA_EMU_AUDIO_CONVERTER_LOCK".to_owned())?
             .as_mut()
             .ok_or_else(|| "ASTRA_EMU_AUDIO_NOT_CONFIGURED".to_owned())?
-            .push(chunk)?;
+            .push(pcm_chunk_samples(chunk))?;
         let producer = self
             .state
             .producer
@@ -322,9 +320,7 @@ fn audio_error(code: &str, message: String) -> astra_emu_family_api::FamilyError
     astra_emu_family_api::FamilyError::new(code, message)
 }
 
-fn register_cancel_waiter(
-    state: &AudioState,
-) -> Result<Option<(Sender<()>, Receiver<()>)>, String> {
+fn register_cancel_waiter(state: &AudioState) -> Result<Option<CancelWaiter>, String> {
     let (sender, receiver) = bounded(1);
     let mut waiters = state
         .cancel_waiters
@@ -371,7 +367,10 @@ impl DeviceConsumer {
     fn refill(&mut self) {
         while self.blocks.len() < AUDIO_QUEUE_CHUNKS {
             match self.receiver.try_recv() {
-                Ok(block) => self.blocks.push_back(block),
+                Ok(block) => {
+                    debug_assert_eq!(self.blocks.capacity(), AUDIO_QUEUE_CHUNKS);
+                    self.blocks.push_back(block);
+                }
                 Err(_) => break,
             }
         }

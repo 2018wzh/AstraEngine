@@ -618,7 +618,7 @@ impl RuntimeBridge {
                     Some(self.provider.read_vfs_resource(
                         &session_id,
                         resource_uri,
-                        audio_executor::MAX_RESOURCE_BYTES,
+                        video_executor::MAX_ENCODED_BYTES,
                     )?)
                 }
                 _ => None,

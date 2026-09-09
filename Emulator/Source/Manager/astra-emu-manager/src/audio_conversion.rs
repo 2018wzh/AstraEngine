@@ -112,7 +112,7 @@ impl AudioConverter {
                     output.push(
                         converted
                             .read_sample(channel, frame)
-                            .map_err(|error| format!("ASTRA_EMU_AUDIO_RESAMPLE_READ:{error}"))?,
+                            .ok_or_else(|| "ASTRA_EMU_AUDIO_RESAMPLE_READ".to_owned())?,
                     );
                 }
             }
@@ -225,8 +225,8 @@ fn drain_interleaved(pending: &mut [Vec<f32>], channels: u16) -> Result<Vec<f32>
     Ok(output)
 }
 
-pub(super) fn convert_chunk(chunk: PcmChunk, output: OutputFormat) -> Result<Vec<f32>, String> {
-    let samples = match chunk {
+pub(super) fn pcm_chunk_samples(chunk: PcmChunk) -> Vec<f32> {
+    match chunk {
         PcmChunk::I16(values) => values
             .iter()
             .map(|sample| {
@@ -238,7 +238,11 @@ pub(super) fn convert_chunk(chunk: PcmChunk, output: OutputFormat) -> Result<Vec
             })
             .collect::<Vec<_>>(),
         PcmChunk::F32(values) => values.into_iter().collect(),
-    };
+    }
+}
+
+pub(super) fn convert_chunk(chunk: PcmChunk, output: OutputFormat) -> Result<Vec<f32>, String> {
+    let samples = pcm_chunk_samples(chunk);
     convert_samples(
         samples,
         output.source.sample_rate,
@@ -275,7 +279,7 @@ pub(super) fn convert_samples(
         .map_err(|error| format!("ASTRA_EMU_AUDIO_RESAMPLER_INPUT:{error}"))?;
     let mut resampler = new_resampler(source_rate, target_rate, usize::from(target_channels))?;
     let output = resampler
-        .process_all(&adapter, None)
+        .process_all(&adapter, frames, None)
         .map_err(|error| format!("ASTRA_EMU_AUDIO_RESAMPLE:{error}"))?;
     let output_len = output
         .frames()
@@ -290,7 +294,7 @@ pub(super) fn convert_samples(
             interleaved.push(
                 output
                     .read_sample(channel, frame)
-                    .map_err(|error| format!("ASTRA_EMU_AUDIO_RESAMPLE_READ:{error}"))?,
+                    .ok_or_else(|| "ASTRA_EMU_AUDIO_RESAMPLE_READ".to_owned())?,
             );
         }
     }
