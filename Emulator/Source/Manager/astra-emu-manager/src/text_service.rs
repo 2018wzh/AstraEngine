@@ -54,6 +54,26 @@ impl TextReplacementBridge {
             .enable_all()
             .build()
             .map_err(|_| error("ASTRA_EMU_TEXT_RUNTIME_CREATE"))?;
+        Self::from_runtime(profile, secrets, runtime)
+    }
+
+    #[cfg(test)]
+    fn inert_for_test(
+        profile: TranslationProfile,
+        secrets: Arc<dyn SecretResolver>,
+    ) -> Result<Self, FamilyError> {
+        let runtime = Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|_| error("ASTRA_EMU_TEXT_RUNTIME_CREATE"))?;
+        Self::from_runtime(profile, secrets, runtime)
+    }
+
+    fn from_runtime(
+        profile: TranslationProfile,
+        secrets: Arc<dyn SecretResolver>,
+        runtime: Runtime,
+    ) -> Result<Self, FamilyError> {
         let provider = OpenAiCompatibleTranslationProvider::new(profile, secrets)
             .map_err(translation_error)?;
         let session = Arc::new(TranslationSession::new(Arc::new(provider)));
@@ -322,7 +342,8 @@ mod tests {
 
     #[test]
     fn cancel_maps_pending_request_to_cancelled() {
-        let bridge = TextReplacementBridge::new(profile(), Arc::new(TestSecrets)).unwrap();
+        let bridge =
+            TextReplacementBridge::inert_for_test(profile(), Arc::new(TestSecrets)).unwrap();
         let sink = TextReplacementSink {
             state: Arc::clone(&bridge.state),
         };
@@ -343,7 +364,8 @@ mod tests {
 
     #[test]
     fn reset_discards_pending_request_and_session_state() {
-        let bridge = TextReplacementBridge::new(profile(), Arc::new(TestSecrets)).unwrap();
+        let bridge =
+            TextReplacementBridge::inert_for_test(profile(), Arc::new(TestSecrets)).unwrap();
         let sink = TextReplacementSink {
             state: Arc::clone(&bridge.state),
         };
