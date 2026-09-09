@@ -30,14 +30,6 @@ Extension ABI v1 提供同步 opaque Hook，translation companion 只约束 UTF-
 - 崩溃隔离改由 capability sandbox、permission policy、deterministic effect list、redacted report、provider unload 和 headless scenario gate 共同处理。
 - FVP 是 v1 首发 family，并以固定 rfvp revision 的合法输入行为、148 个 release syscall、原生存档冷启动和脱敏 parity evidence 作为 full-flow gate。Artemis、KrKr、BGI、SoftPAL、Siglus 和 Minori 先输出 alpha probe report，再补各自 full-flow gate。
 
-## Verification
+## 历史验证
 
-```bash
-cargo test -p astra-emu-manager manager_runtime_world
-cargo test -p astra-emu-family-api legacy_runtime_provider_api
-cargo test -p astra-emu-cli --all-targets
-astra-emu-cli headless --engine fvp --game-dir ./Games/Example --entry Game.hcb --input ./Automation/fvp.jsonl --artifacts ./Build/FvpEvidence
-cargo test -p astra-release emu_gate
-```
-
-Expected report includes `emu.legacy_runtime_provider`, `emu.auto_probe`, `emu.trusted_luau_policy`, `emu.text_redaction`, `emu.filter_preset`, `plugin.extension_registry`, `runtime.replay.determinism`, `emu.fvp_full_flow` and `emu.report_redaction`.
+当时的 RuntimeWorld、CLI/Headless 与 EMU Release Gate 验证入口已删除。当前实现和验证要求见 [ADR 0019](0019-astraemu-independent-host.md)，不再执行本 ADR 的旧命令。

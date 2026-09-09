@@ -1,5 +1,7 @@
 # Minori 移植日志
 
+本页是旧架构移植记录。旧 CLI/Headless 命令已退出当前运行路径；Minori 源码保留为 inactive 研究材料，新 Host 接入尚未开始。
+
 ## 2026-07-21
 
 ### 目标

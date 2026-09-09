@@ -1,6 +1,6 @@
 # AstraEMU Minori
 
-Minori family 资料面向 PAZ + `.sc` 脚本游戏。本阶段已有 `astra-emu-minori`、公共 VFS/support 层、通用 `astra-emu-cli vfs --family minori` 和独立研究工具 `astra-emu-minori-cli`。runtime 已具备 typed IR、已确认 control-flow、消息、音频与无 stand stage 子集、可序列化状态和签名动态 provider 的 Headless E2 slice；真实八包已跑到竖排标题。选项、普通 voice、人物站位、transition 动画、系统页和完整路线仍未实现。
+Minori family 资料面向 PAZ + `.sc` 脚本游戏。核心和专用研究工具源码保留，但已退出活动 workspace，尚未接入独立 Family ABI。下文及关联页面中的旧 VFS、Headless 和动态 provider 结果属于历史研究；当前交付范围见 [独立 Host 重构](../../migrations/astraemu-independent-host.md)。
 
 ## 阅读顺序
 

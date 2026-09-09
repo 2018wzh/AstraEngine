@@ -1,5 +1,7 @@
 # Implementation Plan Status
 
+2026-09-09：AstraEMU 旧通用 CLI、schema/evidence/E3/family-package、平台构建脚本和 iOS 宿主已移除，活动 workspace 收敛为独立 Host 所需的七个成员。Minori 核心及专用研究工具保留为 inactive 源码。下文旧 CLI/schema/report 记录属于历史；新 Host 与 FVP 的集成仍在进行。
+
 2026-09-08：[AstraEMU 独立 Host 重构](../migrations/astraemu-independent-host.md) 已获批准，当前 `IN_PROGRESS`。本页较早的 AstraEMU RuntimeWorld、Family ABI v9、Hook、Host VFS 和统一 package/save 记录由新方案取代；不能用于宣称独立 Host 已完成。
 
 2026-07-30 增量：Runtime、Action/Plugin ABI、Product Runtime Provider ABI 已一次性切到 v3/v2 breaking contract。Runtime 使用 inverse journal/overlay transaction、增量状态根、强制 Action access/StableId 声明、只编译一次的 transition/event dispatch 和 deterministic conflict-DAG；NativeVN 使用 hot/cold history、mutation journal、四 presentation region 与统一 worker budget。Provider factory/session、opaque FFI session、ordered mailbox 和 Headless `astra.headless_session_batch.v2` 已落地。测试不再依赖调用方用环境变量指定 Headless binary，同一测试进程复用有界 multi-session server。clean Release code commit `669a98a5` 的集显 DX12 1920×1080、120 Hz、72,000 帧产品运行通过：CPU p95 603,900 ns、GPU p95 208,640 ns、e2e p99 913,840 ns、deadline miss 为零、private memory max 299,180,032 bytes、增长 max 22,257,664 bytes，稳定段 allocation/upload/readback 均为零。相同 build/package/profile 的两 Session performance batch 串行基线 126,024,916 us、并发 63,124,857 us，逐 Session output identity 一致；全局预算 8，并发度 2，每 Session 配额 4，总容量 8。1k/10k/100k backlog 后的真实普通推进均为 cache hit、历史物化 0、追加 1、hot-state 不超过 4 KiB。文档、fmt、workspace clippy、`astra-headless` build、workspace test 与动态导出预算均在该代码提交通过。
