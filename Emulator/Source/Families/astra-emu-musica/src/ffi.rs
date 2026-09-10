@@ -57,7 +57,7 @@ where
 
 extern "C" fn descriptor() -> FfiLegacyResult<FfiFamilyPluginDescriptor> {
     boundary("astra.emu.musica.descriptor", || {
-        let descriptor = MusicaRuntimeProvider::default().descriptor();
+        let descriptor = crate::static_descriptor();
         descriptor.validate()?;
         Ok(descriptor)
     })

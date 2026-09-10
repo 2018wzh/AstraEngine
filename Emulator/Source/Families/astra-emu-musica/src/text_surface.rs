@@ -9,8 +9,64 @@ use astra_media_core::{
     RendererCreateRequest, SceneCommand, Transform2D,
 };
 
-const FONT_FAMILY: &str = "Noto Sans JP";
-const FONT_ASSET_ID: &str = "asset:/font/emu/noto-sans-jp";
+const FONT_FAMILY_JP: &str = "Noto Sans JP";
+const FONT_FAMILY_SC: &str = "Noto Sans SC";
+const FONT_ASSET_ID_JP: &str = "asset:/font/emu/noto-sans-jp";
+const FONT_ASSET_ID_SC: &str = "asset:/font/emu/noto-sans-sc";
+
+/// The declared coverage of both packaged Musica text faces.  The SC face is
+/// required because the official simplified-Chinese scripts contain hanzi
+/// outside the JIS coverage of the JP face (e.g. U+5BF9).
+fn musica_font_coverage() -> Vec<UnicodeRange> {
+    vec![
+        UnicodeRange {
+            start: 0x20,
+            end: 0x7e,
+        },
+        UnicodeRange {
+            start: 0x2010,
+            end: 0x2027,
+        },
+        UnicodeRange {
+            start: 0x25bc,
+            end: 0x25bc,
+        },
+        UnicodeRange {
+            start: 0x266a,
+            end: 0x266a,
+        },
+        UnicodeRange {
+            start: 0x3000,
+            end: 0x30ff,
+        },
+        UnicodeRange {
+            start: 0x3400,
+            end: 0x9fff,
+        },
+        UnicodeRange {
+            start: 0xff00,
+            end: 0xffef,
+        },
+    ]
+}
+
+/// The packaged family chain for a session text encoding: exactly one face.
+/// A deterministic single-face chain keeps the shaper's per-cluster choice
+/// identical to the declared fallback order; text outside the packaged
+/// face's repertoire fails closed as an explicit glyph-missing diagnostic.
+pub(crate) fn font_chain_for_locale(primary: &'static str) -> Vec<&'static str> {
+    vec![primary]
+}
+
+/// The primary text face for a session locale.  Simplified-Chinese sessions
+/// lead with the SC face; Japanese sessions keep the JP face first.
+pub(crate) fn primary_font_for_gbk(gbk: bool) -> &'static str {
+    if gbk {
+        FONT_FAMILY_SC
+    } else {
+        FONT_FAMILY_JP
+    }
+}
 /// The original Musica message panel draws a small, independent downward
 /// triangle after the completed message.  It is a presentation marker, not
 /// part of the message source or backlog text.
@@ -55,58 +111,82 @@ pub(super) struct MusicaTextSurfaceRenderer {
     provider: CosmicTextLayoutProvider,
     renderer: HeadlessRenderer,
     resources: TextRenderResourceOwner,
+    font_families: Vec<&'static str>,
+    run_language: &'static str,
+    run_script: &'static str,
     width: u32,
     height: u32,
 }
 
+/// The BCP-47 language and ISO-15924 script declared on shaped text runs.
+/// The shaper resolves per-cluster fallback through these values, so a
+/// simplified-Chinese session must shape as `zh-Hans`/`Hans` for the SC face
+/// to be selected deterministically.
+#[derive(Clone, Copy)]
+pub(crate) struct TextRunLocale {
+    pub(crate) language: &'static str,
+    pub(crate) script: &'static str,
+}
+
+pub(crate) const TEXT_LOCALE_JA_JP: TextRunLocale = TextRunLocale {
+    language: "ja-JP",
+    script: "Jpan",
+};
+
+pub(crate) const TEXT_LOCALE_ZH_HANS: TextRunLocale = TextRunLocale {
+    language: "zh-Hans",
+    script: "Hans",
+};
+
+pub(crate) fn run_locale_for_primary(primary: &'static str) -> TextRunLocale {
+    if primary == FONT_FAMILY_SC {
+        TEXT_LOCALE_ZH_HANS
+    } else {
+        TEXT_LOCALE_JA_JP
+    }
+}
+
 impl MusicaTextSurfaceRenderer {
-    pub(super) fn new(width: u32, height: u32) -> Result<Self, &'static str> {
-        let bytes =
-            include_bytes!("../../../../../Examples/NativeVN/Assets/Fonts/NotoSansJP-Variable.ttf")
-                .to_vec();
+    pub(super) fn new(
+        width: u32,
+        height: u32,
+        primary_family: &'static str,
+    ) -> Result<Self, &'static str> {
+        let font_families = font_chain_for_locale(primary_family);
+        let run_locale = run_locale_for_primary(primary_family);
+        let (asset_id, family, bytes) = if primary_family == FONT_FAMILY_SC {
+            (
+                FONT_ASSET_ID_SC,
+                FONT_FAMILY_SC,
+                include_bytes!(
+                    "../../../../../Examples/NativeVN/Assets/Fonts/NotoSansSC-Variable.ttf"
+                )
+                .to_vec(),
+            )
+        } else {
+            (
+                FONT_ASSET_ID_JP,
+                FONT_FAMILY_JP,
+                include_bytes!(
+                    "../../../../../Examples/NativeVN/Assets/Fonts/NotoSansJP-Variable.ttf"
+                )
+                .to_vec(),
+            )
+        };
         let provider = CosmicTextLayoutProvider::new(
             FontBindingContext {
                 target: "astra-emu-musica".into(),
                 profile: "musica-v1".into(),
-                default_locale: "ja-JP".into(),
+                default_locale: run_locale.language.into(),
             },
             vec![PackagedFont {
-                asset_id: FONT_ASSET_ID.into(),
-                family: FONT_FAMILY.into(),
+                asset_id: asset_id.into(),
+                family: family.into(),
                 face_index: 0,
                 hash: Hash256::from_sha256(&bytes),
                 license_id: "OFL-1.1".into(),
                 subset: None,
-                coverage: vec![
-                    UnicodeRange {
-                        start: 0x20,
-                        end: 0x7e,
-                    },
-                    UnicodeRange {
-                        start: 0x2010,
-                        end: 0x2027,
-                    },
-                    UnicodeRange {
-                        start: 0x25bc,
-                        end: 0x25bc,
-                    },
-                    UnicodeRange {
-                        start: 0x266a,
-                        end: 0x266a,
-                    },
-                    UnicodeRange {
-                        start: 0x3000,
-                        end: 0x30ff,
-                    },
-                    UnicodeRange {
-                        start: 0x3400,
-                        end: 0x9fff,
-                    },
-                    UnicodeRange {
-                        start: 0xff00,
-                        end: 0xffef,
-                    },
-                ],
+                coverage: musica_font_coverage(),
                 targets: vec!["astra-emu-musica".into()],
                 profiles: vec!["musica-v1".into()],
                 bytes,
@@ -118,8 +198,8 @@ impl MusicaTextSurfaceRenderer {
             .identity()
             .map_err(|_| "ASTRA_EMU_MUSICA_TEXT_PROVIDER_IDENTITY")?;
         if identity.fonts.len() != 1
-            || identity.fonts[0].asset_id != FONT_ASSET_ID
-            || identity.fonts[0].family != FONT_FAMILY
+            || identity.fonts[0].family != family
+            || identity.fonts[0].asset_id != asset_id
         {
             return Err("ASTRA_EMU_MUSICA_TEXT_PROVIDER_IDENTITY");
         }
@@ -135,9 +215,19 @@ impl MusicaTextSurfaceRenderer {
             provider,
             renderer,
             resources: TextRenderResourceOwner::default(),
+            font_families,
+            run_language: run_locale.language,
+            run_script: run_locale.script,
             width,
             height,
         })
+    }
+
+    fn run_locale(&self) -> TextRunLocale {
+        TextRunLocale {
+            language: self.run_language,
+            script: self.run_script,
+        }
     }
 
     pub(super) fn render(
@@ -148,6 +238,7 @@ impl MusicaTextSurfaceRenderer {
             return Err("ASTRA_EMU_MUSICA_TEXT_BATCH_BOUNDS");
         }
         let mut commands = vec![SceneCommand::Clear { rgba: [0, 0, 0, 0] }];
+        let run_locale = self.run_locale();
         for request in requests {
             validate_region(request.body, self.width, self.height)?;
             if let Some(region) = request.speaker_region {
@@ -157,6 +248,8 @@ impl MusicaTextSurfaceRenderer {
                 &self.provider,
                 &mut self.resources,
                 &mut commands,
+                &self.font_families,
+                run_locale,
                 &format!("{}.body", request.key),
                 &request.text,
                 request.body,
@@ -171,6 +264,8 @@ impl MusicaTextSurfaceRenderer {
                     &self.provider,
                     &mut self.resources,
                     &mut commands,
+                    &self.font_families,
+                    run_locale,
                     &format!("{}.speaker", request.key),
                     speaker,
                     region,
@@ -204,11 +299,31 @@ impl MusicaTextSurfaceRenderer {
     }
 }
 
+/// Formats a failed text-layout request into the family's `&'static str`
+/// diagnostic channel.  Layout failure terminates the session fail-closed,
+/// so the one-shot cold-path allocation never recurs within a session.
+fn leak_text_layout_error(error: astra_media_core::MediaError, text: &str) -> &'static str {
+    let scalars: String = text
+        .chars()
+        .take(6)
+        .map(|value| format!(" U+{:04X}", value as u32))
+        .collect();
+    Box::leak(
+        format!(
+            "ASTRA_EMU_MUSICA_TEXT_LAYOUT: {error} [chars={} first:{scalars}]",
+            text.chars().count()
+        )
+        .into_boxed_str(),
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 fn append_text(
     provider: &CosmicTextLayoutProvider,
     owner: &mut TextRenderResourceOwner,
     commands: &mut Vec<SceneCommand>,
+    font_families: &[&'static str],
+    run_locale: TextRunLocale,
     layout_id: &str,
     text: &str,
     region: TextRegion,
@@ -218,8 +333,8 @@ fn append_text(
 ) -> Result<(), &'static str> {
     let runs = vec![TextRun {
         text: text.into(),
-        language: "ja-JP".into(),
-        script: Some("Jpan".into()),
+        language: run_locale.language.into(),
+        script: Some(run_locale.script.into()),
         direction: TextDirection::LeftToRight,
         ruby: Vec::new(),
         voice: None,
@@ -237,10 +352,13 @@ fn append_text(
                 wrap: WrapPolicy::WordOrGlyph,
                 overflow: OverflowPolicy::Clip,
             },
-            font_families: vec![FONT_FAMILY.into()],
+            font_families: font_families
+                .iter()
+                .map(|family| (*family).to_owned())
+                .collect(),
             features: Vec::new(),
         })
-        .map_err(|_| "ASTRA_EMU_MUSICA_TEXT_LAYOUT")?;
+        .map_err(|error| leak_text_layout_error(error, text))?;
     if layout.diagnostics.iter().any(|diagnostic| {
         matches!(
             diagnostic.severity,
@@ -259,8 +377,8 @@ fn append_text(
                 key: format!("{layout_id}.indicator"),
                 runs: vec![TextRun {
                     text: ADVANCE_INDICATOR.into(),
-                    language: "ja-JP".into(),
-                    script: Some("Jpan".into()),
+                    language: run_locale.language.into(),
+                    script: Some(run_locale.script.into()),
                     direction: TextDirection::LeftToRight,
                     ruby: Vec::new(),
                     voice: None,
@@ -274,10 +392,13 @@ fn append_text(
                     wrap: WrapPolicy::None,
                     overflow: OverflowPolicy::Clip,
                 },
-                font_families: vec![FONT_FAMILY.into()],
+                font_families: font_families
+                    .iter()
+                    .map(|family| (*family).to_owned())
+                    .collect(),
                 features: Vec::new(),
             })
-            .map_err(|_| "ASTRA_EMU_MUSICA_TEXT_LAYOUT")?;
+            .map_err(|error| leak_text_layout_error(error, ADVANCE_INDICATOR))?;
         if indicator_layout.diagnostics.iter().any(|diagnostic| {
             matches!(
                 diagnostic.severity,
@@ -434,7 +555,7 @@ mod tests {
 
     #[test]
     fn repeated_text_frames_reuse_retained_glyph_resources() {
-        let mut renderer = MusicaTextSurfaceRenderer::new(1280, 720).unwrap();
+        let mut renderer = MusicaTextSurfaceRenderer::new(1280, 720, FONT_FAMILY_JP).unwrap();
         let request = TextSurfaceRequest {
             key: "musica.test.message".into(),
             text: "日本語テキスト".into(),
@@ -475,7 +596,7 @@ mod tests {
 
     #[test]
     fn advance_indicator_is_rendered_without_mutating_message_text() {
-        let mut renderer = MusicaTextSurfaceRenderer::new(1280, 720).unwrap();
+        let mut renderer = MusicaTextSurfaceRenderer::new(1280, 720, FONT_FAMILY_JP).unwrap();
         let mut request = TextSurfaceRequest {
             key: "musica.test.indicator".into(),
             text: "本文".into(),
@@ -506,7 +627,7 @@ mod tests {
 
     #[test]
     fn advance_indicator_stays_inline_when_the_last_line_has_room() {
-        let renderer = MusicaTextSurfaceRenderer::new(1280, 720).unwrap();
+        let renderer = MusicaTextSurfaceRenderer::new(1280, 720, FONT_FAMILY_JP).unwrap();
         let region = TextRegion {
             x: 160,
             y: 568,
@@ -538,7 +659,7 @@ mod tests {
                     wrap: WrapPolicy::WordOrGlyph,
                     overflow: OverflowPolicy::Clip,
                 },
-                font_families: vec![FONT_FAMILY.into()],
+                font_families: vec![FONT_FAMILY_JP.into()],
                 features: Vec::new(),
             })
             .unwrap();
@@ -563,7 +684,7 @@ mod tests {
                     wrap: WrapPolicy::None,
                     overflow: OverflowPolicy::Clip,
                 },
-                font_families: vec![FONT_FAMILY.into()],
+                font_families: vec![FONT_FAMILY_JP.into()],
                 features: Vec::new(),
             })
             .unwrap();

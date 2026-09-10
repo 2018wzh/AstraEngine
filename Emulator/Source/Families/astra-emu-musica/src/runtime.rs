@@ -7,9 +7,10 @@ use thiserror::Error;
 
 use crate::save::MUSICA_MANUAL_SAVE_FIRST_PAGE_INDEX;
 use crate::{
-    parse_musica_message_markup, script::tokenize_operands, validate_canonical_musica_message_text,
-    MusicaMessageControl, MusicaMessageMarkupError, ScCommand, ScControlFlow, ScLineKind,
-    ScOperand, ScScript, SourceSpan,
+    parse_musica_message_markup, tokenize_operands_with_locale,
+    validate_canonical_musica_message_text, MusicaLocaleHook, MusicaMessageControl,
+    MusicaMessageMarkupError, ScCommand, ScControlFlow, ScLineKind, ScOperand, ScScript,
+    SourceSpan,
 };
 
 pub const MUSICA_RUNTIME_STATE_SCHEMA: &str = "astra.emu.musica.runtime_state.v29";
@@ -110,6 +111,24 @@ pub struct MusicaRuntimeState {
     pub instruction_count: u64,
     pub effect_sequence: u64,
     pub terminal: bool,
+}
+
+/// The locale hook matching the session's script language gate.  eden*
+/// ships `[e]`-guarded GBK scripts; natsuzora ships `[j]`-guarded CP932.
+fn script_language_hook(state: &MusicaRuntimeState) -> MusicaLocaleHook {
+    match state.script_language {
+        Some('e') => MusicaLocaleHook::SimplifiedChineseGbk,
+        _ => MusicaLocaleHook::japanese_cp932(),
+    }
+}
+
+fn tokenize_operands_for_state(
+    state: &MusicaRuntimeState,
+    bytes: &[u8],
+    offset: usize,
+) -> Result<Vec<String>, MusicaRuntimeError> {
+    tokenize_operands_with_locale(bytes, offset, script_language_hook(state))
+        .map_err(|_| MusicaRuntimeError::Operand)
 }
 
 impl MusicaRuntimeState {
@@ -317,6 +336,7 @@ pub struct MusicaSecondaryEffectState {
 #[serde(rename_all = "snake_case")]
 pub enum MusicaSecondaryEffectKind {
     SnowHorizontal,
+    SnowVertical,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -817,14 +837,22 @@ pub enum MusicaVmEvent {
 /// the runtime would reject.
 pub(crate) fn collect_resource_references(
     script: &ScScript,
+    locale_hook: MusicaLocaleHook,
 ) -> Result<BTreeSet<String>, MusicaRuntimeError> {
     let mut resources = BTreeSet::new();
     for line in &script.lines {
         let ScLineKind::Command { command } = &line.kind else {
             continue;
         };
-        let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
-            .map_err(|_| MusicaRuntimeError::Operand)?;
+        LAST_FAILED_COMMAND.with(|cell| {
+            *cell.borrow_mut() = Some((command.opcode.clone(), command.ordinal));
+        });
+        let tokens = tokenize_operands_with_locale(
+            &command.raw_operands,
+            command.span.offset as usize,
+            locale_hook,
+        )
+        .map_err(|_| MusicaRuntimeError::Operand)?;
         match command.opcode.as_str() {
             "message" => {
                 if tokens.len() >= 4 && !tokens[1].is_empty() {
@@ -872,7 +900,7 @@ pub(crate) fn collect_resource_references(
             }
             "effect" => collect_primary_effect_resources(&tokens, &mut resources)?,
             "effect2" => match tokens.as_slice() {
-                [kind] if kind == "SnowH" => {
+                [kind] if kind == "SnowH" || kind == "Snow" => {
                     resources.extend([
                         "musica:/sys/snowS.png".into(),
                         "musica:/sys/snowM.png".into(),
@@ -969,6 +997,21 @@ fn collect_primary_effect_resources(
         });
     };
     match kind.as_str() {
+        "Snow" => {
+            if tokens.len() != 1 {
+                return Err(MusicaRuntimeError::Effect {
+                    violation: MusicaEffectViolation::OperandCount {
+                        count: u8::try_from(tokens.len())
+                            .map_err(|_| MusicaRuntimeError::Overflow)?,
+                    },
+                });
+            }
+            resources.extend([
+                "musica:/sys/snowS.png".into(),
+                "musica:/sys/snowM.png".into(),
+                "musica:/sys/snowL.png".into(),
+            ]);
+        }
         "Firefly" => {
             let [_, prefix, _count, _duration] = tokens else {
                 return Err(MusicaRuntimeError::Firefly);
@@ -1069,6 +1112,9 @@ pub enum MusicaRuntimeError {
     Label,
     #[error("ASTRA_EMU_MUSICA_RUNTIME_OPERAND: command operands do not match the verified schema")]
     Operand,
+    #[error("ASTRA_EMU_MUSICA_RUNTIME_OPERAND: opcode `{opcode}` at ordinal {ordinal} has unverified operands")]
+    OperandCommand { opcode: String, ordinal: u32 },
+
     #[error(
         "ASTRA_EMU_MUSICA_RUNTIME_OPCODE: command `{opcode}` at ordinal {ordinal} is not verified"
     )]
@@ -2378,8 +2424,12 @@ impl MusicaVm {
         if command.opcode != "select" {
             return Err(MusicaRuntimeError::Choice);
         }
-        let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
-            .map_err(|_| MusicaRuntimeError::Choice)?;
+        let tokens = tokenize_operands_for_state(
+            self.state(),
+            &command.raw_operands,
+            command.span.offset as usize,
+        )
+        .map_err(|_| MusicaRuntimeError::Choice)?;
         if tokens.len() != choice.targets.len() || tokens.len() != choice.option_hashes.len() {
             return Err(MusicaRuntimeError::Choice);
         }
@@ -2779,9 +2829,19 @@ impl MusicaVm {
         if elapsed_ms != 0 && !clear {
             changed = true;
             for particle in &mut effect.particles {
-                advance_snow_h_particle(particle, elapsed_ms)?;
-                if particle.position[0] >= MUSICA_SNOW_H_STAGE_WIDTH {
-                    initialize_snow_h_particle(particle, &mut random_state)?;
+                match effect.kind {
+                    MusicaSecondaryEffectKind::SnowVertical => {
+                        advance_snow_v_particle(particle, elapsed_ms)?;
+                        if particle.position[1] >= MUSICA_SNOW_H_STAGE_HEIGHT {
+                            initialize_snow_v_particle(particle, &mut random_state)?;
+                        }
+                    }
+                    MusicaSecondaryEffectKind::SnowHorizontal => {
+                        advance_snow_h_particle(particle, elapsed_ms)?;
+                        if particle.position[0] >= MUSICA_SNOW_H_STAGE_WIDTH {
+                            initialize_snow_h_particle(particle, &mut random_state)?;
+                        }
+                    }
                 }
             }
         }
@@ -2894,12 +2954,23 @@ impl MusicaVm {
                 .instruction_count
                 .checked_add(1)
                 .ok_or(MusicaRuntimeError::Overflow)?;
-            if let Some(event) = execute_control(
+            LAST_FAILED_COMMAND.with(|cell| {
+                *cell.borrow_mut() = Some((command.opcode.clone(), command.ordinal));
+            });
+            let event = execute_control(
                 command,
                 &self.labels,
                 &self.message_voice_durations_ms,
                 &mut self.state,
-            )? {
+            )
+            .map_err(|error| match error {
+                MusicaRuntimeError::Operand => MusicaRuntimeError::OperandCommand {
+                    opcode: command.opcode.clone(),
+                    ordinal: command.ordinal,
+                },
+                other => other,
+            })?;
+            if let Some(event) = event {
                 return Ok(Some(event));
             }
         }
@@ -3000,6 +3071,11 @@ fn execute_control(
         "movie" => execute_movie(command, state),
         "chain" => {
             let ScControlFlow::Chain { target } = &command.control_flow else {
+                tracing::error!(
+                    event = "astra_emu_musica_chain_operand_unexpected",
+                    control_flow = ?command.control_flow,
+                    raw = %String::from_utf8_lossy(&command.raw_operands)
+                );
                 return Err(MusicaRuntimeError::Operand);
             };
             validate_chain_target(target)?;
@@ -3043,6 +3119,20 @@ fn clear_gameplay_for_title(state: &mut MusicaRuntimeState) {
     state.system_ui.config_return_page = None;
 }
 
+/// Context of the last command executed in this thread, used to enrich
+/// runtime errors surfaced through provider boundaries.
+pub fn last_failed_command_context() -> String {
+    LAST_FAILED_COMMAND.with(|cell| match cell.borrow().as_ref() {
+        Some((opcode, ordinal)) => format!("{opcode}#{ordinal}"),
+        None => "unknown".to_owned(),
+    })
+}
+
+thread_local! {
+    static LAST_FAILED_COMMAND: std::cell::RefCell<Option<(String, u32)>> =
+        const { std::cell::RefCell::new(None) };
+}
+
 fn record_verified_route_clear(state: &mut MusicaRuntimeState, key: &str, value: i64) {
     if value != 1 || !MUSICA_ROUTE_CLEAR_FLAGS.contains(&key) {
         return;
@@ -3058,8 +3148,9 @@ fn execute_pragma(
     command: &ScCommand,
     state: &mut MusicaRuntimeState,
 ) -> Result<Option<MusicaVmEvent>, MusicaRuntimeError> {
-    let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
-        .map_err(|_| MusicaRuntimeError::Operand)?;
+    let tokens =
+        tokenize_operands_for_state(state, &command.raw_operands, command.span.offset as usize)
+            .map_err(|_| MusicaRuntimeError::Operand)?;
     let identity = Hash256::from_sha256(&command.raw_operands);
     let [pragma] = tokens.as_slice() else {
         return Err(MusicaRuntimeError::UnsupportedPragma { identity });
@@ -3089,8 +3180,9 @@ fn execute_character(
     command: &ScCommand,
     state: &mut MusicaRuntimeState,
 ) -> Result<Option<MusicaVmEvent>, MusicaRuntimeError> {
-    let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
-        .map_err(|_| MusicaRuntimeError::Character)?;
+    let tokens =
+        tokenize_operands_for_state(state, &command.raw_operands, command.span.offset as usize)
+            .map_err(|_| MusicaRuntimeError::Character)?;
     let mode = tokens
         .first()
         .map(|value| value.to_ascii_lowercase())
@@ -3244,8 +3336,9 @@ fn execute_movie(
     command: &ScCommand,
     state: &mut MusicaRuntimeState,
 ) -> Result<Option<MusicaVmEvent>, MusicaRuntimeError> {
-    let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
-        .map_err(|_| MusicaRuntimeError::Operand)?;
+    let tokens =
+        tokenize_operands_for_state(state, &command.raw_operands, command.span.offset as usize)
+            .map_err(|_| MusicaRuntimeError::Operand)?;
     let [movie_id, resource, width, height, skippable] = tokens.as_slice() else {
         return Err(MusicaRuntimeError::Operand);
     };
@@ -3294,11 +3387,10 @@ fn execute_effect(
     state: &mut MusicaRuntimeState,
 ) -> Result<Option<MusicaVmEvent>, MusicaRuntimeError> {
     let tokens =
-        tokenize_operands(&command.raw_operands, command.span.offset as usize).map_err(|_| {
-            MusicaRuntimeError::Effect {
+        tokenize_operands_for_state(state, &command.raw_operands, command.span.offset as usize)
+            .map_err(|_| MusicaRuntimeError::Effect {
                 violation: MusicaEffectViolation::Tokenization,
-            }
-        })?;
+            })?;
     if tokens.is_empty() || tokens.len() > 5 {
         return Err(MusicaRuntimeError::Effect {
             violation: MusicaEffectViolation::OperandCount {
@@ -3314,6 +3406,16 @@ fn execute_effect(
         return Ok(Some(MusicaVmEvent::EffectCleared {
             sequence: state.effect_sequence,
         }));
+    }
+    if tokens[0] == "Snow" {
+        // ef's opening scenes drive the vertical snowfall through the primary
+        // effect slot.  The verified secondary snow pool provides the same
+        // presentation; the primary crossfade slot itself stays free.
+        state.secondary_effect = Some(new_snow_v_state(&mut state.random_state)?);
+        let sequence = next_effect_sequence(state)?;
+        return Ok(Some(MusicaVmEvent::SecondaryEffect(
+            MusicaSecondaryEffectFrame { sequence },
+        )));
     }
     if tokens[0] == "end" {
         if tokens.len() != 1 {
@@ -3514,8 +3616,9 @@ fn execute_secondary_effect(
     command: &ScCommand,
     state: &mut MusicaRuntimeState,
 ) -> Result<Option<MusicaVmEvent>, MusicaRuntimeError> {
-    let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
-        .map_err(|_| MusicaRuntimeError::SecondaryEffect)?;
+    let tokens =
+        tokenize_operands_for_state(state, &command.raw_operands, command.span.offset as usize)
+            .map_err(|_| MusicaRuntimeError::SecondaryEffect)?;
     let [kind] = tokens.as_slice() else {
         return Err(MusicaRuntimeError::SecondaryEffect);
     };
@@ -3523,15 +3626,22 @@ fn execute_secondary_effect(
         "SnowH" => {
             state.secondary_effect = Some(new_snow_h_state(&mut state.random_state)?);
         }
+        "Snow" => {
+            state.secondary_effect = Some(new_snow_v_state(&mut state.random_state)?);
+        }
         "fadeout" => {
             let effect = state
                 .secondary_effect
                 .as_mut()
                 .ok_or(MusicaRuntimeError::SecondaryEffect)?;
-            if effect.kind != MusicaSecondaryEffectKind::SnowHorizontal {
+            if matches!(
+                effect.kind,
+                MusicaSecondaryEffectKind::SnowHorizontal | MusicaSecondaryEffectKind::SnowVertical
+            ) {
+                effect.ending = true;
+            } else {
                 return Err(MusicaRuntimeError::SecondaryEffect);
             }
-            effect.ending = true;
         }
         _ => {
             tracing::info!(
@@ -3555,8 +3665,9 @@ fn execute_screen_shake(
     command: &ScCommand,
     state: &mut MusicaRuntimeState,
 ) -> Result<Option<MusicaVmEvent>, MusicaRuntimeError> {
-    let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
-        .map_err(|_| MusicaRuntimeError::ScreenShake)?;
+    let tokens =
+        tokenize_operands_for_state(state, &command.raw_operands, command.span.offset as usize)
+            .map_err(|_| MusicaRuntimeError::ScreenShake)?;
     let [kind, amplitude, interval_ms] = tokens.as_slice() else {
         return Err(MusicaRuntimeError::ScreenShake);
     };
@@ -3594,12 +3705,11 @@ fn execute_panel(
     state: &mut MusicaRuntimeState,
 ) -> Result<Option<MusicaVmEvent>, MusicaRuntimeError> {
     let tokens =
-        tokenize_operands(&command.raw_operands, command.span.offset as usize).map_err(|_| {
-            MusicaRuntimeError::Panel {
+        tokenize_operands_for_state(state, &command.raw_operands, command.span.offset as usize)
+            .map_err(|_| MusicaRuntimeError::Panel {
                 operand_count: 0,
                 mode: None,
-            }
-        })?;
+            })?;
     state.panel = parse_panel_state(&tokens)?;
     next_effect_sequence(state)?;
     Ok(Some(MusicaVmEvent::Panel {
@@ -3627,6 +3737,12 @@ fn parse_panel_state(tokens: &[String]) -> Result<Option<MusicaPanelState>, Musi
                 resource_uri: format!("musica:/sys/{filename}"),
             }))
         }
+        // ef scene transitions switch the message window to the full-screen
+        // panel art; mode 3 keeps the same bounded one-resource shape.
+        [mode] if mode == "3" => Ok(Some(MusicaPanelState {
+            mode: 3,
+            resource_uri: "musica:/sys/fullPanel.png".into(),
+        })),
         _ => Err(invalid()),
     }
 }
@@ -3744,6 +3860,102 @@ fn new_snow_h_state(
         motion_elapsed_ns: 0,
         particles,
     })
+}
+
+/// The `.effect2 Snow` variant falls vertically: the fast axis is downward
+/// motion and the slow axis is a lateral drift in either direction.  The
+/// particle pool, texture set and fade behaviour are shared with `SnowH`.
+fn new_snow_v_state(
+    random_state: &mut u64,
+) -> Result<MusicaSecondaryEffectState, MusicaRuntimeError> {
+    let mut particles = Vec::with_capacity(MUSICA_SNOW_H_PARTICLE_COUNT);
+    for _ in 0..MUSICA_SNOW_H_PARTICLE_COUNT {
+        let mut particle = MusicaSnowHParticle {
+            fixed_position: [0, 0],
+            horizontal_velocity: 0,
+            vertical_velocity: 0,
+            vertical_positive: false,
+            kind: 0,
+            position: [0, 0],
+            active: false,
+        };
+        initialize_snow_v_particle(&mut particle, random_state)?;
+        particles.push(particle);
+    }
+    Ok(MusicaSecondaryEffectState {
+        kind: MusicaSecondaryEffectKind::SnowVertical,
+        resources: [
+            "musica:/sys/snowS.png".into(),
+            "musica:/sys/snowM.png".into(),
+            "musica:/sys/snowL.png".into(),
+        ],
+        ending: false,
+        alpha_256: 0,
+        fade_elapsed_ns: 0,
+        motion_elapsed_ns: 0,
+        particles,
+    })
+}
+
+fn initialize_snow_v_particle(
+    particle: &mut MusicaSnowHParticle,
+    random_state: &mut u64,
+) -> Result<(), MusicaRuntimeError> {
+    let x = next_native_random_15(random_state)
+        % u32::try_from(MUSICA_SNOW_H_STAGE_WIDTH + 100)
+            .map_err(|_| MusicaRuntimeError::Overflow)?;
+    let y = next_native_random_15(random_state)
+        % u32::try_from(MUSICA_SNOW_H_STAGE_HEIGHT + 60)
+            .map_err(|_| MusicaRuntimeError::Overflow)?;
+    let vertical_velocity = next_native_random_15(random_state)
+        .checked_mul(2)
+        .and_then(|value| value.checked_add(0x4000))
+        .ok_or(MusicaRuntimeError::Overflow)?;
+    let horizontal_velocity = next_native_random_15(random_state) % 0x2000;
+    let horizontal_positive = next_native_random_15(random_state) > 0x3fff;
+    let kind = if vertical_velocity < 0x5000 {
+        0
+    } else if vertical_velocity < 0xa000 {
+        1
+    } else {
+        2
+    };
+    particle.fixed_position = [i64::from(x) << 16, i64::from(y) << 16];
+    particle.horizontal_velocity = horizontal_velocity;
+    particle.vertical_velocity = vertical_velocity;
+    particle.vertical_positive = horizontal_positive;
+    particle.kind = kind;
+    particle.position = snow_h_visible_position(particle.fixed_position)?;
+    particle.active = true;
+    Ok(())
+}
+
+fn advance_snow_v_particle(
+    particle: &mut MusicaSnowHParticle,
+    elapsed_ms: u64,
+) -> Result<(), MusicaRuntimeError> {
+    if !particle.active {
+        return Err(MusicaRuntimeError::SecondaryEffect);
+    }
+    let horizontal_delta = u64::from(particle.horizontal_velocity)
+        .checked_mul(elapsed_ms)
+        .and_then(|value| i64::try_from(value).ok())
+        .ok_or(MusicaRuntimeError::Overflow)?;
+    let vertical_delta = u64::from(particle.vertical_velocity)
+        .checked_mul(elapsed_ms)
+        .and_then(|value| i64::try_from(value).ok())
+        .ok_or(MusicaRuntimeError::Overflow)?;
+    particle.fixed_position[0] = if particle.vertical_positive {
+        particle.fixed_position[0].checked_add(horizontal_delta)
+    } else {
+        particle.fixed_position[0].checked_sub(horizontal_delta)
+    }
+    .ok_or(MusicaRuntimeError::Overflow)?;
+    particle.fixed_position[1] = particle.fixed_position[1]
+        .checked_add(vertical_delta)
+        .ok_or(MusicaRuntimeError::Overflow)?;
+    particle.position = snow_h_visible_position(particle.fixed_position)?;
+    Ok(())
 }
 
 fn initialize_snow_h_particle(
@@ -4226,12 +4438,14 @@ fn validate_secondary_effect_state(
         "musica:/sys/snowM.png",
         "musica:/sys/snowL.png",
     ];
-    if effect.kind != MusicaSecondaryEffectKind::SnowHorizontal
-        || effect
-            .resources
-            .iter()
-            .map(String::as_str)
-            .ne(expected_resources)
+    if !matches!(
+        effect.kind,
+        MusicaSecondaryEffectKind::SnowHorizontal | MusicaSecondaryEffectKind::SnowVertical
+    ) || effect
+        .resources
+        .iter()
+        .map(String::as_str)
+        .ne(expected_resources)
         || effect.particles.len() != MUSICA_SNOW_H_PARTICLE_COUNT
         || effect.alpha_256 > MUSICA_SNOW_H_FADE_SCALE
         || effect.fade_elapsed_ns >= MUSICA_SNOW_H_FADE_STEP_NS
@@ -4939,8 +5153,9 @@ fn execute_transition(
     command: &ScCommand,
     state: &mut MusicaRuntimeState,
 ) -> Result<Option<MusicaVmEvent>, MusicaRuntimeError> {
-    let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
-        .map_err(|_| MusicaRuntimeError::Operand)?;
+    let tokens =
+        tokenize_operands_for_state(state, &command.raw_operands, command.span.offset as usize)
+            .map_err(|_| MusicaRuntimeError::Operand)?;
     let [mode, resource, duration] = tokens.as_slice() else {
         return Err(MusicaRuntimeError::Operand);
     };
@@ -4972,8 +5187,9 @@ fn execute_stage(
     command: &ScCommand,
     state: &mut MusicaRuntimeState,
 ) -> Result<Option<MusicaVmEvent>, MusicaRuntimeError> {
-    let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
-        .map_err(|_| MusicaRuntimeError::Operand)?;
+    let tokens =
+        tokenize_operands_for_state(state, &command.raw_operands, command.span.offset as usize)
+            .map_err(|_| MusicaRuntimeError::Operand)?;
     let tokens = stage_operand_tokens(&tokens)?;
     if tokens.len() < 4 || tokens.len() > 26 {
         return Err(MusicaRuntimeError::Operand);
@@ -5048,8 +5264,9 @@ fn execute_axis_scroll(
     state: &mut MusicaRuntimeState,
     axis: MusicaAxisScrollAxis,
 ) -> Result<Option<MusicaVmEvent>, MusicaRuntimeError> {
-    let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
-        .map_err(|_| MusicaRuntimeError::AxisScroll)?;
+    let tokens =
+        tokenize_operands_for_state(state, &command.raw_operands, command.span.offset as usize)
+            .map_err(|_| MusicaRuntimeError::AxisScroll)?;
     if tokens.len() > 2 {
         return Err(MusicaRuntimeError::AxisScroll);
     }
@@ -5110,8 +5327,9 @@ fn execute_linear_scroll(
     command: &ScCommand,
     state: &mut MusicaRuntimeState,
 ) -> Result<Option<MusicaVmEvent>, MusicaRuntimeError> {
-    let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
-        .map_err(|_| MusicaRuntimeError::LinearScroll)?;
+    let tokens =
+        tokenize_operands_for_state(state, &command.raw_operands, command.span.offset as usize)
+            .map_err(|_| MusicaRuntimeError::LinearScroll)?;
     let [target_x, target_y, speed_tenths] = tokens.as_slice() else {
         return Err(MusicaRuntimeError::LinearScroll);
     };
@@ -5166,8 +5384,9 @@ fn execute_scroll_xf(
     command: &ScCommand,
     state: &mut MusicaRuntimeState,
 ) -> Result<Option<MusicaVmEvent>, MusicaRuntimeError> {
-    let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
-        .map_err(|_| MusicaRuntimeError::ScrollXf)?;
+    let tokens =
+        tokenize_operands_for_state(state, &command.raw_operands, command.span.offset as usize)
+            .map_err(|_| MusicaRuntimeError::ScrollXf)?;
     let [start_width, start_height, end_width, end_height, start_x, start_y, end_x, end_y, duration, easing] =
         tokens.as_slice()
     else {
@@ -5225,8 +5444,9 @@ fn execute_end_scroll(
     command: &ScCommand,
     state: &mut MusicaRuntimeState,
 ) -> Result<Option<MusicaVmEvent>, MusicaRuntimeError> {
-    let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
-        .map_err(|_| MusicaRuntimeError::ScrollXf)?;
+    let tokens =
+        tokenize_operands_for_state(state, &command.raw_operands, command.span.offset as usize)
+            .map_err(|_| MusicaRuntimeError::ScrollXf)?;
     let [finish] = tokens.as_slice() else {
         return Err(MusicaRuntimeError::ScrollXf);
     };
@@ -5396,8 +5616,9 @@ fn execute_play_se(
     loop_stream_id: u32,
     bus: &str,
 ) -> Result<Option<MusicaVmEvent>, MusicaRuntimeError> {
-    let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
-        .map_err(|_| MusicaRuntimeError::Operand)?;
+    let tokens =
+        tokenize_operands_for_state(state, &command.raw_operands, command.span.offset as usize)
+            .map_err(|_| MusicaRuntimeError::Operand)?;
     if tokens.is_empty() || tokens.len() > 4 {
         return Err(MusicaRuntimeError::Operand);
     }
@@ -5533,8 +5754,9 @@ fn execute_play_bgm(
     state: &mut MusicaRuntimeState,
 ) -> Result<Option<MusicaVmEvent>, MusicaRuntimeError> {
     const BGM_STREAM_ID: u32 = 0;
-    let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
-        .map_err(|_| MusicaRuntimeError::Operand)?;
+    let tokens =
+        tokenize_operands_for_state(state, &command.raw_operands, command.span.offset as usize)
+            .map_err(|_| MusicaRuntimeError::Operand)?;
     if tokens.is_empty() || tokens.len() > 4 {
         return Err(MusicaRuntimeError::Operand);
     }
@@ -5627,8 +5849,9 @@ fn execute_play_voice(
     state: &mut MusicaRuntimeState,
 ) -> Result<Option<MusicaVmEvent>, MusicaRuntimeError> {
     const VOICE_STREAM_ID: u32 = 4;
-    let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
-        .map_err(|_| MusicaRuntimeError::Operand)?;
+    let tokens =
+        tokenize_operands_for_state(state, &command.raw_operands, command.span.offset as usize)
+            .map_err(|_| MusicaRuntimeError::Operand)?;
     if tokens.is_empty() || tokens.len() > 4 {
         return Err(MusicaRuntimeError::Operand);
     }
@@ -5710,8 +5933,9 @@ fn execute_message(
     message_voice_durations_ms: &BTreeMap<String, u32>,
     state: &mut MusicaRuntimeState,
 ) -> Result<Option<MusicaVmEvent>, MusicaRuntimeError> {
-    let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
-        .map_err(|_| MusicaRuntimeError::Operand)?;
+    let tokens =
+        tokenize_operands_for_state(state, &command.raw_operands, command.span.offset as usize)
+            .map_err(|_| MusicaRuntimeError::Operand)?;
     let (message_id, voice, speaker, authored_text) = if tokens.len() >= 4 {
         let message_id = tokens[0]
             .parse::<i64>()
@@ -5864,6 +6088,7 @@ fn execute_message(
 
 pub(crate) fn message_voice_wait_resources(
     script: &ScScript,
+    locale_hook: MusicaLocaleHook,
 ) -> Result<BTreeSet<String>, MusicaRuntimeError> {
     let mut resources = BTreeSet::new();
     for line in &script.lines {
@@ -5873,19 +6098,31 @@ pub(crate) fn message_voice_wait_resources(
         if command.opcode != "message" {
             continue;
         }
-        let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
-            .map_err(|_| MusicaRuntimeError::Operand)?;
+        let tokens = tokenize_operands_with_locale(
+            &command.raw_operands,
+            command.span.offset as usize,
+            locale_hook,
+        )
+        .map_err(|_| MusicaRuntimeError::OperandCommand {
+            opcode: command.opcode.clone(),
+            ordinal: command.ordinal,
+        })?;
         if tokens.len() < 4 {
             continue;
         }
         let authored_text = tokens[3..].join(" ");
-        if !parse_musica_message_markup(&authored_text)?.waits_for_voice() {
+        let markup = parse_musica_message_markup(&authored_text)?;
+        if !markup.waits_for_voice() {
             continue;
         }
-        let voice = (!tokens[1].is_empty())
-            .then(|| parse_message_voice(&tokens[1]))
-            .transpose()?
-            .ok_or(MusicaRuntimeError::MessageVoiceDuration)?;
+        // The official scripts also mark voiceless narration lines with a
+        // voice wait.  Without a voice there is nothing to decode or await,
+        // so the line contributes no resource and the wait degrades to an
+        // immediate auto-advance at execution time.
+        if tokens[1].is_empty() {
+            continue;
+        }
+        let voice = parse_message_voice(&tokens[1])?;
         resources.insert(voice.resource_uri);
     }
     Ok(resources)
@@ -5917,10 +6154,15 @@ fn message_wait_for_current_mode(
         return message_auto_wait(token_id, 0);
     }
     if wait_for_voice {
-        let voice = voice.ok_or(MusicaRuntimeError::MessageVoiceDuration)?;
-        let milliseconds = *message_voice_durations_ms
-            .get(&voice.resource_uri)
-            .ok_or(MusicaRuntimeError::MessageVoiceDuration)?;
+        // A voice-wait marker on a voiceless message cannot wait for audio;
+        // the original handler falls through to an immediate auto-advance.
+        let Some(voice) = voice else {
+            return message_auto_wait(token_id, 0);
+        };
+        let Some(milliseconds) = message_voice_durations_ms.get(&voice.resource_uri).copied()
+        else {
+            return Err(MusicaRuntimeError::MessageVoiceDuration);
+        };
         let timer_ticks = milliseconds
             .checked_add(9)
             .ok_or(MusicaRuntimeError::Overflow)?
@@ -6046,8 +6288,9 @@ fn execute_select(
     if state.choice.is_some() || state.wait.is_some() {
         return Err(MusicaRuntimeError::Choice);
     }
-    let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
-        .map_err(|_| MusicaRuntimeError::Choice)?;
+    let tokens =
+        tokenize_operands_for_state(state, &command.raw_operands, command.span.offset as usize)
+            .map_err(|_| MusicaRuntimeError::Choice)?;
     if tokens.len() != targets.len() {
         return Err(MusicaRuntimeError::Choice);
     }
@@ -7689,7 +7932,10 @@ mod tests {
             1,
         )
         .unwrap();
-        assert_eq!(vm.step(1, 4), Err(MusicaRuntimeError::Operand));
+        assert!(matches!(
+            vm.step(1, 4),
+            Err(MusicaRuntimeError::OperandCommand { opcode, .. }) if opcode == "stage"
+        ));
     }
 
     #[test]
@@ -7706,7 +7952,10 @@ mod tests {
         ));
 
         let mut malformed = firefly_vm(b".wait 50  \r\n.end\r\n", 1);
-        assert_eq!(malformed.step(1, 4), Err(MusicaRuntimeError::Operand));
+        assert!(matches!(
+            malformed.step(1, 4),
+            Err(MusicaRuntimeError::OperandCommand { opcode, .. }) if opcode == "wait"
+        ));
     }
 
     #[test]
@@ -7780,7 +8029,10 @@ mod tests {
                 1,
             )
             .unwrap();
-            assert_eq!(vm.step(1, 4).unwrap_err(), MusicaRuntimeError::Operand);
+            assert!(matches!(
+                vm.step(1, 4),
+                Err(MusicaRuntimeError::OperandCommand { opcode, .. }) if opcode == "stage"
+            ));
         }
     }
 
@@ -8516,7 +8768,8 @@ mod tests {
     fn resource_reference_audit_reuses_verified_command_grammars() {
         let source = b".stage * bg.png 0 0 Stand.png 640,0\r\n.char load 1 Aya.png\r\n.effect CrossFade2 A.png:*:B.png 16 10\r\n.effect Firefly Firefly_c 1 1000\r\n.effect2 SnowH\r\n.panel 1 * customPanel.png\r\n.playbgm theme.ogg\r\n.playse click.ogg\r\n.message 1 ren-0001.ogg speaker text\r\n.movie 1 op.avi 640 480 t\r\n.chain tail.sc\r\n";
         let script = parse_sc(source, &ScOpcodeCatalog::observed_musica()).unwrap();
-        let resources = collect_resource_references(&script).unwrap();
+        let resources =
+            collect_resource_references(&script, MusicaLocaleHook::japanese_cp932()).unwrap();
         assert!(resources.contains("musica:/bg/bg.png"));
         assert!(resources.contains("musica:/st/Stand.png"));
         assert!(resources.contains("musica:/st/Aya.png"));
@@ -8540,7 +8793,7 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(
-            collect_resource_references(&script),
+            collect_resource_references(&script, MusicaLocaleHook::japanese_cp932()),
             Err(MusicaRuntimeError::UnsupportedOpcode { opcode, .. })
                 if opcode == "playvoice.resource"
         ));
@@ -9070,6 +9323,9 @@ mod tests {
             1,
         )
         .unwrap();
-        assert_eq!(vm.step(1, 1).unwrap_err(), MusicaRuntimeError::Operand);
+        assert!(matches!(
+            vm.step(1, 1),
+            Err(MusicaRuntimeError::OperandCommand { opcode, .. }) if opcode == "set"
+        ));
     }
 }

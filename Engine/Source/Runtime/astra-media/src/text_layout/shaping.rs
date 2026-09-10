@@ -222,6 +222,11 @@ fn select_family_spans(
     state: &FontState,
 ) -> Result<Vec<SelectedSpan>, MediaError> {
     let mut spans: Vec<SelectedSpan> = Vec::new();
+    let all_coverage: Vec<UnicodeRange> = state
+        .faces
+        .values()
+        .flat_map(|face| face.coverage.iter().cloned())
+        .collect();
     for (start, grapheme) in text.grapheme_indices(true) {
         let family_index = families
             .iter()
@@ -232,9 +237,16 @@ fn select_family_spans(
                 })
             })
             .ok_or_else(|| {
-                MediaError::message(
-                    "ASTRA_TEXT_GLYPH_MISSING: no declared fallback coverage contains a grapheme cluster",
-                )
+                // Identify the first uncovered scalar so a coverage gap is
+                // actionable without logging the surrounding source text.
+                let missing = grapheme
+                    .chars()
+                    .find(|value| !cluster_covered(&value.to_string(), &all_coverage))
+                    .map(|value| format!(" U+{:04X}", value as u32))
+                    .unwrap_or_default();
+                MediaError::message(format!(
+                    "ASTRA_TEXT_GLYPH_MISSING: no declared fallback coverage contains a grapheme cluster{missing}",
+                ))
             })?;
         let end = start + grapheme.len();
         if let Some(previous) = spans.last_mut() {

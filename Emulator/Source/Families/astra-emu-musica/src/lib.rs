@@ -22,7 +22,9 @@ pub use image_container::*;
 pub use locale::*;
 pub use message::*;
 pub use paz::*;
+pub use provider::static_descriptor;
 pub use provider::*;
+pub use runtime::last_failed_command_context;
 pub use runtime::*;
 pub use script::*;
 

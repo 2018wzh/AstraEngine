@@ -212,6 +212,48 @@ pub enum ScParseError {
 pub fn parse_sc(bytes: &[u8], catalog: &ScOpcodeCatalog) -> Result<ScScript, ScParseError> {
     parse_sc_with_locale(bytes, catalog, MusicaLocaleHook::japanese_cp932())
 }
+/// Chooses the text encoding for one script file by strict per-line decode
+/// under both live encodings, preferring the profile primary on ties.
+pub fn detect_script_encoding(
+    bytes: &[u8],
+    primary: MusicaLocaleHook,
+    fallback: MusicaLocaleHook,
+) -> MusicaLocaleHook {
+    fn invalid_lines(bytes: &[u8], hook: MusicaLocaleHook) -> usize {
+        let mut bad = 0usize;
+        let mut offset = 0usize;
+        while offset < bytes.len() {
+            let end = bytes[offset..]
+                .iter()
+                .position(|byte| *byte == b'\n')
+                .map_or(bytes.len(), |relative| offset + relative + 1);
+            let mut logical = &bytes[offset..end.min(bytes.len())];
+            if let Some(stripped) = logical.strip_suffix(b"\r\n") {
+                logical = stripped;
+            } else if let Some(stripped) = logical.strip_suffix(b"\n") {
+                logical = stripped;
+            }
+            if hook.decode(logical).is_err() {
+                bad += 1;
+            }
+            offset = end;
+        }
+        bad
+    }
+    if primary == fallback {
+        return primary;
+    }
+    let primary_bad = invalid_lines(bytes, primary);
+    if primary_bad == 0 {
+        return primary;
+    }
+    let fallback_bad = invalid_lines(bytes, fallback);
+    if fallback_bad < primary_bad {
+        fallback
+    } else {
+        primary
+    }
+}
 
 /// Parses a script through the host-selected Musica locale binding.  The
 /// current original-game binding is strict Japanese CP932; a different or
@@ -562,11 +604,12 @@ fn decode_control_flow(
     })
 }
 
+#[cfg(test)]
 pub(crate) fn tokenize_operands(bytes: &[u8], offset: usize) -> Result<Vec<String>, ScParseError> {
     tokenize_operands_with_locale(bytes, offset, MusicaLocaleHook::japanese_cp932())
 }
 
-fn tokenize_operands_with_locale(
+pub(crate) fn tokenize_operands_with_locale(
     bytes: &[u8],
     offset: usize,
     locale_hook: MusicaLocaleHook,

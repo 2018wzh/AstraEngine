@@ -471,6 +471,7 @@ struct PreparedFamilyCase {
     fvp_pack_paths: Option<Vec<String>>,
     reader: Arc<dyn LegacyVfsReader>,
     evidence: VfsEvidenceBackend,
+    runtime_nls: Option<String>,
 }
 
 enum VfsEvidenceBackend {
@@ -622,6 +623,7 @@ fn prepare_fvp_case(
             registry,
             mount_set_id: mount_set_id.into(),
         },
+        runtime_nls: None,
     })
 }
 
@@ -665,6 +667,19 @@ fn prepare_musica_case(
         return Err("ASTRA_EMU_MUSICA_ENTRY_INVALID".into());
     }
     let launch_mode = parse_family_launch_mode(&loaded.profile.runtime.launch_mode)?;
+    let runtime_nls = loaded
+        .profile
+        .family_options
+        .get(astra_emu_musica::MUSICA_NLS_OPTION)
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| {
+            loaded
+                .profile
+                .family_options
+                .get("nls")
+                .and_then(serde_json::Value::as_str)
+        })
+        .map(str::to_owned);
     let manifest_bytes = postcard::to_allocvec(mounted.manifest())
         .map_err(|_| "ASTRA_EMU_VFS_MANIFEST_HASH".to_owned())?;
     let package_hash = Hash256::from_sha256(&manifest_bytes);
@@ -681,6 +696,7 @@ fn prepare_musica_case(
         fvp_pack_paths: None,
         reader: adapter.clone(),
         evidence: VfsEvidenceBackend::Mounted(adapter),
+        runtime_nls,
     })
 }
 
@@ -2423,7 +2439,9 @@ fn probe_profile(
                     ),
                     (
                         astra_emu_musica::MUSICA_NLS_OPTION.into(),
-                        astra_emu_musica::MUSICA_NLS_SHIFT_JIS.into(),
+                        case.runtime_nls
+                            .clone()
+                            .unwrap_or_else(|| astra_emu_musica::MUSICA_NLS_SHIFT_JIS.into()),
                     ),
                 ]
                 .into_iter()

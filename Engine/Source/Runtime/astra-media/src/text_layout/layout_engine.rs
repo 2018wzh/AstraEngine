@@ -375,9 +375,20 @@ fn append_raw_layout(
                     )
                 })?;
             if glyph.glyph_id == 0 {
-                return Err(MediaError::message(
-                    "ASTRA_TEXT_GLYPH_MISSING: packaged fallback chain does not cover a source cluster",
-                ));
+                let cluster = &source_text[glyph.start..glyph.end];
+                // Identify the uncovered scalar so a coverage gap is actionable
+                // without logging the surrounding source text.
+                let missing = cluster
+                    .chars()
+                    .map(|value| format!(" U+{:04X}", value as u32))
+                    .collect::<String>();
+                return Err(MediaError::message(format!(
+                    "ASTRA_TEXT_GLYPH_MISSING: packaged fallback chain does not cover a source cluster at {}-{} face:{}({}) char:{missing}",
+                    glyph.start,
+                    glyph.end,
+                    glyph.font_id,
+                    face.family,
+                )));
             }
             let cluster = &source_text[glyph.start..glyph.end];
             if cluster.is_empty() {

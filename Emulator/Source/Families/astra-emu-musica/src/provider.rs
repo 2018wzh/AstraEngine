@@ -53,7 +53,8 @@ use crate::save::{
     MUSICA_SAVE_THUMBNAIL_WIDTH, MUSICA_SAVE_TIMESTAMP_MAX_BYTES,
 };
 use crate::text_surface::{
-    MusicaTextSurfaceRenderer, TextAlignment, TextOutline, TextRegion, TextSurfaceRequest,
+    primary_font_for_gbk, MusicaTextSurfaceRenderer, TextAlignment, TextOutline, TextRegion,
+    TextSurfaceRequest,
 };
 #[cfg(test)]
 use crate::MusicaCharacterReplacementState;
@@ -707,7 +708,9 @@ pub struct MusicaRuntimeProvider {
     sessions: BTreeMap<String, MusicaSession>,
     /// Locale binding selected at open time from the mount options; used for
     /// script parsing so the text encoding is one profile-driven decision.
-    locale_hook: MusicaLocaleHook,
+    /// Interior mutability: probe runs before open and adopts the encoding
+    /// detected from the entry script.
+    locale_hook: std::sync::Mutex<MusicaLocaleHook>,
 }
 
 impl MusicaRuntimeProvider {
@@ -716,7 +719,7 @@ impl MusicaRuntimeProvider {
             vfs: Some(vfs),
             host_services: None,
             sessions: BTreeMap::new(),
-            locale_hook: MusicaLocaleHook::japanese_cp932(),
+            locale_hook: std::sync::Mutex::new(MusicaLocaleHook::japanese_cp932()),
         }
     }
 
@@ -725,8 +728,15 @@ impl MusicaRuntimeProvider {
             vfs: Some(Arc::clone(&host_services.vfs)),
             host_services: Some(host_services),
             sessions: BTreeMap::new(),
-            locale_hook: MusicaLocaleHook::japanese_cp932(),
+            locale_hook: std::sync::Mutex::new(MusicaLocaleHook::japanese_cp932()),
         }
+    }
+
+    fn locale_hook(&self) -> MusicaLocaleHook {
+        *self
+            .locale_hook
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     pub fn has_active_sessions(&self) -> bool {
@@ -758,6 +768,37 @@ pub fn create_static_musica_provider(
     let provider = MusicaRuntimeProvider::with_host_services(host_services);
     provider.descriptor().validate()?;
     Ok(Box::new(provider))
+}
+
+/// Compile-time plugin descriptor shared by the trait impl and the dylib
+/// boundary; independent of any instance or host services.
+pub fn static_descriptor() -> LegacyFamilyPluginDescriptor {
+    LegacyFamilyPluginDescriptor {
+        family_id: FamilyId(MUSICA_FAMILY_ID.into()),
+        plugin_id: "astra.emu.musica".into(),
+        provider_id: MUSICA_RUNTIME_PROVIDER_ID.into(),
+        core_kind: astra_emu_family_api::LegacyFamilyCoreKind::Native,
+        engine_version: env!("CARGO_PKG_VERSION").into(),
+        rustc_fingerprint: env!("ASTRA_MUSICA_RUSTC_FINGERPRINT").into(),
+        feature_fingerprint: env!("ASTRA_MUSICA_FEATURE_FINGERPRINT").into(),
+        abi_fingerprint: LEGACY_FAMILY_ABI_FINGERPRINT.into(),
+        supported_formats: vec![
+            "musica.sc".into(),
+            "musica.paz".into(),
+            "musica.ani".into(),
+            "musica.sqz".into(),
+        ],
+        permissions: vec![
+            "vfs.read".into(),
+            "surface.write".into(),
+            "hook.invoke".into(),
+            "media.submit".into(),
+            "writable_file".into(),
+        ],
+        report_redaction: "astra.emu.redaction.v1".into(),
+        license: "MPL-2.0".into(),
+        presentation_mode: astra_emu_family_api::LegacyFamilyPresentationMode::MultiLayer,
+    }
 }
 
 impl LegacyRuntimeProvider for MusicaRuntimeProvider {
@@ -812,11 +853,11 @@ impl LegacyRuntimeProvider for MusicaRuntimeProvider {
                     "probe requires one unambiguous Musica entry script",
                 )
             })?;
-        let (_, identity, _) = load_script_uri(
+        let (_, identity, _, _) = load_script_uri(
             self.vfs()?,
             &request.root_mount_id,
             candidate,
-            self.locale_hook,
+            self.locale_hook(),
         )?;
         let marker_match =
             request.marker_hashes.is_empty() || request.marker_hashes.contains(&identity);
@@ -854,38 +895,59 @@ impl LegacyRuntimeProvider for MusicaRuntimeProvider {
             ));
         }
         validate_script_uri(&request.script_uri)?;
-        let profile_fingerprint = profile_fingerprint(ctx, &request)?;
-        let (script_uri, script_hash, script) = load_script_uri(
-            self.vfs()?,
-            &ctx.mount_set_id,
-            &request.script_uri,
-            self.locale_hook,
-        )?;
-        let entry_script_uri = script_uri.clone();
-        match request
+        let locale_hook = request
+            .family_options
+            .get(MUSICA_NLS_OPTION)
+            .map(String::as_str)
+            .map(MusicaNls::parse)
+            .transpose()
+            .map_err(|_| {
+                invalid(
+                    "ASTRA_EMU_MUSICA_NLS_INVALID",
+                    "Musica profile nls must be shift_jis, gbk, or utf8",
+                )
+            })?
+            .unwrap_or(MusicaNls::ShiftJis)
+            .locale_hook_id();
+        let locale_hook = MusicaLocaleHook::from_id(locale_hook).map_err(|_| {
+            invalid(
+                "ASTRA_EMU_MUSICA_LOCALE_HOOK",
+                "Musica requires a known locale hook id",
+            )
+        })?;
+        *self
+            .locale_hook
+            .lock()
+            .map_err(|_| invalid("ASTRA_EMU_MUSICA_LOCALE_LOCK", "locale hook lock poisoned"))? =
+            locale_hook;
+        let resource_audit = if request
             .family_options
             .get("astra.resource_audit")
             .map(String::as_str)
+            == Some("full")
         {
-            None => {}
-            Some("full") => {
-                let (resource_count, audit_hash) =
-                    audit_script_resources(self.vfs()?, &ctx.mount_set_id, self.locale_hook)?;
-                tracing::info!(
-                    target: "astra_emu_musica::resource",
-                    event = "astra_emu_musica_script_resource_audit_completed",
-                    resource_count,
-                    audit_hash = %audit_hash,
-                    "validated every bounded script resource reference"
-                );
-            }
-            Some(_) => {
-                return Err(invalid(
-                    "ASTRA_EMU_MUSICA_RESOURCE_AUDIT_POLICY",
-                    "resource audit policy must be full when present",
-                ));
-            }
+            "full"
+        } else {
+            "none"
+        };
+        if resource_audit == "full" {
+            let (resource_count, audit_hash) =
+                audit_script_resources(self.vfs()?, &ctx.mount_set_id, self.locale_hook())?;
+            tracing::info!(
+                target: "astra_emu_musica::resource",
+                event = "astra_emu_musica_script_resource_audit_completed",
+                resource_count,
+                audit_hash = %audit_hash,
+                "validated every bounded script resource reference"
+            );
         }
+        let (script_uri, script_hash, script, entry_hook) = load_script_uri(
+            self.vfs()?,
+            &ctx.mount_set_id,
+            &request.script_uri,
+            self.locale_hook(),
+        )?;
+        let entry_script_uri = script_uri.clone();
         let title_launch = match request
             .family_options
             .get("astra.launch_entry_explicit")
@@ -912,16 +974,12 @@ impl LegacyRuntimeProvider for MusicaRuntimeProvider {
             "received the explicit Musica launch profile"
         );
         let message_voice_durations =
-            decode_message_voice_durations(self.vfs()?, &ctx.mount_set_id, &script)?;
-        let script_language = match self.locale_hook {
-            MusicaLocaleHook::JapaneseCp932 => Some('j'),
-            MusicaLocaleHook::SimplifiedChineseGbk => Some('e'),
-        };
+            decode_message_voice_durations(self.vfs()?, &ctx.mount_set_id, &script, entry_hook)?;
         let mut vm = MusicaVm::new(script_uri, script_hash, script, request.session_seed)
             .map_err(runtime_error)?;
         vm.set_message_voice_durations(message_voice_durations)
             .map_err(runtime_error)?;
-        vm.set_script_language(script_language);
+        vm.set_script_language(locale_language(entry_hook));
         if title_launch {
             vm.begin_title_launch().map_err(runtime_error)?;
             tracing::debug!(
@@ -973,27 +1031,6 @@ impl LegacyRuntimeProvider for MusicaRuntimeProvider {
                 ));
             }
         };
-        let locale_hook = request
-            .family_options
-            .get(MUSICA_NLS_OPTION)
-            .map(String::as_str)
-            .map(MusicaNls::parse)
-            .transpose()
-            .map_err(|_| {
-                invalid(
-                    "ASTRA_EMU_MUSICA_NLS_INVALID",
-                    "Musica profile nls must be shift_jis, gbk, or utf8",
-                )
-            })?
-            .unwrap_or(MusicaNls::ShiftJis)
-            .locale_hook_id();
-        let locale_hook = MusicaLocaleHook::from_id(locale_hook).map_err(|_| {
-            invalid(
-                "ASTRA_EMU_MUSICA_LOCALE_HOOK",
-                "Musica requires a known locale hook id",
-            )
-        })?;
-        self.locale_hook = locale_hook;
         let global_progress_enabled = match request
             .family_options
             .get(MUSICA_GLOBAL_PROGRESS_OPTION)
@@ -1009,6 +1046,7 @@ impl LegacyRuntimeProvider for MusicaRuntimeProvider {
             }
         };
         let config_storage_enabled = global_progress_enabled;
+        let profile_fingerprint = profile_fingerprint(ctx, &request)?;
         let (persisted_config, quick_save_cursor) = if config_storage_enabled {
             let services = self.host_services()?.clone();
             load_persistent_config(
@@ -1069,8 +1107,14 @@ impl LegacyRuntimeProvider for MusicaRuntimeProvider {
                 save_slot_metadata: BTreeMap::new(),
                 text_renderer: match stage_size {
                     Some((width, height)) => Some(
-                        MusicaTextSurfaceRenderer::new(width, height)
-                            .map_err(|code| invalid(code, "Musica text renderer setup failed"))?,
+                        MusicaTextSurfaceRenderer::new(
+                            width,
+                            height,
+                            primary_font_for_gbk(
+                                self.locale_hook() == MusicaLocaleHook::SimplifiedChineseGbk,
+                            ),
+                        )
+                        .map_err(|code| invalid(code, "Musica text renderer setup failed"))?,
                     ),
                     None => None,
                 },
@@ -1165,6 +1209,7 @@ impl MusicaRuntimeProvider {
         input.validate()?;
         let vfs = Arc::clone(self.vfs()?);
         let host_services = self.host_services.clone();
+        let hook = self.locale_hook();
         let session = self
             .sessions
             .get_mut(&session_id.0)
@@ -1617,8 +1662,8 @@ impl MusicaRuntimeProvider {
                     ),
                     _ => unreachable!("gallery start action was matched above"),
                 };
-                let (script_uri, script_hash, script) =
-                    load_script(&vfs, &session.mount_set_id, target, self.locale_hook)?;
+                let (script_uri, script_hash, script, script_hook) =
+                    load_script(&vfs, &session.mount_set_id, target, hook)?;
                 session
                     .vm
                     .set_system_page(MusicaSystemPage::None, 0)
@@ -1630,6 +1675,7 @@ impl MusicaRuntimeProvider {
                     script_uri,
                     script_hash,
                     script,
+                    script_hook,
                 )?;
                 tracing::info!(
                     target: "astra_emu_musica::system_ui",
@@ -1641,12 +1687,8 @@ impl MusicaRuntimeProvider {
                 action = MusicaSystemUiAction::StartGame;
             }
             if action == MusicaSystemUiAction::StartGame && title_start {
-                let (script_uri, script_hash, script) = load_script_uri(
-                    &vfs,
-                    &session.mount_set_id,
-                    &session.entry_script_uri,
-                    self.locale_hook,
-                )?;
+                let (script_uri, script_hash, script, script_hook) =
+                    load_script_uri(&vfs, &session.mount_set_id, &session.entry_script_uri, hook)?;
                 replace_vm_script(
                     &vfs,
                     &session.mount_set_id,
@@ -1654,6 +1696,7 @@ impl MusicaRuntimeProvider {
                     script_uri,
                     script_hash,
                     script,
+                    script_hook,
                 )?;
                 tracing::debug!(
                     target: "astra_emu_musica::runtime",
@@ -1720,7 +1763,7 @@ impl MusicaRuntimeProvider {
                         session,
                         slot,
                         input.tick_index,
-                        self.locale_hook,
+                        hook,
                     )?;
                     return gameplay_resume_output(session, &vfs, &input, restore_audio);
                 }
@@ -2370,8 +2413,8 @@ impl MusicaRuntimeProvider {
             _ => None,
         };
         if let Some(target) = chain_target.as_deref() {
-            let switch_result = load_script(&vfs, &session.mount_set_id, target, self.locale_hook)
-                .and_then(|(script_uri, script_hash, script)| {
+            let switch_result = load_script(&vfs, &session.mount_set_id, target, hook).and_then(
+                |(script_uri, script_hash, script, script_hook)| {
                     replace_vm_script(
                         &vfs,
                         &session.mount_set_id,
@@ -2379,8 +2422,10 @@ impl MusicaRuntimeProvider {
                         script_uri,
                         script_hash,
                         script,
+                        script_hook,
                     )
-                });
+                },
+            );
             if let Err(error) = switch_result {
                 session.poisoned = true;
                 return Err(error);
@@ -3209,20 +3254,24 @@ impl MusicaRuntimeProvider {
         }
         let restored = MusicaVm::decode_snapshot(&section.bytes).map_err(runtime_error)?;
         validate_script_uri(&restored.script_uri)?;
-        let bytes = vfs.read_file(&ctx.mount_set_id, &restored.script_uri, MAX_SCRIPT_BYTES)?;
-        let script_hash = Hash256::from_sha256(&bytes);
+        let (script_uri, script_hash, script, script_hook) = load_script_uri(
+            &vfs,
+            &ctx.mount_set_id,
+            &restored.script_uri,
+            self.locale_hook(),
+        )
+        .map_err(|_| {
+            invalid(
+                "ASTRA_EMU_MUSICA_TEST_CHECKPOINT_SCRIPT_IDENTITY",
+                "test checkpoint script does not match the mounted VFS",
+            )
+        })?;
         if script_hash != restored.script_hash {
             return Err(invalid(
                 "ASTRA_EMU_MUSICA_TEST_CHECKPOINT_SCRIPT_IDENTITY",
                 "test checkpoint script does not match the mounted VFS",
             ));
         }
-        let script = parse_sc_with_locale(
-            &bytes,
-            &ScOpcodeCatalog::observed_musica(),
-            self.locale_hook,
-        )
-        .map_err(script_error)?;
         let session = self
             .sessions
             .get_mut(&session_id.0)
@@ -3232,9 +3281,10 @@ impl MusicaRuntimeProvider {
             &vfs,
             &ctx.mount_set_id,
             &mut session.vm,
-            restored.script_uri,
+            script_uri,
             script_hash,
             script,
+            script_hook,
         )?;
         session
             .vm
@@ -3708,21 +3758,34 @@ fn describe_stage_frame(
         .as_ref()
         .filter(|_| !state.system_ui.message_panel_hidden)
     {
-        if panel.mode != 1 {
-            return Err(invalid(
-                "ASTRA_EMU_MUSICA_PANEL_MODE",
-                "panel state contains an unverified mode",
-            ));
+        match panel.mode {
+            1 => append_panel_layer(
+                vfs,
+                mount_set_id,
+                &panel.resource_uri,
+                height,
+                200,
+                &mut texture_resources,
+                &mut draws,
+            )?,
+            3 => append_resource_layer(
+                vfs,
+                mount_set_id,
+                &panel.resource_uri,
+                0,
+                0,
+                1.0,
+                200,
+                &mut texture_resources,
+                &mut draws,
+            )?,
+            _ => {
+                return Err(invalid(
+                    "ASTRA_EMU_MUSICA_PANEL_MODE",
+                    "panel state contains an unverified mode",
+                ));
+            }
         }
-        append_panel_layer(
-            vfs,
-            mount_set_id,
-            &panel.resource_uri,
-            height,
-            200,
-            &mut texture_resources,
-            &mut draws,
-        )?;
     }
     let frame = LegacyRenderResourceFrameV1 {
         width,
@@ -4088,21 +4151,34 @@ fn describe_effect_frame_without_secondary(
         .as_ref()
         .filter(|_| include_panel && !state.system_ui.message_panel_hidden)
     {
-        if panel.mode != 1 {
-            return Err(invalid(
-                "ASTRA_EMU_MUSICA_PANEL_MODE",
-                "panel state contains an unverified mode",
-            ));
+        match panel.mode {
+            1 => append_panel_layer(
+                vfs,
+                mount_set_id,
+                &panel.resource_uri,
+                height,
+                200,
+                &mut texture_resources,
+                &mut draws,
+            )?,
+            3 => append_resource_layer(
+                vfs,
+                mount_set_id,
+                &panel.resource_uri,
+                0,
+                0,
+                1.0,
+                200,
+                &mut texture_resources,
+                &mut draws,
+            )?,
+            _ => {
+                return Err(invalid(
+                    "ASTRA_EMU_MUSICA_PANEL_MODE",
+                    "panel state contains an unverified mode",
+                ));
+            }
         }
-        append_panel_layer(
-            vfs,
-            mount_set_id,
-            &panel.resource_uri,
-            height,
-            200,
-            &mut texture_resources,
-            &mut draws,
-        )?;
     }
     let mut frame = LegacyRenderResourceFrameV1 {
         width,
@@ -5197,12 +5273,16 @@ fn musica_image_container_error(error: LegacyCoreError) -> LegacyProviderError {
     )
 }
 
+/// Loads and parses a script, returning the engine-native per-file encoding
+/// detected for its bytes.  The detected hook is authoritative for every
+/// downstream use of this script (voice durations, resource references and
+/// the VM language gate); the profile hook is only the detection primary.
 fn load_script(
     vfs: &Arc<dyn LegacyVfsReader>,
     mount_set_id: &str,
     target: &str,
     locale_hook: MusicaLocaleHook,
-) -> Result<(String, Hash256, crate::ScScript), LegacyProviderError> {
+) -> Result<(String, Hash256, crate::ScScript, MusicaLocaleHook), LegacyProviderError> {
     let script_uri = format!("musica:/scr/{target}");
     load_script_uri(vfs, mount_set_id, &script_uri, locale_hook)
 }
@@ -5212,7 +5292,7 @@ fn load_script_uri(
     mount_set_id: &str,
     script_uri: &str,
     locale_hook: MusicaLocaleHook,
-) -> Result<(String, Hash256, crate::ScScript), LegacyProviderError> {
+) -> Result<(String, Hash256, crate::ScScript, MusicaLocaleHook), LegacyProviderError> {
     validate_script_uri(script_uri)?;
     let source = vfs
         .read_file(mount_set_id, script_uri, MAX_SCRIPT_BYTES)
@@ -5236,17 +5316,54 @@ fn load_script_uri(
         &mut include_stack,
         &mut expanded_bytes,
     )?;
-    let script = parse_sc_with_locale(&bytes, &ScOpcodeCatalog::observed_musica(), locale_hook)
-        .map_err(script_error)?;
-    Ok((script_uri.to_owned(), script_hash, script))
+    tracing::info!(
+        event = "astra_emu_musica_load_script",
+        script_uri = %script_uri,
+        hook = ?locale_hook
+    );
+    // Engine-native per-file encoding: the profile hook is primary; when
+    // its strict decode fails the other live encoding wins if it decodes
+    // cleanly.  The detected hook also fixes the script language gate so
+    // `[j]`/`[e]` guards match the file's actual text encoding.
+    let fallback_hook = match locale_hook {
+        MusicaLocaleHook::JapaneseCp932 => MusicaLocaleHook::SimplifiedChineseGbk,
+        MusicaLocaleHook::SimplifiedChineseGbk => MusicaLocaleHook::JapaneseCp932,
+    };
+    let detected = crate::detect_script_encoding(&bytes, locale_hook, fallback_hook);
+    set_parse_context(script_uri);
+    let parse_result = parse_sc_with_locale(&bytes, &ScOpcodeCatalog::observed_musica(), detected);
+    let script = match parse_result {
+        Ok(script) => {
+            clear_parse_context();
+            script
+        }
+        Err(error) => {
+            let detail = format!(
+                "Musica script failed strict parsing: {error} [uri={uri}] [hook={hook}]",
+                uri = parse_context_uri(),
+                hook = if detected == MusicaLocaleHook::JapaneseCp932 {
+                    "cp932"
+                } else {
+                    "gbk"
+                },
+            );
+            clear_parse_context();
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_MUSICA_SCRIPT_PARSE",
+                &detail,
+            ));
+        }
+    };
+    Ok((script_uri.to_owned(), script_hash, script, detected))
 }
 
 fn decode_message_voice_durations(
     vfs: &Arc<dyn LegacyVfsReader>,
     mount_set_id: &str,
     script: &crate::ScScript,
+    locale_hook: MusicaLocaleHook,
 ) -> Result<BTreeMap<String, u32>, LegacyProviderError> {
-    let resources = message_voice_wait_resources(script).map_err(runtime_error)?;
+    let resources = message_voice_wait_resources(script, locale_hook).map_err(runtime_error)?;
     if resources.is_empty() {
         return Ok(BTreeMap::new());
     }
@@ -5296,12 +5413,25 @@ fn replace_vm_script(
     script_uri: String,
     script_hash: Hash256,
     script: crate::ScScript,
+    script_hook: MusicaLocaleHook,
 ) -> Result<(), LegacyProviderError> {
-    let durations_ms = decode_message_voice_durations(vfs, mount_set_id, &script)?;
+    let durations_ms = decode_message_voice_durations(vfs, mount_set_id, &script, script_hook)?;
     vm.replace_script(script_uri, script_hash, script)
         .map_err(runtime_error)?;
     vm.set_message_voice_durations(durations_ms)
-        .map_err(runtime_error)
+        .map_err(runtime_error)?;
+    vm.set_script_language(locale_language(script_hook));
+    Ok(())
+}
+
+/// The language-gate character for a script encoding.  The gate follows the
+/// active script's detected encoding so `[j]`/`[e]` guards and runtime
+/// operand decoding always match the bytes being executed.
+fn locale_language(hook: MusicaLocaleHook) -> Option<char> {
+    match hook {
+        MusicaLocaleHook::JapaneseCp932 => Some('j'),
+        MusicaLocaleHook::SimplifiedChineseGbk => Some('e'),
+    }
 }
 
 /// Validates the resource references of every `.sc` entry without loading an
@@ -5349,14 +5479,22 @@ fn audit_script_resources(
                 "a script entry is empty or exceeds the bounded source size",
             ));
         }
-        let (_, _, script) =
+        let (_, _, script, script_hook) =
             load_script_uri(vfs, mount_set_id, &listed.uri, locale_hook).map_err(|_| {
                 invalid(
                     "ASTRA_EMU_MUSICA_RESOURCE_AUDIT_SCRIPT_READ",
                     "a script entry could not be read consistently",
                 )
             })?;
-        let script_references = collect_resource_references(&script).map_err(runtime_error)?;
+        let script_references =
+            collect_resource_references(&script, script_hook).map_err(|error| {
+                tracing::error!(
+                    event = "astra_emu_musica_resource_collect_failed",
+                    script_uri = %listed.uri,
+                    detail = %error
+                );
+                runtime_error(error)
+            })?;
         identity.extend_from_slice(Hash256::from_sha256(listed.uri.as_bytes()).as_bytes());
         identity.extend_from_slice(&listed.stat.len.to_le_bytes());
         identity.extend_from_slice(&listed.stat.revision.0.to_le_bytes());
@@ -6663,7 +6801,7 @@ fn load_slot(
                 "load script URI is invalid",
             )
         })?;
-    let (script_uri, script_hash, script) =
+    let (script_uri, script_hash, script, script_hook) =
         load_script(vfs, &session.mount_set_id, target, locale_hook)?;
     if script_uri != envelope.script_uri || script_hash != envelope.script_hash {
         return Err(invalid(
@@ -6715,6 +6853,7 @@ fn load_slot(
         script_uri,
         script_hash,
         script,
+        script_hook,
     )?;
     session
         .vm
@@ -9066,6 +9205,47 @@ fn describe_system_page_with_slots(
     describe_system_page_with_slots_and_hover(vfs, mount_set_id, stage_size, vm, save_slots, None)
 }
 
+/// Title art naming differs per shipped variant and the mounted namespace
+/// itself is the marker: eden* ships lowercase digit-suffixed names, ef
+/// ships unsuffixed names, and Natsuzora ships CamelCase stage-sized names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TitleArtStyle {
+    Eden,
+    Ef,
+    Natsuzora,
+}
+
+fn title_art_style(vfs: &Arc<dyn LegacyVfsReader>, mount_set_id: &str) -> TitleArtStyle {
+    if vfs
+        .stat_file(mount_set_id, "musica:/sys/topmenu0.png")
+        .is_ok()
+    {
+        TitleArtStyle::Eden
+    } else if vfs
+        .stat_file(mount_set_id, "musica:/sys/topmenu.png")
+        .is_ok()
+    {
+        TitleArtStyle::Ef
+    } else {
+        TitleArtStyle::Natsuzora
+    }
+}
+
+/// ef ships only the fresh-clear and Tohka-clear titles; the three-route
+/// memory title reuses the fresh artwork.
+fn ef_title_art_uri(variant: u8, suffix: &str) -> &'static str {
+    match variant {
+        2 => match suffix {
+            "" => "musica:/sys/topmenu2.png",
+            _ => "musica:/sys/topmenu2Over.png",
+        },
+        _ => match suffix {
+            "" => "musica:/sys/topmenu.png",
+            _ => "musica:/sys/topmenuOver.png",
+        },
+    }
+}
+
 fn describe_system_page_with_slots_and_hover(
     vfs: &Arc<dyn LegacyVfsReader>,
     mount_set_id: &str,
@@ -9108,11 +9288,16 @@ fn describe_system_page_with_slots_and_hover(
         return describe_gallery_cg_page(vfs, mount_set_id, width, height, vm);
     }
     let title_variant = vm.title_variant();
+    let art_style = title_art_style(vfs, mount_set_id);
     let resource_uri = match vm.state().system_ui.page {
-        MusicaSystemPage::Title => match vm.title_variant() {
-            0 => "musica:/sys/topMenu0.png",
-            1 => "musica:/sys/topMenu1.png",
-            2 => "musica:/sys/topMenu2.png",
+        MusicaSystemPage::Title => match (art_style, vm.title_variant()) {
+            (TitleArtStyle::Eden, 0) => "musica:/sys/topmenu0.png",
+            (TitleArtStyle::Eden, 1) => "musica:/sys/topmenu1.png",
+            (TitleArtStyle::Eden, 2) => "musica:/sys/topmenu2.png",
+            (TitleArtStyle::Ef, variant) => ef_title_art_uri(variant, ""),
+            (_, 0) => "musica:/sys/topMenu0.png",
+            (_, 1) => "musica:/sys/topMenu1.png",
+            (_, 2) => "musica:/sys/topMenu2.png",
             _ => {
                 return Err(invalid(
                     "ASTRA_EMU_MUSICA_TITLE_VARIANT",
@@ -9149,7 +9334,9 @@ fn describe_system_page_with_slots_and_hover(
     };
     let resource =
         read_texture_resource(vfs, mount_set_id, resource_uri, MUSICA_SYSTEM_TEXTURE_ID)?;
-    if (resource.decoded_width, resource.decoded_height) != (width, height) {
+    if art_style == TitleArtStyle::Natsuzora
+        && (resource.decoded_width, resource.decoded_height) != (width, height)
+    {
         return Err(invalid(
             "ASTRA_EMU_MUSICA_SYSTEM_RESOURCE_DIMENSIONS",
             "system page resource dimensions do not match the reference stage",
@@ -9163,10 +9350,14 @@ fn describe_system_page_with_slots_and_hover(
     append_texture_draw(resource, 0, 0, 1.0, &mut draws)?;
     if vm.state().system_ui.page == MusicaSystemPage::Title {
         if let Some(focus) = title_pointer_focus {
-            let over_uri = match title_variant {
-                0 => "musica:/sys/topMenu0Over.png",
-                1 => "musica:/sys/topMenu1Over.png",
-                2 => "musica:/sys/topMenu2Over.png",
+            let over_uri = match (art_style, title_variant) {
+                (TitleArtStyle::Eden, 0) => "musica:/sys/topmenu0over.png",
+                (TitleArtStyle::Eden, 1) => "musica:/sys/topmenu1over.png",
+                (TitleArtStyle::Eden, 2) => "musica:/sys/topmenu2over.png",
+                (TitleArtStyle::Ef, variant) => ef_title_art_uri(variant, "Over"),
+                (_, 0) => "musica:/sys/topMenu0Over.png",
+                (_, 1) => "musica:/sys/topMenu1Over.png",
+                (_, 2) => "musica:/sys/topMenu2Over.png",
                 _ => {
                     return Err(invalid(
                         "ASTRA_EMU_MUSICA_TITLE_VARIANT",
@@ -9176,7 +9367,9 @@ fn describe_system_page_with_slots_and_hover(
             };
             let over =
                 read_texture_resource(vfs, mount_set_id, over_uri, MUSICA_SYSTEM_TEXTURE_ID + 1)?;
-            if (over.decoded_width, over.decoded_height) != (width, height) {
+            if art_style == TitleArtStyle::Natsuzora
+                && (over.decoded_width, over.decoded_height) != (width, height)
+            {
                 return Err(invalid(
                     "ASTRA_EMU_MUSICA_TITLE_HOVER_RESOURCE_DIMENSIONS",
                     "title hover resource does not match the reference stage",
@@ -11539,15 +11732,33 @@ fn validate_session_binding(
     Ok(())
 }
 
-fn script_error(_error: crate::ScParseError) -> LegacyProviderError {
-    invalid(
-        "ASTRA_EMU_MUSICA_SCRIPT_PARSE",
-        "Musica script failed strict parsing",
-    )
+thread_local! {
+    static PARSE_URI_CONTEXT: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+}
+
+fn set_parse_context(uri: &str) {
+    PARSE_URI_CONTEXT.with(|c| *c.borrow_mut() = uri.to_owned());
+}
+
+fn clear_parse_context() {
+    PARSE_URI_CONTEXT.with(|c| *c.borrow_mut() = String::new());
+}
+
+fn parse_context_uri() -> String {
+    PARSE_URI_CONTEXT.with(|c| c.borrow().clone())
 }
 
 fn runtime_error(error: MusicaRuntimeError) -> LegacyProviderError {
-    LegacyProviderError::invalid(runtime_error_code(&error), error.to_string())
+    let detail = error.to_string();
+    if matches!(error, crate::MusicaRuntimeError::Operand) {
+        let ctx = crate::last_failed_command_context();
+        let debug = format!("{error:?}");
+        return LegacyProviderError::invalid(
+            runtime_error_code(&error),
+            format!("{detail} [last-command={ctx}] [debug={debug}]"),
+        );
+    }
+    LegacyProviderError::invalid(runtime_error_code(&error), detail)
 }
 
 fn musica_vm_event_name(event: Option<&MusicaVmEvent>) -> &'static str {
@@ -11582,7 +11793,9 @@ fn runtime_error_code(error: &MusicaRuntimeError) -> &'static str {
         MusicaRuntimeError::State => "ASTRA_EMU_MUSICA_RUNTIME_STATE",
         MusicaRuntimeError::ProgramCounter => "ASTRA_EMU_MUSICA_RUNTIME_PC",
         MusicaRuntimeError::Label => "ASTRA_EMU_MUSICA_RUNTIME_LABEL",
-        MusicaRuntimeError::Operand => "ASTRA_EMU_MUSICA_RUNTIME_OPERAND",
+        MusicaRuntimeError::Operand | MusicaRuntimeError::OperandCommand { .. } => {
+            "ASTRA_EMU_MUSICA_RUNTIME_OPERAND"
+        }
         MusicaRuntimeError::UnsupportedOpcode { .. } => "ASTRA_EMU_MUSICA_RUNTIME_OPCODE",
         MusicaRuntimeError::UnsupportedPragma { .. } => "ASTRA_EMU_MUSICA_RUNTIME_PRAGMA",
         MusicaRuntimeError::Budget => "ASTRA_EMU_MUSICA_RUNTIME_BUDGET",
@@ -12341,7 +12554,7 @@ mod tests {
                 ),
             ]),
         });
-        let (_, _, expanded) = load_script(
+        let (_, _, expanded, _) = load_script(
             &reader,
             "mount.test",
             "root.sc",
@@ -12990,10 +13203,10 @@ mod tests {
 
         let mut sequence = 1u64;
         let mut tick = 1u64;
-        let mut quick_save = |provider: &mut MusicaRuntimeProvider,
-                              session: &LegacyRuntimeSessionId,
-                              sequence: &mut u64,
-                              tick: &mut u64| {
+        let quick_save = |provider: &mut MusicaRuntimeProvider,
+                          session: &LegacyRuntimeSessionId,
+                          sequence: &mut u64,
+                          tick: &mut u64| {
             *tick += 1;
             *sequence += 1;
             provider
@@ -13074,11 +13287,25 @@ mod tests {
             .contains_key(&slot_path(quick_save_file_number(1))));
 
         // Script progress moves the line cursor, so the next quick save
-        // writes slot 11.
+        // writes slot 11.  Time waits are completed out-of-band by the host,
+        // so the loop plays the host role: complete the published wait token
+        // with an ordered await result, exactly as the runner does.
         while provider.sessions[&session.0].vm.state().pc_line == initial_pc_line {
             tick += 1;
+            let await_results = match provider.sessions[&session.0].vm.state().wait.clone() {
+                Some(wait) => {
+                    sequence += 1;
+                    vec![LegacyAwaitResult {
+                        token_id: wait_token(&wait).to_owned(),
+                        status: "completed".into(),
+                        payload_len: 0,
+                        sequence,
+                    }]
+                }
+                None => Vec::new(),
+            };
             provider
-                .step(&ctx, &session, step_input(tick, Vec::new()))
+                .step(&ctx, &session, step_input(tick, await_results))
                 .unwrap();
         }
         eprintln!(

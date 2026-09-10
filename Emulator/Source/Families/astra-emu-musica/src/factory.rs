@@ -34,6 +34,12 @@ pub struct MusicaFamilyOptions {
     /// requires `shift_jis`; `gbk` and `utf8` are reserved and fail closed at
     /// mount until a verified localized source contract exists.
     pub nls: String,
+    /// The runtime locale selector carried by the host under its own key.
+    /// The headless CLI and the Manager share one family_options map, so the
+    /// mount contract accepts the selector and requires it to agree with
+    /// `nls` instead of rejecting the map outright.
+    #[serde(rename = "musica.nls", default)]
+    pub runtime_nls: Option<String>,
     pub paz_version: u8,
     pub index_size_xor: u32,
     /// PAZ v2 entry streams derive an RC4 skip count from the key CRC32.
@@ -112,6 +118,20 @@ impl LegacyVfsFamilyFactory for MusicaVfsFamilyFactory {
                 "Musica profile nls must be shift_jis, gbk, or utf8",
             )
         })?;
+        if let Some(runtime_nls) = options.runtime_nls.as_deref() {
+            let parsed = MusicaNls::parse(runtime_nls).map_err(|_| {
+                invalid(
+                    "ASTRA_EMU_MUSICA_NLS_INVALID",
+                    "Musica profile musica.nls must be shift_jis, gbk, or utf8",
+                )
+            })?;
+            if parsed != nls {
+                return Err(invalid(
+                    "ASTRA_EMU_MUSICA_NLS_CONFLICT",
+                    "the runtime locale selector does not match the mount nls encoding",
+                ));
+            }
+        }
         validate_options(&options)?;
         if !nls.is_currently_supported() {
             return Err(invalid(
@@ -289,6 +309,8 @@ fn validate_original_entrypoint(game_root: &std::path::Path) -> Result<(), Legac
         "eden_en.exe",
         "ef_first_AA.exe",
         "ef_latter_en_AA.exe",
+        "yorino.exe",
+        "_yorino.exe",
     ]
     .iter()
     .map(|name| game_root.join(name))
@@ -396,6 +418,7 @@ mod tests {
             content_variant: MUSICA_ORIGINAL_VARIANT_ID.into(),
             locale_hook: MUSICA_LOCALE_HOOK_ID.into(),
             nls: crate::MUSICA_NLS_SHIFT_JIS.into(),
+            runtime_nls: None,
             paz_version: 2,
             index_size_xor: 0,
             key_file: PathBuf::from("key.toml"),
@@ -422,6 +445,7 @@ mod tests {
             content_variant: MUSICA_ORIGINAL_VARIANT_ID.into(),
             locale_hook: MUSICA_LOCALE_HOOK_ID.into(),
             nls: crate::MUSICA_NLS_SHIFT_JIS.into(),
+            runtime_nls: None,
             paz_version: 2,
             index_size_xor: 0,
             key_file: PathBuf::from("key.toml"),
@@ -450,12 +474,13 @@ mod tests {
     }
 
     #[test]
-    fn family_options_reserve_non_japanese_nls_without_fallback() {
+    fn family_options_parse_the_supported_gbk_nls_without_fallback() {
         let options = MusicaFamilyOptions {
             rc4_skip_crc: true,
             content_variant: MUSICA_ORIGINAL_VARIANT_ID.into(),
             locale_hook: MUSICA_LOCALE_HOOK_ID.into(),
             nls: "gbk".into(),
+            runtime_nls: None,
             paz_version: 2,
             index_size_xor: 0,
             key_file: PathBuf::from("key.toml"),
@@ -466,18 +491,20 @@ mod tests {
         };
         assert!(validate_options(&options).is_ok());
         let parsed = MusicaNls::parse(&options.nls).unwrap();
-        assert!(!parsed.is_currently_supported());
+        assert!(parsed.is_currently_supported());
+        assert!(!MusicaNls::parse("utf8").unwrap().is_currently_supported());
         assert_eq!(crate::MUSICA_NLS_OPTION, "musica.nls");
     }
 
     #[test]
-    fn mount_blocks_reserved_nls_before_reading_private_game_files() {
+    fn mount_blocks_hook_nls_mismatch_before_reading_private_game_files() {
         let root = tempfile::tempdir().unwrap();
         let options = MusicaFamilyOptions {
             rc4_skip_crc: true,
             content_variant: MUSICA_ORIGINAL_VARIANT_ID.into(),
             locale_hook: MUSICA_LOCALE_HOOK_ID.into(),
             nls: crate::MUSICA_NLS_GBK.into(),
+            runtime_nls: Some(crate::MUSICA_NLS_GBK.into()),
             paz_version: 2,
             index_size_xor: 0,
             key_file: PathBuf::from("key.toml"),
@@ -499,7 +526,7 @@ mod tests {
             },
         };
         let error = MusicaVfsFamilyFactory.mount(&context).err().unwrap();
-        assert_eq!(error.code(), "ASTRA_EMU_MUSICA_NLS_UNSUPPORTED");
+        assert_eq!(error.code(), "ASTRA_EMU_MUSICA_LOCALE_NLS_MISMATCH");
     }
 
     #[test]
