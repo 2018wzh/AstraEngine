@@ -6,6 +6,7 @@ import { Theme } from "../theme.slint";
 import { M3Button } from "./m3-widgets.slint";
 
 export struct ConfigField {
+    options: [string],
     key: string,
     label: string,
     description: string,
@@ -77,15 +78,12 @@ export component GenericConfigForm inherits Rectangle {
             }
 
             if field.kind == "enum" : ComboBox {
-                // Enum values are encoded as comma-separated in description suffix or value list?
-                // For simplicity, we treat value as single selected, and we show a text edit for now.
-                // Real enum will be rendered via dedicated model passed as separate property in future.
-                model: ["shift_jis", "gbk", "utf8", "ja-JP", "zh-CN", "en-US", "ecnu", "openai", "third_party", "responses", "chat_completions", "none", "grayscale", "crt-soft", "warm", "true", "false"];
+                model: field.options;
                 current-value: field.value;
                 selected(value) => { root.field-changed(field.key, value); }
             }
 
-            if field.kind == "string" : LineEdit {
+            if field.kind == "string" || field.kind == "float" : LineEdit {
                 text: field.value;
                 placeholder-text: field.required ? "Required" : "Optional";
                 edited(value) => { root.field-changed(field.key, value); }
@@ -98,10 +96,9 @@ export component GenericConfigForm inherits Rectangle {
                 edited(value) => { root.field-changed(field.key, value); }
             }
 
-            if field.kind == "integer" : SpinBox {
-                value: field.value == "" ? 0 : 0;
-                minimum: 0;
-                maximum: 100000;
+            if field.kind == "integer" : LineEdit {
+                text: field.value;
+                input-type: number;
                 edited(value) => { root.field-changed(field.key, value); }
             }
 

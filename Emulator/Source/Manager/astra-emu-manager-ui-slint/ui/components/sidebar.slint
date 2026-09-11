@@ -127,12 +127,6 @@ export component Sidebar inherits Rectangle {
             clicked => { root.navigate("library"); }
         }
 
-        SidebarItem {
-            label: "VFS 浏览器";
-            icon: Icons.folder;
-            active: current-page == "vfs";
-            clicked => { root.navigate("vfs"); }
-        }
 
         Rectangle { height: 12px; }
 
@@ -255,12 +249,6 @@ export component BottomNav inherits Rectangle {
             icon: Icons.gamepad;
             active: current-page == "library";
             clicked => { root.navigate("library"); }
-        }
-        BottomNavItem {
-            label: "VFS";
-            icon: Icons.folder;
-            active: current-page == "vfs";
-            clicked => { root.navigate("vfs"); }
         }
         BottomNavItem {
             label: "设置";

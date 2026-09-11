@@ -40,10 +40,13 @@ fn main() {
         features.join(",").to_ascii_lowercase()
     };
     let manifest_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
-    let hosted_fork_revision = hosted_fork_revision(&manifest_path);
+    let hosted_fork_revision = source_revision(&manifest_path, "hosted_fork_revision");
+    let upstream_revision = source_revision(&manifest_path, "upstream_revision");
     println!("cargo:rerun-if-changed={}", manifest_path.display());
     println!("cargo:rustc-env=ASTRA_FVP_HOSTED_FORK_REVISION={hosted_fork_revision}");
-    let feature_identity = format!("rfvp={hosted_fork_revision};features={feature_identity}");
+    let feature_identity = format!(
+        "rfvp={upstream_revision};hosted={hosted_fork_revision};features={feature_identity}"
+    );
     let feature_fingerprint = format!("sha256.{}", hex_sha256(feature_identity.as_bytes()));
     println!("cargo:rustc-env=ASTRA_FVP_FEATURE_FINGERPRINT={feature_fingerprint}");
     let descriptor = json!({
@@ -77,13 +80,13 @@ fn hex_sha256(bytes: &[u8]) -> String {
         .collect()
 }
 
-fn hosted_fork_revision(manifest_path: &Path) -> String {
+fn source_revision(manifest_path: &Path, key: &str) -> String {
     let manifest = fs::read_to_string(manifest_path).expect("ASTRA_FVP_MANIFEST_READ_FAILED");
-    let prefix = "hosted_fork_revision = \"";
+    let prefix = format!("{key} = \"");
     let revision = manifest
         .lines()
         .map(str::trim)
-        .find_map(|line| line.strip_prefix(prefix))
+        .find_map(|line| line.strip_prefix(&prefix))
         .and_then(|value| value.strip_suffix('"'))
         .expect("ASTRA_FVP_HOSTED_FORK_REVISION_MISSING");
     assert!(

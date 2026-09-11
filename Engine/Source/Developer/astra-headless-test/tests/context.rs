@@ -2,6 +2,15 @@
 fn starts_and_stops_worktree_local_session() {
     let ctx = astra_headless_test::HeadlessTestContext::start().unwrap();
     assert!(ctx.artifact_root().is_dir());
+    let identity = astra_headless_test::headless_build_identity_path().unwrap();
+    let identity: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(identity).unwrap()).unwrap();
+    assert_eq!(identity["schema"], "astra.build_identity.v1");
+    assert!(identity["identity_hash"]
+        .as_str()
+        .unwrap()
+        .starts_with("sha256:"));
+    assert!(astra_headless_test::active_headless_session_count().unwrap() >= 2);
 }
 
 #[astra_headless_test::tokio_test]
@@ -20,16 +29,13 @@ fn resolves_worktree_profile_binary_without_a_binary_environment_variable() {
         binary.file_stem().and_then(|value| value.to_str()),
         Some("astra-headless")
     );
-    // Library-inline mode does not require the binary to be pre-built.
-    // The path is only validated for its file_stem.
+    assert!(binary.is_file());
 }
 
 #[astra_headless_test::test]
 fn concurrent_tests_share_one_multi_session_server() {
     use std::sync::{Arc, Barrier};
 
-    // Library-inline mode: each test gets an isolated TempDir, no global
-    // OnceLock server. This test now verifies isolation, not sharing.
     let entered = Arc::new(Barrier::new(5));
     let release = Arc::new(Barrier::new(5));
     let handles = (0..4)
@@ -46,11 +52,7 @@ fn concurrent_tests_share_one_multi_session_server() {
         .collect::<Vec<_>>();
     let _ctx = astra_headless_test::HeadlessTestContext::start().unwrap();
     entered.wait();
-    // No global session counter in library-inline mode.
-    assert_eq!(
-        astra_headless_test::active_headless_session_count().unwrap(),
-        0
-    );
+    assert!(astra_headless_test::active_headless_session_count().unwrap() >= 6);
     release.wait();
     for handle in handles {
         handle.join().unwrap();

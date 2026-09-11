@@ -245,37 +245,14 @@ impl<P: ProductRuntimeProvider + 'static> ProductRuntimeSession for ProviderAsSe
     }
 }
 
-fn block_on<F: std::future::Future + Send + 'static>(future: F) -> F::Output
-where
-    F::Output: Send + 'static,
-{
-    std::thread::spawn(move || {
-        tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .unwrap()
-            .block_on(future)
-    })
-    .join()
-    .unwrap()
-}
-
-impl ProductRuntimeHost {
-    fn block_on_self<F: std::future::Future + Send + 'static>(&self, future: F) -> F::Output
-    where
-        F::Output: Send + 'static,
-    {
-        let rt = Arc::clone(&self.rt);
-        std::thread::spawn(move || rt.block_on(future))
-            .join()
-            .unwrap()
-    }
-}
+#[path = "runtime_executor.rs"]
+mod executor;
+use executor::RuntimeExecutor;
 
 pub struct ProductRuntimeHost {
     inner: ConcurrentProductRuntimeHost,
     open_sessions: Arc<Mutex<Vec<GameRuntimeSessionId>>>,
-    rt: Arc<tokio::runtime::Runtime>,
+    rt: RuntimeExecutor,
 }
 
 impl ProductRuntimeHost {
@@ -298,12 +275,7 @@ impl ProductRuntimeHost {
         Ok(Self {
             inner,
             open_sessions: Arc::new(Mutex::new(Vec::new())),
-            rt: Arc::new(
-                tokio::runtime::Builder::new_multi_thread()
-                    .enable_all()
-                    .build()
-                    .unwrap(),
-            ),
+            rt: RuntimeExecutor::new()?,
         })
     }
 
@@ -324,12 +296,7 @@ impl ProductRuntimeHost {
         Ok(Self {
             inner,
             open_sessions: Arc::new(Mutex::new(Vec::new())),
-            rt: Arc::new(
-                tokio::runtime::Builder::new_multi_thread()
-                    .enable_all()
-                    .build()
-                    .unwrap(),
-            ),
+            rt: RuntimeExecutor::new()?,
         })
     }
 
@@ -350,12 +317,7 @@ impl ProductRuntimeHost {
         Ok(Self {
             inner,
             open_sessions: Arc::new(Mutex::new(Vec::new())),
-            rt: Arc::new(
-                tokio::runtime::Builder::new_multi_thread()
-                    .enable_all()
-                    .build()
-                    .unwrap(),
-            ),
+            rt: RuntimeExecutor::new()?,
         })
     }
 
@@ -374,12 +336,7 @@ impl ProductRuntimeHost {
         Ok(Self {
             inner,
             open_sessions: Arc::new(Mutex::new(Vec::new())),
-            rt: Arc::new(
-                tokio::runtime::Builder::new_multi_thread()
-                    .enable_all()
-                    .build()
-                    .unwrap(),
-            ),
+            rt: RuntimeExecutor::new()?,
         })
     }
 
@@ -388,7 +345,8 @@ impl ProductRuntimeHost {
         request: RuntimePrepareRequest,
     ) -> Result<RuntimePrepareReport, RuntimeHostError> {
         let inner = self.inner.clone();
-        self.block_on_self(async move { inner.prepare(request).await })
+        self.rt
+            .block_on(async move { inner.prepare(request).await })
     }
 
     pub fn probe(
@@ -396,7 +354,7 @@ impl ProductRuntimeHost {
         request: RuntimeProbeRequest,
     ) -> Result<RuntimeProbeReport, RuntimeHostError> {
         let inner = self.inner.clone();
-        self.block_on_self(async move { inner.probe(request).await })
+        self.rt.block_on(async move { inner.probe(request).await })
     }
 
     pub fn open(
@@ -405,7 +363,7 @@ impl ProductRuntimeHost {
     ) -> Result<RuntimeOpenReport, RuntimeHostError> {
         let inner = self.inner.clone();
         let session_store = Arc::clone(&self.open_sessions);
-        let report = self.block_on_self(async move { inner.open(request).await })?;
+        let report = self.rt.block_on(async move { inner.open(request).await })?;
         session_store
             .lock()
             .unwrap()
@@ -415,7 +373,7 @@ impl ProductRuntimeHost {
 
     pub fn step(&mut self, input: RuntimeStepInput) -> Result<RuntimeStepOutput, RuntimeHostError> {
         let inner = self.inner.clone();
-        self.block_on_self(async move { inner.step(input).await })
+        self.rt.block_on(async move { inner.step(input).await })
     }
 
     pub fn save(
@@ -423,7 +381,7 @@ impl ProductRuntimeHost {
         request: RuntimeSaveRequest,
     ) -> Result<RuntimeSaveSections, RuntimeHostError> {
         let inner = self.inner.clone();
-        self.block_on_self(async move { inner.save(request).await })
+        self.rt.block_on(async move { inner.save(request).await })
     }
 
     pub fn restore(
@@ -431,7 +389,8 @@ impl ProductRuntimeHost {
         request: RuntimeRestoreRequest,
     ) -> Result<RuntimeRestoreReport, RuntimeHostError> {
         let inner = self.inner.clone();
-        self.block_on_self(async move { inner.restore(request).await })
+        self.rt
+            .block_on(async move { inner.restore(request).await })
     }
 
     pub fn shutdown_session(
@@ -441,7 +400,9 @@ impl ProductRuntimeHost {
         let inner = self.inner.clone();
         let session_store = Arc::clone(&self.open_sessions);
         let sid = session_id.clone();
-        let result = block_on(async move { inner.shutdown(session_id).await });
+        let result = self
+            .rt
+            .block_on(async move { inner.shutdown(session_id).await });
         if result.is_ok() {
             session_store.lock().unwrap().retain(|id| id != &sid);
         }
@@ -464,14 +425,14 @@ impl ProductRuntimeHost {
 
     pub fn destroy(&mut self) -> Result<RuntimeProviderInstanceReport, RuntimeHostError> {
         let inner = self.inner.clone();
-        self.block_on_self(async move { inner.destroy().await })
+        self.rt.block_on(async move { inner.destroy().await })
     }
 
     pub fn cleanup_after_failure(
         &mut self,
     ) -> Result<RuntimeProviderInstanceReport, RuntimeHostError> {
         let inner = self.inner.clone();
-        self.block_on_self(async move { inner.destroy().await })
+        self.rt.block_on(async move { inner.destroy().await })
     }
 }
 

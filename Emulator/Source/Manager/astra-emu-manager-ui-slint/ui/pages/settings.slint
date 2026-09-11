@@ -1,13 +1,12 @@
 // Settings center - M3 Styled Category Drawer (left) + Sub-page (right).
 
-import { ScrollView } from "std-widgets.slint";
+import { ScrollView, ComboBox } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
 import { Icons } from "../components/icons.slint";
 import { SettingsCategoryItem } from "../components/settings-card.slint";
-import { MatchReview, MetadataSettingsPage } from "../settings/metadata.slint";
+import { MetadataSettingsPage } from "../settings/metadata.slint";
 import { TranslationSettingsPage } from "../settings/translation.slint";
 import { FilterSettingsPage } from "../settings/filters.slint";
-import { PatchSettingsPage } from "../settings/patches.slint";
 import { CompatibilitySettingsPage } from "../settings/compatibility.slint";
 import { GamepadBinding, InputSettingsPage } from "../settings/input.slint";
 import { AppearanceSettingsPage } from "../settings/appearance.slint";
@@ -40,6 +39,8 @@ export component SettingsPage inherits Rectangle {
     in-out property <string> category: "translation";
     in property <bool> desktop-mode: true;
     in property <bool> has-selected-case;
+    in property <string> audio-device: "native";
+    callback set-audio-device(string);
 
     // Translation
     in-out property <string> endpoint-kind;
@@ -47,34 +48,19 @@ export component SettingsPage inherits Rectangle {
     in-out property <string> protocol;
     in-out property <string> model;
     in-out property <string> target-language;
-    in-out property <int> context-sentences;
-    in-out property <int> body-limit-bytes;
     in-out property <int> timeout-ms;
-    in-out property <string> background-context;
-    in-out property <string> glossary;
     in-out property <string> secret-input;
     in property <bool> consent-present;
-    in property <[ConfigField]> extension-config-fields;
-    callback save-translation-profile(string, string, string, string, string, int, int, int, string, string, string);
+    callback save-translation-profile(string, string, string, string, string, int, string);
     callback grant-translation-consent();
-    callback extension-config-changed(string, string);
-    callback save-extension-config();
-    callback reset-extension-config();
+    callback test-translation-connection();
 
     // Metadata
-    in property <[MatchReview]> match-reviews;
-    in property <string> selected-case-id;
     in-out property <bool> vndb-consent;
     in-out property <bool> bangumi-consent;
     in-out property <bool> sensitive-covers;
     in-out property <string> metadata-provider;
-    in-out property <string> external-id-input;
     in-out property <string> bangumi-token-input;
-    callback refresh-metadata(string);
-    callback accept-match(string);
-    callback reject-match(string);
-    callback unlink-identity(string);
-    callback link-external-id(string, string);
     callback set-metadata-consent(string, bool, string);
     callback set-sensitive-cover-policy(string, bool);
 
@@ -83,6 +69,7 @@ export component SettingsPage inherits Rectangle {
     in property <[ConfigField]> filter-config-fields;
     callback set-filter-preset(string);
     callback filter-config-changed(string, string);
+    callback load-filter-source();
     callback save-filter-config();
     callback reset-filter-config();
 
@@ -92,21 +79,15 @@ export component SettingsPage inherits Rectangle {
     callback refresh-compatibility();
 
     // Patches
-    in property <string> patches-summary;
-    in property <string> patch-mode;
-    callback set-patch-mode(string);
 
     // Input
-    in-out property <string> confirm-key;
-    in-out property <string> cancel-key;
-    in-out property <float> touch-sensitivity;
     in-out property <bool> gamepad-enabled;
     in-out property <string> gamepad-deadzone;
     in property <[GamepadBinding]> gamepad-bindings;
-    callback save-input-config(string, string, float, bool, string);
+    callback save-input-config(bool, string);
     callback set-gamepad-binding(string, string);
     callback reset-gamepad-mapping();
-    callback save-per-game-input-mapping();
+    callback save-per-game-input-mapping(bool, string);
     callback clear-per-game-input-mapping();
 
     // Appearance
@@ -125,13 +106,11 @@ export component SettingsPage inherits Rectangle {
 
     background: Theme.surface;
 
-    // Desktop: category sidebar + content
-    if root.desktop-mode : HorizontalLayout {
-        spacing: 0px;
-
-        // Category list
-        Rectangle {
+    if root.desktop-mode : Rectangle {
+            x: 0px;
+            y: 0px;
             width: 250px;
+            height: parent.height;
             background: Theme.surface-container-low;
             border-width: 1px;
             border-color: Theme.outline-variant;
@@ -150,23 +129,31 @@ export component SettingsPage inherits Rectangle {
                 Rectangle { height: 10px; }
 
                 SettingsCategoryItem {
+                    label: "音频输出";
+                    icon: Icons.gamepad;
+                    description: "系统设备与测试后端";
+                    active: root.category == "audio";
+                    clicked => { root.category = "audio"; }
+                }
+
+                SettingsCategoryItem {
                     label: "输入控制";
                     icon: Icons.keyboard;
-                    description: "按键映射、手柄、触控";
+                    description: "手柄键位与死区";
                     active: root.category == "input";
                     clicked => { root.category = "input"; }
                 }
                 SettingsCategoryItem {
                     label: "文本翻译";
                     icon: Icons.language;
-                    description: "LLM 模型、端点、术语表";
+                    description: "模型、端点与连接测试";
                     active: root.category == "translation";
                     clicked => { root.category = "translation"; }
                 }
                 SettingsCategoryItem {
                     label: "作品元数据";
                     icon: Icons.database;
-                    description: "VNDB、Bangumi 关联与审核";
+                    description: "VNDB、Bangumi 数据源";
                     active: root.category == "metadata";
                     clicked => { root.category = "metadata"; }
                 }
@@ -185,13 +172,6 @@ export component SettingsPage inherits Rectangle {
                     clicked => { root.category = "filters"; }
                 }
                 SettingsCategoryItem {
-                    label: "Luau 补丁";
-                    icon: Icons.puzzle-piece;
-                    description: "Trusted 脚本补丁策略";
-                    active: root.category == "patches";
-                    clicked => { root.category = "patches"; }
-                }
-                SettingsCategoryItem {
                     label: "界面外观";
                     icon: Icons.palette;
                     description: "深浅色彩、网格密度";
@@ -202,116 +182,11 @@ export component SettingsPage inherits Rectangle {
                 Rectangle { vertical-stretch: 1; }
             }
         }
-
-        // Content area
-        Rectangle {
-            horizontal-stretch: 1;
-            clip: true;
-
-            if root.category == "translation" : TranslationSettingsPage {
-                endpoint-kind <=> root.endpoint-kind;
-                endpoint <=> root.endpoint;
-                protocol <=> root.protocol;
-                model <=> root.model;
-                target-language <=> root.target-language;
-                context-sentences <=> root.context-sentences;
-                body-limit-bytes <=> root.body-limit-bytes;
-                timeout-ms <=> root.timeout-ms;
-                background-context <=> root.background-context;
-                glossary <=> root.glossary;
-                secret-input <=> root.secret-input;
-                consent-present: root.consent-present;
-                extension-config-fields: root.extension-config-fields;
-                save(kind, endpoint, protocol, model, language, context, body-limit, timeout, background, glossary, secret) => {
-                    root.save-translation-profile(kind, endpoint, protocol, model, language, context, body-limit, timeout, background, glossary, secret);
-                }
-                grant-consent => { root.grant-translation-consent(); }
-                extension-config-changed(key, value) => { root.extension-config-changed(key, value); }
-                save-extension-config => { root.save-extension-config(); }
-                reset-extension-config => { root.reset-extension-config(); }
-            }
-
-            if root.category == "metadata" : MetadataSettingsPage {
-                match-reviews: root.match-reviews;
-                selected-case-id: root.selected-case-id;
-                vndb-consent <=> root.vndb-consent;
-                bangumi-consent <=> root.bangumi-consent;
-                sensitive-covers <=> root.sensitive-covers;
-                metadata-provider <=> root.metadata-provider;
-                external-id-input <=> root.external-id-input;
-                bangumi-token-input <=> root.bangumi-token-input;
-                refresh-metadata(provider) => { root.refresh-metadata(provider); }
-                accept-match(id) => { root.accept-match(id); }
-                reject-match(id) => { root.reject-match(id); }
-                unlink-identity(provider) => { root.unlink-identity(provider); }
-                link-external-id(provider, id) => { root.link-external-id(provider, id); }
-                set-metadata-consent(provider, enabled, secret) => { root.set-metadata-consent(provider, enabled, secret); }
-                set-sensitive-cover-policy(provider, enabled) => { root.set-sensitive-cover-policy(provider, enabled); }
-            }
-
-            if root.category == "filters" : FilterSettingsPage {
-                filter-preset <=> root.filter-preset;
-                filter-config-fields: root.filter-config-fields;
-                set-filter-preset(preset) => { root.set-filter-preset(preset); }
-                filter-config-changed(key, value) => { root.filter-config-changed(key, value); }
-                save-filter-config => { root.save-filter-config(); }
-                reset-filter-config => { root.reset-filter-config(); }
-            }
-
-            if root.category == "compatibility" : CompatibilitySettingsPage {
-                source-url: root.compatibility-source-url;
-                sync-summary: root.compatibility-sync-summary;
-                network-consent: root.vndb-consent || root.bangumi-consent;
-                refresh-compatibility => { root.refresh-compatibility(); }
-            }
-
-            if root.category == "patches" : PatchSettingsPage {
-                patches-summary: root.patches-summary;
-                patch-mode: root.patch-mode;
-                set-patch-mode(mode) => { root.set-patch-mode(mode); }
-            }
-
-            if root.category == "input" : InputSettingsPage {
-                confirm-key <=> root.confirm-key;
-                cancel-key <=> root.cancel-key;
-                touch-sensitivity <=> root.touch-sensitivity;
-                gamepad-enabled <=> root.gamepad-enabled;
-                gamepad-deadzone <=> root.gamepad-deadzone;
-                gamepad-bindings: root.gamepad-bindings;
-                save-input-config(confirm, cancel, sensitivity, gamepad, deadzone) => {
-                    root.save-input-config(confirm, cancel, sensitivity, gamepad, deadzone);
-                }
-                set-gamepad-binding(button, key) => { root.set-gamepad-binding(button, key); }
-                reset-gamepad-mapping => { root.reset-gamepad-mapping(); }
-                has-selected-case: root.has-selected-case;
-                save-per-game-input-mapping => { root.save-per-game-input-mapping(); }
-                clear-per-game-input-mapping => { root.clear-per-game-input-mapping(); }
-            }
-
-            if root.category == "appearance" : AppearanceSettingsPage {
-                dark-mode: root.dark-mode;
-                theme-mode <=> root.theme-mode;
-                accent <=> root.accent;
-                grid-columns <=> root.grid-columns;
-                density <=> root.density;
-                view-mode <=> root.view-mode;
-                toggle-theme => { root.toggle-theme(); }
-                set-grid-columns(cols) => { root.set-grid-columns(cols); }
-                set-theme-mode(mode) => { root.set-theme-mode(mode); }
-                set-accent(ac) => { root.set-accent(ac); }
-                set-density(d) => { root.set-density(d); }
-                set-view-mode(m) => { root.set-view-mode(m); }
-            }
-        }
-    }
-
-    // Mobile: horizontal category chips + content below
-    if !root.desktop-mode : VerticalLayout {
-        spacing: 0px;
-
-        // Horizontal category chips
-        Rectangle {
+    if !root.desktop-mode : Rectangle {
+            x: 0px;
+            y: 0px;
             height: 52px;
+            width: parent.width;
             background: Theme.surface-container-low;
 
             ScrollView {
@@ -324,22 +199,46 @@ export component SettingsPage inherits Rectangle {
                     alignment: start;
 
                     MobileCategoryChip { label: "输入"; active: root.category == "input"; clicked => { root.category = "input"; } }
+                    MobileCategoryChip { label: "音频"; active: root.category == "audio"; clicked => { root.category = "audio"; } }
                     MobileCategoryChip { label: "翻译"; active: root.category == "translation"; clicked => { root.category = "translation"; } }
                     MobileCategoryChip { label: "元数据"; active: root.category == "metadata"; clicked => { root.category = "metadata"; } }
                     MobileCategoryChip { label: "兼容性"; active: root.category == "compatibility"; clicked => { root.category = "compatibility"; } }
                     MobileCategoryChip { label: "滤镜"; active: root.category == "filters"; clicked => { root.category = "filters"; } }
-                    MobileCategoryChip { label: "补丁"; active: root.category == "patches"; clicked => { root.category = "patches"; } }
                     MobileCategoryChip { label: "外观"; active: root.category == "appearance"; clicked => { root.category = "appearance"; } }
                 }
             }
         }
-
-        Rectangle { height: 1px; background: Theme.outline-variant; }
-
-        // Content
         Rectangle {
-            vertical-stretch: 1;
+            x: root.desktop-mode ? 250px : 0px;
+            y: root.desktop-mode ? 0px : 52px;
+            width: parent.width - self.x;
+            height: parent.height - self.y;
             clip: true;
+
+            if root.category == "audio" : VerticalLayout {
+                padding: 24px;
+                spacing: 16px;
+                alignment: start;
+                Text {
+                    text: "音频输出";
+                    color: Theme.on-surface;
+                    font-size: Theme.font-title-lg;
+                    font-weight: 700;
+                }
+                ComboBox {
+                    model: ["系统默认音频设备", "NullAudioDevice（仅测试，不播放声音）"];
+                    current-index: root.audio-device == "null" ? 1 : 0;
+                    selected(value) => {
+                        root.set-audio-device(value == "系统默认音频设备" ? "native" : "null");
+                    }
+                }
+                Text {
+                    text: "测试后端按播放速度消费音频数据，适合没有声卡的自动化环境。它不会输出声音，不能用于听感或真实设备测试。选择仅在本次应用运行中生效，重启后恢复系统设备。";
+                    color: Theme.on-surface-variant;
+                    font-size: Theme.font-body-md;
+                    wrap: word-wrap;
+                }
+            }
 
             if root.category == "translation" : TranslationSettingsPage {
                 endpoint-kind <=> root.endpoint-kind;
@@ -347,37 +246,22 @@ export component SettingsPage inherits Rectangle {
                 protocol <=> root.protocol;
                 model <=> root.model;
                 target-language <=> root.target-language;
-                context-sentences <=> root.context-sentences;
-                body-limit-bytes <=> root.body-limit-bytes;
                 timeout-ms <=> root.timeout-ms;
-                background-context <=> root.background-context;
-                glossary <=> root.glossary;
                 secret-input <=> root.secret-input;
                 consent-present: root.consent-present;
-                extension-config-fields: root.extension-config-fields;
-                save(kind, endpoint, protocol, model, language, context, body-limit, timeout, background, glossary, secret) => {
-                    root.save-translation-profile(kind, endpoint, protocol, model, language, context, body-limit, timeout, background, glossary, secret);
+                save(kind, endpoint, protocol, model, language, timeout, secret) => {
+                    root.save-translation-profile(kind, endpoint, protocol, model, language, timeout, secret);
                 }
+                test-connection => { root.test-translation-connection(); }
                 grant-consent => { root.grant-translation-consent(); }
-                extension-config-changed(key, value) => { root.extension-config-changed(key, value); }
-                save-extension-config => { root.save-extension-config(); }
-                reset-extension-config => { root.reset-extension-config(); }
             }
 
             if root.category == "metadata" : MetadataSettingsPage {
-                match-reviews: root.match-reviews;
-                selected-case-id: root.selected-case-id;
                 vndb-consent <=> root.vndb-consent;
                 bangumi-consent <=> root.bangumi-consent;
                 sensitive-covers <=> root.sensitive-covers;
                 metadata-provider <=> root.metadata-provider;
-                external-id-input <=> root.external-id-input;
                 bangumi-token-input <=> root.bangumi-token-input;
-                refresh-metadata(provider) => { root.refresh-metadata(provider); }
-                accept-match(id) => { root.accept-match(id); }
-                reject-match(id) => { root.reject-match(id); }
-                unlink-identity(provider) => { root.unlink-identity(provider); }
-                link-external-id(provider, id) => { root.link-external-id(provider, id); }
                 set-metadata-consent(provider, enabled, secret) => { root.set-metadata-consent(provider, enabled, secret); }
                 set-sensitive-cover-policy(provider, enabled) => { root.set-sensitive-cover-policy(provider, enabled); }
             }
@@ -387,6 +271,7 @@ export component SettingsPage inherits Rectangle {
                 filter-config-fields: root.filter-config-fields;
                 set-filter-preset(preset) => { root.set-filter-preset(preset); }
                 filter-config-changed(key, value) => { root.filter-config-changed(key, value); }
+                load-filter-source => { root.load-filter-source(); }
                 save-filter-config => { root.save-filter-config(); }
                 reset-filter-config => { root.reset-filter-config(); }
             }
@@ -394,30 +279,21 @@ export component SettingsPage inherits Rectangle {
             if root.category == "compatibility" : CompatibilitySettingsPage {
                 source-url: root.compatibility-source-url;
                 sync-summary: root.compatibility-sync-summary;
-                network-consent: root.vndb-consent || root.bangumi-consent;
+                network-consent: root.vndb-consent;
                 refresh-compatibility => { root.refresh-compatibility(); }
             }
 
-            if root.category == "patches" : PatchSettingsPage {
-                patches-summary: root.patches-summary;
-                patch-mode: root.patch-mode;
-                set-patch-mode(mode) => { root.set-patch-mode(mode); }
-            }
-
             if root.category == "input" : InputSettingsPage {
-                confirm-key <=> root.confirm-key;
-                cancel-key <=> root.cancel-key;
-                touch-sensitivity <=> root.touch-sensitivity;
                 gamepad-enabled <=> root.gamepad-enabled;
                 gamepad-deadzone <=> root.gamepad-deadzone;
                 gamepad-bindings: root.gamepad-bindings;
-                save-input-config(confirm, cancel, sensitivity, gamepad, deadzone) => {
-                    root.save-input-config(confirm, cancel, sensitivity, gamepad, deadzone);
+                save-input-config(gamepad, deadzone) => {
+                    root.save-input-config(gamepad, deadzone);
                 }
                 set-gamepad-binding(button, key) => { root.set-gamepad-binding(button, key); }
                 reset-gamepad-mapping => { root.reset-gamepad-mapping(); }
                 has-selected-case: root.has-selected-case;
-                save-per-game-input-mapping => { root.save-per-game-input-mapping(); }
+                save-per-game-input-mapping(gamepad, deadzone) => { root.save-per-game-input-mapping(gamepad, deadzone); }
                 clear-per-game-input-mapping => { root.clear-per-game-input-mapping(); }
             }
 
@@ -436,5 +312,4 @@ export component SettingsPage inherits Rectangle {
                 set-view-mode(m) => { root.set-view-mode(m); }
             }
         }
-    }
 }

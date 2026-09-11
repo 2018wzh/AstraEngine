@@ -151,4 +151,18 @@ impl rfvp::host_api::RfvpClock for SessionClock {
     fn ticks_us(&mut self) -> u64 {
         self.micros
     }
+
+    fn local_calendar_time(&mut self) -> RfvpResult<rfvp::host_api::clock::CalendarTime> {
+        let now = time::OffsetDateTime::now_local().map_err(|_| RfvpError::Backend)?;
+        let value = rfvp::host_api::clock::CalendarTime {
+            year: now.year().try_into().map_err(|_| RfvpError::InvalidData)?,
+            month: now.month() as u8,
+            day: now.day(),
+            day_of_week: now.weekday().number_days_from_sunday(),
+            hour: now.hour(),
+            minute: now.minute(),
+        };
+        value.validate()?;
+        Ok(value)
+    }
 }

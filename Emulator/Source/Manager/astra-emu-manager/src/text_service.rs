@@ -109,7 +109,12 @@ impl TextReplacementBridge {
 
 impl Drop for TextReplacementBridge {
     fn drop(&mut self) {
-        let _ = close_state(&self.state);
+        if close_state(&self.state).is_err() {
+            tracing::error!(
+                event = "astra.emu.text.shutdown_failed",
+                diagnostic_code = "ASTRA_EMU_TEXT_SHUTDOWN_FAILED"
+            );
+        }
     }
 }
 

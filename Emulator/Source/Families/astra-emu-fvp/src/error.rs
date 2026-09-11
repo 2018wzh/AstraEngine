@@ -6,6 +6,10 @@ pub(crate) fn invalid(code: &'static str, message: &'static str) -> FamilyError 
 }
 
 pub(crate) fn rfvp(error: RfvpError) -> FamilyError {
+    rfvp_operation(error, "family operation")
+}
+
+pub(crate) fn rfvp_operation(error: RfvpError, operation: &'static str) -> FamilyError {
     let code = match error {
         RfvpError::Io => "ASTRA_EMU_FVP_RFVP_IO",
         RfvpError::NotFound => "ASTRA_EMU_FVP_RFVP_NOT_FOUND",
@@ -17,5 +21,5 @@ pub(crate) fn rfvp(error: RfvpError) -> FamilyError {
         RfvpError::EndOfFile => "ASTRA_EMU_FVP_RFVP_EOF",
         RfvpError::Backend => "ASTRA_EMU_FVP_RFVP_BACKEND",
     };
-    FamilyError::invalid(code, "RFVP rejected the family operation")
+    FamilyError::invalid(code, format!("RFVP rejected {operation}"))
 }

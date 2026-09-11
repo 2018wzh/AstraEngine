@@ -96,7 +96,7 @@ fn extension_registry_preserves_explicit_binding_and_reports_conflicts() {
 }
 
 #[astra_headless_test::test]
-fn explicit_binding_is_registration_order_independent_and_blocks_context_drift() {
+fn explicit_binding_is_order_independent_and_only_blocks_abi_drift() {
     for order in [
         ["astra.provider.first", "astra.provider.second"],
         ["astra.provider.second", "astra.provider.first"],
@@ -106,7 +106,7 @@ fn explicit_binding_is_registration_order_independent_and_blocks_context_drift()
             registrar.register_provider(provider(id)).unwrap();
         }
         let mut drifted = context();
-        drifted.feature_fingerprint = "wrong-feature".to_string();
+        drifted.abi_fingerprint = "wrong-abi".to_string();
         assert!(registrar
             .bind_provider(
                 &EngineModuleSlot("presentation".to_string()),
@@ -117,11 +117,14 @@ fn explicit_binding_is_registration_order_independent_and_blocks_context_drift()
             .contains("ASTRA_PLUGIN_BINDING_FINGERPRINT_MISMATCH"));
         assert!(registrar.services.get("presentation").is_none());
 
+        let mut warning_only = context();
+        warning_only.feature_fingerprint = "different-feature".to_string();
+        warning_only.rustc_fingerprint = "different-rustc".to_string();
         registrar
             .bind_provider(
                 &EngineModuleSlot("presentation".to_string()),
                 "astra.provider.second",
-                context(),
+                warning_only,
             )
             .unwrap();
         assert_eq!(

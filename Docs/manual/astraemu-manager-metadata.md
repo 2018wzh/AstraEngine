@@ -1,22 +1,42 @@
 # AstraEMU Manager 元数据与游玩状态
 
-Manager 扫描授权目录时，只读取 discovery descriptor 声明的入口和 marker。扫描不会执行脚本，也不会把路径、文件 hash、脚本文本或素材上传。family probe 与作品匹配是两条独立链路，外部元数据不能修改 family binding。
+## 启动与设置
 
-首次使用 VNDB 或 Bangumi 前，打开 **Metadata**，分别启用 provider。Bangumi 搜索不强制 token；关联收藏和同步游玩状态需要 access token。token 写入平台 secret store，Library 只保存 `astraemu.metadata.bangumi.token` reference。关闭 provider 后，本地扫描、probe、已保存 snapshot 和 review queue 都保留。
+独立 Host 首先支持 Windows 和 FVP。点击资料库的添加目录按钮，选择授权游戏目录并扫描；其他插件通过“安装 Family 插件”显式选择本地 DLL。安装记录会保留，后续启动重新检查 ABI 与 descriptor。插件和游戏文件不能在运行期间移动或替换。
 
-选中游戏后点击 **Refresh**。未关联作品时，Manager 以本地标题搜索并把所有名称匹配放入 Review queue。查看标题、别名、日期、开发者和逐项 evidence 后，逐条 Accept 或 Reject。系统不提供模糊匹配批量接受。也可以输入 VNDB `v123` 或 Bangumi subject ID；Manager 先向对应 provider 校验，成功后才以 `user-verified-id` provenance 建立关系。
+FVP 的脚本与资源包按原版规则从游戏目录直接读取，不递归加载备份等子目录中的同后缀文件。启动失败会保留诊断，直到下一次相关操作更新状态。
 
-**Unlink** 只解除当前作品与 provider 的关系，不删除安装。删除安装后，work 仍可保留 snapshot 和用户保留标志；清理 orphan work 必须走单独的维护动作。
+默认音频输出是系统设备。没有声卡的测试环境可在“设置中心 → 音频输出”选择 `NullAudioDevice`，然后返回游戏库启动。该后端按播放速度消费 PCM，但不播放声音；游戏中显示测试标记。选择只对本次应用运行有效，重启后须重新选择。切换前先退出游戏；系统设备初始化失败不会自动切到测试后端。
 
-安全封面默认启用。敏感封面开关按 provider 保存；开关关闭时，带 VNDB sexual/violence 或 Bangumi `nsfw` 标记的图片不会下载，也不会写入缓存。下载过程拒绝重定向和非 HTTPS 域名，并限制 MIME、响应大小、像素尺寸和解码预算。
+游戏画面显示在 Host 工具栏下方，并保持原始宽高比。返回管理器、运行时诊断和视觉滤镜位于独立工具栏中，不遮挡游戏自身的按钮。FVP 清理空存档槽时允许文件不存在，其他文件系统错误仍会中止游戏并显示诊断。
 
-作品已经关联 Bangumi 后，可设置 `wish`、`doing`、`collect`、`on_hold` 或 `dropped`，填写 1 到 10 分和私密备注，再点击 **Sync play status**。Manager 先保存本地待同步状态，再把请求交给后台 worker。成功时间和失败 diagnostic 都会持久化；429、401、超时或 schema mismatch 不会触发无限重试，需要用户显式重试。
+Manager 使用全新的 SQLite schema 3，不读取或迁移旧资料库。游戏的原生存档由 Family 管理，和 Manager 数据分开。外观页保存主题、配色、密度与视图；选择系统主题时响应 Windows 主题变化。手柄设置可保存为全局默认，也可为选中游戏单独覆盖。清除逐游戏设置后恢复使用全局映射；修改输入或翻译设置前先退出游戏。
 
-VNDB 默认只适用于 development/non-commercial profile。商业构建必须在 release manifest 中提供明确的 VNDB commercial license ID；缺失时 `emu.metadata_license` 必须阻断发布。当前正式 release gate 仍在 `IN_PROGRESS`，不能把 provider unit test 当作商业发布许可证明。
+滤镜页提供原画、缩放、锐化与 Anime4K 2×，也可加载 Magpie format 4 HLSL。加载后调整参数并保存；编译或保存失败会显示错误并保留旧有效效果。游戏内菜单使用同一组预设。外部效果只接受当前解析器支持的指令，未知指令会报错。
+
+翻译页先保存 endpoint、协议、模型、目标语言、timeout 和 secret，再点击连接测试。secret 存入平台 keyring，测试在后台请求模型列表，不发送游戏文本。默认 timeout 为 15 秒，上下文固定限最近 8 段、6000 字符。FVP 暂不支持文本替换，游戏继续使用原有字体和正文。
+
+## 元数据
+
+Manager 扫描授权目录时调用已安装 Family 的 probe。扫描不会执行脚本，也不会把路径、文件 hash、脚本文本或素材上传。family probe 与作品匹配是两条独立链路，外部元数据不能修改 family binding。
+
+首次使用 VNDB 或 Bangumi 前，在 Metadata 启用对应服务。Bangumi 搜索不强制 token；同步游玩状态需要 access token。token 写入平台 secret store，网络访问许可在本次 Manager 会话内生效。
+
+在游戏库选中作品，打开详情顶部的“关联 / 更换作品”。选择 VNDB 或 Bangumi，输入作品名、原名或译名后按 Enter 或点击“搜索作品”，再根据标题、别名、发售日和开发商选择“关联此作品”。无需查找或填写外部 ID。关联操作重新向 provider 获取该候选的元数据，成功后保存关系和快照；卡片与详情显示关联标题，已有自定义标题优先。
+
+搜索每次最多返回 10 项，关键词不能为空或超过 256 个字符。请求在后台执行，同一作品同时只处理一个请求；空结果和请求失败都会显示状态，用户可修改关键词后重试。候选只属于发起搜索的作品，切换作品不会把结果关联到另一安装。“刷新”更新当前数据源已经关联的条目，不重新进行名称搜索。设置中心只保留数据源网络许可、token 和封面策略。
+
+详情中的“解除关联”只移除当前作品与所选数据源的关系，不删除安装或游戏存档。旧快照不再用于标题和详情展示；没有其他关联来源时显示导入标题。
+
+安全封面默认启用。敏感封面开关作用于当前会话；开关关闭时，带 VNDB sexual/violence 或 Bangumi `nsfw` 标记的图片不会下载，也不会写入缓存。下载过程拒绝重定向和非 HTTPS 域名，并限制 MIME、响应大小、像素尺寸和解码预算。
+
+作品已经关联 Bangumi 后，可设置 `wish`、`doing`、`collect`、`on_hold` 或 `dropped`，填写 1 到 10 分和私密备注，再点击 **Sync play status**。Manager 把请求交给后台 worker，并在界面显示结果；429、401、超时或 schema mismatch 不会触发无限重试，需要用户显式重试。
+
+正式发布流程尚未完成；元数据接口的局部测试不代表商业发布许可已获确认。
 
 ## 游玩时间与历史
 
-Manager 在启动游戏时开启一条游玩会话，离开游戏或关闭 Manager 时结算，并写入本地 Library。封面卡和 inspector 显示累计游玩时长和最近游玩时间；inspector 还提供逐条会话历史。如果上一次会话因崩溃未正常结算，Manager 会在恢复时按上次已知时间补结算，不会丢失也不会重复计时。游玩记录只保存在本地，不上传，也不进入发布报告。
+Manager 在启动游戏时开启一条游玩会话，离开游戏或关闭 Manager 时结算，并写入本地 Library。封面卡和 inspector 显示累计游玩时长和最近游玩时间；inspector 还提供逐条会话历史。异常中断的会话可能没有完整结束时间，不据此推算未记录的游玩时长。游玩记录只保存在本地，不上传，也不进入发布报告。
 
 ## 社区兼容性库
 
@@ -24,4 +44,4 @@ Manager 在启动游戏时开启一条游玩会话，离开游戏或关闭 Manag
 
 首次使用前，先在 **Metadata** 启用 VNDB 的网络访问；兼容性刷新复用同一 consent gate。打开 **Settings → Compatibility** 可查看源地址与同步状态，并点击 **Refresh compatibility** 手动拉取。库未变更时返回未修改，不重复下载；拉取失败会记录稳定 diagnostic，不会无限重试。库页顶部的筛选可按适配分级过滤封面卡。兼容性缓存只读且只保存在本地。
 
-要让某个本地安装的兼容性精确到版本：选中游戏后在 inspector 的 **Game version (VNDB release)** 区域点击 **Fetch releases**，Manager 从 VNDB 拉取该游戏的发布（rID）列表，再点选对应的 rID 把当前安装钉到该版本，其分级即按该版本显示。社区条目经由仓库 ISSUE_TEMPLATE 提交结构化 vID/rID 报告，维护者合并进数据仓。
+要让某个本地安装的兼容性精确到版本：选中游戏后在 inspector 的 **Game version (VNDB release)** 区域点击 **Fetch releases**，Manager 从 VNDB 拉取该游戏的发布（rID）列表，再点选对应的 rID 在当前会话选择该版本，其分级即按该版本显示。社区条目经由仓库 ISSUE_TEMPLATE 提交结构化 vID/rID 报告，维护者合并进数据仓。

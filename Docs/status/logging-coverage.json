@@ -239,31 +239,15 @@
     },
     "astra-emu-family-api": {
       "status": "not_applicable",
-      "reason": "pure ABI-safe descriptor, session, effect and redaction DTO contract"
-    },
-    "astra-emu-extension-api": {
-      "status": "not_applicable",
-      "reason": "pure ABI-safe extension lifecycle, opaque Hook and translation companion schema contract"
-    },
-    "astra-emu-family-core": {
-      "status": "not_applicable",
-      "reason": "pure in-process VFS, decrypt transport and family factory contract"
-    },
-    "astra-emu-family-support": {
-      "status": "instrumented",
-      "reason": "trusted Luau, private profile, cache, verify, extract and viewer failure lifecycle"
+      "reason": "pure ABI-safe borrowed frame, PCM, physical input and session lifecycle contract"
     },
     "astra-emu-fvp": {
       "status": "instrumented",
-      "reason": "FVP provider session, step, media and snapshot lifecycle"
-    },
-    "astra-emu-minori": {
-      "status": "instrumented",
-      "reason": "Minori PAZ mount, source validation, decrypt and cache lifecycle"
+      "reason": "FVP native provider session, VM, media and original save lifecycle"
     },
     "astra-emu-manager-core": {
       "status": "instrumented",
-      "reason": "Library, family loading and RuntimeWorld provider lifecycle"
+      "reason": "Library, verified family loading and independent provider lifecycle"
     },
     "astra-emu-translation-openai-compatible": {
       "status": "instrumented",
@@ -281,30 +265,6 @@
       "status": "instrumented",
       "reason": "Manager host, platform source, renderer, audio and input lifecycle"
     },
-    "astra-emu-e3": {
-      "status": "instrumented",
-      "reason": "external Windows Manager E3 lifecycle, physical input dispatch and fail-closed evidence collection"
-    },
-    "astra-emu-cli": {
-      "status": "instrumented",
-      "reason": "explicit native launch and headless provider/session/artifact lifecycle"
-    },
-    "astra-emu-minori-cli": {
-      "status": "instrumented",
-      "reason": "Minori private scheme import and script census lifecycle"
-    },
-    "astra-emu-schema": {
-      "status": "not_applicable",
-      "reason": "pure JSON Schema generator over Rust schema source types"
-    },
-    "astra-emu-evidence": {
-      "status": "instrumented",
-      "reason": "release evidence validation and section encoding lifecycle"
-    },
-    "astra-emu-family-package": {
-      "status": "instrumented",
-      "reason": "native family identity validation and signing lifecycle"
-    },
     "headless-presentation-provider": {
       "status": "instrumented",
       "reason": "fixture provider lifecycle"
@@ -320,6 +280,10 @@
     "tsuinosora-original-patcher": {
       "status": "not_applicable",
       "reason": "pure offline original-game patch transformation tool outside engine runtime and host sessions"
+    },
+    "xtask": {
+      "status": "not_applicable",
+      "reason": "facade for human-readable repository checks; subprocess errors propagate to the caller"
     }
   }
 }

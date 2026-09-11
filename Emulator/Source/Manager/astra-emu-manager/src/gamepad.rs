@@ -34,7 +34,7 @@ pub(crate) struct GameInputPump {
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 impl GameInputPump {
-    pub(crate) fn new(mapping: InputMapping) -> Self {
+    pub(crate) fn new(mapping: InputMapping) -> Result<Self, String> {
         let mapping = Arc::new(Mutex::new(mapping));
         let worker_mapping = Arc::clone(&mapping);
         let wake = Arc::new(Mutex::new(None));
@@ -42,57 +42,58 @@ impl GameInputPump {
         let stop = Arc::new(AtomicBool::new(false));
         let worker_stop = Arc::clone(&stop);
         let (batch_tx, batches) = mpsc::sync_channel(32);
-        let worker = match thread::Builder::new()
+        let worker = thread::Builder::new()
             .name("astra-manager-gamepad".to_string())
             .spawn(move || {
                 gamepad_worker(worker_mapping, worker_wake, worker_stop, batch_tx.clone())
-            }) {
-            Ok(worker) => Some(worker),
-            Err(error) => {
-                tracing::error!(
-                    event = "astra.emu.input.gamepad_worker_create_failed",
-                    diagnostic_code = "ASTRA_EMU_GAMEPAD_WORKER_CREATE",
-                    error_kind = %error
-                );
-                None
-            }
-        };
-        Self {
+            })
+            .map_err(|_| "ASTRA_EMU_GAMEPAD_WORKER_CREATE")?;
+        Ok(Self {
             batches: Some(batches),
             mapping,
             wake,
             stop,
-            worker,
-        }
+            worker: Some(worker),
+        })
     }
 
     /// Replace the active mapping, re-tuning stick hysteresis.
-    pub(crate) fn set_mapping(&mut self, mapping: InputMapping) {
-        if let Ok(mut current) = self.mapping.lock() {
-            *current = mapping;
-        }
+    pub(crate) fn set_mapping(&mut self, mapping: InputMapping) -> Result<(), String> {
+        *self
+            .mapping
+            .lock()
+            .map_err(|_| "ASTRA_EMU_GAMEPAD_MAPPING_LOCK")? = mapping;
+        Ok(())
     }
 
     /// Installs the host event-loop wake used by the worker.  The worker never
     /// touches UI state; it only signals that a bounded batch is ready so the
     /// host can drain it on its own thread.
-    pub(crate) fn set_wake(&mut self, wake: GameInputWake) {
-        if let Ok(mut current) = self.wake.lock() {
-            *current = Some(wake.clone());
-        }
+    pub(crate) fn set_wake(&mut self, wake: GameInputWake) -> Result<(), String> {
+        *self
+            .wake
+            .lock()
+            .map_err(|_| "ASTRA_EMU_GAMEPAD_WAKE_LOCK")? = Some(wake.clone());
         // The worker can receive a device event during startup before the
         // host installs its callback. One explicit wake closes that race; the
         // UI still drains only the bounded channel and never starts polling.
         wake();
+        Ok(())
     }
 
     pub(crate) fn poll(&mut self) -> Result<Vec<GameInput>, String> {
         let mut output = Vec::new();
         let Some(batches) = self.batches.as_ref() else {
-            return Ok(output);
+            return Err("ASTRA_EMU_GAMEPAD_CLOSED".into());
         };
-        while let Ok(batch) = batches.try_recv() {
-            output.extend(batch?);
+        loop {
+            match batches.try_recv() {
+                Ok(batch) => output.extend(batch?),
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    return Err("ASTRA_EMU_GAMEPAD_WORKER_STOPPED".into())
+                }
+            }
         }
         Ok(output)
     }
@@ -345,55 +346,25 @@ fn update_button(
     }
 }
 
-#[cfg(target_os = "android")]
+#[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
 pub(crate) struct GameInputPump;
 
-#[cfg(target_os = "android")]
+#[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
 impl GameInputPump {
-    pub(crate) fn new(_mapping: InputMapping) -> Self {
-        Self
+    pub(crate) fn new(_mapping: InputMapping) -> Result<Self, String> {
+        Err("ASTRA_EMU_GAMEPAD_PLATFORM_UNSUPPORTED".into())
     }
 
-    pub(crate) fn set_mapping(&mut self, _mapping: InputMapping) {}
-
-    pub(crate) fn set_wake(&mut self, _wake: std::sync::Arc<dyn Fn() + Send + Sync + 'static>) {}
-
-    pub(crate) fn poll(&mut self) -> Result<Vec<GameInput>, String> {
-        crate::android_platform::take_pending_gamepad_inputs().map(|events| {
-            events
-                .into_iter()
-                .map(|event| GameInput {
-                    control: event.control.to_owned(),
-                    pressed: event.pressed,
-                    value: event.value,
-                })
-                .collect()
-        })
-    }
-}
-
-#[cfg(not(any(
-    target_os = "windows",
-    target_os = "linux",
-    target_os = "macos",
-    target_os = "android"
-)))]
-pub(crate) struct GameInputPump;
-
-#[cfg(not(any(
-    target_os = "windows",
-    target_os = "linux",
-    target_os = "macos",
-    target_os = "android"
-)))]
-impl GameInputPump {
-    pub(crate) fn new(_mapping: InputMapping) -> Self {
-        Self
+    pub(crate) fn set_mapping(&mut self, _mapping: InputMapping) -> Result<(), String> {
+        Err("ASTRA_EMU_GAMEPAD_PLATFORM_UNSUPPORTED".into())
     }
 
-    pub(crate) fn set_mapping(&mut self, _mapping: InputMapping) {}
-
-    pub(crate) fn set_wake(&mut self, _wake: std::sync::Arc<dyn Fn() + Send + Sync + 'static>) {}
+    pub(crate) fn set_wake(
+        &mut self,
+        _wake: std::sync::Arc<dyn Fn() + Send + Sync + 'static>,
+    ) -> Result<(), String> {
+        Err("ASTRA_EMU_GAMEPAD_PLATFORM_UNSUPPORTED".into())
+    }
 
     pub(crate) fn poll(&mut self) -> Result<Vec<GameInput>, String> {
         Ok(Vec::new())

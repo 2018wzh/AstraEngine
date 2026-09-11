@@ -51,8 +51,12 @@ pub struct MetadataRecord {
     pub provider: MetadataProviderId,
     pub remote_id: String,
     pub title: String,
+    #[serde(default)]
+    pub description: Option<String>,
     pub alternate_titles: Vec<String>,
     pub developers: Vec<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
     pub release_date: Option<String>,
     pub platforms: Vec<String>,
     pub engine: Option<String>,

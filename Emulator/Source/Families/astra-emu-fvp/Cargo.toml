@@ -18,6 +18,7 @@ astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api" }
 rfvp = { path = "../../../ThirdParty/rfvp", default-features = false, features = ["hosted"] }
 fontdb.workspace = true
 tracing.workspace = true
+time = { workspace = true, features = ["local-offset"] }
 symphonia = { version = "0.5", default-features = false, features = ["ogg", "vorbis", "wav", "pcm", "mp3", "flac"] }
 wmv-decoder = { path = "../na_wmv_player", default-features = false, features = ["audio"] }
 
@@ -34,7 +35,7 @@ tempfile.workspace = true
 
 [package.metadata.astra]
 upstream = "https://github.com/xmoezzz/rfvp"
-upstream_revision = "3b5ea6c96a925c12f95aef8554905e8fecbc77c3"
+upstream_revision = "304e773387a9920c9db091ec1fd937c717aea949"
 hosted_fork = "https://github.com/2018wzh/rfvp"
 hosted_fork_revision = "f4f64a5bb726c1759350a666a35e0a454b810f61"
 license_notice = "THIRD_PARTY_NOTICES.md"

@@ -65,6 +65,7 @@ impl VndbProvider {
             .raw_fields(
                 [
                     "title",
+                    "description",
                     "alttitle",
                     "aliases",
                     "titles.lang",
@@ -76,6 +77,7 @@ impl VndbProvider {
                     "platforms",
                     "developers.name",
                     "developers.original",
+                    "tags.name",
                     "image.url",
                     "image.thumbnail",
                     "image.dims",
@@ -219,6 +221,14 @@ fn convert_record(value: vn::VisualNovel) -> MetadataRecord {
     }
     alternate_titles.sort();
     alternate_titles.dedup();
+    let mut tags = value
+        .tags
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|tag| tag.tag.name)
+        .collect::<Vec<_>>();
+    tags.sort();
+    tags.dedup();
     let developers = value
         .developers
         .unwrap_or_default()
@@ -239,8 +249,10 @@ fn convert_record(value: vn::VisualNovel) -> MetadataRecord {
         provider: MetadataProviderId::Vndb,
         remote_id: value.id.to_string(),
         title: value.title.unwrap_or_default(),
+        description: value.description,
         alternate_titles,
         developers,
+        tags,
         release_date: value.released,
         platforms: value
             .platforms

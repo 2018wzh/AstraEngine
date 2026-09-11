@@ -17,6 +17,8 @@ AstraEngine 仓库是 AstraEngine 系列的产品总入口，负责维护跨仓�
 
 ## 2. 架构硬约束
 
+- AstraEMU FVP 的 RFVP 上游基线固定为 0.6.0 revision 304e773387a9920c9db091ec1fd937c717aea949；hosted 适配来源与本地差异统一记录在 Family 的 MODIFICATIONS.md，不得把原始 fork revision 当成当前上游基线。 全局持久化共用上游 GlobalSaveDataV1 与 RFVG codec，只适配 session globals、文件系统及启动/关闭边界；不得复制一套 hosted 存档结构或在读取失败后覆盖旧文件。
+
 - Runtime 权威模型是 Actor/Component + StateMachine；局部 ECS 只用于可证明的热点批处理，不能作为 creator-facing 对象模型。
 - Stage 1 StateMachine 保持 flat FSM；transition 可以顺序执行多个 action，但层级、并行和 pushdown stack 必须另立设计决策。
 - StateMachine action 只能通过 `DeterministicActionContext` 修改 Actor/Component、Blackboard、Event、AwaitToken、PresentationCommand 和 delayed event queue。Runtime action 是 host 内注册的 typed Rust action；动态插件不再提供通用 bytes action ABI、effect envelope 或 host adapter 二次应用层。
@@ -58,9 +60,12 @@ AstraEngine 仓库是 AstraEngine 系列的产品总入口，负责维护跨仓�
 - 独立 Family ABI 只包含 descriptor/probe/open/advance/input/window event/close、借用 CPU 最终帧、独立混合 PCM 和可选异步文本替换。采用 `abi_stable`，第三方只依赖 ABI，不强制 SDK；旧 Family ABI 和 Extension ABI 直接删除，不提供兼容层。
 - Family 自行持有 VM、原生文件访问、解码、混音、渲染与游戏原生存档。Host 只传游戏位置，不提供 VFS 或存档根目录。一个进程只允许一个活动 session。Host 同步复制 Family 借出的只读帧后释放借用。
 - PCM 格式在开流时固定，Family 音频 worker 向 Host 有界可取消队列阻塞写入；Host 转换设备格式，设备实时回调不调用 Family。退出先取消请求和写入，等待 worker 结束，再释放 session 和动态库。错误必须显示并可定位，不隐藏为成功。
+- Manager 默认使用系统音频设备；`NullAudioDevice` 只作为显式选择的测试后端，按采样时钟消费同一有界 PCM 队列，不输出声音。选择只在当前进程有效，游戏中必须显示测试标记，不能作为设备失败后的 fallback 或真实音频播放验收。
 - 首轮只接 Windows 与 FVP，其他 family core 源码保留但不进入活动 workspace；Artemis、Minori 等后续直接实现新 ABI。本地插件显式安装并校验 ABI/capability，多项 probe 命中由用户选择。
 - 翻译为独立异步正文服务，默认 timeout 15 秒、可配置，只暂停当前文字流程；失败显示诊断并保留原文，不自动重试或跳过。上下文限 8 段/6000 字符，session cache 有界，新游戏/读档/配置改变时清空。FVP 本轮声明 unsupported，翻译 UI 禁用，端到端测试等待 Minori；继续使用原游戏字体。正文、secret 和上下文不进日志或持久化缓存。
+- Manager 的作品搜索、候选关联、刷新和解除关联统一放在作品详情；设置只管理数据源许可、token 和封面策略。候选绑定发起搜索的作品，同一作品的元数据请求串行，禁止旧结果覆盖后续选择。
 - Manager 与设置采用新 schema，旧数据明确重建，不写迁移层。HLSL 最终帧效果链使用独立实现的 Magpie format 4 兼容解析、固定 DXC 和 Naga/wgpu 校验；内置 MIT Anime4K Restore_S/Upscale_S、缩放和锐化。未知指令、编译或能力错误拒绝新配置并保留此前有效配置。
+- Slint 与最终帧滤镜共用 wgpu device，创建时必须显式申请 compute/storage limits，不能沿用 Slint 的 UI-only WebGL2 limits。滤镜先在 GPU 接受新配置，再写 SQLite；数据库失败恢复旧 GPU 配置。SQLite schema 3 保存外观、输入映射、滤镜原文与参数、显式安装插件，Host VFS 和 Luau patch 页面不再存在。
 - 本次 AstraEMU 重构按普通软件开发方式实施，增量测试后执行提交前检查；不建立或保留新的 evidence/report 体系。授权游戏的系统页、音视频、原生存读档、冷启动和任一结局仍须实际测试，未完成应如实说明。
 - Minori GARbro scheme 导入必须使用仓库内纯 Rust 两阶段 NRBF reader，先收集对象、metadata、library 与有符号 object id，再解析 forward reference。不得调用 .NET `BinaryFormatter`、managed helper、外部进程、启发式扫描或任何 fallback；未知 record、断裂 reference、重复 id、越界、非预期 Musica/PAZ graph 和 role/key 约束不满足都必须阻断。
 - AstraRPG 是后续同级 gameplay runtime provider。`AstraTRPG` 不作为独立顶层模块或 provider 落地，只能作为 AstraRPG 的 `rpg.trpg` ruleset/profile layer；package/save/report namespace 使用 `rpg.*` 和 `rpg.trpg.*`，不得新增顶层 `trpg.*`。

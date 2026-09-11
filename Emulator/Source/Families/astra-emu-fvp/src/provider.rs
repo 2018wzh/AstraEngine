@@ -58,6 +58,10 @@ impl FamilyProvider for FvpProvider {
             .map_err(|_| error::invalid("ASTRA_EMU_FVP_PROBE_PATH", "invalid game directory"))?;
         let mut fs = NativeFileSystem::new(&request.game_path).map_err(error::rfvp)?;
         let paths = hcb_paths(&mut fs).map_err(error::rfvp)?;
+        tracing::debug!(
+            event = "astra.emu.fvp.probe.complete",
+            script_count = paths.len()
+        );
         if paths.is_empty() {
             return Ok(None);
         }
@@ -103,6 +107,9 @@ impl FvpProvider {
         &mut self,
         request: OpenRequest,
     ) -> FamilyResult<(OpenResponse, FvpSession)> {
+        let _span =
+            tracing::info_span!("fvp_session_open", event = "astra.emu.fvp.session.opening")
+                .entered();
         let descriptor = self.descriptor()?;
         request.validate_for_descriptor(&descriptor)?;
         let mut fs = NativeFileSystem::new(&request.game_path).map_err(error::rfvp)?;
@@ -154,7 +161,7 @@ impl FvpProvider {
                         nls: Nls::ShiftJIS,
                     },
                 )
-                .map_err(error::rfvp)?;
+                .map_err(|error| error::rfvp_operation(error, hosted.core().last_operation()))?;
         }
         let config = hosted.core().config();
         let frame_info = FrameInfo {
@@ -191,6 +198,11 @@ impl FvpProvider {
             fatal: None,
         };
         session.render_frame()?;
+        tracing::info!(
+            event = "astra.emu.fvp.session.open",
+            width = frame_info.width,
+            height = frame_info.height
+        );
         Ok((
             OpenResponse {
                 session_id: session_id.into(),
@@ -201,6 +213,10 @@ impl FvpProvider {
         ))
     }
 }
+
+#[cfg(all(test, target_os = "windows"))]
+#[path = "persistence_tests.rs"]
+mod persistence_tests;
 
 fn hcb_paths(fs: &mut NativeFileSystem) -> rfvp::host_api::RfvpResult<Vec<String>> {
     let mut paths = Vec::new();
@@ -277,7 +293,7 @@ impl FvpSession {
                 PixelFormat::Rgba8,
                 pixels,
             )
-            .map_err(error::rfvp)?;
+            .map_err(|error| error::rfvp_operation(error, "software rendering"))?;
         if rendered.len()
             != self.frame_info.required_bytes().ok_or_else(|| {
                 error::invalid("ASTRA_EMU_FVP_FRAME_SIZE", "frame dimensions overflow")
@@ -345,7 +361,7 @@ impl FvpSession {
         let bytes = self
             .hosted
             .read_resource(&mut host, resource_name, byte_len)
-            .map_err(error::rfvp)?;
+            .map_err(|error| error::rfvp_operation(error, "video resource read"))?;
         if bytes.len() != byte_len {
             return Err(error::invalid(
                 "ASTRA_EMU_FVP_VIDEO_BYTES",
@@ -424,8 +440,8 @@ impl FvpSession {
                 };
                 let bytes = self
                     .hosted
-                    .read_resource(&mut host, resource_name, usize::MAX)
-                    .map_err(error::rfvp)?;
+                    .read_resource(&mut host, resource_name, isize::MAX as usize)
+                    .map_err(|error| error::rfvp_operation(error, "audio resource read"))?;
                 rfvp::hosted::HostedAudioOperation::LoadEncoded { id, kind, bytes }
             }
             other => other,
@@ -460,7 +476,9 @@ impl FamilySession for FvpSession {
             };
             self.hosted
                 .step(&mut host, HostedStepInput { events: input })
-                .map_err(error::rfvp)?
+                .map_err(|error| {
+                    error::rfvp_operation(error, self.hosted.core().last_operation())
+                })?
         };
         for operation in delta.audio {
             if let Err(value) = self.send_audio(operation) {
@@ -537,12 +555,19 @@ impl FamilySession for FvpSession {
         visitor.accept(view)
     }
     fn close(mut self: Box<Self>) -> FamilyResult<()> {
+        tracing::info!(event = "astra.emu.fvp.session.closing");
+        let save_result = self
+            .hosted
+            .core()
+            .save_global_data(&mut self.fs)
+            .map_err(|error| error::rfvp_operation(error, "global save write"));
         let video_result = if self.video.is_some() || self.video_audio_id.is_some() {
             self.finish_video(true)
         } else {
             Ok(())
         };
         let audio_result = self.audio.close();
+        save_result?;
         video_result?;
         audio_result
     }

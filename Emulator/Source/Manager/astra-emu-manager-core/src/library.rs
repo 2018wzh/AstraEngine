@@ -19,12 +19,16 @@ use crate::{
     work_settings::GameSettings,
 };
 
-const SCHEMA_VERSION: i64 = 1;
+#[path = "library_settings.rs"]
+mod settings;
+
+const SCHEMA_VERSION: i64 = 3;
 const MAX_TITLE_CHARS: usize = 1_024;
 const MAX_LOCATION_BYTES: usize = 4_096;
 const MAX_METADATA_BYTES: usize = 1_048_576;
 
-const REQUIRED_TABLES: [&str; 8] = [
+const REQUIRED_TABLES: [&str; 9] = [
+    "appearance_settings",
     "library_game",
     "external_identity",
     "metadata_snapshot",
@@ -36,6 +40,10 @@ const REQUIRED_TABLES: [&str; 8] = [
 ];
 
 const SCHEMA_SQL: &str = r#"
+CREATE TABLE appearance_settings (
+    singleton INTEGER PRIMARY KEY NOT NULL CHECK(singleton = 1),
+    settings_json TEXT NOT NULL
+);
 CREATE TABLE library_game (
     game_id TEXT PRIMARY KEY NOT NULL,
     title TEXT NOT NULL,
@@ -78,7 +86,7 @@ CREATE UNIQUE INDEX one_active_play_session ON play_session((1)
 CREATE TABLE manager_settings (
     singleton INTEGER PRIMARY KEY NOT NULL CHECK(singleton = 1),
     input_mapping_json TEXT NOT NULL,
-    filter_preset TEXT NOT NULL
+    filter_settings_json TEXT NOT NULL
 );
 CREATE TABLE game_settings (
     game_id TEXT PRIMARY KEY NOT NULL REFERENCES library_game(game_id) ON DELETE CASCADE,
@@ -154,7 +162,7 @@ pub struct VerifiedPluginInstall {
 
 impl VerifiedPluginInstall {
     #[allow(dead_code)]
-    pub(crate) fn from_verified_descriptor(
+    pub fn from_verified_descriptor(
         descriptor: FamilyPluginDescriptor,
         location: String,
         installed_at_unix_ms: i64,
@@ -403,234 +411,6 @@ impl Library {
         }
         Ok(())
     }
-
-    pub fn save_input_mapping(&mut self, mapping: &InputMapping) -> Result<(), LibraryError> {
-        let mapping_json =
-            serde_json::to_string(mapping).map_err(|_| LibraryError::Serialization)?;
-        let filter = self.filter_preset()?.unwrap_or_else(|| "none".into());
-        self.connection.execute(
-            "INSERT INTO manager_settings(singleton, input_mapping_json, filter_preset)
-             VALUES(1, ?1, ?2)
-             ON CONFLICT(singleton) DO UPDATE SET
-                input_mapping_json=excluded.input_mapping_json",
-            params![mapping_json, filter],
-        )?;
-        Ok(())
-    }
-
-    pub fn load_input_mapping(&self) -> Result<Option<InputMapping>, LibraryError> {
-        let raw: Option<String> = self
-            .connection
-            .query_row(
-                "SELECT input_mapping_json FROM manager_settings WHERE singleton=1",
-                [],
-                |row| row.get(0),
-            )
-            .optional()?;
-        raw.map(|value| serde_json::from_str(&value).map_err(|_| LibraryError::Settings))
-            .transpose()
-    }
-
-    pub fn set_filter_preset(&mut self, preset: &str) -> Result<(), LibraryError> {
-        if preset.is_empty() || preset.len() > 128 || !is_safe_identifier(preset) {
-            return Err(LibraryError::Settings);
-        }
-        let mapping = self
-            .load_input_mapping()?
-            .unwrap_or_else(crate::input_mapping::default_vn_preset);
-        let mapping_json =
-            serde_json::to_string(&mapping).map_err(|_| LibraryError::Serialization)?;
-        self.connection.execute(
-            "INSERT INTO manager_settings(singleton, input_mapping_json, filter_preset)
-             VALUES(1, ?1, ?2)
-             ON CONFLICT(singleton) DO UPDATE SET filter_preset=excluded.filter_preset",
-            params![mapping_json, preset],
-        )?;
-        Ok(())
-    }
-
-    pub fn filter_preset(&self) -> Result<Option<String>, LibraryError> {
-        self.connection
-            .query_row(
-                "SELECT filter_preset FROM manager_settings WHERE singleton=1",
-                [],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(LibraryError::from)
-    }
-
-    pub fn game_settings(&self, game_id: &str) -> Result<Option<GameSettings>, LibraryError> {
-        validate_id(game_id)?;
-        let raw: Option<String> = self
-            .connection
-            .query_row(
-                "SELECT settings_json FROM game_settings WHERE game_id=?1",
-                [game_id],
-                |row| row.get(0),
-            )
-            .optional()?;
-        raw.map(|value| {
-            let settings: GameSettings =
-                serde_json::from_str(&value).map_err(|_| LibraryError::Settings)?;
-            settings.validate().map_err(|_| LibraryError::Settings)?;
-            Ok(settings)
-        })
-        .transpose()
-    }
-
-    pub fn set_game_settings(
-        &mut self,
-        game_id: &str,
-        settings: &GameSettings,
-    ) -> Result<(), LibraryError> {
-        validate_id(game_id)?;
-        if self.game(game_id)?.is_none() {
-            return Err(LibraryError::GameNotFound);
-        }
-        settings.validate().map_err(|_| LibraryError::Settings)?;
-        let encoded = serde_json::to_string(settings).map_err(|_| LibraryError::Serialization)?;
-        self.connection.execute(
-            "INSERT INTO game_settings(game_id, settings_json) VALUES(?1, ?2)
-             ON CONFLICT(game_id) DO UPDATE SET settings_json=excluded.settings_json",
-            params![game_id, encoded],
-        )?;
-        Ok(())
-    }
-
-    pub fn clear_game_settings(&mut self, game_id: &str) -> Result<(), LibraryError> {
-        validate_id(game_id)?;
-        self.connection
-            .execute("DELETE FROM game_settings WHERE game_id=?1", [game_id])?;
-        Ok(())
-    }
-
-    pub fn set_translation_profile(
-        &mut self,
-        profile: &TranslationProfile,
-    ) -> Result<(), LibraryError> {
-        profile.validate().map_err(|_| LibraryError::Settings)?;
-        let encoded = serde_json::to_string(profile).map_err(|_| LibraryError::Serialization)?;
-        self.connection.execute(
-            "INSERT INTO translation_profile(singleton, profile_json) VALUES(1, ?1)
-             ON CONFLICT(singleton) DO UPDATE SET profile_json=excluded.profile_json",
-            [encoded],
-        )?;
-        Ok(())
-    }
-
-    pub fn translation_profile(&self) -> Result<Option<TranslationProfile>, LibraryError> {
-        let encoded: Option<String> = self
-            .connection
-            .query_row(
-                "SELECT profile_json FROM translation_profile WHERE singleton=1",
-                [],
-                |row| row.get(0),
-            )
-            .optional()?;
-        encoded
-            .map(|value| serde_json::from_str(&value).map_err(|_| LibraryError::Settings))
-            .transpose()
-    }
-
-    pub fn clear_translation_profile(&mut self) -> Result<(), LibraryError> {
-        self.connection
-            .execute("DELETE FROM translation_profile WHERE singleton=1", [])?;
-        Ok(())
-    }
-
-    pub fn install_verified_plugin(
-        &mut self,
-        verified: &VerifiedPluginInstall,
-    ) -> Result<(), LibraryError> {
-        let record = verified.record();
-        let descriptor = record.descriptor();
-        descriptor
-            .validate()
-            .map_err(|_| LibraryError::PluginDescriptor)?;
-        validate_location(&record.location)?;
-        let capabilities =
-            serde_json::to_string(&record.capabilities).map_err(|_| LibraryError::Serialization)?;
-        let supported_formats = serde_json::to_string(&record.supported_formats)
-            .map_err(|_| LibraryError::Serialization)?;
-        self.connection.execute(
-            "INSERT INTO plugin_installation(
-                plugin_id, family_id, location, abi_fingerprint, version,
-                capabilities_json, supported_formats_json, installed_at_unix_ms)
-             VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-             ON CONFLICT(plugin_id) DO UPDATE SET
-                family_id=excluded.family_id,
-                location=excluded.location,
-                abi_fingerprint=excluded.abi_fingerprint,
-                version=excluded.version,
-                capabilities_json=excluded.capabilities_json,
-                supported_formats_json=excluded.supported_formats_json,
-                installed_at_unix_ms=excluded.installed_at_unix_ms",
-            params![
-                record.plugin_id,
-                record.family_id,
-                record.location,
-                record.abi_fingerprint,
-                record.version,
-                capabilities,
-                supported_formats,
-                record.installed_at_unix_ms,
-            ],
-        )?;
-        Ok(())
-    }
-
-    pub fn list_installed_plugins(&self) -> Result<Vec<PluginInstallRecord>, LibraryError> {
-        let mut statement = self.connection.prepare(
-            "SELECT plugin_id, family_id, location, abi_fingerprint, version,
-                    capabilities_json, supported_formats_json, installed_at_unix_ms
-             FROM plugin_installation ORDER BY plugin_id",
-        )?;
-        let rows = statement.query_map([], |row| {
-            let capabilities_json: String = row.get(5)?;
-            let capabilities = serde_json::from_str(&capabilities_json).map_err(|_| {
-                rusqlite::Error::FromSqlConversionFailure(
-                    5,
-                    rusqlite::types::Type::Text,
-                    Box::new(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "capabilities",
-                    )),
-                )
-            })?;
-            let formats_json: String = row.get(6)?;
-            let supported_formats = serde_json::from_str(&formats_json).map_err(|_| {
-                rusqlite::Error::FromSqlConversionFailure(
-                    6,
-                    rusqlite::types::Type::Text,
-                    Box::new(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "supported formats",
-                    )),
-                )
-            })?;
-            Ok(PluginInstallRecord {
-                plugin_id: row.get(0)?,
-                family_id: row.get(1)?,
-                location: row.get(2)?,
-                abi_fingerprint: row.get(3)?,
-                version: row.get(4)?,
-                capabilities,
-                supported_formats,
-                installed_at_unix_ms: row.get(7)?,
-            })
-        })?;
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(LibraryError::from)
-    }
-
-    pub fn remove_plugin(&mut self, plugin_id: &str) -> Result<bool, LibraryError> {
-        validate_id(plugin_id)?;
-        Ok(self.connection.execute(
-            "DELETE FROM plugin_installation WHERE plugin_id=?1",
-            [plugin_id],
-        )? > 0)
-    }
 }
 
 fn game_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<GameRecord> {
@@ -745,8 +525,13 @@ mod tests {
         );
         library.save_input_mapping(&default_vn_preset()).unwrap();
         assert!(library.load_input_mapping().unwrap().is_some());
-        library.set_filter_preset("none").unwrap();
-        assert_eq!(library.filter_preset().unwrap().as_deref(), Some("none"));
+        library
+            .save_filter_settings(&crate::FilterSettings::default())
+            .unwrap();
+        assert_eq!(
+            library.filter_settings().unwrap(),
+            Some(crate::FilterSettings::default())
+        );
     }
 
     #[test]

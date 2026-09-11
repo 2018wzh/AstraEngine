@@ -70,6 +70,7 @@ export component FilterSettingsPage inherits Rectangle {
     in property <[ConfigField]> filter-config-fields;
     callback set-filter-preset(string);
     callback filter-config-changed(string, string);
+    callback load-filter-source();
     callback save-filter-config();
     callback reset-filter-config();
 
@@ -83,6 +84,10 @@ export component FilterSettingsPage inherits Rectangle {
             spacing: 16px;
 
             SettingsSectionHeader { title: "后处理着色器滤镜 (Final-frame Shader)"; }
+            if root.filter-preset == "external" : Text {
+                text: "当前使用外部 HLSL 效果";
+                color: Theme.primary;
+            }
 
             Text {
                 text: "由宿主硬件渲染管线驱动。直接在游戏画布输出前执行后处理着色，零额外帧缓冲回读延迟。";
@@ -100,35 +105,36 @@ export component FilterSettingsPage inherits Rectangle {
             }
 
             FilterPresetRow {
-                title: "怀旧黑白 (Grayscale)";
-                description: "经典单色阶灰度滤镜，适合剧情倒叙回忆或老式胶片质感演出";
-                preset-id: "grayscale";
-                active: root.filter-preset == "grayscale";
+                title: "缩放 (Scale)";
+                description: "按指定倍率放大游戏画面";
+                preset-id: "scale";
+                active: root.filter-preset == "scale";
                 selected(id) => { root.set-filter-preset(id); }
             }
 
             FilterPresetRow {
-                title: "柔和显像管 (CRT Soft)";
-                description: "模拟经典 CRT 阴极射线管细微扫描线与微光晕，消除早期低分辨率锯齿";
-                preset-id: "crt-soft";
-                active: root.filter-preset == "crt-soft";
+                title: "锐化 (Sharpen)";
+                description: "调整最终画面的锐化强度";
+                preset-id: "sharpen";
+                active: root.filter-preset == "sharpen";
                 selected(id) => { root.set-filter-preset(id); }
             }
 
             FilterPresetRow {
-                title: "日系暖阳 (Warm)";
-                description: "微调色温曲线与暗部色调，增强视觉小说 CG 立绘的温润与梦幻感";
-                preset-id: "warm";
-                active: root.filter-preset == "warm";
+                title: "Anime4K Restore + Upscale";
+                description: "Restore CNN S 修复与 Upscale CNN x2 S 二倍放大";
+                preset-id: "anime4k";
+                active: root.filter-preset == "anime4k";
                 selected(id) => { root.set-filter-preset(id); }
             }
 
+            Button { text: "加载外部 HLSL 效果（Magpie format 4）"; clicked => { root.load-filter-source(); } }
             SettingsDivider {}
 
             GenericConfigForm {
                 fields: root.filter-config-fields;
                 form-title: "Filter 通用配置";
-                form-description: "由 filter_config_schema 驱动，未来可扩展 per-layer 绑定";
+                form-description: "修改参数后保存；加载失败时保持当前滤镜。";
                 field-changed(key, value) => { root.filter-config-changed(key, value); }
                 save => { root.save-filter-config(); }
                 reset => { root.reset-filter-config(); }

@@ -502,7 +502,6 @@ fn resource_keys_overlap(left: &ActionResourceKey, right: &ActionResourceKey) ->
         )
 }
 
-#[allow(dead_code)]
 fn resource_is_declared(
     declared: &BTreeSet<ActionResourceKey>,
     observed: &ActionResourceKey,
@@ -517,9 +516,31 @@ fn validate_observed_access(
     declared: &crate::ActionAccess,
     observed: &crate::ActionAccess,
 ) -> Result<(), Diagnostic> {
-    // Shipping 高性能：仅 Evidence 模式做严格白名单
-    // 运行时校验移至 cargo xtask 静态审计，帧内不阻断
-    let _ = (action_id, declared, observed);
+    if let Some(resource) = observed.reads.iter().find(|resource| {
+        !resource_is_declared(&declared.reads, resource)
+            && !resource_is_declared(&declared.writes, resource)
+    }) {
+        return Err(Diagnostic::blocking(
+            "ASTRA_RUNTIME_ACTION_ACCESS_UNDECLARED",
+            "action performed an undeclared deterministic read",
+        )
+        .with_field("action_id", action_id)
+        .with_field("access_mode", "read")
+        .with_field("resource", format!("{resource:?}")));
+    }
+    if let Some(resource) = observed
+        .writes
+        .iter()
+        .find(|resource| !resource_is_declared(&declared.writes, resource))
+    {
+        return Err(Diagnostic::blocking(
+            "ASTRA_RUNTIME_ACTION_ACCESS_UNDECLARED",
+            "action performed an undeclared deterministic write",
+        )
+        .with_field("action_id", action_id)
+        .with_field("access_mode", "write")
+        .with_field("resource", format!("{resource:?}")));
+    }
     Ok(())
 }
 
@@ -825,15 +846,17 @@ fn execute_machine(
                 evidence_mode,
             );
             let action_result = action.run(&mut ctx, &invocation.input);
-            let observed_access = ctx.observed_access();
+            let observed_access = evidence_mode.then(|| ctx.observed_access());
             drop(ctx);
-            if let Err(diagnostic) = validate_observed_access(
-                &invocation.action_id,
-                &descriptor.access,
-                &observed_access,
-            ) {
-                transition_failed = Some(diagnostic);
-                break;
+            if let Some(observed_access) = observed_access {
+                if let Err(diagnostic) = validate_observed_access(
+                    &invocation.action_id,
+                    &descriptor.access,
+                    &observed_access,
+                ) {
+                    transition_failed = Some(diagnostic);
+                    break;
+                }
             }
             if stable_ids_used > descriptor.stable_id_reservation && evidence_mode {
                 transition_failed = Some(

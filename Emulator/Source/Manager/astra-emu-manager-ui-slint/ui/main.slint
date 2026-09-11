@@ -6,18 +6,16 @@ import { AboutSlint, Button, CheckBox, ComboBox, LineEdit, ScrollView, SpinBox, 
 import { Theme } from "./theme.slint";
 import { Sidebar, BottomNav } from "./components/sidebar.slint";
 import { GameCard } from "./components/cover-card.slint";
-import { VfsEntry, VfsPreview } from "./components/file-tree.slint";
-import { MatchReview } from "./settings/metadata.slint";
+import { MatchReview } from "./components/work-association.slint";
 import { GamepadBinding } from "./settings/input.slint";
 import { LibraryPage, PlaySession, ReleaseOption } from "./pages/library.slint";
 import { AboutPage } from "./pages/about.slint";
 import { SettingsPage } from "./pages/settings.slint";
-import { VfsBrowserPage } from "./pages/vfs-browser.slint";
 import { GameViewPage } from "./pages/game-view.slint";
 import { ConfigField } from "./components/generic-config.slint";
 import { M3Button } from "./components/m3-widgets.slint";
 
-export { GameCard, MatchReview, VfsEntry, VfsPreview, PlaySession, ReleaseOption }
+export { GameCard, MatchReview, PlaySession, ReleaseOption }
 
 export component ManagerWindow inherits Window {
     in property <bool> demo-mode: false;
@@ -57,12 +55,10 @@ export component ManagerWindow inherits Window {
     in-out property <string> search-query;
     in property <string> endpoint-identity;
     in property <string> model-identity;
-    in-out property <string> selected-nls;
     in property <string> selected-title;
     in property <string> selected-family;
     in property <string> selected-play-time;
     in property <string> selected-last-played;
-    in property <string> selected-vfs-status;
     in property <[PlaySession]> play-history;
     in-out property <string> library-sort: "title";
 
@@ -89,11 +85,14 @@ export component ManagerWindow inherits Window {
 
     // ===== Global diagnostic =====
     in property <string> global-diagnostic;
+    in property <string> audio-device: "native";
+    callback set-audio-device(string);
     in-out property <bool> fatal-error-active: false;
     in-out property <string> fatal-error-message;
 
     // ===== Game view =====
     in property <image> stage-frame;
+    in-out property <float> stage-output-aspect: 1.333333;
     in-out property <float> stage-native-width: 1024;
     in-out property <float> stage-native-height: 768;
     in-out property <bool> game-active: false;
@@ -101,12 +100,9 @@ export component ManagerWindow inherits Window {
     // ===== Overlay panels (game view) =====
     in-out property <bool> translation-overlay-active: false;
     in-out property <bool> diagnostics-overlay-active: false;
-    in-out property <bool> patches-overlay-active: false;
     in-out property <bool> filters-overlay-active: false;
     in-out property <string> filter-preset: "none";
     in property <string> diagnostics-summary;
-    in property <string> patches-summary;
-    in property <string> patch-mode: "no_patch";
 
     // ===== Translation =====
     in-out property <string> translation-endpoint-kind: "ecnu";
@@ -114,11 +110,8 @@ export component ManagerWindow inherits Window {
     in-out property <string> translation-profile-protocol: "responses";
     in-out property <string> translation-profile-model;
     in-out property <string> translation-target-language: "zh-CN";
-    in-out property <int> translation-context-sentences: 10;
-    in-out property <int> translation-body-limit-bytes: 16384;
     in-out property <int> translation-timeout-ms: 30000;
     in-out property <string> translation-background;
-    in-out property <string> translation-glossary;
     in-out property <string> translation-secret-input;
     in property <bool> translation-consent-present;
 
@@ -128,32 +121,20 @@ export component ManagerWindow inherits Window {
     in-out property <bool> bangumi-consent;
     in-out property <bool> sensitive-covers;
     in-out property <string> metadata-provider: "vndb";
-    in-out property <string> external-id-input;
     in-out property <string> bangumi-token-input;
     in-out property <string> bangumi-play-status: "doing";
     in-out property <int> bangumi-rating: 1;
     in-out property <string> bangumi-note;
     in property <string> bangumi-sync-summary;
 
-    // ===== VFS browser =====
-    in property <[VfsEntry]> vfs-entries;
-    in property <VfsPreview> vfs-preview;
-    in property <bool> vfs-has-preview: false;
-    in property <string> vfs-selected-path;
-    in property <string> vfs-current-dir: "/";
-    in property <string> vfs-mount-summary;
 
     // ===== Input config =====
-    in-out property <string> confirm-key: "return";
-    in-out property <string> cancel-key: "escape";
-    in-out property <float> touch-sensitivity: 50;
     in-out property <bool> gamepad-enabled: true;
     in-out property <string> gamepad-deadzone: "medium";
     in property <[GamepadBinding]> gamepad-bindings;
 
     // ===== Generic config (Family / Extension / Filter) =====
     in property <[ConfigField]> family-config-fields;
-    in property <[ConfigField]> extension-config-fields;
     in property <[ConfigField]> filter-config-fields;
 
     // ===== About =====
@@ -172,29 +153,30 @@ export component ManagerWindow inherits Window {
     callback launch(string);
     callback select-case(string);
     callback search(string);
-    callback configure-nls(string);
     callback game-input(string, bool, float);
     callback leave-game();
     callback open-diagnostics();
     callback open-translation();
-    callback open-patches();
     callback open-filters();
     callback rescan();
+    callback add-game-directory();
+    callback install-family-plugin();
     callback open-settings();
     callback set-library-sort(string);
     callback refresh-compatibility();
     callback set-compatibility-filter(string);
     callback fetch-releases();
     callback pin-release(string);
-    callback save-translation-profile(string, string, string, string, string, int, int, int, string, string, string);
+    callback save-translation-profile(string, string, string, string, string, int, string);
     callback grant-translation-consent();
+    callback test-translation-connection();
     callback set-filter-preset(string);
-    callback set-patch-mode(string);
+    in property <bool> metadata-busy;
+    in property <string> metadata-status;
+    callback search-metadata(string, string);
     callback refresh-metadata(string);
     callback accept-match(string);
-    callback reject-match(string);
     callback unlink-identity(string);
-    callback link-external-id(string, string);
     callback set-metadata-consent(string, bool, string);
     callback set-sensitive-cover-policy(string, bool);
     callback update-bangumi-play-status(string, int, string);
@@ -205,29 +187,18 @@ export component ManagerWindow inherits Window {
     callback set-accent(string);
     callback set-density(string);
     callback set-view-mode(string);
-    callback open-vfs();
-    callback save-input-config(string, string, float, bool, string);
+    callback save-input-config(bool, string);
     callback set-gamepad-binding(string, string);
     callback reset-gamepad-mapping();
-    callback save-per-game-input-mapping();
+    callback save-per-game-input-mapping(bool, string);
     callback clear-per-game-input-mapping();
     callback set-grid-columns(int);
-    callback vfs-select-entry(string);
-    callback vfs-toggle-expand(string);
-    callback vfs-navigate-up();
-    callback vfs-refresh();
-    callback vfs-export-file(string);
-    callback vfs-copy-path(string);
-    callback vfs-search(string);
-    callback vfs-set-type-filter(string);
     callback family-config-changed(string, string);
-    callback extension-config-changed(string, string);
     callback filter-config-changed(string, string);
     callback save-family-config();
-    callback save-extension-config();
+    callback load-filter-source();
     callback save-filter-config();
     callback reset-family-config();
-    callback reset-extension-config();
     callback reset-filter-config();
 
     // ===== Game view (overlays everything when active) =====
@@ -239,6 +210,7 @@ export component ManagerWindow inherits Window {
         z: 10;
 
         stage-frame: root.stage-frame;
+        stage-output-aspect: root.stage-output-aspect;
         stage-native-width <=> root.stage-native-width;
         stage-native-height <=> root.stage-native-height;
         game-input(control, pressed, value) => { root.game-input(control, pressed, value); }
@@ -246,13 +218,10 @@ export component ManagerWindow inherits Window {
 
         translation-overlay-active <=> root.translation-overlay-active;
         diagnostics-overlay-active <=> root.diagnostics-overlay-active;
-        patches-overlay-active <=> root.patches-overlay-active;
         filters-overlay-active <=> root.filters-overlay-active;
         filter-preset <=> root.filter-preset;
         diagnostics-summary: root.diagnostics-summary;
         global-diagnostic: root.global-diagnostic;
-        patches-summary: root.patches-summary;
-        set-patch-mode(mode) => { root.set-patch-mode(mode); }
         set-filter-preset(preset) => { root.set-filter-preset(preset); }
 
     }
@@ -285,16 +254,24 @@ export component ManagerWindow inherits Window {
 
                 if root.current-page == "library" : LibraryPage {
                     games: root.games;
+                    match-reviews: root.match-reviews;
+                    metadata-busy: root.metadata-busy;
+                    metadata-status: root.metadata-status;
+                    vndb-consent: root.vndb-consent;
+                    bangumi-consent: root.bangumi-consent;
+                    search-metadata(provider, query) => { root.search-metadata(provider, query); }
+                    accept-match(id) => { root.accept-match(id); }
+                    refresh-metadata(provider) => { root.refresh-metadata(provider); }
+                    unlink-identity(provider) => { root.unlink-identity(provider); }
+                    metadata-settings => { root.current-page = "settings"; root.settings-category = "metadata"; }
                     selected-case-id <=> root.selected-case-id;
                     search-query <=> root.search-query;
                     endpoint-identity: root.endpoint-identity;
                     model-identity: root.model-identity;
-                    selected-nls <=> root.selected-nls;
                     selected-title: root.selected-title;
                     selected-family: root.selected-family;
                     selected-play-time: root.selected-play-time;
                     selected-last-played: root.selected-last-played;
-                    selected-vfs-status: root.selected-vfs-status;
                     play-history: root.play-history;
                     library-sort <=> root.library-sort;
                     compatibility-filter <=> root.compatibility-filter;
@@ -324,9 +301,9 @@ export component ManagerWindow inherits Window {
                     launch(id) => { root.launch(id); }
                     select-case(id) => { root.select-case(id); }
                     search(query) => { root.search(query); }
-                    configure-nls(nls) => { root.configure-nls(nls); }
                     rescan => { root.rescan(); }
-                    open-vfs => { root.open-vfs(); }
+                    add-game-directory => { root.add-game-directory(); }
+                    install-family-plugin => { root.install-family-plugin(); }
                     set-library-sort(mode) => { root.set-library-sort(mode); }
                     refresh-compatibility => { root.refresh-compatibility(); }
                     set-compatibility-filter(filter) => { root.set-compatibility-filter(filter); }
@@ -339,25 +316,11 @@ export component ManagerWindow inherits Window {
                     reset-family-config => { root.reset-family-config(); }
                 }
 
-                if root.current-page == "vfs" : VfsBrowserPage {
-                    entries: root.vfs-entries;
-                    preview: root.vfs-preview;
-                    has-preview: root.vfs-has-preview;
-                    selected-path: root.vfs-selected-path;
-                    current-dir: root.vfs-current-dir;
-                    mount-summary: root.vfs-mount-summary;
-                    desktop-mode: root.desktop-mode;
-                    select-entry(path) => { root.vfs-select-entry(path); }
-                    toggle-expand(path) => { root.vfs-toggle-expand(path); }
-                    navigate-up => { root.vfs-navigate-up(); }
-                    refresh => { root.vfs-refresh(); }
-                    export-file(path) => { root.vfs-export-file(path); }
-                    copy-path(path) => { root.vfs-copy-path(path); }
-                    search(query) => { root.vfs-search(query); }
-                    set-type-filter(filter) => { root.vfs-set-type-filter(filter); }
-                }
+
 
                 if root.current-page == "settings" : SettingsPage {
+                    audio-device: root.audio-device;
+                    set-audio-device(device) => { root.set-audio-device(device); }
                     category <=> root.settings-category;
                     desktop-mode: root.desktop-mode;
                     has-selected-case: root.selected-case-id != "";
@@ -368,45 +331,32 @@ export component ManagerWindow inherits Window {
                     protocol <=> root.translation-profile-protocol;
                     model <=> root.translation-profile-model;
                     target-language <=> root.translation-target-language;
-                    context-sentences <=> root.translation-context-sentences;
-                    body-limit-bytes <=> root.translation-body-limit-bytes;
                     timeout-ms <=> root.translation-timeout-ms;
-                    background-context <=> root.translation-background;
-                    glossary <=> root.translation-glossary;
                     secret-input <=> root.translation-secret-input;
                     consent-present: root.translation-consent-present;
-                    save-translation-profile(kind, endpoint, protocol, model, language, context, body-limit, timeout, background, glossary, secret) => {
-                        root.save-translation-profile(kind, endpoint, protocol, model, language, context, body-limit, timeout, background, glossary, secret);
+                    save-translation-profile(kind, endpoint, protocol, model, language, timeout, secret) => {
+                        root.save-translation-profile(kind, endpoint, protocol, model, language, timeout, secret);
                     }
+                    test-translation-connection => { root.test-translation-connection(); }
                     grant-translation-consent => { root.grant-translation-consent(); }
-                    extension-config-fields: root.extension-config-fields;
-                    extension-config-changed(key, value) => { root.extension-config-changed(key, value); }
-                    save-extension-config => { root.save-extension-config(); }
-                    reset-extension-config => { root.reset-extension-config(); }
 
                     // Metadata
-                    match-reviews: root.match-reviews;
-                    selected-case-id: root.selected-case-id;
                     vndb-consent <=> root.vndb-consent;
                     bangumi-consent <=> root.bangumi-consent;
                     sensitive-covers <=> root.sensitive-covers;
                     metadata-provider <=> root.metadata-provider;
-                    external-id-input <=> root.external-id-input;
                     bangumi-token-input <=> root.bangumi-token-input;
-                    refresh-metadata(provider) => { root.refresh-metadata(provider); }
-                    accept-match(id) => { root.accept-match(id); }
-                    reject-match(id) => { root.reject-match(id); }
-                    unlink-identity(provider) => { root.unlink-identity(provider); }
-                    link-external-id(provider, id) => { root.link-external-id(provider, id); }
                     set-metadata-consent(provider, enabled, secret) => { root.set-metadata-consent(provider, enabled, secret); }
                     set-sensitive-cover-policy(provider, enabled) => { root.set-sensitive-cover-policy(provider, enabled); }
+
 
                     // Filters
                     filter-preset <=> root.filter-preset;
                     filter-config-fields: root.filter-config-fields;
                     set-filter-preset(preset) => { root.set-filter-preset(preset); }
                     filter-config-changed(key, value) => { root.filter-config-changed(key, value); }
-                    save-filter-config => { root.save-filter-config(); }
+                    load-filter-source => { root.load-filter-source(); }
+                save-filter-config => { root.save-filter-config(); }
                     reset-filter-config => { root.reset-filter-config(); }
 
                     // Compatibility
@@ -415,23 +365,17 @@ export component ManagerWindow inherits Window {
                     refresh-compatibility => { root.refresh-compatibility(); }
 
                     // Patches
-                    patches-summary: root.patches-summary;
-                    patch-mode: root.patch-mode;
-                    set-patch-mode(mode) => { root.set-patch-mode(mode); }
 
                     // Input
-                    confirm-key <=> root.confirm-key;
-                    cancel-key <=> root.cancel-key;
-                    touch-sensitivity <=> root.touch-sensitivity;
                     gamepad-enabled <=> root.gamepad-enabled;
                     gamepad-deadzone <=> root.gamepad-deadzone;
                     gamepad-bindings: root.gamepad-bindings;
-                    save-input-config(confirm, cancel, sensitivity, gamepad, deadzone) => {
-                        root.save-input-config(confirm, cancel, sensitivity, gamepad, deadzone);
+                    save-input-config(gamepad, deadzone) => {
+                        root.save-input-config(gamepad, deadzone);
                     }
                     set-gamepad-binding(button, key) => { root.set-gamepad-binding(button, key); }
                     reset-gamepad-mapping => { root.reset-gamepad-mapping(); }
-                    save-per-game-input-mapping => { root.save-per-game-input-mapping(); }
+                    save-per-game-input-mapping(gamepad, deadzone) => { root.save-per-game-input-mapping(gamepad, deadzone); }
                     clear-per-game-input-mapping => { root.clear-per-game-input-mapping(); }
 
                     // Appearance
@@ -464,25 +408,45 @@ export component ManagerWindow inherits Window {
     }
 
     // ===== Global diagnostic banner (M3 Snackbar / Banner) =====
+    if root.game-active && root.audio-device == "null" : Rectangle {
+        x: root.usable-x + root.usable-width - self.width - 16px;
+        y: root.usable-y + 16px;
+        width: 208px;
+        height: 32px;
+        background: Theme.surface-container-high;
+        border-radius: Theme.shape-md;
+        z: 30;
+        Text {
+            text: "测试音频 · 不播放声音";
+            color: Theme.on-surface;
+            font-size: Theme.font-label-md;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+
     if root.global-diagnostic != "" : Rectangle {
         x: root.usable-x + 16px;
         y: root.usable-y + root.usable-height - self.height - 16px;
         width: root.usable-width - 32px;
-        min-height: 48px;
+        height: min(root.usable-height / 3, max(48px, diagnostic-text.preferred-height + 24px));
+        clip: true;
         background: Theme.error-container;
         border-radius: Theme.shape-md;
         border-width: 1px;
         border-color: Theme.error;
         z: 100;
 
-        Text {
+        diagnostic-text := Text {
             text: root.global-diagnostic;
             color: Theme.on-error-container;
             font-size: Theme.font-body-sm;
             wrap: word-wrap;
             vertical-alignment: center;
             x: 16px;
+            y: 12px;
             width: parent.width - 32px;
+            height: parent.height - 24px;
         }
     }
 
@@ -499,7 +463,7 @@ export component ManagerWindow inherits Window {
 
         Rectangle {
             width: min(parent.width - 32px, 560px);
-            min-height: 220px;
+            height: min(parent.height - 32px, 400px);
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             background: Theme.surface-container-high;

@@ -1,5 +1,7 @@
 # RFVP fork v9 职责审计
 
+> 历史记录：本页描述旧 Family ABI v9 分支，不代表当前独立 Host 的实现。2026-09-11 已升级到 RFVP 0.6.0，删除 hosted snapshot/restore 与 canonical state hash API，并接入上游全局持久化。当前差异以 `Emulator/Source/Families/astra-emu-fvp/MODIFICATIONS.md` 为准。
+
 ## 审计结论
 
 结论为 **不通过**。AstraEngine 的 `astra-emu-fvp` adapter 已经足够薄，但

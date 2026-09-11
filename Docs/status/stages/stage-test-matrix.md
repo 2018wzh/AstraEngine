@@ -1,5 +1,9 @@
 # Stage Test Matrix
 
+2026 年 9 月 11 日：RFVP 升级到上游 0.6.0（304e773387a9920c9db091ec1fd937c717aea949），保留 session-owned hosted 适配。FVP 的 26 项测试、RFVP hosted 的 43 项测试通过，Manager 编译通过。上游 TextWait、InputFlash 和 dissolve wait 修复已合入；本地另修复协程退出后被迟到的文本完成事件重新启动的问题。全局持久化已接入：启动在首个 tick 前加载，正常关闭通过原子替换写入；文件损坏、变量数量不符与 I/O 失败均返回错误。删除无调用方的 hosted snapshot/hash 与自定义 motion/graph 存档扩展，恢复上游普通存档布局。Sandbox 中修改两项游戏设置后完全退出并重启管理器，设置均保留。后续已通过当前集成工作区的全 workspace Clippy、Headless 构建和 workspace test；RFVP 内部适配单独提交为 bfc652cfc。游戏已检查标题、新游戏正文、普通槽位写入、重新创建 session 后读档及继续推进。载入会先恢复到存档页，退出该页后回到正文。Sandbox 采用显式 NullAudioDevice，真实声音、完整视频和结局仍待验证。
+
+2026 年 9 月 10 日：独立 Manager 入口已集成，全 workspace 的格式、Clippy、Headless 构建与测试已通过。后续修正了 FVP 目录枚举和启动诊断，并加入显式选择的 NullAudioDevice 测试后端；FVP 的 18 项测试、Manager 的 26 项测试通过。真实设备缺失仍报错，NullAudioDevice 不输出声音。Sandbox 游戏流程、原生存档和视频测试仍在进行。
+
 2026-09-09：AstraEMU 集成分支的 Family ABI、Manager core、翻译服务和 FVP 分别通过 7、22、12、16 项测试；联网凭据测试跳过。FVP 测试包含原始字体绑定与原生文件操作。Headless 和 FVP 动态库已完成构建，完整 workspace 与真实游戏流程仍未完成。
 
 2026-09-08：[AstraEMU 独立 Host 重构](../../migrations/astraemu-independent-host.md) 已获批准，当前 `IN_PROGRESS`。本页较早的 AstraEMU RuntimeWorld、Family ABI v9、Hook、Host VFS 和统一 package/save 记录由新方案取代；不能用于宣称独立 Host 已完成。
@@ -204,3 +208,5 @@
 | `T-S8-RPG-NET-SERVER-01` | Stage 8 | `astra-rpg-server` planned target | `Engine/Source/Modules/AstraRPG/astra-rpg-server/` | `cargo test -p astra-rpg-server server_session` | `S8-RPG-NET-SERVER-01` | RPG network server | server assigns seats, validates permissions, appends action transcript and emits redacted audit |
 | `T-S8-RPG-NET-CLIENT-01` | Stage 8 | `astra-rpg-client` planned target | `Engine/Source/Modules/AstraRPG/astra-rpg-client/` | `cargo test -p astra-rpg-client client_session` | `S8-RPG-NET-CLIENT-01` | RPG network client | client validates handshake, seat permissions, local transcript view and reconnect cursor |
 | `T-S8-RPG-NET-REPLAY-01` | Stage 8 | `astra-release` planned target | `Engine/Source/Developer/astra-release/tests/rpg_network_gate.rs` | `cargo test -p astra-release rpg_network_gate` | `S8-RPG-NET-REPLAY-01` | RPG network replay | synced transcript replays without live provider and state/event/provider hash matches |
+
+Manager 元数据增量回归：`cargo test -p astra-emu-manager metadata_` 覆盖候选归属、关键词校验、重复请求、空结果、关联标题重启保留和解除关联；界面验证从作品详情搜索并选择候选。

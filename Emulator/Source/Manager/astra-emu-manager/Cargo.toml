@@ -34,6 +34,7 @@ rubato.workspace = true
 sha2.workspace = true
 slint = { workspace = true, features = ["std", "compat-1-2", "accessibility", "backend-winit", "renderer-femtovg-wgpu", "unstable-wgpu-29", "unstable-winit-030"] }
 thiserror.workspace = true
+tempfile.workspace = true
 tracing.workspace = true
 winit.workspace = true
 hassle-rs = "=0.12.0"
@@ -42,9 +43,6 @@ wgpu.workspace = true
 [target.'cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))'.dependencies]
 gilrs = { workspace = true, features = ["wgi"] }
 rfd.workspace = true
-
-[dev-dependencies]
-tempfile.workspace = true
 
 [build-dependencies]
 sha2.workspace = true

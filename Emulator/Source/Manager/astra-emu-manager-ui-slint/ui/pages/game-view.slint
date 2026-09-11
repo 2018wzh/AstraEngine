@@ -1,4 +1,4 @@
-// Game view page - full-screen stage + auto-hiding M3 toolbar + M3 Bottom Sheet.
+// Game view page - unobstructed stage below the host toolbar.
 
 import { Button } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
@@ -17,19 +17,19 @@ export component GameViewPage inherits Rectangle {
     // Overlay panel visibility
     in-out property <bool> translation-overlay-active: false;
     in-out property <bool> diagnostics-overlay-active: false;
-    in-out property <bool> patches-overlay-active: false;
     in-out property <bool> filters-overlay-active: false;
-    property <bool> overlay-active: root.diagnostics-overlay-active || root.patches-overlay-active || root.filters-overlay-active;
+    property <bool> overlay-active: root.diagnostics-overlay-active || root.filters-overlay-active;
     in-out property <string> enhance-tab: "filters";
 
-    // Toolbar auto-hide: visible while pointer is near the top edge
-    property <length> last-pointer-y: 0px;
-    property <bool> toolbar-hover: root.last-pointer-y < 64px;
-    property <float> stage-aspect: root.stage-native-width / root.stage-native-height;
-    property <length> stage-width: root.width / root.height > root.stage-aspect ? root.height * root.stage-aspect : root.width;
-    property <length> stage-height: root.width / root.height > root.stage-aspect ? root.height : root.width / root.stage-aspect;
+    // Keep host controls outside the game's original input and image area.
+    property <length> toolbar-height: 64px;
+    property <length> stage-available-height: max(1px, root.height - root.toolbar-height);
+    in property <float> stage-output-aspect: 1.333333;
+    property <float> stage-aspect: root.stage-output-aspect;
+    property <length> stage-width: root.width / root.stage-available-height > root.stage-aspect ? root.stage-available-height * root.stage-aspect : root.width;
+    property <length> stage-height: root.width / root.stage-available-height > root.stage-aspect ? root.stage-available-height : root.width / root.stage-aspect;
     property <length> stage-x: (root.width - root.stage-width) / 2;
-    property <length> stage-y: (root.height - root.stage-height) / 2;
+    property <length> stage-y: root.toolbar-height + (root.stage-available-height - root.stage-height) / 2;
 
     // Diagnostics panel state
     in-out property <length> diagnostics-x: 40px;
@@ -37,13 +37,6 @@ export component GameViewPage inherits Rectangle {
     in-out property <bool> diagnostics-collapsed: false;
     in property <string> diagnostics-summary;
     in property <string> global-diagnostic;
-
-    // Patches panel state
-    in-out property <length> patches-x: 60px;
-    in-out property <length> patches-y: 160px;
-    in-out property <bool> patches-collapsed: false;
-    in property <string> patches-summary;
-    callback set-patch-mode(string);
 
     // Filters panel state
     in-out property <length> filters-x: 80px;
@@ -68,60 +61,44 @@ export component GameViewPage inherits Rectangle {
 
     // Game input focus scope
     game-focus := FocusScope {
-        key-pressed(event) => {
-            if root.overlay-active { return reject; }
-            if event.text == Key.Return { root.game-input("enter", true, 1); return accept; }
-            if event.text == Key.Escape { root.game-input("escape", true, 1); return accept; }
-            if event.text == Key.UpArrow { root.game-input("arrow_up", true, 1); return accept; }
-            if event.text == Key.DownArrow { root.game-input("arrow_down", true, 1); return accept; }
-            if event.text == Key.LeftArrow { root.game-input("arrow_left", true, 1); return accept; }
-            if event.text == Key.RightArrow { root.game-input("arrow_right", true, 1); return accept; }
-            if event.text == Key.Control { root.game-input("control", true, 1); return accept; }
-            if event.text == " " { root.game-input("space", true, 1); return accept; }
-            return reject;
-        }
-        key-released(event) => {
-            if root.overlay-active { return reject; }
-            if event.text == Key.Return { root.game-input("enter", false, 0); return accept; }
-            if event.text == Key.Escape { root.game-input("escape", false, 0); return accept; }
-            if event.text == Key.UpArrow { root.game-input("arrow_up", false, 0); return accept; }
-            if event.text == Key.DownArrow { root.game-input("arrow_down", false, 0); return accept; }
-            if event.text == Key.LeftArrow { root.game-input("arrow_left", false, 0); return accept; }
-            if event.text == Key.RightArrow { root.game-input("arrow_right", false, 0); return accept; }
-            if event.text == Key.Control { root.game-input("control", false, 0); return accept; }
-            if event.text == " " { root.game-input("space", false, 0); return accept; }
-            return reject;
-        }
 
         TouchArea {
             moved => {
-                root.last-pointer-y = self.mouse-y;
+                if root.overlay-active { return; }
                 if root.stage-width > 0px && root.stage-height > 0px && self.mouse-x >= root.stage-x && self.mouse-x < root.stage-x + root.stage-width && self.mouse-y >= root.stage-y && self.mouse-y < root.stage-y + root.stage-height {
                     root.game-input("pointer.x", true, (self.mouse-x - root.stage-x) / root.stage-width * root.stage-native-width);
                     root.game-input("pointer.y", true, (self.mouse-y - root.stage-y) / root.stage-height * root.stage-native-height);
                 }
             }
-            clicked => {
-                if root.stage-width > 0px && root.stage-height > 0px && self.mouse-x >= root.stage-x && self.mouse-x < root.stage-x + root.stage-width && self.mouse-y >= root.stage-y && self.mouse-y < root.stage-y + root.stage-height {
-                    root.game-input("pointer.x", true, (self.mouse-x - root.stage-x) / root.stage-width * root.stage-native-width);
-                    root.game-input("pointer.y", true, (self.mouse-y - root.stage-y) / root.stage-height * root.stage-native-height);
-                    root.game-input("pointer.primary", true, 1);
+            pointer-event(event) => {
+                if root.overlay-active { return; }
+                if event.kind == PointerEventKind.cancel {
                     root.game-input("pointer.primary", false, 0);
+                    root.game-input("pointer.secondary", false, 0);
+                    root.game-input("pointer.middle", false, 0);
+                    return;
                 }
+                if event.kind != PointerEventKind.down && event.kind != PointerEventKind.up { return; }
+                if event.kind == PointerEventKind.down && (self.mouse-x < root.stage-x || self.mouse-x >= root.stage-x + root.stage-width || self.mouse-y < root.stage-y || self.mouse-y >= root.stage-y + root.stage-height) { return; }
+                root.game-input("pointer.x", true, (self.mouse-x - root.stage-x) / root.stage-width * root.stage-native-width);
+                root.game-input("pointer.y", true, (self.mouse-y - root.stage-y) / root.stage-height * root.stage-native-height);
+                if event.button == PointerEventButton.left { root.game-input("pointer.primary", event.kind == PointerEventKind.down, 1); }
+                if event.button == PointerEventButton.right { root.game-input("pointer.secondary", event.kind == PointerEventKind.down, 1); }
+                if event.button == PointerEventButton.middle { root.game-input("pointer.middle", event.kind == PointerEventKind.down, 1); }
             }
             scroll-event(event) => {
-                root.game-input("wheel", false, event.delta-y / 1px);
+                root.game-input("wheel", false, event.delta-y / 60px);
                 return accept;
             }
         }
     }
 
-    // Auto-hiding top toolbar (M3 Stadium App Bar on hover near top)
+    // Persistent host toolbar above the stage.
     toolbar-area := Rectangle {
         x: 0px;
         y: 0px;
         width: parent.width;
-        height: 64px;
+        height: root.toolbar-height;
         z: 50;
 
         Rectangle {
@@ -133,8 +110,6 @@ export component GameViewPage inherits Rectangle {
             border-radius: 23px;
             border-width: 1px;
             border-color: Theme.outline-variant;
-            opacity: root.toolbar-hover ? 1 : 0;
-            animate opacity { duration: 150ms; }
 
             HorizontalLayout {
                 padding-left: 14px;
@@ -156,19 +131,8 @@ export component GameViewPage inherits Rectangle {
                     checked: root.diagnostics-overlay-active;
                     clicked => {
                         root.translation-overlay-active = false;
-                        root.patches-overlay-active = false;
                         root.filters-overlay-active = false;
                         if root.diagnostics-overlay-active { root.diagnostics-overlay-active = false; } else { root.diagnostics-overlay-active = true; root.enhance-tab = "diagnostics"; }
-                    }
-                }
-                CheckButton {
-                    label: "Luau 补丁";
-                    checked: root.patches-overlay-active;
-                    clicked => {
-                        root.translation-overlay-active = false;
-                        root.diagnostics-overlay-active = false;
-                        root.filters-overlay-active = false;
-                        if root.patches-overlay-active { root.patches-overlay-active = false; } else { root.patches-overlay-active = true; root.enhance-tab = "patches"; }
                     }
                 }
                 CheckButton {
@@ -177,7 +141,6 @@ export component GameViewPage inherits Rectangle {
                     clicked => {
                         root.translation-overlay-active = false;
                         root.diagnostics-overlay-active = false;
-                        root.patches-overlay-active = false;
                         if root.filters-overlay-active { root.filters-overlay-active = false; } else { root.filters-overlay-active = true; root.enhance-tab = "filters"; }
                     }
                 }
@@ -234,22 +197,7 @@ export component GameViewPage inherits Rectangle {
                             horizontal-alignment: center;
                             vertical-alignment: center;
                         }
-                        TouchArea { clicked => { root.enhance-tab = "diagnostics"; root.diagnostics-overlay-active = true; root.patches-overlay-active = false; root.filters-overlay-active = false; } }
-                    }
-
-                    Rectangle {
-                        horizontal-stretch: 1;
-                        border-radius: 8px;
-                        background: root.enhance-tab == "patches" ? Theme.primary-container : Theme.surface-container;
-                        Text {
-                            text: "补丁";
-                            color: root.enhance-tab == "patches" ? Theme.on-primary-container : Theme.on-surface-variant;
-                            font-size: Theme.font-label-lg;
-                            font-weight: root.enhance-tab == "patches" ? 700 : 400;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-                        TouchArea { clicked => { root.enhance-tab = "patches"; root.diagnostics-overlay-active = false; root.patches-overlay-active = true; root.filters-overlay-active = false; } }
+                        TouchArea { clicked => { root.enhance-tab = "diagnostics"; root.diagnostics-overlay-active = true; root.filters-overlay-active = false; } }
                     }
 
                     Rectangle {
@@ -264,7 +212,7 @@ export component GameViewPage inherits Rectangle {
                             horizontal-alignment: center;
                             vertical-alignment: center;
                         }
-                        TouchArea { clicked => { root.enhance-tab = "filters"; root.diagnostics-overlay-active = false; root.patches-overlay-active = false; root.filters-overlay-active = true; } }
+                        TouchArea { clicked => { root.enhance-tab = "filters"; root.diagnostics-overlay-active = false; root.filters-overlay-active = true; } }
                     }
                 }
 
@@ -286,20 +234,6 @@ export component GameViewPage inherits Rectangle {
                 }
             }
 
-            if root.enhance-tab == "patches" : VerticalLayout {
-                padding: 16px;
-                spacing: 10px;
-                vertical-stretch: 1;
-
-                Text { text: "Trusted Luau 补丁策略"; color: Theme.on-surface; font-size: Theme.font-title-sm; font-weight: 600; }
-                Text { text: root.patches-summary; color: Theme.on-surface-variant; wrap: word-wrap; font-size: Theme.font-body-sm; }
-                HorizontalLayout {
-                    spacing: 10px;
-                    M3Button { text: "无补丁模式 (no_patch)"; variant: "outlined"; clicked => { root.set-patch-mode("no_patch"); } }
-                    M3Button { text: "强制签名补丁 (trusted)"; variant: "tonal"; clicked => { root.set-patch-mode("trusted"); } }
-                }
-            }
-
             if root.enhance-tab == "filters" : VerticalLayout {
                 padding: 16px;
                 spacing: 10px;
@@ -307,7 +241,7 @@ export component GameViewPage inherits Rectangle {
 
                 Text { text: "后处理着色器滤镜 (Final-frame Shader)"; color: Theme.primary; font-size: Theme.font-title-sm; font-weight: 600; }
                 Text {
-                    text: "实时 GPU 着色管线驱动，复用双缓冲纹理零开销呈现。";
+                    text: "对游戏最终画面应用滤镜。外部 HLSL 和参数可在设置中调整。";
                     color: Theme.on-surface-variant;
                     wrap: word-wrap;
                     font-size: Theme.font-body-sm;
@@ -315,9 +249,9 @@ export component GameViewPage inherits Rectangle {
                 HorizontalLayout {
                     spacing: 8px;
                     CheckButton { label: "原画 (Off)"; checked: root.filter-preset == "none"; clicked => { root.set-filter-preset("none"); } }
-                    CheckButton { label: "灰度 (Grayscale)"; checked: root.filter-preset == "grayscale"; clicked => { root.set-filter-preset("grayscale"); } }
-                    CheckButton { label: "柔和 CRT"; checked: root.filter-preset == "crt-soft"; clicked => { root.set-filter-preset("crt-soft"); } }
-                    CheckButton { label: "暖色 (Warm)"; checked: root.filter-preset == "warm"; clicked => { root.set-filter-preset("warm"); } }
+                    CheckButton { label: "缩放 (Scale)"; checked: root.filter-preset == "scale"; clicked => { root.set-filter-preset("scale"); } }
+                    CheckButton { label: "锐化 (Sharpen)"; checked: root.filter-preset == "sharpen"; clicked => { root.set-filter-preset("sharpen"); } }
+                    CheckButton { label: "Anime4K 2×"; checked: root.filter-preset == "anime4k"; clicked => { root.set-filter-preset("anime4k"); } }
                 }
             }
 
@@ -331,7 +265,6 @@ export component GameViewPage inherits Rectangle {
                         variant: "tonal";
                         clicked => {
                             root.diagnostics-overlay-active = false;
-                            root.patches-overlay-active = false;
                             root.filters-overlay-active = false;
                         }
                     }

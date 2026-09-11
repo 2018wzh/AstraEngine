@@ -47,17 +47,14 @@ component GamepadButtonBadge inherits Rectangle {
 }
 
 export component InputSettingsPage inherits Rectangle {
-    in-out property <string> confirm-key: "return";
-    in-out property <string> cancel-key: "escape";
-    in-out property <float> touch-sensitivity: 50;
     in-out property <bool> gamepad-enabled: true;
     in-out property <string> gamepad-deadzone: "medium";
     in property <[GamepadBinding]> gamepad-bindings;
     in property <bool> has-selected-case;
-    callback save-input-config(string, string, float, bool, string);
+    callback save-input-config(bool, string);
     callback set-gamepad-binding(string, string);
     callback reset-gamepad-mapping();
-    callback save-per-game-input-mapping();
+    callback save-per-game-input-mapping(bool, string);
     callback clear-per-game-input-mapping();
 
     background: Theme.background;
@@ -68,85 +65,6 @@ export component InputSettingsPage inherits Rectangle {
         VerticalLayout {
             padding: 24px;
             spacing: 16px;
-
-            SettingsSectionHeader { title: "键盘控制映射 / Keyboard Mapping"; }
-
-            Rectangle {
-                border-radius: Theme.shape-lg;
-                background: Theme.surface-container-low;
-                border-width: 1px;
-                border-color: Theme.outline-variant;
-
-                VerticalLayout {
-                    padding: 16px;
-                    spacing: 12px;
-
-                    Text { text: "确定 / 推进剧情键 (Confirm / Advance)"; color: Theme.on-surface-variant; font-size: Theme.font-label-lg; }
-                    ComboBox {
-                        model: ["return (回车)", "space (空格)", "e"];
-                        current-index: root.confirm-key == "space" ? 1 : root.confirm-key == "e" ? 2 : 0;
-                        selected(value) => {
-                            if (value == "space (空格)") { root.confirm-key = "space"; }
-                            else if (value == "e") { root.confirm-key = "e"; }
-                            else { root.confirm-key = "return"; }
-                        }
-                    }
-
-                    Text { text: "取消 / 打开系统菜单键 (Cancel / Menu)"; color: Theme.on-surface-variant; font-size: Theme.font-label-lg; }
-                    ComboBox {
-                        model: ["escape (Esc)", "backspace (退格)", "q"];
-                        current-index: root.cancel-key == "backspace" ? 1 : root.cancel-key == "q" ? 2 : 0;
-                        selected(value) => {
-                            if (value == "backspace (退格)") { root.cancel-key = "backspace"; }
-                            else if (value == "q") { root.cancel-key = "q"; }
-                            else { root.cancel-key = "escape"; }
-                        }
-                    }
-                }
-            }
-
-            SettingsDivider {}
-
-            SettingsSectionHeader { title: "移动端与触控 / Touch Input"; }
-
-            Rectangle {
-                border-radius: Theme.shape-lg;
-                background: Theme.surface-container-low;
-                border-width: 1px;
-                border-color: Theme.outline-variant;
-
-                VerticalLayout {
-                    padding: 16px;
-                    spacing: 10px;
-
-                    Text { text: "触控与手势灵敏度 / Touch Sensitivity"; color: Theme.on-surface-variant; font-size: Theme.font-label-lg; }
-                    HorizontalLayout {
-                        spacing: 16px;
-                        Slider {
-                            minimum: 10;
-                            maximum: 100;
-                            value <=> root.touch-sensitivity;
-                            horizontal-stretch: 1;
-                        }
-                        Rectangle {
-                            width: 56px;
-                            height: 32px;
-                            border-radius: Theme.shape-sm;
-                            background: Theme.surface-container-highest;
-                            Text {
-                                text: round(root.touch-sensitivity) + "%";
-                                color: Theme.on-surface;
-                                font-size: Theme.font-label-lg;
-                                font-weight: 600;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
-                            }
-                        }
-                    }
-                }
-            }
-
-            SettingsDivider {}
 
             SettingsSectionHeader { title: "物理手柄支持 / Gamepad Hardware"; }
 
@@ -167,7 +85,7 @@ export component InputSettingsPage inherits Rectangle {
                             spacing: 2px;
                             horizontal-stretch: 1;
                             Text { text: "启用手柄输入监听 / Gamepad Support"; color: Theme.on-surface; font-size: Theme.font-title-sm; font-weight: 600; }
-                            Text { text: root.gamepad-enabled ? "已启用 (后台独立 Worker 采样)" : "已停用"; color: Theme.on-surface-variant; font-size: Theme.font-body-sm; }
+                            Text { text: root.gamepad-enabled ? "已启用" : "已停用"; color: Theme.on-surface-variant; font-size: Theme.font-body-sm; }
                         }
 
                         ComboBox {
@@ -209,7 +127,7 @@ export component InputSettingsPage inherits Rectangle {
             SettingsSectionHeader { title: "模拟器手柄映射表 / Gamepad Button Mapping"; }
 
             Text {
-                text: "由于许多旧版视觉小说引擎缺少原生手柄协议，AstraEMU 会将手柄物理信号自动转译为内核底层键盘注入事件。";
+                text: "由于许多旧版视觉小说引擎缺少原生手柄协议，AstraEMU 会将手柄物理信号自动转译为游戏键盘事件。";
                 color: Theme.on-surface-variant;
                 font-size: Theme.font-body-sm;
                 wrap: word-wrap;
@@ -241,19 +159,9 @@ export component InputSettingsPage inherits Rectangle {
                         }
 
                         ComboBox {
-                            model: ["enter (回车)", "escape (Esc)", "space (空格)", "arrow_up (上)", "arrow_down (下)", "arrow_left (左)", "arrow_right (右)", "shift (加速/快进)", "control (跳过)"];
-                            current-index: binding.key-name == "enter" ? 0 : binding.key-name == "escape" ? 1 : binding.key-name == "space" ? 2 : binding.key-name == "arrow_up" ? 3 : binding.key-name == "arrow_down" ? 4 : binding.key-name == "arrow_left" ? 5 : binding.key-name == "arrow_right" ? 6 : binding.key-name == "shift" ? 7 : binding.key-name == "control" ? 8 : 0;
-                            selected(value) => {
-                                if (value == "enter (回车)") { root.set-gamepad-binding(binding.button-id, "enter"); }
-                                else if (value == "escape (Esc)") { root.set-gamepad-binding(binding.button-id, "escape"); }
-                                else if (value == "space (空格)") { root.set-gamepad-binding(binding.button-id, "space"); }
-                                else if (value == "arrow_up (上)") { root.set-gamepad-binding(binding.button-id, "arrow_up"); }
-                                else if (value == "arrow_down (下)") { root.set-gamepad-binding(binding.button-id, "arrow_down"); }
-                                else if (value == "arrow_left (左)") { root.set-gamepad-binding(binding.button-id, "arrow_left"); }
-                                else if (value == "arrow_right (右)") { root.set-gamepad-binding(binding.button-id, "arrow_right"); }
-                                else if (value == "shift (加速/快进)") { root.set-gamepad-binding(binding.button-id, "shift"); }
-                                else if (value == "control (跳过)") { root.set-gamepad-binding(binding.button-id, "control"); }
-                            }
+                            model: ["未绑定", "enter", "escape", "space", "arrow_up", "arrow_down", "arrow_left", "arrow_right", "shift", "control", "tab", "backspace", "page_up", "page_down", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12"];
+                            current-value: binding.key-name == "" ? "未绑定" : binding.key-name;
+                            selected(value) => { root.set-gamepad-binding(binding.button-id, value == "未绑定" ? "" : value); }
                             horizontal-stretch: 1;
                         }
                     }
@@ -272,6 +180,8 @@ export component InputSettingsPage inherits Rectangle {
             }
 
             SettingsDivider {}
+
+            M3Button { text: "保存为全局默认键位"; primary: true; clicked => { root.save-input-config(root.gamepad-enabled, root.gamepad-deadzone); } }
 
             SettingsSectionHeader { title: "单游戏独立覆写配置 / Per-Game Profiles"; }
 
@@ -313,7 +223,7 @@ export component InputSettingsPage inherits Rectangle {
                             text: "为此游戏保存独占键位";
                             icon: Icons.check;
                             primary: true;
-                            clicked => { root.save-per-game-input-mapping(); }
+                            clicked => { root.save-per-game-input-mapping(root.gamepad-enabled, root.gamepad-deadzone); }
                         }
                         M3Button {
                             text: "清除此游戏独立键位";
@@ -327,7 +237,7 @@ export component InputSettingsPage inherits Rectangle {
             }
 
             Text {
-                text: "所有输入配置修改将在当前活动的游戏运行会话中实时生效。";
+                text: "选择游戏时加载该游戏的键位；保存后在下次启动游戏时生效。";
                 color: Theme.on-surface-variant;
                 font-size: Theme.font-label-sm;
                 wrap: word-wrap;

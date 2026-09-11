@@ -175,34 +175,33 @@ impl NativeFileSystem {
             kind,
         })
     }
-    fn walk(
+    fn enumerate_directory(
         &self,
-        relative: &Path,
+        relative: &str,
         extension: Option<&str>,
         visitor: &mut dyn FnMut(&str, RfvpFileInfo) -> RfvpResult<()>,
     ) -> RfvpResult<()> {
-        let relative_text = relative.to_str().ok_or(RfvpError::InvalidArgument)?;
-        let directory = self.resolve_existing(relative_text)?;
+        let directory = self.resolve_existing(relative)?;
         let mut entries = fs::read_dir(&directory)
             .map_err(|_| RfvpError::Io)?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|_| RfvpError::Io)?;
         entries.sort_by_key(|entry| entry.file_name());
         for entry in entries {
-            let child_relative = relative.join(entry.file_name());
+            let child_relative = Path::new(relative).join(entry.file_name());
             let child_text = child_relative
                 .to_str()
                 .ok_or(RfvpError::InvalidArgument)?
                 .replace(std::path::MAIN_SEPARATOR, "/");
             let child = self.resolve_existing(&child_text)?;
             let info = Self::info(&child)?;
-            if info.kind == RfvpFileKind::Directory {
-                self.walk(&child_relative, extension, visitor)?;
-            } else if info.kind == RfvpFileKind::File
-                && extension.is_none_or(|ext| {
-                    child_relative.extension().and_then(|v| v.to_str()) == Some(ext)
-                })
-            {
+            if extension.is_none_or(|ext| {
+                info.kind == RfvpFileKind::File
+                    && child_relative
+                        .extension()
+                        .and_then(|v| v.to_str())
+                        .is_some_and(|actual| actual.eq_ignore_ascii_case(ext))
+            }) {
                 visitor(&child_text, info)?;
             }
         }
@@ -288,7 +287,7 @@ impl RfvpFileSystem for NativeFileSystem {
     ) -> RfvpResult<()> {
         let relative = Self::relative(root)?;
         match self.resolve_existing(root) {
-            Ok(_) => self.walk(&relative, None, visitor),
+            Ok(_) => self.enumerate_directory(root, None, visitor),
             // A fresh game has no save directory yet. Treat that save root as
             // an empty collection so SaveData(RefreshAll) is harmless before
             // the first save is written; other missing roots remain errors.
@@ -302,11 +301,7 @@ impl RfvpFileSystem for NativeFileSystem {
         extension: &str,
         visitor: &mut dyn FnMut(&str, RfvpFileInfo) -> RfvpResult<()>,
     ) -> RfvpResult<()> {
-        self.walk(
-            Path::new(root),
-            Some(extension.trim_start_matches('.')),
-            visitor,
-        )
+        self.enumerate_directory(root, Some(extension.trim_start_matches('.')), visitor)
     }
 }
 
@@ -354,6 +349,38 @@ fn atomic_replace(temporary: &Path, destination: &Path) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn directory_enumeration_is_non_recursive_and_returns_portable_paths() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(root.path().join("nested/deeper")).unwrap();
+        fs::write(root.path().join("nested/story.HCB"), b"script").unwrap();
+        fs::write(root.path().join("nested/deeper/backup.hcb"), b"ignored").unwrap();
+        fs::write(root.path().join("nested/other.bin"), b"asset").unwrap();
+        let mut filesystem = NativeFileSystem::new(root.path().to_str().unwrap()).unwrap();
+        let mut paths = Vec::new();
+        filesystem
+            .enumerate_by_extension("nested", "hcb", &mut |path, _| {
+                paths.push(path.to_owned());
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(paths.len(), 1);
+        assert!(!paths[0].contains('\\'));
+        let mut file = filesystem.open(&paths[0]).unwrap();
+        let mut bytes = [0; 6];
+        assert_eq!(file.read_at(0, &mut bytes).unwrap(), 6);
+        assert_eq!(&bytes, b"script");
+        let mut listed = Vec::new();
+        filesystem
+            .list("nested", &mut |path, _| {
+                listed.push(path.to_owned());
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(listed.len(), 3);
+        assert!(listed.iter().all(|path| !path.contains('\\')));
+    }
 
     #[test]
     fn write_all_creates_nested_save_directories() {

@@ -1,0 +1,94 @@
+import { ComboBox, LineEdit } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { M3Button } from "./m3-widgets.slint";
+export struct MatchReview {
+    candidate-id: string,
+    case-id: string,
+    provider: string,
+    remote-id: string,
+    title: string,
+    aliases: string,
+    release-date: string,
+    developer: string,
+    evidence: string,
+    score-millis: int,
+    diagnostic: string,
+}
+
+
+export component WorkAssociation inherits Rectangle {
+    in property <[MatchReview]> candidates;
+    in property <bool> busy;
+    in property <string> status;
+    in property <string> work-id;
+    in property <bool> vndb-consent;
+    in property <bool> bangumi-consent;
+    private property <string> provider: "vndb";
+    private property <string> query;
+    private property <bool> expanded: false;
+    changed work-id => { root.query = ""; root.expanded = false; }
+    callback search(string, string);
+    callback accept(string);
+    callback refresh(string);
+    callback unlink(string);
+    callback settings();
+    VerticalLayout {
+        spacing: 8px;
+        M3Button {
+            text: root.expanded ? "收起作品关联" : "关联 / 更换作品";
+            clicked => { root.expanded = !root.expanded; }
+        }
+        if root.expanded : VerticalLayout {
+            spacing: 8px;
+            ComboBox {
+                model: ["VNDB", "Bangumi"];
+                selected(value) => { root.provider = value == "Bangumi" ? "bangumi" : "vndb"; }
+                enabled: !root.busy;
+            }
+            LineEdit {
+                text <=> root.query;
+                placeholder-text: "搜索作品名、原名或译名";
+                enabled: !root.busy;
+                accepted => { root.search(root.provider, root.query); }
+            }
+            if (root.provider == "vndb" ? root.vndb-consent : root.bangumi-consent) : M3Button {
+                text: root.busy ? "请求中…" : "搜索作品";
+                primary: true;
+                enabled: !root.busy && root.query != "";
+                clicked => { root.search(root.provider, root.query); }
+            }
+            if !(root.provider == "vndb" ? root.vndb-consent : root.bangumi-consent) : M3Button {
+                text: "前往设置启用数据源";
+                clicked => { root.settings(); }
+            }
+            Text { text: root.status; wrap: word-wrap; color: Theme.on-surface-variant; }
+            for item in root.candidates : Rectangle {
+                background: Theme.surface-container;
+                border-radius: Theme.shape-md;
+                VerticalLayout {
+                    padding: 10px;
+                    spacing: 6px;
+                    Text { text: item.title; wrap: word-wrap; color: Theme.on-surface; font-weight: 600; }
+                    Text { text: item.provider + " · " + item.release-date + " · " + item.developer; wrap: word-wrap; color: Theme.on-surface-variant; }
+                    if item.aliases != "" : Text {
+                        text: item.aliases;
+                        wrap: word-wrap;
+                        overflow: elide;
+                        height: 42px;
+                        color: Theme.on-surface-variant;
+                    }
+                    M3Button {
+                        text: "关联此作品";
+                        enabled: !root.busy;
+                        clicked => { root.accept(item.candidate-id); }
+                    }
+                }
+            }
+            HorizontalLayout {
+                spacing: 6px;
+                M3Button { text: "刷新"; enabled: !root.busy; clicked => { root.refresh(root.provider); } }
+                M3Button { text: "解除关联"; enabled: !root.busy; clicked => { root.unlink(root.provider); } }
+            }
+        }
+    }
+}

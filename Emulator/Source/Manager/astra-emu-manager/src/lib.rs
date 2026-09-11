@@ -1,10 +1,6 @@
+pub mod effects;
 mod gamepad;
 mod host;
-
-#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
-pub mod desktop_source;
-pub mod effects;
-pub mod family_host;
 
 extern crate self as astra_emu_manager;
 
@@ -12,6 +8,3 @@ pub use host::{
     run_manager, run_manager_with_initial_state, AstraUnderlayRenderer, HostError, HostWake,
     ManagerController, WgpuFrameContext,
 };
-
-#[cfg(target_os = "android")]
-include!("main.rs");

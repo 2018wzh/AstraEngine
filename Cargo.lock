@@ -773,6 +773,7 @@ dependencies = [
  "sha2 0.10.9",
  "symphonia 0.5.5",
  "tempfile",
+ "time",
  "tracing",
  "windows-sys 0.61.2",
  "wmv-decoder",
@@ -6705,6 +6706,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "num_threads"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c7398b9c8b70908f6371f47ed36737907c87c52af34c268fed0bf0ceb92ead9"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "objc-sys"
 version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8415,7 +8425,7 @@ dependencies = [
 
 [[package]]
 name = "rfvp"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "ab_glyph",
  "anyhow",
@@ -8440,6 +8450,7 @@ dependencies = [
  "serde",
  "sha2 0.10.9",
  "spin",
+ "tracing",
  "twofloat",
 ]
 
@@ -10085,7 +10096,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "18dfaaeddcb932337b5e7866ee7d0ce9b76d2fd092997146f187ec09b4558a50"
 dependencies = [
  "deranged",
+ "libc",
  "num-conv",
+ "num_threads",
  "powerfmt",
  "serde_core",
  "time-core",

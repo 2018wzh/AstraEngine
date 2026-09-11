@@ -3,8 +3,8 @@
 ## RFVP covered source
 
 `../../ThirdParty/rfvp/` contains the MPL-2.0 covered source from
-[`xmoezzz/rfvp`](https://github.com/xmoezzz/rfvp) `0.5.0` upstream revision
-`3b5ea6c96a925c12f95aef8554905e8fecbc77c3`, imported from the hosted fork
+[`xmoezzz/rfvp`](https://github.com/xmoezzz/rfvp) `0.6.0` upstream revision
+`304e773387a9920c9db091ec1fd937c717aea949`, with hosted adaptations originating from
 `2018wzh/rfvp` revision `f4f64a5bb726c1759350a666a35e0a454b810f61`.
 The complete license text is `../../ThirdParty/rfvp/LICENSE`. The file-level change
 inventory is `MODIFICATIONS.md`; both it and the covered source must remain in

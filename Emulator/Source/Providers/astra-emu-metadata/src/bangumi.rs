@@ -187,8 +187,10 @@ fn convert_record(subject: Subject) -> MetadataRecord {
         provider: MetadataProviderId::Bangumi,
         remote_id: subject.id.to_string(),
         title: subject.name,
+        description: (!subject.summary.trim().is_empty()).then_some(subject.summary),
         alternate_titles,
         developers,
+        tags: subject.tags.into_iter().map(|tag| tag.name).collect(),
         release_date: subject.date,
         platforms: if subject.platform.is_empty() {
             Vec::new()

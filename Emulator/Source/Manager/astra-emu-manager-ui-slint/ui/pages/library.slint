@@ -1,3 +1,4 @@
+import { MatchReview, WorkAssociation } from "../components/work-association.slint";
 // Game library page - M3 Search Bar, Filter Chip Bar, Cover Grid, and Side Sheet Inspector.
 
 import { Button, ComboBox, LineEdit, ScrollView, SpinBox, TextEdit } from "std-widgets.slint";
@@ -335,17 +336,26 @@ component BangumiProgressSection inherits VerticalLayout {
 }
 
 export component LibraryPage inherits Rectangle {
+    in property <[MatchReview]> match-reviews;
+    in property <bool> metadata-busy;
+    in property <string> metadata-status;
+    in property <bool> vndb-consent;
+    in property <bool> bangumi-consent;
+    callback search-metadata(string, string);
+    callback accept-match(string);
+    callback refresh-metadata(string);
+    callback unlink-identity(string);
+    callback metadata-settings();
+
     in property <[GameCard]> games;
     in-out property <string> selected-case-id;
     in-out property <string> search-query;
     in property <string> endpoint-identity;
     in property <string> model-identity;
-    in-out property <string> selected-nls;
     in property <string> selected-title;
     in property <string> selected-family;
     in property <string> selected-play-time;
     in property <string> selected-last-played;
-    in property <string> selected-vfs-status;
     in property <[PlaySession]> play-history;
     in-out property <string> library-sort: "title";
     // Compatibility: filter mode, sync summary and inspector details.
@@ -377,9 +387,9 @@ export component LibraryPage inherits Rectangle {
     callback launch(string);
     callback select-case(string);
     callback search(string);
-    callback configure-nls(string);
     callback rescan();
-    callback open-vfs();
+    callback add-game-directory();
+    callback install-family-plugin();
     callback set-library-sort(string);
     callback refresh-compatibility();
     callback set-compatibility-filter(string);
@@ -479,6 +489,8 @@ export component LibraryPage inherits Rectangle {
                     }
                 }
 
+                M3Button { text: "添加游戏"; primary: true; clicked => { root.add-game-directory(); } }
+                M3Button { text: "安装插件"; variant: "outlined"; clicked => { root.install-family-plugin(); } }
                 M3Button {
                     text: "扫描游戏";
                     icon: Icons.rotate;
@@ -609,7 +621,7 @@ export component LibraryPage inherits Rectangle {
                                 horizontal-alignment: center;
                             }
                             Text {
-                                text: root.search-query != "" ? "尝试更换关键字或重置筛选条件" : "引导：1. 添加游戏根目录  2. 在设置中开启网络授权  3. 点击“扫描游戏”自动探测 Family 与元数据";
+                                text: root.search-query != "" ? "尝试更换关键字或重置筛选条件" : "点击“添加游戏”选择游戏目录。联网元数据可在设置中单独启用。";
                                 color: Theme.on-surface-variant;
                                 font-size: Theme.font-body-sm;
                                 wrap: word-wrap;
@@ -755,7 +767,6 @@ export component LibraryPage inherits Rectangle {
                     }
                 }
 
-                // Quick Launch & VFS Action Bar
                 HorizontalLayout {
                     spacing: 10px;
 
@@ -766,12 +777,7 @@ export component LibraryPage inherits Rectangle {
                         primary: true;
                         clicked => { root.launch(root.selected-case-id); }
                     }
-                    M3Button {
-                        text: "VFS 浏览";
-                        icon: Icons.folder-tree;
-                        variant: "tonal";
-                        clicked => { root.open-vfs(); }
-                    }
+
                 }
 
                 Rectangle { height: 1px; background: Theme.outline-variant; }
@@ -783,12 +789,25 @@ export component LibraryPage inherits Rectangle {
                     VerticalLayout {
                         spacing: 12px;
 
+                        WorkAssociation {
+                            work-id: root.selected-case-id;
+                            candidates: root.match-reviews;
+                            busy: root.metadata-busy;
+                            status: root.metadata-status;
+                            vndb-consent: root.vndb-consent;
+                            bangumi-consent: root.bangumi-consent;
+                            search(provider, query) => { root.search-metadata(provider, query); }
+                            accept(id) => { root.accept-match(id); }
+                            refresh(provider) => { root.refresh-metadata(provider); }
+                            unlink(provider) => { root.unlink-identity(provider); }
+                            settings => { root.metadata-settings(); }
+                        }
                         // Metadata section
                         VerticalLayout {
                             spacing: 6px;
 
                             Text {
-                                text: "作品元数据 (PotatoVN 对标)";
+                                text: "作品信息";
                                 color: Theme.primary;
                                 font-size: Theme.font-title-sm;
                                 font-weight: 600;
@@ -901,19 +920,6 @@ export component LibraryPage inherits Rectangle {
                         }
 
                         Rectangle { height: 1px; background: Theme.outline-variant; }
-
-                        // Text encoding quick selector
-                        Text {
-                            text: "文本编码快捷选项 (FVP)";
-                            color: Theme.on-surface-variant;
-                            font-size: Theme.font-label-md;
-                        }
-                        ComboBox {
-                            enabled: root.selected-case-id != "";
-                            model: ["未配置", "shift_jis", "gbk", "utf8"];
-                            current-index: root.selected-nls == "shift_jis" ? 1 : root.selected-nls == "gbk" ? 2 : root.selected-nls == "utf8" ? 3 : 0;
-                            selected(value) => { if value != "未配置" { root.configure-nls(value); } }
-                        }
 
                         // Family specific config
                         if root.family-config-fields.length > 0 : GenericConfigForm {

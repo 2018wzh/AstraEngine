@@ -41,38 +41,8 @@ pub struct MatchReviewViewModel {
     pub diagnostic: String,
 }
 
-/// One row of the VFS file tree (read-only view over the mount set).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct VfsEntryViewModel {
-    pub path: String,
-    pub name: String,
-    pub is_dir: bool,
-    pub size_display: String,
-    pub source_layer: String,
-    pub expanded: bool,
-    pub depth: i32,
-}
-
-/// Content preview for the selected VFS file.
-#[derive(Debug, Clone, PartialEq)]
-pub struct VfsPreviewViewModel {
-    pub path: String,
-    /// "text" | "image" | "binary"
-    pub kind: String,
-    pub text_content: String,
-    pub hex_summary: String,
-    pub image_uri: String,
-    pub size_display: String,
-    pub source_layer: String,
-    pub resolve_path: String,
-}
-
-/// Keyboard / gamepad / touch input configuration.
 #[derive(Debug, Clone, PartialEq)]
 pub struct InputConfigViewModel {
-    pub confirm_key: String,
-    pub cancel_key: String,
-    pub touch_sensitivity: f32,
     pub gamepad_enabled: bool,
     pub gamepad_deadzone: String,
     pub gamepad_bindings: Vec<GamepadBindingViewModel>,
@@ -104,9 +74,6 @@ pub struct GamepadBindingViewModel {
 impl Default for InputConfigViewModel {
     fn default() -> Self {
         Self {
-            confirm_key: "return".into(),
-            cancel_key: "escape".into(),
-            touch_sensitivity: 50.0,
             gamepad_enabled: true,
             gamepad_deadzone: "medium".into(),
             gamepad_bindings: Vec::new(),
@@ -142,30 +109,27 @@ impl Default for AppearanceViewModel {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct ManagerViewModel {
     pub games: Vec<GameCardViewModel>,
     pub match_reviews: Vec<MatchReviewViewModel>,
+    pub metadata_busy: bool,
+    pub metadata_status: String,
     pub selected_case_id: Option<String>,
     pub search_query: String,
     pub endpoint_identity: String,
     pub model_identity: String,
     pub global_diagnostic: String,
-    pub selected_nls: String,
+    pub audio_device: String,
     pub translation_endpoint_kind: String,
     pub translation_endpoint: String,
     pub translation_protocol: String,
     pub translation_model: String,
     pub translation_target_language: String,
-    pub translation_context_sentences: i32,
-    pub translation_body_limit_bytes: i32,
     pub translation_timeout_ms: i32,
-    pub translation_background: String,
-    pub translation_glossary: String,
     pub translation_consent_present: bool,
     pub filter_preset: String,
     pub diagnostics_summary: String,
-    pub patches_summary: String,
     pub vndb_consent: bool,
     pub bangumi_consent: bool,
     pub sensitive_covers: bool,
@@ -179,7 +143,6 @@ pub struct ManagerViewModel {
     pub selected_family: String,
     pub selected_play_time: String,
     pub selected_last_played: String,
-    pub selected_vfs_status: String,
     /// Finished play sessions for the selected game, most recent first.
     pub play_history: Vec<PlaySessionViewModel>,
     /// Library sort mode: "title" | "recent" | "play_time".
@@ -203,12 +166,6 @@ pub struct ManagerViewModel {
     pub selected_releases: Vec<(String, String)>,
     /// Navigation. Empty `current_page` means "do not change the current page".
     pub current_page: String,
-    /// VFS browser state.
-    pub vfs_entries: Vec<VfsEntryViewModel>,
-    pub vfs_preview: Option<VfsPreviewViewModel>,
-    pub vfs_selected_path: String,
-    pub vfs_current_dir: String,
-    pub vfs_mount_summary: String,
     /// Input configuration.
     pub input_config: InputConfigViewModel,
     /// Appearance preferences.
@@ -216,7 +173,6 @@ pub struct ManagerViewModel {
     /// Generic Family config fields for selected game (schema-driven).
     pub family_config_fields: Vec<GenericConfigFieldViewModel>,
     /// Generic Extension config fields (e.g. translate).
-    pub extension_config_fields: Vec<GenericConfigFieldViewModel>,
     /// Generic Filter config fields.
     pub filter_config_fields: Vec<GenericConfigFieldViewModel>,
     /// About page metadata.
@@ -242,12 +198,10 @@ pub struct SlintManagerAdapter {
     window: ManagerWindow,
     games: Rc<VecModel<GameCard>>,
     reviews: Rc<VecModel<MatchReview>>,
-    vfs_entries: Rc<VecModel<VfsEntry>>,
     play_history: Rc<VecModel<PlaySession>>,
     releases: Rc<VecModel<ReleaseOption>>,
     gamepad_bindings: Rc<VecModel<GamepadBinding>>,
     family_config: Rc<VecModel<ConfigField>>,
-    extension_config: Rc<VecModel<ConfigField>>,
     filter_config: Rc<VecModel<ConfigField>>,
     image_cache: std::cell::RefCell<std::collections::HashMap<String, slint::Image>>,
     cached_games_signature: std::cell::RefCell<Vec<GameCardSignature>>,
@@ -258,32 +212,26 @@ impl SlintManagerAdapter {
         let window = ManagerWindow::new()?;
         let games = Rc::new(VecModel::default());
         let reviews = Rc::new(VecModel::default());
-        let vfs_entries = Rc::new(VecModel::default());
         let play_history = Rc::new(VecModel::default());
         let releases = Rc::new(VecModel::default());
         let gamepad_bindings = Rc::new(VecModel::default());
         let family_config = Rc::new(VecModel::default());
-        let extension_config = Rc::new(VecModel::default());
         let filter_config = Rc::new(VecModel::default());
         window.set_games(ModelRc::from(games.clone()));
         window.set_match_reviews(ModelRc::from(reviews.clone()));
-        window.set_vfs_entries(ModelRc::from(vfs_entries.clone()));
         window.set_play_history(ModelRc::from(play_history.clone()));
         window.set_releases(ModelRc::from(releases.clone()));
         window.set_gamepad_bindings(ModelRc::from(gamepad_bindings.clone()));
         window.set_family_config_fields(ModelRc::from(family_config.clone()));
-        window.set_extension_config_fields(ModelRc::from(extension_config.clone()));
         window.set_filter_config_fields(ModelRc::from(filter_config.clone()));
         Ok(Self {
             window,
             games,
             reviews,
-            vfs_entries,
             play_history,
             releases,
             gamepad_bindings,
             family_config,
-            extension_config,
             filter_config,
             image_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
             cached_games_signature: std::cell::RefCell::new(Vec::new()),
@@ -291,6 +239,9 @@ impl SlintManagerAdapter {
     }
 
     pub fn apply(&self, model: &ManagerViewModel) {
+        self.window.set_metadata_busy(model.metadata_busy);
+        self.window
+            .set_metadata_status(model.metadata_status.as_str().into());
         let current_signature: Vec<GameCardSignature> = model
             .games
             .iter()
@@ -358,7 +309,6 @@ impl SlintManagerAdapter {
                 })
                 .collect::<Vec<_>>(),
         );
-        self.apply_vfs(&model.vfs_entries, model.vfs_preview.as_ref());
         self.gamepad_bindings.set_vec(
             model
                 .input_config
@@ -376,22 +326,14 @@ impl SlintManagerAdapter {
                 .family_config_fields
                 .iter()
                 .map(|field| ConfigField {
-                    key: field.key.as_str().into(),
-                    label: field.label.as_str().into(),
-                    description: field.description.as_str().into(),
-                    kind: field.kind.as_str().into(),
-                    value: field.value.as_str().into(),
-                    required: field.required,
-                    min: field.min,
-                    max: field.max,
-                })
-                .collect::<Vec<_>>(),
-        );
-        self.extension_config.set_vec(
-            model
-                .extension_config_fields
-                .iter()
-                .map(|field| ConfigField {
+                    options: std::rc::Rc::new(slint::VecModel::from(
+                        field
+                            .enum_values
+                            .iter()
+                            .map(|value| slint::SharedString::from(value.as_str()))
+                            .collect::<Vec<_>>(),
+                    ))
+                    .into(),
                     key: field.key.as_str().into(),
                     label: field.label.as_str().into(),
                     description: field.description.as_str().into(),
@@ -408,6 +350,14 @@ impl SlintManagerAdapter {
                 .filter_config_fields
                 .iter()
                 .map(|field| ConfigField {
+                    options: std::rc::Rc::new(slint::VecModel::from(
+                        field
+                            .enum_values
+                            .iter()
+                            .map(|value| slint::SharedString::from(value.as_str()))
+                            .collect::<Vec<_>>(),
+                    ))
+                    .into(),
                     key: field.key.as_str().into(),
                     label: field.label.as_str().into(),
                     description: field.description.as_str().into(),
@@ -420,12 +370,6 @@ impl SlintManagerAdapter {
                 .collect::<Vec<_>>(),
         );
         self.window
-            .set_vfs_selected_path(model.vfs_selected_path.as_str().into());
-        self.window
-            .set_vfs_current_dir(model.vfs_current_dir.as_str().into());
-        self.window
-            .set_vfs_mount_summary(model.vfs_mount_summary.as_str().into());
-        self.window
             .set_selected_case_id(model.selected_case_id.as_deref().unwrap_or_default().into());
         self.window
             .set_search_query(model.search_query.as_str().into());
@@ -436,7 +380,7 @@ impl SlintManagerAdapter {
         self.window
             .set_global_diagnostic(model.global_diagnostic.as_str().into());
         self.window
-            .set_selected_nls(model.selected_nls.as_str().into());
+            .set_audio_device(model.audio_device.as_str().into());
         self.window
             .set_selected_title(model.selected_title.as_str().into());
         self.window
@@ -483,8 +427,6 @@ impl SlintManagerAdapter {
                 .collect::<Vec<_>>(),
         );
         self.window
-            .set_selected_vfs_status(model.selected_vfs_status.as_str().into());
-        self.window
             .set_translation_endpoint_kind(model.translation_endpoint_kind.as_str().into());
         self.window
             .set_translation_profile_endpoint(model.translation_endpoint.as_str().into());
@@ -495,23 +437,13 @@ impl SlintManagerAdapter {
         self.window
             .set_translation_target_language(model.translation_target_language.as_str().into());
         self.window
-            .set_translation_context_sentences(model.translation_context_sentences);
-        self.window
-            .set_translation_body_limit_bytes(model.translation_body_limit_bytes);
-        self.window
             .set_translation_timeout_ms(model.translation_timeout_ms);
-        self.window
-            .set_translation_background(model.translation_background.as_str().into());
-        self.window
-            .set_translation_glossary(model.translation_glossary.as_str().into());
         self.window
             .set_translation_consent_present(model.translation_consent_present);
         self.window
             .set_filter_preset(model.filter_preset.as_str().into());
         self.window
             .set_diagnostics_summary(model.diagnostics_summary.as_str().into());
-        self.window
-            .set_patches_summary(model.patches_summary.as_str().into());
         self.window.set_vndb_consent(model.vndb_consent);
         self.window.set_bangumi_consent(model.bangumi_consent);
         self.window.set_sensitive_covers(model.sensitive_covers);
@@ -522,12 +454,6 @@ impl SlintManagerAdapter {
             .set_bangumi_note(model.bangumi_note.as_str().into());
         self.window
             .set_bangumi_sync_summary(model.bangumi_sync_summary.as_str().into());
-        self.window
-            .set_confirm_key(model.input_config.confirm_key.as_str().into());
-        self.window
-            .set_cancel_key(model.input_config.cancel_key.as_str().into());
-        self.window
-            .set_touch_sensitivity(model.input_config.touch_sensitivity);
         self.window
             .set_gamepad_enabled(model.input_config.gamepad_enabled);
         self.window
@@ -569,47 +495,6 @@ impl SlintManagerAdapter {
         }
     }
 
-    /// Targeted VFS update without a full model round-trip.
-    pub fn apply_vfs(&self, entries: &[VfsEntryViewModel], preview: Option<&VfsPreviewViewModel>) {
-        self.vfs_entries.set_vec(
-            entries
-                .iter()
-                .map(|entry| VfsEntry {
-                    path: entry.path.as_str().into(),
-                    name: entry.name.as_str().into(),
-                    is_dir: entry.is_dir,
-                    size_display: entry.size_display.as_str().into(),
-                    source_layer: entry.source_layer.as_str().into(),
-                    expanded: entry.expanded,
-                    depth: entry.depth,
-                })
-                .collect::<Vec<_>>(),
-        );
-        match preview {
-            Some(preview) => {
-                self.window.set_vfs_preview(VfsPreview {
-                    path: preview.path.as_str().into(),
-                    kind: preview.kind.as_str().into(),
-                    text_content: preview.text_content.as_str().into(),
-                    hex_summary: preview.hex_summary.as_str().into(),
-                    image_data: if preview.image_uri.is_empty() {
-                        slint::Image::default()
-                    } else {
-                        slint::Image::load_from_path(Path::new(&preview.image_uri))
-                            .unwrap_or_default()
-                    },
-                    size_display: preview.size_display.as_str().into(),
-                    source_layer: preview.source_layer.as_str().into(),
-                    resolve_path: preview.resolve_path.as_str().into(),
-                });
-                self.window.set_vfs_has_preview(true);
-            }
-            None => {
-                self.window.set_vfs_has_preview(false);
-            }
-        }
-    }
-
     /// Switch the color theme directly (UI-initiated toggle).
     pub fn set_theme(&self, dark: bool) {
         self.window.set_theme_dark(dark);
@@ -628,7 +513,7 @@ impl SlintManagerAdapter {
 mod tests {
     use super::{
         AppearanceViewModel, GameCardViewModel, InputConfigViewModel, ManagerViewModel,
-        MatchReviewViewModel, PlaySessionViewModel, VfsEntryViewModel, VfsPreviewViewModel,
+        MatchReviewViewModel, PlaySessionViewModel,
     };
 
     fn assert_contract_is_send_sync<T: Send + Sync>() {}
@@ -638,8 +523,6 @@ mod tests {
         assert_contract_is_send_sync::<GameCardViewModel>();
         assert_contract_is_send_sync::<ManagerViewModel>();
         assert_contract_is_send_sync::<MatchReviewViewModel>();
-        assert_contract_is_send_sync::<VfsEntryViewModel>();
-        assert_contract_is_send_sync::<VfsPreviewViewModel>();
         assert_contract_is_send_sync::<InputConfigViewModel>();
         assert_contract_is_send_sync::<AppearanceViewModel>();
         assert_contract_is_send_sync::<PlaySessionViewModel>();

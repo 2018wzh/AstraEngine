@@ -1,39 +1,15 @@
-// Metadata settings sub-page - migrated from legacy metadata-active page.
+// Provider-wide metadata permissions and cover preferences.
 
-import { Button, CheckBox, ComboBox, LineEdit, ScrollView } from "std-widgets.slint";
+import { CheckBox, ComboBox, LineEdit, ScrollView } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
-import { Icon, Icons } from "../components/icons.slint";
-import { SettingsSectionHeader, SettingsDivider } from "../components/settings-card.slint";
-import { M3Button, M3Card } from "../components/m3-widgets.slint";
-
-export struct MatchReview {
-    candidate-id: string,
-    case-id: string,
-    provider: string,
-    remote-id: string,
-    title: string,
-    aliases: string,
-    release-date: string,
-    developer: string,
-    evidence: string,
-    score-millis: int,
-    diagnostic: string,
-}
+import { SettingsSectionHeader } from "../components/settings-card.slint";
 
 export component MetadataSettingsPage inherits Rectangle {
-    in property <[MatchReview]> match-reviews;
-    in property <string> selected-case-id;
     in-out property <bool> vndb-consent;
     in-out property <bool> bangumi-consent;
     in-out property <bool> sensitive-covers;
     in-out property <string> metadata-provider: "vndb";
-    in-out property <string> external-id-input;
     in-out property <string> bangumi-token-input;
-    callback refresh-metadata(string);
-    callback accept-match(string);
-    callback reject-match(string);
-    callback unlink-identity(string);
-    callback link-external-id(string, string);
     callback set-metadata-consent(string, bool, string);
     callback set-sensitive-cover-policy(string, bool);
 
@@ -45,141 +21,42 @@ export component MetadataSettingsPage inherits Rectangle {
         VerticalLayout {
             padding: 20px;
             spacing: 12px;
+            alignment: start;
 
-            SettingsSectionHeader { title: "Provider consent"; }
+            SettingsSectionHeader { title: "元数据来源"; }
+            ComboBox {
+                height: 36px;
+                model: ["vndb", "bangumi"];
+                current-index: root.metadata-provider == "bangumi" ? 1 : 0;
+                selected(value) => { root.metadata-provider = value; }
+            }
+            Text { text: "作品搜索与关联位于游戏库的作品详情中。"; wrap: word-wrap; color: Theme.on-surface-variant; }
 
             CheckBox {
                 checked <=> root.vndb-consent;
-                text: "Enable VNDB metadata network access";
+                text: "允许访问 VNDB 元数据";
                 toggled => { root.set-metadata-consent("vndb", self.checked, ""); }
             }
 
             CheckBox {
                 checked <=> root.bangumi-consent;
-                text: "Enable Bangumi metadata and collection access";
+                text: "允许访问 Bangumi 元数据与收藏";
                 toggled => { root.set-metadata-consent("bangumi", self.checked, root.bangumi-token-input); root.bangumi-token-input = ""; }
             }
 
             LineEdit {
+                height: 36px;
                 text <=> root.bangumi-token-input;
                 input-type: password;
-                placeholder-text: "Bangumi access token (stored by the platform secret store)";
+                placeholder-text: "Bangumi access token（存入系统凭据管理器）";
             }
 
             CheckBox {
                 checked <=> root.sensitive-covers;
-                text: "Allow sensitive covers for the selected provider";
+                text: "允许下载敏感封面";
                 toggled => { root.set-sensitive-cover-policy(root.metadata-provider, self.checked); }
             }
 
-            SettingsDivider {}
-
-            SettingsSectionHeader { title: "Manual verified identity"; }
-
-            ComboBox {
-                model: ["vndb", "bangumi"];
-                current-index: root.metadata-provider == "bangumi" ? 1 : 0;
-                selected(value) => { root.metadata-provider = value; }
-            }
-
-            LineEdit {
-                text <=> root.external-id-input;
-                placeholder-text: root.metadata-provider == "vndb" ? "v123" : "subject id";
-            }
-
-            HorizontalLayout {
-                spacing: 10px;
-                M3Button {
-                    enabled: root.selected-case-id != "";
-                    text: "校验并关联 (Link)";
-                    icon: Icons.link;
-                    primary: true;
-                    clicked => { root.link-external-id(root.metadata-provider, root.external-id-input); }
-                }
-                M3Button {
-                    enabled: root.selected-case-id != "";
-                    text: "刷新元数据 (Refresh)";
-                    icon: Icons.arrows-rotate;
-                    variant: "tonal";
-                    clicked => { root.refresh-metadata(root.metadata-provider); }
-                }
-                M3Button {
-                    enabled: root.selected-case-id != "";
-                    text: "解除关联 (Unlink)";
-                    icon: Icons.link-slash;
-                    variant: "outlined";
-                    danger: true;
-                    clicked => { root.unlink-identity(root.metadata-provider); }
-                }
-            }
-
-            SettingsDivider {}
-
-            SettingsSectionHeader { title: "待审核匹配队列 (Match Review Queue)"; }
-
-            for item in root.match-reviews: Rectangle {
-                background: Theme.surface-container-low;
-                border-radius: Theme.shape-lg;
-                border-width: 1px;
-                border-color: Theme.outline-variant;
-
-                VerticalLayout {
-                    padding: 16px;
-                    spacing: 8px;
-
-                    HorizontalLayout {
-                        spacing: 8px;
-                        Rectangle {
-                            width: provider-text.preferred-width + 12px;
-                            height: 22px;
-                            border-radius: Theme.shape-xs;
-                            background: Theme.primary-container;
-
-                            provider-text := Text {
-                                text: item.provider + " · " + item.remote-id;
-                                color: Theme.on-primary-container;
-                                font-size: Theme.font-label-sm;
-                                font-weight: 700;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
-                            }
-                        }
-
-                        Text {
-                            text: item.title;
-                            color: Theme.on-surface;
-                            font-size: Theme.font-title-sm;
-                            font-weight: 700;
-                            horizontal-stretch: 1;
-                            overflow: elide;
-                        }
-                    }
-
-                    Text {
-                        text: item.aliases + " · " + item.release-date + " · " + item.developer;
-                        color: Theme.on-surface-variant;
-                        wrap: word-wrap;
-                        font-size: Theme.font-body-sm;
-                    }
-                    Text {
-                        text: "匹配依据: " + item.evidence;
-                        color: Theme.on-surface-variant;
-                        wrap: word-wrap;
-                        font-size: Theme.font-label-md;
-                    }
-                    if item.diagnostic != "" : Text {
-                        text: item.diagnostic;
-                        color: Theme.error;
-                        wrap: word-wrap;
-                        font-size: Theme.font-body-sm;
-                    }
-                    HorizontalLayout {
-                        spacing: 10px;
-                        M3Button { text: "采纳此匹配 (Accept)"; icon: Icons.check; primary: true; clicked => { root.accept-match(item.candidate-id); } }
-                        M3Button { text: "拒绝此匹配 (Reject)"; icon: Icons.xmark; variant: "outlined"; danger: true; clicked => { root.reject-match(item.candidate-id); } }
-                    }
-                }
-            }
         }
     }
 }

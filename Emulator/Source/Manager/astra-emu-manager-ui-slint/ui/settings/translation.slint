@@ -13,20 +13,13 @@ export component TranslationSettingsPage inherits Rectangle {
     in-out property <string> protocol;
     in-out property <string> model;
     in-out property <string> target-language;
-    in-out property <int> context-sentences;
-    in-out property <int> body-limit-bytes;
     in-out property <int> timeout-ms;
-    in-out property <string> background-context;
-    in-out property <string> glossary;
     in-out property <string> secret-input;
     in property <bool> consent-present;
     in-out property <bool> expert-mode: false;
-    in property <[ConfigField]> extension-config-fields;
-    callback save(string, string, string, string, string, int, int, int, string, string, string);
+    callback save(string, string, string, string, string, int, string);
     callback grant-consent();
-    callback extension-config-changed(string, string);
-    callback save-extension-config();
-    callback reset-extension-config();
+    callback test-connection();
 
     background: Theme.background;
 
@@ -76,8 +69,8 @@ export component TranslationSettingsPage inherits Rectangle {
 
             Text { text: "Endpoint kind"; color: Theme.text-muted; font-size: 12px; }
             ComboBox {
-                model: ["ecnu", "openai", "third_party"];
-                current-index: root.endpoint-kind == "openai" ? 1 : root.endpoint-kind == "third_party" ? 2 : 0;
+                model: ["openai-compatible", "openai", "ecnu", "third_party"];
+                current-value: root.endpoint-kind;
                 selected(value) => { root.endpoint-kind = value; }
             }
 
@@ -97,20 +90,9 @@ export component TranslationSettingsPage inherits Rectangle {
                 selected(value) => { root.protocol = value; }
             }
 
-            if root.expert-mode : Text { text: "Context sentences (0–32)"; color: Theme.text-muted; font-size: 12px; }
-            if root.expert-mode : SpinBox { value <=> root.context-sentences; minimum: 0; maximum: 32; }
-
-            if root.expert-mode : Text { text: "Maximum request body bytes (1–16384)"; color: Theme.text-muted; font-size: 12px; }
-            if root.expert-mode : SpinBox { value <=> root.body-limit-bytes; minimum: 1; maximum: 16384; step-size: 256; }
-
-            if root.expert-mode : Text { text: "Timeout milliseconds (1000–120000)"; color: Theme.text-muted; font-size: 12px; }
-            if root.expert-mode : SpinBox { value <=> root.timeout-ms; minimum: 1000; maximum: 120000; step-size: 1000; }
-
-            if root.expert-mode : Text { text: "Character and world background"; color: Theme.text-muted; font-size: 12px; }
-            if root.expert-mode : TextEdit { text <=> root.background-context; min-height: 96px; placeholder-text: "Optional context supplied with each request"; wrap: word-wrap; }
-
-            if root.expert-mode : Text { text: "Glossary (one source = target pair per line)"; color: Theme.text-muted; font-size: 12px; }
-            if root.expert-mode : TextEdit { text <=> root.glossary; min-height: 112px; placeholder-text: "character name = translated name"; wrap: word-wrap; }
+            Text { text: "上下文固定保留最近 8 段，最多 6000 字符；切换游戏、读档或配置变更时清空。"; color: Theme.text-muted; wrap: word-wrap; }
+            Text { text: "超时（毫秒）"; color: Theme.text-muted; }
+            SpinBox { value <=> root.timeout-ms; minimum: 1000; maximum: 120000; step-size: 1000; }
 
             Text { text: "API credential"; color: Theme.text-muted; font-size: 12px; }
             LineEdit { text <=> root.secret-input; input-type: password; placeholder-text: "Leave blank to keep the platform-stored credential"; }
@@ -121,21 +103,20 @@ export component TranslationSettingsPage inherits Rectangle {
                     icon: Icons.check;
                     primary: true;
                     clicked => {
-                        root.save(root.endpoint-kind, root.endpoint, root.protocol, root.model,
-                            root.target-language, root.context-sentences, root.body-limit-bytes,
-                            root.timeout-ms, root.background-context, root.glossary, root.secret-input);
+                        root.save(root.endpoint-kind, root.endpoint, root.protocol, root.model, root.target-language, root.timeout-ms, root.secret-input);
                         root.secret-input = "";
                     }
                 }
             }
 
+            Button { text: "测试已保存配置的连接"; clicked => { root.test-connection(); } }
             SettingsDivider {}
 
             SettingsSectionHeader { title: "网络访问授权"; }
 
             Text {
                 text: root.consent-present
-                    ? "已全局授予网络翻译授权。切换配置无需再次确认。"
+                    ? "已授权当前提供方配置。更改配置后需重新授权。"
                     : "翻译服务会将当前游戏台词及上下文发送至指定的端点与模型。授权为全局生效。";
                 color: Theme.on-surface-variant;
                 wrap: word-wrap;
@@ -153,14 +134,7 @@ export component TranslationSettingsPage inherits Rectangle {
 
             SettingsDivider {}
 
-            GenericConfigForm {
-                fields: root.extension-config-fields;
-                form-title: "Extension 通用配置（Translate）";
-                form-description: "由 extension_config_schema 驱动，同一表单引擎服务所有翻译提供方";
-                field-changed(key, value) => { root.extension-config-changed(key, value); }
-                save => { root.save-extension-config(); }
-                reset => { root.reset-extension-config(); }
-            }
+
 
         }
     }

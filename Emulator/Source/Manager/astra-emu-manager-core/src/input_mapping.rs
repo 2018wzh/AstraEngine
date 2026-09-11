@@ -47,7 +47,7 @@ pub enum GamepadInput {
 
 impl GamepadInput {
     /// All mappable inputs in a stable order for the settings UI.
-    pub const DISPLAY_ORDER: [GamepadInput; 16] = [
+    pub const DISPLAY_ORDER: [GamepadInput; 20] = [
         GamepadInput::South,
         GamepadInput::East,
         GamepadInput::North,
@@ -64,6 +64,10 @@ impl GamepadInput {
         GamepadInput::LeftStickRight,
         GamepadInput::LeftShoulder,
         GamepadInput::RightShoulder,
+        GamepadInput::LeftTrigger,
+        GamepadInput::RightTrigger,
+        GamepadInput::LeftThumb,
+        GamepadInput::RightThumb,
     ];
 
     /// The stable snake_case identifier used by the settings UI.
@@ -189,10 +193,24 @@ impl GamepadDeadzone {
 /// `gamepad_enabled` gates the gamepad pump; `deadzone` tunes stick
 /// hysteresis. Key names are validated by the selected Family.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct InputMapping {
     pub gamepad_enabled: bool,
     pub deadzone: GamepadDeadzone,
     pub gamepad: BTreeMap<GamepadInput, String>,
+}
+
+impl InputMapping {
+    pub fn validate(&self) -> Result<(), String> {
+        if self
+            .gamepad
+            .values()
+            .any(|key| input_key_code(key).is_none())
+        {
+            return Err("ASTRA_EMU_INPUT_KEY_INVALID".into());
+        }
+        Ok(())
+    }
 }
 
 impl Default for InputMapping {
@@ -227,6 +245,71 @@ pub fn default_vn_preset() -> InputMapping {
         deadzone: GamepadDeadzone::Medium,
         gamepad,
     }
+}
+
+pub fn input_key_code(control: &str) -> Option<astra_emu_family_api::KeyCode> {
+    use astra_emu_family_api::KeyCode;
+    Some(match control {
+        "a" => KeyCode::A,
+        "b" => KeyCode::B,
+        "c" => KeyCode::C,
+        "d" => KeyCode::D,
+        "e" => KeyCode::E,
+        "f" => KeyCode::F,
+        "g" => KeyCode::G,
+        "h" => KeyCode::H,
+        "i" => KeyCode::I,
+        "j" => KeyCode::J,
+        "k" => KeyCode::K,
+        "l" => KeyCode::L,
+        "m" => KeyCode::M,
+        "n" => KeyCode::N,
+        "o" => KeyCode::O,
+        "p" => KeyCode::P,
+        "q" => KeyCode::Q,
+        "r" => KeyCode::R,
+        "s" => KeyCode::S,
+        "t" => KeyCode::T,
+        "u" => KeyCode::U,
+        "v" => KeyCode::V,
+        "w" => KeyCode::W,
+        "x" => KeyCode::X,
+        "y" => KeyCode::Y,
+        "z" => KeyCode::Z,
+        "enter" | "return" | "confirm" => KeyCode::Enter,
+        "escape" | "esc" | "cancel" => KeyCode::Escape,
+        "space" => KeyCode::Space,
+        "tab" => KeyCode::Tab,
+        "backspace" => KeyCode::Backspace,
+        "arrow_left" | "left" => KeyCode::ArrowLeft,
+        "arrow_right" | "right" => KeyCode::ArrowRight,
+        "arrow_up" | "up" => KeyCode::ArrowUp,
+        "arrow_down" | "down" => KeyCode::ArrowDown,
+        "page_up" => KeyCode::PageUp,
+        "page_down" => KeyCode::PageDown,
+        "delete" => KeyCode::Delete,
+        "home" => KeyCode::Home,
+        "end" => KeyCode::End,
+        "control" | "control_left" => KeyCode::ControlLeft,
+        "control_right" => KeyCode::ControlRight,
+        "shift" | "shift_left" => KeyCode::ShiftLeft,
+        "shift_right" => KeyCode::ShiftRight,
+        "alt" | "alt_left" => KeyCode::AltLeft,
+        "alt_right" => KeyCode::AltRight,
+        "f1" => KeyCode::F1,
+        "f2" => KeyCode::F2,
+        "f3" => KeyCode::F3,
+        "f4" => KeyCode::F4,
+        "f5" => KeyCode::F5,
+        "f6" => KeyCode::F6,
+        "f7" => KeyCode::F7,
+        "f8" => KeyCode::F8,
+        "f9" => KeyCode::F9,
+        "f10" => KeyCode::F10,
+        "f11" => KeyCode::F11,
+        "f12" => KeyCode::F12,
+        _ => return None,
+    })
 }
 
 #[cfg(test)]
@@ -274,9 +357,7 @@ mod tests {
         let parsed: Result<InputMapping, _> = serde_json::from_str(
             r#"{"gamepad_enabled":true,"deadzone":"medium","gamepad":{},"bogus":1}"#,
         );
-        // Struct is not deny_unknown_fields; unknown keys are ignored, but the
-        // required fields must still be present.
-        assert!(parsed.is_ok());
+        assert!(parsed.is_err());
         let missing: Result<InputMapping, _> = serde_json::from_str(r#"{"gamepad_enabled":true}"#);
         assert!(missing.is_err());
     }

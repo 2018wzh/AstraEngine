@@ -1,5 +1,9 @@
 # Stage 5 AstraEMU
 
+2026 年 9 月 11 日：RFVP 升级到上游 0.6.0（304e773387a9920c9db091ec1fd937c717aea949），保留 session-owned hosted 适配。FVP 的 26 项测试、RFVP hosted 的 43 项测试通过，Manager 编译通过。上游 TextWait、InputFlash 和 dissolve wait 修复已合入；本地另修复协程退出后被迟到的文本完成事件重新启动的问题。全局持久化已接入：启动在首个 tick 前加载，正常关闭通过原子替换写入；文件损坏、变量数量不符与 I/O 失败均返回错误。删除无调用方的 hosted snapshot/hash 与自定义 motion/graph 存档扩展，恢复上游普通存档布局。Sandbox 中修改两项游戏设置后完全退出并重启管理器，设置均保留。后续已通过当前集成工作区的全 workspace Clippy、Headless 构建和 workspace test；RFVP 内部适配单独提交为 bfc652cfc。游戏已检查标题、新游戏正文、普通槽位写入、重新创建 session 后读档及继续推进。载入会先恢复到存档页，退出该页后回到正文。Sandbox 采用显式 NullAudioDevice，真实声音、完整视频和结局仍待验证。
+
+2026 年 9 月 10 日：独立 Manager 入口已集成，全 workspace 的格式、Clippy、Headless 构建与测试已通过。后续修正了 FVP 目录枚举和启动诊断，并加入显式选择的 NullAudioDevice 测试后端；FVP 的 18 项测试、Manager 的 26 项测试通过。真实设备缺失仍报错，NullAudioDevice 不输出声音。Sandbox 游戏流程、原生存档和视频测试仍在进行。
+
 Status: `IN_PROGRESS`
 
 2026-09-09：FVP 原始系统字体绑定已合入，集成分支的 16 项 FVP 测试通过，包含已安装 MS Gothic 的实际 face 解析、字体槽位和原生文件操作。RFVP 移至 `Emulator/ThirdParty/rfvp`，不再自动加入主 workspace；生产路径不再携带 Noto 替代字体。
@@ -42,3 +46,5 @@ T-S5-INDEPENDENT-HOST 覆盖启动、输入、音视频、系统页、原生存�
 Report Schema: 本轮不新增运行报告 schema。Sample: 授权本地游戏只用于临时测试，不进入仓库。
 
 提交前检查仍按根 AGENTS.md 执行；不自动合并或发布。
+
+Manager 作品详情已接入 VNDB/Bangumi 名称搜索与候选关联，移除设置页手填 ID。关联标题用于卡片、排序和本地搜索；解除关联后不读取旧快照。本轮 4 项元数据回归、Manager/UI Clippy、格式与文档检查通过；Windows Sandbox 已实际验证中文搜索、候选关联、空结果和重启保留，Bangumi 网络请求本轮未实测。`S5-METADATA-01` 保持 `IN_PROGRESS`。
