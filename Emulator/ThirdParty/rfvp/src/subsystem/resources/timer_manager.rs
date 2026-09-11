@@ -5,10 +5,9 @@ use alloc::{
     string::{String, ToString},
     vec::Vec,
 };
-use serde::{Deserialize, Serialize};
 use std::vec;
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default)]
 pub struct TimerItem {
     enabled: bool,
     elapsed: u32,
@@ -55,13 +54,6 @@ pub struct TimerManager {
     suspend: bool,
 }
 
-#[cfg(feature = "hosted")]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TimerManagerSnapshotV1 {
-    items: Vec<TimerItem>,
-    suspend: bool,
-}
-
 impl Default for TimerManager {
     fn default() -> Self {
         Self::new()
@@ -69,20 +61,6 @@ impl Default for TimerManager {
 }
 
 impl TimerManager {
-    #[cfg(feature = "hosted")]
-    pub fn capture_snapshot_v1(&self) -> TimerManagerSnapshotV1 {
-        TimerManagerSnapshotV1 {
-            items: self.items.clone(),
-            suspend: self.suspend,
-        }
-    }
-
-    #[cfg(feature = "hosted")]
-    pub fn apply_snapshot_v1(&mut self, snapshot: TimerManagerSnapshotV1) {
-        self.items = snapshot.items;
-        self.suspend = snapshot.suspend;
-    }
-
     pub fn new() -> Self {
         Self {
             items: vec![TimerItem::new(); 16],

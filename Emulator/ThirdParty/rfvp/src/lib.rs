@@ -372,6 +372,7 @@ pub mod io {
     pub enum ErrorKind {
         Other,
         InvalidInput,
+        InvalidData,
         Unsupported,
         UnexpectedEof,
     }

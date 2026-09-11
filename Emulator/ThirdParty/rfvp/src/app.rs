@@ -1428,7 +1428,9 @@ impl App {
 
     pub fn set_text_hidpi_enabled(&mut self, enabled: bool) {
         let mut gd = gd_write(&self.game_data);
-        gd.motion_manager.text_manager.set_hidpi_enabled(enabled);
+        gd.motion_manager
+            .text_manager
+            .set_hidpi_enabled(enabled);
     }
 
     pub fn text_hidpi_enabled(&self) -> bool {
@@ -1660,11 +1662,6 @@ impl App {
             }
         }
 
-        // Wake the VM for touch edges only. Move events are coalesced by the per-frame path;
-        // waking the VM for every move floods Android/iOS during drags.
-        if matches!(phase, 0 | 2 | 3) {
-            self.vm_worker.send_input_signal();
-        }
     }
 
     /// Inject a mouse-button event from an iOS host.
@@ -1702,9 +1699,6 @@ impl App {
             }
         }
 
-        if matches!(phase, 0 | 2 | 3) {
-            self.vm_worker.send_input_signal();
-        }
     }
 
     /// Inject a mouse-wheel event from an iOS host.
@@ -1728,7 +1722,6 @@ impl App {
             gd.inputs_manager.notify_mouse_wheel(delta);
         }
 
-        self.vm_worker.send_input_signal();
     }
 
     /// Inject a key event from an iOS host.
@@ -1757,9 +1750,6 @@ impl App {
             }
         }
 
-        if matches!(phase, 0 | 2 | 3) {
-            self.vm_worker.send_input_signal();
-        }
     }
 
     /// Inject a single-finger touch event from an Android host.
@@ -1847,9 +1837,6 @@ impl App {
             }
         }
 
-        if matches!(phase, 0 | 2 | 3) {
-            self.vm_worker.send_input_signal();
-        }
     }
 
     /// Recreate the presentation surface from a new `ANativeWindow*`.

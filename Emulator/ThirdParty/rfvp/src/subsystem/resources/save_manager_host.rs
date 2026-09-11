@@ -1,17 +1,18 @@
 use alloc::format;
-use alloc::string::{String, ToString};
+use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 
 use anyhow::{anyhow, Result};
 
+use crate::host_api::clock::CalendarTime;
 use crate::script::parser::Nls;
 use crate::subsystem::resources::thread_manager::ThreadManagerSnapshotV1;
-use crate::subsystem::save_state::{append_state_chunk_v1, SaveStateSnapshotV1};
-use std::path::PathBuf;
+use crate::subsystem::save_state::SaveStateSnapshotV1;
 
-const HOSTED_SAVE_MAGIC: [u8; 4] = *b"RFV9";
-const HOSTED_SAVE_VERSION: u16 = 1;
+#[path = "save_manager_host/codec.rs"]
+mod codec;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SaveDataFunction {
@@ -71,29 +72,15 @@ pub struct SaveItem {
 
 impl SaveItem {
     pub fn get_save_path(slot: u32) -> PathBuf {
-        PathBuf::from(format!("save/save{slot:03}.dat").as_str())
+        PathBuf::from(format!("save/rfvp_s{slot:03}.bin").as_str())
     }
 
     pub fn resolve_save_path_for_read(slot: u32) -> PathBuf {
         Self::get_save_path(slot)
     }
 
-    pub fn load_from_mem(buf: &[u8], _nls: Nls) -> Result<Self> {
-        if buf.starts_with(&HOSTED_SAVE_MAGIC) {
-            return decode_hosted_save(buf);
-        }
-        let text = core::str::from_utf8(buf).unwrap_or_default();
-        let mut item = SaveItem::default();
-        for line in text.lines() {
-            if let Some(value) = line.strip_prefix("title=") {
-                item.title = value.to_string();
-            } else if let Some(value) = line.strip_prefix("scene=") {
-                item.scene_title = value.to_string();
-            } else if let Some(value) = line.strip_prefix("script=") {
-                item.script_content = value.to_string();
-            }
-        }
-        Ok(item)
+    pub fn load_from_mem(buf: &[u8], nls: Nls) -> Result<Self> {
+        codec::decode(buf, nls)
     }
 }
 
@@ -108,7 +95,7 @@ pub struct SaveManager {
     savedata_requested: bool,
     savedata_prepared: bool,
     should_load: bool,
-    save_requested: bool,
+    prepare_requested: bool,
     local_saved: Option<Vec<u8>>,
     pending_vm_snapshot: Option<ThreadManagerSnapshotV1>,
     load_request: Option<u32>,
@@ -146,7 +133,7 @@ impl SaveManager {
             savedata_requested: false,
             savedata_prepared: false,
             should_load: false,
-            save_requested: false,
+            prepare_requested: false,
             local_saved: None,
             pending_vm_snapshot: None,
             load_request: None,
@@ -173,6 +160,8 @@ impl SaveManager {
         self.current_save_slot = slot;
     }
     pub fn set_savedata_requested(&mut self, requested: bool) {
+        #[cfg(feature = "hosted")]
+        tracing::info!(target: "rfvp::save", event = "rfvp.save.write_requested", requested, prepared = self.local_saved.is_some());
         self.savedata_requested = requested;
     }
     pub fn set_savedata_prepared(&mut self, prepared: bool) {
@@ -201,7 +190,7 @@ impl SaveManager {
         self.current_save_slot
     }
     pub fn is_save_requested(&self) -> bool {
-        self.savedata_requested || self.save_requested
+        self.savedata_requested
     }
     pub fn is_savedata_prepared(&self) -> bool {
         self.savedata_prepared
@@ -211,7 +200,7 @@ impl SaveManager {
     }
 
     pub fn wants_vm_snapshot_capture(&self) -> bool {
-        self.savedata_requested || self.local_saved.is_none() && self.savedata_prepared
+        self.prepare_requested || (self.savedata_requested && self.local_saved.is_none())
     }
 
     pub fn set_pending_vm_snapshot(&mut self, snap: ThreadManagerSnapshotV1) {
@@ -315,6 +304,12 @@ impl SaveManager {
         core::mem::take(&mut self.file_operations)
     }
 
+    pub fn has_pending_host_operation(&self) -> bool {
+        self.should_load
+            || (self.savedata_requested && !self.prepare_requested)
+            || !self.file_operations.is_empty()
+    }
+
     pub fn clear_cached_slots(&mut self) {
         self.slots.fill(None);
         self.slot_bytes.fill(None);
@@ -332,49 +327,36 @@ impl SaveManager {
         self.load_slot_into_current_from_bytes(slot, nls, cache)
     }
 
-    pub fn pending_save_capture(&self) -> Option<(u32, u32, u32)> {
-        if self.savedata_requested {
-            Some((self.current_save_slot, self.thumb_width, self.thumb_height))
-        } else {
-            None
-        }
+    pub fn pending_save_capture(&self) -> Option<(u32, u32)> {
+        self.wants_vm_snapshot_capture()
+            .then_some((self.thumb_width, self.thumb_height))
     }
 
     pub fn request_prepare_local_savedata(&mut self) {
+        #[cfg(feature = "hosted")]
+        tracing::info!(target: "rfvp::save", event = "rfvp.save.prepare_requested", prepared = self.local_saved.is_some());
+        self.prepare_requested = true;
         self.savedata_prepared = false;
         self.local_saved = None;
+        self.pending_vm_snapshot = None;
     }
 
     pub fn has_local_saved(&self) -> bool {
         self.local_saved.is_some()
     }
 
-    pub fn finalize_local_savedata_prepare(&mut self, bytes: Vec<u8>, nls: Nls) -> Result<()> {
-        let item = SaveItem::load_from_mem(&bytes, nls)?;
-        self.local_saved = Some(bytes);
-        self.savedata_prepared = true;
-        let idx = self.current_save_slot as usize;
-        if idx < self.slots.len() {
-            self.slots[idx] = Some(item);
-        }
-        Ok(())
-    }
-
-    pub fn try_commit_local_savedata(&mut self, nls: Nls) -> Result<bool> {
+    pub fn pending_save_write(&self) -> Result<Option<(u32, Vec<u8>)>> {
         if !self.savedata_requested {
-            return Ok(false);
+            return Ok(None);
         }
-        let Some(bytes) = self.local_saved.clone() else {
-            return Ok(false);
-        };
-        let idx = self.current_save_slot as usize;
-        if idx >= self.slots.len() {
+        if self.current_save_slot >= 1000 {
             return Err(anyhow!("save slot out of range"));
         }
-        self.slots[idx] = Some(SaveItem::load_from_mem(&bytes, nls)?);
-        self.slot_bytes[idx] = Some(bytes);
-        self.savedata_requested = false;
-        Ok(true)
+        let bytes = self
+            .local_saved
+            .as_ref()
+            .ok_or_else(|| anyhow!("save has not been prepared"))?;
+        Ok(Some((self.current_save_slot, bytes.clone())))
     }
 
     pub fn finalize_save_write(&mut self, slot: u32, bytes: Vec<u8>, nls: Nls) -> Result<()> {
@@ -385,6 +367,8 @@ impl SaveManager {
         self.slots[idx] = Some(SaveItem::load_from_mem(&bytes, nls)?);
         self.slot_bytes[idx] = Some(bytes);
         self.savedata_requested = false;
+        #[cfg(feature = "hosted")]
+        tracing::info!(target: "rfvp::save", event = "rfvp.save.written", slot);
         Ok(())
     }
 
@@ -424,128 +408,62 @@ impl SaveManager {
         Ok(())
     }
 
-    pub fn finish_save_write_from_thumb(
+    pub fn prepare_hosted_save(
         &mut self,
-        slot: u32,
-        mut bytes: Vec<u8>,
-        thumb: Vec<u8>,
-        nls: Nls,
-    ) -> Result<()> {
-        let item = SaveItem {
-            title: self.current_title.clone(),
-            scene_title: self.current_scene_title.clone(),
-            script_content: self.current_script_content.clone(),
-            thumb,
-            ..SaveItem::default()
-        };
-        bytes.extend_from_slice(
-            format!(
-                "\ntitle={}\nscene={}\nscript={}\n",
-                item.title, item.scene_title, item.script_content
-            )
-            .as_bytes(),
-        );
-        let idx = slot as usize;
-        if idx >= self.slots.len() {
-            return Err(anyhow!("save slot out of range"));
-        }
-        self.slots[idx] = Some(SaveItem::load_from_mem(&bytes, nls).unwrap_or(item));
-        self.slot_bytes[idx] = Some(bytes);
-        self.savedata_requested = false;
-        Ok(())
-    }
-
-    pub fn build_and_store_hosted_save(
-        &mut self,
-        slot: u32,
         thumb: Vec<u8>,
         snapshot: &SaveStateSnapshotV1,
         nls: Nls,
-    ) -> Result<Vec<u8>> {
-        let idx = slot as usize;
-        if idx >= self.slots.len() {
-            return Err(anyhow!("save slot out of range"));
+        calendar: CalendarTime,
+    ) -> Result<()> {
+        calendar
+            .validate()
+            .map_err(|_| anyhow!("save date invalid"))?;
+        let expected = self
+            .thumb_width
+            .max(1)
+            .checked_mul(self.thumb_height.max(1))
+            .and_then(|size| size.checked_mul(4))
+            .ok_or_else(|| anyhow!("save thumbnail size overflow"))?;
+        if thumb.len() != expected as usize {
+            return Err(anyhow!("save thumbnail size mismatch"));
         }
         let item = SaveItem {
             title: self.current_title.clone(),
             scene_title: self.current_scene_title.clone(),
             script_content: self.current_script_content.clone(),
             thumb,
-            ..SaveItem::default()
+            year: calendar.year,
+            month: calendar.month,
+            day: calendar.day,
+            day_of_week: calendar.day_of_week,
+            hour: calendar.hour,
+            minute: calendar.minute,
         };
-        let mut bytes = Vec::new();
-        bytes.extend_from_slice(&HOSTED_SAVE_MAGIC);
-        bytes.extend_from_slice(&HOSTED_SAVE_VERSION.to_le_bytes());
-        push_field(&mut bytes, item.title.as_bytes())?;
-        push_field(&mut bytes, item.scene_title.as_bytes())?;
-        push_field(&mut bytes, item.script_content.as_bytes())?;
-        push_field(&mut bytes, &item.thumb)?;
-        append_state_chunk_v1(&mut bytes, snapshot)?;
-        self.slots[idx] = Some(SaveItem::load_from_mem(&bytes, nls).unwrap_or(item));
-        self.slot_bytes[idx] = Some(bytes.clone());
-        self.savedata_requested = false;
+        self.local_saved = Some(codec::encode(&item, nls, snapshot)?);
+        self.prepare_requested = false;
         self.savedata_prepared = true;
-        self.local_saved = Some(bytes.clone());
-        Ok(bytes)
+        #[cfg(feature = "hosted")]
+        tracing::info!(target: "rfvp::save", event = "rfvp.save.prepared", context_id = snapshot.vm.current_id);
+        Ok(())
+    }
+
+    pub fn restore_current_metadata(&mut self, slot: u32) -> Result<()> {
+        let item = self
+            .slot(slot)
+            .ok_or_else(|| anyhow!("save slot is empty"))?
+            .clone();
+        self.current_title = item.title;
+        self.current_scene_title = item.scene_title;
+        self.current_script_content = item.script_content;
+        self.local_saved = None;
+        self.pending_vm_snapshot = None;
+        self.prepare_requested = false;
+        self.savedata_requested = false;
+        self.savedata_prepared = false;
+        Ok(())
     }
 
     fn slot(&self, slot: u32) -> Option<&SaveItem> {
         self.slots.get(slot as usize).and_then(|s| s.as_ref())
     }
-}
-
-fn push_field(output: &mut Vec<u8>, field: &[u8]) -> Result<()> {
-    let length = u32::try_from(field.len()).map_err(|_| anyhow!("save field too large"))?;
-    output.extend_from_slice(&length.to_le_bytes());
-    output.extend_from_slice(field);
-    Ok(())
-}
-
-fn decode_hosted_save(bytes: &[u8]) -> Result<SaveItem> {
-    let mut cursor = 4usize;
-    let version = read_u16(bytes, &mut cursor)?;
-    if version != HOSTED_SAVE_VERSION {
-        return Err(anyhow!("unsupported hosted save version: {version}"));
-    }
-    let title = read_field(bytes, &mut cursor)?;
-    let scene_title = read_field(bytes, &mut cursor)?;
-    let script_content = read_field(bytes, &mut cursor)?;
-    let thumb = read_field(bytes, &mut cursor)?.to_vec();
-    Ok(SaveItem {
-        title: core::str::from_utf8(title)?.to_string(),
-        scene_title: core::str::from_utf8(scene_title)?.to_string(),
-        script_content: core::str::from_utf8(script_content)?.to_string(),
-        thumb,
-        ..SaveItem::default()
-    })
-}
-
-fn read_u16(bytes: &[u8], cursor: &mut usize) -> Result<u16> {
-    let end = cursor
-        .checked_add(2)
-        .ok_or_else(|| anyhow!("save cursor overflow"))?;
-    let field = bytes
-        .get(*cursor..end)
-        .ok_or_else(|| anyhow!("save header truncated"))?;
-    *cursor = end;
-    Ok(u16::from_le_bytes([field[0], field[1]]))
-}
-
-fn read_field<'a>(bytes: &'a [u8], cursor: &mut usize) -> Result<&'a [u8]> {
-    let length_end = cursor
-        .checked_add(4)
-        .ok_or_else(|| anyhow!("save cursor overflow"))?;
-    let length = bytes
-        .get(*cursor..length_end)
-        .ok_or_else(|| anyhow!("save field length truncated"))?;
-    *cursor = length_end;
-    let length = u32::from_le_bytes([length[0], length[1], length[2], length[3]]) as usize;
-    let end = cursor
-        .checked_add(length)
-        .ok_or_else(|| anyhow!("save field length overflow"))?;
-    let field = bytes
-        .get(*cursor..end)
-        .ok_or_else(|| anyhow!("save field truncated"))?;
-    *cursor = end;
-    Ok(field)
 }

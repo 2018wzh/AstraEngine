@@ -50,18 +50,6 @@ pub struct SaveStateSnapshotV1 {
 
 impl SaveStateSnapshotV1 {
     pub fn capture(game_data: &mut GameData) -> Self {
-        #[cfg(feature = "hosted")]
-        let globals_non_volatile = {
-            let globals = game_data.capture_hosted_globals();
-            globals
-                .values
-                .into_iter()
-                .take(globals.non_volatile_count as usize)
-                .collect()
-        };
-        #[cfg(not(feature = "hosted"))]
-        let globals_non_volatile = GLOBAL.lock().unwrap().snapshot_non_volatile();
-
         let vm = match game_data.save_manager.take_pending_vm_snapshot() {
             Some(s) => s,
             None => {
@@ -70,7 +58,33 @@ impl SaveStateSnapshotV1 {
             }
         };
 
-        SaveStateSnapshotV1 {
+        Self::capture_with_vm(game_data, vm)
+    }
+
+    /// Captures a coherent hosted checkpoint from the live VM.
+    #[cfg(feature = "hosted")]
+    pub fn capture_hosted(game_data: &GameData, vm: &ThreadManager) -> Self {
+        Self::capture_with_vm(game_data, vm.capture_snapshot_v1())
+    }
+
+    #[cfg(feature = "hosted")]
+    pub fn capture_user_save(game_data: &mut GameData) -> Result<Self> {
+        let vm = game_data
+            .save_manager
+            .take_pending_vm_snapshot()
+            .context("user save has no prepared VM snapshot")?;
+        Ok(Self::capture_with_vm(game_data, vm))
+    }
+
+    fn capture_with_vm(game_data: &GameData, vm: ThreadManagerSnapshotV1) -> Self {
+        let globals_non_volatile = {
+            #[cfg(feature = "hosted")]
+            let g = &game_data.globals;
+            #[cfg(not(feature = "hosted"))]
+            let g = GLOBAL.lock().unwrap();
+            g.snapshot_non_volatile()
+        };
+        Self {
             version: 1,
             motion: game_data.motion_manager.capture_snapshot_v1(),
             audio: AudioSnapshotV1 {
@@ -79,27 +93,6 @@ impl SaveStateSnapshotV1 {
             },
             globals_non_volatile,
             vm,
-        }
-    }
-
-    /// Captures a coherent hosted checkpoint from the live VM rather than the
-    /// deferred user-save queue.  The host owns persistence and serialization.
-    #[cfg(feature = "hosted")]
-    pub fn capture_hosted(game_data: &GameData, vm: &ThreadManager) -> Self {
-        let globals = game_data.capture_hosted_globals();
-        SaveStateSnapshotV1 {
-            version: 1,
-            motion: game_data.motion_manager.capture_snapshot_v1(),
-            audio: AudioSnapshotV1 {
-                bgm: game_data.bgm_player_ref().capture_snapshot_v1(),
-                se: game_data.se_player_ref().capture_snapshot_v1(),
-            },
-            globals_non_volatile: globals
-                .values
-                .into_iter()
-                .take(globals.non_volatile_count as usize)
-                .collect(),
-            vm: vm.capture_snapshot_v1(),
         }
     }
 
@@ -124,28 +117,16 @@ impl SaveStateSnapshotV1 {
             .apply_snapshot_v1(&self.audio.se, vfs)
             .context("apply SePlayerSnapshotV1")?;
 
-        #[cfg(not(feature = "hosted"))]
         {
+            #[cfg(feature = "hosted")]
+            let g = &mut game_data.globals;
+            #[cfg(not(feature = "hosted"))]
             let mut g = GLOBAL.lock().unwrap();
-            g.restore_non_volatile(&self.globals_non_volatile);
-        }
-
-        #[cfg(feature = "hosted")]
-        {
-            let globals = game_data.capture_hosted_globals();
-            let mut values = globals.values;
-            if self.globals_non_volatile.len() != globals.non_volatile_count as usize {
+            #[cfg(feature = "hosted")]
+            if self.globals_non_volatile.len() != usize::from(g.non_volatile_count()) {
                 bail!("hosted snapshot global count is incompatible with this session");
             }
-            values[..self.globals_non_volatile.len()].clone_from_slice(&self.globals_non_volatile);
-            let snapshot = crate::script::global::HostedGlobalSnapshot {
-                non_volatile_count: globals.non_volatile_count,
-                volatile_count: globals.volatile_count,
-                values,
-            };
-            if !game_data.restore_hosted_globals(&snapshot) {
-                bail!("hosted snapshot global state is incompatible with this session");
-            }
+            g.restore_non_volatile(&self.globals_non_volatile);
         }
 
         tm.apply_snapshot_v1(&self.vm);

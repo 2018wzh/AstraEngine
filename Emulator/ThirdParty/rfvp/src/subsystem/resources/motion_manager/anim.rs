@@ -10,19 +10,19 @@ use anyhow::{bail, Result};
 
 use crate::subsystem::resources::prim::{PrimManager, INVAILD_PRIM_HANDLE};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SpriteAnimMode {
     Loop,
     Once,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone)]
 struct SpriteAnimStep {
     sprt_prim_id: i16,
     time_ms: i32,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone)]
 struct SpriteAnim {
     prim_id: u32,
     mode: SpriteAnimMode,
@@ -66,7 +66,7 @@ impl SpriteAnim {
     }
 }
 
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default)]
 pub struct SpriteAnimContainer {
     anims: Vec<SpriteAnim>,
 }

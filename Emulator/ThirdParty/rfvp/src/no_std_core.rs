@@ -4,10 +4,6 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 #[cfg(feature = "hosted")]
-use bincode::Options;
-#[cfg(feature = "hosted")]
-use serde::{Deserialize, Serialize};
-#[cfg(feature = "hosted")]
 use std::io::Read;
 
 #[cfg(feature = "old_school")]
@@ -26,8 +22,6 @@ use crate::script::parser::{Nls, Parser};
 use crate::soft_render::SoftRenderer;
 use crate::subsystem::anzu_scene::AnzuScene;
 #[cfg(feature = "hosted")]
-use crate::subsystem::global_savedata::GlobalSaveDataV1;
-#[cfg(feature = "hosted")]
 use crate::subsystem::resources::save_manager::{HostedSaveFileOperation, SaveItem};
 use crate::subsystem::resources::text_manager::FontEnumerator;
 #[cfg(feature = "hosted")]
@@ -35,18 +29,8 @@ use crate::subsystem::resources::text_manager::SystemFontBindings;
 use crate::subsystem::resources::vfs::Vfs;
 use crate::subsystem::resources::window::Window;
 #[cfg(feature = "hosted")]
-use crate::subsystem::resources::{
-    input_manager::InputManagerSnapshotV1, motion_manager::MotionManagerCanonicalStateV1,
-    thread_manager::ThreadManagerSnapshotV1, thread_wrapper::ThreadWrapperSnapshotV1,
-    time::TimeSnapshotV1, timer_manager::TimerManagerSnapshotV1,
-};
-#[cfg(feature = "hosted")]
-use crate::subsystem::save_state::{
-    try_decode_state_chunk_v1, AudioSnapshotV1, SaveStateSnapshotV1,
-};
+use crate::subsystem::save_state::{try_decode_state_chunk_v1, SaveStateSnapshotV1};
 use crate::subsystem::world::GameData;
-#[cfg(feature = "hosted")]
-use crate::subsystem::world::RuntimeGameStateSnapshotV1;
 #[cfg(feature = "hosted")]
 use crate::vm_runner::HostedVmTraceRecord;
 use crate::vm_runner::VmRunner;
@@ -225,81 +209,6 @@ pub struct RfvpLoadedGame {
     pub hcb_manifest: Vec<RfvpResourceEntry>,
 }
 
-/// In-memory exact checkpoint for a hosted session.  It contains no host
-/// handles or platform paths and is valid only for the already-booted session
-/// with the same loaded game and resource binding.
-#[cfg(feature = "hosted")]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HostedCoreSnapshot {
-    pub version: u16,
-    pub frame_index: u64,
-    pub last_tick_us: Option<u64>,
-    pub last_dissolve_transitioning: bool,
-    pub last_dissolve2_transitioning: bool,
-    pub quit_requested: bool,
-    pub save_state: SaveStateSnapshotV1,
-    pub globals: crate::script::global::HostedGlobalSnapshot,
-    pub input: InputManagerSnapshotV1,
-    pub timers: TimerManagerSnapshotV1,
-    pub time: TimeSnapshotV1,
-    pub deferred_threads: ThreadWrapperSnapshotV1,
-    pub runtime_state: RuntimeGameStateSnapshotV1,
-    pub global_state: GlobalSaveDataV1,
-}
-
-#[cfg(feature = "hosted")]
-pub const HOSTED_CORE_SNAPSHOT_VERSION: u16 = 3;
-
-/// Stable semantic state used by an embedding for verification.  This is not
-/// a persistence format: it deliberately represents graphics pixels by
-/// content digest so image allocation and decode-cache layout cannot perturb
-/// the state identity after a restore.
-#[cfg(feature = "hosted")]
-#[derive(Debug, Clone, Serialize)]
-struct HostedCanonicalStateV1 {
-    version: u16,
-    frame_index: u64,
-    last_tick_us: Option<u64>,
-    last_dissolve_transitioning: bool,
-    last_dissolve2_transitioning: bool,
-    quit_requested: bool,
-    globals: crate::script::global::HostedGlobalSnapshot,
-    input: InputManagerSnapshotV1,
-    timers: TimerManagerSnapshotV1,
-    time: TimeSnapshotV1,
-    deferred_threads: ThreadWrapperSnapshotV1,
-    runtime_state: RuntimeGameStateSnapshotV1,
-    global_state: GlobalSaveDataV1,
-    motion: MotionManagerCanonicalStateV1,
-    audio: AudioSnapshotV1,
-    vm: ThreadManagerSnapshotV1,
-}
-
-/// Digest-only hosted state breakdown for restore diagnostics.  It exposes no
-/// script payload, resource bytes or host paths.
-#[cfg(feature = "hosted")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct HostedStateComponentHashesV1 {
-    pub session: [u8; 32],
-    pub globals: [u8; 32],
-    pub input_and_time: [u8; 32],
-    pub runtime: [u8; 32],
-    pub motion: [u8; 32],
-    pub audio: [u8; 32],
-    pub vm: [u8; 32],
-}
-
-#[cfg(feature = "hosted")]
-fn hosted_component_hash<T: Serialize>(value: &T) -> RfvpResult<[u8; 32]> {
-    let bytes = bincode::DefaultOptions::new()
-        .with_fixint_encoding()
-        .with_little_endian()
-        .serialize(value)
-        .map_err(|_| RfvpError::InvalidData)?;
-    use sha2::Digest;
-    Ok(sha2::Sha256::digest(bytes).into())
-}
-
 pub struct RfvpCore {
     config: RfvpCoreConfig,
     pending_events: Vec<RfvpEvent>,
@@ -321,6 +230,8 @@ pub struct RfvpCore {
     hit_proxies: HitProxyTable,
     last_error: Option<RfvpError>,
     last_error_detail: Option<String>,
+    // Diagnostic context only; never serialized into game state.
+    last_operation: &'static str,
 }
 
 impl RfvpCore {
@@ -346,11 +257,25 @@ impl RfvpCore {
             hit_proxies: HitProxyTable::default(),
             last_error: None,
             last_error_detail: None,
+            last_operation: "initialization",
         }
     }
 
     pub fn config(&self) -> RfvpCoreConfig {
         self.config
+    }
+
+    pub fn last_operation(&self) -> &'static str {
+        self.last_operation
+    }
+
+    /// Persist the upstream global/system save at the host's explicit close boundary.
+    #[cfg(feature = "hosted")]
+    pub fn save_global_data(&self, fs: &mut impl RfvpFileSystem) -> RfvpResult<()> {
+        if self.run_state != RfvpCoreRunState::Booted {
+            return Err(RfvpError::InvalidArgument);
+        }
+        crate::subsystem::global_savedata::hosted::save(&self.game_data, fs)
     }
 
     pub fn frame_index(&self) -> u64 {
@@ -491,143 +416,6 @@ impl RfvpCore {
             .stop_without_host_command(&mut self.game_data.motion_manager);
         self.game_data.set_halt(false);
         Ok(())
-    }
-
-    #[cfg(feature = "hosted")]
-    pub fn capture_hosted_snapshot(&self) -> RfvpResult<HostedCoreSnapshot> {
-        if self.run_state != RfvpCoreRunState::Booted {
-            return Err(RfvpError::InvalidData);
-        }
-        let vm_runner = self.vm_runner.as_ref().ok_or(RfvpError::InvalidData)?;
-        Ok(HostedCoreSnapshot {
-            version: HOSTED_CORE_SNAPSHOT_VERSION,
-            frame_index: self.frame_index,
-            last_tick_us: self.last_tick_us,
-            last_dissolve_transitioning: self.last_dissolve_transitioning,
-            last_dissolve2_transitioning: self.last_dissolve2_transitioning,
-            quit_requested: self.quit_requested,
-            save_state: SaveStateSnapshotV1::capture_hosted(
-                &self.game_data,
-                vm_runner.thread_manager(),
-            ),
-            globals: self.game_data.capture_hosted_globals(),
-            input: self.game_data.inputs_manager.capture_snapshot_v1(),
-            timers: self.game_data.timer_manager.capture_snapshot_v1(),
-            time: self.game_data.time_ref().capture_snapshot_v1(),
-            deferred_threads: self.game_data.thread_wrapper.capture_snapshot_v1(),
-            runtime_state: self.game_data.capture_runtime_state_v1(),
-            global_state: GlobalSaveDataV1::capture_hosted(&self.game_data),
-        })
-    }
-
-    #[cfg(feature = "hosted")]
-    pub fn restore_hosted_snapshot(&mut self, snapshot: &HostedCoreSnapshot) -> RfvpResult<()> {
-        if snapshot.version != HOSTED_CORE_SNAPSHOT_VERSION
-            || self.run_state != RfvpCoreRunState::Booted
-        {
-            return Err(RfvpError::InvalidData);
-        }
-        let vm_runner = self.vm_runner.as_mut().ok_or(RfvpError::InvalidData)?;
-        snapshot
-            .save_state
-            .apply(&mut self.game_data, vm_runner.thread_manager_mut())
-            .map_err(|_| RfvpError::InvalidData)?;
-        if !self.game_data.restore_hosted_globals(&snapshot.globals) {
-            return Err(RfvpError::InvalidData);
-        }
-        self.game_data
-            .inputs_manager
-            .apply_snapshot_v1(snapshot.input.clone());
-        self.game_data
-            .timer_manager
-            .apply_snapshot_v1(snapshot.timers.clone());
-        self.game_data
-            .time_mut_ref()
-            .apply_snapshot_v1(snapshot.time.clone());
-        self.game_data
-            .thread_wrapper
-            .apply_snapshot_v1(snapshot.deferred_threads.clone());
-        self.game_data
-            .apply_runtime_state_v1(snapshot.runtime_state.clone());
-        snapshot.global_state.apply(&mut self.game_data);
-        self.frame_index = snapshot.frame_index;
-        self.last_tick_us = snapshot.last_tick_us;
-        self.last_dissolve_transitioning = snapshot.last_dissolve_transitioning;
-        self.last_dissolve2_transitioning = snapshot.last_dissolve2_transitioning;
-        self.quit_requested = snapshot.quit_requested;
-        self.last_error = None;
-        self.last_error_detail = None;
-        Ok(())
-    }
-
-    /// Produces a deterministic, host-neutral state representation for
-    /// replay and restore verification. Persistence must use
-    /// [`Self::capture_hosted_snapshot`] instead.
-    #[cfg(feature = "hosted")]
-    pub fn canonical_hosted_state_bytes(&self) -> RfvpResult<Vec<u8>> {
-        let state = self.capture_canonical_hosted_state()?;
-        bincode::DefaultOptions::new()
-            .with_fixint_encoding()
-            .with_little_endian()
-            .serialize(&state)
-            .map_err(|_| RfvpError::InvalidData)
-    }
-
-    #[cfg(feature = "hosted")]
-    pub fn canonical_hosted_state_component_hashes(
-        &self,
-    ) -> RfvpResult<HostedStateComponentHashesV1> {
-        let state = self.capture_canonical_hosted_state()?;
-        Ok(HostedStateComponentHashesV1 {
-            session: hosted_component_hash(&(
-                state.version,
-                state.frame_index,
-                state.last_tick_us,
-                state.last_dissolve_transitioning,
-                state.last_dissolve2_transitioning,
-                state.quit_requested,
-            ))?,
-            globals: hosted_component_hash(&state.globals)?,
-            input_and_time: hosted_component_hash(&(
-                &state.input,
-                &state.timers,
-                &state.time,
-                &state.deferred_threads,
-            ))?,
-            runtime: hosted_component_hash(&(&state.runtime_state, &state.global_state))?,
-            motion: hosted_component_hash(&state.motion)?,
-            audio: hosted_component_hash(&state.audio)?,
-            vm: hosted_component_hash(&state.vm)?,
-        })
-    }
-
-    #[cfg(feature = "hosted")]
-    fn capture_canonical_hosted_state(&self) -> RfvpResult<HostedCanonicalStateV1> {
-        if self.run_state != RfvpCoreRunState::Booted {
-            return Err(RfvpError::InvalidData);
-        }
-        let vm_runner = self.vm_runner.as_ref().ok_or(RfvpError::InvalidData)?;
-        Ok(HostedCanonicalStateV1 {
-            version: 1,
-            frame_index: self.frame_index,
-            last_tick_us: self.last_tick_us,
-            last_dissolve_transitioning: self.last_dissolve_transitioning,
-            last_dissolve2_transitioning: self.last_dissolve2_transitioning,
-            quit_requested: self.quit_requested,
-            globals: self.game_data.capture_hosted_globals(),
-            input: self.game_data.inputs_manager.capture_snapshot_v1(),
-            timers: self.game_data.timer_manager.capture_snapshot_v1(),
-            time: self.game_data.time_ref().capture_snapshot_v1(),
-            deferred_threads: self.game_data.thread_wrapper.capture_snapshot_v1(),
-            runtime_state: self.game_data.capture_runtime_state_v1(),
-            global_state: GlobalSaveDataV1::capture_hosted(&self.game_data),
-            motion: self.game_data.motion_manager.capture_canonical_state_v1(),
-            audio: AudioSnapshotV1 {
-                bgm: self.game_data.bgm_player_ref().capture_snapshot_v1(),
-                se: self.game_data.se_player_ref().capture_snapshot_v1(),
-            },
-            vm: vm_runner.thread_manager().capture_snapshot_v1(),
-        })
     }
 
     pub fn push_event(&mut self, event: RfvpEvent) -> RfvpResult<()> {
@@ -844,6 +632,12 @@ impl RfvpCore {
         game_data.nls = boot.nls;
         game_data.set_window(Window::new(screen, 1.0));
 
+        #[cfg(feature = "hosted")]
+        {
+            self.last_operation = "global save load";
+            crate::subsystem::global_savedata::hosted::load(&mut game_data, host.fs())?;
+        }
+
         let mut vm_runner =
             VmRunner::new(crate::subsystem::resources::thread_manager::ThreadManager::new());
         #[cfg(feature = "hosted")]
@@ -879,6 +673,7 @@ impl RfvpCore {
     }
 
     pub fn tick<H: RfvpHost>(&mut self, host: &mut H) -> RfvpResult<RfvpTickResult> {
+        self.last_operation = "tick input";
         let now = host.clock().ticks_us();
         let elapsed_us = match self.last_tick_us.replace(now) {
             Some(prev) => now.saturating_sub(prev),
@@ -931,14 +726,19 @@ impl RfvpCore {
         if self.game_data.get_halt() {
             self.game_data.set_halt(false);
         }
+        self.last_operation = "audio tick";
         host.audio().tick(elapsed_us)?;
         #[cfg(feature = "hosted")]
         self.sync_hosted_audio_state(host)?;
         #[cfg(feature = "hosted")]
-        let loaded_hosted_save = self.process_hosted_load(host)?;
+        let loaded_hosted_save = {
+            self.last_operation = "save load";
+            self.process_hosted_load(host)?
+        };
         #[cfg(not(feature = "hosted"))]
         let loaded_hosted_save = false;
         if let (Some(parser), Some(vm_runner)) = (self.parser.as_mut(), self.vm_runner.as_mut()) {
+            self.last_operation = "VM execution";
             let dissolve_type = self.game_data.motion_manager.get_dissolve_type();
             let dissolve_transitioning = !matches!(
                 dissolve_type,
@@ -975,11 +775,13 @@ impl RfvpCore {
             scene.update_after_vm(&mut self.game_data, frame_time_ms);
             self.game_data.set_current_thread(0);
 
+            self.last_operation = "audio commands";
             self.flush_audio(host)?;
             #[cfg(feature = "hosted")]
             self.persist_hosted_file_operations(host)?;
             #[cfg(feature = "hosted")]
             self.persist_hosted_save(host)?;
+            self.last_operation = "scene submission";
             self.render_game_frame(host)?;
             self.game_data.inputs_manager.frame_reset();
         } else if self.run_state == RfvpCoreRunState::BootFailed {
@@ -1000,6 +802,7 @@ impl RfvpCore {
     /// A backend without this query fails the hosted tick at the boundary.
     #[cfg(feature = "hosted")]
     fn sync_hosted_audio_state<H: RfvpHost>(&mut self, host: &mut H) -> RfvpResult<()> {
+        self.last_operation = "audio playback state";
         let mut bgm = [false; crate::host_api::BGM_LOGICAL_SLOT_COUNT];
         let mut se = [false; crate::host_api::SE_LOGICAL_SLOT_COUNT];
         for (slot, state) in bgm.iter_mut().enumerate() {
@@ -1042,39 +845,54 @@ impl RfvpCore {
         snapshot
             .apply(&mut self.game_data, vm_runner.thread_manager_mut())
             .map_err(|_| RfvpError::InvalidData)?;
+        vm_runner.thread_manager_mut().signal_native_load();
+        self.game_data
+            .save_manager
+            .restore_current_metadata(slot)
+            .map_err(|_| RfvpError::InvalidData)?;
+        self.invalidate_host_render_cache();
+        tracing::info!(target: "rfvp::save", event = "rfvp.save.loaded", slot, context_id = snapshot.vm.current_id);
         Ok(true)
     }
 
     #[cfg(feature = "hosted")]
     fn persist_hosted_save<H: RfvpHost>(&mut self, host: &mut H) -> RfvpResult<()> {
-        let Some((slot, thumb_width, thumb_height)) =
-            self.game_data.save_manager.pending_save_capture()
-        else {
-            return Ok(());
-        };
-        if slot >= 1000 {
-            return Err(RfvpError::InvalidArgument);
-        }
-        let vm_runner = self.vm_runner.as_ref().ok_or(RfvpError::InvalidData)?;
-        let snapshot =
-            SaveStateSnapshotV1::capture_hosted(&self.game_data, vm_runner.thread_manager());
-        let thumb = render_hosted_save_thumbnail(
-            &self.game_data.motion_manager,
-            self.config.virtual_width,
-            self.config.virtual_height,
-            thumb_width.max(1),
-            thumb_height.max(1),
-        )?;
+        self.last_operation = "save write";
         let nls = self.game_data.get_nls();
-        let bytes = self
+        if let Some((thumb_width, thumb_height)) =
+            self.game_data.save_manager.pending_save_capture()
+        {
+            self.last_operation = "save prepare";
+            let snapshot = SaveStateSnapshotV1::capture_user_save(&mut self.game_data)
+                .map_err(|_| RfvpError::InvalidData)?;
+            let thumb = render_hosted_save_thumbnail(
+                &self.game_data.motion_manager,
+                self.config.virtual_width,
+                self.config.virtual_height,
+                thumb_width.max(1),
+                thumb_height.max(1),
+            )?;
+            let calendar = host.clock().local_calendar_time()?;
+            self.game_data
+                .save_manager
+                .prepare_hosted_save(thumb, &snapshot, nls.clone(), calendar)
+                .map_err(|_| RfvpError::InvalidData)?;
+        }
+        self.last_operation = "save write";
+        if let Some((slot, bytes)) = self
             .game_data
             .save_manager
-            .build_and_store_hosted_save(slot, thumb, &snapshot, nls)
-            .map_err(|_| RfvpError::InvalidData)?;
-        let path = SaveItem::get_save_path(slot);
-        let path = path.to_str().ok_or(RfvpError::InvalidData)?;
-        host.fs().write_all(path, &bytes)?;
-        self.game_data.save_manager.consume_save_write_result();
+            .pending_save_write()
+            .map_err(|_| RfvpError::InvalidData)?
+        {
+            let path = SaveItem::get_save_path(slot);
+            host.fs()
+                .write_all(path.to_str().ok_or(RfvpError::InvalidData)?, &bytes)?;
+            self.game_data
+                .save_manager
+                .finalize_save_write(slot, bytes, nls)
+                .map_err(|_| RfvpError::InvalidData)?;
+        }
         Ok(())
     }
 
@@ -1083,16 +901,29 @@ impl RfvpCore {
         let operations = self.game_data.save_manager.take_file_operations();
         for operation in operations {
             match operation {
-                HostedSaveFileOperation::Refresh => self.refresh_hosted_saves(host)?,
+                HostedSaveFileOperation::Refresh => {
+                    self.last_operation = "save refresh";
+                    self.refresh_hosted_saves(host)?;
+                }
                 HostedSaveFileOperation::Remove { slot } => {
+                    self.last_operation = "save remove";
                     let path = SaveItem::get_save_path(slot);
-                    host.fs()
-                        .remove(path.to_str().ok_or(RfvpError::InvalidData)?)?;
+                    // SaveData(Delete) also clears an empty slot in the native
+                    // engine. Absence is success; other filesystem errors must
+                    // still terminate the hosted operation.
+                    match host
+                        .fs()
+                        .remove(path.to_str().ok_or(RfvpError::InvalidData)?)
+                    {
+                        Ok(()) | Err(RfvpError::NotFound) => {}
+                        Err(error) => return Err(error),
+                    }
                 }
                 HostedSaveFileOperation::Copy {
                     source,
                     destination,
                 } => {
+                    self.last_operation = "save copy";
                     let source = SaveItem::get_save_path(source);
                     let destination = SaveItem::get_save_path(destination);
                     host.fs().copy(
@@ -1321,7 +1152,7 @@ fn render_hosted_save_thumbnail(
 
 #[cfg(feature = "hosted")]
 fn hosted_save_slot_from_path(path: &str) -> Option<u32> {
-    let name = path.strip_prefix("save/save")?.strip_suffix(".dat")?;
+    let name = path.strip_prefix("save/rfvp_s")?.strip_suffix(".bin")?;
     if name.len() != 3 || !name.bytes().all(|byte| byte.is_ascii_digit()) {
         return None;
     }

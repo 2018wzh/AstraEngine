@@ -52,7 +52,7 @@ fn should_skip_update(prim_manager: &PrimManager, prim_id: u32, flag: bool) -> b
     false
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ZMotionType {
     None = 0,
     Linear,
@@ -78,7 +78,7 @@ impl TryFrom<i32> for ZMotionType {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone)]
 pub struct ZMotion {
     id: u16,
     prim_id: u32,
@@ -185,7 +185,6 @@ impl ZMotion {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ZMotionContainer {
     motions: Vec<ZMotion>,
     free_ids: Vec<u16>,

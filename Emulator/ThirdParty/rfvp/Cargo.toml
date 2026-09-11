@@ -1,6 +1,6 @@
 [package]
 name = "rfvp"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 default-run = "rfvp"
 homepage = "https://github.com/xmoezzz/rfvp"
@@ -107,7 +107,7 @@ default = ["runtime-core-deps", "gpu-render", "audio", "mp4", "native-video", "r
 # A standard-library embedding of the portable RFVP core.  This selects the
 # host-neutral resource/render/audio modules without enabling the upstream
 # window or GPU product hosts.
-hosted = ["no_std", "dep:image", "dep:bincode", "dep:sha2"]
+hosted = ["no_std", "dep:image", "dep:bincode", "dep:sha2", "dep:tracing"]
 
 # Independent no_std + alloc library surface. This feature intentionally does
 # not enable any runtime/backend dependency. Use it with:

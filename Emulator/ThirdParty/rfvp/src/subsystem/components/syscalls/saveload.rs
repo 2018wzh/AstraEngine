@@ -69,7 +69,10 @@ pub fn save_create(game_data: &mut GameData, fnid: &Variant, value: &Variant) ->
                 }
             }
 
-            // Break the current context so the host loop can prepare `local_saved` immediately.
+            // Hosted saves capture at the caller's cooperative yield (normally
+            // ThreadNext). Capturing inside SaveCreate resumes before that yield
+            // and loses the native load return signal consumed immediately after it.
+            #[cfg(not(feature = "hosted"))]
             game_data.thread_wrapper.should_break();
         }
         _ => {

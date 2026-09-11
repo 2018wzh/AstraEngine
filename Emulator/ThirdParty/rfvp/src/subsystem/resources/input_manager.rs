@@ -5,7 +5,6 @@ use alloc::{
     string::{String, ToString},
     vec::Vec,
 };
-use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::{sync::Mutex, vec};
 #[cfg(any(feature = "gpu-render", feature = "soft-render-desktop"))]
@@ -45,7 +44,7 @@ impl<'a> Drop for CriticalGuard<'a> {
     }
 }
 
-#[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub struct PressItem {
     keycode: u8,
     in_screen: bool,
@@ -144,40 +143,6 @@ pub struct InputManager {
     cs: CriticalSection,
 }
 
-/// Complete input latch state for a hosted checkpoint.  It includes queued
-/// edges so restoring immediately before `begin_frame` preserves the same
-/// script-visible pulse instead of silently dropping a user input.
-#[cfg(feature = "hosted")]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct InputManagerSnapshotV1 {
-    mouse_x: i32,
-    mouse_y: i32,
-    press_items: Vec<PressItem>,
-    current_index: u8,
-    next_index: u8,
-    new_input_state: u32,
-    old_input_state: u32,
-    current_event: PressItem,
-    click: u32,
-    input_down: u32,
-    input_up: u32,
-    input_state: u32,
-    input_repeat: u32,
-    cursor_in: bool,
-    cursor_x: i32,
-    cursor_y: i32,
-    wheel_value: i32,
-    control_is_masked: bool,
-    control_is_pulse: bool,
-    suppress_next_mouse: u8,
-    input_down_pending: u32,
-    input_up_pending: u32,
-    input_repeat_pending: u32,
-    wheel_pending: i32,
-    hud_down: u32,
-    hud_up: u32,
-}
-
 impl Default for InputManager {
     fn default() -> Self {
         Self::new()
@@ -185,67 +150,6 @@ impl Default for InputManager {
 }
 
 impl InputManager {
-    #[cfg(feature = "hosted")]
-    pub fn capture_snapshot_v1(&self) -> InputManagerSnapshotV1 {
-        InputManagerSnapshotV1 {
-            mouse_x: self.mouse_x,
-            mouse_y: self.mouse_y,
-            press_items: self.press_items.clone(),
-            current_index: self.current_index,
-            next_index: self.next_index,
-            new_input_state: self.new_input_state,
-            old_input_state: self.old_input_state,
-            current_event: self.current_event.clone(),
-            click: self.click,
-            input_down: self.input_down,
-            input_up: self.input_up,
-            input_state: self.input_state,
-            input_repeat: self.input_repeat,
-            cursor_in: self.cursor_in,
-            cursor_x: self.cursor_x,
-            cursor_y: self.cursor_y,
-            wheel_value: self.wheel_value,
-            control_is_masked: self.control_is_masked,
-            control_is_pulse: self.control_is_pulse,
-            suppress_next_mouse: self.suppress_next_mouse,
-            input_down_pending: self.input_down_pending,
-            input_up_pending: self.input_up_pending,
-            input_repeat_pending: self.input_repeat_pending,
-            wheel_pending: self.wheel_pending,
-            hud_down: self.hud_down,
-            hud_up: self.hud_up,
-        }
-    }
-
-    #[cfg(feature = "hosted")]
-    pub fn apply_snapshot_v1(&mut self, snapshot: InputManagerSnapshotV1) {
-        self.mouse_x = snapshot.mouse_x;
-        self.mouse_y = snapshot.mouse_y;
-        self.press_items = snapshot.press_items;
-        self.current_index = snapshot.current_index;
-        self.next_index = snapshot.next_index;
-        self.new_input_state = snapshot.new_input_state;
-        self.old_input_state = snapshot.old_input_state;
-        self.current_event = snapshot.current_event;
-        self.click = snapshot.click;
-        self.input_down = snapshot.input_down;
-        self.input_up = snapshot.input_up;
-        self.input_state = snapshot.input_state;
-        self.input_repeat = snapshot.input_repeat;
-        self.cursor_in = snapshot.cursor_in;
-        self.cursor_x = snapshot.cursor_x;
-        self.cursor_y = snapshot.cursor_y;
-        self.wheel_value = snapshot.wheel_value;
-        self.control_is_masked = snapshot.control_is_masked;
-        self.control_is_pulse = snapshot.control_is_pulse;
-        self.suppress_next_mouse = snapshot.suppress_next_mouse;
-        self.input_down_pending = snapshot.input_down_pending;
-        self.input_up_pending = snapshot.input_up_pending;
-        self.input_repeat_pending = snapshot.input_repeat_pending;
-        self.wheel_pending = snapshot.wheel_pending;
-        self.hud_down = snapshot.hud_down;
-        self.hud_up = snapshot.hud_up;
-    }
     pub fn new() -> Self {
         Self {
             mouse_x: 0,
@@ -289,6 +193,15 @@ impl InputManager {
         self.input_state = 0;
         self.input_down = 0;
         self.input_up = 0;
+
+        // rfvp stages edge/repeat events until begin_frame(). The original engine has no
+        // separate pending layer: InputFlash resets the producer state and the visible
+        // edge/repeat state atomically, so pre-flash events cannot reappear next frame.
+        self.input_down_pending = 0;
+        self.input_up_pending = 0;
+        self.input_repeat_pending = 0;
+        // Do not clear wheel_pending/wheel_value: the original InputFlash leaves
+        // InputState::wheel_value untouched.
     }
 
     pub fn suppress_next_mouse_click(&mut self) {
@@ -674,5 +587,40 @@ impl InputManager {
         self.input_up_pending = 0;
         self.input_repeat_pending = 0;
         self.wheel_pending = 0;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn input_flash_discards_staged_edges_repeat_and_event_queue() {
+        let mut input = InputManager::new();
+
+        input.notify_mouse_down(KeyCode::MouseLeft);
+        input.notify_mouse_up(KeyCode::MouseLeft);
+        input.notify_keycode_down(KeyCode::Space, false);
+        input.notify_keycode_up(KeyCode::Space);
+
+        input.set_flash();
+        input.begin_frame();
+
+        assert_eq!(input.get_input_state(), 0);
+        assert_eq!(input.get_input_down(), 0);
+        assert_eq!(input.get_input_up(), 0);
+        assert_eq!(input.get_repeat(), 0);
+        assert!(input.get_event().is_none());
+    }
+
+    #[test]
+    fn input_flash_preserves_wheel_state_like_original_engine() {
+        let mut input = InputManager::new();
+
+        input.notify_mouse_wheel(120);
+        input.set_flash();
+        input.begin_frame();
+
+        assert_eq!(input.get_wheel_value(), 120);
     }
 }

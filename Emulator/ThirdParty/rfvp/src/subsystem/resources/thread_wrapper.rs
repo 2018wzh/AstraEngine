@@ -6,10 +6,8 @@ use alloc::{
     vec,
     vec::Vec,
 };
-use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ThreadRequest {
     /// start a new thread with the given id and address
     Start(u32, u32),
@@ -38,25 +36,7 @@ pub struct ThreadWrapper {
     requests: VecDeque<ThreadRequest>,
 }
 
-#[cfg(feature = "hosted")]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ThreadWrapperSnapshotV1 {
-    requests: VecDeque<ThreadRequest>,
-}
-
 impl ThreadWrapper {
-    #[cfg(feature = "hosted")]
-    pub fn capture_snapshot_v1(&self) -> ThreadWrapperSnapshotV1 {
-        ThreadWrapperSnapshotV1 {
-            requests: self.requests.clone(),
-        }
-    }
-
-    #[cfg(feature = "hosted")]
-    pub fn apply_snapshot_v1(&mut self, snapshot: ThreadWrapperSnapshotV1) {
-        self.requests = snapshot.requests;
-    }
-
     pub fn new() -> Self {
         Default::default()
     }
@@ -95,6 +75,15 @@ impl ThreadWrapper {
 
     pub fn thread_text_resume(&mut self, id: u32) {
         self.requests.push_back(ThreadRequest::TextResume(id));
+    }
+
+    pub fn cancel_text_requests(&mut self, id: u32) {
+        self.requests.retain(|request| match request {
+            ThreadRequest::TextWait(target) | ThreadRequest::TextResume(target) => {
+                id != 0 && *target != id
+            }
+            _ => true,
+        });
     }
 
     pub fn thread_exit(&mut self, id: Option<u32>) {

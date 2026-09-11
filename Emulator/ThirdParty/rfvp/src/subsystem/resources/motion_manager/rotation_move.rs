@@ -52,7 +52,7 @@ fn should_skip_update(prim_manager: &PrimManager, prim_id: u32, flag: bool) -> b
     false
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum RotationMotionType {
     None = 0,
     Linear,
@@ -78,7 +78,7 @@ impl TryFrom<i32> for RotationMotionType {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone)]
 pub struct RotationMotion {
     id: u16,
     prim_id: u32,
@@ -185,7 +185,6 @@ impl RotationMotion {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RotationMotionContainer {
     motions: Vec<RotationMotion>,
     free_ids: Vec<u16>,

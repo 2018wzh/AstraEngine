@@ -3343,6 +3343,16 @@ impl TextManager {
         self.items[id as usize].arm_sync_print_wait(thread_id);
     }
 
+    /// Detach reveal completions from a coroutine that is exiting or restarting.
+    /// Thread zero replaces the entire script and therefore cancels every waiter.
+    pub fn cancel_thread_waiters(&mut self, thread_id: u32) {
+        for text in &mut self.items {
+            if thread_id == 0 || text.sync_wait_thread == Some(thread_id) {
+                text.clear_sync_print_wait();
+            }
+        }
+    }
+
     pub fn collect_completed_sync_print_waiters(&mut self) -> Vec<u32> {
         let mut out = Vec::new();
         for t in self.items.iter_mut() {
@@ -3389,9 +3399,6 @@ impl TextManager {
                     t.apply_reveal_delta_to_current_target();
                 }
                 t.dirty = true;
-            }
-            if t.reveal_is_complete() {
-                t.sync_wait_active = false;
             }
         }
     }
@@ -3970,6 +3977,27 @@ mod hidpi_surface_tests {
         assert!(item.full_buffer.is_empty());
         assert_eq!(item.pixel_buffer.capacity(), 0);
         assert_eq!(item.full_buffer.capacity(), 0);
+    }
+
+    #[test]
+    fn force_reveal_preserves_sync_waiter_until_collected() {
+        let mut manager = TextManager::new();
+        manager.set_text_buff(0, 100, 40);
+        {
+            let item = &mut manager.items[0];
+            item.total_chars = 10;
+            item.visible_chars = 3;
+            item.wait_points.clear();
+            item.next_wait_index = 0;
+            item.pending_wait_ms = 0;
+            item.pending_special_wait = false;
+        }
+
+        manager.arm_sync_print_wait(0, 42);
+        manager.force_reveal_all_non_suspended();
+
+        assert_eq!(manager.collect_completed_sync_print_waiters(), vec![42]);
+        assert!(manager.collect_completed_sync_print_waiters().is_empty());
     }
 
     #[test]

@@ -137,7 +137,7 @@ pub trait World {
 
 pub struct GameData {
     #[cfg(feature = "hosted")]
-    globals: Global,
+    pub(crate) globals: Global,
     /// Text printed during the current hosted transaction. This queue belongs
     /// to the session instead of the legacy process-wide text-history state,
     /// so concurrent hosted games cannot leak dialogue into one another.
@@ -202,55 +202,7 @@ pub(crate) struct HostedTextEvent {
     pub text: String,
 }
 
-/// Runtime control state not owned by the VM, motion, audio or globals
-/// snapshots.  Hosted checkpointing must retain it to preserve shutdown,
-/// thread-routing and next-frame presentation behavior.
-#[cfg(feature = "hosted")]
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct RuntimeGameStateSnapshotV1 {
-    root_prim: Option<i16>,
-    can_fullscreen: bool,
-    pending_render_flag: Option<i32>,
-    lock_scripter: bool,
-    close_pending: bool,
-    last_current_thread: u32,
-    current_thread: u32,
-    main_thread_exited: bool,
-    game_should_exit: bool,
-    halt: bool,
-}
-
 impl GameData {
-    #[cfg(feature = "hosted")]
-    pub(crate) fn capture_runtime_state_v1(&self) -> RuntimeGameStateSnapshotV1 {
-        RuntimeGameStateSnapshotV1 {
-            root_prim: self.root_prim,
-            can_fullscreen: self.can_fullscreen,
-            pending_render_flag: self.pending_render_flag,
-            lock_scripter: self.lock_scripter,
-            close_pending: self.close_pending,
-            last_current_thread: self.last_current_thread,
-            current_thread: self.current_thread,
-            main_thread_exited: self.main_thread_exited,
-            game_should_exit: self.game_should_exit,
-            halt: self.halt,
-        }
-    }
-
-    #[cfg(feature = "hosted")]
-    pub(crate) fn apply_runtime_state_v1(&mut self, snapshot: RuntimeGameStateSnapshotV1) {
-        self.root_prim = snapshot.root_prim;
-        self.can_fullscreen = snapshot.can_fullscreen;
-        self.pending_render_flag = snapshot.pending_render_flag;
-        self.lock_scripter = snapshot.lock_scripter;
-        self.close_pending = snapshot.close_pending;
-        self.last_current_thread = snapshot.last_current_thread;
-        self.current_thread = snapshot.current_thread;
-        self.main_thread_exited = snapshot.main_thread_exited;
-        self.game_should_exit = snapshot.game_should_exit;
-        self.halt = snapshot.halt;
-    }
-
     /// Initialize a `GameData` at `dst` with the same values as `GameData::default()`,
     /// but without creating a large temporary on the stack.
     ///
@@ -401,19 +353,6 @@ impl GameData {
     #[cfg(feature = "hosted")]
     pub(crate) fn hosted_global_int(&self, key: u16) -> i32 {
         self.globals.get_int_var(key)
-    }
-
-    #[cfg(feature = "hosted")]
-    pub(crate) fn capture_hosted_globals(&self) -> crate::script::global::HostedGlobalSnapshot {
-        self.globals.capture_hosted_snapshot()
-    }
-
-    #[cfg(feature = "hosted")]
-    pub(crate) fn restore_hosted_globals(
-        &mut self,
-        snapshot: &crate::script::global::HostedGlobalSnapshot,
-    ) -> bool {
-        self.globals.restore_hosted_snapshot(snapshot)
     }
 
     #[cfg(feature = "hosted")]
@@ -758,6 +697,7 @@ lazy_static::lazy_static! {
         m.insert("SoundMasterVol".into(), Box::new(SoundMasterVol));
 
         m.insert("AudioLoad".into(), Box::new(AudioLoad));
+        m.insert("AudioLoad2".into(), Box::new(AudioLoad)); // workaround for steam, non-official patch
         m.insert("AudioPlay".into(), Box::new(AudioPlay));
         m.insert("AudioSilentOn".into(), Box::new(AudioSilentOn));
         m.insert("AudioStop".into(), Box::new(AudioStop));
@@ -818,6 +758,8 @@ lazy_static::lazy_static! {
         // graph apis
         m.insert("GraphLoad".into(), Box::new(GraphLoad));
         m.insert("GraphRGB".into(), Box::new(GraphRGB));
+
+        m.insert("GraphLoad2".into(), Box::new(GraphLoad)); // workaround for steam, non-official patch
 
         // gaiji apis
         m.insert("GaijiLoad".into(), Box::new(GaijiLoad));

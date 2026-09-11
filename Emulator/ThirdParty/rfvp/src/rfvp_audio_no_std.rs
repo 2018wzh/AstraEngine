@@ -1,3 +1,4 @@
+use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::host_api::{AudioParams, AudioStreamDesc, AudioStreamId, EncodedAudioKind};

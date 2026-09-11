@@ -17,15 +17,6 @@ pub enum Error {
 
 mod time {
     use crate::platform_time::{Duration, Instant};
-    use serde::{Deserialize, Serialize};
-
-    #[cfg(feature = "hosted")]
-    #[derive(Debug, Clone, Serialize, Deserialize)]
-    pub struct TimeSnapshotV1 {
-        delta_micros: u64,
-        frame_number: u64,
-        external_delta_micros: Option<u64>,
-    }
 
     /// ['Time'] is a resource dedicated to compute the time durations between frames and keep a track of
     /// frame numbers
@@ -50,25 +41,6 @@ mod time {
     }
 
     impl Time {
-        #[cfg(feature = "hosted")]
-        pub fn capture_snapshot_v1(&self) -> TimeSnapshotV1 {
-            TimeSnapshotV1 {
-                delta_micros: self.delta_duration.as_micros().min(u128::from(u64::MAX)) as u64,
-                frame_number: self.frame_number,
-                external_delta_micros: self
-                    .external_delta
-                    .map(|delta| delta.as_micros().min(u128::from(u64::MAX)) as u64),
-            }
-        }
-
-        #[cfg(feature = "hosted")]
-        pub fn apply_snapshot_v1(&mut self, snapshot: TimeSnapshotV1) {
-            self.delta_duration = Duration::from_micros(snapshot.delta_micros);
-            self.frame_number = snapshot.frame_number;
-            self.measure_start = Instant::now();
-            self.external_delta = snapshot.external_delta_micros.map(Duration::from_micros);
-        }
-
         /// Inject a frame delta from an external host (e.g. iOS/Android runloop).
         /// The value is consumed by the next `frame()` call.
         pub fn set_external_delta(&mut self, delta: Duration) {

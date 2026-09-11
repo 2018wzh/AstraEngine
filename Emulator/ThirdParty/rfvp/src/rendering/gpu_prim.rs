@@ -678,8 +678,10 @@ impl GpuPrimRenderer {
                                     draw_prim.get_w() as f32,
                                     draw_prim.get_h() as f32,
                                 ) {
-                                    let uv0 =
-                                        vec2(region.tex_x / tw as f32, region.tex_y / th as f32);
+                                    let uv0 = vec2(
+                                        region.tex_x / tw as f32,
+                                        region.tex_y / th as f32,
+                                    );
                                     let uv1 = vec2(
                                         (region.tex_x + region.tex_w) / tw as f32,
                                         (region.tex_y + region.tex_h) / th as f32,
@@ -693,8 +695,18 @@ impl GpuPrimRenderer {
                                         (g.get_u() as f32, g.get_v() as f32)
                                     };
                                     let model = self.build_draw_model(
-                                        &draw_prim, parent_x, parent_y, draw_x, draw_y, off_x,
-                                        off_y, pivot_x, pivot_y, v3d_x, v3d_y, v3d_z,
+                                        &draw_prim,
+                                        parent_x,
+                                        parent_y,
+                                        draw_x,
+                                        draw_y,
+                                        off_x,
+                                        off_y,
+                                        pivot_x,
+                                        pivot_y,
+                                        v3d_x,
+                                        v3d_y,
+                                        v3d_z,
                                     );
 
                                     self.emit_sprite_vertices(
@@ -822,8 +834,11 @@ impl GpuPrimRenderer {
                     // The original engine's draw_color_tile() uses only the
                     // accumulated parent position plus the tile's X/Y and W/H.
                     // Tile primitives do not apply rotation, scale, pivot, or V3D.
-                    let model =
-                        Mat4::from_translation(vec3(parent_x + draw_x, parent_y + draw_y, 0.0));
+                    let model = Mat4::from_translation(vec3(
+                        parent_x + draw_x,
+                        parent_y + draw_y,
+                        0.0,
+                    ));
                     self.emit_sprite_vertices(
                         model,
                         w,

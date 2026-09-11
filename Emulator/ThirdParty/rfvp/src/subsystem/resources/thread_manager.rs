@@ -35,6 +35,14 @@ impl Default for ThreadManager {
 }
 
 impl ThreadManager {
+    /// Native slot loading replaces each coroutine's return register with true.
+    /// Scripts consume this after their saved yield to rebuild transient UI state.
+    pub fn signal_native_load(&mut self) {
+        for context in &mut self.contexts {
+            context.signal_native_load();
+        }
+    }
+
     pub fn new() -> Self {
         let mut contexts = Vec::with_capacity(32);
         for i in 0..32 {

@@ -8,8 +8,6 @@
 use alloc::vec::Vec;
 
 #[cfg(feature = "hosted")]
-const MAX_HOSTED_SNAPSHOT_BYTES: usize = 64 * 1024 * 1024;
-
 use crate::host_api::{
     AudioParams, AudioStreamDesc, AudioStreamId, ColorRgba, DrawSolidCommand, DrawSpriteCommand,
     EncodedAudioKind, HostedPixelBuffer, PixelBuffer, PixelFormat, PlatformCallbacks, RectI32,
@@ -19,20 +17,15 @@ use crate::host_api::{
 #[cfg(feature = "hosted")]
 const MAX_HOSTED_AUDIO_STATES: usize =
     crate::host_api::BGM_LOGICAL_SLOT_COUNT + crate::host_api::SE_LOGICAL_SLOT_COUNT;
-#[cfg(feature = "hosted")]
-pub use crate::no_std_core::{
-    HostedCoreSnapshot as HostedSnapshot, HostedStateComponentHashesV1,
-    HOSTED_CORE_SNAPSHOT_VERSION,
-};
 pub use crate::no_std_core::{
     RfvpBootConfig as HostedBootConfig, RfvpCore, RfvpCoreConfig as HostedConfig,
     RfvpCoreRunState as HostedRunState, RfvpLoadedGame as HostedLoadedGame,
     RfvpResourceEntry as HostedResourceEntry, RfvpTickResult as HostedTickResult,
 };
 #[cfg(feature = "hosted")]
-pub use crate::vm_runner::HostedVmTraceRecord;
-#[cfg(feature = "hosted")]
 use crate::subsystem::resources::text_manager::SystemFontBindings;
+#[cfg(feature = "hosted")]
+pub use crate::vm_runner::HostedVmTraceRecord;
 
 /// Increment only for a deliberately incompatible hosted-core wire contract.
 pub const HOSTED_ABI_VERSION: u16 = 3;
@@ -493,49 +486,6 @@ impl HostedSession {
             Err(RfvpError::NotFound) => self.core.read_hosted_resource(resource_uri, max_bytes),
             Err(error) => Err(error),
         }
-    }
-
-    pub fn snapshot(&self) -> RfvpResult<HostedSnapshot> {
-        self.core.capture_hosted_snapshot()
-    }
-
-    pub fn restore(&mut self, snapshot: &HostedSnapshot) -> RfvpResult<()> {
-        self.core.restore_hosted_snapshot(snapshot)?;
-        self.core.invalidate_host_render_cache();
-        self.renderer.reset_resources();
-        Ok(())
-    }
-
-    /// Stable opaque persistence form for a hosted checkpoint.  Embedders may
-    /// place these bytes in their own save container, but must bind them to the
-    /// same hosted ABI and game identity before restore.
-    pub fn snapshot_bytes(&self) -> RfvpResult<Vec<u8>> {
-        let bytes = bincode::serialize(&self.snapshot()?).map_err(|_| RfvpError::InvalidData)?;
-        if bytes.len() > MAX_HOSTED_SNAPSHOT_BYTES {
-            return Err(RfvpError::CapacityExceeded);
-        }
-        Ok(bytes)
-    }
-
-    /// Deterministic semantic state for replay and restore verification.
-    /// Unlike [`Self::snapshot_bytes`], this excludes transient graphics cache
-    /// representation and must not be used as a persistence payload.
-    pub fn canonical_state_bytes(&self) -> RfvpResult<Vec<u8>> {
-        self.core.canonical_hosted_state_bytes()
-    }
-
-    /// Digest-only breakdown for a restore mismatch investigation.
-    pub fn canonical_state_component_hashes(&self) -> RfvpResult<HostedStateComponentHashesV1> {
-        self.core.canonical_hosted_state_component_hashes()
-    }
-
-    pub fn restore_bytes(&mut self, bytes: &[u8]) -> RfvpResult<()> {
-        if bytes.is_empty() || bytes.len() > MAX_HOSTED_SNAPSHOT_BYTES {
-            return Err(RfvpError::CapacityExceeded);
-        }
-        let snapshot: HostedSnapshot =
-            bincode::deserialize(bytes).map_err(|_| RfvpError::InvalidData)?;
-        self.restore(&snapshot)
     }
 
     /// Boot through the same constrained ports used by `step`.  A boot that

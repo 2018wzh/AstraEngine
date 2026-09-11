@@ -25,7 +25,13 @@ pub async fn start_rfvp_from_directory_with_text_hidpi(
     files_json: String,
     text_hidpi_enabled: bool,
 ) -> Result<(), JsValue> {
-    start_rfvp_from_directory_impl(canvas_id, nls, files_json, text_hidpi_enabled).await
+    start_rfvp_from_directory_impl(
+        canvas_id,
+        nls,
+        files_json,
+        text_hidpi_enabled,
+    )
+    .await
 }
 
 async fn start_rfvp_from_directory_impl(

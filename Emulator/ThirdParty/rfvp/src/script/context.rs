@@ -92,6 +92,10 @@ pub struct ContextSnapshotV1 {
 }
 
 impl Context {
+    pub(crate) fn signal_native_load(&mut self) {
+        self.return_value = Variant::True;
+    }
+
     pub fn new(start_addr: u32, id: u32) -> Self {
         let mut ctx = Context {
             id,

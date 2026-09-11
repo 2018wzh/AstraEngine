@@ -12,7 +12,6 @@ use anyhow::{anyhow, Result};
 use core_maths::CoreFloat;
 use image::{DynamicImage, GenericImageView, ImageBuffer};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 #[cfg(not(feature = "no_std"))]
 use std::sync::Arc;
 
@@ -86,14 +85,6 @@ pub struct GraphBuff {
 }
 
 impl GraphBuff {
-    fn content_sha256(&self) -> [u8; 32] {
-        let mut digest = Sha256::new();
-        if let Some(texture) = &self.texture {
-            digest.update(texture.to_rgba8().as_raw());
-        }
-        digest.finalize().into()
-    }
-
     pub fn new() -> Self {
         Self {
             texture: None,
@@ -935,59 +926,12 @@ pub struct GraphBuffSnapshotV1 {
     pub display_height: u16,
     pub u: u16,
     pub v: u16,
-    pub generation: u64,
     pub load_kind: GraphBuffLoadKind,
     /// Raw RGBA8 pixels (width*height*4). Only present for non-VFS textures.
     pub rgba: Option<Vec<u8>>,
 }
 
-/// Canonical graph identity used for deterministic hosted-state comparison.
-/// Pixel buffers are represented by their digest so restore-time image-cache
-/// layout cannot affect state verification.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GraphBuffCanonicalStateV1 {
-    pub id: u16,
-    pub r_value: u8,
-    pub g_value: u8,
-    pub b_value: u8,
-    pub texture_ready: bool,
-    pub texture_path: String,
-    pub offset_x: u16,
-    pub offset_y: u16,
-    pub width: u16,
-    pub height: u16,
-    pub display_width: u16,
-    pub display_height: u16,
-    pub u: u16,
-    pub v: u16,
-    pub generation: u64,
-    pub load_kind: GraphBuffLoadKind,
-    pub rgba_sha256: [u8; 32],
-}
-
 impl GraphBuff {
-    pub fn capture_canonical_state_with_id(&self, id: u16) -> GraphBuffCanonicalStateV1 {
-        GraphBuffCanonicalStateV1 {
-            id,
-            r_value: self.r_value,
-            g_value: self.g_value,
-            b_value: self.b_value,
-            texture_ready: self.texture_ready,
-            texture_path: self.texture_path.clone(),
-            offset_x: self.offset_x,
-            offset_y: self.offset_y,
-            width: self.width,
-            height: self.height,
-            display_width: self.get_display_width(),
-            display_height: self.get_display_height(),
-            u: self.u,
-            v: self.v,
-            generation: self.generation,
-            load_kind: self.load_kind,
-            rgba_sha256: self.content_sha256(),
-        }
-    }
-
     pub fn capture_snapshot_with_id(&self, id: u16) -> GraphBuffSnapshotV1 {
         // Skip empty graphs.
         if !self.texture_ready && self.texture.is_none() && self.texture_path.is_empty() {
@@ -1006,7 +950,6 @@ impl GraphBuff {
                 display_height: self.get_display_height(),
                 u: self.u,
                 v: self.v,
-                generation: self.generation,
                 load_kind: self.load_kind,
                 rgba: None,
             };
@@ -1027,14 +970,16 @@ impl GraphBuff {
             display_height: self.get_display_height(),
             u: self.u,
             v: self.v,
-            generation: self.generation,
             load_kind: self.load_kind,
-            // Pixels are authoritative: a loaded VFS texture may have been
-            // mutated by a motion or parts operation after its initial load.
-            rgba: self.texture.as_ref().map(|img| match img.as_ref() {
-                DynamicImage::ImageRgba8(rgba) => rgba.as_raw().clone(),
-                _ => img.to_rgba8().into_raw(),
-            }),
+            rgba: if self.texture_path.is_empty() {
+                // In-memory textures (text buffers, intermediate results). Persist raw RGBA.
+                self.texture.as_ref().map(|img| match img.as_ref() {
+                    DynamicImage::ImageRgba8(rgba) => rgba.as_raw().clone(),
+                    _ => img.to_rgba8().into_raw(),
+                })
+            } else {
+                None
+            },
         }
     }
 
@@ -1046,33 +991,30 @@ impl GraphBuff {
         self.g_value = snap.g_value;
         self.b_value = snap.b_value;
 
-        // Embedded pixels are authoritative because a texture may have been
-        // mutated after its source asset was loaded.
-        if let Some(rgba) = &snap.rgba {
-            self.load_from_buff_ref_with_display_size(
-                rgba,
-                snap.width as u32,
-                snap.height as u32,
-                snap.display_width as u32,
-                snap.display_height as u32,
-            )?;
-            self.offset_x = snap.offset_x;
-            self.offset_y = snap.offset_y;
-            self.u = snap.u;
-            self.v = snap.v;
-            self.texture_path = snap.texture_path.clone();
-            self.texture_ready = snap.texture_ready;
-            self.load_kind = snap.load_kind;
-            self.generation = snap.generation;
-            return Ok(());
-        }
-
-        // VFS reload remains the compatibility path for a snapshot with no
-        // embedded pixels.
+        // Prefer VFS re-load if we have a path.
         if !snap.texture_path.is_empty() {
             let bytes = match vfs.read_file(&snap.texture_path) {
                 Ok(b) => b,
                 Err(e) => {
+                    // Fall back to embedded pixels if provided.
+                    if let Some(rgba) = &snap.rgba {
+                        self.load_from_buff_ref_with_display_size(
+                            rgba,
+                            snap.width as u32,
+                            snap.height as u32,
+                            snap.display_width as u32,
+                            snap.display_height as u32,
+                        )?;
+                        self.offset_x = snap.offset_x;
+                        self.offset_y = snap.offset_y;
+                        self.u = snap.u;
+                        self.v = snap.v;
+                        self.texture_path = snap.texture_path.clone();
+                        self.texture_ready = snap.texture_ready;
+                        self.load_kind = snap.load_kind;
+                        self.mark_dirty();
+                        return Ok(());
+                    }
                     return Err(anyhow!(
                         "apply_snapshot_v1: failed to read {} from vfs: {}",
                         snap.texture_path,
@@ -1089,17 +1031,7 @@ impl GraphBuff {
                 _ => self.load_texture(&snap.texture_path, bytes)?,
             }
 
-            self.offset_x = snap.offset_x;
-            self.offset_y = snap.offset_y;
-            self.width = snap.width;
-            self.height = snap.height;
-            self.display_width = snap.display_width;
-            self.display_height = snap.display_height;
-            self.u = snap.u;
-            self.v = snap.v;
-            self.texture_ready = snap.texture_ready;
-            self.load_kind = snap.load_kind;
-            self.generation = snap.generation;
+            // load_* already sets offsets/u/v/size/ready/path/kind.
             return Ok(());
         }
 
@@ -1118,11 +1050,10 @@ impl GraphBuff {
             self.v = snap.v;
             self.texture_ready = snap.texture_ready;
             self.load_kind = snap.load_kind;
-            self.generation = snap.generation;
+            self.mark_dirty();
             return Ok(());
         }
 
-        self.generation = snap.generation;
         Ok(())
     }
 }
