@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "Source/FamilyApi/astra-emu-family-api",
     "Source/Families/astra-emu-fvp",
+    "Source/Families/astra-emu-minori",
     "Source/Manager/astra-emu-manager-core",
     "Source/Providers/astra-emu-translation-openai-compatible",
     "Source/Providers/astra-emu-metadata",
@@ -11,7 +12,6 @@ members = [
 ]
 exclude = [
     "ThirdParty/rfvp",
-    "Source/Families/astra-emu-minori",
     "Source/Programs/astra-emu-minori-cli",
     "Source/FamilyApi/astra-emu-extension-api",
     "Source/FamilyCore/astra-emu-family-core",

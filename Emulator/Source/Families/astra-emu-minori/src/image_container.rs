@@ -1,6 +1,6 @@
 use std::{io::Read, sync::Arc};
 
-use astra_emu_family_core::LegacyCoreError;
+use crate::MinoriError;
 use encoding_rs::SHIFT_JIS;
 use flate2::read::ZlibDecoder;
 use image::RgbaImage;
@@ -30,7 +30,7 @@ pub struct MinoriAniArchive {
 }
 
 impl MinoriAniArchive {
-    pub fn parse(source: impl Into<Arc<[u8]>>) -> Result<Self, LegacyCoreError> {
+    pub fn parse(source: impl Into<Arc<[u8]>>) -> Result<Self, MinoriError> {
         let source = source.into();
         validate_container_size(source.len())?;
         if read_u16(&source, 0)? != 0x0100 || read_u32(&source, 4)? != 0 {
@@ -111,7 +111,7 @@ impl MinoriAniArchive {
         &self.frames
     }
 
-    pub fn decode_frame(&self, index: usize) -> Result<RgbaImage, LegacyCoreError> {
+    pub fn decode_frame(&self, index: usize) -> Result<RgbaImage, MinoriError> {
         let frame = self.frames.get(index).ok_or_else(|| {
             invalid(
                 "ASTRA_EMU_MINORI_ANI_FRAME_INDEX",
@@ -143,7 +143,7 @@ pub struct MinoriSqzArchive {
 }
 
 impl MinoriSqzArchive {
-    pub fn parse(source: impl Into<Arc<[u8]>>) -> Result<Self, LegacyCoreError> {
+    pub fn parse(source: impl Into<Arc<[u8]>>) -> Result<Self, MinoriError> {
         let source = source.into();
         validate_container_size(source.len())?;
         if checked_slice(&source, 0, 4)? != b"SQZ1" {
@@ -207,7 +207,7 @@ impl MinoriSqzArchive {
         &self.frames
     }
 
-    pub fn decode_frame(&self, index: usize) -> Result<RgbaImage, LegacyCoreError> {
+    pub fn decode_frame(&self, index: usize) -> Result<RgbaImage, MinoriError> {
         let frame = self.frames.get(index).ok_or_else(|| {
             invalid(
                 "ASTRA_EMU_MINORI_SQZ_FRAME_INDEX",
@@ -248,7 +248,7 @@ fn raw_to_rgba(
     height: u32,
     bits_per_pixel: u16,
     source: &[u8],
-) -> Result<RgbaImage, LegacyCoreError> {
+) -> Result<RgbaImage, MinoriError> {
     let expected = checked_pixel_bytes(width, height, bits_per_pixel)?;
     if source.len() != expected {
         return Err(invalid(
@@ -304,11 +304,7 @@ fn raw_to_rgba(
     })
 }
 
-fn checked_pixel_bytes(
-    width: u32,
-    height: u32,
-    bits_per_pixel: u16,
-) -> Result<usize, LegacyCoreError> {
+fn checked_pixel_bytes(width: u32, height: u32, bits_per_pixel: u16) -> Result<usize, MinoriError> {
     if width == 0
         || height == 0
         || width > MAX_DIMENSION
@@ -333,7 +329,7 @@ fn checked_pixel_bytes(
         .map_err(|_| invalid("ASTRA_EMU_MINORI_IMAGE_SIZE", "image byte size overflowed"))
 }
 
-fn validate_container_size(len: usize) -> Result<(), LegacyCoreError> {
+fn validate_container_size(len: usize) -> Result<(), MinoriError> {
     if len == 0 || len > MAX_CONTAINER_BYTES {
         return Err(invalid(
             "ASTRA_EMU_MINORI_IMAGE_CONTAINER_SIZE",
@@ -343,7 +339,7 @@ fn validate_container_size(len: usize) -> Result<(), LegacyCoreError> {
     Ok(())
 }
 
-fn checked_slice(source: &[u8], offset: usize, len: usize) -> Result<&[u8], LegacyCoreError> {
+fn checked_slice(source: &[u8], offset: usize, len: usize) -> Result<&[u8], MinoriError> {
     let end = offset
         .checked_add(len)
         .ok_or_else(|| invalid("ASTRA_EMU_MINORI_IMAGE_BOUNDS", "image range overflowed"))?;
@@ -352,104 +348,26 @@ fn checked_slice(source: &[u8], offset: usize, len: usize) -> Result<&[u8], Lega
         .ok_or_else(|| invalid("ASTRA_EMU_MINORI_IMAGE_BOUNDS", "image range is truncated"))
 }
 
-fn read_u16(source: &[u8], offset: usize) -> Result<u16, LegacyCoreError> {
+fn read_u16(source: &[u8], offset: usize) -> Result<u16, MinoriError> {
     Ok(u16::from_le_bytes(
         checked_slice(source, offset, 2)?.try_into().unwrap(),
     ))
 }
-fn read_i16(source: &[u8], offset: usize) -> Result<i16, LegacyCoreError> {
+fn read_i16(source: &[u8], offset: usize) -> Result<i16, MinoriError> {
     Ok(i16::from_le_bytes(
         checked_slice(source, offset, 2)?.try_into().unwrap(),
     ))
 }
-fn read_u32(source: &[u8], offset: usize) -> Result<u32, LegacyCoreError> {
+fn read_u32(source: &[u8], offset: usize) -> Result<u32, MinoriError> {
     Ok(u32::from_le_bytes(
         checked_slice(source, offset, 4)?.try_into().unwrap(),
     ))
 }
 
-fn invalid(code: &'static str, message: &'static str) -> LegacyCoreError {
-    LegacyCoreError::invalid(code, message)
+fn invalid(code: &'static str, message: &'static str) -> MinoriError {
+    MinoriError::invalid(code, message)
 }
 
 #[cfg(test)]
-mod tests {
-    use std::io::Write;
-
-    use flate2::{write::ZlibEncoder, Compression};
-
-    use super::*;
-
-    #[test]
-    fn ani_decodes_all_observed_pixel_formats() {
-        for (bpp, raw, expected) in [
-            (32, vec![1, 2, 3, 4], [3, 2, 1, 4]),
-            (24, vec![1, 2, 3], [3, 2, 1, 255]),
-            (16, 0xf800u16.to_le_bytes().to_vec(), [255, 0, 0, 255]),
-            (8, vec![7], [7, 7, 7, 255]),
-        ] {
-            let mut bytes = vec![0x00, 0x01, 0x01, 0x00, 0, 0, 0, 0, b'f', 0];
-            bytes.extend_from_slice(&1u16.to_le_bytes());
-            bytes.extend_from_slice(&1u16.to_le_bytes());
-            bytes.extend_from_slice(&(bpp as u16).to_le_bytes());
-            bytes.extend_from_slice(&(-2i16).to_le_bytes());
-            bytes.extend_from_slice(&3i16.to_le_bytes());
-            bytes.extend_from_slice(&raw);
-            let archive = MinoriAniArchive::parse(Arc::<[u8]>::from(bytes)).unwrap();
-            assert_eq!(
-                (archive.frames()[0].offset_x, archive.frames()[0].offset_y),
-                (-2, 3)
-            );
-            assert_eq!(archive.decode_frame(0).unwrap().as_raw(), &expected);
-        }
-    }
-
-    #[test]
-    fn ani_rejects_truncation_and_trailing_data() {
-        let bytes = vec![0x00, 0x01, 0x01, 0x00, 0, 0, 0, 0, b'f', 0];
-        assert_eq!(
-            MinoriAniArchive::parse(Arc::<[u8]>::from(bytes))
-                .unwrap_err()
-                .code(),
-            "ASTRA_EMU_MINORI_IMAGE_BOUNDS"
-        );
-    }
-
-    #[test]
-    fn sqz_decodes_bgra_and_enforces_exact_output() {
-        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
-        encoder.write_all(&[1, 2, 3, 4]).unwrap();
-        let frame = encoder.finish().unwrap();
-        let index_end = 0x24u32;
-        let mut bytes = b"SQZ1".to_vec();
-        bytes.extend_from_slice(&32u32.to_le_bytes());
-        bytes.extend_from_slice(&1u32.to_le_bytes());
-        bytes.extend_from_slice(&1u32.to_le_bytes());
-        bytes.extend_from_slice(&1u32.to_le_bytes());
-        for _ in 0..2 {
-            bytes.extend_from_slice(&index_end.to_le_bytes());
-            bytes.extend_from_slice(&(frame.len() as u32).to_le_bytes());
-        }
-        bytes.extend_from_slice(&frame);
-        let archive = MinoriSqzArchive::parse(Arc::<[u8]>::from(bytes)).unwrap();
-        assert_eq!(archive.frames().len(), 2);
-        assert_eq!(archive.decode_frame(1).unwrap().as_raw(), &[3, 2, 1, 4]);
-    }
-
-    #[test]
-    fn sqz_rejects_metadata_overlap_and_output_overrun() {
-        let mut bytes = vec![0; 0x24];
-        bytes[..4].copy_from_slice(b"SQZ1");
-        bytes[8..12].copy_from_slice(&1u32.to_le_bytes());
-        bytes[12..16].copy_from_slice(&1u32.to_le_bytes());
-        bytes[16..20].copy_from_slice(&1u32.to_le_bytes());
-        bytes[20..24].copy_from_slice(&4u32.to_le_bytes());
-        bytes[24..28].copy_from_slice(&1u32.to_le_bytes());
-        assert_eq!(
-            MinoriSqzArchive::parse(Arc::<[u8]>::from(bytes))
-                .unwrap_err()
-                .code(),
-            "ASTRA_EMU_MINORI_SQZ_ENTRY"
-        );
-    }
-}
+#[path = "image_container/tests.rs"]
+mod tests;

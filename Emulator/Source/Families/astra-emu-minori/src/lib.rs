@@ -1,21 +1,22 @@
 //! Minori PAZ virtual filesystem and lossless script research parser.
 
-mod factory;
-#[cfg(feature = "dynamic-plugin-export")]
-mod ffi;
+mod archive;
+mod error;
 mod image_container;
 mod paz;
-mod provider;
+mod profile;
 mod runtime;
 mod script;
 mod text_renderer;
 
-pub use factory::*;
+pub use archive::*;
+pub use error::*;
 pub use image_container::*;
 pub use paz::*;
-pub use provider::*;
+pub use profile::*;
 pub use runtime::*;
 pub use script::*;
+pub use text_renderer::MinoriTextRenderer;
 
 pub const MINORI_READER_ID: &str = "astra.emu.minori.paz.v1";
 pub const MINORI_DECRYPT_PROVIDER_ID: &str = "astra.emu.minori.paz.decrypt.v1";

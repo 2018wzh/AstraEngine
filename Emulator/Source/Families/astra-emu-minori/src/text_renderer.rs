@@ -1,18 +1,18 @@
 use astra_core::{DiagnosticSeverity, Hash256};
-use astra_media::{
-    CosmicTextLayoutProvider, FontBindingContext, LayoutConstraint, OverflowPolicy, PackagedFont,
-    TextDirection, TextLayoutConfig, TextLayoutProvider, TextLayoutRequest,
-    TextRenderResourceOwner, TextRun, UnicodeRange, WrapPolicy,
-};
 use astra_media_core::{
     CpuRendererProvider, HeadlessRenderer, RenderTargetFormat, Renderer2DProvider,
     RendererCreateRequest, SceneCommand, Transform2D,
+};
+use astra_text::{
+    CosmicTextLayoutProvider, FontBindingContext, LayoutConstraint, OverflowPolicy, PackagedFont,
+    TextDirection, TextLayoutConfig, TextLayoutProvider, TextLayoutRequest,
+    TextRenderResourceOwner, TextRun, UnicodeRange, WrapPolicy,
 };
 
 const FONT_FAMILY: &str = "Noto Sans JP";
 const FONT_ASSET_ID: &str = "asset:/font/emu/noto-sans-jp";
 
-pub(crate) struct MinoriTextRenderer {
+pub struct MinoriTextRenderer {
     provider: CosmicTextLayoutProvider,
     resources: TextRenderResourceOwner,
     renderer: Option<(u32, u32, HeadlessRenderer)>,
@@ -30,7 +30,7 @@ struct Region {
 }
 
 impl MinoriTextRenderer {
-    pub(crate) fn new() -> Result<Self, String> {
+    pub fn new() -> Result<Self, String> {
         let bytes =
             include_bytes!("../../../../../Examples/NativeVN/Assets/Fonts/NotoSansJP-Variable.ttf")
                 .to_vec();
@@ -79,7 +79,7 @@ impl MinoriTextRenderer {
         })
     }
 
-    pub(crate) fn render(
+    pub fn render(
         &mut self,
         width: u32,
         height: u32,
@@ -198,4 +198,24 @@ fn append_layout(
     );
     commands.push(SceneCommand::PopTransform);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn genuine_japanese_glyphs_are_composited_without_engine_session() {
+        let mut renderer = MinoriTextRenderer::new().unwrap();
+        let frame = renderer
+            .render(1280, 720, "日本語の文字", Some("名前"))
+            .unwrap();
+        assert_eq!(frame.len(), 1280 * 720 * 4);
+        assert!(frame.chunks_exact(4).any(|pixel| pixel[3] != 0));
+        assert_eq!(
+            frame,
+            renderer
+                .render(1280, 720, "日本語の文字", Some("名前"))
+                .unwrap()
+        );
+    }
 }
