@@ -636,6 +636,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "astra-emu-minori-cli"
+version = "0.1.0"
+dependencies = [
+ "astra-core",
+ "astra-emu-minori",
+ "astra-observability",
+ "clap",
+ "flate2",
+ "image 0.25.10",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tracing",
+ "windows",
+]
+
+[[package]]
 name = "astra-emu-translation-openai-compatible"
 version = "0.1.0"
 dependencies = [

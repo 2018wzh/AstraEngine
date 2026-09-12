@@ -10,8 +10,6 @@ path = "src/main.rs"
 
 [dependencies]
 astra-core = { path = "../../../../Engine/Source/Runtime/astra-core" }
-astra-emu-family-core = { path = "../../FamilyCore/astra-emu-family-core" }
-astra-emu-family-support = { path = "../../FamilySupport/astra-emu-family-support" }
 astra-emu-minori = { path = "../../Families/astra-emu-minori" }
 astra-observability = { path = "../../../../Engine/Source/Developer/astra-observability" }
 clap.workspace = true
@@ -19,8 +17,9 @@ flate2.workspace = true
 image.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-serde_yaml.workspace = true
 tracing.workspace = true
 
-[dev-dependencies]
 tempfile.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization"] }

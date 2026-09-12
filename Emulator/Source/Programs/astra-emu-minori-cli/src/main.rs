@@ -6,11 +6,9 @@ use std::{
 };
 
 use astra_core::Hash256;
-use astra_emu_family_support::mount_family_vfs;
 use astra_emu_minori::{
-    parse_audio_resource_spec, parse_sc, MinoriAniArchive, MinoriSqzArchive,
-    MinoriVfsFamilyFactory, ScCensus, ScLineKind, ScOpcodeCatalog, ScOperand, ScScript,
-    MAX_ENTRY_BYTES,
+    mount_minori, parse_audio_resource_spec, parse_sc, MinoriAniArchive, MinoriSqzArchive,
+    ScCensus, ScLineKind, ScOpcodeCatalog, ScOperand, ScScript, MAX_ENTRY_BYTES,
 };
 use clap::{Parser, Subcommand};
 use serde::Serialize;
@@ -18,6 +16,7 @@ use serde::Serialize;
 mod garbro_nrbf;
 mod importer;
 mod inventory;
+mod private_output;
 
 #[derive(Debug, Parser)]
 #[command(name = "astra-emu-minori-cli")]
@@ -44,13 +43,13 @@ enum Command {
         #[arg(long)]
         game_dir: PathBuf,
         #[arg(long)]
-        mount_profile: PathBuf,
+        profile: PathBuf,
     },
     CensusMedia {
         #[arg(long)]
         game_dir: PathBuf,
         #[arg(long)]
-        mount_profile: PathBuf,
+        profile: PathBuf,
     },
 }
 
@@ -77,14 +76,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             title,
             game_dir,
         } => importer::import(&formats, &title, &game_dir),
-        Command::CensusScripts {
-            game_dir,
-            mount_profile,
-        } => census(&game_dir, &mount_profile),
-        Command::CensusMedia {
-            game_dir,
-            mount_profile,
-        } => census_media(&game_dir, &mount_profile),
+        Command::CensusScripts { game_dir, profile } => census(&game_dir, &profile),
+        Command::CensusMedia { game_dir, profile } => census_media(&game_dir, &profile),
     };
     if result.is_err() {
         tracing::error!(
@@ -96,18 +89,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracing::info!(event = "astra.emu.minori_cli.completed", action);
     }
     result
-}
-
-fn mount_minori(
-    game_dir: &std::path::Path,
-    profile: &std::path::Path,
-) -> Result<Arc<dyn astra_emu_family_core::LegacyMountedVfs>, Box<dyn std::error::Error>> {
-    Ok(mount_family_vfs(
-        "minori",
-        game_dir,
-        profile,
-        vec![Arc::new(MinoriVfsFamilyFactory)],
-    )?)
 }
 
 fn census(
@@ -165,7 +146,7 @@ struct AudioResourceRoleCensus {
 
 fn census_audio_resources(
     scripts: &[ScScript],
-    manifest: &astra_emu_family_core::LegacyPackManifest,
+    manifest: &astra_emu_minori::PazManifest,
 ) -> Result<AudioResourceCensus, Box<dyn std::error::Error>> {
     let mut entries = BTreeMap::<&str, Vec<&str>>::new();
     for entry in &manifest.entries {
