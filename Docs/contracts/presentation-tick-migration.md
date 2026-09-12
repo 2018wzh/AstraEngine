@@ -35,3 +35,13 @@ Region 队列保持原顺序并在活动过渡完成后激活；排队状态可�
 共用 fence id 的 Character/Background/Text/Video 命令组成 all-of 等待组，包含区域队列中的成员；同组未完成成员的 command id 必须唯一，冲突在批次提交前拒绝。只有所有成员都完成，coordinator 才发出一次完成通知；文字立即显示或视频先结束不能提前放行其他成员。任一成员失败或被新命令替换，组保持 Failed，后续成员完成不能覆盖失败；其他轨道继续执行。已经终结且没有活动成员的 fence id 可以用于新一组命令，重新进入 Pending。
 
 成员身份直接来自现有活动/排队命令，保存同一 coordinator state，不另建线程池或任务 registry。新 coordinator schema 为 v5，旧 v4 快照拒绝重建；StageDirector 外层仍为 v8，恢复时校验内层 schema 与 fence 引用。跨区域并行、顺序排队、文字点击、视频完成/失败、替换与中途保存恢复均需要普通产品状态测试；通用 Runtime 任务组合和产品异步 IO 接入仍未完成。
+
+## Player 呈现会话
+
+NativeVN Player 的 frame tick 直接推进其 StageDirector，并按当前场景的资源需求生成输出；不克隆整个 director、stage state 或上一帧 scene 来回滚。delta 输入预检失败可重试；推进后发生资源、场景或渲染错误时，Player 呈现会话终止，后续 tick、剧情输入、渲染和保存拒绝。资源释放与 shutdown 仍可执行。
+
+Player 检查当前 VN wait 对应的演出 fence；Failed 必须返回 `ASTRA_PLAYER_PRESENTATION_FENCE_FAILED`，不能静默等待或伪造完成。未被剧情等待的失败组不终止其他轨道。恢复在验证旧存档后重建呈现状态；提交前拒绝保留原会话状态，提交后的恢复失败保持终止，完整恢复成功才重新允许运行。此变更不改变存档字段布局。
+
+读档首帧必须按恢复后的 stage 重建场景与纹理生命周期，不沿用读档前的 scene draw。活动转场逐帧借用已有 source snapshot，只有创建新转场或存读档边界才复制状态。
+
+[Player 失败恢复回归](../../Engine/Source/Programs/astra-player-vn/src/native_vn_host/presentation_tests.rs)使用公开 package、字体与图片 fixture，覆盖资源失败后的帧状态、失败会话的输入/保存拒绝、恢复前后失败与成功重开，以及当前 fence 与无关失败组的隔离。

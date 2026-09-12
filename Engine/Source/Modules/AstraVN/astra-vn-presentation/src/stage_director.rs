@@ -317,6 +317,10 @@ impl ProductStageDirector {
         self.coordinator.start_video(&format!("movie.{layer}"))
     }
 
+    pub fn fence_status(&self, id: &str) -> Option<crate::FenceStatus> {
+        self.coordinator.state().fences.get(id).copied()
+    }
+
     pub fn complete_video(&mut self, layer: &str) -> Result<Vec<String>, VnError> {
         self.ensure_active()?;
         self.coordinator.complete_video(&format!("movie.{layer}"))

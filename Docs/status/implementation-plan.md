@@ -44,3 +44,5 @@
 - Runtime 完成句柄绑定 host 内 TaskScope，成功读档、失败和销毁使旧工作失效；子作用域取消及单 token 取消移除排队结果并发出取消事件。同一 token 只接受一个终态，重复/无主完成存档拒绝；旧 AwaitReplayPolicy 已更名为 AwaitCompletionPolicy，文本字段同步而 Postcard 布局不变。NativeVN 同步 wait 消费改用句柄，未使用的 provider 局部 save_slot/load_slot 删除。真实 worker 迟到、跨 World、取消、恢复和重复终态等 Runtime/provider 针对性测试 52 项通过，Engine 全量 fmt/clippy/build/test 通过：680 项通过、0 失败、9 项按原条件未执行；通用任务组合器、可信 Luau 与产品异步 IO 的完整接入仍未完成。
 
 - 演出 coordinator 共用 fence 改为 all-of 等待，覆盖活动与排队成员；文字点击、单视频结束不提前完成，失败/替换保持组 Failed，其他轨道继续。成员身份冲突在提交前拒绝，终结后的空组可重新使用。coordinator v5 拒绝旧 v4 和不一致的恢复状态；ProductStageDirector 双视频层等待已验证。Engine 全量 fmt/clippy/build/test 通过：688 项通过、0 失败、9 项按原条件未执行。真实媒体播放、通用任务组合与异步 IO 接入仍未完成。
+
+- Player 呈现帧已改为原地推进，移除 StageDirector、stage state、旧 scene draw 和活动转场 source snapshot 的逐帧回滚克隆。执行失败或当前等待的 fence 失败会终止呈现会话；损坏存档保持失败，成功恢复才重开。读档首帧重建已恢复场景及纹理生命周期。新增两项真实 package/字体/图片 fixture 回归覆盖帧后资源失败、输入/保存拒绝、恢复前后失败和无关 fence 隔离，均通过；本轮 Engine 全量 fmt/clippy/build/test 通过：690 项通过、0 失败、9 项按原条件未执行；真实硬件验收未执行。
