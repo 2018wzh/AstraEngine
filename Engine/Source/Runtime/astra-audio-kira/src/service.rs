@@ -1,3 +1,5 @@
+mod restore;
+
 use std::{
     collections::{BTreeMap, VecDeque},
     sync::Arc,
@@ -630,19 +632,7 @@ impl AudioServiceSession {
         &mut self,
         snapshot: AudioTimelineStateV1,
     ) -> Result<(), AudioServiceError> {
-        self.ensure_healthy()?;
-        if snapshot.schema != crate::timeline::AUDIO_TIMELINE_SCHEMA
-            || snapshot.device_sample_rate != self.timeline.device_sample_rate
-            || snapshot.device_channels != self.timeline.device_channels
-            || snapshot
-                .voices
-                .values()
-                .any(|voice| voice.command_sequence == 0)
-        {
-            return Err(AudioServiceError::InvalidCommand(
-                "audio timeline schema or device format is incompatible",
-            ));
-        }
+        self.validate_timeline_restore(&snapshot)?;
         for voice in self.voices.values() {
             voice.handle.stop();
         }

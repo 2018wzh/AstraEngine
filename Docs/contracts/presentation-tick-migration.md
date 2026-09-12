@@ -69,3 +69,7 @@ Media Host 使用独立播放时间驱动 timeline deadline 和视频 `started_a
 视频帧绑定必须同时更新 CPU 缓存与场景的 `VideoFrame` 命令，命令携带当前像素、尺寸和目标区域，由 renderer 管理视频资源。不能以空呈现批次或仅更新 CPU 缓存代表视频播放。场景重建借用当前 StageDirector，不为每个视频帧复制整个演出状态。
 
 恢复视频时按已保存的 cursor 解码并校验计数，只保留最后一个已呈现帧，再将该帧重新提交到场景；不能跳过它而沿用读档前纹理。恢复期间的解码、计数或呈现错误必须保留该流的关闭任务。
+
+## 音频恢复预检
+
+`AudioServiceSession::validate_timeline_restore` 在停止当前声音前检查设备格式、voice/bus 容量、序列、准备的 PCM、采样游标和渐变状态；失败保留当前 timeline 和声音。Player 的媒体预检在已打开音频服务时使用同一检查，不能等到剧情提交后才发现缺 PCM。此检查不代替冷启动时从 package 解码并准备保存的声音资产；没有资源时仍返回明确错误。

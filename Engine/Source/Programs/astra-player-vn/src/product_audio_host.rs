@@ -162,15 +162,10 @@ impl NativeVnProductAudioHost {
                 "ASTRA_PLAYER_AUDIO_TIMELINE_INVALID",
             ));
         }
-        Ok(())
-    }
-
-    pub fn restore(&mut self, snapshot: NativeVnProductAudioSnapshot) -> Result<(), PlatformError> {
-        self.validate_restore(&snapshot)?;
-        if let Some(service) = self.service.as_mut() {
+        if let Some(service) = self.service.as_ref() {
             service
-                .restore_timeline(snapshot.timeline.clone())
-                .map_err(|error| player_platform_error("player.audio.restore", error))?;
+                .validate_timeline_restore(&snapshot.timeline)
+                .map_err(|error| player_platform_error("player.audio.restore.validate", error))?;
         } else if !snapshot.timeline.voices.is_empty()
             || snapshot
                 .timeline
@@ -182,6 +177,16 @@ impl NativeVnProductAudioHost {
                 "player.audio.restore",
                 "ASTRA_PLAYER_AUDIO_RESTORE_REQUIRES_OPEN_SESSION",
             ));
+        }
+        Ok(())
+    }
+
+    pub fn restore(&mut self, snapshot: NativeVnProductAudioSnapshot) -> Result<(), PlatformError> {
+        self.validate_restore(&snapshot)?;
+        if let Some(service) = self.service.as_mut() {
+            service
+                .restore_timeline(snapshot.timeline.clone())
+                .map_err(|error| player_platform_error("player.audio.restore", error))?;
         } else {
             self.pending_restore = Some(snapshot.timeline.clone());
         }

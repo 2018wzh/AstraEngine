@@ -195,3 +195,58 @@ fn active_pcm_is_pinned_when_cache_budget_is_exhausted() {
         .prepare_pcm(other, 48_000, 2, vec![0.0; 128])
         .is_err());
 }
+
+#[test]
+fn invalid_restore_preserves_live_audio_before_any_voice_is_stopped() {
+    let mut session = AudioServiceSession::new(
+        AudioServiceConfig {
+            max_voices: 2,
+            max_buses: 2,
+            max_events: 8,
+            pcm_cache_bytes: 64 * 1024,
+        },
+        AstraChunkBackendSettings {
+            sample_rate: 48_000,
+            channels: 2,
+            chunk_frames: 800,
+            endpoint: Box::new(DeterministicEndpoint { consumed: 0 }),
+            deterministic_fixed_tick_hz: Some(60),
+        },
+    )
+    .unwrap();
+    session
+        .prepare_pcm(asset(), 48_000, 2, vec![0.25; 128])
+        .unwrap();
+    session
+        .apply(AudioServiceCommand::Play {
+            voice_id: "voice".into(),
+            bus: "voice".into(),
+            asset: asset(),
+            start_frame: 0,
+            looping: true,
+        })
+        .unwrap();
+    let before = session.timeline().clone();
+    for variant in 0..7 {
+        let mut invalid = before.clone();
+        match variant {
+            0 => invalid.voices.get_mut("voice").unwrap().asset.revision = "missing".into(),
+            1 => invalid.voices.get_mut("voice").unwrap().cursor_frames = 64,
+            2 => invalid.voices.get_mut("voice").unwrap().bus = "missing".into(),
+            3 => invalid.voices.get_mut("voice").unwrap().command_sequence = 0,
+            4 => invalid.buses.get_mut("voice").unwrap().gain = f32::NAN,
+            5 => invalid.buses.get_mut("voice").unwrap().fade_id = Some("incomplete".into()),
+            _ => {
+                let bus = invalid.buses["voice"].clone();
+                invalid.buses.insert("extra.one".into(), bus.clone());
+                invalid.buses.insert("extra.two".into(), bus);
+            }
+        }
+        assert!(session.restore_timeline(invalid).is_err());
+        assert_eq!(session.timeline(), &before);
+    }
+    session.validate_timeline_restore(&before).unwrap();
+    session.restore_timeline(before).unwrap();
+    session.poll_fixed_tick().unwrap();
+    assert!(session.timeline().voices.contains_key("voice"));
+}
