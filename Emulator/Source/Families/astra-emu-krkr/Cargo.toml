@@ -1,0 +1,36 @@
+[workspace]
+
+[package]
+name = "astra-emu-krkr"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+publish = false
+
+[lib]
+name = "astra_emu_krkr"
+crate-type = ["rlib", "cdylib"]
+doctest = false
+
+[features]
+default = ["engine"]
+# Builds the vendored Kirikiri core through CMake. Tests and Rust-only
+# iterations can disable it, leaving the engine FFI symbols unresolved.
+engine = []
+
+[dependencies]
+abi_stable = "0.11"
+astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api" }
+tracing = "0.1"
+
+[build-dependencies]
+
+[dev-dependencies]
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[package.metadata.astra]
+upstream = "https://github.com/fenghengzhi/kirikiroid2-web"
+upstream_revision = "7105b50822097d11b7b1f5894bf541509fd51350"
+upstream_lineage = "Kirikiroid2 (TJS License) retargeted to SDL2/vcpkg"
+license_notice = "THIRD_PARTY_NOTICES.md"
+modifications = "MODIFICATIONS.md"
