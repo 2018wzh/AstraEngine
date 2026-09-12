@@ -124,8 +124,11 @@ if(KRKR2_ASTRA_HOSTED)
     find_package(PNG REQUIRED)
     target_link_libraries(${PROJECT_NAME} PRIVATE PNG::PNG)
     # LoadJPEG.cpp uses the plain libjpeg API, not the turbojpeg wrapper.
+    # Dynamic triplets export `jpeg`; static ones (x64-linux) `jpeg-static`.
     find_package(libjpeg-turbo CONFIG REQUIRED)
-    target_link_libraries(${PROJECT_NAME} PRIVATE libjpeg-turbo::jpeg)
+    target_link_libraries(${PROJECT_NAME} PRIVATE
+        $<IF:$<TARGET_EXISTS:libjpeg-turbo::jpeg>,libjpeg-turbo::jpeg,libjpeg-turbo::jpeg-static>
+    )
 endif()
 
 if(NOT EMSCRIPTEN)

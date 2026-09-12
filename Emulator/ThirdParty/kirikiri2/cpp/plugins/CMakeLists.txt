@@ -8,7 +8,11 @@ if(KRKR2_ASTRA_HOSTED)
     # storage behind it. The compat header maps GCC builtins used by the
     # vendored sources onto MSVC equivalents.
     target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_LIST_DIR}/astra-shim)
-    target_compile_options(${PROJECT_NAME} PRIVATE /FIastra_msvc_builtin_compat.h)
+    if(MSVC)
+        target_compile_options(${PROJECT_NAME} PRIVATE /FIastra_msvc_builtin_compat.h)
+    else()
+        target_compile_options(${PROJECT_NAME} PRIVATE -include astra_msvc_builtin_compat.h)
+    endif()
 endif()
 
 set(_PLUGIN_SOURCES

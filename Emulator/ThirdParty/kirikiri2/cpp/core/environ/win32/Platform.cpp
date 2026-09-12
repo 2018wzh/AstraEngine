@@ -79,14 +79,16 @@ std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
 
 // Astra hosted: engine state (config, saves, dumps) is redirected to the
 // family-provided directory instead of the process working directory.
+// Paths cross the C ABI as UTF-16 code units (tjs_char is char16_t on every
+// platform), which is element-compatible with wchar_t here.
 #if defined(KRKR2_ASTRA_HOSTED)
 static std::wstring &astra_save_dir() {
     static std::wstring dir;
     return dir;
 }
-void TVPSetAstraHostedDirs(const std::wstring & /*game_dir*/,
-                           const std::wstring &save_dir) {
-    astra_save_dir() = save_dir;
+void TVPSetAstraHostedDirs(const std::u16string & /*game_dir*/,
+                           const std::u16string &save_dir) {
+    astra_save_dir().assign(save_dir.begin(), save_dir.end());
 }
 static std::string astra_save_dir_utf8() {
     std::wstring dir = astra_save_dir();

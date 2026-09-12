@@ -5,7 +5,7 @@
 
 #include "tjsCommHead.h"
 
-#include <windows.h>
+#include <cstdio>
 
 #include <filesystem>
 #include <fstream>
@@ -19,7 +19,7 @@
 #include "RenderManager.h"
 #include "LayerBitmapIntf.h"
 
-// Defined in environ/win32/Platform.cpp under KRKR2_ASTRA_HOSTED.
+// Defined in environ/<platform>/Platform.cpp under KRKR2_ASTRA_HOSTED.
 std::string TVPGetDefaultFileDir();
 
 // ---------------------------------------------------------------------------
@@ -32,8 +32,8 @@ void TVPConsoleLog(const ttstr &l, bool important) {
     // text only when the game prints it, which matches the reference
     // console behavior.
     std::string text = l.AsNarrowStdString();
-    OutputDebugStringA(text.c_str());
-    OutputDebugStringA("\n");
+    std::fwrite(text.c_str(), 1, text.size(), stderr);
+    std::fputc('\n', stderr);
 }
 
 // ---------------------------------------------------------------------------
@@ -74,7 +74,7 @@ unsigned int TVPMaxTextureSize = 4096;
 // OS/platform description strings (upstream: MainScene.cpp)
 // ---------------------------------------------------------------------------
 
-ttstr TVPGetOSName(void) { return ttstr("Astra Hosted (Windows)"); }
+ttstr TVPGetOSName(void) { return ttstr("Astra Hosted"); }
 ttstr TVPGetPlatformName(void) { return ttstr("astra-hosted"); }
 
 // ---------------------------------------------------------------------------
@@ -91,7 +91,7 @@ namespace TJS {
 void TVPConsoleLog(const tTJSString &text) {
     std::string line = text.AsNarrowStdString();
     line.push_back(0x0A);
-    OutputDebugStringA(line.c_str());
+    std::fwrite(line.c_str(), 1, line.size(), stderr);
 }
 } // namespace TJS
 

@@ -1,5 +1,10 @@
 #include <spdlog/spdlog.h>
+// The GDI+ backend keeps the cocos include only for the platform shell
+// build; the Astra hosted build drops cocos entirely and nothing here uses
+// it.
+#ifndef KRKR2_ASTRA_HOSTED
 #include <cocos2d.h>
+#endif
 #include <filesystem>
 
 #include "common/Defer.h"

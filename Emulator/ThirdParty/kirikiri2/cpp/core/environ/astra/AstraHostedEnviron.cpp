@@ -10,11 +10,12 @@
 #include <chrono>
 #include <filesystem>
 #include <condition_variable>
-#ifndef _WINDOWS_
-#include <windows.h>
-#endif
+#include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <mutex>
+#include <spdlog/sinks/stdout_color_sinks.h>
+#include <spdlog/spdlog.h>
 #include <string>
 #include <thread>
 #include <vector>
@@ -34,9 +35,11 @@
 #include "TVPWindow.h"
 #include "vkdefine.h"
 
-// Defined in environ/win32/Platform.cpp under KRKR2_ASTRA_HOSTED.
-void TVPSetAstraHostedDirs(const std::wstring &game_dir,
-                           const std::wstring &save_dir);
+// Defined in environ/<platform>/Platform.cpp under KRKR2_ASTRA_HOSTED.
+// Paths use UTF-16 code units: tjs_char is char16_t on every platform, while
+// std::wstring is only 16-bit on Windows.
+void TVPSetAstraHostedDirs(const std::u16string &game_dir,
+                           const std::u16string &save_dir);
 
 // ---------------------------------------------------------------------------
 // Hosted state
@@ -55,9 +58,9 @@ struct HostedState {
 
     astra_krkr_host_callbacks callbacks{};
 
-    std::wstring game_dir;
-    std::wstring save_dir;
-    std::wstring project_url;
+    std::u16string game_dir;
+    std::u16string save_dir;
+    std::u16string project_url;
 
     // Audio worker: the hosted renderer is pulled on a paced thread instead
     // of an OS audio callback.
@@ -229,6 +232,8 @@ public:
     void UpdateDrawBuffer(iTVPTexture2D *tex) override {
         if(!tex)
             return;
+        if(!tex)
+            return;
         const tjs_uint width = tex->GetWidth();
         const tjs_uint height = tex->GetHeight();
         if(width == 0 || height == 0)
@@ -367,9 +372,9 @@ void astra_krkr_hosted_push_pcm(const int16_t *samples, uint32_t frame_count) {
 // C ABI
 // ---------------------------------------------------------------------------
 
-// tjs_char is char16_t in this fork while Windows wchar_t is 16-bit; the
-// encodings are bit-compatible, but no ttstr constructor accepts wchar_t*.
-static ttstr wide_to_ttstr(const std::wstring &wide) {
+// tjs_char is char16_t; paths arrive as UTF-16 code units on every platform,
+// so the conversion to ttstr is a straight element copy.
+static ttstr wide_to_ttstr(const std::u16string &wide) {
     std::basic_string<tjs_char> out(wide.begin(), wide.end());
     return ttstr(out);
 }
@@ -378,15 +383,52 @@ extern "C" uint32_t astra_krkr_abi_version(void) {
     return ASTRA_KRKR_HOST_ABI_VERSION;
 }
 
-static std::wstring utf8_to_wide(const char *text) {
+static std::u16string utf8_to_wide(const char *text) {
     if(!text)
-        return std::wstring();
-    const int size = MultiByteToWideChar(CP_UTF8, 0, text, -1, nullptr, 0);
-    if(size <= 0)
-        return std::wstring();
-    std::wstring wide(size - 1, L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, text, -1, wide.data(), size);
-    return wide;
+        return std::u16string();
+    std::u16string out;
+    out.reserve(std::strlen(text));
+    for(size_t i = 0; text[i];) {
+        const unsigned char c = static_cast<unsigned char>(text[i++]);
+        uint32_t cp = 0;
+        int extra = 0;
+        if(c < 0x80) {
+            cp = c;
+        } else if((c & 0xE0) == 0xC0) {
+            cp = c & 0x1F;
+            extra = 1;
+        } else if((c & 0xF0) == 0xE0) {
+            cp = c & 0x0F;
+            extra = 2;
+        } else if((c & 0xF8) == 0xF0) {
+            cp = c & 0x07;
+            extra = 3;
+        } else {
+            continue;  // invalid lead byte
+        }
+        bool valid = true;
+        for(int k = 0; k < extra; ++k) {
+            const unsigned char cc = static_cast<unsigned char>(text[i]);
+            if((cc & 0xC0) != 0x80) {
+                valid = false;
+                break;
+            }
+            ++i;
+            cp = (cp << 6) | (cc & 0x3F);
+        }
+        if(!valid)
+            break;
+        if(cp >= 0xD800 && cp < 0xE000)
+            continue;  // surrogate: not produced by valid UTF-8
+        if(cp >= 0x10000) {
+            cp -= 0x10000;
+            out.push_back(static_cast<char16_t>(0xD800 + (cp >> 10)));
+            out.push_back(static_cast<char16_t>(0xDC00 + (cp & 0x3FF)));
+        } else {
+            out.push_back(static_cast<char16_t>(cp));
+        }
+    }
+    return out;
 }
 
 extern "C" int32_t astra_krkr_boot(const astra_krkr_boot_config *config) {
@@ -395,6 +437,14 @@ extern "C" int32_t astra_krkr_boot(const astra_krkr_boot_config *config) {
         return astra_krkr_err_arg;
     if(host().booted.load(std::memory_order_acquire))
         return astra_krkr_err_state;
+
+    // Platform shells register these named loggers in main(); several call
+    // sites (the TJS exception path, the motionplayer LOGGER macro) assume
+    // they exist and would dereference null.
+    for(const char *name : {"core", "tjs2", "plugin"}) {
+        if(!spdlog::get(name))
+            spdlog::stdout_color_mt(name);
+    }
 
     HostedState &state = host();
     state.callbacks = config->callbacks;
@@ -420,33 +470,34 @@ extern "C" int32_t astra_krkr_boot(const astra_krkr_boot_config *config) {
         // archive file so the engine mounts it as the project root. The
         // base normalizer treats "E:" as a relative directory, so build
         // the storage URL directly.
-        std::wstring game = state.game_dir;
-        for(wchar_t &c : game) {
-            if(c == static_cast<wchar_t>(92))
-                c = L'/';
+        std::u16string game = state.game_dir;
+        for(char16_t &c : game) {
+            if(c == u'\\')
+                c = u'/';
         }
-        std::wstring lower = game;
-        for(wchar_t &c : lower) {
-            if(c >= L'A' && c <= L'Z')
-                c = c + (L'a' - L'A');
+        std::u16string lower = game;
+        for(char16_t &c : lower) {
+            if(c >= u'A' && c <= u'Z')
+                c = c + (u'a' - u'A');
         }
-        std::wstring project;
-        if(lower.size() >= 4 && lower.substr(lower.size() - 4) == L".xp3") {
+        std::u16string project;
+        if(lower.size() >= 4 && lower.substr(lower.size() - 4) == u".xp3") {
             project = game;
         } else {
-            std::wstring candidate = game;
-            if(!candidate.empty() && candidate.back() != L'/')
-                candidate += L'/';
-            candidate += L"data.xp3";
+            std::u16string candidate = game;
+            if(!candidate.empty() && candidate.back() != u'/')
+                candidate += u'/';
+            candidate += u"data.xp3";
             std::error_code ec;
-            if(std::filesystem::exists(std::filesystem::path(candidate),
-                                       ec)) {
+            if(std::filesystem::exists(
+                   std::filesystem::path(candidate.begin(), candidate.end()),
+                   ec)) {
                 project = candidate;
             } else {
                 project = game;
             }
         }
-        std::wstring url = L"file://" + project;
+        std::u16string url = u"file://" + project;
         state.project_url = url;
         TVPNativeProjectDir = wide_to_ttstr(project);
         TVPProjectDir = wide_to_ttstr(url);

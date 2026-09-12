@@ -218,6 +218,21 @@ void TVPInitFontNames() {
             break;
         if(TVPEnumFontsProc(TJS_W("file://./c/Windows/Fonts/simhei.ttf")))
             break;
+#elif defined(LINUX)
+        // Hosted Linux has no cocos-internal fallback font; enumerate the
+        // common system font locations directly. The first hit wins, the
+        // game directory "fonts/" scan below still takes priority in
+        // practice because it runs afterwards with its own registration.
+        for(const tjs_nchar *path : {
+                "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+                "/usr/share/fonts/noto-cjk/NotoSansCJK-Bold.ttc",
+                "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+                "/usr/share/fonts/wenquanyi/wqy-microhei/wqy-microhei.ttc",
+                "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"}) {
+            if(TVPEnumFontsProc(path))
+                break;
+        }
 #endif
 
 #ifndef KRKR2_ASTRA_HOSTED

@@ -154,7 +154,11 @@
         "freetype",
         "xxhash",
         "tinyxml2",
-        "libpng"
+        "libpng",
+        {
+          "name": "libgdiplus",
+          "platform": "!windows"
+        }
       ]
     }
   },

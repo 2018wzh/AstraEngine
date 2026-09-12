@@ -13,6 +13,9 @@ vcpkg_cmake_configure(
         -DENABLE_TEST=OFF
         -DENABLE_LIBXML2=OFF
         -DENABLE_LIBB2=OFF
+        # GCC 16 / Clang 22 newly flag the tree's qualifier-dropping
+        # assignments; keep them as warnings instead of failing the build.
+        -DENABLE_WERROR=OFF
 )
 
 vcpkg_cmake_install()

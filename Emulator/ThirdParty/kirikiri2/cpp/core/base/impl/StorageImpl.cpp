@@ -20,8 +20,11 @@
 #else
 // cocos2d.h used to pull windows.h in ahead of the TJS headers; with it gone
 // the UNICODE GetClassName macro would leak into the native-class macros
-// below, so re-run the same undef tjsNative.h performs.
+// below, so re-run the same undef tjsNative.h performs. Windows still needs
+// the real header; other platforms only need the TJS native declarations.
+#ifdef _WIN32
 #include <windows.h>
+#endif
 #include <tjsNative.h>
 #undef GetClassName
 #endif

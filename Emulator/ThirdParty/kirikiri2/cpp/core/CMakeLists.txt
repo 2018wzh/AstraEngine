@@ -63,8 +63,14 @@ if(NOT KRKR2_ASTRA_HOSTED)
         $<$<BOOL:${ANDROID}>:$<LINK_LIBRARY:WHOLE_ARCHIVE,cocos2dx::cpp_android_spec>>
     )
 else()
-    # GCC builtins used by vendored sources map onto MSVC equivalents.
+    # GCC builtins used by vendored sources map onto MSVC equivalents. The
+    # header self-guards on _MSC_VER, so non-MSVC builds only need the flag
+    # expressed in their own syntax.
     target_include_directories(${PROJECT_NAME} INTERFACE
         ${CMAKE_CURRENT_SOURCE_DIR}/../plugins/astra-shim)
-    target_compile_options(${PROJECT_NAME} INTERFACE /FIastra_msvc_builtin_compat.h)
+    if(MSVC)
+        target_compile_options(${PROJECT_NAME} INTERFACE /FIastra_msvc_builtin_compat.h)
+    else()
+        target_compile_options(${PROJECT_NAME} INTERFACE -include astra_msvc_builtin_compat.h)
+    endif()
 endif()

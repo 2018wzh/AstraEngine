@@ -47,6 +47,10 @@ if(NOT ANDROID AND NOT WEB AND NOT EMSCRIPTEN)
         set(MACOS ON)
     else()
         set(LINUX ON)
+        # Upstream received LINUX through the cocos2d package config; the
+        # hosted build drops cocos, so define the C++ macro here (MSVC keeps
+        # using its built-in WIN32).
+        add_compile_definitions(LINUX)
     endif()
 endif()
 
@@ -415,7 +419,11 @@ if(KRKR2_ASTRA_HOSTED)
     add_library(astra-krkr-hosted SHARED
         ${CMAKE_CURRENT_SOURCE_DIR}/cpp/core/environ/astra/astra_krkr_hosted_target.cpp)
     target_compile_definitions(astra-krkr-hosted PRIVATE ASTRA_KRKR_BUILDING)
-    target_link_libraries(astra-krkr-hosted PRIVATE krkr2plugin krkr2core winmm)
+    if(WIN32)
+        target_link_libraries(astra-krkr-hosted PRIVATE krkr2plugin krkr2core winmm)
+    else()
+        target_link_libraries(astra-krkr-hosted PRIVATE krkr2plugin krkr2core)
+    endif()
     if(MSVC)
         target_link_options(astra-krkr-hosted PRIVATE
             "/WHOLEARCHIVE:$<TARGET_FILE:krkr2plugins_ncbind>")
@@ -426,6 +434,7 @@ if(KRKR2_ASTRA_HOSTED)
     set_target_properties(astra-krkr-hosted PROPERTIES
         WINDOWS_EXPORT_ALL_SYMBOLS ON
         RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
         ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
     # Direct C-ABI smoke runner used for game compatibility validation before

@@ -355,6 +355,10 @@ bool tTVPApplication::StartApplication(ttstr path) {
 
         TVPInitializeStartupScript();
         _project_startup = true;
+        // The startup script finished: the boot succeeded. Return true so
+        // embedded hosts (the Astra hosted environ) can distinguish success;
+        // platform main() entry points ignore the result.
+        return true;
     } catch(const EAbort &) {
         // nothing to do
     } catch(const Exception &exception) {

@@ -5,7 +5,7 @@ use std::path::Path;
 use abi_stable::std_types::ROption;
 use astra_emu_family_api::{
     FamilyCapability, FamilyDescriptor, FamilyError, FamilyOpen, FamilyProvider, FamilyResult,
-    OpenRequest, ProbeReport, ProbeRequest,
+    OpenRequest, OpenResponse, ProbeReport, ProbeRequest,
 };
 
 #[cfg(feature = "engine")]
@@ -106,7 +106,7 @@ impl FamilyProvider for KrkrProvider {
         .entered();
         let descriptor = self.descriptor()?;
         request.validate_for_descriptor(&descriptor)?;
-        let _sink = match request.host.audio_sink {
+        let sink = match request.host.audio_sink {
             ROption::RSome(sink) => sink,
             ROption::RNone => {
                 return Err(FamilyError::invalid(

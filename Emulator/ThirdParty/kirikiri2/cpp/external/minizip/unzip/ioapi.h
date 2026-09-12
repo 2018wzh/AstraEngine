@@ -203,6 +203,16 @@ void fill_zlib_filefunc64_32_def_from_filefunc32(zlib_filefunc64_32_def* p_filef
 #define ZTELL64(filefunc,filestream)            (call_ztell64((&(filefunc)),(filestream)))
 #define ZSEEK64(filefunc,filestream,pos,mode)   (call_zseek64((&(filefunc)),(filestream),(pos),(mode)))
 
+/* zip.c's spanned-archive path references the zlib-ng minizip entry, but
+   this ioapi has no disk-aware opener. Kirikiri XP3 archives are never
+   spanned (zipGoToSpecificDisk returns before touching it when
+   disk_size == 0), so fall back to the plain opener with the disk number
+   ignored. MSVC only warned about the implicit declaration; GCC 16 errors. */
+#ifndef ZOPENDISK64
+#define ZOPENDISK64(filefunc,filestream,number_disk,mode) \
+    (call_zopen64((&(filefunc)),(filestream),(mode)))
+#endif
+
 #ifdef __cplusplus
 }
 #endif

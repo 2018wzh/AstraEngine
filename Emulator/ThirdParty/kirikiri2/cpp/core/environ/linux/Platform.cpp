@@ -66,9 +66,11 @@ bool TVP_utime(const char *name, time_t modtime) {
 
 #ifdef LINUX
 #include <filesystem>
-#include <gtk/gtk.h>
 #include <fstream>
+#ifndef KRKR2_ASTRA_HOSTED
+#include <gtk/gtk.h>
 #include <Defer.h>
+#endif
 #include <sys/stat.h>
 #include <unistd.h>
 #include <spdlog/spdlog.h>
@@ -137,8 +139,35 @@ std::string TVPGetCurrentLanguage() {
     return locale; // 如果没有国家代码（如 "en"）
 }
 
+#ifdef KRKR2_ASTRA_HOSTED
+#include <boost/locale/encoding_utf.hpp>
+// Astra hosted: engine state (config, saves, dumps) is redirected to the
+// family-provided directory. Paths cross the C ABI as UTF-16 code units.
+static std::u16string &astra_save_dir() {
+    static std::u16string dir;
+    return dir;
+}
+void TVPSetAstraHostedDirs(const std::u16string & /*game_dir*/,
+                           const std::u16string &save_dir) {
+    astra_save_dir() = save_dir;
+}
+std::string TVPGetDefaultFileDir() {
+    std::u16string dir = astra_save_dir();
+    if(dir.empty())
+        return ".";
+    return boost::locale::conv::utf_to_utf<char>(dir);
+}
+#endif
+
 int TVPShowSimpleMessageBox(const ttstr &text, const ttstr &caption,
                             const std::vector<ttstr> &vecButtons) {
+#ifdef KRKR2_ASTRA_HOSTED
+    // Headless family plugin: no dialog may block the session thread. Log
+    // the caption and body so the boot failure is diagnosable, and answer OK.
+    spdlog::warn("hosted message box suppressed: {} / {}",
+                 caption.AsNarrowStdString(), text.AsNarrowStdString());
+    return 0;
+#else
     GtkWidget *dialog = nullptr;
     DEFER({
         if(dialog) {
@@ -180,6 +209,7 @@ int TVPShowSimpleMessageBox(const ttstr &text, const ttstr &caption,
             break;
     }
     return -1;
+#endif
 }
 
 extern "C" int TVPShowSimpleMessageBox(const char *pszText,
@@ -279,7 +309,12 @@ tjs_uint32 TVPGetRoughTickCount32() {
 void TVPExitApplication(int code) {
     // clear some static data for memory leak detect
     TVPDeliverCompactEvent(TVP_COMPACT_LEVEL_MAX);
+#ifdef KRKR2_ASTRA_HOSTED
+    // The engine lives inside the AstraEMU family plugin process; exiting
+    // here would kill the host. Run() observes the terminated flag instead.
+#else
     exit(code);
+#endif
 }
 
 bool TVPCheckStartupArg() { return false; }
@@ -299,6 +334,7 @@ void TVPSendToOtherApp(const std::string &filename) {}
 
 std::vector<std::string> TVPGetDriverPath() { return { "/" }; }
 
+#ifndef KRKR2_ASTRA_HOSTED
 std::string TVPGetDefaultFileDir() {
     char buffer[PATH_MAX];
     ssize_t len = readlink("/proc/self/exe", buffer, sizeof(buffer) - 1);
@@ -314,6 +350,7 @@ std::string TVPGetDefaultFileDir() {
     }
     return std::string(buffer);
 }
+#endif
 
 std::vector<std::string> TVPGetAppStoragePath() {
     std::vector<std::string> ret;

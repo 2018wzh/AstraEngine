@@ -98,7 +98,7 @@ fn headless_boot_advance_and_close() {
         return;
     };
     let mut provider = astra_emu_krkr::KrkrProvider::default();
-    let mut open = provider
+    let open = provider
         .open(OpenRequest {
             game_path: game.display().to_string().into(),
             initial_window: WindowState {
@@ -116,7 +116,10 @@ fn headless_boot_advance_and_close() {
             },
         })
         .expect("krkr session opens");
-    let FamilyOpen { response, session } = open;
+    let FamilyOpen {
+        response,
+        mut session,
+    } = open;
     assert!(response.frame.width > 0);
 
     let first = digest(session.as_ref());
