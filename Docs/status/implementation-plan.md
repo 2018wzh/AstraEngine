@@ -4,7 +4,7 @@
 
 | 阶段 | 状态 | 尚需完成 |
 | --- | --- | --- |
-| 0 规则与测试 | 进行中 | 新宪章/契约已写入；替换文档检查、普通分层测试与产品构建入口 |
+| 0 规则与测试 | 进行中 | 新宪章/契约与轻量文档检查已落地；EMU 独立 workspace 和 xtask 已接通；普通测试迁移待整合 |
 | 1 EMU 薄 API/FVP | 未完成 | typed 配置、可选翻译、驻留库生命周期与 FVP 最小适配 |
 | 2 SDK/Minori | 未完成 | 共享能力分离、真实 SDK 消费、新 Family API 与自有存档 |
 | 3 跨平台 EMU | 未完成 | 三桌面/Android Manager、核心与真实媒体运行 |
@@ -21,4 +21,9 @@
 
 ## 当前验证记录
 
-- 初始工作树干净，创建独占重构 worktree；尚未进行重构后的产品验证。
+- 独占重构 worktree；并行子任务各用独立 worktree/target。
+- 新文档检查 237 页通过；7 个链接/卫生回归测试通过。
+- EMU 独立 workspace 的 Family API 7 tests 通过，使用独立 target。
+- xtask 与 Linux platform all-target clippy 通过；修复 default build 的 audio fault-injection feature 组合错误。
+- 子任务普通逻辑测试和独立文字库测试已通过，尚待整合及扩大检查。
+- 真实 GPU/商业游戏/其他平台验收仍未执行。

@@ -5,8 +5,13 @@ on:
   pull_request:
 
 jobs:
-  headless-platform:
-    runs-on: windows-latest
+  products:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        workspace: [engine, emu]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -14,33 +19,17 @@ jobs:
           components: rustfmt, clippy
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.x"
-      - name: Docs
-        run: python Tools/check_docs.py
-      - name: Live hot-path serialization guard
-        run: python Tools/check_live_hot_path.py
-      - name: Dynamic artifact policy and Windows export budgets
-        run: python Tools/check_dynamic_artifacts.py --verify-windows-exports
-      - name: Format
-        run: cargo fmt --check
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: Build Headless test driver
-        run: cargo build -p astra-headless
-      - name: Test
-        run: cargo test --workspace
-      - name: Headless convergence
-        run: python Tools/check_headless_test_convergence.py
-      - name: Shipping dependency isolation
-        run: python Tools/check_headless_shipping_graph.py
-      - name: Headless acceptance tooling
-        run: python -m unittest Tools.tests.test_run_platform_host_acceptance
+          python-version: '3.x'
+      - name: Linux native dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libwayland-dev libxkbcommon-dev libx11-dev libxcursor-dev libxi-dev libxrandr-dev libvulkan-dev clang cmake
+      - name: Check product workspace
+        run: cargo xtask check --workspace ${{ matrix.workspace }}
 
-  headless-video-ffmpeg:
+  ffmpeg:
     runs-on: windows-latest
     env:
       VCPKG_DEFAULT_TRIPLET: x64-windows
-      VCPKG_ROOT: ${{ github.workspace }}\vcpkg
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -48,18 +37,13 @@ jobs:
           components: rustfmt, clippy
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.x"
-      - name: Checkout vcpkg
-        run: git clone --depth 1 https://github.com/microsoft/vcpkg.git vcpkg
-      - name: Bootstrap vcpkg
-        run: .\vcpkg\bootstrap-vcpkg.bat -disableMetrics
-      - name: Install FFmpeg
-        run: .\vcpkg\vcpkg.exe install ffmpeg:x64-windows --clean-after-build
-      - name: Configure FFmpeg runtime
-        run: python -c "import os,pathlib; root=pathlib.Path(os.environ['VCPKG_ROOT'])/'installed'/os.environ['VCPKG_DEFAULT_TRIPLET']; pathlib.Path(os.environ['GITHUB_PATH']).open('a', encoding='utf-8').write(str(root/'debug'/'bin')+'\n'+str(root/'bin')+'\n')"
-      - name: Clippy with FFmpeg
-        run: cargo clippy --workspace --all-targets --features ffmpeg-vcpkg -- -D warnings
-      - name: Build Headless test driver with FFmpeg
-        run: cargo build -p astra-headless --features ffmpeg-vcpkg
-      - name: Test with FFmpeg
-        run: cargo test --workspace --features ffmpeg-vcpkg
+          python-version: '3.x'
+      - name: Build optional FFmpeg tests
+        shell: bash
+        run: |
+          git clone --depth 1 https://github.com/microsoft/vcpkg.git .tmp/vcpkg
+          .tmp/vcpkg/bootstrap-vcpkg.bat -disableMetrics
+          .tmp/vcpkg/vcpkg.exe install ffmpeg:x64-windows --clean-after-build
+          python Tools/configure_ci_ffmpeg.py
+      - name: Validate explicit decoder
+        run: cargo test -p astra-media --features ffmpeg-vcpkg

@@ -1,13 +1,5 @@
-# Status
+# 实施状态
 
-状态页记录当前实现覆盖、缺口、样例和 release gate。设计目标不在这里重复展开。
+当前权威状态在 [实施计划](implementation-plan.md)。重构按 EMU/SDK、Engine/VN、Editor/Agent、终之空和跨平台验收推进。
 
-| 文档 | 内容 |
-| --- | --- |
-| [coverage-matrix.md](coverage-matrix.md) | 模块覆盖矩阵 |
-| [implementation-plan.md](implementation-plan.md) | 当前代码完成度、工作项状态和下一步实施顺序 |
-| [open-work.md](open-work.md) | 产品级缺口和下一步 |
-| [samples-and-tests.md](samples-and-tests.md) | 样例与测试矩阵 |
-| [release-observability.md](release-observability.md) | Release report、trace、crash bundle 状态 |
-| [logging-coverage.md](logging-coverage.md) | Cargo workspace 逐 crate logging 分类与准入 |
-| [stages/README.md](stages/README.md) | Stage 1-8 可执行工作项和测试矩阵 |
+历史 Stage、coverage 和 logging 矩阵随相应子系统删除，不作为重构完成证据。设计目标见 [总体架构](../product/architecture.md)，验证入口见 [开发手册](../manual/development.md)。

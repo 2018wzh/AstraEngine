@@ -610,10 +610,19 @@ mod linux {
                         let _ = reply.send(result);
                     }
                     HostCommand::InjectAudioDeviceLoss { output, reply } => {
+                        #[cfg(feature = "platform-test-driver")]
                         let result = self
                             .audio_outputs
                             .get_mut(output)
                             .map(AudioResource::inject_device_loss);
+                        #[cfg(not(feature = "platform-test-driver"))]
+                        let result = self.audio_outputs.get(output).and_then(|_| {
+                            Err(PlatformError::new(
+                                PlatformErrorCode::InvalidState,
+                                "audio.test.inject_device_loss",
+                                "audio fault injection requires platform-test-driver",
+                            ))
+                        });
                         let _ = reply.send(result);
                     }
                     HostCommand::CloseAudio { output, reply } => {
