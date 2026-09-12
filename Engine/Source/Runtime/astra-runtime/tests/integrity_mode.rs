@@ -1,69 +1,73 @@
 use astra_runtime::{
-    PackageHandle, RuntimeConfig, RuntimeWorld, TickInput, TickIntegrityMode, TickRequest,
+    RuntimeConfig, RuntimeWorld, SaveRequest, TickInput, TickIntegrityMode, TickRequest,
 };
+use std::sync::atomic::{AtomicUsize, Ordering};
 
-fn request(step: u64) -> TickRequest {
-    TickRequest::live(
-        TickInput {
-            fixed_step: step,
-            delta_ns: 16_666_667,
-            seed: 7,
-        },
-        vec![],
-    )
+static SERIALIZATIONS: AtomicUsize = AtomicUsize::new(0);
+
+#[derive(Debug, Clone)]
+struct CountedPayload(u32);
+
+impl serde::Serialize for CountedPayload {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        SERIALIZATIONS.fetch_add(1, Ordering::SeqCst);
+        serializer.serialize_u32(self.0)
+    }
 }
 
 #[test]
-fn shipping_mode_disables_aggregate_hashes_and_replay_recording() {
-    let mut world = RuntimeWorld::create_with_integrity(
-        RuntimeConfig {
-            seed: 7,
-            required_slots: vec![],
-        },
-        TickIntegrityMode::Shipping,
-    )
-    .unwrap();
-    let report = world.tick(request(1)).unwrap();
-    assert_eq!(report.integrity_mode, TickIntegrityMode::Shipping);
-    assert_eq!(report.step, 1);
-    let error = world.begin_replay_recording().unwrap_err();
-    assert!(error
-        .to_string()
-        .contains("ASTRA_RUNTIME_REPLAY_RECORDING_DISABLED"));
+fn both_tick_modes_leave_component_encoding_to_the_save_boundary() {
+    for mode in [TickIntegrityMode::Shipping, TickIntegrityMode::Evidence] {
+        let mut world =
+            RuntimeWorld::create_with_integrity(RuntimeConfig::default(), mode).unwrap();
+        let actor = world.create_actor("typed", vec![]).unwrap();
+        world
+            .attach_component(actor, "test.counted", &CountedPayload(7))
+            .unwrap();
+        SERIALIZATIONS.store(0, Ordering::SeqCst);
+        for fixed_step in 1..=3 {
+            let report = world
+                .tick(TickRequest::live(
+                    TickInput {
+                        fixed_step,
+                        delta_ns: 16_666_667,
+                        seed: 0,
+                    },
+                    vec![],
+                ))
+                .unwrap();
+            assert_eq!(report.integrity_mode, mode);
+            assert_eq!(report.step, fixed_step);
+        }
+        assert_eq!(SERIALIZATIONS.load(Ordering::SeqCst), 0);
+        world.save(SaveRequest::default()).unwrap();
+        assert!(SERIALIZATIONS.load(Ordering::SeqCst) > 0);
+    }
 }
 
 #[test]
-fn evidence_mode_records_and_replays_v3_transcript() {
+fn restore_reports_saved_step_and_seed_without_aggregate_hashes() {
     let config = RuntimeConfig {
-        seed: 7,
+        seed: 29,
         required_slots: vec![],
     };
-    let package = PackageHandle::default();
     let mut world =
-        RuntimeWorld::create_with_integrity(config.clone(), TickIntegrityMode::Evidence)
-            .and_then(|world| world.with_package(package.clone()))
-            .unwrap();
-    let mut recorder = world.begin_replay_recording().unwrap();
-    let request = request(1);
-    let report = world.tick(request.clone()).unwrap();
-    let checkpoint = astra_runtime::ReplayHashCheckpoint {
-        step: report.step,
-        state_hash: world.state_hash(),
-        event_hash: world.event_hash(),
-        presentation_hash: world.presentation_hash(),
-    };
-    recorder.record(request, &report, checkpoint).unwrap();
-    let transcript = recorder.finish();
-    assert_eq!(transcript.schema, "astra.runtime_replay_transcript.v3");
-
-    let mut replay_world = RuntimeWorld::create_with_integrity(config, TickIntegrityMode::Evidence)
-        .and_then(|world| world.with_package(package))
+        RuntimeWorld::create_with_integrity(config, TickIntegrityMode::Shipping).unwrap();
+    world
+        .tick(TickRequest::live(
+            TickInput {
+                fixed_step: 1,
+                delta_ns: 16_666_667,
+                seed: 29,
+            },
+            vec![],
+        ))
         .unwrap();
-    let replay_report = replay_world.replay(transcript).unwrap();
-    assert_eq!(replay_report.state_hash, checkpoint.state_hash);
-    assert_eq!(replay_report.event_hash, checkpoint.event_hash);
-    assert_eq!(
-        replay_report.presentation_hash,
-        checkpoint.presentation_hash
-    );
+    let saved = world.save(SaveRequest::default()).unwrap();
+    let before = world.snapshot().unwrap();
+    let mut loaded = RuntimeWorld::create(RuntimeConfig::default()).unwrap();
+    let report = loaded.load(saved).unwrap();
+    assert_eq!(report.step, 1);
+    assert_eq!(report.seed, 29);
+    assert_eq!(loaded.snapshot().unwrap(), before);
 }

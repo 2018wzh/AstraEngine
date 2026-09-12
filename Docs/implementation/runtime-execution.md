@@ -1,102 +1,44 @@
 # Runtime Execution
 
-Runtime determinism comes from a fixed tick pipeline. Async work can run on Tokio, but Runtime state only changes when ordered results enter a tick.
+Runtime 用固定 tick 接收有序输入和异步完成结果。Actor/Component 可由持有 World 的宿主直接更新；flat StateMachine 是可选执行机制。完整接口与失败边界见 [Runtime Contract](../contracts/runtime.md)。
 
-## Tick Order
+## Tick 顺序
 
 ```text
-TickInput
-  -> collect PlayerInput
-  -> apply typed replay ingress and completion
-  -> collect AwaitResult sorted by token_id, sequence
-  -> apply scheduled RuntimeEvent
-  -> run StateMachine guard
-  -> run StateMachine action
-  -> record MutationLog
-  -> emit PresentationCommand / AudioCommand
-  -> update AwaitToken queue
-  -> compute state/event/presentation hash
-  -> TickReport
+TickRequest
+  -> 校验连续 step、seed、delta、mode、required slots 与 ingress 顺序
+  -> 提交 typed PlayerInput / AwaitCompletion
+  -> 处理到期 AwaitToken 和 delayed event
+  -> 执行 StateMachine 候选 action，验证后提交
+  -> 返回 step、integrity mode 与 diagnostics
 ```
 
-No provider callback may mutate Runtime state directly.
+实时 tick 不生成 aggregate state/event/presentation 摘要，也不为整帧建立 snapshot 或逆向日志。输入预检失败不修改 World；执行失败或 panic 终止 World，已提交状态保留供诊断，后续 tick、写入和保存拒绝，直到销毁或成功读档。
 
-## EventQueue
+## Event 与 Await
 
-```rust
-pub struct RuntimeEvent {
-    pub id: EventId,
-    pub source: EventSource,
-    pub step: u64,
-    pub sequence: u64,
-    pub payload: EventPayload,
-}
-```
+EventQueue 按 `(step, sequence, id)` 消费事件；DelayedEventQueue 按 `(due_tick, sequence, id)` 把到期事件加入同一队列。队列和 StableId generator 进入存档，读档后继续使用保存的 sequence。
 
-Ordering key: `(step, sequence, id)`. When two producers submit at the same logical time, Scheduler assigns sequence before guard/action execution.
+现有 AwaitToken 使用显式 token id、请求 step、可选 timeout step 和完成策略。`AwaitReplayPolicy::RecordedResult` 这个旧命名目前表示接收 host 的 AwaitResult；`DeterministicTimeout` 只在指定 tick 超时，拒绝外部 completion。命名和任务作用域将在任务生命周期迁移中处理。不能把 Future 或 native handle 放入存档。
 
-## AwaitToken And Fence
+## 候选状态与诊断
 
-```rust
-pub struct AwaitToken {
-    pub token_id: StableId,
-    pub kind: AwaitKind,
-    pub requested_at_step: u64,
-    pub deterministic_timeout_step: Option<u64>,
-    pub replay_policy: AwaitReplayPolicy,
-}
+StateMachine action 使用 `DeterministicActionContext`，必须声明实际 read/write set。单个 machine 的候选改动通过验证后提交；这不提供整个 World 的失败回滚。跨 machine 执行错误会终止本次会话，不能以历史 hash 或撤销日志伪装原子成功。
 
-pub struct Fence {
-    pub fence_id: StableId,
-    pub waits_for: Vec<AwaitTokenId>,
-    pub fail_policy: FenceFailPolicy,
-}
-```
+World 目前仍保留 event、presentation、machine 和 mutation 诊断记录，以服务现有 DebugSession。通用 replay recorder/transcript、Replay tick mode、HistoryChain 和 aggregate state/event/presentation 摘要 API 已删除。测试直接比较 typed snapshot 或存档字节，容器 hash 负责保存数据的内容完整性。
 
-`RecordedResult` token 只消费记录的 `AwaitResult`；`DeterministicTimeout` token 只在声明的 fixed step 生成 timeout event，并拒绝 live completion。Replay 从 checkpoint 恢复完整 ID/Event/Await/DelayedEvent 状态，按 tick 应用 typed player input 和 await result，不再调用平台或 provider。
+## 保存恢复
 
-## Provider-Free Replay
+容器校验 schema、版本、section 唯一性和完整性。`load_with_validation` 在候选 snapshot 上完成宿主 typed 校验，再替换 World；拒绝时保持原会话和失败状态。load 后首 tick 使用 `RestoreContinuation`，之后使用 `Live`。
 
-Replay transcript 不保存 provider output、原始 payload、content hash 或序列化 effect。Runtime 在修改 world 前完成 tick、typed ingress sequence 与 await policy 校验；任一字段无效时阻断且不提交部分 input。Evidence replay 每个 tick 随后比较 checkpoint，差异直接返回 `ASTRA_RUNTIME_REPLAY_HASH_MISMATCH`。
-
-## MutationLog
-
-All authoritative state writes use MutationLog:
-
-```rust
-pub struct MutationRecord {
-    pub mutation_id: StableId,
-    pub step: u64,
-    pub source_ref: SourceRef,
-    pub scope: MutationScope,
-    pub before_hash: Hash128,
-    pub after_hash: Hash128,
-    pub rollback: RollbackRecord,
-}
-```
-
-Luau policy, VN command, AI committed output and Editor PIE patch all use the same mutation path. Direct writes to Runtime internals are implementation bugs.
-
-## Hash Domains
-
-`TickReport` contains:
-
-- `state_hash`: RuntimeWorld, Actor/Component, StateMachine, Blackboard, VN core state.
-- `event_hash`: ordered RuntimeEvent and AwaitResult.
-- `presentation_hash`: PresentationCommand, AudioCommand, TextCaptureEvent, policy-visible media state.
-
-Native handles, OS paths, wall-clock time and provider object addresses are excluded.
-
-## Error Handling
-
-Blocking diagnostic stops packaged runtime according to profile. PIE pauses at source span. Recoverable diagnostic continues only when release profile marks the domain as warning.
-
-## Tests
+## 测试
 
 ```bash
-cargo test -p astra-runtime state_machine_tick
-cargo test -p astra-runtime await_token
-cargo test -p astra-runtime save_replay
+cargo test -p astra-runtime --test state_machine_tick
+cargo test -p astra-runtime --test await_token
+cargo test -p astra-runtime --test save_load
+cargo test -p astra-runtime --test integrity_mode
+cargo test -p astra-runtime --test execution_panic
 ```
 
-Expected: out-of-order async completion produces matching hashes；save/load preserves ID and pending event sequence；provider-free replay restores event/presentation/effect/await output and blocks payload hash mismatch.
+测试覆盖候选 action、事件顺序、完成策略、typed 状态保存、损坏容器拒绝、恢复后的 ID/step 连续性、失败会话恢复，以及两种 observer mode 下 tick 不编码 typed component。产品真实流程与性能的当前完成情况见 [实施状态](../status/implementation-plan.md)。

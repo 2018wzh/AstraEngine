@@ -1,8 +1,7 @@
-use std::{cell::RefCell, collections::BTreeMap, time::Instant};
+use std::{collections::BTreeMap, time::Instant};
 
 use astra_core::{
-    Diagnostic, Hash128, SchemaId, SchemaMigrationRegistry, SchemaVersion, StableId,
-    StableIdGenerator,
+    Diagnostic, SchemaId, SchemaMigrationRegistry, SchemaVersion, StableId, StableIdGenerator,
 };
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
@@ -15,9 +14,9 @@ use crate::{
     AwaitToken, Blackboard, BlackboardValue, ComponentId, ComponentRecord, ComponentSnapshot,
     CreateAwaitAction, DelayedEventId, DelayedEventQueue, EmitEventAction, EventId, EventPayload,
     EventQueue, EventSource, PresentationAction, PresentationCommand, PresentationRecord,
-    RuntimeAction, RuntimeComponentPayload, RuntimeEvent, RuntimeMutationRecord,
-    RuntimeReplayTranscript, SaveBlob, SaveRequest, ScheduledEvent, SetBlackboardAction,
-    StateMachineDefinition, StateMachineSnapshot, StateMachineStore,
+    RuntimeAction, RuntimeComponentPayload, RuntimeEvent, RuntimeMutationRecord, SaveBlob,
+    SaveRequest, ScheduledEvent, SetBlackboardAction, StateMachineDefinition, StateMachineSnapshot,
+    StateMachineStore,
 };
 
 #[derive(Debug, Error)]
@@ -228,7 +227,6 @@ pub enum TickMode {
     #[default]
     Live,
     RestoreContinuation,
-    Replay,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -269,14 +267,6 @@ impl TickRequest {
         }
     }
 
-    pub fn replay(timing: TickInput, ingress: Vec<OrderedTickIngress>) -> Self {
-        Self {
-            timing,
-            mode: TickMode::Replay,
-            ingress,
-        }
-    }
-
     pub fn restore_continuation(timing: TickInput, ingress: Vec<OrderedTickIngress>) -> Self {
         Self {
             timing,
@@ -292,8 +282,6 @@ pub struct TickReport {
     pub integrity_mode: TickIntegrityMode,
     pub diagnostics: Vec<Diagnostic>,
 }
-
-const INTEGRITY_DISABLED_HASH: Hash128 = Hash128::from_bytes([0; 16]);
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct PlayerInput {
@@ -320,108 +308,6 @@ pub struct RuntimeSnapshot {
     pub step: u64,
 }
 
-#[derive(Debug, Clone, Copy)]
-struct HistoryChain {
-    count: usize,
-    hash: Hash128,
-}
-
-impl HistoryChain {
-    fn empty(domain: &'static str) -> Self {
-        Self {
-            count: 0,
-            hash: Hash128::from_blake3(domain.as_bytes()),
-        }
-    }
-
-    fn append<T: Serialize>(&mut self, domain: &'static str, value: &T) {
-        let bytes =
-            postcard::to_allocvec(&(domain, self.count as u64, self.hash.as_bytes(), value))
-                .expect("runtime history entry must serialize for deterministic hashing");
-        self.hash = Hash128::from_blake3(&bytes);
-        self.count += 1;
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct RuntimeHistoryDigests {
-    machine_definitions: Option<Hash128>,
-    machine_trace: HistoryChain,
-    events: HistoryChain,
-    presentation: HistoryChain,
-    mutations: HistoryChain,
-}
-
-impl Default for RuntimeHistoryDigests {
-    fn default() -> Self {
-        Self {
-            machine_definitions: None,
-            machine_trace: HistoryChain::empty("astra.runtime.machine_trace.chain.v3"),
-            events: HistoryChain::empty("astra.runtime.events.chain.v2"),
-            presentation: HistoryChain::empty("astra.runtime.presentation.chain.v2"),
-            mutations: HistoryChain::empty("astra.runtime.mutations.chain.v2"),
-        }
-    }
-}
-
-impl RuntimeHistoryDigests {
-    fn refresh<T: Serialize>(chain: &mut HistoryChain, domain: &'static str, values: &[T]) {
-        if chain.count > values.len() {
-            *chain = HistoryChain::empty(domain);
-        }
-        for value in &values[chain.count..] {
-            chain.append(domain, value);
-        }
-    }
-
-    fn refresh_from_world(&mut self, world: &RuntimeWorld) {
-        if self.machine_definitions.is_none() {
-            self.machine_definitions = Some(world.machines.definition_fingerprint());
-        }
-        Self::refresh(
-            &mut self.machine_trace,
-            "astra.runtime.machine_trace.chain.v3",
-            world.machines.trace(),
-        );
-        Self::refresh(
-            &mut self.events,
-            "astra.runtime.events.chain.v2",
-            world.events.trace(),
-        );
-        Self::refresh(
-            &mut self.presentation,
-            "astra.runtime.presentation.chain.v2",
-            &world.presentation,
-        );
-        Self::refresh(
-            &mut self.mutations,
-            "astra.runtime.mutations.chain.v2",
-            &world.mutations,
-        );
-    }
-}
-
-#[derive(Serialize)]
-struct RuntimeStateDigestV3<'a> {
-    schema: &'static str,
-    config: &'a RuntimeConfig,
-    package: &'a Option<PackageHandle>,
-    id_source: &'a StableIdGenerator,
-    actors: Hash128,
-    blackboard: &'a Blackboard,
-    machine_state: Hash128,
-    machine_trace_history: Hash128,
-    awaits: &'a AwaitQueue,
-    delayed_events: &'a DelayedEventQueue,
-    event_pending: Hash128,
-    event_history: Hash128,
-    presentation_history: Hash128,
-    mutation_history: Hash128,
-    mounted_modules: &'a BTreeMap<String, ModuleBindingSnapshot>,
-    integrity_mode: TickIntegrityMode,
-    step: u64,
-}
-
 pub struct RuntimeWorld {
     failed: bool,
     config: RuntimeConfig,
@@ -442,7 +328,6 @@ pub struct RuntimeWorld {
     required_tick_mode: TickMode,
     integrity_mode: TickIntegrityMode,
     machine_worker_count: usize,
-    history_digests: RefCell<RuntimeHistoryDigests>,
 }
 
 impl RuntimeWorld {
@@ -491,33 +376,11 @@ impl RuntimeWorld {
             required_tick_mode: TickMode::Live,
             integrity_mode,
             machine_worker_count: 1,
-            history_digests: RefCell::new(RuntimeHistoryDigests::default()),
         })
     }
 
     pub fn tick_integrity_mode(&self) -> TickIntegrityMode {
         self.integrity_mode
-    }
-
-    pub fn begin_replay_recording(&self) -> Result<crate::RuntimeReplayRecorder, RuntimeError> {
-        self.ensure_active()?;
-        crate::RuntimeReplayRecorder::start(self.snapshot()?)
-    }
-
-    pub fn capture_evidence_checkpoint(&self) -> Result<crate::ReplayHashCheckpoint, RuntimeError> {
-        self.ensure_active()?;
-        if self.integrity_mode != TickIntegrityMode::Evidence {
-            return Err(RuntimeError::diagnostic(Diagnostic::blocking(
-                "ASTRA_RUNTIME_EVIDENCE_DISABLED",
-                "runtime evidence checkpoint requires evidence integrity mode",
-            )));
-        }
-        Ok(crate::ReplayHashCheckpoint {
-            step: self.step,
-            state_hash: self.state_hash(),
-            event_hash: self.event_hash(),
-            presentation_hash: self.presentation_hash(),
-        })
     }
 
     pub fn set_machine_worker_count(&mut self, worker_count: usize) -> Result<(), RuntimeError> {
@@ -796,7 +659,6 @@ impl RuntimeWorld {
             "runtime.state_machine.add"
         );
         self.machines.add(definition)?;
-        self.history_digests.get_mut().machine_definitions = None;
         Ok(())
     }
 
@@ -947,10 +809,7 @@ impl RuntimeWorld {
                 }
             }
             let report = self.tick_validated(request.timing)?;
-            self.required_tick_mode = match request.mode {
-                TickMode::Replay => TickMode::Replay,
-                TickMode::Live | TickMode::RestoreContinuation => TickMode::Live,
-            };
+            self.required_tick_mode = TickMode::Live;
             Ok(report)
         }))
         .unwrap_or_else(|_| {
@@ -1211,13 +1070,15 @@ impl RuntimeWorld {
         self.restore_snapshot(snapshot);
         self.required_tick_mode = TickMode::RestoreContinuation;
         let report = LoadReport {
-            state_hash: if self.integrity_mode == TickIntegrityMode::Evidence {
-                self.state_hash()
-            } else {
-                INTEGRITY_DISABLED_HASH
-            },
+            step: self.step,
+            seed: self.config.seed,
         };
-        info!(state_hash = %report.state_hash, "runtime.load");
+        info!(
+            event = "runtime.load",
+            step = report.step,
+            seed = report.seed,
+            "restored runtime world"
+        );
         Ok((report, validated))
     }
 
@@ -1237,73 +1098,6 @@ impl RuntimeWorld {
         self.mounted_modules = snapshot.mounted_modules;
         self.integrity_mode = snapshot.integrity_mode;
         self.step = snapshot.step;
-        *self.history_digests.get_mut() = RuntimeHistoryDigests::default();
-    }
-
-    pub fn replay(
-        &mut self,
-        replay: RuntimeReplayTranscript,
-    ) -> Result<ReplayReport, RuntimeError> {
-        if self.integrity_mode != TickIntegrityMode::Evidence {
-            return Err(RuntimeError::diagnostic(Diagnostic::blocking(
-                "ASTRA_RUNTIME_REPLAY_RECORDING_DISABLED",
-                "runtime replay is disabled outside evidence integrity mode",
-            )));
-        }
-        if replay.schema != "astra.runtime_replay_transcript.v3" {
-            return Err(RuntimeError::diagnostic(Diagnostic::blocking(
-                "ASTRA_RUNTIME_REPLAY_SCHEMA",
-                "runtime replay transcript schema is invalid",
-            )));
-        }
-        info!(input_count = replay.ticks.len(), "runtime.replay.start");
-        let original = self.snapshot()?;
-        let original_mode = self.required_tick_mode;
-        let result = (|| {
-            self.restore_snapshot(replay.checkpoint);
-            if self.integrity_mode != TickIntegrityMode::Evidence {
-                return Err(RuntimeError::diagnostic(Diagnostic::blocking(
-                    "ASTRA_RUNTIME_REPLAY_RECORDING_DISABLED",
-                    "runtime replay checkpoint was not recorded in evidence integrity mode",
-                )));
-            }
-            self.required_tick_mode = TickMode::Replay;
-            for entry in replay.ticks {
-                let report = self.tick(entry.request)?;
-                let actual = self.capture_evidence_checkpoint()?;
-                if actual != entry.expected {
-                    return Err(RuntimeError::diagnostic(
-                        Diagnostic::blocking(
-                            "ASTRA_RUNTIME_REPLAY_HASH_MISMATCH",
-                            "runtime replay hash checkpoint does not match the transcript",
-                        )
-                        .with_field("step", report.step.to_string())
-                        .with_field("expected_state_hash", entry.expected.state_hash.to_string())
-                        .with_field("actual_state_hash", actual.state_hash.to_string()),
-                    ));
-                }
-            }
-            Ok(ReplayReport {
-                state_hash: self.state_hash(),
-                event_hash: self.event_hash(),
-                presentation_hash: self.presentation_hash(),
-            })
-        })();
-        let report = match result {
-            Ok(report) => report,
-            Err(error) => {
-                self.restore_snapshot(original);
-                self.required_tick_mode = original_mode;
-                return Err(error);
-            }
-        };
-        info!(
-            state_hash = %report.state_hash,
-            event_hash = %report.event_hash,
-            presentation_hash = %report.presentation_hash,
-            "runtime.replay"
-        );
-        Ok(report)
     }
 
     pub fn debug_session(&self) -> RuntimeDebugSession<'_> {
@@ -1330,64 +1124,6 @@ impl RuntimeWorld {
         })
     }
 
-    pub fn state_hash(&self) -> Hash128 {
-        if self.integrity_mode == TickIntegrityMode::Shipping {
-            // 高性能 Shipping：仅 step + actor 摘要，不做全量 HistoryChain/postcard
-            let bytes = postcard::to_allocvec(&(
-                "astra.runtime.state_digest.shipping.v1",
-                self.step,
-                self.actors.deterministic_fingerprint(),
-            ))
-            .expect("shipping state digest must serialize");
-            return Hash128::from_blake3(&bytes);
-        }
-        let mut history = self.history_digests.borrow_mut();
-        history.refresh_from_world(self);
-        let machine_definitions = history
-            .machine_definitions
-            .expect("runtime history refresh must retain state machine definitions");
-        let digest = RuntimeStateDigestV3 {
-            schema: "astra.runtime.state_digest.v3",
-            config: &self.config,
-            package: &self.package,
-            id_source: &self.id_source,
-            actors: self.actors.deterministic_fingerprint(),
-            blackboard: &self.blackboard,
-            machine_state: self.machines.state_fingerprint(machine_definitions),
-            machine_trace_history: history.machine_trace.hash,
-            awaits: &self.awaits,
-            delayed_events: &self.delayed_events,
-            event_pending: self.events.deterministic_pending_fingerprint(),
-            event_history: history.events.hash,
-            presentation_history: history.presentation.hash,
-            mutation_history: history.mutations.hash,
-            mounted_modules: &self.mounted_modules,
-            integrity_mode: self.integrity_mode,
-            step: self.step,
-        };
-        let bytes = postcard::to_allocvec(&digest)
-            .expect("runtime state digest must serialize for state hash");
-        Hash128::from_blake3(&bytes)
-    }
-
-    pub fn event_hash(&self) -> Hash128 {
-        let mut history = self.history_digests.borrow_mut();
-        history.refresh_from_world(self);
-        history.events.hash
-    }
-
-    pub fn presentation_hash(&self) -> Hash128 {
-        let mut history = self.history_digests.borrow_mut();
-        history.refresh_from_world(self);
-        Hash128::from_blake3(
-            &postcard::to_allocvec(&(
-                "astra.runtime.presentation_digest.v3",
-                history.presentation.hash,
-            ))
-            .expect("runtime presentation digest must serialize for presentation hash"),
-        )
-    }
-
     fn next_id(&mut self) -> StableId {
         self.id_source.next_id()
     }
@@ -1405,14 +1141,8 @@ fn presentation_kind(command: &PresentationCommand) -> &str {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct LoadReport {
-    pub state_hash: Hash128,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct ReplayReport {
-    pub state_hash: Hash128,
-    pub event_hash: Hash128,
-    pub presentation_hash: Hash128,
+    pub step: u64,
+    pub seed: u64,
 }
 
 pub struct RuntimeDebugSession<'a> {

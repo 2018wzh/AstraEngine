@@ -43,7 +43,7 @@ fn vn_state_roundtrips_inside_runtime_save_container() {
     world
         .create_actor("vn-host", vec!["nativevn".to_string()])
         .unwrap();
-    let runtime_hash = world.state_hash();
+    let runtime_snapshot = world.snapshot().unwrap();
     let mut policy = LuauPolicy::new().unwrap();
     let mut policy_state = VnPolicyState::default();
     assert!(policy
@@ -75,7 +75,7 @@ fn vn_state_roundtrips_inside_runtime_save_container() {
 
     let mut loaded = RuntimeWorld::create(RuntimeConfig::default()).unwrap();
     loaded.load(save.clone()).unwrap();
-    assert_eq!(loaded.state_hash(), runtime_hash);
+    assert_eq!(loaded.snapshot().unwrap(), runtime_snapshot);
 
     let loaded_vn = read_runtime_save_vn_state(&save).unwrap();
     assert_eq!(loaded_vn.state.backlog.len(), 2);

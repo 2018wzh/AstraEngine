@@ -19,7 +19,6 @@ pub struct ReleaseCheckRecord {
 
 | Domain | Check ID | Input | Blocking Condition | Evidence |
 | --- | --- | --- | --- | --- |
-| runtime | `runtime.replay.determinism` | scenario report | hash mismatch | state/event/presentation hash |
 | target | `target.manifest` | package target manifest | missing target, not exactly one packaged Game, selected target absent | target id, kind, profile |
 | plugin | `plugin.fingerprint` | plugin descriptor | version or feature mismatch | descriptor hash |
 | plugin | `plugin.extension_registry` | extension registration report | conflict, missing phase, invalid extension point or packaged trim error | extension id, phase, plugin id |
@@ -115,11 +114,6 @@ package_id: com.example.nativevn
 profile: desktop-release
 status: blocked
 checks:
-  - id: runtime.replay.determinism
-    domain: runtime
-    status: pass
-    evidence:
-      state_hash: hash128:...
   - id: target.manifest
     domain: target
     status: pass

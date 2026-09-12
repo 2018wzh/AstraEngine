@@ -3,9 +3,8 @@ use astra_package::{
     AstraContainerBuilder, ContainerKind, MigrationPolicy, SectionCodec, SectionPayload,
 };
 use astra_runtime::{
-    EventPayload, MigrationManifest, MigrationManifestEntry, OrderedTickIngress, PlayerInput,
-    ReplayHashCheckpoint, ReplayTick, RuntimeConfig, RuntimeReplayTranscript, RuntimeWorld,
-    SaveBlob, SaveRequest, TickIngress, TickInput, TickRequest,
+    MigrationManifest, MigrationManifestEntry, RuntimeConfig, RuntimeWorld, SaveBlob, SaveRequest,
+    TickInput, TickRequest,
 };
 
 #[test]
@@ -63,13 +62,13 @@ fn save_load_preserves_typed_world_and_stable_id_sequence() {
             Vec::new(),
         ))
         .unwrap();
-    let before = uninterrupted.state_hash();
+    let before = uninterrupted.snapshot().unwrap();
     let save = uninterrupted.save(SaveRequest::default()).unwrap();
     let expected = uninterrupted.create_actor("after-save", vec![]).unwrap();
 
     let mut restored = RuntimeWorld::create(config).unwrap();
     restored.load(save).unwrap();
-    assert_eq!(restored.state_hash(), before);
+    assert_eq!(restored.snapshot().unwrap(), before);
     assert_eq!(
         restored.create_actor("after-save", vec![]).unwrap(),
         expected
@@ -129,57 +128,4 @@ fn save_load_rejects_footer_hash_mismatch() {
     save.0[payload_byte] ^= 1;
     let mut loaded = RuntimeWorld::create(RuntimeConfig::default()).unwrap();
     assert!(loaded.load(save).is_err());
-}
-
-#[test]
-fn replay_consumes_typed_player_input_with_explicit_evidence_checkpoint() {
-    let config = RuntimeConfig {
-        seed: 31,
-        required_slots: vec![],
-    };
-    let mut recorded = RuntimeWorld::create(config).unwrap();
-    let checkpoint = recorded.snapshot().unwrap();
-    let player_input = PlayerInput {
-        kind: "player.advance".to_string(),
-        payload: EventPayload::new("player.advance"),
-    };
-    let timing = TickInput {
-        fixed_step: 1,
-        delta_ns: 16_666_667,
-        seed: 31,
-    };
-    let report = recorded
-        .tick(TickRequest::live(
-            timing,
-            vec![OrderedTickIngress {
-                sequence: 1,
-                payload: TickIngress::PlayerInput(player_input.clone()),
-            }],
-        ))
-        .unwrap();
-    let expected = ReplayHashCheckpoint {
-        step: report.step,
-        state_hash: recorded.state_hash(),
-        event_hash: recorded.event_hash(),
-        presentation_hash: recorded.presentation_hash(),
-    };
-    let transcript = RuntimeReplayTranscript {
-        schema: "astra.runtime_replay_transcript.v3".to_string(),
-        checkpoint,
-        ticks: vec![ReplayTick {
-            request: TickRequest::replay(
-                timing,
-                vec![OrderedTickIngress {
-                    sequence: 1,
-                    payload: TickIngress::PlayerInput(player_input),
-                }],
-            ),
-            expected,
-        }],
-    };
-    let mut replayed = RuntimeWorld::create(RuntimeConfig::default()).unwrap();
-    let replay_report = replayed.replay(transcript).unwrap();
-    assert_eq!(replay_report.state_hash, expected.state_hash);
-    assert_eq!(replay_report.event_hash, expected.event_hash);
-    assert_eq!(replay_report.presentation_hash, expected.presentation_hash);
 }

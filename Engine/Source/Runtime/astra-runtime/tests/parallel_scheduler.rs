@@ -88,7 +88,7 @@ fn install_machine(
 fn run_world(
     worker_count: usize,
     barrier: Option<Arc<Barrier>>,
-) -> (astra_runtime::TickReport, astra_core::Hash128) {
+) -> (astra_runtime::TickReport, Vec<u8>) {
     let mut world = RuntimeWorld::create(RuntimeConfig::default()).unwrap();
     world.set_machine_worker_count(worker_count).unwrap();
     world
@@ -132,8 +132,8 @@ fn run_world(
         world.snapshot().unwrap().blackboard.get("parallel.b"),
         Some(&BlackboardValue::I64(1))
     );
-    let state_hash = world.state_hash();
-    (report, state_hash)
+    let saved = world.save(astra_runtime::SaveRequest::default()).unwrap();
+    (report, saved.0)
 }
 
 #[test]
@@ -146,7 +146,7 @@ fn independent_machine_actions_execute_in_the_same_parallel_wave() {
 fn worker_counts_preserve_authoritative_state() {
     let (_, baseline) = run_world(1, None);
     for worker_count in [2, 4, 8] {
-        let (_, state_hash) = run_world(worker_count, None);
-        assert_eq!(state_hash, baseline);
+        let (_, saved) = run_world(worker_count, None);
+        assert_eq!(saved, baseline);
     }
 }

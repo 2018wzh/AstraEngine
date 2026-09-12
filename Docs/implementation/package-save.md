@@ -148,7 +148,7 @@ Container 已硬切 v2。128-byte footer 绑定 file length、kind/version、hea
 
 ```bash
 cargo test -p astra-package package_roundtrip
-cargo test -p astra-runtime save_replay
+cargo test -p astra-runtime --test save_load
 cargo test -p astra-vn-save --test vn_save_container
 astra package validate target/nativevn.astrapkg --profile desktop-release --target nativevn-game
 ```

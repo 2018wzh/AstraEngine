@@ -54,13 +54,6 @@ pub struct EventQueue {
 }
 
 impl EventQueue {
-    pub(crate) fn deterministic_pending_fingerprint(&self) -> astra_core::Hash128 {
-        astra_core::Hash128::from_blake3(
-            &postcard::to_allocvec(&(&self.queued, self.next_sequence))
-                .expect("event queue pending state must serialize for deterministic hashing"),
-        )
-    }
-
     pub fn push(&mut self, mut event: RuntimeEvent) {
         event.sequence = self.next_sequence;
         self.next_sequence += 1;

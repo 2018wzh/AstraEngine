@@ -46,7 +46,6 @@ It must not include complete rules text, copied tables, complete profession/equi
 - `rpg.trpg.transcript_redaction`
 - `rpg.cp2020.local_private_adapter`
 - `rpg.agent_provider_free_replay`
-- `runtime.replay.determinism`
 
 ## Status
 

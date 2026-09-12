@@ -23,10 +23,6 @@ checks:
     domain: target
     status: pass
     source_ref: null
-  - id: runtime.replay.determinism
-    domain: runtime
-    status: pass
-    source_ref: null
   - id: package.cooked_project
     domain: package
     status: pass

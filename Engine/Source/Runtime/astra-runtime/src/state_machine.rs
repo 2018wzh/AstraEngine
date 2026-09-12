@@ -201,35 +201,6 @@ pub struct StateMachineStore {
 }
 
 impl StateMachineStore {
-    pub(crate) fn definition_fingerprint(&self) -> astra_core::Hash128 {
-        astra_core::Hash128::from_blake3(
-            &postcard::to_allocvec(
-                &self
-                    .machines
-                    .iter()
-                    .map(|machine| machine.definition.as_ref())
-                    .collect::<Vec<_>>(),
-            )
-            .expect("state machine definitions must serialize for deterministic fingerprinting"),
-        )
-    }
-
-    pub(crate) fn state_fingerprint(
-        &self,
-        definition_fingerprint: astra_core::Hash128,
-    ) -> astra_core::Hash128 {
-        astra_core::Hash128::from_blake3(
-            &postcard::to_allocvec(&(
-                definition_fingerprint,
-                self.machines
-                    .iter()
-                    .map(|machine| (machine.current_state, machine.completed))
-                    .collect::<Vec<_>>(),
-            ))
-            .expect("state machine state must serialize for deterministic fingerprinting"),
-        )
-    }
-
     pub fn add(&mut self, definition: StateMachineDefinition) -> Result<(), RuntimeError> {
         if self
             .machines

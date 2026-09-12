@@ -12,8 +12,6 @@ status: blocked
 checks:
   - id: target.manifest
     status: pass
-  - id: runtime.replay.determinism
-    status: pass
   - id: plugin.fingerprint
     status: pass
   - id: plugin.extension_registry

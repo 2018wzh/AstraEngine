@@ -5,7 +5,7 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
-use astra_core::{Hash128, SchemaId, SchemaVersion, StableId};
+use astra_core::{SchemaId, SchemaVersion, StableId};
 use indexmap::IndexMap;
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
@@ -273,22 +273,6 @@ impl PartialEq for ActorStore {
 }
 
 impl ActorStore {
-    pub(crate) fn deterministic_fingerprint(&self) -> Hash128 {
-        let components = self.components.values().map(|component| {
-            (
-                component.component_id,
-                component.actor_id,
-                &component.payload.schema,
-                component.payload.version,
-                component.payload.revision,
-            )
-        });
-        Hash128::from_blake3(
-            &postcard::to_allocvec(&(&self.actors, components.collect::<Vec<_>>()))
-                .expect("actor store metadata must serialize for deterministic fingerprinting"),
-        )
-    }
-
     pub fn insert_actor(&mut self, actor: ActorRecord) {
         self.actors.insert(actor.actor_id, actor);
     }

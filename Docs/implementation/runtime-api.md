@@ -33,21 +33,20 @@ Actor/Component 是 public save、Inspector 和 script 可见模型。局部 ECS
 
 ```rust
 impl RuntimeWorld {
-    pub fn create(config: RuntimeConfig, package: PackageHandle) -> Result<Self, RuntimeError>;
+    pub fn create(config: RuntimeConfig) -> Result<Self, RuntimeError>;
     pub fn mount_module(&mut self, slot: EngineModuleSlot, binding: ValidatedModuleBinding) -> Result<(), RuntimeError>;
-    pub fn register_action<A: RuntimeAction + 'static>(&mut self, provider_id: impl Into<String>, action: A);
+    pub fn register_action<A: RuntimeAction + 'static>(&mut self, provider_id: impl Into<String>, action: A) -> Result<(), RuntimeError>;
     pub fn unregister_action_provider(&mut self, provider_id: &str);
-    pub fn schedule_event(&mut self, due_tick: u64, source: EventSource, payload: EventPayload) -> DelayedEventId;
-    pub fn cancel_delayed_event(&mut self, id: DelayedEventId) -> bool;
+    pub fn schedule_event(&mut self, due_tick: u64, source: EventSource, payload: EventPayload) -> Result<DelayedEventId, RuntimeError>;
+    pub fn cancel_delayed_event(&mut self, id: DelayedEventId) -> Result<bool, RuntimeError>;
     pub fn tick(&mut self, request: TickRequest) -> Result<TickReport, RuntimeError>;
     pub fn save(&self, request: SaveRequest) -> Result<SaveBlob, RuntimeError>;
     pub fn load(&mut self, save: SaveBlob) -> Result<LoadReport, RuntimeError>;
-    pub fn replay(&mut self, replay: ReplayInput) -> Result<ReplayReport, RuntimeError>;
-    pub fn debug_session(&mut self) -> RuntimeDebugSession<'_>;
+    pub fn debug_session(&self) -> RuntimeDebugSession<'_>;
 }
 ```
 
-`mount_module` 只接收 typed slot 和经过 registry selection、packaged eligibility、capability、package/target/profile identity、engine/rustc/feature/ABI fingerprint 校验的 binding token，不接收 provider 字符串或 native handle。缺失必需 slot、重复挂载、slot/token 不一致和 context mismatch 都是 blocking diagnostic。`tick` 只接收 typed `TickRequest`；input、await 和 provider output 没有 tick 外公开注入 API。Runtime 在任何 mutation 之前校验 lifecycle mode、strict ingress order、连续 fixed step、session seed、delta 范围和 required slot；执行期错误会恢复 tick 前 snapshot。load 后第一 tick 使用一次 `RestoreContinuation`；provider-free replay 使用 `Replay` 与 recorded output，且整个 transcript 失败时恢复 replay 调用前 world。
+`mount_module` 只接收 typed slot 和经过 registry selection、packaged eligibility、capability、package/target/profile identity、engine/rustc/feature/ABI fingerprint 校验的 binding token，不接收 provider 字符串或 native handle。缺失必需 slot、重复挂载、slot/token 不一致和 context mismatch 都是 blocking diagnostic。`tick` 只接收 typed `TickRequest`；input、await 和 provider output 没有 tick 外公开注入 API。Runtime 在任何 mutation 之前校验 lifecycle mode、strict ingress order、连续 fixed step、session seed、delta 范围和 required slot；执行期错误终止 World，保留已提交状态供诊断，后续写入与保存被拒绝。load 后第一 tick 使用一次 `RestoreContinuation`。通用 replay 已删除，宿主使用普通存读档恢复。
 
 ## State Machine
 
@@ -96,7 +95,7 @@ pub struct ScheduledEvent {
 }
 ```
 
-`DelayedEventQueue` 每 tick 按 `(due_tick, sequence, id)` drain 到 EventQueue。队列进入 `RuntimeSnapshot` 和 save/replay，timer 类 gameplay 不依赖 task completion order。
+`DelayedEventQueue` 每 tick 按 `(due_tick, sequence, id)` drain 到 EventQueue。队列进入 `RuntimeSnapshot` 和 save/load，timer 类 gameplay 不依赖 task completion order。
 
 ## Debug Session
 
@@ -119,7 +118,7 @@ cargo test -p astra-runtime world_actor
 cargo test -p astra-runtime state_machine_tick
 cargo test -p astra-runtime delayed_event
 cargo test -p astra-runtime await_token
-cargo test -p astra-runtime save_replay
+cargo test -p astra-runtime --test save_load
 ```
 
-Expected report: 同 seed、同 package、同 input 生成相同 state/event/presentation hash；hash mismatch 能定位 step、event id、actor/component 和 source_ref。
+测试覆盖 typed Actor/Component、事件排序、延迟事件、完成结果、损坏存档拒绝和恢复连续性。不建立通用 replay 或逐帧 hash 链；LoadReport 只返回恢复的 step 和 seed，数据检查直接比较 snapshot 或保存字节。
