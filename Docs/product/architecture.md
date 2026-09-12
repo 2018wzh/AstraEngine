@@ -1,65 +1,27 @@
 # 总体架构
 
-AstraEngine 系列采用“共享引擎核心 + 垂直产品 + 平台壳 + 扩展套件”的结构。AstraEngine 仓库维护公共契约，子仓只实现自己的产品面。
+AstraEngine 是单仓中的共享 2D 核心和产品组合。具体公共边界见 [重构契约](../contracts/rebuild.md)，实际进度见 [实施计划](../status/implementation-plan.md)。
 
-## 多仓职责
+## 产品分工
 
-```text
-AstraEngine
-  core/runtime/asset-vfs/media/script/plugin/game-runtime/test contracts
-AstraVN
-  .astra canonical source, NativeVnRuntimeProvider, Luau policy, commercial VN baseline
-AstraEditor
-  Qt/QML creator editor, PIE, inspector, graph/timeline, release UI
-AstraPlatform
-  desktop/mobile/web/experimental native shells and platform decode
-AstraEMU
-  independent host, Slint manager, in-process family plugins, native files/save, async text service, final-frame HLSL filters
-AstraRPG
-  AstraRpgRuntimeProvider, RPG core, AI simulation, rpg.trpg ruleset/profile, local-private tabletop adapters, later Server/Client protocol
-```
+| 产品 | 职责 |
+| --- | --- |
+| Engine | 可独立嵌入的场景对象、任务、时间、输入、渲染、文字、媒体和资源生命周期 |
+| AstraVN | 剧情游标、角色数据、演出编排、可信 Luau、标准系统与存读档 |
+| AstraEditor | GPUI 文本/图/时间线/Inspector、独立预览窗口、ACP Agent 与 MCP 编辑能力 |
+| AstraEMU | 独立 Slint Manager、薄 Family API、FVP/Minori、自主核心和可选 SDK |
+| 共享底层库 | Engine 与 SDK 按需使用的文字、图像、音视频、绘制和字节源 |
 
-## 运行链路
+## 数据与生命周期
 
-```text
-Text-first source (.astra/.yaml/assets)
-  -> Import/Cook
-  -> Asset VFS mount set
-  -> Binary package
-  -> GameRuntimeProvider
-  -> RuntimeWorld
-  -> Actor/Component + StateMachine
-  -> PresentationCommand / AudioCommand / RuntimeEvent
-  -> Renderer2D / TextLayout / AudioGraph / FilterGraph providers
-  -> Save / Replay / ReleaseReport
-```
+.astra 经成熟 CST/AST 前端编译为 Story、Scene、Sequence、角色预设和 UI。图形编辑回写同一源文件。VN session 拥有游戏数据与剧情，场景实例拥有呈现对象与局部任务。Player 和预览使用相同 session 实现。
 
-RuntimeWorld 是组合 facade，不是全局单例。Editor、CLI、MCP、平台壳和测试框架都通过同一 public API 创建和驱动它。
+Runtime 采用 60 Hz 逻辑与独立呈现；FSM、剧情执行器、轨道求值共用任务/作用域机制，不强迫互相转换。普通 Rust typed API 组合后端，不使用内部产品动态 ABI 转发。保存显式运行状态，不记录全量事件历史。
 
-## Target 与 Platform
+EMU Family 自持原引擎 VM、文件与存档，Host 只管理配置、输入、窗口、CPU 最终帧、PCM 与可选文本服务。FVP 保持成熟 RFVP，小型薄适配；Minori 使用可选 SDK。动态核心驻留至进程退出，移动端编译入应用。
 
-Target 描述可执行产品形态：`Game` 用于可发布运行时，`Editor` 用于创作者工具，`Program` 用于 CLI、Manager 和离线工具。`Client`、`Server` 作为后续网络 stage 的 schema 保留值，不参与当前 release gate。
+## 交付边界
 
-Platform 描述运行宿主能力：Windows、Linux、macOS、iOS、Android、Web 都通过 `PlatformCapabilityReport` 报告 renderer、decode、audio、filesystem、input、lifecycle、permission 和 SDK 状态。Package 同时携带 `target.manifest` 和 `platform.eligibility`；Release Gate 按 target、profile 和 platform report 判定。
+先 EMU/SDK，再 Engine/VN、Editor/Agent 和终之空。Editor 覆盖三桌面；VN/EMU 覆盖 Windows/Linux/macOS/Android。终之空为本地转换项目与私有包，Classic/Modern 全部 37 路线。Web/iOS、RPG/TRPG、运行时 AI、完整 Live2D 与通用节点编程留后续路线。
 
-## Core 边界
-
-Core 包含基础类型、diagnostics、stable id、schema、migration、PropertySystem、ServiceRegistry、ExtensionRegistry、EngineModuleSlot 和插件加载策略。Core 不知道 VN、Editor、MCP、AI、Luau、legacy VM 或任何具体平台后端。
-
-## Runtime 边界
-
-Runtime 拥有 World、Scene、Actor、Component、StateMachine、EventBus、Scheduler、Director、ControlPolicy、Save/Replay 和 Debug API。Tokio task 可以服务 IO、decode、network 和工具任务，但 Runtime deterministic state 只在固定 tick 边界消费有序结果。
-
-## Module Slot
-
-可替换能力通过 EngineModuleSlot 和 ExtensionRegistry 明确选择，不按加载顺序抢占。默认 slot 包括 Renderer2D、TextLayout、AudioOutput、DecodeProvider、ScriptRuntime、PresentationLibrary、`vfs_provider`、ProductRuntimeProvider、AiProvider、TranslationProvider、MCPToolProvider。Runtime 不直接持有 AiProvider；运行时 AI 通过受限 MCP session 消费 typed Intent 和 committed output。
-
-## 产品边界
-
-AstraVN 是原生 VN 垂直模块，通过 `NativeVnRuntimeProvider` 接入 gameplay runtime。AstraEMU 使用同仓独立 Host 与 Slint Manager，不使用上述 RuntimeWorld/package 执行链。Family 自行读取原生文件、运行 VM、解码、混音、绘制和存档；Host 通过独立 Family ABI 消费最终帧与 PCM，并提供物理输入、窗口事件、可选异步翻译和 HLSL 滤镜。NativeVN 创作流程不依赖 EMU family。具体边界见 [ADR 0019](../adr/0019-astraemu-independent-host.md)。
-
-AstraRPG 是后续 RPG 垂直模块，通过 `AstraRpgRuntimeProvider` 接入 gameplay runtime。它负责 map、party、inventory、quest、encounter、battle、AI agent intent、committed output 和 RPG-specific editor metadata。TRPG 玩法不作为独立产品模块；规则书适配、骰子、检定、ruling、seat authority 和 transcript 都落在 AstraRPG 的 `rpg.trpg` profile 里。CP2020 等规则书适配只能作为 local-private adapter，仓库只提交 schema、manifest、hash、coverage 和 diagnostic。
-
-## v1 验收边界
-
-全系列 v1 同时要求 EngineCore deterministic gate、NativeVN commercial baseline、UE 级 Editor workflow、六平台 profile gate、AI/MCP audit gate。AstraEMU Windows/FVP 使用独立产品测试范围。AstraRPG 是 Stage 7 planned extension，Server/Client protocol 是 Stage 8 planned extension；二者不阻塞当前 v1 gate。任一产品线可以独立开发，但 release 口径由本仓 contracts、implementation specs 和 status matrix 统一定义。
+普通分层测试与开发 Agent 真实操作共同验收，按实际设备测性能，不设置 evidence 审批体系。
