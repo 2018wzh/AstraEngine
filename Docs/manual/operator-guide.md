@@ -142,7 +142,7 @@ AstraEMU 首轮提供 Windows、Slint Manager 与 FVP。构建、插件加载和
 
 Manager 从本地安装的动态库读取独立 Family ABI descriptor，校验 ABI 和 capability；多个 probe 命中时由用户选择。游戏由 Family 直接读取原生文件和管理存档。资料库与设置使用新 schema，旧 Manager 数据重建，原生存档不迁移也不由 Host 改写。
 
-独立 Host 实现仍在本次重构中；具体命令与 Windows 游戏验证结果在集成完成后更新。本轮计划与边界见 [独立 Host 重构](../migrations/astraemu-independent-host.md)，当前进度见 [Stage 5](../status/stages/stage-5-astra-emu.md)。不生成或保留新的 EMU evidence/report 体系。
+独立 Host 实现仍在本次重构中；具体命令与 Windows 游戏验证结果在集成完成后更新。本轮计划与边界见 [独立 Host 重构](../migrations/astraemu-independent-host.md)，当前进度见 [实施状态](../status/implementation-plan.md)。不生成或保留新的 EMU evidence/report 体系。
 
 ## AstraEMU 兼容性数据仓
 

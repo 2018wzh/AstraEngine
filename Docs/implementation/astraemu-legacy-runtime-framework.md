@@ -24,4 +24,4 @@ FVP 不提供翻译 capability。其后接入的 Family 可以使用异步文本
 
 旧 Family/Extension ABI、runtime provider、evidence 程序与 Host VFS 不进入活动依赖图。其他 family core 保留为后续源码，不因首轮 FVP 而删除研究资料。没有第二消费者时不新建 SDK 或工具 crate。
 
-具体实施顺序、滤镜版本、错误与测试范围见 [实施方案](../migrations/astraemu-independent-host.md)，进度见 [Stage 5](../status/stages/stage-5-astra-emu.md)。
+具体实施顺序、滤镜版本、错误与测试范围见 [实施方案](../migrations/astraemu-independent-host.md)，进度见 [实施状态](../status/implementation-plan.md)。

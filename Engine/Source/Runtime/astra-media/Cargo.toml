@@ -43,9 +43,3 @@ windows = { workspace = true, features = [
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys.workspace = true
 wasm-bindgen.workspace = true
-
-[dev-dependencies]
-astra-headless-test = { path = "../../Developer/astra-headless-test" }
-
-[lib]
-doctest = false

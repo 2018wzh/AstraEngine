@@ -18,4 +18,4 @@ AstraEMU 留在同一仓库，使用独立轻量 Host。Slint Manager 持有窗�
 
 此决策取代 [ADR 0012](0012-astraemu-engine-native-family-plugin.md) 的 AstraEMU 架构。AstraVN、Editor、EngineCore 的 RuntimeWorld 和平台契约继续有效。Manager 资料库与设置采用新 schema，原生游戏存档仍归 Family。
 
-具体生命周期、错误、缓存和测试范围以 [实施方案](../migrations/astraemu-independent-host.md) 和 [共享契约](../contracts/astraemu-ipc.md) 为准；实施进度见 [Stage 5](../status/stages/stage-5-astra-emu.md)。
+具体生命周期、错误、缓存和测试范围以 [实施方案](../migrations/astraemu-independent-host.md) 和 [共享契约](../contracts/astraemu-ipc.md) 为准；实施进度见 [实施状态](../status/implementation-plan.md)。

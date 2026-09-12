@@ -75,6 +75,6 @@
 
 ## Documentation Rules
 
-- 每完成一个迁移任务，必须同步更新 `Docs/status/implementation-plan.md`、对应 Stage 页面、[stage-test-matrix](../status/stages/stage-test-matrix.md) 和 [coverage-matrix](../status/coverage-matrix.md)。
+- 每完成一个迁移任务，必须同步更新 `Docs/status/implementation-plan.md`、对应 Stage 页面、[实施状态](../status/implementation-plan.md) 和 [实施状态](../status/implementation-plan.md)。
 - 未跑过关联测试和 release report 时，不得把任何 Stage 7/8 work item 标为 `DONE`。
 - CP2020 相关文档只能写 local-private adapter、schema、manifest、hash、coverage 和 diagnostic；不能写规则书正文、表格、完整职业/装备/义体清单、扫描图或可复原 payload。

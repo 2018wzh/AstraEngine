@@ -8,7 +8,6 @@ publish = false
 
 [dependencies]
 astra-headless-protocol = { path = "../../Runtime/astra-headless-protocol" }
-astra-headless-test-macros = { path = "../astra-headless-test-macros" }
 serde_json.workspace = true
 thiserror.workspace = true
 sha2.workspace = true

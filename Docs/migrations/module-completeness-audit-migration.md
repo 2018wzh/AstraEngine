@@ -412,7 +412,6 @@ Web Player 现新增由 Rust 产品主链直接发出的 `astra.player_web_live_
 - `cargo check --workspace --all-targets` 通过，证明 `HostLaunchProfile` API 已同步到 native factories、Player 和全部当前测试 target。
 - `cargo test -p astra-platform` 通过；新增 `headless_launch_profile` 的 3 个测试覆盖六平台枚举保持不变、Headless identity/provider/input/artifact limits 和 native factory variant rejection。
 - `cargo test --workspace` 通过。该结果替代早期审查中共享 target 导致的 44/45 crate 假失败记录。
-- `python Tools/check_observability.py` 通过，当前 45 个 workspace crate 均有 classification。
 - `python Tools/check_docs.py`、`cargo fmt --check` 和 `git diff --check` 通过。
 - 完整 `cargo clippy --workspace --all-targets -- -D warnings` 通过。
 

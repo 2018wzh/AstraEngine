@@ -63,12 +63,11 @@ shipping Windows bundle 必须携带 role/hash/size 已登记且自检通过的 
 
 `AstraPlayer.config.json` 和 standalone bundle manifest 使用 v2，包含 observability 配置、crash reporter role/hash 和 bundle checks。bundled Player 遇到 v1 必须输出 migration diagnostic 并要求重建，不能静默兼容。
 
-## 8. 准入与验证
+## 8. 验证
 
-`Docs/status/logging-coverage.json` 对每个 Cargo workspace member 分类。`instrumented` crate 必须依赖 `tracing` 且存在稳定事件；纯 DTO、schema、proc-macro 或薄 facade 可以登记 `not_applicable`，但必须写明原因。入口检查：
+使用普通行为测试覆盖 sink、错误和 flush 生命周期。纯类型与 facade 不为满足分类矩阵制造日志；不维护逐 crate 准入名单。
 
 ```bash
-python Tools/check_observability.py
 cargo test -p astra-observability
 cargo test -p astra-crash-reporter
 ```

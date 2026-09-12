@@ -681,21 +681,11 @@ name = "astra-headless-test"
 version = "0.1.0"
 dependencies = [
  "astra-headless-protocol",
- "astra-headless-test-macros",
  "serde_json",
  "sha2 0.10.9",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
-]
-
-[[package]]
-name = "astra-headless-test-macros"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
 ]
 
 [[package]]
@@ -728,7 +718,6 @@ dependencies = [
  "astra-asset",
  "astra-byte-source",
  "astra-core",
- "astra-headless-test",
  "astra-media-core",
  "astra-package",
  "astra-text",

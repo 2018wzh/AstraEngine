@@ -33,7 +33,7 @@ tooling.md
 implementation-checklist.md
 ```
 
-特化文档只放 family 私有细节，例如 BGI 的 `script-bcs.md` / `script-bp.md`、Artemis 的 `script-tags-lua.md`、KrKr 的 `kag-tjs.md`、SoftPAL 的 `sv20-extcalls.md`。各 family 的 `runtime-family-plugin.md` 保留既有接入研究，当前接入状态统一见 [Stage 5](../status/stages/stage-5-astra-emu.md)。
+特化文档只放 family 私有细节，例如 BGI 的 `script-bcs.md` / `script-bp.md`、Artemis 的 `script-tags-lua.md`、KrKr 的 `kag-tjs.md`、SoftPAL 的 `sv20-extcalls.md`。各 family 的 `runtime-family-plugin.md` 保留既有接入研究，当前接入状态统一见 [实施状态](../status/implementation-plan.md)。
 
 ## Tooling
 

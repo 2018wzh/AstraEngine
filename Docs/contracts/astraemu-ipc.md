@@ -32,4 +32,4 @@ Host 将复制后的最终帧上传到 Slint 共享 wgpu device，执行 HLSL �
 
 新 ABI 替换旧接口与 loader，旧 Manager 数据明确重建，游戏原生存档保持由 Family 管理。ABI 需要覆盖无效 descriptor、frame bounds、PCM format、取消与关闭、插件卸载顺序及 translation capability。产品测试覆盖资料库、原生输入、音视频、系统页、存读档、退出冷启动和授权游戏任一结局；本轮不创建新的 evidence/report 留存体系。
 
-Rust 类型是具体字段和 ABI layout 的真源：[Family API](../../Emulator/Source/FamilyApi/astra-emu-family-api/src/lib.rs)。状态见 [Stage 5](../status/stages/stage-5-astra-emu.md)。
+Rust 类型是具体字段和 ABI layout 的真源：[Family API](../../Emulator/Source/FamilyApi/astra-emu-family-api/src/lib.rs)。状态见 [实施状态](../status/implementation-plan.md)。

@@ -14,6 +14,6 @@ Artemis、KrKr、BGI、SoftPAL、Siglus、Minori 的研究与核心源码保留�
 
 - [共享 ABI 与 Host 契约](../contracts/astraemu-ipc.md)
 - [实施方案与测试范围](../migrations/astraemu-independent-host.md)
-- [当前状态](../status/stages/stage-5-astra-emu.md)
+- [实施状态](../status/implementation-plan.md)
 - [Family 研究索引](../emu/README.md)
 - [Manager 使用手册](../manual/astraemu-manager-metadata.md)

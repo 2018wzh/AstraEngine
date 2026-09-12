@@ -50,7 +50,6 @@ members = [
     "Engine/Source/Developer/astra-property-derive",
     "Engine/Source/Developer/astra-test",
     "Engine/Source/Developer/astra-headless-test",
-    "Engine/Source/Developer/astra-headless-test-macros",
     "Engine/Source/Developer/astra-headless-vn-adapter",
     "Engine/Source/Developer/astra-observability",
     "Engine/Source/Programs/astra-cli",

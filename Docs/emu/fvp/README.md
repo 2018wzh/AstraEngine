@@ -22,7 +22,7 @@
 
 本轮 [独立 Host 重构](../../migrations/astraemu-independent-host.md) 要求 FVP 直接实现独立 Family ABI：接收 elapsed 与物理输入，自行持有原生文件、VM、解码、混音、字体、绘制与存档。Host 同步复制 Family 借出的最终 CPU 帧；独立音频 worker 向 Host 提交混合 PCM。不再使用 Layer2D、Hook、Host writable surface/VFS 或统一 snapshot/save。
 
-上游基线固定为 RFVP 0.6.0 revision `304e773387a9920c9db091ec1fd937c717aea949`，hosted 适配源自 `f4f64a5bb726c1759350a666a35e0a454b810f61`。旧接口审阅见 [RFVP fork audit](rfvp-fork-audit.md)。独立 adapter 正在实现，当前进度与待测游戏流程见 [Stage 5](../../status/stages/stage-5-astra-emu.md)。
+上游基线固定为 RFVP 0.6.0 revision `304e773387a9920c9db091ec1fd937c717aea949`，hosted 适配源自 `f4f64a5bb726c1759350a666a35e0a454b810f61`。旧接口审阅见 [RFVP fork audit](rfvp-fork-audit.md)。独立 adapter 正在实现，当前进度与待测游戏流程见 [实施状态](../../status/implementation-plan.md)。
 
 FVP 不改变 EngineCore 的运行模型，也不把单 Family 主循环和平台细节变成公共 Runtime contract。本轮 FVP 不声明文本替换 capability，不修改其翻译路径；游戏原生存档与系统页继续由 RFVP 持有。
 

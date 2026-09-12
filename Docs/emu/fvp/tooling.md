@@ -2,7 +2,7 @@
 
 当前入口是 [独立 Host 重构](../../migrations/astraemu-independent-host.md)中的 Windows Manager。旧通用 CLI、Headless runner、VFS mount profile、continuation snapshot 和 parity report 工具已删除，不再作为 FVP 的运行或验收入口。
 
-FVP 自行读取原生游戏文件、解码、混音、绘制并管理原生存档。Host 只接收最终帧和 PCM，不为 FVP 建立统一 VFS 或 package。实现状态见 [Stage 5](../../status/stages/stage-5-astra-emu.md)。
+FVP 自行读取原生游戏文件、解码、混音、绘制并管理原生存档。Host 只接收最终帧和 PCM，不为 FVP 建立统一 VFS 或 package。实现状态见 [实施状态](../../status/implementation-plan.md)。
 
 ## 保留的格式研究脚本
 

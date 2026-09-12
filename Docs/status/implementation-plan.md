@@ -4,9 +4,9 @@
 
 | 阶段 | 状态 | 尚需完成 |
 | --- | --- | --- |
-| 0 规则与测试 | 进行中 | 新宪章/契约与轻量文档检查已落地；EMU 独立 workspace 和 xtask 已接通；普通测试迁移待整合 |
+| 0 规则与测试 | 进行中 | 新宪章/契约与轻量文档检查已落地；EMU 独立 workspace 和 xtask 已接通；541 处普通测试已迁移，强制 Headless 宏与旧状态矩阵已删除 |
 | 1 EMU 薄 API/FVP | 未完成 | typed 配置、可选翻译、驻留库生命周期与 FVP 最小适配 |
-| 2 SDK/Minori | 未完成 | 共享能力分离、真实 SDK 消费、新 Family API 与自有存档 |
+| 2 SDK/Minori | 未完成 | 独立 astra-text 已整合；其余 SDK 能力、Minori 新 Family API 与自有存档待完成 |
 | 3 跨平台 EMU | 未完成 | 三桌面/Android Manager、核心与真实媒体运行 |
 | 4 Engine/VN | 未完成 | 场景/任务/演出、可信 Luau、typed 主路径、DSL 和存档 |
 | 5 Editor/Agent | 未完成 | GPUI、文本/图/时间线、独立预览、ACP/MCP 与两种编辑模式 |
@@ -22,8 +22,9 @@
 ## 当前验证记录
 
 - 独占重构 worktree；并行子任务各用独立 worktree/target。
-- 新文档检查 237 页通过；7 个链接/卫生回归测试通过。
+- 新文档检查 221 页通过；7 个链接/卫生回归测试通过。
 - EMU 独立 workspace 的 Family API 7 tests 通过，使用独立 target。
 - xtask 与 Linux platform all-target clippy 通过；修复 default build 的 audio fault-injection feature 组合错误。
-- 子任务普通逻辑测试和独立文字库测试已通过，尚待整合及扩大检查。
+- 普通逻辑测试与独立文字库已整合：子任务验证包含 104 个普通测试、15 个独立文本测试和 5 个媒体适配测试。
+- Engine 全量 clippy 与 build 通过；workspace test 在链接阶段因磁盘耗尽中断，清理本 worktree 构建产物后重跑，尚不计作测试通过。
 - 真实 GPU/商业游戏/其他平台验收仍未执行。
