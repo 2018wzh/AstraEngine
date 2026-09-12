@@ -1,4 +1,5 @@
 mod clock;
+mod restore;
 
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
@@ -290,8 +291,7 @@ impl NativeVnProductMediaHost {
         }
     }
 
-    pub(crate) fn validate_restore(
-        &self,
+    pub(crate) fn validate_snapshot_data(
         snapshot: &NativeVnProductMediaSnapshot,
     ) -> Result<(), PlatformError> {
         if snapshot.schema != "astra.player.native_vn_media_snapshot.v3" {
@@ -316,6 +316,14 @@ impl NativeVnProductMediaHost {
         }
         PlayerTimelineScheduler::restore(snapshot.timeline.clone())
             .map_err(|error| media_error("player.media.timeline.restore", error))?;
+        NativeVnProductAudioHost::validate_snapshot_data(&snapshot.audio)
+    }
+
+    pub(crate) fn validate_restore(
+        &self,
+        snapshot: &NativeVnProductMediaSnapshot,
+    ) -> Result<(), PlatformError> {
+        Self::validate_snapshot_data(snapshot)?;
         self.audio.validate_restore(&snapshot.audio)
     }
 

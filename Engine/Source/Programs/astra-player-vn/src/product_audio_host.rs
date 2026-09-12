@@ -131,8 +131,7 @@ impl NativeVnProductAudioHost {
         }
     }
 
-    pub(crate) fn validate_restore(
-        &self,
+    pub(crate) fn validate_snapshot_data(
         snapshot: &NativeVnProductAudioSnapshot,
     ) -> Result<(), PlatformError> {
         if snapshot.schema != "astra.audio_timeline.v1"
@@ -162,6 +161,14 @@ impl NativeVnProductAudioHost {
                 "ASTRA_PLAYER_AUDIO_TIMELINE_INVALID",
             ));
         }
+        Ok(())
+    }
+
+    pub(crate) fn validate_restore(
+        &self,
+        snapshot: &NativeVnProductAudioSnapshot,
+    ) -> Result<(), PlatformError> {
+        Self::validate_snapshot_data(snapshot)?;
         if let Some(service) = self.service.as_ref() {
             service
                 .validate_timeline_restore(&snapshot.timeline)
@@ -320,6 +327,51 @@ impl NativeVnProductAudioHost {
             .await
     }
 
+    pub(crate) fn has_prepared_asset(&self, revision: &AudioAssetRevision) -> bool {
+        self.service
+            .as_ref()
+            .is_some_and(|service| service.is_pcm_prepared(revision))
+    }
+
+    pub(crate) fn prepare_canonical_asset(
+        &mut self,
+        asset: PcmAsset,
+        package_id: &str,
+    ) -> Result<AudioAssetRevision, PlatformError> {
+        let byte_len = u64::try_from(asset.samples.len())
+            .ok()
+            .and_then(|samples| samples.checked_mul(size_of::<f32>() as u64))
+            .ok_or_else(|| player_platform_error("player.audio.asset", "PCM size overflowed"))?;
+        let revision = AudioAssetRevision {
+            package_id: package_id.to_owned(),
+            uri: asset.identity.clone(),
+            revision: package_id.to_owned(),
+            byte_len,
+        };
+        if let Some(existing) = self.prepared_assets.get(&asset.identity) {
+            if existing != &revision {
+                return Err(player_platform_error(
+                    "player.audio.asset",
+                    "ASTRA_PLAYER_AUDIO_ASSET_REVISION_CONFLICT",
+                ));
+            }
+        }
+        if !self.service_mut()?.is_pcm_prepared(&revision) {
+            self.service_mut()?
+                .prepare_pcm_shared(
+                    revision.clone(),
+                    CANONICAL_SAMPLE_RATE,
+                    CANONICAL_CHANNELS,
+                    asset.samples.clone(),
+                )
+                .map_err(|error| player_platform_error("player.audio.prepare", error))?;
+            self.prepared_assets
+                .insert(asset.identity.clone(), revision.clone());
+        }
+
+        Ok(revision)
+    }
+
     pub async fn start_canonical(
         &mut self,
         source: &mut crate::NativeVnHostCommandSource,
@@ -341,35 +393,7 @@ impl NativeVnProductAudioHost {
             .launch_profile()
             .package_id()
             .to_owned();
-        let byte_len = u64::try_from(asset.samples.len())
-            .ok()
-            .and_then(|samples| samples.checked_mul(size_of::<f32>() as u64))
-            .ok_or_else(|| player_platform_error("player.audio.asset", "PCM size overflowed"))?;
-        let revision = AudioAssetRevision {
-            package_id: package_id.clone(),
-            uri: request.asset_id.clone(),
-            revision: package_id,
-            byte_len,
-        };
-        if let Some(existing) = self.prepared_assets.get(&request.asset_id) {
-            if existing != &revision {
-                return Err(player_platform_error(
-                    "player.audio.asset",
-                    "ASTRA_PLAYER_AUDIO_ASSET_REVISION_CONFLICT",
-                ));
-            }
-        } else {
-            self.service_mut()?
-                .prepare_pcm_shared(
-                    revision.clone(),
-                    CANONICAL_SAMPLE_RATE,
-                    CANONICAL_CHANNELS,
-                    asset.samples,
-                )
-                .map_err(|error| player_platform_error("player.audio.prepare", error))?;
-            self.prepared_assets
-                .insert(request.asset_id.clone(), revision.clone());
-        }
+        let revision = self.prepare_canonical_asset(asset, &package_id)?;
 
         let looping = parse_audio_bool(request, "loop", request.command == "bgm")?;
         let gain = parse_audio_f32(request, "gain", 1.0)?;

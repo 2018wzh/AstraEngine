@@ -73,3 +73,7 @@ Media Host 使用独立播放时间驱动 timeline deadline 和视频 `started_a
 ## 音频恢复预检
 
 `AudioServiceSession::validate_timeline_restore` 在停止当前声音前检查设备格式、voice/bus 容量、序列、准备的 PCM、采样游标和渐变状态；失败保留当前 timeline 和声音。Player 的媒体预检在已打开音频服务时使用同一检查，不能等到剧情提交后才发现缺 PCM。此检查不代替冷启动时从 package 解码并准备保存的声音资产；没有资源时仍返回明确错误。
+
+## 冷启动音频准备
+
+产品 `restore_product_session` 改为 async，并接收当前平台 executor。恢复前从当前 package 重新读取缺失声音，走显式绑定 decoder 和与正常播放相同的 canonical PCM 准备路径；包身份、revision、资源 URI 或 canonical PCM 长度不匹配均失败。已准备的 PCM 可复用，未准备的资源按有界解码与缓存预算处理，不能重新播放剧情来填充缓存。准备和预检完成后才提交剧情与媒体恢复；低层同步 Media Host restore 仍只接受已准备资源。

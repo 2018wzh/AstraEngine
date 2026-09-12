@@ -462,7 +462,8 @@ async fn execute_platform_load(
         }
     };
     let restore = vn
-        .restore_product_session(payload, media)
+        .restore_product_session(payload, media, executor)
+        .await
         .map_err(|error| player_error_owned("player.load.restore", error))?;
     executor
         .execute_batch(restore)

@@ -505,3 +505,174 @@ fn video_frame_commands_carry_current_pixels_and_dimensions() {
     source.release_resources().unwrap();
     source.shutdown().unwrap();
 }
+
+#[tokio::test]
+async fn cold_product_restore_prepares_packaged_pcm_and_preserves_saved_cursor() {
+    use astra_audio_kira::{AudioAssetRevision, AudioBusState, AudioVoiceState};
+    let mut source = support::source_for_audio(
+        "story main #@id story.main\nstate start #@id state.start\n  scene room #@id scene.room\n    text key:line speaker:hero #@id line.one\n",
+    );
+    source.launch().unwrap();
+    source
+        .cache_gameplay_surface(320, 180, vec![0x40; 320 * 180 * 4])
+        .unwrap();
+    source
+        .prepare_save_metadata("slot.01", "2000-01-01T00:00:00Z".into(), 0)
+        .unwrap();
+    let mut media = NativeVnProductMediaHost::default();
+    let mut saved = media.snapshot();
+    saved.audio.timeline.command_sequence = 1;
+    saved.audio.timeline.buses.insert(
+        "bgm".into(),
+        AudioBusState {
+            gain: 0.5,
+            fade_id: None,
+            fade_sequence: 0,
+            fade_start_gain: None,
+            fade_target_gain: None,
+            fade_total_frames: 0,
+            fade_rendered_frames: 0,
+        },
+    );
+    saved.audio.timeline.voices.insert(
+        "saved.voice".into(),
+        AudioVoiceState {
+            command_sequence: 1,
+            bus: "bgm".into(),
+            asset: AudioAssetRevision {
+                package_id: "com.example.player.audio".into(),
+                uri: "asset:/audio/restore".into(),
+                revision: "com.example.player.audio".into(),
+                byte_len: 256,
+            },
+            cursor_frames: 8,
+            looping: true,
+            paused: true,
+        },
+    );
+    saved
+        .audio
+        .voice_kinds
+        .insert("saved.voice".into(), "bgm".into());
+    let bytes = source
+        .save_with_product_media_snapshot("slot.01", Some(serde_json::to_vec(&saved).unwrap()))
+        .unwrap();
+    let mut foreign = saved.clone();
+    foreign
+        .audio
+        .timeline
+        .voices
+        .get_mut("saved.voice")
+        .unwrap()
+        .asset
+        .package_id = "foreign".into();
+    let foreign_bytes = source
+        .save_with_product_media_snapshot("slot.01", Some(serde_json::to_vec(&foreign).unwrap()))
+        .unwrap();
+    let mut wrong_length = saved.clone();
+    wrong_length
+        .audio
+        .timeline
+        .voices
+        .get_mut("saved.voice")
+        .unwrap()
+        .asset
+        .byte_len += 4;
+    let wrong_length_bytes = source
+        .save_with_product_media_snapshot(
+            "slot.01",
+            Some(serde_json::to_vec(&wrong_length).unwrap()),
+        )
+        .unwrap();
+    let profile = PlatformHostProfile::windows_release("nativevn-game", "com.example.player.audio");
+    let (client, mut backend, _events) = host_channel(profile, 16, 16).unwrap();
+    let task = tokio::spawn(async move {
+        let HostCommand::OpenAudioOutput { reply, .. } = backend.next_command().await.unwrap()
+        else {
+            panic!("expected audio open")
+        };
+        let output = AudioOutputHandle::from_parts(3, 1).unwrap();
+        reply
+            .send(Ok(OpenedAudioOutput {
+                handle: output,
+                format: AudioDeviceFormat {
+                    sample_rate: 48_000,
+                    channels: 2,
+                },
+                lane: Box::new(ProductAudioTestLane {
+                    consumed_samples: Arc::new(AtomicU64::new(0)),
+                    underflow_count: 0,
+                }),
+                capture: None,
+            }))
+            .unwrap();
+        let HostCommand::OpenDecode { kind, reply } = backend.next_command().await.unwrap() else {
+            panic!("expected audio decoder")
+        };
+        assert_eq!(kind, DecodeKind::Audio);
+        reply
+            .send(Ok(DecodeSessionHandle::from_parts(9, 1).unwrap()))
+            .unwrap();
+        let HostCommand::Decode { request, reply, .. } = backend.next_command().await.unwrap()
+        else {
+            panic!("expected packaged audio decode")
+        };
+        assert!(request.bytes.starts_with(b"RIFF"));
+        reply
+            .send(Ok(DecodeOutput::AudioPcmF32 {
+                sample_rate: 48_000,
+                channels: 2,
+                samples: vec![0.0; 64],
+            }))
+            .unwrap();
+        let HostCommand::CloseDecode { reply, .. } = backend.next_command().await.unwrap() else {
+            panic!("expected decoder close")
+        };
+        reply.send(Ok(())).unwrap();
+        // A second restore must reuse prepared PCM, not issue another decoder request.
+        let HostCommand::CloseAudio { reply, .. } = backend.next_command().await.unwrap() else {
+            panic!("expected audio shutdown")
+        };
+        reply.send(Ok(())).unwrap();
+    });
+    let mut executor = PlayerHostCommandExecutor::new(PlatformCommandSink::new(client));
+    assert!(source
+        .restore_product_session(&foreign_bytes, &mut media, &mut executor)
+        .await
+        .unwrap_err()
+        .to_string()
+        .contains("REVISION_CONFLICT"));
+    assert!(media.snapshot().audio.timeline.voices.is_empty());
+    source
+        .restore_product_session(&bytes, &mut media, &mut executor)
+        .await
+        .unwrap();
+    let actual = media.snapshot().audio;
+    assert_eq!(actual.timeline.voices, saved.audio.timeline.voices);
+    assert_eq!(actual.timeline.buses, saved.audio.timeline.buses);
+    let wait = source.pending_wait().cloned();
+    assert!(source
+        .restore_product_session(&wrong_length_bytes, &mut media, &mut executor)
+        .await
+        .unwrap_err()
+        .to_string()
+        .contains("PCM_LENGTH_MISMATCH"));
+    assert_eq!(source.pending_wait(), wait.as_ref());
+    assert_eq!(
+        media.snapshot().audio.timeline.voices,
+        saved.audio.timeline.voices
+    );
+
+    source
+        .restore_product_session(&bytes, &mut media, &mut executor)
+        .await
+        .unwrap();
+    assert_eq!(
+        media.snapshot().audio.timeline.voices,
+        saved.audio.timeline.voices
+    );
+    media.shutdown(&mut source, &mut executor).await.unwrap();
+    source.release_resources().unwrap();
+    source.shutdown().unwrap();
+    task.await.unwrap();
+}

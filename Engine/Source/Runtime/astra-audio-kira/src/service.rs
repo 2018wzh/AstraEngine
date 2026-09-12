@@ -228,6 +228,10 @@ impl AudioServiceSession {
     /// Clones only the allocation owners needed to rebuild this session after an endpoint loss.
     /// The PCM allocations themselves are not copied.
     #[must_use]
+    pub fn is_pcm_prepared(&self, asset: &AudioAssetRevision) -> bool {
+        self.pcm_cache.keys().any(|key| &key.asset == asset)
+    }
+
     pub fn prepared_pcm_assets(&self) -> Vec<(AudioAssetRevision, u32, u16, Arc<Vec<f32>>)> {
         self.pcm_cache
             .iter()

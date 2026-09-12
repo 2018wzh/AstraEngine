@@ -1060,7 +1060,8 @@ async fn execute_platform_load(
         }
     };
     let present = source
-        .restore_product_session(bytes, media)
+        .restore_product_session(bytes, media, executor)
+        .await
         .map_err(|error| player_platform_error("player.save.restore", error))?;
     executor
         .execute_batch(present)

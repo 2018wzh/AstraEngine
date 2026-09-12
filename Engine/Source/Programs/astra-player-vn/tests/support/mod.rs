@@ -46,13 +46,13 @@ ui_view ui.test.system model:astra.vn.ui_model.system.v1 theme:astra.vn.theme.cl
 "#;
 
 pub fn source_for(story: &str) -> NativeVnHostCommandSource {
-    source_from_package(product_package_with_video(story, None))
+    source_from_package(product_package_with_video(story, None, false))
 }
 
 pub fn source_for_video(story: &str) -> NativeVnHostCommandSource {
     let mut bytes = vec![0, 0, 0, 16];
     bytes.extend_from_slice(b"ftypisom0000");
-    source_from_package(product_package_with_video(story, Some(bytes)))
+    source_from_package(product_package_with_video(story, Some(bytes), false))
 }
 
 fn source_from_package(package_bytes: Vec<u8>) -> NativeVnHostCommandSource {
@@ -69,10 +69,15 @@ fn source_from_package(package_bytes: Vec<u8>) -> NativeVnHostCommandSource {
 
 #[allow(dead_code)]
 pub fn product_package(story: &str) -> Vec<u8> {
-    product_package_with_video(story, None)
+    product_package_with_video(story, None, false)
 }
 
-fn product_package_with_video(story: &str, video: Option<Vec<u8>>) -> Vec<u8> {
+#[allow(dead_code)]
+pub fn source_for_audio(story: &str) -> NativeVnHostCommandSource {
+    source_from_package(product_package_with_video(story, None, true))
+}
+
+fn product_package_with_video(story: &str, video: Option<Vec<u8>>, audio: bool) -> Vec<u8> {
     let compiled = compile_astra_project(
         [
             AstraSource::story("main.astra", story),
@@ -160,6 +165,30 @@ fn product_package_with_video(story: &str, video: Option<Vec<u8>>) -> Vec<u8> {
         .to_vec(),
     ));
 
+    let audio_wave = if audio {
+        let samples = vec![0_u8; 128];
+        let mut wave = b"RIFF".to_vec();
+        wave.extend_from_slice(&(36_u32 + samples.len() as u32).to_le_bytes());
+        wave.extend_from_slice(b"WAVEfmt ");
+        wave.extend_from_slice(&16_u32.to_le_bytes());
+        wave.extend_from_slice(&1_u16.to_le_bytes());
+        wave.extend_from_slice(&2_u16.to_le_bytes());
+        wave.extend_from_slice(&48_000_u32.to_le_bytes());
+        wave.extend_from_slice(&192_000_u32.to_le_bytes());
+        wave.extend_from_slice(&4_u16.to_le_bytes());
+        wave.extend_from_slice(&16_u16.to_le_bytes());
+        wave.extend_from_slice(b"data");
+        wave.extend_from_slice(&(samples.len() as u32).to_le_bytes());
+        wave.extend_from_slice(&samples);
+        sections.push(SectionPayload::raw(
+            "asset.audio.restore",
+            "astra.cooked_asset.v1",
+            wave.clone(),
+        ));
+        Some(wave)
+    } else {
+        None
+    };
     let mut request = PackageBuildRequest::fixture("com.example.player.audio", "classic", sections);
     bind_product_provider_authority(&mut request);
     let mut vfs_entries = vec![serde_json::json!({
@@ -254,6 +283,27 @@ fn product_package_with_video(story: &str, video: Option<Vec<u8>>) -> Vec<u8> {
         "assets": catalog_assets
     }))
     .unwrap();
+    if let Some(wave) = audio_wave {
+        let mut manifest: serde_json::Value =
+            serde_json::from_slice(&request.asset_vfs_manifest).unwrap();
+        manifest["entries"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({
+                "vfs_uri": "package:/audio/restore.wav", "layer_id": "package.base",
+                "source": {"kind":"package_section", "section_id":"asset.audio.restore"},
+                "offset":0, "size":wave.len(), "hash":Hash256::from_sha256(&wave),
+                "codec":"raw", "media_kind":"audio/wav", "diagnostics":[]
+            }));
+        request.asset_vfs_manifest = serde_json::to_vec(&manifest).unwrap();
+        let mut catalog: serde_json::Value =
+            serde_json::from_slice(&request.asset_catalog).unwrap();
+        catalog["assets"].as_array_mut().unwrap().push(serde_json::json!({
+            "asset_id":"asset:/audio/restore", "vfs_uri":"package:/audio/restore.wav",
+            "media_kind":"audio/wav", "tags":[], "bundle_id":"classic", "chunk_id":"base", "profiles":["classic"]
+        }));
+        request.asset_catalog = serde_json::to_vec(&catalog).unwrap();
+    }
     PackageBuilder::build(request).unwrap().into_bytes()
 }
 

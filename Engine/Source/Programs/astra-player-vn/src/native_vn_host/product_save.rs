@@ -13,12 +13,34 @@ impl NativeVnHostCommandSource {
         self.prepare_save_transaction_with_product_media_snapshot(slot, transaction, Some(snapshot))
     }
 
-    pub fn restore_product_session(
+    pub(crate) fn restored_audio_request(
+        &self,
+        asset_id: &str,
+    ) -> Result<crate::NativeVnAudioPreloadRequest, NativeVnHostError> {
+        let asset = self.asset_store.load_media(asset_id)?;
+        Ok(crate::NativeVnAudioPreloadRequest {
+            asset_id: asset_id.into(),
+            codec: asset.codec.clone(),
+            encoded_bytes: asset.bytes.clone(),
+            encoded_length: asset.byte_length,
+        })
+    }
+
+    pub async fn restore_product_session(
         &mut self,
         bytes: &[u8],
         media: &mut NativeVnProductMediaHost,
+        executor: &mut astra_player_core::PlayerHostCommandExecutor<
+            astra_player_core::PlatformCommandSink,
+        >,
     ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
         let envelope = decode_save_envelope(bytes)?;
+        if envelope.payload.sections.session_id != self.session_id {
+            return Err(NativeVnHostError::Save(
+                "ASTRA_PLAYER_SAVE_SESSION_MISMATCH: save belongs to another runtime session"
+                    .into(),
+            ));
+        }
         let encoded = envelope
             .payload
             .product_media_snapshot_json
@@ -32,6 +54,10 @@ impl NativeVnHostCommandSource {
             serde_json::from_slice(&encoded).map_err(|error| {
                 NativeVnHostError::Save(format!("ASTRA_PLAYER_MEDIA_SNAPSHOT_INVALID: {error}"))
             })?;
+        media
+            .prepare_restore_assets(self, executor, &snapshot)
+            .await
+            .map_err(|error| NativeVnHostError::Save(error.to_string()))?;
         media
             .validate_restore(&snapshot)
             .map_err(|error| NativeVnHostError::Save(error.to_string()))?;
@@ -51,6 +77,22 @@ impl NativeVnHostCommandSource {
 mod tests {
     use super::*;
     use crate::test_native_package;
+
+    fn executor(
+    ) -> astra_player_core::PlayerHostCommandExecutor<astra_player_core::PlatformCommandSink> {
+        let (client, _, _) = astra_platform::host_channel(
+            astra_platform::PlatformHostProfile::windows_release(
+                "nativevn-game",
+                "com.example.player",
+            ),
+            1,
+            1,
+        )
+        .unwrap();
+        astra_player_core::PlayerHostCommandExecutor::new(
+            astra_player_core::PlatformCommandSink::new(client),
+        )
+    }
 
     fn source() -> NativeVnHostCommandSource {
         let bytes = test_native_package::product_package_with_request(
@@ -85,9 +127,10 @@ mod tests {
         bytes.clone()
     }
 
-    #[test]
-    fn product_save_restores_media_instead_of_retaining_live_signals() {
+    #[tokio::test]
+    async fn product_save_restores_media_instead_of_retaining_live_signals() {
         let mut source = source();
+        let mut executor = executor();
         let mut media = NativeVnProductMediaHost::default();
         let mut expected = media.snapshot();
         expected.completed_signals.push("saved.done".into());
@@ -102,7 +145,10 @@ mod tests {
         changed.timeline.last_time_ms = Some(20);
         changed.playback_time_ms = 20;
         media.restore(changed).unwrap();
-        source.restore_product_session(&bytes, &mut media).unwrap();
+        source
+            .restore_product_session(&bytes, &mut media, &mut executor)
+            .await
+            .unwrap();
         assert_eq!(
             serde_json::to_value(media.snapshot()).unwrap(),
             serde_json::to_value(expected).unwrap()
@@ -111,9 +157,10 @@ mod tests {
         source.shutdown().unwrap();
     }
 
-    #[test]
-    fn invalid_product_media_is_rejected_before_the_source_commits() {
+    #[tokio::test]
+    async fn invalid_product_media_is_rejected_before_the_source_commits() {
         let mut source = source();
+        let mut executor = executor();
         let mut media = NativeVnProductMediaHost::default();
         let bytes = saved(&mut source, &media);
         let expected = serde_json::to_value(media.snapshot()).unwrap();
@@ -134,7 +181,8 @@ mod tests {
             }
             let invalid = postcard::to_allocvec(&envelope).unwrap();
             assert!(source
-                .restore_product_session(&invalid, &mut media)
+                .restore_product_session(&invalid, &mut media, &mut executor)
+                .await
                 .is_err());
             assert!(!scope.is_cancelled());
             assert!(!source.presentation_failed);

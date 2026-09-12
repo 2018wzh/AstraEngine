@@ -56,3 +56,5 @@
 - 视频帧绑定现在重建携带当前像素的 `VideoFrame` 场景命令，场景刷新借用当前 StageDirector；避免沿用旧 frame，帧执行错误终止呈现会话。恢复解码到保存 cursor 后重新提交该帧，解码/校验/呈现错误保留关闭任务。视频与音频 Host 5 项集成测试通过，新增尺寸变化与像素断言，恢复流程直接核对第一帧和后续帧的 BGRA→RGBA 字节；Engine 全量 fmt/clippy/build/test 通过：699 项通过、0 失败、9 项按原条件未执行。此处验证平台命令与解码 fixture，不替代真实 GPU/商业视频播放验收。
 
 - AudioServiceSession 新增恢复预检，停止当前声音前检查已准备 PCM、cursor、voice/bus 容量、序列与完整渐变状态。Player 已打开音频服务时复用该检查，未打开却包含声音/渐变的恢复也提前拒绝，避免剧情先提交。7 类无效 snapshot 的拒绝与 live timeline 保持不变已验证，astra-audio-kira 4 项测试通过；Engine 全量 fmt/clippy/build/test 通过：700 项通过、0 失败、9 项按原条件未执行。冷启动 package 音频解码/资产准备与真实设备恢复仍未完成。
+
+- 产品恢复入口改为 async，在提交剧情前按当前 package 和显式 decoder 准备缺失 PCM；正常播放与恢复共用 canonical PCM 准备，检查真实服务缓存避免陈旧 prepared 标记。原生 Player 与 Headless 已同步调用。冷启动媒体 Host 的 package WAV 回归通过：解码、cursor/paused/bus 恢复、重复恢复复用 PCM、外来 package 与错误 PCM 长度拒绝均已验证；Engine 全量 fmt/clippy/build/test 通过：701 项通过、0 失败、9 项按原条件未执行。实际 decoder/设备组合、进程重启长流程和输出队列恢复仍需真实环境验收。
