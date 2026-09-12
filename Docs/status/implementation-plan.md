@@ -50,3 +50,5 @@
 - Player 视频请求绑定 host-owned TaskScope；同层替换、读档提交、呈现失败和退出取消旧请求，decode/frame/fence 入口拒绝旧作用域。恢复提交清空旧媒体/timeline/stage completion 和 UI 请求，验证失败保留队列；Media Host 恢复保留旧流关闭任务，成功关闭后才移除。新增真实 worker 迟到、替换/外来作用域/退出及连续恢复关闭队列回归；Engine 全量 fmt/clippy/build/test 通过：692 项通过、0 失败、9 项按原条件未执行。随后补充取消视频不消费继续输入的回归，并统一测试夹具模块；最终 Player VN fmt/clippy/build/test 复验 65 项通过、0 失败。通用任务组合、完整音频/timeline 作用域与真实媒体验收仍未完成。
 
 - 原生 Player 两条入口与 Headless 已统一产品存读档 API，保存音频/视频/timeline，恢复前检查缺失媒体、schema、timeline 和音频格式；删除分散的“取出媒体 JSON 后另行恢复”接口。native session 补齐捕获与保存元数据。两项 package 回归验证媒体恢复和预检失败不提交剧情；Engine 全量 fmt/clippy/build/test 通过：695 项通过、0 失败、9 项按原条件未执行。播放时钟重新定位、冷启动声音资产恢复和完整产品长流程仍需后续验证。
+
+- Media Host 新增独立播放时钟，保存 `playback_time_ms`，恢复后首次调用重新绑定宿主时钟并保留剩余时长；视频起点与 timeline deadline 共用该播放时间。媒体 snapshot v3 拒绝旧 v2 与未来时间字段，未重开的恢复视频也进入再次保存。Player VN 35 项单元测试通过，覆盖新/旧宿主时间原点、时钟错误不推进、视频立即重存和错误 snapshot 不提交。视频流集成回归补充长暂停后保持第一帧、到剩余 PTS 才呈现第二帧的断言；Engine 全量 fmt/clippy/build/test 通过：698 项通过、0 失败、9 项按原条件未执行。冷启动音频资产恢复、解码实际恢复播放与真实设备长流程仍未验收。

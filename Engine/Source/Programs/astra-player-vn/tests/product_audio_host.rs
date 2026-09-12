@@ -261,13 +261,25 @@ async fn product_media_host_presents_every_video_frame_and_restores_by_asset_ide
     let mut restored = NativeVnProductMediaHost::default();
     restored.restore(snapshot).unwrap();
     restored
-        .poll_and_process(&mut source, &mut executor, 20)
+        .poll_and_process(&mut source, &mut executor, 10_000)
         .await
         .unwrap();
+    assert_eq!(restored.snapshot().playback_time_ms, 0);
+    assert_eq!(restored.snapshot().active_videos[0].next_frame, 1);
+    restored
+        .poll_and_process(&mut source, &mut executor, 10_019)
+        .await
+        .unwrap();
+    assert_eq!(restored.snapshot().active_videos[0].next_frame, 1);
+    restored
+        .poll_and_process(&mut source, &mut executor, 10_020)
+        .await
+        .unwrap();
+    assert_eq!(restored.snapshot().active_videos[0].next_frame, 2);
     assert!(restored.has_active_video());
     assert!(restored.skip_active_videos(&mut source).unwrap());
     restored
-        .poll_and_process(&mut source, &mut executor, 21)
+        .poll_and_process(&mut source, &mut executor, 10_021)
         .await
         .unwrap();
     assert!(!restored.has_active_video());

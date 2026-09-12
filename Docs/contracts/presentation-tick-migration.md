@@ -57,3 +57,9 @@ Media Host 遇到已取消的视频只排队关闭，不能提交旧完成通知
 ## 产品存读档入口
 
 原生 Player 与 Headless 共用 `prepare_product_save_transaction` / `restore_product_session`，把同一会话的音频、视频和 timeline snapshot 纳入存档。低层 `save` / `restore` 仍可用于没有 Media Host 的源状态测试，不能作为完整产品保存入口。产品读取缺媒体状态、错误媒体 schema 或不合法 timeline 时，在剧情恢复前拒绝；音频设备等执行阶段的恢复错误必须终止呈现会话，不能继续运行一半已恢复的产品。产品恢复成功后才向平台提交首帧，随后媒体处理关闭旧视频流并重建保存的流。
+
+## 媒体播放时钟
+
+Media Host 使用独立播放时间驱动 timeline deadline 和视频 `started_at_ms`，宿主 `now_ms` 只提供增量。首次处理绑定宿主时钟，播放时间从当前保存值继续；读档后清除宿主时钟绑定，首次处理不计入离开存档后的时间。后续宿主回退或播放时间溢出明确拒绝且不推进时钟。音频仍恢复其采样游标，不使用毫秒时钟改写 PCM 进度。
+
+媒体 snapshot 升为 `astra.player.native_vn_media_snapshot.v3`，必需 `playback_time_ms`；旧 v2 拒绝重建。保存的 timeline 时刻与视频起点不得晚于播放时间。恢复后尚未重新打开的视频仍须进入再次保存的 snapshot，不能因未处理下一帧而丢失。

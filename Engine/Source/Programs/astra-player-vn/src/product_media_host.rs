@@ -1,3 +1,5 @@
+mod clock;
+
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     time::Instant,
@@ -19,6 +21,7 @@ use crate::{
 pub struct NativeVnProductMediaHost {
     audio: NativeVnProductAudioHost,
     timeline: PlayerTimelineScheduler,
+    clock: clock::PlaybackClock,
     completed_signals: BTreeSet<String>,
     active_videos: Vec<ActiveVideoStream>,
     pending_video_closes: Vec<astra_player_core::PlayerHostResourceId>,
@@ -91,6 +94,7 @@ struct ActiveVideoStream {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct NativeVnProductMediaSnapshot {
     pub schema: String,
+    pub playback_time_ms: u64,
     pub audio: crate::NativeVnProductAudioSnapshot,
     pub timeline: PlayerTimelineSchedulerSnapshot,
     pub completed_signals: Vec<String>,
@@ -139,6 +143,7 @@ impl NativeVnProductMediaHost {
         Self {
             audio: NativeVnProductAudioHost::new(retain_audio_timeline),
             timeline: PlayerTimelineScheduler::new(max_timeline_tasks),
+            clock: clock::PlaybackClock::default(),
             completed_signals: BTreeSet::new(),
             active_videos: Vec::new(),
             pending_video_closes: Vec::new(),
@@ -251,7 +256,8 @@ impl NativeVnProductMediaHost {
 
     pub fn snapshot(&self) -> NativeVnProductMediaSnapshot {
         NativeVnProductMediaSnapshot {
-            schema: "astra.player.native_vn_media_snapshot.v2".into(),
+            schema: "astra.player.native_vn_media_snapshot.v3".into(),
+            playback_time_ms: self.clock.time_ms(),
             audio: self.audio.snapshot(),
             timeline: self.timeline.snapshot(),
             completed_signals: self.completed_signals.iter().cloned().collect(),
@@ -279,6 +285,7 @@ impl NativeVnProductMediaHost {
                     loop_index: video.loop_index,
                     started_at_ms: video.started_at_ms,
                 })
+                .chain(self.restored_videos.iter().cloned())
                 .collect(),
         }
     }
@@ -287,10 +294,24 @@ impl NativeVnProductMediaHost {
         &self,
         snapshot: &NativeVnProductMediaSnapshot,
     ) -> Result<(), PlatformError> {
-        if snapshot.schema != "astra.player.native_vn_media_snapshot.v2" {
+        if snapshot.schema != "astra.player.native_vn_media_snapshot.v3" {
             return Err(media_error(
                 "player.media.restore",
                 "ASTRA_PLAYER_MEDIA_SNAPSHOT_INVALID",
+            ));
+        }
+        if snapshot
+            .timeline
+            .last_time_ms
+            .is_some_and(|time| time > snapshot.playback_time_ms)
+            || snapshot
+                .active_videos
+                .iter()
+                .any(|video| video.started_at_ms > snapshot.playback_time_ms)
+        {
+            return Err(media_error(
+                "player.media.restore",
+                "ASTRA_PLAYER_MEDIA_CLOCK_SNAPSHOT_INVALID",
             ));
         }
         PlayerTimelineScheduler::restore(snapshot.timeline.clone())
@@ -299,16 +320,12 @@ impl NativeVnProductMediaHost {
     }
 
     pub fn restore(&mut self, snapshot: NativeVnProductMediaSnapshot) -> Result<(), PlatformError> {
-        if snapshot.schema != "astra.player.native_vn_media_snapshot.v2" {
-            return Err(media_error(
-                "player.media.restore",
-                "ASTRA_PLAYER_MEDIA_SNAPSHOT_INVALID",
-            ));
-        }
+        self.validate_restore(&snapshot)?;
         let timeline = PlayerTimelineScheduler::restore(snapshot.timeline)
             .map_err(|error| media_error("player.media.timeline.restore", error))?;
         self.audio.restore(snapshot.audio)?;
         self.timeline = timeline;
+        self.clock = clock::PlaybackClock::restored(snapshot.playback_time_ms);
         self.completed_signals = snapshot.completed_signals.into_iter().collect();
         self.pending_video_closes
             .extend(self.active_videos.drain(..).map(|video| {
@@ -345,11 +362,12 @@ impl NativeVnProductMediaHost {
         now_ms: u64,
         render_audio_tick: bool,
     ) -> Result<(), PlatformError> {
+        let now_ms = self.clock.advance(now_ms)?;
         let completed = self
             .timeline
             .poll(now_ms)
             .map_err(|error| media_error("player.timeline.poll", error))?;
-        self.process_with_audio_tick(source, executor, now_ms, completed, render_audio_tick)
+        self.process_at_playback_time(source, executor, now_ms, completed, render_audio_tick)
             .await
     }
 
@@ -365,6 +383,19 @@ impl NativeVnProductMediaHost {
     }
 
     pub async fn process_with_audio_tick(
+        &mut self,
+        source: &mut NativeVnHostCommandSource,
+        executor: &mut PlayerHostCommandExecutor<PlatformCommandSink>,
+        now_ms: u64,
+        completed: Vec<PlayerTimelineCompletion>,
+        render_audio_tick: bool,
+    ) -> Result<(), PlatformError> {
+        let now_ms = self.clock.advance(now_ms)?;
+        self.process_at_playback_time(source, executor, now_ms, completed, render_audio_tick)
+            .await
+    }
+
+    async fn process_at_playback_time(
         &mut self,
         source: &mut NativeVnHostCommandSource,
         executor: &mut PlayerHostCommandExecutor<PlatformCommandSink>,
@@ -1364,6 +1395,40 @@ mod tests {
         assert!(source.take_stage_completions().is_empty());
         source.release_resources().unwrap();
         source.shutdown().unwrap();
+    }
+
+    #[test]
+    fn restored_video_keeps_elapsed_time_and_survives_an_immediate_resave() {
+        let mut media = NativeVnProductMediaHost::default();
+        media.clock.advance(200).unwrap();
+        media.clock.advance(240).unwrap();
+        let mut video = test_video(astra_runtime::TaskScope::new());
+        video.started_at_ms = 10;
+        media.active_videos.push(video);
+        let saved = media.snapshot();
+        media.restore(saved.clone()).unwrap();
+        assert!(media.active_videos.is_empty());
+        let resaved = media.snapshot();
+        assert_eq!(
+            serde_json::to_value(&resaved).unwrap(),
+            serde_json::to_value(&saved).unwrap()
+        );
+        media.restore(resaved).unwrap();
+        let now = media.clock.advance(0).unwrap();
+        assert_eq!(now - media.restored_videos[0].started_at_ms, 30);
+        let now = media.clock.advance(15).unwrap();
+        assert_eq!(now - media.restored_videos[0].started_at_ms, 45);
+        let before = serde_json::to_value(media.snapshot()).unwrap();
+        for variant in 0..3 {
+            let mut invalid = media.snapshot();
+            match variant {
+                0 => invalid.schema = "astra.player.native_vn_media_snapshot.v2".into(),
+                1 => invalid.active_videos[0].started_at_ms = invalid.playback_time_ms + 1,
+                _ => invalid.timeline.last_time_ms = Some(invalid.playback_time_ms + 1),
+            }
+            assert!(media.restore(invalid).is_err());
+            assert_eq!(serde_json::to_value(media.snapshot()).unwrap(), before);
+        }
     }
 
     #[test]

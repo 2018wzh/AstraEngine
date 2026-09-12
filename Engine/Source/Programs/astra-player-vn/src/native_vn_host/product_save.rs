@@ -93,12 +93,14 @@ mod tests {
         expected.completed_signals.push("saved.done".into());
         expected.audio.known_bgm_targets.insert("saved.bgm".into());
         expected.timeline.last_time_ms = Some(10);
+        expected.playback_time_ms = 10;
         media.restore(expected.clone()).unwrap();
         let bytes = saved(&mut source, &media);
         let mut changed = media.snapshot();
         changed.completed_signals = vec!["old.live.done".into()];
         changed.audio.known_bgm_targets.clear();
         changed.timeline.last_time_ms = Some(20);
+        changed.playback_time_ms = 20;
         media.restore(changed).unwrap();
         source.restore_product_session(&bytes, &mut media).unwrap();
         assert_eq!(
