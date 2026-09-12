@@ -431,7 +431,7 @@ mod tests {
         compare_audio_samples, compare_image, integrated_loudness_lufs, spectrum_distance,
     };
 
-    #[astra_headless_test::test]
+    #[test]
     fn image_comparison_checks_exact_pixels_and_declared_tolerance() {
         let temp = tempfile::tempdir().unwrap();
         let baseline = temp.path().join("baseline.png");
@@ -478,7 +478,7 @@ mod tests {
         );
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn audio_comparison_quantizes_actual_pcm_to_canonical_wav() {
         let temp = tempfile::tempdir().unwrap();
         let baseline = temp.path().join("baseline.wav");
@@ -524,7 +524,7 @@ mod tests {
         );
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn audio_analysis_uses_bs1770_loudness_and_the_complete_timeline() {
         let quiet = (0..48_000)
             .flat_map(|frame| {

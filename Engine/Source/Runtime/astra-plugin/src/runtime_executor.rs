@@ -92,7 +92,7 @@ fn executor_error(message: &str) -> RuntimeHostError {
 mod tests {
     use super::*;
 
-    #[astra_headless_test::tokio_test]
+    #[tokio::test]
     async fn sync_executor_runs_and_drops_inside_async_context() {
         let executor = RuntimeExecutor::new().unwrap();
         assert_eq!(executor.block_on(async { Ok(42_u32) }).unwrap(), 42);

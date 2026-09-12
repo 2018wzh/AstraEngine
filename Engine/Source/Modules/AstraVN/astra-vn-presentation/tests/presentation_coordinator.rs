@@ -74,7 +74,7 @@ fn video(sequence: u64, layer: &str) -> PresentationCommandEnvelope {
     }
 }
 
-#[astra_headless_test::test]
+#[test]
 fn serial_and_parallel_region_preparation_are_identical() {
     let commands = vec![
         character(1, "character"),
@@ -92,7 +92,7 @@ fn serial_and_parallel_region_preparation_are_identical() {
     assert_eq!(serial.1, parallel.1);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn cross_region_layer_conflict_fails_without_partial_commit() {
     let mut coordinator = PresentationCoordinator::default();
     let before = coordinator.clone();
@@ -105,7 +105,7 @@ fn cross_region_layer_conflict_fails_without_partial_commit() {
     assert_eq!(coordinator, before);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn text_click_completes_reveal_before_requesting_story_advance() {
     let mut coordinator = PresentationCoordinator::default();
     coordinator.apply_batch(&[text(1)], 1).unwrap();
@@ -123,7 +123,7 @@ fn text_click_completes_reveal_before_requesting_story_advance() {
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn mid_animation_snapshot_and_video_failure_preserve_logical_state() {
     let mut coordinator = PresentationCoordinator::default();
     coordinator
@@ -143,7 +143,7 @@ fn mid_animation_snapshot_and_video_failure_preserve_logical_state() {
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn explicit_queue_and_reject_policies_are_enforced() {
     let mut coordinator = PresentationCoordinator::default();
     coordinator

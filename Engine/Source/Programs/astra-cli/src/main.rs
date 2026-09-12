@@ -4430,7 +4430,7 @@ fn platform_eligibility(manifest: &TargetManifest, target: &str) -> Result<Vec<u
 mod ui_cli_tests {
     use super::*;
 
-    #[astra_headless_test::test]
+    #[test]
     fn matrix_size_parser_enforces_the_preview_contract() {
         assert_eq!(parse_ui_matrix_size("1920x1080").unwrap(), (1920, 1080));
         for invalid in ["1920", "0x720", "8193x720", "640x8193", "640X480"] {
@@ -4438,7 +4438,7 @@ mod ui_cli_tests {
         }
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn scene_evidence_contains_only_counts_and_the_precomputed_hash() {
         let commands = vec![
             astra_media::SceneCommand::rect("panel", 1, 2, 3, 4, [5, 6, 7, 8]),
@@ -4458,7 +4458,7 @@ mod ui_cli_tests {
         }
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn macos_bundle_requires_both_universal_slices() {
         let mut binary = vec![0xca, 0xfe, 0xba, 0xbe, 0, 0, 0, 2];
         for cpu in [0x01000007_u32, 0x0100000c] {
@@ -4470,7 +4470,7 @@ mod ui_cli_tests {
         assert!(validate_universal_macho(&binary).is_err());
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn source_lock_policy_must_cover_every_product_payload_section() {
         let request = PackageBuildRequest::fixture(
             "com.example.locked",

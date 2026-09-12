@@ -25,7 +25,7 @@ fn stream() -> DecodedVideoStream {
     }
 }
 
-#[astra_headless_test::test]
+#[test]
 fn decoded_video_validates_typed_owned_frames() {
     let stream = stream();
     let pointer = stream.frames[0].bgra8.as_ptr();
@@ -33,7 +33,7 @@ fn decoded_video_validates_typed_owned_frames() {
     assert_eq!(stream.frames[0].bgra8.as_ptr(), pointer);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn decoded_video_rejects_invalid_order_dimensions_and_budget() {
     let mut invalid = stream();
     invalid.frames[1].sequence = 1;

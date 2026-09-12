@@ -1,6 +1,6 @@
 use astra_media::PlayerDecodedAudio;
 
-#[astra_headless_test::test]
+#[test]
 fn decoded_audio_accepts_owned_i16_and_f32_samples() {
     let audio =
         PlayerDecodedAudio::from_i16(48_000, 2, vec![i16::MIN, 0, i16::MAX, 16_384], 16).unwrap();
@@ -17,7 +17,7 @@ fn decoded_audio_accepts_owned_i16_and_f32_samples() {
     assert_eq!(audio.samples.as_ptr(), pointer);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn decoded_audio_rejects_alignment_capacity_and_non_finite_samples() {
     assert!(PlayerDecodedAudio::from_i16(48_000, 2, vec![0], 16)
         .unwrap_err()
@@ -33,7 +33,7 @@ fn decoded_audio_rejects_alignment_capacity_and_non_finite_samples() {
         .contains("ASTRA_PLAYER_AUDIO_NON_FINITE"));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn decoded_audio_rejects_invalid_stream_shape() {
     assert!(PlayerDecodedAudio::from_f32(0, 2, vec![0.0, 0.0], 16)
         .unwrap_err()

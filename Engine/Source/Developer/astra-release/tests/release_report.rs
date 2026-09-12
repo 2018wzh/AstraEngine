@@ -24,7 +24,7 @@ use astra_vn_package::{
 };
 use astra_vn_script::{compile_astra_project, AstraSource};
 
-#[astra_headless_test::test]
+#[test]
 fn release_gate_blocks_headless_profile_schema_in_package() {
     let blob = package_with_target_manifest(
         "classic",
@@ -44,7 +44,7 @@ fn release_gate_blocks_headless_profile_schema_in_package() {
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn release_gate_blocks_headless_launch_profile_in_cooked_platform_profiles() {
     let blob = package_with_target_manifest(
         "classic",
@@ -72,7 +72,7 @@ fn release_gate_blocks_headless_launch_profile_in_cooked_platform_profiles() {
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn shipping_release_target_cannot_declare_headless_platform() {
     let target = serde_json::json!({
         "schema": "astra.target_manifest.v2",
@@ -101,7 +101,7 @@ fn shipping_release_target_cannot_declare_headless_platform() {
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn release_gate_blocks_nativevn_minimal_engine_test_profile() {
     let blob = package_with_target_manifest(
         "minimal",
@@ -161,7 +161,7 @@ fn assert_headless_release_boundary_blocked(
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn release_report_covers_pass_warning_and_blocked_checks() {
     let blob = PackageBuilder::build(PackageBuildRequest::fixture(
         "com.example.nativevn",
@@ -262,7 +262,7 @@ fn required_ffmpeg_check() -> astra_release::ReleaseCheckRecord {
 }
 
 #[cfg(not(feature = "ffmpeg-vcpkg"))]
-#[astra_headless_test::test]
+#[test]
 fn required_ffmpeg_gate_blocks_when_feature_is_absent() {
     let check = required_ffmpeg_check();
     assert_eq!(check.status, CheckStatus::Blocked);
@@ -273,7 +273,7 @@ fn required_ffmpeg_gate_blocks_when_feature_is_absent() {
 }
 
 #[cfg(feature = "ffmpeg-vcpkg")]
-#[astra_headless_test::test]
+#[test]
 fn required_ffmpeg_gate_passes_only_after_native_probe() {
     let check = required_ffmpeg_check();
     assert_eq!(check.status, CheckStatus::Pass);
@@ -283,7 +283,7 @@ fn required_ffmpeg_gate_passes_only_after_native_probe() {
         .any(|item| item.key == "provider_id" && item.value == "astra.decode.ffmpeg"));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn release_gate_accepts_player_full_playable_only_with_matching_live_report() {
     let blob = PackageBuilder::build(PackageBuildRequest::fixture(
         "com.example.nativevn",
@@ -345,7 +345,7 @@ fn release_gate_accepts_player_full_playable_only_with_matching_live_report() {
     assert_eq!(blocked_check.status, CheckStatus::Blocked);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn release_gate_requires_capability_conformance_player_identity_continuity() {
     let blob = PackageBuilder::build(PackageBuildRequest::fixture(
         "com.example.nativevn",
@@ -411,7 +411,7 @@ fn release_gate_requires_capability_conformance_player_identity_continuity() {
     }));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn release_gate_accepts_only_measured_performance_from_the_same_clean_product_run() {
     let blob = PackageBuilder::build(PackageBuildRequest::fixture(
         "com.example.performance",
@@ -624,7 +624,7 @@ fn release_gate_accepts_only_measured_performance_from_the_same_clean_product_ru
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn release_gate_blocks_plugin_registry_conflict_and_invalid_binding() {
     let mut request = PackageBuildRequest::fixture(
         "com.example.nativevn",
@@ -652,7 +652,7 @@ fn release_gate_blocks_plugin_registry_conflict_and_invalid_binding() {
         .contains("ASTRA_PLUGIN_EXTENSION_CONFLICT"));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn runtime_provider_gate_blocks_missing_nativevn_binding() {
     let mut request = PackageBuildRequest::fixture(
         "com.example.nativevn",
@@ -675,7 +675,7 @@ fn runtime_provider_gate_blocks_missing_nativevn_binding() {
     assert!(error.to_string().contains("ASTRA_PLUGIN_BINDING_MISSING"));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn release_gate_blocks_unresolved_plugin_dependency() {
     let mut request = PackageBuildRequest::fixture(
         "com.example.nativevn",
@@ -723,7 +723,7 @@ fn release_gate_blocks_unresolved_plugin_dependency() {
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn vfs_mount_gate_blocks_missing_vfs_manifest() {
     let manifest = PackageManifest {
         schema: "astra.package_manifest.v1".to_string(),
@@ -767,7 +767,7 @@ fn vfs_mount_gate_blocks_missing_vfs_manifest() {
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn vfs_mount_gate_blocks_asset_registry_compat_section() {
     let mut request = PackageBuildRequest::fixture(
         "com.example.nativevn",
@@ -808,7 +808,7 @@ fn vfs_mount_gate_blocks_asset_registry_compat_section() {
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn vfs_mount_gate_blocks_missing_provider_binding_for_prefix() {
     let mut request = PackageBuildRequest::fixture(
         "com.example.nativevn",
@@ -838,7 +838,7 @@ fn vfs_mount_gate_blocks_missing_provider_binding_for_prefix() {
     assert!(error.to_string().contains("ASTRA_VFS_PROVIDER_MISSING"));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn plugin_provider_gate_blocks_unpacked_vfs_prefix_provider() {
     let mut request = PackageBuildRequest::fixture(
         "com.example.nativevn",
@@ -864,7 +864,7 @@ fn plugin_provider_gate_blocks_unpacked_vfs_prefix_provider() {
         .contains("ASTRA_PLUGIN_PACKAGED_INELIGIBLE"));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn release_profile_blocks_missing_platform_report() {
     let blob = PackageBuilder::build(PackageBuildRequest::fixture(
         "com.example.nativevn",
@@ -901,7 +901,7 @@ fn release_profile_blocks_missing_platform_report() {
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn dev_profile_warns_on_missing_platform_report() {
     let blob = PackageBuilder::build(PackageBuildRequest::fixture(
         "com.example.nativevn",
@@ -933,7 +933,7 @@ fn dev_profile_warns_on_missing_platform_report() {
     assert_eq!(platform_check.status, CheckStatus::Warning);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn release_profile_blocks_fixture_package_without_cooked_project() {
     let blob = PackageBuilder::build(PackageBuildRequest::fixture(
         "com.example.nativevn",
@@ -970,7 +970,7 @@ fn release_profile_blocks_fixture_package_without_cooked_project() {
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn release_profile_accepts_cooked_project_input_section() {
     let blob = PackageBuilder::build(PackageBuildRequest::fixture(
         "com.example.nativevn",
@@ -1009,7 +1009,7 @@ fn release_profile_accepts_cooked_project_input_section() {
         .any(|entry| { entry.key == "section" && entry.value == "compiled.project" }));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn release_profile_blocks_package_profile_mismatch() {
     let blob = PackageBuilder::build(PackageBuildRequest::fixture(
         "com.example.nativevn",
@@ -1048,7 +1048,7 @@ fn release_profile_blocks_package_profile_mismatch() {
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn release_report_blocks_windows_platform_report_without_required_provider() {
     let blob = PackageBuilder::build(PackageBuildRequest::fixture(
         "com.example.nativevn",
@@ -1089,7 +1089,7 @@ fn release_report_blocks_windows_platform_report_without_required_provider() {
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn release_report_includes_windows_platform_provider_evidence() {
     let blob = PackageBuilder::build(PackageBuildRequest::fixture(
         "com.example.nativevn",
@@ -1137,7 +1137,7 @@ fn release_report_includes_windows_platform_provider_evidence() {
         .any(|entry| entry.key == "build_fingerprint" && entry.value.starts_with("sha256:")));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn release_report_blocks_web_platform_report_without_required_provider() {
     let blob = PackageBuilder::build(PackageBuildRequest::fixture(
         "com.example.nativevn",
@@ -1177,7 +1177,7 @@ fn release_report_blocks_web_platform_report_without_required_provider() {
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn release_report_includes_web_platform_provider_evidence() {
     let blob = PackageBuilder::build(PackageBuildRequest::fixture(
         "com.example.nativevn",
@@ -1234,7 +1234,7 @@ fn release_report_includes_web_platform_provider_evidence() {
         .any(|entry| entry.key == "profile_hash" && entry.value.starts_with("sha256:")));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn release_gate_blocks_package_target_manifests_with_editor_descriptors() {
     let mut request = PackageBuildRequest::fixture(
         "com.example.nativevn",
@@ -1294,7 +1294,7 @@ fn release_gate_blocks_package_target_manifests_with_editor_descriptors() {
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn release_gate_requires_nativevn_sections_for_classic_profile() {
     let blob = package_with_target_manifest(
         "classic",
@@ -1331,7 +1331,7 @@ fn release_gate_requires_nativevn_sections_for_classic_profile() {
         .any(|check| check.id == "vn.compiled_project" && check.status == CheckStatus::Blocked));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn release_gate_accepts_nativevn_sections_for_classic_profile() {
     let compiled = compile_astra_project(
         [AstraSource::story(
@@ -1415,7 +1415,7 @@ fn release_gate_accepts_nativevn_sections_for_classic_profile() {
     }));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn release_gate_blocks_missing_or_duplicate_nativevn_localization() {
     let compiled = compile_astra_project(
         [AstraSource::story(
@@ -1488,7 +1488,7 @@ fn release_gate_blocks_missing_or_duplicate_nativevn_localization() {
         .contains("duplicate localization key"));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn release_gate_blocks_missing_policy_bundle_for_classic_profile() {
     let compiled = compile_astra_project(
         [AstraSource::story(
@@ -1526,7 +1526,7 @@ fn release_gate_blocks_missing_policy_bundle_for_classic_profile() {
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn release_gate_blocks_missing_policy_bundle_source_cache_for_classic_profile() {
     let compiled = compile_astra_project(
         [AstraSource::story(
@@ -1564,7 +1564,7 @@ fn release_gate_blocks_missing_policy_bundle_source_cache_for_classic_profile() 
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn release_gate_blocks_missing_standard_command_manifest_for_classic_profile() {
     let compiled = compile_astra_project(
         [AstraSource::story(
@@ -1602,7 +1602,7 @@ fn release_gate_blocks_missing_standard_command_manifest_for_classic_profile() {
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn compiler_blocks_unknown_standard_command_before_release_packaging() {
     let error = compile_astra_project([AstraSource::story(
         "main.astra",
@@ -1616,7 +1616,7 @@ fn compiler_blocks_unknown_standard_command_before_release_packaging() {
     assert_eq!(error.code(), "ASTRA_VN_COMMAND_UNBOUND");
 }
 
-#[astra_headless_test::test]
+#[test]
 fn release_gate_blocks_missing_presentation_provider_manifest_for_classic_profile() {
     let compiled = compile_astra_project(
         [AstraSource::story(
@@ -1654,7 +1654,7 @@ fn release_gate_blocks_missing_presentation_provider_manifest_for_classic_profil
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn release_gate_blocks_missing_commercial_baseline_manifest_for_classic_profile() {
     let compiled = compile_astra_project(
         [AstraSource::story(
@@ -1692,7 +1692,7 @@ fn release_gate_blocks_missing_commercial_baseline_manifest_for_classic_profile(
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn release_gate_blocks_incomplete_commercial_baseline_for_classic_profile() {
     let compiled = compile_astra_project(
         [AstraSource::story(
@@ -1734,7 +1734,7 @@ state prologue #@id state.prologue
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn release_gate_blocks_missing_vn_extension_bindings_for_classic_profile() {
     let compiled = compile_astra_project(
         [AstraSource::story(
@@ -1772,7 +1772,7 @@ fn release_gate_blocks_missing_vn_extension_bindings_for_classic_profile() {
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn release_gate_blocks_compiled_story_without_command_manifest() {
     let mut compiled = compile_astra_project(
         [AstraSource::story(
@@ -1810,7 +1810,7 @@ fn release_gate_blocks_compiled_story_without_command_manifest() {
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn release_gate_blocks_missing_system_story_manifest_for_classic_profile() {
     let compiled = compile_astra_project(
         [AstraSource::story(
@@ -1852,7 +1852,7 @@ state prologue #@id state.prologue
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn release_gate_blocks_system_story_entries_without_policy() {
     let source = nativevn_story_with_system_pages().replace(" policy:astra.policy.standard", "");
     let compiled = compile_astra_project(
@@ -1887,7 +1887,7 @@ fn release_gate_blocks_system_story_entries_without_policy() {
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn release_gate_blocks_missing_system_ui_profile_manifest() {
     let compiled = compile_astra_project(
         [AstraSource::story(
@@ -1925,7 +1925,7 @@ fn release_gate_blocks_missing_system_ui_profile_manifest() {
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn release_gate_blocks_system_story_manifest_without_profile_policy() {
     let compiled = compile_astra_project(
         [AstraSource::story(

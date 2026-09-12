@@ -309,7 +309,7 @@ impl Drop for WorkerBudgetLease {
 mod tests {
     use super::*;
 
-    #[astra_headless_test::test]
+    #[test]
     fn global_observes_an_explicit_process_limit() {
         let configured = WorkerBudgetBroker::global_with_limit(3).unwrap();
         assert_eq!(configured.limit(), 3);

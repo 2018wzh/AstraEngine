@@ -16,9 +16,5 @@ thiserror.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
-astra-headless-test = { path = "../../Developer/astra-headless-test" }
 serde_json.workspace = true
 serde_yaml.workspace = true
-
-[lib]
-doctest = false

@@ -76,7 +76,7 @@ fn asset() -> AudioAssetRevision {
     }
 }
 
-#[astra_headless_test::test]
+#[test]
 fn deterministic_backend_advances_a_long_route_without_wall_clock_deadline() {
     let mut session = AudioServiceSession::new(
         AudioServiceConfig {
@@ -104,7 +104,7 @@ fn deterministic_backend_advances_a_long_route_without_wall_clock_deadline() {
     assert_eq!(telemetry.consumed_samples, telemetry.submitted_samples);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn decoder_allocation_is_preserved_and_completion_uses_consumed_samples() {
     let mut session = AudioServiceSession::new(
         AudioServiceConfig {
@@ -159,7 +159,7 @@ fn decoder_allocation_is_preserved_and_completion_uses_consumed_samples() {
     }
 }
 
-#[astra_headless_test::test]
+#[test]
 fn active_pcm_is_pinned_when_cache_budget_is_exhausted() {
     let mut session = AudioServiceSession::new(
         AudioServiceConfig {

@@ -5,7 +5,7 @@ use astra_ui_core::{
     UiSemanticSnapshot, ValidateUi,
 };
 
-#[astra_headless_test::test]
+#[test]
 fn accessibility_report_redacts_commercial_text_and_bounds() {
     let snapshot = UiSemanticSnapshot {
         schema: "astra.ui_semantic_snapshot.v1".into(),

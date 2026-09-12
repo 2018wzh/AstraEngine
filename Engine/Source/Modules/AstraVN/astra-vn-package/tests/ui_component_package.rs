@@ -30,7 +30,7 @@ fn manifest(component_id: &str, artifact: &[u8], signing: &SigningKey) -> UiComp
     manifest
 }
 
-#[astra_headless_test::test]
+#[test]
 fn component_artifacts_are_target_bound_signed_and_hash_verified() {
     let project = compile_astra_project(
         [

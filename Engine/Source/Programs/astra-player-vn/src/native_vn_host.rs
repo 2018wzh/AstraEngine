@@ -6468,7 +6468,7 @@ mod director_transition_tests {
         )]
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn wipe_transition_clips_the_new_scene_by_fixed_progress() {
         let snapshot = DirectorTransitionSnapshot {
             descriptor_id: "director.puppet.1".into(),
@@ -6492,7 +6492,7 @@ mod director_transition_tests {
         assert!(matches!(composed.last(), Some(SceneCommand::PopClip)));
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn transition_namespaces_outgoing_and_each_incoming_draw_instance() {
         let snapshot = DirectorTransitionSnapshot {
             descriptor_id: "director.puppet.26".into(),
@@ -6531,7 +6531,7 @@ mod director_transition_tests {
         assert!(ids.iter().all(|id| id.starts_with("vn.transition.")));
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn dissolve_patterns_uses_the_fixed_native_pixel_mask() {
         let snapshot = DirectorTransitionSnapshot {
             descriptor_id: "director.puppet.26".into(),
@@ -7103,7 +7103,7 @@ mod native_vn_host_tests {
     };
     use std::collections::{BTreeMap, BTreeSet};
 
-    #[astra_headless_test::test]
+    #[test]
     fn reusable_ui_frame_does_not_replay_resource_lifecycle() {
         let draw = vec![
             astra_media_core::SceneCommand::ReleaseResource {
@@ -7125,7 +7125,7 @@ mod native_vn_host_tests {
         );
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn image_prefetch_control_flow_prioritizes_branch_targets_over_linear_fallthrough() {
         let state = astra_vn_core::State {
             id: "root".into(),
@@ -7152,7 +7152,7 @@ mod native_vn_host_tests {
         );
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn image_prefetch_control_flow_retains_call_return_fallthrough() {
         let state = astra_vn_core::State {
             id: "root".into(),
@@ -7174,7 +7174,7 @@ mod native_vn_host_tests {
         );
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn image_prewarm_resolves_system_action_target_aliases_before_ranking_gameplay_entries() {
         let states = BTreeMap::from([
             (
@@ -7213,7 +7213,7 @@ mod native_vn_host_tests {
         );
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn image_prewarm_starts_with_the_runtime_launch_state() {
         let stories = vec![
             astra_vn_core::Story {
@@ -7233,7 +7233,7 @@ mod native_vn_host_tests {
         );
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn retained_pointer_activation_prefers_the_topmost_enabled_actionable_node() {
         let bounds = astra_ui_core::UiRect {
             min: astra_ui_core::UiPoint { x: 0.0, y: 0.0 },
@@ -7288,7 +7288,7 @@ mod native_vn_host_tests {
         ]
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn locale_selects_the_matching_cjk_font_without_dropping_fallbacks() {
         let japanese = ordered_ui_font_families(&packaged_families(), "ja");
         let simplified_chinese = ordered_ui_font_families(&packaged_families(), "zh-Hans");
@@ -7299,7 +7299,7 @@ mod native_vn_host_tests {
         assert_eq!(simplified_chinese.len(), 3);
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn non_cjk_locale_uses_the_packaged_japanese_baseline_deterministically() {
         let first = ordered_ui_font_families(&packaged_families(), "en");
         let second = ordered_ui_font_families(&packaged_families(), "en");
@@ -7308,7 +7308,7 @@ mod native_vn_host_tests {
         assert_eq!(first, second);
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn decoded_cache_partition_preserves_the_profile_bound() {
         let budget =
             NativeVnDecodedCacheBudget::partition(DEFAULT_NATIVE_VN_DECODED_CACHE_BYTES).unwrap();
@@ -7322,7 +7322,7 @@ mod native_vn_host_tests {
         assert!(NativeVnDecodedCacheBudget::partition(3).is_err());
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn semantic_text_alignment_uses_bounded_container_offsets() {
         assert_eq!(UiTextAlignment::Start.offset(754, 320), 0);
         assert_eq!(UiTextAlignment::Center.offset(754, 320), 217);
@@ -7330,14 +7330,14 @@ mod native_vn_host_tests {
         assert_eq!(UiTextAlignment::Center.offset(320, 754), 0);
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn invalid_semantic_text_alignment_is_blocking() {
         let invalid = "middle".to_string();
         let error = parse_ui_text_alignment(Some(&invalid)).unwrap_err();
         assert!(error.to_string().contains("ASTRA_PLAYER_UI_TEXT_ALIGNMENT"));
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn save_slot_view_model_is_created_only_from_the_bound_profile_policy() {
         let policy = SystemUiProfilePolicy {
             profile_id: "classic".into(),
@@ -7357,7 +7357,7 @@ mod native_vn_host_tests {
         assert!(!slots.contains_key("slot.quick"));
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn frame_localization_projects_only_static_and_live_model_keys() {
         let dictionary = BTreeMap::from([
             ("ui.title".into(), "Title".into()),
@@ -7384,7 +7384,7 @@ mod native_vn_host_tests {
         assert!(!projected.contains_key("story.unused"));
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn frame_localization_rejects_missing_static_or_modal_projection() {
         let dictionary = BTreeMap::new();
         let view_keys =

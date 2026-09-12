@@ -27,7 +27,7 @@ fn node(id: &str, widget: &str) -> UiNodeBlueprint {
     }
 }
 
-#[astra_headless_test::test]
+#[test]
 fn explicit_max_size_bounds_an_absolutely_positioned_window() {
     let mut window = node("window", "column");
     for (key, value) in [
@@ -138,7 +138,7 @@ fn explicit_max_size_bounds_an_absolutely_positioned_window() {
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn modal_stack_is_rendered_as_bounded_dialog_semantics() {
     let mut base_root = node("root", "screen");
     base_root.children.push(node("content", "panel"));
@@ -261,7 +261,7 @@ fn modal_stack_is_rendered_as_bounded_dialog_semantics() {
     assert_eq!(output.semantics.root_id, "root");
 }
 
-#[astra_headless_test::test]
+#[test]
 fn ten_thousand_items_instantiate_only_visible_rows() {
     let mut item = node("entry", "button");
     item.properties.insert(
@@ -366,7 +366,7 @@ fn ten_thousand_items_instantiate_only_visible_rows() {
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn thousand_gallery_images_are_virtualized_and_bounded_by_lru() {
     let mut image = node("thumbnail", "image");
     image.properties.insert(
@@ -551,7 +551,7 @@ fn thousand_gallery_images_are_virtualized_and_bounded_by_lru() {
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn accessibility_range_action_uses_typed_change_binding_and_is_consumed() {
     let mut slider = node("volume", "slider");
     for (name, value) in [("value", 0.5), ("min", 0.0), ("max", 1.0), ("step", 0.1)] {
@@ -690,7 +690,7 @@ fn accessibility_range_action_uses_typed_change_binding_and_is_consumed() {
     assert!((value - 0.6).abs() < 1e-6);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn requested_focus_activates_a_button_without_prior_navigation() {
     let mut button = node("confirm", "button");
     button.events.push(UiEventBinding {
@@ -878,7 +878,7 @@ fn requested_focus_activates_a_button_without_prior_navigation() {
     assert_eq!(alternate.actions[0].semantic_target_id, "root/alternate");
 }
 
-#[astra_headless_test::test]
+#[test]
 fn missing_focus_target_reports_bounded_focusable_semantic_ids() {
     let mut confirm = node("confirm", "button");
     confirm.events.push(UiEventBinding {

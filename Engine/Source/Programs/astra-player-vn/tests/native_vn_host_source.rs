@@ -98,7 +98,7 @@ fn prepare_test_save_metadata(source: &mut NativeVnHostCommandSource, slot: &str
         .expect("prepare save metadata");
 }
 
-#[astra_headless_test::test]
+#[test]
 fn typed_ui_exit_request_stays_host_owned_and_observable() {
     let mut source = source_for(STORY);
     source.launch().expect("launch");
@@ -119,7 +119,7 @@ fn typed_ui_exit_request_stays_host_owned_and_observable() {
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn secondary_pointer_opens_system_ui_without_advancing_dialogue() {
     let story = r#"
 story main #@id story.main
@@ -181,7 +181,7 @@ state popup #@id state.system.popup
     source.shutdown().expect("shutdown");
 }
 
-#[astra_headless_test::test]
+#[test]
 fn secondary_pointer_round_trips_the_same_choice_occurrence() {
     let story = r#"
 story main #@id story.main
@@ -244,7 +244,7 @@ state popup #@id state.system.popup
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn product_observation_reports_system_ui_without_exposing_content() {
     let story = r#"
 story main #@id story.main
@@ -293,7 +293,7 @@ state popup #@id state.system.popup
     source.shutdown().expect("shutdown");
 }
 
-#[astra_headless_test::test]
+#[test]
 fn secondary_pointer_opens_system_ui_while_story_wait_has_no_ui_surface() {
     let story = r#"
 story main #@id story.main
@@ -330,7 +330,7 @@ state popup #@id state.system.popup
     source.shutdown().expect("shutdown");
 }
 
-#[astra_headless_test::test]
+#[test]
 fn primary_pointer_advances_input_wait_without_fabricating_message_ui() {
     let story = r#"
 story main #@id story.main
@@ -581,7 +581,7 @@ end
     .to_string()
 }
 
-#[astra_headless_test::test]
+#[test]
 fn controller_on_open_focuses_a_stable_semantic_target() {
     let mut source = source_for(STORY);
     source.launch().expect("launch");
@@ -599,7 +599,7 @@ fn controller_on_open_focuses_a_stable_semantic_target() {
     source.shutdown().expect("shutdown");
 }
 
-#[astra_headless_test::test]
+#[test]
 fn product_source_records_bounded_ui_performance_samples() {
     let mut source = source_for(STORY);
     source.launch().unwrap();
@@ -618,7 +618,7 @@ fn product_source_records_bounded_ui_performance_samples() {
     assert!(report.peak_active_texture_bytes <= 64 * 1024 * 1024);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn stable_pointer_motion_reuses_ui_until_the_semantic_hit_region_changes() {
     let mut source = source_for(STORY);
     source.launch().expect("launch");
@@ -679,7 +679,7 @@ fn stable_pointer_motion_reuses_ui_until_the_semantic_hit_region_changes() {
     source.shutdown().expect("shutdown");
 }
 
-#[astra_headless_test::test]
+#[test]
 fn product_source_persists_resize_scale_and_text_across_repaints() {
     let mut source = source_for(STORY);
     source.launch().unwrap();
@@ -816,7 +816,7 @@ fn scene_commands(batch: &astra_player_core::PlayerHostCommandBatch) -> &[SceneC
     }
 }
 
-#[astra_headless_test::test]
+#[test]
 fn packaged_native_vn_source_shapes_localized_text_into_retained_scene_commands() {
     let bytes = product_package();
     let package = PackageReader::open(&bytes).unwrap();
@@ -855,7 +855,7 @@ fn packaged_native_vn_source_shapes_localized_text_into_retained_scene_commands(
     source.shutdown().unwrap();
 }
 
-#[astra_headless_test::test]
+#[test]
 fn packaged_native_vn_stage_uses_product_director_and_package_texture() {
     let bytes = product_package_for(
         r#"
@@ -935,7 +935,7 @@ state start #@id state.start
     source.shutdown().unwrap();
 }
 
-#[astra_headless_test::test]
+#[test]
 fn packaged_native_vn_stage_composes_a_typed_director_transition() {
     let bytes = product_package_for(
         r#"
@@ -974,7 +974,7 @@ state start #@id state.start
     source.shutdown().unwrap();
 }
 
-#[astra_headless_test::test]
+#[test]
 fn packaged_native_vn_stage_restores_a_director_transition_snapshot() {
     let bytes = product_package_for(
         r#"
@@ -1018,7 +1018,7 @@ state start #@id state.start
     source.shutdown().unwrap();
 }
 
-#[astra_headless_test::test]
+#[test]
 fn packaged_native_vn_preload_does_not_create_an_unbounded_gpu_residency_lease() {
     let bytes = product_package_for(
         r#"
@@ -1064,7 +1064,7 @@ state start #@id state.start
     source.shutdown().unwrap();
 }
 
-#[astra_headless_test::test]
+#[test]
 fn package_open_blocks_undeclared_localization() {
     let bytes = product_package();
     let package = PackageReader::open(&bytes).unwrap();
@@ -1081,7 +1081,7 @@ fn package_open_blocks_undeclared_localization() {
     assert!(missing_locale.contains("ASTRA_PLAYER_LOCALE_UNDECLARED"));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn package_open_accepts_movie_for_product_media_execution() {
     let bytes = product_package_for(
         r#"
@@ -1109,7 +1109,7 @@ state start #@id state.start
     source.shutdown().unwrap();
 }
 
-#[astra_headless_test::test]
+#[test]
 fn package_open_blocks_undeclared_presentation_preset_before_provider_creation() {
     let bytes = product_package_for(
         r#"
@@ -1134,7 +1134,7 @@ state start #@id state.start
     assert!(error.contains("ASTRA_VN_PRESENTATION_PRESET_UNDECLARED"));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn package_open_blocks_runtime_descriptor_drift_before_provider_creation() {
     let bytes = product_package_with_request(STORY, |request| {
         let mut policy: ProviderPolicy = serde_json::from_slice(&request.provider_policy).unwrap();
@@ -1159,7 +1159,7 @@ fn package_open_blocks_runtime_descriptor_drift_before_provider_creation() {
 }
 
 #[cfg(all(target_os = "windows", feature = "platform-test-driver"))]
-#[astra_headless_test::tokio_test]
+#[tokio::test]
 async fn packaged_native_vn_scene_reaches_live_windows_wgpu_and_releases_resources() {
     use astra_platform::{
         HostLaunchProfile, PlatformHostFactory, PlatformHostProfile, SurfaceRequest, WindowRequest,
@@ -1234,7 +1234,7 @@ async fn packaged_native_vn_scene_reaches_live_windows_wgpu_and_releases_resourc
     session.client.shutdown().await.unwrap();
 }
 
-#[astra_headless_test::test]
+#[test]
 fn native_vn_source_exposes_route_evidence_from_runtime_outputs() {
     let mut source = source_for(STORY);
 
@@ -1268,7 +1268,7 @@ fn native_vn_source_exposes_route_evidence_from_runtime_outputs() {
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn native_vn_source_save_restore_resumes_the_same_runtime_state() {
     let mut source = source_for(STORY);
     source.launch().unwrap();
@@ -1298,7 +1298,7 @@ fn native_vn_source_save_restore_resumes_the_same_runtime_state() {
     assert_eq!(resumed.terminal_route_ids, uninterrupted.terminal_route_ids);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn native_vn_source_rejects_tampered_save_before_restore() {
     let mut source = source_for(STORY);
     source.launch().unwrap();
@@ -1311,7 +1311,7 @@ fn native_vn_source_rejects_tampered_save_before_restore() {
     assert!(error.to_string().contains("ASTRA_PLAYER_SAVE_INTEGRITY"));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn native_vn_source_hydrates_validated_save_metadata_before_launch() {
     let mut writer = source_for(STORY);
     writer.launch().unwrap();
@@ -1337,7 +1337,7 @@ fn native_vn_source_hydrates_validated_save_metadata_before_launch() {
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn native_vn_source_rejects_catalog_slot_identity_mismatch() {
     let mut writer = source_for(STORY);
     writer.launch().unwrap();
@@ -1352,7 +1352,7 @@ fn native_vn_source_rejects_catalog_slot_identity_mismatch() {
         .contains("ASTRA_PLAYER_SAVE_CATALOG_IDENTITY"));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn native_vn_source_builds_atomic_platform_save_transaction() {
     let mut source = source_for(STORY);
     source.launch().unwrap();
@@ -1389,7 +1389,7 @@ fn native_vn_source_builds_atomic_platform_save_transaction() {
     ));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn native_vn_source_completes_wait_through_runtime_provider() {
     let story = r#"
 story main #@id story.main
@@ -1425,7 +1425,7 @@ state start #@id state.start
     advance(&mut source);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn native_vn_source_exposes_validated_timeline_tasks_to_player() {
     let story = r#"
 story main #@id story.main
@@ -1445,7 +1445,7 @@ state start #@id state.start
     assert_eq!(tasks[0].fence.as_deref(), Some("timeline.intro.complete"));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn packaged_native_vn_source_exposes_hash_validated_audio_requests() {
     let story = r#"
 story main #@id story.main
@@ -1530,7 +1530,7 @@ state start #@id state.start
     ));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn packaged_native_vn_source_routes_typed_audio_control_to_product_audio_owner() {
     let mut source = source_for(
         r#"
@@ -1553,7 +1553,7 @@ state start #@id state.start
     ));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn packaged_player_rejects_headless_presentation_binding() {
     let compiled = compile_astra_project(
         [AstraSource::story("main.astra", STORY)],
@@ -1585,7 +1585,7 @@ fn packaged_player_rejects_headless_presentation_binding() {
         .contains("ASTRA_PLAYER_PRESENTATION_PROVIDER_INELIGIBLE"));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn packaged_player_accepts_explicit_product_provider_bindings() {
     let bytes = product_package();
     let package = astra_package::PackageReader::open(&bytes).unwrap();

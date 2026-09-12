@@ -13,7 +13,6 @@ platform-test-driver = [
 ]
 
 [lib]
-doctest = false
 name = "astra_player"
 path = "src/lib.rs"
 
@@ -54,7 +53,6 @@ astra-platform-linux = { path = "../../Platform/astra-platform-linux" }
 astra-platform-macos = { path = "../../Platform/astra-platform-macos" }
 
 [dev-dependencies]
-astra-headless-test = { path = "../../Developer/astra-headless-test" }
 tempfile.workspace = true
 astra-asset = { path = "../../Runtime/astra-asset" }
 astra-media = { path = "../../Runtime/astra-media" }

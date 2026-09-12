@@ -5,7 +5,7 @@ use astra_player_core::{
     PlayerRuntimeRouteEvidence, PlayerVisualComparisonEvidence, PlayerVisualRegionEvidence,
 };
 
-#[astra_headless_test::test]
+#[test]
 fn player_automation_report_passes_for_live_windows_input() {
     let script = script(PlayerPlatform::Windows);
     let transcript = transcript(PlayerPlatform::Windows, "sendinput.mouse");
@@ -23,7 +23,7 @@ fn player_automation_report_passes_for_live_windows_input() {
     }));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn player_automation_report_accepts_only_linux_uinput() {
     let report = PlayerAutomationValidator.validate(
         &script(PlayerPlatform::Linux),
@@ -38,7 +38,7 @@ fn player_automation_report_accepts_only_linux_uinput() {
     assert_eq!(blocked.status, PlayerAutomationStatus::Blocked);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn player_automation_report_binds_platform_identity_to_full_playable() {
     let report = PlayerAutomationValidator.validate_with_platform_identity(
         &script(PlayerPlatform::Windows),
@@ -63,7 +63,7 @@ fn player_automation_report_binds_platform_identity_to_full_playable() {
         .any(|entry| entry.key == "session_id" && entry.value == "session.windows.1"));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn player_automation_report_blocks_direct_route_scenario_input() {
     let script = script(PlayerPlatform::Windows);
     let transcript = transcript(PlayerPlatform::Windows, "route_scenario");
@@ -82,7 +82,7 @@ fn player_automation_report_blocks_direct_route_scenario_input() {
     assert!(!report.full_playable_passed());
 }
 
-#[astra_headless_test::test]
+#[test]
 fn player_automation_report_blocks_missing_visual_comparison() {
     let script = script(PlayerPlatform::Windows);
     let mut transcript = transcript(PlayerPlatform::Windows, "sendinput.mouse");
@@ -101,7 +101,7 @@ fn player_automation_report_blocks_missing_visual_comparison() {
     assert!(!report.full_playable_passed());
 }
 
-#[astra_headless_test::test]
+#[test]
 fn player_automation_report_blocks_missing_consumed_trace() {
     let script = script(PlayerPlatform::Windows);
     let mut transcript = transcript(PlayerPlatform::Windows, "sendinput.mouse");
@@ -120,7 +120,7 @@ fn player_automation_report_blocks_missing_consumed_trace() {
     assert!(!report.full_playable_passed());
 }
 
-#[astra_headless_test::test]
+#[test]
 fn player_automation_report_blocks_route_coverage_without_runtime_evidence() {
     let script = script(PlayerPlatform::Windows);
     let mut transcript = transcript(PlayerPlatform::Windows, "sendinput.mouse");
@@ -138,7 +138,7 @@ fn player_automation_report_blocks_route_coverage_without_runtime_evidence() {
     }));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn player_automation_report_blocks_route_without_terminal_signature() {
     let script = script(PlayerPlatform::Windows);
     let mut transcript = transcript(PlayerPlatform::Windows, "sendinput.mouse");
@@ -245,7 +245,7 @@ fn transcript(platform: PlayerPlatform, source: &str) -> PlayerInputTranscript {
     }
 }
 
-#[astra_headless_test::test]
+#[test]
 fn transcript_hash_failure_blocks_full_playable_instead_of_hashing_empty_bytes() {
     let script = script(PlayerPlatform::Windows);
     let mut transcript = transcript(PlayerPlatform::Windows, "send_input");

@@ -1276,7 +1276,7 @@ mod tests {
         PcmAsset::from_canonical_samples(id, vec![0.0; samples]).unwrap()
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn decoded_audio_recency_evicts_the_oldest_live_generation() {
         let mut host = NativeVnProductMediaHost::new(8);
         host.max_decoded_cache_bytes = 32;
@@ -1295,7 +1295,7 @@ mod tests {
         assert_eq!(host.decoded_audio_cache_bytes, 32);
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn decoded_audio_recency_queue_compacts_stale_generations() {
         let mut host = NativeVnProductMediaHost::new(8);
         let key = AudioCacheKey::new("stable", "wav", 4);

@@ -37,8 +37,4 @@ tokio.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-astra-headless-test = { path = "../astra-headless-test" }
 tempfile.workspace = true
-
-[lib]
-doctest = false

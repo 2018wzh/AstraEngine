@@ -156,7 +156,7 @@ fn step_at(session_id: GameRuntimeSessionId, seed: u64, fixed_step: u64) -> Runt
     }
 }
 
-#[astra_headless_test::tokio_test]
+#[tokio::test]
 async fn different_sessions_execute_provider_steps_concurrently() {
     let factory = Factory {
         step_barrier: Arc::new(Barrier::new(2)),
@@ -183,7 +183,7 @@ async fn different_sessions_execute_provider_steps_concurrently() {
     host.destroy().await.unwrap();
 }
 
-#[astra_headless_test::tokio_test]
+#[tokio::test]
 async fn provider_failure_poisons_only_the_failing_session() {
     let factory = Factory {
         step_barrier: Arc::new(Barrier::new(1)),
@@ -222,7 +222,7 @@ async fn provider_failure_poisons_only_the_failing_session() {
     host.destroy().await.unwrap();
 }
 
-#[astra_headless_test::tokio_test]
+#[tokio::test]
 async fn same_session_mailbox_preserves_fifo_step_order() {
     let factory = Factory {
         step_barrier: Arc::new(Barrier::new(1)),

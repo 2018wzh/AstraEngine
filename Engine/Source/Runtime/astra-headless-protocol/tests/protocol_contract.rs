@@ -12,7 +12,7 @@ fn hash(label: &str) -> String {
     format!("sha256:{:064x}", label.len())
 }
 
-#[astra_headless_test::test]
+#[test]
 fn file_and_stdio_framing_share_one_strict_jsonl_contract() {
     let message = InputMessage {
         schema: USER_INPUT_SEQUENCE_SCHEMA.into(),
@@ -37,7 +37,7 @@ fn file_and_stdio_framing_share_one_strict_jsonl_contract() {
     decoded.validate().unwrap();
 }
 
-#[astra_headless_test::test]
+#[test]
 fn sequence_validator_blocks_duplicates_reversal_and_cross_session_input() {
     let mut validator = SequenceValidator::default();
     validator.accept("a", 2, 0).unwrap();
@@ -49,7 +49,7 @@ fn sequence_validator_blocks_duplicates_reversal_and_cross_session_input() {
     assert!(validator.accept("b", 6, 1).is_err());
 }
 
-#[astra_headless_test::test]
+#[test]
 fn framing_and_schema_reject_semantic_shortcuts_unknown_fields_and_partial_lines() {
     let semantic_shortcut = b"{\"schema\":\"astra.user_input_sequence.v1\",\"session\":\"run.one\",\"sequence\":1,\"tick\":0,\"event\":{\"type\":\"choose\",\"id\":\"route-a\"}}\n";
     assert!(
@@ -75,7 +75,7 @@ fn framing_and_schema_reject_semantic_shortcuts_unknown_fields_and_partial_lines
     assert_eq!(error.operation, "jsonl.read");
 }
 
-#[astra_headless_test::test]
+#[test]
 fn review_and_preflight_reject_incomplete_or_unsafe_evidence() {
     let review = ReviewRecord {
         schema: HEADLESS_REVIEW_SCHEMA.into(),
@@ -114,7 +114,7 @@ fn review_and_preflight_reject_incomplete_or_unsafe_evidence() {
     assert!(link.validate().is_err());
 }
 
-#[astra_headless_test::test]
+#[test]
 fn customized_tolerance_requires_hash_bound_human_approval() {
     let mut config = CheckpointConfig {
         schema: HEADLESS_CHECKPOINT_CONFIG_SCHEMA.into(),

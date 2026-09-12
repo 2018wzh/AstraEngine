@@ -200,7 +200,7 @@ fn run_nativevn_headless(
     serde_json::from_slice(&output.stdout).unwrap()
 }
 
-#[astra_headless_test::test]
+#[test]
 fn target_validate_and_platform_probe_emit_machine_readable_reports() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
@@ -300,7 +300,7 @@ fn target_validate_and_platform_probe_emit_machine_readable_reports() {
     }
 }
 
-#[astra_headless_test::test]
+#[test]
 fn web_bundle_requires_wasm_bindgen_pair_and_embeds_canonical_host_scripts() {
     let root = workspace_root();
     let case_dir = unique_case_dir(root, "web-explicit-artifacts");
@@ -488,7 +488,7 @@ fn web_bundle_requires_wasm_bindgen_pair_and_embeds_canonical_host_scripts() {
     assert!(!bundle.join("astra-player.js").exists());
 }
 
-#[astra_headless_test::test]
+#[test]
 fn package_build_writes_only_the_selected_game_target() {
     let root = workspace_root();
     let case_dir = unique_case_dir(root, "package-target-filter");
@@ -632,7 +632,7 @@ targets:
     let _ = fs::remove_dir_all(case_dir);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn nativevn_minimal_profile_cooks_packages_and_runs_headless() {
     let root = workspace_root();
     let case_dir = unique_case_dir(root, "nativevn-minimal-profile");

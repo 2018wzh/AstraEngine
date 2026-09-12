@@ -14,7 +14,7 @@ fn start(id: &str, target: &str, fence: &str, duration_ms: u64) -> PlayerTimelin
     }
 }
 
-#[astra_headless_test::test]
+#[test]
 fn timeline_completes_only_after_monotonic_deadline() {
     let mut scheduler = PlayerTimelineScheduler::new(8);
     scheduler
@@ -30,7 +30,7 @@ fn timeline_completes_only_after_monotonic_deadline() {
     assert_eq!(completed[0].kind, PlayerTimelineCompletionKind::Completed);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn timeline_cancel_returns_the_original_join_fence() {
     let mut scheduler = PlayerTimelineScheduler::new(8);
     scheduler
@@ -57,7 +57,7 @@ fn timeline_cancel_returns_the_original_join_fence() {
     assert_eq!(scheduler.active_count(), 0);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn timeline_blocks_clock_regression_without_mutating_tasks() {
     let mut scheduler = PlayerTimelineScheduler::new(8);
     scheduler
@@ -72,7 +72,7 @@ fn timeline_blocks_clock_regression_without_mutating_tasks() {
     assert_eq!(scheduler.active_count(), 1);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn timeline_blocks_duplicate_id_and_capacity_overflow() {
     let mut scheduler = PlayerTimelineScheduler::new(1);
     scheduler
@@ -91,7 +91,7 @@ fn timeline_blocks_duplicate_id_and_capacity_overflow() {
         .contains("ASTRA_PLAYER_TIMELINE_CAPACITY"));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn timeline_snapshot_restores_deadline_and_completed_identity() {
     let mut scheduler = PlayerTimelineScheduler::new(8);
     scheduler

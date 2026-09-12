@@ -12,9 +12,3 @@ schemars.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 rayon.workspace = true
-
-[dev-dependencies]
-astra-headless-test = { path = "../../Developer/astra-headless-test" }
-
-[lib]
-doctest = false

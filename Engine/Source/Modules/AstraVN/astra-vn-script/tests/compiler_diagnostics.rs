@@ -1,6 +1,6 @@
 use astra_vn_script::{compile_astra_project, AstraSource};
 
-#[astra_headless_test::test]
+#[test]
 fn grammar_negative_cases_block_compile() {
     let cases = [
         (
@@ -89,7 +89,7 @@ story system.bad #@id story.system.bad
     }
 }
 
-#[astra_headless_test::test]
+#[test]
 fn duplicate_explicit_source_ids_block_compile() {
     let err = compile_astra_project(
         [AstraSource::story(
@@ -109,7 +109,7 @@ state prologue #@id state.prologue
     assert_eq!(err.code(), "ASTRA_VN_DUPLICATE_ID");
 }
 
-#[astra_headless_test::test]
+#[test]
 fn undefined_jump_targets_block_compile() {
     let err = compile_astra_project(
         [AstraSource::story(
@@ -129,7 +129,7 @@ state prologue #@id state.prologue
     assert_eq!(err.code(), "ASTRA_VN_TARGET_UNDEFINED");
 }
 
-#[astra_headless_test::test]
+#[test]
 fn undefined_choice_targets_block_compile() {
     let err = compile_astra_project(
         [AstraSource::story(
@@ -149,7 +149,7 @@ state prologue #@id state.prologue
     assert_eq!(err.code(), "ASTRA_VN_TARGET_UNDEFINED");
 }
 
-#[astra_headless_test::test]
+#[test]
 fn unreachable_main_states_block_compile() {
     let err = compile_astra_project(
         [AstraSource::story(
@@ -173,7 +173,7 @@ state orphan #@id state.orphan
     assert_eq!(err.code(), "ASTRA_VN_UNREACHABLE_STATE");
 }
 
-#[astra_headless_test::test]
+#[test]
 fn invalid_variable_scope_blocks_compile() {
     let err = compile_astra_project(
         [AstraSource::story(
@@ -192,7 +192,7 @@ state prologue #@id state.prologue
     assert_eq!(err.code(), "ASTRA_VN_VARIABLE_SCOPE");
 }
 
-#[astra_headless_test::test]
+#[test]
 fn duplicate_text_keys_block_compile() {
     let err = compile_astra_project(
         [AstraSource::story(
@@ -212,7 +212,7 @@ state prologue #@id state.prologue
     assert_eq!(err.code(), "ASTRA_VN_TEXT_KEY_DUPLICATE");
 }
 
-#[astra_headless_test::test]
+#[test]
 fn invalid_mutation_number_blocks_compile() {
     let err = compile_astra_project(
         [AstraSource::story(
@@ -231,7 +231,7 @@ state prologue #@id state.prologue
     assert_eq!(err.code(), "ASTRA_VN_MUTATE_VALUE");
 }
 
-#[astra_headless_test::test]
+#[test]
 fn presentation_command_outside_scene_blocks_compile() {
     let err = compile_astra_project(
         [AstraSource::story(
@@ -248,7 +248,7 @@ voice asset:voice.hero.0001 #@id voice.outside
     assert_eq!(err.code(), "ASTRA_VN_SCENE_CONTEXT");
 }
 
-#[astra_headless_test::test]
+#[test]
 fn option_cannot_bind_across_an_intervening_command() {
     let err = compile_astra_project(
         [AstraSource::story(
@@ -269,7 +269,7 @@ state prologue #@id state.prologue
     assert_eq!(err.code(), "ASTRA_VN_OPTION_CONTEXT");
 }
 
-#[astra_headless_test::test]
+#[test]
 fn structural_indentation_is_part_of_the_canonical_ast() {
     let command_error = compile_astra_project(
         [AstraSource::story(
@@ -303,7 +303,7 @@ state prologue #@id state.prologue
     assert_eq!(option_error.code(), "ASTRA_VN_OPTION_CONTEXT");
 }
 
-#[astra_headless_test::test]
+#[test]
 fn system_story_definitions_are_authoritative_over_gameplay_page_triggers() {
     let compiled = compile_astra_project(
         [AstraSource::story(
@@ -335,7 +335,7 @@ state save #@id state.system.save
     assert_eq!(entry.source_id, "page.save");
 }
 
-#[astra_headless_test::test]
+#[test]
 fn duplicate_system_story_page_definitions_are_blocking() {
     let error = compile_astra_project(
         [AstraSource::story(

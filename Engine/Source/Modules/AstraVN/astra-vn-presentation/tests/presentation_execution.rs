@@ -17,7 +17,7 @@ fn asset(asset_id: &str, rgba: [u8; 4]) -> VnPresentationAsset {
     }
 }
 
-#[astra_headless_test::test]
+#[test]
 fn headless_presentation_executor_renders_stage_and_runs_filter_graph() {
     let mut stage = StageModel::new(320, 180);
     stage.apply(StandardPresentationCommand::ShowLayer {
@@ -84,7 +84,7 @@ fn headless_presentation_executor_renders_stage_and_runs_filter_graph() {
     assert!(first.draw_count >= 4);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn headless_presentation_executor_blocks_invalid_filter_graph() {
     let mut stage = StageModel::new(64, 64);
     stage.apply(StandardPresentationCommand::ShowLayer {

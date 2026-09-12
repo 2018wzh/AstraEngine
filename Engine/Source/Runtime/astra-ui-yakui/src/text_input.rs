@@ -358,7 +358,7 @@ mod tests {
         }
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn edits_by_grapheme_and_enforces_limit() {
         let mut state = TextInputState::new("你".into(), 2).expect("state");
         let update = state.update(

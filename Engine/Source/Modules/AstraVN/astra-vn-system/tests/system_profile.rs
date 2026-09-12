@@ -44,7 +44,7 @@ state localization_preview #@id state.system.localization_preview
     system_page kind:localization_preview policy:astra.policy.standard #@id page.localization_preview
 "#;
 
-#[astra_headless_test::test]
+#[test]
 fn system_story_manifest_validates_required_entries_and_sources() {
     let compiled = compile_astra_project(
         [AstraSource::story("system.astra", SYSTEM_STORY)],
@@ -77,7 +77,7 @@ fn system_story_manifest_validates_required_entries_and_sources() {
         .any(|diagnostic| diagnostic.code == "ASTRA_VN_SYSTEM_ENTRY_MISSING"));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn system_ui_profile_manifest_validates_migration_unlock_and_localization() {
     let compiled = compile_astra_project(
         [AstraSource::story("system.astra", SYSTEM_STORY)],

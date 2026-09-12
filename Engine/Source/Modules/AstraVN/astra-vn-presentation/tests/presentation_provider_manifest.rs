@@ -1,6 +1,6 @@
 use astra_vn_presentation::{VnPresentationProviderManifest, VnWaitKind};
 
-#[astra_headless_test::test]
+#[test]
 fn presentation_provider_manifest_declares_filter_fallback_and_await_capabilities() {
     let manifest = VnPresentationProviderManifest::standard();
     let report = manifest.validate_standard();
@@ -26,7 +26,7 @@ fn presentation_provider_manifest_declares_filter_fallback_and_await_capabilitie
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn presentation_provider_manifest_blocks_unknown_and_wrong_command_presets() {
     let manifest = VnPresentationProviderManifest::standard();
 
@@ -46,7 +46,7 @@ fn presentation_provider_manifest_blocks_unknown_and_wrong_command_presets() {
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn presentation_provider_manifest_blocks_duplicate_and_over_budget_policy() {
     let mut manifest = VnPresentationProviderManifest::standard();
     manifest.presets.push(manifest.presets[0].clone());
@@ -79,7 +79,7 @@ fn presentation_provider_manifest_blocks_duplicate_and_over_budget_policy() {
         .any(|diagnostic| diagnostic.code == "ASTRA_VN_PRESENTATION_PROFILE_FILTER"));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn presentation_provider_manifest_blocks_missing_movie_await_capability() {
     let mut manifest = VnPresentationProviderManifest::standard();
     manifest

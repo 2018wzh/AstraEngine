@@ -16,7 +16,7 @@ fn source(command: &str) -> AstraSource {
     )
 }
 
-#[astra_headless_test::test]
+#[test]
 fn fade_stop_requires_duration_and_completion_fence() {
     let command = first_presentation(
         "audio action:fade_stop target:bgm.main duration:4000 fence:bgm.main.end #@id audio.fade",
@@ -49,7 +49,7 @@ fn first_presentation(command: &str) -> PresentationCommand {
     command.clone()
 }
 
-#[astra_headless_test::test]
+#[test]
 fn standard_commands_lower_to_typed_fixed_point_ir() {
     let command = first_presentation(
         "camera target:main x:-12.5 y:4.25 zoom:1.0625 rotation:0 duration:480 preset:slow_push #@id camera.main",
@@ -78,7 +78,7 @@ fn standard_commands_lower_to_typed_fixed_point_ir() {
     assert_eq!(fit, StageFitMode::Native);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn transition_preserves_a_typed_descriptor_identity() {
     let command = first_presentation(
         "transition preset:director_puppet_26 duration:250 descriptor:director.puppet.26 #@id transition.director",
@@ -105,7 +105,7 @@ fn transition_preserves_a_typed_descriptor_identity() {
     assert_eq!(error.code(), "ASTRA_VN_STAGE_ATTRIBUTE_UNKNOWN");
 }
 
-#[astra_headless_test::test]
+#[test]
 fn shade_has_a_typed_opaque_color_and_separate_coverage() {
     let command = first_presentation("shade color:222420ff opacity:0.92 #@id shade.scene");
     let PresentationCommand::Stage(StageCommand::Shade { color, opacity }) = command else {
@@ -124,7 +124,7 @@ fn shade_has_a_typed_opaque_color_and_separate_coverage() {
     assert_eq!(error.code(), "ASTRA_VN_STAGE_ATTRIBUTE_INVALID");
 }
 
-#[astra_headless_test::test]
+#[test]
 fn timeline_requires_real_ordered_keyframes_and_blocking_fence() {
     let command = first_presentation(
         "timeline id:tl.enter target:hero property:opacity keyframes:0=0,120=0.5,300=1 join:block fence:tl.enter.done fallback:flat budget_ms:2 #@id timeline.enter",
@@ -153,7 +153,7 @@ fn timeline_requires_real_ordered_keyframes_and_blocking_fence() {
     }
 }
 
-#[astra_headless_test::test]
+#[test]
 fn standard_commands_reject_unknown_fields_and_noncanonical_assets() {
     let unknown = compile_astra_project(
         [source(
@@ -178,7 +178,7 @@ fn standard_commands_reject_unknown_fields_and_noncanonical_assets() {
     assert_eq!(removed.code(), "ASTRA_VN_COMMAND_UNBOUND");
 }
 
-#[astra_headless_test::test]
+#[test]
 fn extension_commands_require_schema_provider_and_typed_field_contracts() {
     let descriptor = ExtensionCommandDescriptor {
         command: "studio_fx".to_string(),

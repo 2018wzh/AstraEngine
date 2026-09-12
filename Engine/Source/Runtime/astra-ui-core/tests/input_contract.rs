@@ -15,7 +15,7 @@ fn viewport(width: u32, height: u32) -> UiViewport {
     }
 }
 
-#[astra_headless_test::test]
+#[test]
 fn viewport_dimensions_are_hard_bounded() {
     viewport(MAX_UI_VIEWPORT_DIMENSION, MAX_UI_VIEWPORT_DIMENSION)
         .validate()

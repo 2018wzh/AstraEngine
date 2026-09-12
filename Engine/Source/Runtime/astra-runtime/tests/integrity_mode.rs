@@ -13,7 +13,7 @@ fn request(step: u64) -> TickRequest {
     )
 }
 
-#[astra_headless_test::test]
+#[test]
 fn shipping_mode_disables_aggregate_hashes_and_replay_recording() {
     let mut world = RuntimeWorld::create_with_integrity(
         RuntimeConfig {
@@ -33,7 +33,7 @@ fn shipping_mode_disables_aggregate_hashes_and_replay_recording() {
         .contains("ASTRA_RUNTIME_REPLAY_RECORDING_DISABLED"));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn evidence_mode_records_and_replays_v3_transcript() {
     let config = RuntimeConfig {
         seed: 7,

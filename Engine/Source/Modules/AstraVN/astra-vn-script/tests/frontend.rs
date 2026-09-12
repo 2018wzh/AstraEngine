@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 
 const SOURCE: &str = "# leading\nstory main #@id story.main\n\nstate prologue #@id state.prologue\n  scene room #@id scene.room\n    text key:\"line hello\" speaker:hero #@id line.hello\n";
 
-#[astra_headless_test::test]
+#[test]
 fn lossless_parse_preserves_comments_blank_lines_quotes_and_spans() {
     let parsed = parse_astra_source("story.astra", SOURCE);
     assert_eq!(parsed.cst.text(), SOURCE);
@@ -35,7 +35,7 @@ fn lossless_parse_preserves_comments_blank_lines_quotes_and_spans() {
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn semantic_pass_order_is_stable_and_language_service_exposes_navigation() {
     assert_eq!(
         SEMANTIC_PASS_ORDER,
@@ -58,7 +58,7 @@ fn semantic_pass_order_is_stable_and_language_service_exposes_navigation() {
         .any(|token| token.kind == "attribute"));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn semantic_hash_ignores_trivia_and_implicit_command_source_spans() {
     let compact = "story main\nstate start\n  scene room\n    text key:hello\n";
     let with_trivia =
@@ -80,7 +80,7 @@ fn semantic_hash_ignores_trivia_and_implicit_command_source_spans() {
     assert_ne!(left.source_map.hash, right.source_map.hash);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn select_items_are_a_typed_widget_property_not_a_repeat_binding() {
     let story = "story main #@id story.main\nstate start #@id state.start\n  scene room #@id scene.room\n    text key:line.one #@id line.one\n";
     let ui = concat!(
@@ -108,7 +108,7 @@ fn select_items_are_a_typed_widget_property_not_a_repeat_binding() {
     assert!(select.properties.contains_key("items"));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn quick_panel_system_page_and_actions_compile_as_typed_ui_contracts() {
     let story = concat!(
         "story system #@id story.system\n",
@@ -158,7 +158,7 @@ astra.ui.controller.register("quick", {
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn tsuinosora_classic_and_modern_ui_template_compiles_as_one_project() {
     const CLASSIC_UI: &str =
         include_str!("../../../../../../Examples/TsuiNoSora/ProjectTemplate/UI/classic.astra");
@@ -353,7 +353,7 @@ astra.ui.controller.register("config", {
 "#
 }
 
-#[astra_headless_test::test]
+#[test]
 fn unknown_command_is_editable_but_requires_explicit_compile_binding() {
     let source = "story main\nstate start\n  scene room\n    studio_fx intensity:2 #@id fx.1\n";
     let parsed = parse_astra_source("unknown.astra", source);
@@ -388,7 +388,7 @@ fn unknown_command_is_editable_but_requires_explicit_compile_binding() {
     assert_eq!(compiled.schema, "astra.vn.compiled_project.v3");
 }
 
-#[astra_headless_test::test]
+#[test]
 fn standard_audio_control_is_bound_without_an_extension_bypass() {
     let source = "story main\nstate start\n  scene room\n    audio action:pause target:bgm.main #@id audio.pause\n";
     let parsed = parse_astra_source("audio.astra", source);
@@ -405,7 +405,7 @@ fn standard_audio_control_is_bound_without_an_extension_bypass() {
     assert_eq!(compiled.schema, "astra.vn.compiled_project.v3");
 }
 
-#[astra_headless_test::test]
+#[test]
 fn formatter_is_idempotent_and_preserves_semantics() {
     let formatted = format_astra_source("story.astra", SOURCE, FormatOptions::default()).unwrap();
     assert_eq!(

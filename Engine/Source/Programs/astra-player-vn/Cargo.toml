@@ -46,10 +46,6 @@ astra-vn-policy = { path = "../../Modules/AstraVN/astra-vn-policy", default-feat
 astra-vn-policy = { path = "../../Modules/AstraVN/astra-vn-policy", default-features = false, features = ["portable-luau-runtime"] }
 
 [dev-dependencies]
-astra-headless-test = { path = "../../Developer/astra-headless-test" }
 astra-platform = { path = "../../Platform/astra-platform" }
 astra-platform-windows = { path = "../../Platform/astra-platform-windows" }
 tokio.workspace = true
-
-[lib]
-doctest = false

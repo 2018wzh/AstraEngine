@@ -4,7 +4,7 @@ use astra_media_core::{
     TextureFilter2D, TextureFrame, Transform2D,
 };
 
-#[astra_headless_test::test]
+#[test]
 fn cpu_reference_compositor_screens_premultiplied_ui_meshes() {
     let mut renderer = CpuRendererProvider
         .create(RendererCreateRequest {
@@ -37,7 +37,7 @@ fn cpu_reference_compositor_screens_premultiplied_ui_meshes() {
     assert_eq!(frame.bytes, vec![160, 160, 200, 255]);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn cpu_reference_compositor_executes_texture_glyph_clip_transform_and_blend() {
     let mut renderer = CpuRendererProvider
         .create(RendererCreateRequest {
@@ -95,7 +95,7 @@ fn cpu_reference_compositor_executes_texture_glyph_clip_transform_and_blend() {
     assert_eq!(pixel(1, 1), &[0, 0, 32, 255]);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn scene_resources_are_uploaded_reused_cropped_and_released_explicitly() {
     let mut renderer = CpuRendererProvider
         .create(RendererCreateRequest {
@@ -146,7 +146,7 @@ fn scene_resources_are_uploaded_reused_cropped_and_released_explicitly() {
     assert!(missing.to_string().contains("ASTRA_MEDIA_RESOURCE_UNKNOWN"));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn retained_texture_region_updates_are_in_place_and_transactional() {
     let mut renderer = CpuRendererProvider
         .create(RendererCreateRequest {
@@ -208,7 +208,7 @@ fn retained_texture_region_updates_are_in_place_and_transactional() {
     assert_eq!(rendered.bytes, vec![0, 0, 255, 255, 0, 255, 0, 255]);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn compositor_blocks_invalid_texture_dimensions_and_unbalanced_state() {
     let mut renderer = CpuRendererProvider
         .create(RendererCreateRequest {
@@ -241,7 +241,7 @@ fn compositor_blocks_invalid_texture_dimensions_and_unbalanced_state() {
         .contains("ASTRA_MEDIA_CLIP_STACK"));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn resource_updates_are_transactional_and_color_glyphs_preserve_rgba() {
     let mut renderer = CpuRendererProvider
         .create(RendererCreateRequest {

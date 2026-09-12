@@ -15,7 +15,7 @@ use astra_ui_plugin_abi::{
 };
 use ed25519_dalek::SigningKey;
 
-#[astra_headless_test::test]
+#[test]
 fn signed_component_process_supports_frame_snapshot_restore_and_shutdown() {
     let fixture = Fixture::prepare(Duration::from_secs(2));
     let mut process = fixture.spawn();
@@ -75,7 +75,7 @@ fn signed_component_process_supports_frame_snapshot_restore_and_shutdown() {
     assert!(process.invoke(UiComponentRequest::Snapshot).is_err());
 }
 
-#[astra_headless_test::test]
+#[test]
 fn hung_component_terminates_the_entire_component_session() {
     let fixture = Fixture::prepare(Duration::from_millis(50));
     let mut process = fixture.spawn();
@@ -90,7 +90,7 @@ fn hung_component_terminates_the_entire_component_session() {
     assert!(process.invoke(UiComponentRequest::Snapshot).is_err());
 }
 
-#[astra_headless_test::test]
+#[test]
 fn panicking_component_process_cannot_continue_the_ui_session() {
     let fixture = Fixture::prepare(Duration::from_secs(2));
     let mut process = fixture.spawn();

@@ -1,6 +1,6 @@
 use astra_media::PlayerDecodedAudio;
 
-#[astra_headless_test::test]
+#[test]
 fn canonical_upsampling_preserves_tone_energy_and_channel_identity() {
     let source_rate = 44_100_u32;
     let frequency = 440.0_f32;

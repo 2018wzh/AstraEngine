@@ -6,7 +6,7 @@ use astra_media::{
     PlaybackTickRequest, QueuedMediaOutput,
 };
 
-#[astra_headless_test::test]
+#[test]
 fn ffmpeg_audio_stream_produces_timestamped_packets_accepted_by_scheduler() {
     let mut decoder = FfmpegPlaybackDecoder::open(
         "mp3",
@@ -38,7 +38,7 @@ fn ffmpeg_audio_stream_produces_timestamped_packets_accepted_by_scheduler() {
     assert!(packet_count > 4);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn ffmpeg_video_stream_is_monotonic_seekable_and_cancellable() {
     let bytes = fixture_bytes("flower.mp4");
     let mut decoder =
@@ -84,7 +84,7 @@ fn ffmpeg_video_stream_is_monotonic_seekable_and_cancellable() {
     assert!(decoder.cancel().is_err());
 }
 
-#[astra_headless_test::test]
+#[test]
 fn ffmpeg_stream_rejects_corrupt_input_and_invalid_budgets() {
     assert!(
         FfmpegPlaybackDecoder::open("mp4", b"not a container", FfmpegStreamLimits::default())
@@ -97,7 +97,7 @@ fn ffmpeg_stream_rejects_corrupt_input_and_invalid_budgets() {
     assert!(FfmpegPlaybackDecoder::open("mp3", &fixture_bytes("t-rex-roar.mp3"), limits).is_err());
 }
 
-#[astra_headless_test::test]
+#[test]
 fn ffmpeg_stream_drains_to_eos_with_single_packet_backpressure() {
     let limits = FfmpegStreamLimits {
         max_pending_packets: 1,
@@ -123,7 +123,7 @@ fn ffmpeg_stream_drains_to_eos_with_single_packet_backpressure() {
     assert!(decoder.read_next().unwrap().is_none());
 }
 
-#[astra_headless_test::test]
+#[test]
 fn ffmpeg_packets_flow_through_scheduler_with_owned_payloads() {
     let mut audio_decoder = FfmpegPlaybackDecoder::open(
         "mp3",
@@ -200,7 +200,7 @@ fn ffmpeg_packets_flow_through_scheduler_with_owned_payloads() {
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn media_pipeline_rejects_malformed_payload_without_partial_queue() {
     let mut decoder = FfmpegPlaybackDecoder::open(
         "mp3",
@@ -220,7 +220,7 @@ fn media_pipeline_rejects_malformed_payload_without_partial_queue() {
     assert!(pipeline.scheduler().audio_queue.is_empty());
 }
 
-#[astra_headless_test::test]
+#[test]
 fn ffmpeg_stream_resamples_to_explicit_native_audio_format() {
     let mut decoder = FfmpegPlaybackDecoder::open_with_audio_output(
         "mp3",
@@ -247,7 +247,7 @@ fn ffmpeg_stream_resamples_to_explicit_native_audio_format() {
         .is_err());
 }
 
-#[astra_headless_test::test]
+#[test]
 fn media_pipeline_payload_budget_blocks_without_partial_state() {
     let mut decoder = FfmpegPlaybackDecoder::open(
         "mp3",

@@ -286,7 +286,7 @@ mod tests {
         }
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn full_resync_allows_ordered_release_and_reupload() {
         frame(true).validate().unwrap();
         let error = frame(false).validate().unwrap_err();

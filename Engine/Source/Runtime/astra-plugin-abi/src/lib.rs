@@ -2575,7 +2575,7 @@ mod tests {
         }
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn runtime_provider_abi_registers_descriptor_and_entrypoints() {
         let descriptor = ProductRuntimeDescriptor {
             runtime_id: NATIVE_VN_RUNTIME_ID.to_string(),

@@ -24,7 +24,7 @@ state route.two #@id state.route.two
     text key:line.route.two speaker:narrator window:main #@id line.route.two
 "#;
 
-#[astra_headless_test::test]
+#[test]
 fn skip_read_advances_past_read_dialogue_but_stops_at_unread_dialogue() {
     let compiled = compile_astra_project(
         [AstraSource::story("skip.astra", STORY)],
@@ -58,7 +58,7 @@ fn skip_read_advances_past_read_dialogue_but_stops_at_unread_dialogue() {
     assert_eq!(runtime.state().cursor.as_ref().unwrap().ordinal, 2);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn skip_read_reaches_choice_when_all_prior_dialogue_is_read() {
     let compiled = compile_astra_project(
         [AstraSource::story("skip.astra", STORY)],
@@ -96,7 +96,7 @@ fn skip_read_reaches_choice_when_all_prior_dialogue_is_read() {
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn fast_forward_commits_skipped_dialogue_without_emitting_transient_dialogue_frames() {
     let compiled = compile_astra_project(
         [AstraSource::story("fast-forward.astra", STORY)],
@@ -129,7 +129,7 @@ fn fast_forward_commits_skipped_dialogue_without_emitting_transient_dialogue_fra
     ));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn replay_ui_snapshot_exposes_backlog_read_state_and_voice_entries() {
     let compiled = compile_astra_project(
         [AstraSource::story("replay.astra", STORY)],
@@ -167,7 +167,7 @@ fn replay_ui_snapshot_exposes_backlog_read_state_and_voice_entries() {
     assert_eq!(loaded.replay_ui_state(), expected_replay);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn system_controls_persist_auto_skip_config_and_unlocks_through_save_load() {
     let compiled = compile_astra_project(
         [AstraSource::story("system.astra", STORY)],
@@ -231,7 +231,7 @@ fn system_controls_persist_auto_skip_config_and_unlocks_through_save_load() {
     assert!(loaded.state().system.gallery_unlocks.contains("cg.opening"));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn product_ui_requests_are_core_validated_and_use_stable_ids() {
     let compiled = compile_astra_project(
         [AstraSource::story("routes.astra", ROUTE_STORY)],
@@ -322,7 +322,7 @@ fn product_ui_requests_are_core_validated_and_use_stable_ids() {
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn backlog_jump_rejects_missing_entries_and_restores_compiled_command_location() {
     let compiled = compile_astra_project(
         [AstraSource::story("backlog.astra", STORY)],

@@ -23,9 +23,5 @@ tracing.workspace = true
 chumsky.workspace = true
 
 [dev-dependencies]
-astra-headless-test = { path = "../../../Developer/astra-headless-test" }
 insta.workspace = true
 proptest.workspace = true
-
-[lib]
-doctest = false

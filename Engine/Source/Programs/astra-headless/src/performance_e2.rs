@@ -1198,7 +1198,7 @@ mod tests {
         HeadlessReadbackPolicy, HeadlessRenderPolicy,
     };
 
-    #[astra_headless_test::test]
+    #[test]
     fn prepared_budget_uses_fixed_production_thresholds() {
         let hash = Hash256::from_sha256(b"fixture").to_string();
         let mut profile = HeadlessHostProfile::reference(
@@ -1246,7 +1246,7 @@ mod tests {
         );
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn scene2d_animation_changes_output_without_mutating_draw_geometry() {
         let (_, mut frame) = scene2d_workload();
         let commands = frame.commands.clone();
@@ -1256,7 +1256,7 @@ mod tests {
         assert_eq!(frame.commands, commands);
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn product_budget_uses_product_frame_metrics_without_synthetic_overhead_samples() {
         let hash = Hash256::from_sha256(b"fixture").to_string();
         let mut profile = HeadlessHostProfile::reference(
@@ -1301,7 +1301,7 @@ mod tests {
             .all(|metric| metric.min_samples == 445));
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn prepared_performance_profile_requires_timestamped_hardware_gpu() {
         let hash = Hash256::from_sha256(b"fixture").to_string();
         let profile = HeadlessHostProfile::reference(
@@ -1343,7 +1343,7 @@ mod tests {
         ));
     }
 
-    #[astra_headless_test::tokio_test]
+    #[tokio::test]
     #[ignore = "requires the integrated DX12 performance adapter"]
     async fn stable_scene_submit_has_zero_heap_allocation_p95() {
         let policy = GpuAdapterPolicy {
@@ -1368,7 +1368,7 @@ mod tests {
         assert_eq!(percentile(&allocations, 95), 0, "{allocations:?}");
     }
 
-    #[astra_headless_test::tokio_test]
+    #[tokio::test]
     #[ignore = "requires the integrated DX12 performance adapter"]
     async fn timestamp_and_trace_profiling_stays_within_overhead_budget() {
         let policy = GpuAdapterPolicy {

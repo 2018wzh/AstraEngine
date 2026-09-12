@@ -14,7 +14,7 @@ struct CoverageEntry {
     reason: String,
 }
 
-#[astra_headless_test::test]
+#[test]
 fn every_workspace_member_has_enforced_observability_coverage() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()

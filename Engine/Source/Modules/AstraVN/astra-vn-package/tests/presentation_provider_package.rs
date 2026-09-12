@@ -13,7 +13,7 @@ fn compiled_story() -> astra_vn_script::CompiledVnProject {
     .unwrap()
 }
 
-#[astra_headless_test::test]
+#[test]
 fn package_persists_profile_bound_presentation_policy() {
     let sections = package_sections_for_project(
         &compiled_story(),
@@ -42,7 +42,7 @@ fn package_persists_profile_bound_presentation_policy() {
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn compiled_project_v3_requires_the_v2_root_without_reader_fallback() {
     let project = compiled_story();
     let mut sections =
@@ -92,7 +92,7 @@ fn compiled_project_v3_requires_the_v2_root_without_reader_fallback() {
         .contains("ASTRA_VN_COMPILED_PROJECT_ROOT"));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn legacy_presentation_policy_requires_recook() {
     let legacy = astra_vn_package::VnPresentationProviderManifest::standard();
     let section = SectionPayload::postcard(

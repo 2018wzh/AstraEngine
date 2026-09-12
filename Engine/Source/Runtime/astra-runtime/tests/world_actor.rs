@@ -11,7 +11,7 @@ struct TestComponent {
     count: u32,
 }
 
-#[astra_headless_test::test]
+#[test]
 fn world_actor_owns_typed_components_and_tracks_revisions() {
     let mut world = RuntimeWorld::create(
         RuntimeConfig {
@@ -98,7 +98,7 @@ fn world_actor_owns_typed_components_and_tracks_revisions() {
     assert!(!world.save(SaveRequest::default()).unwrap().0.is_empty());
 }
 
-#[astra_headless_test::test]
+#[test]
 fn world_actor_rejects_component_for_missing_actor() {
     let mut world =
         RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();

@@ -605,7 +605,7 @@ fn create_table(lua: &Lua) -> mlua::Result<Table> {
 mod tests {
     use super::*;
 
-    #[astra_headless_test::test]
+    #[test]
     fn controller_runs_in_fresh_sandbox_and_returns_typed_effects() {
         let mut host = LuauUiControllerHost::new(PolicyExecutionBudget::default()).expect("host");
         host.register_source(
@@ -637,7 +637,7 @@ astra.ui.controller.register("controller.test", {
         assert!(session.values().is_empty());
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn tsuinosora_modern_save_controller_requires_overwrite_confirmation() {
         let mut host = LuauUiControllerHost::new(PolicyExecutionBudget::default()).expect("host");
         host.register_source(include_str!(
@@ -677,7 +677,7 @@ astra.ui.controller.register("controller.test", {
         );
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn snapshot_none_controller_cannot_write_session_state() {
         let mut host = LuauUiControllerHost::new(PolicyExecutionBudget::default()).expect("host");
         host.register_source(
@@ -707,7 +707,7 @@ astra.ui.controller.register("controller.test", {
         assert!(error.to_string().contains("snapshot=none"));
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn optional_lifecycle_handlers_are_noops() {
         let mut host = LuauUiControllerHost::new(PolicyExecutionBudget::default()).expect("host");
         host.register_source(
@@ -752,7 +752,7 @@ astra.ui.controller.register("controller.test", {
             .is_empty());
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn missing_optional_handler_does_not_reexecute_controller_source() {
         let mut host = LuauUiControllerHost::new(PolicyExecutionBudget::default()).expect("host");
         host.register_source(
@@ -791,7 +791,7 @@ astra.ui.controller.register("controller.test", {
         assert!(effects.is_empty());
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn lifecycle_handlers_receive_fixed_update_and_commit_session_state() {
         let mut host = LuauUiControllerHost::new(PolicyExecutionBudget::default()).expect("host");
         host.register_source(
@@ -843,7 +843,7 @@ astra.ui.controller.register("controller.test", {
         assert_eq!(session.values().get("updated"), Some(&UiValue::Bool(true)));
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn non_function_optional_handler_is_rejected_during_registration() {
         let mut host = LuauUiControllerHost::new(PolicyExecutionBudget::default()).expect("host");
         let error = host

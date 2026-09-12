@@ -141,7 +141,7 @@ impl Fixture {
     }
 }
 
-#[astra_headless_test::test]
+#[test]
 fn file_and_stdio_execute_the_same_product_sequence() {
     let fixture = Fixture::new();
     let file_root = fixture.root().join("file-run");
@@ -235,7 +235,7 @@ fn file_and_stdio_execute_the_same_product_sequence() {
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 #[ignore = "requires a native hardware GPU runner"]
 fn gpu_run_executes_product_sequence_and_records_native_backend_identity() {
     let fixture = Fixture::new();
@@ -292,7 +292,7 @@ fn gpu_run_executes_product_sequence_and_records_native_backend_identity() {
     assert!(manifest.rasterized_frame_count >= 1);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn malformed_file_and_broken_stdio_fail_with_committed_blocked_reports() {
     let fixture = Fixture::new();
     let malformed = fixture.root().join("malformed.jsonl");
@@ -378,7 +378,7 @@ fn malformed_file_and_broken_stdio_fail_with_committed_blocked_reports() {
     assert_eq!(report.status, RunStatus::Blocked);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn artifact_limit_stops_the_run_and_preserves_only_committed_evidence() {
     let fixture = Fixture::new();
     let mut profile: HeadlessHostProfile =

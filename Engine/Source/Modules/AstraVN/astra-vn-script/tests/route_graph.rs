@@ -1,6 +1,6 @@
 use astra_vn_script::{compile_astra_project, AstraSource};
 
-#[astra_headless_test::test]
+#[test]
 fn system_story_states_do_not_pollute_gameplay_route_graph() {
     let project = compile_astra_project(
         [AstraSource::story(

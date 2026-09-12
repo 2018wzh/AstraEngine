@@ -840,7 +840,7 @@ mod tests {
         }
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn batch_manifest_requires_unique_session_and_artifact_identity() {
         let mut manifest = BatchManifest {
             schema: MANIFEST_SCHEMA.to_string(),
@@ -860,7 +860,7 @@ mod tests {
             .starts_with("ASTRA_HEADLESS_BATCH_ARTIFACT_ROOT"));
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn batch_manifest_bounds_global_workers_and_child_timeout() {
         let mut manifest = BatchManifest {
             schema: MANIFEST_SCHEMA.to_string(),
@@ -877,7 +877,7 @@ mod tests {
             .starts_with("ASTRA_HEADLESS_BATCH_TIMEOUT"));
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn batch_selects_concurrency_from_cap_jobs_and_hardware() {
         assert_eq!(select_concurrency(8, 12, 6).unwrap(), 6);
         assert_eq!(select_concurrency(8, 3, 16).unwrap(), 3);
@@ -890,7 +890,7 @@ mod tests {
             .starts_with("ASTRA_HEADLESS_BATCH_PARALLELISM_QUERY"));
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn batch_partitions_internal_workers_without_oversubscription() {
         assert_eq!(concurrent_session_worker_limit(8, 1).unwrap(), 8);
         assert_eq!(concurrent_session_worker_limit(8, 2).unwrap(), 4);
@@ -904,7 +904,7 @@ mod tests {
             .starts_with("ASTRA_HEADLESS_BATCH_SELECTED_CONCURRENCY"));
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn batch_utilization_is_capacity_normalized_and_bounded() {
         assert_eq!(utilization_permille(4_000, 1_000, 4), 1_000);
         assert_eq!(utilization_permille(2_000, 1_000, 4), 500);

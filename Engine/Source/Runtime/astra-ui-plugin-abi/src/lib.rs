@@ -491,7 +491,7 @@ mod tests {
         }
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn signed_manifest_binds_artifact_and_embedded_descriptor() {
         let artifact = b"test-only component artifact";
         let signing = SigningKey::from_bytes(&[7; 32]);
@@ -513,7 +513,7 @@ mod tests {
         assert!(manifest.verify(b"different", &BTreeMap::new()).is_err());
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn framed_ipc_rejects_hash_and_sequence_corruption() {
         let frame = UiComponentFrame {
             kind: 1,

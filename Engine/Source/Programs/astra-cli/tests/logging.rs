@@ -1,6 +1,6 @@
 use std::{path::Path, process::Command};
 
-#[astra_headless_test::test]
+#[test]
 fn retired_headless_alias_returns_stable_migration_diagnostic() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()

@@ -55,7 +55,7 @@ fn source() -> NativeVnHostCommandSource {
     )
 }
 
-#[astra_headless_test::tokio_test]
+#[tokio::test]
 async fn shared_product_media_host_completes_timeline_fence_and_presents_runtime_result() {
     let mut source = support::source_for(
         "story main #@id story.main\nstate start #@id state.start\n  scene room #@id scene.room\n    timeline id:intro target:hero property:opacity keyframes:0=0,120=1 join:block fence:timeline.intro.complete budget_ms:2 #@id timeline.intro\n    text key:line.after #@id line.after\n",
@@ -101,7 +101,7 @@ async fn shared_product_media_host_completes_timeline_fence_and_presents_runtime
     backend_task.await.unwrap();
 }
 
-#[astra_headless_test::tokio_test]
+#[tokio::test]
 async fn product_media_host_restores_uncommitted_timeline_tasks_after_capacity_failure() {
     let mut source = support::source_for(
         "story main #@id story.main\nstate start #@id state.start\n  scene room #@id scene.room\n    timeline id:intro target:hero property:opacity keyframes:0=0,120=1 join:block fence:timeline.intro.complete budget_ms:2 #@id timeline.intro\n",
@@ -123,7 +123,7 @@ async fn product_media_host_restores_uncommitted_timeline_tasks_after_capacity_f
     assert_eq!(tasks[0].task_id, "intro");
 }
 
-#[astra_headless_test::tokio_test]
+#[tokio::test]
 async fn product_media_host_presents_every_video_frame_and_restores_by_asset_identity() {
     let mut source = support::source_for_video(
         "story main #@id story.main\nstate start #@id state.start\n  scene room #@id scene.room\n    stage viewport:320x180 safe_area:16:9 #@id stage.main\n    layer id:video kind:video z:100 blend:normal clip:stage #@id layer.video\n    movie layer:video asset:asset:/video/intro loop:true end:wait fence:movie.intro.end fallback:asset:/video/intro-fallback interrupt:reject #@id movie.intro\n    text key:line.after #@id line.after\n",
@@ -278,7 +278,7 @@ async fn product_media_host_presents_every_video_frame_and_restores_by_asset_ide
     backend_task.await.unwrap();
 }
 
-#[astra_headless_test::tokio_test]
+#[tokio::test]
 async fn shared_product_audio_host_owns_format_queue_control_and_cleanup() {
     let profile = PlatformHostProfile::windows_release("nativevn-game", "com.example.game");
     let (client, mut backend, _events) = host_channel(profile, 16, 16).unwrap();

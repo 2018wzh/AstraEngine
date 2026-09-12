@@ -21,7 +21,7 @@ fn package(localization: Vec<u8>, config: Vec<u8>) -> Vec<u8> {
     .into_bytes()
 }
 
-#[astra_headless_test::test]
+#[test]
 fn package_locale_config_validates_every_declared_localization() {
     let bytes = package(
         br#"{"schema":"astra.vn.localization_table.v1","locale":"en","strings":{"choice.prompt":"","line.one":"Hello"}}"#.to_vec(),
@@ -46,7 +46,7 @@ fn package_locale_config_validates_every_declared_localization() {
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn localization_duplicate_keys_and_locale_order_are_blocking() {
     let duplicate = package(
         br#"{"schema":"astra.vn.localization_table.v1","locale":"en","strings":{"line.one":"A","line.one":"B"}}"#.to_vec(),

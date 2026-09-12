@@ -1,4 +1,4 @@
-#[astra_headless_test::test]
+#[test]
 fn starts_and_stops_worktree_local_session() {
     let ctx = astra_headless_test::HeadlessTestContext::start().unwrap();
     assert!(ctx.artifact_root().is_dir());
@@ -10,10 +10,12 @@ fn starts_and_stops_worktree_local_session() {
         .as_str()
         .unwrap()
         .starts_with("sha256:"));
+    let second = astra_headless_test::HeadlessTestContext::start().unwrap();
+    assert_ne!(ctx.artifact_root(), second.artifact_root());
     assert!(astra_headless_test::active_headless_session_count().unwrap() >= 2);
 }
 
-#[astra_headless_test::tokio_test]
+#[tokio::test]
 async fn async_test_uses_same_per_binary_server() {
     let ctx = astra_headless_test::HeadlessTestContext::start_async()
         .await
@@ -22,7 +24,7 @@ async fn async_test_uses_same_per_binary_server() {
     tokio::task::yield_now().await;
 }
 
-#[astra_headless_test::test]
+#[test]
 fn resolves_worktree_profile_binary_without_a_binary_environment_variable() {
     let binary = astra_headless_test::headless_binary_path().unwrap();
     assert_eq!(
@@ -32,7 +34,7 @@ fn resolves_worktree_profile_binary_without_a_binary_environment_variable() {
     assert!(binary.is_file());
 }
 
-#[astra_headless_test::test]
+#[test]
 fn concurrent_tests_share_one_multi_session_server() {
     use std::sync::{Arc, Barrier};
 
@@ -52,7 +54,7 @@ fn concurrent_tests_share_one_multi_session_server() {
         .collect::<Vec<_>>();
     let _ctx = astra_headless_test::HeadlessTestContext::start().unwrap();
     entered.wait();
-    assert!(astra_headless_test::active_headless_session_count().unwrap() >= 6);
+    assert!(astra_headless_test::active_headless_session_count().unwrap() >= 5);
     release.wait();
     for handle in handles {
         handle.join().unwrap();

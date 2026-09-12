@@ -46,7 +46,7 @@ fn configure(director: &mut ProductStageDirector) {
         .unwrap();
 }
 
-#[astra_headless_test::test]
+#[test]
 fn stage_batch_prepares_one_atomic_next_state_without_mutating_source() {
     let director = director();
     let initial = director.state().clone();
@@ -68,7 +68,7 @@ fn stage_batch_prepares_one_atomic_next_state_without_mutating_source() {
     assert_eq!(next.state().shade_opacity, fixed(500_000));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn stage_batch_failure_discards_every_preceding_mutation() {
     let director = director();
     let initial = director.state().clone();
@@ -88,7 +88,7 @@ fn stage_batch_failure_discards_every_preceding_mutation() {
     assert_eq!(director.state(), &initial);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn stage_backdrop_is_authoritative_serializable_and_explicitly_clearable() {
     let mut director = director();
     let black = [0, 0, 0, 255];
@@ -114,7 +114,7 @@ fn stage_backdrop_is_authoritative_serializable_and_explicitly_clearable() {
     assert_eq!(director.state().backdrop_color, None);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn stage_shade_color_and_coverage_are_authoritative_and_serializable() {
     let mut director = director();
     let color = [0x22, 0x24, 0x20, 0xff];
@@ -162,7 +162,7 @@ fn show_hero(director: &mut ProductStageDirector) {
         .unwrap();
 }
 
-#[astra_headless_test::test]
+#[test]
 fn stage_director_applies_profile_bound_tween_without_partial_failure() {
     let mut director = director();
     let initial = director.state().clone();
@@ -193,7 +193,7 @@ fn stage_director_applies_profile_bound_tween_without_partial_failure() {
     assert_eq!(director.state().entities["hero"].opacity, FixedScalar::ONE);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn stage_director_tracks_preload_and_layer_authority_in_snapshot_state() {
     let mut director = director();
     let output = director
@@ -250,7 +250,7 @@ fn stage_director_tracks_preload_and_layer_authority_in_snapshot_state() {
     assert!(director.state().entities.is_empty());
 }
 
-#[astra_headless_test::test]
+#[test]
 fn stage_director_can_clear_an_empty_video_layer() {
     let mut director = director();
     configure(&mut director);
@@ -274,7 +274,7 @@ fn stage_director_can_clear_an_empty_video_layer() {
         .unwrap();
 }
 
-#[astra_headless_test::test]
+#[test]
 fn stage_director_resizes_transactionally_without_losing_live_state() {
     let mut director = director();
     configure(&mut director);
@@ -302,7 +302,7 @@ fn stage_director_resizes_transactionally_without_losing_live_state() {
     assert_eq!(director.state(), &stable);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn stage_director_timeline_snapshot_restore_matches_uninterrupted_run() {
     let manifest = VnPresentationProviderManifest::standard();
     let mut uninterrupted = ProductStageDirector::new(
@@ -359,7 +359,7 @@ fn stage_director_timeline_snapshot_restore_matches_uninterrupted_run() {
     )));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn stage_director_rejects_invalid_tick_and_timeline_without_mutation() {
     let mut director = director();
     configure(&mut director);
@@ -401,7 +401,7 @@ fn stage_director_rejects_invalid_tick_and_timeline_without_mutation() {
     assert_eq!(director.state(), &initial);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn audio_bus_enabled_state_is_typed_and_snapshot_stable() {
     let manifest = VnPresentationProviderManifest::standard();
     let mut director = ProductStageDirector::new(

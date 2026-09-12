@@ -143,7 +143,7 @@ impl VnUiSessionState {
 mod tests {
     use super::*;
 
-    #[astra_headless_test::test]
+    #[test]
     fn session_state_application_is_atomic() {
         let mut state = VnUiSessionState::default();
         let effects = vec![

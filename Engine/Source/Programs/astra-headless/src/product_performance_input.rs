@@ -188,7 +188,7 @@ mod tests {
     use super::*;
     use astra_headless_protocol::{InputMessage, JsonlReader};
 
-    #[astra_headless_test::test]
+    #[test]
     fn generates_two_physical_frames_per_authoritative_tick() {
         let temp = tempfile::tempdir().unwrap();
         let prefix = temp.path().join("prefix.jsonl");
@@ -224,7 +224,7 @@ mod tests {
         assert!(matches!(messages[5].event, PhysicalInput::Shutdown));
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn clips_at_a_verified_wait_before_appending_the_stress_frames() {
         let temp = tempfile::tempdir().unwrap();
         let prefix = temp.path().join("prefix.jsonl");

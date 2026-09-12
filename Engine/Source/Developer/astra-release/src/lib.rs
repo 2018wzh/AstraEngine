@@ -814,7 +814,7 @@ mod headless_preflight_tests {
         }
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn formal_preflight_requires_complete_identity_continuity() {
         let valid = evidence();
         let package_hash = valid.run_report.package_hash.clone();

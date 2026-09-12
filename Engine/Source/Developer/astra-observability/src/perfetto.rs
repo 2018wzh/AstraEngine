@@ -456,7 +456,7 @@ fn safe_name(value: &str) -> bool {
 mod tests {
     use super::*;
 
-    #[astra_headless_test::test]
+    #[test]
     fn streams_importable_trace_without_retaining_events() {
         let directory = tempfile::tempdir().unwrap();
         let output = directory.path().join("trace.json");
@@ -501,7 +501,7 @@ mod tests {
         }
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn rejects_timestamp_regression_and_removes_partial_trace() {
         let directory = tempfile::tempdir().unwrap();
         let output = directory.path().join("trace.json");

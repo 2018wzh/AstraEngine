@@ -9,7 +9,7 @@ fn hash() -> String {
     format!("sha256:{}", "b".repeat(64))
 }
 
-#[astra_headless_test::test]
+#[test]
 fn android_bundle_without_same_run_e3_is_blocking() {
     let manifest = AndroidBundleManifest {
         schema: ANDROID_BUNDLE_MANIFEST_SCHEMA.to_string(),

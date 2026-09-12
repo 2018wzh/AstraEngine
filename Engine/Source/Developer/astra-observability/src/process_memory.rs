@@ -211,7 +211,7 @@ mod tests {
     use super::*;
 
     #[cfg(any(windows, target_os = "linux"))]
-    #[astra_headless_test::test]
+    #[test]
     fn samples_nonzero_working_set_and_private_bytes() {
         let sample = sample_process_memory().unwrap();
         assert!(sample.working_set_bytes > 0);
@@ -219,7 +219,7 @@ mod tests {
     }
 
     #[cfg(any(windows, target_os = "linux"))]
-    #[astra_headless_test::test]
+    #[test]
     fn samples_nonzero_memory_by_process_id() {
         let sample = sample_process_memory_by_pid(std::process::id()).unwrap();
         assert!(sample.working_set_bytes > 0);
@@ -227,7 +227,7 @@ mod tests {
     }
 
     #[cfg(any(windows, target_os = "linux"))]
-    #[astra_headless_test::test]
+    #[test]
     fn samples_process_cpu_time_by_process_id() {
         let before = sample_process_cpu_time_us_by_pid(std::process::id()).unwrap();
         let mut accumulator = 0_u64;

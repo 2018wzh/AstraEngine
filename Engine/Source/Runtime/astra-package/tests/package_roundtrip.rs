@@ -13,7 +13,7 @@ struct FixturePayload {
     value: u32,
 }
 
-#[astra_headless_test::test]
+#[test]
 fn container_v2_streaming_reader_requires_external_content_root() {
     let blob = AstraContainerBuilder::new(ContainerKind::Package)
         .add_section(SectionPayload::raw(
@@ -45,7 +45,7 @@ fn container_v2_streaming_reader_requires_external_content_root() {
         .contains("ASTRA_CONTAINER_V1_MIGRATION_REQUIRED"));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn storage_verified_reader_streams_audit_and_rejects_wrong_storage_identity() {
     let blob = AstraContainerBuilder::new(ContainerKind::Package)
         .add_section(SectionPayload::raw(
@@ -78,7 +78,7 @@ fn storage_verified_reader_streams_audit_and_rejects_wrong_storage_identity() {
     .contains("storage hash"));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn package_roundtrip_verifies_hash_bounds_and_schema_registry() {
     let payload = FixturePayload {
         name: "stage2".to_string(),
@@ -108,7 +108,7 @@ fn package_roundtrip_verifies_hash_bounds_and_schema_registry() {
     assert!(AstraContainerReader::new(&corrupted).is_err());
 }
 
-#[astra_headless_test::test]
+#[test]
 fn container_builder_rejects_duplicate_and_invalid_section_authority() {
     let section = || {
         SectionPayload::raw(
@@ -152,7 +152,7 @@ fn container_builder_rejects_duplicate_and_invalid_section_authority() {
         .is_err());
 }
 
-#[astra_headless_test::test]
+#[test]
 fn package_reader_rejects_cook_summary_that_does_not_cover_cooked_assets() {
     let mut request = PackageBuildRequest::fixture(
         "com.example.invalid-cook-summary",
@@ -172,7 +172,7 @@ fn package_reader_rejects_cook_summary_that_does_not_cover_cooked_assets() {
         .contains("cooked asset sections"));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn package_roundtrip_zstd_codec_roundtrips_and_encryption_descriptor_requires_provider() {
     let section = SectionPayload::new(
         "media.manifest",
@@ -242,7 +242,7 @@ impl astra_package::ContainerCryptoProvider for XorCryptoProvider {
     }
 }
 
-#[astra_headless_test::test]
+#[test]
 fn package_roundtrip_builder_writes_required_runtime_sections() {
     let request = PackageBuildRequest::fixture(
         "com.example.nativevn",
@@ -299,7 +299,7 @@ fn package_roundtrip_builder_writes_required_runtime_sections() {
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn package_builder_rejects_legacy_or_tampered_provider_authority() {
     let mut legacy = PackageBuildRequest::fixture("com.example.game", "desktop-release", vec![]);
     let mut legacy_policy: serde_json::Value =

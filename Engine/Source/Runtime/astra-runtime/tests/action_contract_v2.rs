@@ -86,7 +86,7 @@ impl RuntimeAction for UndeclaredWriteAction {
     }
 }
 
-#[astra_headless_test::test]
+#[test]
 fn action_registration_rejects_invalid_parallel_pure_access() {
     let mut world = RuntimeWorld::create(RuntimeConfig::default(), Default::default()).unwrap();
     let error = world
@@ -97,7 +97,7 @@ fn action_registration_rejects_invalid_parallel_pure_access() {
         .contains("ASTRA_RUNTIME_ACTION_ACCESS_INVALID"));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn action_execution_rolls_back_when_stable_id_reservation_is_exceeded() {
     let mut world = RuntimeWorld::create(RuntimeConfig::default(), Default::default()).unwrap();
     world
@@ -163,7 +163,7 @@ fn action_execution_rolls_back_when_stable_id_reservation_is_exceeded() {
     assert!(!snapshot.completed);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn action_execution_rolls_back_undeclared_access() {
     let mut world = RuntimeWorld::create(RuntimeConfig::default(), Default::default()).unwrap();
     world

@@ -22,7 +22,7 @@ fn open_font_fixture(file: &str) -> Vec<u8> {
     std::fs::read(path).unwrap()
 }
 
-#[astra_headless_test::test]
+#[test]
 fn frame_resource_journal_is_incremental_shared_and_transactional() {
     let provider = provider();
     let layout = provider.layout(&request("shared frame glyphs")).unwrap();
@@ -135,7 +135,7 @@ fn frame_resource_journal_is_incremental_shared_and_transactional() {
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn retained_glyph_cache_reuses_resources_and_evicts_under_pressure() {
     let provider = provider();
     let layout = provider
@@ -312,7 +312,7 @@ fn provider() -> CosmicTextLayoutProvider {
     .unwrap()
 }
 
-#[astra_headless_test::test]
+#[test]
 fn text_layout_single_flight_and_worker_pool_are_bounded_and_parallel() {
     let provider = Arc::new(provider());
     let barrier = Arc::new(Barrier::new(8));
@@ -366,7 +366,7 @@ fn text_layout_single_flight_and_worker_pool_are_bounded_and_parallel() {
     }
 }
 
-#[astra_headless_test::test]
+#[test]
 fn overlapping_cjk_fallback_honors_the_explicit_family_order() {
     let jp_bytes =
         include_bytes!("../../../../../Examples/NativeVN/Assets/Fonts/NotoSansJP-Variable.ttf")
@@ -488,7 +488,7 @@ fn replay_binding(provider: &CosmicTextLayoutProvider) -> TextLayoutBindingIdent
     }
 }
 
-#[astra_headless_test::test]
+#[test]
 fn shaped_clusters_fonts_ruby_voice_and_glyph_bitmaps_reach_renderer() {
     let provider = provider();
     let mut request = request("AV cafe\u{301} office");
@@ -584,7 +584,7 @@ fn shaped_clusters_fonts_ruby_voice_and_glyph_bitmaps_reach_renderer() {
     assert_eq!(stats.hits, 1);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn measurement_reuses_the_authoritative_layout_cache_without_glyph_clone_contract() {
     let provider = provider();
     let request = request("measure this line");
@@ -602,7 +602,7 @@ fn measurement_reuses_the_authoritative_layout_cache_without_glyph_clone_contrac
     assert_eq!(stats_after_layout.hits, 1);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn shared_layout_reuses_the_authoritative_cached_allocation() {
     let provider = provider();
     let request = request("share this shaped line");
@@ -614,7 +614,7 @@ fn shared_layout_reuses_the_authoritative_cached_allocation() {
     assert_eq!(provider.cache_stats().unwrap().entries, 1);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn validation_layouts_can_be_released_before_runtime_rendering() {
     let provider = provider();
     let request = request("cache clear validation");
@@ -636,7 +636,7 @@ fn validation_layouts_can_be_released_before_runtime_rendering() {
     assert_eq!(repopulated.misses, 1);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn licensed_multiscript_fallback_shapes_cjk_arabic_and_emoji_clusters() {
     let provider = CosmicTextLayoutProvider::new(
         FontBindingContext {
@@ -721,7 +721,7 @@ fn licensed_multiscript_fallback_shapes_cjk_arabic_and_emoji_clusters() {
     assert_eq!(layout.revision, provider.layout(&request).unwrap().revision);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn cjk_vertical_layout_places_columns_ruby_rotated_glyphs_and_tate_chu_yoko() {
     let provider = CosmicTextLayoutProvider::new(
         FontBindingContext {
@@ -791,7 +791,7 @@ fn cjk_vertical_layout_places_columns_ruby_rotated_glyphs_and_tate_chu_yoko() {
     }
 }
 
-#[astra_headless_test::test]
+#[test]
 fn open_font_fixture_manifest_is_revision_hash_and_license_bound() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../../Fixtures/PublicDomainFonts");
@@ -820,7 +820,7 @@ fn open_font_fixture_manifest_is_revision_hash_and_license_bound() {
     }
 }
 
-#[astra_headless_test::test]
+#[test]
 fn wrap_ellipsis_and_source_clusters_are_semantic() {
     let provider = provider();
     let mut request = request("A very long production text line with multiple words and clusters");
@@ -845,7 +845,7 @@ fn wrap_ellipsis_and_source_clusters_are_semantic() {
         .all(|glyph| glyph.source.end <= request.runs[0].text.len()));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn bidi_empty_input_and_clip_policy_are_explicit() {
     let provider = provider();
     let empty = provider.layout(&request("")).unwrap();
@@ -880,7 +880,7 @@ fn bidi_empty_input_and_clip_policy_are_explicit() {
         .any(|command| matches!(command, SceneCommand::PopClip)));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn font_binding_hash_direction_and_fallback_fail_fast() {
     let bytes = include_bytes!("../../../../../Examples/NativeVN/Assets/Fonts/Poppins-Regular.ttf")
         .to_vec();
@@ -917,7 +917,7 @@ fn font_binding_hash_direction_and_fallback_fail_fast() {
         .contains("ASTRA_TEXT_DIRECTION"));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn font_replacement_is_transactional_and_invalidates_layout_cache() {
     let provider = provider();
     let request = request("cache identity");
@@ -955,7 +955,7 @@ fn font_replacement_is_transactional_and_invalidates_layout_cache() {
     assert_eq!(provider.cache_stats().unwrap(), before_failure);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn verified_package_vfs_is_the_font_database_authority() {
     let font_bytes =
         include_bytes!("../../../../../Examples/NativeVN/Assets/Fonts/Poppins-Regular.ttf")
@@ -1060,7 +1060,7 @@ fn verified_package_vfs_is_the_font_database_authority() {
         .contains("ASTRA_TEXT_PACKAGE_MANIFEST_IDENTITY"));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn multiscript_fallback_database_is_loaded_from_verified_package_sections() {
     let mut fonts = multiscript_fonts();
     for font in &mut fonts {
@@ -1171,7 +1171,7 @@ fn multiscript_fallback_database_is_loaded_from_verified_package_sections() {
     assert_eq!(layout.revision, provider.layout(&mixed).unwrap().revision);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn layout_snapshot_restore_and_provider_free_replay_are_deterministic() {
     let provider = provider();
     let binding = replay_binding(&provider);
@@ -1235,7 +1235,7 @@ fn layout_snapshot_restore_and_provider_free_replay_are_deterministic() {
         .is_err());
 }
 
-#[astra_headless_test::test]
+#[test]
 fn layout_replay_blocks_request_provider_and_payload_drift_without_advancing() {
     let provider = provider();
     let binding = replay_binding(&provider);
@@ -1292,7 +1292,7 @@ fn layout_replay_blocks_request_provider_and_payload_drift_without_advancing() {
     assert!(error.to_string().contains("ASTRA_TEXT_REPLAY_RECORD"));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn layout_replay_enforces_record_and_snapshot_budgets_transactionally() {
     let provider = provider();
     let binding = replay_binding(&provider);

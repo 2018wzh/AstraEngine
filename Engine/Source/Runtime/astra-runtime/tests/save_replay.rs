@@ -8,7 +8,7 @@ use astra_runtime::{
     RuntimeWorld, SaveBlob, SaveRequest, TickIngress, TickInput, TickRequest,
 };
 
-#[astra_headless_test::test]
+#[test]
 fn save_load_rejects_previous_runtime_world_layout_without_compatibility() {
     let world = RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
     let version = SchemaVersion::new(1, 0, 0);
@@ -46,7 +46,7 @@ fn save_load_rejects_previous_runtime_world_layout_without_compatibility() {
         .contains("ASTRA_RUNTIME_SAVE_WORLD_VERSION_UNSUPPORTED"));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn save_load_preserves_typed_world_and_stable_id_sequence() {
     let config = RuntimeConfig {
         seed: 23,
@@ -74,7 +74,7 @@ fn save_load_preserves_typed_world_and_stable_id_sequence() {
     assert_eq!(restored.create_actor("after-save", vec![]), expected);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn restored_world_requires_exactly_one_restore_continuation_tick() {
     let config = RuntimeConfig {
         seed: 17,
@@ -118,7 +118,7 @@ fn restored_world_requires_exactly_one_restore_continuation_tick() {
         .is_err());
 }
 
-#[astra_headless_test::test]
+#[test]
 fn save_load_rejects_footer_hash_mismatch() {
     let mut world =
         RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
@@ -131,7 +131,7 @@ fn save_load_rejects_footer_hash_mismatch() {
     assert!(loaded.load(save).is_err());
 }
 
-#[astra_headless_test::test]
+#[test]
 fn replay_consumes_typed_player_input_with_explicit_evidence_checkpoint() {
     let config = RuntimeConfig {
         seed: 31,

@@ -136,13 +136,13 @@ fn run_world(
     (report, state_hash)
 }
 
-#[astra_headless_test::test]
+#[test]
 fn independent_machine_actions_execute_in_the_same_parallel_wave() {
     let (report, _) = run_world(2, Some(Arc::new(Barrier::new(2))));
     assert!(report.diagnostics.is_empty());
 }
 
-#[astra_headless_test::test]
+#[test]
 fn worker_counts_preserve_authoritative_state() {
     let (_, baseline) = run_world(1, None);
     for worker_count in [2, 4, 8] {

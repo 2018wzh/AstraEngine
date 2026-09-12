@@ -7,7 +7,7 @@ use astra_player_core::{
     PlayerHostCommandResult, PlayerHostResourceId,
 };
 
-#[astra_headless_test::tokio_test]
+#[tokio::test]
 async fn platform_sink_keeps_native_save_handles_out_of_results() {
     let profile = PlatformHostProfile::windows_release("nativevn-game", "com.example.game");
     let (client, mut backend, _events) = host_channel(profile, 8, 8).unwrap();
@@ -57,7 +57,7 @@ async fn platform_sink_keeps_native_save_handles_out_of_results() {
     backend_task.await.unwrap();
 }
 
-#[astra_headless_test::tokio_test]
+#[tokio::test]
 async fn platform_sink_lists_sorted_save_slots_without_native_storage_details() {
     let profile = PlatformHostProfile::windows_release("nativevn-game", "com.example.game");
     let (client, mut backend, _events) = host_channel(profile, 8, 8).unwrap();
@@ -81,7 +81,7 @@ async fn platform_sink_lists_sorted_save_slots_without_native_storage_details() 
     backend_task.await.unwrap();
 }
 
-#[astra_headless_test::tokio_test]
+#[tokio::test]
 async fn platform_sink_forwards_renderer_ready_glyph_commands_without_cpu_frames() {
     let profile = PlatformHostProfile::windows_release("nativevn-game", "com.example.game");
     let (client, mut backend, _events) = host_channel(profile, 8, 8).unwrap();

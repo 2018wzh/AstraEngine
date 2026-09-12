@@ -5,7 +5,7 @@ use astra_media::{
 };
 use serde_json::Value;
 
-#[astra_headless_test::test]
+#[test]
 fn decode_provider_selection_is_profile_bound_not_load_order() {
     let mut registry = DecodeProviderRegistry::default();
     assert!(ImageDecodeProvider
@@ -58,7 +58,7 @@ fn decode_provider_selection_is_profile_bound_not_load_order() {
         .is_err());
 }
 
-#[astra_headless_test::test]
+#[test]
 fn symphonia_decode_provider_decodes_bounded_wav_to_cpu_pcm() {
     let provider = SymphoniaAudioDecodeProvider;
     let result = provider
@@ -84,7 +84,7 @@ fn symphonia_decode_provider_decodes_bounded_wav_to_cpu_pcm() {
     }
 }
 
-#[astra_headless_test::test]
+#[test]
 fn symphonia_stream_decoder_emits_bounded_chunks_without_whole_file_pcm() {
     let source = tiny_wav().into();
     let mut decoder = open_symphonia_audio_stream("wav", source, 8).unwrap();
@@ -99,7 +99,7 @@ fn symphonia_stream_decoder_emits_bounded_chunks_without_whole_file_pcm() {
     assert!(decoder.next_chunk().is_err());
 }
 
-#[astra_headless_test::test]
+#[test]
 fn registry_executes_only_the_explicit_provider_and_validates_output_identity() {
     let mut registry = DecodeProviderRegistry::default();
     registry
@@ -120,7 +120,7 @@ fn registry_executes_only_the_explicit_provider_and_validates_output_identity() 
     assert!(matches!(result.output, DecodeOutput::AudioPcmI16 { .. }));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn public_domain_media_manifest_matches_checked_in_assets() {
     let manifest = public_media_manifest();
     assert_eq!(manifest["license"], "CC0-1.0");
@@ -160,7 +160,7 @@ fn public_domain_media_manifest_matches_checked_in_assets() {
 }
 
 #[cfg(not(feature = "ffmpeg-vcpkg"))]
-#[astra_headless_test::test]
+#[test]
 fn ffmpeg_probe_is_a_structured_blocker_when_feature_is_absent() {
     assert!(!astra_media::ffmpeg_compiled());
     match astra_media::probe_ffmpeg_provider().unwrap_err() {
@@ -171,7 +171,7 @@ fn ffmpeg_probe_is_a_structured_blocker_when_feature_is_absent() {
     }
 }
 
-#[astra_headless_test::test]
+#[test]
 fn symphonia_decode_provider_decodes_public_mp3_to_cpu_pcm() {
     let provider = SymphoniaAudioDecodeProvider;
     let result = provider
@@ -193,7 +193,7 @@ fn symphonia_decode_provider_decodes_public_mp3_to_cpu_pcm() {
 }
 
 #[cfg(windows)]
-#[astra_headless_test::test]
+#[test]
 fn windows_wmf_decode_provider_decodes_public_mp3_to_cpu_pcm() {
     let provider = astra_media::WindowsMediaFoundationDecodeProvider::probe().unwrap();
     let result = provider
@@ -215,7 +215,7 @@ fn windows_wmf_decode_provider_decodes_public_mp3_to_cpu_pcm() {
 }
 
 #[cfg(windows)]
-#[astra_headless_test::test]
+#[test]
 fn windows_wmf_decode_provider_decodes_public_mp4_first_frame_to_bgra() {
     let provider = astra_media::WindowsMediaFoundationDecodeProvider::probe().unwrap();
     let result = provider
@@ -238,7 +238,7 @@ fn windows_wmf_decode_provider_decodes_public_mp4_first_frame_to_bgra() {
 }
 
 #[cfg(windows)]
-#[astra_headless_test::test]
+#[test]
 fn windows_wmf_full_stream_decoder_enforces_frame_and_byte_budgets() {
     let bytes = fixture_bytes("flower.mp4");
     let frame_limited =
@@ -260,7 +260,7 @@ fn assert_wmf_diagnostic(error: astra_media::MediaError) {
 }
 
 #[cfg(windows)]
-#[astra_headless_test::test]
+#[test]
 fn windows_wmf_incremental_stream_releases_frames_and_enforces_running_budget() {
     let bytes = fixture_bytes("flower.mp4");
     let mut decoder =
@@ -284,7 +284,7 @@ fn windows_wmf_incremental_stream_releases_frames_and_enforces_running_budget() 
 }
 
 #[cfg(windows)]
-#[astra_headless_test::test]
+#[test]
 fn windows_wmf_incremental_audio_releases_ordered_bounded_pcm_chunks() {
     let bytes = fixture_bytes("flower.mp4");
     let mut decoder = astra_media::open_windows_audio_stream(&bytes, 1_000_000).unwrap();
@@ -307,7 +307,7 @@ fn windows_wmf_incremental_audio_releases_ordered_bounded_pcm_chunks() {
 }
 
 #[cfg(windows)]
-#[astra_headless_test::test]
+#[test]
 fn windows_wmf_decode_provider_video_without_transform_reports_blocking_diagnostic() {
     let provider = astra_media::WindowsMediaFoundationDecodeProvider::probe().unwrap();
     let err = provider
@@ -330,7 +330,7 @@ fn windows_wmf_decode_provider_video_without_transform_reports_blocking_diagnost
 }
 
 #[cfg(target_arch = "wasm32")]
-#[astra_headless_test::test]
+#[test]
 fn webcodecs_decode_provider_returns_browser_surface_token() {
     let provider = astra_media::WebCodecsDecodeProvider;
     let capability = provider.capability();
@@ -393,7 +393,7 @@ fn fixture_bytes(file: &str) -> Vec<u8> {
 }
 
 #[cfg(feature = "ffmpeg-vcpkg")]
-#[astra_headless_test::test]
+#[test]
 fn ffmpeg_decode_provider_decodes_real_audio_and_video() {
     let unavailable = astra_media::FfmpegDecodeProvider::new_unprobed()
         .decode(&DecodeRequest {

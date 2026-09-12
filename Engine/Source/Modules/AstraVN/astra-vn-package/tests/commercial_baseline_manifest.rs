@@ -1,6 +1,6 @@
 use astra_vn_package::{compile_astra_project, AstraSource, VnCommercialBaselineManifest};
 
-#[astra_headless_test::test]
+#[test]
 fn commercial_baseline_manifest_detects_required_vn_features() {
     let compiled = compile_astra_project(
         [AstraSource::story("baseline.astra", baseline_story())],
@@ -16,7 +16,7 @@ fn commercial_baseline_manifest_detects_required_vn_features() {
     assert!(manifest.features_present.contains("movie_wait"));
 }
 
-#[astra_headless_test::test]
+#[test]
 fn commercial_baseline_manifest_blocks_incomplete_fixture() {
     let compiled = compile_astra_project(
         [AstraSource::story(

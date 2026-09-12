@@ -2644,7 +2644,7 @@ mod evidence_tests {
         astra_core::Hash256::from_sha256(value).to_string()
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn review_bundle_and_preflight_link_require_complete_matching_evidence() {
         let temp = tempfile::tempdir().unwrap();
         let frame = temp.path().join("frame.png");

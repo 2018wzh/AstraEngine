@@ -5,7 +5,7 @@ use std::{
 
 use astra_worker_budget::WorkerBudgetBroker;
 
-#[astra_headless_test::test]
+#[test]
 fn worker_budget_never_exceeds_the_configured_limit() {
     let broker = Arc::new(WorkerBudgetBroker::new(2).unwrap());
     let entered = Arc::new(Barrier::new(3));
@@ -35,13 +35,13 @@ fn worker_budget_never_exceeds_the_configured_limit() {
     assert_eq!(broker.peak_acquired(), 2);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn worker_budget_rejects_zero_and_over_global_limit() {
     assert!(WorkerBudgetBroker::new(0).is_err());
     assert!(WorkerBudgetBroker::new(9).is_err());
 }
 
-#[astra_headless_test::test]
+#[test]
 fn nested_work_reuses_the_callers_scoped_token() {
     let broker = WorkerBudgetBroker::new(1).unwrap();
     broker
@@ -56,7 +56,7 @@ fn nested_work_reuses_the_callers_scoped_token() {
     assert_eq!(broker.acquired(), 0);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn worker_budget_serves_queued_workers_in_fifo_order() {
     let broker = Arc::new(WorkerBudgetBroker::new(1).unwrap());
     let held = broker.blocking_acquire().unwrap();

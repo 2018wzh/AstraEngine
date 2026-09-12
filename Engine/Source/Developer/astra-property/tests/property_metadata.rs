@@ -16,7 +16,7 @@ where
     value: T,
 }
 
-#[astra_headless_test::test]
+#[test]
 fn property_metadata_is_stable_and_explicit() {
     let metadata = SpriteComponent::property_metadata();
     assert_eq!(metadata.type_name, "SpriteComponent");

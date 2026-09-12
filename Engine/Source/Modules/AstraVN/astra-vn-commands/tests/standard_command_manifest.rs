@@ -1,6 +1,6 @@
 use astra_vn_commands::{compile_astra_project, AstraSource, VnStandardCommandManifest};
 
-#[astra_headless_test::test]
+#[test]
 fn standard_command_manifest_validates_compiled_presentation_usage() {
     let compiled = compile_astra_project([AstraSource::story(
         "commands.astra",
@@ -21,7 +21,7 @@ state prologue #@id state.prologue
     assert_eq!(report.checked_usage_count, 2);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn compiler_blocks_missing_movie_fallback_before_manifest_generation() {
     let error = compile_astra_project([AstraSource::story(
         "commands.astra",
@@ -37,7 +37,7 @@ state prologue #@id state.prologue
     assert_eq!(error.code(), "ASTRA_VN_MOVIE_WAIT_CONTRACT");
 }
 
-#[astra_headless_test::test]
+#[test]
 fn compiler_blocks_unknown_command_before_manifest_generation() {
     let error = compile_astra_project(
         [AstraSource::story(
@@ -56,7 +56,7 @@ state prologue #@id state.prologue
     assert_eq!(error.code(), "ASTRA_VN_COMMAND_UNBOUND");
 }
 
-#[astra_headless_test::test]
+#[test]
 fn standard_command_manifest_blocks_unknown_audio_control_action() {
     let error = compile_astra_project(
         [AstraSource::story(

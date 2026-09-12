@@ -2,7 +2,7 @@ use astra_media::{
     CpuRendererProvider, DrawCommand, RenderTargetFormat, Renderer2DProvider, RendererCreateRequest,
 };
 
-#[astra_headless_test::test]
+#[test]
 fn headless_capture_hash_is_repeatable_and_descriptor_is_gateable() {
     let provider = CpuRendererProvider;
     let descriptor = provider.descriptor();

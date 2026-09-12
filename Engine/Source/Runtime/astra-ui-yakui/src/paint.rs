@@ -430,7 +430,7 @@ mod tests {
     use yakui_core::geometry::UVec2;
     use yakui_core::paint::{Texture, TextureFormat};
 
-    #[astra_headless_test::test]
+    #[test]
     fn glyph_mask_upload_becomes_straight_alpha_scene_texture() {
         let upload = UiTextureUpload {
             id: UiTextureId(1),
@@ -447,7 +447,7 @@ mod tests {
         );
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn premultiplied_ui_upload_is_unpremultiplied_at_scene_boundary() {
         let upload = UiTextureUpload {
             id: UiTextureId(2),
@@ -464,7 +464,7 @@ mod tests {
         );
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn texture_resource_identity_is_stable_across_ui_render_generations() {
         let first = texture_resource_id_for_session("vn.ui.demo:0", UiTextureId(7), 3);
         let repeated = texture_resource_id_for_session("vn.ui.demo:0", UiTextureId(7), 3);
@@ -474,7 +474,7 @@ mod tests {
         assert_ne!(first, updated);
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn recreated_managed_texture_uses_explicit_lifecycle_identity() {
         let mut converter = YakuiPaintConverter::new();
         let texture = Texture::new(TextureFormat::R8, UVec2::new(2, 1), vec![42, 84]);
@@ -512,7 +512,7 @@ mod tests {
         assert_eq!(replacement.len(), 1);
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn changed_managed_texture_uploads_new_content_and_releases_old_resource() {
         let mut converter = YakuiPaintConverter::new();
         let first_texture = Texture::new(TextureFormat::R8, UVec2::new(1, 1), vec![42]);
@@ -545,7 +545,7 @@ mod tests {
         assert_eq!(release.id, old);
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn full_resync_releases_live_resources_before_reusing_their_identity() {
         let mut converter = YakuiPaintConverter::new();
         let texture = Texture::new(TextureFormat::R8, UVec2::new(1, 1), vec![42]);

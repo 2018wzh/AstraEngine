@@ -3,7 +3,7 @@ use astra_vn::{
     VnRunConfig, VnRuntime,
 };
 
-#[astra_headless_test::test]
+#[test]
 fn vn_dylib_facade_reexports_runtime_story_and_presentation_api() {
     let compiled = compile_astra_project(
         [AstraSource::story(

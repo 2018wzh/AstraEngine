@@ -85,7 +85,7 @@ fn decode_plan() -> PlayerDecodeLifecyclePlan {
     }
 }
 
-#[astra_headless_test::tokio_test]
+#[tokio::test]
 async fn decode_lifecycle_closes_after_submit_failure() {
     let mut executor = PlayerHostCommandExecutor::new(LifecycleSink {
         fail_operation: Some("decode.submit"),
@@ -104,7 +104,7 @@ async fn decode_lifecycle_closes_after_submit_failure() {
     );
 }
 
-#[astra_headless_test::tokio_test]
+#[tokio::test]
 async fn decode_lifecycle_returns_validated_buffer_after_close() {
     let mut executor = PlayerHostCommandExecutor::new(LifecycleSink {
         fail_operation: None,

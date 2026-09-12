@@ -2138,7 +2138,7 @@ pub fn frame_hash(width: u32, height: u32, format: RenderTargetFormat, bytes: &[
 mod tests {
     use super::*;
 
-    #[astra_headless_test::test]
+    #[test]
     fn owned_pixel_buffer_moves_the_pixel_allocation_without_copying() {
         let pixels = vec![0x11; 64 * 64 * 4];
         let pointer = pixels.as_ptr();
@@ -2149,7 +2149,7 @@ mod tests {
         assert!(!buffer.is_empty());
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn texture_frame_preserves_the_buffer_allocation() {
         let pixels = vec![0x22; 8 * 4 * 4];
         let pointer = pixels.as_ptr();
@@ -2158,7 +2158,7 @@ mod tests {
         assert_eq!(frame.rgba8.as_slice().as_ptr(), pointer);
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn mesh_texture_sampling_preserves_channels_and_filter_semantics() {
         let frame =
             TextureFrame::from_vec(2, 1, vec![100, 50, 25, 128, 200, 100, 50, 255]).unwrap();
@@ -2173,7 +2173,7 @@ mod tests {
         );
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn retained_validation_tracks_owned_texture_without_pixel_mirror() {
         let mut renderer = CpuRendererProvider
             .create(RendererCreateRequest {

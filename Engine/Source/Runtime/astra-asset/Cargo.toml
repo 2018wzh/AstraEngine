@@ -14,9 +14,5 @@ thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-astra-headless-test = { path = "../../Developer/astra-headless-test" }
 serde_json.workspace = true
 tempfile.workspace = true
-
-[lib]
-doctest = false

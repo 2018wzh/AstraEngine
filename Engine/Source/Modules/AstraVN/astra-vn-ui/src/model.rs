@@ -838,7 +838,7 @@ mod tests {
     use astra_ui_core::UiValue;
     use std::collections::BTreeMap;
 
-    #[astra_headless_test::test]
+    #[test]
     fn config_values_are_schema_checked_instead_of_silently_clamped() {
         let values = BTreeMap::from([
             ("volume".to_owned(), "101".to_owned()),
@@ -852,14 +852,14 @@ mod tests {
         assert_eq!(boolean.code(), "ASTRA_VN_UI_CONFIG_BOOL");
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn missing_config_values_use_declared_schema_defaults() {
         let values = BTreeMap::new();
         assert_eq!(config_integer(&values, "volume", 50, 0, 100).unwrap(), 50);
         assert!(config_bool(&values, "contrast", true).unwrap());
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn speaker_ids_are_resolved_through_the_localization_namespace() {
         assert_eq!(
             speaker_localization_key(Some("tsui.speaker.fixture")),
@@ -868,7 +868,7 @@ mod tests {
         assert_eq!(speaker_localization_key(None), None);
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn system_page_model_exposes_a_typed_reconstructible_underlay() {
         let value = SystemPageViewModel {
             page: VnUiPageModel::Title { can_continue: true },

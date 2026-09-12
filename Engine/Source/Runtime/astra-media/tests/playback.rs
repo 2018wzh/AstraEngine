@@ -28,7 +28,7 @@ fn audio(generation: u64, sequence: u64, pts_us: u64) -> AudioFramePacket {
     }
 }
 
-#[astra_headless_test::test]
+#[test]
 fn playback_session_schedules_audio_master_video_pause_seek_and_eos() {
     let mut session = MediaPlaybackSession::new(MediaPlaybackConfig {
         duration_us: 120_000,
@@ -90,7 +90,7 @@ fn playback_session_schedules_audio_master_video_pause_seek_and_eos() {
     assert_eq!(session.state, MediaPlaybackState::Ended);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn playback_session_rejects_queue_clock_and_sync_errors_transactionally() {
     let mut session = MediaPlaybackSession::new(MediaPlaybackConfig {
         duration_us: 1_000_000,
@@ -118,7 +118,7 @@ fn playback_session_rejects_queue_clock_and_sync_errors_transactionally() {
     assert_eq!(session.deterministic_hash().unwrap(), before_tick);
 }
 
-#[astra_headless_test::test]
+#[test]
 fn playback_drop_policy_is_explicit_and_cancel_releases_queues() {
     let mut session = MediaPlaybackSession::new(MediaPlaybackConfig {
         duration_us: 1_000_000,
@@ -146,7 +146,7 @@ fn playback_drop_policy_is_explicit_and_cancel_releases_queues() {
     assert!(session.cancel().is_err());
 }
 
-#[astra_headless_test::test]
+#[test]
 fn playback_snapshot_restore_continues_identically_and_corruption_blocks() {
     let mut uninterrupted = MediaPlaybackSession::new(MediaPlaybackConfig {
         duration_us: 120_000,

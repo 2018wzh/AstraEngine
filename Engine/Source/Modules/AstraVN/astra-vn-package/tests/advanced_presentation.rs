@@ -19,7 +19,7 @@ state prologue #@id state.prologue
     text key:hello speaker:hero #@id line.hello
 "#;
 
-#[astra_headless_test::test]
+#[test]
 fn advanced_presentation_manifest_requires_real_evidence() {
     let compiled = compile_astra_project(
         [AstraSource::story("advanced.astra", ADVANCED_STORY)],
@@ -43,7 +43,7 @@ fn advanced_presentation_manifest_requires_real_evidence() {
     }
 }
 
-#[astra_headless_test::test]
+#[test]
 fn advanced_presentation_manifest_blocks_thin_stage() {
     let compiled = compile_astra_project(
         [AstraSource::story(

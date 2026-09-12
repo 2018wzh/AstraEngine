@@ -9,7 +9,7 @@ use astra_runtime::{
 };
 use serde::{Deserialize, Serialize};
 
-#[astra_headless_test::test]
+#[test]
 fn action_context_exposes_transition_trigger_event() {
     let mut world = RuntimeWorld::create(RuntimeConfig::default(), Default::default()).unwrap();
     world
@@ -70,7 +70,7 @@ fn action_context_exposes_transition_trigger_event() {
     );
 }
 
-#[astra_headless_test::test]
+#[test]
 fn compiled_event_dispatch_preserves_original_event_order() {
     let mut world = RuntimeWorld::create(RuntimeConfig::default(), Default::default()).unwrap();
     world
@@ -179,7 +179,7 @@ struct CounterComponent {
     value: u32,
 }
 
-#[astra_headless_test::test]
+#[test]
 fn action_context_commits_typed_component_mutation() {
     let mut world = RuntimeWorld::create(RuntimeConfig::default(), Default::default()).unwrap();
     let owner = world.create_actor("runtime.owner", vec![]);

@@ -724,7 +724,7 @@ mod tests {
         CachedAsset::Media(bytes.to_vec().into())
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn decoded_cache_evicts_least_recently_used_entry_within_bound() {
         let mut cache = AssetCache {
             entries: BTreeMap::new(),
@@ -743,7 +743,7 @@ mod tests {
         assert_eq!(cache.bytes, 6);
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn decoded_cache_rejects_single_entry_over_budget() {
         let mut cache = AssetCache {
             entries: BTreeMap::new(),
@@ -757,7 +757,7 @@ mod tests {
         assert!(cache.entries.is_empty());
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn prewarm_insert_never_evicts_an_authored_prefix() {
         let mut cache = AssetCache {
             entries: BTreeMap::new(),
@@ -777,7 +777,7 @@ mod tests {
         assert_eq!(cache.bytes, 4);
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn background_admission_accounts_for_replacement_without_evicting_neighbors() {
         let mut cache = AssetCache {
             entries: BTreeMap::new(),
@@ -799,7 +799,7 @@ mod tests {
         assert!(cache.entries.contains_key("b"));
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn decoded_cache_never_evicts_the_explicit_working_set() {
         let mut cache = AssetCache {
             entries: BTreeMap::new(),

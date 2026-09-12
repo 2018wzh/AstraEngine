@@ -25,7 +25,7 @@ impl ProductPerformanceObserver for TestPerformanceObserver {
     }
 }
 
-#[astra_headless_test::tokio_test]
+#[tokio::test]
 async fn real_native_vn_package_accepts_physical_input_and_produces_cpu_frame() {
     let package = astra_player_vn::headless_test_fixture::product_package(
         "story main #@id story.main\nstate start #@id state.start\n  scene room #@id scene.room\n    text key:line speaker:hero #@id line.one\n    choice key:choice.next #@id choice.next\n      option key:choice.end -> ending #@id choice.end\nstate ending #@id state.ending\n  scene room #@id scene.ending\n    text key:line.after speaker:hero #@id line.ending\n    system_page kind:backlog policy:astra.policy.standard #@id page.backlog\n",

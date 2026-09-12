@@ -183,7 +183,7 @@ mod tests {
         }
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn production_gate_computes_blocking_p95_without_hiding_stable_uploads() {
         let mut gate = UiPerformanceGate::new(UiPerformanceBudget::production());
         for _ in 0..29 {

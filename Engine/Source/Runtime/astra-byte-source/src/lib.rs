@@ -334,7 +334,7 @@ mod tests {
 
     use super::*;
 
-    #[astra_headless_test::test]
+    #[test]
     fn sparse_source_larger_than_512_mib_uses_bounded_ranges() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("large.bin");
@@ -359,7 +359,7 @@ mod tests {
         assert_eq!(result.bytes.as_slice(), b"tail");
     }
 
-    #[astra_headless_test::test]
+    #[test]
     fn range_limit_and_revision_are_fail_closed() {
         let source = MemoryByteSource::new(vec![7; 32]);
         let stat = source.stat().unwrap();

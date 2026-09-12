@@ -61,7 +61,7 @@ pub(crate) fn controller_state_value(
 mod tests {
     use super::*;
 
-    #[astra_headless_test::test]
+    #[test]
     fn animation_progress_uses_only_fixed_time() {
         let animation = ActiveUiAnimation {
             target_id: "root/button".into(),
