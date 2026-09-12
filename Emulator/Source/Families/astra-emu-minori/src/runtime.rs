@@ -529,7 +529,12 @@ impl MinoriVm {
         }
         self.state.fixed_tick = fixed_tick;
         let mut visited = BTreeSet::new();
+        let mut operations = 0u32;
         loop {
+            operations += 1;
+            if operations > 10_000 {
+                return Err(MinoriRuntimeError::NonYieldingCycle);
+            }
             let control_state = (
                 self.state.pc_line,
                 self.state.variables.clone(),

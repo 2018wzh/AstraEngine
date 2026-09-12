@@ -1,4 +1,8 @@
-//! Minori PAZ virtual filesystem and lossless script research parser.
+mod audio;
+mod provider;
+mod scene;
+mod session;
+mod storage;
 
 mod archive;
 mod error;
@@ -21,6 +25,11 @@ pub use text_renderer::MinoriTextRenderer;
 pub const MINORI_READER_ID: &str = "astra.emu.minori.paz.v1";
 pub const MINORI_DECRYPT_PROVIDER_ID: &str = "astra.emu.minori.paz.decrypt.v1";
 pub const MINORI_DECRYPT_DESCRIPTOR_SCHEMA: &str = "astra.emu.minori.paz.decrypt_descriptor.v1";
-pub const MINORI_FAMILY_OPTIONS_SCHEMA: &str = "astra.emu.minori.mount_options.v1";
-pub const MINORI_PRIVATE_PROFILE_SCHEMA: &str = "astra.emu.minori.private_profile.v2";
 pub const MINORI_SCRIPT_IR_SCHEMA: &str = "astra.emu.minori.script_ir.v2";
+
+pub use provider::{create_minori_provider, minori_descriptor, MinoriProvider};
+
+#[cfg(feature = "dynamic-plugin-export")]
+mod ffi;
+#[cfg(feature = "dynamic-plugin-export")]
+pub use ffi::astra_minori_family_root_module;

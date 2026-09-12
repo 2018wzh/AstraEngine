@@ -5,8 +5,8 @@ use astra_media_core::{
 };
 use astra_text::{
     CosmicTextLayoutProvider, FontBindingContext, LayoutConstraint, OverflowPolicy, PackagedFont,
-    TextDirection, TextLayoutConfig, TextLayoutProvider, TextLayoutRequest,
-    TextRenderResourceOwner, TextRun, UnicodeRange, WrapPolicy,
+    TextDirection, TextLayoutConfig, TextLayoutRequest, TextRenderResourceOwner, TextRun,
+    UnicodeRange, WrapPolicy,
 };
 
 const FONT_FAMILY: &str = "Noto Sans JP";
@@ -157,7 +157,7 @@ fn append_layout(
     region: Region,
 ) -> Result<(), String> {
     let layout = provider
-        .layout(&TextLayoutRequest {
+        .layout_shared(&TextLayoutRequest {
             key: layout_id.into(),
             runs: vec![TextRun {
                 text: text.into(),

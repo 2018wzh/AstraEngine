@@ -21,10 +21,11 @@ astra-text = { path = "../../../../Engine/Source/Runtime/astra-text" }
 astra-media-core = { path = "../../../../Engine/Source/Runtime/astra-media-core" }
 blowfish.workspace = true
 crc32fast = "1.5"
-directories.workspace = true
 encoding_rs.workspace = true
 flate2.workspace = true
 image.workspace = true
+kira.workspace = true
+symphonia.workspace = true
 lru.workspace = true
 postcard.workspace = true
 rc4.workspace = true
@@ -35,6 +36,4 @@ sha2.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 
-[dev-dependencies]
 tempfile.workspace = true
-
