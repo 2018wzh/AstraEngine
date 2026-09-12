@@ -10,7 +10,7 @@ use astra_engine::{
 
 #[test]
 fn dylib_facade_reexports_enginecore_public_api() {
-    let world = RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
+    let world = RuntimeWorld::create(RuntimeConfig::default()).unwrap();
     assert_eq!(world.snapshot().step, 0);
 
     let stable_id = StableId::nil();

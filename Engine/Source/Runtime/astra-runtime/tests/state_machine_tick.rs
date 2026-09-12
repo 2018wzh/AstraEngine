@@ -1,9 +1,9 @@
 use astra_core::StableId;
 use astra_runtime::{
     validate_state_machine, ActionInvocation, ActionRegistry, BlackboardValue, EventPayload,
-    EventSource, GuardExpr, PackageHandle, PresentationCommand, RuntimeConfig, RuntimeWorld,
-    SetBlackboardAction, StateDefinition, StateMachineDefinition, StateMachineValidationReport,
-    TickInput, TickIntegrityMode, TransitionDefinition,
+    EventSource, GuardExpr, PresentationCommand, RuntimeConfig, RuntimeWorld, SetBlackboardAction,
+    StateDefinition, StateMachineDefinition, StateMachineValidationReport, TickInput,
+    TickIntegrityMode, TransitionDefinition,
 };
 use std::collections::BTreeMap;
 
@@ -15,13 +15,10 @@ fn state_machine_tick_repeats_hash_for_same_seed_and_input() {
 }
 
 fn run_once() -> astra_runtime::TickReport {
-    let mut world = RuntimeWorld::create(
-        RuntimeConfig {
-            seed: 11,
-            required_slots: vec![],
-        },
-        PackageHandle::default(),
-    )
+    let mut world = RuntimeWorld::create(RuntimeConfig {
+        seed: 11,
+        required_slots: vec![],
+    })
     .unwrap();
     let actor = world.create_actor("system", vec!["runtime".to_string()]);
     let start = StableId::deterministic_v7(1, 1, 11);
@@ -76,13 +73,10 @@ fn run_once() -> astra_runtime::TickReport {
 
 #[test]
 fn state_machine_presentation_action_supports_generic_commands() {
-    let mut world = RuntimeWorld::create(
-        RuntimeConfig {
-            seed: 11,
-            ..RuntimeConfig::default()
-        },
-        PackageHandle::default(),
-    )
+    let mut world = RuntimeWorld::create(RuntimeConfig {
+        seed: 11,
+        ..RuntimeConfig::default()
+    })
     .unwrap();
     let actor = world.create_actor("system", vec![]);
     let start = StableId::deterministic_v7(2, 1, 11);
@@ -141,13 +135,10 @@ fn state_machine_presentation_action_supports_generic_commands() {
 
 #[test]
 fn state_machine_runs_transition_actions_in_order() {
-    let mut world = RuntimeWorld::create(
-        RuntimeConfig {
-            seed: 11,
-            ..RuntimeConfig::default()
-        },
-        PackageHandle::default(),
-    )
+    let mut world = RuntimeWorld::create(RuntimeConfig {
+        seed: 11,
+        ..RuntimeConfig::default()
+    })
     .unwrap();
     let actor = world.create_actor("system", vec![]);
     let start = StableId::deterministic_v7(3, 1, 11);
@@ -225,13 +216,10 @@ fn state_machine_runs_transition_actions_in_order() {
 
 #[test]
 fn action_failure_keeps_machine_state_and_allows_other_machines() {
-    let mut world = RuntimeWorld::create(
-        RuntimeConfig {
-            seed: 11,
-            ..RuntimeConfig::default()
-        },
-        PackageHandle::default(),
-    )
+    let mut world = RuntimeWorld::create(RuntimeConfig {
+        seed: 11,
+        ..RuntimeConfig::default()
+    })
     .unwrap();
     let actor = world.create_actor("system", vec![]);
     let failed_start = StableId::deterministic_v7(4, 1, 11);
@@ -400,13 +388,10 @@ fn validates_state_machine_shape_and_conflicts() {
 
 #[test]
 fn terminal_state_marks_machine_completed_and_blocks_future_ticks() {
-    let mut world = RuntimeWorld::create(
-        RuntimeConfig {
-            seed: 11,
-            ..RuntimeConfig::default()
-        },
-        PackageHandle::default(),
-    )
+    let mut world = RuntimeWorld::create(RuntimeConfig {
+        seed: 11,
+        ..RuntimeConfig::default()
+    })
     .unwrap();
     let actor = world.create_actor("system", vec![]);
     let start = StableId::deterministic_v7(6, 1, 11);
@@ -478,8 +463,7 @@ fn terminal_state_marks_machine_completed_and_blocks_future_ticks() {
 
 #[test]
 fn state_machine_runs_transitions_until_it_reaches_a_stable_state() {
-    let mut world =
-        RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
+    let mut world = RuntimeWorld::create(RuntimeConfig::default()).unwrap();
     let actor = world.create_actor("stable", vec![]);
     let start = StableId::deterministic_v7(7, 1, 11);
     let middle = StableId::deterministic_v7(7, 2, 11);
@@ -594,12 +578,8 @@ fn shipping_state_machine_cycle_uses_microstep_budget_without_hash_guard() {
 }
 
 fn cycle_world(integrity_mode: TickIntegrityMode) -> (RuntimeWorld, astra_runtime::ActorId) {
-    let mut world = RuntimeWorld::create_with_integrity(
-        RuntimeConfig::default(),
-        PackageHandle::default(),
-        integrity_mode,
-    )
-    .unwrap();
+    let mut world =
+        RuntimeWorld::create_with_integrity(RuntimeConfig::default(), integrity_mode).unwrap();
     let actor = world.create_actor("cycle", vec![]);
     let left = StableId::deterministic_v7(8, 1, 11);
     let right = StableId::deterministic_v7(8, 2, 11);

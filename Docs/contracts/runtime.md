@@ -39,7 +39,7 @@ impl RuntimeWorld {
 
 `ValidatedModuleBinding` 只能由显式 registry selection、packaged eligibility、capability、package、target、profile、engine version、rustc/feature/ABI fingerprint 校验生成。上述 identity 由已验证的 `PackageHandle` 固化；重复 slot、token/slot 不一致或任一 identity 不一致必须在修改 world 前失败。`tick` 的首步固定为 `1`，之后每次只能递增 `1`；`seed` 必须等于 session seed，`delta_ns` 必须处于 `1..=1_000_000_000`。`PlayerInput` 与 `AwaitCompletion` 只能通过 non-zero、strictly increasing 的 `OrderedTickIngress` 提交。provider live output 不再伪装成 Runtime ingress；replay 也不携带 recorded provider output。load 后第一步必须使用一次 `RestoreContinuation`，replay 只能使用 `Replay`。重复、回退、跳步、非法 delta、seed mismatch、mode mismatch、ingress 乱序、缺少 required module 或任一 ingress 校验失败都返回稳定 blocking diagnostic，并恢复完整 tick 前状态。
 
-`runtime.world` 当前二进制 schema 为 `4.0.0`，外层产品 section 为 `astra.runtime.save_blob.v4`。v3 及更早布局、旧 replay transcript 和调用方请求的旧 minimum version直接返回 `ASTRA_RUNTIME_SAVE_WORLD_VERSION_UNSUPPORTED`；不提供兼容 adapter 或迁移工具。
+`runtime.world` 当前二进制 schema 为 `5.0.0`，外层产品 section 为 `astra.runtime.save_blob.v5`。v4 及更早布局、旧 replay transcript 和调用方请求的旧 minimum version直接返回 `ASTRA_RUNTIME_SAVE_WORLD_VERSION_UNSUPPORTED`；不提供兼容 adapter 或迁移工具。
 
 字段级实现蓝图见 [Runtime API Blueprint](../implementation/runtime-api.md)、[Runtime Execution](../implementation/runtime-execution.md) 和 [StateMachine Action Provider](../implementation/state-machine-action-provider.md)。
 
@@ -112,3 +112,11 @@ Unknown event、invalid payload、missing required module、missing action、act
 ## Release Gate
 
 `runtime.replay.determinism`、`runtime.await.ordering`、`runtime.save_load`、`runtime.debug_snapshot`、`runtime.delayed_event`、`plugin.typed_runtime_provider` 是必需检查。Evidence 检查输出 step、digest、source_ref 或 diagnostic code；Shipping 不为这些检查进入实时 hash 路径。
+
+## 嵌入式 World
+
+`RuntimeWorld::create(RuntimeConfig)` 与 `create_with_integrity(config, mode)` 不需要产品包或 provider registry。宿主可直接创建 Actor、挂载与更新 typed Component、推进固定 tick 并存读档；未安装 StateMachine 的 World 使用同一执行与保存路径。
+
+需要旧 packaged module binding 的产品宿主在首 tick 前调用 `with_package(PackageHandle)` 显式附加身份，且只能附加一次。`package_id()` 与 `package_handle()` 返回 Option，无包时不生成默认或伪造身份。无包 World 调用 packaged `mount_module` 返回 `ASTRA_RUNTIME_MODULE_PACKAGE_REQUIRED`；重复附加或首 tick 后附加返回 `ASTRA_RUNTIME_PACKAGE_LIFECYCLE`。普通 Actor/Component 操作不依赖这项绑定。
+
+`runtime.world` v5 snapshot 将 package 身份改为 Option，NativeVN 外层 section 同步升级为 `astra.runtime.save_blob.v5`。旧布局明确拒绝；内存 typed state 与正常存读档仍由同一 RuntimeWorld 持有。权限来自宿主对 World 的所有权，诊断不记录组件 payload。验收包含无包/无 FSM 的 typed 更新和恢复、身份生命周期失败路径，以及现有 VN provider/Player 存档调用方。

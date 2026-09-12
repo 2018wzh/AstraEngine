@@ -1,6 +1,4 @@
-use astra_runtime::{
-    write_runtime_save_with_sections, PackageHandle, RuntimeConfig, RuntimeWorld, SaveRequest,
-};
+use astra_runtime::{write_runtime_save_with_sections, RuntimeConfig, RuntimeWorld, SaveRequest};
 use astra_vn_policy::{LuauPolicy, PolicySnapshotValue, VnPolicyState};
 use astra_vn_save::{
     compile_astra_project, policy_state_save_section, read_runtime_save_policy_state,
@@ -41,8 +39,7 @@ fn vn_state_roundtrips_inside_runtime_save_container() {
     })
     .unwrap();
 
-    let mut world =
-        RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
+    let mut world = RuntimeWorld::create(RuntimeConfig::default()).unwrap();
     world.create_actor("vn-host", vec!["nativevn".to_string()]);
     let runtime_hash = world.state_hash();
     let mut policy = LuauPolicy::new().unwrap();
@@ -74,8 +71,7 @@ fn vn_state_roundtrips_inside_runtime_save_container() {
     )
     .unwrap();
 
-    let mut loaded =
-        RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
+    let mut loaded = RuntimeWorld::create(RuntimeConfig::default()).unwrap();
     loaded.load(save.clone()).unwrap();
     assert_eq!(loaded.state_hash(), runtime_hash);
 

@@ -20,7 +20,6 @@ fn shipping_mode_disables_aggregate_hashes_and_replay_recording() {
             seed: 7,
             required_slots: vec![],
         },
-        PackageHandle::default(),
         TickIntegrityMode::Shipping,
     )
     .unwrap();
@@ -40,12 +39,10 @@ fn evidence_mode_records_and_replays_v3_transcript() {
         required_slots: vec![],
     };
     let package = PackageHandle::default();
-    let mut world = RuntimeWorld::create_with_integrity(
-        config.clone(),
-        package.clone(),
-        TickIntegrityMode::Evidence,
-    )
-    .unwrap();
+    let mut world =
+        RuntimeWorld::create_with_integrity(config.clone(), TickIntegrityMode::Evidence)
+            .and_then(|world| world.with_package(package.clone()))
+            .unwrap();
     let mut recorder = world.begin_replay_recording().unwrap();
     let request = request(1);
     let report = world.tick(request.clone()).unwrap();
@@ -59,8 +56,9 @@ fn evidence_mode_records_and_replays_v3_transcript() {
     let transcript = recorder.finish();
     assert_eq!(transcript.schema, "astra.runtime_replay_transcript.v3");
 
-    let mut replay_world =
-        RuntimeWorld::create_with_integrity(config, package, TickIntegrityMode::Evidence).unwrap();
+    let mut replay_world = RuntimeWorld::create_with_integrity(config, TickIntegrityMode::Evidence)
+        .and_then(|world| world.with_package(package))
+        .unwrap();
     let replay_report = replay_world.replay(transcript).unwrap();
     assert_eq!(replay_report.state_hash, checkpoint.state_hash);
     assert_eq!(replay_report.event_hash, checkpoint.event_hash);

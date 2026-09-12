@@ -580,13 +580,15 @@ impl NativeVnRuntimeProvider {
                 seed: request.seed,
                 required_slots: Vec::new(),
             },
-            PackageHandle {
+            integrity_mode,
+        )
+        .and_then(|world| {
+            world.with_package(PackageHandle {
                 package_id: request.package_hash.clone(),
                 target: request.target_id.clone(),
                 ..PackageHandle::default()
-            },
-            integrity_mode,
-        )
+            })
+        })
         .map_err(|err| CoreVnError::message(err.to_string()))?;
         request
             .executor
@@ -1009,7 +1011,7 @@ impl NativeVnRuntimeProvider {
             session_id: request.session_id,
             sections: vec![RuntimeSectionPayload {
                 section_id: "runtime.world".to_string(),
-                schema: "astra.runtime.save_blob.v4".to_string(),
+                schema: "astra.runtime.save_blob.v5".to_string(),
                 version: SchemaVersion::new(4, 0, 0),
                 codec: RuntimeSectionCodec::Raw,
                 hash: astra_core::Hash256::from_sha256(&save.0),
@@ -1032,7 +1034,7 @@ impl NativeVnRuntimeProvider {
         let runtime_section = required_restore_section_with_codec(
             &request.sections,
             "runtime.world",
-            "astra.runtime.save_blob.v4",
+            "astra.runtime.save_blob.v5",
             RuntimeSectionCodec::Raw,
         )?;
         let session = self.session_mut(&request.session_id)?;

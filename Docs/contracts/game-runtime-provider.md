@@ -128,7 +128,7 @@ Provider 可以在内部维护 product-specific cursor，但 fixed tick 只返�
 
 并发 host 使用 factory/session 所有权：factory 必须是 `Send + Sync`，只处理 descriptor、prepare/probe、instance lifecycle 和 session 创建；返回的 `ProductRuntimeSession: Send` 独占其 `RuntimeWorld` 和产品状态。每条 session 有容量 32 的 ordered mailbox，同一 session 永远单飞；不同 session 可以并行。queue full、timeout、panic、provider error、malformed output 和非法 step 只 poison 对应 session；binding、descriptor、package 或 instance control failure才 poison 整个 instance。完整 Headless 多任务测试用独立进程承载平台 session，并通过全局 `WorkerBudgetBroker` 限制 session、text、image、audio、video 和 region worker 的总并发，不能在线程间移动本地 event-loop 对象。
 
-NativeVN product save 只返回一个权威 `runtime.world` section，schema 为 `astra.runtime.save_blob.v4`、codec 为 `Raw`；payload 是 Runtime save container，内部 snapshot 覆盖 StableId generator、Actor/typed Component、StateMachine、Blackboard、Event/Await/delayed queues、MutationLog、mounted module binding 和当前 step。Player save envelope 不再复制一份 `VnRuntimeState`。Restore 必须只接受这一 section，先完成 outer hash、nested container/footer/section hash 和 schema/version 校验，再事务替换 world。旧 save 直接拒绝，不保留迁移器。
+NativeVN product save 只返回一个权威 `runtime.world` section，schema 为 `astra.runtime.save_blob.v5`、codec 为 `Raw`；payload 是 Runtime save container，内部 snapshot 覆盖 StableId generator、Actor/typed Component、StateMachine、Blackboard、Event/Await/delayed queues、MutationLog、mounted module binding 和当前 step。Player save envelope 不再复制一份 `VnRuntimeState`。Restore 必须只接受这一 section，先完成 outer hash、nested container/footer/section hash 和 schema/version 校验，再事务替换 world。旧 save 直接拒绝，不保留迁移器。
 
 ## AstraRPG Profile Boundary
 

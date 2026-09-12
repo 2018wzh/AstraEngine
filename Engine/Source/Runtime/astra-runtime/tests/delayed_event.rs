@@ -1,12 +1,10 @@
 use astra_runtime::{
-    EventPayload, EventSource, PackageHandle, RuntimeConfig, RuntimeWorld, SaveRequest, TickInput,
-    TickRequest,
+    EventPayload, EventSource, RuntimeConfig, RuntimeWorld, SaveRequest, TickInput, TickRequest,
 };
 
 #[test]
 fn delayed_events_drain_in_due_tick_sequence_order() {
-    let mut world =
-        RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
+    let mut world = RuntimeWorld::create(RuntimeConfig::default()).unwrap();
     world.schedule_event(3, EventSource::Scenario, EventPayload::new("timer.first"));
     let canceled = world.schedule_event(3, EventSource::Scenario, EventPayload::new("timer.skip"));
     world.schedule_event(3, EventSource::Scenario, EventPayload::new("timer.second"));
@@ -28,14 +26,12 @@ fn delayed_events_drain_in_due_tick_sequence_order() {
 
 #[test]
 fn delayed_events_survive_save_load_before_due_tick() {
-    let mut world =
-        RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
+    let mut world = RuntimeWorld::create(RuntimeConfig::default()).unwrap();
     world.schedule_event(4, EventSource::Scenario, EventPayload::new("timer.saved"));
     tick(&mut world, 1);
     let save = world.save(SaveRequest::default()).unwrap();
 
-    let mut loaded =
-        RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
+    let mut loaded = RuntimeWorld::create(RuntimeConfig::default()).unwrap();
     loaded.load(save).unwrap();
     loaded
         .tick(TickRequest::restore_continuation(

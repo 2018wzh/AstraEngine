@@ -45,7 +45,7 @@ Provider step 输出只有分类后的 typed live DTO 与轻量 control transact
 - `probe` 校验 package sections、target/profile、scenario refs 和 player route model。
 - `open` 创建 session-owned `RuntimeWorld`、VN Actor、typed VN/policy components、runtime cursor、policy state 和 flat story StateMachine。
 - `step` 把 launch、advance、choose、system page、wait completion 等输入编码成 RuntimeEvent，由 `astra.vn.step` action 推进 dialogue、choice、system story、wait、presentation、audio、timeline 和 mutation。
-- `save/restore` 只读写权威 `runtime.world`/`astra.runtime.save_blob.v4` section。Nested Runtime save container 保存完整 RuntimeSnapshot；restore 在 outer hash、container footer、section hash 和 schema/version 全部通过后事务替换 world，并回报 restored step/seed。旧格式直接拒绝。
+- `save/restore` 只读写权威 `runtime.world`/`astra.runtime.save_blob.v5` section。Nested Runtime save container 保存完整 RuntimeSnapshot；restore 在 outer hash、container footer、section hash 和 schema/version 全部通过后事务替换 world，并回报 restored step/seed。旧格式直接拒绝。
 
 Runtime v3 的 Action descriptor 强制包含 execution class、read/write set 和 StableId reservation。FFI Action ABI v2 传递完整 descriptor JSON；metadata 不一致、pure action 声明写入、StableId 声明不闭合、effect 越权或实际 ID 消耗超额都会产生 blocking diagnostic。AstraVN reducer 按实际写入记录 variable mutation journal；backlog、read-state、route coverage 和 voice replay 使用固定 64 条 chunk、stable ordinal/bitset 与历史 root，普通 step 只替换 hot state 和变化的尾 chunk，save/checkpoint 才物化完整 v3 state。Runtime tick 的 Actor、Blackboard、Event、Await 和 DelayedEvent 已切换 inverse journal，conflict-DAG 在明确的 1/2/4/8 worker 配置下并行无冲突 machine。
 - `package_sections` 继续输出 `vn.*` sections。

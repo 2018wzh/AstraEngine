@@ -305,7 +305,7 @@ pub struct PlayerInput {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RuntimeSnapshot {
     pub config: RuntimeConfig,
-    pub package: PackageHandle,
+    pub package: Option<PackageHandle>,
     pub id_source: StableIdGenerator,
     pub actors: ActorStore,
     pub blackboard: Blackboard,
@@ -405,7 +405,7 @@ impl RuntimeHistoryDigests {
 struct RuntimeStateDigestV3<'a> {
     schema: &'static str,
     config: &'a RuntimeConfig,
-    package: &'a PackageHandle,
+    package: &'a Option<PackageHandle>,
     id_source: &'a StableIdGenerator,
     actors: Hash128,
     blackboard: &'a Blackboard,
@@ -433,7 +433,7 @@ struct RuntimeTransactionCheckpoint {
 
 pub struct RuntimeWorld {
     config: RuntimeConfig,
-    package: PackageHandle,
+    package: Option<PackageHandle>,
     id_source: StableIdGenerator,
     actors: ActorStore,
     blackboard: Blackboard,
@@ -454,18 +454,17 @@ pub struct RuntimeWorld {
 }
 
 impl RuntimeWorld {
-    pub fn create(config: RuntimeConfig, package: PackageHandle) -> Result<Self, RuntimeError> {
+    pub fn create(config: RuntimeConfig) -> Result<Self, RuntimeError> {
         let integrity_mode = if cfg!(debug_assertions) {
             TickIntegrityMode::Evidence
         } else {
             TickIntegrityMode::Shipping
         };
-        Self::create_with_integrity(config, package, integrity_mode)
+        Self::create_with_integrity(config, integrity_mode)
     }
 
     pub fn create_with_integrity(
         config: RuntimeConfig,
-        package: PackageHandle,
         integrity_mode: TickIntegrityMode,
     ) -> Result<Self, RuntimeError> {
         let mut actions = ActionRegistry::default();
@@ -476,7 +475,6 @@ impl RuntimeWorld {
         info!(
             seed = config.seed,
             required_slot_count = config.required_slots.len(),
-            package_id = %package.package_id,
             integrity_mode = ?integrity_mode,
             default_action_count = 4,
             "runtime.create"
@@ -484,7 +482,7 @@ impl RuntimeWorld {
         Ok(Self {
             id_source: StableIdGenerator::new(config.seed),
             config,
-            package,
+            package: None,
             actors: ActorStore::default(),
             blackboard: Blackboard::default(),
             events: EventQueue::default(),
@@ -544,12 +542,44 @@ impl RuntimeWorld {
         Ok(())
     }
 
-    pub fn package_id(&self) -> &str {
-        &self.package.package_id
+    /// Attach product identity only for hosts using packaged module bindings.
+    /// Standalone worlds use the same state, tick and save implementation without it.
+    pub fn with_package(mut self, package: PackageHandle) -> Result<Self, RuntimeError> {
+        if self.step != 0 || self.package.is_some() || !self.mounted_modules.is_empty() {
+            return Err(RuntimeError::diagnostic(Diagnostic::blocking(
+                "ASTRA_RUNTIME_PACKAGE_LIFECYCLE",
+                "package identity must be attached once before ticking or mounting modules",
+            )));
+        }
+        if [
+            &package.package_id,
+            &package.target,
+            &package.profile,
+            &package.engine_version,
+            &package.rustc_fingerprint,
+            &package.feature_fingerprint,
+            &package.abi_fingerprint,
+        ]
+        .iter()
+        .any(|value| value.is_empty() || value.len() > 256 || value.chars().any(char::is_control))
+        {
+            return Err(RuntimeError::diagnostic(Diagnostic::blocking(
+                "ASTRA_RUNTIME_PACKAGE_IDENTITY",
+                "package identity fields are invalid",
+            )));
+        }
+        self.package = Some(package);
+        Ok(self)
     }
 
-    pub fn package_handle(&self) -> &PackageHandle {
-        &self.package
+    pub fn package_id(&self) -> Option<&str> {
+        self.package
+            .as_ref()
+            .map(|package| package.package_id.as_str())
+    }
+
+    pub fn package_handle(&self) -> Option<&PackageHandle> {
+        self.package.as_ref()
     }
 
     pub fn mount_module(
@@ -563,14 +593,20 @@ impl RuntimeWorld {
                 "module binding token does not match the requested slot",
             )));
         }
+        let package = self.package.as_ref().ok_or_else(|| {
+            RuntimeError::diagnostic(Diagnostic::blocking(
+                "ASTRA_RUNTIME_MODULE_PACKAGE_REQUIRED",
+                "packaged module bindings require a host-supplied package identity",
+            ))
+        })?;
         let expected_context = ModuleBindingContext {
-            package_id: self.package.package_id.clone(),
-            target: self.package.target.clone(),
-            profile: self.package.profile.clone(),
-            engine_version: self.package.engine_version.clone(),
-            rustc_fingerprint: self.package.rustc_fingerprint.clone(),
-            feature_fingerprint: self.package.feature_fingerprint.clone(),
-            abi_fingerprint: self.package.abi_fingerprint.clone(),
+            package_id: package.package_id.clone(),
+            target: package.target.clone(),
+            profile: package.profile.clone(),
+            engine_version: package.engine_version.clone(),
+            rustc_fingerprint: package.rustc_fingerprint.clone(),
+            feature_fingerprint: package.feature_fingerprint.clone(),
+            abi_fingerprint: package.abi_fingerprint.clone(),
         };
         let actual_context = ModuleBindingContext {
             package_id: binding.snapshot.package_id.clone(),

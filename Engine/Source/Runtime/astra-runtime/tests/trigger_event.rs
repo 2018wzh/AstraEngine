@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 #[test]
 fn action_context_exposes_transition_trigger_event() {
-    let mut world = RuntimeWorld::create(RuntimeConfig::default(), Default::default()).unwrap();
+    let mut world = RuntimeWorld::create(RuntimeConfig::default()).unwrap();
     world
         .register_action("astra.test", CaptureTriggerAction)
         .unwrap();
@@ -72,7 +72,7 @@ fn action_context_exposes_transition_trigger_event() {
 
 #[test]
 fn compiled_event_dispatch_preserves_original_event_order() {
-    let mut world = RuntimeWorld::create(RuntimeConfig::default(), Default::default()).unwrap();
+    let mut world = RuntimeWorld::create(RuntimeConfig::default()).unwrap();
     world
         .register_action("astra.test", CaptureTriggerAction)
         .unwrap();
@@ -181,7 +181,7 @@ struct CounterComponent {
 
 #[test]
 fn action_context_commits_typed_component_mutation() {
-    let mut world = RuntimeWorld::create(RuntimeConfig::default(), Default::default()).unwrap();
+    let mut world = RuntimeWorld::create(RuntimeConfig::default()).unwrap();
     let owner = world.create_actor("runtime.owner", vec![]);
     let component = world
         .attach_component(owner, "astra.test.counter", &CounterComponent { value: 1 })

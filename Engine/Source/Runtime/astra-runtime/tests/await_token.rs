@@ -1,7 +1,7 @@
 use astra_core::StableId;
 use astra_runtime::{
     AwaitKind, AwaitReplayPolicy, AwaitResult, AwaitToken, AwaitTokenId, OrderedTickIngress,
-    PackageHandle, RuntimeConfig, RuntimeWorld, TickIngress, TickInput, TickRequest,
+    RuntimeConfig, RuntimeWorld, TickIngress, TickInput, TickRequest,
 };
 
 #[test]
@@ -12,13 +12,10 @@ fn await_token_orders_out_of_order_results() {
 }
 
 fn run_with_order(order: [u64; 2]) -> Vec<astra_runtime::RuntimeEvent> {
-    let mut world = RuntimeWorld::create(
-        RuntimeConfig {
-            seed: 13,
-            required_slots: vec![],
-        },
-        PackageHandle::default(),
-    )
+    let mut world = RuntimeWorld::create(RuntimeConfig {
+        seed: 13,
+        required_slots: vec![],
+    })
     .unwrap();
     let token_a = AwaitTokenId(StableId::deterministic_v7(1, 1, 13));
     let token_b = AwaitTokenId(StableId::deterministic_v7(1, 2, 13));
@@ -89,13 +86,10 @@ fn await_token_is_serializable() {
 
 #[test]
 fn await_timeout_materializes_deterministic_result() {
-    let mut world = RuntimeWorld::create(
-        RuntimeConfig {
-            seed: 13,
-            ..RuntimeConfig::default()
-        },
-        PackageHandle::default(),
-    )
+    let mut world = RuntimeWorld::create(RuntimeConfig {
+        seed: 13,
+        ..RuntimeConfig::default()
+    })
     .unwrap();
     let token_id = AwaitTokenId(StableId::deterministic_v7(2, 1, 13));
     world
@@ -152,13 +146,10 @@ fn await_timeout_materializes_deterministic_result() {
 
 #[test]
 fn unknown_and_duplicate_await_results_are_diagnostic_only() {
-    let mut world = RuntimeWorld::create(
-        RuntimeConfig {
-            seed: 13,
-            ..RuntimeConfig::default()
-        },
-        PackageHandle::default(),
-    )
+    let mut world = RuntimeWorld::create(RuntimeConfig {
+        seed: 13,
+        ..RuntimeConfig::default()
+    })
     .unwrap();
     let token_id = AwaitTokenId(StableId::deterministic_v7(3, 1, 13));
     world
@@ -226,13 +217,10 @@ fn unknown_and_duplicate_await_results_are_diagnostic_only() {
 
 #[test]
 fn await_replay_policy_rejects_invalid_tokens_and_live_timeout_results() {
-    let mut world = RuntimeWorld::create(
-        RuntimeConfig {
-            seed: 13,
-            ..RuntimeConfig::default()
-        },
-        PackageHandle::default(),
-    )
+    let mut world = RuntimeWorld::create(RuntimeConfig {
+        seed: 13,
+        ..RuntimeConfig::default()
+    })
     .unwrap();
     let invalid_recorded = AwaitTokenId(StableId::deterministic_v7(4, 1, 13));
     let error = world

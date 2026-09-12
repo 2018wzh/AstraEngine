@@ -77,7 +77,7 @@ pub struct VnStepOutput {
 }
 ```
 
-`VnRuntimeState` 和 policy state 作为 typed component 进入完整 Runtime snapshot。NativeVN product provider 把自描述 Runtime save container 封装成唯一 `runtime.world`/`astra.runtime.save_blob.v4` section；Player envelope 不再复制 `VnRuntimeState`。Provider 把 `VnStepOutput.awaits` 映射成 Runtime `AwaitToken`，audio/timeline/presentation 直接进入分类后的 typed live output。Luau query trace保存 typed result，不在 query 热路径 postcard/hash。Luau snapshot 只能保存策略私有的可序列化值，不能保存 function、thread、userdata、native handle 或 coroutine state。
+`VnRuntimeState` 和 policy state 作为 typed component 进入完整 Runtime snapshot。NativeVN product provider 把自描述 Runtime save container 封装成唯一 `runtime.world`/`astra.runtime.save_blob.v5` section；Player envelope 不再复制 `VnRuntimeState`。Provider 把 `VnStepOutput.awaits` 映射成 Runtime `AwaitToken`，audio/timeline/presentation 直接进入分类后的 typed live output。Luau query trace保存 typed result，不在 query 热路径 postcard/hash。Luau snapshot 只能保存策略私有的可序列化值，不能保存 function、thread、userdata、native handle 或 coroutine state。
 
 ## Step Action
 

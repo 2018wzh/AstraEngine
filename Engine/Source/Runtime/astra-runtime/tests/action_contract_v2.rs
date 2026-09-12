@@ -88,7 +88,7 @@ impl RuntimeAction for UndeclaredWriteAction {
 
 #[test]
 fn action_registration_rejects_invalid_parallel_pure_access() {
-    let mut world = RuntimeWorld::create(RuntimeConfig::default(), Default::default()).unwrap();
+    let mut world = RuntimeWorld::create(RuntimeConfig::default()).unwrap();
     let error = world
         .register_action("astra.test", InvalidPureAction)
         .unwrap_err();
@@ -99,7 +99,7 @@ fn action_registration_rejects_invalid_parallel_pure_access() {
 
 #[test]
 fn action_execution_rolls_back_when_stable_id_reservation_is_exceeded() {
-    let mut world = RuntimeWorld::create(RuntimeConfig::default(), Default::default()).unwrap();
+    let mut world = RuntimeWorld::create(RuntimeConfig::default()).unwrap();
     world
         .register_action("astra.test", ExcessStableIdAction)
         .unwrap();
@@ -165,7 +165,7 @@ fn action_execution_rolls_back_when_stable_id_reservation_is_exceeded() {
 
 #[test]
 fn action_execution_rolls_back_undeclared_access() {
-    let mut world = RuntimeWorld::create(RuntimeConfig::default(), Default::default()).unwrap();
+    let mut world = RuntimeWorld::create(RuntimeConfig::default()).unwrap();
     world
         .register_action("astra.test", UndeclaredWriteAction)
         .unwrap();

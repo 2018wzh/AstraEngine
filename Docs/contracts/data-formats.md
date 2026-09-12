@@ -86,7 +86,7 @@ Section payload 默认使用 `postcard` + serde。大型媒体 payload 可以使
 
 ## Save
 
-Save 必须包含 Runtime state、Actor/typed Component、StateMachine、Blackboard、Director、AwaitToken、script snapshot、VN backlog、`astra.audio_timeline.v1`、FilterGraph state、committed AI output、plugin typed sections 和 manifest。NativeVN product provider 只输出 `runtime.world`/`astra.runtime.save_blob.v4` 权威 section；其 Raw payload 是自描述 Runtime save container，VN runtime/policy component 连同完整 Event/Await/delayed queue 和 MutationLog 进入 snapshot。Player envelope 不复制 runtime state；旧格式与拆分 authority 直接拒绝。
+Save 必须包含 Runtime state、Actor/typed Component、StateMachine、Blackboard、Director、AwaitToken、script snapshot、VN backlog、`astra.audio_timeline.v1`、FilterGraph state、committed AI output、plugin typed sections 和 manifest。NativeVN product provider 只输出 `runtime.world`/`astra.runtime.save_blob.v5` 权威 section；其 Raw payload 是自描述 Runtime save container，VN runtime/policy component 连同完整 Event/Await/delayed queue 和 MutationLog 进入 snapshot。Player envelope 不复制 runtime state；旧格式与拆分 authority 直接拒绝。
 
 AI Runtime 生成的文本、图像和语音结果是 save 数据，不是 package 数据。流式 chunk 通过 `ai.generated_artifact.*` extra section 固化；manifest 记录 model fingerprint、provider profile、validator result、content type、hash、codec 和可选 encryption。正式 replay 只读 save payload，不重跑 provider。
 
@@ -173,7 +173,7 @@ Stage 3 已开始落地、但尚未全部写入 release package 的 VN runtime �
 | Data type | Status | Purpose |
 | --- | --- | --- |
 | `VnRuntimeState` | `DONE` | 作为 save/checkpoint 时的完整语义物化视图，保存 profile、locale、cursor、stack、wait、变量、backlog、read-state、voice replay、route coverage、route flags 和 `VnSystemState`；普通 step 使用 `astra.vn.runtime_hot_state.v3` 与 append-only history chunk，不重复编码完整历史 |
-| `astra.runtime.save_blob.v4` | `IN_PROGRESS` | NativeVN 与 AstraEMU 已硬切 v4，nested container 保存完整 RuntimeSnapshot，并通过 restored step/seed 约束 continuation；旧 save/replay 直接拒绝。全 workspace 与真实产品 restore 证据待本轮测试阶段刷新 |
+| `astra.runtime.save_blob.v5` | `IN_PROGRESS` | NativeVN 与 AstraEMU 已硬切 v4，nested container 保存完整 RuntimeSnapshot，并通过 restored step/seed 约束 continuation；旧 save/replay 直接拒绝。全 workspace 与真实产品 restore 证据待本轮测试阶段刷新 |
 | `VnRuntimeStateSave` | `REFERENCE_ONLY` | `astra-vn-save` 的局部 VN state 工具；不得替代 product provider 的完整 RuntimeWorld save authority |
 | `BacklogEntry` / `VnReplayUiState` | `DONE` | 保存 command id、text key、speaker、voice ref、story/state、route position、read flag、layout metadata、voice replay rows 和 replay UI hash |
 | `VnSystemState` | `IN_PROGRESS` | 保存 auto enabled、skip mode、config key/value、gallery unlocks 和 replay unlocks；随 save/load/replay 保持 hash 一致 |

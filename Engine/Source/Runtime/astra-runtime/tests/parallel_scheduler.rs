@@ -89,7 +89,7 @@ fn run_world(
     worker_count: usize,
     barrier: Option<Arc<Barrier>>,
 ) -> (astra_runtime::TickReport, astra_core::Hash128) {
-    let mut world = RuntimeWorld::create(RuntimeConfig::default(), Default::default()).unwrap();
+    let mut world = RuntimeWorld::create(RuntimeConfig::default()).unwrap();
     world.set_machine_worker_count(worker_count).unwrap();
     world
         .register_action(

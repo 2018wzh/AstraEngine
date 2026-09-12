@@ -13,13 +13,11 @@ struct TestComponent {
 
 #[test]
 fn world_actor_owns_typed_components_and_tracks_revisions() {
-    let mut world = RuntimeWorld::create(
-        RuntimeConfig {
-            seed: 7,
-            required_slots: vec!["presentation".to_string()],
-        },
-        PackageHandle::default(),
-    )
+    let mut world = RuntimeWorld::create(RuntimeConfig {
+        seed: 7,
+        required_slots: vec!["presentation".to_string()],
+    })
+    .and_then(|world| world.with_package(PackageHandle::default()))
     .unwrap();
     let slot = EngineModuleSlot("presentation".to_string());
     let binding = ValidatedModuleBinding::validate(
@@ -100,8 +98,9 @@ fn world_actor_owns_typed_components_and_tracks_revisions() {
 
 #[test]
 fn world_actor_rejects_component_for_missing_actor() {
-    let mut world =
-        RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
+    let mut world = RuntimeWorld::create(RuntimeConfig::default())
+        .and_then(|world| world.with_package(PackageHandle::default()))
+        .unwrap();
     let missing = ActorId(StableId::deterministic_v7(1, 2, 3));
     let error = world
         .attach_component(missing, "astra.test.component", &"orphan")

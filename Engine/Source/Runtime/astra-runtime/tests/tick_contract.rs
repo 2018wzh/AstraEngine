@@ -31,13 +31,11 @@ fn binding_context(package_id: &str) -> ModuleBindingContext {
 
 #[test]
 fn tick_rejects_duplicate_gap_regression_delta_and_seed_without_mutation() {
-    let mut world = RuntimeWorld::create(
-        RuntimeConfig {
-            seed: 41,
-            required_slots: vec![],
-        },
-        PackageHandle::default(),
-    )
+    let mut world = RuntimeWorld::create(RuntimeConfig {
+        seed: 41,
+        required_slots: vec![],
+    })
+    .and_then(|world| world.with_package(PackageHandle::default()))
     .unwrap();
     world.create_actor("system", vec![]);
     world.tick(request(input(1, 41))).unwrap();
@@ -70,13 +68,11 @@ fn tick_rejects_duplicate_gap_regression_delta_and_seed_without_mutation() {
 
 #[test]
 fn missing_required_module_blocks_before_step_or_id_state_changes() {
-    let mut world = RuntimeWorld::create(
-        RuntimeConfig {
-            seed: 7,
-            required_slots: vec!["presentation".to_string()],
-        },
-        PackageHandle::default(),
-    )
+    let mut world = RuntimeWorld::create(RuntimeConfig {
+        seed: 7,
+        required_slots: vec!["presentation".to_string()],
+    })
+    .and_then(|world| world.with_package(PackageHandle::default()))
     .unwrap();
     let checkpoint = postcard::to_allocvec(&world.snapshot()).unwrap();
     let error = world.tick(request(input(1, 7))).unwrap_err();
@@ -89,8 +85,9 @@ fn missing_required_module_blocks_before_step_or_id_state_changes() {
 
 #[test]
 fn module_mount_requires_matching_explicit_packaged_binding_and_unique_slot() {
-    let mut world =
-        RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
+    let mut world = RuntimeWorld::create(RuntimeConfig::default())
+        .and_then(|world| world.with_package(PackageHandle::default()))
+        .unwrap();
     let slot = EngineModuleSlot("presentation".to_string());
     assert!(ValidatedModuleBinding::validate(
         slot.clone(),
@@ -145,13 +142,11 @@ fn module_mount_requires_matching_explicit_packaged_binding_and_unique_slot() {
 
 #[test]
 fn tick_rejects_invalid_ingress_order_and_mode_without_mutation() {
-    let mut world = RuntimeWorld::create(
-        RuntimeConfig {
-            seed: 41,
-            required_slots: vec![],
-        },
-        PackageHandle::default(),
-    )
+    let mut world = RuntimeWorld::create(RuntimeConfig {
+        seed: 41,
+        required_slots: vec![],
+    })
+    .and_then(|world| world.with_package(PackageHandle::default()))
     .unwrap();
     let checkpoint = postcard::to_allocvec(&world.snapshot()).unwrap();
     let player_input = || {
