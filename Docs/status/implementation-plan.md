@@ -5,10 +5,10 @@
 | 阶段 | 状态 | 尚需完成 |
 | --- | --- | --- |
 | 0 规则与测试 | 进行中 | 新宪章/契约与轻量文档检查已落地；EMU 独立 workspace 和 xtask 已接通；541 处普通测试已迁移，强制 Headless 宏与旧状态矩阵已删除 |
-| 1 EMU 薄 API/FVP | 未完成 | typed 配置、可选翻译、驻留库生命周期与 FVP 最小适配 |
-| 2 SDK/Minori | 未完成 | 独立 astra-text 已整合；其余 SDK 能力、Minori 新 Family API 与自有存档待完成 |
+| 1 EMU 薄 API/FVP | 进行中 | typed 配置、可选翻译、驻留库与 FVP 编码适配已整合；待整合验证和真实游戏运行 |
+| 2 SDK/Minori | 未完成 | 独立 astra-text、Minori 自有 archive/profile 已整合；Family session、媒体和存档待完成 |
 | 3 跨平台 EMU | 未完成 | 三桌面/Android Manager、核心与真实媒体运行 |
-| 4 Engine/VN | 未完成 | 场景/任务/演出、可信 Luau、typed 主路径、DSL 和存档 |
+| 4 Engine/VN | 未完成 | 演出 tick 去除整会话克隆并修复排队存档；其余场景/任务、可信 Luau、typed 主路径和 DSL 待完成 |
 | 5 Editor/Agent | 未完成 | GPUI、文本/图/时间线、独立预览、ACP/MCP 与两种编辑模式 |
 | 6 终之空 | 未完成 | 新 .astra 工程、Classic/Modern 37 路线及私有四平台包 |
 | 7 整体验收 | 未完成 | 全活动产品检查、真实流程、固定场景性能与旧路径清理 |
@@ -22,9 +22,10 @@
 ## 当前验证记录
 
 - 独占重构 worktree；并行子任务各用独立 worktree/target。
-- 新文档检查 221 页通过；7 个链接/卫生回归测试通过。
-- EMU 独立 workspace 的 Family API 7 tests 通过，使用独立 target。
+- 新文档检查 222 页通过；7 个链接/卫生回归测试通过。
+- EMU API v2 子任务局部验证：API 11、Manager core 23、FVP 25、Manager 24 项测试通过；GPU/DXC 测试 1 项未执行。整合后全量检查待完成。
 - xtask 与 Linux platform all-target clippy 通过；修复 default build 的 audio fault-injection feature 组合错误。
 - 普通逻辑测试与独立文字库已整合：子任务验证包含 104 个普通测试、15 个独立文本测试和 5 个媒体适配测试。
 - Engine 全量 clippy 与 build 通过；workspace test 在链接阶段因磁盘耗尽中断，清理本 worktree 构建产物后重跑，尚不计作测试通过。
+- 演出改动子任务的 35 项测试、all-target clippy 和 Player VN 调用方编译通过；Minori archive/profile 子任务的 40 项测试与 clippy 通过。
 - 真实 GPU/商业游戏/其他平台验收仍未执行。

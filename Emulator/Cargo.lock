@@ -505,6 +505,7 @@ name = "astra-emu-family-api"
 version = "0.1.0"
 dependencies = [
  "abi_stable",
+ "serde",
 ]
 
 [[package]]
