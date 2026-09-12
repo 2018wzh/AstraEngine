@@ -12,3 +12,7 @@ pub use source_unlock::*;
 #[cfg(feature = "headless-test-fixtures")]
 #[doc(hidden)]
 pub mod headless_test_fixture;
+
+#[cfg(test)]
+#[path = "../tests/support/native_package.rs"]
+mod test_native_package;

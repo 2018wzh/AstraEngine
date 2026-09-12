@@ -46,3 +46,5 @@
 - 演出 coordinator 共用 fence 改为 all-of 等待，覆盖活动与排队成员；文字点击、单视频结束不提前完成，失败/替换保持组 Failed，其他轨道继续。成员身份冲突在提交前拒绝，终结后的空组可重新使用。coordinator v5 拒绝旧 v4 和不一致的恢复状态；ProductStageDirector 双视频层等待已验证。Engine 全量 fmt/clippy/build/test 通过：688 项通过、0 失败、9 项按原条件未执行。真实媒体播放、通用任务组合与异步 IO 接入仍未完成。
 
 - Player 呈现帧已改为原地推进，移除 StageDirector、stage state、旧 scene draw 和活动转场 source snapshot 的逐帧回滚克隆。执行失败或当前等待的 fence 失败会终止呈现会话；损坏存档保持失败，成功恢复才重开。读档首帧重建已恢复场景及纹理生命周期。新增两项真实 package/字体/图片 fixture 回归覆盖帧后资源失败、输入/保存拒绝、恢复前后失败和无关 fence 隔离，均通过；本轮 Engine 全量 fmt/clippy/build/test 通过：690 项通过、0 失败、9 项按原条件未执行；真实硬件验收未执行。
+
+- Player 视频请求绑定 host-owned TaskScope；同层替换、读档提交、呈现失败和退出取消旧请求，decode/frame/fence 入口拒绝旧作用域。恢复提交清空旧媒体/timeline/stage completion 和 UI 请求，验证失败保留队列；Media Host 恢复保留旧流关闭任务，成功关闭后才移除。新增真实 worker 迟到、替换/外来作用域/退出及连续恢复关闭队列回归；Engine 全量 fmt/clippy/build/test 通过：692 项通过、0 失败、9 项按原条件未执行。随后补充取消视频不消费继续输入的回归，并统一测试夹具模块；最终 Player VN fmt/clippy/build/test 复验 65 项通过、0 失败。通用任务组合、完整音频/timeline 作用域与真实媒体验收仍未完成。

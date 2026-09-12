@@ -217,8 +217,14 @@ impl NativeVnProductMediaHost {
         if self.active_videos.is_empty() {
             return Ok(false);
         }
+        let mut skipped = false;
         for video in &self.active_videos {
+            if video.request.is_cancelled() {
+                self.pending_video_closes.push(video.session);
+                continue;
+            }
             source.complete_video_fence(&video.request)?;
+            skipped = true;
             self.pending_video_closes.push(video.session);
             tracing::info!(
                 event = "astra.player.video.skipped",
@@ -228,7 +234,7 @@ impl NativeVnProductMediaHost {
             );
         }
         self.active_videos.clear();
-        Ok(true)
+        Ok(skipped)
     }
 
     pub fn last_audio_meter(&self) -> Option<crate::NativeVnAudioMeterSnapshot> {
@@ -289,8 +295,11 @@ impl NativeVnProductMediaHost {
         self.audio.restore(snapshot.audio)?;
         self.timeline = timeline;
         self.completed_signals = snapshot.completed_signals.into_iter().collect();
-        self.active_videos.clear();
-        self.pending_video_closes.clear();
+        self.pending_video_closes
+            .extend(self.active_videos.drain(..).map(|video| {
+                video.request.scope.cancel();
+                video.session
+            }));
         self.restored_videos = snapshot.active_videos;
         Ok(())
     }
@@ -348,6 +357,14 @@ impl NativeVnProductMediaHost {
         mut completed: Vec<PlayerTimelineCompletion>,
         render_audio_tick: bool,
     ) -> Result<(), PlatformError> {
+        self.active_videos.retain(|video| {
+            if video.request.is_cancelled() {
+                self.pending_video_closes.push(video.session);
+                false
+            } else {
+                true
+            }
+        });
         self.close_pending_video_streams(source, executor).await?;
         let prewarm_started = self.performance.as_ref().map(|_| Instant::now());
         self.prewarm_pending_audio(source, executor).await?;
@@ -641,7 +658,7 @@ impl NativeVnProductMediaHost {
         source: &mut NativeVnHostCommandSource,
         executor: &mut PlayerHostCommandExecutor<PlatformCommandSink>,
     ) -> Result<(), PlatformError> {
-        for session in std::mem::take(&mut self.pending_video_closes) {
+        while let Some(session) = self.pending_video_closes.first().copied() {
             let close = source
                 .prepare_video_stream_close(session)
                 .map_err(|error| media_error("player.video.close.prepare", error))?;
@@ -649,6 +666,7 @@ impl NativeVnProductMediaHost {
                 .execute_decode_close(session, close)
                 .await
                 .map_err(|error| media_error("player.video.close", error))?;
+            self.pending_video_closes.remove(0);
         }
         Ok(())
     }
@@ -1099,6 +1117,10 @@ impl NativeVnProductMediaHost {
         let mut completed = Vec::new();
         let mut restarts = Vec::new();
         for (index, video) in self.active_videos.iter_mut().enumerate() {
+            if video.request.is_cancelled() {
+                completed.push(index);
+                continue;
+            }
             let elapsed_us = now_ms
                 .saturating_sub(video.started_at_ms)
                 .saturating_mul(1_000);
@@ -1271,6 +1293,89 @@ fn media_error(operation: &'static str, error: impl std::fmt::Display) -> Platfo
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_native_package as package_fixture;
+
+    fn test_video(scope: astra_runtime::TaskScope) -> ActiveVideoStream {
+        ActiveVideoStream {
+            request: NativeVnVideoRequest {
+                scope,
+                layer: "movie".into(),
+                asset_id: "asset:/test.webm".into(),
+                codec: "webm".into(),
+                encoded_bytes: vec![1].into(),
+                encoded_length: 1,
+                alpha_millionths: 1_000_000,
+                looping: false,
+                fence: None,
+            },
+            session: astra_player_core::PlayerHostResourceId(41),
+            duration_us: 10,
+            expected_frame_count: None,
+            expected_decoded_byte_count: None,
+            decoded_byte_count: 0,
+            pending_frame: None,
+            next_frame: 0,
+            next_request_sequence: 1,
+            reached_end: false,
+            loop_index: 0,
+            started_at_ms: 0,
+        }
+    }
+
+    #[test]
+    fn cancelled_video_does_not_consume_advance_input() {
+        let bytes = package_fixture::product_package_with_request(
+            "story main #@id story.main\nstate start #@id state.start\n  scene room #@id scene.room\n    text key:line.one speaker:hero #@id line.one\n", |_| {},
+        );
+        let package = astra_package::PackageReader::open(&bytes).unwrap();
+        let mut source = NativeVnHostCommandSource::from_package(
+            &package,
+            astra_vn_core::VnRunConfig::classic("en"),
+            320,
+            180,
+            astra_player_core::PlayerHostResourceId(1),
+        )
+        .unwrap();
+        let mut host = NativeVnProductMediaHost::new(8);
+        let scope = astra_runtime::TaskScope::new();
+        scope.cancel();
+        host.active_videos.push(test_video(scope));
+        assert!(!host.skip_active_videos(&mut source).unwrap());
+        assert!(host.active_videos.is_empty());
+        assert_eq!(
+            host.pending_video_closes,
+            vec![astra_player_core::PlayerHostResourceId(41)]
+        );
+        assert!(source.take_stage_completions().is_empty());
+        source.release_resources().unwrap();
+        source.shutdown().unwrap();
+    }
+
+    #[test]
+    fn restore_preserves_existing_and_active_decode_stream_closes() {
+        let mut host = NativeVnProductMediaHost::new(8);
+        let snapshot = host.snapshot();
+        host.pending_video_closes
+            .push(astra_player_core::PlayerHostResourceId(40));
+        host.active_videos
+            .push(test_video(astra_runtime::TaskScope::new()));
+        let mut invalid = snapshot.clone();
+        invalid.schema = "invalid".into();
+        assert!(host.restore(invalid).is_err());
+        assert_eq!(host.active_videos.len(), 1);
+        assert_eq!(host.pending_video_closes.len(), 1);
+        host.restore(snapshot.clone()).unwrap();
+        assert!(host.active_videos.is_empty());
+        assert_eq!(
+            host.pending_video_closes,
+            vec![
+                astra_player_core::PlayerHostResourceId(40),
+                astra_player_core::PlayerHostResourceId(41)
+            ]
+        );
+        host.restore(snapshot).unwrap();
+        assert_eq!(host.pending_video_closes.len(), 2);
+    }
 
     fn pcm(id: &str, samples: usize) -> PcmAsset {
         PcmAsset::from_canonical_samples(id, vec![0.0; samples]).unwrap()

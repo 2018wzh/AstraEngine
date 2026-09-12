@@ -19,7 +19,8 @@ struct ScopeState {
 }
 
 impl TaskScope {
-    fn root() -> Self {
+    /// Create a standalone host scope. The owner must cancel it on shutdown.
+    pub fn new() -> Self {
         Self(Arc::new(ScopeState {
             cancelled: AtomicBool::new(false),
             parent: None,
@@ -57,6 +58,12 @@ impl TaskScope {
             current = scope.0.parent.as_ref();
         }
         false
+    }
+}
+
+impl Default for TaskScope {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -136,18 +143,10 @@ pub struct AwaitCompletion {
     pub(crate) result: AwaitResult,
 }
 
+#[derive(Default)]
 pub(crate) struct TaskRuntime {
     root: TaskScope,
     pending: BTreeMap<AwaitTokenId, AwaitCompletionHandle>,
-}
-
-impl Default for TaskRuntime {
-    fn default() -> Self {
-        Self {
-            root: TaskScope::root(),
-            pending: BTreeMap::new(),
-        }
-    }
 }
 
 impl Drop for TaskRuntime {

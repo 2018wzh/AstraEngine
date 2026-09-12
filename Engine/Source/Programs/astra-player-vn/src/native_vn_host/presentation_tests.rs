@@ -1,6 +1,5 @@
 use super::*;
-#[path = "../../tests/support/native_package.rs"]
-mod native_package;
+use crate::test_native_package as native_package;
 
 const STORY: &str = r#"
 story main #@id story.main
@@ -13,7 +12,11 @@ state start #@id state.start
 "#;
 
 fn source() -> NativeVnHostCommandSource {
-    let bytes = native_package::product_package_with_request(STORY, |_| {});
+    source_for(STORY)
+}
+
+fn source_for(story: &str) -> NativeVnHostCommandSource {
+    let bytes = native_package::product_package_with_request(story, |_| {});
     let package = astra_package::PackageReader::open(&bytes).unwrap();
     let mut source = NativeVnHostCommandSource::from_package(
         &package,
@@ -134,4 +137,95 @@ fn only_failure_of_the_awaited_fence_ends_the_player_session() {
     assert!(source.presentation_failed);
     source.release_resources().unwrap();
     source.shutdown().unwrap();
+}
+
+#[test]
+fn video_work_cannot_cross_replacement_restore_or_source_lifetime() {
+    let mut source = source_for("story main #@id story.main\nstate start #@id state.start\n  scene room #@id scene.room\n    text key:line.one speaker:hero #@id line.one\n");
+    source
+        .cache_gameplay_surface(320, 180, vec![0x40; 320 * 180 * 4])
+        .unwrap();
+    source
+        .prepare_save_metadata("slot.01", "2000-01-01T00:00:00Z".into(), 0)
+        .unwrap();
+    let save = source.save("slot.01").unwrap();
+    let make_request = |scope| NativeVnVideoRequest {
+        scope,
+        layer: "movie".into(),
+        asset_id: "asset:/test.webm".into(),
+        codec: "webm".into(),
+        encoded_bytes: vec![1].into(),
+        encoded_length: 1,
+        alpha_millionths: 1_000_000,
+        looping: false,
+        fence: Some("movie.done".into()),
+    };
+    let old = make_request(source.replace_video_scope("movie"));
+    let current = make_request(source.replace_video_scope("movie"));
+    assert!(old.is_cancelled());
+    assert!(source
+        .prepare_video_decode(&old)
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("REQUEST_STALE"));
+    source.validate_video_request(&current).unwrap();
+    let foreign = make_request(astra_runtime::TaskScope::new());
+    assert!(source
+        .validate_video_request(&foreign)
+        .unwrap_err()
+        .to_string()
+        .contains("REQUEST_STALE"));
+    source.pending_video.push(current.clone());
+    source.pending_stage_completions.push("movie.done".into());
+    source
+        .pending_audio
+        .push(NativeVnAudioOutput::Control(NativeVnAudioControlRequest {
+            command_id: "stop.old".into(),
+            action: "stop".into(),
+            target: "bgm".into(),
+            duration_ms: None,
+            fence: None,
+        }));
+    source.pending_ui_host_request = Some(VnUiHostRequest::Load {
+        slot_id: "old.slot".into(),
+    });
+    assert!(source.restore(b"invalid").is_err());
+    assert!(!current.is_cancelled());
+    assert_eq!(source.pending_video.len(), 1);
+    assert_eq!(source.pending_stage_completions.len(), 1);
+    let worker_request = current.clone();
+    let (release, ready) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        ready.recv().unwrap();
+        worker_request
+    });
+    source.restore(&save).unwrap();
+    release.send(()).unwrap();
+    let late = worker.join().unwrap();
+    assert!(late.is_cancelled());
+    let frame = TextureFrame::from_vec(1, 1, vec![0; 4]).unwrap();
+    assert!(source
+        .bind_decoded_video_frame(&late, frame, true)
+        .unwrap_err()
+        .to_string()
+        .contains("REQUEST_STALE"));
+    assert!(source
+        .complete_video_fence(&late)
+        .unwrap_err()
+        .to_string()
+        .contains("REQUEST_STALE"));
+    assert!(source.take_video_requests().is_empty());
+    assert!(source.take_stage_completions().is_empty());
+    assert!(source.take_audio_requests().is_empty());
+    assert!(source.take_ui_host_request().is_none());
+    let fresh = make_request(source.replace_video_scope("movie"));
+    source.validate_video_request(&fresh).unwrap();
+    source.release_resources().unwrap();
+    assert!(fresh.is_cancelled());
+    source.shutdown().unwrap();
+    let source = source_for("story main #@id story.main\nstate start #@id state.start\n  scene room #@id scene.room\n    text key:line.one speaker:hero #@id line.one\n");
+    let scope = source.media_scope.child();
+    drop(source);
+    assert!(scope.is_cancelled());
 }

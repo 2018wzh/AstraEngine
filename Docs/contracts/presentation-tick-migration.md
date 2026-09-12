@@ -45,3 +45,11 @@ Player 检查当前 VN wait 对应的演出 fence；Failed 必须返回 `ASTRA_P
 读档首帧必须按恢复后的 stage 重建场景与纹理生命周期，不沿用读档前的 scene draw。活动转场逐帧借用已有 source snapshot，只有创建新转场或存读档边界才复制状态。
 
 [Player 失败恢复回归](../../Engine/Source/Programs/astra-player-vn/src/native_vn_host/presentation_tests.rs)使用公开 package、字体与图片 fixture，覆盖资源失败后的帧状态、失败会话的输入/保存拒绝、恢复前后失败与成功重开，以及当前 fence 与无关失败组的隔离。
+
+## Player 媒体结果作用域
+
+`TaskScope::new` 允许不创建 World 的宿主持有根作用域；所有者负责在关闭时 cancel，子作用域与身份不进入存档。Player 发出的视频请求携带私有作用域，只能由当前 Player 创建。读档提交、请求替换和关闭使旧请求失效；视频 decode、帧提交和 fence 完成必须先验证作用域，不能仅凭相同 layer 名完成新请求。外部调用方使用 Player 发出的请求，不再自行构造 struct；存档只保存媒体数据，恢复时创建新作用域。
+
+读档验证被拒绝时保留原请求和队列。Runtime 恢复一旦提交，Player 清空旧 timeline、音频、视频、stage completion 及待处理 UI/保存请求；后续呈现恢复失败也不能重新使用旧工作。资源缓存可保留，媒体 Host 必须保留旧视频流的关闭队列，在重新打开恢复的流之前关闭旧流，不能直接 clear 后遗失 native decode session。
+
+Media Host 遇到已取消的视频只排队关闭，不能提交旧完成通知或把一次物理继续输入标为已消费。关闭失败保留当前及后续关闭任务，并返回错误。

@@ -55,7 +55,10 @@ pub(super) fn stage_texture_requirements(
 
 impl NativeVnHostCommandSource {
     pub(super) fn ensure_presentation_active(&mut self) -> Result<(), NativeVnHostError> {
-        if self.presentation_failed || self.stage_director.is_failed() {
+        if self.presentation_failed
+            || self.stage_director.is_failed()
+            || self.media_scope.is_cancelled()
+        {
             return Err(NativeVnHostError::RuntimeEvidence("ASTRA_PLAYER_PRESENTATION_SESSION_FAILED: restore a saved session or recreate the Player".into()));
         }
         if self.pending_wait().is_some_and(|wait| {
@@ -63,6 +66,7 @@ impl NativeVnHostCommandSource {
                 == Some(astra_vn_core::FenceStatus::Failed)
         }) {
             self.presentation_failed = true;
+            self.media_scope.cancel();
             return Err(NativeVnHostError::RuntimeEvidence(
                 "ASTRA_PLAYER_PRESENTATION_FENCE_FAILED: the awaited presentation group failed"
                     .into(),
@@ -79,6 +83,7 @@ impl NativeVnHostCommandSource {
             director.fence_status(&wait.fence) == Some(astra_vn_core::FenceStatus::Failed)
         }) {
             self.presentation_failed = true;
+            self.media_scope.cancel();
             return Err(NativeVnHostError::RuntimeEvidence(
                 "ASTRA_PLAYER_PRESENTATION_FENCE_FAILED: the awaited presentation group failed"
                     .into(),
@@ -98,6 +103,7 @@ impl NativeVnHostCommandSource {
         let result = self.tick_presentation_inner(delta_ns);
         if result.is_err() {
             self.presentation_failed = true;
+            self.media_scope.cancel();
         }
         result
     }
@@ -122,6 +128,7 @@ impl NativeVnHostCommandSource {
                 StageDirectorOutput::Movie(movie) => {
                     let asset = self.asset_store.load_media(&movie.asset)?;
                     videos.push(NativeVnVideoRequest {
+                        scope: self.replace_video_scope(&movie.layer),
                         layer: movie.layer,
                         asset_id: movie.asset,
                         codec: asset.codec.clone(),

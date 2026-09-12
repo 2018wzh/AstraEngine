@@ -1,3 +1,4 @@
+mod media_scope;
 mod presentation;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -135,6 +136,8 @@ pub enum VnUiHostRequest {
 
 pub struct NativeVnHostCommandSource {
     presentation_failed: bool,
+    media_scope: astra_runtime::TaskScope,
+    video_scopes: BTreeMap<String, astra_runtime::TaskScope>,
     host: ProductRuntimeHost,
     session_id: GameRuntimeSessionId,
     runtime_state: Option<VnRuntimeState>,
@@ -352,6 +355,7 @@ enum NativeVnOrderedRuntimeOutput {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NativeVnVideoRequest {
+    pub(crate) scope: astra_runtime::TaskScope,
     pub layer: String,
     pub asset_id: String,
     pub codec: String,
@@ -920,6 +924,8 @@ impl NativeVnHostCommandSource {
             next_media_resource_id: 10_000,
             stage_director,
             presentation_failed: false,
+            media_scope: astra_runtime::TaskScope::new(),
+            video_scopes: BTreeMap::new(),
             restored_product_media_snapshot: None,
             story: compiled.story,
             ui_blueprints: compiled.ui_blueprints,
@@ -1008,6 +1014,9 @@ impl NativeVnHostCommandSource {
 
     pub fn take_video_requests(&mut self) -> Vec<NativeVnVideoRequest> {
         std::mem::take(&mut self.pending_video)
+            .into_iter()
+            .filter(|request| !request.is_cancelled())
+            .collect()
     }
 
     pub fn take_stage_completions(&mut self) -> Vec<String> {
@@ -1386,6 +1395,7 @@ impl NativeVnHostCommandSource {
         &mut self,
         request: &NativeVnVideoRequest,
     ) -> Result<PlayerDecodeLifecyclePlan, NativeVnHostError> {
+        self.validate_video_request(request)?;
         if request.encoded_bytes.is_empty()
             || request.encoded_bytes.len() as u64 != request.encoded_length
         {
@@ -1464,7 +1474,7 @@ impl NativeVnHostCommandSource {
         frame: TextureFrame,
         complete: bool,
     ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
-        self.ensure_presentation_active()?;
+        self.validate_video_request(request)?;
         self.stage_director
             .start_video(&request.layer)
             .map_err(stage_director_error)?;
@@ -1487,7 +1497,7 @@ impl NativeVnHostCommandSource {
         &mut self,
         request: &NativeVnVideoRequest,
     ) -> Result<(), NativeVnHostError> {
-        self.ensure_presentation_active()?;
+        self.validate_video_request(request)?;
         let completed = self
             .stage_director
             .complete_video(&request.layer)
@@ -1497,7 +1507,7 @@ impl NativeVnHostCommandSource {
     }
 
     pub(crate) fn rehydrate_video_request(
-        &self,
+        &mut self,
         snapshot: &crate::NativeVnVideoStreamSnapshot,
     ) -> Result<NativeVnVideoRequest, NativeVnHostError> {
         let asset = self.asset_store.load_media(&snapshot.asset_id)?;
@@ -1508,6 +1518,7 @@ impl NativeVnHostCommandSource {
             )));
         }
         Ok(NativeVnVideoRequest {
+            scope: self.replace_video_scope(&snapshot.layer),
             layer: snapshot.layer.clone(),
             asset_id: snapshot.asset_id.clone(),
             codec: asset.codec.clone(),
@@ -1593,6 +1604,9 @@ impl NativeVnHostCommandSource {
         let result = self.restore_inner(bytes, &mut committed);
         if committed {
             self.presentation_failed = result.is_err();
+            if self.presentation_failed {
+                self.media_scope.cancel();
+            }
         }
         result
     }
@@ -1623,6 +1637,7 @@ impl NativeVnHostCommandSource {
             sections: envelope.payload.sections.sections,
         })?;
         *committed = true;
+        self.reset_pending_work();
         if report.status != "restored" || !report.diagnostics.is_empty() {
             return Err(NativeVnHostError::Save(format!(
                 "ASTRA_PLAYER_RESTORE_FAILED: status={} diagnostics={}",
@@ -3597,6 +3612,8 @@ impl NativeVnHostCommandSource {
                 "ASTRA_PLAYER_SHUTDOWN_REPEATED: resource shutdown already started".to_string(),
             ));
         }
+        self.reset_pending_work();
+        self.media_scope.cancel();
         for (asset_id, result) in self.image_prefetcher.shutdown()? {
             self.image_prefetch_inflight.remove(&asset_id);
             if let Err(error) = result {
@@ -3662,7 +3679,7 @@ impl NativeVnHostCommandSource {
         }
         self.host.shutdown()?;
         self.host.destroy()?;
-        if let Some(error) = self.image_prefetch_failure {
+        if let Some(error) = self.image_prefetch_failure.take() {
             return Err(NativeVnHostError::Asset(error));
         }
         Ok(())
@@ -4126,7 +4143,9 @@ impl NativeVnHostCommandSource {
                         }
                         StageDirectorOutput::Movie(movie) => {
                             let asset = self.asset_store.load_media(&movie.asset)?;
+                            let scope = self.replace_video_scope(&movie.layer);
                             self.pending_video.push(NativeVnVideoRequest {
+                                scope,
                                 layer: movie.layer,
                                 asset_id: movie.asset,
                                 codec: asset.codec.clone(),
@@ -4353,6 +4372,7 @@ impl NativeVnHostCommandSource {
         } else if active_transition.is_none() {
             self.director_transition_snapshot = None;
         }
+        self.cancel_removed_video_scopes();
         self.ui_draw = ui_draw;
         if !next_audio.is_empty() {
             tracing::trace!(
