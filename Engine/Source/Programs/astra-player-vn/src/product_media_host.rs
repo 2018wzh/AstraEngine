@@ -1,5 +1,6 @@
 mod clock;
 mod restore;
+mod video_open;
 
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
@@ -623,106 +624,6 @@ impl NativeVnProductMediaHost {
         self.restored_videos.clear();
         self.close_pending_video_streams(source, executor).await?;
         self.audio.shutdown(source, executor).await
-    }
-
-    async fn open_video_stream(
-        &self,
-        source: &mut NativeVnHostCommandSource,
-        executor: &mut PlayerHostCommandExecutor<PlatformCommandSink>,
-        request: NativeVnVideoRequest,
-        started_at_ms: u64,
-    ) -> Result<ActiveVideoStream, PlatformError> {
-        let plan = source
-            .prepare_video_decode(&request)
-            .map_err(|error| media_error("player.video.decode.prepare", error))?;
-        executor
-            .execute_decode_open(plan.session, plan.open)
-            .await
-            .map_err(|error| media_error("player.video.decode.open", error))?;
-        let decoded = match executor
-            .execute_decode_submit(plan.session, plan.decode)
-            .await
-        {
-            Ok(decoded) => decoded,
-            Err(error) => {
-                let close =
-                    source
-                        .prepare_video_stream_close(plan.session)
-                        .map_err(|close_error| {
-                            media_error(
-                                "player.video.decode.cleanup.prepare",
-                                format!("{error}; close preparation failed: {close_error}"),
-                            )
-                        })?;
-                if let Err(close_error) = executor.execute_decode_close(plan.session, close).await {
-                    return Err(media_error(
-                        "player.video.decode.cleanup",
-                        format!("{error}; close failed: {close_error}"),
-                    ));
-                }
-                return Err(media_error("player.video.decode.start", error));
-            }
-        };
-        let astra_platform::DecodeOutput::VideoStreamStart {
-            duration_us: Some(duration_us),
-            frame_count,
-            decoded_byte_count,
-        } = decoded.output
-        else {
-            let close = source
-                .prepare_video_stream_close(plan.session)
-                .map_err(|error| media_error("player.video.decode.cleanup.prepare", error))?;
-            executor
-                .execute_decode_close(plan.session, close)
-                .await
-                .map_err(|error| media_error("player.video.decode.cleanup", error))?;
-            return Err(media_error(
-                "player.video.decode.contract",
-                "ASTRA_PLAYER_VIDEO_STREAM_DESCRIPTOR_REQUIRED",
-            ));
-        };
-        if duration_us == 0
-            || frame_count.is_some_and(|count| count == 0 || count > self.max_video_frames)
-            || decoded_byte_count
-                .is_some_and(|bytes| bytes == 0 || bytes > self.max_decode_output_bytes)
-        {
-            return Err(media_error(
-                "player.video.decode.contract",
-                "ASTRA_PLAYER_VIDEO_STREAM_DESCRIPTOR_INVALID",
-            ));
-        }
-        Ok(ActiveVideoStream {
-            request,
-            session: plan.session,
-            duration_us,
-            expected_frame_count: frame_count,
-            expected_decoded_byte_count: decoded_byte_count,
-            decoded_byte_count: 0,
-            pending_frame: None,
-            next_frame: 0,
-            next_request_sequence: 2,
-            reached_end: false,
-            loop_index: 0,
-            started_at_ms,
-        })
-    }
-
-    async fn close_pending_video_streams(
-        &mut self,
-        source: &mut NativeVnHostCommandSource,
-        executor: &mut PlayerHostCommandExecutor<PlatformCommandSink>,
-    ) -> Result<(), PlatformError> {
-        while let Some(session) = self.pending_video_closes.first().copied() {
-            let close = source
-                .prepare_video_stream_close(session)
-                .map_err(|error| media_error("player.video.close.prepare", error))?;
-            executor
-                .execute_decode_close(session, close)
-                .await
-                .map_err(|error| media_error("player.video.close", error))?;
-            self.pending_video_closes.remove(0);
-        }
-        Ok(())
     }
 
     async fn fetch_video_frame(

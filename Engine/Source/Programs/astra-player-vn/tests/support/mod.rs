@@ -45,6 +45,7 @@ ui_view ui.test.system model:astra.vn.ui_model.system.v1 theme:astra.vn.theme.cl
       on activate -> vn.return_system
 "#;
 
+#[allow(dead_code)]
 pub fn source_for(story: &str) -> NativeVnHostCommandSource {
     source_from_package(product_package_with_video(story, None, false))
 }

@@ -81,3 +81,7 @@ Media Host 使用独立播放时间驱动 timeline deadline 和视频 `started_a
 ### 读档输出端点边界
 
 产品读档在预检和剧情提交后，重建已打开的音频输出端点与 Kira manager，复用已准备的共享 PCM 和保存的声音状态。旧 mixer 先停止并等待退出，再关闭旧 output，关闭成功后才打开同一显式 provider 的新 output；返回成功时不再消费旧端点队列。关闭或重建失败终止产品会话，保留可关闭 handle 供退出清理，不选择替代 provider。同步媒体 `restore` 只恢复内存状态，产品入口负责异步端点边界；真实设备已提交到硬件的采样与听感连续性另行实测。
+
+### 视频启动失败的清理所有权
+
+视频 decode open 成功后，Media Host 立即把逻辑 session 放入待关闭队列。描述校验和启动解码全部成功后才交给活动视频；启动失败立即尝试关闭，关闭失败保留队列供后续退出重试。等待启动 decode 的 future 被 drop 时同样保留 session，不能把已打开资源只留在局部变量中。取消请求在 open 后和 decode 返回后检查，旧请求不能接收新流。平台 open 命令自身被中断时的资源所有权仍须由平台 executor 单独处理。

@@ -62,3 +62,5 @@
 - 产品读档在媒体状态恢复后停止旧 Kira worker、关闭旧音频端点并重建所选 output，复用共享 PCM 与存档 timeline。端点关闭失败保留 handle，打开后的格式/初始化失败也保留清理所有权；未清理 handle 阻止再次打开，退出清空待恢复 PCM。集成回归验证两次读档的关闭/打开顺序、PCM 复用及关闭失败后会话拒绝 tick、退出重试清理。Engine 全量 fmt/clippy/build/test 通过：701 项通过、0 失败、9 项按原条件未执行；真实设备缓冲与听感连续性未验收。
 
 - TaskScope 取消实现复用已锁定的 tokio-util CancellationToken，新增 cancelled 等待与 run 的 typed Completed/Failed/Cancelled 结果。普通 async 顺序短路和 futures try_join 并行组合复用同一作用域，不新增调度器或存档类型。8 项异步作用域测试及既有 8 项完成句柄测试通过，包含并行整组取消释放所有分支回归；Engine 全量 fmt/clippy/build/test 通过：709 项通过、0 失败、9 项按原条件未执行。平台资源的异步关闭、可信 Luau 与产品任务组合接入仍未完成。
+
+- 视频启动/关闭从 Media Host 大文件拆成独立模块。打开成功立即登记待关闭 session，描述和 decode 成功后才转交活动视频；失败尝试关闭，关闭失败或启动 future 被 drop 均保留清理责任。两项集成回归通过，覆盖无效描述、错误输出类型、解码失败、关闭重试和迟到响应拒绝；Engine 全量 fmt/clippy/build/test 通过：711 项通过、0 失败、9 项按原条件未执行。平台 open 自身被中断的资源回收和真实 decoder/设备验收仍未完成。
