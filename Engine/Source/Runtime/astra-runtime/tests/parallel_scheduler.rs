@@ -111,7 +111,7 @@ fn run_world(
             },
         )
         .unwrap();
-    let owner = world.create_actor("owner", vec![]);
+    let owner = world.create_actor("owner", vec![]).unwrap();
     install_machine(&mut world, owner, 1, "astra.test.parallel.a");
     install_machine(&mut world, owner, 2, "astra.test.parallel.b");
     let report = world
@@ -125,11 +125,11 @@ fn run_world(
         ))
         .unwrap();
     assert_eq!(
-        world.snapshot().blackboard.get("parallel.a"),
+        world.snapshot().unwrap().blackboard.get("parallel.a"),
         Some(&BlackboardValue::I64(1))
     );
     assert_eq!(
-        world.snapshot().blackboard.get("parallel.b"),
+        world.snapshot().unwrap().blackboard.get("parallel.b"),
         Some(&BlackboardValue::I64(1))
     );
     let state_hash = world.state_hash();

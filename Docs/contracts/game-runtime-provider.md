@@ -120,7 +120,7 @@ project target
   -> save/package/release gate consume provider sections and checks
 ```
 
-Provider 可以在内部维护 product-specific cursor，但 fixed tick 只返回分类后的 typed live output、await token、event、blackboard mutation 与 dirty-section metadata。大块 scene/PCM 不进入 RuntimeWorld transaction；control transaction 成功后直接移动到 host。Replay 消费 transcript 中已记录的 typed ingress/completion，不保存或重放 live provider output，也不重新请求 provider 或平台回调。
+Provider 可以在内部维护 product-specific cursor，但 fixed tick 只返回分类后的 typed live output、await token、event、blackboard mutation 与 dirty-section metadata。大块 scene/PCM 不进入 RuntimeWorld 状态；tick 成功后将 live output 移交 host。Replay 消费 transcript 中已记录的 typed ingress/completion，不保存或重放 live provider output，也不重新请求 provider 或平台回调。
 
 `ProductRuntimeProvider` 必须显式实现 `create_instance` 和 `destroy_instance`，不得依赖 host 伪造成功报告。产品入口只允许使用 `PackageReader::runtime_provider_selection` 产生的 `ValidatedRuntimeProviderSelection` 创建 `ProductRuntimeHost::bound_in_process`/`bound_ffi`；host 会在 create 前逐字段比对 linked descriptor，在 prepare/probe/open 前比对 target/profile，并验证 provider/runtime report identity。无 package binding 的入口已改名为 `reference_in_process`/`reference_ffi`，只用于明确的 fixture/reference runner，不能进入 Player 或 shipping host。
 

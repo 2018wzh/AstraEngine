@@ -20,7 +20,9 @@ fn run_once() -> astra_runtime::TickReport {
         required_slots: vec![],
     })
     .unwrap();
-    let actor = world.create_actor("system", vec!["runtime".to_string()]);
+    let actor = world
+        .create_actor("system", vec!["runtime".to_string()])
+        .unwrap();
     let start = StableId::deterministic_v7(1, 1, 11);
     let done = StableId::deterministic_v7(1, 2, 11);
     let mut input = BTreeMap::new();
@@ -58,7 +60,9 @@ fn run_once() -> astra_runtime::TickReport {
             initial_state: start,
         })
         .unwrap();
-    world.emit_event(EventSource::Scenario, EventPayload::new("scenario.start"));
+    world
+        .emit_event(EventSource::Scenario, EventPayload::new("scenario.start"))
+        .unwrap();
     world
         .tick(astra_runtime::TickRequest::live(
             TickInput {
@@ -78,7 +82,7 @@ fn state_machine_presentation_action_supports_generic_commands() {
         ..RuntimeConfig::default()
     })
     .unwrap();
-    let actor = world.create_actor("system", vec![]);
+    let actor = world.create_actor("system", vec![]).unwrap();
     let start = StableId::deterministic_v7(2, 1, 11);
     let done = StableId::deterministic_v7(2, 2, 11);
     let mut input = BTreeMap::new();
@@ -140,7 +144,7 @@ fn state_machine_runs_transition_actions_in_order() {
         ..RuntimeConfig::default()
     })
     .unwrap();
-    let actor = world.create_actor("system", vec![]);
+    let actor = world.create_actor("system", vec![]).unwrap();
     let start = StableId::deterministic_v7(3, 1, 11);
     let done = StableId::deterministic_v7(3, 2, 11);
     let first = set_blackboard_input("route", "library");
@@ -185,7 +189,9 @@ fn state_machine_runs_transition_actions_in_order() {
         })
         .unwrap();
 
-    world.emit_event(EventSource::Scenario, EventPayload::new("scenario.start"));
+    world
+        .emit_event(EventSource::Scenario, EventPayload::new("scenario.start"))
+        .unwrap();
     world
         .tick(astra_runtime::TickRequest::live(
             TickInput {
@@ -197,7 +203,7 @@ fn state_machine_runs_transition_actions_in_order() {
         ))
         .unwrap();
 
-    let snapshot = world.snapshot();
+    let snapshot = world.snapshot().unwrap();
     assert_eq!(
         snapshot.blackboard.get("route"),
         Some(&BlackboardValue::from("rooftop"))
@@ -215,13 +221,13 @@ fn state_machine_runs_transition_actions_in_order() {
 }
 
 #[test]
-fn action_failure_keeps_machine_state_and_allows_other_machines() {
+fn action_failure_preserves_committed_work_but_stops_the_world() {
     let mut world = RuntimeWorld::create(RuntimeConfig {
         seed: 11,
         ..RuntimeConfig::default()
     })
     .unwrap();
-    let actor = world.create_actor("system", vec![]);
+    let actor = world.create_actor("system", vec![]).unwrap();
     let failed_start = StableId::deterministic_v7(4, 1, 11);
     let failed_done = StableId::deterministic_v7(4, 2, 11);
     let other_start = StableId::deterministic_v7(4, 3, 11);
@@ -292,8 +298,11 @@ fn action_failure_keeps_machine_state_and_allows_other_machines() {
         })
         .unwrap();
 
-    world.emit_event(EventSource::Scenario, EventPayload::new("scenario.start"));
-    let report = world
+    let saved = world.save(astra_runtime::SaveRequest::default()).unwrap();
+    world
+        .emit_event(EventSource::Scenario, EventPayload::new("scenario.start"))
+        .unwrap();
+    let error = world
         .tick(astra_runtime::TickRequest::live(
             TickInput {
                 fixed_step: 1,
@@ -302,12 +311,10 @@ fn action_failure_keeps_machine_state_and_allows_other_machines() {
             },
             Vec::new(),
         ))
-        .unwrap();
+        .unwrap_err();
 
-    assert!(report
-        .diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.code == "ASTRA_RUNTIME_ACTION_MISSING"));
+    assert!(error.to_string().contains("ASTRA_RUNTIME_ACTION_MISSING"));
+    assert!(world.is_failed());
     let debug = world.debug_session();
     let machines = debug.state_machines(actor);
     assert!(machines
@@ -320,9 +327,48 @@ fn action_failure_keeps_machine_state_and_allows_other_machines() {
             && machine.current_state == other_done
             && machine.completed));
     assert_eq!(
-        world.snapshot().blackboard.get("other_machine"),
+        world.debug_session().blackboard().get("other_machine"),
         Some(&BlackboardValue::from("continued"))
     );
+    assert!(world.snapshot().is_err());
+    assert!(world.save(astra_runtime::SaveRequest::default()).is_err());
+    assert!(world.create_actor("must-not-exist", vec![]).is_err());
+    assert!(world
+        .emit_event(EventSource::Scenario, EventPayload::new("blocked"))
+        .is_err());
+    assert!(world
+        .tick(astra_runtime::TickRequest::live(
+            TickInput {
+                fixed_step: 2,
+                delta_ns: 16_666_667,
+                seed: 11,
+            },
+            vec![]
+        ))
+        .unwrap_err()
+        .to_string()
+        .contains("ASTRA_RUNTIME_SESSION_FAILED"));
+    assert!(world.load(astra_runtime::SaveBlob(vec![])).is_err());
+    assert!(world.is_failed());
+    world.load(saved).unwrap();
+    assert!(!world.is_failed());
+    assert!(world
+        .snapshot()
+        .unwrap()
+        .blackboard
+        .get("other_machine")
+        .is_none());
+    world
+        .tick(astra_runtime::TickRequest::restore_continuation(
+            TickInput {
+                fixed_step: 1,
+                delta_ns: 16_666_667,
+                seed: 11,
+            },
+            vec![],
+        ))
+        .unwrap();
+    world.create_actor("recovered", vec![]).unwrap();
 }
 
 #[test]
@@ -393,7 +439,7 @@ fn terminal_state_marks_machine_completed_and_blocks_future_ticks() {
         ..RuntimeConfig::default()
     })
     .unwrap();
-    let actor = world.create_actor("system", vec![]);
+    let actor = world.create_actor("system", vec![]).unwrap();
     let start = StableId::deterministic_v7(6, 1, 11);
     let done = StableId::deterministic_v7(6, 2, 11);
     world
@@ -451,7 +497,7 @@ fn terminal_state_marks_machine_completed_and_blocks_future_ticks() {
     let machines = world.debug_session().state_machines(actor);
     assert_eq!(machines[0].current_state, done);
     assert!(machines[0].completed);
-    let snapshot = world.snapshot();
+    let snapshot = world.snapshot().unwrap();
     let trace: Vec<_> = snapshot
         .machines
         .trace()
@@ -464,7 +510,7 @@ fn terminal_state_marks_machine_completed_and_blocks_future_ticks() {
 #[test]
 fn state_machine_runs_transitions_until_it_reaches_a_stable_state() {
     let mut world = RuntimeWorld::create(RuntimeConfig::default()).unwrap();
-    let actor = world.create_actor("stable", vec![]);
+    let actor = world.create_actor("stable", vec![]).unwrap();
     let start = StableId::deterministic_v7(7, 1, 11);
     let middle = StableId::deterministic_v7(7, 2, 11);
     let done = StableId::deterministic_v7(7, 3, 11);
@@ -530,7 +576,7 @@ fn state_machine_runs_transitions_until_it_reaches_a_stable_state() {
 #[test]
 fn evidence_state_machine_cycle_uses_microstep_budget_without_live_hash_guard() {
     let (mut world, actor) = cycle_world(TickIntegrityMode::Evidence);
-    let report = world
+    let error = world
         .tick(astra_runtime::TickRequest::live(
             TickInput {
                 fixed_step: 1,
@@ -539,23 +585,23 @@ fn evidence_state_machine_cycle_uses_microstep_budget_without_live_hash_guard() 
             },
             Vec::new(),
         ))
-        .unwrap();
+        .unwrap_err();
 
-    assert!(report
-        .diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.code == "ASTRA_RUNTIME_STATE_MACHINE_BUDGET"));
+    assert!(error
+        .to_string()
+        .contains("ASTRA_RUNTIME_STATE_MACHINE_BUDGET"));
+    assert!(world.is_failed());
     assert_eq!(
         world.debug_session().state_machines(actor)[0].current_state,
         StableId::deterministic_v7(8, 1, 11)
     );
-    assert_eq!(world.snapshot().blackboard.get("cycle"), None);
+    assert_eq!(world.debug_session().blackboard().get("cycle"), None);
 }
 
 #[test]
 fn shipping_state_machine_cycle_uses_microstep_budget_without_hash_guard() {
     let (mut world, actor) = cycle_world(TickIntegrityMode::Shipping);
-    let report = world
+    let error = world
         .tick(astra_runtime::TickRequest::live(
             TickInput {
                 fixed_step: 1,
@@ -564,23 +610,23 @@ fn shipping_state_machine_cycle_uses_microstep_budget_without_hash_guard() {
             },
             Vec::new(),
         ))
-        .unwrap();
+        .unwrap_err();
 
-    assert!(report
-        .diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.code == "ASTRA_RUNTIME_STATE_MACHINE_BUDGET"));
+    assert!(error
+        .to_string()
+        .contains("ASTRA_RUNTIME_STATE_MACHINE_BUDGET"));
+    assert!(world.is_failed());
     assert_eq!(
         world.debug_session().state_machines(actor)[0].current_state,
         StableId::deterministic_v7(8, 1, 11)
     );
-    assert_eq!(world.snapshot().blackboard.get("cycle"), None);
+    assert_eq!(world.debug_session().blackboard().get("cycle"), None);
 }
 
 fn cycle_world(integrity_mode: TickIntegrityMode) -> (RuntimeWorld, astra_runtime::ActorId) {
     let mut world =
         RuntimeWorld::create_with_integrity(RuntimeConfig::default(), integrity_mode).unwrap();
-    let actor = world.create_actor("cycle", vec![]);
+    let actor = world.create_actor("cycle", vec![]).unwrap();
     let left = StableId::deterministic_v7(8, 1, 11);
     let right = StableId::deterministic_v7(8, 2, 11);
     world

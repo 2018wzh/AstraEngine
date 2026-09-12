@@ -98,12 +98,12 @@ fn action_registration_rejects_invalid_parallel_pure_access() {
 }
 
 #[test]
-fn action_execution_rolls_back_when_stable_id_reservation_is_exceeded() {
+fn failed_id_reservation_stops_world_without_committing_invalid_transition() {
     let mut world = RuntimeWorld::create(RuntimeConfig::default()).unwrap();
     world
         .register_action("astra.test", ExcessStableIdAction)
         .unwrap();
-    let owner = world.create_actor("owner", vec![]);
+    let owner = world.create_actor("owner", vec![]).unwrap();
     let start = StableId::deterministic_v7(9, 1, 1);
     let done = StableId::deterministic_v7(9, 1, 2);
     let machine_id = StableId::deterministic_v7(9, 1, 3);
@@ -138,7 +138,7 @@ fn action_execution_rolls_back_when_stable_id_reservation_is_exceeded() {
         })
         .unwrap();
 
-    let report = world
+    let error = world
         .tick(astra_runtime::TickRequest::live(
             TickInput {
                 fixed_step: 1,
@@ -147,12 +147,12 @@ fn action_execution_rolls_back_when_stable_id_reservation_is_exceeded() {
             },
             vec![],
         ))
-        .unwrap();
+        .unwrap_err();
 
-    assert!(report
-        .diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.code == "ASTRA_RUNTIME_ACTION_ID_RESERVATION_EXCEEDED"));
+    assert!(error
+        .to_string()
+        .contains("ASTRA_RUNTIME_ACTION_ID_RESERVATION_EXCEEDED"));
+    assert!(world.is_failed());
     let snapshot = world
         .debug_session()
         .state_machines(owner)
@@ -164,12 +164,12 @@ fn action_execution_rolls_back_when_stable_id_reservation_is_exceeded() {
 }
 
 #[test]
-fn action_execution_rolls_back_undeclared_access() {
+fn undeclared_access_stops_world_without_committing_invalid_transition() {
     let mut world = RuntimeWorld::create(RuntimeConfig::default()).unwrap();
     world
         .register_action("astra.test", UndeclaredWriteAction)
         .unwrap();
-    let owner = world.create_actor("owner", vec![]);
+    let owner = world.create_actor("owner", vec![]).unwrap();
     let start = StableId::deterministic_v7(9, 2, 1);
     let done = StableId::deterministic_v7(9, 2, 2);
     world
@@ -202,7 +202,7 @@ fn action_execution_rolls_back_undeclared_access() {
             initial_state: start,
         })
         .unwrap();
-    let report = world
+    let error = world
         .tick(astra_runtime::TickRequest::live(
             TickInput {
                 fixed_step: 1,
@@ -211,11 +211,11 @@ fn action_execution_rolls_back_undeclared_access() {
             },
             vec![],
         ))
-        .unwrap();
-    assert!(report
-        .diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.code == "ASTRA_RUNTIME_ACTION_ACCESS_UNDECLARED"));
+        .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("ASTRA_RUNTIME_ACTION_ACCESS_UNDECLARED"));
+    assert!(world.is_failed());
     assert!(!world
         .debug_session()
         .blackboard()

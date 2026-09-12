@@ -120,3 +120,13 @@ Unknown event、invalid payload、missing required module、missing action、act
 需要旧 packaged module binding 的产品宿主在首 tick 前调用 `with_package(PackageHandle)` 显式附加身份，且只能附加一次。`package_id()` 与 `package_handle()` 返回 Option，无包时不生成默认或伪造身份。无包 World 调用 packaged `mount_module` 返回 `ASTRA_RUNTIME_MODULE_PACKAGE_REQUIRED`；重复附加或首 tick 后附加返回 `ASTRA_RUNTIME_PACKAGE_LIFECYCLE`。普通 Actor/Component 操作不依赖这项绑定。
 
 `runtime.world` v5 snapshot 将 package 身份改为 Option，NativeVN 外层 section 同步升级为 `astra.runtime.save_blob.v5`。旧布局明确拒绝；内存 typed state 与正常存读档仍由同一 RuntimeWorld 持有。权限来自宿主对 World 的所有权，诊断不记录组件 payload。验收包含无包/无 FSM 的 typed 更新和恢复、身份生命周期失败路径，以及现有 VN provider/Player 存档调用方。
+
+## Tick 失败与恢复
+
+RuntimeWorld tick 原地推进，不再为 Actor、Blackboard、Event、Await、delayed event 和 StateMachine 建立整帧撤销日志或状态 checkpoint。动作自身的访问声明与候选变更验证继续生效；已提交的其他 machine 工作不会因本 tick 后续错误撤回。
+
+step、seed、mode 等输入预检在修改前完成；预检错误不终止 World。执行阶段返回错误、blocking/error diagnostic 或发生 Rust unwind panic 时，`is_failed()` 变为 true，首次调用返回根因；后续 tick、可变 World API、save 和 snapshot 返回 `ASTRA_RUNTIME_SESSION_FAILED`。`create_actor`、事件写入、移除/取消和 snapshot 等原先不可失败的 API 现返回 Result，产品调用方必须传播错误。DebugSession 与只读查询可用于诊断，动作 provider 注销仍可用于清理。
+
+失败状态不进入正常存档。宿主可销毁 World，或明确读取已存在且通过格式验证的存档；读取失败保持当前失败状态，成功恢复后使用 RestoreContinuation 继续。宿主显式提供的 `restore_snapshot` 是同样的恢复边界。此调整不改变 runtime.world v5 二进制布局：删除的事务字段此前均未序列化。
+
+验证覆盖多 machine 部分提交、动作访问错误、microstep 超限、Await policy 错误、panic、失败后的写入/保存拒绝以及从此前存档恢复。它不表示通用 replay/history 路径已删除；该迁移仍单独推进。

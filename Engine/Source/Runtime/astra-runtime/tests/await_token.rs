@@ -141,7 +141,7 @@ fn await_timeout_materializes_deterministic_result() {
         event.source == astra_runtime::EventSource::AwaitResult
             && event.payload.kind == "await.timeout"
     }));
-    assert!(world.snapshot().awaits.pending().is_empty());
+    assert!(world.snapshot().unwrap().awaits.pending().is_empty());
 }
 
 #[test]
@@ -244,7 +244,7 @@ fn await_replay_policy_rejects_invalid_tokens_and_live_timeout_results() {
             replay_policy: AwaitReplayPolicy::DeterministicTimeout,
         })
         .unwrap();
-    let report = world
+    let error = world
         .tick(TickRequest::live(
             TickInput {
                 fixed_step: 1,
@@ -261,10 +261,8 @@ fn await_replay_policy_rejects_invalid_tokens_and_live_timeout_results() {
                 )),
             }],
         ))
-        .unwrap();
-    assert!(report
-        .diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.code == "ASTRA_AWAIT_RESULT_POLICY"));
+        .unwrap_err();
+    assert!(error.to_string().contains("ASTRA_AWAIT_RESULT_POLICY"));
+    assert!(world.is_failed());
     assert!(world.debug_session().event_trace().is_empty());
 }

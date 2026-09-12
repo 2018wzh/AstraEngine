@@ -365,7 +365,10 @@ fn materialize_session_state(session: &NativeVnSession) -> Result<VnRuntimeState
 
 fn materialized_save_snapshot(session: &NativeVnSession) -> Result<RuntimeSnapshot, CoreVnError> {
     let state = materialize_session_state(session)?;
-    let mut snapshot = session.world.snapshot();
+    let mut snapshot = session
+        .world
+        .snapshot()
+        .map_err(|error| CoreVnError::message(error.to_string()))?;
     let mut id_probe = snapshot.id_source.clone();
     let component_id = loop {
         let candidate = ComponentId(id_probe.next_id());
@@ -398,6 +401,7 @@ fn consume_materialized_restore_state(
     let mut candidates = session
         .world
         .snapshot()
+        .map_err(|error| CoreVnError::message(error.to_string()))?
         .actors
         .component_ids_for_actor_schema(session.owner, &schema);
     if candidates.len() != 1 {
@@ -411,7 +415,11 @@ fn consume_materialized_restore_state(
         .world
         .read_component(component_id)
         .map_err(|error| CoreVnError::message(error.to_string()))?;
-    if !session.world.detach_component(component_id) {
+    if !session
+        .world
+        .detach_component(component_id)
+        .map_err(|error| CoreVnError::message(error.to_string()))?
+    {
         return Err(CoreVnError::diagnostic(
             "ASTRA_NATIVE_VN_RESTORE_STATE_DETACH",
             "materialized VN restore state could not be removed after validation",
@@ -424,7 +432,10 @@ fn replace_session_state(
     session: &mut NativeVnSession,
     state: VnRuntimeState,
 ) -> Result<(), CoreVnError> {
-    let checkpoint = session.world.snapshot();
+    let checkpoint = session
+        .world
+        .snapshot()
+        .map_err(|error| CoreVnError::message(error.to_string()))?;
     let cached = session.state.clone();
     match replace_session_state_inner(session, state) {
         Ok(()) => Ok(()),
@@ -600,7 +611,9 @@ impl NativeVnRuntimeProvider {
                 RuntimeExecutorKind::Parallel => usize::from(request.executor.worker_count),
             })
             .map_err(|error| CoreVnError::message(error.to_string()))?;
-        let owner = world.create_actor("astra.vn.runtime", vec!["gameplay_runtime".to_string()]);
+        let owner = world
+            .create_actor("astra.vn.runtime", vec!["gameplay_runtime".to_string()])
+            .map_err(|error| CoreVnError::message(error.to_string()))?;
         let initial_state = initial_runtime.state().clone();
         world
             .attach_component(owner, "astra.vn.policy_state.v1", &VnPolicyState::default())
@@ -969,7 +982,10 @@ impl NativeVnRuntimeProvider {
         &self,
         session_id: &GameRuntimeSessionId,
     ) -> Result<RuntimeSnapshot, CoreVnError> {
-        Ok(self.session(session_id)?.world.snapshot())
+        self.session(session_id)?
+            .world
+            .snapshot()
+            .map_err(|error| CoreVnError::message(error.to_string()))
     }
 
     pub fn save_slot(
@@ -1044,7 +1060,10 @@ impl NativeVnRuntimeProvider {
             .map_err(|err| CoreVnError::message(err.to_string()))?;
         let state = consume_materialized_restore_state(session)?;
         session.state = state;
-        let snapshot = session.world.snapshot();
+        let snapshot = session
+            .world
+            .snapshot()
+            .map_err(|error| CoreVnError::message(error.to_string()))?;
         Ok(RuntimeRestoreReport {
             session_id: request.session_id,
             restored_fixed_step: snapshot.step,

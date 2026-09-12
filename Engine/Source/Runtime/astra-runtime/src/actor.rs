@@ -255,8 +255,6 @@ impl RuntimeComponentPayload {
 pub struct ActorStore {
     actors: IndexMap<ActorId, ActorRecord>,
     components: IndexMap<ComponentId, ComponentRecord>,
-    #[serde(skip)]
-    transaction: Option<ActorStoreTransaction>,
 }
 
 impl Clone for ActorStore {
@@ -264,7 +262,6 @@ impl Clone for ActorStore {
         Self {
             actors: self.actors.clone(),
             components: self.components.clone(),
-            transaction: self.transaction.clone(),
         }
     }
 }
@@ -275,117 +272,7 @@ impl PartialEq for ActorStore {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
-struct ActorStoreTransaction {
-    actors: BTreeMap<ActorId, IndexedActorUndo>,
-    components: BTreeMap<ComponentId, IndexedComponentUndo>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-struct IndexedActorUndo {
-    index: Option<usize>,
-    value: Option<ActorRecord>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-struct IndexedComponentUndo {
-    index: Option<usize>,
-    value: Option<ComponentRecord>,
-}
-
-fn restore_indexed_actor(
-    actors: &mut IndexMap<ActorId, ActorRecord>,
-    actor_id: ActorId,
-    undo: IndexedActorUndo,
-) {
-    actors.shift_remove(&actor_id);
-    if let Some(value) = undo.value {
-        actors.shift_insert(
-            undo.index.unwrap_or(actors.len()).min(actors.len()),
-            actor_id,
-            value,
-        );
-    }
-}
-
-fn restore_indexed_component(
-    components: &mut IndexMap<ComponentId, ComponentRecord>,
-    component_id: ComponentId,
-    undo: IndexedComponentUndo,
-) {
-    components.shift_remove(&component_id);
-    if let Some(value) = undo.value {
-        components.shift_insert(
-            undo.index.unwrap_or(components.len()).min(components.len()),
-            component_id,
-            value,
-        );
-    }
-}
-
 impl ActorStore {
-    pub(crate) fn begin_transaction(&mut self) -> Result<(), RuntimeError> {
-        if self.transaction.is_some() {
-            return Err(RuntimeError::message(
-                "ASTRA_RUNTIME_ACTOR_TRANSACTION_NESTED: actor transaction is already active",
-            ));
-        }
-        self.transaction = Some(ActorStoreTransaction::default());
-        Ok(())
-    }
-
-    pub(crate) fn commit_transaction(&mut self) {
-        self.transaction = None;
-    }
-
-    pub(crate) fn rollback_transaction(&mut self) {
-        let Some(transaction) = self.transaction.take() else {
-            return;
-        };
-        for (component_id, undo) in transaction.components.into_iter().rev() {
-            restore_indexed_component(&mut self.components, component_id, undo);
-        }
-        for (actor_id, undo) in transaction.actors.into_iter().rev() {
-            restore_indexed_actor(&mut self.actors, actor_id, undo);
-        }
-    }
-
-    fn record_actor_before(&mut self, actor_id: ActorId) {
-        let Some(transaction) = self.transaction.as_ref() else {
-            return;
-        };
-        if transaction.actors.contains_key(&actor_id) {
-            return;
-        }
-        let undo = IndexedActorUndo {
-            index: self.actors.get_index_of(&actor_id),
-            value: self.actors.get(&actor_id).cloned(),
-        };
-        self.transaction
-            .as_mut()
-            .expect("transaction presence was checked")
-            .actors
-            .insert(actor_id, undo);
-    }
-
-    fn record_component_before(&mut self, component_id: ComponentId) {
-        let Some(transaction) = self.transaction.as_ref() else {
-            return;
-        };
-        if transaction.components.contains_key(&component_id) {
-            return;
-        }
-        let undo = IndexedComponentUndo {
-            index: self.components.get_index_of(&component_id),
-            value: self.components.get(&component_id).cloned(),
-        };
-        self.transaction
-            .as_mut()
-            .expect("transaction presence was checked")
-            .components
-            .insert(component_id, undo);
-    }
-
     pub(crate) fn deterministic_fingerprint(&self) -> Hash128 {
         let components = self.components.values().map(|component| {
             (
@@ -403,13 +290,10 @@ impl ActorStore {
     }
 
     pub fn insert_actor(&mut self, actor: ActorRecord) {
-        self.record_actor_before(actor.actor_id);
         self.actors.insert(actor.actor_id, actor);
     }
 
     pub fn attach_component(&mut self, component: ComponentRecord) -> bool {
-        self.record_actor_before(component.actor_id);
-        self.record_component_before(component.component_id);
         let Some(actor) = self.actors.get_mut(&component.actor_id) else {
             return false;
         };
@@ -419,11 +303,6 @@ impl ActorStore {
     }
 
     pub fn remove_actor(&mut self, actor_id: ActorId) -> Option<ActorRecord> {
-        self.record_actor_before(actor_id);
-        let component_ids = self.actors.get(&actor_id)?.components.clone();
-        for component_id in &component_ids {
-            self.record_component_before(*component_id);
-        }
         let actor = self.actors.shift_remove(&actor_id)?;
         for component_id in &actor.components {
             self.components.shift_remove(component_id);
@@ -432,9 +311,6 @@ impl ActorStore {
     }
 
     pub fn detach_component(&mut self, component_id: ComponentId) -> Option<ComponentRecord> {
-        let actor_id = self.components.get(&component_id)?.actor_id;
-        self.record_actor_before(actor_id);
-        self.record_component_before(component_id);
         let component = self.components.shift_remove(&component_id)?;
         if let Some(actor) = self.actors.get_mut(&component.actor_id) {
             actor.components.retain(|id| *id != component_id);
@@ -451,7 +327,6 @@ impl ActorStore {
     }
 
     pub fn component_mut(&mut self, component_id: ComponentId) -> Option<&mut ComponentRecord> {
-        self.record_component_before(component_id);
         self.components.get_mut(&component_id)
     }
 
@@ -587,7 +462,6 @@ impl<'a> ActorStoreOverlay<'a> {
 impl ActorStoreDelta {
     pub(crate) fn commit(self, target: &mut ActorStore) {
         for (actor_id, actor) in self.actors {
-            target.record_actor_before(actor_id);
             match actor {
                 Some(actor) => {
                     target.actors.insert(actor_id, actor);
@@ -598,7 +472,6 @@ impl ActorStoreDelta {
             }
         }
         for (component_id, component) in self.components {
-            target.record_component_before(component_id);
             match component {
                 Some(component) => {
                     target.components.insert(component_id, component);

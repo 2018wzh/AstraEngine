@@ -15,7 +15,7 @@ fn action_context_exposes_transition_trigger_event() {
     world
         .register_action("astra.test", CaptureTriggerAction)
         .unwrap();
-    let owner = world.create_actor("vn.driver", vec![]);
+    let owner = world.create_actor("vn.driver", vec![]).unwrap();
 
     let start = StableId::deterministic_v7(1, 1, 1);
     let done = StableId::deterministic_v7(1, 2, 1);
@@ -52,7 +52,9 @@ fn action_context_exposes_transition_trigger_event() {
         })
         .unwrap();
 
-    world.emit_event(EventSource::PlayerInput, EventPayload::new("vn.advance"));
+    world
+        .emit_event(EventSource::PlayerInput, EventPayload::new("vn.advance"))
+        .unwrap();
     world
         .tick(astra_runtime::TickRequest::live(
             TickInput {
@@ -65,7 +67,7 @@ fn action_context_exposes_transition_trigger_event() {
         .unwrap();
 
     assert_eq!(
-        world.snapshot().blackboard.get("trigger.kind"),
+        world.snapshot().unwrap().blackboard.get("trigger.kind"),
         Some(&BlackboardValue::String("vn.advance".to_string()))
     );
 }
@@ -76,7 +78,7 @@ fn compiled_event_dispatch_preserves_original_event_order() {
     world
         .register_action("astra.test", CaptureTriggerAction)
         .unwrap();
-    let owner = world.create_actor("vn.driver", vec![]);
+    let owner = world.create_actor("vn.driver", vec![]).unwrap();
     let start = StableId::deterministic_v7(3, 1, 1);
     let done = StableId::deterministic_v7(3, 2, 1);
     world
@@ -119,8 +121,12 @@ fn compiled_event_dispatch_preserves_original_event_order() {
         })
         .unwrap();
 
-    world.emit_event(EventSource::PlayerInput, EventPayload::new("vn.z_first"));
-    world.emit_event(EventSource::PlayerInput, EventPayload::new("vn.a_second"));
+    world
+        .emit_event(EventSource::PlayerInput, EventPayload::new("vn.z_first"))
+        .unwrap();
+    world
+        .emit_event(EventSource::PlayerInput, EventPayload::new("vn.a_second"))
+        .unwrap();
     world
         .tick(astra_runtime::TickRequest::live(
             TickInput {
@@ -133,7 +139,7 @@ fn compiled_event_dispatch_preserves_original_event_order() {
         .unwrap();
 
     assert_eq!(
-        world.snapshot().blackboard.get("trigger.kind"),
+        world.snapshot().unwrap().blackboard.get("trigger.kind"),
         Some(&BlackboardValue::String("vn.z_first".to_string()))
     );
 }
@@ -182,7 +188,7 @@ struct CounterComponent {
 #[test]
 fn action_context_commits_typed_component_mutation() {
     let mut world = RuntimeWorld::create(RuntimeConfig::default()).unwrap();
-    let owner = world.create_actor("runtime.owner", vec![]);
+    let owner = world.create_actor("runtime.owner", vec![]).unwrap();
     let component = world
         .attach_component(owner, "astra.test.counter", &CounterComponent { value: 1 })
         .unwrap();

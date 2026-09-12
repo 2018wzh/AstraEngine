@@ -44,16 +44,12 @@ impl From<bool> for BlackboardValue {
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema)]
 pub struct Blackboard {
     values: BTreeMap<String, BlackboardValue>,
-    #[serde(skip)]
-    #[schemars(skip)]
-    transaction: Option<BTreeMap<String, Option<BlackboardValue>>>,
 }
 
 impl Clone for Blackboard {
     fn clone(&self) -> Self {
         Self {
             values: self.values.clone(),
-            transaction: self.transaction.clone(),
         }
     }
 }
@@ -65,53 +61,9 @@ impl PartialEq for Blackboard {
 }
 
 impl Blackboard {
-    pub(crate) fn begin_transaction(&mut self) -> Result<(), &'static str> {
-        if self.transaction.is_some() {
-            return Err(
-                "ASTRA_RUNTIME_BLACKBOARD_TRANSACTION_NESTED: blackboard transaction is already active",
-            );
-        }
-        self.transaction = Some(BTreeMap::new());
-        Ok(())
-    }
-
-    pub(crate) fn commit_transaction(&mut self) {
-        self.transaction = None;
-    }
-
-    pub(crate) fn rollback_transaction(&mut self) {
-        let Some(transaction) = self.transaction.take() else {
-            return;
-        };
-        for (key, value) in transaction {
-            match value {
-                Some(value) => {
-                    self.values.insert(key, value);
-                }
-                None => {
-                    self.values.remove(&key);
-                }
-            }
-        }
-    }
-
-    fn record_before(&mut self, key: &str) {
-        let Some(transaction) = self.transaction.as_ref() else {
-            return;
-        };
-        if transaction.contains_key(key) {
-            return;
-        }
-        let previous = self.values.get(key).cloned();
-        self.transaction
-            .as_mut()
-            .expect("transaction presence was checked")
-            .insert(key.to_string(), previous);
-    }
-
     pub fn set(&mut self, key: impl Into<String>, value: BlackboardValue) {
         let key = key.into();
-        self.record_before(&key);
+
         self.values.insert(key, value);
     }
 

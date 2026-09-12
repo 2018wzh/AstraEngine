@@ -200,11 +200,6 @@ pub struct StateMachineStore {
     trace: Vec<ActionTrace>,
 }
 
-pub(crate) struct StateMachineTransactionCheckpoint {
-    machine_states: Vec<(StableId, bool)>,
-    trace_len: usize,
-}
-
 impl StateMachineStore {
     pub(crate) fn definition_fingerprint(&self) -> astra_core::Hash128 {
         astra_core::Hash128::from_blake3(
@@ -233,35 +228,6 @@ impl StateMachineStore {
             ))
             .expect("state machine state must serialize for deterministic fingerprinting"),
         )
-    }
-
-    pub(crate) fn transaction_checkpoint(&self) -> StateMachineTransactionCheckpoint {
-        StateMachineTransactionCheckpoint {
-            machine_states: self
-                .machines
-                .iter()
-                .map(|machine| (machine.current_state, machine.completed))
-                .collect(),
-            trace_len: self.trace.len(),
-        }
-    }
-
-    pub(crate) fn restore_transaction_checkpoint(
-        &mut self,
-        checkpoint: StateMachineTransactionCheckpoint,
-    ) {
-        assert_eq!(
-            self.machines.len(),
-            checkpoint.machine_states.len(),
-            "state machine topology must not change during a tick transaction"
-        );
-        for (machine, (current_state, completed)) in
-            self.machines.iter_mut().zip(checkpoint.machine_states)
-        {
-            machine.current_state = current_state;
-            machine.completed = completed;
-        }
-        self.trace.truncate(checkpoint.trace_len);
     }
 
     pub fn add(&mut self, definition: StateMachineDefinition) -> Result<(), RuntimeError> {

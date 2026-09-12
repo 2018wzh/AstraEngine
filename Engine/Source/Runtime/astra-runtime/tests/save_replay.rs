@@ -25,7 +25,7 @@ fn save_load_rejects_previous_runtime_world_layout_without_compatibility() {
             "runtime.world",
             version,
             SectionCodec::Postcard,
-            postcard::to_allocvec(&world.snapshot()).unwrap(),
+            postcard::to_allocvec(&world.snapshot().unwrap()).unwrap(),
             MigrationPolicy::current(),
         ))
         .add_section(SectionPayload::new(
@@ -52,7 +52,7 @@ fn save_load_preserves_typed_world_and_stable_id_sequence() {
         required_slots: vec![],
     };
     let mut uninterrupted = RuntimeWorld::create(config.clone()).unwrap();
-    uninterrupted.create_actor("before-save", vec![]);
+    uninterrupted.create_actor("before-save", vec![]).unwrap();
     uninterrupted
         .tick(TickRequest::live(
             TickInput {
@@ -65,12 +65,15 @@ fn save_load_preserves_typed_world_and_stable_id_sequence() {
         .unwrap();
     let before = uninterrupted.state_hash();
     let save = uninterrupted.save(SaveRequest::default()).unwrap();
-    let expected = uninterrupted.create_actor("after-save", vec![]);
+    let expected = uninterrupted.create_actor("after-save", vec![]).unwrap();
 
     let mut restored = RuntimeWorld::create(config).unwrap();
     restored.load(save).unwrap();
     assert_eq!(restored.state_hash(), before);
-    assert_eq!(restored.create_actor("after-save", vec![]), expected);
+    assert_eq!(
+        restored.create_actor("after-save", vec![]).unwrap(),
+        expected
+    );
 }
 
 #[test]
@@ -120,7 +123,7 @@ fn restored_world_requires_exactly_one_restore_continuation_tick() {
 #[test]
 fn save_load_rejects_footer_hash_mismatch() {
     let mut world = RuntimeWorld::create(RuntimeConfig::default()).unwrap();
-    world.create_actor("corrupt", vec![]);
+    world.create_actor("corrupt", vec![]).unwrap();
     let mut save = world.save(SaveRequest::default()).unwrap();
     let payload_byte = save.0.len() / 2;
     save.0[payload_byte] ^= 1;
@@ -135,7 +138,7 @@ fn replay_consumes_typed_player_input_with_explicit_evidence_checkpoint() {
         required_slots: vec![],
     };
     let mut recorded = RuntimeWorld::create(config).unwrap();
-    let checkpoint = recorded.snapshot();
+    let checkpoint = recorded.snapshot().unwrap();
     let player_input = PlayerInput {
         kind: "player.advance".to_string(),
         payload: EventPayload::new("player.advance"),

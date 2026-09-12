@@ -5,10 +5,16 @@ use astra_runtime::{
 #[test]
 fn delayed_events_drain_in_due_tick_sequence_order() {
     let mut world = RuntimeWorld::create(RuntimeConfig::default()).unwrap();
-    world.schedule_event(3, EventSource::Scenario, EventPayload::new("timer.first"));
-    let canceled = world.schedule_event(3, EventSource::Scenario, EventPayload::new("timer.skip"));
-    world.schedule_event(3, EventSource::Scenario, EventPayload::new("timer.second"));
-    assert!(world.cancel_delayed_event(canceled));
+    world
+        .schedule_event(3, EventSource::Scenario, EventPayload::new("timer.first"))
+        .unwrap();
+    let canceled = world
+        .schedule_event(3, EventSource::Scenario, EventPayload::new("timer.skip"))
+        .unwrap();
+    world
+        .schedule_event(3, EventSource::Scenario, EventPayload::new("timer.second"))
+        .unwrap();
+    assert!(world.cancel_delayed_event(canceled).unwrap());
 
     tick(&mut world, 1);
     tick(&mut world, 2);
@@ -27,7 +33,9 @@ fn delayed_events_drain_in_due_tick_sequence_order() {
 #[test]
 fn delayed_events_survive_save_load_before_due_tick() {
     let mut world = RuntimeWorld::create(RuntimeConfig::default()).unwrap();
-    world.schedule_event(4, EventSource::Scenario, EventPayload::new("timer.saved"));
+    world
+        .schedule_event(4, EventSource::Scenario, EventPayload::new("timer.saved"))
+        .unwrap();
     tick(&mut world, 1);
     let save = world.save(SaveRequest::default()).unwrap();
 

@@ -40,7 +40,9 @@ fn vn_state_roundtrips_inside_runtime_save_container() {
     .unwrap();
 
     let mut world = RuntimeWorld::create(RuntimeConfig::default()).unwrap();
-    world.create_actor("vn-host", vec!["nativevn".to_string()]);
+    world
+        .create_actor("vn-host", vec!["nativevn".to_string()])
+        .unwrap();
     let runtime_hash = world.state_hash();
     let mut policy = LuauPolicy::new().unwrap();
     let mut policy_state = VnPolicyState::default();
@@ -62,7 +64,7 @@ fn vn_state_roundtrips_inside_runtime_save_container() {
         .expect("vn runtime save section must be directly postcard-decodable");
 
     let save = write_runtime_save_with_sections(
-        world.snapshot(),
+        world.snapshot().unwrap(),
         SaveRequest::default(),
         vec![
             vn_section,

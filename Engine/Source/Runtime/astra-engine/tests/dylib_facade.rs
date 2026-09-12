@@ -11,7 +11,7 @@ use astra_engine::{
 #[test]
 fn dylib_facade_reexports_enginecore_public_api() {
     let world = RuntimeWorld::create(RuntimeConfig::default()).unwrap();
-    assert_eq!(world.snapshot().step, 0);
+    assert_eq!(world.snapshot().unwrap().step, 0);
 
     let stable_id = StableId::nil();
     assert_eq!(

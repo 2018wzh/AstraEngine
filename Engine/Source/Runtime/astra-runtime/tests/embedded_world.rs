@@ -18,7 +18,7 @@ fn standalone_world_updates_typed_state_and_restores_without_package_or_fsm() {
     let mut world = RuntimeWorld::create(config.clone()).unwrap();
     assert!(world.package_id().is_none());
     assert!(world.package_handle().is_none());
-    let actor = world.create_actor("sprite", vec![]);
+    let actor = world.create_actor("sprite", vec![]).unwrap();
     let component = world
         .attach_component(actor, "test.position", &Position { x: 1.0, y: 2.0 })
         .unwrap();
@@ -66,8 +66,8 @@ fn standalone_world_updates_typed_state_and_restores_without_package_or_fsm() {
         .unwrap();
     // Stable IDs continue from the saved generator even without any product metadata.
     assert_eq!(
-        world.create_actor("next", vec![]),
-        restored.create_actor("next", vec![])
+        world.create_actor("next", vec![]).unwrap(),
+        restored.create_actor("next", vec![]).unwrap()
     );
 }
 

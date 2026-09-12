@@ -37,9 +37,9 @@ fn tick_rejects_duplicate_gap_regression_delta_and_seed_without_mutation() {
     })
     .and_then(|world| world.with_package(PackageHandle::default()))
     .unwrap();
-    world.create_actor("system", vec![]);
+    world.create_actor("system", vec![]).unwrap();
     world.tick(request(input(1, 41))).unwrap();
-    let checkpoint = postcard::to_allocvec(&world.snapshot()).unwrap();
+    let checkpoint = postcard::to_allocvec(&world.snapshot().unwrap()).unwrap();
 
     let cases = [
         input(1, 41),
@@ -58,7 +58,7 @@ fn tick_rejects_duplicate_gap_regression_delta_and_seed_without_mutation() {
     for invalid in cases {
         assert!(world.tick(request(invalid)).is_err());
         assert_eq!(
-            postcard::to_allocvec(&world.snapshot()).unwrap(),
+            postcard::to_allocvec(&world.snapshot().unwrap()).unwrap(),
             checkpoint
         );
     }
@@ -74,11 +74,11 @@ fn missing_required_module_blocks_before_step_or_id_state_changes() {
     })
     .and_then(|world| world.with_package(PackageHandle::default()))
     .unwrap();
-    let checkpoint = postcard::to_allocvec(&world.snapshot()).unwrap();
+    let checkpoint = postcard::to_allocvec(&world.snapshot().unwrap()).unwrap();
     let error = world.tick(request(input(1, 7))).unwrap_err();
     assert!(error.to_string().contains("ASTRA_RUNTIME_MODULE_MISSING"));
     assert_eq!(
-        postcard::to_allocvec(&world.snapshot()).unwrap(),
+        postcard::to_allocvec(&world.snapshot().unwrap()).unwrap(),
         checkpoint
     );
 }
@@ -148,7 +148,7 @@ fn tick_rejects_invalid_ingress_order_and_mode_without_mutation() {
     })
     .and_then(|world| world.with_package(PackageHandle::default()))
     .unwrap();
-    let checkpoint = postcard::to_allocvec(&world.snapshot()).unwrap();
+    let checkpoint = postcard::to_allocvec(&world.snapshot().unwrap()).unwrap();
     let player_input = || {
         TickIngress::PlayerInput(PlayerInput {
             kind: "advance".to_string(),
@@ -189,7 +189,7 @@ fn tick_rejects_invalid_ingress_order_and_mode_without_mutation() {
             .to_string()
             .contains("ASTRA_RUNTIME_TICK_INGRESS_ORDER_INVALID"));
         assert_eq!(
-            postcard::to_allocvec(&world.snapshot()).unwrap(),
+            postcard::to_allocvec(&world.snapshot().unwrap()).unwrap(),
             checkpoint
         );
     }

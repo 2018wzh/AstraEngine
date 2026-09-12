@@ -38,7 +38,9 @@ fn world_actor_owns_typed_components_and_tracks_revisions() {
     )
     .unwrap();
     world.mount_module(slot, binding).unwrap();
-    let actor = world.create_actor("hero", vec!["player".to_string()]);
+    let actor = world
+        .create_actor("hero", vec!["player".to_string()])
+        .unwrap();
     let component = world
         .attach_component(
             actor,
@@ -91,8 +93,8 @@ fn world_actor_owns_typed_components_and_tracks_revisions() {
     assert_eq!(mutations[0].component_id, component);
     assert!(mutations[0].after_revision > mutations[0].before_revision);
 
-    assert!(world.detach_component(component));
-    assert!(world.remove_actor(actor));
+    assert!(world.detach_component(component).unwrap());
+    assert!(world.remove_actor(actor).unwrap());
     assert!(!world.save(SaveRequest::default()).unwrap().0.is_empty());
 }
 

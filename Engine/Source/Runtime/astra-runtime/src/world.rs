@@ -422,16 +422,8 @@ struct RuntimeStateDigestV3<'a> {
     step: u64,
 }
 
-struct RuntimeTransactionCheckpoint {
-    id_source: StableIdGenerator,
-    machines: crate::state_machine::StateMachineTransactionCheckpoint,
-    presentation_len: usize,
-    mutations_len: usize,
-    step: u64,
-    required_tick_mode: TickMode,
-}
-
 pub struct RuntimeWorld {
+    failed: bool,
     config: RuntimeConfig,
     package: Option<PackageHandle>,
     id_source: StableIdGenerator,
@@ -480,6 +472,7 @@ impl RuntimeWorld {
             "runtime.create"
         );
         Ok(Self {
+            failed: false,
             id_source: StableIdGenerator::new(config.seed),
             config,
             package: None,
@@ -507,10 +500,12 @@ impl RuntimeWorld {
     }
 
     pub fn begin_replay_recording(&self) -> Result<crate::RuntimeReplayRecorder, RuntimeError> {
-        crate::RuntimeReplayRecorder::start(self.snapshot())
+        self.ensure_active()?;
+        crate::RuntimeReplayRecorder::start(self.snapshot()?)
     }
 
     pub fn capture_evidence_checkpoint(&self) -> Result<crate::ReplayHashCheckpoint, RuntimeError> {
+        self.ensure_active()?;
         if self.integrity_mode != TickIntegrityMode::Evidence {
             return Err(RuntimeError::diagnostic(Diagnostic::blocking(
                 "ASTRA_RUNTIME_EVIDENCE_DISABLED",
@@ -526,6 +521,7 @@ impl RuntimeWorld {
     }
 
     pub fn set_machine_worker_count(&mut self, worker_count: usize) -> Result<(), RuntimeError> {
+        self.ensure_active()?;
         if !(1..=8).contains(&worker_count) {
             return Err(RuntimeError::diagnostic(Diagnostic::blocking(
                 "ASTRA_RUNTIME_WORKER_COUNT",
@@ -545,6 +541,7 @@ impl RuntimeWorld {
     /// Attach product identity only for hosts using packaged module bindings.
     /// Standalone worlds use the same state, tick and save implementation without it.
     pub fn with_package(mut self, package: PackageHandle) -> Result<Self, RuntimeError> {
+        self.ensure_active()?;
         if self.step != 0 || self.package.is_some() || !self.mounted_modules.is_empty() {
             return Err(RuntimeError::diagnostic(Diagnostic::blocking(
                 "ASTRA_RUNTIME_PACKAGE_LIFECYCLE",
@@ -587,6 +584,7 @@ impl RuntimeWorld {
         slot: EngineModuleSlot,
         binding: ValidatedModuleBinding,
     ) -> Result<(), RuntimeError> {
+        self.ensure_active()?;
         if binding.slot != slot {
             return Err(RuntimeError::diagnostic(Diagnostic::blocking(
                 "ASTRA_RUNTIME_MODULE_SLOT_MISMATCH",
@@ -642,6 +640,7 @@ impl RuntimeWorld {
         provider_id: impl Into<String>,
         action: A,
     ) -> Result<(), RuntimeError> {
+        self.ensure_active()?;
         let provider_id = provider_id.into();
         let action_id = action.descriptor().id;
         info!(
@@ -657,7 +656,12 @@ impl RuntimeWorld {
         self.actions.unregister_provider(provider_id);
     }
 
-    pub fn create_actor(&mut self, name: impl Into<String>, tags: Vec<String>) -> ActorId {
+    pub fn create_actor(
+        &mut self,
+        name: impl Into<String>,
+        tags: Vec<String>,
+    ) -> Result<ActorId, RuntimeError> {
+        self.ensure_active()?;
         let actor_id = ActorId(self.next_id());
         debug!(?actor_id, tag_count = tags.len(), "runtime.actor.create");
         self.actors.insert_actor(ActorRecord {
@@ -666,7 +670,7 @@ impl RuntimeWorld {
             tags,
             components: Vec::new(),
         });
-        actor_id
+        Ok(actor_id)
     }
 
     pub fn attach_component<T>(
@@ -678,6 +682,7 @@ impl RuntimeWorld {
     where
         T: Serialize + Clone + std::fmt::Debug + Send + Sync + 'static,
     {
+        self.ensure_active()?;
         let component_id = ComponentId(self.next_id());
         let schema = schema.into();
         let payload =
@@ -730,6 +735,7 @@ impl RuntimeWorld {
     where
         T: Serialize + Clone + std::fmt::Debug + Send + Sync + 'static,
     {
+        self.ensure_active()?;
         let component = self.actors.component_mut(component_id).ok_or_else(|| {
             RuntimeError::diagnostic(Diagnostic::blocking(
                 "ASTRA_RUNTIME_COMPONENT_MISSING",
@@ -763,22 +769,25 @@ impl RuntimeWorld {
         Ok(())
     }
 
-    pub fn remove_actor(&mut self, actor_id: ActorId) -> bool {
+    pub fn remove_actor(&mut self, actor_id: ActorId) -> Result<bool, RuntimeError> {
+        self.ensure_active()?;
         let removed = self.actors.remove_actor(actor_id).is_some();
         debug!(?actor_id, removed, "runtime.actor.remove");
-        removed
+        Ok(removed)
     }
 
-    pub fn detach_component(&mut self, component_id: ComponentId) -> bool {
+    pub fn detach_component(&mut self, component_id: ComponentId) -> Result<bool, RuntimeError> {
+        self.ensure_active()?;
         let detached = self.actors.detach_component(component_id).is_some();
         debug!(?component_id, detached, "runtime.component.detach");
-        detached
+        Ok(detached)
     }
 
     pub fn add_state_machine(
         &mut self,
         definition: StateMachineDefinition,
     ) -> Result<(), RuntimeError> {
+        self.ensure_active()?;
         debug!(
             machine_id = ?definition.id,
             owner = ?definition.owner,
@@ -791,7 +800,12 @@ impl RuntimeWorld {
         Ok(())
     }
 
-    pub fn emit_event(&mut self, source: EventSource, payload: EventPayload) {
+    pub fn emit_event(
+        &mut self,
+        source: EventSource,
+        payload: EventPayload,
+    ) -> Result<(), RuntimeError> {
+        self.ensure_active()?;
         let kind = payload.kind.clone();
         let event = RuntimeEvent {
             id: EventId(self.next_id()),
@@ -808,9 +822,11 @@ impl RuntimeWorld {
             "runtime.event.emit"
         );
         self.events.push(event);
+        Ok(())
     }
 
-    pub fn enqueue_event(&mut self, event: RuntimeEvent) {
+    pub fn enqueue_event(&mut self, event: RuntimeEvent) -> Result<(), RuntimeError> {
+        self.ensure_active()?;
         debug!(
             event_id = ?event.id,
             source = ?event.source,
@@ -819,6 +835,7 @@ impl RuntimeWorld {
             "runtime.event.enqueue"
         );
         self.events.push(event);
+        Ok(())
     }
 
     pub fn schedule_event(
@@ -826,7 +843,8 @@ impl RuntimeWorld {
         due_tick: u64,
         source: EventSource,
         payload: EventPayload,
-    ) -> DelayedEventId {
+    ) -> Result<DelayedEventId, RuntimeError> {
+        self.ensure_active()?;
         let kind = payload.kind.clone();
         let source_for_log = source.clone();
         let event = ScheduledEvent {
@@ -844,16 +862,18 @@ impl RuntimeWorld {
             kind = %kind,
             "runtime.delayed_event.schedule"
         );
-        id
+        Ok(id)
     }
 
-    pub fn cancel_delayed_event(&mut self, id: DelayedEventId) -> bool {
+    pub fn cancel_delayed_event(&mut self, id: DelayedEventId) -> Result<bool, RuntimeError> {
+        self.ensure_active()?;
         let cancelled = self.delayed_events.cancel(id);
         debug!(?id, cancelled, "runtime.delayed_event.cancel");
-        cancelled
+        Ok(cancelled)
     }
 
-    pub fn emit_presentation(&mut self, command: PresentationCommand) {
+    pub fn emit_presentation(&mut self, command: PresentationCommand) -> Result<(), RuntimeError> {
+        self.ensure_active()?;
         let sequence = self.presentation.len() as u64;
         debug!(
             step = self.step,
@@ -866,6 +886,7 @@ impl RuntimeWorld {
             sequence,
             command,
         });
+        Ok(())
     }
 
     fn submit_await_result(&mut self, result: AwaitResult) {
@@ -880,6 +901,7 @@ impl RuntimeWorld {
     }
 
     pub fn insert_await_token(&mut self, token: AwaitToken) -> Result<(), RuntimeError> {
+        self.ensure_active()?;
         debug!(
             token_id = ?token.token_id,
             requested_at_step = token.requested_at_step,
@@ -894,19 +916,30 @@ impl RuntimeWorld {
         if payload.kind.is_empty() {
             payload.kind = input.kind;
         }
-        self.emit_event(EventSource::PlayerInput, payload);
+        self.emit_event(EventSource::PlayerInput, payload)?;
+        Ok(())
+    }
+
+    pub fn is_failed(&self) -> bool {
+        self.failed
+    }
+
+    fn ensure_active(&self) -> Result<(), RuntimeError> {
+        if self.failed {
+            return Err(RuntimeError::diagnostic(Diagnostic::blocking(
+                "ASTRA_RUNTIME_SESSION_FAILED",
+                "runtime execution failed; restore a saved state or recreate the world",
+            )));
+        }
         Ok(())
     }
 
     pub fn tick(&mut self, request: TickRequest) -> Result<TickReport, RuntimeError> {
+        self.ensure_active()?;
         self.validate_tick_request(&request)?;
-        let checkpoint_started = Instant::now();
-        let checkpoint = self.transaction_checkpoint()?;
-        let checkpoint_ns = checkpoint_started.elapsed().as_nanos() as u64;
-        let diagnostics = self.diagnostics.clone();
+        let started = Instant::now();
         let performance_step = request.timing.fixed_step;
-        let transaction_started = Instant::now();
-        let result = (|| {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             for ingress in request.ingress {
                 match ingress.payload {
                     TickIngress::PlayerInput(input) => self.apply_input(input)?,
@@ -919,31 +952,22 @@ impl RuntimeWorld {
                 TickMode::Live | TickMode::RestoreContinuation => TickMode::Live,
             };
             Ok(report)
-        })();
-        let transaction_ns = transaction_started.elapsed().as_nanos() as u64;
+        }))
+        .unwrap_or_else(|_| {
+            Err(RuntimeError::diagnostic(Diagnostic::blocking(
+                "ASTRA_RUNTIME_EXECUTION_PANIC",
+                "runtime action execution panicked",
+            )))
+        });
+        self.failed = result.is_err();
         trace!(
-            event = "runtime.tick.transaction.performance",
+            event = "runtime.tick.execution.performance",
             step = performance_step,
-            checkpoint_ns,
-            transaction_ns,
+            execution_ns = started.elapsed().as_nanos() as u64,
             succeeded = result.is_ok(),
-            "measured RuntimeWorld tick transaction phases"
+            "measured RuntimeWorld tick execution"
         );
-        match result {
-            Ok(report) => {
-                self.actors.commit_transaction();
-                self.blackboard.commit_transaction();
-                self.awaits.commit_transaction();
-                self.delayed_events.commit_transaction();
-                self.events.commit_transaction();
-                Ok(report)
-            }
-            Err(error) => {
-                self.restore_transaction_checkpoint(checkpoint);
-                self.diagnostics = diagnostics;
-                Err(error)
-            }
-        }
+        result
     }
 
     fn validate_tick_request(&self, request: &TickRequest) -> Result<(), RuntimeError> {
@@ -1122,9 +1146,17 @@ impl RuntimeWorld {
                 .map_err(RuntimeError::diagnostic)?;
         }
         for command in output.presentation {
-            self.emit_presentation(command);
+            self.emit_presentation(command)?;
         }
         self.mutations.extend(output.mutations);
+        if let Some(diagnostic) = self.diagnostics.iter().find(|diagnostic| {
+            matches!(
+                diagnostic.severity,
+                astra_core::DiagnosticSeverity::Blocking | astra_core::DiagnosticSeverity::Error
+            )
+        }) {
+            return Err(RuntimeError::diagnostic(diagnostic.clone()));
+        }
         let report = TickReport {
             step: input.fixed_step,
             integrity_mode: self.integrity_mode,
@@ -1142,12 +1174,13 @@ impl RuntimeWorld {
     }
 
     pub fn save(&self, request: SaveRequest) -> Result<SaveBlob, RuntimeError> {
+        self.ensure_active()?;
         debug!(
             minimum_supported_version = ?request.minimum_supported_version,
             step = self.step,
             "runtime.save"
         );
-        crate::save::write_runtime_save(self.snapshot(), request)
+        crate::save::write_runtime_save(self.snapshot()?, request)
     }
 
     pub fn load(&mut self, save: SaveBlob) -> Result<LoadReport, RuntimeError> {
@@ -1176,6 +1209,7 @@ impl RuntimeWorld {
     }
 
     pub fn restore_snapshot(&mut self, snapshot: RuntimeSnapshot) {
+        self.failed = false;
         self.config = snapshot.config;
         self.package = snapshot.package;
         self.id_source = snapshot.id_source;
@@ -1210,7 +1244,7 @@ impl RuntimeWorld {
             )));
         }
         info!(input_count = replay.ticks.len(), "runtime.replay.start");
-        let original = self.snapshot();
+        let original = self.snapshot()?;
         let original_mode = self.required_tick_mode;
         let result = (|| {
             self.restore_snapshot(replay.checkpoint);
@@ -1263,8 +1297,9 @@ impl RuntimeWorld {
         RuntimeDebugSession { world: self }
     }
 
-    pub fn snapshot(&self) -> RuntimeSnapshot {
-        RuntimeSnapshot {
+    pub fn snapshot(&self) -> Result<RuntimeSnapshot, RuntimeError> {
+        self.ensure_active()?;
+        Ok(RuntimeSnapshot {
             config: self.config.clone(),
             package: self.package.clone(),
             id_source: self.id_source.clone(),
@@ -1279,7 +1314,7 @@ impl RuntimeWorld {
             mounted_modules: self.mounted_modules.clone(),
             integrity_mode: self.integrity_mode,
             step: self.step,
-        }
+        })
     }
 
     pub fn state_hash(&self) -> Hash128 {
@@ -1338,56 +1373,6 @@ impl RuntimeWorld {
             ))
             .expect("runtime presentation digest must serialize for presentation hash"),
         )
-    }
-
-    fn transaction_checkpoint(&mut self) -> Result<RuntimeTransactionCheckpoint, RuntimeError> {
-        self.actors.begin_transaction()?;
-        if let Err(message) = self.blackboard.begin_transaction() {
-            self.actors.rollback_transaction();
-            return Err(RuntimeError::message(message));
-        }
-        if let Err(message) = self.awaits.begin_transaction() {
-            self.blackboard.rollback_transaction();
-            self.actors.rollback_transaction();
-            return Err(RuntimeError::message(message));
-        }
-        if let Err(message) = self.delayed_events.begin_transaction() {
-            self.awaits.rollback_transaction();
-            self.blackboard.rollback_transaction();
-            self.actors.rollback_transaction();
-            return Err(RuntimeError::message(message));
-        }
-        if let Err(message) = self.events.begin_transaction() {
-            self.delayed_events.rollback_transaction();
-            self.awaits.rollback_transaction();
-            self.blackboard.rollback_transaction();
-            self.actors.rollback_transaction();
-            return Err(RuntimeError::message(message));
-        }
-        Ok(RuntimeTransactionCheckpoint {
-            id_source: self.id_source.clone(),
-            machines: self.machines.transaction_checkpoint(),
-            presentation_len: self.presentation.len(),
-            mutations_len: self.mutations.len(),
-            step: self.step,
-            required_tick_mode: self.required_tick_mode,
-        })
-    }
-
-    fn restore_transaction_checkpoint(&mut self, checkpoint: RuntimeTransactionCheckpoint) {
-        self.id_source = checkpoint.id_source;
-        self.actors.rollback_transaction();
-        self.blackboard.rollback_transaction();
-        self.machines
-            .restore_transaction_checkpoint(checkpoint.machines);
-        self.awaits.rollback_transaction();
-        self.delayed_events.rollback_transaction();
-        self.events.rollback_transaction();
-        self.presentation.truncate(checkpoint.presentation_len);
-        self.mutations.truncate(checkpoint.mutations_len);
-        self.step = checkpoint.step;
-        self.required_tick_mode = checkpoint.required_tick_mode;
-        *self.history_digests.get_mut() = RuntimeHistoryDigests::default();
     }
 
     fn next_id(&mut self) -> StableId {
