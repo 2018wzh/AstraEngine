@@ -19,7 +19,7 @@ TickRequest
 
 EventQueue 按 `(step, sequence, id)` 消费事件；DelayedEventQueue 按 `(due_tick, sequence, id)` 把到期事件加入同一队列。队列和 StableId generator 进入存档，读档后继续使用保存的 sequence。
 
-现有 AwaitToken 使用显式 token id、请求 step、可选 timeout step 和完成策略。`AwaitReplayPolicy::RecordedResult` 这个旧命名目前表示接收 host 的 AwaitResult；`DeterministicTimeout` 只在指定 tick 超时，拒绝外部 completion。命名和任务作用域将在任务生命周期迁移中处理。不能把 Future 或 native handle 放入存档。
+现有 AwaitToken 使用显式 token id、请求 step、可选 timeout step 和完成策略。`AwaitCompletionPolicy::HostResult` 表示接收持有当前完成句柄的 host 结果；`TickTimeout` 只在指定 tick 超时，拒绝外部 completion。任务作用域和完成句柄的取消/读档边界见 Runtime Contract。不能把 Future 或 native handle 放入存档。
 
 ## 候选状态与诊断
 

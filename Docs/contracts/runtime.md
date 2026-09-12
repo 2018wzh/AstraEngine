@@ -30,6 +30,9 @@ impl RuntimeWorld {
     pub fn cancel_delayed_event(&mut self, id: DelayedEventId) -> Result<bool, RuntimeError>;
     pub fn save(&self, request: SaveRequest) -> Result<SaveBlob, RuntimeError>;
     pub fn load(&mut self, save: SaveBlob) -> Result<LoadReport, RuntimeError>;
+    pub fn task_scope(&self) -> TaskScope;
+    pub fn await_handle(&mut self, token_id: AwaitTokenId, scope: &TaskScope) -> Result<AwaitCompletionHandle, RuntimeError>;
+    pub fn cancel_await(&mut self, token_id: AwaitTokenId) -> Result<bool, RuntimeError>;
     pub fn debug_session(&self) -> RuntimeDebugSession<'_>;
 }
 ```
@@ -64,8 +67,8 @@ pub struct AwaitToken {
     pub token_id: StableId,
     pub kind: AwaitKind,
     pub requested_at_step: u64,
-    pub deterministic_timeout_step: Option<u64>,
-    pub replay_policy: AwaitReplayPolicy,
+    pub timeout_step: Option<u64>,
+    pub completion_policy: AwaitCompletionPolicy,
 }
 ```
 
@@ -98,7 +101,7 @@ Runtime 外层 tick 原地执行；候选 action/machine 验证与整帧回滚�
 
 World 不再保存或增量刷新 HistoryChain，也不再提供 aggregate `state_hash`/`event_hash`/`presentation_hash` API。`LoadReport` 返回恢复的 step 和 seed，不返回结构摘要。测试直接比较 typed snapshot 或存档字节，内容完整性由容器 hash 校验；旧摘要不再作验收基线，runtime.world v5 存档布局不变。诊断记录存储的进一步精简单独推进。
 
-现有 `AwaitReplayPolicy` 命名仍待任务生命周期迁移：`RecordedResult` 接受 host 提交的完成结果，不能声明 timeout；`DeterministicTimeout` 必须声明 timeout step，并拒绝外部 completion。
+`AwaitCompletionPolicy` 表示完成来源：`HostResult` 接受 host 提交的完成结果，不能声明 timeout；`TickTimeout` 必须声明 timeout step，并拒绝外部 completion。
 
 ## Delayed Event
 
@@ -135,3 +138,17 @@ step、seed、mode 等输入预检在修改前完成；预检错误不终止 Wor
 `load_with_validation(save, registry, validate)` 先验证容器并解码候选 RuntimeSnapshot，再由持有 World 的宿主检查和提取 typed 产品状态。闭包只修改候选 snapshot；返回错误时不替换当前 World，也不解除失败状态。验证成功后提交并进入 RestoreContinuation，同时返回宿主提取的数据。普通 `load`/`load_with_registry` 复用这一路径，不要求无产品 World 安装 VN 校验器。
 
 NativeVN 在提交前检查外层 section 的 hash、v5 数字版本、package 身份、唯一 owner state component、component 版本、typed 解码与 VN state schema；验证失败保留 World、VN state 和待处理控制。成功时一起替换状态并清空旧控制。外层旧 v4 数字版本明确拒绝，需重新生成内部开发存档；嵌套 runtime.world v5 布局不变。验收包含合法 hash 下的无效 typed state、版本/包不符、失败 World 的拒绝恢复和正常恢复后续 tick。
+
+## 异步完成句柄与作用域
+
+宿主通过 `task_scope()` 取得当前 World 的根作用域，可创建 child scope；`await_handle(token_id, scope)` 只为本 World 的待完成 host-result token 颁发句柄。worker 必须在启动时捕获句柄，再用句柄构造 `AwaitCompletion`，不能在结果返回后用 token id 重新申请当前代次的句柄。`TickIngress::AwaitCompletion` 只接收这种带来源的完成消息。
+
+作用域、完成句柄与 TickRequest 是 host 内对象，不实现 serde/JsonSchema，也不进入 save 或插件 ABI。成功 restore 为 World 创建新根作用域并取消旧作用域；拒绝 restore 保留旧作用域。执行失败和销毁同样取消旧工作。旧 World、旧 restore 代次、已完成或取消的句柄只产生忽略诊断，不修改当前 token；同一 token 最多接受一个终态结果。
+
+`TaskScope::cancel()` 是跨线程取消请求；worker 通过句柄状态协作停止，World 在下一 tick 移除对应待完成 token 和尚未消费的结果，并发出 `await.cancelled`。`cancel_await(token_id)` 由 World owner 立即取消指定 token，使用同一终态与事件路径。子作用域取消不影响父或兄弟，根作用域取消后不再接收新任务，直到成功恢复或重建 World。取消请求在 tick 前尚未提交时，存档仍表示此前状态。
+
+已进入 AwaitQueue 的结果是可序列化提交数据，保存后恢复继续消费；新恢复的未完成任务必须由宿主重新启动并取得新句柄，不能恢复线程/协程。await token 与容器 v5 二进制布局不变；调用方把裸 AwaitResult ingress 改为句柄构造的完成消息。验证覆盖真实 worker 迟到结果、跨 World、恢复拒绝/成功、scope 取消、已排队结果取消、重复完成和 World 销毁。任务组合器与产品异步 IO 的完整接入仍按实施状态推进。
+
+本次同时将 AwaitReplayPolicy/RecordedResult/DeterministicTimeout 重命名为 AwaitCompletionPolicy/HostResult/TickTimeout，字段改为 completion_policy/timeout_step；Postcard 字段顺序和 enum variant 顺序不变，文本 schema 使用新名称，不提供 alias。NativeVnRuntimeProvider 无消费者的局部 save_slot/load_slot 接口删除，产品存读档统一使用完整 Runtime save/restore，避免只恢复 VN state 而保留旧 World 工作。独立 VnRuntime 的数据级 save_slot 不受影响。
+
+恢复同时校验 AwaitQueue 的 token 唯一性、完成策略与单一终态；合法容器 hash 下的重复或无主完成结果也必须拒绝，且不得取消当前工作。

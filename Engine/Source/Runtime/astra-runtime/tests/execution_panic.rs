@@ -66,7 +66,9 @@ fn action_panic_poisoning_is_contained_until_explicit_restore() {
         delta_ns: 16_666_667,
         seed: 0,
     };
+    let scope = world.task_scope();
     let error = world.tick(TickRequest::live(input, vec![])).unwrap_err();
+    assert!(scope.is_cancelled());
     assert!(error.to_string().contains("ASTRA_RUNTIME_ACTION_PANIC"));
     assert!(world.is_failed());
     assert!(world.save(SaveRequest::default()).is_err());
@@ -82,6 +84,7 @@ fn action_panic_poisoning_is_contained_until_explicit_restore() {
     assert!(world.is_failed());
     world.load(saved).unwrap();
     assert!(!world.is_failed());
+    assert!(!world.task_scope().is_cancelled());
     world
         .tick(TickRequest::restore_continuation(input, vec![]))
         .unwrap();

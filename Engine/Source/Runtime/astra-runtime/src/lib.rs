@@ -8,6 +8,7 @@ pub mod mutation;
 pub mod presentation;
 pub mod save;
 pub mod state_machine;
+pub mod task_scope;
 pub mod world;
 
 pub use action::*;
@@ -20,4 +21,5 @@ pub use mutation::*;
 pub use presentation::*;
 pub use save::*;
 pub use state_machine::*;
+pub use task_scope::*;
 pub use world::*;

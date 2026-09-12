@@ -398,38 +398,6 @@ fn materialized_save_snapshot(session: &NativeVnSession) -> Result<RuntimeSnapsh
     Ok(snapshot)
 }
 
-fn replace_session_state(
-    session: &mut NativeVnSession,
-    state: VnRuntimeState,
-) -> Result<(), CoreVnError> {
-    let checkpoint = session
-        .world
-        .snapshot()
-        .map_err(|error| CoreVnError::message(error.to_string()))?;
-    let cached = session.state.clone();
-    match replace_session_state_inner(session, state) {
-        Ok(()) => Ok(()),
-        Err(error) => {
-            session.world.restore_snapshot(checkpoint);
-            session.state = cached;
-            Err(error)
-        }
-    }
-}
-
-fn replace_session_state_inner(
-    session: &mut NativeVnSession,
-    state: VnRuntimeState,
-) -> Result<(), CoreVnError> {
-    CoreVnRuntime::from_shared_state_indexed(
-        Arc::clone(&session.compiled),
-        Arc::clone(&session.runtime_index),
-        state.clone(),
-    )?;
-    session.state = state;
-    Ok(())
-}
-
 impl NativeVnRuntimeProvider {
     pub fn slot() -> &'static str {
         GAME_RUNTIME_PROVIDER_SLOT
@@ -775,14 +743,18 @@ impl NativeVnRuntimeProvider {
                 astra_core::StableId::parse(await_id)
                     .map_err(|err| CoreVnError::message(err.to_string()))?,
             );
+            let scope = session.world.task_scope();
+            let handle = session
+                .world
+                .await_handle(token_id, &scope)
+                .map_err(|error| CoreVnError::message(error.to_string()))?;
             ingress.push(OrderedTickIngress {
                 sequence: 1,
-                payload: TickIngress::AwaitCompletion(astra_runtime::AwaitResult {
-                    token_id,
-                    sequence: fixed_step,
-                    completed_at_step: fixed_step,
-                    payload: EventPayload::new("await.resolved"),
-                }),
+                payload: TickIngress::AwaitCompletion(handle.complete(
+                    fixed_step,
+                    fixed_step,
+                    EventPayload::new("await.resolved"),
+                )),
             });
         }
         ingress.push(OrderedTickIngress {
@@ -956,34 +928,6 @@ impl NativeVnRuntimeProvider {
             .world
             .snapshot()
             .map_err(|error| CoreVnError::message(error.to_string()))
-    }
-
-    pub fn save_slot(
-        &self,
-        session_id: &GameRuntimeSessionId,
-        slot: impl Into<String>,
-    ) -> Result<VnSaveBlob, CoreVnError> {
-        let state = self.state(session_id)?;
-        Ok(VnSaveBlob {
-            schema: "astra.vn.save_slot.v2".to_string(),
-            slot: slot.into(),
-            state,
-        })
-    }
-
-    pub fn load_slot(
-        &mut self,
-        session_id: &GameRuntimeSessionId,
-        save: VnSaveBlob,
-    ) -> Result<(), CoreVnError> {
-        if save.schema != "astra.vn.save_slot.v2" || save.state.schema != VN_RUNTIME_STATE_SCHEMA {
-            return Err(CoreVnError::diagnostic(
-                "ASTRA_VN_SAVE_SCHEMA",
-                "AstraVN save slot schema is invalid",
-            ));
-        }
-        let session = self.session_mut(session_id)?;
-        replace_session_state(session, save.state)
     }
 
     pub fn save(&self, request: RuntimeSaveRequest) -> Result<RuntimeSaveSections, CoreVnError> {

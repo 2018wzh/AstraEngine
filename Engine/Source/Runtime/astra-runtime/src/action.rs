@@ -10,9 +10,9 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    actor::ActorStoreAccess, blackboard::BlackboardAccess, ActorId, ActorRecord, AwaitKind,
-    AwaitReplayPolicy, AwaitToken, AwaitTokenId, BlackboardValue, ComponentId, ComponentRecord,
-    DelayedEventId, EventId, EventPayload, EventSource, PresentationCommand,
+    actor::ActorStoreAccess, blackboard::BlackboardAccess, ActorId, ActorRecord,
+    AwaitCompletionPolicy, AwaitKind, AwaitToken, AwaitTokenId, BlackboardValue, ComponentId,
+    ComponentRecord, DelayedEventId, EventId, EventPayload, EventSource, PresentationCommand,
     RuntimeComponentPayload, RuntimeError, RuntimeEvent, RuntimeMutationRecord, ScheduledEvent,
 };
 
@@ -344,8 +344,8 @@ impl<'a> DeterministicActionContext<'a> {
             token_id: AwaitTokenId(self.next_id()),
             kind,
             requested_at_step: self.step,
-            deterministic_timeout_step: None,
-            replay_policy: AwaitReplayPolicy::RecordedResult,
+            timeout_step: None,
+            completion_policy: AwaitCompletionPolicy::HostResult,
         }
     }
 

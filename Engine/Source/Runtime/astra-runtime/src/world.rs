@@ -1,3 +1,5 @@
+mod tasks;
+
 use std::{collections::BTreeMap, time::Instant};
 
 use astra_core::{
@@ -10,13 +12,13 @@ use thiserror::Error;
 use tracing::{debug, info, trace, warn};
 
 use crate::{
-    ActionRegistry, ActorId, ActorRecord, ActorSnapshot, ActorStore, AwaitQueue, AwaitResult,
-    AwaitToken, Blackboard, BlackboardValue, ComponentId, ComponentRecord, ComponentSnapshot,
-    CreateAwaitAction, DelayedEventId, DelayedEventQueue, EmitEventAction, EventId, EventPayload,
-    EventQueue, EventSource, PresentationAction, PresentationCommand, PresentationRecord,
-    RuntimeAction, RuntimeComponentPayload, RuntimeEvent, RuntimeMutationRecord, SaveBlob,
-    SaveRequest, ScheduledEvent, SetBlackboardAction, StateMachineDefinition, StateMachineSnapshot,
-    StateMachineStore,
+    ActionRegistry, ActorId, ActorRecord, ActorSnapshot, ActorStore, AwaitCompletion,
+    AwaitCompletionHandle, AwaitQueue, AwaitToken, Blackboard, BlackboardValue, ComponentId,
+    ComponentRecord, ComponentSnapshot, CreateAwaitAction, DelayedEventId, DelayedEventQueue,
+    EmitEventAction, EventId, EventPayload, EventQueue, EventSource, PresentationAction,
+    PresentationCommand, PresentationRecord, RuntimeAction, RuntimeComponentPayload, RuntimeEvent,
+    RuntimeMutationRecord, SaveBlob, SaveRequest, ScheduledEvent, SetBlackboardAction,
+    StateMachineDefinition, StateMachineSnapshot, StateMachineStore, TaskScope,
 };
 
 #[derive(Debug, Error)]
@@ -237,24 +239,22 @@ pub enum TickIntegrityMode {
     Evidence,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct OrderedTickIngress {
     pub sequence: u64,
     pub payload: TickIngress,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TickIngress {
     PlayerInput(PlayerInput),
-    AwaitCompletion(AwaitResult),
+    AwaitCompletion(AwaitCompletion),
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TickRequest {
     pub timing: TickInput,
     pub mode: TickMode,
-    #[serde(default)]
     pub ingress: Vec<OrderedTickIngress>,
 }
 
@@ -309,6 +309,7 @@ pub struct RuntimeSnapshot {
 }
 
 pub struct RuntimeWorld {
+    tasks: crate::task_scope::TaskRuntime,
     failed: bool,
     config: RuntimeConfig,
     package: Option<PackageHandle>,
@@ -357,6 +358,7 @@ impl RuntimeWorld {
             "runtime.create"
         );
         Ok(Self {
+            tasks: crate::task_scope::TaskRuntime::default(),
             failed: false,
             id_source: StableIdGenerator::new(config.seed),
             config,
@@ -751,23 +753,12 @@ impl RuntimeWorld {
         Ok(())
     }
 
-    fn submit_await_result(&mut self, result: AwaitResult) {
-        debug!(
-            token_id = ?result.token_id,
-            sequence = result.sequence,
-            completed_at_step = result.completed_at_step,
-            kind = %result.payload.kind,
-            "runtime.await.submit_result"
-        );
-        self.awaits.submit_result(result);
-    }
-
     pub fn insert_await_token(&mut self, token: AwaitToken) -> Result<(), RuntimeError> {
         self.ensure_active()?;
         debug!(
             token_id = ?token.token_id,
             requested_at_step = token.requested_at_step,
-            timeout_step = ?token.deterministic_timeout_step,
+            timeout_step = ?token.timeout_step,
             "runtime.await.insert"
         );
         self.awaits.insert(token).map_err(RuntimeError::diagnostic)
@@ -819,6 +810,9 @@ impl RuntimeWorld {
             )))
         });
         self.failed = result.is_err();
+        if self.failed {
+            self.tasks.scope().cancel();
+        }
         trace!(
             event = "runtime.tick.execution.performance",
             step = performance_step,
@@ -930,6 +924,9 @@ impl RuntimeWorld {
         self.step = input.fixed_step;
         self.id_source.set_step(input.fixed_step);
         self.diagnostics.clear();
+        for token_id in self.tasks.cancelled() {
+            self.cancel_await(token_id)?;
+        }
         let await_drain = self.awaits.drain_ordered_results(input.fixed_step);
         for diagnostic in &await_drain.diagnostics {
             warn!(
@@ -945,6 +942,7 @@ impl RuntimeWorld {
             "runtime.await.drain"
         );
         for result in await_drain.results {
+            self.tasks.finish(result.token_id, false);
             let id = EventId(self.next_id());
             self.events.push(RuntimeEvent {
                 id,
@@ -1066,7 +1064,15 @@ impl RuntimeWorld {
     ) -> Result<(LoadReport, T), RuntimeError> {
         debug!("runtime.load.with_validation");
         let mut snapshot = crate::save::read_runtime_save(&save, registry)?;
+        snapshot
+            .awaits
+            .validate()
+            .map_err(RuntimeError::diagnostic)?;
         let validated = validate(&mut snapshot)?;
+        snapshot
+            .awaits
+            .validate()
+            .map_err(RuntimeError::diagnostic)?;
         self.restore_snapshot(snapshot);
         self.required_tick_mode = TickMode::RestoreContinuation;
         let report = LoadReport {
@@ -1083,6 +1089,7 @@ impl RuntimeWorld {
     }
 
     pub fn restore_snapshot(&mut self, snapshot: RuntimeSnapshot) {
+        self.tasks = crate::task_scope::TaskRuntime::default();
         self.failed = false;
         self.config = snapshot.config;
         self.package = snapshot.package;

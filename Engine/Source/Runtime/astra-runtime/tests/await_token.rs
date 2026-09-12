@@ -1,7 +1,7 @@
 use astra_core::StableId;
 use astra_runtime::{
-    AwaitKind, AwaitReplayPolicy, AwaitResult, AwaitToken, AwaitTokenId, OrderedTickIngress,
-    RuntimeConfig, RuntimeWorld, TickIngress, TickInput, TickRequest,
+    AwaitCompletionPolicy, AwaitKind, AwaitToken, AwaitTokenId, OrderedTickIngress, RuntimeConfig,
+    RuntimeWorld, TickIngress, TickInput, TickRequest,
 };
 
 #[test]
@@ -24,8 +24,8 @@ fn run_with_order(order: [u64; 2]) -> Vec<astra_runtime::RuntimeEvent> {
             token_id: token_a,
             kind: AwaitKind::Custom("scenario".to_string()),
             requested_at_step: 0,
-            deterministic_timeout_step: None,
-            replay_policy: AwaitReplayPolicy::RecordedResult,
+            timeout_step: None,
+            completion_policy: AwaitCompletionPolicy::HostResult,
         })
         .unwrap();
     world
@@ -33,8 +33,8 @@ fn run_with_order(order: [u64; 2]) -> Vec<astra_runtime::RuntimeEvent> {
             token_id: token_b,
             kind: AwaitKind::Custom("scenario".to_string()),
             requested_at_step: 0,
-            deterministic_timeout_step: None,
-            replay_policy: AwaitReplayPolicy::RecordedResult,
+            timeout_step: None,
+            completion_policy: AwaitCompletionPolicy::HostResult,
         })
         .unwrap();
     let ingress = order
@@ -42,7 +42,8 @@ fn run_with_order(order: [u64; 2]) -> Vec<astra_runtime::RuntimeEvent> {
         .enumerate()
         .map(|(index, sequence)| OrderedTickIngress {
             sequence: index as u64 + 1,
-            payload: TickIngress::AwaitCompletion(AwaitResult::custom(
+            payload: TickIngress::AwaitCompletion(completion(
+                &mut world,
                 token_for(sequence, token_a, token_b),
                 sequence,
                 1,
@@ -77,11 +78,12 @@ fn await_token_is_serializable() {
         token_id: AwaitTokenId(StableId::deterministic_v7(1, 1, 1)),
         kind: AwaitKind::Timer,
         requested_at_step: 1,
-        deterministic_timeout_step: Some(4),
-        replay_policy: AwaitReplayPolicy::RecordedResult,
+        timeout_step: Some(4),
+        completion_policy: AwaitCompletionPolicy::TickTimeout,
     };
     let encoded = postcard::to_allocvec(&token).unwrap();
-    assert!(!encoded.is_empty());
+    token.validate().unwrap();
+    assert_eq!(postcard::from_bytes::<AwaitToken>(&encoded).unwrap(), token);
 }
 
 #[test]
@@ -97,8 +99,8 @@ fn await_timeout_materializes_deterministic_result() {
             token_id,
             kind: AwaitKind::PresentationFence,
             requested_at_step: 1,
-            deterministic_timeout_step: Some(3),
-            replay_policy: AwaitReplayPolicy::DeterministicTimeout,
+            timeout_step: Some(3),
+            completion_policy: AwaitCompletionPolicy::TickTimeout,
         })
         .unwrap();
 
@@ -157,31 +159,23 @@ fn unknown_and_duplicate_await_results_are_diagnostic_only() {
             token_id,
             kind: AwaitKind::Custom("scenario".to_string()),
             requested_at_step: 0,
-            deterministic_timeout_step: None,
-            replay_policy: AwaitReplayPolicy::RecordedResult,
+            timeout_step: None,
+            completion_policy: AwaitCompletionPolicy::HostResult,
         })
         .unwrap();
     let ingress = vec![
         OrderedTickIngress {
             sequence: 1,
-            payload: TickIngress::AwaitCompletion(AwaitResult::custom(token_id, 1, 1, "done")),
+            payload: TickIngress::AwaitCompletion(completion(&mut world, token_id, 1, 1, "done")),
         },
         OrderedTickIngress {
             sequence: 2,
-            payload: TickIngress::AwaitCompletion(AwaitResult::custom(
+            payload: TickIngress::AwaitCompletion(completion(
+                &mut world,
                 token_id,
-                1,
-                1,
-                "done-again",
-            )),
-        },
-        OrderedTickIngress {
-            sequence: 3,
-            payload: TickIngress::AwaitCompletion(AwaitResult::custom(
-                AwaitTokenId(StableId::deterministic_v7(3, 2, 13)),
                 2,
                 1,
-                "unknown",
+                "done-again",
             )),
         },
     ];
@@ -201,10 +195,13 @@ fn unknown_and_duplicate_await_results_are_diagnostic_only() {
         .diagnostics
         .iter()
         .any(|diagnostic| diagnostic.code == "ASTRA_AWAIT_RESULT_DUPLICATE"));
-    assert!(report
-        .diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.code == "ASTRA_AWAIT_RESULT_UNKNOWN"));
+    let scope = world.task_scope();
+    assert!(world
+        .await_handle(AwaitTokenId(StableId::deterministic_v7(3, 2, 13)), &scope)
+        .unwrap_err()
+        .to_string()
+        .contains("ASTRA_AWAIT_TOKEN_MISSING"));
+
     let await_events: Vec<_> = world
         .debug_session()
         .event_trace()
@@ -216,7 +213,7 @@ fn unknown_and_duplicate_await_results_are_diagnostic_only() {
 }
 
 #[test]
-fn await_replay_policy_rejects_invalid_tokens_and_live_timeout_results() {
+fn await_completion_policy_rejects_invalid_tokens_and_live_timeout_results() {
     let mut world = RuntimeWorld::create(RuntimeConfig {
         seed: 13,
         ..RuntimeConfig::default()
@@ -228,11 +225,11 @@ fn await_replay_policy_rejects_invalid_tokens_and_live_timeout_results() {
             token_id: invalid_recorded,
             kind: AwaitKind::Timer,
             requested_at_step: 0,
-            deterministic_timeout_step: Some(2),
-            replay_policy: AwaitReplayPolicy::RecordedResult,
+            timeout_step: Some(2),
+            completion_policy: AwaitCompletionPolicy::HostResult,
         })
         .unwrap_err();
-    assert!(error.to_string().contains("ASTRA_AWAIT_REPLAY_POLICY"));
+    assert!(error.to_string().contains("ASTRA_AWAIT_COMPLETION_POLICY"));
 
     let timeout_token = AwaitTokenId(StableId::deterministic_v7(4, 2, 13));
     world
@@ -240,29 +237,30 @@ fn await_replay_policy_rejects_invalid_tokens_and_live_timeout_results() {
             token_id: timeout_token,
             kind: AwaitKind::Timer,
             requested_at_step: 0,
-            deterministic_timeout_step: Some(2),
-            replay_policy: AwaitReplayPolicy::DeterministicTimeout,
+            timeout_step: Some(2),
+            completion_policy: AwaitCompletionPolicy::TickTimeout,
         })
         .unwrap();
-    let error = world
-        .tick(TickRequest::live(
-            TickInput {
-                fixed_step: 1,
-                delta_ns: 16_666_667,
-                seed: 13,
-            },
-            vec![OrderedTickIngress {
-                sequence: 1,
-                payload: TickIngress::AwaitCompletion(AwaitResult::custom(
-                    timeout_token,
-                    1,
-                    1,
-                    "live",
-                )),
-            }],
-        ))
-        .unwrap_err();
+    let scope = world.task_scope();
+    let error = world.await_handle(timeout_token, &scope).unwrap_err();
     assert!(error.to_string().contains("ASTRA_AWAIT_RESULT_POLICY"));
-    assert!(world.is_failed());
+    assert!(!world.is_failed());
     assert!(world.debug_session().event_trace().is_empty());
+}
+
+fn completion(
+    world: &mut RuntimeWorld,
+    token: AwaitTokenId,
+    sequence: u64,
+    step: u64,
+    value: &str,
+) -> astra_runtime::AwaitCompletion {
+    let scope = world.task_scope();
+    let handle = world.await_handle(token, &scope).unwrap();
+    let mut payload = astra_runtime::EventPayload::new("await.completed");
+    payload.data.insert(
+        "value".into(),
+        astra_runtime::BlackboardValue::String(value.into()),
+    );
+    handle.complete(sequence, step, payload)
 }

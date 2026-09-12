@@ -39,4 +39,6 @@
 - 真实 GPU/商业游戏/其他平台验收仍未执行。
 - NativeVN 恢复先验证候选 World 和 typed VN state，再一起提交；无效状态保留当前会话与待处理控制，成功恢复清空旧控制。修复 save_blob v5 的外层数字版本不一致，新增 hash/版本/包身份检查。合法 hash 下的缺失/重复组件、错误版本、错误 typed payload/schema 和拒绝恢复后的失败状态已验证；Engine 全量 fmt/clippy/build/test 通过，673 项通过、0 失败、9 项按原条件未执行。
 
-- Runtime 通用 replay recorder/transcript/checkpoint、Replay tick mode、HistoryChain 与 aggregate state/event/presentation 摘要 API 已删除；LoadReport 只返回 step/seed。保存恢复与并行调度测试改为比较实际 snapshot/完整存档字节，两种模式的 tick 均验证不编码 typed component。Runtime/VN 保存针对性测试 43 项通过，Engine 最终全量 fmt/clippy/build/test 通过：672 项通过、0 失败、9 项按原条件未执行；旧 AwaitReplayPolicy 命名、诊断记录存储和 Shipping/Evidence 检查差异仍待后续统一。
+- Runtime 通用 replay recorder/transcript/checkpoint、Replay tick mode、HistoryChain 与 aggregate state/event/presentation 摘要 API 已删除；LoadReport 只返回 step/seed。保存恢复与并行调度测试改为比较实际 snapshot/完整存档字节，两种模式的 tick 均验证不编码 typed component。Runtime/VN 保存针对性测试 43 项通过，Engine 最终全量 fmt/clippy/build/test 通过：672 项通过、0 失败、9 项按原条件未执行；诊断记录存储和 Shipping/Evidence 检查差异仍待后续统一。
+
+- Runtime 完成句柄绑定 host 内 TaskScope，成功读档、失败和销毁使旧工作失效；子作用域取消及单 token 取消移除排队结果并发出取消事件。同一 token 只接受一个终态，重复/无主完成存档拒绝；旧 AwaitReplayPolicy 已更名为 AwaitCompletionPolicy，文本字段同步而 Postcard 布局不变。NativeVN 同步 wait 消费改用句柄，未使用的 provider 局部 save_slot/load_slot 删除。真实 worker 迟到、跨 World、取消、恢复和重复终态等 Runtime/provider 针对性测试 52 项通过，Engine 全量 fmt/clippy/build/test 通过：680 项通过、0 失败、9 项按原条件未执行；通用任务组合器、可信 Luau 与产品异步 IO 的完整接入仍未完成。
