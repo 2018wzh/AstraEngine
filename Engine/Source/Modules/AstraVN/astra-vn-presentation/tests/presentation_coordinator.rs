@@ -162,3 +162,6 @@ fn explicit_queue_and_reject_policies_are_enforced() {
         .to_string()
         .contains("ASTRA_VN_CHARACTER_INTERRUPT_REJECTED"));
 }
+
+#[path = "support/coordinator_tick.rs"]
+mod tick_regressions;

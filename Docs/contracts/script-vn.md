@@ -4,6 +4,8 @@
 
 完整脚本规格见 [AstraVN Script Spec](../modules/astra-vn-script.md)。演出模型、标准命令库和系统 UI 分别见 [AstraVN Presentation Model](../modules/astra-vn-presentation-model.md)、[AstraVN Standard Command Library](../modules/astra-vn-standard-commands.md) 和 [AstraVN System UI Profile](../modules/astra-vn-system-ui-profile.md)。
 
+演出帧推进、失败终止和 snapshot v8/v4 的具体边界见[演出帧推进迁移](presentation-tick-migration.md)。
+
 ## `.astra` 输出
 
 编译器主线从 source 进入 frontend，再 lowering 到 runtime IR：

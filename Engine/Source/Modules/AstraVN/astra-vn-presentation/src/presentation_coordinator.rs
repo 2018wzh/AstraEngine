@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{MovieLoopMode, PresentationInterruptPolicy, VnError, VnMovieEndBehavior};
 
-pub const PRESENTATION_COORDINATOR_SCHEMA: &str = "astra.vn.presentation_coordinator.v3";
+pub const PRESENTATION_COORDINATOR_SCHEMA: &str = "astra.vn.presentation_coordinator.v4";
 const MAX_REGION_QUEUE: usize = 4_096;
 const MAX_FRAME_DELTA_NS: u64 = 1_000_000_000;
 
@@ -53,7 +53,7 @@ impl PresentationCommandEnvelope {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "region", content = "command", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
 pub enum PresentationRegionCommand {
     Character(CharacterRegionCommand),
     Background(BackgroundRegionCommand),
@@ -110,7 +110,7 @@ pub struct CharacterPresentationState {
     pub fence: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CharacterRegionState {
     pub characters: BTreeMap<String, CharacterPresentationState>,
     pub queued: VecDeque<PresentationCommandEnvelope>,
@@ -121,12 +121,13 @@ pub struct BackgroundPresentationState {
     pub command_id: String,
     pub current: Option<String>,
     pub incoming: Option<String>,
+    pub transition_pending: bool,
     pub elapsed_ns: u64,
     pub duration_ns: u64,
     pub fence: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct BackgroundRegionState {
     pub layers: BTreeMap<String, BackgroundPresentationState>,
     pub queued: VecDeque<PresentationCommandEnvelope>,
@@ -153,7 +154,7 @@ impl TextPresentationState {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct TextRegionState {
     pub active: Option<TextPresentationState>,
     pub queued: VecDeque<PresentationCommandEnvelope>,
@@ -183,7 +184,7 @@ pub struct VideoPresentationState {
     pub fence: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct VideoRegionState {
     pub sessions: BTreeMap<String, VideoPresentationState>,
     pub queued: VecDeque<PresentationCommandEnvelope>,
@@ -256,9 +257,24 @@ pub enum TextAdvanceDisposition {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PresentationCoordinator {
     state: PresentationCoordinatorState,
+    failed: bool,
 }
 
 impl PresentationCoordinator {
+    pub fn is_failed(&self) -> bool {
+        self.failed
+    }
+
+    fn ensure_active(&self) -> Result<(), VnError> {
+        if self.failed {
+            return Err(coordinator_error(
+                "ASTRA_VN_PRESENTATION_SESSION_FAILED",
+                "presentation session terminated after an execution failure",
+            ));
+        }
+        Ok(())
+    }
+
     pub fn state(&self) -> &PresentationCoordinatorState {
         &self.state
     }
@@ -268,6 +284,7 @@ impl PresentationCoordinator {
         commands: &[PresentationCommandEnvelope],
         worker_count: usize,
     ) -> Result<(Self, Vec<PresentationRegionDelta>), VnError> {
+        self.ensure_active()?;
         WorkerBudgetBroker::global()
             .run_scoped(|| self.prepare_batch_scoped(commands, worker_count))
             .map_err(|error| coordinator_error_owned(error.code(), error.to_string()))?
@@ -424,15 +441,23 @@ impl PresentationCoordinator {
     }
 
     pub fn tick(&mut self, delta_ns: u64) -> Result<Vec<String>, VnError> {
+        self.ensure_active()?;
         if delta_ns == 0 || delta_ns > MAX_FRAME_DELTA_NS {
             return Err(coordinator_error(
                 "ASTRA_VN_PRESENTATION_TICK_DELTA",
                 "presentation frame delta is outside the fixed-step budget",
             ));
         }
-        let mut next = self.clone();
+        let result = self.tick_committed(delta_ns);
+        if result.is_err() {
+            self.failed = true;
+        }
+        result
+    }
+
+    fn tick_committed(&mut self, delta_ns: u64) -> Result<Vec<String>, VnError> {
         let mut completed = Vec::new();
-        for state in next.state.character.characters.values_mut() {
+        for state in self.state.character.characters.values_mut() {
             state.elapsed_ns = state
                 .elapsed_ns
                 .saturating_add(delta_ns)
@@ -443,60 +468,68 @@ impl PresentationCoordinator {
                 }
             }
         }
-        for state in next.state.background.layers.values_mut() {
+        for state in self.state.background.layers.values_mut() {
             state.elapsed_ns = state
                 .elapsed_ns
                 .saturating_add(delta_ns)
                 .min(state.duration_ns);
-            if state.elapsed_ns == state.duration_ns {
+            if state.elapsed_ns == state.duration_ns && state.transition_pending {
                 state.current = state.incoming.take();
+                state.transition_pending = false;
                 if let Some(fence) = state.fence.take() {
                     completed.push(fence);
                 }
             }
         }
-        if let Some(text) = next.state.text.active.as_mut() {
+        if let Some(text) = self.state.text.active.as_mut() {
             text.elapsed_ns = text.elapsed_ns.saturating_add(delta_ns);
             let visible = (u128::from(text.elapsed_ns) * u128::from(text.graphemes_per_second)
                 / 1_000_000_000_u128)
                 .min(u128::from(text.grapheme_count)) as u32;
-            text.visible_graphemes = visible;
+            text.visible_graphemes = text.visible_graphemes.max(visible);
             if text.reveal_complete() {
                 if let Some(fence) = text.fence.take() {
                     completed.push(fence);
                 }
             }
         }
-        for video in next.state.video.sessions.values_mut() {
+        for video in self.state.video.sessions.values_mut() {
             if video.phase == VideoPhase::Playing {
                 video.logical_time_ns = video.logical_time_ns.saturating_add(delta_ns);
             }
         }
-        let (character, activated_character) = drain_character_queue(next.state.character)?;
-        next.state.character = character;
-        let (background, activated_background) = drain_background_queue(next.state.background)?;
-        next.state.background = background;
-        let (video, activated_video) = drain_video_queue(next.state.video)?;
-        next.state.video = video;
+        let (character, activated_character) =
+            drain_character_queue(std::mem::take(&mut self.state.character))?;
+        self.state.character = character;
+        let (background, activated_background) =
+            drain_background_queue(std::mem::take(&mut self.state.background))?;
+        self.state.background = background;
+        let (video, activated_video) = drain_video_queue(std::mem::take(&mut self.state.video))?;
+        self.state.video = video;
         for command_id in activated_character
             .into_iter()
             .chain(activated_background)
             .chain(activated_video)
         {
-            push_activated(&mut next.state.activated_commands, command_id)?;
+            if let Err(error) = push_activated(&mut self.state.activated_commands, command_id) {
+                self.failed = true;
+                return Err(error);
+            }
         }
         completed.sort();
         completed.dedup();
         for fence in &completed {
-            next.state
+            self.state
                 .fences
                 .insert(fence.clone(), FenceStatus::Completed);
         }
-        *self = next;
         Ok(completed)
     }
 
     pub fn request_text_advance(&mut self) -> TextAdvanceDisposition {
+        if self.failed {
+            return TextAdvanceDisposition::NoActiveText;
+        }
         let Some(text) = self.state.text.active.as_mut() else {
             return TextAdvanceDisposition::NoActiveText;
         };
@@ -512,6 +545,7 @@ impl PresentationCoordinator {
     }
 
     pub fn complete_text_layout(&mut self, command_id: &str) -> Result<(), VnError> {
+        self.ensure_active()?;
         let text = self.state.text.active.as_mut().ok_or_else(|| {
             coordinator_error(
                 "ASTRA_VN_TEXT_LAYOUT_STATE",
@@ -529,6 +563,7 @@ impl PresentationCoordinator {
     }
 
     pub fn acknowledge_story_advance(&mut self) -> Result<(), VnError> {
+        self.ensure_active()?;
         let Some(active) = self.state.text.active.as_ref() else {
             return Err(coordinator_error(
                 "ASTRA_VN_TEXT_ADVANCE_STATE",
@@ -551,16 +586,23 @@ impl PresentationCoordinator {
         ))?;
         self.state.text = text;
         for command_id in activated {
-            push_activated(&mut self.state.activated_commands, command_id)?;
+            if let Err(error) = push_activated(&mut self.state.activated_commands, command_id) {
+                self.failed = true;
+                return Err(error);
+            }
         }
         Ok(())
     }
 
     pub fn take_activated_commands(&mut self) -> Vec<String> {
+        if self.failed {
+            return Vec::new();
+        }
         self.state.activated_commands.drain(..).collect()
     }
 
     pub fn start_video(&mut self, session_id: &str) -> Result<(), VnError> {
+        self.ensure_active()?;
         let video = self
             .state
             .video
@@ -586,6 +628,7 @@ impl PresentationCoordinator {
     }
 
     pub fn complete_video(&mut self, session_id: &str) -> Result<Vec<String>, VnError> {
+        self.ensure_active()?;
         let video = self
             .state
             .video
@@ -614,12 +657,16 @@ impl PresentationCoordinator {
         ))?;
         self.state.video = video;
         for command_id in activated {
-            push_activated(&mut self.state.activated_commands, command_id)?;
+            if let Err(error) = push_activated(&mut self.state.activated_commands, command_id) {
+                self.failed = true;
+                return Err(error);
+            }
         }
         Ok(completed)
     }
 
     pub fn fail_video(&mut self, session_id: &str) -> Result<Option<String>, VnError> {
+        self.ensure_active()?;
         let fallback = {
             let video = self
                 .state
@@ -648,25 +695,34 @@ impl PresentationCoordinator {
         let (video, activated) = drain_video_queue(state)?;
         self.state.video = video;
         for command_id in activated {
-            push_activated(&mut self.state.activated_commands, command_id)?;
+            if let Err(error) = push_activated(&mut self.state.activated_commands, command_id) {
+                self.failed = true;
+                return Err(error);
+            }
         }
         Ok(fallback)
     }
 
     pub fn snapshot(&self) -> Result<Vec<u8>, VnError> {
+        self.ensure_active()?;
         postcard::to_allocvec(self).map_err(Into::into)
     }
 
     pub fn restore(bytes: &[u8]) -> Result<Self, VnError> {
         let restored: Self = postcard::from_bytes(bytes)?;
-        if restored.state.schema != PRESENTATION_COORDINATOR_SCHEMA {
+        restored.validate_restored_state()?;
+        Ok(restored)
+    }
+
+    pub(crate) fn validate_restored_state(&self) -> Result<(), VnError> {
+        if self.state.schema != PRESENTATION_COORDINATOR_SCHEMA {
             return Err(coordinator_error(
                 "ASTRA_VN_PRESENTATION_SNAPSHOT_SCHEMA",
                 "presentation coordinator snapshot schema is invalid",
             ));
         }
-        validate_queues(&restored.state)?;
-        Ok(restored)
+        self.ensure_active()?;
+        validate_queues(&self.state)
     }
 }
 
@@ -710,6 +766,25 @@ fn validate_batch(
 }
 
 fn validate_queues(state: &PresentationCoordinatorState) -> Result<(), VnError> {
+    for (region, queue) in [
+        (PresentationRegion::Character, &state.character.queued),
+        (PresentationRegion::Background, &state.background.queued),
+        (PresentationRegion::Text, &state.text.queued),
+        (PresentationRegion::Video, &state.video.queued),
+    ] {
+        for command in queue {
+            if command.region() != region
+                || command.interrupt != PresentationInterruptPolicy::Queue
+                || command.command_id.is_empty()
+                || matches!(&command.payload, PresentationRegionCommand::Text(text) if text.graphemes_per_second == 0)
+            {
+                return Err(coordinator_error(
+                    "ASTRA_VN_PRESENTATION_QUEUE_STATE",
+                    "queued presentation command violates its region or input contract",
+                ));
+            }
+        }
+    }
     if [
         state.character.queued.len(),
         state.background.queued.len(),
@@ -824,6 +899,7 @@ fn prepare_background(
                 command_id: envelope.command_id.clone(),
                 current,
                 incoming: command.asset.clone(),
+                transition_pending: true,
                 elapsed_ns: 0,
                 duration_ns: command.duration_ns,
                 fence: envelope.fence.clone(),
@@ -1039,3 +1115,7 @@ fn coordinator_error(code: &'static str, message: &'static str) -> VnError {
 fn coordinator_error_owned(code: &'static str, message: String) -> VnError {
     VnError::Diagnostic(Diagnostic::blocking(code, message))
 }
+
+#[cfg(test)]
+#[path = "coordinator_tick_tests.rs"]
+mod tick_tests;

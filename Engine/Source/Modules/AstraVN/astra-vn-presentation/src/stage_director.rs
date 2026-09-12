@@ -14,7 +14,7 @@ use crate::{
     VnTextRevealState, VnTimelineJoinPolicy,
 };
 
-pub const PRODUCT_STAGE_STATE_SCHEMA: &str = "astra.vn.product_stage_state.v7";
+pub const PRODUCT_STAGE_STATE_SCHEMA: &str = "astra.vn.product_stage_state.v8";
 const MAX_FRAME_DELTA_NS: u64 = 1_000_000_000;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -142,6 +142,7 @@ pub struct ProductStageDirector {
     queued_region_commands: BTreeMap<String, StageCommand>,
     queued_stage_commands: VecDeque<StageCommand>,
     next_region_sequence: u64,
+    failed: bool,
 }
 
 impl ProductStageDirector {
@@ -190,7 +191,22 @@ impl ProductStageDirector {
             queued_region_commands: BTreeMap::new(),
             queued_stage_commands: VecDeque::new(),
             next_region_sequence: 1,
+            failed: false,
         })
+    }
+
+    pub fn is_failed(&self) -> bool {
+        self.failed || self.coordinator.is_failed()
+    }
+
+    fn ensure_active(&self) -> Result<(), VnError> {
+        if self.is_failed() {
+            return Err(stage_error(
+                "ASTRA_VN_STAGE_SESSION_FAILED",
+                "presentation session terminated after an execution failure",
+            ));
+        }
+        Ok(())
     }
 
     pub fn state(&self) -> &ProductStageState {
@@ -198,11 +214,10 @@ impl ProductStageDirector {
     }
 
     pub fn resize_viewport(&mut self, viewport: StageViewport) -> Result<(), VnError> {
+        self.ensure_active()?;
         validate_viewport(viewport)?;
-        let mut next = self.clone();
-        next.state.viewport = viewport;
-        next.validate_state()?;
-        *self = next;
+        self.validate_state()?;
+        self.state.viewport = viewport;
         Ok(())
     }
 
@@ -211,16 +226,17 @@ impl ProductStageDirector {
     }
 
     pub fn requires_frame_tick(&self) -> bool {
-        !self.tweens.is_empty()
-            || !self.timelines.is_empty()
-            || self.shake.is_some()
-            || self
-                .coordinator
-                .state()
-                .text
-                .active
-                .as_ref()
-                .is_some_and(|text| !text.reveal_complete())
+        !self.is_failed()
+            && (!self.tweens.is_empty()
+                || !self.timelines.is_empty()
+                || self.shake.is_some()
+                || self
+                    .coordinator
+                    .state()
+                    .text
+                    .active
+                    .as_ref()
+                    .is_some_and(|text| !text.reveal_complete()))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -234,8 +250,9 @@ impl ProductStageDirector {
         graphemes_per_second: u16,
         interrupt: PresentationInterruptPolicy,
     ) -> Result<(), VnError> {
+        self.ensure_active()?;
         let sequence = self.next_region_sequence;
-        self.next_region_sequence = self.next_region_sequence.checked_add(1).ok_or_else(|| {
+        let next_sequence = self.next_region_sequence.checked_add(1).ok_or_else(|| {
             stage_error(
                 "ASTRA_VN_STAGE_REGION_SEQUENCE",
                 "presentation region sequence overflowed",
@@ -258,6 +275,7 @@ impl ProductStageDirector {
             }],
             1,
         )?;
+        self.next_region_sequence = next_sequence;
         Ok(())
     }
 
@@ -278,26 +296,34 @@ impl ProductStageDirector {
     }
 
     pub fn request_text_advance(&mut self) -> TextAdvanceDisposition {
+        if self.is_failed() {
+            return TextAdvanceDisposition::NoActiveText;
+        }
         self.coordinator.request_text_advance()
     }
 
     pub fn complete_text_layout(&mut self, command_id: &str) -> Result<(), VnError> {
+        self.ensure_active()?;
         self.coordinator.complete_text_layout(command_id)
     }
 
     pub fn acknowledge_story_advance(&mut self) -> Result<(), VnError> {
+        self.ensure_active()?;
         self.coordinator.acknowledge_story_advance()
     }
 
     pub fn start_video(&mut self, layer: &str) -> Result<(), VnError> {
+        self.ensure_active()?;
         self.coordinator.start_video(&format!("movie.{layer}"))
     }
 
     pub fn complete_video(&mut self, layer: &str) -> Result<Vec<String>, VnError> {
+        self.ensure_active()?;
         self.coordinator.complete_video(&format!("movie.{layer}"))
     }
 
     pub fn fail_video(&mut self, layer: &str) -> Result<Option<String>, VnError> {
+        self.ensure_active()?;
         self.coordinator.fail_video(&format!("movie.{layer}"))
     }
 
@@ -313,6 +339,7 @@ impl ProductStageDirector {
         &self,
         commands: impl IntoIterator<Item = &'a StageCommand>,
     ) -> Result<(Self, Vec<Vec<StageDirectorOutput>>), VnError> {
+        self.ensure_active()?;
         let mut next = self.clone();
         let mut outputs = Vec::new();
         for command in commands {
@@ -346,22 +373,37 @@ impl ProductStageDirector {
     }
 
     pub fn tick(&mut self, delta_ns: u64) -> Result<Vec<StageDirectorOutput>, VnError> {
+        self.ensure_active()?;
         if delta_ns == 0 || delta_ns > MAX_FRAME_DELTA_NS {
             return Err(stage_error(
                 "ASTRA_VN_STAGE_TICK_DELTA",
                 "presentation frame delta is outside the fixed-step budget",
             ));
         }
-        let mut next = self.clone();
-        let mut output = next.tick_inner(delta_ns)?;
-        output.extend(next.coordinator.tick(delta_ns)?.into_iter().map(|id| {
+        self.state.frame_index.checked_add(1).ok_or_else(|| {
+            stage_error("ASTRA_VN_STAGE_FRAME_OVERFLOW", "frame index overflowed")
+        })?;
+        self.state
+            .elapsed_ns
+            .checked_add(delta_ns)
+            .ok_or_else(|| stage_error("ASTRA_VN_STAGE_TIME_OVERFLOW", "stage time overflowed"))?;
+        let result = self.tick_committed(delta_ns);
+        if result.is_err() {
+            self.failed = true;
+        }
+        result
+    }
+
+    fn tick_committed(&mut self, delta_ns: u64) -> Result<Vec<StageDirectorOutput>, VnError> {
+        let mut output = self.tick_inner(delta_ns)?;
+        output.extend(self.coordinator.tick(delta_ns)?.into_iter().map(|id| {
             StageDirectorOutput::FenceCompleted {
                 kind: "presentation.region".to_string(),
                 id,
             }
         }));
-        for command_id in next.coordinator.take_activated_commands() {
-            let command = next
+        for command_id in self.coordinator.take_activated_commands() {
+            let command = self
                 .queued_region_commands
                 .remove(&command_id)
                 .ok_or_else(|| {
@@ -370,17 +412,17 @@ impl ProductStageDirector {
                         "presentation coordinator activated an unknown stage command",
                     )
                 })?;
-            output.extend(next.apply_inner(&command)?);
+            output.extend(self.apply_inner(&command)?);
         }
-        let queued = std::mem::take(&mut next.queued_stage_commands);
+        let queued = std::mem::take(&mut self.queued_stage_commands);
         for command in queued {
-            output.extend(next.apply_inner(&command)?);
+            output.extend(self.apply_inner(&command)?);
         }
-        *self = next;
         Ok(output)
     }
 
     pub fn snapshot(&self) -> Result<Vec<u8>, VnError> {
+        self.ensure_active()?;
         postcard::to_allocvec(self).map_err(Into::into)
     }
 
@@ -400,6 +442,8 @@ impl ProductStageDirector {
                 "presentation snapshot identity does not match the package binding",
             ));
         }
+        restored.ensure_active()?;
+        restored.coordinator.validate_restored_state()?;
         restored.validate_state()?;
         Ok(restored)
     }
@@ -408,6 +452,43 @@ impl ProductStageDirector {
         &mut self,
         command: &StageCommand,
     ) -> Result<Option<PresentationCommandEnvelope>, VnError> {
+        match command {
+            StageCommand::Show { layer, opacity, .. } => {
+                self.require_layer(
+                    layer,
+                    &[
+                        StageLayerKind::Sprite,
+                        StageLayerKind::Cg,
+                        StageLayerKind::Ui,
+                    ],
+                )?;
+                if !(0..=1_000_000).contains(&opacity.millionths) {
+                    return Err(stage_error(
+                        "ASTRA_VN_STAGE_ENTITY_STATE",
+                        "stage entity opacity must be between zero and one",
+                    ));
+                }
+            }
+            StageCommand::Background { layer, .. } => {
+                self.require_layer(layer, &[StageLayerKind::Background])?
+            }
+            StageCommand::Movie { layer, alpha, .. } => {
+                self.require_layer(layer, &[StageLayerKind::Video])?;
+                if !(0..=1_000_000).contains(&alpha.millionths) {
+                    return Err(stage_error(
+                        "ASTRA_VN_STAGE_MOVIE_ALPHA",
+                        "movie alpha must be between zero and one",
+                    ));
+                }
+            }
+            StageCommand::ClearLayer { layer, .. } if !self.state.layers.contains_key(layer) => {
+                return Err(stage_error(
+                    "ASTRA_VN_STAGE_LAYER_UNKNOWN",
+                    "presentation command references an undeclared layer",
+                ));
+            }
+            _ => {}
+        }
         let (interrupt, fence, payload) = match command {
             StageCommand::Background {
                 asset,
@@ -1055,9 +1136,16 @@ impl ProductStageDirector {
                 }
                 self.completed_timelines.remove(&spec.id);
                 if spec.join == VnTimelineJoinPolicy::ReplaceTarget {
-                    let targets = timeline_targets(spec);
-                    self.timelines
-                        .retain(|_, active| timeline_targets(&active.spec).is_disjoint(&targets));
+                    let properties = timeline_properties(spec);
+                    self.timelines.retain(|_, active| {
+                        active.spec.tracks.retain(|track| {
+                            !properties.contains(&(
+                                canonical_timeline_target(&track.target),
+                                track.property.as_str(),
+                            ))
+                        });
+                        !active.spec.tracks.is_empty()
+                    });
                 }
                 let profile = self.profile()?;
                 if self.timelines.len() >= profile.max_timelines as usize {
@@ -1130,34 +1218,19 @@ impl ProductStageDirector {
 
     fn advance_timelines(&mut self, delta_ns: u64) -> Result<Vec<StageDirectorOutput>, VnError> {
         let mut output = Vec::new();
-        let ids = self.timelines.keys().cloned().collect::<Vec<_>>();
-        for id in ids {
-            let (spec, elapsed_ns, complete) = {
-                let active = self.timelines.get_mut(&id).ok_or_else(|| {
-                    stage_error(
-                        "ASTRA_VN_STAGE_TIMELINE_STATE",
-                        "active timeline disappeared",
-                    )
-                })?;
-                active.elapsed_ns = active.elapsed_ns.checked_add(delta_ns).ok_or_else(|| {
-                    stage_error("ASTRA_VN_STAGE_TIME_OVERFLOW", "timeline time overflowed")
-                })?;
-                let duration_ns = u64::from(timeline_duration_ms(&active.spec)?) * 1_000_000;
-                active.elapsed_ns = active.elapsed_ns.min(duration_ns);
-                (
-                    active.spec.clone(),
-                    active.elapsed_ns,
-                    active.elapsed_ns == duration_ns,
-                )
-            };
-            self.apply_timeline_sample(&spec, elapsed_ns)?;
-            if complete {
-                self.timelines.remove(&id);
+        let timelines = std::mem::take(&mut self.timelines);
+        for (id, mut active) in timelines {
+            let duration_ns = u64::from(timeline_duration_ms(&active.spec)?) * 1_000_000;
+            active.elapsed_ns = active.elapsed_ns.saturating_add(delta_ns).min(duration_ns);
+            self.apply_timeline_sample(&active.spec, active.elapsed_ns)?;
+            if active.elapsed_ns == duration_ns {
                 self.completed_timelines.insert(id.clone());
                 output.push(StageDirectorOutput::FenceCompleted {
                     kind: "timeline".to_string(),
-                    id: spec.fence.unwrap_or(spec.id),
+                    id: active.spec.fence.unwrap_or(id),
                 });
+            } else {
+                self.timelines.insert(id, active);
             }
         }
         Ok(output)
@@ -1258,7 +1331,29 @@ impl ProductStageDirector {
                     "timeline keyframes must be strictly ordered",
                 ));
             }
-            let _ = timeline_target_property(&track.target, &track.property)?;
+            let (target, property) = timeline_target_property(&track.target, &track.property)?;
+            if let TweenTarget::Entity(id) = target {
+                self.entity(&id)?;
+            }
+            for keyframe in &track.keyframes {
+                match property {
+                    TweenProperty::Zoom if keyframe.value.millionths <= 0 => {
+                        return Err(stage_error(
+                            "ASTRA_VN_STAGE_CAMERA_ZOOM",
+                            "camera timeline keyframes must have positive zoom",
+                        ))
+                    }
+                    TweenProperty::Opacity
+                        if !(0..=1_000_000).contains(&keyframe.value.millionths) =>
+                    {
+                        return Err(stage_error(
+                            "ASTRA_VN_STAGE_ENTITY_STATE",
+                            "entity timeline opacity must be between zero and one",
+                        ))
+                    }
+                    _ => {}
+                }
+            }
         }
         if spec.join == VnTimelineJoinPolicy::Block && spec.fence.is_none() {
             return Err(stage_error(
@@ -1662,10 +1757,22 @@ fn placement_x(placement: StagePlacement, width: u32) -> Result<FixedScalar, VnE
     Ok(FixedScalar { millionths })
 }
 
-fn timeline_targets(spec: &TimelineSpec) -> BTreeSet<String> {
+fn canonical_timeline_target(target: &str) -> &str {
+    match target {
+        "main" | "camera" | "camera.main" => "camera",
+        other => other,
+    }
+}
+
+fn timeline_properties(spec: &TimelineSpec) -> BTreeSet<(&str, &str)> {
     spec.tracks
         .iter()
-        .map(|track| track.target.clone())
+        .map(|track| {
+            (
+                canonical_timeline_target(&track.target),
+                track.property.as_str(),
+            )
+        })
         .collect()
 }
 
@@ -1858,3 +1965,7 @@ fn fixed_lerp(
 fn stage_error(code: &str, message: &str) -> VnError {
     VnError::Diagnostic(Diagnostic::blocking(code, message))
 }
+
+#[cfg(test)]
+#[path = "stage_tick_tests.rs"]
+mod tick_tests;

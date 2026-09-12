@@ -15,6 +15,7 @@
 | UI Component Plugin | [ui-component-plugin.md](ui-component-plugin.md) |
 | Performance | [performance.md](performance.md) |
 | Script / VN | [script-vn.md](script-vn.md) |
+| 演出帧推进迁移 | [presentation-tick-migration.md](presentation-tick-migration.md) |
 | AstraRPG / `rpg.trpg` | [rpg-trpg.md](rpg-trpg.md) |
 | AI / MCP | [ai-mcp.md](ai-mcp.md) |
 | AstraEMU 独立 Family ABI、最终帧与 PCM | [astraemu-ipc.md](astraemu-ipc.md) |

@@ -433,3 +433,6 @@ fn audio_bus_enabled_state_is_typed_and_snapshot_stable() {
     let restored = ProductStageDirector::restore(manifest, "advanced-vn", &snapshot).unwrap();
     assert_eq!(restored.state(), director.state());
 }
+
+#[path = "support/stage_tick.rs"]
+mod tick_regressions;
