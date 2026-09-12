@@ -1,3 +1,5 @@
+mod fences;
+
 use std::collections::{BTreeMap, VecDeque};
 
 use astra_core::Diagnostic;
@@ -7,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{MovieLoopMode, PresentationInterruptPolicy, VnError, VnMovieEndBehavior};
 
-pub const PRESENTATION_COORDINATOR_SCHEMA: &str = "astra.vn.presentation_coordinator.v4";
+pub const PRESENTATION_COORDINATOR_SCHEMA: &str = "astra.vn.presentation_coordinator.v5";
 const MAX_REGION_QUEUE: usize = 4_096;
 const MAX_FRAME_DELTA_NS: u64 = 1_000_000_000;
 
@@ -407,20 +409,19 @@ impl PresentationCoordinator {
                     delta
                 }
             };
-            for fence in &delta.completed_fences {
-                next.state
-                    .fences
-                    .insert(fence.clone(), FenceStatus::Completed);
-            }
             deltas.push(delta);
         }
-        for command in commands {
-            if let Some(fence) = &command.fence {
-                next.state
-                    .fences
-                    .entry(fence.clone())
-                    .or_insert(FenceStatus::Pending);
-            }
+        next.register_fences(&self.state, commands);
+        let completed = next.finish_fences(
+            deltas
+                .iter()
+                .flat_map(|delta| delta.completed_fences.iter().cloned())
+                .collect(),
+        );
+        for delta in &mut deltas {
+            delta
+                .completed_fences
+                .retain(|fence| completed.contains(fence));
         }
         deltas.sort_by_key(|delta| (delta.first_sequence, delta.region));
         if let Some(command) = commands.last() {
@@ -516,14 +517,7 @@ impl PresentationCoordinator {
                 return Err(error);
             }
         }
-        completed.sort();
-        completed.dedup();
-        for fence in &completed {
-            self.state
-                .fences
-                .insert(fence.clone(), FenceStatus::Completed);
-        }
-        Ok(completed)
+        Ok(self.finish_fences(completed))
     }
 
     pub fn request_text_advance(&mut self) -> TextAdvanceDisposition {
@@ -536,7 +530,7 @@ impl PresentationCoordinator {
         if !text.reveal_complete() {
             text.visible_graphemes = text.grapheme_count;
             if let Some(fence) = text.fence.take() {
-                self.state.fences.insert(fence, FenceStatus::Completed);
+                self.finish_fences(vec![fence]);
             }
             TextAdvanceDisposition::RevealCompleted
         } else {
@@ -643,9 +637,6 @@ impl PresentationCoordinator {
         video.phase = VideoPhase::Ended;
         let mut completed = Vec::new();
         if let Some(fence) = video.fence.take() {
-            self.state
-                .fences
-                .insert(fence.clone(), FenceStatus::Completed);
             completed.push(fence);
         }
         let (video, activated) = drain_video_queue(std::mem::replace(
@@ -662,7 +653,7 @@ impl PresentationCoordinator {
                 return Err(error);
             }
         }
-        Ok(completed)
+        Ok(self.finish_fences(completed))
     }
 
     pub fn fail_video(&mut self, session_id: &str) -> Result<Option<String>, VnError> {
@@ -722,7 +713,8 @@ impl PresentationCoordinator {
             ));
         }
         self.ensure_active()?;
-        validate_queues(&self.state)
+        validate_queues(&self.state)?;
+        self.validate_fences()
     }
 }
 
@@ -737,6 +729,7 @@ fn validate_batch(
     state: &PresentationCoordinatorState,
     commands: &[PresentationCommandEnvelope],
 ) -> Result<(), VnError> {
+    fences::validate_commands(state, commands)?;
     let mut prior = state.last_sequence;
     let mut layer_regions: BTreeMap<&str, PresentationRegion> = BTreeMap::new();
     for command in commands {

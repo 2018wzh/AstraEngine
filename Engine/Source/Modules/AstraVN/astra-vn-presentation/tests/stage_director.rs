@@ -436,3 +436,38 @@ fn audio_bus_enabled_state_is_typed_and_snapshot_stable() {
 
 #[path = "support/stage_tick.rs"]
 mod tick_regressions;
+
+#[test]
+fn product_movie_fence_waits_for_both_layers() {
+    let mut director = director();
+    configure(&mut director);
+    for (index, layer) in ["movie.left", "movie.right"].into_iter().enumerate() {
+        director
+            .apply(&StageCommand::DeclareLayer {
+                id: layer.into(),
+                kind: StageLayerKind::Video,
+                z: 200 + index as i32,
+                blend: StageBlendMode::Normal,
+                clip: Some(StageClipPolicy::Stage),
+                input: None,
+            })
+            .unwrap();
+        director
+            .apply(&StageCommand::Movie {
+                layer: layer.into(),
+                asset: "asset:/opening.webm".into(),
+                alpha: fixed(1_000_000),
+                loop_mode: astra_vn_presentation::MovieLoopMode::Once,
+                end: astra_vn_presentation::VnMovieEndBehavior::Wait,
+                fence: Some("movies.done".into()),
+                fallback: None,
+                interrupt: PresentationInterruptPolicy::Reject,
+            })
+            .unwrap();
+    }
+    assert!(director.complete_video("movie.left").unwrap().is_empty());
+    assert_eq!(
+        director.complete_video("movie.right").unwrap(),
+        vec!["movies.done"]
+    );
+}

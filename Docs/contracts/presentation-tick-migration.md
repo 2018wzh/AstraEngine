@@ -20,7 +20,7 @@ Region 队列保持原顺序并在活动过渡完成后激活；排队状态可�
 
 ## 数据格式迁移
 
-Stage snapshot schema 从 `astra.vn.product_stage_state.v7` 升至 `v8`；coordinator 从 `astra.vn.presentation_coordinator.v3` 升至 `v4`。两者增加内部 failed 字段，背景状态增加上述 pending 标记。`PresentationRegionCommand` 改用 serde 外部标记枚举，使非空队列可由 postcard 双向编码；旧内部标记表示只能写入，读取会失败。若使用 JSON，payload 形式相应改为如 `{"character": {...}}`，不再是 `{"region": "character", "command": {...}}`。
+当前 Stage snapshot schema 为 `astra.vn.product_stage_state.v8`，coordinator 为 `astra.vn.presentation_coordinator.v5`。此前 v8/v4 布局已增加内部 failed 字段和背景 pending 标记；本轮 v5 增加等待组一致性校验，字段布局不变。`PresentationRegionCommand` 改用 serde 外部标记枚举，使非空队列可由 postcard 双向编码；旧内部标记表示只能写入，读取会失败。若使用 JSON，payload 形式相应改为如 `{"character": {...}}`，不再是 `{"region": "character", "command": {...}}`。
 
 旧内部 snapshot 明确拒绝并重建，不提供迁移器。恢复时校验 coordinator schema、队列边界、区域匹配、排队策略和文字 reveal rate，拒绝损坏队列而不是延迟到 tick panic。商业游戏原生存档不属于此格式，不能覆盖。
 
@@ -29,3 +29,9 @@ Stage snapshot schema 从 `astra.vn.product_stage_state.v7` 升至 `v8`；coordi
 [Stage 回归](../../Engine/Source/Modules/AstraVN/astra-vn-presentation/tests/support/stage_tick.rs)覆盖 queued Move 的存读档、畸形排队命令拒绝、执行失败终止、从先前存档恢复、同目标不同属性继续、替换和取消。[Coordinator 回归](../../Engine/Source/Modules/AstraVN/astra-vn-presentation/tests/support/coordinator_tick.rs)覆盖多个 region 同时推进、一次性激活和 fence、显式清空及 reveal 不倒退。内部测试补充 counter 溢出和有界 activation 队列耗尽。
 
 本项只证明普通 Rust 演出状态推进和保存边界。实际 Player 视听、性能预算和四平台播放仍须产品运行验证，不由本项单元测试关闭。
+
+## 演出等待组
+
+共用 fence id 的 Character/Background/Text/Video 命令组成 all-of 等待组，包含区域队列中的成员；同组未完成成员的 command id 必须唯一，冲突在批次提交前拒绝。只有所有成员都完成，coordinator 才发出一次完成通知；文字立即显示或视频先结束不能提前放行其他成员。任一成员失败或被新命令替换，组保持 Failed，后续成员完成不能覆盖失败；其他轨道继续执行。已经终结且没有活动成员的 fence id 可以用于新一组命令，重新进入 Pending。
+
+成员身份直接来自现有活动/排队命令，保存同一 coordinator state，不另建线程池或任务 registry。新 coordinator schema 为 v5，旧 v4 快照拒绝重建；StageDirector 外层仍为 v8，恢复时校验内层 schema 与 fence 引用。跨区域并行、顺序排队、文字点击、视频完成/失败、替换与中途保存恢复均需要普通产品状态测试；通用 Runtime 任务组合和产品异步 IO 接入仍未完成。

@@ -165,3 +165,6 @@ fn explicit_queue_and_reject_policies_are_enforced() {
 
 #[path = "support/coordinator_tick.rs"]
 mod tick_regressions;
+
+#[path = "support/fence_groups.rs"]
+mod fence_groups;
