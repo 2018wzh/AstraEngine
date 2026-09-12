@@ -629,10 +629,54 @@ async fn cold_product_restore_prepares_packaged_pcm_and_preserves_saved_cursor()
             panic!("expected decoder close")
         };
         reply.send(Ok(())).unwrap();
-        // A second restore must reuse prepared PCM, not issue another decoder request.
-        let HostCommand::CloseAudio { reply, .. } = backend.next_command().await.unwrap() else {
-            panic!("expected audio shutdown")
+        // Each successful restore closes the old queue before opening a fresh endpoint.
+        // Prepared PCM survives both cycles without another decoder request.
+        let mut current = output;
+        for generation in 2..=3 {
+            let HostCommand::CloseAudio { output, reply } = backend.next_command().await.unwrap()
+            else {
+                panic!("expected old output close")
+            };
+            assert_eq!(output, current);
+            reply.send(Ok(())).unwrap();
+            let HostCommand::OpenAudioOutput { reply, .. } = backend.next_command().await.unwrap()
+            else {
+                panic!("expected new output after close")
+            };
+            current = AudioOutputHandle::from_parts(3, generation).unwrap();
+            reply
+                .send(Ok(OpenedAudioOutput {
+                    handle: current,
+                    format: AudioDeviceFormat {
+                        sample_rate: 48_000,
+                        channels: 2,
+                    },
+                    lane: Box::new(ProductAudioTestLane {
+                        consumed_samples: Arc::new(AtomicU64::new(0)),
+                        underflow_count: 0,
+                    }),
+                    capture: None,
+                }))
+                .unwrap();
+        }
+
+        let HostCommand::CloseAudio { output, reply } = backend.next_command().await.unwrap()
+        else {
+            panic!("expected failing restore close")
         };
+        assert_eq!(output, current);
+        reply
+            .send(Err(PlatformError::new(
+                astra_platform::PlatformErrorCode::DeviceLost,
+                "audio.close",
+                "test endpoint close failed",
+            )))
+            .unwrap();
+        let HostCommand::CloseAudio { output, reply } = backend.next_command().await.unwrap()
+        else {
+            panic!("expected retained handle cleanup")
+        };
+        assert_eq!(output, current);
         reply.send(Ok(())).unwrap();
     });
     let mut executor = PlayerHostCommandExecutor::new(PlatformCommandSink::new(client));
@@ -671,6 +715,18 @@ async fn cold_product_restore_prepares_packaged_pcm_and_preserves_saved_cursor()
         media.snapshot().audio.timeline.voices,
         saved.audio.timeline.voices
     );
+    let error = source
+        .restore_product_session(&bytes, &mut media, &mut executor)
+        .await
+        .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("ASTRA_PLAYER_MEDIA_RESTORE_FAILED"));
+    assert!(source
+        .tick_presentation(16_666_667)
+        .unwrap_err()
+        .to_string()
+        .contains("ASTRA_PLAYER_PRESENTATION_SESSION_FAILED"));
     media.shutdown(&mut source, &mut executor).await.unwrap();
     source.release_resources().unwrap();
     source.shutdown().unwrap();

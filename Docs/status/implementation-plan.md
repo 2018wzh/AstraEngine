@@ -58,3 +58,5 @@
 - AudioServiceSession 新增恢复预检，停止当前声音前检查已准备 PCM、cursor、voice/bus 容量、序列与完整渐变状态。Player 已打开音频服务时复用该检查，未打开却包含声音/渐变的恢复也提前拒绝，避免剧情先提交。7 类无效 snapshot 的拒绝与 live timeline 保持不变已验证，astra-audio-kira 4 项测试通过；Engine 全量 fmt/clippy/build/test 通过：700 项通过、0 失败、9 项按原条件未执行。冷启动 package 音频解码/资产准备与真实设备恢复仍未完成。
 
 - 产品恢复入口改为 async，在提交剧情前按当前 package 和显式 decoder 准备缺失 PCM；正常播放与恢复共用 canonical PCM 准备，检查真实服务缓存避免陈旧 prepared 标记。原生 Player 与 Headless 已同步调用。冷启动媒体 Host 的 package WAV 回归通过：解码、cursor/paused/bus 恢复、重复恢复复用 PCM、外来 package 与错误 PCM 长度拒绝均已验证；Engine 全量 fmt/clippy/build/test 通过：701 项通过、0 失败、9 项按原条件未执行。实际 decoder/设备组合、进程重启长流程和输出队列恢复仍需真实环境验收。
+
+- 产品读档在媒体状态恢复后停止旧 Kira worker、关闭旧音频端点并重建所选 output，复用共享 PCM 与存档 timeline。端点关闭失败保留 handle，打开后的格式/初始化失败也保留清理所有权；未清理 handle 阻止再次打开，退出清空待恢复 PCM。集成回归验证两次读档的关闭/打开顺序、PCM 复用及关闭失败后会话拒绝 tick、退出重试清理。Engine 全量 fmt/clippy/build/test 通过：701 项通过、0 失败、9 项按原条件未执行；真实设备缓冲与听感连续性未验收。

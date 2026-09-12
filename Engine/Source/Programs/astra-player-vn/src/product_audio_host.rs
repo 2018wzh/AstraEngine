@@ -211,6 +211,12 @@ impl NativeVnProductAudioHost {
         if self.service.is_some() {
             return Ok(());
         }
+        if self.output.is_some() {
+            return Err(player_platform_error(
+                "player.audio.open",
+                "ASTRA_PLAYER_AUDIO_OUTPUT_REQUIRES_CLEANUP",
+            ));
+        }
         let client = executor.sink().client().clone();
         let limits = client.launch_profile().limits();
         let capture_samples = self.retain_evidence_audio
@@ -225,6 +231,8 @@ impl NativeVnProductAudioHost {
                 capture_samples,
             })
             .await?;
+        // Keep ownership even if format or mixer setup fails; shutdown closes this handle.
+        self.output = Some(opened.handle);
         if opened.format.sample_rate != CANONICAL_SAMPLE_RATE
             || opened.format.channels != CANONICAL_CHANNELS
         {
@@ -278,6 +286,17 @@ impl NativeVnProductAudioHost {
         Ok(())
     }
 
+    pub(crate) async fn reset_output_after_restore(
+        &mut self,
+        source: &mut crate::NativeVnHostCommandSource,
+        executor: &mut PlayerHostCommandExecutor<PlatformCommandSink>,
+    ) -> Result<(), PlatformError> {
+        if self.service.is_some() {
+            self.recover_device_loss(source, executor).await?;
+        }
+        Ok(())
+    }
+
     /// Recreates the selected output endpoint and Kira manager without copying cached PCM.
     /// Failure is terminal for this audio host; no alternate mixer or output provider is selected.
     pub async fn recover_device_loss(
@@ -296,13 +315,14 @@ impl NativeVnProductAudioHost {
         drop(service);
         self.evidence_capture = None;
         self.previous_telemetry = AudioChunkTelemetry::default();
-        let output = self.output.take().ok_or_else(|| {
+        let output = self.output.ok_or_else(|| {
             player_platform_error(
                 "player.audio.recover",
                 "ASTRA_PLAYER_AUDIO_RECOVERY_OUTPUT_MISSING",
             )
         })?;
         executor.sink().client().close_audio(output).await?;
+        self.output = None;
         self.ensure_open(source, executor).await
     }
 
@@ -697,14 +717,16 @@ impl NativeVnProductAudioHost {
             self.last_meter = Some(NativeVnAudioMeterSnapshot::from(service.telemetry()));
         }
         drop(self.service.take());
-        if let Some(output) = self.output.take() {
+        if let Some(output) = self.output {
             executor.sink().client().close_audio(output).await?;
+            self.output = None;
         }
         self.prepared_assets.clear();
         self.voice_kinds.clear();
         self.known_bgm_targets.clear();
         self.pending_fade_stops.clear();
         self.pending_restore = None;
+        self.pending_recovery_assets.clear();
         Ok(())
     }
 

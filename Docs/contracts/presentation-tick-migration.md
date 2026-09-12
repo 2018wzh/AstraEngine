@@ -77,3 +77,7 @@ Media Host 使用独立播放时间驱动 timeline deadline 和视频 `started_a
 ## 冷启动音频准备
 
 产品 `restore_product_session` 改为 async，并接收当前平台 executor。恢复前从当前 package 重新读取缺失声音，走显式绑定 decoder 和与正常播放相同的 canonical PCM 准备路径；包身份、revision、资源 URI 或 canonical PCM 长度不匹配均失败。已准备的 PCM 可复用，未准备的资源按有界解码与缓存预算处理，不能重新播放剧情来填充缓存。准备和预检完成后才提交剧情与媒体恢复；低层同步 Media Host restore 仍只接受已准备资源。
+
+### 读档输出端点边界
+
+产品读档在预检和剧情提交后，重建已打开的音频输出端点与 Kira manager，复用已准备的共享 PCM 和保存的声音状态。旧 mixer 先停止并等待退出，再关闭旧 output，关闭成功后才打开同一显式 provider 的新 output；返回成功时不再消费旧端点队列。关闭或重建失败终止产品会话，保留可关闭 handle 供退出清理，不选择替代 provider。同步媒体 `restore` 只恢复内存状态，产品入口负责异步端点边界；真实设备已提交到硬件的采样与听感连续性另行实测。

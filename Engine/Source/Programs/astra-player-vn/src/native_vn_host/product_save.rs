@@ -62,7 +62,7 @@ impl NativeVnHostCommandSource {
             .validate_restore(&snapshot)
             .map_err(|error| NativeVnHostError::Save(error.to_string()))?;
         let present = self.restore(bytes)?;
-        if let Err(error) = media.restore(snapshot) {
+        if let Err(error) = media.restore_product_media(self, executor, snapshot).await {
             self.presentation_failed = true;
             self.media_scope.cancel();
             return Err(NativeVnHostError::Save(format!(

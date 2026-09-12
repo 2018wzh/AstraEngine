@@ -1,6 +1,18 @@
 use super::*;
 
 impl NativeVnProductMediaHost {
+    pub(crate) async fn restore_product_media(
+        &mut self,
+        source: &mut NativeVnHostCommandSource,
+        executor: &mut PlayerHostCommandExecutor<PlatformCommandSink>,
+        snapshot: NativeVnProductMediaSnapshot,
+    ) -> Result<(), PlatformError> {
+        self.restore(snapshot)?;
+        self.audio
+            .reset_output_after_restore(source, executor)
+            .await
+    }
+
     pub(crate) async fn prepare_restore_assets(
         &mut self,
         source: &mut NativeVnHostCommandSource,
