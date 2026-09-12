@@ -619,7 +619,7 @@ impl NativeVnHostCommandSource {
                 "ASTRA_PLAYER_LOCALE_TABLE_MISSING: declared locale has no loaded table".into(),
             )
         })?;
-        let text_provider = Arc::new(CosmicTextLayoutProvider::from_package(
+        let text_provider = Arc::new(astra_media::text_layout_from_package(
             package,
             "media.font_manifest",
             FontBindingContext {

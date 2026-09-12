@@ -168,7 +168,7 @@ impl CosmicTextLayoutProvider {
         fonts.sort_by(|left, right| left.asset_id.cmp(&right.asset_id));
         let loaded = load_database(&context, &config, &fonts)?;
         tracing::info!(
-            target: "astra_media::text",
+            target: "astra_text",
             event = "text.font_database.created",
             target_id = %context.target,
             profile = %context.profile,
@@ -232,7 +232,7 @@ impl CosmicTextLayoutProvider {
         fonts.push(font);
         self.replace_fonts_locked(&mut state, fonts)?;
         tracing::info!(
-            target: "astra_media::text",
+            target: "astra_text",
             event = "text.font.installed",
             font_count = state.catalog.fonts.len(),
             generation = state.catalog.generation,
@@ -264,7 +264,7 @@ impl CosmicTextLayoutProvider {
         }
         self.replace_fonts_locked(&mut state, fonts)?;
         tracing::info!(
-            target: "astra_media::text",
+            target: "astra_text",
             event = "text.font.uninstalled",
             font_count = state.catalog.fonts.len(),
             generation = state.catalog.generation,
@@ -301,7 +301,7 @@ impl CosmicTextLayoutProvider {
         fonts[index] = replacement;
         self.replace_fonts_locked(&mut state, fonts)?;
         tracing::info!(
-            target: "astra_media::text",
+            target: "astra_text",
             event = "text.font.replaced",
             font_count = state.catalog.fonts.len(),
             generation = state.catalog.generation,
@@ -383,7 +383,7 @@ impl CosmicTextLayoutProvider {
         request: &TextLayoutRequest,
     ) -> Result<Arc<TextLayoutResult>, MediaError> {
         let span = tracing::debug_span!(
-            target: "astra_media::text",
+            target: "astra_text",
             "text_layout",
             event = "text.layout",
             target_id = %self.context.target,
@@ -420,7 +420,7 @@ impl CosmicTextLayoutProvider {
                         };
                     state.catalog.hits += 1;
                     tracing::trace!(
-                        target: "astra_media::text",
+                        target: "astra_text",
                         event = "text.layout.cache_hit",
                         layout_revision = result.revision,
                         cache_entries = state.catalog.layout_cache.len(),
@@ -503,7 +503,7 @@ impl CosmicTextLayoutProvider {
         flight.complete(result_for_waiters)?;
         let result = layout_result?;
         tracing::debug!(
-            target: "astra_media::text",
+            target: "astra_text",
             event = "text.layout.completed",
             layout_revision = result.revision,
             line_count = result.lines.len(),

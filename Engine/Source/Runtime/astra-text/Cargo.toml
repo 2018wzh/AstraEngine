@@ -1,0 +1,18 @@
+[package]
+name = "astra-text"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+astra-core = { path = "../astra-core" }
+astra-media-core = { path = "../astra-media-core" }
+astra-worker-budget = { path = "../astra-worker-budget" }
+cosmic-text.workspace = true
+schemars.workspace = true
+serde.workspace = true
+tracing.workspace = true
+unicode-segmentation.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

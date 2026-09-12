@@ -6,8 +6,7 @@ use astra_core::{
 };
 use astra_headless_protocol::{PreflightLink, ReviewBundle, ReviewRecord, RunReport, RunStatus};
 use astra_media::{
-    CosmicTextLayoutProvider, FontBindingContext, FontPackageManifest, TextLayoutConfig,
-    FONT_PACKAGE_MANIFEST_SCHEMA,
+    FontBindingContext, FontPackageManifest, TextLayoutConfig, FONT_PACKAGE_MANIFEST_SCHEMA,
 };
 use astra_package::{CookSummaryManifest, PackageManifest, PackageReader};
 use astra_platform::{
@@ -1127,7 +1126,7 @@ fn font_package_check(
         profile: profile.to_string(),
         default_locale: "und".to_string(),
     };
-    if let Err(error) = CosmicTextLayoutProvider::from_package(
+    if let Err(error) = astra_media::text_layout_from_package(
         package,
         section_id,
         context,

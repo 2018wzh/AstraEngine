@@ -7,8 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::MediaError;
 
 use super::{
-    contract::{FontBindingContext, PackagedFont, TextLayoutConfig, UnicodeRange},
-    provider::CosmicTextLayoutProvider,
+    CosmicTextLayoutProvider, FontBindingContext, PackagedFont, TextLayoutConfig, UnicodeRange,
 };
 
 pub const FONT_PACKAGE_MANIFEST_SCHEMA: &str = "astra.font_manifest.v1";
@@ -36,25 +35,25 @@ pub struct FontPackageEntry {
     pub profiles: Vec<String>,
 }
 
-impl CosmicTextLayoutProvider {
-    pub fn from_package(
-        package: &PackageReader,
-        manifest_section: &str,
-        context: FontBindingContext,
-        config: TextLayoutConfig,
-    ) -> Result<Self, MediaError> {
-        load_from_package(package, manifest_section, context, config, None)
-    }
+/// Loads verified package font assets into the standalone text provider.
+pub fn text_layout_from_package(
+    package: &PackageReader,
+    manifest_section: &str,
+    context: FontBindingContext,
+    config: TextLayoutConfig,
+) -> Result<CosmicTextLayoutProvider, MediaError> {
+    load_from_package(package, manifest_section, context, config, None)
+}
 
-    pub fn from_package_with_crypto(
-        package: &PackageReader,
-        manifest_section: &str,
-        context: FontBindingContext,
-        config: TextLayoutConfig,
-        crypto: &dyn ContainerCryptoProvider,
-    ) -> Result<Self, MediaError> {
-        load_from_package(package, manifest_section, context, config, Some(crypto))
-    }
+/// Loads verified encrypted package font assets with the explicit crypto provider.
+pub fn text_layout_from_package_with_crypto(
+    package: &PackageReader,
+    manifest_section: &str,
+    context: FontBindingContext,
+    config: TextLayoutConfig,
+    crypto: &dyn ContainerCryptoProvider,
+) -> Result<CosmicTextLayoutProvider, MediaError> {
+    load_from_package(package, manifest_section, context, config, Some(crypto))
 }
 
 fn load_from_package(

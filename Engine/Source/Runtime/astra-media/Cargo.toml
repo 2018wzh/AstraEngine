@@ -15,7 +15,7 @@ astra-worker-budget = { path = "../astra-worker-budget" }
 astra-asset = { path = "../astra-asset" }
 astra-media-core = { path = "../astra-media-core" }
 astra-package = { path = "../astra-package" }
-cosmic-text.workspace = true
+astra-text = { path = "../astra-text" }
 ffmpeg-next = { workspace = true, optional = true }
 tempfile = { workspace = true, optional = true }
 image.workspace = true
@@ -29,7 +29,6 @@ thiserror.workspace = true
 tracing.workspace = true
 rubato.workspace = true
 sha2.workspace = true
-unicode-segmentation.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [

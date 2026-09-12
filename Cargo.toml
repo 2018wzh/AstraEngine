@@ -7,6 +7,7 @@ members = [
     "Engine/Source/Runtime/astra-byte-source",
     "Engine/Source/Runtime/astra-media-core",
     "Engine/Source/Runtime/astra-media",
+    "Engine/Source/Runtime/astra-text",
     "Engine/Source/Runtime/astra-audio-kira",
     "Engine/Source/Runtime/astra-ui-core",
     "Engine/Source/Runtime/astra-ui-yakui",

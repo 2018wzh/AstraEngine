@@ -731,8 +731,8 @@ dependencies = [
  "astra-headless-test",
  "astra-media-core",
  "astra-package",
+ "astra-text",
  "astra-worker-budget",
- "cosmic-text",
  "ffmpeg-next",
  "image",
  "js-sys",
@@ -747,7 +747,6 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tracing",
- "unicode-segmentation",
  "wasm-bindgen",
  "windows",
 ]
@@ -1299,6 +1298,21 @@ dependencies = [
  "astra-core",
  "schemars",
  "serde",
+]
+
+[[package]]
+name = "astra-text"
+version = "0.1.0"
+dependencies = [
+ "astra-core",
+ "astra-media-core",
+ "astra-worker-budget",
+ "cosmic-text",
+ "schemars",
+ "serde",
+ "serde_json",
+ "tracing",
+ "unicode-segmentation",
 ]
 
 [[package]]

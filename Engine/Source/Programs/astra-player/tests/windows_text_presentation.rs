@@ -3,10 +3,9 @@
 use astra_asset::VfsUri;
 use astra_core::Hash256;
 use astra_media::{
-    CosmicTextLayoutProvider, FontBindingContext, FontPackageEntry, FontPackageManifest,
-    LayoutConstraint, OverflowPolicy, TextDirection, TextLayoutConfig, TextLayoutProvider,
-    TextLayoutRequest, TextRenderResourceOwner, TextRun, UnicodeRange, WrapPolicy,
-    FONT_PACKAGE_MANIFEST_SCHEMA,
+    FontBindingContext, FontPackageEntry, FontPackageManifest, LayoutConstraint, OverflowPolicy,
+    TextDirection, TextLayoutConfig, TextLayoutProvider, TextLayoutRequest,
+    TextRenderResourceOwner, TextRun, UnicodeRange, WrapPolicy, FONT_PACKAGE_MANIFEST_SCHEMA,
 };
 use astra_package::{PackageBuildRequest, PackageBuilder, PackageReader, SectionPayload};
 use astra_platform::{PlatformHostFactory, PlatformHostProfile, SurfaceRequest, WindowRequest};
@@ -211,7 +210,7 @@ async fn player_command_path_presents_packaged_layout_and_records_live_gpu_ident
     let package_bytes = package();
     let package_hash = Hash256::from_sha256(&package_bytes).to_string();
     let package = PackageReader::open(&package_bytes).unwrap();
-    let provider = CosmicTextLayoutProvider::from_package(
+    let provider = astra_media::text_layout_from_package(
         &package,
         "media.font_manifest",
         FontBindingContext {
