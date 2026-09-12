@@ -302,7 +302,7 @@ impl AstraEmuManagerController {
             current_page: String::new(),
             input_config: self.input_view(),
             appearance: self.appearance_view(),
-            family_config_fields: self.family_fields(),
+            family_config_fields: self.family_fields()?,
             filter_config_fields: self.filter_fields()?,
             version: env!("CARGO_PKG_VERSION").into(),
             build_identity: option_env!("ASTRA_EMU_MANAGER_RUSTC_FINGERPRINT")

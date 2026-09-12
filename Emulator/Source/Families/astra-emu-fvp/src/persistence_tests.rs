@@ -53,6 +53,7 @@ fn fixture() -> tempfile::TempDir {
 fn open(root: &Path, cancelled: Arc<AtomicBool>) -> FamilyResult<FvpSession> {
     FvpProvider::default()
         .open_session(OpenRequest {
+            configuration: Default::default(),
             game_path: root.to_str().unwrap().into(),
             initial_window: WindowState {
                 width: 640,

@@ -22,12 +22,13 @@ use crate::{
 #[path = "library_settings.rs"]
 mod settings;
 
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 const MAX_TITLE_CHARS: usize = 1_024;
 const MAX_LOCATION_BYTES: usize = 4_096;
 const MAX_METADATA_BYTES: usize = 1_048_576;
 
-const REQUIRED_TABLES: [&str; 9] = [
+const REQUIRED_TABLES: [&str; 10] = [
+    "family_configuration",
     "appearance_settings",
     "library_game",
     "external_identity",
@@ -40,6 +41,12 @@ const REQUIRED_TABLES: [&str; 9] = [
 ];
 
 const SCHEMA_SQL: &str = r#"
+CREATE TABLE family_configuration (
+    plugin_id TEXT NOT NULL,
+    game_id TEXT NOT NULL,
+    values_json TEXT NOT NULL,
+    PRIMARY KEY(plugin_id, game_id)
+);
 CREATE TABLE appearance_settings (
     singleton INTEGER PRIMARY KEY NOT NULL CHECK(singleton = 1),
     settings_json TEXT NOT NULL
@@ -192,6 +199,8 @@ impl VerifiedPluginInstall {
 
 #[derive(Debug, Error)]
 pub enum LibraryError {
+    #[error("{0}")]
+    FamilyConfiguration(astra_emu_family_api::FamilyError),
     #[error("ASTRA_EMU_LIBRARY_SQLITE: {0}")]
     Sqlite(#[from] rusqlite::Error),
     #[error("ASTRA_EMU_LIBRARY_SCHEMA_CORRUPT")]
@@ -368,10 +377,15 @@ impl Library {
 
     pub fn remove_game(&mut self, game_id: &str) -> Result<bool, LibraryError> {
         validate_id(game_id)?;
-        Ok(self
-            .connection
-            .execute("DELETE FROM library_game WHERE game_id=?1", [game_id])?
-            > 0)
+        let transaction = self.connection.transaction()?;
+        transaction.execute(
+            "DELETE FROM family_configuration WHERE game_id=?1",
+            [game_id],
+        )?;
+        let removed =
+            transaction.execute("DELETE FROM library_game WHERE game_id=?1", [game_id])? > 0;
+        transaction.commit()?;
+        Ok(removed)
     }
 
     pub fn set_game_user_title(

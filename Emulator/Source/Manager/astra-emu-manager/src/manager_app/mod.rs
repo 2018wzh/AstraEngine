@@ -43,6 +43,7 @@ const MAX_SCAN_DEPTH: usize = 5;
 
 mod connection_test;
 mod controller;
+mod family_config;
 mod filters;
 mod input;
 mod installation;

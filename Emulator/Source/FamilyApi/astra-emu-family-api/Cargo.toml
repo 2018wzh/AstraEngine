@@ -13,3 +13,4 @@ path = "src/bin/schema.rs"
 
 [dependencies]
 abi_stable.workspace = true
+serde.workspace = true

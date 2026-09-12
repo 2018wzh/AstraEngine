@@ -25,6 +25,7 @@ impl FamilyProvider for ProbeProvider {
 
 fn descriptor(plugin_id: &str, family_id: &str) -> FamilyDescriptor {
     FamilyDescriptor {
+        configuration: Default::default(),
         family_id: family_id.into(),
         plugin_id: plugin_id.into(),
         abi_fingerprint: astra_emu_family_api::FAMILY_ABI_FINGERPRINT.into(),

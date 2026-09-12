@@ -57,6 +57,24 @@ impl AstraEmuManagerController {
     }
 
     pub(super) fn family_config_changed(&mut self, key: &str, value: &str) -> Result<(), String> {
+        if self.active.is_some() {
+            return Err("ASTRA_EMU_FAMILY_SESSION_ALREADY_ACTIVE".into());
+        }
+        if key == "manager.config_scope" && matches!(value, "game" | "core") {
+            self.family_options.clear();
+            self.family_options.insert(key.into(), value.into());
+            return Ok(());
+        }
+        if let Some(id) = key.strip_prefix("config.") {
+            let (_, schema) = self.config_schema()?;
+            if !schema.iter().any(|field| field.id == id)
+                || value.len() > astra_emu_family_api::MAX_CONFIG_TEXT_BYTES
+            {
+                return Err("ASTRA_EMU_FAMILY_CONFIG_FIELD_UNKNOWN".into());
+            }
+            self.family_options.insert(key.into(), value.into());
+            return Ok(());
+        }
         if key != "family.plugin_id" {
             return Err("ASTRA_EMU_FAMILY_CONFIG_FIELD_UNKNOWN".into());
         }
@@ -78,6 +96,9 @@ impl AstraEmuManagerController {
     }
 
     pub(super) fn save_family_config(&mut self) -> Result<ManagerViewModel, String> {
+        if self.active.is_some() {
+            return Err("ASTRA_EMU_FAMILY_SESSION_ALREADY_ACTIVE".into());
+        }
         let game_id = self
             .selected_case_id
             .clone()
@@ -101,11 +122,23 @@ impl AstraEmuManagerController {
                 return Err("ASTRA_EMU_FAMILY_PROVIDER_SELECTION_INVALID".into());
             }
         }
+        if !self.probe_choices.contains_key(&game_id) {
+            self.save_typed_family_config()?;
+        }
         self.model()
     }
 
     pub(super) fn reset_family_config(&mut self) -> Result<ManagerViewModel, String> {
-        self.family_options.clear();
+        if self.active.is_some() {
+            return Err("ASTRA_EMU_FAMILY_SESSION_ALREADY_ACTIVE".into());
+        }
+        let (plugin, schema) = self.config_schema()?;
+        let scope = self.config_scope().to_owned();
+        self.library
+            .save_family_configuration(&plugin, &scope, &schema, &[])
+            .map_err(|error| error.to_string())?;
+        self.family_options
+            .retain(|key, _| key == "manager.config_scope");
         self.model()
     }
 }

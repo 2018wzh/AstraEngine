@@ -11,6 +11,6 @@ mod ffi;
 pub use ffi::*;
 
 /// Machine-readable schema name for this independent host contract.
-pub const FAMILY_API_SCHEMA: &str = "astra.emu.independent_family_api.v1";
+pub const FAMILY_API_SCHEMA: &str = "astra.emu.independent_family_api.v2";
 /// ABI identity is intentionally distinct from every historical family ABI.
-pub const FAMILY_ABI_FINGERPRINT: &str = "astra.emu.independent_family_abi.v1";
+pub const FAMILY_ABI_FINGERPRINT: &str = "astra.emu.independent_family_abi.v2";

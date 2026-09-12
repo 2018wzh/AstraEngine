@@ -35,3 +35,5 @@ pub use metadata::{
 };
 pub use play::{PlaySessionEndReason, PlaySessionRecord, PlayStats, RecentGameRecord};
 pub use work_settings::GameSettings;
+
+mod family_configuration;

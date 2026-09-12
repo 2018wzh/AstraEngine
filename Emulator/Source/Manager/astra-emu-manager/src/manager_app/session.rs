@@ -13,7 +13,7 @@ pub(super) struct ActiveFamilySession {
 
 impl ActiveFamilySession {
     pub(super) fn open(
-        game: &GameRecord,
+        game_config: (&GameRecord, Vec<astra_emu_family_api::ConfigEntry>),
         candidate: &FamilyProbeCandidate,
         registry: &mut FamilyProviderRegistry,
         mailbox: FrameMailbox,
@@ -21,6 +21,7 @@ impl ActiveFamilySession {
         text: Option<TextReplacementBridge>,
         audio: Option<audio_executor::HostAudioExecutor>,
     ) -> Result<Self, String> {
+        let (game, configuration) = game_config;
         if candidate.descriptor.family_id != candidate.report.family_id
             || game.family_id.as_deref() != Some(candidate.report.family_id.as_str())
         {
@@ -40,6 +41,7 @@ impl ActiveFamilySession {
             .open_selected(
                 candidate,
                 OpenRequest {
+                    configuration: configuration.into(),
                     game_path: game.location.clone().into(),
                     initial_window,
                     host,

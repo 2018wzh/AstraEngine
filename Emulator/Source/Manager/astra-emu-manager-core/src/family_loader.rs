@@ -1,11 +1,11 @@
 //! Loading and driving the independent Family ABI.
 //!
-//! A loaded module keeps one `FamilyModuleBox` and one `RawLibrary` together.
-//! The module object, ABI DTO copies, and root reference are dropped before the
-//! library guard. Sessions hold the same guard, so removing a provider from a
-//! registry cannot unmap code that an active session still calls.
+//! Dynamic libraries remain mapped until process exit, including failed loads.
+//! Module/session objects still close and drop normally; updating a plugin
+//! requires restarting Manager. ABI metadata may retain library references.
 
 use std::{
+    mem::ManuallyDrop,
     path::{Path, PathBuf},
     rc::Rc,
 };
@@ -106,14 +106,14 @@ impl FamilyLoadError {
     }
 }
 
-/// The only object that owns a raw library handle. Every ABI object created by
-/// the module is stored before that handle, so Rust drop order preserves the
-/// dynamic code while vtables and allocator callbacks are still needed.
+/// Module and descriptor objects are released normally. The raw library is
+/// intentionally never dropped: ABI metadata and plugin globals remain valid
+/// until the operating system tears down the process.
 struct LoadedModuleInner {
     module: FamilyModuleBox,
     descriptor: AbiDescriptor,
     _root: AstraFamilyModuleRef,
-    _library: RawLibrary,
+    _library: ManuallyDrop<RawLibrary>,
 }
 
 /// One dynamically loaded plugin. The `Rc` is also held by every live session.
@@ -130,7 +130,9 @@ impl LoadedFamilyPlugin {
             return Err(FamilyLoadError::InvalidPath);
         }
 
-        let library = RawLibrary::load_at(path).map_err(|_| FamilyLoadError::Library)?;
+        // Library code, including ABI global metadata, remains mapped until process exit.
+        let library =
+            ManuallyDrop::new(RawLibrary::load_at(path).map_err(|_| FamilyLoadError::Library)?);
         let header = unsafe { lib_header_from_raw_library(&library) }
             .map_err(|_| FamilyLoadError::AbiLayout)?;
         let actual_layout = header.layout().ok_or(FamilyLoadError::AbiLayout)?;
@@ -289,7 +291,7 @@ impl FamilySession for LoadedFamilySession {
         };
         // `FrameConsumerRef` is tied to this stack borrow and can only be used
         // for the synchronous `frame` call. No foreign frame bytes or callback
-        // object survive the call, so unloading remains guarded by `inner`.
+        // object survive the call. Library residency does not extend the borrow.
         let consumer: FrameConsumerRef<'_> = FrameConsumerRef::from_ptr(&mut bridge, TD_Opaque);
         let result = self
             .inner
@@ -425,6 +427,7 @@ fn host_owned_message(message: &str) -> String {
 
 fn host_owned_descriptor(descriptor: AbiDescriptor) -> AbiDescriptor {
     AbiDescriptor {
+        configuration: descriptor.configuration.clone(),
         family_id: descriptor.family_id.as_str().to_owned().into(),
         plugin_id: descriptor.plugin_id.as_str().to_owned().into(),
         abi_fingerprint: descriptor.abi_fingerprint.as_str().to_owned().into(),

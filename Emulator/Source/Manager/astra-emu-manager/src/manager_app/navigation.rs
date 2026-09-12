@@ -5,6 +5,7 @@ impl AstraEmuManagerController {
         if self.active.is_some() {
             return Err("ASTRA_EMU_FAMILY_SESSION_ALREADY_ACTIVE".into());
         }
+        self.family_options.clear();
         if case_id.is_empty() {
             self.selected_case_id = None;
         } else {
@@ -91,8 +92,16 @@ impl AstraEmuManagerController {
             .descriptor
             .has_capability(astra_emu_manager_core::FamilyCapability::PcmAudio)
             .then(|| audio_executor::HostAudioExecutor::new(self.audio_device, Some(wake)));
+        let schema = self
+            .registry
+            .configuration(&candidate.descriptor.plugin_id)
+            .map_err(|error| error.to_string())?;
+        let configuration = self
+            .library
+            .family_configuration(&candidate.descriptor.plugin_id, case_id, &schema)
+            .map_err(|error| error.to_string())?;
         let active = ActiveFamilySession::open(
-            &game,
+            (&game, configuration),
             &candidate,
             &mut self.registry,
             self.mailbox.clone(),

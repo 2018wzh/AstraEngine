@@ -82,3 +82,7 @@ format.
 
 `Docs/emu/fvp/rfvp-fork-audit.md` records the historical v9 audit. It is not
 a description of the current independent-host source or its release status.
+
+## Family API v2 启动配置
+
+Family adapter 声明 `script_encoding` enum（shift_jis/gbk/utf8），经 v2 typed schema 验证后传给已有 `HostedBootConfig.nls`。默认仍是 ShiftJIS；没有修改 RFVP VM、编解码器或 GlobalSaveDataV1/RFVG。翻译 capability 仍未声明。

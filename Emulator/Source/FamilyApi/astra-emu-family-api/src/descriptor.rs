@@ -59,7 +59,7 @@ pub enum FamilyCapability {
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
+#[derive(Debug, Clone, PartialEq, StableAbi)]
 pub struct FamilyDescriptor {
     pub family_id: RString,
     pub plugin_id: RString,
@@ -67,10 +67,12 @@ pub struct FamilyDescriptor {
     pub version: RString,
     pub capabilities: RVec<FamilyCapability>,
     pub supported_formats: RVec<RString>,
+    pub configuration: RVec<crate::ConfigField>,
 }
 
 impl FamilyDescriptor {
     pub fn validate(&self) -> FamilyResult<()> {
+        crate::validate_config_schema(&self.configuration)?;
         validate_symbol("family_id", &self.family_id)?;
         validate_symbol("plugin_id", &self.plugin_id)?;
         validate_symbol("abi_fingerprint", &self.abi_fingerprint)?;

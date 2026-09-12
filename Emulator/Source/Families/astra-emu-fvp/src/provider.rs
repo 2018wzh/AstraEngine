@@ -23,6 +23,16 @@ use crate::{
 
 pub fn fvp_descriptor() -> FamilyDescriptor {
     FamilyDescriptor {
+        configuration: vec![astra_emu_family_api::ConfigField {
+            id: "script_encoding".into(),
+            label: "Script encoding".into(),
+            group: "Script".into(),
+            kind: astra_emu_family_api::ConfigKind::Enum {
+                choices: vec!["shift_jis".into(), "gbk".into(), "utf8".into()].into(),
+            },
+            default: astra_emu_family_api::ConfigValue::Enum("shift_jis".into()),
+        }]
+        .into(),
         family_id: "fvp".into(),
         plugin_id: "astra.emu.fvp".into(),
         abi_fingerprint: astra_emu_family_api::FAMILY_ABI_FINGERPRINT.into(),
@@ -112,6 +122,21 @@ impl FvpProvider {
                 .entered();
         let descriptor = self.descriptor()?;
         request.validate_for_descriptor(&descriptor)?;
+        let configuration = astra_emu_family_api::resolve_config(
+            &descriptor.configuration,
+            &request.configuration,
+        )?;
+        let nls = match &configuration[0].value {
+            astra_emu_family_api::ConfigValue::Enum(value) if value == "gbk" => Nls::GBK,
+            astra_emu_family_api::ConfigValue::Enum(value) if value == "utf8" => Nls::UTF8,
+            astra_emu_family_api::ConfigValue::Enum(value) if value == "shift_jis" => Nls::ShiftJIS,
+            _ => {
+                return Err(error::invalid(
+                    "ASTRA_EMU_FAMILY_CONFIG",
+                    "script_encoding is invalid",
+                ))
+            }
+        };
         let mut fs = NativeFileSystem::new(&request.game_path).map_err(error::rfvp)?;
         let font_bindings = font_bindings::load_system_font_bindings()?;
         let hcb_paths = hcb_paths(&mut fs).map_err(error::rfvp)?;
@@ -158,7 +183,7 @@ impl FvpProvider {
                         hcb_extension: "hcb",
                         max_hcb_bytes: 64 * 1024 * 1024,
                         max_manifest_entries: 4096,
-                        nls: Nls::ShiftJIS,
+                        nls,
                     },
                 )
                 .map_err(|error| error::rfvp_operation(error, hosted.core().last_operation()))?;

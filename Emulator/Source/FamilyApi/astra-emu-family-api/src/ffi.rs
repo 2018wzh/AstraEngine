@@ -1,3 +1,6 @@
+#[path = "config.rs"]
+mod config;
+pub use config::*;
 #[path = "audio.rs"]
 mod audio;
 #[path = "descriptor.rs"]
@@ -32,6 +35,7 @@ mod tests {
 
     fn descriptor(capabilities: Vec<FamilyCapability>) -> FamilyDescriptor {
         FamilyDescriptor {
+            configuration: Default::default(),
             family_id: "fvp".into(),
             plugin_id: "astra.emu.fvp".into(),
             abi_fingerprint: FAMILY_ABI_FINGERPRINT.into(),
@@ -223,6 +227,6 @@ mod tests {
             TextPollResult::Cancelled,
             TextPollResult::Cancelled
         ));
-        assert_eq!(FAMILY_API_SCHEMA, "astra.emu.independent_family_api.v1");
+        assert_eq!(FAMILY_API_SCHEMA, "astra.emu.independent_family_api.v2");
     }
 }

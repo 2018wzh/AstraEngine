@@ -69,6 +69,23 @@ impl FamilyProviderRegistry {
         self.descriptors.descriptor(plugin_id)
     }
 
+    pub fn configuration(
+        &self,
+        plugin_id: &str,
+    ) -> Result<abi_stable::std_types::RVec<astra_emu_family_api::ConfigField>, FamilyLoadError>
+    {
+        let descriptor = self
+            .providers
+            .get(plugin_id)
+            .ok_or(FamilyLoadError::Provider)?
+            .descriptor()
+            .map_err(FamilyLoadError::DescriptorError)?;
+        descriptor
+            .validate()
+            .map_err(FamilyLoadError::DescriptorError)?;
+        Ok(descriptor.configuration)
+    }
+
     pub fn descriptors(&self) -> impl Iterator<Item = &FamilyPluginDescriptor> {
         self.descriptors.descriptors()
     }
@@ -106,7 +123,7 @@ impl FamilyProviderRegistry {
     pub fn open_selected(
         &mut self,
         candidate: &crate::family::FamilyProbeCandidate,
-        request: OpenRequest,
+        mut request: OpenRequest,
     ) -> Result<FamilyOpen, FamilyLoadError> {
         let checked = self
             .descriptors
@@ -120,6 +137,15 @@ impl FamilyProviderRegistry {
             .providers
             .get_mut(&checked.report.plugin_id)
             .ok_or(FamilyLoadError::Provider)?;
+        let descriptor = provider
+            .descriptor()
+            .map_err(FamilyLoadError::DescriptorError)?;
+        request
+            .validate_for_descriptor(&descriptor)
+            .map_err(FamilyLoadError::ProviderError)?;
+        request.configuration =
+            astra_emu_family_api::resolve_config(&descriptor.configuration, &request.configuration)
+                .map_err(FamilyLoadError::ProviderError)?;
         provider
             .open(request)
             .map_err(|error| FamilyLoadError::ProviderError(host_owned_error(error)))

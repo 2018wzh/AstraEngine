@@ -30,6 +30,7 @@ pub struct FamilyHostServices {
 #[derive(StableAbi)]
 pub struct OpenRequest {
     pub game_path: RString,
+    pub configuration: RVec<crate::ConfigEntry>,
     pub initial_window: WindowState,
     pub host: FamilyHostServices,
 }
@@ -41,6 +42,7 @@ impl OpenRequest {
     }
 
     pub fn validate_for_descriptor(&self, descriptor: &FamilyDescriptor) -> FamilyResult<()> {
+        descriptor.validate()?;
         self.validate()?;
         if descriptor.has_capability(crate::FamilyCapability::PcmAudio)
             && !matches!(&self.host.audio_sink, ROption::RSome(_))
@@ -50,14 +52,7 @@ impl OpenRequest {
                 "family declares PCM audio but the host supplied no audio sink",
             ));
         }
-        if descriptor.has_capability(crate::FamilyCapability::TextReplacement)
-            && !matches!(&self.host.text_replacement, ROption::RSome(_))
-        {
-            return Err(FamilyError::invalid(
-                "ASTRA_EMU_FAMILY_TEXT_SERVICE",
-                "family declares text replacement but the host supplied no text service",
-            ));
-        }
+        crate::resolve_config(&descriptor.configuration, &self.configuration)?;
         Ok(())
     }
 }
@@ -156,8 +151,7 @@ pub trait FamilyModule {
     /// An implementation that returns an error must already have cancelled
     /// every host call and stopped and joined every worker it created while
     /// opening. An `Err` result is not permission to leave callbacks or
-    /// background threads alive; the loaded library may be released
-    /// immediately after this call returns.
+    /// background threads alive. The library remains resident until process exit.
     fn open(&self, request: OpenRequest) -> FfiFamilyResult<OpenResponse>;
     fn advance(&self, request: AdvanceRequest) -> FfiFamilyResult<AdvanceResponse>;
     fn frame(&self, request: SessionRequest, consumer: FrameConsumerRef<'_>)
@@ -166,7 +160,7 @@ pub trait FamilyModule {
     ///
     /// Before returning, including when returning `Err`, the implementation
     /// must cancel in-flight host calls and stop and join all family workers.
-    /// `LoadedLibrary` is released after close completes, so an error cannot
+    /// The library remains resident, but an error cannot
     /// be used to retain a worker or a host callback. If a family owns audio
     /// and video workers, it must complete shutdown for both before returning
     /// the first error; an early `audio.close()` must not skip video cleanup.
@@ -212,8 +206,8 @@ pub trait FamilySession {
     ///
     /// Before returning, including when returning `Err`, the implementation
     /// must cancel in-flight host calls and stop and join every family worker.
-    /// The caller may release `LoadedLibrary` as soon as this method returns,
-    /// so an error must never leave a worker or host callback running. When
+    /// The library remains resident, but an error must never leave a worker
+    /// or host callback running. When
     /// audio and video workers are present, both shutdown paths must finish
     /// before the first error is returned.
     fn close(self: Box<Self>) -> FamilyResult<()>;

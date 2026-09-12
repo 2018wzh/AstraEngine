@@ -18,12 +18,12 @@ impl AstraEmuManagerController {
             .map(|candidate| candidate.descriptor.clone())
     }
 
-    pub(super) fn family_fields(&self) -> Vec<GenericConfigFieldViewModel> {
+    pub(super) fn family_fields(&self) -> Result<Vec<GenericConfigFieldViewModel>, String> {
         let Some(game_id) = self.selected_case_id.as_deref() else {
-            return Vec::new();
+            return Ok(Vec::new());
         };
         if let Some(choices) = self.probe_selection_for_game(game_id) {
-            return vec![GenericConfigFieldViewModel {
+            return Ok(vec![GenericConfigFieldViewModel {
                 key: "family.plugin_id".into(),
                 label: "Family provider".into(),
                 description:
@@ -42,22 +42,12 @@ impl AstraEmuManagerController {
                 required: true,
                 min: 0,
                 max: 0,
-            }];
+            }]);
         }
-        let Some(descriptor) = self.candidate_descriptor(game_id) else {
-            return Vec::new();
-        };
-        vec![GenericConfigFieldViewModel {
-            key: "family.plugin_id".into(),
-            label: "Family provider".into(),
-            description: "The provider selected by the probe result.".into(),
-            kind: "string".into(),
-            value: descriptor.plugin_id,
-            enum_values: Vec::new(),
-            required: true,
-            min: 0,
-            max: 0,
-        }]
+        if self.candidate_descriptor(game_id).is_none() {
+            return Ok(Vec::new());
+        }
+        self.typed_family_fields()
     }
 
     pub(super) fn input_view(&self) -> InputConfigViewModel {
