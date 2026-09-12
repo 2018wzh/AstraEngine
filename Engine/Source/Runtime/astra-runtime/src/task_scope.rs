@@ -1,20 +1,22 @@
 use std::{
     collections::BTreeMap,
     fmt,
+    future::Future,
     sync::{
-        atomic::{AtomicBool, AtomicU8, Ordering},
+        atomic::{AtomicU8, Ordering},
         Arc,
     },
 };
 
 use crate::{AwaitResult, AwaitTokenId, EventPayload};
+use tokio_util::sync::CancellationToken;
 
 /// Host-owned cancellation scope. It deliberately has no serialized identity.
 #[derive(Clone)]
 pub struct TaskScope(Arc<ScopeState>);
 
 struct ScopeState {
-    cancelled: AtomicBool,
+    cancellation: CancellationToken,
     parent: Option<TaskScope>,
 }
 
@@ -22,31 +24,44 @@ impl TaskScope {
     /// Create a standalone host scope. The owner must cancel it on shutdown.
     pub fn new() -> Self {
         Self(Arc::new(ScopeState {
-            cancelled: AtomicBool::new(false),
+            cancellation: CancellationToken::new(),
             parent: None,
         }))
     }
 
     pub fn child(&self) -> Self {
         Self(Arc::new(ScopeState {
-            cancelled: AtomicBool::new(false),
+            cancellation: self.0.cancellation.child_token(),
             parent: Some(self.clone()),
         }))
     }
 
     pub fn cancel(&self) {
-        self.0.cancelled.store(true, Ordering::Release);
+        self.0.cancellation.cancel();
     }
 
     pub fn is_cancelled(&self) -> bool {
-        let mut current = Some(self);
-        while let Some(scope) = current {
-            if scope.0.cancelled.load(Ordering::Acquire) {
-                return true;
-            }
-            current = scope.0.parent.as_ref();
+        self.0.cancellation.is_cancelled()
+    }
+
+    /// Wait for this scope or an ancestor to be cancelled, without polling a flag.
+    pub async fn cancelled(&self) {
+        self.0.cancellation.cancelled().await;
+    }
+
+    /// Run cancel-safe work without spawning it. Cancellation drops the future.
+    /// Use ordinary async blocks and futures combinators for sequence and parallel work.
+    /// Detached workers and external resources still require explicit owner cleanup.
+    pub async fn run<T, E>(&self, work: impl Future<Output = Result<T, E>>) -> TaskOutcome<T, E> {
+        let result = self.0.cancellation.run_until_cancelled(work).await;
+        if self.is_cancelled() {
+            return TaskOutcome::Cancelled;
         }
-        false
+        match result {
+            Some(Ok(value)) => TaskOutcome::Completed(value),
+            Some(Err(error)) => TaskOutcome::Failed(error),
+            None => TaskOutcome::Cancelled,
+        }
     }
 
     fn belongs_to(&self, root: &Self) -> bool {
@@ -79,6 +94,14 @@ impl fmt::Debug for TaskScope {
             .field("cancelled", &self.is_cancelled())
             .finish_non_exhaustive()
     }
+}
+
+/// Process-local task result. Only explicit business state belongs in a save.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TaskOutcome<T, E> {
+    Completed(T),
+    Failed(E),
+    Cancelled,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

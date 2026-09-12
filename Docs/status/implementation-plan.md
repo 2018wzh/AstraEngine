@@ -60,3 +60,5 @@
 - 产品恢复入口改为 async，在提交剧情前按当前 package 和显式 decoder 准备缺失 PCM；正常播放与恢复共用 canonical PCM 准备，检查真实服务缓存避免陈旧 prepared 标记。原生 Player 与 Headless 已同步调用。冷启动媒体 Host 的 package WAV 回归通过：解码、cursor/paused/bus 恢复、重复恢复复用 PCM、外来 package 与错误 PCM 长度拒绝均已验证；Engine 全量 fmt/clippy/build/test 通过：701 项通过、0 失败、9 项按原条件未执行。实际 decoder/设备组合、进程重启长流程和输出队列恢复仍需真实环境验收。
 
 - 产品读档在媒体状态恢复后停止旧 Kira worker、关闭旧音频端点并重建所选 output，复用共享 PCM 与存档 timeline。端点关闭失败保留 handle，打开后的格式/初始化失败也保留清理所有权；未清理 handle 阻止再次打开，退出清空待恢复 PCM。集成回归验证两次读档的关闭/打开顺序、PCM 复用及关闭失败后会话拒绝 tick、退出重试清理。Engine 全量 fmt/clippy/build/test 通过：701 项通过、0 失败、9 项按原条件未执行；真实设备缓冲与听感连续性未验收。
+
+- TaskScope 取消实现复用已锁定的 tokio-util CancellationToken，新增 cancelled 等待与 run 的 typed Completed/Failed/Cancelled 结果。普通 async 顺序短路和 futures try_join 并行组合复用同一作用域，不新增调度器或存档类型。8 项异步作用域测试及既有 8 项完成句柄测试通过，包含并行整组取消释放所有分支回归；Engine 全量 fmt/clippy/build/test 通过：709 项通过、0 失败、9 项按原条件未执行。平台资源的异步关闭、可信 Luau 与产品任务组合接入仍未完成。

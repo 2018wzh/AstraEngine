@@ -1257,6 +1257,7 @@ dependencies = [
  "astra-core",
  "astra-package",
  "blake3",
+ "futures-util",
  "indexmap",
  "postcard",
  "schemars",
@@ -1264,6 +1265,8 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "thiserror 1.0.69",
+ "tokio",
+ "tokio-util",
  "tracing",
 ]
 
@@ -7223,6 +7226,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "futures-util",
  "pin-project-lite",
  "tokio",
 ]

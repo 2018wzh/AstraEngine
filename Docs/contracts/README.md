@@ -6,6 +6,7 @@
 | --- | --- |
 | Logging / Crash Observability | [logging-observability.md](logging-observability.md) |
 | Runtime | [runtime.md](runtime.md) |
+| Runtime 异步任务作用域 | [task-scope.md](task-scope.md) |
 | Plugin ABI | [plugin-abi.md](plugin-abi.md) |
 | Data / Save / Package | [data-formats.md](data-formats.md) |
 | Asset VFS | [asset-vfs.md](asset-vfs.md) |

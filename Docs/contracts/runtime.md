@@ -145,7 +145,7 @@ NativeVN 在提交前检查外层 section 的 hash、v5 数字版本、package �
 
 作用域、完成句柄与 TickRequest 是 host 内对象，不实现 serde/JsonSchema，也不进入 save 或插件 ABI。成功 restore 为 World 创建新根作用域并取消旧作用域；拒绝 restore 保留旧作用域。执行失败和销毁同样取消旧工作。旧 World、旧 restore 代次、已完成或取消的句柄只产生忽略诊断，不修改当前 token；同一 token 最多接受一个终态结果。
 
-`TaskScope::cancel()` 是跨线程取消请求；worker 通过句柄状态协作停止，World 在下一 tick 移除对应待完成 token 和尚未消费的结果，并发出 `await.cancelled`。`cancel_await(token_id)` 由 World owner 立即取消指定 token，使用同一终态与事件路径。子作用域取消不影响父或兄弟，根作用域取消后不再接收新任务，直到成功恢复或重建 World。取消请求在 tick 前尚未提交时，存档仍表示此前状态。
+`TaskScope::cancel()` 是跨线程取消请求；`cancelled().await` 唤醒异步等待，`run` 返回 typed `TaskOutcome`，顺序和并行组合见[异步任务作用域](task-scope.md)。worker 也可通过句柄状态协作停止，World 在下一 tick 移除对应待完成 token 和尚未消费的结果，并发出 `await.cancelled`。`cancel_await(token_id)` 由 World owner 立即取消指定 token，使用同一终态与事件路径。子作用域取消不影响父或兄弟，根作用域取消后不再接收新任务，直到成功恢复或重建 World。取消请求在 tick 前尚未提交时，存档仍表示此前状态。
 
 已进入 AwaitQueue 的结果是可序列化提交数据，保存后恢复继续消费；新恢复的未完成任务必须由宿主重新启动并取得新句柄，不能恢复线程/协程。await token 与容器 v5 二进制布局不变；调用方把裸 AwaitResult ingress 改为句柄构造的完成消息。验证覆盖真实 worker 迟到结果、跨 World、恢复拒绝/成功、scope 取消、已排队结果取消、重复完成和 World 销毁。任务组合器与产品异步 IO 的完整接入仍按实施状态推进。
 
