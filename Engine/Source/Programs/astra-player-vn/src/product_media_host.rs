@@ -618,6 +618,7 @@ impl NativeVnProductMediaHost {
         source: &mut NativeVnHostCommandSource,
         executor: &mut PlayerHostCommandExecutor<PlatformCommandSink>,
     ) -> Result<(), PlatformError> {
+        executor.sink_mut().cleanup_pending_decode_opens().await?;
         self.pending_video_closes
             .extend(self.active_videos.iter().map(|video| video.session));
         self.active_videos.clear();

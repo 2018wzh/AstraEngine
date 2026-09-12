@@ -143,3 +143,46 @@ async fn dropping_a_pending_stream_start_preserves_decoder_cleanup() {
     source.shutdown().unwrap();
     task.await.unwrap();
 }
+
+#[tokio::test]
+async fn media_shutdown_reclaims_an_interrupted_decoder_open() {
+    let mut source = source();
+    let mut media = NativeVnProductMediaHost::default();
+    let profile = PlatformHostProfile::windows_release("nativevn-game", "com.example.game");
+    let (client, mut backend, _events) = host_channel(profile, 16, 16).unwrap();
+    let mut executor = PlayerHostCommandExecutor::new(PlatformCommandSink::new(client));
+    let scope = astra_runtime::TaskScope::new();
+    let reply = {
+        let process = scope.run(media.process(&mut source, &mut executor, 0, Vec::new()));
+        tokio::pin!(process);
+        let reply = tokio::select! {
+            command = backend.next_command() => {
+                let HostCommand::OpenDecode { reply, .. } = command.unwrap() else {
+                    panic!("expected decoder open")
+                };
+                reply
+            },
+            result = &mut process => panic!("open completed without a response: {result:?}"),
+        };
+        scope.cancel();
+        assert_eq!(process.await, astra_runtime::TaskOutcome::Cancelled);
+        reply
+    };
+    let native = DecodeSessionHandle::from_parts(9, 1).unwrap();
+    reply.send(Ok(native)).unwrap();
+    assert!(executor.sink().has_live_resources());
+    let backend_task = tokio::spawn(async move {
+        let HostCommand::CloseDecode { session, reply } = backend.next_command().await.unwrap()
+        else {
+            panic!("expected abandoned open cleanup without starting decode")
+        };
+        assert_eq!(session, native);
+        reply.send(Ok(())).unwrap();
+    });
+    media.shutdown(&mut source, &mut executor).await.unwrap();
+    assert!(!executor.sink().has_live_resources());
+    assert!(media.snapshot().active_videos.is_empty());
+    source.release_resources().unwrap();
+    source.shutdown().unwrap();
+    backend_task.await.unwrap();
+}

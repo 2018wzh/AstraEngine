@@ -1,3 +1,5 @@
+mod decode_open;
+
 use std::{collections::BTreeMap, future::Future, pin::Pin};
 
 use astra_platform::{
@@ -16,6 +18,7 @@ pub struct PlatformCommandSink {
     packages: BTreeMap<PlayerHostResourceId, PackageSourceHandle>,
     saves: BTreeMap<PlayerHostResourceId, SaveTransactionHandle>,
     decoders: BTreeMap<PlayerHostResourceId, DecodeSessionHandle>,
+    pending_decode_opens: BTreeMap<PlayerHostResourceId, decode_open::PendingDecodeOpen>,
     surfaces: BTreeMap<PlayerHostResourceId, SurfaceHandle>,
 }
 
@@ -26,6 +29,7 @@ impl PlatformCommandSink {
             packages: BTreeMap::new(),
             saves: BTreeMap::new(),
             decoders: BTreeMap::new(),
+            pending_decode_opens: BTreeMap::new(),
             surfaces: BTreeMap::new(),
         }
     }
@@ -43,7 +47,10 @@ impl PlatformCommandSink {
     }
 
     pub fn has_live_resources(&self) -> bool {
-        !(self.packages.is_empty() && self.saves.is_empty() && self.decoders.is_empty())
+        !(self.packages.is_empty()
+            && self.saves.is_empty()
+            && self.decoders.is_empty()
+            && self.pending_decode_opens.is_empty())
     }
 }
 
@@ -135,8 +142,8 @@ impl PlatformCommandSink {
                 Ok(PlayerHostCommandResult::Unit)
             }
             PlayerHostCommand::OpenDecode { session, kind, .. } => {
-                let handle = self.client.open_decode(decode_kind(*kind)).await?;
-                insert_unique(&mut self.decoders, *session, handle, "decode.open")?;
+                self.open_owned_decoder(*session, decode_kind(*kind))
+                    .await?;
                 Ok(PlayerHostCommandResult::DecodeOpened { session: *session })
             }
             PlayerHostCommand::Decode {

@@ -64,3 +64,5 @@
 - TaskScope 取消实现复用已锁定的 tokio-util CancellationToken，新增 cancelled 等待与 run 的 typed Completed/Failed/Cancelled 结果。普通 async 顺序短路和 futures try_join 并行组合复用同一作用域，不新增调度器或存档类型。8 项异步作用域测试及既有 8 项完成句柄测试通过，包含并行整组取消释放所有分支回归；Engine 全量 fmt/clippy/build/test 通过：709 项通过、0 失败、9 项按原条件未执行。平台资源的异步关闭、可信 Luau 与产品任务组合接入仍未完成。
 
 - 视频启动/关闭从 Media Host 大文件拆成独立模块。打开成功立即登记待关闭 session，描述和 decode 成功后才转交活动视频；失败尝试关闭，关闭失败或启动 future 被 drop 均保留清理责任。两项集成回归通过，覆盖无效描述、错误输出类型、解码失败、关闭重试和迟到响应拒绝；Engine 全量 fmt/clippy/build/test 通过：711 项通过、0 失败、9 项按原条件未执行。平台 open 自身被中断的资源回收和真实 decoder/设备验收仍未完成。
+
+- Player PlatformCommandSink 持有未交付 decoder open/close future，待处理上限 64，逻辑 id 冲突在发送前拒绝。新增 cleanup_pending_decode_opens，保留中断的清理响应与失败关闭重试，has_live_resources 包含未交付资源；Media Host shutdown 已接入。3 项命令层测试与通过 TaskScope 取消的媒体退出回收集成测试通过；Engine 全量 fmt/clippy/build/test 通过：715 项通过、0 失败、9 项按原条件未执行。直接 PlatformHostClient 与其他资源种类的 open 取消仍未处理，真实平台生命周期尚待验收。

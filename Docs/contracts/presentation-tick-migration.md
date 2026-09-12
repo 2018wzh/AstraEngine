@@ -85,3 +85,7 @@ Media Host 使用独立播放时间驱动 timeline deadline 和视频 `started_a
 ### 视频启动失败的清理所有权
 
 视频 decode open 成功后，Media Host 立即把逻辑 session 放入待关闭队列。描述校验和启动解码全部成功后才交给活动视频；启动失败立即尝试关闭，关闭失败保留队列供后续退出重试。等待启动 decode 的 future 被 drop 时同样保留 session，不能把已打开资源只留在局部变量中。取消请求在 open 后和 decode 返回后检查，旧请求不能接收新流。平台 open 命令自身被中断时的资源所有权仍须由平台 executor 单独处理。
+
+### Player decoder open 的取消边界
+
+PlatformCommandSink 持有尚未交付的 decoder open future，限制为 64 个；取消外层命令不会丢弃响应 receiver。正常返回后转入已打开 decoder 表，重复逻辑 id 在发送 open 前拒绝。媒体 shutdown 调用 cleanup_pending_decode_opens，等待被取消 open 的响应并关闭返回的 native session。清理自身被中断时保留 open/close future；关闭失败保留可重试状态，has_live_resources 包含这些未完成资源。清理不创建后台任务，sink 所有者必须等待清理结束后再销毁宿主。此约束覆盖 Player decoder 路径，直接 PlatformHostClient 调用和其他资源种类的取消仍单独推进。
