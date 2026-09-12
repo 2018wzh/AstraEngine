@@ -7,7 +7,7 @@ use std::{
     io::{Read, Write},
     path::{Path, PathBuf},
 };
-const MAGIC: &[u8; 8] = b"AMINSV01";
+const MAGIC: &[u8; 8] = b"AMINSV02";
 const MAX_SAVE: usize = 16 * 1024 * 1024;
 #[derive(Serialize, Deserialize)]
 pub(crate) struct Snapshot {

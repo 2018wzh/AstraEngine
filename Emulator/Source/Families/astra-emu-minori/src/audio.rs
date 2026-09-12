@@ -25,6 +25,10 @@ use std::{
     time::Duration,
 };
 pub(crate) mod decode;
+mod fade;
+mod mixer;
+use fade::FadeSnapshot;
+use mixer::Mixer;
 
 pub(crate) const FORMAT: PcmFormatSpec = PcmFormatSpec {
     sample_rate: 48000,
@@ -41,6 +45,7 @@ pub(crate) struct SoundSnapshot {
     pub pan: f32,
     pub repeat: bool,
     pub playing: bool,
+    pub fade: Option<FadeSnapshot>,
 }
 enum Command {
     Apply(Vec<MinoriAudioCommand>),
@@ -171,230 +176,6 @@ impl Drop for Audio {
         let _ = self.shutdown();
     }
 }
-struct CpuBackend {
-    renderer: Option<Renderer>,
-}
-impl Backend for CpuBackend {
-    type Settings = ();
-    type Error = std::convert::Infallible;
-    fn setup(_: (), _: usize) -> Result<(Self, u32), Self::Error> {
-        Ok((Self { renderer: None }, FORMAT.sample_rate))
-    }
-    fn start(&mut self, r: Renderer) -> Result<(), Self::Error> {
-        self.renderer = Some(r);
-        Ok(())
-    }
-}
-struct Sound {
-    data: StaticSoundData,
-    handle: Option<StaticSoundHandle>,
-    state: SoundSnapshot,
-}
-struct Mixer {
-    manager: AudioManager<CpuBackend>,
-    sounds: BTreeMap<u32, Sound>,
-}
-impl Mixer {
-    fn new() -> FamilyResult<Self> {
-        Ok(Self {
-            manager: AudioManager::new(AudioManagerSettings {
-                backend_settings: (),
-                ..Default::default()
-            })
-            .map_err(|_| error("ASTRA_EMU_MINORI_MIXER", "mixer could not start"))?,
-            sounds: BTreeMap::new(),
-        })
-    }
-    fn load(
-        &mut self,
-        id: u32,
-        uri: &str,
-        archive: &MinoriMountedVfs,
-        stop: &AtomicBool,
-    ) -> FamilyResult<()> {
-        if self.sounds.len() >= 64 && !self.sounds.contains_key(&id) {
-            return Err(error(
-                "ASTRA_EMU_MINORI_AUDIO_STREAMS",
-                "too many audio streams",
-            ));
-        }
-        let used = self
-            .sounds
-            .values()
-            .map(|s| s.data.frames.len())
-            .sum::<usize>();
-        let bytes = read_asset(archive, uri, 64 * 1024 * 1024)?;
-        let data = decode::decode(bytes, MAX_FRAMES.saturating_sub(used), stop)?;
-        if let Some(mut previous) = self.sounds.remove(&id) {
-            if let Some(h) = &mut previous.handle {
-                h.stop(immediate());
-            }
-        }
-        self.sounds.insert(
-            id,
-            Sound {
-                data,
-                handle: None,
-                state: SoundSnapshot {
-                    id,
-                    uri: uri.into(),
-                    position: 0.0,
-                    volume: 1.0,
-                    pan: 0.0,
-                    repeat: false,
-                    playing: false,
-                },
-            },
-        );
-        Ok(())
-    }
-    fn play(
-        &mut self,
-        id: u32,
-        volume: f32,
-        pan: f32,
-        repeat: bool,
-        fade: u32,
-    ) -> FamilyResult<()> {
-        validate_params(volume, pan)?;
-        let sound = self.sounds.get_mut(&id).ok_or_else(|| {
-            error(
-                "ASTRA_EMU_MINORI_AUDIO_UNKNOWN",
-                "audio stream is not loaded",
-            )
-        })?;
-        if let Some(handle) = &mut sound.handle {
-            handle.stop(immediate());
-        }
-        let mut data = sound.data.volume(db(volume)).panning(Panning(pan));
-        if repeat {
-            data = data.loop_region(0.0..);
-        }
-        data.settings.fade_in_tween = Some(tween(fade));
-        sound.handle = Some(
-            self.manager
-                .play(data)
-                .map_err(|_| error("ASTRA_EMU_MINORI_AUDIO_PLAY", "mixer rejected sound"))?,
-        );
-        sound.state.volume = volume;
-        sound.state.pan = pan;
-        sound.state.repeat = repeat;
-        sound.state.playing = true;
-        Ok(())
-    }
-    fn apply(
-        &mut self,
-        command: MinoriAudioCommand,
-        archive: &MinoriMountedVfs,
-        stop: &AtomicBool,
-    ) -> FamilyResult<()> {
-        match command {
-            MinoriAudioCommand::LoadResource {
-                stream_id,
-                resource_uri,
-                ..
-            } => self.load(stream_id, &resource_uri, archive, stop),
-            MinoriAudioCommand::Play {
-                stream_id,
-                volume,
-                pan,
-                repeat,
-                fade_in_ms,
-                ..
-            } => self.play(stream_id, volume, pan, repeat, fade_in_ms),
-            MinoriAudioCommand::Stop {
-                stream_id, fade_ms, ..
-            } => {
-                if let Some(s) = self.sounds.get_mut(&stream_id) {
-                    if let Some(h) = &mut s.handle {
-                        h.stop(tween(fade_ms));
-                    }
-                    s.state.playing = false;
-                }
-                Ok(())
-            }
-            MinoriAudioCommand::SetParams {
-                stream_id,
-                volume,
-                pan,
-                repeat,
-                ..
-            } => {
-                validate_params(volume, pan)?;
-                let s = self.sounds.get_mut(&stream_id).ok_or_else(|| {
-                    error(
-                        "ASTRA_EMU_MINORI_AUDIO_UNKNOWN",
-                        "audio stream is not loaded",
-                    )
-                })?;
-                if let Some(h) = &mut s.handle {
-                    h.set_volume(db(volume), immediate());
-                    h.set_panning(Panning(pan), immediate());
-                    if repeat {
-                        h.set_loop_region(0.0..)
-                    } else {
-                        h.set_loop_region(None)
-                    }
-                }
-                s.state.volume = volume;
-                s.state.pan = pan;
-                s.state.repeat = repeat;
-                Ok(())
-            }
-        }
-    }
-    fn snapshot(&self) -> Vec<SoundSnapshot> {
-        self.sounds
-            .values()
-            .map(|s| {
-                let mut result = s.state.clone();
-                if let Some(h) = &s.handle {
-                    result.position = h.position();
-                    result.playing = h.state() != PlaybackState::Stopped;
-                }
-                result
-            })
-            .collect()
-    }
-    fn restore(
-        &mut self,
-        snapshot: Vec<SoundSnapshot>,
-        archive: &MinoriMountedVfs,
-        stop: &AtomicBool,
-    ) -> FamilyResult<()> {
-        if snapshot.len() > 64 {
-            return Err(error(
-                "ASTRA_EMU_MINORI_AUDIO_SNAPSHOT",
-                "snapshot contains too many sounds",
-            ));
-        }
-        let mut next = Self::new()?;
-        for s in snapshot {
-            if next.sounds.contains_key(&s.id) || !s.position.is_finite() || s.position < 0.0 {
-                return Err(error(
-                    "ASTRA_EMU_MINORI_AUDIO_SNAPSHOT",
-                    "snapshot sound identity or cursor is invalid",
-                ));
-            }
-            validate_params(s.volume, s.pan)?;
-            next.load(s.id, &s.uri, archive, stop)?;
-            if s.playing {
-                next.play(s.id, s.volume, s.pan, s.repeat, 0)?;
-                next.sounds
-                    .get_mut(&s.id)
-                    .unwrap()
-                    .handle
-                    .as_mut()
-                    .unwrap()
-                    .seek_to(s.position);
-            }
-            let id = s.id;
-            next.sounds.get_mut(&id).unwrap().state = s;
-        }
-        *self = next;
-        Ok(())
-    }
-}
 fn run(
     archive: Arc<MinoriMountedVfs>,
     sink: Arc<AudioSinkBox>,
@@ -424,9 +205,7 @@ fn run(
         }
         let mut samples = vec![0.0; 512 * 2];
         if !suspended {
-            let r = mixer.manager.backend_mut().renderer.as_mut().unwrap();
-            r.on_start_processing();
-            r.process(&mut samples, 2);
+            mixer.render(&mut samples);
         }
         match sink.write(PcmChunk::F32(samples.into())).into_result()? {
             AudioWriteStatus::Accepted => {}
@@ -459,7 +238,7 @@ fn db(volume: f32) -> Decibels {
     if volume <= 0.0 {
         Decibels::SILENCE
     } else {
-        Decibels(20.0 * volume.log10())
+        Decibels((20.0 * volume.log10()).max(Decibels::SILENCE.0))
     }
 }
 fn tween(ms: u32) -> Tween {

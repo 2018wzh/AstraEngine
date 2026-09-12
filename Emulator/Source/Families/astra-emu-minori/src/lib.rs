@@ -33,3 +33,6 @@ pub use provider::{create_minori_provider, minori_descriptor, MinoriProvider};
 mod ffi;
 #[cfg(feature = "dynamic-plugin-export")]
 pub use ffi::astra_minori_family_root_module;
+
+#[cfg(test)]
+mod test_fixture;

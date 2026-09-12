@@ -47,7 +47,7 @@ fn archive(role: &str, name: &str, payload: &[u8]) -> Vec<u8> {
     bytes.extend(data);
     bytes
 }
-pub(super) fn game(root: &Path, script: &[u8]) {
+pub(crate) fn game(root: &Path, script: &[u8]) {
     let mut png = Cursor::new(Vec::new());
     image::RgbaImage::from_pixel(16, 16, image::Rgba([25, 100, 220, 255]))
         .write_to(&mut png, image::ImageFormat::Png)
@@ -92,7 +92,7 @@ pub(super) fn game(root: &Path, script: &[u8]) {
     )
     .unwrap();
 }
-pub(super) fn wave() -> Vec<u8> {
+pub(crate) fn wave() -> Vec<u8> {
     let samples = (0..4800)
         .map(|i| ((i as f32 * 440.0 * std::f32::consts::TAU / 48000.0).sin() * 16000.0) as i16)
         .collect::<Vec<_>>();

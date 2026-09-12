@@ -1,3 +1,4 @@
+use crate::test_fixture as fixture;
 use crate::{
     audio::Audio, mount_minori, scene::core_error, MinoriProvider, MinoriVm, MINORI_PROFILE_FILE,
 };
@@ -10,8 +11,6 @@ use std::{
     },
     time::{Duration, Instant},
 };
-#[path = "fixture.rs"]
-mod fixture;
 #[derive(Clone, Default)]
 struct Sink {
     cancelled: Arc<AtomicBool>,

@@ -16,7 +16,7 @@ Minori 提供独立 `FamilyProvider`、`FamilySession` 和可选 `abi_stable` �
 
 PAZ 的边界/重叠校验、分卷读取、Blowfish/RC4、XOR、解压和源文件变化校验保留。`PazManifest` 是核心本地索引，不是 Host VFS 或产品 package。导入/读取不运行 managed helper、BinaryFormatter 或 executable patch。
 
-核心自有 slot 位于游戏目录 `.astra-minori/saves/slot-000.asav`。容器 `AMINSV01` 包含长度、SHA-256 与 postcard snapshot，保存 VM、当前文本、等待进度以及 sound resource/播放位置/volume/pan/repeat。它绑定同一 archive/profile identity；加载重建脚本、场景和声音后提交。临时文件 flush 后原子替换；损坏、异版本或外部格式文件拒绝覆盖。此格式不宣称兼容原版存档。加载恢复声音的当前参数与位置，不保留尚未完成的 Kira fade tween。
+核心自有 slot 位于游戏目录 `.astra-minori/saves/slot-000.asav`。容器 `AMINSV02` 包含长度、SHA-256 与 postcard snapshot，保存 VM、当前文本、等待进度以及 sound resource/播放位置/volume/pan/repeat。它绑定同一 archive/profile identity；加载重建脚本、场景和声音后提交。临时文件 flush 后原子替换；损坏、异版本或外部格式文件拒绝覆盖。此格式不宣称兼容原版存档。加载恢复声音的当前参数、位置与尚未完成的音量渐变。渐变保存分贝起止值、总采样数、已推进采样数和结束停止意图；按剩余采样继续，暂停不推进渐变。新音量命令替换旧渐变。旧 AMINSV01 内部格式明确拒绝，不覆盖旧 slot。
 
 ## 音频边界
 
@@ -30,6 +30,6 @@ cargo clippy --manifest-path Emulator/Cargo.toml -p astra-emu-minori --all-targe
 cargo build --manifest-path Emulator/Cargo.toml -p astra-emu-minori --features dynamic-plugin-export
 ```
 
-45 个普通测试覆盖 archive、图像、parser/VM、native codec、profile 边界和真实日文字形合成。公开最小字节格式 fixture 贯通 encrypted PAZ、SC、PNG、完整 PCM decode、Kira stereo pan、消息物理输入、atomic save/load 相同帧、translation cancel/load 和 close/reopen；单独验证阻塞 audio sink 退出、decode budget 与非挂起 VM 循环边界。Fixture audio sink 不是真实音频设备，动态模块编译也不代表 Manager 内实际安装验收。
+50 个普通测试覆盖 archive、图像、parser/VM、native codec、profile 边界和真实日文字形合成。公开最小字节格式 fixture 贯通 encrypted PAZ、SC、PNG、完整 PCM decode、Kira stereo pan、消息物理输入、atomic save/load 相同帧、translation cancel/load 和 close/reopen；单独验证阻塞 audio sink 退出、decode budget 与非挂起 VM 循环边界。Fixture audio sink 不是真实音频设备，动态模块编译也不代表 Manager 内实际安装验收。
 
 现有未验证 stand positioning、movie、choice、系统页相关 opcode 仍明确失败，不能把这一可运行子集说成完整 Minori 兼容。ANI/SQZ decoder 有独立真实格式 fixture，尚未接入 session 动画播放。尚无授权完整游戏、真实设备音视频、原版 save compatibility、冷启动/完整结局、Android 静态注册或跨平台验收。
