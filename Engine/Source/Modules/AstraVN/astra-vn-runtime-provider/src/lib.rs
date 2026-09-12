@@ -74,6 +74,10 @@ pub use astra_vn_editor::*;
 pub use astra_vn_package::*;
 pub use astra_vn_save::*;
 
+mod restore;
+#[cfg(test)]
+mod restore_tests;
+
 #[derive(Default)]
 pub struct NativeVnRuntimeProvider {
     instance_id: Option<astra_plugin_abi::ProviderInstanceId>,
@@ -392,40 +396,6 @@ fn materialized_save_snapshot(session: &NativeVnSession) -> Result<RuntimeSnapsh
         ));
     }
     Ok(snapshot)
-}
-
-fn consume_materialized_restore_state(
-    session: &mut NativeVnSession,
-) -> Result<VnRuntimeState, CoreVnError> {
-    let schema = VN_RUNTIME_STATE_SCHEMA.to_string();
-    let mut candidates = session
-        .world
-        .snapshot()
-        .map_err(|error| CoreVnError::message(error.to_string()))?
-        .actors
-        .component_ids_for_actor_schema(session.owner, &schema);
-    if candidates.len() != 1 {
-        return Err(CoreVnError::diagnostic(
-            "ASTRA_NATIVE_VN_RESTORE_STATE_SET",
-            "Runtime v3 restore must contain exactly one materialized VN state",
-        ));
-    }
-    let component_id = candidates.remove(0);
-    let state: VnRuntimeState = session
-        .world
-        .read_component(component_id)
-        .map_err(|error| CoreVnError::message(error.to_string()))?;
-    if !session
-        .world
-        .detach_component(component_id)
-        .map_err(|error| CoreVnError::message(error.to_string()))?
-    {
-        return Err(CoreVnError::diagnostic(
-            "ASTRA_NATIVE_VN_RESTORE_STATE_DETACH",
-            "materialized VN restore state could not be removed after validation",
-        ));
-    }
-    Ok(state)
 }
 
 fn replace_session_state(
@@ -1028,7 +998,7 @@ impl NativeVnRuntimeProvider {
             sections: vec![RuntimeSectionPayload {
                 section_id: "runtime.world".to_string(),
                 schema: "astra.runtime.save_blob.v5".to_string(),
-                version: SchemaVersion::new(4, 0, 0),
+                version: SchemaVersion::new(5, 0, 0),
                 codec: RuntimeSectionCodec::Raw,
                 hash: astra_core::Hash256::from_sha256(&save.0),
                 bytes: save.0,
@@ -1053,21 +1023,20 @@ impl NativeVnRuntimeProvider {
             "astra.runtime.save_blob.v5",
             RuntimeSectionCodec::Raw,
         )?;
+        if runtime_section.version != SchemaVersion::new(5, 0, 0)
+            || runtime_section.hash != astra_core::Hash256::from_sha256(&runtime_section.bytes)
+        {
+            return Err(CoreVnError::diagnostic(
+                "ASTRA_NATIVE_VN_RESTORE_INTEGRITY",
+                "runtime.world section version or hash is invalid",
+            ));
+        }
         let session = self.session_mut(&request.session_id)?;
-        session
-            .world
-            .load(SaveBlob(runtime_section.bytes.clone()))
-            .map_err(|err| CoreVnError::message(err.to_string()))?;
-        let state = consume_materialized_restore_state(session)?;
-        session.state = state;
-        let snapshot = session
-            .world
-            .snapshot()
-            .map_err(|error| CoreVnError::message(error.to_string()))?;
+        let (step, seed) = restore::restore_session(session, runtime_section)?;
         Ok(RuntimeRestoreReport {
             session_id: request.session_id,
-            restored_fixed_step: snapshot.step,
-            session_seed: snapshot.config.seed,
+            restored_fixed_step: step,
+            session_seed: seed,
             status: "restored".to_string(),
             diagnostics: Vec::new(),
         })

@@ -1193,8 +1193,21 @@ impl RuntimeWorld {
         save: SaveBlob,
         registry: &SchemaMigrationRegistry,
     ) -> Result<LoadReport, RuntimeError> {
-        debug!("runtime.load.with_registry");
-        let snapshot = crate::save::read_runtime_save(&save, registry)?;
+        self.load_with_validation(save, registry, |_| Ok(()))
+            .map(|(report, ())| report)
+    }
+
+    /// Validate and prepare decoded state before replacing the live world.
+    /// A rejected snapshot leaves the world, including its failure status, unchanged.
+    pub fn load_with_validation<T>(
+        &mut self,
+        save: SaveBlob,
+        registry: &SchemaMigrationRegistry,
+        validate: impl FnOnce(&mut RuntimeSnapshot) -> Result<T, RuntimeError>,
+    ) -> Result<(LoadReport, T), RuntimeError> {
+        debug!("runtime.load.with_validation");
+        let mut snapshot = crate::save::read_runtime_save(&save, registry)?;
+        let validated = validate(&mut snapshot)?;
         self.restore_snapshot(snapshot);
         self.required_tick_mode = TickMode::RestoreContinuation;
         let report = LoadReport {
@@ -1205,7 +1218,7 @@ impl RuntimeWorld {
             },
         };
         info!(state_hash = %report.state_hash, "runtime.load");
-        Ok(report)
+        Ok((report, validated))
     }
 
     pub fn restore_snapshot(&mut self, snapshot: RuntimeSnapshot) {

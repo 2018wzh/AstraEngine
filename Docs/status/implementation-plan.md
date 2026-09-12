@@ -19,6 +19,10 @@
 
 性能目标为 VN 桌面 1440p120、移动 1080p60。记录实际设备与固定场景结果，EMU 按原生速率分别测核心与 Host。
 
+用户补充设备范围为“主流配置”；CPU/GPU、内存、macOS 机型与 Android SoC 尚未指定，正式测量时记录实际型号，不能把“主流配置”当成已固定的性能基线。尽量通过远程环境完成工作；当前环境不可用的商业游戏与转换工程在另一环境可用，具体接入方式和设备远程权限待提供。
+
+用户指定 OpenAI Responses/Completions 为优先接入方向。它是模型 API 选择，尚不能确定是外部 Agent 的后端，还是需要项目直接实现 Agent 循环；该取舍待澄清，当前 ACP/MCP 契约继续有效。
+
 ## 当前验证记录
 
 - 独占重构 worktree；并行子任务各用独立 worktree/target。
@@ -33,3 +37,4 @@
 - RuntimeWorld 构造不再要求 package；产品身份由宿主首 tick 前显式附加，无包/无 FSM 的 typed 更新、tick 和保存恢复已验证。Runtime world v5 与 NativeVN save_blob v5 同步，旧格式拒绝。Engine 最新全量 fmt/clippy/build/test 通过，669 项测试通过、9 项按原条件未执行。
 - RuntimeWorld 整帧事务 checkpoint 和五类撤销日志已删除；执行错误/动作 panic 会终止 World，预检错误仍可重试，保存和可变 API 显式传播错误。部分提交、写入/快照拒绝、损坏存档及成功恢复均通过测试。Engine 最新全量 fmt/clippy/build/test 通过：670 项通过、9 项按原条件未执行。
 - 真实 GPU/商业游戏/其他平台验收仍未执行。
+- NativeVN 恢复先验证候选 World 和 typed VN state，再一起提交；无效状态保留当前会话与待处理控制，成功恢复清空旧控制。修复 save_blob v5 的外层数字版本不一致，新增 hash/版本/包身份检查。合法 hash 下的缺失/重复组件、错误版本、错误 typed payload/schema 和拒绝恢复后的失败状态已验证；Engine 全量 fmt/clippy/build/test 通过，673 项通过、0 失败、9 项按原条件未执行。

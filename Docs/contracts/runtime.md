@@ -130,3 +130,9 @@ step、seed、mode 等输入预检在修改前完成；预检错误不终止 Wor
 失败状态不进入正常存档。宿主可销毁 World，或明确读取已存在且通过格式验证的存档；读取失败保持当前失败状态，成功恢复后使用 RestoreContinuation 继续。宿主显式提供的 `restore_snapshot` 是同样的恢复边界。此调整不改变 runtime.world v5 二进制布局：删除的事务字段此前均未序列化。
 
 验证覆盖多 machine 部分提交、动作访问错误、microstep 超限、Await policy 错误、panic、失败后的写入/保存拒绝以及从此前存档恢复。它不表示通用 replay/history 路径已删除；该迁移仍单独推进。
+
+## 宿主恢复验证
+
+`load_with_validation(save, registry, validate)` 先验证容器并解码候选 RuntimeSnapshot，再由持有 World 的宿主检查和提取 typed 产品状态。闭包只修改候选 snapshot；返回错误时不替换当前 World，也不解除失败状态。验证成功后提交并进入 RestoreContinuation，同时返回宿主提取的数据。普通 `load`/`load_with_registry` 复用这一路径，不要求无产品 World 安装 VN 校验器。
+
+NativeVN 在提交前检查外层 section 的 hash、v5 数字版本、package 身份、唯一 owner state component、component 版本、typed 解码与 VN state schema；验证失败保留 World、VN state 和待处理控制。成功时一起替换状态并清空旧控制。外层旧 v4 数字版本明确拒绝，需重新生成内部开发存档；嵌套 runtime.world v5 布局不变。验收包含合法 hash 下的无效 typed state、版本/包不符、失败 World 的拒绝恢复和正常恢复后续 tick。

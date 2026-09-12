@@ -133,3 +133,34 @@ fn standalone_world_rejects_packaged_module_mount_without_identity() {
         .contains("ASTRA_RUNTIME_MODULE_PACKAGE_REQUIRED"));
     assert!(world.package_handle().is_none());
 }
+
+#[test]
+fn rejected_host_validation_does_not_commit_staged_mutations() {
+    let mut world = RuntimeWorld::create(RuntimeConfig::default()).unwrap();
+    world.create_actor("live", vec![]).unwrap();
+    let saved = world.save(SaveRequest::default()).unwrap();
+    let error = world
+        .load_with_validation(
+            saved.clone(),
+            &astra_core::SchemaMigrationRegistry::default(),
+            |snapshot| {
+                snapshot.step = 100;
+                snapshot.config.seed = 500;
+                Err::<(), _>(astra_runtime::RuntimeError::message("invalid host state"))
+            },
+        )
+        .unwrap_err();
+    assert!(error.to_string().contains("invalid host state"));
+    assert_eq!(world.save(SaveRequest::default()).unwrap().0, saved.0);
+    assert!(!world.is_failed());
+    world
+        .tick(TickRequest::live(
+            TickInput {
+                fixed_step: 1,
+                delta_ns: 16_666_667,
+                seed: 0,
+            },
+            vec![],
+        ))
+        .unwrap();
+}

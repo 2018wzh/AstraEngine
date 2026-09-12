@@ -4947,7 +4947,7 @@ fn saved_runtime_state(
     };
     if section.section_id != "runtime.world"
         || section.schema != "astra.runtime.save_blob.v5"
-        || section.version != SchemaVersion::new(4, 0, 0)
+        || section.version != SchemaVersion::new(5, 0, 0)
         || section.codec != RuntimeSectionCodec::Raw
     {
         return Err(NativeVnHostError::Save(
