@@ -15,6 +15,7 @@ use astra_platform::HeadlessHostProfile;
 use sha2::{Digest, Sha256};
 
 struct Fixture {
+    _host: astra_headless_test::HeadlessTestContext,
     _root: tempfile::TempDir,
     profile: PathBuf,
     package: PathBuf,
@@ -27,6 +28,7 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
+        let host = astra_headless_test::HeadlessTestContext::start().unwrap();
         let root = tempfile::tempdir().unwrap();
         let package_bytes = astra_player_vn::headless_test_fixture::product_package(
             "story main #@id story.main\nstate start #@id state.start\n  scene room #@id scene.room\n    text key:line speaker:hero #@id line.one\n",
@@ -125,6 +127,7 @@ impl Fixture {
         .unwrap();
         fs::write(&approval_path, approval_bytes).unwrap();
         Self {
+            _host: host,
             _root: root,
             profile: profile_path,
             package: package_path,

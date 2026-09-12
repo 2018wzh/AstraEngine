@@ -23,9 +23,9 @@
 
 - 独占重构 worktree；并行子任务各用独立 worktree/target。
 - 新文档检查 222 页通过；7 个链接/卫生回归测试通过。
-- EMU API v2 子任务局部验证：API 11、Manager core 23、FVP 25、Manager 24 项测试通过；GPU/DXC 测试 1 项未执行。整合后全量检查待完成。
+- EMU 独立 workspace 全量 fmt/clippy/build/test 通过：169 项测试通过，3 项按 GPU/联网条件未执行；含 API v2、Manager、FVP 和 Minori CLI。
 - xtask 与 Linux platform all-target clippy 通过；修复 default build 的 audio fault-injection feature 组合错误。
 - 普通逻辑测试与独立文字库已整合：子任务验证包含 104 个普通测试、15 个独立文本测试和 5 个媒体适配测试。
-- Engine 全量 clippy 与 build 通过；workspace test 在链接阶段因磁盘耗尽中断，清理本 worktree 构建产物后重跑，尚不计作测试通过。
+- Engine 全量 clippy 与 build 通过。清理调试产物后完整测试运行报告 661 通过、5 失败、9 未执行；失败涉及失效矩阵检查、日志队列时序测试和无效 timeline fixture，现已修正，35 项 Player 回归和日志测试通过；最终全量复验待完成。
 - 演出改动子任务的 35 项测试、all-target clippy 和 Player VN 调用方编译通过；Minori archive/profile 子任务的 40 项测试与 clippy 通过。
 - 真实 GPU/商业游戏/其他平台验收仍未执行。

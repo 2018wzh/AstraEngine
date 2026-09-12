@@ -58,7 +58,7 @@ fn source() -> NativeVnHostCommandSource {
 #[tokio::test]
 async fn shared_product_media_host_completes_timeline_fence_and_presents_runtime_result() {
     let mut source = support::source_for(
-        "story main #@id story.main\nstate start #@id state.start\n  scene room #@id scene.room\n    timeline id:intro target:hero property:opacity keyframes:0=0,120=1 join:block fence:timeline.intro.complete budget_ms:2 #@id timeline.intro\n    text key:line.after #@id line.after\n",
+        "story main #@id story.main\nstate start #@id state.start\n  scene room #@id scene.room\n    timeline id:intro target:camera property:x keyframes:0=0,120=1 join:block fence:timeline.intro.complete budget_ms:2 #@id timeline.intro\n    text key:line.after #@id line.after\n",
     );
     source.launch().unwrap();
 
@@ -104,7 +104,7 @@ async fn shared_product_media_host_completes_timeline_fence_and_presents_runtime
 #[tokio::test]
 async fn product_media_host_restores_uncommitted_timeline_tasks_after_capacity_failure() {
     let mut source = support::source_for(
-        "story main #@id story.main\nstate start #@id state.start\n  scene room #@id scene.room\n    timeline id:intro target:hero property:opacity keyframes:0=0,120=1 join:block fence:timeline.intro.complete budget_ms:2 #@id timeline.intro\n",
+        "story main #@id story.main\nstate start #@id state.start\n  scene room #@id scene.room\n    timeline id:intro target:camera property:x keyframes:0=0,120=1 join:block fence:timeline.intro.complete budget_ms:2 #@id timeline.intro\n",
     );
     source.launch().unwrap();
     let profile = PlatformHostProfile::windows_release("nativevn-game", "com.example.game");

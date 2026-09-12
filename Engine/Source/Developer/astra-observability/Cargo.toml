@@ -38,4 +38,3 @@ windows = { workspace = true, features = [
 
 [dev-dependencies]
 tempfile.workspace = true
-toml = "0.8"

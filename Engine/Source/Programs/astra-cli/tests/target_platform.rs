@@ -20,6 +20,7 @@ fn run_nativevn_headless(
     product_profile: &str,
     choice_key: &str,
 ) -> serde_json::Value {
+    let _host = astra_headless_test::HeadlessTestContext::start().unwrap();
     let build_identity_path = astra_headless_test::headless_build_identity_path()
         .unwrap()
         .to_string_lossy()

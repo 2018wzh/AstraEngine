@@ -1431,7 +1431,7 @@ fn native_vn_source_exposes_validated_timeline_tasks_to_player() {
 story main #@id story.main
 state start #@id state.start
   scene room #@id scene.room
-    timeline id:intro target:hero property:opacity keyframes:0=0,120=1 join:block fence:timeline.intro.complete budget_ms:2 #@id timeline.intro
+    timeline id:intro target:camera property:x keyframes:0=0,120=1 join:block fence:timeline.intro.complete budget_ms:2 #@id timeline.intro
 "#;
     let mut source = source_for(story);
 
@@ -1440,7 +1440,7 @@ state start #@id state.start
 
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0].task_id, "intro");
-    assert_eq!(tasks[0].target.as_deref(), Some("hero"));
+    assert_eq!(tasks[0].target.as_deref(), Some("camera"));
     assert_eq!(tasks[0].duration_ms, Some(120));
     assert_eq!(tasks[0].fence.as_deref(), Some("timeline.intro.complete"));
 }

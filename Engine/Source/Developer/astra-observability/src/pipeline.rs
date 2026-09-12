@@ -476,3 +476,7 @@ fn rotating_file(
         None,
     )
 }
+
+#[cfg(test)]
+#[path = "pipeline_tests.rs"]
+mod tests;
