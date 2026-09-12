@@ -8,3 +8,7 @@ Emulator/Automation/.local/
 Examples/TsuiNoSora/.local/
 Examples/NativeVN/.local/
 .idea
+Emulator/ThirdParty/kirikiri2/CMakeUserPresets.json
+Emulator/ThirdParty/kirikiri2/build/
+Emulator/ThirdParty/kirikiri2/vcpkg_installed/
+Emulator/Source/Families/astra-emu-krkr/target/

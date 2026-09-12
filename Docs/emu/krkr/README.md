@@ -1,6 +1,6 @@
 # AstraEMU KrKr 兼容文档
 
-本目录只记录 AstraEMU 对 KrKr/KAG/TJS family 的兼容边界、输入格式和验收口径。当前内容是文档规格，不表示 AstraEMU 已经实现 KrKr runtime。
+本目录记录 AstraEMU 对 KrKr/KAG/TJS family 的兼容边界、输入格式和验收口径。当前实现按 [hosted-integration.md](hosted-integration.md) 以 vendored Kirikiri 引擎核心接入独立 Family ABI；`runtime-family-plugin.md` 等页面描述的是已被取代的 LegacyRuntimeProvider 设计，仅作历史参考。
 
 ## 范围
 
@@ -19,7 +19,8 @@ KrKr family 覆盖 KiriKiri2/KAG/TJS 常见游戏形态：XP3 archive、KAG `.ks
 | [kag-tjs.md](kag-tjs.md) | KAG/TJS boot、`SystemConfig`、`KAGLoadScript` 和 tag conductor |
 | [script-execution.md](script-execution.md) | 脚本执行、等待、输入、save/load 和 trace 语义 |
 | [presentation-and-media.md](presentation-and-media.md) | layer、transition、text、audio、movie 和插件媒体能力 |
-| [runtime-family-plugin.md](runtime-family-plugin.md) | AstraEMU KrKr family plugin 的 session 模块划分 |
+| [runtime-family-plugin.md](runtime-family-plugin.md) | 旧 LegacyRuntimeProvider 架构下的 session 模块划分（历史设计） |
+| [hosted-integration.md](hosted-integration.md) | 当前实现：vendored kirikiri2 核心 + hosted environ + Family ABI 接入 |
 | [game-observations.md](game-observations.md) | 3lj 样本的本地结构化结构观察 |
 | [tooling.md](tooling.md) | 只读 probe、index diff、trace 和媒体 smoke 工具需求 |
 | [implementation-checklist.md](implementation-checklist.md) | 实现顺序和 release gate 检查项 |

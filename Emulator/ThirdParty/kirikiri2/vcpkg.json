@@ -1,0 +1,164 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "krkr2",
+  "version-string": "1.5.0",
+  "dependencies": [],
+  "overrides": [],
+  "features": {
+    "engine-full": {
+      "description": "Full engine with the cocos2d platform shell (upstream default)",
+      "dependencies": [
+        "7zip",
+        {
+          "name": "argparse",
+          "platform": "linux | windows | osx"
+        },
+        "boost-iostreams",
+        {
+          "name": "boost-locale",
+          "default-features": false
+        },
+        {
+          "name": "bullet3",
+          "platform": "!emscripten"
+        },
+        "boost-phoenix",
+        "boost-spirit",
+        {
+          "name": "breakpad",
+          "default-features": false,
+          "platform": "android"
+        },
+        {
+          "name": "catch2",
+          "default-features": false,
+          "platform": "!android & !ios & !emscripten"
+        },
+        "cocos2dx",
+        {
+          "name": "dirent",
+          "platform": "windows"
+        },
+        "ffmpeg",
+        "fmt",
+        {
+          "name": "glfw3",
+          "platform": "linux | windows | osx"
+        },
+        {
+          "name": "jxrlib",
+          "platform": "!emscripten"
+        },
+        "libarchive",
+        {
+          "name": "libgdiplus",
+          "platform": "!windows"
+        },
+        "libjpeg-turbo",
+        "libogg",
+        {
+          "name": "libpng",
+          "platform": "!linux & !emscripten"
+        },
+        "libvorbis",
+        "libwebp",
+        "lz4",
+        "oniguruma",
+        {
+          "name": "openal-soft",
+          "platform": "!emscripten"
+        },
+        {
+          "name": "opencv4",
+          "default-features": false,
+          "features": [
+            "openmp"
+          ],
+          "platform": "!emscripten & !osx"
+        },
+        {
+          "name": "opencv4",
+          "default-features": false,
+          "platform": "emscripten | osx"
+        },
+        {
+          "name": "opus",
+          "platform": "android"
+        },
+        {
+          "name": "opusfile",
+          "default-features": false
+        },
+        {
+          "name": "sdl2",
+          "default-features": false,
+          "platform": "!emscripten"
+        },
+        "spdlog",
+        "uchardet",
+        "unrar",
+        {
+          "name": "vcpkg-cmake",
+          "host": true
+        },
+        "zstd"
+      ]
+    },
+    "astra-hosted": {
+      "description": "AstraEMU hosted family build: engine dependencies without the cocos2d platform shell",
+      "dependencies": [
+        "7zip",
+        "boost-iostreams",
+        {
+          "name": "boost-locale",
+          "default-features": false
+        },
+        "boost-phoenix",
+        "boost-spirit",
+        "dirent",
+        "ffmpeg",
+        "fmt",
+        "jxrlib",
+        "libarchive",
+        "libjpeg-turbo",
+        "libogg",
+        "libvorbis",
+        "libwebp",
+        "lz4",
+        "oniguruma",
+        {
+          "name": "openal-soft",
+          "platform": "!emscripten"
+        },
+        {
+          "name": "opencv4",
+          "default-features": false,
+          "features": [
+            "openmp"
+          ],
+          "platform": "!emscripten & !osx"
+        },
+        {
+          "name": "opusfile",
+          "default-features": false
+        },
+        {
+          "name": "sdl2",
+          "default-features": false,
+          "platform": "!emscripten"
+        },
+        "spdlog",
+        "uchardet",
+        "unrar",
+        "zstd",
+        "freetype",
+        "xxhash",
+        "tinyxml2",
+        "libpng"
+      ]
+    }
+  },
+  "default-features": [
+    "engine-full"
+  ]
+}
