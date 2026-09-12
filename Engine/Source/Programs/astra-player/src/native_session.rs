@@ -311,9 +311,11 @@ pub async fn run_native_vn_player_session(
                                 })?;
                             if let Err(error) = execute_platform_save(
                                 &mut vn,
+                                &media,
                                 &mut executor,
                                 &slot_id,
                                 PlayerHostResourceId(save_transaction_id),
+                                timeline_clock.elapsed().as_millis() as u64,
                             )
                             .await
                             {
@@ -333,7 +335,7 @@ pub async fn run_native_vn_player_session(
                             }
                         }
                         VnUiHostRequest::Load { slot_id } => {
-                            execute_platform_load(&mut vn, &mut executor, &slot_id).await?;
+                            execute_platform_load(&mut vn, &mut media, &mut executor, &slot_id).await?;
                         }
                         VnUiHostRequest::Delete { slot_id } => {
                             executor
@@ -392,12 +394,43 @@ pub async fn run_native_vn_player_session(
 
 async fn execute_platform_save(
     vn: &mut NativeVnHostCommandSource,
+    media: &NativeVnProductMediaHost,
     executor: &mut PlayerHostCommandExecutor<PlatformCommandSink>,
     slot: &str,
     transaction: PlayerHostResourceId,
+    playtime_ms: u64,
 ) -> Result<(), PlatformError> {
+    if !vn.has_gameplay_thumbnail_capture() {
+        let capture = vn
+            .prepare_surface_capture()
+            .map_err(|error| player_error_owned("player.save.capture.prepare", error))?;
+        let result = executor
+            .execute_batch(capture)
+            .await
+            .map_err(|error| player_error_owned("player.save.capture", error))?;
+        let [PlayerHostCommandResult::Captured {
+            width,
+            height,
+            rgba8,
+            ..
+        }] = result.as_slice()
+        else {
+            return Err(player_error(
+                "player.save.capture",
+                "ASTRA_PLAYER_SAVE_CAPTURE_RESULT",
+            ));
+        };
+        vn.cache_gameplay_surface(*width, *height, rgba8.clone())
+            .map_err(|error| player_error_owned("player.save.capture.cache", error))?;
+    }
+    vn.prepare_save_metadata(
+        slot,
+        time::OffsetDateTime::now_utc().to_string(),
+        playtime_ms,
+    )
+    .map_err(|error| player_error_owned("player.save.metadata", error))?;
     let plan = vn
-        .prepare_save_transaction(slot, transaction)
+        .prepare_product_save_transaction(slot, transaction, media)
         .map_err(|error| player_error_owned("player.save.prepare", error))?;
     executor
         .execute_save_transaction(plan)
@@ -408,6 +441,7 @@ async fn execute_platform_save(
 
 async fn execute_platform_load(
     vn: &mut NativeVnHostCommandSource,
+    media: &mut NativeVnProductMediaHost,
     executor: &mut PlayerHostCommandExecutor<PlatformCommandSink>,
     slot: &str,
 ) -> Result<(), PlatformError> {
@@ -428,7 +462,7 @@ async fn execute_platform_load(
         }
     };
     let restore = vn
-        .restore(payload)
+        .restore_product_session(payload, media)
         .map_err(|error| player_error_owned("player.load.restore", error))?;
     executor
         .execute_batch(restore)

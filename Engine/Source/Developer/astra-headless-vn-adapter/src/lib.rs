@@ -921,8 +921,6 @@ impl NativeVnHeadlessSession {
             .checked_add(1)
             .ok_or_else(|| ProductHostError::Input("save transaction overflowed".into()))?;
         let transaction = PlayerHostResourceId(self.next_save_transaction);
-        let media_snapshot = serde_json::to_vec(&self.media.snapshot())
-            .map_err(|error| ProductHostError::Input(error.to_string()))?;
         if !self.source()?.has_gameplay_thumbnail_capture() {
             self.capture_gameplay_surface().await?;
         }
@@ -942,12 +940,10 @@ impl NativeVnHeadlessSession {
             )
             .map_err(|error| ProductHostError::Input(error.to_string()))?;
         let plan = self
-            .source()?
-            .prepare_save_transaction_with_product_media_snapshot(
-                slot,
-                transaction,
-                Some(media_snapshot),
-            )
+            .source
+            .as_mut()
+            .ok_or_else(|| ProductHostError::Input("runtime source is unavailable".into()))?
+            .prepare_product_save_transaction(slot, transaction, &self.media)
             .map_err(|error| ProductHostError::Input(error.to_string()))?;
         self.executor
             .execute_save_transaction(plan)
@@ -1007,26 +1003,14 @@ impl NativeVnHeadlessSession {
             }
         };
         let present = self
-            .source()?
-            .restore(&bytes)
+            .source
+            .as_mut()
+            .ok_or_else(|| ProductHostError::Input("runtime source is unavailable".into()))?
+            .restore_product_session(&bytes, &mut self.media)
             .map_err(|error| ProductHostError::Input(error.to_string()))?;
         self.executor
             .execute_batch(present)
             .await
-            .map_err(|error| ProductHostError::Input(error.to_string()))?;
-        let media_snapshot = self
-            .source()?
-            .take_restored_product_media_snapshot()
-            .ok_or_else(|| {
-                ProductHostError::Input(
-                    "ASTRA_PLAYER_SAVE_MEDIA_SNAPSHOT_MISSING: save has no product media state"
-                        .into(),
-                )
-            })?;
-        let media_snapshot = serde_json::from_slice(&media_snapshot)
-            .map_err(|error| ProductHostError::Input(error.to_string()))?;
-        self.media
-            .restore(media_snapshot)
             .map_err(|error| ProductHostError::Input(error.to_string()))?;
         self.add_profile_duration(profile_started, |sample, duration| {
             sample.save_load_ns = sample.save_load_ns.saturating_add(duration);

@@ -53,7 +53,6 @@ impl NativeVnHostCommandSource {
         self.pending_save_metadata = None;
         self.pending_save_completion = None;
         self.gameplay_thumbnail_capture = None;
-        self.restored_product_media_snapshot = None;
     }
 }
 

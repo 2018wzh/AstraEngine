@@ -569,6 +569,7 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
                                 })?;
                             if let Err(error) = execute_platform_save(
                                 &mut vn,
+                                &media,
                                 &mut executor,
                                 "slot.quick",
                                 PlayerHostResourceId(save_transaction_id),
@@ -599,7 +600,7 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
                             continue;
                         }
                         if state == InputState::Pressed && physical_key == "F9" {
-                            execute_platform_load(&mut vn, &mut executor, "slot.quick").await?;
+                            execute_platform_load(&mut vn, &mut media, &mut executor, "slot.quick").await?;
                             tracing::info!(
                                 event = "astra.player.save.restored",
                                 player_sequence,
@@ -739,6 +740,7 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
                                     })?;
                                 if let Err(error) = execute_platform_save(
                                     &mut vn,
+                                    &media,
                                     &mut executor,
                                     &slot_id,
                                     PlayerHostResourceId(save_transaction_id),
@@ -768,7 +770,7 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
                                 }
                             }
                             astra_player::VnUiHostRequest::Load { slot_id } => {
-                                execute_platform_load(&mut vn, &mut executor, &slot_id).await?;
+                                execute_platform_load(&mut vn, &mut media, &mut executor, &slot_id).await?;
                             }
                             astra_player::VnUiHostRequest::Delete { slot_id } => {
                                 executor
@@ -969,6 +971,7 @@ fn gamepad_navigation(
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 async fn execute_platform_save(
     source: &mut astra_player::NativeVnHostCommandSource,
+    media: &astra_player::NativeVnProductMediaHost,
     executor: &mut astra_player::PlayerHostCommandExecutor<astra_player::PlatformCommandSink>,
     slot: &str,
     transaction: astra_player::PlayerHostResourceId,
@@ -990,7 +993,7 @@ async fn execute_platform_save(
         .prepare_save_metadata(slot, timestamp, playtime_ms)
         .map_err(|error| player_platform_error("player.save.metadata", error))?;
     let plan = source
-        .prepare_save_transaction(slot, transaction)
+        .prepare_product_save_transaction(slot, transaction, media)
         .map_err(|error| player_platform_error("player.save.prepare", error))?;
     executor
         .execute_save_transaction(plan)
@@ -1034,6 +1037,7 @@ async fn capture_gameplay_surface(
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 async fn execute_platform_load(
     source: &mut astra_player::NativeVnHostCommandSource,
+    media: &mut astra_player::NativeVnProductMediaHost,
     executor: &mut astra_player::PlayerHostCommandExecutor<astra_player::PlatformCommandSink>,
     slot: &str,
 ) -> Result<(), astra_platform::PlatformError> {
@@ -1056,7 +1060,7 @@ async fn execute_platform_load(
         }
     };
     let present = source
-        .restore(bytes)
+        .restore_product_session(bytes, media)
         .map_err(|error| player_platform_error("player.save.restore", error))?;
     executor
         .execute_batch(present)

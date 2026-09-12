@@ -131,7 +131,10 @@ impl NativeVnProductAudioHost {
         }
     }
 
-    pub fn restore(&mut self, snapshot: NativeVnProductAudioSnapshot) -> Result<(), PlatformError> {
+    pub(crate) fn validate_restore(
+        &self,
+        snapshot: &NativeVnProductAudioSnapshot,
+    ) -> Result<(), PlatformError> {
         if snapshot.schema != "astra.audio_timeline.v1"
             || snapshot.timeline.schema != "astra.audio_timeline.v1"
             || snapshot.timeline.device_sample_rate != CANONICAL_SAMPLE_RATE
@@ -159,6 +162,11 @@ impl NativeVnProductAudioHost {
                 "ASTRA_PLAYER_AUDIO_TIMELINE_INVALID",
             ));
         }
+        Ok(())
+    }
+
+    pub fn restore(&mut self, snapshot: NativeVnProductAudioSnapshot) -> Result<(), PlatformError> {
+        self.validate_restore(&snapshot)?;
         if let Some(service) = self.service.as_mut() {
             service
                 .restore_timeline(snapshot.timeline.clone())

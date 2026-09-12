@@ -53,3 +53,7 @@ Player 检查当前 VN wait 对应的演出 fence；Failed 必须返回 `ASTRA_P
 读档验证被拒绝时保留原请求和队列。Runtime 恢复一旦提交，Player 清空旧 timeline、音频、视频、stage completion 及待处理 UI/保存请求；后续呈现恢复失败也不能重新使用旧工作。资源缓存可保留，媒体 Host 必须保留旧视频流的关闭队列，在重新打开恢复的流之前关闭旧流，不能直接 clear 后遗失 native decode session。
 
 Media Host 遇到已取消的视频只排队关闭，不能提交旧完成通知或把一次物理继续输入标为已消费。关闭失败保留当前及后续关闭任务，并返回错误。
+
+## 产品存读档入口
+
+原生 Player 与 Headless 共用 `prepare_product_save_transaction` / `restore_product_session`，把同一会话的音频、视频和 timeline snapshot 纳入存档。低层 `save` / `restore` 仍可用于没有 Media Host 的源状态测试，不能作为完整产品保存入口。产品读取缺媒体状态、错误媒体 schema 或不合法 timeline 时，在剧情恢复前拒绝；音频设备等执行阶段的恢复错误必须终止呈现会话，不能继续运行一半已恢复的产品。产品恢复成功后才向平台提交首帧，随后媒体处理关闭旧视频流并重建保存的流。

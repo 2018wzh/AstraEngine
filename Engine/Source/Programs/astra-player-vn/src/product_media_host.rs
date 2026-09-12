@@ -283,6 +283,21 @@ impl NativeVnProductMediaHost {
         }
     }
 
+    pub(crate) fn validate_restore(
+        &self,
+        snapshot: &NativeVnProductMediaSnapshot,
+    ) -> Result<(), PlatformError> {
+        if snapshot.schema != "astra.player.native_vn_media_snapshot.v2" {
+            return Err(media_error(
+                "player.media.restore",
+                "ASTRA_PLAYER_MEDIA_SNAPSHOT_INVALID",
+            ));
+        }
+        PlayerTimelineScheduler::restore(snapshot.timeline.clone())
+            .map_err(|error| media_error("player.media.timeline.restore", error))?;
+        self.audio.validate_restore(&snapshot.audio)
+    }
+
     pub fn restore(&mut self, snapshot: NativeVnProductMediaSnapshot) -> Result<(), PlatformError> {
         if snapshot.schema != "astra.player.native_vn_media_snapshot.v2" {
             return Err(media_error(

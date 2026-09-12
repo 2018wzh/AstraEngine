@@ -1,5 +1,6 @@
 mod media_scope;
 mod presentation;
+mod product_save;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Arc, Mutex, RwLock};
@@ -189,7 +190,6 @@ pub struct NativeVnHostCommandSource {
     pending_stage_completions: Vec<String>,
     next_media_resource_id: u64,
     stage_director: ProductStageDirector,
-    restored_product_media_snapshot: Option<Vec<u8>>,
     story: CompiledStory,
     ui_blueprints: astra_ui_core::UiBlueprintBundle,
     ui_view_localization_keys: BTreeMap<String, BTreeSet<String>>,
@@ -926,7 +926,6 @@ impl NativeVnHostCommandSource {
             presentation_failed: false,
             media_scope: astra_runtime::TaskScope::new(),
             video_scopes: BTreeMap::new(),
-            restored_product_media_snapshot: None,
             story: compiled.story,
             ui_blueprints: compiled.ui_blueprints,
             ui_view_localization_keys,
@@ -1667,7 +1666,6 @@ impl NativeVnHostCommandSource {
         )?;
         self.director_transition_snapshot = restored_transition_snapshot;
         self.last_step_evidence = Some(envelope.payload.step_evidence);
-        self.restored_product_media_snapshot = envelope.payload.product_media_snapshot_json;
         self.apply_save_metadata(save_metadata)?;
         self.ui_controller_sessions.clear();
         self.base_ui_instance_id = None;
@@ -1748,10 +1746,6 @@ impl NativeVnHostCommandSource {
             commit,
             abort,
         })
-    }
-
-    pub fn take_restored_product_media_snapshot(&mut self) -> Option<Vec<u8>> {
-        self.restored_product_media_snapshot.take()
     }
 
     pub fn read_save(
