@@ -12,6 +12,15 @@ cargo test --manifest-path Emulator/Cargo.toml -p astra-emu-family-api
 
 `check` 执行链接检查、格式、clippy、产品构建和完整测试；`fmt` 只处理所选 workspace 的成员，不格式化第三方路径依赖。`test -p` 是普通定向测试，不启动或预构建 Headless。完整产品测试先构建所选产品的程序，供真正的 CLI/宿主测试使用。
 
+全量开发测试会产生较大的调试符号和增量缓存。CI 设置以下环境变量以控制空间，本地空间有限时也可使用；它们不改变 Release 配置。需要调试器符号时移除这些变量并重建。
+
+```bash
+export CARGO_PROFILE_DEV_DEBUG=0
+export CARGO_PROFILE_TEST_DEBUG=0
+export CARGO_INCREMENTAL=0
+cargo xtask check --workspace engine
+```
+
 并行开发每个实例使用独占 worktree 和 target；不要设置指向其他 worktree 的 CARGO_TARGET_DIR。构建/测试失败必须修复或准确记录根因。
 
 文档检查仅检查链接、控制字符与私有绝对路径，允许 TODO 和未完成状态，不要求报告 schema 或指定 Stage 文字。普通 Rust 测试验证数据和行为，GPU/音频/设备测试按实际需要运行。开发 Agent 辅助真实产品验收，不生成具名审批体系。
