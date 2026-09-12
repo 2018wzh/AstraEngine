@@ -26,6 +26,6 @@
 - EMU 独立 workspace 全量 fmt/clippy/build/test 通过：169 项测试通过，3 项按 GPU/联网条件未执行；含 API v2、Manager、FVP 和 Minori CLI。
 - xtask 与 Linux platform all-target clippy 通过；修复 default build 的 audio fault-injection feature 组合错误。
 - 普通逻辑测试与独立文字库已整合：子任务验证包含 104 个普通测试、15 个独立文本测试和 5 个媒体适配测试。
-- Engine 全量 clippy 与 build 通过。清理调试产物后完整测试运行报告 661 通过、5 失败、9 未执行；失败涉及失效矩阵检查、日志队列时序测试和无效 timeline fixture，现已修正，35 项 Player 回归和日志测试通过；最终全量复验待完成。
+- Engine 全量 fmt/clippy/build/test 复验通过：666 项测试通过、0 失败、9 项按原条件未执行。修复了显式 Headless fixture 生命周期、无效 timeline fixture 和日志队列时序测试；已删除旧矩阵检查。
 - 演出改动子任务的 35 项测试、all-target clippy 和 Player VN 调用方编译通过；Minori archive/profile 子任务的 40 项测试与 clippy 通过。
 - 真实 GPU/商业游戏/其他平台验收仍未执行。
