@@ -179,13 +179,16 @@ async fn product_media_host_presents_every_video_frame_and_restores_by_asset_ide
                 }))
                 .unwrap();
 
-            if cycle == 0 {
+            {
                 let HostCommand::PresentScene { frame, reply, .. } =
                     backend.next_command().await.unwrap()
                 else {
                     panic!("expected first frame presentation");
                 };
-                assert!(!frame.commands.is_empty());
+                assert!(frame.commands.iter().any(|command| matches!(command,
+                    astra_media_core::SceneCommand::VideoFrame { id, frame, .. }
+                    if id == "vn.movie.video" && frame.rgba8.to_vec() == vec![3, 2, 1, 255]
+                )));
                 reply.send(Ok(())).unwrap();
             }
 
@@ -214,7 +217,10 @@ async fn product_media_host_presents_every_video_frame_and_restores_by_asset_ide
                 else {
                     panic!("expected restored second frame presentation");
                 };
-                assert!(!frame.commands.is_empty());
+                assert!(frame.commands.iter().any(|command| matches!(command,
+                    astra_media_core::SceneCommand::VideoFrame { id, frame, .. }
+                    if id == "vn.movie.video" && frame.rgba8.to_vec() == vec![6, 5, 4, 255]
+                )));
                 reply.send(Ok(())).unwrap();
                 let HostCommand::Decode { request, reply, .. } =
                     backend.next_command().await.unwrap()
@@ -467,4 +473,35 @@ async fn shared_product_audio_host_owns_format_queue_control_and_cleanup() {
     assert!(endpoint_consumed - final_meter.consumed_samples <= 1_024);
     assert!(final_meter.submitted_samples > 0);
     backend_task.await.unwrap();
+}
+
+#[test]
+fn video_frame_commands_carry_current_pixels_and_dimensions() {
+    use astra_media_core::{SceneCommand, TextureFrame};
+    let mut source = support::source_for_video(
+        "story main #@id story.main\nstate start #@id state.start\n  scene room #@id scene.room\n    stage viewport:320x180 safe_area:16:9 #@id stage.main\n    layer id:video kind:video z:100 blend:normal clip:stage #@id layer.video\n    movie layer:video asset:asset:/video/intro loop:true end:wait fence:movie.intro.end fallback:asset:/video/intro-fallback interrupt:reject #@id movie.intro\n    text key:line.after #@id line.after\n",
+    );
+    source.launch().unwrap();
+    let request = source.take_video_requests().remove(0);
+    for (index, width) in [1, 1, 2].into_iter().enumerate() {
+        let pixels = vec![index as u8 + 1; width * 4];
+        let batch = source
+            .bind_decoded_video_frame(
+                &request,
+                TextureFrame::from_vec(width as u32, 1, pixels.clone()).unwrap(),
+                false,
+            )
+            .unwrap();
+        let [astra_player_core::PlayerHostCommand::PresentScene { commands, .. }] =
+            batch.commands.as_slice()
+        else {
+            panic!("expected scene")
+        };
+        assert!(commands.iter().any(|command| matches!(command,
+            SceneCommand::VideoFrame { id, frame, .. }
+            if id == "vn.movie.video" && frame.width == width as u32 && frame.rgba8.to_vec() == pixels
+        )));
+    }
+    source.release_resources().unwrap();
+    source.shutdown().unwrap();
 }

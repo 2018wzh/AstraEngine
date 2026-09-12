@@ -849,37 +849,66 @@ impl NativeVnProductMediaHost {
                     "ASTRA_PLAYER_VIDEO_STREAM_IDENTITY_MISMATCH",
                 ));
             }
-            for expected in 1..=snapshot.next_frame {
-                let frame = Self::fetch_video_frame(
-                    self.max_decode_output_bytes,
-                    source,
-                    executor,
-                    &mut video,
-                )
-                .await?
-                .ok_or_else(|| {
-                    media_error(
-                        "player.video.restore.cursor",
-                        "ASTRA_PLAYER_VIDEO_RESTORE_CURSOR_OUT_OF_RANGE",
+            let restored_frame = async {
+                let mut restored_frame = None;
+                for expected in 1..=snapshot.next_frame {
+                    let frame = Self::fetch_video_frame(
+                        self.max_decode_output_bytes,
+                        source,
+                        executor,
+                        &mut video,
                     )
-                })?;
-                if frame.sequence != expected {
-                    self.pending_video_closes.push(video.session);
+                    .await?
+                    .ok_or_else(|| {
+                        media_error(
+                            "player.video.restore.cursor",
+                            "ASTRA_PLAYER_VIDEO_RESTORE_CURSOR_OUT_OF_RANGE",
+                        )
+                    })?;
+                    if frame.sequence != expected {
+                        return Err(media_error(
+                            "player.video.restore.cursor",
+                            "ASTRA_PLAYER_VIDEO_RESTORE_SEQUENCE_MISMATCH",
+                        ));
+                    }
+                    video.next_frame = expected;
+                    restored_frame = Some(frame);
+                }
+                if video.decoded_byte_count != snapshot.decoded_byte_count {
                     return Err(media_error(
-                        "player.video.restore.cursor",
-                        "ASTRA_PLAYER_VIDEO_RESTORE_SEQUENCE_MISMATCH",
+                        "player.video.restore.identity",
+                        "ASTRA_PLAYER_VIDEO_STREAM_IDENTITY_MISMATCH",
                     ));
                 }
-                video.next_frame = expected;
+                Ok::<_, PlatformError>(restored_frame)
             }
-            if video.decoded_byte_count != snapshot.decoded_byte_count {
-                self.pending_video_closes.push(video.session);
-                return Err(media_error(
-                    "player.video.restore.identity",
-                    "ASTRA_PLAYER_VIDEO_STREAM_IDENTITY_MISMATCH",
-                ));
-            }
+            .await;
+            let restored_frame = match restored_frame {
+                Ok(frame) => frame,
+                Err(error) => {
+                    self.pending_video_closes.push(video.session);
+                    return Err(error);
+                }
+            };
             video.loop_index = snapshot.loop_index;
+            if let Some(frame) = restored_frame {
+                let result = async {
+                    let texture = decoded_bgra_frame(frame.width, frame.height, frame.bgra8)?;
+                    let present = source
+                        .bind_decoded_video_frame(&video.request, texture, false)
+                        .map_err(|error| media_error("player.video.restore.bind", error))?;
+                    executor
+                        .execute_batch(present)
+                        .await
+                        .map_err(|error| media_error("player.video.restore.present", error))?;
+                    Ok::<_, PlatformError>(())
+                }
+                .await;
+                if let Err(error) = result {
+                    self.pending_video_closes.push(video.session);
+                    return Err(error);
+                }
+            }
             self.active_videos.push(video);
         }
         Ok(())

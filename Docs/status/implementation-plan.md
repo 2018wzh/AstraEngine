@@ -52,3 +52,5 @@
 - 原生 Player 两条入口与 Headless 已统一产品存读档 API，保存音频/视频/timeline，恢复前检查缺失媒体、schema、timeline 和音频格式；删除分散的“取出媒体 JSON 后另行恢复”接口。native session 补齐捕获与保存元数据。两项 package 回归验证媒体恢复和预检失败不提交剧情；Engine 全量 fmt/clippy/build/test 通过：695 项通过、0 失败、9 项按原条件未执行。播放时钟重新定位、冷启动声音资产恢复和完整产品长流程仍需后续验证。
 
 - Media Host 新增独立播放时钟，保存 `playback_time_ms`，恢复后首次调用重新绑定宿主时钟并保留剩余时长；视频起点与 timeline deadline 共用该播放时间。媒体 snapshot v3 拒绝旧 v2 与未来时间字段，未重开的恢复视频也进入再次保存。Player VN 35 项单元测试通过，覆盖新/旧宿主时间原点、时钟错误不推进、视频立即重存和错误 snapshot 不提交。视频流集成回归补充长暂停后保持第一帧、到剩余 PTS 才呈现第二帧的断言；Engine 全量 fmt/clippy/build/test 通过：698 项通过、0 失败、9 项按原条件未执行。冷启动音频资产恢复、解码实际恢复播放与真实设备长流程仍未验收。
+
+- 视频帧绑定现在重建携带当前像素的 `VideoFrame` 场景命令，场景刷新借用当前 StageDirector；避免沿用旧 frame，帧执行错误终止呈现会话。恢复解码到保存 cursor 后重新提交该帧，解码/校验/呈现错误保留关闭任务。视频与音频 Host 5 项集成测试通过，新增尺寸变化与像素断言，恢复流程直接核对第一帧和后续帧的 BGRA→RGBA 字节；Engine 全量 fmt/clippy/build/test 通过：699 项通过、0 失败、9 项按原条件未执行。此处验证平台命令与解码 fixture，不替代真实 GPU/商业视频播放验收。

@@ -1474,6 +1474,20 @@ impl NativeVnHostCommandSource {
         complete: bool,
     ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
         self.validate_video_request(request)?;
+        let result = self.bind_decoded_video_frame_inner(request, frame, complete);
+        if result.is_err() {
+            self.presentation_failed = true;
+            self.media_scope.cancel();
+        }
+        result
+    }
+
+    fn bind_decoded_video_frame_inner(
+        &mut self,
+        request: &NativeVnVideoRequest,
+        frame: TextureFrame,
+        complete: bool,
+    ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
         self.stage_director
             .start_video(&request.layer)
             .map_err(stage_director_error)?;
@@ -1489,7 +1503,7 @@ impl NativeVnHostCommandSource {
                 .map_err(stage_director_error)?;
             self.pending_stage_completions.extend(completed);
         }
-        self.render(&[], 0)
+        self.render_with_stage_refresh(&[], 0, true)
     }
 
     pub(crate) fn complete_video_fence(
@@ -4046,12 +4060,7 @@ impl NativeVnHostCommandSource {
             Some(descriptor_id.clone())
         });
         let (next_stage_director, stage_outputs) = if stage_commands.is_empty() {
-            // Restore is a transaction boundary: rebuild the saved scene and its
-            // resource lifecycle instead of retaining the scene from before load.
-            (
-                refresh_stage.then(|| self.stage_director.clone()),
-                Vec::new(),
-            )
+            (None, Vec::new())
         } else {
             let (director, outputs) = self
                 .stage_director
@@ -4172,10 +4181,17 @@ impl NativeVnHostCommandSource {
             performance_phase_started(self.ui_host_performance_sampling_enabled);
         let mut lifecycle = Vec::new();
         let mut uploaded_texture_ids = Vec::new();
-        let next_stage_scene = if let Some(director) = next_stage_director.as_ref() {
+        let next_stage_scene = if next_stage_director.is_some() || refresh_stage {
             let stage_texture_started =
                 performance_phase_started(self.ui_host_performance_sampling_enabled);
-            self.ensure_stage_textures(director.state())?;
+            let (required, cpu_required) = presentation::stage_texture_requirements(
+                next_stage_director
+                    .as_ref()
+                    .unwrap_or(&self.stage_director)
+                    .state(),
+                &self.textures,
+            );
+            self.ensure_stage_texture_assets(required, cpu_required)?;
             let stage_texture_ns = performance_phase_duration(stage_texture_started)?;
             if let Some(sample) = self.last_ui_host_performance_sample.as_mut() {
                 sample.stage_texture_ns = sample.stage_texture_ns.saturating_add(stage_texture_ns);
@@ -4183,7 +4199,10 @@ impl NativeVnHostCommandSource {
             let stage_command_started =
                 performance_phase_started(self.ui_host_performance_sampling_enabled);
             let scene_draw = stage_scene_commands(
-                director.state(),
+                next_stage_director
+                    .as_ref()
+                    .unwrap_or(&self.stage_director)
+                    .state(),
                 &self.textures,
                 &self.texture_dimensions,
                 self.width,
