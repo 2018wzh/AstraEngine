@@ -1,0 +1,264 @@
+//! Siglus family session: owns the engine host, the audio bridge, and the
+//! CPU frame snapshot handed to the host.
+//!
+//! Ownership is pull-based and single-threaded: the engine composes into the
+//! offscreen wgpu target during `SiglusHost::step`, the session reads the
+//! frame back afterwards, and mixed PCM arrives from the kira tap worker
+//! thread. `boot`, `advance`, and shutdown all run on the family session
+//! thread, which the provider serializes.
+
+use std::path::Path;
+
+use astra_emu_family_api::{
+    AdvanceResponse, AudioSinkBox, FamilyError, FamilyResult, FamilySession, FamilyStatus,
+    FrameAlpha, FrameFormat, FrameInfo, FrameView, FrameVisitor, WindowState,
+};
+use siglus_scene_vm::audio::kira_hub::hosted_tap;
+use siglus_scene_vm::host::{SiglusHost, SiglusHostConfig};
+use siglus_scene_vm::render::Renderer;
+use siglus_scene_vm::resource;
+
+use crate::{audio, audio::PcmBridge, error, events};
+
+/// How many settle frames `open` may spend waiting for the first composed
+/// frame before failing the boot.
+const FIRST_FRAME_SETTLE_FRAMES: u32 = 120;
+const FRAME_INTERVAL_MS: u32 = 16;
+
+#[derive(Default)]
+struct FrameSnapshot {
+    pixels: Vec<u8>,
+    width: u32,
+    height: u32,
+}
+
+pub(crate) struct SiglusSession {
+    host: SiglusHost,
+    audio: PcmBridge,
+    frame: FrameSnapshot,
+    frame_info: FrameInfo,
+    fatal: Option<FamilyError>,
+    trace: bool,
+}
+
+pub(crate) struct SiglusOpen {
+    pub(crate) session: SiglusSession,
+    pub(crate) frame_info: FrameInfo,
+}
+
+pub(crate) fn boot(
+    game_path: &Path,
+    _initial_window: WindowState,
+    sink: AudioSinkBox,
+) -> FamilyResult<SiglusOpen> {
+    let game_path = game_path.to_owned();
+    let (width, height) = resolve_screen_size(&game_path)?;
+
+    let audio = PcmBridge::new(sink)?;
+    hosted_tap::install(audio.tap_callback(), audio::OUTPUT_FORMAT.sample_rate);
+    siglus_scene_vm::platform_time::hosted_clock::enable();
+
+    let boot_result = boot_engine(&game_path, width, height, audio);
+    if boot_result.is_err() {
+        // Unwind the tap registry so a later session cannot inherit a dead
+        // callback; the engine may still own the mixer worker until dropped.
+        hosted_tap::clear();
+    }
+    boot_result
+}
+
+fn boot_engine(
+    game_path: &Path,
+    width: u32,
+    height: u32,
+    audio: PcmBridge,
+) -> FamilyResult<SiglusOpen> {
+    let renderer =
+        pollster::block_on(Renderer::new_offscreen(width, height)).map_err(error::engine)?;
+    let mut config = SiglusHostConfig::new(game_path.to_owned());
+    config.width = Some(width);
+    config.height = Some(height);
+    config.deterministic_frame_clock = true;
+    let mut host = pollster::block_on(SiglusHost::new_with_renderer(config, renderer))
+        .map_err(error::engine)?;
+
+    // Pump settle frames until the first composition, so the open response
+    // carries a real frame size instead of an empty buffer.
+    let mut frame = FrameSnapshot::default();
+    let mut settled = false;
+    for _ in 0..FIRST_FRAME_SETTLE_FRAMES {
+        let exit = host.step(FRAME_INTERVAL_MS).map_err(error::engine)?;
+        if exit {
+            break;
+        }
+        if pull_frame(&mut host, &mut frame).is_ok() {
+            settled = true;
+            break;
+        }
+    }
+    if !settled {
+        return Err(error::invalid(
+            "ASTRA_EMU_SIGLUS_BOOT_FRAME",
+            "the Siglus engine produced no composed frame during boot",
+        ));
+    }
+    let frame_info = frame_info(&frame)?;
+
+    Ok(SiglusOpen {
+        frame_info,
+        session: SiglusSession {
+            host,
+            audio,
+            frame,
+            frame_info,
+            fatal: None,
+            trace: std::env::var_os("SG_HEADLESS_TRACE").is_some(),
+        },
+    })
+}
+
+/// Resolves the game's native `#SCREEN_SIZE` with the same discovery and
+/// fallback the engine host uses, so the offscreen target matches the VM
+/// layout size exactly.
+fn resolve_screen_size(game_path: &Path) -> FamilyResult<(u32, u32)> {
+    let fallback = (1280_u32, 720_u32);
+    let Some(size) = (|| -> Option<(u32, u32)> {
+        let path = resource::find_initial_gameexe_path(game_path).ok()?;
+        let raw = std::fs::read(&path).ok()?;
+        let text = if path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("ini"))
+        {
+            String::from_utf8(raw).ok()?
+        } else {
+            let options = resource::load_gameexe_decode_options(game_path).ok()?;
+            let (text, _report) =
+                siglus_scene_vm::formats::gameexe::decode_gameexe_dat_bytes(&raw, &options).ok()?;
+            text
+        };
+        let config = siglus_scene_vm::formats::gameexe::GameexeConfig::from_text(&text);
+        let entry = config.get_entry("SCREEN_SIZE")?;
+        let width = entry.item_unquoted(0)?.trim().parse::<u32>().ok()?;
+        let height = entry.item_unquoted(1)?.trim().parse::<u32>().ok()?;
+        (width > 0 && height > 0).then_some((width, height))
+    })() else {
+        tracing::debug!(event = "astra.emu.siglus.screen_size_fallback");
+        return Ok(fallback);
+    };
+    Ok(size)
+}
+
+fn frame_info(frame: &FrameSnapshot) -> FamilyResult<FrameInfo> {
+    if frame.width == 0 || frame.height == 0 {
+        return Err(error::invalid(
+            "ASTRA_EMU_SIGLUS_FRAME_EMPTY",
+            "the engine produced an empty frame",
+        ));
+    }
+    Ok(FrameInfo {
+        width: frame.width,
+        height: frame.height,
+        stride: frame.width.checked_mul(4).ok_or_else(|| {
+            error::invalid("ASTRA_EMU_SIGLUS_FRAME_SIZE", "frame stride overflows")
+        })?,
+        format: FrameFormat::Rgba8Srgb {
+            alpha: FrameAlpha::Opaque,
+        },
+    })
+}
+
+/// Reads the composed frame back from the offscreen target. A size change
+/// resizes the snapshot; the stride stays width * 4.
+fn pull_frame(host: &mut SiglusHost, frame: &mut FrameSnapshot) -> FamilyResult<()> {
+    let (width, height, pixels) = {
+        let renderer = host.renderer_mut();
+        renderer.read_frame_rgba().map_err(error::engine)?
+    };
+    if width == 0 || height == 0 {
+        return Err(error::invalid(
+            "ASTRA_EMU_SIGLUS_FRAME_EMPTY",
+            "the engine reported an empty frame size",
+        ));
+    }
+    frame.width = width;
+    frame.height = height;
+    frame.pixels = pixels;
+    Ok(())
+}
+
+impl SiglusSession {
+    fn fail<T>(&mut self, value: FamilyError) -> FamilyResult<T> {
+        self.fatal = Some(value.clone());
+        Err(value)
+    }
+
+    fn ensure_live(&self) -> FamilyResult<()> {
+        if let Some(value) = &self.fatal {
+            return Err(value.clone());
+        }
+        Ok(())
+    }
+}
+
+impl FamilySession for SiglusSession {
+    fn advance(
+        &mut self,
+        _elapsed_ns: u64,
+        events: &[astra_emu_family_api::FamilyEvent],
+    ) -> FamilyResult<AdvanceResponse> {
+        self.ensure_live()?;
+        self.audio.check_error()?;
+        events::apply(&mut self.host, events);
+        // The engine runs one VM frame per advance; the deterministic clock
+        // consumes this elapsed value instead of the wall clock.
+        let elapsed_ms = ((_elapsed_ns + 500_000) / 1_000_000).clamp(1, 1_000) as u32;
+        let exit = self.host.step(elapsed_ms).map_err(error::engine)?;
+        if self.trace {
+            let vm = self.host.vm_mut();
+            let g1080 = vm
+                .ctx
+                .globals
+                .int_lists
+                .get(&(siglus_scene_vm::runtime::forms::codes::ELM_GLOBAL_G as u32))
+                .and_then(|g| g.get(1080))
+                .copied()
+                .unwrap_or(-1);
+            let scene = vm.current_scene_name().map(str::to_owned);
+            let line = vm.current_line_no();
+            let active = vm.ctx.globals.system.active_flag;
+            let blocked = vm.is_blocked();
+            let movie = vm.ctx.globals.mov.playing;
+            eprintln!(
+                "[SG_HEADLESS] scene={scene:?} line={line} g1080={g1080} active={active} blocked={blocked} movie_playing={movie}",
+            );
+        }
+        if let Err(value) = pull_frame(&mut self.host, &mut self.frame) {
+            return self.fail(value);
+        }
+        self.frame_info = frame_info(&self.frame)?;
+        if exit {
+            return Ok(AdvanceResponse {
+                status: FamilyStatus::Finished,
+            });
+        }
+        Ok(AdvanceResponse::running())
+    }
+
+    fn visit_frame(&self, visitor: &mut dyn FrameVisitor) -> FamilyResult<()> {
+        self.ensure_live()?;
+        let info = frame_info(&self.frame)?;
+        let view = FrameView::from_slice(&self.frame.pixels, info)?;
+        visitor.accept(view)
+    }
+
+    fn close(self: Box<Self>) -> FamilyResult<()> {
+        // Cancel the host queue first so the kira worker cannot stay blocked
+        // in `write`; dropping the host then joins that worker.
+        let audio_result = self.audio.close();
+        drop(self.host);
+        hosted_tap::clear();
+        siglus_scene_vm::platform_time::hosted_clock::disable();
+        audio_result
+    }
+}

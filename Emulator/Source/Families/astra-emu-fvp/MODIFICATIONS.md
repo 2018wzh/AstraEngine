@@ -1,11 +1,14 @@
 # RFVP Astra Family fork record
 
-`../../ThirdParty/rfvp/` is a source snapshot of the `0.6.0` upstream commit
-`304e773387a9920c9db091ec1fd937c717aea949` from
-[`xmoezzz/rfvp`](https://github.com/xmoezzz/rfvp). The hosted adaptation originated
-from the `2018wzh/rfvp` fork at the immutable revision
-`f4f64a5bb726c1759350a666a35e0a454b810f61`. The covered source and the complete
-MPL-2.0 text are in `../../ThirdParty/rfvp/` and `../../ThirdParty/rfvp/LICENSE`.
+`../../ThirdParty/rfvp/` is the git submodule of the full
+[`xmoezzz/rfvp`](https://github.com/xmoezzz/rfvp) repository pinned to the
+`astra-0.6-hosted` branch of the [`2018wzh/rfvp`](https://github.com/2018wzh/rfvp)
+fork. That branch is upstream `0.6.0` commit
+`304e773387a9920c9db091ec1fd937c717aea949` plus a single adaptation commit
+(`14b7f8a748b6c5eeed48afaed621274417ac530d`) that confines every local change to
+`crates/rfvp/`; the adapter builds that member through the path dependency
+`ThirdParty/rfvp/crates/rfvp`. The covered source and the complete MPL-2.0 text
+are in `../../ThirdParty/rfvp/` and `../../ThirdParty/rfvp/LICENSE`.
 
 The 0.6.0 update incorporates upstream text-wait completion, InputFlash,
 dissolve-wait and native global-save fixes. Hosted sessions own script globals per session and never use the process-global
@@ -21,9 +24,10 @@ Input, time, timer and motion serialization additions were removed; native slot
 snapshots now use the upstream graph and motion layout and load behavior.
 The Arc texture ownership adapter remains for shared host rendering resources.
 
-The local changes to the vendored tree are limited to these areas:
+The local changes to the vendored tree are limited to these areas (paths
+relative to `crates/rfvp/`):
 
-- `../../ThirdParty/rfvp/Cargo.toml` removes dependencies on private Astra path crates,
+- `../../ThirdParty/rfvp/crates/rfvp/Cargo.toml` removes dependencies on private Astra path crates,
   keeps the hosted feature graph self-contained, records the local `flate2`
   version, and builds the private RFVP core as `rlib` only. The FVP crate in
   the parent directory is the only dynamic plugin boundary.

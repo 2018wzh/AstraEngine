@@ -2,10 +2,11 @@
 
 ## RFVP covered source
 
-`../../ThirdParty/rfvp/` contains the MPL-2.0 covered source from
-[`xmoezzz/rfvp`](https://github.com/xmoezzz/rfvp) `0.6.0` upstream revision
-`304e773387a9920c9db091ec1fd937c717aea949`, with hosted adaptations originating from
-`2018wzh/rfvp` revision `f4f64a5bb726c1759350a666a35e0a454b810f61`.
+`../../ThirdParty/rfvp/` is a git submodule of
+[`xmoezzz/rfvp`](https://github.com/xmoezzz/rfvp) pinned to the `astra-0.6-hosted`
+branch of the [`2018wzh/rfvp`](https://github.com/2018wzh/rfvp) fork: upstream
+`0.6.0` revision `304e773387a9920c9db091ec1fd937c717aea949` plus a single
+hosted-adaptation commit `14b7f8a748b6c5eeed48afaed621274417ac530d`.
 The complete license text is `../../ThirdParty/rfvp/LICENSE`. The file-level change
 inventory is `MODIFICATIONS.md`; both it and the covered source must remain in
 the source archive or the valid source offer for a binary distribution.

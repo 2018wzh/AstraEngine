@@ -23,6 +23,9 @@ impl AstraEmuManagerController {
         registry
             .register_provider(astra_emu_fvp::FvpProvider::default())
             .map_err(|error| error.to_string())?;
+        registry
+            .register_provider(astra_emu_siglus::SiglusProvider::default())
+            .map_err(|error| error.to_string())?;
         for installed in library
             .list_installed_plugins()
             .map_err(|e| e.to_string())?

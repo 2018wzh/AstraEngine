@@ -15,7 +15,7 @@ dynamic-plugin-export = []
 [dependencies]
 abi_stable.workspace = true
 astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api" }
-rfvp = { path = "../../../ThirdParty/rfvp", default-features = false, features = ["hosted"] }
+rfvp = { path = "../../../ThirdParty/rfvp/crates/rfvp", default-features = false, features = ["hosted"] }
 fontdb.workspace = true
 tracing.workspace = true
 time = { workspace = true, features = ["local-offset"] }
@@ -37,5 +37,6 @@ tempfile.workspace = true
 upstream = "https://github.com/xmoezzz/rfvp"
 upstream_revision = "304e773387a9920c9db091ec1fd937c717aea949"
 hosted_fork = "https://github.com/2018wzh/rfvp"
-hosted_fork_revision = "f4f64a5bb726c1759350a666a35e0a454b810f61"
+hosted_fork_branch = "astra-0.6-hosted"
+hosted_fork_revision = "14b7f8a748b6c5eeed48afaed621274417ac530d"
 license_notice = "THIRD_PARTY_NOTICES.md"

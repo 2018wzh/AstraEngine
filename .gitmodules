@@ -1,0 +1,8 @@
+[submodule "Emulator/ThirdParty/rfvp"]
+	path = Emulator/ThirdParty/rfvp
+	url = https://github.com/2018wzh/rfvp
+	branch = astra-0.6-hosted
+[submodule "Emulator/ThirdParty/siglus_rs"]
+	path = Emulator/ThirdParty/siglus_rs
+	url = https://github.com/2018wzh/siglus_rs
+	branch = astra-hosted
