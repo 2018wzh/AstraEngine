@@ -17,6 +17,7 @@ anyhow = "1"
 pollster = "0.3"
 
 [dev-dependencies]
+env_logger = "0.11"
 tempfile.workspace = true
 
 [package.metadata.astra]
@@ -24,6 +25,6 @@ upstream = "https://github.com/xmoezzz/siglus_rs"
 upstream_revision = "e762f9f9c1c94cb490fb13f1367fd06f3e1367b4"
 hosted_fork = "https://github.com/2018wzh/siglus_rs"
 hosted_fork_branch = "astra-hosted"
-hosted_fork_revision = "2ab860f9002f6fd04abce24fdc136bfc5e1a832b"
+hosted_fork_revision = "2be01aee004a3cb9f5c72eac6a73532d125162c3"
 license_notice = "THIRD_PARTY_NOTICES.md"
 modifications = "MODIFICATIONS.md"

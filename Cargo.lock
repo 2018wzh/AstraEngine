@@ -906,6 +906,7 @@ dependencies = [
  "abi_stable",
  "anyhow",
  "astra-emu-family-api",
+ "env_logger",
  "pollster 0.3.0",
  "siglus_scene_vm",
  "tempfile",

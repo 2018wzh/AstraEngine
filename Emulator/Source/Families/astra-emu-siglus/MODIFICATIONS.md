@@ -6,7 +6,7 @@ to the `astra-hosted` branch of the
 [`2018wzh/siglus_rs`](https://github.com/2018wzh/siglus_rs) fork. That branch
 is upstream commit `e762f9f9c1c94cb490fb13f1367fd06f3e1367b4` (2026-09-13)
 plus a single adaptation commit
-(`2ab860f9002f6fd04abce24fdc136bfc5e1a832b`). The complete MPL-2.0 text stays
+(`2be01aee004a3cb9f5c72eac6a73532d125162c3`). The complete MPL-2.0 text stays
 in `../../ThirdParty/siglus_rs/LICENSE-MPL-2.0`; `THIRD_PARTY_NOTICES.md`
 records the attribution chain.
 
@@ -63,8 +63,25 @@ applies translated family events, pumps one engine frame through
 frame back into the session snapshot; a `true` step result (engine-requested
 exit or halted proc flow) maps to `FamilyStatus::Finished`. `close` cancels
 the host audio queue first, then drops the host so the tap worker joins, and
-clears the process-global tap registry.
+clears the process-global tap registry. The frame readback is lazy: `advance`
+only composes into the offscreen target and `visit_frame` copies to the CPU
+on demand, so hosts that skip frame pulls (headless routes) do not pay a
+texture-to-buffer copy per advance.
 
 Save data stays in the game directory (`<game>/savedata`), owned entirely by
 the engine; the host provides only the game path. Protected retail resources
 are decrypted through the user-provided `key.toml` in the game directory.
+
+## Known route blocker (upstream)
+
+The Rewrite+ prologue stalls a few lines into the first message block: the
+`sys40_mp20` message proc gates its entire input handling behind a per-message
+voice-completion flag (`d[700]`) that never clears in this engine, so the
+proc spins on `disp()` and ignores every input shape (single-poll clicks,
+split-edge clicks, Enter, Ctrl skip, and the in-game A.Skip toggle). No koe
+error is logged and `KoeEngine::is_playing_any()` never reports playback,
+so the voice event that should clear the flag never fires. Headless route
+completion therefore stops at that point; everything before it (boot, title
+flow, opening scene, movie, and the leading dialogue lines) runs and renders
+correctly. Fixing it requires upstream work on the msg-block/voice state
+machine in `siglus_scene_vm`, not adapter changes.

@@ -25,20 +25,26 @@ use crate::{audio, audio::PcmBridge, error, events};
 const FIRST_FRAME_SETTLE_FRAMES: u32 = 120;
 const FRAME_INTERVAL_MS: u32 = 16;
 
+/// Interior-mutable frame snapshot so an immutable `visit_frame` can refresh
+/// the CPU copy on demand. Only the family session thread touches these.
 #[derive(Default)]
 struct FrameSnapshot {
-    pixels: Vec<u8>,
-    width: u32,
-    height: u32,
+    pixels: std::cell::RefCell<Vec<u8>>,
+    width: std::cell::Cell<u32>,
+    height: std::cell::Cell<u32>,
 }
 
 pub(crate) struct SiglusSession {
     host: SiglusHost,
     audio: PcmBridge,
     frame: FrameSnapshot,
-    frame_info: FrameInfo,
+    frame_info: std::cell::Cell<FrameInfo>,
     fatal: Option<FamilyError>,
     trace: bool,
+    frame_dirty: std::cell::Cell<bool>,
+    last_trace_scene: std::cell::RefCell<Option<String>>,
+    last_trace_line: std::cell::Cell<i32>,
+    last_trace_wait: std::cell::Cell<(bool, bool, bool, bool, bool, bool, bool)>,
 }
 
 pub(crate) struct SiglusOpen {
@@ -84,14 +90,14 @@ fn boot_engine(
 
     // Pump settle frames until the first composition, so the open response
     // carries a real frame size instead of an empty buffer.
-    let mut frame = FrameSnapshot::default();
+    let frame = FrameSnapshot::default();
     let mut settled = false;
     for _ in 0..FIRST_FRAME_SETTLE_FRAMES {
         let exit = host.step(FRAME_INTERVAL_MS).map_err(error::engine)?;
         if exit {
             break;
         }
-        if pull_frame(&mut host, &mut frame).is_ok() {
+        if pull_frame(&mut host, &frame).is_ok() {
             settled = true;
             break;
         }
@@ -110,9 +116,15 @@ fn boot_engine(
             host,
             audio,
             frame,
-            frame_info,
+            frame_info: std::cell::Cell::new(frame_info),
             fatal: None,
             trace: std::env::var_os("SG_HEADLESS_TRACE").is_some(),
+            frame_dirty: std::cell::Cell::new(true),
+            last_trace_scene: std::cell::RefCell::new(None),
+            last_trace_line: std::cell::Cell::new(-1),
+            last_trace_wait: std::cell::Cell::new((
+                false, false, false, false, false, false, false,
+            )),
         },
     })
 }
@@ -150,16 +162,16 @@ fn resolve_screen_size(game_path: &Path) -> FamilyResult<(u32, u32)> {
 }
 
 fn frame_info(frame: &FrameSnapshot) -> FamilyResult<FrameInfo> {
-    if frame.width == 0 || frame.height == 0 {
+    if frame.width.get() == 0 || frame.height.get() == 0 {
         return Err(error::invalid(
             "ASTRA_EMU_SIGLUS_FRAME_EMPTY",
             "the engine produced an empty frame",
         ));
     }
     Ok(FrameInfo {
-        width: frame.width,
-        height: frame.height,
-        stride: frame.width.checked_mul(4).ok_or_else(|| {
+        width: frame.width.get(),
+        height: frame.height.get(),
+        stride: frame.width.get().checked_mul(4).ok_or_else(|| {
             error::invalid("ASTRA_EMU_SIGLUS_FRAME_SIZE", "frame stride overflows")
         })?,
         format: FrameFormat::Rgba8Srgb {
@@ -170,9 +182,9 @@ fn frame_info(frame: &FrameSnapshot) -> FamilyResult<FrameInfo> {
 
 /// Reads the composed frame back from the offscreen target. A size change
 /// resizes the snapshot; the stride stays width * 4.
-fn pull_frame(host: &mut SiglusHost, frame: &mut FrameSnapshot) -> FamilyResult<()> {
+fn pull_frame(host: &mut SiglusHost, frame: &FrameSnapshot) -> FamilyResult<()> {
     let (width, height, pixels) = {
-        let renderer = host.renderer_mut();
+        let renderer = host.renderer();
         renderer.read_frame_rgba().map_err(error::engine)?
     };
     if width == 0 || height == 0 {
@@ -181,18 +193,13 @@ fn pull_frame(host: &mut SiglusHost, frame: &mut FrameSnapshot) -> FamilyResult<
             "the engine reported an empty frame size",
         ));
     }
-    frame.width = width;
-    frame.height = height;
-    frame.pixels = pixels;
+    frame.width.set(width);
+    frame.height.set(height);
+    *frame.pixels.borrow_mut() = pixels;
     Ok(())
 }
 
 impl SiglusSession {
-    fn fail<T>(&mut self, value: FamilyError) -> FamilyResult<T> {
-        self.fatal = Some(value.clone());
-        Err(value)
-    }
-
     fn ensure_live(&self) -> FamilyResult<()> {
         if let Some(value) = &self.fatal {
             return Err(value.clone());
@@ -216,27 +223,46 @@ impl FamilySession for SiglusSession {
         let exit = self.host.step(elapsed_ms).map_err(error::engine)?;
         if self.trace {
             let vm = self.host.vm_mut();
-            let g1080 = vm
-                .ctx
-                .globals
-                .int_lists
-                .get(&(siglus_scene_vm::runtime::forms::codes::ELM_GLOBAL_G as u32))
-                .and_then(|g| g.get(1080))
-                .copied()
-                .unwrap_or(-1);
             let scene = vm.current_scene_name().map(str::to_owned);
             let line = vm.current_line_no();
-            let active = vm.ctx.globals.system.active_flag;
-            let blocked = vm.is_blocked();
-            let movie = vm.ctx.globals.mov.playing;
-            eprintln!(
-                "[SG_HEADLESS] scene={scene:?} line={line} g1080={g1080} active={active} blocked={blocked} movie_playing={movie}",
+            let wait = &vm.ctx.wait;
+            let koe_playing = vm.ctx.koe.is_playing_any();
+            let syscom = &vm.ctx.globals.syscom;
+            let wait_state = (
+                wait.until.is_some(),
+                wait.until_frame.is_some(),
+                wait.waiting_for_key,
+                wait.message_reveal,
+                wait.audio.is_some() || wait.event.is_some() || wait.movie.is_some(),
+                syscom.menu_open || syscom.msg_back_open || wait.system_modal,
+                koe_playing,
             );
+            let last_scene = self.last_trace_scene.borrow().clone();
+            let last_line = self.last_trace_line.get();
+            let last_wait = self.last_trace_wait.get();
+            if scene != last_scene || line != last_line || wait_state != last_wait {
+                let g1080 = vm
+                    .ctx
+                    .globals
+                    .int_lists
+                    .get(&(siglus_scene_vm::runtime::forms::codes::ELM_GLOBAL_G as u32))
+                    .and_then(|g| g.get(1080))
+                    .copied()
+                    .unwrap_or(-1);
+                let active = vm.ctx.globals.system.active_flag;
+                let blocked = vm.is_blocked();
+                eprintln!(
+                    "[SG_HEADLESS] scene={scene:?} line={line} g1080={g1080} active={active} blocked={blocked} wait={wait_state:?} koe_playing={koe_playing}",
+                );
+                *self.last_trace_scene.borrow_mut() = scene.clone();
+                self.last_trace_line.set(line);
+                self.last_trace_wait.set(wait_state);
+            }
         }
-        if let Err(value) = pull_frame(&mut self.host, &mut self.frame) {
-            return self.fail(value);
-        }
-        self.frame_info = frame_info(&self.frame)?;
+        // The composed frame stays in the offscreen target; the CPU readback
+        // happens on demand in `visit_frame`, so hosts that skip frame pulls
+        // (headless routes) do not pay a texture-to-buffer copy per advance.
+        self.frame_dirty.set(true);
         if exit {
             return Ok(AdvanceResponse {
                 status: FamilyStatus::Finished,
@@ -247,8 +273,27 @@ impl FamilySession for SiglusSession {
 
     fn visit_frame(&self, visitor: &mut dyn FrameVisitor) -> FamilyResult<()> {
         self.ensure_live()?;
-        let info = frame_info(&self.frame)?;
-        let view = FrameView::from_slice(&self.frame.pixels, info)?;
+        if self.frame_dirty.get() {
+            let (width, height, pixels) = {
+                let renderer = self.host.renderer();
+                renderer.read_frame_rgba().map_err(error::engine)?
+            };
+            if width == 0 || height == 0 {
+                return Err(error::invalid(
+                    "ASTRA_EMU_SIGLUS_FRAME_EMPTY",
+                    "the engine reported an empty frame size",
+                ));
+            }
+            self.frame.width.set(width);
+            self.frame.height.set(height);
+            *self.frame.pixels.borrow_mut() = pixels;
+            let info = frame_info(&self.frame)?;
+            self.frame_info.set(info);
+            self.frame_dirty.set(false);
+        }
+        let info = self.frame_info.get();
+        let pixels = self.frame.pixels.borrow();
+        let view = FrameView::from_slice(&pixels, info)?;
         visitor.accept(view)
     }
 
