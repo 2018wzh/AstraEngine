@@ -10,5 +10,11 @@ commit）。它不属于主 workspace 成员。来源、固定 revision 和修�
 [Siglus 修改说明](../Source/Families/astra-emu-siglus/MODIFICATIONS.md)及
 [第三方说明](../Source/Families/astra-emu-siglus/THIRD_PARTY_NOTICES.md)。
 
+`art3m1s-core/` 是 Artemis family adapter 使用的 MPL-2.0 源码，以 git submodule
+指向 `2018wzh/art3m1s-core` 的 `astra-hosted` 分支（上游
+`Alphaly2K/art3m1s-core` 0.4.0 加单个适配 commit）。它不属于主 workspace 成员。
+来源、固定 revision 和修改范围见 [Artemis 修改说明](../Source/Families/astra-emu-artemis/MODIFICATIONS.md)
+及[第三方说明](../Source/Families/astra-emu-artemis/THIRD_PARTY_NOTICES.md)。
+
 `rfvp/` 与 `kirikiri2/` 之外，新增第三方核心一律以 submodule 接入，不在本仓
 镜像全量源码。克隆后需执行 `git submodule update --init` 获取 submodule 内容。

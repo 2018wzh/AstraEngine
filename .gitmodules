@@ -6,3 +6,7 @@
 	path = Emulator/ThirdParty/siglus_rs
 	url = https://github.com/2018wzh/siglus_rs
 	branch = astra-hosted
+[submodule "Emulator/ThirdParty/art3m1s-core"]
+	path = Emulator/ThirdParty/art3m1s-core
+	url = https://github.com/2018wzh/art3m1s-core.git
+	branch = astra-hosted
