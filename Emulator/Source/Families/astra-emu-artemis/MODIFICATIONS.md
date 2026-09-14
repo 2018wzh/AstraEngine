@@ -90,10 +90,25 @@ the engine; the host provides only the game path.
 The title flow works end to end (logo movie completion, title menu, START
 including the system-voice wait, gamestart transition), but the prologue's
 scenario mainloop does not turn text pages: `system/script.asb` parks in a
-`Generic` wait at its `scriptMainloop` call and composed frames stay fixed no
-matter the decide cadence. サクラノ詩 drives its scenario through direct AST
-chunks and plays fine through the same adapter, so the gap is specific to the
-Lua mainloop pattern this title uses inside `asb-interpreter`. Fixing it
-requires upstream work on the scriptMainloop resume path, not adapter
-changes. Everything up to that point (boot, title, movie skip, audio, first
-scene composition) runs and renders correctly.
+`Generic` wait at its `scriptMainloop`/`scriptMainAdd` `calllua` pair (the
+`click2` position), and composed frames stay fixed no matter the decide
+cadence.
+
+Root cause, traced with the fork's wait-state/tag-queue diagnostics and the
+game's own Lua (`system/adv/keyconfig.lua`, `system/adv/adv.lua`): the
+scenario pages advance by re-entering the Lua mainloop state machine, whose
+click wait raises a Generic wait from inside a `calllua`. The registered
+global `push` handler (`setonpush_calllua`) consumes each click and signals
+`flg.exclick`; the mainloop then needs to be **re-entered** to consume it and
+present the next page. The interpreter executes `calllua` synchronously with
+no coroutine yield/resume, so the only available continuation is
+`advance_wait_line` past the `calllua` line — verified experimentally to skip
+the page machinery entirely (the scenario runs to its end within a few ticks
+and the game restarts back through boot). Properly supporting this pattern
+requires upstream coroutine-style `calllua` yielding (or an exclick-aware
+stop release designed with the game's Lua contract), not adapter changes.
+
+サクラノ詩 drives its scenario through direct AST chunks and plays fine
+through the same adapter. Everything up to the blocker in 終ノ空 remake
+(boot, title, movie skip, audio, first scene composition) runs and renders
+correctly.
