@@ -142,6 +142,12 @@ fn boot_engine(
     };
     let mut pixels = vec![0_u8; rt.pixel_buffer_size()];
 
+    // Telemetry mode also turns on the core's input/wait diagnostics so a
+    // stalled headless driver can be debugged from the drained log stream.
+    if std::env::var("ASTRA_ARTEMIS_TRACE_STATE").is_ok() {
+        unsafe { art3m1s_core::ffi::art3m1s_set_debug(1) };
+    }
+
     // Pump settle frames until the first composition, so the open response
     // carries a real frame instead of an empty buffer.
     let mut settled = false;

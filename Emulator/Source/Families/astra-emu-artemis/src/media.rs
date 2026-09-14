@@ -134,6 +134,14 @@ pub(crate) fn drain(events: &HostEvents, resources: &HostResources) -> DrainOutc
                 EVENT_KIND_LOG => {
                     let level = char::from_u32(aux).unwrap_or('I');
                     let message = String::from_utf8_lossy(payload);
+                    // Diagnostic mode mirrors engine logs to stderr: the
+                    // adapter itself only emits tracing events, which need a
+                    // subscriber the headless driver may not install.
+                    if std::env::var("ASTRA_ARTEMIS_TRACE_STATE").is_ok() {
+                        eprintln!(
+                            "event = astra.emu.artemis.engine_log, level = {level}, {message}"
+                        );
+                    }
                     match level {
                         'E' => tracing::warn!(
                             event = "astra.emu.artemis.engine_log",
