@@ -100,24 +100,35 @@ the engine; the host provides only the game path.
 The title flow works end to end (logo movie completion, title menu, START
 including the system-voice wait, gamestart transition), but the prologue's
 scenario mainloop does not turn text pages: `system/script.asb` parks in a
-`Generic` wait at its `scriptMainloop`/`scriptMainAdd` `calllua` pair (the
-`click2` position), and composed frames stay fixed no matter the decide
-cadence.
+`Generic` wait at its `click2` position (the `[@]` of the
+`scriptMainloop`/`scriptMainAdd` `calllua` pair), and composed frames stay
+fixed no matter the decide cadence.
 
-Root cause, traced with the fork's wait-state/tag-queue diagnostics and the
-game's own Lua (`system/adv/keyconfig.lua`, `system/adv/adv.lua`): the
-scenario pages advance by re-entering the Lua mainloop state machine, whose
-click wait raises a Generic wait from inside a `calllua`. The registered
-global `push` handler (`setonpush_calllua`) consumes each click and signals
-`flg.exclick`; the mainloop then needs to be **re-entered** to consume it and
-present the next page. The interpreter executes `calllua` synchronously with
-no coroutine yield/resume, so the only available continuation is
-`advance_wait_line` past the `calllua` line — verified experimentally to skip
-the page machinery entirely (the scenario runs to its end within a few ticks
-and the game restarts back through boot). Properly supporting this pattern
-requires upstream coroutine-style `calllua` yielding (or an exclick-aware
-stop release designed with the game's Lua contract), not adapter changes.
+Root cause, traced with the fork's wait-state/tag-queue/Lua-flag diagnostics
+and the game's own Lua (`system/adv/keyconfig.lua`, `system/adv/adv.lua`,
+`system/adv/button.lua`, `system/adv/mainloop.lua`):
 
+1. Every click during the prologue click wait is dispatched to the
+   registered global push handler (`setonpush_calllua`), and
+   `global_push_absorbs_default_click` lets that dispatch consume the click
+   (`advance=false`), so the engine never treats it as a decide edge.
+2. `setonpush_calllua`'s branch chain requires state that does not hold
+   while the title's `flg.ui` mode table is still set and `btn.cursor` was
+   left stale by the scene change (the button layers are deleted without
+   out handlers): it early-returns, `setexclick` never runs, and
+   `flg.exclick` stays nil — so the engine-side exclick wake has nothing to
+   consume.
+3. Force-advancing the wait from the host (or exempting Generic waits from
+   push absorption) skips the `calllua` page presentation wholesale: the
+   scenario runs to its end within ticks and the game restarts through
+   boot, so a raw line skip is not a safe substitute for the missing
+   Lua-state re-entry.
+
+Properly supporting this pattern requires upstream interpreter work: deliver
+the exclick decide edge into the scenario mainloop's Lua state machine (or
+coroutine-style `calllua` yielding) together with the game's mode-transition
+contract. Filed upstream as
+https://github.com/Alphaly2K/art3m1s-core/issues/3 with the trace evidence.
 サクラノ詩 drives its scenario through direct AST chunks and plays fine
 through the same adapter. Everything up to the blocker in 終ノ空 remake
 (boot, title, movie skip, audio, first scene composition) runs and renders
