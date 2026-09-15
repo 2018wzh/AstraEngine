@@ -86,8 +86,8 @@ struct VolumePayload {
 pub(crate) struct DrainOutcome {
     pub(crate) commands: Vec<MixerCommand>,
     /// Video ids the host must report finished because it does not decode
-    /// video itself.
-    pub(crate) finished_videos: Vec<Option<String>>,
+    /// video itself. Reported when their scheduled completion falls due.
+    pub(crate) started_videos: Vec<Option<String>>,
 }
 
 /// Reads every queued host event. `events` must be the enabled handle of the
@@ -95,7 +95,7 @@ pub(crate) struct DrainOutcome {
 pub(crate) fn drain(events: &HostEvents, resources: &HostResources) -> DrainOutcome {
     let mut outcome = DrainOutcome {
         commands: Vec::new(),
-        finished_videos: Vec::new(),
+        started_videos: Vec::new(),
     };
     loop {
         let next = events.next_event_bytes();
@@ -296,7 +296,7 @@ fn apply_media_event(payload: &[u8], resources: &HostResources, outcome: &mut Dr
             let id: Option<String> = serde_json::from_value::<PlayPayload>(envelope.payload)
                 .ok()
                 .and_then(|parsed| parsed.id);
-            outcome.finished_videos.push(id);
+            outcome.started_videos.push(id);
         }
         "video_stop_all" => {}
         other => {
@@ -402,4 +402,14 @@ pub(crate) fn notify_videos_finished(rt: &mut CoreRuntime, ids: &[Option<String>
     for id in ids {
         rt.notify_video_finished(id.as_deref());
     }
+}
+
+/// Default engine-time window a started movie keeps "playing" before the
+/// host reports completion, in milliseconds. Gives the movie's Lua state
+/// migrations (mode switches registered during playback) time to run.
+pub(crate) fn video_finish_delay_ms() -> u64 {
+    std::env::var("ASTRA_ARTEMIS_VIDEO_FINISH_DELAY_MS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(2_000)
 }

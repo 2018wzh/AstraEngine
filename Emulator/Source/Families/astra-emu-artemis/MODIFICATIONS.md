@@ -83,9 +83,12 @@ thread, the process-global `HostEvents` handle, and one software mixer worker.
   Natural end of a non-looping source is reported back through
   `notify_sound_finished`.
 - Without a bound FFmpeg provider the adapter cannot decode the core's video
-  commands; `video_play` is answered with an immediate
-  `notify_video_finished`, so opening movies are skipped instead of stalling
-  the script. This is a declared degradation, visible in tracing.
+  commands; `video_play` is answered with a delayed
+  `notify_video_finished` (default 2 s of engine time,
+  `ASTRA_ARTEMIS_VIDEO_FINISH_DELAY_MS`), so opening movies are skipped
+  instead of stalling the script while the Lua state migrations scheduled
+  around the movie still run. This is a declared degradation, visible in
+  tracing.
 - `close` cancels the host audio queue first, then joins the mixer worker,
   drops the runtime, and disables the host-events handle.
 

@@ -37,6 +37,13 @@ pub(crate) struct ArtemisOpen {
     pub(crate) frame_info: FrameInfo,
 }
 
+/// A started movie awaiting its host-side completion report.
+struct PendingVideo {
+    id: Option<String>,
+    /// Engine milliseconds at which the movie counts as finished.
+    due_ms: u64,
+}
+
 pub(crate) struct ArtemisSession {
     rt: CoreRuntime,
     resources: HostResources,
@@ -44,6 +51,9 @@ pub(crate) struct ArtemisSession {
     audio: AudioBridge,
     pixels: RefCell<Vec<u8>>,
     frame_info: Cell<FrameInfo>,
+    pending_videos: RefCell<Vec<PendingVideo>>,
+    engine_ms: Cell<u64>,
+    video_delay_ms: u64,
     fatal: Option<FamilyError>,
 }
 
@@ -150,13 +160,22 @@ fn boot_engine(
 
     // Pump settle frames until the first composition, so the open response
     // carries a real frame instead of an empty buffer.
+    let video_delay_ms = media::video_finish_delay_ms();
+    let mut pending_videos: Vec<PendingVideo> = Vec::new();
+    let mut engine_ms: u64 = 0;
     let mut settled = false;
     for _ in 0..FIRST_FRAME_SETTLE_FRAMES {
-        match pump(
-            &mut rt,
+        let mut tick = TickContext {
             host_events,
             resources,
-            &audio,
+            audio: &audio,
+            pending_videos: &mut pending_videos,
+            engine_ms: &mut engine_ms,
+            video_delay_ms,
+        };
+        match pump(
+            &mut rt,
+            &mut tick,
             pixels.as_mut_slice(),
             FRAME_INTERVAL_MS,
             &[],
@@ -191,6 +210,9 @@ fn boot_engine(
             audio,
             pixels: RefCell::new(pixels),
             frame_info: Cell::new(frame_info),
+            pending_videos: RefCell::new(pending_videos),
+            engine_ms: Cell::new(engine_ms),
+            video_delay_ms,
             fatal: None,
         },
     })
@@ -234,15 +256,34 @@ fn frame_info_of(width: u32, height: u32) -> FamilyResult<FrameInfo> {
 
 /// Applies finished-sound notifications and queued media commands, injects
 /// input, and runs one engine tick. Returns the number of rendered bytes.
+/// Per-tick session state the pump consumes and updates.
+struct TickContext<'a> {
+    host_events: &'a HostEvents,
+    resources: &'a HostResources,
+    audio: &'a AudioBridge,
+    pending_videos: &'a mut Vec<PendingVideo>,
+    engine_ms: &'a mut u64,
+    video_delay_ms: u64,
+}
+
 fn pump(
     rt: &mut CoreRuntime,
-    host_events: &HostEvents,
-    resources: &HostResources,
-    audio: &AudioBridge,
+    tick: &mut TickContext<'_>,
     pixels: &mut [u8],
     elapsed_ms: u64,
     input: &[FamilyEvent],
 ) -> FamilyResult<usize> {
+    let TickContext {
+        host_events,
+        resources,
+        audio,
+        pending_videos,
+        engine_ms,
+        video_delay_ms,
+    } = tick;
+    let elapsed = elapsed_ms.clamp(1, 1_000);
+    let engine_now: u64 = **engine_ms;
+
     for finished in audio.drain_finished() {
         rt.notify_sound_finished(finished.id.as_deref());
     }
@@ -250,14 +291,32 @@ fn pump(
     for command in outcome.commands {
         audio.send(command);
     }
-    media::notify_videos_finished(rt, &outcome.finished_videos);
-    let decide = events::apply(rt, input);
+    // Movies the host cannot decode keep "playing" for the configured
+    // engine-time window before the completion report, so the Lua state
+    // migrations scheduled during playback still run.
+    for id in outcome.started_videos {
+        pending_videos.push(PendingVideo {
+            id,
+            due_ms: engine_now.saturating_add(*video_delay_ms),
+        });
+    }
+    let mut due: Vec<Option<String>> = Vec::new();
+    pending_videos.retain(|pending| {
+        if engine_now >= pending.due_ms {
+            due.push(pending.id.clone());
+            false
+        } else {
+            true
+        }
+    });
+    media::notify_videos_finished(rt, &due);
+
+    events::apply(rt, input);
     // A scenario mainloop parked on a bare stop resumes from the decide
     // edge; the runtime exposes the documented setScriptStatus(0) wake for
     // exactly this handoff.
-    if decide {
-        rt.host_decide_wake();
-    }
+    rt.host_decide_wake();
+
     // One-shot: hovering the title's START leaves `btn.cursor` set; the
     // gamestart scene change deletes the button layers without their out
     // handlers, and the game's keyconfig dispatcher early-returns on every
@@ -271,40 +330,9 @@ fn pump(
             tracing::info!(event = "astra.emu.artemis.stale_cursor_cleared");
         }
     }
-    let written = rt.advance_and_render_into(elapsed_ms.clamp(1, 1_000), pixels);
-    if let Ok(state) = std::env::var("ASTRA_ARTEMIS_TRACE_STATE") {
-        let interval: u64 = state.parse().unwrap_or(600);
-        TRACE_STATE.with(|cell| {
-            let (count, composed) = {
-                let (c, k) = cell.get();
-                (c + 1, k + u64::from(written > 0))
-            };
-            cell.set((count, composed));
-            if count % interval.max(1) == 0 {
-                eprintln!(
-                    "event = astra.emu.artemis.wait_state, {} tags={:?} exclick={:?} click={:?} cursor={:?} advclick={:?} waitflag={:?} tx={:?} keycode={:?} dlg={:?} ui={:?} mwmute={:?} btnstop={:?} btnclick={:?} auto={:?} skip={:?} select={:?} mwmsg={:?} composed={composed}",
-                    rt.debug_wait_state(),
-                    rt.debug_tag_queue(),
-                    rt.debug_global_flag("flg", "exclick"),
-                    rt.debug_global_flag("flg", "click"),
-                    rt.debug_global_flag("btn", "cursor"),
-                    rt.debug_global_flag("csv", "advkey.tbl.CLICK"),
-                    rt.debug_global_flag("flg", "waitflag"),
-                    rt.debug_global_flag("flg", "txclick"),
-                    rt.debug_global_flag("flg", "keycode"),
-                    rt.debug_global_flag("flg", "dlg"),
-                    rt.debug_global_flag("flg", "ui"),
-                    rt.debug_global_flag("flg", "mwmute"),
-                    rt.debug_global_flag("flg", "btnstop"),
-                    rt.debug_global_flag("flg", "btnclick"),
-                    rt.debug_global_flag("flg", "automode"),
-                    rt.debug_global_flag("flg", "skip"),
-                    rt.debug_global_flag("scr", "select"),
-                    rt.debug_global_flag("scr", "mw.msg"),
-                );
-            }
-        });
-    }
+
+    let written = rt.advance_and_render_into(elapsed, pixels);
+    **engine_ms = engine_now + elapsed;
     Ok(written)
 }
 
@@ -332,15 +360,26 @@ impl FamilySession for ArtemisSession {
         self.audio.check_error()?;
         let elapsed_ms = ((elapsed_ns + 500_000) / 1_000_000).clamp(1, 1_000);
         let mut pixels = self.pixels.borrow_mut();
-        pump(
-            &mut self.rt,
-            &self.events,
-            &self.resources,
-            &self.audio,
-            pixels.as_mut_slice(),
-            elapsed_ms,
-            events,
-        )?;
+        let mut pending_videos = self.pending_videos.borrow_mut();
+        let mut engine_ms = self.engine_ms.get();
+        {
+            let mut tick = TickContext {
+                host_events: &self.events,
+                resources: &self.resources,
+                audio: &self.audio,
+                pending_videos: &mut pending_videos,
+                engine_ms: &mut engine_ms,
+                video_delay_ms: self.video_delay_ms,
+            };
+            pump(
+                &mut self.rt,
+                &mut tick,
+                pixels.as_mut_slice(),
+                elapsed_ms,
+                events,
+            )?;
+        }
+        self.engine_ms.set(engine_ms);
         drop(pixels);
         if self.rt.is_exit_requested() {
             return Ok(AdvanceResponse {
