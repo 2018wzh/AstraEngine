@@ -258,6 +258,19 @@ fn pump(
     if decide {
         rt.host_decide_wake();
     }
+    // One-shot: hovering the title's START leaves `btn.cursor` set; the
+    // gamestart scene change deletes the button layers without their out
+    // handlers, and the game's keyconfig dispatcher early-returns on every
+    // later click while that stale state persists. Clear it once the
+    // scenario mainloop's first click wait is reached.
+    if !STALE_CURSOR_CLEARED.with(Cell::get) {
+        let state = rt.debug_wait_state();
+        if state.starts_with("script=system/script.asb ") && state.contains("wait=Generic") {
+            rt.clear_global_key("btn", "cursor");
+            STALE_CURSOR_CLEARED.with(|cell| cell.set(true));
+            tracing::info!(event = "astra.emu.artemis.stale_cursor_cleared");
+        }
+    }
     let written = rt.advance_and_render_into(elapsed_ms.clamp(1, 1_000), pixels);
     if let Ok(state) = std::env::var("ASTRA_ARTEMIS_TRACE_STATE") {
         let interval: u64 = state.parse().unwrap_or(600);
@@ -269,9 +282,25 @@ fn pump(
             cell.set((count, composed));
             if count % interval.max(1) == 0 {
                 eprintln!(
-                    "event = astra.emu.artemis.wait_state, {} tags={:?} composed={composed}",
+                    "event = astra.emu.artemis.wait_state, {} tags={:?} exclick={:?} click={:?} cursor={:?} advclick={:?} waitflag={:?} tx={:?} keycode={:?} dlg={:?} ui={:?} mwmute={:?} btnstop={:?} btnclick={:?} auto={:?} skip={:?} select={:?} mwmsg={:?} composed={composed}",
                     rt.debug_wait_state(),
                     rt.debug_tag_queue(),
+                    rt.debug_global_flag("flg", "exclick"),
+                    rt.debug_global_flag("flg", "click"),
+                    rt.debug_global_flag("btn", "cursor"),
+                    rt.debug_global_flag("csv", "advkey.tbl.CLICK"),
+                    rt.debug_global_flag("flg", "waitflag"),
+                    rt.debug_global_flag("flg", "txclick"),
+                    rt.debug_global_flag("flg", "keycode"),
+                    rt.debug_global_flag("flg", "dlg"),
+                    rt.debug_global_flag("flg", "ui"),
+                    rt.debug_global_flag("flg", "mwmute"),
+                    rt.debug_global_flag("flg", "btnstop"),
+                    rt.debug_global_flag("flg", "btnclick"),
+                    rt.debug_global_flag("flg", "automode"),
+                    rt.debug_global_flag("flg", "skip"),
+                    rt.debug_global_flag("scr", "select"),
+                    rt.debug_global_flag("scr", "mw.msg"),
                 );
             }
         });
@@ -281,6 +310,7 @@ fn pump(
 
 thread_local! {
     static TRACE_STATE: Cell<(u64, u64)> = const { Cell::new((0, 0)) };
+    static STALE_CURSOR_CLEARED: Cell<bool> = const { Cell::new(false) };
 }
 
 impl ArtemisSession {

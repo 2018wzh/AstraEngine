@@ -5,7 +5,7 @@
 repository pinned to the `astra-hosted` branch of the
 [`2018wzh/art3m1s-core`](https://github.com/2018wzh/art3m1s-core) fork. That
 branch is upstream commit `0c06f37160961c9ff75d4937d5e6bb0500d0bef9` (0.4.0)
-plus the adaptation commits below, head `3f73097ec3b74b8dfb223167d3cc663428d18a0d`. The complete MPL-2.0 text
+plus the adaptation commits below, head `95deb90a80f3da68bc4f5b96215c4626f2300829`. The complete MPL-2.0 text
 stays in `../../../ThirdParty/art3m1s-core/LICENSE`;
 `THIRD_PARTY_NOTICES.md` records the attribution chain.
 
@@ -24,6 +24,13 @@ stays in `../../../ThirdParty/art3m1s-core/LICENSE`;
   of `backend-lua51`. Desktop/Android upstream builds keep Lua 5.1 through
   the default feature set; iOS builders now select `backend-luau`
   explicitly.
+- `crates/asb-interpreter/src/interpreter.rs` + `src/runtime/mod.rs`
+  (`95deb90`) add Lua-flag access for the keyconfig exclick contract:
+  `take_global_flag`/`clear_global_key`/`read_global_value` on the
+  interpreter, `CoreRuntime::poll_exclick_wake` (consumes `flg.exclick` as
+  a decide edge while parked on a `[@]`/bare stop), a host
+  `clear_global_key` passthrough for stale button-hover state, and debug
+  reads for the wait state, tag queue, and Lua flags.
 - `crates/asb-interpreter/Cargo.toml` (`3f73097`) moves the mlua `send`
   feature behind a passthrough default feature. This workspace unifies mlua
   without `send` (Rc-based Lua state owned by one thread), and the runtime
