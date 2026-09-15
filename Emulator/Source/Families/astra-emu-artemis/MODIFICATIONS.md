@@ -5,7 +5,7 @@
 repository pinned to the `astra-hosted` branch of the
 [`2018wzh/art3m1s-core`](https://github.com/2018wzh/art3m1s-core) fork. That
 branch is upstream commit `0c06f37160961c9ff75d4937d5e6bb0500d0bef9` (0.4.0)
-plus the adaptation commits below, head `95deb90a80f3da68bc4f5b96215c4626f2300829`. The complete MPL-2.0 text
+plus the adaptation commits below, head `327ec88b30aa605e5e7f9147e8678fea6ff41727`. The complete MPL-2.0 text
 stays in `../../../ThirdParty/art3m1s-core/LICENSE`;
 `THIRD_PARTY_NOTICES.md` records the attribution chain.
 

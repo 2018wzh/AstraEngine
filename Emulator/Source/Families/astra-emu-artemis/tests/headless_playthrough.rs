@@ -227,7 +227,7 @@ fn headless_playthrough_route_completion() {
             eprintln!("PLAYTHROUGH: engine requested exit at route frame {i}");
             break;
         }
-        if i % 20_000 == 19_999 {
+        if i % 200 == 199 {
             eprintln!(
                 "PLAYTHROUGH: {}/{} route frames in {:?} ({:.0} adv/s)",
                 i + 1,
