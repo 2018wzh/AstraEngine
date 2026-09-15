@@ -26,6 +26,8 @@
 
 ## 代码、数据与协作
 
+- 用户于 2026-09-15 要求本次重构由主线程完成；不得启动或委派子智能体。已有子任务 worktree 不因此自动归当前实例所有。
+
 - 每个实例独占 Git worktree、branch、target 和服务。开始前检查归属；禁止在其他实例 worktree 编辑/编译/测试。只清理自己创建且不再使用的产物。并行 agent 通过独立提交整合。
 - 成熟 crate 优先；按真实消费者、平台隔离和职责拆分。合并纯转发 crate，不为数量目标新增抽象。lib.rs 薄 facade；接近 400–600 行拆模块。
 - Rust 使用 idiomatic 命名与 typed API；Rust 类型为 schema 真源。跨平台脚本用 Python，命令示例用 bash/sh。

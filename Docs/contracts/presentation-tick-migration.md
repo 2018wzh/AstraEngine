@@ -89,3 +89,7 @@ Media Host 使用独立播放时间驱动 timeline deadline 和视频 `started_a
 ### Player decoder open 的取消边界
 
 PlatformCommandSink 持有尚未交付的 decoder open future，限制为 64 个；取消外层命令不会丢弃响应 receiver。正常返回后转入已打开 decoder 表，重复逻辑 id 在发送 open 前拒绝。媒体 shutdown 调用 cleanup_pending_decode_opens，等待被取消 open 的响应并关闭返回的 native session。清理自身被中断时保留 open/close future；关闭失败保留可重试状态，has_live_resources 包含这些未完成资源。清理不创建后台任务，sink 所有者必须等待清理结束后再销毁宿主。此约束覆盖 Player decoder 路径，直接 PlatformHostClient 调用和其他资源种类的取消仍单独推进。
+
+### 音频 output 响应所有权
+
+NativeVnProductAudioHost 持有唯一 pending open 和 pending close future。取消 ensure_open 后再次调用会继续同一 open；shutdown 则等待结果，直接关闭端点，不创建 Kira worker。关闭响应在恢复或退出 future 中断后继续由 Host 持有，下一次清理消费同一响应，不重复发送已完成的 close。明确失败的关闭仍可重试，端点在成功响应前保持所有权。这些 future 不进入存档，Host 必须在其平台客户端存活期间完成 shutdown。

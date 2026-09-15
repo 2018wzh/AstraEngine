@@ -50,6 +50,7 @@ pub fn source_for(story: &str) -> NativeVnHostCommandSource {
     source_from_package(product_package_with_video(story, None, false))
 }
 
+#[allow(dead_code)]
 pub fn source_for_video(story: &str) -> NativeVnHostCommandSource {
     let mut bytes = vec![0, 0, 0, 16];
     bytes.extend_from_slice(b"ftypisom0000");

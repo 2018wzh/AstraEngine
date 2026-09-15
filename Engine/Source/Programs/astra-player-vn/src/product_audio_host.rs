@@ -1,3 +1,6 @@
+mod output;
+mod snapshot;
+
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
@@ -17,6 +20,8 @@ use astra_player_core::{PlatformCommandSink, PlayerDecodedAudio, PlayerHostComma
 pub struct NativeVnProductAudioHost {
     service: Option<AudioServiceSession>,
     output: Option<AudioOutputHandle>,
+    pending_open: Option<output::OpenFuture>,
+    pending_close: Option<output::CloseFuture>,
     prepared_assets: BTreeMap<String, AudioAssetRevision>,
     voice_kinds: BTreeMap<String, String>,
     known_bgm_targets: BTreeSet<String>,
@@ -79,6 +84,8 @@ impl NativeVnProductAudioHost {
         Self {
             service: None,
             output: None,
+            pending_open: None,
+            pending_close: None,
             prepared_assets: BTreeMap::new(),
             voice_kinds: BTreeMap::new(),
             known_bgm_targets: BTreeSet::new(),
@@ -100,230 +107,6 @@ impl NativeVnProductAudioHost {
 
     pub fn has_active_voice(&self) -> bool {
         self.voice_kinds.values().any(|kind| kind == "voice")
-    }
-
-    pub fn last_meter(&self) -> Option<NativeVnAudioMeterSnapshot> {
-        self.last_meter
-    }
-
-    pub fn submitted_timeline(&self) -> Result<Vec<f32>, PlatformError> {
-        self.evidence_capture
-            .as_ref()
-            .map(AudioCaptureReader::take_samples)
-            .unwrap_or_else(|| Ok(Vec::new()))
-    }
-
-    pub fn snapshot(&self) -> NativeVnProductAudioSnapshot {
-        let timeline = self
-            .service
-            .as_ref()
-            .map(|service| service.timeline().clone())
-            .or_else(|| self.pending_restore.clone())
-            .unwrap_or_else(|| {
-                AudioTimelineStateV1::new(CANONICAL_SAMPLE_RATE, CANONICAL_CHANNELS)
-            });
-        NativeVnProductAudioSnapshot {
-            schema: "astra.audio_timeline.v1".into(),
-            timeline,
-            voice_kinds: self.voice_kinds.clone(),
-            known_bgm_targets: self.known_bgm_targets.clone(),
-            pending_fade_stops: self.pending_fade_stops.clone(),
-        }
-    }
-
-    pub(crate) fn validate_snapshot_data(
-        snapshot: &NativeVnProductAudioSnapshot,
-    ) -> Result<(), PlatformError> {
-        if snapshot.schema != "astra.audio_timeline.v1"
-            || snapshot.timeline.schema != "astra.audio_timeline.v1"
-            || snapshot.timeline.device_sample_rate != CANONICAL_SAMPLE_RATE
-            || snapshot.timeline.device_channels != CANONICAL_CHANNELS
-            || snapshot.voice_kinds.len() != snapshot.timeline.voices.len()
-            || snapshot
-                .voice_kinds
-                .keys()
-                .any(|voice_id| !snapshot.timeline.voices.contains_key(voice_id))
-            || snapshot
-                .pending_fade_stops
-                .iter()
-                .any(|(fade_id, pending)| {
-                    pending.fence.is_empty()
-                        || !snapshot.voice_kinds.contains_key(&pending.voice_id)
-                        || !snapshot
-                            .timeline
-                            .buses
-                            .values()
-                            .any(|bus| bus.fade_id.as_deref() == Some(fade_id.as_str()))
-                })
-        {
-            return Err(player_platform_error(
-                "player.audio.restore",
-                "ASTRA_PLAYER_AUDIO_TIMELINE_INVALID",
-            ));
-        }
-        Ok(())
-    }
-
-    pub(crate) fn validate_restore(
-        &self,
-        snapshot: &NativeVnProductAudioSnapshot,
-    ) -> Result<(), PlatformError> {
-        Self::validate_snapshot_data(snapshot)?;
-        if let Some(service) = self.service.as_ref() {
-            service
-                .validate_timeline_restore(&snapshot.timeline)
-                .map_err(|error| player_platform_error("player.audio.restore.validate", error))?;
-        } else if !snapshot.timeline.voices.is_empty()
-            || snapshot
-                .timeline
-                .buses
-                .values()
-                .any(|bus| bus.fade_id.is_some())
-        {
-            return Err(player_platform_error(
-                "player.audio.restore",
-                "ASTRA_PLAYER_AUDIO_RESTORE_REQUIRES_OPEN_SESSION",
-            ));
-        }
-        Ok(())
-    }
-
-    pub fn restore(&mut self, snapshot: NativeVnProductAudioSnapshot) -> Result<(), PlatformError> {
-        self.validate_restore(&snapshot)?;
-        if let Some(service) = self.service.as_mut() {
-            service
-                .restore_timeline(snapshot.timeline.clone())
-                .map_err(|error| player_platform_error("player.audio.restore", error))?;
-        } else {
-            self.pending_restore = Some(snapshot.timeline.clone());
-        }
-        self.voice_kinds = snapshot.voice_kinds;
-        self.known_bgm_targets = snapshot.known_bgm_targets;
-        self.pending_fade_stops = snapshot.pending_fade_stops;
-        Ok(())
-    }
-
-    pub async fn ensure_open(
-        &mut self,
-        _source: &mut crate::NativeVnHostCommandSource,
-        executor: &mut PlayerHostCommandExecutor<PlatformCommandSink>,
-    ) -> Result<(), PlatformError> {
-        if self.service.is_some() {
-            return Ok(());
-        }
-        if self.output.is_some() {
-            return Err(player_platform_error(
-                "player.audio.open",
-                "ASTRA_PLAYER_AUDIO_OUTPUT_REQUIRES_CLEANUP",
-            ));
-        }
-        let client = executor.sink().client().clone();
-        let limits = client.launch_profile().limits();
-        let capture_samples = self.retain_evidence_audio
-            && matches!(client.launch_profile().kind(), HostKind::Headless);
-        let opened = client
-            .open_audio_output(AudioOutputRequest {
-                sample_rate: CANONICAL_SAMPLE_RATE,
-                channels: CANONICAL_CHANNELS,
-                chunk_frames: limits.audio_chunk_frames,
-                max_buffered_frames: Self::BUFFERED_FRAMES,
-                start_paused: false,
-                capture_samples,
-            })
-            .await?;
-        // Keep ownership even if format or mixer setup fails; shutdown closes this handle.
-        self.output = Some(opened.handle);
-        if opened.format.sample_rate != CANONICAL_SAMPLE_RATE
-            || opened.format.channels != CANONICAL_CHANNELS
-        {
-            return Err(player_platform_error(
-                "player.audio.open",
-                "ASTRA_PLAYER_AUDIO_OUTPUT_FORMAT_DRIFT",
-            ));
-        }
-        let evidence_capture = opened.capture;
-        if capture_samples && evidence_capture.is_none() {
-            return Err(player_platform_error(
-                "player.audio.capture",
-                "ASTRA_PLAYER_AUDIO_CAPTURE_MISSING",
-            ));
-        }
-        let output = opened.handle;
-        let mut service = AudioServiceSession::new(
-            AudioServiceConfig {
-                max_voices: Self::MAX_VOICES,
-                max_buses: Self::MAX_BUSES,
-                max_events: Self::MAX_EVENTS,
-                pcm_cache_bytes: limits.audio_pcm_cache_bytes,
-            },
-            AstraChunkBackendSettings {
-                sample_rate: opened.format.sample_rate,
-                channels: opened.format.channels,
-                chunk_frames: limits.audio_chunk_frames,
-                endpoint: opened.lane,
-                deterministic_fixed_tick_hz: matches!(
-                    client.launch_profile().kind(),
-                    HostKind::Headless
-                )
-                .then_some(60),
-            },
-        )
-        .map_err(|error| player_platform_error("player.audio.kira.create", error))?;
-        for (asset, sample_rate, channels, samples) in self.pending_recovery_assets.drain(..) {
-            service
-                .prepare_pcm_shared(asset, sample_rate, channels, samples)
-                .map_err(|error| player_platform_error("player.audio.recover.prepare", error))?;
-        }
-        if let Some(timeline) = self.pending_restore.take() {
-            service
-                .restore_timeline(timeline)
-                .map_err(|error| player_platform_error("player.audio.restore", error))?;
-        }
-        self.output = Some(output);
-        self.service = Some(service);
-        self.evidence_capture = evidence_capture;
-        self.previous_telemetry = AudioChunkTelemetry::default();
-        Ok(())
-    }
-
-    pub(crate) async fn reset_output_after_restore(
-        &mut self,
-        source: &mut crate::NativeVnHostCommandSource,
-        executor: &mut PlayerHostCommandExecutor<PlatformCommandSink>,
-    ) -> Result<(), PlatformError> {
-        if self.service.is_some() {
-            self.recover_device_loss(source, executor).await?;
-        }
-        Ok(())
-    }
-
-    /// Recreates the selected output endpoint and Kira manager without copying cached PCM.
-    /// Failure is terminal for this audio host; no alternate mixer or output provider is selected.
-    pub async fn recover_device_loss(
-        &mut self,
-        source: &mut crate::NativeVnHostCommandSource,
-        executor: &mut PlayerHostCommandExecutor<PlatformCommandSink>,
-    ) -> Result<(), PlatformError> {
-        let service = self.service.take().ok_or_else(|| {
-            player_platform_error(
-                "player.audio.recover",
-                "ASTRA_PLAYER_AUDIO_RECOVERY_REQUIRES_OPEN_SESSION",
-            )
-        })?;
-        self.pending_restore = Some(service.timeline().clone());
-        self.pending_recovery_assets = service.prepared_pcm_assets();
-        drop(service);
-        self.evidence_capture = None;
-        self.previous_telemetry = AudioChunkTelemetry::default();
-        let output = self.output.ok_or_else(|| {
-            player_platform_error(
-                "player.audio.recover",
-                "ASTRA_PLAYER_AUDIO_RECOVERY_OUTPUT_MISSING",
-            )
-        })?;
-        executor.sink().client().close_audio(output).await?;
-        self.output = None;
-        self.ensure_open(source, executor).await
     }
 
     pub async fn start(
@@ -702,31 +485,6 @@ impl NativeVnProductAudioHost {
             self.voice_kinds.remove(&request.target);
             complete_voice(completed_signals, &request.target, &kind);
         }
-        Ok(())
-    }
-
-    pub async fn shutdown(
-        &mut self,
-        _source: &mut crate::NativeVnHostCommandSource,
-        executor: &mut PlayerHostCommandExecutor<PlatformCommandSink>,
-    ) -> Result<(), PlatformError> {
-        if let Some(service) = self.service.as_mut() {
-            service
-                .poll_backend()
-                .map_err(|error| player_platform_error("player.audio.shutdown", error))?;
-            self.last_meter = Some(NativeVnAudioMeterSnapshot::from(service.telemetry()));
-        }
-        drop(self.service.take());
-        if let Some(output) = self.output {
-            executor.sink().client().close_audio(output).await?;
-            self.output = None;
-        }
-        self.prepared_assets.clear();
-        self.voice_kinds.clear();
-        self.known_bgm_targets.clear();
-        self.pending_fade_stops.clear();
-        self.pending_restore = None;
-        self.pending_recovery_assets.clear();
         Ok(())
     }
 
