@@ -300,7 +300,7 @@ impl MinoriVm {
                         line = line_index,
                         offset = command.span.offset,
                         operand_count = command.operands.len(),
-                        script_hash = %self.state.script_hash,
+                        script_hash = self.state.script_hash.to_hex().as_str(),
                         tick = fixed_tick,
                     );
                 })?;

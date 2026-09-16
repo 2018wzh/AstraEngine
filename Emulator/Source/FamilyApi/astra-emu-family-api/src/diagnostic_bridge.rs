@@ -131,6 +131,17 @@ impl Visit for DiagnosticVisitor {
             "code" | "operation" | "state" if diagnostic_symbol(value) => {
                 self.push(field.name(), DiagnosticValue::Symbol(value.into()));
             }
+            "slot_kind" if matches!(value, "bgm" | "se" | "none") => {
+                self.push(field.name(), DiagnosticValue::Symbol(value.into()));
+            }
+            "script_hash"
+                if value.len() == 64
+                    && value
+                        .bytes()
+                        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)) =>
+            {
+                self.push(field.name(), DiagnosticValue::Symbol(value.into()));
+            }
             _ => self.redact(),
         }
     }

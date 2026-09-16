@@ -69,3 +69,46 @@ fn host_contract_rejects_unbounded_or_ambiguous_diagnostics() {
     event.target = "private/path".into();
     assert!(event.validate().is_err());
 }
+
+#[test]
+fn reviewed_audio_kinds_and_script_hashes_remain_bounded_and_typed() {
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let sink = DiagnosticSink_TO::from_value(Recorder(events.clone()), TD_Opaque);
+    let subscriber = tracing_subscriber::registry().with(Bridge { sink });
+    let hash = "0123456789abcdef".repeat(4);
+    tracing::subscriber::with_default(subscriber, || {
+        tracing::error!(
+            event = "core.failed",
+            slot_kind = "bgm",
+            script_hash = hash.as_str()
+        );
+        tracing::error!(
+            event = "core.failed",
+            slot_kind = "private_data",
+            script_hash = "private/path"
+        );
+        tracing::error!(event = "core.failed", script_hash = "a".repeat(65).as_str());
+        tracing::error!(event = "core.failed", script_hash = "g".repeat(64).as_str());
+        tracing::error!(event = "core.failed", script_hash = ?hash);
+    });
+    let events = events.lock().unwrap();
+    assert_eq!(events.len(), 5);
+    assert_eq!(events[0].redacted_fields, 0);
+    assert!(events[0]
+        .fields
+        .iter()
+        .any(|field| field.name == "slot_kind"
+            && field.value == DiagnosticValue::Symbol("bgm".into())));
+    assert!(events[0]
+        .fields
+        .iter()
+        .any(|field| field.name == "script_hash"
+            && field.value == DiagnosticValue::Symbol(hash.as_str().into())));
+    assert_eq!(events[1].redacted_fields, 2);
+    for event in &events[2..] {
+        assert_eq!(event.redacted_fields, 1);
+    }
+    for event in events.iter() {
+        event.validate().unwrap();
+    }
+}
