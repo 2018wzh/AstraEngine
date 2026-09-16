@@ -5,6 +5,15 @@ use rfvp::subsystem::resources::{
 };
 
 #[test]
+#[ignore = "requires a hardware GPU"]
+fn native_gpu_device_can_be_recreated_after_renderer_drop() {
+    for _ in 0..3 {
+        let renderer = GpuRenderer::new(64, 64).unwrap();
+        drop(renderer);
+    }
+}
+
+#[test]
 #[ignore = "requires a hardware GPU and installed native system fonts"]
 fn native_text_restore_rebuilds_the_same_gpu_surface() {
     use rfvp::{

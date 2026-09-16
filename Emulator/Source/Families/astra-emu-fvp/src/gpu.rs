@@ -59,7 +59,14 @@ impl GpuRenderer {
                 None,
             )
             .await
-            .map_err(|_| error("ASTRA_EMU_FVP_GPU_DEVICE"))?;
+            .map_err(|cause| {
+                // Native wgpu device-request errors contain fixed diagnostics,
+                // feature flags and numeric limits, not game data or paths.
+                FamilyError::new(
+                    "ASTRA_EMU_FVP_GPU_DEVICE",
+                    format!("RFVP native GPU device initialization failed: {cause}"),
+                )
+            })?;
         tracing::info!(event = "fvp_gpu_created", backend = ?info.backend, device_type = ?info.device_type, vendor = info.vendor, "RFVP native GPU renderer created");
         let queue = Arc::new(queue);
         let bind_group_layouts = BindGroupLayouts::new(&device);

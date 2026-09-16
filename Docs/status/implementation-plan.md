@@ -21,6 +21,8 @@ Headless 长流程新增逐输入开始/完成 TRACE，使用序号、输入种�
 
 修复版 Headless 已启动同一终之空完整路线，逐输入日志确认越过第 124 条等待并继续推进；完整终局仍未完成。Windows Sandbox 中已用重新构建的 Slint Manager 安装 FVP 插件，从独立游戏副本显示原生启动与标题画面，点击进入系统设置页，并关闭会话返回 Manager。首次系统音频启动因设备缺失明确失败，Manager 显示 ASTRA_EMU_AUDIO_DEVICE_UNAVAILABLE；随后显式选择 NullAudioDevice，游戏页持续显示无声测试标记。此次只确认窗口、画面、输入、诊断和会话关闭，不计作真实声音、存读档、冷启动或结局验收。源目录仅只读共享，测试写入留在 Sandbox 副本。
 
+FVP Sandbox 后续验证确认 Manager 冷启动可恢复游戏库与插件，测试音频选项重置为系统默认；显式重新选择测试后端后可打开原生标题。同一 RDP 连接内关闭重开正常，但断线重连后，同一 Manager 进程再次创建设备会失败。适配层现保留 wgpu 原生设备请求的具体错误，Manager 显示 Connection to device was lost during initialization；未切换 CPU 或静默重试。设备丢失的底层原因仍开放。本机新增三次 GPU 创建/释放回归通过，FVP 30 项普通测试、导出 feature 的 Clippy 与格式检查通过；其余 3 项显式 GPU 用例本次未重跑。
+
 ## 验收安排
 
 Artemis 接续检查确认独立 Emulator 依赖图不含 mlua，因此旧分支为合并 VN 而改用 Luau、移除 send 的适配不再需要；优先保持上游桌面 Lua 5.1。完整历史候选现为上游 0c06f37 加单个本地适配提交 13e55ff，包含 PFS 分隔符修复、独立构建依赖固定与硬件 Vulkan 选择。主仓已登记精确 submodule gitlink 并补齐 Family 修改和许可证说明；Family 尚未接入活动 workspace，提交尚未推送。独立构建曾在 Cargo 清单解析阶段遇到可选 art3m1s-rfvp 对相邻 RFVP fork 的路径依赖。候选清单现将此可选依赖固定到 Alphaly2K/rfvp 的 ec204312e123b4839cec8e69e6237fb0374e5518，该版本提供 external-renderer 与 host-runtime；依赖解析已通过；首次 Vulkan 构建在 shaderc 原生编译阶段因 Windows 对象文件路径过长失败，缩短当前工作树内的产物路径后，Vulkan 配置 cargo check 已通过；显式原生 Vulkan 测试已通过三次创建、帧读回和关闭重开。Clippy 执行成功，上游警告保留；这不等于 Manager、真实游戏或视频音频验收。原生 Lua 5.1 配置的 asb-interpreter 227 项单元测试通过，未移植旧分支的 Luau/send 改动。PFS 9 项测试已通过，包括新增的大小写、混合分隔符与范围读取回归；原有路径转换测试改用原生 Path 比较，修正其 Unix 分隔符假设。此依赖不启用为 AstraEMU 的 FVP 运行路径，也不改变其既定基线。Artemis 已有 FFmpeg 视频 session，应复用该实现而非伪造视频完成。旧分支的延迟伪造视频完成和强制唤醒不可直接沿用。
