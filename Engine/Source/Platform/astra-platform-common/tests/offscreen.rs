@@ -8,6 +8,49 @@ use astra_platform_common::WgpuOffscreenRenderer;
 
 #[tokio::test]
 #[ignore = "requires a native hardware GPU runner"]
+async fn large_scene_preserves_draw_order_and_rejects_duplicate_ids() {
+    let mut renderer = WgpuOffscreenRenderer::new().await.unwrap();
+    assert_ne!(renderer.identity().device_type, "cpu");
+    let mut frame = SceneFrame {
+        sequence: 1,
+        width: 4,
+        height: 4,
+        clear_rgba: [0, 0, 0, 255],
+        commands: (0..512)
+            .map(|index| {
+                SceneCommand::rect(
+                    format!("rect.{index}"),
+                    0,
+                    0,
+                    4,
+                    4,
+                    if index == 511 {
+                        [0, 255, 0, 255]
+                    } else {
+                        [255, 0, 0, 255]
+                    },
+                )
+            })
+            .collect(),
+        semantics: None,
+    };
+    let capture = renderer.render(&frame).unwrap();
+    assert!(capture
+        .rgba8
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .all(|p| *p == [0, 255, 0, 255]));
+    frame.sequence = 2;
+    frame.commands.push(frame.commands[0].clone());
+    assert!(renderer.render(&frame).is_err());
+    frame.commands.pop();
+    frame.sequence = 3;
+    assert_eq!(renderer.render(&frame).unwrap().rgba8, capture.rgba8);
+}
+
+#[tokio::test]
+#[ignore = "requires a native hardware GPU runner"]
 async fn transient_texture_ids_reallocate_released_slots_across_frames() {
     let mut renderer = WgpuOffscreenRenderer::new().await.unwrap();
     for sequence in 1..=6 {

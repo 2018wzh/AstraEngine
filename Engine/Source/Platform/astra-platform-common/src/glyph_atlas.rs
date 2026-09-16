@@ -1,3 +1,7 @@
+mod id_set;
+
+use id_set::SceneIdSet;
+
 use std::{
     borrow::Cow,
     collections::{BTreeMap, BTreeSet},
@@ -727,9 +731,9 @@ impl WgpuGlyphAtlasRenderer {
         // primitives. Keep the common bounded scene entirely on the stack so
         // static 120 Hz frames do not allocate merely while validating IDs.
         // Larger authored scenes still remain bounded by their declared frame
-        // budget and may spill explicitly rather than silently dropping draws.
-        let mut run_ids: SmallVec<[&str; 128]> = SmallVec::new();
-        let mut drawn_resources: SmallVec<[&str; 128]> = SmallVec::new();
+        // budget and switch to hashed membership without changing command order.
+        let mut run_ids = SceneIdSet::default();
+        let mut drawn_resources = SceneIdSet::default();
         let mut upload_texture_count = 0_u32;
         let mut texture_region_uploads: SmallVec<[TextureRegionUpload<'_>; 16]> = SmallVec::new();
         let mut upload_glyph_count = 0_u32;
@@ -858,7 +862,7 @@ impl WgpuGlyphAtlasRenderer {
                     release_resource_count += 1;
                     validate_resource_id(resource_id)?;
                     if apply_mutations {
-                        if drawn_resources.contains(&resource_id.as_str()) {
+                        if drawn_resources.contains(resource_id) {
                             return Err(invalid(
                                 "glyph resource cannot be released after use in the same frame",
                             ));
@@ -900,7 +904,7 @@ impl WgpuGlyphAtlasRenderer {
                 } => {
                     if id.is_empty()
                         || id.len() > 256
-                        || !insert_unique(&mut run_ids, id)
+                        || !run_ids.insert(id)
                         || !opacity.is_finite()
                         || !(0.0..=1.0).contains(opacity)
                         || *blend == BlendMode::Screen
@@ -925,7 +929,7 @@ impl WgpuGlyphAtlasRenderer {
                             destination: RectI::new(glyph.x, glyph.y, bitmap.width, bitmap.height),
                             rotation_quadrants: glyph.rotation_quadrants,
                         });
-                        insert_unique(&mut drawn_resources, &glyph.resource_id);
+                        drawn_resources.insert(&glyph.resource_id);
                     }
                     push_quad_run(
                         &mut quad_runs,
@@ -954,7 +958,7 @@ impl WgpuGlyphAtlasRenderer {
                 } => {
                     if id.is_empty()
                         || id.len() > 256
-                        || !insert_unique(&mut run_ids, id)
+                        || !run_ids.insert(id)
                         || !opacity.is_finite()
                         || !(0.0..=1.0).contains(opacity)
                         || *blend == BlendMode::Screen
@@ -972,7 +976,7 @@ impl WgpuGlyphAtlasRenderer {
                         source.unwrap_or(RectI::new(0, 0, texture.base.width, texture.base.height));
                     validate_source_rect(source, texture.base.width, texture.base.height)?;
                     validate_destination(*destination)?;
-                    insert_unique(&mut drawn_resources, texture_id);
+                    drawn_resources.insert(texture_id);
                     push_quad_run(
                         &mut quad_runs,
                         &mut draw_runs,
@@ -1005,7 +1009,7 @@ impl WgpuGlyphAtlasRenderer {
                     height,
                     rgba,
                 } => {
-                    let duplicate = run_ids.contains(&id.as_str());
+                    let duplicate = run_ids.contains(id);
                     if id.is_empty() || id.len() > 256 || duplicate || *width == 0 || *height == 0 {
                         let id_hash = format!("sha256:{:x}", Sha256::digest(id.as_bytes()));
                         tracing::error!(
@@ -1020,7 +1024,7 @@ impl WgpuGlyphAtlasRenderer {
                         );
                         return Err(invalid("rectangle identity or dimensions are invalid"));
                     }
-                    insert_unique(&mut run_ids, id);
+                    run_ids.insert(id);
                     push_quad_run(
                         &mut quad_runs,
                         &mut draw_runs,
@@ -1055,7 +1059,7 @@ impl WgpuGlyphAtlasRenderer {
                     let mesh_command_started = astra_observability::thread_allocation_snapshot();
                     if id.is_empty()
                         || id.len() > 256
-                        || !insert_unique(&mut run_ids, id)
+                        || !run_ids.insert(id)
                         || !opacity.is_finite()
                         || !(0.0..=1.0).contains(opacity)
                         || *blend != BlendMode::Alpha
@@ -1101,7 +1105,7 @@ impl WgpuGlyphAtlasRenderer {
                                     ))
                                 }
                             }
-                            insert_unique(&mut drawn_resources, resource_id);
+                            drawn_resources.insert(resource_id);
                             Some(resource_id.as_str())
                         }
                         _ => return Err(invalid("mesh material and texture binding mismatch")),
@@ -1189,7 +1193,7 @@ impl WgpuGlyphAtlasRenderer {
                                         ));
                                     }
                                 }
-                                insert_unique(&mut drawn_resources, resource_id);
+                                drawn_resources.insert(resource_id);
                                 Some(resource_id.as_str())
                             }
                             _ => {
@@ -3563,11 +3567,11 @@ fn validate_draw_identity<'a>(
     id: &'a str,
     opacity: &f32,
     blend: BlendMode,
-    run_ids: &mut SmallVec<[&'a str; 128]>,
+    run_ids: &mut SceneIdSet<'a>,
 ) -> Result<(), PlatformError> {
     if id.is_empty()
         || id.len() > 256
-        || !insert_unique(run_ids, id)
+        || !run_ids.insert(id)
         || !opacity.is_finite()
         || !(0.0..=1.0).contains(opacity)
         || blend != BlendMode::Alpha
@@ -3575,15 +3579,6 @@ fn validate_draw_identity<'a>(
         return Err(invalid("draw identity, opacity, or blend mode is invalid"));
     }
     Ok(())
-}
-
-fn insert_unique<'a>(values: &mut SmallVec<[&'a str; 128]>, value: &'a str) -> bool {
-    if values.contains(&value) {
-        false
-    } else {
-        values.push(value);
-        true
-    }
 }
 
 fn transient_resource_id(
@@ -3882,32 +3877,15 @@ struct VertexOutput {
 #[cfg(test)]
 mod tests {
     use super::{
-        allocate_pending_atlas_slot, insert_unique, pack_atlas, pack_atlas_at_extent,
-        prepare_upload_pixels, release_pending_atlas_slot, updated_retained_texture,
-        vertex_upload_required, write_padded_resource, AtlasAllocatorState, AtlasResource,
-        AtlasResourceView, ResourceMutationJournal, RetainedTexture, ATLAS_PADDING, ATLAS_SIDE,
+        allocate_pending_atlas_slot, pack_atlas, pack_atlas_at_extent, prepare_upload_pixels,
+        release_pending_atlas_slot, updated_retained_texture, vertex_upload_required,
+        write_padded_resource, AtlasAllocatorState, AtlasResource, AtlasResourceView,
+        ResourceMutationJournal, RetainedTexture, ATLAS_PADDING, ATLAS_SIDE,
         MAX_ATLAS_UPLOAD_BYTES, MAX_ATLAS_WIDTH,
     };
     use astra_media_core::TextureFrame;
     use astra_platform::PlatformErrorCode;
-    use smallvec::SmallVec;
     use std::{collections::BTreeMap, sync::Arc};
-
-    #[test]
-    fn classic_scene_id_journal_stays_within_inline_capacity() {
-        let mut ids: SmallVec<[&str; 128]> = SmallVec::new();
-        for id in ["a"; 128] {
-            // Distinct suffixes are unnecessary for this capacity invariant;
-            // insert directly so the test only exercises the inline journal.
-            ids.push(id);
-        }
-        assert_eq!(ids.len(), 128);
-        assert!(!ids.spilled());
-
-        let mut unique_ids: SmallVec<[&str; 128]> = SmallVec::new();
-        assert!(insert_unique(&mut unique_ids, "classic.background"));
-        assert!(!insert_unique(&mut unique_ids, "classic.background"));
-    }
 
     #[test]
     fn atlas_width_tracks_total_area_and_packs_multiple_stage_textures() {

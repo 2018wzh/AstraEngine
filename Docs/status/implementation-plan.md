@@ -17,6 +17,8 @@ FVP、Minori、Siglus 已改用 API 内可选 ProviderModule，共用单会话 A
 
 Headless 长流程新增逐输入开始/完成 TRACE，使用序号、输入种类和有效 tick 定位耗时，不输出观察值或商业内容。22 项单元测试通过，2 项显式性能测试未执行；当前终之空运行仍使用此前二进制，新日志尚未用于该运行。
 
+终之空完整路线运行的主线程采样落在 GPU 场景 ID 的线性去重检查。Renderer 现对不超过 128 个 ID 的场景保留栈内集合，较大场景转为哈希成员检查，避免平方级查找；命令顺序仍由原始绘制序列决定。12 项平台公共层单元测试通过，包含 16384 个 ID 跨阈值插入与重复检查；新增硬件 GPU 回归通过 512 项绘制顺序、重复拒绝和拒绝后的正常绘制。当前长流程仍运行旧二进制，尚不能据此认定停滞已解决或路线完成。
+
 ## 验收安排
 
 Artemis 接续检查确认独立 Emulator 依赖图不含 mlua，因此旧分支为合并 VN 而改用 Luau、移除 send 的适配不再需要；优先保持上游桌面 Lua 5.1。完整历史候选现为上游 0c06f37 加单个本地适配提交 13e55ff，包含 PFS 分隔符修复、独立构建依赖固定与硬件 Vulkan 选择。主仓已登记精确 submodule gitlink 并补齐 Family 修改和许可证说明；Family 尚未接入活动 workspace，提交尚未推送。独立构建曾在 Cargo 清单解析阶段遇到可选 art3m1s-rfvp 对相邻 RFVP fork 的路径依赖。候选清单现将此可选依赖固定到 Alphaly2K/rfvp 的 ec204312e123b4839cec8e69e6237fb0374e5518，该版本提供 external-renderer 与 host-runtime；依赖解析已通过；首次 Vulkan 构建在 shaderc 原生编译阶段因 Windows 对象文件路径过长失败，缩短当前工作树内的产物路径后，Vulkan 配置 cargo check 已通过；显式原生 Vulkan 测试已通过三次创建、帧读回和关闭重开。Clippy 执行成功，上游警告保留；这不等于 Manager、真实游戏或视频音频验收。原生 Lua 5.1 配置的 asb-interpreter 227 项单元测试通过，未移植旧分支的 Luau/send 改动。PFS 9 项测试已通过，包括新增的大小写、混合分隔符与范围读取回归；原有路径转换测试改用原生 Path 比较，修正其 Unix 分隔符假设。此依赖不启用为 AstraEMU 的 FVP 运行路径，也不改变其既定基线。Artemis 已有 FFmpeg 视频 session，应复用该实现而非伪造视频完成。旧分支的延迟伪造视频完成和强制唤醒不可直接沿用。
