@@ -548,10 +548,25 @@ fn apply_operation(
     };
     result.map_err(|cause| {
         let error = crate::error::rfvp_operation(cause, name);
+        let slot_kind = match operation_stream_id(operation).and_then(AudioStreamId::slot_kind) {
+            Some(rfvp::host_api::AudioSlotKind::Bgm) => "bgm",
+            Some(rfvp::host_api::AudioSlotKind::Se) => "se",
+            None => "none",
+        };
         tracing::error!(
             event = "astra.emu.fvp.audio.operation_failed",
             operation = name,
-            code = error.code()
+            code = error.code(),
+            slot_kind,
+            bgm_limit = mixer.config().max_active_bgm,
+            se_limit = mixer.config().max_active_se,
+            total_limit = mixer.config().max_active_total,
+            bgm_playing = (0..rfvp::host_api::BGM_LOGICAL_SLOT_COUNT)
+                .filter(|slot| mixer.is_playing(AudioStreamId::bgm(*slot)))
+                .count(),
+            se_playing = (0..rfvp::host_api::SE_LOGICAL_SLOT_COUNT)
+                .filter(|slot| mixer.is_playing(AudioStreamId::se(*slot)))
+                .count(),
         );
         error
     })

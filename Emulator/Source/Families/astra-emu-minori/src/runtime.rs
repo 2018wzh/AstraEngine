@@ -291,7 +291,20 @@ impl MinoriVm {
                 .instruction_count
                 .checked_add(1)
                 .ok_or(MinoriRuntimeError::Overflow)?;
-            if let Some(event) = execute_control(command, &self.labels, &mut self.state)? {
+            let event =
+                execute_control(command, &self.labels, &mut self.state).inspect_err(|cause| {
+                    tracing::error!(
+                        event = "astra.emu.minori.command.failed",
+                        code = cause.diagnostic_code(),
+                        ordinal = command.ordinal,
+                        line = line_index,
+                        offset = command.span.offset,
+                        operand_count = command.operands.len(),
+                        script_hash = %self.state.script_hash,
+                        tick = fixed_tick,
+                    );
+                })?;
+            if let Some(event) = event {
                 return Ok(Some(event));
             }
         }
