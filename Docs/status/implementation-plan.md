@@ -15,6 +15,8 @@
 
 ## 验收安排
 
+Artemis 接续检查确认独立 Emulator 依赖图不含 mlua，因此旧分支为合并 VN 而改用 Luau、移除 send 的适配不再需要；优先保持上游桌面 Lua 5.1。已准备完整历史的上游 0c06f37 加 PFS 分隔符修复 38993a9 候选，尚未接入活动 workspace。独立构建在 Cargo 清单解析阶段遇到上游可选 art3m1s-rfvp 对相邻 RFVP fork 的路径依赖，需要先解决构建边界；未声称 Artemis 编译或游戏验收通过。旧分支的延迟伪造视频完成和强制唤醒不可直接沿用。
+
 Classic 物理输入驱动已支持指定生成路线执行到终局，不再只限 Y→K 段。路线追踪拒绝剩余未消费选择、不可用选项和目标终局不符；通过条件仍是实际 VN session 的终局观察。25 项相关 Python 回归通过。首条完整路线生成 46997 条输入，包含 39 次选择；私有测试 profile 按输入长度设置预算，未修改 Host 限制逻辑。完整路线尚未验收通过，37 路线完成数不变。
 
 Native VN 本地整合回归通过：Player 保留 UI 操作产生的字形生命周期命令，文字显示完成状态通过只读观察提供给物理输入脚本；GPU Headless 在资源跨帧重用前提交待绘制场景。相关 Player、CLI、media-core、Headless 平台及 VN adapter 测试和 Clippy 通过，显式 GPU 资源回归通过，Player/Headless/CLI 构建完成。终之空生成器更新当前平台契约和演出替换策略，28 项相关 Python 测试通过。Windows CRT 打包复用 object 校验 x64 PE DLL，全部校验后复制；缺失、截断、错误架构和非 DLL 输入回归通过。此批不新增真实路线完成记录，37 路线与 Sandbox 长流程仍开放。
