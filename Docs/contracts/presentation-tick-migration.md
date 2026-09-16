@@ -115,3 +115,7 @@ NativeVnStateView 是进程内只读显示投影：直接复用 VN typed 字段�
 ### NativeVN 原生创建入口
 
 open_native 接收共享 Arc<CompiledStory>、VnRunConfig 与 NativeVnSessionConfig，配置直接声明 seed、worker_count、integrity_mode 和可选 PackageHandle。Player 与 runtime 共享已经校验、解码的剧情，不再生成中间 Postcard section/hash，也不重复 prepare/probe。package 仍在外层加载和 binding 校验；保存恢复身份检查不变。无 package 的嵌入式 NativeVN 可创建 session；旧 ABI open_compiled_story 只负责参数适配。非法 executor/worker_count 和重复 session 必须在发布会话前失败。
+
+### NativeVN session 直接所有权
+
+NativeVnSession::new 返回原生会话对象，Player 私有宿主直接拥有并调用 step/save/restore，关闭时消费并销毁会话，取消 RuntimeWorld 作用域。实时操作不经 provider session map 查找；旧 provider 将同一 session 实现保存在 map 中，仅服务旧 ABI 消费者。session API 验证传入的会话身份，非法身份不改变会话；已有 tick/失败、保存边界、恢复预检仍然有效。创建与 step/save 模块独立，不复制一套产品执行器。

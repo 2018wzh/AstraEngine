@@ -10,13 +10,12 @@ pub struct NativeVnSessionConfig {
     pub worker_count: usize,
 }
 
-impl NativeVnRuntimeProvider {
-    pub fn open_native(
-        &mut self,
+impl NativeVnSession {
+    pub fn new(
         compiled: Arc<CoreCompiledStory>,
         config: VnRunConfig,
         options: NativeVnSessionConfig,
-    ) -> Result<GameRuntimeSessionId, CoreVnError> {
+    ) -> Result<Self, CoreVnError> {
         let runtime_index = Arc::new(CoreVnRuntimeIndex::build(&compiled)?);
         tracing::info!(
             event = "vn.provider.session.open.start",
@@ -28,12 +27,6 @@ impl NativeVnRuntimeProvider {
             "{}:{}:{}",
             NATIVE_VN_RUNTIME_ID, options.target_id, options.seed
         ));
-        if self.sessions.contains_key(&session_id.0) {
-            return Err(CoreVnError::diagnostic(
-                "ASTRA_NATIVE_VN_SESSION_DUPLICATE",
-                "runtime session id is already open",
-            ));
-        }
         let initial_runtime = CoreVnRuntime::new_shared_indexed(
             Arc::clone(&compiled),
             Arc::clone(&runtime_index),
@@ -104,20 +97,40 @@ impl NativeVnRuntimeProvider {
                 initial_state: running,
             })
             .map_err(|err| CoreVnError::message(err.to_string()))?;
-        self.sessions.insert(
-            session_id.0.clone(),
-            NativeVnSession {
-                world,
-                owner,
-                compiled,
-                runtime_index,
-                state: initial_state,
-                pending_control,
-                control_result,
-                step_complexity: None,
-            },
-        );
-        Ok(session_id)
+        Ok(Self {
+            id: session_id,
+            world,
+            owner,
+            compiled,
+            runtime_index,
+            state: initial_state,
+            pending_control,
+            control_result,
+            step_complexity: None,
+        })
+    }
+}
+
+impl NativeVnRuntimeProvider {
+    pub fn open_native(
+        &mut self,
+        compiled: Arc<CoreCompiledStory>,
+        config: VnRunConfig,
+        options: NativeVnSessionConfig,
+    ) -> Result<GameRuntimeSessionId, CoreVnError> {
+        let id = GameRuntimeSessionId(format!(
+            "{}:{}:{}",
+            NATIVE_VN_RUNTIME_ID, options.target_id, options.seed
+        ));
+        if self.sessions.contains_key(&id.0) {
+            return Err(CoreVnError::diagnostic(
+                "ASTRA_NATIVE_VN_SESSION_DUPLICATE",
+                "runtime session id is already open",
+            ));
+        }
+        let session = NativeVnSession::new(compiled, config, options)?;
+        self.sessions.insert(id.0.clone(), session);
+        Ok(id)
     }
 }
 

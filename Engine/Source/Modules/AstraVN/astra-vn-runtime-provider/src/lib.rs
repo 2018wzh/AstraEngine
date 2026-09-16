@@ -5,6 +5,10 @@
 //! `ffi.rs`（FfiProviderInstance 1200+ 行）；本轮仅库内Headless/指纹/Hash优先，拆分延至下次 PR 避免与 `973191ede` 合并冲突。
 
 mod native_open;
+mod native_session;
+pub use native_session::NativeVnSession;
+mod native_session_save;
+mod native_session_step;
 pub use native_open::NativeVnSessionConfig;
 mod native_step;
 mod native_view;
@@ -327,17 +331,6 @@ impl ProductRuntimeProvider for NativeVnRuntimeProvider {
     }
 }
 
-struct NativeVnSession {
-    world: RuntimeWorld,
-    owner: ActorId,
-    compiled: Arc<CoreCompiledStory>,
-    runtime_index: Arc<CoreVnRuntimeIndex>,
-    state: VnRuntimeState,
-    pending_control: Arc<Mutex<Option<PreparedVnControl>>>,
-    control_result: Arc<Mutex<Option<astra_runtime::AwaitTokenId>>>,
-    step_complexity: Option<VnStepComplexityMetrics>,
-}
-
 struct VnStepAction {
     pending_control: Arc<Mutex<Option<PreparedVnControl>>>,
     control_result: Arc<Mutex<Option<astra_runtime::AwaitTokenId>>>,
@@ -554,189 +547,6 @@ impl NativeVnRuntimeProvider {
         .into_abi()
     }
 
-    fn apply_command_at_step(
-        &mut self,
-        session_id: GameRuntimeSessionId,
-        command: CoreVnPlayerCommand,
-        fixed_step: u64,
-        delta_ns: u64,
-        session_seed: u64,
-        mode: RuntimeStepMode,
-    ) -> Result<NativeVnStepOutput, CoreVnError> {
-        let session = self.session_mut(&session_id)?;
-        let event_kind = vn_event_kind(&command).to_string();
-        let previous_state = session.state.clone();
-        let pending_wait = previous_state.pending_wait.clone();
-        let reading_mode = previous_state.system.reading_mode;
-        let previous_backlog_count = previous_state.backlog.len();
-        let previous_wait = previous_state.pending_wait.clone();
-        let (mut next_state, mut pending_output) = astra_vn_core::reduce_vn_step_indexed_pending(
-            Arc::clone(&session.compiled),
-            Arc::clone(&session.runtime_index),
-            previous_state,
-            command.clone(),
-        )?;
-        if next_state.backlog.len() < previous_backlog_count {
-            return Err(CoreVnError::diagnostic(
-                "ASTRA_NATIVE_VN_HISTORY_TRUNCATION",
-                "VN reducer attempted to truncate append-only backlog history",
-            ));
-        }
-        let next_revision = next_state.revision.checked_add(1).ok_or_else(|| {
-            CoreVnError::message("VN state revision exhausted its deterministic range")
-        })?;
-        next_state.revision = next_revision;
-        let create_wait = if next_state.pending_wait != previous_wait {
-            next_state.pending_wait.as_ref().and_then(|wait| {
-                let has_runtime_await_id = wait
-                    .await_id
-                    .as_deref()
-                    .is_some_and(|await_id| astra_core::StableId::parse(await_id).is_ok());
-                (!has_runtime_await_id)
-                    .then(|| astra_runtime::AwaitKind::Custom(format!("vn.{:?}", wait.kind)))
-            })
-        } else {
-            None
-        };
-        if let Some(wait) = next_state.pending_wait.clone() {
-            pending_output.set_wait(wait);
-        }
-        let control = PreparedVnControl {
-            events: pending_output
-                .events()
-                .iter()
-                .map(|event| (event.kind.clone(), event.id.clone()))
-                .collect(),
-            create_wait,
-        };
-        *session
-            .pending_control
-            .lock()
-            .map_err(|_| CoreVnError::message("VN control lock is poisoned"))? = Some(control);
-        *session
-            .control_result
-            .lock()
-            .map_err(|_| CoreVnError::message("VN control result lock is poisoned"))? = None;
-        let mut ingress = Vec::new();
-        if command_resolves_wait(
-            &command,
-            pending_wait.as_ref().map(|wait| wait.kind),
-            reading_mode,
-            &session.compiled,
-        ) {
-            let await_id = pending_wait
-                .as_ref()
-                .and_then(|wait| wait.await_id.as_deref())
-                .ok_or_else(|| {
-                    CoreVnError::diagnostic(
-                        "ASTRA_NATIVE_VN_AWAIT_ID_MISSING",
-                        "VN wait does not reference its Runtime AwaitToken",
-                    )
-                })?;
-            let token_id = astra_runtime::AwaitTokenId(
-                astra_core::StableId::parse(await_id)
-                    .map_err(|err| CoreVnError::message(err.to_string()))?,
-            );
-            let scope = session.world.task_scope();
-            let handle = session
-                .world
-                .await_handle(token_id, &scope)
-                .map_err(|error| CoreVnError::message(error.to_string()))?;
-            ingress.push(OrderedTickIngress {
-                sequence: 1,
-                payload: TickIngress::AwaitCompletion(handle.complete(
-                    fixed_step,
-                    fixed_step,
-                    EventPayload::new("await.resolved"),
-                )),
-            });
-        }
-        ingress.push(OrderedTickIngress {
-            sequence: ingress.len() as u64 + 1,
-            payload: TickIngress::PlayerInput(PlayerInput {
-                kind: event_kind.clone(),
-                payload: EventPayload {
-                    kind: event_kind,
-                    data: command_event_data(&command),
-                },
-            }),
-        });
-        let timing = TickInput {
-            fixed_step,
-            delta_ns,
-            seed: session_seed,
-        };
-        let request = match mode {
-            RuntimeStepMode::Live => TickRequest::live(timing, ingress),
-            RuntimeStepMode::RestoreContinuation => {
-                TickRequest::restore_continuation(timing, ingress)
-            }
-        };
-        let tick = session
-            .world
-            .tick(request)
-            .map_err(|err| CoreVnError::message(err.to_string()))?;
-        if let Some(diagnostic) = tick.diagnostics.first() {
-            return Err(CoreVnError::diagnostic(
-                diagnostic.code.clone(),
-                diagnostic.message.clone(),
-            ));
-        }
-        if let Some(token_id) = session
-            .control_result
-            .lock()
-            .map_err(|_| CoreVnError::message("VN control result lock is poisoned"))?
-            .take()
-        {
-            let wait = next_state.pending_wait.as_mut().ok_or_else(|| {
-                CoreVnError::diagnostic(
-                    "ASTRA_NATIVE_VN_AWAIT_STATE_MISSING",
-                    "Runtime created an await token without VN wait state",
-                )
-            })?;
-            let runtime_await_id = token_id.0.to_string();
-            wait.await_id = Some(runtime_await_id.clone());
-            pending_output.set_wait(wait.clone());
-            pending_output.push_await(runtime_await_id);
-        }
-        if next_state.pending_wait != previous_wait
-            && next_state.pending_wait.as_ref().is_some_and(|wait| {
-                wait.await_id
-                    .as_deref()
-                    .is_none_or(|id| astra_core::StableId::parse(id).is_err())
-            })
-        {
-            return Err(CoreVnError::diagnostic(
-                "ASTRA_NATIVE_VN_AWAIT_ID_MISSING",
-                "VN wait was not bound to a Runtime AwaitToken",
-            ));
-        }
-        let appended_backlog_entries = next_state.backlog.len() - previous_backlog_count;
-        let output = pending_output.finalize(next_revision);
-        let mutation_journal_entries = output.mutations.len();
-        session.state = next_state;
-        session.step_complexity = Some(VnStepComplexityMetrics {
-            schema: "astra.vn.step_complexity_metrics.v3".to_string(),
-            previous_backlog_count,
-            appended_backlog_entries,
-            state_cache_hit: true,
-            materialized_history_entries: 0,
-            history_component_writes: 0,
-            encoded_hot_state_bytes: 0,
-            mutation_journal_entries,
-        });
-        let live_vn_state = NativeVnStateView::project(&session.state);
-        Ok(NativeVnStepOutput {
-            session_id,
-            fixed_step,
-            vn_state: live_vn_state,
-            presentations: output.presentation,
-            audio: output.audio,
-            timeline: output.timeline_tasks,
-            coverage_reached: output.coverage.reached.into_iter().collect(),
-        })
-    }
-
     pub fn default_launch_command(
         &self,
         session_id: &GameRuntimeSessionId,
@@ -772,76 +582,27 @@ impl NativeVnRuntimeProvider {
     }
 
     pub fn save(&self, request: RuntimeSaveRequest) -> Result<RuntimeSaveSections, CoreVnError> {
-        let session = self.session(&request.session_id)?;
-        let save = astra_runtime::write_runtime_save(
-            materialized_save_snapshot(session)?,
-            SaveRequest::default(),
-        )
-        .map_err(|err| CoreVnError::message(err.to_string()))?;
-        Ok(RuntimeSaveSections {
-            session_id: request.session_id,
-            sections: vec![RuntimeSectionPayload {
-                section_id: "runtime.world".to_string(),
-                schema: "astra.runtime.save_blob.v5".to_string(),
-                version: SchemaVersion::new(5, 0, 0),
-                codec: RuntimeSectionCodec::Raw,
-                hash: astra_core::Hash256::from_sha256(&save.0),
-                bytes: save.0,
-            }],
-            diagnostics: Vec::new(),
-        })
+        self.session(&request.session_id)?.save(request)
     }
 
     pub fn restore(
         &mut self,
         request: RuntimeRestoreRequest,
     ) -> Result<RuntimeRestoreReport, CoreVnError> {
-        if request.sections.len() != 1 {
-            return Err(CoreVnError::diagnostic(
-                "ASTRA_NATIVE_VN_RESTORE_SECTION_SET",
-                "restore requires exactly one authoritative runtime.world section",
-            ));
-        }
-        let runtime_section = required_restore_section_with_codec(
-            &request.sections,
-            "runtime.world",
-            "astra.runtime.save_blob.v5",
-            RuntimeSectionCodec::Raw,
-        )?;
-        if runtime_section.version != SchemaVersion::new(5, 0, 0)
-            || runtime_section.hash != astra_core::Hash256::from_sha256(&runtime_section.bytes)
-        {
-            return Err(CoreVnError::diagnostic(
-                "ASTRA_NATIVE_VN_RESTORE_INTEGRITY",
-                "runtime.world section version or hash is invalid",
-            ));
-        }
-        let session = self.session_mut(&request.session_id)?;
-        let (step, seed) = restore::restore_session(session, runtime_section)?;
-        Ok(RuntimeRestoreReport {
-            session_id: request.session_id,
-            restored_fixed_step: step,
-            session_seed: seed,
-            status: "restored".to_string(),
-            diagnostics: Vec::new(),
-        })
+        self.session_mut(&request.session_id)?.restore(request)
     }
 
     pub fn shutdown(
         &mut self,
         session_id: GameRuntimeSessionId,
     ) -> Result<RuntimeShutdownReport, CoreVnError> {
-        self.sessions.remove(&session_id.0).ok_or_else(|| {
+        let session = self.sessions.remove(&session_id.0).ok_or_else(|| {
             CoreVnError::diagnostic(
                 "ASTRA_NATIVE_VN_SESSION_MISSING",
                 "runtime session is not open",
             )
         })?;
-        Ok(RuntimeShutdownReport {
-            session_id,
-            status: "shutdown".to_string(),
-            diagnostics: Vec::new(),
-        })
+        Ok(session.close())
     }
 
     pub fn package_sections(&self) -> RuntimePackageSectionPlan {

@@ -18,6 +18,7 @@ fn fixture() -> (NativeVnRuntimeProvider, GameRuntimeSessionId) {
         .unwrap();
     let owner = world.create_actor("vn", vec![]).unwrap();
     let session = NativeVnSession {
+        id: GameRuntimeSessionId("restore.test".into()),
         world,
         owner,
         compiled,

@@ -80,3 +80,5 @@
 - NativeVnStateView 直接携带 typed 显示投影，Player 删除 RuntimeLiveVnState 和 cursor/choice/wait/system 等往返转换；ABI 仅在旧输出边界适配。4096 条 backlog 回归验证常规显示只取末条，Backlog/VoiceReplay/RouteChart 按页展开，终局保留路线，投影排除私有变量、调用栈和 read_state；2 项针对性测试通过。Engine 全量 fmt/clippy/build/test 通过：724 项通过、0 失败、9 项按原条件未执行；通用 package/lifecycle ABI 与其他消费者仍待迁移，真实平台验收未完成。
 
 - NativeVN 新增 open_native 与 NativeVnSessionConfig，创建逻辑拆到 native_open；Player 与 runtime 共享同一 Arc<CompiledStory>，删除启动时的 Postcard 编码/hash/解码、临时 section、重复 prepare/probe 和通用 open request。原生入口支持无 package 嵌入；2 项回归验证剧情共享、无包存读档、恢复后推进、关闭取消、非法 worker 数与重复 session 不发布/覆盖。Engine 全量 fmt/clippy/build/test 通过：726 项通过、0 失败、9 项按原条件未执行；provider 内部 session map、save/lifecycle 数据类型与 package descriptor 仍待迁移。
+
+- Player 的 NativeVnRuntimeHost 直接持有 NativeVnSession，step/save/restore 不再经 provider map；旧 ABI map 复用同一个 session 执行与关闭实现。创建、执行和保存模块已拆分，session API 校验调用身份，close 消费会话并取消作用域。provider 与 Player 单元测试通过，新增外来身份不变更状态、两个会话关闭隔离及 drop 取消回归。Engine 全量 fmt/clippy/build/test 通过：728 项通过、0 失败、9 项按原条件未执行；save/lifecycle ABI 数据类型、package descriptor 和剩余 ABI 消费者仍待迁移。

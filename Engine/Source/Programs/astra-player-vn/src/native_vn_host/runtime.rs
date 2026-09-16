@@ -2,7 +2,7 @@ use super::*;
 use astra_plugin_abi::{RuntimeRestoreReport, RuntimeShutdownReport};
 
 pub(super) struct NativeVnRuntimeHost {
-    provider: NativeVnRuntimeProvider,
+    runtime: Option<astra_vn_runtime_provider::NativeVnSession>,
     binding: ValidatedRuntimeProviderSelection,
     limits: RuntimeHostLimits,
     session: Option<GameRuntimeSessionId>,
@@ -22,7 +22,7 @@ impl NativeVnRuntimeHost {
             .validate_linked_descriptor(&NativeVnRuntimeProvider::descriptor())
             .map_err(|error| RuntimeHostError::new(error.code, error.message))?;
         Ok(Self {
-            provider: NativeVnRuntimeProvider::default(),
+            runtime: None,
             binding: binding.clone(),
             limits,
             session: None,
@@ -45,7 +45,7 @@ impl NativeVnRuntimeHost {
     }
 
     fn validate_session(&self, session: &GameRuntimeSessionId) -> Result<(), RuntimeHostError> {
-        if self.destroyed || self.session.as_ref() != Some(session) {
+        if self.destroyed || self.runtime.is_none() || self.session.as_ref() != Some(session) {
             return Err(RuntimeHostError::new(
                 "ASTRA_RUNTIME_HOST_SESSION",
                 "NativeVN session is not open",
@@ -78,10 +78,10 @@ impl NativeVnRuntimeHost {
             ));
         }
         let seed = options.seed;
-        let session_id = self
-            .provider
-            .open_native(compiled, config, options)
+        let runtime = astra_vn_runtime_provider::NativeVnSession::new(compiled, config, options)
             .map_err(|error| RuntimeHostError::new("ASTRA_RUNTIME_HOST_OPEN", error.to_string()))?;
+        let session_id = runtime.id().clone();
+        self.runtime = Some(runtime);
         self.session = Some(session_id.clone());
         self.seed = seed;
         self.last_step = 0;
@@ -111,8 +111,10 @@ impl NativeVnRuntimeHost {
         let step = input.fixed_step;
         self.failed = true;
         let result = self
-            .provider
-            .step_native(input)
+            .runtime
+            .as_mut()
+            .expect("validated native session")
+            .step(input)
             .map_err(|error| RuntimeHostError::new("ASTRA_RUNTIME_HOST_STEP", error.to_string()))
             .and_then(|output| {
                 if Some(&output.session_id) != self.session.as_ref() {
@@ -146,7 +148,9 @@ impl NativeVnRuntimeHost {
         self.require_healthy()?;
         self.failed = true;
         let result = self
-            .provider
+            .runtime
+            .as_ref()
+            .expect("validated native session")
             .save(request)
             .map_err(|error| RuntimeHostError::new("ASTRA_RUNTIME_HOST_SAVE", error.to_string()))
             .and_then(|report| {
@@ -165,7 +169,12 @@ impl NativeVnRuntimeHost {
         self.limits.validate_sections(&request.sections)?;
         let was_failed = self.failed;
         self.failed = true;
-        let report = match self.provider.restore(request) {
+        let report = match self
+            .runtime
+            .as_mut()
+            .expect("validated native session")
+            .restore(request)
+        {
             Ok(report) => report,
             Err(error) => {
                 self.failed = was_failed;
@@ -192,9 +201,12 @@ impl NativeVnRuntimeHost {
         let session = self.session.clone().ok_or_else(|| {
             RuntimeHostError::new("ASTRA_RUNTIME_HOST_SESSION", "NativeVN session is not open")
         })?;
-        let report = self.provider.shutdown(session).map_err(|error| {
-            RuntimeHostError::new("ASTRA_RUNTIME_HOST_SHUTDOWN", error.to_string())
-        })?;
+        self.validate_session(&session)?;
+        let report = self
+            .runtime
+            .take()
+            .expect("validated native session")
+            .close();
         self.session = None;
         Ok(report)
     }

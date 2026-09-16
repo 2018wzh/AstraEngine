@@ -17,11 +17,9 @@ pub struct NativeVnStepInput {
     pub command: NativeVnStepCommand,
 }
 
-impl NativeVnRuntimeProvider {
-    pub fn step_native(
-        &mut self,
-        input: NativeVnStepInput,
-    ) -> Result<NativeVnStepOutput, CoreVnError> {
+impl NativeVnSession {
+    pub fn step(&mut self, input: NativeVnStepInput) -> Result<NativeVnStepOutput, CoreVnError> {
+        self.validate_id(&input.session_id)?;
         tracing::trace!(
             event = "vn.provider.session.step",
             fixed_step = input.fixed_step,
@@ -30,7 +28,7 @@ impl NativeVnRuntimeProvider {
         let command = match input.command {
             NativeVnStepCommand::Execute(command) => command,
             NativeVnStepCommand::LaunchDefault => {
-                let session = self.session(&input.session_id)?;
+                let session = &*self;
                 CoreVnRuntime::from_shared_state_indexed(
                     Arc::clone(&session.compiled),
                     Arc::clone(&session.runtime_index),
@@ -165,6 +163,15 @@ fn validate_audio_order(
         ));
     }
     Ok(())
+}
+
+impl NativeVnRuntimeProvider {
+    pub fn step_native(
+        &mut self,
+        input: NativeVnStepInput,
+    ) -> Result<NativeVnStepOutput, CoreVnError> {
+        self.session_mut(&input.session_id)?.step(input)
+    }
 }
 
 #[cfg(test)]
