@@ -12,7 +12,7 @@ VM 和 CMVS 3.90 指令契约已迁入，状态、单步调度和 opcode 表拆�
 
 `CmvsArchive` 已改为核心自有文件访问，复用 SDK 的归档数据类型、读取边界与可选明文缓存。挂载、文件访问和来源校验分模块。`mount_cmvs` 从游戏目录有界读取 `cmvs.profile.json`，typed `CmvsProfile` 使用 `astra.emu.cmvs.profile.v2`。`archives` 是有序 `CmvsArchiveFile { role, path }` 列表，同名脚本查找按列表顺序决定优先级；不再由 role 名称的字母排序决定。`loose_files` 仍按唯一 role 映射相对文件路径。重复归档 role、重复来源、未知 schema、错误参数和未支持的 CPZ 版本明确失败，所有路径必须留在游戏目录。旧 v1 对象式归档配置直接拒绝，应按预期顺序重新编写列表，不自动推断优先级。当前挂载只接受 CPZ5，默认不创建磁盘缓存，不运行旧私有 patch 服务。
 
-`CmvsArchive::load_script` 直接从核心归档加载 PS2A，读取与解码成功后才通过 `install_script_frame` 更新入口 PC、脚本身份、名称索引、字符串长度表与初始数据段。frame 限 0–3，非法 frame 或路径在修改 VM 前拒绝。`install_script_data` 在重载时替换稀疏字表，全零或空数据段会删除旧字，其他 frame 不受影响。加载日志只记录 frame 和解码字节数，不记录资源名或正文。帧安装及关联脚本路径的 8 项增量回归通过。
+`CmvsArchive::load_script` 直接解析核心归档返回的共享字节，不再经流复制整份输入。输入上限仍为 64 MiB，读取与解码成功后才通过 `install_script_frame` 更新入口 PC、脚本身份、名称索引、字符串长度表与初始数据段。frame 限 0–3，非法 frame 或路径在修改 VM 前拒绝。`install_script_data` 在重载时替换稀疏字表，全零或空数据段会删除旧字，其他 frame 不受影响。加载日志只记录 frame 和解码字节数，不记录资源名或正文。帧安装及关联脚本路径的 8 项增量回归通过。
 
 `load_called_script` 经 `resolve_script_uri` 解析调用操作数后走同一加载入口。裸文件名沿用 ASCII 大小写不敏感、按归档挂载顺序首次命中的规则，不受 URI 字母排序影响；显式目录支持游戏使用的两种分隔符，越界路径拒绝。未找到脚本时返回稳定诊断，不附带原始名称。VM 调度与呈现的完整 session 尚未接通。
 

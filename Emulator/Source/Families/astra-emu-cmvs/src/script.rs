@@ -5,7 +5,7 @@ use crate::{
 };
 use astra_core::Hash256;
 use astra_emu_sdk::{validate_archive_uri, CoreError};
-use std::{collections::BTreeMap, io::Read};
+use std::collections::BTreeMap;
 
 const MAX_SCRIPT_BYTES: usize = 64 * 1024 * 1024;
 
@@ -31,21 +31,15 @@ impl CmvsArchive {
     ) -> Result<CmvsScript, CoreError> {
         validate_frame(frame)?;
         validate_archive_uri(&self.manifest().prefix, uri)?;
-        if self.stat(uri)?.size > MAX_SCRIPT_BYTES as u64 {
+        let size = self.stat(uri)?.size;
+        if size > MAX_SCRIPT_BYTES as u64 {
             return Err(script_bound());
         }
-        let mut bytes = Vec::new();
-        self.open_stream(uri)?
-            .take(MAX_SCRIPT_BYTES as u64 + 1)
-            .read_to_end(&mut bytes)
-            .map_err(|_| {
-                CoreError::invalid("ASTRA_EMU_CMVS_SCRIPT_READ", "script could not be read")
-            })?;
-        if bytes.len() > MAX_SCRIPT_BYTES {
-            return Err(script_bound());
-        }
-        let script = parse_ps2a(&bytes)?;
-        vm.install_script_frame(frame, uri, Hash256::from_sha256(&bytes), &script)?;
+        // Keep the decoded archive entry alive while parsing, without copying
+        // it through a stream into a second full-size input allocation.
+        let bytes = self.read_range(uri, 0, size)?.bytes;
+        let script = parse_ps2a(bytes.as_slice())?;
+        vm.install_script_frame(frame, uri, Hash256::from_sha256(bytes.as_slice()), &script)?;
         tracing::debug!(
             event = "cmvs.script.loaded",
             frame,
