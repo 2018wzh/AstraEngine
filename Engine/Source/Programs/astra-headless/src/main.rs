@@ -1279,6 +1279,13 @@ async fn run_execution(request: RunRequest<'_>) -> Result<(), String> {
                 Some(message.sequence),
             )?;
         }
+        tracing::trace!(
+            event = "astra.headless.input.started",
+            sequence = message.sequence,
+            effective_tick,
+            input_kind = physical_input_kind(&message.event),
+            "Headless started consuming physical input"
+        );
         let (observations, await_advanced_ticks) =
             consume_input(product.as_mut(), effective_tick, &message.event)
                 .await
@@ -1290,6 +1297,14 @@ async fn run_execution(request: RunRequest<'_>) -> Result<(), String> {
                         physical_input_kind(&message.event)
                     )
                 })?;
+        tracing::trace!(
+            event = "astra.headless.input.completed",
+            sequence = message.sequence,
+            effective_tick,
+            input_kind = physical_input_kind(&message.event),
+            advanced_ticks = await_advanced_ticks,
+            "Headless finished consuming physical input"
+        );
         if let Some(observer) = &performance_observer {
             observer.end_cpu_scope(
                 "runtime.cpu",
