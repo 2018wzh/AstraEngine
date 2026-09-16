@@ -1,11 +1,11 @@
 use super::*;
 
+#[cfg(test)]
+mod tests;
+
 pub(super) fn tag_zero_reference(value: u32) -> Result<CmvsPs2aPrivateStringReference, CoreError> {
-    // Tag 0x00 is the active frame's private pool and tag 0x40 is the
-    // alternate frame pool; both resolve through the same frame-owned
-    // string store, so the alternate tag folds onto the masked offset.
-    // Tags 0x80 (process-global message slots) and 0xC0 stay unrecovered
-    // here; command 48 resolves them through the message slot store.
+    // This entry point accepts only the active frame's tag-zero pool.
+    // Commands with other recovered domains use their explicit resolver.
     if value & 0xc000_0000 != 0 {
         return Err(invalid(
             "ASTRA_EMU_CMVS_VM_STRING_TAG",
@@ -32,21 +32,15 @@ pub(super) fn script_name_reference(
         }),
         0x8000_0000 => {
             let index = value & 0x3fff_ffff;
-            let segments = state
+            let reference = state
                 .message_string_slots
                 .get(&index)
-                .cloned()
-                .unwrap_or_default();
-            if let Some(reference) = single_pool_string_in_segments(state, &segments, 0) {
-                return Ok(reference);
-            }
-            // The native engine fills this slot from interpreter-external
-            // state (the menu confirm path copies the scenario name before
-            // `command 128` runs). The sentinel offset defers the name
-            // resolution to the provider, which maps the active filter-chain
-            // selection to its scenario.
-            Ok(CmvsPs2aPrivateStringReference {
-                relative_offset: u32::MAX,
+                .and_then(|segments| single_pool_string_in_segments(state, segments, 0));
+            reference.ok_or_else(|| {
+                invalid(
+                    "ASTRA_EMU_CMVS_VM_SCRIPT_NAME",
+                    "CMVS script name requires one resolved private string",
+                )
             })
         }
         _ => Err(invalid(
