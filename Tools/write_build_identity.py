@@ -83,40 +83,6 @@ def untracked_files(root: pathlib.Path) -> list[tuple[str, bytes]]:
     return files
 
 
-def ui_toolchain_identity(root: pathlib.Path) -> dict[str, object] | None:
-    lock_path = root / "Tools" / "ui-toolchain-lock.json"
-    if not lock_path.is_file():
-        return None
-    report_path = root / ".tmp" / "ui-toolchain" / "preflight.json"
-    if not report_path.is_file():
-        raise ValueError("ASTRA_UI_TOOLCHAIN_PREFLIGHT_MISSING")
-    report = json.loads(report_path.read_text(encoding="utf-8"))
-    if report.get("schema") != "astra.ui_toolchain_preflight.v1":
-        raise ValueError("ASTRA_UI_TOOLCHAIN_PREFLIGHT_SCHEMA_INVALID")
-    if report.get("lock_sha256") != sha256(lock_path.read_bytes()):
-        raise ValueError("ASTRA_UI_TOOLCHAIN_PREFLIGHT_STALE")
-    if report.get("controller_analysis") != "passed":
-        raise ValueError("ASTRA_UI_TOOLCHAIN_LUAU_ANALYSIS_NOT_PASSED")
-    tools = report.get("tools")
-    if not isinstance(tools, dict) or set(tools) != {"node", "luau_analyze", "jco"}:
-        raise ValueError("ASTRA_UI_TOOLCHAIN_PREFLIGHT_TOOLS_INVALID")
-    claimed_hash = report.get("report_hash")
-    canonical_report = dict(report)
-    canonical_report.pop("report_hash", None)
-    actual_hash = sha256(
-        json.dumps(canonical_report, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    )
-    if claimed_hash != actual_hash:
-        raise ValueError("ASTRA_UI_TOOLCHAIN_PREFLIGHT_HASH_INVALID")
-    return {
-        "lock_sha256": report["lock_sha256"],
-        "target": report.get("target"),
-        "tools": tools,
-        "supply_chain": report.get("supply_chain"),
-        "preflight_hash": actual_hash,
-    }
-
-
 def build_identity(root: pathlib.Path, cargo_args: Iterable[str]) -> dict[str, object]:
     git_head = run_output(["git", "rev-parse", "HEAD"], root).decode("utf-8").strip()
     git_diff = run_output(["git", "diff", "--binary", "HEAD"], root)
@@ -140,7 +106,6 @@ def build_identity(root: pathlib.Path, cargo_args: Iterable[str]) -> dict[str, o
         "workspace_manifest_hash": manifest_hash(root),
         "dependency_lock_hash": sha256((root / "Cargo.lock").read_bytes()),
         "toolchain_fingerprint": sha256(rustc_version.encode("utf-8")),
-        "ui_toolchain": ui_toolchain_identity(root) or {"status": "not_configured"},
         "feature_fingerprint": sha256(
             json.dumps(
                 feature_arguments(cargo_args),
