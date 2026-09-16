@@ -211,6 +211,17 @@ impl From<Vec<u8>> for OwnedPixelBuffer {
     }
 }
 
+/// Retain a GPU capture or other shared allocation without copying pixels.
+/// A subsequent mutable update uses the existing copy-on-write path.
+impl From<Arc<[u8]>> for OwnedPixelBuffer {
+    fn from(value: Arc<[u8]>) -> Self {
+        Self::from_owned(astra_byte_source::OwnedByteBuffer::from_owner(
+            value,
+            |bytes| bytes.as_ref(),
+        ))
+    }
+}
+
 impl Deref for OwnedPixelBuffer {
     type Target = [u8];
 

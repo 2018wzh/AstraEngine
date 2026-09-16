@@ -152,7 +152,7 @@ impl CmvsScene {
         Ok(TextureFrame {
             width,
             height,
-            rgba8: output.rgba8.to_vec().into(),
+            rgba8: output.rgba8.into(),
         })
     }
 }

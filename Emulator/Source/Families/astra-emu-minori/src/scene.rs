@@ -43,7 +43,7 @@ pub(crate) struct Scene {
     textures: TextureCache,
     width: u32,
     height: u32,
-    pub pixels: Vec<u8>,
+    pub pixels: Arc<[u8]>,
 }
 
 impl Scene {
@@ -76,7 +76,7 @@ impl Scene {
                 })?,
             width,
             height,
-            pixels: vec![0; width as usize * height as usize * 4],
+            pixels: vec![0; width as usize * height as usize * 4].into(),
         })
     }
     fn texture(&mut self, uri: &str) -> FamilyResult<TextureFrame> {
@@ -227,8 +227,7 @@ impl Scene {
                     code = ?cause.code, "GPU scene composition failed");
                 error("ASTRA_EMU_MINORI_RENDER", "GPU scene composition failed")
             })?
-            .rgba8
-            .to_vec();
+            .rgba8;
         self.sequence = sequence;
         Ok(())
     }
