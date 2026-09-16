@@ -58,12 +58,12 @@ impl NativeVnRuntimeProvider {
     }
 }
 
-/// Owned in-process presentation output. The view currently retains the bounded ABI projection.
+/// Owned in-process presentation output with a typed display projection.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NativeVnStepOutput {
     pub session_id: GameRuntimeSessionId,
     pub fixed_step: u64,
-    pub vn_state: astra_plugin_abi::RuntimeLiveVnState,
+    pub vn_state: NativeVnStateView,
     pub presentations: Vec<PresentationCommand>,
     pub audio: Vec<VnAudioCommand>,
     pub timeline: Vec<astra_vn_core::VnTimelineTask>,
@@ -128,7 +128,7 @@ impl NativeVnStepOutput {
                 audio_cues,
                 presentations,
                 timeline,
-                vn_state: Some(self.vn_state),
+                vn_state: Some(runtime_live_vn_state(&self.vn_state)),
                 vn_step: Some(vn_step),
                 ..astra_plugin_abi::RuntimeLiveOutput::default()
             },

@@ -5,7 +5,9 @@
 //! `ffi.rs`（FfiProviderInstance 1200+ 行）；本轮仅库内Headless/指纹/Hash优先，拆分延至下次 PR 避免与 `973191ede` 合并冲突。
 
 mod native_step;
+mod native_view;
 pub use native_step::{NativeVnStepCommand, NativeVnStepInput, NativeVnStepOutput};
+pub use native_view::NativeVnStateView;
 
 #[cfg(feature = "ffi")]
 use std::sync::OnceLock;
@@ -810,7 +812,7 @@ impl NativeVnRuntimeProvider {
             encoded_hot_state_bytes: 0,
             mutation_journal_entries,
         });
-        let live_vn_state = runtime_live_vn_state(&session.state);
+        let live_vn_state = NativeVnStateView::project(&session.state);
         Ok(NativeVnStepOutput {
             session_id,
             fixed_step,
@@ -1298,12 +1300,10 @@ fn unlock_kind_name(kind: SystemUnlockKind) -> &'static str {
     }
 }
 
-fn runtime_live_vn_state(state: &VnRuntimeState) -> astra_plugin_abi::RuntimeLiveVnState {
-    let active_page = state.system_stack.last().map(|frame| frame.page);
-    let expose_route_history =
-        active_page == Some(SystemPageKind::RouteChart) || state.cursor.is_none();
+fn runtime_live_vn_state(view: &NativeVnStateView) -> astra_plugin_abi::RuntimeLiveVnState {
+    let state = view.state();
     astra_plugin_abi::RuntimeLiveVnState {
-        backlog_count: state.backlog.len(),
+        backlog_count: view.backlog_count,
         revision: state.revision,
         instance_id: state.instance_id.clone(),
         profile: state.profile.clone(),
@@ -1350,11 +1350,6 @@ fn runtime_live_vn_state(state: &VnRuntimeState) -> astra_plugin_abi::RuntimeLiv
         backlog: state
             .backlog
             .iter()
-            .skip(if active_page == Some(SystemPageKind::Backlog) {
-                0
-            } else {
-                state.backlog.len().saturating_sub(1)
-            })
             .cloned()
             .map(|entry| astra_plugin_abi::RuntimeLiveVnBacklogEntry {
                 command_id: entry.command_id,
@@ -1371,7 +1366,6 @@ fn runtime_live_vn_state(state: &VnRuntimeState) -> astra_plugin_abi::RuntimeLiv
         voice_replay: state
             .voice_replay
             .iter()
-            .filter(|_| active_page == Some(SystemPageKind::VoiceReplay))
             .map(
                 |(id, entry)| astra_plugin_abi::RuntimeLiveVnVoiceReplayEntry {
                     id: id.clone(),
@@ -1381,16 +1375,10 @@ fn runtime_live_vn_state(state: &VnRuntimeState) -> astra_plugin_abi::RuntimeLiv
                 },
             )
             .collect(),
-        route_coverage: state
-            .route_coverage
-            .iter()
-            .filter(|_| expose_route_history)
-            .cloned()
-            .collect(),
+        route_coverage: state.route_coverage.iter().cloned().collect(),
         route_flags: state
             .route_flags
             .iter()
-            .filter(|_| expose_route_history)
             .map(|(id, flag)| astra_plugin_abi::RuntimeLiveVnRouteFlag {
                 id: id.clone(),
                 kind: match flag.kind {

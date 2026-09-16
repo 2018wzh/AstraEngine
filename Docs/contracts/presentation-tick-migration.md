@@ -107,3 +107,7 @@ NativeVnStepInput 将 tick/seed/mode 与 NativeVnStepCommand 分开表达。Play
 ### NativeVN typed 演出输出
 
 NativeVnStepOutput 直接拥有 PresentationCommand、VnAudioCommand 和 VnTimelineTask，Player 移动消费这些值，不再转换为 RuntimeLive 演出类型后解码回来。仅旧 ABI step 在返回边界进行转换。输出数量仍合计演出、音频和 timeline，超过宿主预算终止执行；音频与演出按原顺序匹配，缺失或多余音频明确失败。当前 VN view state 仍使用原来的按需历史投影，后续单独迁移，不为本次改动复制完整 backlog。save/package 格式不变。
+
+### NativeVN typed 状态视图
+
+NativeVnStateView 是进程内只读显示投影：直接复用 VN typed 字段，记录完整 backlog_count，但常规对话只复制最后一条 backlog。Backlog 页展开 backlog，VoiceReplay 页展开语音索引，RouteChart 或终局展开路线历史。call stack、variables、read_state 和 wait_sequence 不进入显示投影；权威状态与保存仍由 runtime 持有。Player 消费投影，不经过 RuntimeLiveVnState 往返转换；仅旧 ABI 输出边界适配。投影不提供 serde，不可用作存档恢复输入。
