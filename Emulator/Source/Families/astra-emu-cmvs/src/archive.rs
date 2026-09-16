@@ -13,6 +13,7 @@ use std::{
     time::SystemTime,
 };
 
+use astra_byte_source::OwnedByteBuffer;
 use astra_core::Hash256;
 use astra_emu_sdk::{
     validate_archive_directory_uri, validate_archive_uri, ArchiveEntry, ArchiveManifest,
@@ -79,7 +80,7 @@ pub struct CmvsArchive {
     scheme: CmvsSchemeProfile,
     private_profile_hash: Hash256,
     cache: Option<PlaintextCache>,
-    ephemeral_entry: Mutex<Option<(String, Vec<u8>)>>,
+    ephemeral_entry: Mutex<Option<(String, OwnedByteBuffer)>>,
 }
 
 struct CmvsPbImageResolver<'a> {
@@ -212,7 +213,7 @@ impl CmvsArchive {
         }
     }
 
-    fn decode_entry(&self, entry: &MountedEntry) -> Result<(Vec<u8>, bool), CoreError> {
+    fn decode_entry(&self, entry: &MountedEntry) -> Result<(OwnedByteBuffer, bool), CoreError> {
         let archive = &self.archives[entry.archive];
         verify_archive_stamp(archive)?;
         let cache_identity = CacheIdentity {
@@ -255,7 +256,7 @@ impl CmvsArchive {
                     "CMVS cached entry size does not match its descriptor",
                 ));
             }
-            return Ok((bytes, true));
+            return Ok((bytes.into(), true));
         }
         let mut source = File::open(&archive.path).map_err(|_| {
             invalid(
@@ -284,6 +285,7 @@ impl CmvsArchive {
         if let Some(cache) = cache {
             cache.put(&cache_identity, &bytes).map_err(cache_error)?;
         }
+        let bytes = OwnedByteBuffer::from(bytes);
         if entry.descriptor.stored_size < MIN_CACHEABLE_ENTRY_BYTES {
             let mut ephemeral = self.ephemeral_entry.lock().map_err(|_| {
                 invalid(
@@ -373,6 +375,10 @@ fn cache_error(error: PlaintextCacheError) -> CoreError {
         PlaintextCacheError::Io(_) => invalid("ASTRA_EMU_CMVS_CACHE_IO", "CMVS cache I/O failed"),
     }
 }
+
+#[cfg(test)]
+#[path = "archive/cache_tests.rs"]
+mod cache_tests;
 
 #[cfg(test)]
 mod tests {

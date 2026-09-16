@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+astra-byte-source = { path = "../../../../Engine/Source/Runtime/astra-byte-source" }
 astra-emu-sdk = { path = "../../SDK/astra-emu-sdk", default-features = false, features = ["archive", "cache", "image", "audio"] }
 kira.workspace = true
 astra-media-core = { path = "../../../../Engine/Source/Runtime/astra-media-core" }

@@ -543,6 +543,7 @@ dependencies = [
 name = "astra-emu-cmvs"
 version = "0.1.0"
 dependencies = [
+ "astra-byte-source",
  "astra-core",
  "astra-emu-sdk",
  "astra-media-core",

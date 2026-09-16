@@ -198,11 +198,15 @@ impl CmvsArchive {
                 )
             })?)
             .ok_or_else(|| invalid("ASTRA_EMU_VFS_READ_RANGE", "VFS range overflowed"))?;
+        let eof = end == decoded.len();
+        let bytes = OwnedByteBuffer::from_owner((decoded, start..end), |(owner, range)| {
+            &owner[range.clone()]
+        });
         Ok(ArchiveReadResult {
             uri: uri.into(),
             offset,
-            bytes: decoded[start..end].to_vec().into(),
-            eof: end == decoded.len(),
+            bytes,
+            eof,
             cache_hit,
         })
     }
