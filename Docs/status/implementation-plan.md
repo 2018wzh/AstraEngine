@@ -31,6 +31,8 @@ CMVS 指令执行已移除整 VM 克隆与隐式回滚，直接保留现有缓�
 
 SDK 音频解码改为同步借用源切片，直接复用 Symphonia 支持借用数据的 MediaSourceStream。Minori 的资产读取保留 AstraEngine OwnedByteBuffer，脚本、图片和音频消费者不再先复制整段归档数据；CMVS 普通音频与 MGV 内嵌 Ogg 同样删除解码前的整段复制。返回 PCM 独立持有采样，帧数预算、取消和格式错误语义不变。SDK 单元测试、CMVS 与 Minori 库测试通过，包含已有 GPU 会话、音频关闭与恢复回归；受影响三个 crate 的全目标 Clippy 和格式检查通过。尚未完成 CMVS Family session 与真实游戏验收。
 
+FVP Sandbox 后续剧情已完成中途存读档往返：自动播放经过场景与人物切换后，在空槽 005 保存；原生存档页显示新缩略图和时间。返回剧情并推进下一段后，读取 005 直接恢复保存时的背景与文字，随后可继续自动播放。本次未复现早期槽位读取后停留在系统页的现象，但未与上游独立程序对照，不能据此认定相关行为已修复。测试仍使用 GPU 和显式 NullAudioDevice；完整结局、实际声音和损坏存档验收继续开放。
+
 FVP、Minori、Siglus 已改用 API 内可选 ProviderModule，共用单会话 ABI 管理；panic 后仍可关闭，模块释放会关闭遗留会话。API 16 项单元测试、FVP/Minori/Siglus 与 Manager 的增量测试、受影响 crate 全目标 Clippy 和格式检查已通过。FVP/Minori 显式开启 dynamic-plugin-export 后，三个实际插件均通过 Manager 的 ABI 布局与诊断接入检查（共 6 项）；导出 feature 的全目标 Clippy 和 FVP 在 1 MiB 栈上连续三次开关会话的回归也通过。核心 VM、媒体和原生存档实现未因 ABI 复用而改写。
 
 Headless 长流程新增逐输入开始/完成 TRACE，使用序号、输入种类和有效 tick 定位耗时，不输出观察值或商业内容。22 项单元测试通过，2 项显式性能测试未执行；逐输入日志现已用于修复版终之空完整路线运行。
