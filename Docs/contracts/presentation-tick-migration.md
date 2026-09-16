@@ -139,3 +139,7 @@ PackageReader::runtime_selection 返回只读 PackageRuntimeSelection（NativeVn
 ### NativeVN 状态原位执行
 
 NativeVnSession 长期持有 VnRuntime，step 在同一份状态上执行，不复制 backlog/read-state/voice replay，也不临时重建 reducer。Core 的 apply_deferred 提交 revision 并返回待 Runtime 补齐 await 身份的输出；bind_pending_wait 只允许替换匹配的当前 wait，不公开可变状态。执行错误或 panic 时取消当前任务作用域，session 保持 failed，拒绝 step/save；成功 restore 才恢复可用，失败 restore 保留原状态与失败标记。存档仍在保存边界物化，容器格式不变。
+
+### NativeVN 移除转发 FSM
+
+NativeVN 由会话直接执行 typed command，Runtime tick 处理已有等待完成，随后会话以 Runtime 来源提交业务事件，并通过 RuntimeWorld::create_host_await 创建下一等待。新等待绑定当前 tick，事件进入有序队列供下一 tick 消费；保存保留队列和等待。删除专用单状态 FSM、转发 action、控制 Mutex 和字符串 PlayerInput 映射。Runtime 的通用 flat FSM 仍可选用。旧 NativeVN 存档中非空 StateMachineStore 返回 ASTRA_NATIVE_VN_RESTORE_LEGACY_MACHINE，预检失败不改变当前会话，不提供迁移。

@@ -1,8 +1,4 @@
-//! Native AstraVN gameplay runtime provider and ABI-safe FFI adapter.
-//! TODO(harness-merge): 单文件 3372 行违反 Charter `>600 拆模块`，已规划拆
-//! `factory.rs`（Factory/Session wrapper）`session.rs`（NativeVnSession/VnStepAction）
-//! `provider.rs`（NativeVnRuntimeProvider impl）`command.rs`（command 转换）
-//! `ffi.rs`（FfiProviderInstance 1200+ 行）；本轮仅库内Headless/指纹/Hash优先，拆分延至下次 PR 避免与 `973191ede` 合并冲突。
+//! Owned NativeVN sessions and the remaining legacy provider/FFI boundary.
 
 mod native_open;
 mod native_session;
@@ -68,12 +64,9 @@ use astra_plugin_abi::{
     RuntimeLiveWaitKind,
 };
 use astra_runtime::{
-    ActionAccess, ActionDescriptor, ActionExecutionClass, ActionInvocation, ActionResourceKey,
-    ActionTrace, ActorId, BlackboardValue, ComponentId, ComponentRecord,
-    DeterministicActionContext, EventPayload, GuardExpr, OrderedTickIngress, PackageHandle,
-    PlayerInput, RuntimeAction, RuntimeComponentPayload, RuntimeConfig, RuntimeError,
-    RuntimeSnapshot, RuntimeWorld, SaveBlob, SaveRequest, StateDefinition, StateMachineDefinition,
-    TickIngress, TickInput, TickIntegrityMode, TickRequest, TransitionDefinition,
+    ActorId, BlackboardValue, ComponentId, ComponentRecord, EventPayload, OrderedTickIngress,
+    PackageHandle, RuntimeComponentPayload, RuntimeConfig, RuntimeError, RuntimeSnapshot,
+    RuntimeWorld, SaveBlob, SaveRequest, TickIngress, TickInput, TickIntegrityMode, TickRequest,
 };
 pub use astra_vn_core::*;
 use astra_vn_core::{
@@ -329,17 +322,6 @@ impl ProductRuntimeProvider for NativeVnRuntimeProvider {
     ) -> Result<RuntimeShutdownReport, String> {
         NativeVnRuntimeProvider::shutdown(self, session_id).map_err(|err| err.to_string())
     }
-}
-
-struct VnStepAction {
-    pending_control: Arc<Mutex<Option<PreparedVnControl>>>,
-    control_result: Arc<Mutex<Option<astra_runtime::AwaitTokenId>>>,
-}
-
-#[derive(Clone)]
-struct PreparedVnControl {
-    events: Vec<(String, String)>,
-    create_wait: Option<astra_runtime::AwaitKind>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -876,110 +858,6 @@ fn required_unlock_kind(value: String) -> Result<SystemUnlockKind, CoreVnError> 
     }
 }
 
-fn command_event_data(command: &CoreVnPlayerCommand) -> BTreeMap<String, BlackboardValue> {
-    let mut data = BTreeMap::new();
-    let string = |value: &str| BlackboardValue::String(value.to_string());
-    match command {
-        CoreVnPlayerCommand::Launch { story_id, state_id } => {
-            data.insert("story_id".to_string(), string(story_id));
-            data.insert("state_id".to_string(), string(state_id));
-        }
-        CoreVnPlayerCommand::Choose { option_id } => {
-            data.insert("option_id".to_string(), string(option_id));
-        }
-        CoreVnPlayerCommand::OpenSystem { page }
-        | CoreVnPlayerCommand::SwitchSystemPage { page } => {
-            data.insert("page".to_string(), string(page_name(*page)));
-        }
-        CoreVnPlayerCommand::ReplayVoice { voice } => {
-            data.insert("voice".to_string(), string(voice));
-        }
-        CoreVnPlayerCommand::SetAuto { enabled }
-        | CoreVnPlayerCommand::SetAudioEnabled { enabled } => {
-            data.insert("enabled".to_string(), BlackboardValue::Bool(*enabled));
-        }
-        CoreVnPlayerCommand::SetSkip { mode } => {
-            data.insert("mode".to_string(), string(skip_mode_name(*mode)));
-        }
-        CoreVnPlayerCommand::SetReadingMode { mode } => {
-            data.insert("mode".to_string(), string(reading_mode_name(*mode)));
-        }
-        CoreVnPlayerCommand::InvokeSystemAction { action_id } => {
-            data.insert("action_id".to_string(), string(action_id));
-        }
-        CoreVnPlayerCommand::SetConfig { key, value } => {
-            data.insert("key".to_string(), string(key));
-            data.insert("value".to_string(), string(value));
-        }
-        CoreVnPlayerCommand::StartReplay { replay_id } => {
-            data.insert("replay_id".to_string(), string(replay_id));
-        }
-        CoreVnPlayerCommand::PreviewGallery { item_id } => {
-            data.insert("item_id".to_string(), string(item_id));
-        }
-        CoreVnPlayerCommand::JumpRoute { node_id } => {
-            data.insert("node_id".to_string(), string(node_id));
-        }
-        CoreVnPlayerCommand::JumpBacklog { command_id } => {
-            data.insert("command_id".to_string(), string(command_id));
-        }
-        CoreVnPlayerCommand::SubmitText { input_id, value } => {
-            data.insert("input_id".to_string(), string(input_id));
-            data.insert("value".to_string(), string(value));
-        }
-        CoreVnPlayerCommand::Unlock { kind, id } => {
-            data.insert("kind".to_string(), string(unlock_kind_name(*kind)));
-            data.insert("id".to_string(), string(id));
-        }
-        CoreVnPlayerCommand::CompleteWait { fence } => {
-            data.insert("fence".to_string(), string(fence));
-        }
-        CoreVnPlayerCommand::Advance | CoreVnPlayerCommand::ReturnSystem => {}
-    }
-    data
-}
-
-fn page_name(page: SystemPageKind) -> &'static str {
-    match page {
-        SystemPageKind::Title => "title",
-        SystemPageKind::QuickPanel => "quick_panel",
-        SystemPageKind::Save => "save",
-        SystemPageKind::Load => "load",
-        SystemPageKind::Config => "config",
-        SystemPageKind::Gallery => "gallery",
-        SystemPageKind::Replay => "replay",
-        SystemPageKind::VoiceReplay => "voice_replay",
-        SystemPageKind::RouteChart => "route_chart",
-        SystemPageKind::Backlog => "backlog",
-        SystemPageKind::LocalizationPreview => "localization_preview",
-        SystemPageKind::Custom => "custom",
-        SystemPageKind::Unknown => "unknown",
-    }
-}
-
-fn skip_mode_name(mode: SkipMode) -> &'static str {
-    match mode {
-        SkipMode::None => "none",
-        SkipMode::Read => "read",
-        SkipMode::All => "all",
-    }
-}
-
-fn reading_mode_name(mode: ReadingMode) -> &'static str {
-    match mode {
-        ReadingMode::Hidden => "hidden",
-        ReadingMode::Manual => "manual",
-        ReadingMode::FastForward => "fast_forward",
-    }
-}
-
-fn unlock_kind_name(kind: SystemUnlockKind) -> &'static str {
-    match kind {
-        SystemUnlockKind::Gallery => "gallery",
-        SystemUnlockKind::Replay => "replay",
-    }
-}
-
 fn runtime_live_vn_state(view: &NativeVnStateView) -> astra_plugin_abi::RuntimeLiveVnState {
     let state = view.state();
     astra_plugin_abi::RuntimeLiveVnState {
@@ -1119,85 +997,6 @@ fn runtime_live_vn_wait(wait: VnWaitState) -> astra_plugin_abi::RuntimeLiveVnWai
         fence: wait.fence,
         command_id: wait.command_id,
         await_id: wait.await_id,
-    }
-}
-
-impl RuntimeAction for VnStepAction {
-    fn descriptor(&self) -> ActionDescriptor {
-        ActionDescriptor::declared(
-            "astra.vn.step",
-            "astra.vn.step_action_input.v1",
-            "astra.vn.step_output.v1",
-            ActionExecutionClass::Serial,
-            ActionAccess::new(
-                [ActionResourceKey::EventQueue],
-                [
-                    ActionResourceKey::AwaitQueue,
-                    ActionResourceKey::EventQueue,
-                    ActionResourceKey::StableIdSource,
-                ],
-            ),
-            200_000,
-        )
-    }
-
-    fn run(
-        &self,
-        ctx: &mut DeterministicActionContext<'_>,
-        input: &BTreeMap<String, BlackboardValue>,
-    ) -> Result<ActionTrace, RuntimeError> {
-        let event = ctx.trigger_event().ok_or_else(|| {
-            RuntimeError::diagnostic(astra_core::Diagnostic::blocking(
-                "ASTRA_VN_STEP_TRIGGER_MISSING",
-                "astra.vn.step requires a trigger event",
-            ))
-        })?;
-        let event_kind = event.payload.kind.clone();
-        let control = self
-            .pending_control
-            .lock()
-            .map_err(|_| RuntimeError::message("VN control lock is poisoned"))?
-            .take()
-            .ok_or_else(|| {
-                RuntimeError::diagnostic(astra_core::Diagnostic::blocking(
-                    "ASTRA_NATIVE_VN_CONTROL_MISSING",
-                    "NativeVN provider did not prepare a control transaction",
-                ))
-            })?;
-        for (kind, id) in control.events {
-            ctx.emit_event(
-                astra_runtime::EventSource::StateMachine,
-                EventPayload {
-                    kind,
-                    data: [("id".to_string(), BlackboardValue::String(id))]
-                        .into_iter()
-                        .collect(),
-                },
-            );
-        }
-        if let Some(kind) = control.create_wait {
-            let token = ctx.create_await(kind);
-            let token_id = token.token_id;
-            ctx.push_await(token)?;
-            *self
-                .control_result
-                .lock()
-                .map_err(|_| RuntimeError::message("VN control result lock is poisoned"))? =
-                Some(token_id);
-        }
-        let mut trace_payload = if ctx.evidence_mode() {
-            input.clone()
-        } else {
-            BTreeMap::new()
-        };
-        trace_payload.insert(
-            "event_kind".to_string(),
-            BlackboardValue::String(event_kind),
-        );
-        Ok(ActionTrace {
-            action_id: self.descriptor().id,
-            payload: trace_payload,
-        })
     }
 }
 
@@ -1650,56 +1449,6 @@ fn runtime_live_interrupt(
         }
         PresentationInterruptPolicy::Reject => astra_plugin_abi::RuntimeLiveInterruptPolicy::Reject,
     }
-}
-
-fn vn_event_kind(command: &CoreVnPlayerCommand) -> &'static str {
-    match command {
-        CoreVnPlayerCommand::Launch { .. } => "vn.launch",
-        CoreVnPlayerCommand::Advance => "player.advance",
-        CoreVnPlayerCommand::Choose { .. } => "choice.selected",
-        CoreVnPlayerCommand::OpenSystem { .. } => "system.open",
-        CoreVnPlayerCommand::SwitchSystemPage { .. } => "system.switch",
-        CoreVnPlayerCommand::ReturnSystem => "system.return",
-        CoreVnPlayerCommand::ReplayVoice { .. } => "voice.replay",
-        CoreVnPlayerCommand::SetAuto { .. } => "system.auto",
-        CoreVnPlayerCommand::SetSkip { .. } => "system.skip",
-        CoreVnPlayerCommand::SetReadingMode { .. } => "system.reading_mode",
-        CoreVnPlayerCommand::SetAudioEnabled { .. } => "system.audio_enabled",
-        CoreVnPlayerCommand::InvokeSystemAction { .. } => "system.action",
-        CoreVnPlayerCommand::SetConfig { .. } => "system.config",
-        CoreVnPlayerCommand::StartReplay { .. } => "system.replay.start",
-        CoreVnPlayerCommand::PreviewGallery { .. } => "system.gallery.preview",
-        CoreVnPlayerCommand::JumpRoute { .. } => "system.route.jump",
-        CoreVnPlayerCommand::JumpBacklog { .. } => "system.backlog.jump",
-        CoreVnPlayerCommand::SubmitText { .. } => "system.text.submit",
-        CoreVnPlayerCommand::Unlock { .. } => "system.unlock",
-        CoreVnPlayerCommand::CompleteWait { .. } => "await.completed",
-    }
-}
-
-fn vn_runtime_event_kinds() -> [&'static str; 20] {
-    [
-        "vn.launch",
-        "player.advance",
-        "choice.selected",
-        "system.open",
-        "system.switch",
-        "system.return",
-        "voice.replay",
-        "system.auto",
-        "system.skip",
-        "system.reading_mode",
-        "system.audio_enabled",
-        "system.action",
-        "system.config",
-        "system.replay.start",
-        "system.gallery.preview",
-        "system.route.jump",
-        "system.backlog.jump",
-        "system.text.submit",
-        "system.unlock",
-        "await.completed",
-    ]
 }
 
 fn command_resolves_wait(

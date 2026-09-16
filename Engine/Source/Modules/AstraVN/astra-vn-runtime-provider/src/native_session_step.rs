@@ -9,7 +9,6 @@ impl NativeVnSession {
     ) -> Result<NativeVnStepOutput, CoreVnError> {
         let fixed_step = timing.fixed_step;
         let session = self;
-        let event_kind = vn_event_kind(&command).to_string();
         let previous_state = session.runtime.state();
         let pending_wait = previous_state.pending_wait.clone();
         let reading_mode = previous_state.system.reading_mode;
@@ -39,22 +38,6 @@ impl NativeVnSession {
         if let Some(wait) = next_state.pending_wait.clone() {
             pending_output.set_wait(wait);
         }
-        let control = PreparedVnControl {
-            events: pending_output
-                .events()
-                .iter()
-                .map(|event| (event.kind.clone(), event.id.clone()))
-                .collect(),
-            create_wait,
-        };
-        *session
-            .pending_control
-            .lock()
-            .map_err(|_| CoreVnError::message("VN control lock is poisoned"))? = Some(control);
-        *session
-            .control_result
-            .lock()
-            .map_err(|_| CoreVnError::message("VN control result lock is poisoned"))? = None;
         let mut ingress = Vec::new();
         if command_resolves_wait(
             &command,
@@ -89,16 +72,6 @@ impl NativeVnSession {
                 )),
             });
         }
-        ingress.push(OrderedTickIngress {
-            sequence: ingress.len() as u64 + 1,
-            payload: TickIngress::PlayerInput(PlayerInput {
-                kind: event_kind.clone(),
-                payload: EventPayload {
-                    kind: event_kind,
-                    data: command_event_data(&command),
-                },
-            }),
-        });
         let request = TickRequest {
             timing,
             mode,
@@ -114,12 +87,25 @@ impl NativeVnSession {
                 diagnostic.message.clone(),
             ));
         }
-        if let Some(token_id) = session
-            .control_result
-            .lock()
-            .map_err(|_| CoreVnError::message("VN control result lock is poisoned"))?
-            .take()
-        {
+        for event in pending_output.events() {
+            session
+                .world
+                .emit_event(
+                    astra_runtime::EventSource::Runtime,
+                    EventPayload {
+                        kind: event.kind.clone(),
+                        data: [("id".into(), BlackboardValue::String(event.id.clone()))]
+                            .into_iter()
+                            .collect(),
+                    },
+                )
+                .map_err(|error| CoreVnError::message(error.to_string()))?;
+        }
+        if let Some(kind) = create_wait {
+            let token_id = session
+                .world
+                .create_host_await(kind)
+                .map_err(|error| CoreVnError::message(error.to_string()))?;
             let wait = session
                 .runtime
                 .state()

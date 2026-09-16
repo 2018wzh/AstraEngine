@@ -1,6 +1,24 @@
 use super::*;
 
 impl RuntimeWorld {
+    /// Create a host-result wait at the current committed step without an FSM action.
+    /// The token is saved with the world; obtain a scoped handle to complete it.
+    pub fn create_host_await(
+        &mut self,
+        kind: crate::AwaitKind,
+    ) -> Result<crate::AwaitTokenId, RuntimeError> {
+        self.ensure_active()?;
+        let token_id = crate::AwaitTokenId(self.next_id());
+        self.insert_await_token(crate::AwaitToken {
+            token_id,
+            kind,
+            requested_at_step: self.step,
+            timeout_step: None,
+            completion_policy: crate::AwaitCompletionPolicy::HostResult,
+        })?;
+        Ok(token_id)
+    }
+
     pub(super) fn submit_await_result(&mut self, completion: AwaitCompletion) {
         if !self.tasks.accepts(&completion) {
             self.awaits.reject_stale(completion.result.token_id);

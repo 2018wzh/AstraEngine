@@ -10,8 +10,6 @@ pub struct NativeVnSession {
     pub(super) runtime_index: Arc<CoreVnRuntimeIndex>,
     pub(super) runtime: CoreVnRuntime,
     pub(super) failed: bool,
-    pub(super) pending_control: Arc<Mutex<Option<PreparedVnControl>>>,
-    pub(super) control_result: Arc<Mutex<Option<astra_runtime::AwaitTokenId>>>,
     pub(super) step_complexity: Option<VnStepComplexityMetrics>,
 }
 
@@ -229,5 +227,52 @@ mod tests {
             .bind_pending_wait(&original, "host.await.stale".into())
             .is_err());
         assert_eq!(session.runtime.state().pending_wait.as_ref(), Some(&bound));
+    }
+    #[test]
+    fn direct_wait_survives_save_and_completes_without_a_state_machine() {
+        let mut session = session("direct");
+        launch(&mut session);
+        let snapshot = session.world.snapshot().unwrap();
+        assert_eq!(
+            snapshot.machines,
+            astra_runtime::StateMachineStore::default()
+        );
+        assert_eq!(snapshot.awaits.pending().len(), 1);
+        let token = &snapshot.awaits.pending()[0];
+        assert_eq!(token.requested_at_step, 1);
+        assert_eq!(
+            session
+                .runtime
+                .state()
+                .pending_wait
+                .as_ref()
+                .unwrap()
+                .await_id
+                .as_deref(),
+            Some(token.token_id.0.to_string().as_str())
+        );
+        assert!(!snapshot.events.pending().is_empty());
+        assert!(snapshot
+            .events
+            .pending()
+            .iter()
+            .all(|event| event.source == astra_runtime::EventSource::Runtime && event.step == 1));
+        let saved = session.save().unwrap();
+        session.restore(saved).unwrap();
+        session
+            .step(NativeVnStepInput {
+                timing: TickInput {
+                    fixed_step: 2,
+                    delta_ns: 16_666_667,
+                    seed: 23,
+                },
+                mode: astra_runtime::TickMode::RestoreContinuation,
+                command: NativeVnStepCommand::Execute(CoreVnPlayerCommand::Advance),
+            })
+            .unwrap();
+        let after = session.world.snapshot().unwrap();
+        assert!(after.awaits.pending().is_empty());
+        assert_eq!(after.machines, astra_runtime::StateMachineStore::default());
+        assert!(session.runtime.state().pending_wait.is_none());
     }
 }

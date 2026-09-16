@@ -54,48 +54,6 @@ impl NativeVnSession {
         world
             .attach_component(owner, "astra.vn.policy_state.v1", &VnPolicyState::default())
             .map_err(|err| CoreVnError::message(err.to_string()))?;
-        let pending_control = Arc::new(Mutex::new(None));
-        let control_result = Arc::new(Mutex::new(None));
-        world
-            .register_action(
-                NATIVE_VN_PROVIDER_ID,
-                VnStepAction {
-                    pending_control: Arc::clone(&pending_control),
-                    control_result: Arc::clone(&control_result),
-                },
-            )
-            .map_err(|err| CoreVnError::message(err.to_string()))?;
-        let running = astra_core::StableId::deterministic_v7(0, 1, options.seed);
-        world
-            .add_state_machine(StateMachineDefinition {
-                id: astra_core::StableId::deterministic_v7(0, 2, options.seed),
-                owner,
-                states: vec![StateDefinition {
-                    id: running,
-                    name: "vn.running".to_string(),
-                    terminal: false,
-                }],
-                transitions: vec![TransitionDefinition {
-                    from: running,
-                    to: running,
-                    guard: GuardExpr::Or {
-                        terms: vn_runtime_event_kinds()
-                            .into_iter()
-                            .map(|kind| GuardExpr::EventIs {
-                                kind: kind.to_string(),
-                            })
-                            .collect(),
-                    },
-                    actions: vec![ActionInvocation {
-                        action_id: "astra.vn.step".to_string(),
-                        input: BTreeMap::new(),
-                    }],
-                    priority: 0,
-                    source_ref: None,
-                }],
-                initial_state: running,
-            })
-            .map_err(|err| CoreVnError::message(err.to_string()))?;
         Ok(Self {
             id: session_id,
             seed: options.seed,
@@ -105,8 +63,6 @@ impl NativeVnSession {
             runtime_index,
             runtime: initial_runtime,
             failed: false,
-            pending_control,
-            control_result,
             step_complexity: None,
         })
     }

@@ -26,11 +26,6 @@ fn fixture() -> (NativeVnRuntimeProvider, GameRuntimeSessionId) {
         runtime_index,
         runtime,
         failed: false,
-        pending_control: Arc::new(Mutex::new(Some(PreparedVnControl {
-            events: vec![],
-            create_wait: None,
-        }))),
-        control_result: Arc::new(Mutex::new(None)),
         step_complexity: None,
     };
     let id = GameRuntimeSessionId("restore.test".into());
@@ -52,7 +47,7 @@ fn section(snapshot: RuntimeSnapshot) -> RuntimeSectionPayload {
 }
 
 #[test]
-fn typed_restore_rejection_preserves_world_state_and_pending_control() {
+fn typed_restore_rejection_preserves_world_state_and_scope() {
     for case in [
         "missing",
         "duplicate",
@@ -61,11 +56,13 @@ fn typed_restore_rejection_preserves_world_state_and_pending_control() {
         "schema",
         "package",
         "seed",
+        "legacy_machine",
     ] {
         let (mut provider, id) = fixture();
         let session = provider.session(&id).unwrap();
         let before = session.world.save(SaveRequest::default()).unwrap();
         let state_before = session.runtime.state().clone();
+        let scope_before = session.world.task_scope();
         let mut snapshot = materialized_save_snapshot(session).unwrap();
         // This mutation would become visible if the world were committed before validation.
         snapshot.step = 99;
@@ -114,6 +111,23 @@ fn typed_restore_rejection_preserves_world_state_and_pending_control() {
                         invalid,
                     );
             }
+            "legacy_machine" => {
+                let running = astra_core::StableId::deterministic_v7(0, 1, 0);
+                snapshot
+                    .machines
+                    .add(astra_runtime::StateMachineDefinition {
+                        id: astra_core::StableId::deterministic_v7(0, 2, 0),
+                        owner: session.owner,
+                        states: vec![astra_runtime::StateDefinition {
+                            id: running,
+                            name: "vn.running".into(),
+                            terminal: false,
+                        }],
+                        transitions: vec![],
+                        initial_state: running,
+                    })
+                    .unwrap();
+            }
             _ => unreachable!(),
         }
         let error = provider.restore(RuntimeRestoreRequest {
@@ -121,6 +135,12 @@ fn typed_restore_rejection_preserves_world_state_and_pending_control() {
             sections: vec![section(snapshot)],
         });
         assert!(error.is_err(), "{case}");
+        if case == "legacy_machine" {
+            assert!(error
+                .unwrap_err()
+                .to_string()
+                .contains("ASTRA_NATIVE_VN_RESTORE_LEGACY_MACHINE"));
+        }
         let session = provider.session(&id).unwrap();
         assert_eq!(
             session.world.save(SaveRequest::default()).unwrap().0,
@@ -128,12 +148,13 @@ fn typed_restore_rejection_preserves_world_state_and_pending_control() {
             "{case}"
         );
         assert_eq!(session.runtime.state(), &state_before, "{case}");
-        assert!(session.pending_control.lock().unwrap().is_some(), "{case}");
+        assert_eq!(session.world.task_scope(), scope_before, "{case}");
+        assert!(!scope_before.is_cancelled());
     }
 }
 
 #[test]
-fn restore_checks_outer_integrity_then_commits_and_clears_old_controls() {
+fn restore_checks_outer_integrity_then_commits_and_cancels_old_scope() {
     let (mut provider, id) = fixture();
     let saved = provider
         .save(RuntimeSaveRequest {
@@ -141,6 +162,7 @@ fn restore_checks_outer_integrity_then_commits_and_clears_old_controls() {
             slot: "test".into(),
         })
         .unwrap();
+    let old_scope = provider.session(&id).unwrap().world.task_scope();
     assert_eq!(saved.sections[0].version, SchemaVersion::new(5, 0, 0));
     for wrong_version in [true, false] {
         let mut sections = saved.sections.clone();
@@ -158,13 +180,7 @@ fn restore_checks_outer_integrity_then_commits_and_clears_old_controls() {
         assert!(error
             .to_string()
             .contains("ASTRA_NATIVE_VN_RESTORE_INTEGRITY"));
-        assert!(provider
-            .session(&id)
-            .unwrap()
-            .pending_control
-            .lock()
-            .unwrap()
-            .is_some());
+        assert!(!old_scope.is_cancelled());
     }
     provider
         .session_mut(&id)
@@ -187,7 +203,8 @@ fn restore_checks_outer_integrity_then_commits_and_clears_old_controls() {
     assert_eq!(report.restored_fixed_step, 0);
     let session = provider.session_mut(&id).unwrap();
     assert_eq!(session.runtime.state().revision, 0);
-    assert!(session.pending_control.lock().unwrap().is_none());
+    assert!(old_scope.is_cancelled());
+    assert!(!session.world.task_scope().is_cancelled());
     assert_eq!(
         session
             .world

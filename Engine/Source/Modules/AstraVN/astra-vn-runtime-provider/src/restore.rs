@@ -4,15 +4,6 @@ pub(super) fn restore_session(
     session: &mut NativeVnSession,
     blob: SaveBlob,
 ) -> Result<(u64, u64), CoreVnError> {
-    // Acquire fallible host resources before committing either half of the session.
-    let mut pending = session
-        .pending_control
-        .lock()
-        .map_err(|_| CoreVnError::message("VN control lock is poisoned"))?;
-    let mut result = session
-        .control_result
-        .lock()
-        .map_err(|_| CoreVnError::message("VN control result lock is poisoned"))?;
     let package = session.world.package_handle().cloned();
     let owner = session.owner;
     let expected_seed = session.seed;
@@ -22,6 +13,9 @@ pub(super) fn restore_session(
         blob,
         &astra_core::SchemaMigrationRegistry::default(),
         |snapshot| {
+            if snapshot.machines != astra_runtime::StateMachineStore::default() {
+                return Err(RuntimeError::message("ASTRA_NATIVE_VN_RESTORE_LEGACY_MACHINE: NativeVN no longer executes saved forwarding state machines"));
+            }
             if snapshot.config.seed != expected_seed {
                 return Err(RuntimeError::message("ASTRA_NATIVE_VN_RESTORE_SEED: save belongs to a different session seed"));
             }
@@ -47,8 +41,6 @@ pub(super) fn restore_session(
         },
     ).map_err(|error| CoreVnError::message(error.to_string()))?;
     session.runtime = runtime;
-    *pending = None;
-    *result = None;
     session.step_complexity = None;
     Ok((step, seed))
 }

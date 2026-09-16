@@ -92,3 +92,5 @@
 - PackageReader 对外改为 PackageRuntimeSelection（NativeVn/target/profile），删除插件选择对象 API；Player 与发布检查同步迁移。builder/reader 继续完整验证现有 policy/registry/target/VFS，并拒绝未知 runtime 描述。发布行为检查直接使用 NativeVnSession，验证容器恢复一致与恢复后 typed step，删除通用宿主、Tokio runtime 和剧情重复编码；清理直接依赖的默认动态 ABI feature。package 双入口拒绝与 NativeVN 发布回归通过；Player 打开包和发布入口继续严格匹配编译入产品的描述，新增能力漂移拒绝回归。Engine 全量 docs/fmt/clippy/build/test 通过：734 项通过、0 失败、9 项按原条件未执行；序列化 policy descriptor 和其他 ABI 消费者仍待改版移除，此检查不替代真实 Player 验收。
 
 - NativeVnSession 改为长期持有 VnRuntime，移除每步完整状态克隆和 reducer 重建；Core 提供 deferred step 与匹配当前 wait 的绑定。执行失败后 step/save 阻断，成功恢复才解除失败；restore 在提交前构建并验证新 runtime，保存格式不变。3 项新增回归验证 4096 条 backlog 在连续 step 中保留分配、失败后作用域取消及 step/save 阻断与恢复、过期/空等待绑定拒绝；同时去掉默认启动和存储计数的全状态物化。Engine 全量 docs/fmt/clippy/build/test 通过：737 项通过、0 失败、9 项按原条件未执行。真实平台性能尚未验收。
+
+- NativeVN 删除专用转发 FSM/action、控制锁和命令转字符串 PlayerInput 层；会话直接在 Runtime tick 后提交业务事件及 host await。共享 Runtime 新增 create_host_await，保留 scoped completion 与可靠存档。旧专用 FSM 存档明确拒绝且保持当前会话；新增无 FSM 的等待保存/恢复/完成回归，并扩展旧 FSM 预检拒绝与作用域保留测试。Engine 全量 docs/fmt/clippy/build/test 通过：738 项通过、0 失败、9 项按原条件未执行。真实平台及商业游戏仍未验收。
