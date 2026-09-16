@@ -219,7 +219,10 @@ impl SymphoniaAudioStreamDecoder {
                 Ok(Some(packet)) => packet,
                 Ok(None) => return Ok(None),
                 Err(SymphoniaError::IoError(error)) if error.kind() == ErrorKind::UnexpectedEof => {
-                    return Ok(None);
+                    return Err(decode_error(
+                        "ASTRA_AUDIO_STREAM_TRUNCATED_INPUT",
+                        "streaming audio container ended before an explicit end of stream",
+                    ));
                 }
                 Err(error) => {
                     return Err(MediaError::message(format!(

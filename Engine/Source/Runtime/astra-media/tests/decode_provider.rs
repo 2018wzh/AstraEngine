@@ -121,6 +121,21 @@ fn registry_executes_only_the_explicit_provider_and_validates_output_identity() 
 }
 
 #[test]
+fn symphonia_stream_rejects_truncated_pcm_instead_of_reporting_completion() {
+    let mut source = tiny_wav();
+    source.truncate(source.len() - 2);
+    let mut decoder = open_symphonia_audio_stream("wav", source.into(), 8).unwrap();
+    assert_eq!(decoder.next_chunk().unwrap().unwrap().samples.len(), 3);
+    let error = decoder.next_chunk().unwrap_err();
+    match error {
+        astra_media::MediaError::Diagnostics(diagnostics) => assert!(diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "ASTRA_AUDIO_STREAM_TRUNCATED_INPUT")),
+        error => panic!("expected a structured truncation diagnostic, got {error}"),
+    }
+}
+
+#[test]
 fn public_domain_media_manifest_matches_checked_in_assets() {
     let manifest = public_media_manifest();
     assert_eq!(manifest["license"], "CC0-1.0");
@@ -187,6 +202,17 @@ fn symphonia_decode_provider_decodes_public_mp3_to_cpu_pcm() {
     match result.output {
         DecodeOutput::AudioPcmI16 { samples, .. } => {
             assert!(samples.len() > 8_000);
+            let mut stream = open_symphonia_audio_stream(
+                "mp3",
+                fixture_bytes("t-rex-roar.mp3").into(),
+                (samples.len() * 2) as u64,
+            )
+            .unwrap();
+            let mut streamed = Vec::new();
+            while let Some(chunk) = stream.next_chunk().unwrap() {
+                streamed.extend(chunk.samples);
+            }
+            assert_eq!(streamed, samples);
         }
         _ => panic!("expected typed PCM output"),
     }
