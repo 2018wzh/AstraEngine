@@ -70,6 +70,12 @@ const MAX_FILTER_CHAIN_RECORDS_PER_BANK: usize = 4096;
 /// execution. The wire payload is untrusted even when its outer envelope and
 /// hash are valid.
 pub fn validate_cmvs390_vm_state(state: &CmvsPs2aVmState) -> Result<(), CoreError> {
+    if state.execution_failed {
+        return Err(invalid(
+            "ASTRA_EMU_CMVS_VM_FAILED",
+            "failed VM state cannot be saved or restored",
+        ));
+    }
     if state.stack_bytes.len() > MAX_STACK_BYTES
         || state.stack_initialized.len() != state.stack_bytes.len()
     {

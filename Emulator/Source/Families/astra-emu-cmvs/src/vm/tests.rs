@@ -67,7 +67,7 @@ fn emits_a_payload_free_message_action_from_the_proven_command_stack() {
 }
 
 #[test]
-fn preserves_state_when_an_unrecovered_expression_is_encountered() {
+fn rejects_execution_and_snapshot_after_an_unrecovered_expression() {
     let mut state = CmvsPs2aVmState::new(4);
     let before = state.clone();
     let error = execute_cmvs390_frame(
@@ -79,7 +79,74 @@ fn preserves_state_when_an_unrecovered_expression_is_encountered() {
     )
     .unwrap_err();
     assert_eq!(error.code(), "ASTRA_EMU_CMVS_VM_STACK_EXPRESSION");
-    assert_eq!(state, before);
+    assert!(state.execution_failed);
+    assert_eq!(
+        execute_cmvs390_frame(&mut state, &push_immediate(1))
+            .unwrap_err()
+            .code(),
+        "ASTRA_EMU_CMVS_VM_FAILED"
+    );
+    assert_eq!(
+        validate_cmvs390_vm_state(&state).unwrap_err().code(),
+        "ASTRA_EMU_CMVS_VM_FAILED"
+    );
+    // Restoring a separately validated successful snapshot is still allowed.
+    validate_cmvs390_vm_state(&before).unwrap();
+    state = before;
+    execute_cmvs390_frame(&mut state, &push_immediate(1)).unwrap();
+}
+
+#[test]
+fn instruction_dispatch_reuses_large_vm_allocations() {
+    let mut state = CmvsPs2aVmState::new(0);
+    state.stack_bytes = vec![0; MAX_STACK_BYTES];
+    state.stack_initialized = vec![false; MAX_STACK_BYTES];
+    let allocation = state.stack_bytes.as_ptr();
+    for value in 0..1024 {
+        execute_cmvs390_frame(&mut state, &push_immediate(value)).unwrap();
+        assert_eq!(state.stack_bytes.as_ptr(), allocation);
+    }
+    assert_eq!(state.stack_cursor_bytes, 4096);
+    validate_cmvs390_vm_state(&state).unwrap();
+}
+
+#[test]
+fn partial_instruction_failure_cannot_resume_by_resetting_dispatch_stop() {
+    let mut state = CmvsPs2aVmState::new(u32::MAX - 1);
+    assert!(execute_cmvs390_frame(&mut state, &push_immediate(42)).is_err());
+    assert_eq!(state.stack_cursor_bytes, 4);
+    state.dispatch_stopped = false;
+    state.program_counter = 0;
+    assert_eq!(
+        execute_cmvs390_frame(&mut state, &push_immediate(1))
+            .unwrap_err()
+            .code(),
+        "ASTRA_EMU_CMVS_VM_FAILED"
+    );
+    assert_eq!(state.stack_cursor_bytes, 4);
+}
+
+#[test]
+fn dispatch_preconditions_do_not_poison_a_waiting_machine() {
+    let mut state = CmvsPs2aVmState::new(0);
+    state.filter_graph_input_await = true;
+    assert_eq!(
+        execute_cmvs390_frame(&mut state, &push_immediate(1))
+            .unwrap_err()
+            .code(),
+        "ASTRA_EMU_CMVS_VM_STORAGE_AWAIT"
+    );
+    state.filter_graph_input_await = false;
+    state.dispatch_stopped = true;
+    assert_eq!(
+        execute_cmvs390_frame(&mut state, &push_immediate(1))
+            .unwrap_err()
+            .code(),
+        "ASTRA_EMU_CMVS_VM_STOPPED"
+    );
+    state.dispatch_stopped = false;
+    execute_cmvs390_frame(&mut state, &push_immediate(1)).unwrap();
+    assert_eq!(state.stack_cursor_bytes, 4);
 }
 
 #[test]
@@ -625,6 +692,7 @@ fn stack_expression_reads_and_writes_the_loaded_data_segment() {
     .unwrap_err();
     assert_eq!(error.code(), "ASTRA_EMU_CMVS_VM_DATA_SEGMENT");
     // A frame without a declared segment blocks as well.
+    let mut state = CmvsPs2aVmState::new(0);
     state.current_frame = 3;
     let error = execute_cmvs390_frame(
         &mut state,
@@ -1011,6 +1079,7 @@ fn command_138_blocks_on_a_missing_or_invalidated_coroutine_record() {
         }),
     )
     .unwrap();
+    let successful_snapshot = state.clone();
     let error = execute_cmvs390_frame(
         &mut state,
         &CmvsPs2aInstructionFrame::Command {
@@ -1022,6 +1091,8 @@ fn command_138_blocks_on_a_missing_or_invalidated_coroutine_record() {
     assert_eq!(error.code(), "ASTRA_EMU_CMVS_VM_COROUTINE");
 
     // Case 139 invalidates the record PC; the resume must keep blocking.
+    validate_cmvs390_vm_state(&successful_snapshot).unwrap();
+    let mut state = successful_snapshot;
     execute_cmvs390_frame(
         &mut state,
         &CmvsPs2aInstructionFrame::Control(CmvsPs2aControlInstruction::PushImmediate {

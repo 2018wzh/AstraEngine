@@ -1,12 +1,19 @@
 use super::*;
 
-/// Executes exactly one framed instruction. On error, `state` is unchanged.
+/// Executes exactly one framed instruction without cloning the VM.
 /// Unsupported expressions, controls, tag domains and stack widths are
-/// blocking by design; callers must not advance past them.
+/// blocking. An execution error leaves partial state and permanently rejects
+/// further dispatch and snapshot validation; it must not be retried in place.
 pub fn execute_cmvs390_frame(
     state: &mut CmvsPs2aVmState,
     frame: &CmvsPs2aInstructionFrame,
 ) -> Result<Option<CmvsPs2aVmAction>, CoreError> {
+    if state.execution_failed {
+        return Err(invalid(
+            "ASTRA_EMU_CMVS_VM_FAILED",
+            "VM cannot execute after an instruction failure",
+        ));
+    }
     if state.dispatch_stopped {
         return Err(invalid(
             "ASTRA_EMU_CMVS_VM_STOPPED",
@@ -19,22 +26,35 @@ pub fn execute_cmvs390_frame(
             "CMVS PS2A dispatch waits on an unresolved host request",
         ));
     }
-    let mut next = state.clone();
+    // Mark before entering the handler so an unwinding panic cannot leave a
+    // resumable partially mutated VM either. Success is the only reset path.
+    state.execution_failed = true;
+    let result = execute_instruction(state, frame);
+    if result.is_ok() {
+        state.execution_failed = false;
+    }
+    result
+}
+
+fn execute_instruction(
+    next: &mut CmvsPs2aVmState,
+    frame: &CmvsPs2aInstructionFrame,
+) -> Result<Option<CmvsPs2aVmAction>, CoreError> {
     let depth_before = next.stack_cursor_bytes;
     let action = match frame {
         CmvsPs2aInstructionFrame::ValueExpression(expression) => {
-            run_value_expression(&mut next, expression)?;
-            advance(&mut next, frame)?;
+            run_value_expression(next, expression)?;
+            advance(next, frame)?;
             None
         }
         CmvsPs2aInstructionFrame::StackExpression(expression) => {
-            run_stack_expression(&mut next, expression)?;
-            advance(&mut next, frame)?;
+            run_stack_expression(next, expression)?;
+            advance(next, frame)?;
             None
         }
         CmvsPs2aInstructionFrame::NumericExpression(expression) => {
-            run_numeric_expression(&mut next, expression)?;
-            advance(&mut next, frame)?;
+            run_numeric_expression(next, expression)?;
+            advance(next, frame)?;
             None
         }
         CmvsPs2aInstructionFrame::Control(CmvsPs2aControlInstruction::AbsoluteJump {
@@ -87,7 +107,7 @@ pub fn execute_cmvs390_frame(
                     ));
                 }
             } else {
-                advance(&mut next, frame)?;
+                advance(next, frame)?;
             }
             None
         }
@@ -114,7 +134,7 @@ pub fn execute_cmvs390_frame(
                     ));
                 }
             } else {
-                advance(&mut next, frame)?;
+                advance(next, frame)?;
             }
             None
         }
@@ -135,7 +155,7 @@ pub fn execute_cmvs390_frame(
                     ));
                 }
             } else {
-                advance(&mut next, frame)?;
+                advance(next, frame)?;
             }
             None
         }
@@ -152,8 +172,8 @@ pub fn execute_cmvs390_frame(
                         "CMVS PS2A program counter overflowed",
                     )
                 })?;
-            push_word(&mut next, return_pc)?;
-            push_call_frame_base(&mut next)?;
+            push_word(next, return_pc)?;
+            push_call_frame_base(next)?;
             next.program_counter = *target;
             if !next.program_counter.is_multiple_of(2) {
                 return Err(CoreError::invalid(
@@ -192,8 +212,8 @@ pub fn execute_cmvs390_frame(
                         "CMVS PS2A program counter overflowed",
                     )
                 })?;
-            push_word(&mut next, return_pc)?;
-            push_call_frame_base(&mut next)?;
+            push_word(next, return_pc)?;
+            push_call_frame_base(next)?;
             next.program_counter = target;
             if !next.program_counter.is_multiple_of(2) {
                 return Err(CoreError::invalid(
@@ -225,12 +245,12 @@ pub fn execute_cmvs390_frame(
                     next.dispatch_stopped = true;
                 } else {
                     let current_pc = next.program_counter;
-                    let return_pc = read_stack_word_from_top(&next, 4)?;
+                    let return_pc = read_stack_word_from_top(next, 4)?;
                     if return_pc == current_pc || return_pc == 0 || !return_pc.is_multiple_of(2) {
                         next.dispatch_stopped = true;
                     } else {
-                        let _ = pop_word(&mut next)?;
-                        drop_stack_bytes(&mut next, *stack_adjust)?;
+                        let _ = pop_word(next)?;
+                        drop_stack_bytes(next, *stack_adjust)?;
                         next.program_counter = return_pc;
                     }
                 }
@@ -240,7 +260,7 @@ pub fn execute_cmvs390_frame(
                 None
             } else {
                 let current_pc = next.program_counter;
-                let return_pc = read_stack_word_from_top(&next, 4)?;
+                let return_pc = read_stack_word_from_top(next, 4)?;
                 if return_pc == current_pc || return_pc == 0 {
                     // A self-return inside the event handler is the same
                     // stale-word case; end the dispatch rather than loop,
@@ -252,8 +272,8 @@ pub fn execute_cmvs390_frame(
                         format!("CMVS PS2A PC set to odd {return_pc} at vm.rs:747"),
                     ));
                 } else {
-                    let _ = pop_word(&mut next)?;
-                    drop_stack_bytes(&mut next, *stack_adjust)?;
+                    let _ = pop_word(next)?;
+                    drop_stack_bytes(next, *stack_adjust)?;
                     next.call_frame_bases.pop();
                     next.program_counter = return_pc;
                 }
@@ -264,8 +284,8 @@ pub fn execute_cmvs390_frame(
             stack_bytes,
             ..
         }) => {
-            drop_stack_bytes(&mut next, *stack_bytes)?;
-            advance(&mut next, frame)?;
+            drop_stack_bytes(next, *stack_bytes)?;
+            advance(next, frame)?;
             None
         }
         CmvsPs2aInstructionFrame::Control(CmvsPs2aControlInstruction::FrameReturn { .. }) => {
@@ -281,7 +301,7 @@ pub fn execute_cmvs390_frame(
                     "CMVS frame return has no active call frame",
                 ));
             }
-            let return_pc = pop_word(&mut next)?;
+            let return_pc = pop_word(next)?;
             let adjust = next
                 .interpreter_words
                 .get(&VALUE_EXPRESSION_RESULT_FIELD)
@@ -298,7 +318,7 @@ pub fn execute_cmvs390_frame(
                     "CMVS frame return stack adjustment overflowed",
                 )
             })?;
-            drop_stack_bytes(&mut next, adjust_bytes)?;
+            drop_stack_bytes(next, adjust_bytes)?;
             next.call_frame_bases.pop();
             next.program_counter = return_pc;
             if !next.program_counter.is_multiple_of(2) {
@@ -315,9 +335,9 @@ pub fn execute_cmvs390_frame(
         CmvsPs2aInstructionFrame::Control(CmvsPs2aControlInstruction::ScriptReturn { .. }) => {
             // Opcode 0x414 pops the saved frame index, return PC and frame
             // counter pushed by the nested-script loader, in that order.
-            let frame_word = pop_word(&mut next)?;
-            let return_pc = pop_word(&mut next)?;
-            let frame_counter = pop_word(&mut next)?;
+            let frame_word = pop_word(next)?;
+            let return_pc = pop_word(next)?;
+            let frame_counter = pop_word(next)?;
             let frame = u16::try_from(frame_word).map_err(|_| {
                 invalid(
                     "ASTRA_EMU_CMVS_VM_SCRIPT_FRAME",
@@ -348,8 +368,8 @@ pub fn execute_cmvs390_frame(
                     "CMVS PS2A push requires an evaluator result",
                 )
             })?;
-            push_word(&mut next, value)?;
-            advance(&mut next, frame)?;
+            push_word(next, value)?;
+            advance(next, frame)?;
             None
         }
         CmvsPs2aInstructionFrame::Control(CmvsPs2aControlInstruction::PushImmediate {
@@ -357,8 +377,8 @@ pub fn execute_cmvs390_frame(
             value,
             ..
         }) => {
-            push_immediate(&mut next, *value, *stack_bytes)?;
-            advance(&mut next, frame)?;
+            push_immediate(next, *value, *stack_bytes)?;
+            advance(next, frame)?;
             None
         }
         CmvsPs2aInstructionFrame::Command { command_id, .. } => {
@@ -379,13 +399,13 @@ pub fn execute_cmvs390_frame(
                 CmvsPs2aCommandEffectKind::ResumeInterpreterCoroutineRecord { .. }
             );
             let action = execute_command(
-                &mut next,
+                next,
                 contract.effect_kind,
                 contract.stack_pop_bytes,
                 &contract.stack_words,
             )?;
             if !program_counter_overridden {
-                advance(&mut next, frame)?;
+                advance(next, frame)?;
             }
             action
         }
@@ -393,7 +413,6 @@ pub fn execute_cmvs390_frame(
     let depth_after = next.stack_cursor_bytes;
     let trace_pc = next.program_counter;
     let trace_frame = next.current_frame;
-    *state = next;
     if trace_frame != 0 && vm_trace_enabled() {
         tracing::trace!(
             event = "astra.emu.cmvs.vm.ctl_trace",

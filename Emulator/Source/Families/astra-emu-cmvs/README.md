@@ -4,6 +4,8 @@
 
 VM 和 CMVS 3.90 指令契约已迁入，状态、单步调度和 opcode 表拆开；130 项格式与 VM 测试通过。opcode 表另与原始实现逐一比较全部 65536 个输入，契约保持一致。旧 stderr 调试输出改为 tracing 事件，只传位置、状态和计数，不传正文、任意内存值或整体 Debug 对象；日志过滤随宿主订阅器变化。
 
+`execute_cmvs390_frame` 直接修改当前 VM，不再逐指令克隆状态或承诺错误回滚。开始执行前设置失败标志，只有成功返回才清除，因此错误或 panic 后的部分状态不能继续 dispatch，`validate_cmvs390_vm_state` 也拒绝该状态。调用方应结束失败会话，或恢复另一个经过校验的成功快照；不得只重置 `dispatch_stopped` 后重试。尚未开始执行时的等待、停止检查仍可在正常调度恢复后继续。状态结构新增失败标志，旧序列化状态不做迁移；CMVS 尚无已发布的 Family 存档格式。
+
 `CmvsArchive` 已改为核心自有文件访问，复用 SDK 的归档数据类型、读取边界与可选明文缓存。挂载、文件访问和来源校验分模块。`mount_cmvs` 从游戏目录有界读取 `cmvs.profile.json`，typed `CmvsProfile` 使用 `astra.emu.cmvs.profile.v1`，直接声明 scheme、archive role 和 loose file role；不运行旧私有 patch 服务。路径必须留在游戏目录，重复来源、未知 schema、错误参数和未支持的 CPZ 版本明确失败。当前挂载只接受 CPZ5，默认不创建磁盘缓存。
 
 `CmvsArchive::load_script` 直接从核心归档加载 PS2A，读取与解码成功后才通过 `install_script_frame` 更新入口 PC、脚本身份、名称索引、字符串长度表与初始数据段。frame 限 0–3，非法 frame 或路径在修改 VM 前拒绝。`install_script_data` 在重载时替换稀疏字表，全零或空数据段会删除旧字，其他 frame 不受影响。加载日志只记录 frame 和解码字节数，不记录资源名或正文。帧安装及关联脚本路径的 8 项增量回归通过。

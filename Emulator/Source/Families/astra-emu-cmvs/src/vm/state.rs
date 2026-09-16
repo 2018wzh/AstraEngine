@@ -5,6 +5,9 @@ use super::*;
 /// by the active VFS-backed `CmvsScript` and are never copied here.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CmvsPs2aVmState {
+    /// An instruction failed or unwound after beginning execution. Only a new
+    /// machine or a validated successful snapshot may resume execution.
+    pub(super) execution_failed: bool,
     pub program_counter: u32,
     pub current_value: Option<u32>,
     pub condition_flag: bool,
@@ -262,6 +265,7 @@ impl CmvsPs2aVmState {
             pointer_x: 0,
             pointer_y: 0,
             dispatch_stopped: false,
+            execution_failed: false,
         }
     }
 }
