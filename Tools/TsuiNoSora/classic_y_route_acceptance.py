@@ -10,6 +10,7 @@ from pathlib import Path
 
 from classic_visual_acceptance import (
     AcceptanceError,
+    InputBudgetError,
     CLASSIC_CONFIG_FAST_FORWARD_POINT,
     Sequence,
     json_hash,
@@ -303,6 +304,8 @@ def main() -> int:
     arguments = parse_args()
     try:
         report = run(arguments)
+    except InputBudgetError as error:
+        raise SystemExit(f"Classic Y route acceptance blocked: {error}") from None
     except (
         AcceptanceError,
         DirectorNativeStoryError,

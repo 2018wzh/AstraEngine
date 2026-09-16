@@ -26,6 +26,28 @@ class AcceptanceError(RuntimeError):
     pass
 
 
+class InputBudgetError(AcceptanceError):
+    """Public diagnostic containing only policy field names and counts."""
+
+
+def validate_input_budget(profile: dict, rows: list[dict]) -> None:
+    policy = profile.get("input")
+    if not isinstance(policy, dict):
+        raise InputBudgetError("Classic input policy is missing")
+    required = {
+        "max_messages": len(rows),
+        "max_tick": max((row["tick"] for row in rows), default=0),
+    }
+    for field, count in required.items():
+        limit = policy.get(field)
+        if type(limit) is not int or limit <= 0:
+            raise InputBudgetError(f"Classic input {field} must be a positive integer")
+        if count > limit:
+            raise InputBudgetError(
+                f"Classic input {field} is insufficient: required={count}, configured={limit}"
+            )
+
+
 CLASSIC_CONFIG_FAST_FORWARD_POINT = (490, 265)
 
 
@@ -479,6 +501,9 @@ def write_sequence(path: Path, sequence: Sequence) -> None:
 
 
 def run_sequence(arguments: argparse.Namespace, root: Path, sequence: Sequence) -> dict:
+    validate_input_budget(
+        json.loads(arguments.profile.read_text(encoding="utf-8")), sequence.rows
+    )
     root.mkdir(parents=True)
     gpu_profile_path = root / "headless-gpu-profile.json"
     profile = prepare_gpu_profile(arguments.profile, gpu_profile_path)
