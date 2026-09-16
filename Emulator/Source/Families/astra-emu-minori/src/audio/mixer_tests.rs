@@ -20,6 +20,42 @@ fn rendered(mixer: &mut Mixer, frames: usize) -> Vec<f32> {
 }
 
 #[test]
+fn restore_rejects_cursor_beyond_asset_without_changing_live_audio() {
+    let (_root, archive, mut mixer) = setup();
+    mixer.play(1, 0.5, 0.0, true, 0).unwrap();
+    rendered(&mut mixer, 512);
+    let before = postcard::to_allocvec(&mixer.snapshot()).unwrap();
+    for playing in [false, true] {
+        let mut snapshot: Vec<SoundSnapshot> = postcard::from_bytes(&before).unwrap();
+        snapshot[0].position = 1_000_000.0;
+        snapshot[0].playing = playing;
+        let failure = mixer
+            .restore(snapshot, &archive, &AtomicBool::new(false))
+            .unwrap_err();
+        assert_eq!(failure.code.as_str(), "ASTRA_EMU_MINORI_AUDIO_SNAPSHOT");
+        assert_eq!(postcard::to_allocvec(&mixer.snapshot()).unwrap(), before);
+    }
+    assert!(rendered(&mut mixer, 512)
+        .iter()
+        .any(|sample| sample.abs() > 0.001));
+}
+
+#[test]
+fn restore_accepts_a_stopped_sound_at_its_exact_endpoint() {
+    let (_root, archive, mut mixer) = setup();
+    let data = &mixer.sounds[&1].data;
+    let endpoint = data.num_frames() as f64 / f64::from(data.sample_rate);
+    let mut snapshot = mixer.snapshot();
+    snapshot[0].position = endpoint;
+    mixer
+        .restore(snapshot, &archive, &AtomicBool::new(false))
+        .unwrap();
+    let restored = mixer.snapshot();
+    assert_eq!(restored[0].position, endpoint);
+    assert!(!restored[0].playing);
+}
+
+#[test]
 fn cancelled_empty_restore_cannot_clear_the_live_mixer() {
     let (_root, archive, mut mixer) = setup();
     mixer.play(1, 0.5, 0.0, true, 0).unwrap();

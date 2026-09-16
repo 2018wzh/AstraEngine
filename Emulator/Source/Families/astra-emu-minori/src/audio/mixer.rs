@@ -282,6 +282,16 @@ impl Mixer {
                 fade.validate(s.playing)?;
             }
             next.load(s.id, &s.uri, archive, stop)?;
+            let data = &next.sounds[&s.id].data;
+            // Use the same frame/rate units as Kira's playback cursor, without
+            // rounding through Duration. The endpoint is valid for ended sounds.
+            let duration = data.num_frames() as f64 / f64::from(data.sample_rate);
+            if s.position > duration {
+                return Err(error(
+                    "ASTRA_EMU_MINORI_AUDIO_SNAPSHOT",
+                    "snapshot audio cursor exceeds the loaded sound",
+                ));
+            }
             if s.playing && s.fade.is_none() {
                 next.play(s.id, s.volume, s.pan, s.repeat, 0)?;
                 next.sounds
