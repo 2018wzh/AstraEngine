@@ -7,7 +7,7 @@ from the `2018wzh/rfvp` fork at the immutable revision
 `f4f64a5bb726c1759350a666a35e0a454b810f61`. The covered source and the complete
 MPL-2.0 text are in `../../../ThirdParty/rfvp/crates/rfvp/` and `../../../ThirdParty/rfvp/LICENSE`.
 
-The local adaptation is a single commit, `4c67834`, directly on that upstream
+The local adaptation is a single commit, `73d3b44`, directly on that upstream
 baseline. The parent repository pins its exact gitlink. This commit has not been
 pushed; fetching the configured remote alone cannot reproduce it yet. The fork
 retains upstream history, workspace members, tools, licenses and platform crates.
@@ -30,6 +30,10 @@ The Arc texture ownership adapter remains for shared host rendering resources.
 
 The local changes to the fork are limited to these areas:
 
+- The hosted mixer exposes a read-only `voice_count(kind)` diagnostic, including
+  paused and fading-out voices still charged against capacity. The Family logs
+  this count separately from `is_playing` and the configured limits. Admission,
+  mixing, fade timing and capacity limits are unchanged.
 - `crates/rfvp/Cargo.toml` adds hosted and hosted-gpu features plus the SHA-256
   dependency used by native persistence. Upstream default features, sibling
   dependencies and library targets remain intact. Astra loads only the separate

@@ -561,6 +561,8 @@ fn apply_operation(
             bgm_limit = mixer.config().max_active_bgm,
             se_limit = mixer.config().max_active_se,
             total_limit = mixer.config().max_active_total,
+            bgm_voices = mixer.voice_count(rfvp::host_api::AudioSlotKind::Bgm),
+            se_voices = mixer.voice_count(rfvp::host_api::AudioSlotKind::Se),
             bgm_playing = (0..rfvp::host_api::BGM_LOGICAL_SLOT_COUNT)
                 .filter(|slot| mixer.is_playing(AudioStreamId::bgm(*slot)))
                 .count(),

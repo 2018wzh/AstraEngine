@@ -149,3 +149,46 @@ fn mixer_keeps_looping_voice_playing_after_buffer_wrap() {
     assert!(mixer.mix_next(&mut output).expect("looping voice mixes"));
     assert!(mixer.is_playing(id));
 }
+
+#[test]
+fn mixer_capacity_counts_paused_and_fading_voices_until_removal() {
+    use rfvp::host_api::AudioSlotKind;
+    let mut mixer = SoftAudioMixer::new(
+        SymphoniaBackend,
+        SoftAudioConfig {
+            mix_frames: 480,
+            ..SoftAudioConfig::default()
+        },
+    );
+    let id = AudioStreamId::bgm(0);
+    mixer
+        .load_encoded(
+            id,
+            EncodedAudioKind::Wav,
+            &wav_pcm16(&[1_000, -1_000], 2, OUTPUT.sample_rate),
+        )
+        .unwrap();
+    mixer
+        .play(
+            id,
+            rfvp::host_api::AudioParams {
+                repeat: true,
+                ..Default::default()
+            },
+            0,
+        )
+        .unwrap();
+    assert_eq!(mixer.voice_count(AudioSlotKind::Bgm), 1);
+    assert_eq!(mixer.voice_count(AudioSlotKind::Se), 0);
+    mixer.pause(id).unwrap();
+    assert!(!mixer.is_playing(id));
+    assert_eq!(mixer.voice_count(AudioSlotKind::Bgm), 1);
+    mixer.mix_next(&mut vec![0; 960]).unwrap();
+    assert_eq!(mixer.voice_count(AudioSlotKind::Bgm), 1);
+    mixer.stop(id, 20).unwrap();
+    mixer.mix_next(&mut vec![0; 960]).unwrap();
+    assert!(!mixer.is_playing(id));
+    assert_eq!(mixer.voice_count(AudioSlotKind::Bgm), 1);
+    mixer.mix_next(&mut vec![0; 960]).unwrap();
+    assert_eq!(mixer.voice_count(AudioSlotKind::Bgm), 0);
+}
