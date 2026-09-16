@@ -1,7 +1,5 @@
 use astra_asset::{ResolveContext, VfsManifest};
-use astra_plugin_abi::{
-    PluginExtensionRegistrySnapshot, ProviderPolicy, ValidatedRuntimeProviderSelection,
-};
+use astra_plugin_abi::{PluginExtensionRegistrySnapshot, ProviderPolicy};
 use astra_target::{validate_manifest, TargetKind, TargetManifest, TargetValidationStatus};
 use std::collections::BTreeSet;
 
@@ -14,7 +12,7 @@ pub(crate) fn validate_provider_authority(
     registry_bytes: &[u8],
     target_manifest_bytes: &[u8],
     vfs_manifest_bytes: &[u8],
-) -> Result<ValidatedRuntimeProviderSelection, ContainerError> {
+) -> Result<crate::PackageRuntimeSelection, ContainerError> {
     let policy: ProviderPolicy = serde_json::from_slice(policy_bytes).map_err(|error| {
         ContainerError::message(format!(
             "ASTRA_PROVIDER_POLICY_INVALID: provider policy v2 decode failed: {error}"
@@ -156,7 +154,19 @@ pub(crate) fn validate_provider_authority(
             ContainerError::message(format!("{}: {}", diagnostic.code, diagnostic.message))
         })?;
     }
-    registry
+    let selection = registry
         .resolve_embedded_runtime_provider(&policy, package_id, profile)
-        .map_err(|diagnostic| ContainerError::message(diagnostic.to_string()))
+        .map_err(|diagnostic| ContainerError::message(diagnostic.to_string()))?;
+    let descriptor = selection.descriptor();
+    if descriptor.runtime_id != astra_plugin_abi::NATIVE_VN_RUNTIME_ID
+        || descriptor.provider_id != astra_plugin_abi::NATIVE_VN_PROVIDER_ID
+        || descriptor.product_kind != "visual_novel"
+        || descriptor.presentation_lane != astra_plugin_abi::RuntimePresentationLane::Scene2D
+    {
+        return Err(ContainerError::message("ASTRA_PACKAGE_RUNTIME_UNSUPPORTED: package does not select the compiled NativeVN runtime"));
+    }
+    Ok(crate::PackageRuntimeSelection::native_vn(
+        target,
+        profile.into(),
+    ))
 }

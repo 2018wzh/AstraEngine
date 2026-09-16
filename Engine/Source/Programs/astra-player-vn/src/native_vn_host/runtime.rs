@@ -3,7 +3,7 @@ use astra_runtime::{LoadReport, SaveBlob};
 
 pub(super) struct NativeVnRuntimeHost {
     runtime: Option<astra_vn_runtime_provider::NativeVnSession>,
-    binding: ValidatedRuntimeProviderSelection,
+    binding: astra_package::PackageRuntimeSelection,
     limits: RuntimeHostLimits,
     session: Option<GameRuntimeSessionId>,
     seed: u64,
@@ -15,12 +15,12 @@ pub(super) struct NativeVnRuntimeHost {
 
 impl NativeVnRuntimeHost {
     pub(super) fn new(
-        binding: &ValidatedRuntimeProviderSelection,
+        binding: &astra_package::PackageRuntimeSelection,
         limits: RuntimeHostLimits,
     ) -> Result<Self, RuntimeHostError> {
-        binding
-            .validate_linked_descriptor(&NativeVnRuntimeProvider::descriptor())
-            .map_err(|error| RuntimeHostError::new(error.code, error.message))?;
+        match binding.kind() {
+            astra_package::PackageRuntimeKind::NativeVn => {}
+        }
         Ok(Self {
             runtime: None,
             binding: binding.clone(),

@@ -1332,6 +1332,44 @@ fn release_gate_requires_nativevn_sections_for_classic_profile() {
 }
 
 #[test]
+fn release_gate_blocks_compiled_runtime_capability_drift() {
+    let compiled = compile_astra_project(
+        [AstraSource::story(
+            "main.astra",
+            nativevn_story_with_system_pages(),
+        )],
+        Default::default(),
+    )
+    .unwrap();
+    let mut sections =
+        package_sections_for_project(&compiled, &["classic".to_string()], "test-game").unwrap();
+    append_valid_locale_sections(&mut sections);
+    let mut request = PackageBuildRequest::fixture("com.example.nativevn", "classic", sections);
+    let mut policy: astra_plugin_abi::ProviderPolicy =
+        serde_json::from_slice(&request.provider_policy).unwrap();
+    policy.runtime_provider = astra_vn_runtime_provider::NativeVnRuntimeProvider::descriptor();
+    policy
+        .runtime_provider
+        .capabilities
+        .push("runtime.native_vn.drift".into());
+    request.provider_policy = serde_json::to_vec(&policy).unwrap();
+    let blob = PackageBuilder::build(request).unwrap();
+    let report = ReleaseValidator
+        .validate_package(package_request(blob.into_bytes()))
+        .unwrap();
+    let check = report
+        .checks
+        .iter()
+        .find(|check| check.id == "runtime_provider.native_vn")
+        .unwrap();
+    assert_eq!(check.status, CheckStatus::Blocked);
+    assert_eq!(
+        check.diagnostic.as_ref().unwrap().code,
+        "ASTRA_RUNTIME_PROVIDER_LINKED_DESCRIPTOR_MISMATCH"
+    );
+}
+
+#[test]
 fn release_gate_accepts_nativevn_sections_for_classic_profile() {
     let compiled = compile_astra_project(
         [AstraSource::story(
@@ -1412,6 +1450,10 @@ fn release_gate_accepts_nativevn_sections_for_classic_profile() {
                 .evidence
                 .iter()
                 .any(|evidence| evidence.key == "behavior_state_hash")
+            && check
+                .evidence
+                .iter()
+                .any(|evidence| evidence.key == "behavior_resumed_step" && evidence.value == "2")
     }));
 }
 

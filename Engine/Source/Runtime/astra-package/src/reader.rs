@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
 
+use crate::PackageRuntimeSelection;
 use crate::{
     AstraContainerReader, ContainerError, ContainerKind, PackageManifest, SchemaRegistryManifest,
     CURRENT_CONTAINER_VERSION,
 };
 use astra_core::Hash256;
-use astra_plugin_abi::ValidatedRuntimeProviderSelection;
 use std::sync::Arc;
 
 const REQUIRED_SECTIONS: &[(&str, &str)] = &[
@@ -34,7 +34,7 @@ const REQUIRED_SECTIONS: &[(&str, &str)] = &[
 #[derive(Debug, Clone)]
 pub struct PackageReader {
     container: AstraContainerReader,
-    runtime_provider: ValidatedRuntimeProviderSelection,
+    runtime_provider: PackageRuntimeSelection,
     package_hash: Hash256,
 }
 
@@ -247,7 +247,7 @@ impl PackageReader {
         &self.container
     }
 
-    pub fn runtime_provider_selection(&self) -> &ValidatedRuntimeProviderSelection {
+    pub fn runtime_selection(&self) -> &PackageRuntimeSelection {
         &self.runtime_provider
     }
 

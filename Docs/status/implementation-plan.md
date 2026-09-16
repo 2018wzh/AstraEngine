@@ -88,3 +88,5 @@
 - NativeVN step 输入统一使用 Runtime TickInput/TickMode，移除输入/输出 session id 与中间 step_native；时间参数直接进入 TickRequest，旧 ABI 仅在边界查找会话和适配模式/身份。原生 close 返回 unit，旧 ABI 单独生成关闭 report。原有 provider/Player 单元测试及新增五类非法时间参数、失败后恢复推进回归通过。Engine 全量 fmt/clippy/build/test 通过：730 项通过、0 失败、9 项按原条件未执行；存档 v8 不变，package descriptor、配置与其他 ABI 消费者仍待清理。
 
 - NativeVnRuntimeExecution 拆成独立模块，直接使用 Runtime TickIntegrityMode 和 usize worker_count，移除 ABI executor/mode 映射与 u8 范围转换；parallel 构造不再返回 Result。Player 与 Headless 调用方同步，直接依赖已有 astra-worker-budget。2 项回归验证进程预算一致性及 package 打开前拒绝 0/超限/usize::MAX worker 数。Engine 全量 fmt/clippy/build/test 通过：732 项通过、0 失败、9 项按原条件未执行；package descriptor 与其他 ABI 消费者仍待清理。
+
+- PackageReader 对外改为 PackageRuntimeSelection（NativeVn/target/profile），删除插件选择对象 API；Player 与发布检查同步迁移。builder/reader 继续完整验证现有 policy/registry/target/VFS，并拒绝未知 runtime 描述。发布行为检查直接使用 NativeVnSession，验证容器恢复一致与恢复后 typed step，删除通用宿主、Tokio runtime 和剧情重复编码；清理直接依赖的默认动态 ABI feature。package 双入口拒绝与 NativeVN 发布回归通过；Player 打开包和发布入口继续严格匹配编译入产品的描述，新增能力漂移拒绝回归。Engine 全量 docs/fmt/clippy/build/test 通过：734 项通过、0 失败、9 项按原条件未执行；序列化 policy descriptor 和其他 ABI 消费者仍待改版移除，此检查不替代真实 Player 验收。

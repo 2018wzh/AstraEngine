@@ -1232,6 +1232,7 @@ dependencies = [
  "astra-player-core",
  "astra-plugin",
  "astra-plugin-abi",
+ "astra-runtime",
  "astra-target",
  "astra-vn",
  "astra-vn-core",
@@ -1247,7 +1248,6 @@ dependencies = [
  "serde_yaml",
  "tempfile",
  "thiserror 1.0.69",
- "tokio",
  "tracing",
 ]
 

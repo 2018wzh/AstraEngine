@@ -28,9 +28,7 @@ use astra_player_core::{
     PlayerTimelineTaskAction,
 };
 use astra_plugin::{RuntimeHostError, RuntimeHostLimits};
-use astra_plugin_abi::{
-    GameRuntimeSessionId, ValidatedRuntimeProviderSelection, NATIVE_VN_PROVIDER_ID,
-};
+use astra_plugin_abi::GameRuntimeSessionId;
 use astra_ui_core::{
     UiBackend, UiBlueprintBundle, UiBlueprintFrameModel, UiBlueprintModalFrameModel, UiButtonState,
     UiFrameRequest, UiInputDisposition, UiInputDispositionKind, UiInputEvent, UiInputEventKind,
@@ -60,9 +58,7 @@ use astra_vn_package::{
     VnSystemUiProfileManifest,
 };
 use astra_vn_policy::LuauUiControllerHost;
-use astra_vn_runtime_provider::{
-    NativeVnRuntimeProvider, NativeVnStepCommand, NativeVnStepInput, NativeVnStepOutput,
-};
+use astra_vn_runtime_provider::{NativeVnStepCommand, NativeVnStepInput, NativeVnStepOutput};
 use astra_vn_ui::{
     resolve_binding, SaveSlotViewModel, VnUiAction, VnUiBindingError, VnUiBindingRequest,
     VnUiControllerEffect, VnUiControllerUpdate, VnUiModelContext, VnUiSessionState,
@@ -447,7 +443,7 @@ struct ProductPresentationBinding {
 }
 
 struct ProductPackageBinding {
-    runtime_provider: ValidatedRuntimeProviderSelection,
+    runtime_provider: astra_package::PackageRuntimeSelection,
     package_hash: Hash256,
     presentation: ProductPresentationBinding,
     system_ui_policy: SystemUiProfilePolicy,
@@ -526,7 +522,19 @@ impl NativeVnHostCommandSource {
         } = options;
         runtime_execution.validate()?;
         validate_product_provider_bindings(package)?;
-        let runtime_provider = package.runtime_provider_selection().clone();
+        // Until the serialized policy is replaced, reject declarations the linked
+        // runtime cannot fulfill before creating any product resources.
+        let policy: astra_plugin_abi::ProviderPolicy =
+            serde_json::from_value(read_package_json(package, "provider.policy")?)
+                .map_err(|error| NativeVnHostError::Package(error.to_string()))?;
+        if policy.runtime_provider
+            != astra_vn_runtime_provider::NativeVnRuntimeProvider::descriptor()
+        {
+            return Err(NativeVnHostError::Package(
+                "ASTRA_RUNTIME_PROVIDER_LINKED_DESCRIPTOR_MISMATCH: package declarations do not match the compiled NativeVN runtime".into(),
+            ));
+        }
+        let runtime_provider = package.runtime_selection().clone();
         if config.profile != runtime_provider.profile() {
             return Err(NativeVnHostError::Package(format!(
                 "ASTRA_PLAYER_RUNTIME_PROFILE_MISMATCH: requested profile {} does not match package provider profile {}",
@@ -720,13 +728,7 @@ impl NativeVnHostCommandSource {
                     .into(),
             ));
         }
-        let limits = RuntimeHostLimits::from_descriptor(runtime_provider.descriptor());
-        if runtime_provider.provider_id() != NATIVE_VN_PROVIDER_ID {
-            return Err(NativeVnHostError::Package(format!(
-                "ASTRA_PLAYER_RUNTIME_PROVIDER_UNAVAILABLE: package selected unlinked provider {}",
-                runtime_provider.provider_id()
-            )));
-        }
+        let limits = RuntimeHostLimits::new();
         let mut host = NativeVnRuntimeHost::new(runtime_provider, limits)?;
         let story = Arc::new(compiled.story);
         let open = match host.open(

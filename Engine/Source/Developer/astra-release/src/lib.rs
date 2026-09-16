@@ -17,11 +17,8 @@ use astra_player_core::{
     PlayerAutomationReport, PlayerAutomationStatus, PlayerPlatform, PlayerPresentationReport,
     PLAYER_PRESENTATION_REPORT_SCHEMA,
 };
-use astra_plugin::{ConcurrentProductRuntimeHost, RuntimeHostLimits};
-use astra_plugin_abi::{
-    PluginExtensionRegistrySnapshot, ProviderPolicy, RuntimeOpenRequest, RuntimeRestoreRequest,
-    RuntimeSaveRequest, RuntimeStepInput, RuntimeStepMode,
-};
+use astra_plugin::RuntimeHostLimits;
+use astra_plugin_abi::{PluginExtensionRegistrySnapshot, ProviderPolicy};
 use astra_target::{validate_manifest, TargetKind, TargetManifest, TargetValidationStatus};
 use astra_vn_package::{
     decode_compiled_project, load_player_locale_config, load_presentation_provider_manifest,
@@ -29,7 +26,7 @@ use astra_vn_package::{
     VnProfileManifest, VnStandardCommandManifest,
 };
 use astra_vn_policy::{VnPolicyBundleManifest, VnPolicyBundleSourceCache};
-use astra_vn_runtime_provider::NativeVnRuntimeProviderFactory;
+
 use astra_vn_script::SystemStoryValidationStatus;
 use astra_vn_system::{SystemStoryManifest, VnSystemUiProfileManifest};
 use schemars::JsonSchema;
@@ -1735,7 +1732,7 @@ fn runtime_provider_native_vn_check(package: &PackageReader) -> ReleaseCheckReco
         id: "runtime_provider.native_vn".to_string(),
         domain: ReleaseDomain::Runtime,
         status: CheckStatus::Pass,
-        summary: "NativeVN runtime provider completed package-bound lifecycle conformance"
+        summary: "NativeVN owned session completed package-bound save/restore and resume checks"
             .to_string(),
         diagnostic: None,
         evidence: release_evidence,
@@ -1745,231 +1742,112 @@ fn runtime_provider_native_vn_check(package: &PackageReader) -> ReleaseCheckReco
 fn native_vn_behavioral_evidence(
     package: &PackageReader,
 ) -> Result<Vec<ReleaseEvidence>, (&'static str, String)> {
-    let compiled = decode_compiled_project(package).map_err(|err| {
-        (
-            "ASTRA_RUNTIME_PROVIDER_BEHAVIOR_PACKAGE",
-            format!("decode vn.compiled_project for provider conformance: {err}"),
-        )
-    })?;
-    let locale = load_player_locale_config(package)
-        .map_err(|err| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_LOCALE", err.to_string()))?
-        .default_locale;
-    let selection = package.runtime_provider_selection();
-    let compiled_bytes = postcard::to_allocvec(&compiled.story)
-        .map_err(|err| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_PACKAGE", err.to_string()))?;
-    let compiled_hash = astra_core::Hash256::from_sha256(&compiled_bytes);
-    let compiled_section = astra_plugin_abi::RuntimeSectionPayload {
-        section_id: "vn.story".to_string(),
-        schema: "astra.vn.story".to_string(),
-        version: astra_core::SchemaVersion::default(),
-        codec: astra_plugin_abi::RuntimeSectionCodec::Postcard,
-        hash: compiled_hash,
-        bytes: compiled_bytes,
+    use astra_vn_runtime_provider::{
+        NativeVnSession, NativeVnSessionConfig, NativeVnStepCommand, NativeVnStepInput,
     };
-    let section_ids = package
-        .container()
-        .entries()
-        .iter()
-        .map(|entry| entry.id.clone())
-        .collect::<Vec<_>>();
-    let limits = RuntimeHostLimits::from_descriptor(selection.descriptor());
-    // v2 工厂式宿主：factory 独占 instance，session 各自 mailbox
-    let host = ConcurrentProductRuntimeHost::bound_in_process(
-        format!(
-            "astra-release.native-vn.{}",
-            selection
-                .binding_hash()
-                .to_string()
-                .trim_start_matches("sha256:")
-        ),
-        selection,
-        NativeVnRuntimeProviderFactory::default(),
-        limits,
-        std::time::Duration::from_secs(10),
-    )
-    .map_err(|err| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_BINDING", err.to_string()))?;
-
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|err| {
-            (
-                "ASTRA_RUNTIME_PROVIDER_BEHAVIOR_RUNTIME",
-                format!("create tokio runtime: {err}"),
-            )
-        })?;
-    let result = rt.block_on(async {
-        let prepare = host
-            .prepare(astra_plugin_abi::RuntimePrepareRequest {
-                target_id: selection.target().to_string(),
-                profile: selection.profile().to_string(),
-                package_hash: package.package_hash().to_string(),
-                section_ids: section_ids.clone(),
-            })
-            .await
-            .map_err(|err| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_PREPARE", err.to_string()))?;
-        if prepare.status != "pass" || !prepare.diagnostics.is_empty() {
-            return Err((
-                "ASTRA_RUNTIME_PROVIDER_BEHAVIOR_PREPARE",
-                "runtime provider preparation did not pass without diagnostics".to_string(),
-            ));
-        }
-        let probe = host
-            .probe(astra_plugin_abi::RuntimeProbeRequest {
-                target_id: selection.target().to_string(),
-                profile: selection.profile().to_string(),
-                platform: None,
-                section_ids,
-            })
-            .await
-            .map_err(|err| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_PROBE", err.to_string()))?;
-        if probe.status != "pass" || !probe.diagnostics.is_empty() {
-            return Err((
-                "ASTRA_RUNTIME_PROVIDER_BEHAVIOR_PROBE",
-                "runtime provider probe did not pass without diagnostics".to_string(),
-            ));
-        }
-        let open = host
-            .open(RuntimeOpenRequest {
-                target_id: selection.target().to_string(),
-                profile: selection.profile().to_string(),
-                locale,
-                seed: 0xA57A,
-                integrity_mode: astra_plugin_abi::RuntimeTickIntegrityMode::Evidence,
-                executor: astra_plugin_abi::RuntimeExecutorConfig::parallel(4),
-                package_hash: package.package_hash().to_string(),
-                sections: vec![compiled_section],
-            })
-            .await
-            .map_err(|err| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_OPEN", err.to_string()))?;
-        let output = host
-            .step(RuntimeStepInput {
-                session_id: open.session_id.clone(),
-                fixed_step: 1,
-                delta_ns: 16_666_667,
-                session_seed: 0xA57A,
-                mode: RuntimeStepMode::Live,
-                action: "launch_default".to_string(),
-                ..RuntimeStepInput::default()
-            })
-            .await
-            .map_err(|err| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_STEP", err.to_string()))?;
-        let state = output.live.vn_state.as_ref().ok_or_else(|| {
-            (
-                "ASTRA_RUNTIME_PROVIDER_BEHAVIOR_STATE",
-                "runtime provider emitted no typed runtime view state".to_string(),
-            )
-        })?;
-        let event_bytes = postcard::to_allocvec(&(
-            output.live.state_revision,
-            output
-                .live
-                .vn_step
-                .as_ref()
-                .map(|step| step.coverage_reached.as_slice()),
-            state.cursor.as_ref().map(|cursor| cursor.state_id.as_str()),
-        ))
-        .map_err(|err| {
-            (
-                "ASTRA_RUNTIME_PROVIDER_BEHAVIOR_EVENT_HASH",
-                err.to_string(),
-            )
-        })?;
-        let presentation_summary = output
-            .live
-            .presentations
-            .iter()
-            .map(|presentation| {
-                let kind = match &presentation.command {
-                    astra_plugin_abi::RuntimeLivePresentationKind::Dialogue { .. } => "dialogue",
-                    astra_plugin_abi::RuntimeLivePresentationKind::Choice { .. } => "choice",
-                    astra_plugin_abi::RuntimeLivePresentationKind::SystemPage { .. } => {
-                        "system_page"
-                    }
-                    astra_plugin_abi::RuntimeLivePresentationKind::SystemOption { .. } => {
-                        "system_option"
-                    }
-                    astra_plugin_abi::RuntimeLivePresentationKind::Stage(_) => "stage",
-                    astra_plugin_abi::RuntimeLivePresentationKind::Extension(_) => "extension",
-                    astra_plugin_abi::RuntimeLivePresentationKind::Marker { .. } => "marker",
-                };
-                (presentation.sequence, kind)
-            })
-            .collect::<Vec<_>>();
-        let presentation_bytes = postcard::to_allocvec(&presentation_summary).map_err(|err| {
-            (
-                "ASTRA_RUNTIME_PROVIDER_BEHAVIOR_PRESENTATION_HASH",
-                err.to_string(),
-            )
-        })?;
-        let save = host
-            .save(RuntimeSaveRequest {
-                session_id: open.session_id.clone(),
-                slot: "release.conformance".to_string(),
-            })
-            .await
-            .map_err(|err| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_SAVE", err.to_string()))?;
-        let save_section_count = save.sections.len();
-        let expected_sections = save.sections.clone();
-        let state_identity = expected_sections
-            .iter()
-            .map(|section| (&section.section_id, section.hash))
-            .collect::<Vec<_>>();
-        let state_bytes = postcard::to_allocvec(&state_identity).map_err(|err| {
-            (
-                "ASTRA_RUNTIME_PROVIDER_BEHAVIOR_STATE_HASH",
-                err.to_string(),
-            )
-        })?;
-        host.restore(RuntimeRestoreRequest {
-            session_id: open.session_id.clone(),
-            sections: save.sections,
-        })
-        .await
-        .map_err(|err| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_RESTORE", err.to_string()))?;
-        let restored = host
-            .save(RuntimeSaveRequest {
-                session_id: open.session_id.clone(),
-                slot: "release.conformance".to_string(),
-            })
-            .await
-            .map_err(|err| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_SAVE", err.to_string()))?;
-        if restored.sections != expected_sections {
-            return Err((
-                "ASTRA_RUNTIME_PROVIDER_BEHAVIOR_RESTORE_HASH",
-                "provider restore did not reproduce the saved section identity".to_string(),
-            ));
-        }
-        host.shutdown(open.session_id.clone())
-            .await
-            .map_err(|err| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_SHUTDOWN", err.to_string()))?;
-        host.destroy()
-            .await
-            .map_err(|err| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_DESTROY", err.to_string()))?;
-        Ok(vec![
-            evidence(
-                "behavior_state_hash",
-                astra_core::Hash128::from_blake3(&state_bytes),
-            ),
-            evidence(
-                "behavior_event_hash",
-                astra_core::Hash128::from_blake3(&event_bytes),
-            ),
-            evidence(
-                "behavior_presentation_hash",
-                astra_core::Hash128::from_blake3(&presentation_bytes),
-            ),
-            evidence("behavior_save_section_count", save_section_count),
-            evidence("provider_binding_hash", selection.binding_hash()),
-        ])
-    });
-    match result {
-        Ok(evidence) => Ok(evidence),
-        Err(error) => {
-            let _ = rt.block_on(host.destroy());
-            Err(error)
-        }
+    let policy = read_typed_json_section::<ProviderPolicy>(package, "provider.policy")?;
+    if policy.runtime_provider != astra_vn_runtime_provider::NativeVnRuntimeProvider::descriptor() {
+        return Err((
+            "ASTRA_RUNTIME_PROVIDER_LINKED_DESCRIPTOR_MISMATCH",
+            "package declarations do not match the compiled NativeVN runtime".into(),
+        ));
     }
+    let compiled = decode_compiled_project(package)
+        .map_err(|error| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_PACKAGE", error.to_string()))?;
+    let locale = load_player_locale_config(package)
+        .map_err(|error| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_LOCALE", error.to_string()))?
+        .default_locale;
+    let selection = package.runtime_selection();
+    match selection.kind() {
+        astra_package::PackageRuntimeKind::NativeVn => {}
+    }
+    let mut session = NativeVnSession::new(
+        std::sync::Arc::new(compiled.story),
+        astra_vn_core::VnRunConfig {
+            profile: selection.profile().into(),
+            locale,
+        },
+        NativeVnSessionConfig {
+            target_id: selection.target().into(),
+            seed: 0xA57A,
+            package: Some(astra_runtime::PackageHandle {
+                package_id: package.package_hash().to_string(),
+                target: selection.target().into(),
+                ..Default::default()
+            }),
+            integrity_mode: astra_runtime::TickIntegrityMode::Evidence,
+            worker_count: 4,
+        },
+    )
+    .map_err(|error| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_OPEN", error.to_string()))?;
+    let input = |fixed_step, mode, command| NativeVnStepInput {
+        timing: astra_runtime::TickInput {
+            fixed_step,
+            delta_ns: 16_666_667,
+            seed: 0xA57A,
+        },
+        mode,
+        command,
+    };
+    let output = session
+        .step(input(
+            1,
+            astra_runtime::TickMode::Live,
+            NativeVnStepCommand::LaunchDefault,
+        ))
+        .map_err(|error| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_STEP", error.to_string()))?;
+    let limits = RuntimeHostLimits::new();
+    limits
+        .validate_output_count(
+            output
+                .presentations
+                .len()
+                .saturating_add(output.audio.len())
+                .saturating_add(output.timeline.len()),
+        )
+        .map_err(|error| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_STEP", error.to_string()))?;
+    let save = session
+        .save()
+        .map_err(|error| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_SAVE", error.to_string()))?;
+    limits
+        .validate_save_bytes(save.0.len())
+        .map_err(|error| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_SAVE", error.to_string()))?;
+    let report = session
+        .restore(save.clone())
+        .map_err(|error| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_RESTORE", error.to_string()))?;
+    let restored = session
+        .save()
+        .map_err(|error| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_SAVE", error.to_string()))?;
+    if restored != save || report.step != 1 || report.seed != 0xA57A {
+        return Err((
+            "ASTRA_RUNTIME_PROVIDER_BEHAVIOR_RESTORE_HASH",
+            "native restore did not reproduce the saved Runtime container".into(),
+        ));
+    }
+    let resumed = session
+        .step(input(
+            2,
+            astra_runtime::TickMode::RestoreContinuation,
+            NativeVnStepCommand::Execute(astra_vn_core::VnPlayerCommand::SetAuto { enabled: true }),
+        ))
+        .map_err(|error| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_RESUME", error.to_string()))?;
+    if !resumed.vn_state.into_display_state().system.auto_enabled {
+        return Err((
+            "ASTRA_RUNTIME_PROVIDER_BEHAVIOR_RESUME",
+            "restored native session did not apply typed input".into(),
+        ));
+    }
+    session.close();
+    Ok(vec![
+        evidence(
+            "behavior_state_hash",
+            astra_core::Hash128::from_blake3(&save.0),
+        ),
+        evidence("behavior_save_bytes", save.0.len()),
+        evidence("behavior_presentation_count", output.presentations.len()),
+        evidence("behavior_restored_step", report.step),
+        evidence("behavior_resumed_step", 2),
+    ])
 }
 
 fn select_game_target<'a>(

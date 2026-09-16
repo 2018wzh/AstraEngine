@@ -131,3 +131,7 @@ NativeVnStepInput 使用 Runtime TickInput/TickMode，与 NativeVnStepOutput 一
 ### 原生执行配置
 
 NativeVnRuntimeExecution 直接声明 Runtime TickIntegrityMode 与 usize worker_count，删除 RuntimeExecutorConfig、ABI mode 映射及 u8 转换。serial 使用一个 worker，parallel 使用独立 astra-worker-budget 已验证的进程预算，构造本身不再返回伪失败。package 打开入口先校验 1..=DEFAULT_LIMIT 的 worker 数，非法值明确失败，不截断或回退；session 创建沿用同一配置。此改动不改变存档格式或全局 worker 调度。
+
+### Package 原生 runtime 选择
+
+PackageReader::runtime_selection 返回只读 PackageRuntimeSelection（NativeVn、target、profile），不再公开插件 ValidatedRuntimeProviderSelection。builder/reader 继续完成现有 policy、registry、target 和 VFS 一致性验证，仅当前支持的 NativeVN/Scene2D 可生成原生选择；未知 runtime 或不匹配 provider 拒绝。现有序列化 policy 的 descriptor 暂留，后续整体改版移除；Player 打开包和发布检查仍在创建会话前校验其与编译入产品的描述完全一致，不将其存入运行宿主。发布行为检查直接创建 NativeVnSession，验证保存恢复字节一致和恢复后 typed step；不再建立通用 worker/mailbox、重复编解码剧情或伪造插件 lifecycle。此检查仍仅为局部 session conformance，不代表真实 Player 验收。

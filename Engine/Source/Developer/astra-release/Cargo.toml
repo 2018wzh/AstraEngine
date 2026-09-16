@@ -13,18 +13,19 @@ astra-asset = { path = "../../Runtime/astra-asset" }
 astra-core = { path = "../../Runtime/astra-core" }
 astra-media = { path = "../../Runtime/astra-media" }
 astra-package = { path = "../../Runtime/astra-package" }
+astra-runtime = { path = "../../Runtime/astra-runtime" }
 astra-player-core = { path = "../../Runtime/astra-player-core" }
 astra-headless-protocol = { path = "../../Runtime/astra-headless-protocol" }
-astra-plugin = { path = "../../Runtime/astra-plugin" }
+astra-plugin = { path = "../../Runtime/astra-plugin", default-features = false }
 astra-platform = { path = "../../Platform/astra-platform" }
 astra-platform-android = { path = "../../Platform/astra-platform-android" }
-astra-plugin-abi = { path = "../../Runtime/astra-plugin-abi" }
+astra-plugin-abi = { path = "../../Runtime/astra-plugin-abi", default-features = false }
 astra-target = { path = "../../Platform/astra-target" }
 astra-vn = { path = "../../Modules/AstraVN/astra-vn" }
 astra-vn-core = { path = "../../Modules/AstraVN/astra-vn-core" }
 astra-vn-package = { path = "../../Modules/AstraVN/astra-vn-package" }
 astra-vn-policy = { path = "../../Modules/AstraVN/astra-vn-policy" }
-astra-vn-runtime-provider = { path = "../../Modules/AstraVN/astra-vn-runtime-provider" }
+astra-vn-runtime-provider = { path = "../../Modules/AstraVN/astra-vn-runtime-provider", default-features = false }
 astra-vn-script = { path = "../../Modules/AstraVN/astra-vn-script" }
 astra-vn-system = { path = "../../Modules/AstraVN/astra-vn-system" }
 postcard.workspace = true
@@ -33,7 +34,6 @@ serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true
 thiserror.workspace = true
-tokio.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
