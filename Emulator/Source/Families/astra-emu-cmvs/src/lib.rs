@@ -2,7 +2,9 @@
 mod archive;
 mod audio;
 mod profile;
-pub use profile::{mount_cmvs, CmvsProfile, CMVS_PROFILE_FILE, CMVS_PROFILE_SCHEMA};
+pub use profile::{
+    mount_cmvs, CmvsArchiveFile, CmvsProfile, CMVS_PROFILE_FILE, CMVS_PROFILE_SCHEMA,
+};
 mod cmvs_md5;
 pub use archive::CmvsArchive;
 mod cpz;
