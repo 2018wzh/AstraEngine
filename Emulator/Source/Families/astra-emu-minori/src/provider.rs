@@ -141,7 +141,7 @@ impl MinoriProvider {
         }
         let lease = SessionLease::acquire()?;
         let root = Path::new(request.game_path.as_str());
-        let archive = Arc::new(mount_minori(root, &root.join(profile)).map_err(core_error)?);
+        let archive = Arc::new(mount_minori(root, Path::new(&profile)).map_err(core_error)?);
         let uri = format!("minori:/scr/{entry}");
         let bytes = read_asset(&archive, &uri, 16 * 1024 * 1024)?;
         let script = parse_sc(&bytes, &ScOpcodeCatalog::observed_minori())
@@ -155,7 +155,7 @@ impl MinoriProvider {
             )
         })?);
         let mut scene = Scene::new(archive.clone(), 1280, 720)?;
-        scene.render(vm.state(), None)?;
+        scene.render(vm.state(), None, None)?;
         let storage = Storage::new(root)?;
         let replacement = request.host.text_replacement.into_option();
         if let Some(service) = &replacement {

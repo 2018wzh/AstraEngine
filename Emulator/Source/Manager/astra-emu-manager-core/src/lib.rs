@@ -37,3 +37,5 @@ pub use play::{PlaySessionEndReason, PlaySessionRecord, PlayStats, RecentGameRec
 pub use work_settings::GameSettings;
 
 mod family_configuration;
+
+mod family_diagnostics;

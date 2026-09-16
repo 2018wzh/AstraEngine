@@ -15,6 +15,36 @@
 
 ## 验收安排
 
+本地 Emulator 整合检查通过：活动 workspace 的默认测试、全 targets Clippy、构建及格式检查完成；文档检查通过。共享 GPU atlas 的跨帧纹理 ID 释放/重用回归和 astra-platform-common Clippy 通过。需商业素材、指定设备或真实服务的 ignored 测试仍保持各自验收范围，不计入完成。此次只固化 EMU 整合与共享 GPU 修复，VN 长流程和其余产品工作继续。
+
+Siglus 的完整 fork 已合成为上游 e762f9f 基线加单个本地适配提交 c6c4f99，保留原提交历史，主仓 gitlink 已更新，尚未推送。确认并移除了 117 个文件的纯格式差异及 18 个 manifest 的全局警告屏蔽，实际适配涉及 13 个文件。Family 配置和阻塞 PCM 关闭测试、显式 GPU 离屏回读以及 Family Clippy 通过；上游编译警告保持可见，三项需要授权素材的真实游戏测试未执行。
+
+RFVP 已由裁剪源码快照改为完整上游 fork 的 submodule。保留 0.6.0 基线 304e773387a9920c9db091ec1fd937c717aea949，单个本地适配提交为 4c67834；主仓 gitlink 固定精确提交，尚未推送。FVP 依赖改为上游 crates/rfvp 目录，恢复原生视频、bitmap、Anzu 等原有依赖和 feature 定义。hosted-gpu 编译、29 项常规测试、3 项显式 GPU 测试及 Clippy 通过；原生平台入口尚未逐平台构建，真实结局验收仍开放。
+
+Minori VM 已按状态模型、演出、音频命令、选择和错误定义拆分模块，保持既有状态格式与执行顺序。拆分后的 62 项默认回归和新增诊断隐私回归通过，Clippy 通过；未实现命令的 Family 诊断保留指令序号，删除对错误显示字符串的诊断码解析，避免透传脚本内容。
+
+Musica 的 select 已接通 Minori 解析、选择等待、键盘焦点、确认跳转与 GPU 文字显示。原生 Family GPU fixture 验证 F5/F9 恢复相同选择画面，VM 回归验证目标分支和损坏索引拒绝。新增 GPU 测试按进程单会话约束串行持有 provider；Minori 62 项默认测试通过，另显式执行独立文字 GPU 测试并通过，相关 Clippy 通过；此前 CLI 10 项测试通过。鼠标命中与 GPU 显示共用布局，回归覆盖悬停、无位置点击、行间空白、边界外点击及确认对应分支。原版界面一致性和真实路线仍待验证。
+
+Musica 的 CrossFade 名称和空效果清除行为已接入 Minori 原有时间线与 GPU scene。3 项演出逻辑回归、1 项原生 Family GPU 帧回归及相关 Clippy 通过；清除后 GPU 帧不再包含旧效果，存档保持清除状态。真实游戏演出仍待验收。
+
+Musica 的 playbgm2、playse4 与 deletevar 已合入 Minori，同一音频执行模块支持独立通道、停止和存档恢复。音频指令从 Runtime 大文件拆出，未新增平行核心。21 项 Runtime、14 项音频相关和 10 项 CLI 测试通过（集合有交叉），相关 Clippy 通过；实际新增通道设备播放仍未验收。
+
+Musica 来源分支的带标签 chain 已合入 Minori parser、VM 与原生 session；目标标签验证成功后才替换脚本，存读档保留目标位置。Minori 52 项及 CLI 10 项测试通过，独立 GPU 文字测试按原条件未在本轮执行；相关 Clippy 通过。Musica 其余功能仍待整合，未修改来源工作树。
+
+Minori 音频请求超时现在取消 sink、保留失败状态并拒绝后续命令，恢复替换前检查取消。13 项音频相关增量测试通过，包括实际超时后解除阻塞写入、关闭等待 worker，以及取消空恢复保留原混音器。Clippy 通过。
+
+SDK audio feature 已替代 Minori 独立解码模块，CMVS 普通音频与 MGV 内嵌 Ogg 使用同一 Symphonia/Kira 浮点解码入口。相关 15 项增量测试与受影响 Clippy 通过，包括解码预算、取消、损坏输入、Minori 阻塞 PCM 退出和 session 存读档。CMVS 播放 worker、长媒体及真实音频设备未验收。
+
+CMVS 已迁入 VM、CMVS 3.90 指令契约和核心自有归档访问，141 项测试通过；状态/单步调度分开，opcode 表拆成 8 个有界模块。全部 65536 个 opcode 输入与来源契约逐项比较一致，临时比较源码与测试程序已清理。旧调试输出改为 tracing 的稳定事件与受限字段；未导入旧 provider 的私有日志和整体 Debug 内容。脚本加载已直接连接核心归档，成功解析后统一更新 frame 身份、入口 PC、索引、字符串表和初始数据；非法 frame 或路径保持 VM 不变，关联 8 项增量测试通过；重载全零或空数据段会清除旧的稀疏字表，两项回归覆盖其他 frame 隔离与字节布局。脚本调用查找已连接同一归档加载入口，按挂载顺序匹配裸文件名；路径越界和未找到资源明确失败，诊断不附带私有名称。CmvsScene 已复用 SDK 纹理缓存和公共 wgpu renderer，硬件 GPU 回归验证层级合成与同槽纹理尺寸更换；完整 Family session、媒体连接与大型执行分派细分仍待完成。
+
+2026-09-16，CMVS 的 CPZ、PB2/PB3/JBP、MGV、PS2A 与系统存档格式层从 `de4110e9e` 迁入，47 项既有格式测试通过。导入的大文件已按格式职责拆分，共用 SDK `CoreError`，删除 Minori 的重复错误类型。后续归档访问改为 `CmvsArchive`，typed profile 直接声明文件与 scheme，挂载前拒绝未支持的 CPZ 版本。来源 provider 的未提交改动尚未移植，真实 CPZ5 游戏流程未验收。
+
+SDK 的归档数据类型、有界私有配置读取和可选明文缓存已由 Minori 与 CMVS 共同使用，Minori 原有重复模块已删除。SDK 无默认 feature 及 archive/cache/text/image 各自单独启用均可编译；不要求 Engine/VN session。配置读取失败不回写文件，错误不含原始输入和路径；相对游戏目录的回归覆盖配置路径仅解析一次。最近一次增量检查中 Minori 48 项、CLI 10 项和 SDK 7 项测试通过，独立 GPU 文字测试仍按原条件单独执行。
+
+2026-09-16，`astra-emu-sdk` 已进入 Emulator workspace，提取 Minori 的文字资源管理和纹理缓存，复用 `astra-text`、`astra-media-core`、`image` 和 `lru`。Minori 删除 CPU 文字中间图层与 CPU 场景合成，直接使用公共 `WgpuOffscreenRenderer`；不创建 Engine/VN session。GPU 回归暴露并修复公共图集在跨帧重用临时纹理 ID 时跳过重新分配的问题。Minori 50 项测试（含 GPU session 的输入、存读档和关闭重开）、SDK 2 项缓存测试、独立 GPU 文字测试、公共图集 GPU 回归和 12 项单元测试通过；受影响 crate 的 Clippy 通过。此项是 SDK 首批实际调用方迁移，CMVS/Musica 整合、Minori 长流程与 Sandbox 验收仍未完成。
+
+2026-09-16 从 `1748dd68` 建立本地独占分支 `codex/local-product-rebuild`，先验证 FVP《樱花萌放》和 AstraVN 终之空原生 Player。KrKr、Siglus、Artemis、CMVS、Musica/Minori 的本地已提交及未提交成果均纳入，来源工作树保持原状；Siglus 已开始导入，其余成果尚未整合。ACP 外部 Agent + MCP 方案保持不变。公共 Runtime 命名与 VN 专属职责分离，具体见重构契约。
+
 用户于 2026-09-15 指定后续重构全部由主线程实施，不再使用子智能体；总体范围、阶段顺序和验收目标保持不变。
 
 本环境优先做可执行的实现和自动测试；另一环境中的合法游戏源和设备于阶段验收时接入。Windows 承担终之空 37 路线和两款 EMU 各一结局；其他三平台执行代表流程。未接入设备的结果保持未验收。
@@ -23,7 +53,7 @@
 
 用户补充设备范围为“主流配置”；CPU/GPU、内存、macOS 机型与 Android SoC 尚未指定，正式测量时记录实际型号，不能把“主流配置”当成已固定的性能基线。尽量通过远程环境完成工作；当前环境不可用的商业游戏与转换工程在另一环境可用，具体接入方式和设备远程权限待提供。
 
-用户指定 OpenAI Responses/Completions 为优先接入方向。它是模型 API 选择，尚不能确定是外部 Agent 的后端，还是需要项目直接实现 Agent 循环；该取舍待澄清，当前 ACP/MCP 契约继续有效。
+Agent 采用 ACP 外部进程与 MCP；不在 Editor 内置 OpenAI 模型循环。
 
 ## 当前验证记录
 
@@ -94,3 +124,66 @@
 - NativeVnSession 改为长期持有 VnRuntime，移除每步完整状态克隆和 reducer 重建；Core 提供 deferred step 与匹配当前 wait 的绑定。执行失败后 step/save 阻断，成功恢复才解除失败；restore 在提交前构建并验证新 runtime，保存格式不变。3 项新增回归验证 4096 条 backlog 在连续 step 中保留分配、失败后作用域取消及 step/save 阻断与恢复、过期/空等待绑定拒绝；同时去掉默认启动和存储计数的全状态物化。Engine 全量 docs/fmt/clippy/build/test 通过：737 项通过、0 失败、9 项按原条件未执行。真实平台性能尚未验收。
 
 - NativeVN 删除专用转发 FSM/action、控制锁和命令转字符串 PlayerInput 层；会话直接在 Runtime tick 后提交业务事件及 host await。共享 Runtime 新增 create_host_await，保留 scoped completion 与可靠存档。旧专用 FSM 存档明确拒绝且保持当前会话；新增无 FSM 的等待保存/恢复/完成回归，并扩展旧 FSM 预检拒绝与作用域保留测试。Engine 全量 docs/fmt/clippy/build/test 通过：738 项通过、0 失败、9 项按原条件未执行。真实平台及商业游戏仍未验收。
+
+## 本地接续进展（2026-09-16）
+
+- 终之空转换器更新为平台 profile v3，分离 Kira mixer 与 WASAPI output；生成器经 Rust 实际类型解析的回归测试通过。Classic 工程 Cook 与 package 完成，包含 1,093 个状态和 327 项资源。
+- Classic 的 GPU Headless 启动与 Enter 进入剧情通过，使用 DX12 独立 GPU；尚未完成路线、系统页与存读档验收。Windows bundle 已支持显式提供匹配工具链的 VC CRT 并纳入文件清单，缺文件或无效文件头会拒绝打包，相关增量测试通过。
+- 完整 Windows 包在 Sandbox 的原生 GPU 路径显示标题，点击开始游戏后在 `audio.open` 返回 `ProviderUnavailable`，当前环境没有可用音频输出。Player 已补充退出边界的错误码和操作名日志，避免只有窗口消失而没有文件诊断；未将此结果计作剧情、音频或路线通过。
+- Classic 开场的 GPU Headless 物理输入检查已覆盖右键系统面板、Escape 返回、演出中保存、继续播放、读档及恢复后继续播放。保存前与读回后的 RGB 图像完全相同，恢复后推进到同一时间的画面也与连续播放一致；使用 DX12 独立 GPU。混音输出存在非静音 PCM，但不代表真实设备播放通过。当前仅覆盖开场片段，冷启动恢复、损坏存档、其他剧情及 37 路线仍未验收。
+- Classic Y 段长流程发现旧包与当前研究 IR 的命令 ID 对应不同，原超时不能认定为 Runtime 故障。已固定私有 IR 快照并完成配套源码、输入和包的重建；转换器为六类舞台命令补全 `interrupt:replace_from_current`，真实 Rust 编译器回归测试通过。新包 GPU 长流程在输入 284、tick 11097 因未上传的字形引用失败，资源生命周期问题待修复，未计作路线通过。
+- 字形故障排查增加资源哈希、原驻留状态、当前帧变更状态和命令位置诊断，不记录正文或路径。包含逐字显示初始化和连续物理按键的上传顺序检查通过，Native VN 宿主测试共 32 项通过；该用例尚未复现商业包故障，不能据此认定修复。受影响 crate 的 Clippy 通过，同包 GPU 长流程继续定位。
+- GPU 重跑稳定复现输入 284 的错误：该字形从未上传，当前帧也没有对应上传命令。新增“布局缩放与剧情动作同批输入”回归复现了上传丢失；UI 资源 owner 已更新，但动作替换帧时丢弃了生命周期命令。现将这些命令保留到下一次实际提交，按顺序先上传再绘制；缓存 UI 只保留绘制命令，关闭也处理未提交的生命周期。失败回归已转为通过，44 项库测试、32 项宿主集成测试、Clippy、fmt 和文档检查通过。修复后的同包 GPU 长流程已越过原字形失败位置，随后在输入 285 等待剧情命令时超时；该等待问题继续排查，尚未计作路线通过。
+- 桌面 Manager 删除隐式静态 FVP 注册，避免与显式安装的动态插件冲突；25 项 Manager 测试通过，1 项 GPU 条件测试未运行。
+- FVP 现有全局存档的系统变量区与 HCB 不匹配，加载被拒绝且原文件保持不变。测试副本的新游戏与冷启动单帧通过；已有 CPU 软件渲染流程不计入 GPU 验收。
+- FVP 已通过 `hosted-gpu` 复用 RFVP 原生渲染器，删除 Family 内独立 GPU 管线。动态插件启动 1800 帧到达标题页；新增原生遮罩溶解，28 项测试（含硬件 GPU 转场和 1 MiB 栈动态模块重复开关）通过。Sandbox 已进入系统页、切换文字设置、返回标题并进入剧情首屏。独立 RFVP `gpu-render` 检查通过。动态模块 session map 改为堆上持有，修复第二次插入的栈溢出；Sandbox 同一进程重开已通过。音频输出、存读档及结局验收仍开放。
+- Slint 配置刷新保留未变更的 enum model，修复下拉列表被刷新关闭；回归与 Clippy 通过，Sandbox 已实际选择并保存配置。剧情乱码确认为启动编码选择问题，改为脚本对应的 Shift JIS 后，Sandbox 剧情首屏文字显示正常。Sandbox 没有可用系统音频设备，显式使用测试后端，不计入听感验收。
+- 全部核心优先使用已有 GPU feature 和平台适配，仅修改必要嵌入边界；实际画面先用 GPU Headless 检查，再进入 Windows Sandbox，不以 CPU 渲染或 Host 上传 CPU 帧替代 GPU 验收。
+- Siglus 已从固定宿主适配基线 `2be01aee` 导入独立 Emulator workspace，补充 Family API v2 动态入口和配置字段。保留核心 wgpu 离屏渲染及原生 PCM tap；移除游戏专用变量输出和错误链中的私有数据，启动失败清理宿主时钟，配置解析与首帧读回失败直接返回错误。核心仅在既有宿主边界增加 PCM 取消回调（先解除阻塞再 join），并拒绝 CPU/未知 GPU adapter。真实 Kira 阻塞写入连续三次关闭回归、配置回归、原生硬件 GPU 离屏读回、全部目标 Clippy 与动态库构建通过；实际插件加载、Sandbox 游戏流程和音频设备播放仍未验收。
+- Manager 的真实动态加载器已分别加载 FVP、Siglus 构建产物，连续三次检查 ABI、描述一致性和空目录探测通过；动态库按现有契约驻留至进程退出。此项只验证插件加载边界，Siglus 的实际开局与 Sandbox 流程仍未验收。
+- Siglus 的真实游戏测试改为显式 ignored，手动运行时缺少素材直接失败；不再通过提前返回将未执行的流程计作成功。全部目标测试中 2 项局部回归通过，3 项真实游戏测试及 1 项硬件 GPU 条件测试保持明确的未执行状态；硬件 GPU 读回已在此前单独运行通过。
+
+- Sandbox 原生存档已写入并显示剧情缩略图。读档后却回到存档页，退出该页后的文字样式也与保存前不同；VM 恢复位置、输入残留与渲染缓存失效仍需定位，尚未通过存读档验收。
+
+- 修复 RFVP 图像恢复丢失调色像素和显示尺寸的问题，沿用原生快照结构与 GPU 管线。30 项 FVP 测试全部通过，包含 GPU 原地恢复、新会话恢复和动态模块重复开关；实际游戏读档返回页面的问题尚未解决。Manager Headless 增加按帧投递物理键鼠输入，复用现有键码映射与 Family advance，非法键码、顺序和帧范围在启动插件前拒绝。
+
+- 更新后的插件在 GPU Headless 通过键鼠输入进入实际剧情，并复现保存后恢复异常；Sandbox 新建 DATA002、推进剧情、读取该槽后仍返回保存页，退出后文字过亮。已定位保存的 VM 游标处于原生读档返回值检查位置，具体恢复缺陷尚待定位。FVP/Manager Clippy、构建、受影响包 fmt 及 224 页文档检查通过；这些局部检查不表示存读档已通过。
+
+- 使用 RFVP 已有有界 opcode 诊断环确认实际读档执行了脚本重建分支，没有据此改动 VM 指令语义。新增原生系统字体的 GPU 描边恢复回归，验证重建文字 surface 后像素一致；31 项 FVP 测试通过。实际读档的页面与文字异常仍开放，下一步检查其他协程及脚本重建状态。临时私有诊断入口已从源码移除。
+
+- Family API v3 新增进程级诊断 sink，FVP、Siglus、Minori 动态适配层共用可选 tracing/log 桥，Manager 统一接收。最小原生移植与诊断接入原则已写入宪章、重构契约、API 契约和开发手册。受影响 API/Manager core/三个核心共 117 项测试通过；另对 FVP、Siglus、Minori 实际动态库各连续加载三次，日志转发无重复。跨 worker 的 tracing/log、级别过滤及敏感字段脱敏检查通过，受影响 crate 和 Manager/Minori CLI 的全部目标 Clippy、fmt、构建与文档检查通过。Manager 的 FVP 原生 GPU Headless 运行完成 5100 帧，收到核心初始化、存档准备/写入/恢复和关闭日志，未出现非法诊断记录；使用 Null 音频，不计作实际声音或完整存读档视觉验收。
+
+- FVP 的 Manager GPU 复测已收到 slot 1 的原生恢复事件，待处理线程请求为零；恢复后四次物理 Enter 能推进到后续演出，未出现完全失去响应。最终画面尚需与保存点及正常推进路径比较，音频与结局仍未验收。
+- Classic Y 字形修复后的等待超时定位到输入脚本：对白进入等待时仍在逐字显示，第一次 Enter 只补全文字。真实 Native VN 宿主回归验证了该行为；产品观察 v3 增加只读 `text_reveal_complete`，Headless 与路线脚本先等待显示完成，再投递物理推进输入。同包 GPU 长流程待复测。
+
+- 本地接续阶段复查：Emulator 活动 workspace 的 cargo test --locked --workspace --all-targets 、cargo clippy --locked --workspace --all-targets -- -D warnings、cargo fmt --all --check 和 cargo build --locked --workspace 通过；显式忽略的 GPU、授权游戏与外部服务测试不计入本次通过范围。Sandbox 中 FVP 新建槽位后推进剧情，再读取该槽位、退出原生系统页并继续输入，恢复到保存位置后可继续剧情，随后正常返回 Manager。仍需验证进程重开及完整结局；Null 音频不计实际声音验收。终之空文字揭示修正后的 GPU 长流程因测试环境结束而中断，无完成结果；已在确认旧进程不存在后重新启动。
+
+- 重建 Sandbox 后，Manager 安装 FVP v3 插件并扫描游戏成功；系统音频启动返回 ASTRA_EMU_AUDIO_DEVICE_UNAVAILABLE，没有自动换后端。当前环境仍不能完成实际声音验收。
+
+- FVP 新进程在系统音频失败后显式选择 Null 可重新启动，标题与原生 Continue 页面可操作。读取既有测试槽位后背景和花瓣恢复，Enter 可推进到下一句；刚读档时保存位置的文字未显示，冷读档视觉恢复仍未通过，需区分旧槽位内容与当前恢复路径。
+
+- FVP 当前版本新建空槽位后关闭并重开 session，原生 Continue 能读到该槽位，但保存位置文字颜色明显变浅；问题不局限于旧槽位。点击 Save 首次推进一句、第二次进入系统页，输入处理顺序也需复查。GPU 文字恢复测试补充全新 MotionManager 与渲染器路径并通过，fmt 与文档检查通过；局部重建路径未复现真实游戏颜色差异，仍需沿实际存档与脚本恢复时序定位。
+
+- FVP 原生存档捕获/恢复增加 DEBUG 数值文字状态日志，经 Manager 桥输出字体、RGBA、描边与揭示进度，不包含正文。5 项存档测试、受影响 Clippy 和文档检查通过。新本地构建的实际插件加载返回 ASTRA_EMU_FAMILY_LOAD_ABI，本次真实游戏数值采集尚未运行，需先定位加载差异；Sandbox 中先前构建仍可运行，不据此判定新构建可用。
+
+- 上述 FVP 加载拒绝已定位为本次构建命令遗漏 dynamic-plugin-export，DLL 缺少 Family root symbol，并非已确认的布局不兼容。新增实际 DLL header/layout 测试可在插件初始化前直接定位此类构建问题；正在按既有手册重新构建。
+
+- 渐变恢复缺陷已用纯原生状态测试复现：alpha 由 0 淡入 255，在 200/1000 ms 时存档得到 51；恢复清空 alpha motion，剩余 800 ms 不再执行。新增普通回归测试当前失败，尚未修复，不能沿用此前测试全通过结论。实际 DLL header/layout 与三次初始化日志测试已在正确 export feature 构建后通过。终之空重启后的 GPU 长流程已经失败，原因是单帧重复修改同一 texture resource，下一步需定位 UI/stage 生命周期合并路径。
+
+- FVP RFVS v2 已保存并恢复原生 alpha、move、rotation、scale、z、V3D、sprite、snow、lip 容器；不再在读档时清空进行中的动画。遮罩渐变类型 4–6 恢复映射已修复。29 项常规测试和 3 项显式 GPU 测试通过，包含中途淡出恢复后逐步画面与不中断播放一致，以及 RFVS 编解码后的剩余时长恢复。旧 RFVS v1 缺动画状态，明确拒绝且不改写文件；RFVG 全局存档保持原样。真实游戏需新建槽位重测，尚未关闭视觉问题。
+
+- FVP v2 实际 GPU Headless 完成 5100 帧，写入并读取新测试槽位 3，正常关闭。人工检查最终画面确认保存位置文字和紫色描边清晰显示，之前半透明停滞在本流程未再出现；原测试存档保留，音频为显式 Null，不计声音验收。Sandbox 新版重开及结局仍待验证。
+
+- 终之空纹理重复修改错误补充结构化诊断：仅记录资源摘要、此前是否释放及当帧上传/释放计数。相关 atlas 10 项测试与 astra-platform-common Clippy 通过；未放宽资源生命周期校验，真实触发路径仍待定位。Sandbox 旧 Manager 已正常关闭，修复后的 FVP 插件副本已更新，尚未重开复测。
+
+- FVP RFVS v2 已在 Windows Sandbox 完成新空槽位保存、退出游戏与 Manager、重启进程、原生 Continue 读取及继续剧情。关闭恢复出的原生系统页后，保存位置文字与紫色描边清晰，Enter 可推进至下一句；本次未复现半透明停滞。旧槽位未覆盖。仍使用显式 Null 音频，不计声音验收；完整结局及其他存档异常流程仍未完成。开发手册已说明 v2 动画恢复与旧 RFVS v1 的拒绝行为。
+
+- GPU Headless 检查点模式已复现跨帧资源操作被错误合并：释放后再次上传同一纹理，在最终绘制时报单帧重复修改。现于资源再次变更前提交此前待绘制帧，不执行中间像素回读；新帧仍先验证，GPU 原有校验未放宽。新增 GPU 回归覆盖三次释放/重传、非法后续帧拒绝与最终绿色纹理；连同既有 4 项 GPU 测试、11 项普通 host contract 测试及受影响 Clippy 通过。终之空诊断长流程仍在使用修改前的二进制运行，修复版真实路线尚未复测。
+
+- FVP 原生 motion 恢复在修改场景前拒绝越界或重复图像槽位及未知渐变类型，删除越界静默跳过路径。回归确认这三类错误保持当前场景不变；30 项常规测试、3 项显式 GPU 测试及受影响 Clippy 通过。其他存档容器与资源错误仍需继续覆盖，尚未关闭完整损坏存档验收。
+
+- 加入上述校验后的 FVP 插件完成 3100 帧 GPU Headless 冷读档复测，进程正常退出；通过原生 Continue 读取既有 v2 测试槽位并推进，最终文字与描边清晰。Null 音频不计声音验收。
+
+- 终之空诊断运行的纹理重复修改错误确认同一资源此前已释放（previous_release=true），与跨帧合并回归一致。修复版已使用同一 Classic 包完成 DX12 独立 GPU 复测：498 个物理输入事件、27 次选择走完 Y 段并到达 K 段边界，自动检查通过，关闭正常释放文字资源。最终检查点已查看，章节文字正常显示。此项仅完成 Classic Y 分段，不代表 Classic/Modern 37 路线、完整结局或 Sandbox 实际音频验收。
+
+- 修复版首次启动误用 RUST_LOG，未启用附加推进日志；已停止该测试进程，并按 Headless 实际使用的 ASTRA_LOG 重新启动。该次主动停止不计测试失败或路线完成，重开运行仍待结果。

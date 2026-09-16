@@ -1,0 +1,28 @@
+[package]
+name = "astra-emu-cmvs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+astra-emu-sdk = { path = "../../SDK/astra-emu-sdk", default-features = false, features = ["archive", "cache", "image", "audio"] }
+kira.workspace = true
+astra-media-core = { path = "../../../../Engine/Source/Runtime/astra-media-core" }
+astra-platform = { path = "../../../../Engine/Source/Platform/astra-platform" }
+astra-platform-common = { path = "../../../../Engine/Source/Platform/astra-platform-common" }
+pollster.workspace = true
+encoding_rs.workspace = true
+flate2.workspace = true
+image.workspace = true
+md-5 = "0.10"
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+
+astra-core = { path = "../../../../Engine/Source/Runtime/astra-core" }
+postcard.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

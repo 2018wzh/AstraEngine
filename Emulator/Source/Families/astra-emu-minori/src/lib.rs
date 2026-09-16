@@ -5,7 +5,6 @@ mod session;
 mod storage;
 
 mod archive;
-mod error;
 mod image_container;
 mod paz;
 mod profile;
@@ -14,7 +13,7 @@ mod script;
 mod text_renderer;
 
 pub use archive::*;
-pub use error::*;
+pub use astra_emu_sdk::CoreError;
 pub use image_container::*;
 pub use paz::*;
 pub use profile::*;

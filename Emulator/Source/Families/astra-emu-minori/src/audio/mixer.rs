@@ -53,7 +53,8 @@ impl Mixer {
             .map(|s| s.data.frames.len())
             .sum::<usize>();
         let bytes = read_asset(archive, uri, 64 * 1024 * 1024)?;
-        let data = decode::decode(bytes, MAX_FRAMES.saturating_sub(used), stop)?;
+        let data = astra_emu_sdk::decode_audio(bytes, MAX_FRAMES.saturating_sub(used), stop)
+            .map_err(crate::scene::core_error)?;
         if let Some(mut previous) = self.sounds.remove(&id) {
             if let Some(h) = &mut previous.handle {
                 h.stop(immediate());
@@ -316,6 +317,12 @@ impl Mixer {
                 sound.handle = Some(handle);
             }
             sound.state = s;
+        }
+        if stop.load(Ordering::Acquire) {
+            return Err(error(
+                "ASTRA_EMU_AUDIO_CANCELLED",
+                "audio restore cancelled",
+            ));
         }
         *self = next;
         Ok(())

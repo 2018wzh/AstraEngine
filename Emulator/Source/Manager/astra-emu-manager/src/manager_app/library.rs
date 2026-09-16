@@ -20,6 +20,7 @@ impl AstraEmuManagerController {
             .map_err(|error| error.to_string())?;
 
         let mut registry = FamilyProviderRegistry::new();
+        #[cfg(target_os = "android")]
         registry
             .register_provider(astra_emu_fvp::FvpProvider::default())
             .map_err(|error| error.to_string())?;

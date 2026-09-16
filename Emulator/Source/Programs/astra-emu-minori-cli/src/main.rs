@@ -146,7 +146,7 @@ struct AudioResourceRoleCensus {
 
 fn census_audio_resources(
     scripts: &[ScScript],
-    manifest: &astra_emu_minori::PazManifest,
+    manifest: &astra_emu_minori::ArchiveManifest,
 ) -> Result<AudioResourceCensus, Box<dyn std::error::Error>> {
     let mut entries = BTreeMap::<&str, Vec<&str>>::new();
     for entry in &manifest.entries {

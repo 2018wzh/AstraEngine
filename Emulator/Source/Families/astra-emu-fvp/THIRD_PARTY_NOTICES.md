@@ -2,17 +2,17 @@
 
 ## RFVP covered source
 
-`../../ThirdParty/rfvp/` contains the MPL-2.0 covered source from
+`../../../ThirdParty/rfvp/` contains the complete fork and MPL-2.0 covered source from
 [`xmoezzz/rfvp`](https://github.com/xmoezzz/rfvp) `0.6.0` upstream revision
 `304e773387a9920c9db091ec1fd937c717aea949`, with hosted adaptations originating from
 `2018wzh/rfvp` revision `f4f64a5bb726c1759350a666a35e0a454b810f61`.
-The complete license text is `../../ThirdParty/rfvp/LICENSE`. The file-level change
+The complete license text is `../../../ThirdParty/rfvp/LICENSE`. The file-level change
 inventory is `MODIFICATIONS.md`; both it and the covered source must remain in
 the source archive or the valid source offer for a binary distribution.
 
 The parent `astra-emu-fvp` crate is the dynamic Family ABI boundary. The
-vendored RFVP core is private and is built as `rlib`; the current adapter uses
-its hosted core with the direct CPU/native-file-system, bounded audio, and
+RFVP dependency is built from the submodule's `crates/rfvp` with `hosted-gpu`;
+the current adapter uses its native GPU renderer, native file system, bounded audio, and
 session-owned WMV paths described in `MODIFICATIONS.md`.
 
 ## System font binding

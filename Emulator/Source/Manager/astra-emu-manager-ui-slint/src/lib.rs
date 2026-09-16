@@ -1,3 +1,5 @@
+mod config_model;
+
 use std::{path::Path, rc::Rc};
 
 use slint::{ModelRc, SharedString, VecModel};
@@ -205,6 +207,8 @@ pub struct SlintManagerAdapter {
     filter_config: Rc<VecModel<ConfigField>>,
     image_cache: std::cell::RefCell<std::collections::HashMap<String, slint::Image>>,
     cached_games_signature: std::cell::RefCell<Vec<GameCardSignature>>,
+    cached_family_config: std::cell::RefCell<Vec<GenericConfigFieldViewModel>>,
+    cached_filter_config: std::cell::RefCell<Vec<GenericConfigFieldViewModel>>,
 }
 
 impl SlintManagerAdapter {
@@ -235,6 +239,8 @@ impl SlintManagerAdapter {
             filter_config,
             image_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
             cached_games_signature: std::cell::RefCell::new(Vec::new()),
+            cached_family_config: std::cell::RefCell::default(),
+            cached_filter_config: std::cell::RefCell::default(),
         })
     }
 
@@ -321,53 +327,15 @@ impl SlintManagerAdapter {
                 })
                 .collect::<Vec<_>>(),
         );
-        self.family_config.set_vec(
-            model
-                .family_config_fields
-                .iter()
-                .map(|field| ConfigField {
-                    options: std::rc::Rc::new(slint::VecModel::from(
-                        field
-                            .enum_values
-                            .iter()
-                            .map(|value| slint::SharedString::from(value.as_str()))
-                            .collect::<Vec<_>>(),
-                    ))
-                    .into(),
-                    key: field.key.as_str().into(),
-                    label: field.label.as_str().into(),
-                    description: field.description.as_str().into(),
-                    kind: field.kind.as_str().into(),
-                    value: field.value.as_str().into(),
-                    required: field.required,
-                    min: field.min,
-                    max: field.max,
-                })
-                .collect::<Vec<_>>(),
+        config_model::update(
+            &self.family_config,
+            &self.cached_family_config,
+            &model.family_config_fields,
         );
-        self.filter_config.set_vec(
-            model
-                .filter_config_fields
-                .iter()
-                .map(|field| ConfigField {
-                    options: std::rc::Rc::new(slint::VecModel::from(
-                        field
-                            .enum_values
-                            .iter()
-                            .map(|value| slint::SharedString::from(value.as_str()))
-                            .collect::<Vec<_>>(),
-                    ))
-                    .into(),
-                    key: field.key.as_str().into(),
-                    label: field.label.as_str().into(),
-                    description: field.description.as_str().into(),
-                    kind: field.kind.as_str().into(),
-                    value: field.value.as_str().into(),
-                    required: field.required,
-                    min: field.min,
-                    max: field.max,
-                })
-                .collect::<Vec<_>>(),
+        config_model::update(
+            &self.filter_config,
+            &self.cached_filter_config,
+            &model.filter_config_fields,
         );
         self.window
             .set_selected_case_id(model.selected_case_id.as_deref().unwrap_or_default().into());

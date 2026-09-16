@@ -14,16 +14,17 @@ dynamic-plugin-export = []
 
 [dependencies]
 abi_stable.workspace = true
-astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api" }
-rfvp = { path = "../../../ThirdParty/rfvp", default-features = false, features = ["hosted"] }
+astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api", features = ["diagnostic-bridge"] }
+rfvp = { path = "../../../ThirdParty/rfvp/crates/rfvp", default-features = false, features = ["hosted-gpu"] }
 fontdb.workspace = true
 tracing.workspace = true
+pollster.workspace = true
 time = { workspace = true, features = ["local-offset"] }
 symphonia = { version = "0.5", default-features = false, features = ["ogg", "vorbis", "wav", "pcm", "mp3", "flac"] }
 wmv-decoder = { path = "../na_wmv_player", default-features = false, features = ["audio"] }
 
 [build-dependencies]
-astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api" }
+astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api", features = ["diagnostic-bridge"] }
 serde_json.workspace = true
 sha2.workspace = true
 

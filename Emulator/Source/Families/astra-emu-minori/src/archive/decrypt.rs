@@ -2,7 +2,7 @@ use astra_core::{is_safe_symbol as safe_symbol, Hash256};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{MinoriError, MinoriPazDecryptProvider};
+use crate::{CoreError, MinoriPazDecryptProvider};
 
 pub const PAZ_DECRYPT_MAX_BATCH_BYTES: usize = 64 * 1024 * 1024;
 pub const PAZ_DECRYPT_MAX_BATCH_ENTRIES: usize = 64;
@@ -24,12 +24,12 @@ pub struct PazDecryptDescriptor {
 }
 
 impl PazDecryptDescriptor {
-    pub fn validate(&self) -> Result<(), MinoriError> {
+    pub fn validate(&self) -> Result<(), CoreError> {
         if !safe_symbol(&self.schema_id)
             || self.payload.is_empty()
             || self.payload.len() > PAZ_DECRYPT_MAX_DESCRIPTOR_BYTES
         {
-            return Err(MinoriError::invalid(
+            return Err(CoreError::invalid(
                 "ASTRA_EMU_DECRYPT_DESCRIPTOR",
                 "decrypt descriptor identity or payload is invalid",
             ));
@@ -48,12 +48,12 @@ pub struct PazDecryptTransport {
 }
 
 impl PazDecryptTransport {
-    pub fn validate(&self, input_len: usize) -> Result<(), MinoriError> {
+    pub fn validate(&self, input_len: usize) -> Result<(), CoreError> {
         let end = self
             .chunk_offset
             .checked_add(input_len as u64)
             .ok_or_else(|| {
-                MinoriError::invalid("ASTRA_EMU_DECRYPT_RANGE", "decrypt chunk range overflowed")
+                CoreError::invalid("ASTRA_EMU_DECRYPT_RANGE", "decrypt chunk range overflowed")
             })?;
         if input_len == 0
             || input_len > PAZ_DECRYPT_CHUNK_BYTES
@@ -66,7 +66,7 @@ impl PazDecryptTransport {
             || self.output_bound == 0
             || self.output_bound > PAZ_DECRYPT_MAX_BATCH_BYTES as u64
         {
-            return Err(MinoriError::invalid(
+            return Err(CoreError::invalid(
                 "ASTRA_EMU_DECRYPT_TRANSPORT",
                 "decrypt transport is outside the configured bounds",
             ));
@@ -85,9 +85,9 @@ pub struct PazDecryptRequest<'a> {
 pub fn validate_decrypt_request(
     provider: &MinoriPazDecryptProvider,
     request: &PazDecryptRequest<'_>,
-) -> Result<(), MinoriError> {
+) -> Result<(), CoreError> {
     if request.descriptors.is_empty() || request.descriptors.len() > PAZ_DECRYPT_MAX_BATCH_ENTRIES {
-        return Err(MinoriError::invalid(
+        return Err(CoreError::invalid(
             "ASTRA_EMU_DECRYPT_DESCRIPTOR_COUNT",
             "decrypt descriptor batch is empty or exceeds its entry bound",
         ));
@@ -100,7 +100,7 @@ pub fn validate_decrypt_request(
         descriptor.schema_id != provider.descriptor_schema_id()
             || descriptor.schema_hash != provider.descriptor_schema_hash()
     }) {
-        return Err(MinoriError::invalid(
+        return Err(CoreError::invalid(
             "ASTRA_EMU_DECRYPT_SCHEMA",
             "decrypt descriptor schema does not match the provider",
         ));
@@ -111,9 +111,9 @@ pub fn validate_decrypt_request(
 pub fn validate_decrypt_output(
     request: &PazDecryptRequest<'_>,
     output: &[u8],
-) -> Result<(), MinoriError> {
+) -> Result<(), CoreError> {
     if output.is_empty() || output.len() as u64 > request.transport.output_bound {
-        return Err(MinoriError::invalid(
+        return Err(CoreError::invalid(
             "ASTRA_EMU_DECRYPT_OUTPUT",
             "decrypt output is empty or exceeds its declared bound",
         ));

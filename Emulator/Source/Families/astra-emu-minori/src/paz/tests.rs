@@ -104,8 +104,8 @@ fn blowfish_encrypt(key: &[u8], plaintext: &[u8]) -> Vec<u8> {
     bytes
 }
 
-fn hash_fixture_entry(id: &str, offset: u64, size: u64) -> PazEntryDescriptor {
-    PazEntryDescriptor {
+fn hash_fixture_entry(id: &str, offset: u64, size: u64) -> ArchiveEntryDescriptor {
+    ArchiveEntryDescriptor {
         archive_role: "bg".into(),
         entry_id: id.into(),
         name: format!("{id}.bin"),
@@ -219,7 +219,9 @@ fn v0_fixture_mounts_all_roles_and_reads_across_a_volume_boundary() {
     }
     let root = vfs.read_dir("minori:/").unwrap();
     assert_eq!(root.len(), REQUIRED_ARCHIVE_ROLES.len());
-    assert!(root.iter().all(|node| node.kind == PazNodeKind::Directory));
+    assert!(root
+        .iter()
+        .all(|node| node.kind == ArchiveNodeKind::Directory));
     let read = vfs.read_range("minori:/scr/scr.bin", 3, 4).unwrap();
     assert_eq!(read.bytes.as_slice(), b"ture");
     assert!(!read.cache_hit);

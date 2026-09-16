@@ -9,7 +9,6 @@ use rfvp::{
     host_api::{AudioStreamId, RfvpFileSystem, RfvpHost},
     hosted::{HostedBootConfig, HostedConfig, HostedLimits, HostedSession, HostedStepInput},
     script::parser::Nls,
-    soft_render::PixelFormat,
 };
 
 use crate::{
@@ -203,6 +202,8 @@ impl FvpProvider {
             error::invalid("ASTRA_EMU_FVP_FRAME_SIZE", "frame dimensions overflow")
         })?;
         let frame = vec![0_u8; frame_len];
+        let gpu = crate::gpu::GpuRenderer::new(frame_info.width, frame_info.height)?;
+        hosted.use_direct_surface();
         let audio = AudioBridge::new(sink)?;
         let id = self.next_session_id;
         self.next_session_id = self
@@ -220,6 +221,7 @@ impl FvpProvider {
             video_audio_id: None,
             frame,
             frame_info,
+            gpu,
             fatal: None,
         };
         session.render_frame()?;
@@ -297,6 +299,7 @@ pub(crate) struct FvpSession {
     video_audio_id: Option<AudioStreamId>,
     frame: Vec<u8>,
     frame_info: FrameInfo,
+    gpu: crate::gpu::GpuRenderer,
     fatal: Option<astra_emu_family_api::FamilyError>,
 }
 
@@ -309,16 +312,7 @@ impl FvpSession {
         self.fatal.clone().map_or(Ok(()), Err)
     }
     fn render_frame(&mut self) -> FamilyResult<()> {
-        let pixels = std::mem::take(&mut self.frame);
-        let rendered = self
-            .hosted
-            .render_direct_surface(
-                self.frame_info.width,
-                self.frame_info.height,
-                PixelFormat::Rgba8,
-                pixels,
-            )
-            .map_err(|error| error::rfvp_operation(error, "software rendering"))?;
+        let rendered = self.gpu.capture(self.hosted.core())?;
         if rendered.len()
             != self.frame_info.required_bytes().ok_or_else(|| {
                 error::invalid("ASTRA_EMU_FVP_FRAME_SIZE", "frame dimensions overflow")

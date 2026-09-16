@@ -20,6 +20,22 @@ fn rendered(mixer: &mut Mixer, frames: usize) -> Vec<f32> {
 }
 
 #[test]
+fn cancelled_empty_restore_cannot_clear_the_live_mixer() {
+    let (_root, archive, mut mixer) = setup();
+    mixer.play(1, 0.5, 0.0, true, 0).unwrap();
+    rendered(&mut mixer, 512);
+    let before = postcard::to_allocvec(&mixer.snapshot()).unwrap();
+    let error = mixer
+        .restore(Vec::new(), &archive, &AtomicBool::new(true))
+        .unwrap_err();
+    assert_eq!(error.code.as_str(), "ASTRA_EMU_AUDIO_CANCELLED");
+    assert_eq!(postcard::to_allocvec(&mixer.snapshot()).unwrap(), before);
+    assert!(rendered(&mut mixer, 512)
+        .iter()
+        .any(|sample| sample.abs() > 0.001));
+}
+
+#[test]
 fn fade_in_snapshot_roundtrip_resumes_gain_and_remaining_duration() {
     let (_root, archive, mut mixer) = setup();
     mixer.play(1, 0.8, 0.0, true, 100).unwrap();

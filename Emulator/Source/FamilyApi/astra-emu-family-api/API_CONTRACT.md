@@ -1,4 +1,4 @@
-# Independent Family API v2
+# Independent Family API v3
 
 `astra-emu-family-api` 是 Family 插件唯一必需的契约依赖。不依赖 RuntimeWorld、package/save、VFS、renderer/audio backend 或 UI。静态核心和动态核心共用 typed DTO；动态入口使用 `abi_stable` 的 `FamilyModule`，提供 descriptor/probe/open/advance/frame/close。
 
@@ -22,10 +22,20 @@ Host 只提供 game_path、初始 WindowState 和输入。Family 自持 VM、文
 
 `FrameView<'a>` 借用 CPU RGBA8 sRGB opaque 像素；`FrameConsumerRef<'_>` 只可在同步 frame 调用内使用。Host 返回前复制 stride × height 字节，不跨 ABI 传 GPU/native handle。
 
+## Manager 诊断
+
+加载器必须先调用 `initialize_diagnostics(DiagnosticSinkBox)`，成功后才能读取 descriptor、probe 或 open。sink 支持并发调用，作用域为进程，不捕获游戏、窗口、音频或 session 资源，也不得回调 Family。库驻留期间保留首个 sink；重复加载不叠加 subscriber。静态核心不安装桥，直接使用宿主 tracing/log 订阅器。
+
+API 的可选 `diagnostic-bridge` feature 复用 tracing-subscriber 与 tracing-log，供 FVP、Siglus、Minori 动态适配层使用；纯 ABI 消费者无需这些依赖。安装冲突返回 `ASTRA_EMU_FAMILY_DIAGNOSTIC_INIT` 并阻止加载。桥不打开文件、不另建队列或日志线程；Manager 通过既有 astra-observability 管理输出、过滤、丢弃统计和 flush。
+
+`DiagnosticEvent` 最多 32 个唯一字段；target/event/字段名/符号值为最多 128 bytes 的 ASCII 标识符。数值必须有限。共享桥保留数值与布尔字段，字符串仅接收 event、code、operation、state，以及 log 的来源 target；其他字符串与 Debug 不格式化，累计 `redacted_fields`。未结构化事件标为 `family.unstructured_log`，保留来源与源码行号，不传文件路径或 message。适配者必须审查日志字段，标识符格式校验本身不能证明内容无敏感数据。
+
+Manager 再验证边界和重复字段；非法记录输出 `family.diagnostics.invalid`，不打印原记录。正常记录在 `astra_emu::family` target 输出，原来源为 `core_target`。关键诊断仍需稳定事件和安全字段，错误继续由原操作返回，不以日志代替错误处理。
+
 ## 生命周期与迁移
 
-ABI fingerprint 为 `astra.emu.independent_family_abi.v2`，schema 为 `astra.emu.independent_family_api.v2`。v1 插件必须重新构建安装，不提供兼容 reader/adapter。
+ABI fingerprint 为 `astra.emu.independent_family_abi.v3`，schema 为 `astra.emu.independent_family_api.v3`。v1/v2 插件必须重新构建安装，不提供兼容 reader/adapter。
 
-动态库首次加载后一直驻留到进程退出，失败加载产生的 ABI 元数据也不会指向卸载的代码；更新插件必须重启 Manager。provider/module 对象按正常生命周期释放。会话 close 和 open 失败仍须取消 Host 请求、唤醒阻塞 PCM 写入并等待所有 worker 结束，错误不得跳过其他 worker 清理。驻留不允许保留已关闭会话的线程或 callback。
+动态库首次加载后一直驻留到进程退出，失败加载产生的 ABI 元数据也不会指向卸载的代码；更新插件必须重启 Manager。provider/module 对象按正常生命周期释放。会话 close 和 open 失败仍须取消 Host 请求、唤醒阻塞 PCM 写入并等待所有 worker 结束，错误不得跳过其他 worker 清理。驻留不允许保留已关闭会话的线程或 session callback；无 session 资源的进程级诊断 sink 除外。
 
 验证使用普通 Rust unit/integration test。配置合法/默认/边界/损坏值、可选翻译和必需音频、Manager 持久化覆盖及失败写入保护均需通过；真实游戏输入、音视频、原生存读档和退出仍须实际运行，局部测试不代表产品验收。

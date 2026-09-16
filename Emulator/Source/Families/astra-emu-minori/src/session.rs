@@ -33,6 +33,7 @@ pub(crate) struct MinoriSession {
     phase: u128,
     wait_ns: u64,
     input_pending: bool,
+    pointer: Option<(f32, f32)>,
     finished: bool,
     poisoned: bool,
     suspended: bool,
@@ -68,6 +69,7 @@ impl MinoriSession {
             phase: 0,
             wait_ns: 0,
             input_pending: false,
+            pointer: None,
             finished: false,
             poisoned: false,
             suspended: false,
@@ -107,7 +109,7 @@ impl MinoriSession {
                     let replacement = (response.replacement.to_string(), speaker.clone());
                     if self
                         .scene
-                        .render(self.vm.state(), Some(&replacement))
+                        .render(self.vm.state(), Some(&replacement), None)
                         .is_ok()
                     {
                         self.message = Some(replacement);
@@ -203,7 +205,14 @@ impl MinoriSession {
         vm.restore_native_save(&saved.vm, 1)
             .map_err(|_| error("ASTRA_EMU_MINORI_SAVE_STATE", "saved VM state is invalid"))?;
         let mut scene = Scene::new(self.archive.clone(), self.info.width, self.info.height)?;
-        scene.render(vm.state(), saved.message.as_ref())?;
+        let choices = vm.choice_display().map_err(vm_error)?;
+        scene.render(
+            vm.state(),
+            saved.message.as_ref(),
+            choices
+                .as_ref()
+                .map(|(labels, index)| (labels.as_slice(), *index)),
+        )?;
         self.cancel_text()?;
         if let Some(service) = &self.replacement {
             service.reset(TextResetReason::Load).into_result()?;
@@ -221,6 +230,7 @@ impl MinoriSession {
         self.wait_ns = saved.wait_ns;
         self.phase = 0;
         self.input_pending = false;
+        self.pointer = None;
         self.finished = self.vm.state().terminal;
         tracing::info!(event = "astra.emu.minori.load.completed");
         Ok(())
@@ -257,7 +267,11 @@ impl MinoriSession {
                 }
             };
             if ready {
-                self.vm.resolve_wait(&id).map_err(vm_error)?;
+                if self.vm.state().choice.is_some() {
+                    self.vm.commit_choice().map_err(vm_error)?;
+                } else {
+                    self.vm.resolve_wait(&id).map_err(vm_error)?;
+                }
                 self.wait_ns = 0;
                 self.input_pending = false;
             } else {
@@ -267,6 +281,10 @@ impl MinoriSession {
         }
         let event = self.vm.step(tick).map_err(vm_error)?;
         match event {
+            Some(MinoriVmEvent::Choice) => {
+                self.message = None;
+                Ok(true)
+            }
             Some(MinoriVmEvent::Message { text, speaker, .. }) => {
                 self.wait_ns = 0;
                 self.message(text, speaker)?;
@@ -281,14 +299,21 @@ impl MinoriSession {
                 Ok(false)
             }
             Some(MinoriVmEvent::Chain { target }) => {
-                let uri = format!("minori:/scr/{target}");
+                let (file, label) =
+                    crate::script::chain_target_parts(&target).ok_or_else(|| {
+                        error(
+                            "ASTRA_EMU_MINORI_RUNTIME_CHAIN",
+                            "invalid chained script location",
+                        )
+                    })?;
+                let uri = format!("minori:/scr/{file}");
                 let bytes = read_asset(&self.archive, &uri, 16 * 1024 * 1024)?;
                 let script =
                     parse_sc(&bytes, &ScOpcodeCatalog::observed_minori()).map_err(|_| {
                         error("ASTRA_EMU_MINORI_SCRIPT", "chained script cannot be parsed")
                     })?;
                 self.vm
-                    .replace_script(uri, Hash256::from_sha256(&bytes), script)
+                    .replace_script(uri, Hash256::from_sha256(&bytes), script, label)
                     .map_err(vm_error)?;
                 Ok(false)
             }
@@ -301,7 +326,11 @@ impl MinoriSession {
                 }
                 Ok(true)
             }
-            Some(MinoriVmEvent::Effect(_) | MinoriVmEvent::Panel { .. }) => Ok(true),
+            Some(
+                MinoriVmEvent::Effect(_)
+                | MinoriVmEvent::EffectCleared
+                | MinoriVmEvent::Panel { .. },
+            ) => Ok(true),
             Some(MinoriVmEvent::Terminal) => {
                 self.finished = true;
                 Ok(false)
@@ -329,8 +358,52 @@ impl MinoriSession {
         self.audio.check()?;
         let mut save = false;
         let mut load = false;
+        let mut choice_dirty = false;
         for event in events {
             match event {
+                FamilyEvent::PointerMove { x, y } => {
+                    self.pointer = Some((*x, *y));
+                    if let Some((labels, _)) = self.vm.choice_display().map_err(vm_error)? {
+                        if let Some(index) = crate::text_renderer::choice_at(labels.len(), *x, *y) {
+                            choice_dirty |= self.vm.focus_choice(index).map_err(vm_error)?;
+                        }
+                    }
+                }
+                FamilyEvent::PointerButton {
+                    button: PointerButton::Primary,
+                    state: KeyState::Pressed,
+                } if self.vm.state().choice.is_some() => {
+                    let (labels, _) =
+                        self.vm.choice_display().map_err(vm_error)?.ok_or_else(|| {
+                            error("ASTRA_EMU_MINORI_CHOICE", "choice is unavailable")
+                        })?;
+                    if let Some(index) = self
+                        .pointer
+                        .and_then(|(x, y)| crate::text_renderer::choice_at(labels.len(), x, y))
+                    {
+                        choice_dirty |= self.vm.focus_choice(index).map_err(vm_error)?;
+                        self.input_pending = true;
+                    }
+                }
+                FamilyEvent::Key {
+                    code: KeyCode::ArrowUp | KeyCode::ArrowDown,
+                    state: KeyState::Pressed,
+                    ..
+                } if self.vm.state().choice.is_some() => {
+                    let direction = if matches!(
+                        event,
+                        FamilyEvent::Key {
+                            code: KeyCode::ArrowUp,
+                            ..
+                        }
+                    ) {
+                        -1
+                    } else {
+                        1
+                    };
+                    self.vm.move_choice(direction).map_err(vm_error)?;
+                    choice_dirty = true;
+                }
                 FamilyEvent::Key {
                     code: KeyCode::F5,
                     state: KeyState::Pressed,
@@ -375,7 +448,7 @@ impl MinoriSession {
         if load {
             self.load()?;
         }
-        let mut dirty = self.poll_text()?;
+        let mut dirty = self.poll_text()? || choice_dirty;
         if !self.suspended && !self.finished {
             dirty |= self
                 .vm
@@ -389,7 +462,14 @@ impl MinoriSession {
             }
         }
         if dirty {
-            self.scene.render(self.vm.state(), self.message.as_ref())?;
+            let choices = self.vm.choice_display().map_err(vm_error)?;
+            self.scene.render(
+                self.vm.state(),
+                self.message.as_ref(),
+                choices
+                    .as_ref()
+                    .map(|(labels, index)| (labels.as_slice(), *index)),
+            )?;
         }
         if save {
             self.save()?;
@@ -449,9 +529,14 @@ impl Drop for MinoriSession {
     }
 }
 fn vm_error(cause: crate::MinoriRuntimeError) -> FamilyError {
-    let text = cause.to_string();
+    if let crate::MinoriRuntimeError::UnsupportedOpcode { ordinal, .. } = &cause {
+        return error(
+            cause.diagnostic_code(),
+            &format!("script command at ordinal {ordinal} is not implemented"),
+        );
+    }
     error(
-        text.split(':').next().unwrap_or("ASTRA_EMU_MINORI_VM"),
+        cause.diagnostic_code(),
         "script execution failed at an unsupported or invalid operation",
     )
 }

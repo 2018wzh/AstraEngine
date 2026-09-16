@@ -5,6 +5,7 @@ mod error;
 mod events;
 mod filesystem;
 mod font_bindings;
+mod gpu;
 mod provider;
 mod renderer;
 mod video;

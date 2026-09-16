@@ -81,13 +81,25 @@ pub struct ScOpcodeSpec {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ScControlFlowKind {
     Next,
-    LabelSymbol { operand: usize },
-    JumpSymbol { operand: usize },
-    ConditionalJumpSymbol { operand: usize },
-    ChainSymbol { operand: usize },
+    LabelSymbol {
+        operand: usize,
+    },
+    JumpSymbol {
+        operand: usize,
+    },
+    ConditionalJumpSymbol {
+        operand: usize,
+    },
+    ChainSymbol {
+        operand: usize,
+    },
     Return,
     Terminate,
-    ChoiceSymbols { operands: Vec<usize> },
+    ChoiceSymbols {
+        operands: Vec<usize>,
+    },
+    /// One to four source-preserving `display:label` options.
+    ChoicePairs,
     Unknown,
 }
 
@@ -110,7 +122,7 @@ impl ScOpcodeCatalog {
     }
 
     /// Catalog entries whose syntax was verified across the authorized 89-file sample.
-    /// `select` remains explicitly unknown because its branch semantics are not proven.
+    /// Includes the display/label select form integrated from the Musica core.
     pub fn observed_minori() -> Self {
         let mut catalog = Self::default();
         for opcode in [
@@ -119,6 +131,7 @@ impl ScOpcodeCatalog {
             "stage",
             "panel",
             "playbgm",
+            "playbgm2",
             "char",
             "playse",
             "wait",
@@ -127,6 +140,8 @@ impl ScOpcodeCatalog {
             "setglobal",
             "set",
             "playse3",
+            "playse4",
+            "deletevar",
             "effect",
             "movie",
             "playvoice",
@@ -157,7 +172,7 @@ impl ScOpcodeCatalog {
             ),
             ("chain", ScControlFlowKind::ChainSymbol { operand: 0 }),
             ("end", ScControlFlowKind::Terminate),
-            ("select", ScControlFlowKind::Unknown),
+            ("select", ScControlFlowKind::ChoicePairs),
         ] {
             catalog
                 .insert(
@@ -465,7 +480,11 @@ fn decode_control_flow(
             target: symbol(*operand)?,
         },
         ScControlFlowKind::ChainSymbol { operand } => ScControlFlow::Chain {
-            target: symbol(*operand)?,
+            target: tokens
+                .get(*operand)
+                .filter(|target| chain_target_parts(target).is_some())
+                .cloned()
+                .ok_or(ScParseError::OperandSchema(offset))?,
         },
         ScControlFlowKind::Return => unreachable!("handled before operand tokenization"),
         ScControlFlowKind::Terminate => unreachable!("handled before operand tokenization"),
@@ -475,6 +494,22 @@ fn decode_control_flow(
                 .map(|operand| symbol(*operand))
                 .collect::<Result<_, _>>()?,
         },
+        ScControlFlowKind::ChoicePairs => {
+            if tokens.is_empty() || tokens.len() > 4 {
+                return Err(ScParseError::OperandSchema(offset));
+            }
+            let targets = tokens
+                .iter()
+                .map(|token| {
+                    let (_, target) = token
+                        .split_once(':')
+                        .filter(|(display, target)| !display.is_empty() && safe_symbol(target))
+                        .ok_or(ScParseError::OperandSchema(offset))?;
+                    Ok(target.to_owned())
+                })
+                .collect::<Result<Vec<_>, ScParseError>>()?;
+            ScControlFlow::Choice { targets }
+        }
         ScControlFlowKind::Unknown => unreachable!("handled before operand tokenization"),
     })
 }
@@ -539,6 +574,28 @@ fn safe_symbol(value: &str) -> bool {
         && value.bytes().all(|byte| {
             byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'-' | b'/' | b'\\')
         })
+}
+
+/// Musica script transfer syntax, shared by parser, VM and native session.
+pub(crate) fn chain_target_parts(target: &str) -> Option<(&str, Option<&str>)> {
+    let (file, label) = target
+        .split_once('#')
+        .map_or((target, None), |(file, label)| (file, Some(label)));
+    let plain = |value: &str| {
+        !value.is_empty()
+            && value.len() <= 256
+            && value
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'-'))
+    };
+    if !plain(file)
+        || !file.to_ascii_lowercase().ends_with(".sc")
+        || file.contains("..")
+        || label.is_some_and(|label| !plain(label))
+    {
+        return None;
+    }
+    Some((file, label))
 }
 
 #[cfg(test)]

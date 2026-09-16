@@ -1,0 +1,6 @@
+[submodule "siglus"]
+	path = Emulator/ThirdParty/siglus_rs
+	url = https://github.com/2018wzh/siglus_rs
+[submodule "rfvp"]
+	path = Emulator/ThirdParty/rfvp
+	url = https://github.com/2018wzh/rfvp

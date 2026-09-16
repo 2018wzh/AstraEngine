@@ -30,6 +30,8 @@ use crate::family_registry::manager_descriptor;
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum FamilyLoadError {
+    #[error("ASTRA_EMU_FAMILY_DIAGNOSTIC_INIT")]
+    Diagnostics,
     #[error("ASTRA_EMU_FAMILY_LOAD_PATH")]
     InvalidPath,
     #[error("ASTRA_EMU_FAMILY_LOAD_LIBRARY")]
@@ -62,6 +64,7 @@ impl FamilyLoadError {
     /// Stable code suitable for a Manager diagnostic or UI status line.
     pub fn diagnostic_code(&self) -> &str {
         match self {
+            Self::Diagnostics => "ASTRA_EMU_FAMILY_DIAGNOSTIC_INIT",
             Self::InvalidPath => "ASTRA_EMU_FAMILY_LOAD_PATH",
             Self::Library => "ASTRA_EMU_FAMILY_LOAD_LIBRARY",
             Self::AbiLayout => "ASTRA_EMU_FAMILY_LOAD_ABI",
@@ -86,6 +89,7 @@ impl FamilyLoadError {
     /// are normalized before they enter a `FamilyLoadError`.
     pub fn human_message(&self) -> &str {
         match self {
+            Self::Diagnostics => "the family diagnostic bridge could not initialize",
             Self::DescriptorError(error) | Self::ProviderError(error) | Self::ProbeError(error) => {
                 error.message.as_str()
             }
@@ -153,6 +157,10 @@ impl LoadedFamilyPlugin {
             unsafe { header.init_root_module_with_unchecked_layout::<AstraFamilyModuleRef>() }
                 .map_err(|_| FamilyLoadError::ModuleInitialization)?;
         let module = root.service().get();
+        module
+            .initialize_diagnostics(crate::family_diagnostics::sink())
+            .into_result()
+            .map_err(|_| FamilyLoadError::Diagnostics)?;
         let descriptor = module
             .descriptor()
             .into_result()
@@ -470,6 +478,32 @@ mod tests {
     use astra_emu_family_api::{FamilyResult, FrameAlpha, FrameFormat, FrameInfo};
 
     struct CountingVisitor(usize);
+
+    #[test]
+    #[ignore = "requires an explicitly built Family plugin binary"]
+    fn built_family_binary_loads_and_reopens_without_unloading() {
+        let path = std::env::var_os("ASTRA_EMU_TEST_PLUGIN")
+            .expect("ASTRA_EMU_TEST_PLUGIN must identify the plugin under test");
+        let empty_game = tempfile::tempdir().unwrap();
+        let mut first_descriptor = None;
+        for _ in 0..3 {
+            let plugin = LoadedFamilyPlugin::load(PathBuf::from(&path)).unwrap();
+            let descriptor = plugin.descriptor().unwrap();
+            descriptor.validate().unwrap();
+            if let Some(first) = &first_descriptor {
+                assert_eq!(first, &descriptor);
+            } else {
+                first_descriptor = Some(descriptor);
+            }
+            assert!(plugin
+                .probe(ProbeRequest {
+                    game_path: empty_game.path().to_str().unwrap().into(),
+                })
+                .unwrap()
+                .is_none());
+            drop(plugin);
+        }
+    }
 
     impl FrameVisitor for CountingVisitor {
         fn accept(&mut self, _frame: FrameView<'_>) -> FamilyResult<()> {

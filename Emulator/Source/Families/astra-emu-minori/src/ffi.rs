@@ -25,6 +25,13 @@ struct MinoriModule {
 }
 
 impl FamilyModule for MinoriModule {
+    fn initialize_diagnostics(
+        &self,
+        sink: astra_emu_family_api::DiagnosticSinkBox,
+    ) -> astra_emu_family_api::FfiFamilyResult<()> {
+        boundary(|| astra_emu_family_api::diagnostic_bridge::install(sink))
+    }
+
     fn descriptor(
         &self,
     ) -> astra_emu_family_api::FfiFamilyResult<astra_emu_family_api::FamilyDescriptor> {

@@ -1,11 +1,18 @@
 # RFVP Astra Family fork record
 
-`../../ThirdParty/rfvp/` is a source snapshot of the `0.6.0` upstream commit
+`../../../ThirdParty/rfvp/` is a complete Git submodule fork of the `0.6.0` upstream commit
 `304e773387a9920c9db091ec1fd937c717aea949` from
 [`xmoezzz/rfvp`](https://github.com/xmoezzz/rfvp). The hosted adaptation originated
 from the `2018wzh/rfvp` fork at the immutable revision
 `f4f64a5bb726c1759350a666a35e0a454b810f61`. The covered source and the complete
-MPL-2.0 text are in `../../ThirdParty/rfvp/` and `../../ThirdParty/rfvp/LICENSE`.
+MPL-2.0 text are in `../../../ThirdParty/rfvp/crates/rfvp/` and `../../../ThirdParty/rfvp/LICENSE`.
+
+The local adaptation is a single commit, `4c67834`, directly on that upstream
+baseline. The parent repository pins its exact gitlink. This commit has not been
+pushed; fetching the configured remote alone cannot reproduce it yet. The fork
+retains upstream history, workspace members, tools, licenses and platform crates.
+The Family depends on `crates/rfvp` with `hosted-gpu`; native video, bitmap and
+Anzu feature dependencies retain their upstream definitions.
 
 The 0.6.0 update incorporates upstream text-wait completion, InputFlash,
 dissolve-wait and native global-save fixes. Hosted sessions own script globals per session and never use the process-global
@@ -21,12 +28,12 @@ Input, time, timer and motion serialization additions were removed; native slot
 snapshots now use the upstream graph and motion layout and load behavior.
 The Arc texture ownership adapter remains for shared host rendering resources.
 
-The local changes to the vendored tree are limited to these areas:
+The local changes to the fork are limited to these areas:
 
-- `../../ThirdParty/rfvp/Cargo.toml` removes dependencies on private Astra path crates,
-  keeps the hosted feature graph self-contained, records the local `flate2`
-  version, and builds the private RFVP core as `rlib` only. The FVP crate in
-  the parent directory is the only dynamic plugin boundary.
+- `crates/rfvp/Cargo.toml` adds hosted and hosted-gpu features plus the SHA-256
+  dependency used by native persistence. Upstream default features, sibling
+  dependencies and library targets remain intact. Astra loads only the separate
+  FVP Family dynamic plugin.
 - `src/host_api/audio.rs`, `src/hosted.rs`,
   `src/audio_player/{bgm_player_host,se_player_host}.rs`, and
   `src/no_std_core.rs` add a typed `is_playing` query and synchronize host
@@ -44,7 +51,7 @@ The local changes to the vendored tree are limited to these areas:
   host-owned bytes plus a TTC face index. No font is embedded or substituted;
   the Astra adapter resolves exact installed family names with `fontdb`, and
   missing optional faces fail only when selected for rendering.
-- `src/app.rs`, `src/rendering/gpu_prim.rs`, and `src/wasm_entry.rs` now match
+- `src/rendering/gpu_prim.rs` and `src/wasm_entry.rs` match
   the pinned upstream files exactly; formatting-only fork changes were removed.
 - `src/subsystem/save_state.rs` shares one capture implementation and the
   upstream region-specific global operations. User-save capture still requires
@@ -74,7 +81,7 @@ The local changes to the vendored tree are limited to these areas:
 
 The AstraEngine `astra-emu-fvp/src/` files are the separate family adapter.
 They keep RFVP responsible for game state and use `NativeFileSystem` for
-relative game-file access, a direct CPU surface for frame output, the bounded
+relative game-file access, native GPU rendering with final-frame readback, the bounded
 host audio worker for mixed PCM, and the session-owned WMV playback path for
 movie duration, frame timing, and completion. The adapter does not add a
 second scene renderer, translation cache, save format, or runtime snapshot
@@ -86,3 +93,37 @@ a description of the current independent-host source or its release status.
 ## Family API v2 启动配置
 
 Family adapter 声明 `script_encoding` enum（shift_jis/gbk/utf8），经 v2 typed schema 验证后传给已有 `HostedBootConfig.nls`。默认仍是 ShiftJIS；没有修改 RFVP VM、编解码器或 GlobalSaveDataV1/RFVG。翻译 capability 仍未声明。
+
+## 全局存档失败诊断
+
+Hosted 读取分别记录 RFVG 解码失败、footer 缺失与状态不匹配。状态不匹配日志只包含版本、变量区及已读位图计数，不输出文件位置或游戏内容；失败仍在应用状态前返回，不更改文件。
+
+## 原生 GPU 嵌入
+
+`hosted-gpu` 开放已有 `GpuPrimRenderer`、纹理、Sprite/Fill 管线和 `RenderTarget`，保留 RFVP 的 wgpu 0.19 版本与平台后端。新增离屏入口从 Core 的 MotionManager 绘制，不经 Family 重建场景或复制 shader。Hosted 图像缓冲只补充现有渲染器需要的 `dimensions`/`from_pixel` 方法。
+
+最终帧回读使用原有 RenderTarget 的行对齐与映射实现；新增有界、可返回错误的映射入口供 Family 使用。Family 拒绝软件 adapter，允许 Windows Sandbox 的虚拟 GPU。
+
+原生 `rfvp_render/mask.rs` 补齐旧画面捕获、遮罩阈值与两段透明度演出，Hosted 与 `app.rs` 共用同一 GPU 管线。遮罩读取 NVSG 的 alpha 通道，演出进度沿用原游戏整数计算；缺失或尺寸不匹配时返回错误。缓存代数只用于渲染失效，不改变原生存档格式。中途恢复仍需验证。
+
+独立 `gpu-render` 构建修正 Hosted 共享图像及字体结果的 feature 边界，不改变原生字体选择策略。离屏与窗口后端均保留各自的逻辑尺寸和渲染尺寸。
+
+## 动态模块重复启动
+
+Family 的 session map 改为持有 `Box<FvpSession>`。原先第二次启动在 `BTreeMap` 的节点插入路径上为整个 session 生成大型栈临时值，导致 Windows GUI 线程栈溢出；现在节点只移动堆指针。核心状态、关闭顺序与存档 codec 均保持原样。回归通过动态模块入口在 1 MiB 栈中连续启动、关闭三次。
+
+## 图像恢复
+
+`GraphBuff` 重新加载纹理后恢复存档中的颜色与显示位置，避免加载器的初始化覆盖保存值。调色会修改像素，因此调色后的图像使用既有 `RawRgba` 分支保存；从源文件重新加载无法还原这些累积修改。没有新增存档结构或渲染路径。GPU 回归覆盖原地及新会话恢复，完整游戏读档仍待验证。
+
+## Manager diagnostics
+
+The Family adapter installs the shared optional Family API v3 diagnostic bridge before descriptor/probe/open. Existing core tracing and log events reach the Manager sink without adding a core logger or changing native rendering/platform behavior. Unreviewed text and Debug values are redacted with an explicit count.
+
+Hosted save capture and restore emit `rfvp.save.text_state` at DEBUG with numeric font, color, outline and reveal state for loaded text slots. This diagnoses visual restoration differences without logging the text or retaining pixel dumps. It does not change the save codec or restore behavior.
+
+## Timed motion restoration
+
+RFVS snapshot version 2 preserves the existing alpha, move, rotation, scale, depth, V3D, sprite, snow and lip containers, including elapsed time and allocation state. Restore resumes these native containers instead of discarding them. Mask dissolve types 4–6 are restored explicitly. RFVG global persistence is unchanged. Version 1 RFVS snapshots lack the required motion state and are rejected without rewriting the source file; tests must use new slots. The snapshot payload remains bounded and uses the existing bincode codec.
+
+Motion restore rejects out-of-range or duplicate image slots and unknown dissolve types before changing the current scene. Invalid slots are no longer skipped or applied in input order. This validation does not introduce another persistence format or rendering path.

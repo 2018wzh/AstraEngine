@@ -4,6 +4,15 @@ fn controller(root: &Path) -> AstraEmuManagerController {
     AstraEmuManagerController::open_library(root.into(), FrameMailbox::new(), Vec::new()).unwrap()
 }
 
+#[test]
+#[cfg(not(target_os = "android"))]
+fn desktop_library_starts_without_implicitly_registered_fvp() {
+    let root = tempfile::tempdir().unwrap();
+    let app = controller(root.path());
+    assert!(app.library.list_installed_plugins().unwrap().is_empty());
+    assert!(app.registry.descriptor("astra.emu.fvp").is_none());
+}
+
 fn add_game(controller: &mut AstraEmuManagerController, id: &str) {
     controller
         .library

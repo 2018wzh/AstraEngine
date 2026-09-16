@@ -14,3 +14,24 @@ path = "src/bin/schema.rs"
 [dependencies]
 abi_stable.workspace = true
 serde.workspace = true
+
+[features]
+default = []
+diagnostic-bridge = ["dep:tracing", "dep:tracing-subscriber", "dep:tracing-log"]
+
+[dependencies.tracing]
+version = "0.1"
+optional = true
+
+[dependencies.tracing-subscriber]
+version = "0.3"
+default-features = false
+features = ["registry", "std"]
+optional = true
+
+[dependencies.tracing-log]
+version = "0.2"
+optional = true
+
+[dev-dependencies]
+log = "0.4"

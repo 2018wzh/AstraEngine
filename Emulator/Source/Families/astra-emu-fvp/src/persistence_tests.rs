@@ -8,6 +8,7 @@ use rfvp::{script::Variant, subsystem::global_savedata::try_decode_global_saveda
 use std::sync::atomic::{AtomicBool, Ordering};
 
 struct TestSink(Arc<AtomicBool>);
+
 impl AudioSink for TestSink {
     fn configure(&self, _: PcmFormatSpec) -> FfiFamilyResult<()> {
         Ok(()).into()
@@ -52,24 +53,56 @@ fn fixture() -> tempfile::TempDir {
 
 fn open(root: &Path, cancelled: Arc<AtomicBool>) -> FamilyResult<FvpSession> {
     FvpProvider::default()
-        .open_session(OpenRequest {
-            configuration: Default::default(),
-            game_path: root.to_str().unwrap().into(),
-            initial_window: WindowState {
-                width: 640,
-                height: 480,
-                focused: true,
-                visible: true,
-            },
-            host: FamilyHostServices {
-                audio_sink: ROption::RSome(AudioSink_TO::from_value(
-                    TestSink(cancelled),
-                    TD_Opaque,
-                )),
-                text_replacement: ROption::RNone,
-            },
-        })
+        .open_session(request(root, cancelled))
         .map(|(_, session)| session)
+}
+
+fn request(root: &Path, cancelled: Arc<AtomicBool>) -> OpenRequest {
+    OpenRequest {
+        configuration: Default::default(),
+        game_path: root.to_str().unwrap().into(),
+        initial_window: WindowState {
+            width: 640,
+            height: 480,
+            focused: true,
+            visible: true,
+        },
+        host: FamilyHostServices {
+            audio_sink: ROption::RSome(AudioSink_TO::from_value(TestSink(cancelled), TD_Opaque)),
+            text_replacement: ROption::RNone,
+        },
+    }
+}
+
+#[cfg(feature = "dynamic-plugin-export")]
+#[test]
+fn dynamic_module_reopens_on_windows_sized_stack() {
+    use astra_emu_family_api::{FamilyModule, SessionRequest};
+    std::thread::Builder::new()
+        .stack_size(1024 * 1024)
+        .spawn(|| {
+            let root = fixture();
+            let module = crate::ffi::FvpModule::default();
+            // Reusing an emptied BTreeMap takes a different insertion path.
+            // Inline FvpSession values exhausted the desktop GUI thread stack.
+            for _ in 0..3 {
+                let cancelled = Arc::new(AtomicBool::new(false));
+                let opened = module
+                    .open(request(root.path(), cancelled.clone()))
+                    .into_result()
+                    .unwrap();
+                module
+                    .close(SessionRequest {
+                        session_id: opened.session_id,
+                    })
+                    .into_result()
+                    .unwrap();
+                assert!(cancelled.load(Ordering::Acquire));
+            }
+        })
+        .unwrap()
+        .join()
+        .unwrap();
 }
 
 #[test]

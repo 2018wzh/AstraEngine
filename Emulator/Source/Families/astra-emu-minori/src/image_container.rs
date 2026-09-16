@@ -1,6 +1,6 @@
 use std::{io::Read, sync::Arc};
 
-use crate::MinoriError;
+use crate::CoreError;
 use encoding_rs::SHIFT_JIS;
 use flate2::read::ZlibDecoder;
 use image::RgbaImage;
@@ -30,7 +30,7 @@ pub struct MinoriAniArchive {
 }
 
 impl MinoriAniArchive {
-    pub fn parse(source: impl Into<Arc<[u8]>>) -> Result<Self, MinoriError> {
+    pub fn parse(source: impl Into<Arc<[u8]>>) -> Result<Self, CoreError> {
         let source = source.into();
         validate_container_size(source.len())?;
         if read_u16(&source, 0)? != 0x0100 || read_u32(&source, 4)? != 0 {
@@ -111,7 +111,7 @@ impl MinoriAniArchive {
         &self.frames
     }
 
-    pub fn decode_frame(&self, index: usize) -> Result<RgbaImage, MinoriError> {
+    pub fn decode_frame(&self, index: usize) -> Result<RgbaImage, CoreError> {
         let frame = self.frames.get(index).ok_or_else(|| {
             invalid(
                 "ASTRA_EMU_MINORI_ANI_FRAME_INDEX",
@@ -143,7 +143,7 @@ pub struct MinoriSqzArchive {
 }
 
 impl MinoriSqzArchive {
-    pub fn parse(source: impl Into<Arc<[u8]>>) -> Result<Self, MinoriError> {
+    pub fn parse(source: impl Into<Arc<[u8]>>) -> Result<Self, CoreError> {
         let source = source.into();
         validate_container_size(source.len())?;
         if checked_slice(&source, 0, 4)? != b"SQZ1" {
@@ -207,7 +207,7 @@ impl MinoriSqzArchive {
         &self.frames
     }
 
-    pub fn decode_frame(&self, index: usize) -> Result<RgbaImage, MinoriError> {
+    pub fn decode_frame(&self, index: usize) -> Result<RgbaImage, CoreError> {
         let frame = self.frames.get(index).ok_or_else(|| {
             invalid(
                 "ASTRA_EMU_MINORI_SQZ_FRAME_INDEX",
@@ -248,7 +248,7 @@ fn raw_to_rgba(
     height: u32,
     bits_per_pixel: u16,
     source: &[u8],
-) -> Result<RgbaImage, MinoriError> {
+) -> Result<RgbaImage, CoreError> {
     let expected = checked_pixel_bytes(width, height, bits_per_pixel)?;
     if source.len() != expected {
         return Err(invalid(
@@ -304,7 +304,7 @@ fn raw_to_rgba(
     })
 }
 
-fn checked_pixel_bytes(width: u32, height: u32, bits_per_pixel: u16) -> Result<usize, MinoriError> {
+fn checked_pixel_bytes(width: u32, height: u32, bits_per_pixel: u16) -> Result<usize, CoreError> {
     if width == 0
         || height == 0
         || width > MAX_DIMENSION
@@ -329,7 +329,7 @@ fn checked_pixel_bytes(width: u32, height: u32, bits_per_pixel: u16) -> Result<u
         .map_err(|_| invalid("ASTRA_EMU_MINORI_IMAGE_SIZE", "image byte size overflowed"))
 }
 
-fn validate_container_size(len: usize) -> Result<(), MinoriError> {
+fn validate_container_size(len: usize) -> Result<(), CoreError> {
     if len == 0 || len > MAX_CONTAINER_BYTES {
         return Err(invalid(
             "ASTRA_EMU_MINORI_IMAGE_CONTAINER_SIZE",
@@ -339,7 +339,7 @@ fn validate_container_size(len: usize) -> Result<(), MinoriError> {
     Ok(())
 }
 
-fn checked_slice(source: &[u8], offset: usize, len: usize) -> Result<&[u8], MinoriError> {
+fn checked_slice(source: &[u8], offset: usize, len: usize) -> Result<&[u8], CoreError> {
     let end = offset
         .checked_add(len)
         .ok_or_else(|| invalid("ASTRA_EMU_MINORI_IMAGE_BOUNDS", "image range overflowed"))?;
@@ -348,24 +348,24 @@ fn checked_slice(source: &[u8], offset: usize, len: usize) -> Result<&[u8], Mino
         .ok_or_else(|| invalid("ASTRA_EMU_MINORI_IMAGE_BOUNDS", "image range is truncated"))
 }
 
-fn read_u16(source: &[u8], offset: usize) -> Result<u16, MinoriError> {
+fn read_u16(source: &[u8], offset: usize) -> Result<u16, CoreError> {
     Ok(u16::from_le_bytes(
         checked_slice(source, offset, 2)?.try_into().unwrap(),
     ))
 }
-fn read_i16(source: &[u8], offset: usize) -> Result<i16, MinoriError> {
+fn read_i16(source: &[u8], offset: usize) -> Result<i16, CoreError> {
     Ok(i16::from_le_bytes(
         checked_slice(source, offset, 2)?.try_into().unwrap(),
     ))
 }
-fn read_u32(source: &[u8], offset: usize) -> Result<u32, MinoriError> {
+fn read_u32(source: &[u8], offset: usize) -> Result<u32, CoreError> {
     Ok(u32::from_le_bytes(
         checked_slice(source, offset, 4)?.try_into().unwrap(),
     ))
 }
 
-fn invalid(code: &'static str, message: &'static str) -> MinoriError {
-    MinoriError::invalid(code, message)
+fn invalid(code: &'static str, message: &'static str) -> CoreError {
+    CoreError::invalid(code, message)
 }
 
 #[cfg(test)]

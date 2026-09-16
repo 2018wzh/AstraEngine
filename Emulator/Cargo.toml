@@ -1,8 +1,11 @@
 [workspace]
 resolver = "2"
 members = [
+    "Source/SDK/astra-emu-sdk",
+    "Source/Families/astra-emu-cmvs",
     "Source/FamilyApi/astra-emu-family-api",
     "Source/Families/astra-emu-fvp",
+    "Source/Families/astra-emu-siglus",
     "Source/Families/astra-emu-minori",
     "Source/Programs/astra-emu-minori-cli",
     "Source/Manager/astra-emu-manager-core",
@@ -13,6 +16,7 @@ members = [
 ]
 exclude = [
     "ThirdParty/rfvp",
+    "ThirdParty/siglus_rs",
     "Source/FamilyApi/astra-emu-extension-api",
     "Source/FamilyCore/astra-emu-family-core",
     "Source/FamilySupport/astra-emu-family-support",

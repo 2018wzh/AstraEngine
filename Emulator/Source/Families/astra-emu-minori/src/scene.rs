@@ -1,11 +1,10 @@
 use crate::{MinoriMountedVfs, MinoriRuntimeState, MinoriTextRenderer};
 use astra_emu_family_api::{FamilyError, FamilyResult};
-use astra_media_core::{
-    BlendMode, CpuRendererProvider, HeadlessRenderer, RectI, RenderTargetFormat,
-    Renderer2DProvider, RendererCreateRequest, SceneCommand, TextureFrame,
-};
-use lru::LruCache;
-use std::{io::Cursor, num::NonZeroUsize, sync::Arc};
+use astra_emu_sdk::TextureCache;
+use astra_media_core::{BlendMode, RectI, SceneCommand, TextureFrame};
+use astra_platform::SceneFrame;
+use astra_platform_common::WgpuOffscreenRenderer;
+use std::{num::NonZeroUsize, sync::Arc};
 
 const MAX_ASSET_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_IMAGE_BYTES: usize = 128 * 1024 * 1024;
@@ -28,7 +27,7 @@ pub(crate) fn read_asset(
         .map_err(core_error)
 }
 
-pub(crate) fn core_error(e: crate::MinoriError) -> FamilyError {
+pub(crate) fn core_error(e: crate::CoreError) -> FamilyError {
     FamilyError::invalid(e.code(), e.message())
 }
 pub(crate) fn error(code: &str, message: &str) -> FamilyError {
@@ -37,10 +36,10 @@ pub(crate) fn error(code: &str, message: &str) -> FamilyError {
 
 pub(crate) struct Scene {
     archive: Arc<MinoriMountedVfs>,
-    renderer: HeadlessRenderer,
+    renderer: WgpuOffscreenRenderer,
+    sequence: u64,
     text: MinoriTextRenderer,
-    textures: LruCache<String, TextureFrame>,
-    message_cache: Option<(String, Option<String>, TextureFrame)>,
+    textures: TextureCache,
     width: u32,
     height: u32,
     pub pixels: Vec<u8>,
@@ -48,19 +47,14 @@ pub(crate) struct Scene {
 
 impl Scene {
     pub fn new(archive: Arc<MinoriMountedVfs>, width: u32, height: u32) -> FamilyResult<Self> {
-        let renderer = CpuRendererProvider
-            .create(RendererCreateRequest {
-                width,
-                height,
-                format: RenderTargetFormat::Rgba8Srgb,
-                profile: "minori.native".into(),
-            })
-            .map_err(|_| {
-                error(
-                    "ASTRA_EMU_MINORI_RENDERER",
-                    "CPU renderer could not be created",
-                )
-            })?;
+        let renderer = pollster::block_on(WgpuOffscreenRenderer::new()).map_err(|_| {
+            error(
+                "ASTRA_EMU_MINORI_RENDERER",
+                "hardware GPU renderer could not be created",
+            )
+        })?;
+        tracing::info!(event = "astra.emu.minori.gpu.created", backend = %renderer.identity().backend,
+            device_type = %renderer.identity().device_type);
         let text = MinoriTextRenderer::new().map_err(|_| {
             error(
                 "ASTRA_EMU_MINORI_FONT",
@@ -71,8 +65,14 @@ impl Scene {
             archive,
             renderer,
             text,
-            message_cache: None,
-            textures: LruCache::new(NonZeroUsize::new(32).unwrap()),
+            sequence: 0,
+            textures: TextureCache::new(NonZeroUsize::new(32).unwrap(), MAX_IMAGE_BYTES, 8192)
+                .map_err(|_| {
+                    error(
+                        "ASTRA_EMU_MINORI_IMAGE_BOUND",
+                        "invalid texture cache budget",
+                    )
+                })?,
             width,
             height,
             pixels: vec![0; width as usize * height as usize * 4],
@@ -83,50 +83,12 @@ impl Scene {
             return Ok(frame.clone());
         }
         let bytes = read_asset(&self.archive, uri, MAX_ASSET_BYTES)?;
-        let mut reader = image::ImageReader::new(Cursor::new(bytes))
-            .with_guessed_format()
-            .map_err(|_| {
-                error(
-                    "ASTRA_EMU_MINORI_IMAGE_FORMAT",
-                    "image format could not be identified",
-                )
-            })?;
-        let mut limits = image::Limits::default();
-        limits.max_image_width = Some(8192);
-        limits.max_image_height = Some(8192);
-        limits.max_alloc = Some(MAX_IMAGE_BYTES as u64);
-        reader.limits(limits);
-        let image = reader
-            .decode()
-            .map_err(|_| {
-                error(
-                    "ASTRA_EMU_MINORI_IMAGE_DECODE",
-                    "image could not be decoded within its bounds",
-                )
-            })?
-            .to_rgba8();
-        let frame = TextureFrame {
-            width: image.width(),
-            height: image.height(),
-            rgba8: image.into_raw().into(),
-        };
-        if frame.rgba8.len() > MAX_IMAGE_BYTES {
-            return Err(error(
-                "ASTRA_EMU_MINORI_IMAGE_BOUND",
-                "decoded image exceeds the cache budget",
-            ));
-        }
-        while self
-            .textures
-            .iter()
-            .map(|(_, frame)| frame.rgba8.len())
-            .sum::<usize>()
-            + frame.rgba8.len()
-            > MAX_IMAGE_BYTES
-        {
-            self.textures.pop_lru();
-        }
-        self.textures.put(uri.into(), frame.clone());
+        let frame = self.textures.decode(uri.into(), &bytes).map_err(|_| {
+            error(
+                "ASTRA_EMU_MINORI_IMAGE_DECODE",
+                "image could not be decoded within its bounds",
+            )
+        })?;
         Ok(frame)
     }
     fn layer(
@@ -156,6 +118,7 @@ impl Scene {
         &mut self,
         state: &MinoriRuntimeState,
         message: Option<&(String, Option<String>)>,
+        choices: Option<(&[String], u32)>,
     ) -> FamilyResult<()> {
         let mut commands = vec![SceneCommand::Clear {
             rgba: [0, 0, 0, 255],
@@ -231,49 +194,41 @@ impl Scene {
                 1.0,
             )?;
         }
-        if let Some((text, speaker)) = message {
-            if self
-                .message_cache
-                .as_ref()
-                .is_none_or(|(previous, name, _)| previous != text || name != speaker)
-            {
-                let bytes = self
-                    .text
-                    .render(self.width, self.height, text, speaker.as_deref())
-                    .map_err(|_| {
-                        error(
-                            "ASTRA_EMU_MINORI_TEXT_RENDER",
-                            "message could not be rendered",
-                        )
-                    })?;
-                self.message_cache = Some((
-                    text.clone(),
-                    speaker.clone(),
-                    TextureFrame {
-                        width: self.width,
-                        height: self.height,
-                        rgba8: bytes.into(),
-                    },
-                ));
-            }
-            commands.push(SceneCommand::Texture {
-                id: "minori.message".into(),
-                frame: self.message_cache.as_ref().unwrap().2.clone(),
-                destination: RectI {
-                    x: 0,
-                    y: 0,
-                    width: self.width,
-                    height: self.height,
-                },
-                opacity: 1.0,
-                blend: BlendMode::Alpha,
-            });
-        }
+        commands.extend(
+            self.text
+                .commands(
+                    message.map(|(text, speaker)| (text.as_str(), speaker.as_deref())),
+                    choices,
+                )
+                .map_err(|_| {
+                    error(
+                        "ASTRA_EMU_MINORI_TEXT_RENDER",
+                        "message could not be rendered",
+                    )
+                })?,
+        );
+        let sequence = self
+            .sequence
+            .checked_add(1)
+            .ok_or_else(|| error("ASTRA_EMU_MINORI_FRAME_SEQUENCE", "frame sequence overflow"))?;
         self.pixels = self
             .renderer
-            .capture_frame(&commands)
-            .map_err(|_| error("ASTRA_EMU_MINORI_RENDER", "scene composition failed"))?
-            .bytes;
+            .render(&SceneFrame {
+                sequence,
+                width: self.width,
+                height: self.height,
+                clear_rgba: [0, 0, 0, 255],
+                commands,
+                semantics: None,
+            })
+            .map_err(|cause| {
+                tracing::error!(event = "astra.emu.minori.gpu.failed", operation = %cause.operation,
+                    code = ?cause.code, "GPU scene composition failed");
+                error("ASTRA_EMU_MINORI_RENDER", "GPU scene composition failed")
+            })?
+            .rgba8
+            .to_vec();
+        self.sequence = sequence;
         Ok(())
     }
 }

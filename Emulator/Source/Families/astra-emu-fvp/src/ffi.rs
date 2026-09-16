@@ -19,12 +19,19 @@ use astra_emu_family_api::{
 use crate::provider::{FvpProvider, FvpSession};
 
 #[derive(Default)]
-struct FvpModule {
+pub(crate) struct FvpModule {
     provider: Mutex<FvpProvider>,
-    sessions: Mutex<BTreeMap<String, FvpSession>>,
+    sessions: Mutex<BTreeMap<String, Box<FvpSession>>>,
 }
 
 impl FamilyModule for FvpModule {
+    fn initialize_diagnostics(
+        &self,
+        sink: astra_emu_family_api::DiagnosticSinkBox,
+    ) -> astra_emu_family_api::FfiFamilyResult<()> {
+        boundary(|| astra_emu_family_api::diagnostic_bridge::install(sink))
+    }
+
     fn descriptor(
         &self,
     ) -> astra_emu_family_api::FfiFamilyResult<astra_emu_family_api::FamilyDescriptor> {
@@ -54,7 +61,7 @@ impl FamilyModule for FvpModule {
             self.sessions
                 .lock()
                 .map_err(lock_error)?
-                .insert(response.session_id.to_string(), session);
+                .insert(response.session_id.to_string(), Box::new(session));
             Ok(response)
         })
     }
@@ -116,7 +123,7 @@ impl FamilyModule for FvpModule {
                         "the requested FVP session does not exist",
                     )
                 })?;
-            Box::new(session).close()
+            session.close()
         })
     }
 }

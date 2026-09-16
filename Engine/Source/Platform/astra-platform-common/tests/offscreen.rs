@@ -8,6 +8,46 @@ use astra_platform_common::WgpuOffscreenRenderer;
 
 #[tokio::test]
 #[ignore = "requires a native hardware GPU runner"]
+async fn transient_texture_ids_reallocate_released_slots_across_frames() {
+    let mut renderer = WgpuOffscreenRenderer::new().await.unwrap();
+    for sequence in 1..=6 {
+        let (width, height, color) = if sequence % 2 == 0 {
+            (3, 1, [0, 255, 0, 255])
+        } else {
+            (2, 2, [255, 0, 0, 255])
+        };
+        let capture = renderer
+            .render(&SceneFrame {
+                sequence,
+                width: 4,
+                height: 4,
+                clear_rgba: [0, 0, 0, 255],
+                commands: vec![SceneCommand::Texture {
+                    id: "image".into(),
+                    frame: TextureFrame::from_vec(
+                        width,
+                        height,
+                        color.repeat((width * height) as usize),
+                    )
+                    .unwrap(),
+                    destination: astra_media_core::RectI::new(0, 0, 4, 4),
+                    opacity: 1.0,
+                    blend: astra_media_core::BlendMode::Alpha,
+                }],
+                semantics: None,
+            })
+            .unwrap();
+        assert!(capture
+            .rgba8
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|pixel| *pixel == color));
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires a native hardware GPU runner"]
 async fn native_offscreen_gpu_renders_scene_filter_and_readback() {
     let mut renderer = WgpuOffscreenRenderer::new().await.unwrap();
     assert_eq!(renderer.identity().provider, "wgpu_offscreen");

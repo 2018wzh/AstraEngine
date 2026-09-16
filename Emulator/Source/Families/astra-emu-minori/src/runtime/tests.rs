@@ -3,6 +3,114 @@ use crate::{parse_sc, ScOpcodeCatalog};
 use super::*;
 
 #[test]
+fn choice_restores_focus_and_commits_the_selected_label() {
+    let source = b".select First:left Second:right\r\n.label left\r\n.setglobal branch = 1\r\n.end\r\n.label right\r\n.setglobal branch = 2\r\n.end\r\n";
+    let mut vm = MinoriVm::new(
+        "minori:/scr/test.sc".into(),
+        Hash256::from_sha256(source),
+        parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap(),
+        1,
+    )
+    .unwrap();
+    assert_eq!(vm.step(1).unwrap(), Some(MinoriVmEvent::Choice));
+    vm.move_choice(-1).unwrap();
+    assert_eq!(vm.choice_display().unwrap().unwrap().1, 1);
+    let saved = vm.encode_native_save().unwrap();
+    vm.move_choice(1).unwrap();
+    vm.restore_native_save(&saved, 2).unwrap();
+    vm.commit_choice().unwrap();
+    assert_eq!(vm.step(2).unwrap(), Some(MinoriVmEvent::Terminal));
+    assert_eq!(vm.state().global_variables.get("branch"), Some(&2));
+    let before = vm.state().clone();
+    let mut corrupt = MinoriVm::decode_native_save(&saved).unwrap();
+    assert!(vm.restore_native_save(&saved, 0).is_err());
+    assert_eq!(vm.state(), &before);
+    corrupt.choice.as_mut().unwrap().selected_index = Some(9);
+    assert!(vm
+        .restore_native_save(&postcard::to_allocvec(&corrupt).unwrap(), 3)
+        .is_err());
+    assert_eq!(vm.state(), &before);
+}
+
+#[test]
+fn musica_crossfade_reuses_timeline_and_empty_effect_releases_primary_slot() {
+    for clearing in ["CrossFade", "CrossFade2", "CrossFade * 320 100"] {
+        let source = format!(
+            ".effect CrossFade first.png:second.png 32 100\r\n.effect {clearing}\r\n.end\r\n"
+        );
+        let mut vm = MinoriVm::new(
+            "minori:/scr/test.sc".into(),
+            Hash256::from_sha256(source.as_bytes()),
+            parse_sc(source.as_bytes(), &ScOpcodeCatalog::observed_minori()).unwrap(),
+            1,
+        )
+        .unwrap();
+        assert!(matches!(
+            vm.step(1).unwrap(),
+            Some(MinoriVmEvent::Effect(_))
+        ));
+        vm.advance_effect_clock(100_000_000).unwrap();
+        assert!(vm.state().effect.is_some());
+        assert_eq!(vm.step(2).unwrap(), Some(MinoriVmEvent::EffectCleared));
+        assert!(vm.state().effect.is_none());
+        assert_eq!(vm.advance_effect_clock(100_000_000).unwrap(), None);
+        let save = vm.encode_native_save().unwrap();
+        assert!(MinoriVm::decode_native_save(&save)
+            .unwrap()
+            .effect
+            .is_none());
+    }
+}
+
+#[test]
+fn additional_musica_audio_buses_are_independent_and_saved() {
+    let source = b".playbgm first.ogg\r\n.playbgm2 second.ogg\r\n.playse4 hit.ogg t\r\n.playbgm2 *\r\n.end\r\n";
+    let mut vm = MinoriVm::new(
+        "minori:/scr/test.sc".into(),
+        Hash256::from_sha256(source),
+        parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap(),
+        1,
+    )
+    .unwrap();
+    for tick in 1..=3 {
+        assert!(matches!(
+            vm.step(tick).unwrap(),
+            Some(MinoriVmEvent::Audio { .. })
+        ));
+    }
+    assert_eq!(vm.state().audio[&0].bus, "bgm");
+    assert_eq!(vm.state().audio[&5].bus, "bgm2");
+    assert_eq!(vm.state().audio[&6].bus, "se4");
+    let save = vm.encode_native_save().unwrap();
+    let saved = vm.state().clone();
+    assert!(matches!(
+        vm.step(4).unwrap(),
+        Some(MinoriVmEvent::Audio { .. })
+    ));
+    assert!(!vm.state().audio[&5].playing);
+    assert!(vm.state().audio[&0].playing);
+    assert!(vm.state().audio[&6].playing);
+    vm.restore_native_save(&save, 4).unwrap();
+    assert_eq!(vm.state(), &saved);
+}
+
+#[test]
+fn deletevar_removes_local_and_global_bindings_without_affecting_other_names() {
+    let source = b".set remove = 1\r\n.setglobal remove = 2\r\n.setglobal keep = 3\r\n.deletevar remove\r\n.deletevar absent\r\n.end\r\n";
+    let mut vm = MinoriVm::new(
+        "minori:/scr/test.sc".into(),
+        Hash256::from_sha256(source),
+        parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap(),
+        1,
+    )
+    .unwrap();
+    assert_eq!(vm.step(1).unwrap(), Some(MinoriVmEvent::Terminal));
+    assert!(!vm.state().variables.contains_key("remove"));
+    assert!(!vm.state().global_variables.contains_key("remove"));
+    assert_eq!(vm.state().global_variables.get("keep"), Some(&3));
+}
+
+#[test]
 fn deterministic_control_flow_wait_and_native_save_round_trip() {
     let source = b".setglobal route = 1\r\n.label loop\r\n.set count = count + 1\r\n.if count < 3 loop\r\n.wait 20\r\n.end\r\n";
     let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
@@ -146,7 +254,7 @@ fn crossfade2_keeps_the_verified_resource_and_timeline_state() {
 #[test]
 fn crossfade2_rejects_unknown_modes_and_invalid_timeline_values() {
     for source in [
-        b".effect CrossFade first.png:second.png 320 100\r\n".as_slice(),
+        b".effect UnknownEffect first.png:second.png 320 100\r\n".as_slice(),
         b".effect CrossFade2 first.png:second.png 0 100\r\n".as_slice(),
         b".effect CrossFade2 first.png:second.png 320 0\r\n".as_slice(),
         b".effect CrossFade2 first.png:second.png 320 100 1\r\n".as_slice(),
@@ -461,6 +569,7 @@ fn chain_is_a_bounded_tail_transfer_without_a_return_frame() {
         "minori:/scr/K01.sc".into(),
         Hash256::from_sha256(next),
         parse_sc(next, &ScOpcodeCatalog::observed_minori()).unwrap(),
+        None,
     )
     .unwrap();
     assert!(vm.state().variables.is_empty());
@@ -470,15 +579,56 @@ fn chain_is_a_bounded_tail_transfer_without_a_return_frame() {
 #[test]
 fn chain_rejects_path_escape() {
     let source = b".chain ../outside.sc\r\n";
-    let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
+    assert!(parse_sc(source, &ScOpcodeCatalog::observed_minori()).is_err());
+    assert_eq!(
+        validate_chain_target("../outside.sc"),
+        Err(MinoriRuntimeError::ChainTarget)
+    );
+}
+
+#[test]
+fn chain_label_is_resolved_before_replacing_script_and_survives_save_restore() {
+    let source = b".chain next.sc#entry\r\n";
     let mut vm = MinoriVm::new(
-        "minori:/scr/test.sc".into(),
+        "minori:/scr/start.sc".into(),
         Hash256::from_sha256(source),
-        script,
+        parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap(),
         1,
     )
     .unwrap();
-    assert_eq!(vm.step(1).unwrap_err(), MinoriRuntimeError::ChainTarget);
+    assert_eq!(
+        vm.step(1).unwrap(),
+        Some(MinoriVmEvent::Chain {
+            target: "next.sc#entry".into()
+        })
+    );
+    let before = vm.state().clone();
+    let next = b".setglobal skipped = 1\r\n.label entry\r\n.setglobal reached = 1\r\n.end\r\n";
+    let script = parse_sc(next, &ScOpcodeCatalog::observed_minori()).unwrap();
+    assert_eq!(
+        vm.replace_script(
+            "minori:/scr/next.sc".into(),
+            Hash256::from_sha256(next),
+            script.clone(),
+            Some("missing")
+        ),
+        Err(MinoriRuntimeError::Label)
+    );
+    assert_eq!(vm.state(), &before);
+    vm.replace_script(
+        "minori:/scr/next.sc".into(),
+        Hash256::from_sha256(next),
+        script,
+        Some("entry"),
+    )
+    .unwrap();
+    let save = vm.encode_native_save().unwrap();
+    assert_eq!(vm.step(2).unwrap(), Some(MinoriVmEvent::Terminal));
+    assert!(!vm.state().global_variables.contains_key("skipped"));
+    assert_eq!(vm.state().global_variables.get("reached"), Some(&1));
+    vm.restore_native_save(&save, 2).unwrap();
+    assert_eq!(vm.step(2).unwrap(), Some(MinoriVmEvent::Terminal));
+    assert!(!vm.state().global_variables.contains_key("skipped"));
 }
 
 #[test]

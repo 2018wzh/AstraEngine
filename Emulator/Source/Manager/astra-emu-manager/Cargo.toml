@@ -17,11 +17,12 @@ path = "src/bin_main.rs"
 astra-emu-manager-core = { path = "../astra-emu-manager-core" }
 astra-emu-manager-ui-slint = { path = "../astra-emu-manager-ui-slint" }
 astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api" }
-astra-emu-fvp = { path = "../../Families/astra-emu-fvp" }
 astra-emu-metadata = { path = "../../Providers/astra-emu-metadata" }
 astra-emu-translation-openai-compatible = { path = "../../Providers/astra-emu-translation-openai-compatible" }
 astra-observability = { path = "../../../../Engine/Source/Developer/astra-observability" }
 abi_stable.workspace = true
+clap.workspace = true
+serde.workspace = true
 cpal.workspace = true
 crossbeam-channel.workspace = true
 naga.workspace = true
@@ -43,6 +44,9 @@ wgpu.workspace = true
 [target.'cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))'.dependencies]
 gilrs = { workspace = true, features = ["wgi"] }
 rfd.workspace = true
+
+[target.'cfg(target_os = "android")'.dependencies]
+astra-emu-fvp = { path = "../../Families/astra-emu-fvp" }
 
 [build-dependencies]
 sha2.workspace = true

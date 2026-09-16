@@ -1,13 +1,10 @@
 use crate::{
-    MinoriError, MinoriMountedVfs, MinoriPazDecryptProvider, PazArchiveConfig, PazRoleScheme,
+    CoreError, MinoriMountedVfs, MinoriPazDecryptProvider, PazArchiveConfig, PazRoleScheme,
     REQUIRED_ARCHIVE_ROLES,
 };
-use astra_core::Hash256;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs::File,
-    io::Read,
     path::Path,
     sync::Arc,
 };
@@ -37,62 +34,18 @@ pub struct MinoriRolePrivateProfile {
 }
 
 /// Opens a bounded private JSON profile and archives owned by the Minori core.
-pub fn mount_minori(
-    game_root: &Path,
-    profile_path: &Path,
-) -> Result<MinoriMountedVfs, MinoriError> {
-    let root = game_root.canonicalize().map_err(|_| {
-        invalid(
-            "ASTRA_EMU_MINORI_GAME_ROOT",
-            "game directory cannot be opened",
-        )
-    })?;
-    let path = profile_path.canonicalize().map_err(|_| {
-        invalid(
-            "ASTRA_EMU_MINORI_PROFILE_OPEN",
-            "private profile cannot be opened",
-        )
-    })?;
-    if !path.starts_with(&root) {
-        return Err(invalid(
-            "ASTRA_EMU_MINORI_PROFILE_PATH",
-            "private profile must be inside the game directory",
-        ));
-    }
-    let file = File::open(path).map_err(|_| {
-        invalid(
-            "ASTRA_EMU_MINORI_PROFILE_OPEN",
-            "private profile cannot be opened",
-        )
-    })?;
-    let mut bytes = Vec::new();
-    file.take(MAX_PROFILE_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|_| {
-            invalid(
-                "ASTRA_EMU_MINORI_PROFILE_READ",
-                "private profile cannot be read",
-            )
-        })?;
-    if bytes.len() as u64 > MAX_PROFILE_BYTES {
-        return Err(invalid(
-            "ASTRA_EMU_MINORI_PROFILE_BOUND",
-            "private profile exceeds the size limit",
-        ));
-    }
-    let profile: MinoriProfile = serde_json::from_slice(&bytes).map_err(|_| {
-        invalid(
-            "ASTRA_EMU_MINORI_PROFILE_FORMAT",
-            "private profile JSON is invalid",
-        )
-    })?;
+pub fn mount_minori(game_root: &Path, profile_path: &Path) -> Result<MinoriMountedVfs, CoreError> {
+    let (profile, hash, root) = astra_emu_sdk::read_game_profile::<MinoriProfile>(
+        game_root,
+        profile_path,
+        MAX_PROFILE_BYTES,
+    )?;
     if profile.paz_version > 2 {
         return Err(invalid(
             "ASTRA_EMU_MINORI_PROFILE_VERSION",
             "PAZ version is unsupported",
         ));
     }
-    let hash = Hash256::from_sha256(&bytes);
     let configs = REQUIRED_ARCHIVE_ROLES
         .iter()
         .map(|role| PazArchiveConfig {
@@ -109,10 +62,7 @@ pub fn mount_minori(
 }
 
 impl MinoriProfile {
-    fn into_schemes(
-        self,
-        expected_xor: u32,
-    ) -> Result<BTreeMap<String, PazRoleScheme>, MinoriError> {
+    fn into_schemes(self, expected_xor: u32) -> Result<BTreeMap<String, PazRoleScheme>, CoreError> {
         if self.schema != MINORI_PROFILE_SCHEMA {
             return Err(invalid(
                 "ASTRA_EMU_MINORI_PRIVATE_SCHEMA",
@@ -175,8 +125,8 @@ impl MinoriProfile {
     }
 }
 
-fn invalid(code: &'static str, message: &'static str) -> MinoriError {
-    MinoriError::invalid(code, message)
+fn invalid(code: &'static str, message: &'static str) -> CoreError {
+    CoreError::invalid(code, message)
 }
 
 #[cfg(test)]
@@ -191,13 +141,13 @@ mod tests {
                 .err()
                 .unwrap()
                 .code(),
-            "ASTRA_EMU_MINORI_PROFILE_PATH"
+            "ASTRA_EMU_PROFILE_PATH"
         );
         let file = root.path().join(MINORI_PROFILE_FILE);
         std::fs::write(&file, vec![0; MAX_PROFILE_BYTES as usize + 1]).unwrap();
         assert_eq!(
             mount_minori(root.path(), &file).err().unwrap().code(),
-            "ASTRA_EMU_MINORI_PROFILE_BOUND"
+            "ASTRA_EMU_PROFILE_BOUND"
         );
         assert_eq!(
             std::fs::metadata(file).unwrap().len(),

@@ -1,6 +1,37 @@
 use super::*;
 
 #[test]
+fn select_preserves_source_and_resolves_each_display_label_pair() {
+    let source =
+        b".select first:left second:right\r\n.label left\r\n.end\r\n.label right\r\n.end\r\n";
+    let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
+    let ScLineKind::Command { command } = &script.lines[0].kind else {
+        panic!("expected select");
+    };
+    assert_eq!(
+        command.control_flow,
+        ScControlFlow::Choice {
+            targets: vec!["left".into(), "right".into()]
+        }
+    );
+    assert_eq!(encode_sc(&script).unwrap(), source);
+}
+
+#[test]
+fn select_rejects_missing_labels_empty_options_and_excess_options() {
+    for source in [
+        ".select first:missing\r\n.end\r\n",
+        ".select first:a malformed\r\n.label a\r\n.end\r\n",
+        ".select :a\r\n.label a\r\n.end\r\n",
+        ".select first:\r\n.end\r\n",
+        ".select\r\n.end\r\n",
+        ".select a:x b:x c:x d:x e:x\r\n.label x\r\n.end\r\n",
+    ] {
+        assert!(parse_sc(source.as_bytes(), &ScOpcodeCatalog::observed_minori()).is_err());
+    }
+}
+
+#[test]
 fn observed_cp932_source_round_trips_losslessly() {
     let source = b"; fixture\r\n.pragma entry\r\n.unknown raw operands\r\n.end\r\n";
     let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
@@ -76,4 +107,18 @@ fn tokenizer_preserves_empty_positional_operands() {
         vec!["100", "", "speaker", "body"]
     );
     assert_eq!(tokenize_operands(b"", 0).unwrap(), Vec::<String>::new());
+}
+#[test]
+fn chain_locations_reject_empty_or_escaping_segments() {
+    use super::*;
+    for target in [
+        "next.sc#",
+        "../next.sc#entry",
+        "next.txt#entry",
+        "next.sc#entry#other",
+        "next.sc#/entry",
+    ] {
+        let source = format!(".chain {target}\r\n");
+        assert!(parse_sc(source.as_bytes(), &ScOpcodeCatalog::observed_minori()).is_err());
+    }
 }

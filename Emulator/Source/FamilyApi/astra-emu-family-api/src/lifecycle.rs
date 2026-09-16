@@ -144,6 +144,8 @@ impl SessionRequest {
 /// is needed in the root module.
 #[sabi_trait]
 pub trait FamilyModule {
+    /// Install the process-lifetime host diagnostic sink before descriptor/probe/open.
+    fn initialize_diagnostics(&self, sink: crate::DiagnosticSinkBox) -> FfiFamilyResult<()>;
     fn descriptor(&self) -> FfiFamilyResult<FamilyDescriptor>;
     fn probe(&self, request: ProbeRequest) -> FfiFamilyResult<ROption<ProbeReport>>;
     /// Opens a family session.

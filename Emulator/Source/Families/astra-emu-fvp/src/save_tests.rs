@@ -2,7 +2,7 @@ use rfvp::host_api::clock::CalendarTime;
 use rfvp::script::parser::Nls;
 use rfvp::subsystem::resources::save_manager::{SaveItem, SaveManager};
 use rfvp::subsystem::resources::thread_manager::ThreadManager;
-use rfvp::subsystem::save_state::{try_decode_state_chunk_v1, SaveStateSnapshotV1};
+use rfvp::subsystem::save_state::{try_decode_state_chunk_v2, SaveStateSnapshotV2};
 use rfvp::subsystem::world::GameData;
 
 fn prepared_save() -> SaveManager {
@@ -12,7 +12,7 @@ fn prepared_save() -> SaveManager {
     save.request_prepare_local_savedata();
     assert!(save.wants_vm_snapshot_capture());
     let mut snapshot =
-        SaveStateSnapshotV1::capture_hosted(&GameData::default(), &ThreadManager::new());
+        SaveStateSnapshotV2::capture_hosted(&GameData::default(), &ThreadManager::new());
     snapshot.vm.current_id = 7;
     save.prepare_hosted_save(
         vec![11, 22, 33, 255],
@@ -47,7 +47,7 @@ fn save_write_preserves_pre_menu_capture_and_supports_cold_load() {
     assert_eq!(item.title, "日本語");
     assert_eq!(item.thumb, [11, 22, 33, 255]);
     assert_eq!(
-        try_decode_state_chunk_v1(&bytes)
+        try_decode_state_chunk_v2(&bytes)
             .unwrap()
             .unwrap()
             .vm
@@ -118,7 +118,7 @@ fn save_prepare_captures_after_all_contexts_yield_in_the_current_frame() {
     assert_eq!(runner.thread_manager().contexts[1].get_pc(), 13);
     // A second tick in the same host frame must also wait for persistence.
     runner.tick(&mut game, &mut parser, 0).unwrap();
-    let snapshot = SaveStateSnapshotV1::capture_user_save(&mut game).unwrap();
+    let snapshot = SaveStateSnapshotV2::capture_user_save(&mut game).unwrap();
     assert_eq!(snapshot.vm.current_id, 1);
     assert_eq!(snapshot.vm.contexts[0].cursor, 9);
     assert_eq!(snapshot.vm.contexts[1].cursor, 13);
@@ -189,4 +189,80 @@ fn hosted_save_refresh_blocks_queries_until_file_operations_complete() {
     runner.tick(&mut game, &mut parser, 0).unwrap();
     assert_eq!(runner.thread_manager().contexts[0].get_pc(), 7);
     assert_eq!(runner.thread_manager().contexts[1].get_pc(), 7);
+}
+
+#[test]
+fn native_restore_resumes_an_in_progress_alpha_fade() {
+    use rfvp::{
+        script::parser::Nls,
+        subsystem::resources::{
+            motion_manager::{AlphaMotionType, MotionManager},
+            vfs::Vfs,
+        },
+    };
+    let vfs = Vfs::new(Nls::ShiftJIS).unwrap();
+    let mut motion = MotionManager::new();
+    let mut setup = motion.capture_snapshot_v2();
+    setup.prim_manager.prims[0].alpha = 0;
+    motion.apply_snapshot_v2(&setup, &vfs).unwrap();
+    motion
+        .set_alpha_motion(0, 0, 255, 1000, AlphaMotionType::Linear, false)
+        .unwrap();
+    motion.update_alpha_motions(200, false);
+    let saved = motion.capture_snapshot_v2();
+    assert_eq!(saved.prim_manager.prims[0].alpha, 51);
+    motion.update_alpha_motions(800, false);
+    assert_eq!(
+        motion.capture_snapshot_v2().prim_manager.prims[0].alpha,
+        255
+    );
+    let mut state =
+        SaveStateSnapshotV2::capture_hosted(&GameData::default(), &ThreadManager::new());
+    state.motion = saved;
+    let mut bytes = Vec::new();
+    rfvp::subsystem::save_state::append_state_chunk_v2(&mut bytes, &state).unwrap();
+    let saved = try_decode_state_chunk_v2(&bytes).unwrap().unwrap().motion;
+    let mut old_version = bytes.clone();
+    old_version[..2].copy_from_slice(&1u16.to_le_bytes());
+    assert!(try_decode_state_chunk_v2(&old_version).is_err());
+    let mut restored = MotionManager::new();
+    restored.apply_snapshot_v2(&saved, &vfs).unwrap();
+    assert!(
+        restored.test_alpha_motion(0),
+        "restore discarded the active fade"
+    );
+    restored.update_alpha_motions(800, false);
+    assert_eq!(
+        restored.capture_snapshot_v2().prim_manager.prims[0].alpha,
+        255
+    );
+}
+
+#[test]
+fn invalid_motion_snapshot_rejects_before_changing_the_current_scene() {
+    use rfvp::{
+        script::parser::Nls,
+        subsystem::resources::{graph_buff::GraphBuff, motion_manager::MotionManager, vfs::Vfs},
+    };
+    let vfs = Vfs::new(Nls::ShiftJIS).unwrap();
+    let mut motion = MotionManager::new();
+    let mut initial = motion.capture_snapshot_v2();
+    initial.prim_manager.prims[0].alpha = 71;
+    motion.apply_snapshot_v2(&initial, &vfs).unwrap();
+    for invalid_kind in 0..3 {
+        let mut invalid = initial.clone();
+        invalid.prim_manager.prims[0].alpha = 0;
+        match invalid_kind {
+            0 => invalid
+                .textures
+                .push(GraphBuff::new().capture_snapshot_with_id(4096)),
+            1 => {
+                let texture = GraphBuff::new().capture_snapshot_with_id(0);
+                invalid.textures.extend([texture.clone(), texture]);
+            }
+            _ => invalid.dissolve1.dissolve_type = 7,
+        }
+        assert!(motion.apply_snapshot_v2(&invalid, &vfs).is_err());
+        assert_eq!(motion.capture_snapshot_v2().prim_manager.prims[0].alpha, 71);
+    }
 }

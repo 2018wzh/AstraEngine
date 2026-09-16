@@ -24,7 +24,6 @@ use std::{
     thread::{self, JoinHandle},
     time::Duration,
 };
-pub(crate) mod decode;
 mod fade;
 mod mixer;
 use fade::FadeSnapshot;
@@ -133,21 +132,33 @@ impl Audio {
         let (tx, rx) = sync_channel(1);
         self.send(Command::Snapshot(tx))?;
         rx.recv_timeout(Duration::from_secs(5)).map_err(|_| {
-            error(
+            self.fail_request(error(
                 "ASTRA_EMU_MINORI_AUDIO_SNAPSHOT",
                 "audio snapshot did not complete",
-            )
+            ))
         })?
     }
     pub fn restore(&self, snapshot: Vec<SoundSnapshot>) -> FamilyResult<()> {
         let (tx, rx) = sync_channel(1);
         self.send(Command::Restore(snapshot, tx))?;
         rx.recv_timeout(Duration::from_secs(15)).map_err(|_| {
-            error(
+            self.fail_request(error(
                 "ASTRA_EMU_MINORI_AUDIO_RESTORE",
                 "audio restore did not complete",
-            )
+            ))
         })?
+    }
+    fn fail_request(&self, failure: FamilyError) -> FamilyError {
+        self.stop.store(true, Ordering::Release);
+        if let Ok(mut slot) = self.failure.lock() {
+            if slot.is_none() {
+                *slot = Some(failure.clone());
+            }
+        }
+        if let Err(cancel_error) = self.sink.cancel().into_result() {
+            return cancel_error;
+        }
+        failure
     }
     pub fn shutdown(&mut self) -> FamilyResult<()> {
         if self.worker.is_none() {
@@ -186,9 +197,15 @@ fn run(
     let mut suspended = false;
     while !stop.load(Ordering::Acquire) {
         for command in commands.try_iter().take(64) {
+            if stop.load(Ordering::Acquire) {
+                return Ok(());
+            }
             match command {
                 Command::Apply(list) => {
                     for command in list {
+                        if stop.load(Ordering::Acquire) {
+                            return Ok(());
+                        }
                         mixer.apply(command, &archive, &stop)?
                     }
                 }

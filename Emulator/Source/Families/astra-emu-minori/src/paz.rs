@@ -8,11 +8,11 @@ use std::{
 };
 
 use crate::archive::{
-    validate_decrypt_output, validate_decrypt_request, validate_paz_uri_directory_uri,
-    validate_paz_uri_uri, PazDecryptDescriptor, PazDecryptPhase, PazDecryptRequest,
-    PazDecryptTransport, PazEntry, PazManifest, PazNode, PazNodeKind, PazReadResult, PazSource,
-    PazStat, PazStream, PAZ_DECRYPT_CHUNK_BYTES, PAZ_DECRYPT_MAX_BATCH_BYTES, PAZ_MANIFEST_SCHEMA,
-    PAZ_READ_MAX_READ_BYTES,
+    validate_archive_directory_uri, validate_archive_uri, validate_decrypt_output,
+    validate_decrypt_request, ArchiveEntry, ArchiveManifest, ArchiveNode, ArchiveNodeKind,
+    ArchiveReadResult, ArchiveSource, ArchiveStat, ArchiveStream, PazDecryptDescriptor,
+    PazDecryptPhase, PazDecryptRequest, PazDecryptTransport, ARCHIVE_MANIFEST_SCHEMA,
+    ARCHIVE_MAX_READ_BYTES, PAZ_DECRYPT_CHUNK_BYTES, PAZ_DECRYPT_MAX_BATCH_BYTES,
 };
 use astra_byte_source::OwnedByteBuffer;
 use astra_core::Hash256;
@@ -28,7 +28,7 @@ use crate::archive::{CacheIdentity, PlaintextCache, PlaintextCacheError};
 
 use crate::{MINORI_DECRYPT_DESCRIPTOR_SCHEMA, MINORI_DECRYPT_PROVIDER_ID, MINORI_READER_ID};
 
-type PazError = crate::MinoriError;
+type PazError = crate::CoreError;
 
 pub const REQUIRED_ARCHIVE_ROLES: [&str; 8] =
     ["bg", "bgm", "scr", "st", "sys", "se", "voice", "mov"];
@@ -45,7 +45,7 @@ pub struct PazArchiveConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PazEntryDescriptor {
+pub struct ArchiveEntryDescriptor {
     pub archive_role: String,
     pub entry_id: String,
     pub name: String,
@@ -130,7 +130,7 @@ enum MinoriDecryptDescriptor {
     },
     Entry {
         version: u8,
-        entry: PazEntryDescriptor,
+        entry: ArchiveEntryDescriptor,
         stream_offset: u64,
     },
 }
@@ -213,7 +213,7 @@ impl MinoriPazDecryptProvider {
     fn decrypt_entry_chunk(
         &self,
         version: u8,
-        entry: &PazEntryDescriptor,
+        entry: &ArchiveEntryDescriptor,
         absolute_offset: u64,
         encrypted: &[u8],
     ) -> Result<Vec<u8>, PazError> {
@@ -322,7 +322,7 @@ impl MinoriPazDecryptProvider {
 }
 
 #[derive(Clone)]
-struct ArchiveSource {
+struct ArchiveFile {
     role: String,
     parts: Vec<ArchivePart>,
     version: u8,
@@ -340,7 +340,7 @@ struct ArchivePart {
 
 #[derive(Clone)]
 struct MountedEntry {
-    descriptor: PazEntryDescriptor,
+    descriptor: ArchiveEntryDescriptor,
     uri: String,
     archive: usize,
     encrypted_hash: Hash256,
@@ -349,8 +349,8 @@ struct MountedEntry {
 pub struct MinoriMountedVfs {
     mount_id: String,
     prefix: String,
-    manifest: PazManifest,
-    archives: Vec<ArchiveSource>,
+    manifest: ArchiveManifest,
+    archives: Vec<ArchiveFile>,
     entries: BTreeMap<String, MountedEntry>,
     decrypt_provider: Arc<MinoriPazDecryptProvider>,
     cache: Option<PlaintextCache>,
@@ -423,7 +423,7 @@ impl MinoriMountedVfs {
                     "only PAZ versions 0 through 2 are supported",
                 ));
             }
-            let mut source = ArchiveSource {
+            let mut source = ArchiveFile {
                 role: config.role.clone(),
                 parts,
                 version: config.version,
@@ -460,7 +460,7 @@ impl MinoriMountedVfs {
                     config.role,
                     normalize_entry_name(&entry.name)?
                 );
-                validate_paz_uri_uri(&prefix, &uri)?;
+                validate_archive_uri(&prefix, &uri)?;
                 if !entry_ids.insert(entry.entry_id.clone()) || entries.contains_key(&uri) {
                     return Err(error(
                         "ASTRA_EMU_MINORI_ENTRY_DUPLICATE",
@@ -490,7 +490,7 @@ impl MinoriMountedVfs {
         let reader_hash = Hash256::from_sha256(&reader_material);
         let manifest_entries = entries
             .values()
-            .map(|entry| PazEntry {
+            .map(|entry| ArchiveEntry {
                 uri: entry.uri.clone(),
                 entry_id: entry.descriptor.entry_id.clone(),
                 source_id: entry.descriptor.archive_role.clone(),
@@ -503,8 +503,8 @@ impl MinoriMountedVfs {
                 media_kind: media_kind(&entry.descriptor.name).into(),
             })
             .collect();
-        let manifest = PazManifest {
-            schema: PAZ_MANIFEST_SCHEMA.into(),
+        let manifest = ArchiveManifest {
+            schema: ARCHIVE_MANIFEST_SCHEMA.into(),
             family_id: "minori".into(),
             mount_id: mount_id.clone(),
             prefix: prefix.clone(),
@@ -515,7 +515,7 @@ impl MinoriMountedVfs {
             mount_profile_hash,
             sources: archives
                 .iter()
-                .map(|archive| PazSource {
+                .map(|archive| ArchiveSource {
                     source_id: archive.role.clone(),
                     archive_role: Some(archive.role.clone()),
                     byte_size: archive.length,
@@ -634,7 +634,7 @@ impl MinoriMountedVfs {
     }
 
     fn entry(&self, uri: &str) -> Result<&MountedEntry, PazError> {
-        validate_paz_uri_uri(&self.prefix, uri)?;
+        validate_archive_uri(&self.prefix, uri)?;
         self.entries
             .get(uri)
             .ok_or_else(|| error("ASTRA_EMU_VFS_NOT_FOUND", "VFS entry was not found"))
@@ -645,7 +645,7 @@ impl MinoriMountedVfs {
     pub fn mount_id(&self) -> &str {
         &self.mount_id
     }
-    pub fn manifest(&self) -> &PazManifest {
+    pub fn manifest(&self) -> &ArchiveManifest {
         &self.manifest
     }
 
@@ -662,8 +662,8 @@ impl MinoriMountedVfs {
         Ok(())
     }
 
-    pub fn read_dir(&self, uri: &str) -> Result<Vec<PazNode>, PazError> {
-        validate_paz_uri_directory_uri(&self.prefix, uri)?;
+    pub fn read_dir(&self, uri: &str) -> Result<Vec<ArchiveNode>, PazError> {
+        validate_archive_directory_uri(&self.prefix, uri)?;
         let base = if uri.ends_with('/') {
             uri.to_owned()
         } else {
@@ -683,15 +683,17 @@ impl MinoriMountedVfs {
                 continue;
             }
             let directory = suffix.contains('/');
-            children.entry(name.to_owned()).or_insert_with(|| PazNode {
-                uri: format!("{base}{name}"),
-                name: name.to_owned(),
-                kind: if directory {
-                    PazNodeKind::Directory
-                } else {
-                    PazNodeKind::File
-                },
-            });
+            children
+                .entry(name.to_owned())
+                .or_insert_with(|| ArchiveNode {
+                    uri: format!("{base}{name}"),
+                    name: name.to_owned(),
+                    kind: if directory {
+                        ArchiveNodeKind::Directory
+                    } else {
+                        ArchiveNodeKind::File
+                    },
+                });
         }
         if children.is_empty() && uri != self.prefix {
             return Err(error(
@@ -702,27 +704,27 @@ impl MinoriMountedVfs {
         Ok(children.into_values().collect())
     }
 
-    pub fn stat(&self, uri: &str) -> Result<PazStat, PazError> {
+    pub fn stat(&self, uri: &str) -> Result<ArchiveStat, PazError> {
         if uri == self.prefix
             || self
                 .entries
                 .keys()
                 .any(|candidate| candidate.starts_with(&format!("{}/", uri.trim_end_matches('/'))))
         {
-            return Ok(PazStat {
+            return Ok(ArchiveStat {
                 uri: uri.into(),
                 entry_id: None,
-                kind: PazNodeKind::Directory,
+                kind: ArchiveNodeKind::Directory,
                 size: 0,
                 archive_role: None,
                 method: None,
             });
         }
         let entry = self.entry(uri)?;
-        Ok(PazStat {
+        Ok(ArchiveStat {
             uri: uri.into(),
             entry_id: Some(entry.descriptor.entry_id.clone()),
-            kind: PazNodeKind::File,
+            kind: ArchiveNodeKind::File,
             size: entry.descriptor.unpacked_size,
             archive_role: Some(entry.descriptor.archive_role.clone()),
             method: Some(entry_method(&entry.descriptor).into()),
@@ -734,8 +736,8 @@ impl MinoriMountedVfs {
         uri: &str,
         offset: u64,
         length: u64,
-    ) -> Result<PazReadResult, PazError> {
-        if length > PAZ_READ_MAX_READ_BYTES {
+    ) -> Result<ArchiveReadResult, PazError> {
+        if length > ARCHIVE_MAX_READ_BYTES {
             return Err(error(
                 "ASTRA_EMU_VFS_READ_LIMIT",
                 "range read exceeds the configured limit",
@@ -760,7 +762,7 @@ impl MinoriMountedVfs {
             },
             DecodedRange::as_slice,
         );
-        Ok(PazReadResult {
+        Ok(ArchiveReadResult {
             uri: uri.into(),
             offset,
             bytes,
@@ -769,7 +771,7 @@ impl MinoriMountedVfs {
         })
     }
 
-    pub fn open_stream(&self, uri: &str) -> Result<Box<dyn PazStream>, PazError> {
+    pub fn open_stream(&self, uri: &str) -> Result<Box<dyn ArchiveStream>, PazError> {
         Ok(Box::new(Cursor::new(
             self.decoded_entry(self.entry(uri)?)?.0,
         )))
@@ -824,10 +826,10 @@ fn validate_role_set(configs: &[PazArchiveConfig]) -> Result<(), PazError> {
 }
 
 fn parse_archive_index(
-    source: &mut ArchiveSource,
+    source: &mut ArchiveFile,
     expected_index_xor: u32,
     decrypt_provider: &MinoriPazDecryptProvider,
-) -> Result<Vec<PazEntryDescriptor>, PazError> {
+) -> Result<Vec<ArchiveEntryDescriptor>, PazError> {
     let (index_offset, encrypted_size) = if source.version == 0 {
         let bytes = read_source_range(source, 0, 4)?;
         let mut size = [0u8; 4];
@@ -914,7 +916,7 @@ fn parse_archive_index(
                 "PAZ entry descriptor is oversized, unaligned, or out of bounds",
             ));
         }
-        entries.push(PazEntryDescriptor {
+        entries.push(ArchiveEntryDescriptor {
             archive_role: source.role.clone(),
             entry_id: format!("{}:{index}", source.role),
             name,
@@ -1033,11 +1035,7 @@ fn read_exact_range(
     Ok(bytes)
 }
 
-fn read_source_range(
-    source: &ArchiveSource,
-    offset: u64,
-    length: u64,
-) -> Result<Vec<u8>, PazError> {
+fn read_source_range(source: &ArchiveFile, offset: u64, length: u64) -> Result<Vec<u8>, PazError> {
     if offset
         .checked_add(length)
         .is_none_or(|end| end > source.length)
@@ -1081,7 +1079,7 @@ fn read_source_range(
 fn hash_parts_and_entries(
     parts: &[ArchivePart],
     source_length: u64,
-    entries: &[PazEntryDescriptor],
+    entries: &[ArchiveEntryDescriptor],
 ) -> Result<(Hash256, Vec<Hash256>), PazError> {
     let mut ranges = Vec::with_capacity(entries.len());
     let mut entry_hashes = vec![None; entries.len()];
@@ -1260,7 +1258,7 @@ fn hash_parts(parts: &[ArchivePart]) -> Result<Hash256, PazError> {
     hash_parts_and_entries(parts, source_length, &[]).map(|(hash, _)| hash)
 }
 
-fn verify_source_unchanged(source: &ArchiveSource) -> Result<(), PazError> {
+fn verify_source_unchanged(source: &ArchiveFile) -> Result<(), PazError> {
     for part in &source.parts {
         let metadata = std::fs::metadata(&part.path).map_err(|_| {
             error(
@@ -1369,7 +1367,7 @@ fn media_kind(name: &str) -> &'static str {
     }
 }
 
-fn entry_method(entry: &PazEntryDescriptor) -> &'static str {
+fn entry_method(entry: &ArchiveEntryDescriptor) -> &'static str {
     match (entry.archive_role.as_str(), entry.packed) {
         ("mov", false) => "movie-transform",
         ("mov", true) => "movie-transform+zlib",
@@ -1379,7 +1377,7 @@ fn entry_method(entry: &PazEntryDescriptor) -> &'static str {
 }
 
 fn password_for_entry<'a>(
-    entry: &PazEntryDescriptor,
+    entry: &ArchiveEntryDescriptor,
     scheme: &'a PazRoleScheme,
 ) -> Option<&'a str> {
     if entry.packed {

@@ -746,7 +746,17 @@ impl WgpuGlyphAtlasRenderer {
                     validate_resource_id(resource_id)?;
                     validate_texture_metadata(frame)?;
                     if apply_mutations {
-                        if committed_mutations.contains_key(resource_id) {
+                        if let Some(previous) = committed_mutations.get(resource_id) {
+                            let id_hash =
+                                format!("sha256:{:x}", Sha256::digest(resource_id.as_bytes()));
+                            tracing::error!(
+                                event = "platform.wgpu.scene.texture_mutation_rejected",
+                                id_hash,
+                                previous_release = previous.is_none(),
+                                upload_texture_count,
+                                release_resource_count,
+                                "texture resource is mutated repeatedly in one frame"
+                            );
                             return Err(invalid(
                                 "texture resource id is mutated more than once in a frame",
                             ));
@@ -2119,7 +2129,11 @@ fn update_gpu_atlas(
         })
         .collect::<Vec<_>>();
     for (resource_id, resource) in &uploads {
-        if current.packed.placements.contains_key(*resource_id) {
+        // Transient ids may be reused by the next frame. Their old placement
+        // was released above; consult the pending removal before reusing it.
+        if current.packed.placements.contains_key(*resource_id)
+            && !matches!(placement_mutations.get(*resource_id), Some(None))
+        {
             continue;
         }
         let placement = match allocate_pending_atlas_slot(

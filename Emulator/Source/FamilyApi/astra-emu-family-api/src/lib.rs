@@ -6,11 +6,15 @@
 //! native persistence, and exposes one borrowed CPU frame plus an optional
 //! fixed-format audio sink.
 
+mod diagnostics;
 mod ffi;
+pub use diagnostics::*;
+#[cfg(feature = "diagnostic-bridge")]
+pub mod diagnostic_bridge;
 
 pub use ffi::*;
 
 /// Machine-readable schema name for this independent host contract.
-pub const FAMILY_API_SCHEMA: &str = "astra.emu.independent_family_api.v2";
+pub const FAMILY_API_SCHEMA: &str = "astra.emu.independent_family_api.v3";
 /// ABI identity is intentionally distinct from every historical family ABI.
-pub const FAMILY_ABI_FINGERPRINT: &str = "astra.emu.independent_family_abi.v2";
+pub const FAMILY_ABI_FINGERPRINT: &str = "astra.emu.independent_family_abi.v3";

@@ -11,6 +11,22 @@ use std::{
     },
     time::{Duration, Instant},
 };
+// The provider intentionally permits one live session per process.
+static PROVIDER_SESSION: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[test]
+fn unsupported_command_diagnostic_keeps_ordinal_without_source_text() {
+    let error = super::vm_error(crate::MinoriRuntimeError::UnsupportedOpcode {
+        opcode: "private script text: hidden".into(),
+        ordinal: 42,
+    });
+    assert_eq!(error.code.as_str(), "ASTRA_EMU_MINORI_RUNTIME_OPCODE");
+    assert_eq!(
+        error.message.as_str(),
+        "script command at ordinal 42 is not implemented"
+    );
+}
+
 #[derive(Clone, Default)]
 struct Sink {
     cancelled: Arc<AtomicBool>,
@@ -34,7 +50,7 @@ impl AudioSink for Sink {
             return Ok(AudioWriteStatus::Cancelled).into();
         }
         if let PcmChunk::F32(samples) = chunk {
-            for frame in samples.chunks_exact(2) {
+            for frame in samples.as_chunks::<2>().0 {
                 if frame[0].abs() > 0.01 {
                     self.left.fetch_add(1, Ordering::Relaxed);
                 }
@@ -136,8 +152,135 @@ fn until(test: impl Fn() -> bool) {
         std::thread::sleep(Duration::from_millis(1));
     }
 }
+
+#[test]
+fn native_gpu_choice_focus_save_restore_and_confirm_follow_the_selected_branch() {
+    let _session = PROVIDER_SESSION.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    fixture::game(root.path(), b".select First:left Second:right\r\n.label left\r\n.message 1   Wrong\r\n.end\r\n.label right\r\n.message 2   Selected\r\n.end\r\n");
+    let mut provider = MinoriProvider::default();
+    let mut opened = provider
+        .open(request(root.path(), Sink::default()))
+        .unwrap();
+    assert_eq!(
+        opened.session.advance(16_666_667, &[]).unwrap().status,
+        FamilyStatus::Waiting
+    );
+    let mut frame = Capture(Vec::new());
+    opened.session.visit_frame(&mut frame).unwrap();
+    let first = frame.0.clone();
+    assert!(first.as_chunks::<4>().0.iter().any(|p| p[0] != 0));
+    opened
+        .session
+        .advance(0, &[key(KeyCode::ArrowDown)])
+        .unwrap();
+    opened.session.visit_frame(&mut frame).unwrap();
+    let second = frame.0.clone();
+    assert_ne!(first, second);
+    opened.session.advance(0, &[key(KeyCode::F5)]).unwrap();
+    opened
+        .session
+        .advance(0, &[key(KeyCode::ArrowDown)])
+        .unwrap();
+    opened.session.visit_frame(&mut frame).unwrap();
+    assert_eq!(frame.0, first);
+    opened.session.advance(0, &[key(KeyCode::F9)]).unwrap();
+    opened.session.visit_frame(&mut frame).unwrap();
+    assert_eq!(frame.0, second);
+    opened
+        .session
+        .advance(16_666_667, &[key(KeyCode::Enter)])
+        .unwrap();
+    opened.session.visit_frame(&mut frame).unwrap();
+    assert_ne!(frame.0, second);
+    opened.session.close().unwrap();
+}
+
+#[test]
+fn native_gpu_choice_pointer_ignores_blank_clicks_and_selects_hovered_branch() {
+    let _session = PROVIDER_SESSION.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    fixture::game(root.path(), b".select First:left Second:right\r\n.label left\r\n.message 1   Wrong\r\n.end\r\n.label right\r\n.end\r\n");
+    let mut provider = MinoriProvider::default();
+    let mut opened = provider
+        .open(request(root.path(), Sink::default()))
+        .unwrap();
+    let click = || FamilyEvent::PointerButton {
+        button: PointerButton::Primary,
+        state: KeyState::Pressed,
+    };
+    opened.session.advance(16_666_667, &[]).unwrap();
+    let mut frame = Capture(Vec::new());
+    opened.session.visit_frame(&mut frame).unwrap();
+    let first = frame.0.clone();
+    // No known pointer position must not confirm the keyboard focus.
+    assert_eq!(
+        opened
+            .session
+            .advance(16_666_667, &[click()])
+            .unwrap()
+            .status,
+        FamilyStatus::Waiting
+    );
+    for (x, y) in [(20.0, 20.0), (250.0, 300.0), (1040.0, 310.0)] {
+        assert_eq!(
+            opened
+                .session
+                .advance(16_666_667, &[FamilyEvent::PointerMove { x, y }, click()])
+                .unwrap()
+                .status,
+            FamilyStatus::Waiting
+        );
+        opened.session.visit_frame(&mut frame).unwrap();
+        assert_eq!(frame.0, first);
+    }
+    opened
+        .session
+        .advance(0, &[FamilyEvent::PointerMove { x: 250.0, y: 310.0 }])
+        .unwrap();
+    opened.session.visit_frame(&mut frame).unwrap();
+    assert_ne!(frame.0, first);
+    // Only the second branch ends immediately; the first waits for dialogue input.
+    assert_eq!(
+        opened
+            .session
+            .advance(16_666_667, &[click()])
+            .unwrap()
+            .status,
+        FamilyStatus::Finished
+    );
+    opened.session.close().unwrap();
+}
+
+#[test]
+fn native_gpu_crossfade_clear_removes_the_previous_effect_frame() {
+    let _session = PROVIDER_SESSION.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    fixture::game(
+        root.path(),
+        b".effect CrossFade BG.png:* 32 100\r\n.effect CrossFade\r\n.end\r\n",
+    );
+    let mut provider = MinoriProvider::default();
+    let mut opened = provider
+        .open(request(root.path(), Sink::default()))
+        .unwrap();
+    let mut frame = Capture(Vec::new());
+    opened.session.advance(16_666_667, &[]).unwrap();
+    opened.session.visit_frame(&mut frame).unwrap();
+    assert_eq!(&frame.0[..4], &[25, 100, 220, 255]);
+    opened.session.advance(16_666_667, &[]).unwrap();
+    opened.session.visit_frame(&mut frame).unwrap();
+    assert!(frame
+        .0
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .all(|pixel| *pixel == [0, 0, 0, 255]));
+    opened.session.close().unwrap();
+}
 #[test]
 fn native_family_advances_real_archive_scene_audio_input_save_restore_and_close() {
+    let _session = PROVIDER_SESSION.lock().unwrap();
     let root = tempfile::tempdir().unwrap();
     fixture::game(
         root.path(),
@@ -174,7 +317,12 @@ fn native_family_advances_real_archive_scene_audio_input_save_restore_and_close(
     );
     opened.session.visit_frame(&mut frame).unwrap();
     let dialogue = frame.0.clone();
-    assert!(dialogue.chunks_exact(4).skip(528 * 1280).any(|p| p[0] > 0));
+    assert!(dialogue
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .skip(528 * 1280)
+        .any(|p| p[0] > 0));
     opened.session.advance(0, &[key(KeyCode::F5)]).unwrap();
     assert_eq!(
         opened
@@ -255,9 +403,37 @@ fn audio_close_cancels_blocked_write_and_joins_worker() {
 fn decoded_audio_rejects_expansion_budget_and_cancellation() {
     let bytes = fixture::wave();
     let stop = AtomicBool::new(false);
-    assert!(crate::audio::decode::decode(bytes.clone(), 100, &stop).is_err());
+    assert!(astra_emu_sdk::decode_audio(bytes.clone(), 100, &stop).is_err());
     stop.store(true, Ordering::Release);
-    assert!(crate::audio::decode::decode(bytes, 4800, &stop).is_err());
+    assert!(astra_emu_sdk::decode_audio(bytes, 4800, &stop).is_err());
+}
+
+#[test]
+fn audio_snapshot_timeout_cancels_blocked_worker_and_rejects_late_commands() {
+    let root = tempfile::tempdir().unwrap();
+    fixture::game(root.path(), b".end\r\n");
+    let archive =
+        Arc::new(mount_minori(root.path(), &root.path().join(MINORI_PROFILE_FILE)).unwrap());
+    let sink = Sink {
+        block: true,
+        ..Default::default()
+    };
+    let mut audio =
+        Audio::start(archive, AudioSink_TO::from_value(sink.clone(), TD_Opaque)).unwrap();
+    until(|| sink.writes.load(Ordering::Acquire) > 0);
+    assert_eq!(
+        audio.snapshot().err().unwrap().code.as_str(),
+        "ASTRA_EMU_MINORI_AUDIO_SNAPSHOT"
+    );
+    assert!(sink.cancelled.load(Ordering::Acquire));
+    assert_eq!(
+        audio.apply(Vec::new()).unwrap_err().code.as_str(),
+        "ASTRA_EMU_MINORI_AUDIO_SNAPSHOT"
+    );
+    assert!(audio.shutdown().is_err());
+    let writes = sink.writes.load(Ordering::Acquire);
+    std::thread::sleep(Duration::from_millis(5));
+    assert_eq!(sink.writes.load(Ordering::Acquire), writes);
 }
 #[test]
 fn corrupt_or_foreign_slot_is_never_overwritten() {

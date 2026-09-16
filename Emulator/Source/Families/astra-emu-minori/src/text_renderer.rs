@@ -1,21 +1,16 @@
-use astra_core::{DiagnosticSeverity, Hash256};
-use astra_media_core::{
-    CpuRendererProvider, HeadlessRenderer, RenderTargetFormat, Renderer2DProvider,
-    RendererCreateRequest, SceneCommand, Transform2D,
-};
+use astra_core::Hash256;
+use astra_emu_sdk::{TextScene, TextSceneLayout};
+use astra_media_core::SceneCommand;
 use astra_text::{
     CosmicTextLayoutProvider, FontBindingContext, LayoutConstraint, OverflowPolicy, PackagedFont,
-    TextDirection, TextLayoutConfig, TextLayoutRequest, TextRenderResourceOwner, TextRun,
-    UnicodeRange, WrapPolicy,
+    TextDirection, TextLayoutConfig, TextLayoutRequest, TextRun, UnicodeRange, WrapPolicy,
 };
 
 const FONT_FAMILY: &str = "Noto Sans JP";
 const FONT_ASSET_ID: &str = "asset:/font/emu/noto-sans-jp";
 
 pub struct MinoriTextRenderer {
-    provider: CosmicTextLayoutProvider,
-    resources: TextRenderResourceOwner,
-    renderer: Option<(u32, u32, HeadlessRenderer)>,
+    scene: TextScene,
 }
 
 #[derive(Clone, Copy)]
@@ -73,44 +68,42 @@ impl MinoriTextRenderer {
         )
         .map_err(|_| "ASTRA_EMU_MINORI_TEXT_PROVIDER_CREATE".to_owned())?;
         Ok(Self {
-            provider,
-            resources: TextRenderResourceOwner::default(),
-            renderer: None,
+            scene: TextScene::new(provider),
         })
     }
 
-    pub fn render(
+    pub fn commands(
         &mut self,
-        width: u32,
-        height: u32,
-        text: &str,
-        speaker: Option<&str>,
-    ) -> Result<Vec<u8>, String> {
-        let renderer = match &mut self.renderer {
-            Some((bound_width, bound_height, renderer))
-                if *bound_width == width && *bound_height == height =>
-            {
-                renderer
-            }
-            Some(_) => return Err("ASTRA_EMU_MINORI_TEXT_STAGE_CHANGED".into()),
-            slot @ None => {
-                let renderer = CpuRendererProvider
-                    .create(RendererCreateRequest {
-                        width,
-                        height,
-                        format: RenderTargetFormat::Rgba8Srgb,
-                        profile: "astra.emu.minori.text.v1".into(),
-                    })
-                    .map_err(|_| "ASTRA_EMU_MINORI_TEXT_RENDERER_CREATE".to_owned())?;
-                let (_, _, renderer) = slot.insert((width, height, renderer));
-                renderer
-            }
+        message: Option<(&str, Option<&str>)>,
+        choices: Option<(&[String], u32)>,
+    ) -> Result<Vec<SceneCommand>, String> {
+        if let Some((labels, selected)) = choices {
+            let regions = labels
+                .iter()
+                .enumerate()
+                .map(|(index, label)| {
+                    let mut layout = layout_request(
+                        &format!("minori.choice.{index}"),
+                        label,
+                        choice_region(index),
+                    );
+                    layout.rgba = if index == selected as usize {
+                        [255, 220, 96, 255]
+                    } else {
+                        [255, 255, 255, 255]
+                    };
+                    layout
+                })
+                .collect::<Vec<_>>();
+            return self
+                .scene
+                .frame(&regions)
+                .map_err(|_| "ASTRA_EMU_MINORI_CHOICE_RENDER".to_owned());
+        }
+        let Some((text, speaker)) = message else {
+            return Ok(self.scene.clear());
         };
-        let mut commands = vec![SceneCommand::Clear { rgba: [0, 0, 0, 0] }];
-        append_layout(
-            &self.provider,
-            &mut self.resources,
-            &mut commands,
+        let mut regions = vec![layout_request(
             "minori.reference.message.body",
             text,
             Region {
@@ -122,12 +115,9 @@ impl MinoriTextRenderer {
                 line_height: 32.0,
                 max_lines: 3,
             },
-        )?;
+        )];
         if let Some(speaker) = speaker {
-            append_layout(
-                &self.provider,
-                &mut self.resources,
-                &mut commands,
+            regions.push(layout_request(
                 "minori.reference.message.speaker",
                 speaker,
                 Region {
@@ -139,25 +129,46 @@ impl MinoriTextRenderer {
                     line_height: 32.0,
                     max_lines: 1,
                 },
-            )?;
+            ));
         }
-        renderer
-            .capture_frame(&commands)
-            .map(|frame| frame.bytes)
+        self.scene
+            .frame(&regions)
             .map_err(|_| "ASTRA_EMU_MINORI_TEXT_RENDER".to_owned())
     }
 }
 
-fn append_layout(
-    provider: &CosmicTextLayoutProvider,
-    resources: &mut TextRenderResourceOwner,
-    commands: &mut Vec<SceneCommand>,
-    layout_id: &str,
-    text: &str,
-    region: Region,
-) -> Result<(), String> {
-    let layout = provider
-        .layout_shared(&TextLayoutRequest {
+fn choice_region(index: usize) -> Region {
+    Region {
+        x: 240,
+        y: 240 + index as i32 * 64,
+        width: 800,
+        height: 56,
+        font_size: 28.0,
+        line_height: 34.0,
+        max_lines: 1,
+    }
+}
+
+pub(crate) fn choice_at(count: usize, x: f32, y: f32) -> Option<u32> {
+    if !(1..=4).contains(&count) || !x.is_finite() || !y.is_finite() {
+        return None;
+    }
+    (0..count)
+        .find(|index| {
+            let region = choice_region(*index);
+            x >= region.x as f32
+                && x < region.x as f32 + region.width as f32
+                && y >= region.y as f32
+                && y < region.y as f32 + region.height as f32
+        })
+        .map(|index| index as u32)
+}
+
+fn layout_request(layout_id: &str, text: &str, region: Region) -> TextSceneLayout {
+    TextSceneLayout {
+        translation: (region.x, region.y),
+        rgba: [255, 255, 255, 255],
+        request: TextLayoutRequest {
             key: layout_id.into(),
             runs: vec![TextRun {
                 text: text.into(),
@@ -178,44 +189,91 @@ fn append_layout(
             },
             font_families: vec![FONT_FAMILY.into()],
             features: Vec::new(),
-        })
-        .map_err(|_| "ASTRA_EMU_MINORI_TEXT_LAYOUT".to_owned())?;
-    if layout.diagnostics.iter().any(|diagnostic| {
-        matches!(
-            diagnostic.severity,
-            DiagnosticSeverity::Error | DiagnosticSeverity::Blocking
-        )
-    }) {
-        return Err("ASTRA_EMU_MINORI_TEXT_LAYOUT_DIAGNOSTIC".into());
+        },
     }
-    commands.push(SceneCommand::PushTransform {
-        transform: Transform2D::translation(region.x as f32, region.y as f32),
-    });
-    commands.extend(
-        resources
-            .update_layout(layout_id, &layout, [255, 255, 255, 255])
-            .map_err(|_| "ASTRA_EMU_MINORI_TEXT_RESOURCE".to_owned())?,
-    );
-    commands.push(SceneCommand::PopTransform);
-    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use astra_platform::SceneFrame;
+    use astra_platform_common::WgpuOffscreenRenderer;
+
     #[test]
-    fn genuine_japanese_glyphs_are_composited_without_engine_session() {
-        let mut renderer = MinoriTextRenderer::new().unwrap();
-        let frame = renderer
-            .render(1280, 720, "日本語の文字", Some("名前"))
-            .unwrap();
-        assert_eq!(frame.len(), 1280 * 720 * 4);
-        assert!(frame.chunks_exact(4).any(|pixel| pixel[3] != 0));
-        assert_eq!(
-            frame,
-            renderer
-                .render(1280, 720, "日本語の文字", Some("名前"))
-                .unwrap()
-        );
+    fn choice_hit_testing_excludes_gaps_edges_and_invalid_coordinates() {
+        assert_eq!(choice_at(2, 240.0, 240.0), Some(0));
+        assert_eq!(choice_at(2, 1039.5, 295.5), Some(0));
+        assert_eq!(choice_at(2, 240.0, 304.0), Some(1));
+        for (x, y) in [
+            (239.0, 250.0),
+            (1040.0, 250.0),
+            (250.0, 296.0),
+            (250.0, 360.0),
+            (f32::NAN, 250.0),
+            (250.0, f32::INFINITY),
+        ] {
+            assert_eq!(choice_at(2, x, y), None);
+        }
+        assert_eq!(choice_at(0, 250.0, 250.0), None);
+        assert_eq!(choice_at(5, 250.0, 250.0), None);
+    }
+
+    #[test]
+    #[ignore = "requires a hardware GPU"]
+    fn gpu_text_updates_shared_glyphs_and_releases_removed_regions() {
+        let mut text = MinoriTextRenderer::new().unwrap();
+        let mut gpu = pollster::block_on(WgpuOffscreenRenderer::new()).unwrap();
+        let mut sequence = 0;
+        let mut draw = |message| {
+            sequence += 1;
+            gpu.render(&SceneFrame {
+                sequence,
+                width: 1280,
+                height: 720,
+                clear_rgba: [0, 0, 0, 0],
+                commands: text.commands(message, None).unwrap(),
+                semantics: None,
+            })
+            .unwrap()
+            .rgba8
+        };
+        let first = draw(Some(("日本語の文字", Some("日本語"))));
+        assert!(first.as_chunks::<4>().0.iter().any(|pixel| pixel[3] != 0));
+        assert_eq!(first, draw(Some(("日本語の文字", Some("日本語")))));
+        let without_speaker = draw(Some(("日本語の文字", None)));
+        assert_ne!(first, without_speaker);
+        assert!(draw(None).iter().all(|byte| *byte == 0));
+        assert_eq!(first, draw(Some(("日本語の文字", Some("日本語")))));
+    }
+
+    #[test]
+    fn duplicate_region_failure_preserves_the_previous_glyph_residency() {
+        let mut text = MinoriTextRenderer::new().unwrap();
+        text.commands(Some(("日本語", None)), None).unwrap();
+        let region = || {
+            layout_request(
+                "duplicate",
+                "文字",
+                Region {
+                    x: 0,
+                    y: 0,
+                    width: 100,
+                    height: 100,
+                    font_size: 24.0,
+                    line_height: 30.0,
+                    max_lines: 2,
+                },
+            )
+        };
+        assert!(text.scene.frame(&[region(), region()]).is_err());
+        let commands = text.commands(Some(("日本語", None)), None).unwrap();
+        assert!(!commands
+            .iter()
+            .any(|command| matches!(command, SceneCommand::UploadGlyph { .. })));
+        assert!(text
+            .commands(None, None)
+            .unwrap()
+            .iter()
+            .any(|command| matches!(command, SceneCommand::ReleaseResource { .. })));
     }
 }
