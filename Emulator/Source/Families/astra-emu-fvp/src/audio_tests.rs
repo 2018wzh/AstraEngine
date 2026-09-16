@@ -2,6 +2,39 @@ use super::*;
 use rfvp::host_api::EncodedAudioKind;
 
 #[test]
+fn voice_capacity_failure_identifies_play_without_exposing_resource_data() {
+    let mut mixer = SoftAudioMixer::new(
+        SymphoniaBackend,
+        SoftAudioConfig {
+            max_active_total: 0,
+            ..SoftAudioConfig::default()
+        },
+    );
+    let id = AudioStreamId::se(0);
+    apply_operation(
+        &mut mixer,
+        &HostedAudioOperation::LoadEncoded {
+            id,
+            kind: EncodedAudioKind::Wav,
+            bytes: wav_pcm16(&[1_000, -1_000], 2, OUTPUT.sample_rate),
+        },
+    )
+    .unwrap();
+    let error = apply_operation(
+        &mut mixer,
+        &HostedAudioOperation::Play {
+            id,
+            params: Default::default(),
+            fade_in_ms: 0,
+        },
+    )
+    .unwrap_err();
+    assert_eq!(error.code(), "ASTRA_EMU_FVP_RFVP_CAPACITY");
+    assert_eq!(error.message.as_str(), "RFVP rejected audio play");
+    assert!(!mixer.is_playing(id));
+}
+
+#[test]
 fn configuration_failure_preserves_the_host_diagnostic() {
     use abi_stable::type_level::downcasting::TD_Opaque;
     use astra_emu_family_api::{AudioSink, AudioSink_TO, FfiFamilyResult};

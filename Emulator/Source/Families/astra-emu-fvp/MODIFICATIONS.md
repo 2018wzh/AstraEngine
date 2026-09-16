@@ -122,6 +122,8 @@ Family 的 session map 改为持有 `Box<FvpSession>`。原先第二次启动在
 
 The Family adapter installs the shared optional Family API v3 diagnostic bridge before descriptor/probe/open. Existing core tracing and log events reach the Manager sink without adding a core logger or changing native rendering/platform behavior. Unreviewed text and Debug values are redacted with an explicit count.
 
+Family audio errors retain the failed operation (load, play, mix, stream submission or parameter update), and command failures emit `astra.emu.fvp.audio.operation_failed` with only operation and diagnostic code. Playback-state synchronization and video completion have distinct error contexts. Mixer limits and core behavior are unchanged; these diagnostics narrow the unresolved capacity failure seen during the Sandbox playthrough.
+
 Hosted save capture and restore emit `rfvp.save.text_state` at DEBUG with numeric font, color, outline and reveal state for loaded text slots. This diagnoses visual restoration differences without logging the text or retaining pixel dumps. It does not change the save codec or restore behavior.
 
 ## Timed motion restoration

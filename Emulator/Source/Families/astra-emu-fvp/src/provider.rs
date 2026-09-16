@@ -425,7 +425,9 @@ impl FvpSession {
             stop
         });
         let core_result = if complete_core {
-            self.hosted.complete_video().map_err(error::rfvp)
+            self.hosted
+                .complete_video()
+                .map_err(|cause| error::rfvp_operation(cause, "video completion"))
         } else {
             Ok(())
         };
@@ -472,7 +474,7 @@ impl FvpSession {
         let states = self.audio.playback_states()?;
         self.hosted
             .set_audio_playback_states(&states)
-            .map_err(error::rfvp)
+            .map_err(|cause| error::rfvp_operation(cause, "audio playback state synchronization"))
     }
 }
 

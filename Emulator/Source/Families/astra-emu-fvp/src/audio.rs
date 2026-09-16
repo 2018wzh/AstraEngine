@@ -358,7 +358,9 @@ fn run_worker(
         }
 
         let mut samples = vec![0_i16; mix_samples];
-        let mixer_active = mixer.mix_next(&mut samples).map_err(crate::error::rfvp)?;
+        let mixer_active = mixer
+            .mix_next(&mut samples)
+            .map_err(|cause| crate::error::rfvp_operation(cause, "audio mix"))?;
         let video_active = mix_video_audio(&mut video_audio, &playback_states, &mut samples)?;
         if mixer_active || video_active {
             refresh_playback_states(&mixer, &video_audio, &playback_states);
@@ -505,47 +507,54 @@ fn apply_operation(
     mixer: &mut SoftAudioMixer<SymphoniaBackend>,
     operation: &HostedAudioOperation,
 ) -> FamilyResult<()> {
-    match operation {
-        HostedAudioOperation::LoadResource { .. } => Err(FamilyError::invalid(
-            "ASTRA_EMU_FVP_AUDIO_RESOURCE",
-            "resource audio must be resolved by the family session",
-        )),
-        HostedAudioOperation::LoadEncoded { id, kind, bytes } => mixer
-            .load_encoded(*id, *kind, bytes)
-            .map_err(crate::error::rfvp),
+    let (name, result) = match operation {
+        HostedAudioOperation::LoadResource { .. } => {
+            return Err(FamilyError::invalid(
+                "ASTRA_EMU_FVP_AUDIO_RESOURCE",
+                "resource audio must be resolved by the family session",
+            ))
+        }
+        HostedAudioOperation::LoadEncoded { id, kind, bytes } => {
+            ("audio load", mixer.load_encoded(*id, *kind, bytes))
+        }
         HostedAudioOperation::CreateStream { id, desc } => {
-            mixer.create_stream(*id, *desc).map_err(crate::error::rfvp)
+            ("audio stream creation", mixer.create_stream(*id, *desc))
         }
         HostedAudioOperation::SubmitI16 { id, samples } => {
-            mixer.submit_i16(*id, samples).map_err(crate::error::rfvp)
+            ("audio i16 submission", mixer.submit_i16(*id, samples))
         }
         HostedAudioOperation::SubmitF32 { id, samples } => {
-            mixer.submit_f32(*id, samples).map_err(crate::error::rfvp)
+            ("audio f32 submission", mixer.submit_f32(*id, samples))
         }
         HostedAudioOperation::Play {
             id,
             params,
             fade_in_ms,
-        } => mixer
-            .play(*id, *params, *fade_in_ms)
-            .map_err(crate::error::rfvp),
-        HostedAudioOperation::Stop { id, fade_ms } => {
-            mixer.stop(*id, *fade_ms).map_err(crate::error::rfvp)
-        }
-        HostedAudioOperation::Pause(id) => mixer.pause(*id).map_err(crate::error::rfvp),
-        HostedAudioOperation::Resume(id) => mixer.resume(*id).map_err(crate::error::rfvp),
+        } => ("audio play", mixer.play(*id, *params, *fade_in_ms)),
+        HostedAudioOperation::Stop { id, fade_ms } => ("audio stop", mixer.stop(*id, *fade_ms)),
+        HostedAudioOperation::Pause(id) => ("audio pause", mixer.pause(*id)),
+        HostedAudioOperation::Resume(id) => ("audio resume", mixer.resume(*id)),
         HostedAudioOperation::SetParams { id, params } => {
-            mixer.set_params(*id, *params).map_err(crate::error::rfvp)
+            ("audio parameter update", mixer.set_params(*id, *params))
         }
         HostedAudioOperation::SetMasterVolume(volume) => {
-            mixer.set_master_volume(*volume).map_err(crate::error::rfvp)
+            ("audio master volume", mixer.set_master_volume(*volume))
         }
         HostedAudioOperation::DestroyStream(id) => {
             mixer.destroy_stream(*id);
-            Ok(())
+            return Ok(());
         }
-        HostedAudioOperation::Tick { .. } => Ok(()),
-    }
+        HostedAudioOperation::Tick { .. } => return Ok(()),
+    };
+    result.map_err(|cause| {
+        let error = crate::error::rfvp_operation(cause, name);
+        tracing::error!(
+            event = "astra.emu.fvp.audio.operation_failed",
+            operation = name,
+            code = error.code()
+        );
+        error
+    })
 }
 
 fn write_pcm(sink: &AudioSinkBox, samples: Vec<i16>) -> FamilyResult<()> {
