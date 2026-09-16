@@ -1,3 +1,5 @@
+mod windows_runtime;
+
 use std::{
     collections::BTreeMap,
     env, fs,
@@ -226,6 +228,9 @@ enum PackageCommand {
         platform: PlatformArg,
         #[arg(long)]
         windows_player: Option<PathBuf>,
+        /// Directory containing the matching Microsoft VC x64 CRT redistributable DLLs.
+        #[arg(long)]
+        windows_runtime: Option<PathBuf>,
         #[arg(long)]
         linux_player: Option<PathBuf>,
         #[arg(long)]
@@ -503,6 +508,7 @@ fn main() -> Result<(), CliError> {
                 profile,
                 platform,
                 windows_player,
+                windows_runtime,
                 linux_player,
                 macos_player,
                 crash_reporter,
@@ -517,6 +523,7 @@ fn main() -> Result<(), CliError> {
             } => {
                 let artifacts = BundleArtifactInputs {
                     windows_player,
+                    windows_runtime,
                     linux_player,
                     macos_player,
                     crash_reporter,
@@ -1361,6 +1368,7 @@ struct StandaloneBundleManifest {
 #[derive(Clone, Default)]
 struct BundleArtifactInputs {
     windows_player: Option<PathBuf>,
+    windows_runtime: Option<PathBuf>,
     linux_player: Option<PathBuf>,
     macos_player: Option<PathBuf>,
     crash_reporter: Option<PathBuf>,
@@ -3539,6 +3547,10 @@ fn build_standalone_bundle_into(
 
     let entrypoint = match platform {
         PlatformId::Windows => {
+            let runtime = artifacts.windows_runtime.as_deref().ok_or(
+                "Windows bundle requires --windows-runtime pointing to the matching Microsoft VC x64 CRT redistributable directory",
+            )?;
+            files.extend(windows_runtime::bundle(runtime, out)?);
             let entrypoint = "AstraPlayer.exe";
             let player_source = artifacts.windows_player.as_deref().ok_or(
                 "Windows bundle requires --windows-player pointing to a built AstraPlayer.exe",

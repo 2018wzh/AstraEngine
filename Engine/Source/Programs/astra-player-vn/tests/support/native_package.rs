@@ -43,12 +43,21 @@ pub(crate) fn product_package_with_request(
     story: &str,
     mutate: impl FnOnce(&mut PackageBuildRequest),
 ) -> Vec<u8> {
+    product_package_with_ui_and_request(story, TEST_UI, test_compile_options(), mutate)
+}
+
+pub(crate) fn product_package_with_ui_and_request(
+    story: &str,
+    ui: &str,
+    options: CompileAstraProjectOptions,
+    mutate: impl FnOnce(&mut PackageBuildRequest),
+) -> Vec<u8> {
     let compiled = compile_astra_project(
         [
             AstraSource::story("main.astra", story),
-            AstraSource::ui("test-ui.astra", TEST_UI),
+            AstraSource::ui("test-ui.astra", ui),
         ],
-        test_compile_options(),
+        options,
     )
     .unwrap();
     let mut sections =

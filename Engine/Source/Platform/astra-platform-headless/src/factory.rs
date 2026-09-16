@@ -875,7 +875,13 @@ impl HostState {
                 let result = (|| {
                     let scene_build_started = Instant::now();
                     let sequence = frame.sequence;
-                    let (canonical, journal, pending, deferred_resources, materialize) = {
+                    let mut commands = Vec::with_capacity(frame.commands.len() + 1);
+                    commands.push(SceneCommand::Clear {
+                        rgba: frame.clear_rgba,
+                    });
+                    commands.extend(frame.commands);
+                    let scene_validation_started = Instant::now();
+                    let (journal, flush_deferred) = {
                         let s = self.surfaces.get(surface)?;
                         ensure_increasing(
                             s.last_sequence,
@@ -888,18 +894,31 @@ impl HostState {
                                 "frame dimensions do not match surface",
                             ));
                         }
-                        let mut commands = Vec::with_capacity(frame.commands.len() + 1);
-                        commands.push(SceneCommand::Clear {
-                            rgba: frame.clear_rgba,
-                        });
-                        commands.extend(frame.commands);
-                        let scene_validation_started = Instant::now();
                         let journal = s.renderer.validate_frame(&commands).map_err(media_error)?;
-                        let scene_validation_ns = elapsed_ns(
-                            scene_validation_started,
-                            "surface.present_scene",
-                            "scene validation duration overflowed",
-                        )?;
+                        let flush_deferred = crate::deferred_resources::crosses_resource_boundary(
+                            &s.deferred_gpu_resource_commands,
+                            &commands,
+                        );
+                        (journal, flush_deferred)
+                    };
+                    let scene_validation_ns = elapsed_ns(
+                        scene_validation_started,
+                        "surface.present_scene",
+                        "scene validation duration overflowed",
+                    )?;
+                    if flush_deferred {
+                        // Validate the incoming frame before submitting anything.
+                        // The previous pending scene owns the earlier mutations;
+                        // submit it without a checkpoint readback before reusing IDs.
+                        self.materialize_surface(surface, false)?;
+                        tracing::debug!(
+                            event = "platform.headless.gpu.resource_boundary",
+                            sequence,
+                            "submitted deferred scene before the next resource mutation"
+                        );
+                    }
+                    let (canonical, pending, deferred_resources, materialize) = {
+                        let s = self.surfaces.get(surface)?;
                         let scene_digest_started = Instant::now();
                         let canonical = scene_submission_identity(
                             frame.sequence,
@@ -965,7 +984,6 @@ impl HostState {
                         };
                         (
                             canonical,
-                            journal,
                             pending,
                             deferred_resources,
                             self.profile.render_policy == HeadlessRenderPolicy::All

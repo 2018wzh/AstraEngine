@@ -1056,6 +1056,7 @@ impl NativeVnHeadlessSession {
             hashed_observation("vn.audio_enabled", &product.audio_enabled)?,
             hashed_observation("vn.skip_allowed", &product.skip_allowed)?,
             hashed_observation("vn.system_config", &product.system_config)?,
+            hashed_observation("vn.text_reveal_complete", &product.text_reveal_complete)?,
             hashed_observation("vn.backlog_count", &product.backlog_count)?,
             hashed_observation(
                 "vn.occupied_save_slot_count",

@@ -1,6 +1,79 @@
 use super::*;
 use crate::test_native_package as native_package;
 
+#[test]
+fn input_action_preserves_resized_glyph_uploads() {
+    let bytes = native_package::product_package_with_request(
+        "story main #@id story.main\nstate start #@id state.start\n  scene room #@id scene.room\n    text key:line.one speaker:hero #@id line.one\n    text key:line.two speaker:hero #@id line.two\n",
+        |_| {},
+    );
+    let package = astra_package::PackageReader::open(&bytes).unwrap();
+    let mut source = NativeVnHostCommandSource::from_package(
+        &package,
+        VnRunConfig::classic("en"),
+        320,
+        180,
+        PlayerHostResourceId(1),
+    )
+    .unwrap();
+    let mut resident = BTreeSet::new();
+    let mut validate = |batch: PlayerHostCommandBatch| {
+        for command in batch.commands {
+            if let PlayerHostCommand::PresentScene { commands, .. } = command {
+                for draw in commands {
+                    match draw {
+                        SceneCommand::UploadGlyph { resource_id, .. }
+                        | SceneCommand::UploadTexture { resource_id, .. } => {
+                            assert!(resident.insert(resource_id));
+                        }
+                        SceneCommand::ReleaseResource { resource_id } => {
+                            assert!(resident.remove(&resource_id));
+                        }
+                        SceneCommand::GlyphRun { glyphs, .. } => {
+                            for glyph in glyphs.iter() {
+                                assert!(
+                                    resident.contains(&glyph.resource_id),
+                                    "missing glyph upload after input action"
+                                );
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    };
+    validate(source.launch().unwrap());
+    let resize = source
+        .next_ui_event(UiInputEventKind::Resize {
+            viewport: UiViewport {
+                physical_width: 640,
+                physical_height: 360,
+                scale_factor: 2.0,
+                font_scale: 2.0,
+                safe_area_points: UiInsets {
+                    top: 0.0,
+                    right: 0.0,
+                    bottom: 0.0,
+                    left: 0.0,
+                },
+            },
+        })
+        .unwrap();
+    let advance = source
+        .next_ui_event(UiInputEventKind::Keyboard {
+            physical_key: "Enter".into(),
+            logical_key: "Enter".into(),
+            state: UiButtonState::Pressed,
+            repeat: false,
+            modifiers: 0,
+        })
+        .unwrap();
+    validate(source.dispatch_ui_events(vec![resize, advance]).unwrap());
+    validate(source.release_resources().unwrap());
+    source.shutdown().unwrap();
+}
+
 const STORY: &str = r#"
 story main #@id story.main
 state start #@id state.start

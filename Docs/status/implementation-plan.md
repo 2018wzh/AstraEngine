@@ -15,6 +15,8 @@
 
 ## 验收安排
 
+Native VN 本地整合回归通过：Player 保留 UI 操作产生的字形生命周期命令，文字显示完成状态通过只读观察提供给物理输入脚本；GPU Headless 在资源跨帧重用前提交待绘制场景。相关 Player、CLI、media-core、Headless 平台及 VN adapter 测试和 Clippy 通过，显式 GPU 资源回归通过，Player/Headless/CLI 构建完成。终之空生成器更新当前平台契约和演出替换策略，28 项相关 Python 测试通过。Windows CRT 打包复用 object 校验 x64 PE DLL，全部校验后复制；缺失、截断、错误架构和非 DLL 输入回归通过。此批不新增真实路线完成记录，37 路线与 Sandbox 长流程仍开放。
+
 本地 Emulator 整合检查通过：活动 workspace 的默认测试、全 targets Clippy、构建及格式检查完成；文档检查通过。共享 GPU atlas 的跨帧纹理 ID 释放/重用回归和 astra-platform-common Clippy 通过。需商业素材、指定设备或真实服务的 ignored 测试仍保持各自验收范围，不计入完成。此次只固化 EMU 整合与共享 GPU 修复，VN 长流程和其余产品工作继续。
 
 Siglus 的完整 fork 已合成为上游 e762f9f 基线加单个本地适配提交 c6c4f99，保留原提交历史，主仓 gitlink 已更新，尚未推送。确认并移除了 117 个文件的纯格式差异及 18 个 manifest 的全局警告屏蔽，实际适配涉及 13 个文件。Family 配置和阻塞 PCM 关闭测试、显式 GPU 离屏回读以及 Family Clippy 通过；上游编译警告保持可见，三项需要授权素材的真实游戏测试未执行。

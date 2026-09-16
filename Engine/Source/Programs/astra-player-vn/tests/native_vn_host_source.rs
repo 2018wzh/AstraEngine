@@ -58,6 +58,9 @@ fn advance(source: &mut NativeVnHostCommandSource) -> astra_player_core::PlayerH
         .unwrap()
 }
 
+#[path = "support/glyph_lifecycle.rs"]
+mod glyph_lifecycle;
+
 fn prepare_test_save_metadata(source: &mut NativeVnHostCommandSource, slot: &str) {
     source
         .cache_gameplay_surface(320, 180, vec![0x40; 320 * 180 * 4])
@@ -232,7 +235,7 @@ state popup #@id state.system.popup
     let initial = source
         .product_observation_evidence()
         .expect("initial product observation");
-    assert_eq!(initial.schema, "astra.player_vn_product_observation.v2");
+    assert_eq!(initial.schema, "astra.player_vn_product_observation.v3");
     assert_eq!(initial.ui_profile, "classic");
     assert_eq!(initial.locale, "en");
     assert_eq!(initial.active_system_page, None);

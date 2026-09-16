@@ -390,6 +390,8 @@ pub struct NativeVnProductObservationEvidence {
     pub audio_enabled: bool,
     pub skip_allowed: bool,
     pub system_config: BTreeMap<String, String>,
+    /// True when no text is revealing or the current text is fully visible.
+    pub text_reveal_complete: bool,
     pub backlog_count: usize,
     pub occupied_save_slot_count: usize,
 }
@@ -1103,7 +1105,7 @@ impl NativeVnHostCommandSource {
             )
         })?;
         Ok(NativeVnProductObservationEvidence {
-            schema: "astra.player_vn_product_observation.v2".into(),
+            schema: "astra.player_vn_product_observation.v3".into(),
             ui_profile: self.ui_profile.clone(),
             locale: state.locale.clone(),
             active_system_page: state.system_stack.last().map(|frame| frame.page),
@@ -1120,6 +1122,10 @@ impl NativeVnHostCommandSource {
             audio_enabled: state.system.audio_enabled,
             skip_allowed: state.system.skip_allowed,
             system_config: state.system.config.clone(),
+            text_reveal_complete: self
+                .stage_director
+                .text_reveal_state()
+                .is_none_or(|text| text.complete()),
             backlog_count: self.runtime_backlog_count,
             occupied_save_slot_count: self
                 .ui_save_slots
@@ -2094,12 +2100,23 @@ impl NativeVnHostCommandSource {
             }
             return result;
         }
-        let frame = self.render_ui(events)?;
+        let mut frame = self.render_ui(events)?;
         if frame.actions.len() > 1 {
             return Err(NativeVnHostError::Input(
                 "ASTRA_PLAYER_UI_ACTION_AMBIGUOUS: one input frame emitted multiple actions".into(),
             ));
         }
+        // Layout has already updated the resource owner. Preserve its one-shot
+        // mutations even when an action replaces this frame before presentation.
+        frame.draw.retain(|command| {
+            if is_ui_resource_lifecycle(command) {
+                self.pending_gpu_lifecycle.push(command.clone());
+                false
+            } else {
+                true
+            }
+        });
+        self.ui_draw = frame.draw.clone();
         if let Some(action) = frame.actions.first() {
             let started = performance_phase_started(self.ui_host_performance_sampling_enabled);
             let result = self.dispatch_ui_action(action);
@@ -2262,7 +2279,7 @@ impl NativeVnHostCommandSource {
                 frame,
             });
         }
-        self.pending_gpu_lifecycle = lifecycle;
+        self.pending_gpu_lifecycle.extend(lifecycle);
         for asset_id in missing_ids {
             self.remove_texture(&asset_id)?;
             self.asset_store.release_uploaded_image(&asset_id)?;
@@ -2975,7 +2992,7 @@ impl NativeVnHostCommandSource {
         // Retain only the UI layer. Keeping the fully composed frame here caused
         // every resize/focus repaint to recursively append the previous clear and
         // scene layers, producing duplicate resource identities on the WGPU path.
-        self.ui_draw = ui_draw;
+        self.ui_draw = reusable_ui_draw_commands(&ui_draw);
         Ok(PlayerHostCommandBatch::new(vec![
             PlayerHostCommand::PresentScene {
                 sequence: self.next_command_sequence()?,
@@ -3535,7 +3552,8 @@ impl NativeVnHostCommandSource {
         }
         self.ui_text_measurer.begin_frame()?;
         self.ui_frame_reuse = None;
-        let mut commands = self.text_resources.shutdown();
+        let mut commands = std::mem::take(&mut self.pending_gpu_lifecycle);
+        commands.extend(self.text_resources.shutdown());
         commands.extend(self.live_texture_ids.iter().map(|resource_id| {
             SceneCommand::ReleaseResource {
                 resource_id: resource_id.clone(),
@@ -4024,7 +4042,7 @@ impl NativeVnHostCommandSource {
         }
         let stage_scene_started =
             performance_phase_started(self.ui_host_performance_sampling_enabled);
-        let mut lifecycle = Vec::new();
+        let mut lifecycle = std::mem::take(&mut self.pending_gpu_lifecycle);
         let mut uploaded_texture_ids = Vec::new();
         let next_stage_scene = if next_stage_director.is_some() || refresh_stage {
             let stage_texture_started =
@@ -4168,6 +4186,7 @@ impl NativeVnHostCommandSource {
                     .lifecycle,
             );
             self.live_layout_ids.clear();
+            self.ui_frame_reuse = None;
             self.ui_text_measurer.begin_frame()?;
         }
         lifecycle.push(SceneCommand::rect(
@@ -4231,7 +4250,7 @@ impl NativeVnHostCommandSource {
             self.director_transition_snapshot = None;
         }
         self.cancel_removed_video_scopes();
-        self.ui_draw = ui_draw;
+        self.ui_draw = reusable_ui_draw_commands(&ui_draw);
         if !next_audio.is_empty() {
             tracing::trace!(
                 event = "player.vn.audio_sequence.queued",
@@ -7059,16 +7078,19 @@ fn validate_story_presentation(
 /// an `Upload*` command violates the retained-resource contract.
 fn reusable_ui_draw_commands(draw: &[SceneCommand]) -> Vec<SceneCommand> {
     draw.iter()
-        .filter(|command| {
-            !matches!(
-                command,
-                SceneCommand::UploadTexture { .. }
-                    | SceneCommand::UploadGlyph { .. }
-                    | SceneCommand::ReleaseResource { .. }
-            )
-        })
+        .filter(|command| !is_ui_resource_lifecycle(command))
         .cloned()
         .collect()
+}
+
+fn is_ui_resource_lifecycle(command: &SceneCommand) -> bool {
+    matches!(
+        command,
+        SceneCommand::UploadTexture { .. }
+            | SceneCommand::UploadGlyph { .. }
+            | SceneCommand::UpdateTextureRegion { .. }
+            | SceneCommand::ReleaseResource { .. }
+    )
 }
 
 fn validate_stage_command_policy(

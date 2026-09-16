@@ -203,7 +203,24 @@ fn main() -> Result<(), PlayerCliError> {
     }
 
     if script.is_none() && transcript.is_none() {
-        return run_bundled_game();
+        let result = run_bundled_game();
+        if let Err(error) = &result {
+            if let Some(platform) = error.downcast_ref::<astra_platform::PlatformError>() {
+                tracing::error!(
+                    event = "player.host.failed",
+                    diagnostic = ?platform.code,
+                    operation = %platform.operation,
+                    "Bundled Player terminated"
+                );
+            } else {
+                tracing::error!(
+                    event = "player.host.failed",
+                    diagnostic = "ASTRA_PLAYER_BUNDLE_FAILED",
+                    "Bundled Player terminated before completing its platform session"
+                );
+            }
+        }
+        return result;
     }
 
     let script_path = script.ok_or("missing --script")?;

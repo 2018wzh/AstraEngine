@@ -581,7 +581,7 @@ impl HeadlessRenderer {
         let mut clip_depth = 1_usize;
         let mut transform_depth = 1_usize;
         let mut opacity_depth = 1_usize;
-        for command in commands {
+        for (command_index, command) in commands.iter().enumerate() {
             match command {
                 DrawCommand::UploadTexture { resource_id, frame } => {
                     validate_texture_metadata(frame)?;
@@ -685,6 +685,23 @@ impl HeadlessRenderer {
                             &resource_overlay,
                             &instance.resource_id,
                         ) {
+                            let pending_state =
+                                match resource_overlay.get(instance.resource_id.as_str()) {
+                                    Some(PendingResource::Released) => "released",
+                                    Some(PendingResource::Texture(_)) => "texture",
+                                    Some(PendingResource::Glyph(_)) => "glyph",
+                                    None => "absent",
+                                };
+                            tracing::error!(
+                                event = "media.scene.glyph_resource_missing",
+                                command_index,
+                                resource_hash = %astra_core::Hash256::from_sha256(instance.resource_id.as_bytes()),
+                                previously_resident = self.glyph_ids.contains(&instance.resource_id),
+                                pending_state,
+                                resident_glyph_count = self.glyph_ids.len(),
+                                pending_mutation_count = mutations.len(),
+                                "glyph draw references a resource outside its lifetime"
+                            );
                             return Err(MediaError::message(
                                 "ASTRA_MEDIA_RESOURCE_UNKNOWN: glyph resource is not uploaded",
                             ));

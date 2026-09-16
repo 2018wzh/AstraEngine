@@ -584,16 +584,16 @@ def _render_command(command: dict, strings: dict[str, str]) -> list[str]:
         at = f" at:{command['at']}" if _safe(command.get("at")) else ""
         fit = f" fit:{command['fit']}" if command.get("fit") else ""
         opacity = command.get("opacity", 100) / 100
-        return [f"{prefix}show id:{command['character_id']} asset:asset:/{command['asset_id']}{pose} layer:{command['layer']}{at}{fit} opacity:{opacity:g} {stable}"]
+        return [f"{prefix}show id:{command['character_id']} asset:asset:/{command['asset_id']}{pose} layer:{command['layer']}{at}{fit} opacity:{opacity:g} interrupt:replace_from_current {stable}"]
     if kind == "move":
         return [
             f"{prefix}move id:{command['character_id']} x:{command['x']} y:{command['y']} "
-            f"duration:{command['duration_ms']} {stable}"
+            f"duration:{command['duration_ms']} interrupt:replace_from_current {stable}"
         ]
     if kind == "hide":
-        return [f"{prefix}hide id:{command['character_id']} {stable}"]
+        return [f"{prefix}hide id:{command['character_id']} interrupt:replace_from_current {stable}"]
     if kind == "background":
-        return [f"{prefix}background asset:asset:/{command['asset_id']} layer:{command.get('layer', 'bg')} {stable}"]
+        return [f"{prefix}background asset:asset:/{command['asset_id']} layer:{command.get('layer', 'bg')} interrupt:replace_from_current {stable}"]
     if kind in {"bgm", "se", "voice"}:
         loop = f" loop:{str(command['loop']).lower()}" if isinstance(command.get("loop"), bool) else ""
         fade = f" fade:{command['fade_ms']}" if isinstance(command.get("fade_ms"), int) else ""
@@ -604,7 +604,7 @@ def _render_command(command: dict, strings: dict[str, str]) -> list[str]:
     if kind == "movie":
         loop = str(bool(command.get("loop", False))).lower()
         end = command.get("end", "wait")
-        return [f"{prefix}movie layer:{command.get('layer', 'video')} asset:asset:/{command['asset_id']} loop:{loop} end:{end} {stable}"]
+        return [f"{prefix}movie layer:{command.get('layer', 'video')} asset:asset:/{command['asset_id']} loop:{loop} end:{end} interrupt:replace_from_current {stable}"]
     if kind == "preload":
         return [f"{prefix}preload asset:asset:/{command['asset_id']} {stable}"]
     if kind == "stage":
@@ -618,7 +618,7 @@ def _render_command(command: dict, strings: dict[str, str]) -> list[str]:
             f"blend:{command.get('blend', 'normal')} clip:{command.get('clip', 'stage')} {stable}"
         ]
     if kind == "clear_layer":
-        return [f"{prefix}clear_layer layer:{command['layer']} duration:{command.get('duration_ms', 0)} {stable}"]
+        return [f"{prefix}clear_layer layer:{command['layer']} duration:{command.get('duration_ms', 0)} interrupt:replace_from_current {stable}"]
     if kind == "layer_visibility":
         return [f"{prefix}layer_visibility layer:{command['layer']} visible:{str(command['visible']).lower()} {stable}"]
     if kind == "shade":

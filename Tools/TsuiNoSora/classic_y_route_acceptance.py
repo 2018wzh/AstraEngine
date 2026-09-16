@@ -44,7 +44,8 @@ def _await_event(key: str, value: object, timeout_ticks: int = 3_600) -> dict:
 
 
 def _lower_transition_events(
-    transitions: list[dict], stable_wait_hashes: set[str], auto_fence_hashes: set[str]
+    transitions: list[dict], stable_wait_hashes: set[str], auto_fence_hashes: set[str],
+    text_wait_hashes: set[str],
 ) -> list[dict]:
     raw: list[dict] = []
     for transition in transitions:
@@ -161,6 +162,10 @@ def _lower_transition_events(
             filtered.append({"type": "advance_ticks", "count": 120})
         elif value_hash in stable_wait_hashes:
             filtered.append(event)
+            if value_hash in text_wait_hashes:
+                # A dialogue wait starts before typewriter reveal finishes.
+                # Wait for the visible text, otherwise Enter only reveals it.
+                filtered.append(_await_event("vn.text_reveal_complete", True, 14_400))
     return filtered
 
 
@@ -200,12 +205,13 @@ def build_sequence(story: dict) -> tuple[Sequence, dict]:
         if command.get("kind") == "wait"
         and command.get("fence") in {"tsui.audio.bgm.end", "tsui.audio.se.end"}
     }
-    stable_wait_hashes.update(
+    text_wait_hashes = {
         json_hash(command["command_id"])
         for state in stories[0]["states"]
         for command in state["scenes"][0]["commands"]
         if command.get("kind") == "text"
-    )
+    }
+    stable_wait_hashes.update(text_wait_hashes)
     trace = trace_route_choice_witness(
         stories[0]["states"], route.get("choice_sequence"), BOUNDARY_MOVIE
     )
@@ -226,7 +232,7 @@ def build_sequence(story: dict) -> tuple[Sequence, dict]:
     sequence.await_value("vn.reading_mode", "fast_forward")
     sequence.key("Escape")
     for event in _lower_transition_events(
-        trace["transitions"], stable_wait_hashes, auto_fence_hashes
+        trace["transitions"], stable_wait_hashes, auto_fence_hashes, text_wait_hashes
     ):
         _append_event(sequence, event)
     sequence.await_value("vn.pending_wait_command", trace["boundary_wait_command"], 18_000)

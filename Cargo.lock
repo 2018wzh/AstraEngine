@@ -565,6 +565,7 @@ dependencies = [
  "ctrlc",
  "hex",
  "image",
+ "object",
  "postcard",
  "schemars",
  "serde",
