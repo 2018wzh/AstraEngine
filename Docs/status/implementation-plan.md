@@ -1,5 +1,9 @@
 # 全产品重构实施状态
 
+Minori 的第 10 条失败指令已确认为 `stage`：前景使用冒号分隔的资源序列，stand 的第二项使用逗号分隔参数；当前解析器把前者当作单一文件名、后者当作单个整数。Musica 来源的 runtime 已有这两类解析，但对应 provider 仍须核对是否消费完整状态，不能直接以忽略附加参数的方式接入。失败前的第 240 帧已查看，物理确认键确实推进了对白。
+
+FVP 同一存档再次复现 `audio play` 容量失败。此次日志显示 BGM/SE/总上限分别为 2/16/24，失败时仍处于 Playing 的 BGM 为 1、SE 为 0；这些计数不包含暂停或淡出中的 voice。RFVP 的默认 SoftAudioConfig 与原生 BGM 槽位数存在差异，但尚不能仅凭 Playing 数确定实际占用，不据此扩大容量或标记修复。
+
 Minori 真实 GPU 连续输入已定位为 tick 421、指令序号 10、字节位置 319 的六操作数指令失败；会话随后正常关闭。失败前指定帧截图成功写出，尚未到达后续截图帧。诊断桥现仅放行枚举通道类别和严格格式的脚本摘要，并继续拒绝任意 Debug、路径及非摘要字符串；3 项日志桥回归和 API/Minori 全目标 Clippy 通过。实际指令语义与 FVP 容量根因仍在排查。
 
 Classic route.coverage.001 与 .002 已完成原生 VN GPU Headless 的完整输入序列，分别消费 46,997 与 47,793 条输入并到达 tsui.ending；运行校验通过且无诊断，使用同一 Release build、package 和 DX12 独显。终点截图已查看，均为黑场；这只能确认当前转换包的路线推进与终止，不能证明片尾影片或全程视听正确，profile 的 video_decode 仍为 disabled。Classic .003 与 .004 已继续运行，Modern、37 路线整体和真实 Player 验收保持开放。
