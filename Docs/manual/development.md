@@ -89,4 +89,6 @@ python Tools/TsuiNoSora/classic_route_inputs.py \
 
 将输出目录作为 `headless_route_matrix.py --automation-root`，并显式传入同一 Classic package、GPU profile、build identity 和独立产物目录。矩阵的 `--timeout-seconds` 是每条路线的实际运行时间上限，需按完整流程设置；输入生成成功不计入 37 路线验收。
 
+矩阵仅接受显式 `wgpu_offscreen` 配置，启动前检查每条输入的消息数和 tick 预算；实际运行传入 `--gpu`，共用单路线的原生硬件 adapter、构建、包与检查点校验。旧版 `--resume-report` 已移除，不再仅凭汇总文件跳过路线。输入预算不足或 GPU 校验失败均不得计作通过。
+
 对白进入 pending wait 时，文字可能还在逐字显示。第一次推进输入会补全文字，后续输入才推进剧情。Headless 可通过只读观察项 `vn.text_reveal_complete` 等待当前文字显示完成，再发送物理按键；它来自真实演出状态，不修改剧情游标或显示进度。没有正在显示的文字时为 true。Classic 路线脚本已按此区分对白等待与普通输入等待，不能仅凭 `vn.pending_wait_command` 就假设一次 Enter 足以推进。

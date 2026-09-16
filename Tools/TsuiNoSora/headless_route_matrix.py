@@ -12,10 +12,12 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 
+from classic_visual_acceptance import InputBudgetError, validate_input_budget
+from headless_gpu_acceptance import GPU_PROVIDER, GpuAcceptanceError, validate_gpu_artifacts
+
 
 SCHEMA = "tsuinosora.headless_route_matrix_report.v1"
 INPUT_SCHEMA = "astra.user_input_sequence.v1"
-RUN_REPORT_SCHEMA = "astra.headless_run_report.v1"
 
 
 class RouteMatrixError(RuntimeError):
@@ -63,7 +65,7 @@ def _load_json(path: Path) -> dict:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
-        raise RouteMatrixError(f"JSON input is unreadable: {path.name}: {error}") from error
+        raise RouteMatrixError(f"JSON input is unreadable ({type(error).__name__})") from error
     if not isinstance(value, dict):
         raise RouteMatrixError(f"JSON input must be an object: {path.name}")
     return value
@@ -73,7 +75,7 @@ def _load_jsonl(path: Path) -> list[dict]:
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except OSError as error:
-        raise RouteMatrixError(f"input sequence is unreadable: {path.name}: {error}") from error
+        raise RouteMatrixError("input sequence is unreadable") from error
     rows = []
     for line_number, line in enumerate(lines, start=1):
         if not line.strip():
@@ -176,6 +178,7 @@ def _run_route(
     command = [
         str(binary),
         "run",
+        "--gpu",
         "--profile",
         str(profile),
         "--package",
@@ -189,7 +192,7 @@ def _run_route(
     ]
     try:
         # Route traces can be hundreds of megabytes. Stream them directly to
-        # private evidence files so parallel coverage never buffers commercial
+        # private log files so parallel coverage never buffers commercial
         # playthrough traces in the matrix coordinator's memory.
         with stdout_path.open("wb") as stdout, stderr_path.open("wb") as stderr:
             completed = subprocess.run(
@@ -205,13 +208,16 @@ def _run_route(
     if completed.returncode != 0:
         raise RouteMatrixError(f"{contract.route_id} exited with code {completed.returncode}")
 
-    report_path = route_root / "run-report.json"
-    report = _load_json(report_path)
-    if report.get("schema") != RUN_REPORT_SCHEMA or report.get("status") != "passed":
-        raise RouteMatrixError(f"{contract.route_id} did not produce a passing Headless report")
+    profile_value = _load_json(profile)
+    report, manifest = validate_gpu_artifacts(
+        route_root,
+        build_fingerprint=profile_value["build_fingerprint"],
+        package_hash=profile_value["package_hash"],
+        completed_sequence=contract.message_count,
+        checkpoint_ids=[f"checkpoint.{contract.route_id}"],
+    )
     if report.get("session_id") != f"tsui.{contract.route_id}":
         raise RouteMatrixError(f"{contract.route_id} report session identity does not match")
-    profile_value = _load_json(profile)
     if (
         report.get("build_fingerprint") != profile_value.get("build_fingerprint")
         or report.get("package_hash") != profile_value.get("package_hash")
@@ -244,57 +250,15 @@ def _run_route(
         "input_sequence_hash": report["input_sequence_hash"],
         "manifest_hash": report["manifest_hash"],
         "completed_sequence": report["completed_sequence"],
-        "frame_count": report["frame_count"],
+        "submitted_frame_count": report["submitted_frame_count"],
+        "rasterized_frame_count": report["rasterized_frame_count"],
+        "renderer_identity_hash": manifest["renderer_identity_hash"],
         "audio_frame_count": report["audio_frame_count"],
         "duration_ns": report["duration_ns"],
         "checkpoint_id": checkpoint["id"],
         "checkpoint_observation_hash": checkpoint["observation_hash"],
         "status": "passed",
     }
-
-
-def _load_resumed_routes(
-    path: Path | None,
-    contracts: list[RouteContract],
-    *,
-    build_fingerprint: str,
-    package_hash: str,
-) -> list[dict]:
-    if path is None:
-        return []
-    report = _load_json(path.resolve(strict=True))
-    if report.get("schema") != SCHEMA:
-        raise RouteMatrixError("resume report has an invalid schema")
-    if report.get("build_fingerprint") != build_fingerprint or report.get("package_hash") != package_hash:
-        raise RouteMatrixError("resume report identity does not match this matrix run")
-    by_id = {contract.route_id: contract for contract in contracts}
-    resumed = report.get("routes")
-    if not isinstance(resumed, list):
-        raise RouteMatrixError("resume report has an invalid route set")
-    validated = []
-    seen = set()
-    for record in resumed:
-        route_id = record.get("route_id") if isinstance(record, dict) else None
-        if route_id in seen or route_id not in by_id or record.get("status") != "passed":
-            raise RouteMatrixError("resume report contains an invalid passed route")
-        contract = by_id[route_id]
-        expected = {
-            "terminal_id": contract.terminal_id,
-            "terminal_route_node_id": contract.terminal_route_node_id,
-            "choice_count": len(contract.choice_ids),
-            "choice_selection_count": len(contract.choice_sequence),
-            "choice_signature_hash": _json_hash(list(contract.choice_sequence)),
-            "session_id": f"tsui.{route_id}",
-            "build_fingerprint": build_fingerprint,
-            "package_hash": package_hash,
-            "input_sequence_hash": contract.input_sequence_hash,
-            "completed_sequence": contract.message_count,
-        }
-        if any(record.get(key) != value for key, value in expected.items()):
-            raise RouteMatrixError(f"resume evidence identity mismatch for {route_id}")
-        seen.add(route_id)
-        validated.append(record)
-    return validated
 
 
 def run_matrix(args: argparse.Namespace) -> dict:
@@ -305,6 +269,8 @@ def run_matrix(args: argparse.Namespace) -> dict:
     automation_root = args.automation_root.resolve(strict=True)
     native_story_ir = _load_json(args.native_story_ir.resolve(strict=True))
     profile = _load_json(profile_path)
+    if profile.get("providers", {}).get("renderer") != GPU_PROVIDER:
+        raise RouteMatrixError("route matrix requires an explicit hardware GPU renderer")
     identity = _load_json(identity_path)
     if identity.get("schema") != "astra.build_identity.v1":
         raise RouteMatrixError("build identity has an invalid schema")
@@ -324,17 +290,11 @@ def run_matrix(args: argparse.Namespace) -> dict:
         if not path.is_file():
             raise RouteMatrixError(f"missing generated input sequence for {route_id}")
         contracts.append(_validate_route_input(path, route))
+        validate_input_budget(profile, _load_jsonl(path))
     if len({contract.route_id for contract in contracts}) != len(contracts):
         raise RouteMatrixError("native story IR contains duplicate route ids")
 
-    passed = _load_resumed_routes(
-        args.resume_report,
-        contracts,
-        build_fingerprint=profile["build_fingerprint"],
-        package_hash=profile["package_hash"],
-    )
-    resumed_ids = {item["route_id"] for item in passed}
-    pending_contracts = [contract for contract in contracts if contract.route_id not in resumed_ids]
+    passed = []
 
     artifact_root = args.artifact_root.resolve()
     if artifact_root.exists():
@@ -353,7 +313,7 @@ def run_matrix(args: argparse.Namespace) -> dict:
                 artifact_root=artifact_root,
                 timeout_seconds=args.timeout_seconds,
             ): contract
-            for contract in pending_contracts
+            for contract in contracts
         }
         for future in as_completed(futures):
             contract = futures[future]
@@ -365,7 +325,7 @@ def run_matrix(args: argparse.Namespace) -> dict:
                     {
                         "code": "TSUI_HEADLESS_ROUTE_FAILED",
                         "route_id": contract.route_id,
-                        "message": str(error),
+                        "message": str(error) if isinstance(error, (RouteMatrixError, GpuAcceptanceError)) else type(error).__name__,
                     }
                 )
                 print(f"BLOCKED {contract.route_id}", file=sys.stderr, flush=True)
@@ -405,7 +365,6 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--native-story-ir", type=Path, required=True)
     parser.add_argument("--artifact-root", type=Path, required=True)
     parser.add_argument("--report", type=Path, required=True)
-    parser.add_argument("--resume-report", type=Path)
     parser.add_argument("--jobs", type=int, default=4)
     parser.add_argument("--timeout-seconds", type=int, default=1800)
     return parser
@@ -419,8 +378,9 @@ def main() -> int:
         raise SystemExit("--timeout-seconds must be positive")
     try:
         report = run_matrix(args)
-    except (OSError, RouteMatrixError) as error:
-        print(f"headless route matrix blocked: {error}", file=sys.stderr)
+    except (OSError, RouteMatrixError, InputBudgetError) as error:
+        detail = type(error).__name__ if isinstance(error, OSError) else str(error)
+        print(f"headless route matrix blocked: {detail}", file=sys.stderr)
         return 1
     print(json.dumps(report, ensure_ascii=False, separators=(",", ":")))
     return 0 if report["status"] == "pass" else 1

@@ -6,7 +6,6 @@ from pathlib import Path
 from headless_route_matrix import (
     RouteMatrixError,
     _json_hash,
-    _load_resumed_routes,
     _validate_route_input,
 )
 
@@ -50,41 +49,6 @@ class HeadlessRouteMatrixTests(unittest.TestCase):
             path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
             contract = _validate_route_input(path, route)
             self.assertEqual(contract.message_count, 4)
-
-            resume = {
-                "schema": "tsuinosora.headless_route_matrix_report.v1",
-                "build_fingerprint": "sha256:" + "1" * 64,
-                "package_hash": "sha256:" + "2" * 64,
-                "routes": [
-                    {
-                        "route_id": contract.route_id,
-                        "terminal_id": contract.terminal_id,
-                        "terminal_route_node_id": contract.terminal_route_node_id,
-                        "choice_count": 1,
-                        "choice_selection_count": 1,
-                        "choice_signature_hash": _json_hash(["choice.safe.1"]),
-                        "session_id": "tsui.route.coverage.001",
-                        "build_fingerprint": "sha256:" + "1" * 64,
-                        "package_hash": "sha256:" + "2" * 64,
-                        "input_sequence_hash": contract.input_sequence_hash,
-                        "completed_sequence": 4,
-                        "status": "passed",
-                    }
-                ],
-            }
-            resume_path = Path(temp) / "resume.json"
-            resume_path.write_text(json.dumps(resume), encoding="utf-8")
-            self.assertEqual(
-                len(
-                    _load_resumed_routes(
-                        resume_path,
-                        [contract],
-                        build_fingerprint="sha256:" + "1" * 64,
-                        package_hash="sha256:" + "2" * 64,
-                    )
-                ),
-                1,
-            )
 
     def test_route_input_blocks_missing_terminal_observation(self):
         route = {
