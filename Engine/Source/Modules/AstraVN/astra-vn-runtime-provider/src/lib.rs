@@ -4,6 +4,9 @@
 //! `provider.rs`（NativeVnRuntimeProvider impl）`command.rs`（command 转换）
 //! `ffi.rs`（FfiProviderInstance 1200+ 行）；本轮仅库内Headless/指纹/Hash优先，拆分延至下次 PR 避免与 `973191ede` 合并冲突。
 
+mod native_step;
+pub use native_step::{NativeVnStepCommand, NativeVnStepInput};
+
 #[cfg(feature = "ffi")]
 use std::sync::OnceLock;
 use std::{
@@ -620,44 +623,19 @@ impl NativeVnRuntimeProvider {
     }
 
     pub fn step(&mut self, input: RuntimeStepInput) -> Result<RuntimeStepOutput, CoreVnError> {
-        tracing::trace!(
-            event = "vn.provider.session.step",
-            fixed_step = input.fixed_step,
-            "AstraVN runtime session step started"
-        );
-        let command = match input.action.as_str() {
-            "command" => {
-                return Err(CoreVnError::diagnostic(
-                    "ASTRA_NATIVE_VN_COMMAND_DISPATCH",
-                    "generic command input is not part of the typed runtime ABI",
-                ));
-            }
-            "launch_default" => {
-                let session = self.session(&input.session_id)?;
-                let state = materialize_session_state(session)?;
-                CoreVnRuntime::from_shared_state_indexed(
-                    Arc::clone(&session.compiled),
-                    Arc::clone(&session.runtime_index),
-                    state,
-                )?
-                .default_launch_command()
-                .ok_or_else(|| {
-                    CoreVnError::diagnostic(
-                        "ASTRA_NATIVE_VN_LAUNCH_MISSING",
-                        "compiled story has no launchable state",
-                    )
-                })?
-            }
-            _ => runtime_command_from_input(&input)?,
+        let command = if input.action == "launch_default" {
+            NativeVnStepCommand::LaunchDefault
+        } else {
+            NativeVnStepCommand::Execute(runtime_command_from_input(&input)?)
         };
-        self.apply_command_at_step(
-            input.session_id,
+        self.step_native(NativeVnStepInput {
+            session_id: input.session_id,
+            fixed_step: input.fixed_step,
+            delta_ns: input.delta_ns,
+            session_seed: input.session_seed,
+            mode: input.mode,
             command,
-            input.fixed_step,
-            input.delta_ns,
-            input.session_seed,
-            input.mode,
-        )
+        })
     }
 
     fn apply_command_at_step(

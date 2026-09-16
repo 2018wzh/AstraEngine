@@ -30,7 +30,7 @@ use astra_plugin_abi::{
     GameRuntimeSessionId, RuntimeExecutorConfig, RuntimeLiveAudioBus, RuntimeLiveAudioSync,
     RuntimeOpenRequest, RuntimePrepareRequest, RuntimeProbeRequest, RuntimeRestoreRequest,
     RuntimeSaveRequest, RuntimeSaveSections, RuntimeSectionCodec, RuntimeSectionPayload,
-    RuntimeStepInput, RuntimeStepMode, RuntimeTickIntegrityMode, ValidatedRuntimeProviderSelection,
+    RuntimeStepMode, RuntimeTickIntegrityMode, ValidatedRuntimeProviderSelection,
     NATIVE_VN_PROVIDER_ID,
 };
 use astra_ui_core::{
@@ -49,10 +49,10 @@ use astra_ui_yakui::{
 use astra_vn_core::SystemActionEffect;
 use astra_vn_core::{
     CompiledCommand, CompiledStory, MovieLoopMode, PresentationCommand, ReadingMode,
-    SaveCompletionPolicy, SkipMode, StageBlendMode, StageClipPolicy, StageCommand, StageFitMode,
-    StageLayerKind, State, SystemPageKind, SystemUiProfilePolicy, SystemUnlockKind,
-    TimelineCommand, VnAudioBus, VnAudioControlAction, VnPlayerCommand, VnRunConfig,
-    VnRuntimeState, VnWaitKind, VN_RUNTIME_STATE_SCHEMA,
+    SaveCompletionPolicy, StageBlendMode, StageClipPolicy, StageCommand, StageFitMode,
+    StageLayerKind, State, SystemPageKind, SystemUiProfilePolicy, TimelineCommand, VnAudioBus,
+    VnAudioControlAction, VnPlayerCommand, VnRunConfig, VnRuntimeState, VnWaitKind,
+    VN_RUNTIME_STATE_SCHEMA,
 };
 use astra_vn_package::{
     decode_compiled_project, load_localization as load_package_localization,
@@ -62,7 +62,7 @@ use astra_vn_package::{
     VnSystemUiProfileManifest,
 };
 use astra_vn_policy::LuauUiControllerHost;
-use astra_vn_runtime_provider::NativeVnRuntimeProvider;
+use astra_vn_runtime_provider::{NativeVnRuntimeProvider, NativeVnStepCommand, NativeVnStepInput};
 use astra_vn_ui::{
     resolve_binding, SaveSlotViewModel, VnUiAction, VnUiBindingError, VnUiBindingRequest,
     VnUiControllerEffect, VnUiControllerUpdate, VnUiModelContext, VnUiSessionState,
@@ -1872,7 +1872,7 @@ impl NativeVnHostCommandSource {
         // same image from racing through both the synchronous upload path and
         // the prefetch cache after its CPU RGBA has already been released.
         let prewarmed_images = self.prewarm_default_gameplay_story_images()?;
-        let mut batch = self.step("launch_default", None, None, None)?;
+        let mut batch = self.step(NativeVnStepCommand::LaunchDefault)?;
         self.queue_default_gameplay_story_audio_preloads()?;
         if !prewarmed_images.is_empty() {
             let [PlayerHostCommand::PresentScene { commands, .. }] = batch.commands.as_mut_slice()
@@ -3700,8 +3700,7 @@ impl NativeVnHostCommandSource {
                     self.stage_director
                         .acknowledge_story_advance()
                         .map_err(stage_director_error)?;
-                    let (action, argument, auxiliary, flag) = runtime_step_fields(&command);
-                    return match self.step(action, argument, auxiliary, flag) {
+                    return match self.step(NativeVnStepCommand::Execute(command)) {
                         Ok(batch) => Ok(batch),
                         Err(error) => {
                             self.stage_director = previous;
@@ -3712,8 +3711,7 @@ impl NativeVnHostCommandSource {
                 TextAdvanceDisposition::NoActiveText => {}
             }
         }
-        let (action, argument, auxiliary, flag) = runtime_step_fields(&command);
-        self.step(action, argument, auxiliary, flag)
+        self.step(NativeVnStepCommand::Execute(command))
     }
 
     fn ensure_text_region(&mut self) -> Result<(), NativeVnHostError> {
@@ -3779,21 +3777,7 @@ impl NativeVnHostCommandSource {
 
     fn step(
         &mut self,
-        action: &str,
-        argument: Option<String>,
-        auxiliary: Option<String>,
-        flag: Option<bool>,
-    ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
-        self.step_with_presentation(action, argument, auxiliary, flag, true)
-    }
-
-    fn step_with_presentation(
-        &mut self,
-        action: &str,
-        argument: Option<String>,
-        auxiliary: Option<String>,
-        flag: Option<bool>,
-        present: bool,
+        command: NativeVnStepCommand,
     ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
         self.ensure_presentation_active()?;
         if self.shutdown_started {
@@ -3809,17 +3793,13 @@ impl NativeVnHostCommandSource {
             .ok_or(NativeVnHostError::SequenceOverflow)?;
         let runtime_step_started =
             performance_phase_started(self.ui_host_performance_sampling_enabled);
-        let mut output = self.host.step(RuntimeStepInput {
+        let mut output = self.host.step(NativeVnStepInput {
             session_id: self.session_id.clone(),
             fixed_step,
             delta_ns: 16_666_667,
             session_seed: self.session_seed,
             mode: self.next_step_mode,
-            action: action.to_string(),
-            argument,
-            auxiliary,
-            flag,
-            ..RuntimeStepInput::default()
+            command,
         })?;
         let runtime_host_step_ns = performance_phase_duration(runtime_step_started)?;
         if let Some(sample) = self.last_ui_host_performance_sample.as_mut() {
@@ -3998,10 +3978,6 @@ impl NativeVnHostCommandSource {
             sample.runtime_output_decode_ns = sample
                 .runtime_output_decode_ns
                 .saturating_add(runtime_output_decode_ns);
-        }
-        if !present {
-            return PlayerHostCommandBatch::new(Vec::new())
-                .map_err(|error| NativeVnHostError::Input(error.to_string()));
         }
         let render_started = performance_phase_started(self.ui_host_performance_sampling_enabled);
         let batch = self.render(&ordered_outputs, presentation_count)?;
@@ -4684,123 +4660,6 @@ impl NativeVnHostCommandSource {
                 "ASTRA_PLAYER_ASSET_MISSING: cooked texture {asset_id} is not mounted"
             ))
         })
-    }
-}
-
-fn runtime_step_fields(
-    command: &VnPlayerCommand,
-) -> (&'static str, Option<String>, Option<String>, Option<bool>) {
-    match command {
-        VnPlayerCommand::Launch { story_id, state_id } => (
-            "launch",
-            Some(story_id.clone()),
-            Some(state_id.clone()),
-            None,
-        ),
-        VnPlayerCommand::Advance => ("advance", None, None, None),
-        VnPlayerCommand::Choose { option_id } => ("choose", Some(option_id.clone()), None, None),
-        VnPlayerCommand::OpenSystem { page } => (
-            "open_system",
-            Some(runtime_page_name(*page).to_string()),
-            None,
-            None,
-        ),
-        VnPlayerCommand::SwitchSystemPage { page } => (
-            "switch_system_page",
-            Some(runtime_page_name(*page).to_string()),
-            None,
-            None,
-        ),
-        VnPlayerCommand::ReturnSystem => ("system_return", None, None, None),
-        VnPlayerCommand::ReplayVoice { voice } => ("replay_voice", Some(voice.clone()), None, None),
-        VnPlayerCommand::SetAuto { enabled } => ("set_auto", None, None, Some(*enabled)),
-        VnPlayerCommand::SetSkip { mode } => (
-            "set_skip",
-            Some(runtime_skip_mode_name(*mode).to_string()),
-            None,
-            None,
-        ),
-        VnPlayerCommand::SetReadingMode { mode } => (
-            "set_reading_mode",
-            Some(runtime_reading_mode_name(*mode).to_string()),
-            None,
-            None,
-        ),
-        VnPlayerCommand::SetAudioEnabled { enabled } => {
-            ("set_audio_enabled", None, None, Some(*enabled))
-        }
-        VnPlayerCommand::InvokeSystemAction { action_id } => {
-            ("invoke_system_action", Some(action_id.clone()), None, None)
-        }
-        VnPlayerCommand::SetConfig { key, value } => {
-            ("set_config", Some(key.clone()), Some(value.clone()), None)
-        }
-        VnPlayerCommand::StartReplay { replay_id } => {
-            ("start_replay", Some(replay_id.clone()), None, None)
-        }
-        VnPlayerCommand::PreviewGallery { item_id } => {
-            ("preview_gallery", Some(item_id.clone()), None, None)
-        }
-        VnPlayerCommand::JumpRoute { node_id } => ("jump_route", Some(node_id.clone()), None, None),
-        VnPlayerCommand::JumpBacklog { command_id } => {
-            ("jump_backlog", Some(command_id.clone()), None, None)
-        }
-        VnPlayerCommand::SubmitText { input_id, value } => (
-            "submit_text",
-            Some(input_id.clone()),
-            Some(value.clone()),
-            None,
-        ),
-        VnPlayerCommand::Unlock { kind, id } => (
-            "unlock",
-            Some(runtime_unlock_kind_name(*kind).to_string()),
-            Some(id.clone()),
-            None,
-        ),
-        VnPlayerCommand::CompleteWait { fence } => {
-            ("complete_wait", Some(fence.clone()), None, None)
-        }
-    }
-}
-
-fn runtime_page_name(page: SystemPageKind) -> &'static str {
-    match page {
-        SystemPageKind::Title => "title",
-        SystemPageKind::QuickPanel => "quick_panel",
-        SystemPageKind::Save => "save",
-        SystemPageKind::Load => "load",
-        SystemPageKind::Config => "config",
-        SystemPageKind::Gallery => "gallery",
-        SystemPageKind::Replay => "replay",
-        SystemPageKind::VoiceReplay => "voice_replay",
-        SystemPageKind::RouteChart => "route_chart",
-        SystemPageKind::Backlog => "backlog",
-        SystemPageKind::LocalizationPreview => "localization_preview",
-        SystemPageKind::Custom => "custom",
-        SystemPageKind::Unknown => "unknown",
-    }
-}
-
-fn runtime_skip_mode_name(mode: SkipMode) -> &'static str {
-    match mode {
-        SkipMode::None => "none",
-        SkipMode::Read => "read",
-        SkipMode::All => "all",
-    }
-}
-
-fn runtime_reading_mode_name(mode: ReadingMode) -> &'static str {
-    match mode {
-        ReadingMode::Hidden => "hidden",
-        ReadingMode::Manual => "manual",
-        ReadingMode::FastForward => "fast_forward",
-    }
-}
-
-fn runtime_unlock_kind_name(kind: SystemUnlockKind) -> &'static str {
-    match kind {
-        SystemUnlockKind::Gallery => "gallery",
-        SystemUnlockKind::Replay => "replay",
     }
 }
 

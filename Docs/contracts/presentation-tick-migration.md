@@ -99,3 +99,7 @@ NativeVnProductAudioHost 持有唯一 pending open 和 pending close future。�
 Player 的 NativeVN 主路径直接持有 NativeVnRuntimeProvider，移除 ProductRuntimeHost 的同步/异步桥、session mailbox、通用 worker 调度与外层 mutex。私有 NativeVnRuntimeHost 只负责已选择 package binding、单 session 生命周期、tick/seed/mode、输出数量和 save section 边界；实际玩法仍由同一 NativeVN RuntimeWorld 执行。step/save 执行失败后拒绝继续，经过完整验证的 restore 可重建会话；输入 section 验证失败不提交恢复。关闭与销毁不再伪造插件 instance lifecycle。
 
 现有 package/save 和 RuntimeStepInput 数据契约暂不改版；旧通用宿主仍供尚未迁移的非 Player 消费者使用，但 Player 不保留可切换的兼容分支。后续继续移除字符串 command、通用 product descriptor 和内部动态 ABI。这一步不把 NativeVN 全部 typed 重构标为完成。
+
+### NativeVN typed 命令入口
+
+NativeVnStepInput 将 tick/seed/mode 与 NativeVnStepCommand 分开表达。Player 直接传递已有 VnPlayerCommand；LaunchDefault 是独立变体，由权威 session 查找默认入口。删除 Player 的 runtime_step_fields 和 page/skip/reading/unlock 字符串映射，不再构造 RuntimeStepInput 的 action/argument/auxiliary/flag。NativeVnRuntimeProvider::step_native 是生产入口，旧 step 只在尚未迁移的 ABI 消费者边界解析字符串后调用同一实现。类型均为进程内数据，不新增序列化或存档字段；输出和 package descriptor 的后续迁移仍按总体计划执行。

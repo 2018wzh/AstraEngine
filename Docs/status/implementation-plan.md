@@ -72,3 +72,5 @@
 - NativeVnProductAudioHost 持有唯一 pending open/close future，取消后可继续同一响应；shutdown 对未交付端点只接收并关闭，不启动 mixer。恢复与退出共用可中断后继续的关闭路径，明确关闭失败保留重试所有权。端点 lifecycle 与 snapshot 拆成模块。两项回归通过，覆盖 TaskScope 取消、shutdown 中断、lane 释放且未启动 worker、格式错误与关闭重试；Engine 全量 fmt/clippy/build/test 于 2026-09-15 重新完整执行并通过：717 项通过、0 失败、9 项按原条件未执行。直接平台客户端的其他资源取消和真实设备退出/恢复仍未验收。
 
 - NativeVN Player 改为私有 NativeVnRuntimeHost 直接持有具体 NativeVnRuntimeProvider，移除生产调用链中的 ProductRuntimeHost、同步/异步桥、mailbox、通用 worker 与外层 mutex。复用共享输出/section 校验，保留 binding、单 session、step/seed/mode 和失败状态；合法恢复可恢复执行，损坏恢复不覆盖现态。35 项既有单元测试和 2 项 binding/生命周期/恢复/预算回归通过；Engine 全量 fmt/clippy/build/test 通过：719 项通过、0 失败、9 项按原条件未执行。通用 RuntimeStepInput、package descriptor、字符串命令与其他消费者的动态 ABI 尚未删除，未将完整 typed 迁移或性能验收标为完成。
+
+- NativeVN Player 直接传递 NativeVnStepInput/NativeVnStepCommand，删除 VnPlayerCommand 到 action/argument/auxiliary/flag 的往返字符串转换及四类枚举映射；默认启动由 session 解析，旧 ABI 边界暂时转换到同一实现。显式 Launch 原先映射为 provider 不接受的字符串，现已修复。3 项针对性回归通过，覆盖指定剧情启动、布尔值/枚举、tick 失败和恢复；Engine 全量 fmt/clippy/build/test 通过：720 项通过、0 失败、9 项按原条件未执行。输出、package descriptor 和剩余 ABI 消费者尚未迁移。

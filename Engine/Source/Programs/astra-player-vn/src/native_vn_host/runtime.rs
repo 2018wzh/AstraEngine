@@ -129,7 +129,7 @@ impl NativeVnRuntimeHost {
 
     pub(super) fn step(
         &mut self,
-        input: RuntimeStepInput,
+        input: NativeVnStepInput,
     ) -> Result<RuntimeStepOutput, RuntimeHostError> {
         self.validate_session(&input.session_id)?;
         self.require_healthy()?;
@@ -149,7 +149,7 @@ impl NativeVnRuntimeHost {
         self.failed = true;
         let result = self
             .provider
-            .step(input)
+            .step_native(input)
             .map_err(|error| RuntimeHostError::new("ASTRA_RUNTIME_HOST_STEP", error.to_string()))
             .and_then(|output| {
                 if Some(&output.session_id) != self.session.as_ref() {
@@ -268,15 +268,14 @@ mod tests {
         .unwrap()
     }
 
-    fn step(host: &NativeVnRuntimeHost, n: u64, action: &str) -> RuntimeStepInput {
-        RuntimeStepInput {
+    fn step(host: &NativeVnRuntimeHost, n: u64, command: NativeVnStepCommand) -> NativeVnStepInput {
+        NativeVnStepInput {
             session_id: host.session.clone().unwrap(),
             fixed_step: n,
             delta_ns: 16_666_667,
             session_seed: host.seed,
             mode: host.next_mode,
-            action: action.into(),
-            ..RuntimeStepInput::default()
+            command,
         }
     }
 
@@ -289,6 +288,50 @@ mod tests {
     }
 
     #[test]
+    fn player_preserves_explicit_launch_and_typed_system_values() {
+        let mut source = source();
+        source
+            .command(VnPlayerCommand::Launch {
+                story_id: "story.main".into(),
+                state_id: "state.start".into(),
+            })
+            .unwrap();
+        assert_eq!(
+            source
+                .runtime_state
+                .as_ref()
+                .unwrap()
+                .cursor
+                .as_ref()
+                .unwrap()
+                .state_id,
+            "state.start"
+        );
+        for enabled in [false, true] {
+            source
+                .command(VnPlayerCommand::SetAudioEnabled { enabled })
+                .unwrap();
+            source
+                .command(VnPlayerCommand::SetAuto { enabled })
+                .unwrap();
+            let state = source.runtime_state.as_ref().unwrap();
+            assert_eq!(state.system.audio_enabled, enabled);
+            assert_eq!(state.system.auto_enabled, enabled);
+        }
+        source
+            .command(VnPlayerCommand::SetSkip {
+                mode: astra_vn_core::SkipMode::Read,
+            })
+            .unwrap();
+        assert_eq!(
+            source.runtime_state.as_ref().unwrap().system.skip_mode,
+            astra_vn_core::SkipMode::Read
+        );
+        source.release_resources().unwrap();
+        source.shutdown().unwrap();
+    }
+
+    #[test]
     fn owned_runtime_enforces_binding_tick_failure_and_restore_continuation() {
         let mut source = source();
         let host = &mut source.host;
@@ -296,10 +339,15 @@ mod tests {
             .validate_request("foreign", host.binding.profile())
             .is_err());
         assert!(host.destroy().is_err());
-        host.step(step(host, 1, "launch_default")).unwrap();
+        host.step(step(host, 1, NativeVnStepCommand::LaunchDefault))
+            .unwrap();
         let saved = save(host);
         assert!(host
-            .step(step(host, 1, "advance"))
+            .step(step(
+                host,
+                1,
+                NativeVnStepCommand::Execute(VnPlayerCommand::Advance)
+            ))
             .unwrap_err()
             .to_string()
             .contains("STEP_ORDER"));
@@ -316,7 +364,12 @@ mod tests {
         .unwrap();
         assert!(!host.failed);
         assert_eq!(host.next_mode, RuntimeStepMode::RestoreContinuation);
-        host.step(step(host, 2, "advance")).unwrap();
+        host.step(step(
+            host,
+            2,
+            NativeVnStepCommand::Execute(VnPlayerCommand::Advance),
+        ))
+        .unwrap();
         assert_eq!(host.next_mode, RuntimeStepMode::Live);
         source.release_resources().unwrap();
         source.host.shutdown().unwrap();
@@ -331,7 +384,8 @@ mod tests {
     fn invalid_restore_preserves_current_native_state_and_save_budget_failure_stops_execution() {
         let mut source = source();
         let host = &mut source.host;
-        host.step(step(host, 1, "launch_default")).unwrap();
+        host.step(step(host, 1, NativeVnStepCommand::LaunchDefault))
+            .unwrap();
         let saved = save(host);
         let mut invalid = saved.sections.clone();
         invalid[0].bytes[0] ^= 1;
@@ -351,7 +405,13 @@ mod tests {
             })
             .is_err());
         assert!(host.failed);
-        assert!(host.step(step(host, 2, "advance")).is_err());
+        assert!(host
+            .step(step(
+                host,
+                2,
+                NativeVnStepCommand::Execute(VnPlayerCommand::Advance)
+            ))
+            .is_err());
         source.release_resources().unwrap();
         source.shutdown().unwrap();
     }
