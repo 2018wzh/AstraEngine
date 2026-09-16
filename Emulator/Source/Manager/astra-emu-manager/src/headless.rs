@@ -58,13 +58,16 @@ pub(crate) fn run(path: &Path) -> Result<(), String> {
         Err(std::env::VarError::NotPresent) => "info".into(),
         Err(_) => return Err("ASTRA_EMU_HEADLESS_LOG_FILTER".into()),
     };
-    let _observability = astra_observability::init_host(
-        astra_observability::HostObservabilityConfig::for_cli(filter),
-    )
-    .map_err(|_| "ASTRA_EMU_HEADLESS_LOG_INIT")?;
     let bytes = std::fs::read(path).map_err(|_| "ASTRA_EMU_HEADLESS_CONFIG_READ")?;
     let config: Configuration =
         serde_json::from_slice(&bytes).map_err(|_| "ASTRA_EMU_HEADLESS_CONFIG_INVALID")?;
+    // The Windows Manager uses the GUI subsystem, where console output may be
+    // unavailable. Keep the same bounded host logs beside this run's captures.
+    let mut observability = astra_observability::HostObservabilityConfig::for_cli(filter);
+    observability.role = astra_observability::HostRole::Test;
+    observability.log_dir = Some(config.output.with_extension("diagnostics"));
+    let _observability = astra_observability::init_host(observability)
+        .map_err(|_| "ASTRA_EMU_HEADLESS_LOG_INIT")?;
     if !(1..=36_000).contains(&config.frames) {
         return Err("ASTRA_EMU_HEADLESS_FRAME_LIMIT".into());
     }
@@ -155,8 +158,14 @@ pub(crate) fn run(path: &Path) -> Result<(), String> {
         .filter_map(Result::err)
         .collect();
     if errors.is_empty() {
+        tracing::info!(event = "astra.emu.headless.closed", succeeded = true);
         Ok(())
     } else {
+        tracing::error!(
+            event = "astra.emu.headless.closed",
+            succeeded = false,
+            error_count = errors.len(),
+        );
         Err(errors.join("; "))
     }
 }

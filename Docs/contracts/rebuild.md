@@ -10,6 +10,8 @@
 
 ## EMU Family API
 
+Manager headless 使用现有 `astra-observability` 的有界日志，与本次输出图像放在一起：将输出文件扩展名替换为 `.diagnostics` 作为日志目录。日志不写入游戏目录或存档，不属于 package；测试结束后按临时产物规则清理。
+
 共享音频的流式解码只将解码器明确返回的流结束视为完成。`SymphoniaAudioStreamDecoder` 遇到意外 EOF 返回 `ASTRA_AUDIO_STREAM_TRUNCATED_INPUT`；已输出的有效 PCM 前缀不代表整段播放成功，调用方须终止失败的播放请求。正常完整流和解码预算规则不变。
 
 GPU 回读缓冲可以在进程内保留共享所有权。`OwnedPixelBuffer::from(Arc<[u8]>)` 复用原像素分配，克隆只延长生命周期，`make_mut_for_update` 继续按写时复制隔离修改；转换本身不校验图像尺寸，仍由 `TextureFrame` 的现有校验入口负责。Minori 直接持有回读缓冲，CMVS 将同一缓冲转为纹理；Family 帧借用有效期和 Host 同步复制约束不变，保存与 ABI 格式不变。

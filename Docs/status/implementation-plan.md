@@ -1,5 +1,9 @@
 # 全产品重构实施状态
 
+FVP 在 Windows Sandbox GPU 长流程中完成新槽 007 的原生保存与读取，恢复相同场景和对白后，物理点击继续推进文字，随后恢复自动播放。已有槽位保留；本次使用显式 NullAudioDevice，不计入可听音频或结局验收。
+
+Minori stage v8 真实 GPU 重跑返回 `ASTRA_EMU_MINORI_STAGE_SEQUENCE`（退出码 1），确认旧参数解析错误已越过，双资源序列绘制仍未实现。此前一次启动退出码为 101 且未捕获错误，原因未确认。Manager headless 现通过现有 astra-observability 在输出图像旁写入有界诊断日志，并记录关闭结果，避免只依赖控制台输出。
+
 Minori stage 已由丢失立绘参数的通用图层映射改为完整原生状态：保留一至两个前景资源、参考坐标、背景和 `position[,resource_parameter]`。解析和存档共用参数校验，VM schema 升到 v8 并拒绝旧格式；正常绘制与恢复共用 Scene。70 项 Minori、12 项 CLI 测试及 Clippy 通过，另单独执行了 GPU 定位/恢复一致性与失败帧保留测试。双资源序列和立绘附加参数目前仍明确拒绝绘制，尚未关闭《夏空的英仙座》第 10 条 stage 的实际播放阻塞；本次补齐状态保存，未以忽略参数的画面代替原生实现。
 
 FVP 在 Windows Sandbox GPU 重测中确认容量失败根因：BGM 请求到来时已有 2 个占用声部，其中只有 1 个处于 Playing，触发 hosted 混音器默认的 2 声部上限。Family 现按 RFVP 0.6.0 原生 BgmPlayer 的 4 个槽位配置 BGM 容量；SE 和总上限不变，不提前结束淡出或移除暂停声部。33 项测试通过，4 项独立 GPU 测试未在本次单元测试中执行；新增回归覆盖淡出与播放交叠、暂停占用、第五声部拒绝和释放后重新播放。Clippy、插件构建通过，同一原生存档的修复版 GPU 重测已越过此前失败的咖啡店段并进入后续场景，Manager 未新增容量错误；长流程继续运行。使用显式 NullAudioDevice，尚不代表真实可听音频或结局验收。
