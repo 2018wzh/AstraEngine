@@ -4,3 +4,6 @@
 [submodule "rfvp"]
 	path = Emulator/ThirdParty/rfvp
 	url = https://github.com/2018wzh/rfvp
+[submodule "artemis"]
+	path = Emulator/ThirdParty/art3m1s-core
+	url = https://github.com/2018wzh/art3m1s-core
