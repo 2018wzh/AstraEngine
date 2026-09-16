@@ -39,6 +39,10 @@ enum Command {
         #[arg(long)]
         game_dir: PathBuf,
     },
+    ListGarbroTitles {
+        #[arg(long)]
+        formats: PathBuf,
+    },
     CensusScripts {
         #[arg(long)]
         game_dir: PathBuf,
@@ -61,6 +65,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let action = match &command {
         Command::ScanArchives { .. } => "scan_archives",
         Command::ImportGarbroScheme { .. } => "import_garbro_scheme",
+        Command::ListGarbroTitles { .. } => "list_garbro_titles",
         Command::CensusScripts { .. } => "census_scripts",
         Command::CensusMedia { .. } => "census_media",
     };
@@ -76,6 +81,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             title,
             game_dir,
         } => importer::import(&formats, &title, &game_dir),
+        Command::ListGarbroTitles { formats } => {
+            println!(
+                "{}",
+                serde_json::to_string(&importer::list_titles(&formats)?)?
+            );
+            Ok(())
+        }
         Command::CensusScripts { game_dir, profile } => census(&game_dir, &profile),
         Command::CensusMedia { game_dir, profile } => census_media(&game_dir, &profile),
     };

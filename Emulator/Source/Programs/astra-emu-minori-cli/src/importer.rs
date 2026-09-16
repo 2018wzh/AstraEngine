@@ -18,6 +18,9 @@ const MAX_GRAPH_NODES: usize = 1_000_000;
 const MAX_GRAPH_DEPTH: usize = 128;
 const MAX_DICTIONARY_ENTRIES: usize = 100_000;
 
+mod catalog;
+pub use catalog::list_titles;
+
 #[derive(Debug)]
 struct ImportedRole {
     index_key: Vec<u8>,
@@ -41,25 +44,7 @@ pub fn import(
     if fs::symlink_metadata(&profile_path).is_ok() {
         return Err("ASTRA_EMU_GARBRO_OUTPUT_EXISTS".into());
     }
-    const MAX_FORMATS_BYTES: u64 = 256 * 1024 * 1024;
-    let mut bytes = Vec::new();
-    File::open(formats)?
-        .take(MAX_FORMATS_BYTES + 1)
-        .read_to_end(&mut bytes)?;
-    if bytes.len() as u64 > MAX_FORMATS_BYTES {
-        return Err("ASTRA_EMU_GARBRO_SIZE".into());
-    }
-    if bytes.len() < 12 || &bytes[..8] != b"GARbroDB" {
-        return Err("ASTRA_EMU_GARBRO_HEADER".into());
-    }
-    let mut decoded = Vec::new();
-    ZlibDecoder::new(&bytes[12..])
-        .take(256 * 1024 * 1024)
-        .read_to_end(&mut decoded)?;
-    if decoded.len() >= 256 * 1024 * 1024 {
-        return Err("ASTRA_EMU_GARBRO_SIZE".into());
-    }
-    let graph = NrbfGraph::parse(&decoded).map_err(|error| error.code())?;
+    let graph = load_graph(formats)?;
     let root = graph.root().map_err(|_| "ASTRA_EMU_GARBRO_ROOT")?;
     let records = find_dictionary_values(&graph, root, title)?;
     let record = match records.as_slice() {
@@ -105,6 +90,28 @@ pub fn import(
     Ok(())
 }
 
+fn load_graph(formats: &Path) -> Result<NrbfGraph, Box<dyn std::error::Error>> {
+    const MAX_FORMATS_BYTES: u64 = 256 * 1024 * 1024;
+    let mut bytes = Vec::new();
+    File::open(formats)?
+        .take(MAX_FORMATS_BYTES + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > MAX_FORMATS_BYTES {
+        return Err("ASTRA_EMU_GARBRO_SIZE".into());
+    }
+    if bytes.len() < 12 || &bytes[..8] != b"GARbroDB" {
+        return Err("ASTRA_EMU_GARBRO_HEADER".into());
+    }
+    let mut decoded = Vec::new();
+    ZlibDecoder::new(&bytes[12..])
+        .take(256 * 1024 * 1024)
+        .read_to_end(&mut decoded)?;
+    if decoded.len() >= 256 * 1024 * 1024 {
+        return Err("ASTRA_EMU_GARBRO_SIZE".into());
+    }
+    NrbfGraph::parse(&decoded).map_err(|error| error.code().into())
+}
+
 fn structural(value: &NrbfValue) -> bool {
     matches!(
         value,
@@ -117,10 +124,24 @@ fn find_dictionary_values<'a>(
     value: &'a NrbfValue,
     key: &str,
 ) -> Result<Vec<&'a NrbfValue>, Box<dyn std::error::Error>> {
+    let mut matches = Vec::new();
+    visit_dictionary_pairs(graph, value, |pair_key, item| {
+        if pair_key == key {
+            matches.push(item);
+        }
+        Ok(matches.len() < 2)
+    })?;
+    Ok(matches)
+}
+
+fn visit_dictionary_pairs<'a>(
+    graph: &'a NrbfGraph,
+    value: &'a NrbfValue,
+    mut visit: impl FnMut(&'a str, &'a NrbfValue) -> Result<bool, Box<dyn std::error::Error>>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let mut stack = vec![(value, 0usize)];
     let mut references = BTreeSet::new();
     let mut visited = 0usize;
-    let mut matches = Vec::new();
     while let Some((value, depth)) = stack.pop() {
         visited += 1;
         if visited > MAX_GRAPH_NODES {
@@ -149,16 +170,14 @@ fn find_dictionary_values<'a>(
                     .map(|value| graph.dereference(value))
                     .transpose()
                     .map_err(|_| "ASTRA_EMU_GARBRO_REFERENCE")?;
-                if matches!(pair_key, Some(NrbfValue::String(value)) if value == key) {
-                    matches.push(
-                        object
-                            .members
-                            .get("value")
-                            .or_else(|| object.members.get("Value"))
-                            .ok_or("ASTRA_EMU_GARBRO_DICTIONARY_PAIR")?,
-                    );
-                    if matches.len() > 1 {
-                        return Ok(matches);
+                if let Some(NrbfValue::String(pair_key)) = pair_key {
+                    let item = object
+                        .members
+                        .get("value")
+                        .or_else(|| object.members.get("Value"))
+                        .ok_or("ASTRA_EMU_GARBRO_DICTIONARY_PAIR")?;
+                    if !visit(pair_key, item)? {
+                        return Ok(());
                     }
                 }
                 stack.extend(
@@ -178,7 +197,7 @@ fn find_dictionary_values<'a>(
             _ => {}
         }
     }
-    Ok(matches)
+    Ok(())
 }
 
 fn dictionary_entries<'a>(

@@ -6,10 +6,13 @@
 
 ```bash
 cargo run --manifest-path Emulator/Cargo.toml -p astra-emu-minori-cli -- scan-archives --game-dir .tmp/minori-game
+cargo run --manifest-path Emulator/Cargo.toml -p astra-emu-minori-cli -- list-garbro-titles --formats .tmp/Formats.dat
 cargo run --manifest-path Emulator/Cargo.toml -p astra-emu-minori-cli -- import-garbro-scheme --formats .tmp/Formats.dat --title "本地作品名" --game-dir .tmp/minori-game
-cargo run --manifest-path Emulator/Cargo.toml -p astra-emu-minori-cli -- census-scripts --game-dir .tmp/minori-game --profile .tmp/minori-game/minori.profile.json
-cargo run --manifest-path Emulator/Cargo.toml -p astra-emu-minori-cli -- census-media --game-dir .tmp/minori-game --profile .tmp/minori-game/minori.profile.json
+cargo run --manifest-path Emulator/Cargo.toml -p astra-emu-minori-cli -- census-scripts --game-dir .tmp/minori-game --profile minori.profile.json
+cargo run --manifest-path Emulator/Cargo.toml -p astra-emu-minori-cli -- census-media --game-dir .tmp/minori-game --profile minori.profile.json
 ```
+
+`list-garbro-titles` 复用导入器的有界解压和 NRBF graph，只输出 `GameRes.Formats.Musica.PazScheme` 对应的作品键名 JSON 数组，不写文件或输出 scheme 内容。名称重复、图结构损坏和预算超限均报错；列出某项不表示其版本已被导入器支持。将选定名称原样传给 `--title`，不按本地目录名猜测。例如现有数据库使用 `Natsuzora no Perseus`，并非日文显示名。`--profile` 的相对路径以 `--game-dir` 为基准，不重复拼接游戏目录。
 
 导入使用仓库原有纯 Rust 两阶段 NRBF reader，先收集 object/metadata/library，再解析有符号 object ID 的 forward reference。未知 record、缺失或重复 reference、角色/类型/key/version 不符合约束时失败，不运行 managed helper，不执行脚本，也不做启发式 fallback。
 
