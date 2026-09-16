@@ -82,9 +82,9 @@ fn dynamic_module_reopens_on_windows_sized_stack() {
         .stack_size(1024 * 1024)
         .spawn(|| {
             let root = fixture();
-            let module = crate::ffi::FvpModule::default();
-            // Reusing an emptied BTreeMap takes a different insertion path.
-            // Inline FvpSession values exhausted the desktop GUI thread stack.
+            let module = astra_emu_family_api::ProviderModule::<crate::FvpProvider>::default();
+            // Keep session storage boxed across repeated opens: inline session
+            // values previously exhausted the desktop GUI thread stack.
             for _ in 0..3 {
                 let cancelled = Arc::new(AtomicBool::new(false));
                 let opened = module

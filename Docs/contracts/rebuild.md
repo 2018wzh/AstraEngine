@@ -24,6 +24,8 @@ FVP 共用 RFVP VM、原生媒体和存档，仅补必要接口。Minori 使用 
 
 跨 ABI 只传有界 typed 事件：级别、来源、稳定 event、数值/布尔及经审查的符号字段；不传任意 message、Debug、路径或商业正文。未结构化日志保留级别、来源、行号与脱敏计数，关键故障需在根因边界补稳定事件。此计数不是成功标记，不替代原有错误传播。
 
+Rust Family 可选用 API crate 的 ProviderModule 复用 ABI 会话管理，FVP、Minori 和 Siglus 共用此实现。它直接适配现有 FamilyProvider/FamilySession，不引入引擎或 SDK 依赖，也不改变 Family ABI。一个模块只持有一个会话；打开、推进、帧借用和完整关闭共用互斥边界，关闭返回前不能重新打开。panic 后拒绝继续工作，但允许取回会话执行关闭；模块释放时也须关闭遗留会话。公共边界错误使用 ASTRA_EMU_FAMILY_SESSION_ACTIVE、SESSION、LOCK 和 PANIC 后缀，核心自身诊断保持原有代码，不保留旧 Family 私有边界错误别名。
+
 ### 外部核心与 SDK 的重构边界
 
 吸收 `emu/krkr-hosted` 中外部核心 fork、最小适配提交和 submodule 的决策。来源提交 `dad452d2d` 将 RFVP、Siglus 改为 submodule，`bfc49f419` 引入 Artemis；这些提交用于确认来源，不整体移植旧 Family 接口。目标是保留完整上游历史，在固定上游基线上用一个适配提交承载必要差异，由主仓 gitlink 锁定精确提交。分支名只用于维护，不能替代提交固定。

@@ -11,6 +11,10 @@ mod ffi;
 pub use diagnostics::*;
 #[cfg(feature = "diagnostic-bridge")]
 pub mod diagnostic_bridge;
+#[cfg(feature = "diagnostic-bridge")]
+mod provider_module;
+#[cfg(feature = "diagnostic-bridge")]
+pub use provider_module::ProviderModule;
 
 pub use ffi::*;
 
