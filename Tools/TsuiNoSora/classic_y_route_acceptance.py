@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prove the complete Classic Y movie through serialized physical Headless input."""
+"""Run Classic Y or a complete authored route through physical GPU Headless input."""
 
 from __future__ import annotations
 
@@ -178,14 +178,14 @@ def _append_event(sequence: Sequence, event: dict) -> None:
     sequence.add(event, tick_advance=tick_advance)
 
 
-def build_sequence(story: dict) -> tuple[Sequence, dict]:
+def build_sequence(story: dict, route_id: str = ROUTE_ID, *, complete_route: bool = False) -> tuple[Sequence, dict]:
     if story.get("schema") != STORY_SCHEMA:
         raise YRouteAcceptanceError("Classic Y acceptance story schema is invalid")
     stories = story.get("stories")
     routes = story.get("routes")
     if not isinstance(stories, list) or len(stories) != 1 or not isinstance(routes, list):
         raise YRouteAcceptanceError("Classic Y acceptance story closure is invalid")
-    matches = [route for route in routes if route.get("route_id") == ROUTE_ID]
+    matches = [route for route in routes if route.get("route_id") == route_id]
     if len(matches) != 1:
         raise YRouteAcceptanceError("Classic Y acceptance route witness is missing or duplicated")
     route = matches[0]
@@ -213,9 +213,12 @@ def build_sequence(story: dict) -> tuple[Sequence, dict]:
     }
     stable_wait_hashes.update(text_wait_hashes)
     trace = trace_route_choice_witness(
-        stories[0]["states"], route.get("choice_sequence"), BOUNDARY_MOVIE
+        stories[0]["states"], route.get("choice_sequence"), None if complete_route else BOUNDARY_MOVIE
     )
-    sequence = Sequence("tsui.classic.route.y.complete")
+    if complete_route and trace["terminal_id"] != route.get("terminal_id"):
+        raise YRouteAcceptanceError("Classic route terminal does not match its authored witness")
+    checkpoint = f"classic.{route_id}.complete" if complete_route else "classic.route.y.complete"
+    sequence = Sequence(f"tsui.{checkpoint}")
     sequence.start()
     sequence.await_value("vn.system_page", "title", 7_200)
     sequence.await_value("vn.focused_semantic_id", "root/start")
@@ -235,24 +238,29 @@ def build_sequence(story: dict) -> tuple[Sequence, dict]:
         trace["transitions"], stable_wait_hashes, auto_fence_hashes, text_wait_hashes
     ):
         _append_event(sequence, event)
-    sequence.await_value("vn.pending_wait_command", trace["boundary_wait_command"], 18_000)
-    sequence.checkpoint("classic.route.y.complete")
+    if complete_route:
+        sequence.await_value("vn.terminal_routes", [f"state.{trace['terminal_id']}"], 18_000)
+    else:
+        sequence.await_value("vn.pending_wait_command", trace["boundary_wait_command"], 18_000)
+    sequence.checkpoint(checkpoint)
     sequence.finish()
     return sequence, trace
 
 
 def run(arguments: argparse.Namespace) -> dict:
     story = json.loads(arguments.story_ir.read_text(encoding="utf-8"))
-    sequence, trace = build_sequence(story)
+    sequence, trace = build_sequence(story, arguments.route_id, complete_route=arguments.complete_route)
     result = run_sequence(arguments, arguments.artifact_root, sequence)
     profile = json.loads(arguments.profile.read_text(encoding="utf-8"))
     consumed_choices = trace["consumed_choice_sequence"]
     return {
         "schema": REPORT_SCHEMA,
         "status": "passed",
-        "route_id": ROUTE_ID,
+        "route_id": arguments.route_id,
+        "complete_route": arguments.complete_route,
+        "terminal_id": trace["terminal_id"],
         "guaranteed_movie": "Y",
-        "boundary_movie": BOUNDARY_MOVIE,
+        "boundary_movie": None if arguments.complete_route else BOUNDARY_MOVIE,
         "boundary_state": trace["boundary_state"],
         "boundary_wait_command": trace["boundary_wait_command"],
         "choice_selection_count": len(consumed_choices),
@@ -265,7 +273,7 @@ def run(arguments: argparse.Namespace) -> dict:
         "run_report_hash": result["run_report_hash"],
         "renderer_identity_hash": result["renderer_identity_hash"],
         "renderer_identity": result["renderer_identity"],
-        "checkpoint_id": "classic.route.y.complete",
+        "checkpoint_id": sequence.checkpoints[0],
         "diagnostics": [],
         "redaction": {
             "commercial_text": "omitted",
@@ -286,6 +294,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--report", required=True, type=Path)
     parser.add_argument("--source-profile", type=Path)
     parser.add_argument("--source-root", type=Path)
+    parser.add_argument("--route-id", default=ROUTE_ID)
+    parser.add_argument("--complete-route", action="store_true")
     return parser.parse_args()
 
 

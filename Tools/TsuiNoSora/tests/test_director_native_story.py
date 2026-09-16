@@ -100,6 +100,24 @@ class DirectorNativeStoryAutomationTests(unittest.TestCase):
         with self.assertRaisesRegex(DirectorNativeStoryError, "no verified executor"):
             parse_director_transition_descriptors(lingo)
 
+    def test_complete_route_witness_consumes_all_choices_and_reaches_terminal(self):
+        states = [
+            {"state_id": "tsui.init", "scenes": [{"commands": [
+                {"command_id": "choice.y", "kind": "choice", "options": [
+                    {"option_id": "choice.y.0001.1", "target": "tsui.ending"},
+                ]},
+            ]}]},
+            {"state_id": "tsui.ending", "scenes": [{"commands": []}]},
+        ]
+        witness = trace_route_choice_witness(states, ["choice.y.0001.1"], None)
+        self.assertEqual(witness["terminal_id"], "tsui.ending")
+        self.assertIsNone(witness["boundary_wait_command"])
+        self.assertEqual(witness["transitions"][-1]["terminal_id"], "tsui.ending")
+        with self.assertRaisesRegex(DirectorNativeStoryError, "unused choices"):
+            trace_route_choice_witness(states, ["choice.y.0001.1", "choice.y.0001.1"], None)
+        with self.assertRaisesRegex(DirectorNativeStoryError, "unavailable"):
+            trace_route_choice_witness(states, ["choice.y.0001.2"], None)
+
     def test_route_witness_reaches_next_movie_wait_and_tracks_authored_choice(self):
         states = [
             {

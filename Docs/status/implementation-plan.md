@@ -15,6 +15,8 @@
 
 ## 验收安排
 
+Classic 物理输入驱动已支持指定生成路线执行到终局，不再只限 Y→K 段。路线追踪拒绝剩余未消费选择、不可用选项和目标终局不符；通过条件仍是实际 VN session 的终局观察。25 项相关 Python 回归通过。首条完整路线生成 46997 条输入，包含 39 次选择；私有测试 profile 按输入长度设置预算，未修改 Host 限制逻辑。完整路线尚未验收通过，37 路线完成数不变。
+
 Native VN 本地整合回归通过：Player 保留 UI 操作产生的字形生命周期命令，文字显示完成状态通过只读观察提供给物理输入脚本；GPU Headless 在资源跨帧重用前提交待绘制场景。相关 Player、CLI、media-core、Headless 平台及 VN adapter 测试和 Clippy 通过，显式 GPU 资源回归通过，Player/Headless/CLI 构建完成。终之空生成器更新当前平台契约和演出替换策略，28 项相关 Python 测试通过。Windows CRT 打包复用 object 校验 x64 PE DLL，全部校验后复制；缺失、截断、错误架构和非 DLL 输入回归通过。此批不新增真实路线完成记录，37 路线与 Sandbox 长流程仍开放。
 
 本地 Emulator 整合检查通过：活动 workspace 的默认测试、全 targets Clippy、构建及格式检查完成；文档检查通过。共享 GPU atlas 的跨帧纹理 ID 释放/重用回归和 astra-platform-common Clippy 通过。需商业素材、指定设备或真实服务的 ignored 测试仍保持各自验收范围，不计入完成。此次只固化 EMU 整合与共享 GPU 修复，VN 长流程和其余产品工作继续。

@@ -1274,14 +1274,16 @@ def _derive_route_automation(states, program):
 
 
 def trace_route_choice_witness(states, choice_sequence, boundary_movie):
-    """Trace one authored choice witness until the next movie's first wait.
+    """Trace authored choices to a movie's first wait, or the terminal when None.
 
     This keeps route acceptance tied to the same deterministic simulator used by
     conversion coverage.  The returned transitions still contain abstract input
     markers; a profile-specific acceptance builder must lower them to physical
     input without writing Runtime state directly.
     """
-    if not isinstance(boundary_movie, str) or len(boundary_movie) != 1 or not boundary_movie.isupper():
+    if boundary_movie is not None and (
+        not isinstance(boundary_movie, str) or len(boundary_movie) != 1 or not boundary_movie.isupper()
+    ):
         raise DirectorNativeStoryError("route witness boundary movie is invalid")
     if not isinstance(choice_sequence, list) or not all(
         isinstance(choice_id, str) and choice_id for choice_id in choice_sequence
@@ -1293,12 +1295,19 @@ def trace_route_choice_witness(states, choice_sequence, boundary_movie):
     transitions = []
     boundary_wait = None
     boundary_state = None
+    terminal_id = None
     visited = 0
     while boundary_wait is None:
         source_state_id = current[0]
         outgoing, terminal_step = _simulate_state(current, state_map)
         if terminal_step is not None:
-            raise DirectorNativeStoryError("route witness reached a terminal before its movie boundary")
+            if boundary_movie is not None:
+                raise DirectorNativeStoryError("route witness reached a terminal before its movie boundary")
+            if choice_cursor != len(choice_sequence):
+                raise DirectorNativeStoryError("route witness reached a terminal with unused choices")
+            transitions.append(terminal_step)
+            terminal_id = terminal_step["terminal_id"]
+            break
         if not outgoing:
             raise DirectorNativeStoryError("route witness reached a state without a successor")
         selected = None
@@ -1326,7 +1335,7 @@ def trace_route_choice_witness(states, choice_sequence, boundary_movie):
         if visited > 100_000:
             raise DirectorNativeStoryError("route witness state budget exceeded")
         state_id = current[0]
-        if state_id.startswith(f"director.{boundary_movie.lower()}."):
+        if boundary_movie is not None and state_id.startswith(f"director.{boundary_movie.lower()}."):
             for event in selected["events"]:
                 if event["type"] == "_pending_wait":
                     boundary_wait = event["command_id"]
@@ -1343,6 +1352,7 @@ def trace_route_choice_witness(states, choice_sequence, boundary_movie):
         "boundary_state": boundary_state,
         "boundary_wait_command": boundary_wait,
         "consumed_choice_sequence": choice_sequence[:choice_cursor],
+        "terminal_id": terminal_id,
     }
 
 
