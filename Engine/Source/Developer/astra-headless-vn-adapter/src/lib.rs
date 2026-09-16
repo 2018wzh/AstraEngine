@@ -160,9 +160,8 @@ impl ProductAdapterFactory for NativeVnProductAdapterFactory {
                 astra_player_vn::NativeVnHostOpenOptions {
                     max_asset_cache_bytes: asset_cache_bytes,
                     max_glyph_cache_bytes: glyph_cache_bytes,
-                    runtime_execution:
-                        astra_player_vn::NativeVnRuntimeExecution::evidence_parallel()
-                            .map_err(|error| binding("runtime.execution", error))?,
+                    runtime_execution: astra_player_vn::NativeVnRuntimeExecution::evidence_parallel(
+                    ),
                 },
             )
             .map_err(|error| binding("runtime.open", error))?;

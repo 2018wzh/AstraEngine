@@ -127,3 +127,7 @@ NativeVnSession::save/restore 直接读写 Runtime SaveBlob，恢复返回 LoadR
 ### 原生 step 时间与关闭
 
 NativeVnStepInput 使用 Runtime TickInput/TickMode，与 NativeVnStepOutput 一起删除冗余 session id；直接持有的 NativeVnSession 决定执行对象，宿主继续校验 fixed step、seed 与恢复模式。旧 provider::step 在边界查找 session 并转换 ABI mode/输出身份，不再提供中间 step_native 转发入口。NativeVnSession::close 消费会话并返回 unit；仅旧 ABI 构造 RuntimeShutdownReport。存档 v8 格式不变。
+
+### 原生执行配置
+
+NativeVnRuntimeExecution 直接声明 Runtime TickIntegrityMode 与 usize worker_count，删除 RuntimeExecutorConfig、ABI mode 映射及 u8 转换。serial 使用一个 worker，parallel 使用独立 astra-worker-budget 已验证的进程预算，构造本身不再返回伪失败。package 打开入口先校验 1..=DEFAULT_LIMIT 的 worker 数，非法值明确失败，不截断或回退；session 创建沿用同一配置。此改动不改变存档格式或全局 worker 调度。

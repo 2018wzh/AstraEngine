@@ -86,3 +86,5 @@
 - 原生 session 与 Player 保存恢复改用 Runtime SaveBlob/LoadReport，删除实时原生路径的通用 save/restore request 和 section 包装。Player 存档升级 v8，旧 v7 实际字段布局、错误版本、容器损坏与外来 session 均拒绝；成功恢复取消旧作用域。provider/Player 单元测试通过；seed 校验前移至提交前，加入合法容器下 seed 不匹配回归。Engine 全量 fmt/clippy/build/test 通过：729 项通过、0 失败、9 项按原条件未执行；关闭 report、step identity 和 package descriptor 仍待清理。
 
 - NativeVN step 输入统一使用 Runtime TickInput/TickMode，移除输入/输出 session id 与中间 step_native；时间参数直接进入 TickRequest，旧 ABI 仅在边界查找会话和适配模式/身份。原生 close 返回 unit，旧 ABI 单独生成关闭 report。原有 provider/Player 单元测试及新增五类非法时间参数、失败后恢复推进回归通过。Engine 全量 fmt/clippy/build/test 通过：730 项通过、0 失败、9 项按原条件未执行；存档 v8 不变，package descriptor、配置与其他 ABI 消费者仍待清理。
+
+- NativeVnRuntimeExecution 拆成独立模块，直接使用 Runtime TickIntegrityMode 和 usize worker_count，移除 ABI executor/mode 映射与 u8 范围转换；parallel 构造不再返回 Result。Player 与 Headless 调用方同步，直接依赖已有 astra-worker-budget。2 项回归验证进程预算一致性及 package 打开前拒绝 0/超限/usize::MAX worker 数。Engine 全量 fmt/clippy/build/test 通过：732 项通过、0 失败、9 项按原条件未执行；package descriptor 与其他 ABI 消费者仍待清理。

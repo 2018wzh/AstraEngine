@@ -22,6 +22,7 @@ astra-plugin-abi = { path = "../../Runtime/astra-plugin-abi", default-features =
 astra-player-core = { path = "../../Runtime/astra-player-core" }
 astra-ui-core = { path = "../../Runtime/astra-ui-core" }
 astra-ui-yakui = { path = "../../Runtime/astra-ui-yakui" }
+astra-worker-budget = { path = "../../Runtime/astra-worker-budget" }
 astra-runtime = { path = "../../Runtime/astra-runtime" }
 astra-platform = { path = "../../Platform/astra-platform" }
 astra-vn-core = { path = "../../Modules/AstraVN/astra-vn-core" }

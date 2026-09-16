@@ -86,8 +86,7 @@ pub async fn run_native_vn_player_session(
     let mut sink = PlatformCommandSink::new(session.client.clone());
     sink.bind_surface(logical_surface, surface)?;
     let mut executor = PlayerHostCommandExecutor::new(sink);
-    let runtime_execution = astra_player_vn::NativeVnRuntimeExecution::shipping_parallel()
-        .map_err(|error| player_error_owned("player.runtime.executor", error))?;
+    let runtime_execution = astra_player_vn::NativeVnRuntimeExecution::shipping_parallel();
     let mut vn = NativeVnHostCommandSource::from_package_with_execution(
         &package,
         VnRunConfig {

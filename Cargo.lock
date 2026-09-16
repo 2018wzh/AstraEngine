@@ -1100,6 +1100,7 @@ dependencies = [
  "astra-vn-runtime-provider",
  "astra-vn-system",
  "astra-vn-ui",
+ "astra-worker-budget",
  "image",
  "postcard",
  "serde",

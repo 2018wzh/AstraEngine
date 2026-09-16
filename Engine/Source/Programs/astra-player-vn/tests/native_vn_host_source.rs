@@ -1082,7 +1082,7 @@ state start #@id state.start
         320,
         180,
         PlayerHostResourceId(1),
-        NativeVnRuntimeExecution::evidence_parallel().unwrap(),
+        NativeVnRuntimeExecution::evidence_parallel(),
     )
     .unwrap();
     source.launch().unwrap();

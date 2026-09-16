@@ -424,14 +424,7 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
         let mut sink = PlatformCommandSink::new(session.client.clone());
         sink.bind_surface(logical_surface, surface)?;
         let mut executor = PlayerHostCommandExecutor::new(sink);
-        let runtime_execution = astra_player_vn::NativeVnRuntimeExecution::shipping_parallel()
-            .map_err(|error| {
-                astra_platform::PlatformError::new(
-                    astra_platform::PlatformErrorCode::InvalidState,
-                    "player.runtime.executor",
-                    error.to_string(),
-                )
-            })?;
+        let runtime_execution = astra_player_vn::NativeVnRuntimeExecution::shipping_parallel();
         let mut vn = NativeVnHostCommandSource::from_package_with_execution(
             &package,
             VnRunConfig {

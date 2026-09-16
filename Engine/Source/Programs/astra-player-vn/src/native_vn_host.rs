@@ -1,3 +1,5 @@
+mod execution;
+pub use execution::NativeVnRuntimeExecution;
 mod media_scope;
 mod presentation;
 mod product_save;
@@ -27,8 +29,7 @@ use astra_player_core::{
 };
 use astra_plugin::{RuntimeHostError, RuntimeHostLimits};
 use astra_plugin_abi::{
-    GameRuntimeSessionId, RuntimeExecutorConfig, RuntimeTickIntegrityMode,
-    ValidatedRuntimeProviderSelection, NATIVE_VN_PROVIDER_ID,
+    GameRuntimeSessionId, ValidatedRuntimeProviderSelection, NATIVE_VN_PROVIDER_ID,
 };
 use astra_ui_core::{
     UiBackend, UiBlueprintBundle, UiBlueprintFrameModel, UiBlueprintModalFrameModel, UiButtonState,
@@ -458,12 +459,6 @@ struct NativeVnHostCacheBudget {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NativeVnRuntimeExecution {
-    pub integrity_mode: RuntimeTickIntegrityMode,
-    pub executor: RuntimeExecutorConfig,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NativeVnHostOpenOptions {
     pub max_asset_cache_bytes: u64,
     pub max_glyph_cache_bytes: u64,
@@ -473,36 +468,6 @@ pub struct NativeVnHostOpenOptions {
 struct NativeVnHostRuntimeOptions {
     cache_budget: NativeVnHostCacheBudget,
     execution: NativeVnRuntimeExecution,
-}
-
-impl NativeVnRuntimeExecution {
-    pub const fn shipping_serial() -> Self {
-        Self {
-            integrity_mode: RuntimeTickIntegrityMode::Shipping,
-            executor: RuntimeExecutorConfig::serial(),
-        }
-    }
-
-    pub fn shipping_parallel() -> Result<Self, NativeVnHostError> {
-        Self::parallel(RuntimeTickIntegrityMode::Shipping)
-    }
-
-    pub fn evidence_parallel() -> Result<Self, NativeVnHostError> {
-        Self::parallel(RuntimeTickIntegrityMode::Evidence)
-    }
-
-    fn parallel(integrity_mode: RuntimeTickIntegrityMode) -> Result<Self, NativeVnHostError> {
-        let worker_count = u8::try_from(astra_plugin::WorkerBudgetBroker::global().limit())
-            .map_err(|_| {
-                NativeVnHostError::Input(
-                    "ASTRA_RUNTIME_EXECUTOR_CONFIG: worker limit exceeds ABI range".into(),
-                )
-            })?;
-        Ok(Self {
-            integrity_mode,
-            executor: RuntimeExecutorConfig::parallel(worker_count),
-        })
-    }
 }
 
 impl NativeVnHostCommandSource {
@@ -559,6 +524,7 @@ impl NativeVnHostCommandSource {
             max_glyph_cache_bytes,
             runtime_execution,
         } = options;
+        runtime_execution.validate()?;
         validate_product_provider_bindings(package)?;
         let runtime_provider = package.runtime_provider_selection().clone();
         if config.profile != runtime_provider.profile() {
@@ -762,10 +728,6 @@ impl NativeVnHostCommandSource {
             )));
         }
         let mut host = NativeVnRuntimeHost::new(runtime_provider, limits)?;
-        runtime_execution
-            .executor
-            .validate()
-            .map_err(|error| NativeVnHostError::Input(error.to_string()))?;
         let story = Arc::new(compiled.story);
         let open = match host.open(
             Arc::clone(&story),
@@ -778,20 +740,8 @@ impl NativeVnHostCommandSource {
                     target: runtime_provider.target().into(),
                     ..Default::default()
                 }),
-                integrity_mode: match runtime_execution.integrity_mode {
-                    RuntimeTickIntegrityMode::Shipping => {
-                        astra_runtime::TickIntegrityMode::Shipping
-                    }
-                    RuntimeTickIntegrityMode::Evidence => {
-                        astra_runtime::TickIntegrityMode::Evidence
-                    }
-                },
-                worker_count: match runtime_execution.executor.kind {
-                    astra_plugin_abi::RuntimeExecutorKind::Serial => 1,
-                    astra_plugin_abi::RuntimeExecutorKind::Parallel => {
-                        usize::from(runtime_execution.executor.worker_count)
-                    }
-                },
+                integrity_mode: runtime_execution.integrity_mode,
+                worker_count: runtime_execution.worker_count,
             },
         ) {
             Ok(session_id) => session_id,
