@@ -93,3 +93,9 @@ PlatformCommandSink 持有尚未交付的 decoder open future，限制为 64 个
 ### 音频 output 响应所有权
 
 NativeVnProductAudioHost 持有唯一 pending open 和 pending close future。取消 ensure_open 后再次调用会继续同一 open；shutdown 则等待结果，直接关闭端点，不创建 Kira worker。关闭响应在恢复或退出 future 中断后继续由 Host 持有，下一次清理消费同一响应，不重复发送已完成的 close。明确失败的关闭仍可重试，端点在成功响应前保持所有权。这些 future 不进入存档，Host 必须在其平台客户端存活期间完成 shutdown。
+
+### NativeVN 直接 Rust 宿主
+
+Player 的 NativeVN 主路径直接持有 NativeVnRuntimeProvider，移除 ProductRuntimeHost 的同步/异步桥、session mailbox、通用 worker 调度与外层 mutex。私有 NativeVnRuntimeHost 只负责已选择 package binding、单 session 生命周期、tick/seed/mode、输出数量和 save section 边界；实际玩法仍由同一 NativeVN RuntimeWorld 执行。step/save 执行失败后拒绝继续，经过完整验证的 restore 可重建会话；输入 section 验证失败不提交恢复。关闭与销毁不再伪造插件 instance lifecycle。
+
+现有 package/save 和 RuntimeStepInput 数据契约暂不改版；旧通用宿主仍供尚未迁移的非 Player 消费者使用，但 Player 不保留可切换的兼容分支。后续继续移除字符串 command、通用 product descriptor 和内部动态 ABI。这一步不把 NativeVN 全部 typed 重构标为完成。

@@ -1,0 +1,358 @@
+use super::*;
+use astra_plugin::ProductRuntimeProvider;
+use astra_plugin_abi::{
+    RuntimeOpenReport, RuntimePrepareReport, RuntimeProbeReport, RuntimeRestoreReport,
+    RuntimeShutdownReport, RuntimeStepOutput,
+};
+
+pub(super) struct NativeVnRuntimeHost {
+    provider: NativeVnRuntimeProvider,
+    binding: ValidatedRuntimeProviderSelection,
+    limits: RuntimeHostLimits,
+    session: Option<GameRuntimeSessionId>,
+    seed: u64,
+    last_step: u64,
+    next_mode: RuntimeStepMode,
+    failed: bool,
+    destroyed: bool,
+}
+
+impl NativeVnRuntimeHost {
+    pub(super) fn new(
+        binding: &ValidatedRuntimeProviderSelection,
+        limits: RuntimeHostLimits,
+    ) -> Result<Self, RuntimeHostError> {
+        binding
+            .validate_linked_descriptor(&NativeVnRuntimeProvider::descriptor())
+            .map_err(|error| RuntimeHostError::new(error.code, error.message))?;
+        Ok(Self {
+            provider: NativeVnRuntimeProvider::default(),
+            binding: binding.clone(),
+            limits,
+            session: None,
+            seed: 0,
+            last_step: 0,
+            next_mode: RuntimeStepMode::Live,
+            failed: false,
+            destroyed: false,
+        })
+    }
+
+    fn validate_request(&self, target: &str, profile: &str) -> Result<(), RuntimeHostError> {
+        if self.destroyed || target != self.binding.target() || profile != self.binding.profile() {
+            return Err(RuntimeHostError::new(
+                "ASTRA_RUNTIME_HOST_BINDING_CONTEXT",
+                "NativeVN request does not match the active package binding",
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_identity(&self, runtime: &str, provider: &str) -> Result<(), RuntimeHostError> {
+        if runtime != self.binding.descriptor().runtime_id || provider != self.binding.provider_id()
+        {
+            return Err(RuntimeHostError::new(
+                "ASTRA_RUNTIME_HOST_PROVIDER_IDENTITY",
+                "NativeVN report does not match the package binding",
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_session(&self, session: &GameRuntimeSessionId) -> Result<(), RuntimeHostError> {
+        if self.destroyed || self.session.as_ref() != Some(session) {
+            return Err(RuntimeHostError::new(
+                "ASTRA_RUNTIME_HOST_SESSION",
+                "NativeVN session is not open",
+            ));
+        }
+        Ok(())
+    }
+
+    fn require_healthy(&self) -> Result<(), RuntimeHostError> {
+        if self.failed {
+            return Err(RuntimeHostError::new(
+                "ASTRA_RUNTIME_HOST_SESSION_POISONED",
+                "NativeVN execution failed; restore or close the session",
+            ));
+        }
+        Ok(())
+    }
+
+    pub(super) fn prepare(
+        &mut self,
+        request: RuntimePrepareRequest,
+    ) -> Result<RuntimePrepareReport, RuntimeHostError> {
+        self.validate_request(&request.target_id, &request.profile)?;
+        let report = self.provider.prepare(request);
+        self.validate_identity(&report.runtime_id, &report.provider_id)?;
+        Ok(report)
+    }
+
+    pub(super) fn probe(
+        &mut self,
+        request: RuntimeProbeRequest,
+    ) -> Result<RuntimeProbeReport, RuntimeHostError> {
+        self.validate_request(&request.target_id, &request.profile)?;
+        let report = self.provider.probe(request);
+        self.validate_identity(&report.runtime_id, &report.provider_id)?;
+        Ok(report)
+    }
+
+    pub(super) fn open(
+        &mut self,
+        request: RuntimeOpenRequest,
+    ) -> Result<RuntimeOpenReport, RuntimeHostError> {
+        self.validate_request(&request.target_id, &request.profile)?;
+        if self.session.is_some() {
+            return Err(RuntimeHostError::new(
+                "ASTRA_RUNTIME_HOST_SESSION_DUPLICATE",
+                "NativeVN host already owns a session",
+            ));
+        }
+        self.limits.validate_sections(&request.sections)?;
+        request
+            .executor
+            .validate()
+            .map_err(|error| RuntimeHostError::new("ASTRA_RUNTIME_EXECUTOR_CONFIG", error))?;
+        let seed = request.seed;
+        let report = ProductRuntimeProvider::open(&mut self.provider, request)
+            .map_err(|error| RuntimeHostError::new("ASTRA_RUNTIME_HOST_OPEN", error))?;
+        self.session = Some(report.session_id.clone());
+        self.seed = seed;
+        self.validate_identity(&report.runtime_id, &report.provider_id)?;
+        self.last_step = 0;
+        self.next_mode = RuntimeStepMode::Live;
+        self.failed = false;
+        Ok(report)
+    }
+
+    pub(super) fn step(
+        &mut self,
+        input: RuntimeStepInput,
+    ) -> Result<RuntimeStepOutput, RuntimeHostError> {
+        self.validate_session(&input.session_id)?;
+        self.require_healthy()?;
+        if self.last_step.checked_add(1) != Some(input.fixed_step)
+            || input.delta_ns == 0
+            || input.delta_ns > 1_000_000_000
+            || input.session_seed != self.seed
+            || input.mode != self.next_mode
+        {
+            self.failed = true;
+            return Err(RuntimeHostError::new(
+                "ASTRA_RUNTIME_HOST_STEP_ORDER",
+                "NativeVN step violates session timing, seed or restore mode",
+            ));
+        }
+        let step = input.fixed_step;
+        self.failed = true;
+        let result = self
+            .provider
+            .step(input)
+            .map_err(|error| RuntimeHostError::new("ASTRA_RUNTIME_HOST_STEP", error.to_string()))
+            .and_then(|output| {
+                if Some(&output.session_id) != self.session.as_ref() {
+                    return Err(RuntimeHostError::new(
+                        "ASTRA_RUNTIME_HOST_OUTPUT_SESSION",
+                        "NativeVN output belongs to another session",
+                    ));
+                }
+                self.limits.validate_output_bounds(&output)?;
+                Ok(output)
+            });
+        self.failed = result.is_err();
+        if result.is_ok() {
+            self.last_step = step;
+            self.next_mode = RuntimeStepMode::Live;
+        }
+        result
+    }
+
+    pub(super) fn save(
+        &mut self,
+        request: RuntimeSaveRequest,
+    ) -> Result<RuntimeSaveSections, RuntimeHostError> {
+        self.validate_session(&request.session_id)?;
+        self.require_healthy()?;
+        self.failed = true;
+        let result = self
+            .provider
+            .save(request)
+            .map_err(|error| RuntimeHostError::new("ASTRA_RUNTIME_HOST_SAVE", error.to_string()))
+            .and_then(|report| {
+                self.limits.validate_sections(&report.sections)?;
+                Ok(report)
+            });
+        self.failed = result.is_err();
+        result
+    }
+
+    pub(super) fn restore(
+        &mut self,
+        request: RuntimeRestoreRequest,
+    ) -> Result<RuntimeRestoreReport, RuntimeHostError> {
+        self.validate_session(&request.session_id)?;
+        self.limits.validate_sections(&request.sections)?;
+        let was_failed = self.failed;
+        self.failed = true;
+        let report = match self.provider.restore(request) {
+            Ok(report) => report,
+            Err(error) => {
+                self.failed = was_failed;
+                return Err(RuntimeHostError::new(
+                    "ASTRA_RUNTIME_HOST_RESTORE",
+                    error.to_string(),
+                ));
+            }
+        };
+        if Some(&report.session_id) != self.session.as_ref() || report.session_seed != self.seed {
+            self.failed = true;
+            return Err(RuntimeHostError::new(
+                "ASTRA_RUNTIME_HOST_RESTORE_IDENTITY",
+                "NativeVN restored session or seed does not match",
+            ));
+        }
+        self.last_step = report.restored_fixed_step;
+        self.next_mode = RuntimeStepMode::RestoreContinuation;
+        self.failed = false;
+        Ok(report)
+    }
+
+    pub(super) fn shutdown(&mut self) -> Result<RuntimeShutdownReport, RuntimeHostError> {
+        let session = self.session.clone().ok_or_else(|| {
+            RuntimeHostError::new("ASTRA_RUNTIME_HOST_SESSION", "NativeVN session is not open")
+        })?;
+        let report = self.provider.shutdown(session).map_err(|error| {
+            RuntimeHostError::new("ASTRA_RUNTIME_HOST_SHUTDOWN", error.to_string())
+        })?;
+        self.session = None;
+        Ok(report)
+    }
+
+    pub(super) fn destroy(&mut self) -> Result<(), RuntimeHostError> {
+        if self.session.is_some() {
+            return Err(RuntimeHostError::new(
+                "ASTRA_RUNTIME_HOST_LIFECYCLE",
+                "close NativeVN before destroying the host",
+            ));
+        }
+        self.destroyed = true;
+        Ok(())
+    }
+
+    pub(super) fn cleanup_after_failure(&mut self) -> Result<(), RuntimeHostError> {
+        if self.session.is_some() {
+            self.shutdown()?;
+        }
+        self.destroy()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn source() -> NativeVnHostCommandSource {
+        let bytes = crate::test_native_package::product_package_with_request(
+            "story main #@id story.main\nstate start #@id state.start\n  scene room #@id scene.room\n    text key:line.one speaker:hero #@id line.one\n", |_| {},
+        );
+        let package = astra_package::PackageReader::open(&bytes).unwrap();
+        NativeVnHostCommandSource::from_package(
+            &package,
+            VnRunConfig::classic("en"),
+            320,
+            180,
+            PlayerHostResourceId(1),
+        )
+        .unwrap()
+    }
+
+    fn step(host: &NativeVnRuntimeHost, n: u64, action: &str) -> RuntimeStepInput {
+        RuntimeStepInput {
+            session_id: host.session.clone().unwrap(),
+            fixed_step: n,
+            delta_ns: 16_666_667,
+            session_seed: host.seed,
+            mode: host.next_mode,
+            action: action.into(),
+            ..RuntimeStepInput::default()
+        }
+    }
+
+    fn save(host: &mut NativeVnRuntimeHost) -> RuntimeSaveSections {
+        host.save(RuntimeSaveRequest {
+            session_id: host.session.clone().unwrap(),
+            slot: "slot.01".into(),
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn owned_runtime_enforces_binding_tick_failure_and_restore_continuation() {
+        let mut source = source();
+        let host = &mut source.host;
+        assert!(host
+            .validate_request("foreign", host.binding.profile())
+            .is_err());
+        assert!(host.destroy().is_err());
+        host.step(step(host, 1, "launch_default")).unwrap();
+        let saved = save(host);
+        assert!(host
+            .step(step(host, 1, "advance"))
+            .unwrap_err()
+            .to_string()
+            .contains("STEP_ORDER"));
+        assert!(host
+            .save(RuntimeSaveRequest {
+                session_id: saved.session_id.clone(),
+                slot: "slot.01".into()
+            })
+            .is_err());
+        host.restore(RuntimeRestoreRequest {
+            session_id: saved.session_id,
+            sections: saved.sections,
+        })
+        .unwrap();
+        assert!(!host.failed);
+        assert_eq!(host.next_mode, RuntimeStepMode::RestoreContinuation);
+        host.step(step(host, 2, "advance")).unwrap();
+        assert_eq!(host.next_mode, RuntimeStepMode::Live);
+        source.release_resources().unwrap();
+        source.host.shutdown().unwrap();
+        source.host.destroy().unwrap();
+        assert!(source
+            .host
+            .validate_request(source.host.binding.target(), source.host.binding.profile())
+            .is_err());
+    }
+
+    #[test]
+    fn invalid_restore_preserves_current_native_state_and_save_budget_failure_stops_execution() {
+        let mut source = source();
+        let host = &mut source.host;
+        host.step(step(host, 1, "launch_default")).unwrap();
+        let saved = save(host);
+        let mut invalid = saved.sections.clone();
+        invalid[0].bytes[0] ^= 1;
+        assert!(host
+            .restore(RuntimeRestoreRequest {
+                session_id: saved.session_id.clone(),
+                sections: invalid
+            })
+            .is_err());
+        assert!(!host.failed);
+        assert_eq!(save(host), saved);
+        host.limits = RuntimeHostLimits::new().with_bounds(256, 1);
+        assert!(host
+            .save(RuntimeSaveRequest {
+                session_id: saved.session_id,
+                slot: "slot.01".into()
+            })
+            .is_err());
+        assert!(host.failed);
+        assert!(host.step(step(host, 2, "advance")).is_err());
+        source.release_resources().unwrap();
+        source.shutdown().unwrap();
+    }
+}

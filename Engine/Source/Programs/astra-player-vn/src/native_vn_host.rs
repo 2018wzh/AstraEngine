@@ -1,6 +1,8 @@
 mod media_scope;
 mod presentation;
 mod product_save;
+mod runtime;
+use runtime::NativeVnRuntimeHost;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Arc, Mutex, RwLock};
@@ -23,7 +25,7 @@ use astra_player_core::{
     PlayerHostCommandError, PlayerHostResourceId, PlayerSaveTransactionPlan, PlayerTimelineTask,
     PlayerTimelineTaskAction,
 };
-use astra_plugin::{ProductRuntimeHost, RuntimeHostError, RuntimeHostLimits};
+use astra_plugin::{RuntimeHostError, RuntimeHostLimits};
 use astra_plugin_abi::{
     GameRuntimeSessionId, RuntimeExecutorConfig, RuntimeLiveAudioBus, RuntimeLiveAudioSync,
     RuntimeOpenRequest, RuntimePrepareRequest, RuntimeProbeRequest, RuntimeRestoreRequest,
@@ -139,7 +141,7 @@ pub struct NativeVnHostCommandSource {
     presentation_failed: bool,
     media_scope: astra_runtime::TaskScope,
     video_scopes: BTreeMap<String, astra_runtime::TaskScope>,
-    host: ProductRuntimeHost,
+    host: NativeVnRuntimeHost,
     session_id: GameRuntimeSessionId,
     runtime_state: Option<VnRuntimeState>,
     runtime_backlog_count: usize,
@@ -777,19 +779,7 @@ impl NativeVnHostCommandSource {
                 runtime_provider.provider_id()
             )));
         }
-        let instance_id = format!(
-            "astra-player.native-vn.{}",
-            runtime_provider
-                .binding_hash()
-                .to_string()
-                .trim_start_matches("sha256:")
-        );
-        let mut host = ProductRuntimeHost::bound_in_process(
-            instance_id,
-            runtime_provider,
-            NativeVnRuntimeProvider::default(),
-            limits,
-        )?;
+        let mut host = NativeVnRuntimeHost::new(runtime_provider, limits)?;
         let prepare = match host.prepare(RuntimePrepareRequest {
             target_id: runtime_provider.target().to_string(),
             profile: config.profile.clone(),
@@ -841,7 +831,7 @@ impl NativeVnHostCommandSource {
             event = "player.vn.runtime.open",
             width,
             height,
-            "opened AstraVN Player command source through ProductRuntimeHost"
+            "opened AstraVN Player command source through its owned NativeVN runtime"
         );
         let localization_keys = binding
             .presentation
@@ -5739,7 +5729,7 @@ fn read_package_json(
 }
 
 fn cleanup_runtime_host(
-    host: &mut ProductRuntimeHost,
+    host: &mut NativeVnRuntimeHost,
     error: impl std::fmt::Display,
 ) -> NativeVnHostError {
     match host.cleanup_after_failure() {

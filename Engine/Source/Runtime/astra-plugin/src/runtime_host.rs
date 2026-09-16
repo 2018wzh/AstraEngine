@@ -48,7 +48,8 @@ impl RuntimeHostLimits {
         self
     }
 
-    pub(crate) fn validate_output_bounds(
+    /// Validate bounded live output for a directly owned runtime as well as plugin hosts.
+    pub fn validate_output_bounds(
         &self,
         output: &astra_plugin_abi::RuntimeStepOutput,
     ) -> Result<(), RuntimeHostError> {
@@ -75,7 +76,8 @@ impl RuntimeHostLimits {
         Ok(())
     }
 
-    pub(crate) fn validate_sections(
+    /// Validate section identity and aggregate size at save/restore boundaries.
+    pub fn validate_sections(
         &self,
         sections: &[astra_plugin_abi::RuntimeSectionPayload],
     ) -> Result<(), RuntimeHostError> {
