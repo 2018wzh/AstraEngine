@@ -1,14 +1,22 @@
 use super::*;
 
 impl NativeVnSession {
-    pub fn save(&self, request: RuntimeSaveRequest) -> Result<RuntimeSaveSections, CoreVnError> {
+    pub fn save(&self) -> Result<SaveBlob, CoreVnError> {
+        astra_runtime::write_runtime_save(materialized_save_snapshot(self)?, SaveRequest::default())
+            .map_err(|error| CoreVnError::message(error.to_string()))
+    }
+
+    pub fn restore(&mut self, blob: SaveBlob) -> Result<astra_runtime::LoadReport, CoreVnError> {
+        let (step, seed) = restore::restore_session(self, blob)?;
+        Ok(astra_runtime::LoadReport { step, seed })
+    }
+
+    pub(super) fn save_abi(
+        &self,
+        request: RuntimeSaveRequest,
+    ) -> Result<RuntimeSaveSections, CoreVnError> {
         self.validate_id(&request.session_id)?;
-        let session = self;
-        let save = astra_runtime::write_runtime_save(
-            materialized_save_snapshot(session)?,
-            SaveRequest::default(),
-        )
-        .map_err(|err| CoreVnError::message(err.to_string()))?;
+        let save = self.save()?;
         Ok(RuntimeSaveSections {
             session_id: request.session_id,
             sections: vec![RuntimeSectionPayload {
@@ -23,7 +31,7 @@ impl NativeVnSession {
         })
     }
 
-    pub fn restore(
+    pub(super) fn restore_abi(
         &mut self,
         request: RuntimeRestoreRequest,
     ) -> Result<RuntimeRestoreReport, CoreVnError> {
@@ -48,12 +56,11 @@ impl NativeVnSession {
                 "runtime.world section version or hash is invalid",
             ));
         }
-        let session = self;
-        let (step, seed) = restore::restore_session(session, runtime_section)?;
+        let report = self.restore(SaveBlob(runtime_section.bytes.clone()))?;
         Ok(RuntimeRestoreReport {
             session_id: request.session_id,
-            restored_fixed_step: step,
-            session_seed: seed,
+            restored_fixed_step: report.step,
+            session_seed: report.seed,
             status: "restored".to_string(),
             diagnostics: Vec::new(),
         })

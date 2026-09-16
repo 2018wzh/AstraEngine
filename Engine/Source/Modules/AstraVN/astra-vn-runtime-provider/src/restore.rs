@@ -2,7 +2,7 @@ use super::*;
 
 pub(super) fn restore_session(
     session: &mut NativeVnSession,
-    section: &RuntimeSectionPayload,
+    blob: SaveBlob,
 ) -> Result<(u64, u64), CoreVnError> {
     // Acquire fallible host resources before committing either half of the session.
     let mut pending = session
@@ -15,12 +15,16 @@ pub(super) fn restore_session(
         .map_err(|_| CoreVnError::message("VN control result lock is poisoned"))?;
     let package = session.world.package_handle().cloned();
     let owner = session.owner;
+    let expected_seed = session.seed;
     let compiled = Arc::clone(&session.compiled);
     let index = Arc::clone(&session.runtime_index);
     let (_, (state, step, seed)) = session.world.load_with_validation(
-        SaveBlob(section.bytes.clone()),
+        blob,
         &astra_core::SchemaMigrationRegistry::default(),
         |snapshot| {
+            if snapshot.config.seed != expected_seed {
+                return Err(RuntimeError::message("ASTRA_NATIVE_VN_RESTORE_SEED: save belongs to a different session seed"));
+            }
             if snapshot.package != package {
                 return Err(RuntimeError::message("ASTRA_NATIVE_VN_RESTORE_PACKAGE: save belongs to a different package"));
             }

@@ -35,7 +35,7 @@ impl NativeVnHostCommandSource {
         >,
     ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
         let envelope = decode_save_envelope(bytes)?;
-        if envelope.payload.sections.session_id != self.session_id {
+        if envelope.payload.session_id != self.session_id {
             return Err(NativeVnHostError::Save(
                 "ASTRA_PLAYER_SAVE_SESSION_MISMATCH: save belongs to another runtime session"
                     .into(),
@@ -125,6 +125,73 @@ mod tests {
             panic!("expected save write")
         };
         bytes.clone()
+    }
+
+    #[test]
+    fn v8_runtime_container_roundtrips_and_rejects_v7_corruption_and_foreign_identity() {
+        use astra_plugin_abi::{RuntimeSaveSections, RuntimeSectionCodec, RuntimeSectionPayload};
+        let mut source = source();
+        let bytes = source.save("slot.01").unwrap();
+        let envelope = decode_save_envelope(&bytes).unwrap();
+        assert_eq!(envelope.schema, "astra.player.native_vn_save.v8");
+        let state = source.runtime_state.clone();
+        let scope = source.media_scope.child();
+        let payload = &envelope.payload;
+        let legacy_sections = RuntimeSaveSections {
+            session_id: payload.session_id.clone(),
+            sections: vec![RuntimeSectionPayload {
+                section_id: "runtime.world".into(),
+                schema: "astra.runtime.save_blob.v5".into(),
+                version: astra_core::SchemaVersion::new(5, 0, 0),
+                codec: RuntimeSectionCodec::Raw,
+                hash: Hash256::from_sha256(&payload.runtime.0),
+                bytes: payload.runtime.0.clone(),
+            }],
+            diagnostics: vec![],
+        };
+        // Serialize the actual v7 field layout, not just a renamed v8 envelope.
+        let legacy = postcard::to_allocvec(&(
+            "astra.player.native_vn_save.v7",
+            (
+                "astra.player.native_vn_save_payload.v7",
+                &payload.slot,
+                legacy_sections,
+                &payload.stage_director,
+                &payload.director_transition_snapshot,
+                &payload.step_evidence,
+                &payload.product_media_snapshot_json,
+                &payload.save_metadata,
+            ),
+        ))
+        .unwrap();
+        assert!(source.restore(&legacy).is_err());
+        for variant in 0..3 {
+            let mut invalid = decode_save_envelope(&bytes).unwrap();
+            match variant {
+                0 => invalid.payload.session_id = GameRuntimeSessionId("foreign".into()),
+                1 => {
+                    let index = invalid.payload.runtime.0.len() - 1;
+                    invalid.payload.runtime.0[index] ^= 1;
+                }
+                _ => invalid.payload.schema = "astra.player.native_vn_save_payload.v7".into(),
+            }
+            assert!(source
+                .restore(&postcard::to_allocvec(&invalid).unwrap())
+                .is_err());
+            assert_eq!(source.runtime_state, state);
+            assert!(!scope.is_cancelled());
+        }
+        source
+            .command(VnPlayerCommand::SetAudioEnabled { enabled: false })
+            .unwrap();
+        source.restore(&bytes).unwrap();
+        assert_eq!(
+            source.runtime_state.as_ref().unwrap().system,
+            state.as_ref().unwrap().system
+        );
+        assert!(scope.is_cancelled());
+        source.release_resources().unwrap();
+        source.shutdown().unwrap();
     }
 
     #[tokio::test]

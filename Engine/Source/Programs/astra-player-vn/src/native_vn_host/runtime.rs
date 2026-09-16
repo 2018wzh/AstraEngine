@@ -1,5 +1,6 @@
 use super::*;
-use astra_plugin_abi::{RuntimeRestoreReport, RuntimeShutdownReport};
+use astra_plugin_abi::RuntimeShutdownReport;
+use astra_runtime::{LoadReport, SaveBlob};
 
 pub(super) struct NativeVnRuntimeHost {
     runtime: Option<astra_vn_runtime_provider::NativeVnSession>,
@@ -140,40 +141,39 @@ impl NativeVnRuntimeHost {
         result
     }
 
-    pub(super) fn save(
-        &mut self,
-        request: RuntimeSaveRequest,
-    ) -> Result<RuntimeSaveSections, RuntimeHostError> {
-        self.validate_session(&request.session_id)?;
+    pub(super) fn save(&mut self) -> Result<SaveBlob, RuntimeHostError> {
+        self.validate_session(self.session.as_ref().ok_or_else(|| {
+            RuntimeHostError::new("ASTRA_RUNTIME_HOST_SESSION", "NativeVN session is not open")
+        })?)?;
         self.require_healthy()?;
         self.failed = true;
         let result = self
             .runtime
             .as_ref()
             .expect("validated native session")
-            .save(request)
+            .save()
             .map_err(|error| RuntimeHostError::new("ASTRA_RUNTIME_HOST_SAVE", error.to_string()))
             .and_then(|report| {
-                self.limits.validate_sections(&report.sections)?;
+                self.limits.validate_output_count(1)?;
+                self.limits.validate_save_bytes(report.0.len())?;
                 Ok(report)
             });
         self.failed = result.is_err();
         result
     }
 
-    pub(super) fn restore(
-        &mut self,
-        request: RuntimeRestoreRequest,
-    ) -> Result<RuntimeRestoreReport, RuntimeHostError> {
-        self.validate_session(&request.session_id)?;
-        self.limits.validate_sections(&request.sections)?;
+    pub(super) fn restore(&mut self, blob: SaveBlob) -> Result<LoadReport, RuntimeHostError> {
+        self.validate_session(self.session.as_ref().ok_or_else(|| {
+            RuntimeHostError::new("ASTRA_RUNTIME_HOST_SESSION", "NativeVN session is not open")
+        })?)?;
+        self.limits.validate_save_bytes(blob.0.len())?;
         let was_failed = self.failed;
         self.failed = true;
         let report = match self
             .runtime
             .as_mut()
             .expect("validated native session")
-            .restore(request)
+            .restore(blob)
         {
             Ok(report) => report,
             Err(error) => {
@@ -184,14 +184,14 @@ impl NativeVnRuntimeHost {
                 ));
             }
         };
-        if Some(&report.session_id) != self.session.as_ref() || report.session_seed != self.seed {
+        if report.seed != self.seed {
             self.failed = true;
             return Err(RuntimeHostError::new(
                 "ASTRA_RUNTIME_HOST_RESTORE_IDENTITY",
                 "NativeVN restored session or seed does not match",
             ));
         }
-        self.last_step = report.restored_fixed_step;
+        self.last_step = report.step;
         self.next_mode = RuntimeStepMode::RestoreContinuation;
         self.failed = false;
         Ok(report)
@@ -260,12 +260,8 @@ mod tests {
         }
     }
 
-    fn save(host: &mut NativeVnRuntimeHost) -> RuntimeSaveSections {
-        host.save(RuntimeSaveRequest {
-            session_id: host.session.clone().unwrap(),
-            slot: "slot.01".into(),
-        })
-        .unwrap()
+    fn save(host: &mut NativeVnRuntimeHost) -> SaveBlob {
+        host.save().unwrap()
     }
 
     #[test]
@@ -353,17 +349,8 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("STEP_ORDER"));
-        assert!(host
-            .save(RuntimeSaveRequest {
-                session_id: saved.session_id.clone(),
-                slot: "slot.01".into()
-            })
-            .is_err());
-        host.restore(RuntimeRestoreRequest {
-            session_id: saved.session_id,
-            sections: saved.sections,
-        })
-        .unwrap();
+        assert!(host.save().is_err());
+        host.restore(saved).unwrap();
         assert!(!host.failed);
         assert_eq!(host.next_mode, RuntimeStepMode::RestoreContinuation);
         host.step(step(
@@ -389,23 +376,13 @@ mod tests {
         host.step(step(host, 1, NativeVnStepCommand::LaunchDefault))
             .unwrap();
         let saved = save(host);
-        let mut invalid = saved.sections.clone();
-        invalid[0].bytes[0] ^= 1;
-        assert!(host
-            .restore(RuntimeRestoreRequest {
-                session_id: saved.session_id.clone(),
-                sections: invalid
-            })
-            .is_err());
+        let mut invalid = saved.clone();
+        invalid.0[0] ^= 1;
+        assert!(host.restore(invalid).is_err());
         assert!(!host.failed);
         assert_eq!(save(host), saved);
         host.limits = RuntimeHostLimits::new().with_bounds(256, 1);
-        assert!(host
-            .save(RuntimeSaveRequest {
-                session_id: saved.session_id,
-                slot: "slot.01".into()
-            })
-            .is_err());
+        assert!(host.save().is_err());
         assert!(host.failed);
         assert!(host
             .step(step(

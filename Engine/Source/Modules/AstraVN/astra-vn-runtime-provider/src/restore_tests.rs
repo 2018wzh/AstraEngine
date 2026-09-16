@@ -19,6 +19,7 @@ fn fixture() -> (NativeVnRuntimeProvider, GameRuntimeSessionId) {
     let owner = world.create_actor("vn", vec![]).unwrap();
     let session = NativeVnSession {
         id: GameRuntimeSessionId("restore.test".into()),
+        seed: RuntimeConfig::default().seed,
         world,
         owner,
         compiled,
@@ -58,6 +59,7 @@ fn typed_restore_rejection_preserves_world_state_and_pending_control() {
         "decode",
         "schema",
         "package",
+        "seed",
     ] {
         let (mut provider, id) = fixture();
         let session = provider.session(&id).unwrap();
@@ -78,6 +80,9 @@ fn typed_restore_rejection_preserves_world_state_and_pending_control() {
                 extra.component_id =
                     ComponentId(astra_core::StableId::deterministic_v7(999, 999, 0));
                 assert!(snapshot.actors.attach_component(extra));
+            }
+            "seed" => {
+                snapshot.config.seed = snapshot.config.seed.wrapping_add(1);
             }
             "package" => {
                 snapshot.package.as_mut().unwrap().package_id = "other".into();

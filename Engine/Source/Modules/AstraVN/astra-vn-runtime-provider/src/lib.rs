@@ -582,14 +582,14 @@ impl NativeVnRuntimeProvider {
     }
 
     pub fn save(&self, request: RuntimeSaveRequest) -> Result<RuntimeSaveSections, CoreVnError> {
-        self.session(&request.session_id)?.save(request)
+        self.session(&request.session_id)?.save_abi(request)
     }
 
     pub fn restore(
         &mut self,
         request: RuntimeRestoreRequest,
     ) -> Result<RuntimeRestoreReport, CoreVnError> {
-        self.session_mut(&request.session_id)?.restore(request)
+        self.session_mut(&request.session_id)?.restore_abi(request)
     }
 
     pub fn shutdown(

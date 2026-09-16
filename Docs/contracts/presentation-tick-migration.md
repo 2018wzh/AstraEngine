@@ -119,3 +119,7 @@ open_native 接收共享 Arc<CompiledStory>、VnRunConfig 与 NativeVnSessionCon
 ### NativeVN session 直接所有权
 
 NativeVnSession::new 返回原生会话对象，Player 私有宿主直接拥有并调用 step/save/restore，关闭时消费并销毁会话，取消 RuntimeWorld 作用域。实时操作不经 provider session map 查找；旧 provider 将同一 session 实现保存在 map 中，仅服务旧 ABI 消费者。session API 验证传入的会话身份，非法身份不改变会话；已有 tick/失败、保存边界、恢复预检仍然有效。创建与 step/save 模块独立，不复制一套产品执行器。
+
+### 原生存档容器 v8
+
+NativeVnSession::save/restore 直接读写 Runtime SaveBlob，恢复返回 LoadReport（step/seed）。Player v8 保存明确 session_id 和自描述 Runtime 容器，删除 RuntimeSaveSections、section 元数据和重复外层 hash；Runtime 容器自身的 schema/codec/hash 校验、宿主大小限制与 package/typed state 预检保留；seed 在提交 World 和 VN state 前与创建配置匹配。v7 与更旧 Player 存档拒绝，不提供迁移或覆盖旧文件。旧 provider ABI 在边界包装同一个 SaveBlob；产品媒体、元数据和恢复后的作用域清理不变。

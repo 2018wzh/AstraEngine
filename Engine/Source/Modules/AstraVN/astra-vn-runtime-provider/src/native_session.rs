@@ -3,6 +3,7 @@ use super::*;
 /// An owned NativeVN session. Dropping it cancels its world-scoped tasks.
 pub struct NativeVnSession {
     pub(super) id: GameRuntimeSessionId,
+    pub(super) seed: u64,
     pub(super) world: RuntimeWorld,
     pub(super) owner: ActorId,
     pub(super) compiled: Arc<CoreCompiledStory>,
@@ -82,7 +83,7 @@ mod tests {
         launch(&mut session);
         let state = session.state.clone();
         let save = session
-            .save(RuntimeSaveRequest {
+            .save_abi(RuntimeSaveRequest {
                 session_id: session.id().clone(),
                 slot: "slot".into(),
             })
@@ -101,7 +102,7 @@ mod tests {
             .to_string()
             .contains("SESSION_MISMATCH"));
         assert!(session
-            .save(RuntimeSaveRequest {
+            .save_abi(RuntimeSaveRequest {
                 session_id: foreign.clone(),
                 slot: "slot".into()
             })
@@ -109,7 +110,7 @@ mod tests {
             .to_string()
             .contains("SESSION_MISMATCH"));
         assert!(session
-            .restore(RuntimeRestoreRequest {
+            .restore_abi(RuntimeRestoreRequest {
                 session_id: foreign,
                 sections: save.sections.clone()
             })
@@ -119,7 +120,7 @@ mod tests {
         assert_eq!(session.state, state);
         assert_eq!(
             session
-                .save(RuntimeSaveRequest {
+                .save_abi(RuntimeSaveRequest {
                     session_id: session.id().clone(),
                     slot: "slot".into()
                 })

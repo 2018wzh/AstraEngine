@@ -10,7 +10,7 @@ use std::time::Instant;
 
 use unicode_segmentation::UnicodeSegmentation;
 
-use astra_core::{Hash256, SchemaVersion};
+use astra_core::Hash256;
 use astra_media::{
     CosmicTextLayoutProvider, FontBindingContext, LayoutConstraint, OverflowPolicy, TextDirection,
     TextLayoutConfig, TextLayoutProvider, TextLayoutRequest, TextLayoutResult,
@@ -27,8 +27,7 @@ use astra_player_core::{
 };
 use astra_plugin::{RuntimeHostError, RuntimeHostLimits};
 use astra_plugin_abi::{
-    GameRuntimeSessionId, RuntimeExecutorConfig, RuntimeRestoreRequest, RuntimeSaveRequest,
-    RuntimeSaveSections, RuntimeSectionCodec, RuntimeStepMode, RuntimeTickIntegrityMode,
+    GameRuntimeSessionId, RuntimeExecutorConfig, RuntimeStepMode, RuntimeTickIntegrityMode,
     ValidatedRuntimeProviderSelection, NATIVE_VN_PROVIDER_ID,
 };
 use astra_ui_core::{
@@ -402,7 +401,8 @@ pub struct NativeVnProductObservationEvidence {
 struct NativeVnPlayerSavePayload {
     schema: String,
     slot: String,
-    sections: RuntimeSaveSections,
+    session_id: GameRuntimeSessionId,
+    runtime: astra_runtime::SaveBlob,
     stage_director: ProductStageDirector,
     director_transition_snapshot: Option<SavedDirectorTransitionSnapshot>,
     step_evidence: NativeVnStepEvidence,
@@ -1538,10 +1538,7 @@ impl NativeVnHostCommandSource {
                 "ASTRA_PLAYER_SAVE_EVIDENCE_MISSING: runtime has no completed step".into(),
             )
         })?;
-        let sections = self.host.save(RuntimeSaveRequest {
-            session_id: self.session_id.clone(),
-            slot: slot.clone(),
-        })?;
+        let runtime = self.host.save()?;
         let save_metadata = self.pending_save_metadata.clone().ok_or_else(|| {
             NativeVnHostError::Save(
                 "ASTRA_PLAYER_SAVE_METADATA_MISSING: save serialization requires prepared metadata"
@@ -1554,9 +1551,10 @@ impl NativeVnHostCommandSource {
             ));
         }
         let payload = NativeVnPlayerSavePayload {
-            schema: "astra.player.native_vn_save_payload.v7".into(),
+            schema: "astra.player.native_vn_save_payload.v8".into(),
             slot,
-            sections,
+            session_id: self.session_id.clone(),
+            runtime,
             stage_director: self.stage_director.clone(),
             director_transition_snapshot: save_director_transition_snapshot(
                 self.director_transition_snapshot.as_ref(),
@@ -1566,7 +1564,7 @@ impl NativeVnHostCommandSource {
             save_metadata: save_metadata_for_persistence(&save_metadata),
         };
         postcard::to_allocvec(&NativeVnPlayerSaveEnvelope {
-            schema: "astra.player.native_vn_save.v7".into(),
+            schema: "astra.player.native_vn_save.v8".into(),
             payload,
         })
         .map_err(|error| NativeVnHostError::Save(error.to_string()))
@@ -1590,7 +1588,7 @@ impl NativeVnHostCommandSource {
         committed: &mut bool,
     ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
         let envelope = decode_save_envelope(bytes)?;
-        if envelope.payload.sections.session_id != self.session_id {
+        if envelope.payload.session_id != self.session_id {
             return Err(NativeVnHostError::Save(
                 "ASTRA_PLAYER_SAVE_SESSION_MISMATCH: save belongs to another runtime session"
                     .into(),
@@ -1598,28 +1596,18 @@ impl NativeVnHostCommandSource {
         }
         let save_metadata = restore_save_metadata(envelope.payload.save_metadata.clone())?;
         validate_save_metadata(&save_metadata, &envelope.payload.slot)?;
-        let restored_runtime_state = saved_runtime_state(&envelope.payload.sections)?;
+        let restored_runtime_state = saved_runtime_state(&envelope.payload.runtime)?;
         let restored_locale = restored_runtime_state.locale.clone();
         if !self.localizations.contains_key(&restored_locale) {
             return Err(NativeVnHostError::Localization(format!(
                 "ASTRA_PLAYER_RESTORE_LOCALE_UNAVAILABLE: locale {restored_locale} is not packaged"
             )));
         }
-        let report = self.host.restore(RuntimeRestoreRequest {
-            session_id: self.session_id.clone(),
-            sections: envelope.payload.sections.sections,
-        })?;
+        let report = self.host.restore(envelope.payload.runtime)?;
         *committed = true;
         self.reset_pending_work();
-        if report.status != "restored" || !report.diagnostics.is_empty() {
-            return Err(NativeVnHostError::Save(format!(
-                "ASTRA_PLAYER_RESTORE_FAILED: status={} diagnostics={}",
-                report.status,
-                report.diagnostics.join(",")
-            )));
-        }
-        self.fixed_step = report.restored_fixed_step;
-        self.session_seed = report.session_seed;
+        self.fixed_step = report.step;
+        self.session_seed = report.seed;
         self.next_step_mode = RuntimeStepMode::RestoreContinuation;
         self.runtime_state = Some(restored_runtime_state);
         self.runtime_backlog_count = self
@@ -1754,8 +1742,7 @@ impl NativeVnHostCommandSource {
         bytes: &[u8],
     ) -> Result<(), NativeVnHostError> {
         let envelope = decode_save_envelope(bytes)?;
-        if envelope.payload.slot != expected_slot
-            || envelope.payload.sections.session_id != self.session_id
+        if envelope.payload.slot != expected_slot || envelope.payload.session_id != self.session_id
         {
             return Err(NativeVnHostError::Save(
                 "ASTRA_PLAYER_SAVE_CATALOG_IDENTITY: catalog entry does not belong to the requested slot and session"
@@ -4700,28 +4687,13 @@ fn validate_product_provider_bindings(
 }
 
 fn saved_runtime_state(
-    sections: &RuntimeSaveSections,
+    blob: &astra_runtime::SaveBlob,
 ) -> Result<VnRuntimeState, NativeVnHostError> {
-    let [section] = sections.sections.as_slice() else {
-        return Err(NativeVnHostError::Save(
-            "ASTRA_PLAYER_SAVE_RUNTIME_SECTION_SET: exactly one runtime.world section is required"
-                .into(),
-        ));
-    };
-    if section.section_id != "runtime.world"
-        || section.schema != "astra.runtime.save_blob.v5"
-        || section.version != SchemaVersion::new(5, 0, 0)
-        || section.codec != RuntimeSectionCodec::Raw
-    {
-        return Err(NativeVnHostError::Save(
-            "ASTRA_PLAYER_SAVE_INTEGRITY: runtime section contract mismatch".into(),
-        ));
-    }
-    let snapshot = astra_runtime::read_runtime_save(
-        &astra_runtime::SaveBlob(section.bytes.clone()),
-        &astra_core::SchemaMigrationRegistry::default(),
-    )
-    .map_err(|error| NativeVnHostError::Save(format!("ASTRA_PLAYER_SAVE_INTEGRITY: {error}")))?;
+    let snapshot =
+        astra_runtime::read_runtime_save(blob, &astra_core::SchemaMigrationRegistry::default())
+            .map_err(|error| {
+                NativeVnHostError::Save(format!("ASTRA_PLAYER_SAVE_INTEGRITY: {error}"))
+            })?;
     let mut states = snapshot
         .actors
         .actor_snapshots()
@@ -6825,8 +6797,8 @@ fn decode_save_envelope(bytes: &[u8]) -> Result<NativeVnPlayerSaveEnvelope, Nati
     let envelope: NativeVnPlayerSaveEnvelope = postcard::from_bytes(bytes).map_err(|error| {
         NativeVnHostError::Save(format!("ASTRA_PLAYER_SAVE_INTEGRITY: {error}"))
     })?;
-    if envelope.schema != "astra.player.native_vn_save.v7"
-        || envelope.payload.schema != "astra.player.native_vn_save_payload.v7"
+    if envelope.schema != "astra.player.native_vn_save.v8"
+        || envelope.payload.schema != "astra.player.native_vn_save_payload.v8"
     {
         return Err(NativeVnHostError::Save(
             "ASTRA_PLAYER_SAVE_VERSION_UNSUPPORTED: save schema is not supported".into(),

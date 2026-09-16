@@ -127,6 +127,11 @@ impl RuntimeHostLimits {
                 )
             })?;
         }
+        self.validate_save_bytes(bytes)
+    }
+
+    /// Bound a native Runtime save without constructing ABI section metadata.
+    pub fn validate_save_bytes(&self, bytes: usize) -> Result<(), RuntimeHostError> {
         if bytes > self.max_output_bytes {
             return Err(RuntimeHostError::new(
                 "ASTRA_RUNTIME_HOST_SECTION_BYTES",

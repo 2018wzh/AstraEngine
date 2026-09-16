@@ -99,6 +99,7 @@ impl NativeVnSession {
             .map_err(|err| CoreVnError::message(err.to_string()))?;
         Ok(Self {
             id: session_id,
+            seed: options.seed,
             world,
             owner,
             compiled,
