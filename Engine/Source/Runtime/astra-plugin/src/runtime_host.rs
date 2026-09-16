@@ -67,7 +67,12 @@ impl RuntimeHostLimits {
             + output.live.events.len()
             + output.live.blackboard.len()
             + output.live.dirty_sections.len();
-        if live_count > self.max_outputs {
+        self.validate_output_count(live_count)
+    }
+
+    /// Apply the same budget to native typed output without constructing an ABI envelope.
+    pub fn validate_output_count(&self, count: usize) -> Result<(), RuntimeHostError> {
+        if count > self.max_outputs {
             return Err(RuntimeHostError::new(
                 "ASTRA_RUNTIME_HOST_OUTPUT_COUNT",
                 "runtime provider live output count exceeds the configured bound",

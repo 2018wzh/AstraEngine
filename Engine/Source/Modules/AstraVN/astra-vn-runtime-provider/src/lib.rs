@@ -5,7 +5,7 @@
 //! `ffi.rs`（FfiProviderInstance 1200+ 行）；本轮仅库内Headless/指纹/Hash优先，拆分延至下次 PR 避免与 `973191ede` 合并冲突。
 
 mod native_step;
-pub use native_step::{NativeVnStepCommand, NativeVnStepInput};
+pub use native_step::{NativeVnStepCommand, NativeVnStepInput, NativeVnStepOutput};
 
 #[cfg(feature = "ffi")]
 use std::sync::OnceLock;
@@ -635,7 +635,8 @@ impl NativeVnRuntimeProvider {
             session_seed: input.session_seed,
             mode: input.mode,
             command,
-        })
+        })?
+        .into_abi()
     }
 
     fn apply_command_at_step(
@@ -646,7 +647,7 @@ impl NativeVnRuntimeProvider {
         delta_ns: u64,
         session_seed: u64,
         mode: RuntimeStepMode,
-    ) -> Result<RuntimeStepOutput, CoreVnError> {
+    ) -> Result<NativeVnStepOutput, CoreVnError> {
         let session = self.session_mut(&session_id)?;
         let event_kind = vn_event_kind(&command).to_string();
         let previous_state = session.state.clone();
@@ -810,67 +811,14 @@ impl NativeVnRuntimeProvider {
             mutation_journal_entries,
         });
         let live_vn_state = runtime_live_vn_state(&session.state);
-        let presentation_count = output.presentation.len();
-        let audio_command_count = output.audio.len();
-        let mut presentations = Vec::with_capacity(presentation_count);
-        let mut audio_cues = Vec::with_capacity(audio_command_count);
-        let mut audio = output.audio.into_iter();
-        for (presentation_index, command) in output.presentation.into_iter().enumerate() {
-            let sequence = presentation_index
-                .checked_add(1)
-                .and_then(|index| u64::try_from(index).ok())
-                .ok_or_else(|| CoreVnError::message("VN presentation sequence overflow"))?;
-            let has_audio = matches!(&command, PresentationCommand::Stage(StageCommand::Audio(_)));
-            if has_audio {
-                let audio_command = audio.next().ok_or_else(|| {
-                    CoreVnError::diagnostic(
-                        "ASTRA_NATIVE_VN_AUDIO_ORDER_MISSING",
-                        "typed audio presentation has no matching audio output",
-                    )
-                })?;
-                audio_cues.push(runtime_live_audio_cue(sequence, &audio_command));
-            }
-            presentations.push(runtime_live_presentation(sequence, command));
-        }
-        if audio.next().is_some() {
-            return Err(CoreVnError::diagnostic(
-                "ASTRA_NATIVE_VN_AUDIO_ORDER_EXTRA",
-                "audio output has no matching typed presentation command",
-            ));
-        }
-        let timeline = output
-            .timeline_tasks
-            .into_iter()
-            .map(|task| astra_plugin_abi::RuntimeLiveTimelineTask {
-                command_id: task.command_id,
-                command: runtime_live_timeline(task.command),
-            })
-            .collect();
-        let vn_step = astra_plugin_abi::RuntimeLiveVnStep {
-            coverage_reached: output.coverage.reached.into_iter().collect(),
-        };
-        Ok(RuntimeStepOutput {
+        Ok(NativeVnStepOutput {
             session_id,
-            status: if presentation_count == 0 {
-                "idle".to_string()
-            } else {
-                "blocked".to_string()
-            },
-            live: astra_plugin_abi::RuntimeLiveOutput {
-                state_revision: fixed_step,
-                coverage: RuntimeLiveCoverage {
-                    presentation_commands: presentation_count as u64,
-                    audio_commands: audio_command_count as u64,
-                    ..RuntimeLiveCoverage::default()
-                },
-                audio_cues,
-                presentations,
-                timeline,
-                vn_state: Some(live_vn_state),
-                vn_step: Some(vn_step),
-                ..astra_plugin_abi::RuntimeLiveOutput::default()
-            },
-            diagnostics: Vec::new(),
+            fixed_step,
+            vn_state: live_vn_state,
+            presentations: output.presentation,
+            audio: output.audio,
+            timeline: output.timeline_tasks,
+            coverage_reached: output.coverage.reached.into_iter().collect(),
         })
     }
 

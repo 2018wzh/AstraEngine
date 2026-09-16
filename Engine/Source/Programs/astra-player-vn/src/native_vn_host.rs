@@ -27,11 +27,10 @@ use astra_player_core::{
 };
 use astra_plugin::{RuntimeHostError, RuntimeHostLimits};
 use astra_plugin_abi::{
-    GameRuntimeSessionId, RuntimeExecutorConfig, RuntimeLiveAudioBus, RuntimeLiveAudioSync,
-    RuntimeOpenRequest, RuntimePrepareRequest, RuntimeProbeRequest, RuntimeRestoreRequest,
-    RuntimeSaveRequest, RuntimeSaveSections, RuntimeSectionCodec, RuntimeSectionPayload,
-    RuntimeStepMode, RuntimeTickIntegrityMode, ValidatedRuntimeProviderSelection,
-    NATIVE_VN_PROVIDER_ID,
+    GameRuntimeSessionId, RuntimeExecutorConfig, RuntimeOpenRequest, RuntimePrepareRequest,
+    RuntimeProbeRequest, RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeSaveSections,
+    RuntimeSectionCodec, RuntimeSectionPayload, RuntimeStepMode, RuntimeTickIntegrityMode,
+    ValidatedRuntimeProviderSelection, NATIVE_VN_PROVIDER_ID,
 };
 use astra_ui_core::{
     UiBackend, UiBlueprintBundle, UiBlueprintFrameModel, UiBlueprintModalFrameModel, UiButtonState,
@@ -62,7 +61,9 @@ use astra_vn_package::{
     VnSystemUiProfileManifest,
 };
 use astra_vn_policy::LuauUiControllerHost;
-use astra_vn_runtime_provider::{NativeVnRuntimeProvider, NativeVnStepCommand, NativeVnStepInput};
+use astra_vn_runtime_provider::{
+    NativeVnRuntimeProvider, NativeVnStepCommand, NativeVnStepInput, NativeVnStepOutput,
+};
 use astra_vn_ui::{
     resolve_binding, SaveSlotViewModel, VnUiAction, VnUiBindingError, VnUiBindingRequest,
     VnUiControllerEffect, VnUiControllerUpdate, VnUiModelContext, VnUiSessionState,
@@ -3793,7 +3794,7 @@ impl NativeVnHostCommandSource {
             .ok_or(NativeVnHostError::SequenceOverflow)?;
         let runtime_step_started =
             performance_phase_started(self.ui_host_performance_sampling_enabled);
-        let mut output = self.host.step(NativeVnStepInput {
+        let output = self.host.step(NativeVnStepInput {
             session_id: self.session_id.clone(),
             fixed_step,
             delta_ns: 16_666_667,
@@ -3811,16 +3812,7 @@ impl NativeVnHostCommandSource {
             performance_phase_started(self.ui_host_performance_sampling_enabled);
         self.fixed_step = fixed_step;
         self.next_step_mode = RuntimeStepMode::Live;
-        let vn_step = output.live.vn_step.take().ok_or_else(|| {
-            NativeVnHostError::RuntimeEvidence(
-                "ASTRA_PLAYER_VN_STEP_METADATA_MISSING: typed VN step metadata is required".into(),
-            )
-        })?;
-        let runtime_view = output.live.vn_state.take().ok_or_else(|| {
-            NativeVnHostError::RuntimeEvidence(
-                "ASTRA_PLAYER_VN_VIEW_STATE_MISSING: typed runtime view state is required".into(),
-            )
-        })?;
+        let runtime_view = output.vn_state;
         self.runtime_backlog_count = runtime_view.backlog_count;
         self.runtime_state = Some(runtime_vn_state(runtime_view)?);
         self.ensure_text_region()?;
@@ -3835,10 +3827,10 @@ impl NativeVnHostCommandSource {
             schema: "astra.player_vn_step_evidence.v2".to_string(),
             fixed_step,
             coverage_reached: unique_string_set(
-                vn_step.coverage_reached,
+                output.coverage_reached,
                 "ASTRA_PLAYER_VN_COVERAGE_DUPLICATE",
             )?,
-            presentation_count: output.live.presentations.len(),
+            presentation_count: output.presentations.len(),
             current_state_id: runtime_state
                 .cursor
                 .as_ref()
@@ -3872,36 +3864,13 @@ impl NativeVnHostCommandSource {
                 Default::default()
             },
         });
-        for task in &output.live.timeline {
-            self.pending_timeline
-                .push(player_timeline_task(runtime_timeline_task(task.clone()))?);
+        for task in output.timeline {
+            self.pending_timeline.push(player_timeline_task(task)?);
         }
-        let mut live_audio_cues = Vec::new();
-        for cue in &output.live.audio_cues {
-            live_audio_cues.push(cue.clone());
-        }
-        if !output.live.scenes.is_empty()
-            || !output.live.resource_scenes.is_empty()
-            || !output.live.audio.is_empty()
-            || !output.live.audio_commands.is_empty()
-            || !output.live.text.is_empty()
-            || !output.live.text_presentations.is_empty()
-            || !output.live.video.is_empty()
-            || !output.live.waits.is_empty()
-            || !output.live.events.is_empty()
-            || !output.live.blackboard.is_empty()
-            || !output.live.dirty_sections.is_empty()
-        {
-            return Err(NativeVnHostError::RuntimeEvidence(
-                "ASTRA_PLAYER_VN_LIVE_EFFECT_UNEXPECTED: VN provider emitted a non-audio live effect"
-                    .into(),
-            ));
-        }
-        let mut live_audio_cues = live_audio_cues.into_iter();
+        let mut live_audio_cues = output.audio.into_iter();
         let mut ordered_outputs = Vec::new();
         let mut presentation_count = 0_usize;
-        for live in &output.live.presentations {
-            let command = runtime_presentation_command(live.clone())?;
+        for command in output.presentations {
             presentation_count = presentation_count.saturating_add(1);
             if matches!(&command, PresentationCommand::Stage(StageCommand::Audio(_))) {
                 let cue = live_audio_cues.next().ok_or_else(|| {
@@ -3909,13 +3878,15 @@ impl NativeVnHostCommandSource {
                                 "ASTRA_PLAYER_VN_AUDIO_LIVE_MISSING: stage audio presentation has no live cue".into(),
                             )
                         })?;
+                let command_id = cue.command_id;
+                let cue = cue.cue;
                 let asset_id = cue.asset.clone();
                 let asset = self.asset_store.load_media(&asset_id)?;
                 let command_kind = match cue.bus {
-                    RuntimeLiveAudioBus::Voice => "voice",
-                    RuntimeLiveAudioBus::Bgm => "bgm",
-                    RuntimeLiveAudioBus::Se => "se",
-                    RuntimeLiveAudioBus::Movie => "movie",
+                    VnAudioBus::Voice => "voice",
+                    VnAudioBus::Bgm => "bgm",
+                    VnAudioBus::Se => "se",
+                    VnAudioBus::Movie => "movie",
                 };
                 let mut attributes = BTreeMap::from([
                     ("asset".to_string(), asset_id.clone()),
@@ -3923,16 +3894,15 @@ impl NativeVnHostCommandSource {
                     ("fade".to_string(), cue.fade_ms.to_string()),
                 ]);
                 match &cue.sync {
-                    RuntimeLiveAudioSync::None => {}
-                    RuntimeLiveAudioSync::Text => {
+                    astra_vn_core::VnAudioSync::None => {}
+                    astra_vn_core::VnAudioSync::Text => {
                         attributes.insert("sync".to_string(), "text".to_string());
                     }
-                    RuntimeLiveAudioSync::Fence(fence) => {
+                    astra_vn_core::VnAudioSync::Fence(fence) => {
                         attributes.insert("sync".to_string(), "fence".to_string());
                         attributes.insert("fence".to_string(), fence.clone());
                     }
                 }
-                let command_id = cue.command_id.clone();
                 ordered_outputs.push(NativeVnOrderedRuntimeOutput::AudioStart(
                     NativeVnAudioRequest {
                         command_id: command_id.clone(),
@@ -5019,75 +4989,6 @@ fn typed_vn_state_error(code: &'static str) -> NativeVnHostError {
     ))
 }
 
-fn runtime_presentation_command(
-    value: astra_plugin_abi::RuntimeLivePresentationCommand,
-) -> Result<PresentationCommand, NativeVnHostError> {
-    use astra_plugin_abi::RuntimeLivePresentationKind as Live;
-    Ok(match value.command {
-        Live::Dialogue {
-            key,
-            speaker,
-            voice,
-            window,
-        } => PresentationCommand::Dialogue {
-            key,
-            speaker,
-            voice,
-            window,
-        },
-        Live::Choice { key, options } => PresentationCommand::Choice {
-            key,
-            options: options.into_iter().map(runtime_choice_option).collect(),
-        },
-        Live::SystemPage { page } => PresentationCommand::SystemPage {
-            page: runtime_system_page(page),
-        },
-        Live::SystemOption { option } => PresentationCommand::SystemOption {
-            option: runtime_choice_option(option),
-        },
-        Live::Stage(command) => PresentationCommand::Stage(runtime_stage_command(command)?),
-        Live::Extension(command) => {
-            PresentationCommand::Extension(astra_vn_core::ExtensionPresentationCommand {
-                command: command.command,
-                provider_id: command.provider_id,
-                schema: command.schema,
-                fields: command
-                    .fields
-                    .into_iter()
-                    .map(|(name, value)| {
-                        (
-                            name,
-                            match value {
-                                astra_plugin_abi::RuntimeLiveExtensionValue::String(value) => {
-                                    astra_vn_core::ExtensionValue::String(value)
-                                }
-                                astra_plugin_abi::RuntimeLiveExtensionValue::Integer(value) => {
-                                    astra_vn_core::ExtensionValue::Integer(value)
-                                }
-                                astra_plugin_abi::RuntimeLiveExtensionValue::Fixed(millionths) => {
-                                    astra_vn_core::ExtensionValue::Fixed(
-                                        astra_vn_core::FixedScalar { millionths },
-                                    )
-                                }
-                                astra_plugin_abi::RuntimeLiveExtensionValue::Boolean(value) => {
-                                    astra_vn_core::ExtensionValue::Boolean(value)
-                                }
-                                astra_plugin_abi::RuntimeLiveExtensionValue::Symbol(value) => {
-                                    astra_vn_core::ExtensionValue::Symbol(value)
-                                }
-                                astra_plugin_abi::RuntimeLiveExtensionValue::AssetUri(value) => {
-                                    astra_vn_core::ExtensionValue::AssetUri(value)
-                                }
-                            },
-                        )
-                    })
-                    .collect(),
-            })
-        }
-        Live::Marker { id } => PresentationCommand::Marker { id },
-    })
-}
-
 fn runtime_choice_option(
     value: astra_plugin_abi::RuntimeLiveChoiceOption,
 ) -> astra_vn_core::ChoiceOption {
@@ -5139,402 +5040,6 @@ fn runtime_system_page(
         Live::LocalizationPreview => astra_vn_core::SystemPageKind::LocalizationPreview,
         Live::Custom => astra_vn_core::SystemPageKind::Custom,
         Live::Unknown => astra_vn_core::SystemPageKind::Unknown,
-    }
-}
-
-fn runtime_timeline_task(
-    value: astra_plugin_abi::RuntimeLiveTimelineTask,
-) -> astra_vn_core::VnTimelineTask {
-    astra_vn_core::VnTimelineTask {
-        command_id: value.command_id,
-        command: runtime_timeline_command(value.command),
-    }
-}
-
-fn runtime_timeline_command(
-    value: astra_plugin_abi::RuntimeLiveTimelineCommand,
-) -> astra_vn_core::TimelineCommand {
-    match value {
-        astra_plugin_abi::RuntimeLiveTimelineCommand::Start(spec) => {
-            astra_vn_core::TimelineCommand::Start(astra_vn_core::TimelineSpec {
-                id: spec.id,
-                join: match spec.join {
-                    astra_plugin_abi::RuntimeLiveTimelineJoin::FireAndForget => {
-                        astra_vn_core::VnTimelineJoinPolicy::FireAndForget
-                    }
-                    astra_plugin_abi::RuntimeLiveTimelineJoin::Block => {
-                        astra_vn_core::VnTimelineJoinPolicy::Block
-                    }
-                    astra_plugin_abi::RuntimeLiveTimelineJoin::ReplaceTarget => {
-                        astra_vn_core::VnTimelineJoinPolicy::ReplaceTarget
-                    }
-                },
-                tracks: spec
-                    .tracks
-                    .into_iter()
-                    .map(|track| astra_vn_core::VnTimelineTrack {
-                        target: track.target,
-                        property: track.property,
-                        keyframes: track
-                            .keyframes
-                            .into_iter()
-                            .map(|keyframe| astra_vn_core::VnTimelineKeyframe {
-                                time_ms: keyframe.time_ms,
-                                value: astra_vn_core::FixedScalar {
-                                    millionths: keyframe.value_millionths,
-                                },
-                            })
-                            .collect(),
-                    })
-                    .collect(),
-                fence: spec.fence,
-                fallback: spec.fallback,
-                budget_us: spec.budget_us,
-            })
-        }
-        astra_plugin_abi::RuntimeLiveTimelineCommand::Cancel { id, reason } => {
-            astra_vn_core::TimelineCommand::Cancel { id, reason }
-        }
-    }
-}
-
-fn runtime_stage_command(
-    value: astra_plugin_abi::RuntimeLiveStageCommand,
-) -> Result<StageCommand, NativeVnHostError> {
-    use astra_plugin_abi::RuntimeLiveStageCommand as Live;
-    Ok(match value {
-        Live::Preload { asset } => StageCommand::Preload { asset },
-        Live::Configure {
-            width,
-            height,
-            safe_area_width,
-            safe_area_height,
-        } => StageCommand::Configure {
-            viewport: astra_vn_core::StageViewport { width, height },
-            safe_area: astra_vn_core::AspectRatio {
-                width: safe_area_width,
-                height: safe_area_height,
-            },
-        },
-        Live::DeclareLayer {
-            id,
-            kind,
-            z,
-            blend,
-            clip,
-            input,
-        } => StageCommand::DeclareLayer {
-            id,
-            kind: match kind {
-                astra_plugin_abi::RuntimeLiveStageLayerKind::Background => {
-                    astra_vn_core::StageLayerKind::Background
-                }
-                astra_plugin_abi::RuntimeLiveStageLayerKind::Sprite => {
-                    astra_vn_core::StageLayerKind::Sprite
-                }
-                astra_plugin_abi::RuntimeLiveStageLayerKind::Video => {
-                    astra_vn_core::StageLayerKind::Video
-                }
-                astra_plugin_abi::RuntimeLiveStageLayerKind::Text => {
-                    astra_vn_core::StageLayerKind::Text
-                }
-                astra_plugin_abi::RuntimeLiveStageLayerKind::Cg => {
-                    astra_vn_core::StageLayerKind::Cg
-                }
-                astra_plugin_abi::RuntimeLiveStageLayerKind::Ui => {
-                    astra_vn_core::StageLayerKind::Ui
-                }
-                astra_plugin_abi::RuntimeLiveStageLayerKind::Effect => {
-                    astra_vn_core::StageLayerKind::Effect
-                }
-            },
-            z,
-            blend: match blend {
-                astra_plugin_abi::RuntimeLiveStageBlend::Normal => {
-                    astra_vn_core::StageBlendMode::Normal
-                }
-                astra_plugin_abi::RuntimeLiveStageBlend::Add => astra_vn_core::StageBlendMode::Add,
-                astra_plugin_abi::RuntimeLiveStageBlend::Multiply => {
-                    astra_vn_core::StageBlendMode::Multiply
-                }
-                astra_plugin_abi::RuntimeLiveStageBlend::Screen => {
-                    astra_vn_core::StageBlendMode::Screen
-                }
-            },
-            clip: clip.map(|clip| match clip {
-                astra_plugin_abi::RuntimeLiveStageClip::Stage => {
-                    astra_vn_core::StageClipPolicy::Stage
-                }
-                astra_plugin_abi::RuntimeLiveStageClip::SafeArea => {
-                    astra_vn_core::StageClipPolicy::SafeArea
-                }
-            }),
-            input,
-        },
-        Live::Background {
-            asset,
-            layer,
-            preset,
-            duration_ms,
-            interrupt,
-        } => StageCommand::Background {
-            asset,
-            layer,
-            preset,
-            duration_ms,
-            interrupt: runtime_interrupt_policy(interrupt),
-        },
-        Live::Show {
-            id,
-            asset,
-            pose,
-            layer,
-            placement,
-            fit,
-            opacity_millionths,
-            preset,
-            interrupt,
-        } => StageCommand::Show {
-            id,
-            asset,
-            pose,
-            layer,
-            placement: match placement {
-                astra_plugin_abi::RuntimeLiveStagePlacement::Left => {
-                    astra_vn_core::StagePlacement::Left
-                }
-                astra_plugin_abi::RuntimeLiveStagePlacement::Center => {
-                    astra_vn_core::StagePlacement::Center
-                }
-                astra_plugin_abi::RuntimeLiveStagePlacement::Right => {
-                    astra_vn_core::StagePlacement::Right
-                }
-            },
-            fit: match fit {
-                astra_plugin_abi::RuntimeLiveStageFit::ContainHeight => {
-                    astra_vn_core::StageFitMode::ContainHeight
-                }
-                astra_plugin_abi::RuntimeLiveStageFit::Native => {
-                    astra_vn_core::StageFitMode::Native
-                }
-            },
-            opacity: astra_vn_core::FixedScalar {
-                millionths: opacity_millionths,
-            },
-            preset,
-            interrupt: runtime_interrupt_policy(interrupt),
-        },
-        Live::Hide {
-            id,
-            preset,
-            duration_ms,
-            interrupt,
-        } => StageCommand::Hide {
-            id,
-            preset,
-            duration_ms,
-            interrupt: runtime_interrupt_policy(interrupt),
-        },
-        Live::ClearLayer {
-            layer,
-            duration_ms,
-            interrupt,
-        } => StageCommand::ClearLayer {
-            layer,
-            duration_ms,
-            interrupt: runtime_interrupt_policy(interrupt),
-        },
-        Live::SetLayerVisibility { layer, visible } => {
-            StageCommand::SetLayerVisibility { layer, visible }
-        }
-        Live::Backdrop { color } => StageCommand::Backdrop { color },
-        Live::Shade {
-            color,
-            opacity_millionths,
-        } => StageCommand::Shade {
-            color,
-            opacity: astra_vn_core::FixedScalar {
-                millionths: opacity_millionths,
-            },
-        },
-        Live::SetSkipAllowed { allowed } => StageCommand::SetSkipAllowed { allowed },
-        Live::Move {
-            id,
-            x_millionths,
-            y_millionths,
-            duration_ms,
-            preset,
-            interrupt,
-        } => StageCommand::Move {
-            id,
-            x: astra_vn_core::FixedScalar {
-                millionths: x_millionths,
-            },
-            y: astra_vn_core::FixedScalar {
-                millionths: y_millionths,
-            },
-            duration_ms,
-            preset,
-            interrupt: runtime_interrupt_policy(interrupt),
-        },
-        Live::Camera {
-            target,
-            x_millionths,
-            y_millionths,
-            zoom_millionths,
-            rotation_millionths,
-            duration_ms,
-            preset,
-        } => StageCommand::Camera {
-            target,
-            x: astra_vn_core::FixedScalar {
-                millionths: x_millionths,
-            },
-            y: astra_vn_core::FixedScalar {
-                millionths: y_millionths,
-            },
-            zoom: astra_vn_core::FixedScalar {
-                millionths: zoom_millionths,
-            },
-            rotation: astra_vn_core::FixedScalar {
-                millionths: rotation_millionths,
-            },
-            duration_ms,
-            preset,
-        },
-        Live::Movie {
-            layer,
-            asset,
-            alpha_millionths,
-            loop_mode,
-            end,
-            fence,
-            fallback,
-            interrupt,
-        } => StageCommand::Movie {
-            layer,
-            asset,
-            alpha: astra_vn_core::FixedScalar {
-                millionths: alpha_millionths,
-            },
-            loop_mode: match loop_mode {
-                astra_plugin_abi::RuntimeLiveMovieLoop::Once => astra_vn_core::MovieLoopMode::Once,
-                astra_plugin_abi::RuntimeLiveMovieLoop::Loop => astra_vn_core::MovieLoopMode::Loop,
-            },
-            end: match end {
-                astra_plugin_abi::RuntimeLiveMovieEnd::Continue => {
-                    astra_vn_core::VnMovieEndBehavior::Continue
-                }
-                astra_plugin_abi::RuntimeLiveMovieEnd::Wait => {
-                    astra_vn_core::VnMovieEndBehavior::Wait
-                }
-                astra_plugin_abi::RuntimeLiveMovieEnd::Hold => {
-                    astra_vn_core::VnMovieEndBehavior::Hold
-                }
-            },
-            fence,
-            fallback,
-            interrupt: runtime_interrupt_policy(interrupt),
-        },
-        Live::Audio(cue) => StageCommand::Audio(astra_vn_core::AudioCue {
-            id: cue.id,
-            bus: runtime_audio_bus(cue.bus),
-            asset: cue.asset,
-            looped: cue.looped,
-            fade_ms: cue.fade_ms,
-            sync: match cue.sync {
-                astra_plugin_abi::RuntimeLiveAudioSync::None => astra_vn_core::VnAudioSync::None,
-                astra_plugin_abi::RuntimeLiveAudioSync::Text => astra_vn_core::VnAudioSync::Text,
-                astra_plugin_abi::RuntimeLiveAudioSync::Fence(fence) => {
-                    astra_vn_core::VnAudioSync::Fence(fence)
-                }
-            },
-        }),
-        Live::AudioControl(control) => StageCommand::AudioControl(astra_vn_core::AudioControl {
-            id: control.id,
-            action: match control.action {
-                astra_plugin_abi::RuntimeLiveAudioControlAction::Pause => {
-                    astra_vn_core::VnAudioControlAction::Pause
-                }
-                astra_plugin_abi::RuntimeLiveAudioControlAction::Resume => {
-                    astra_vn_core::VnAudioControlAction::Resume
-                }
-                astra_plugin_abi::RuntimeLiveAudioControlAction::Stop => {
-                    astra_vn_core::VnAudioControlAction::Stop
-                }
-                astra_plugin_abi::RuntimeLiveAudioControlAction::FadeStop {
-                    duration_ms,
-                    fence,
-                } => astra_vn_core::VnAudioControlAction::FadeStop { duration_ms, fence },
-            },
-            target: control.target,
-        }),
-        Live::SetAudioBusEnabled { bus, enabled } => StageCommand::SetAudioBusEnabled {
-            bus: runtime_audio_bus(bus),
-            enabled,
-        },
-        Live::Transition {
-            preset,
-            duration_ms,
-            descriptor_id,
-        } => StageCommand::Transition {
-            preset,
-            duration_ms,
-            descriptor_id,
-        },
-        Live::Shake {
-            target,
-            strength_millionths,
-            duration_ms,
-        } => StageCommand::Shake {
-            target,
-            strength: astra_vn_core::FixedScalar {
-                millionths: strength_millionths,
-            },
-            duration_ms,
-        },
-        Live::Timeline(command) => StageCommand::Timeline(runtime_timeline_command(command)),
-        Live::Effect {
-            target,
-            lip_sync,
-            filter,
-            fallback,
-            budget_us,
-        } => StageCommand::Effect {
-            target,
-            lip_sync,
-            filter,
-            fallback,
-            budget_us,
-        },
-    })
-}
-
-fn runtime_interrupt_policy(
-    value: astra_plugin_abi::RuntimeLiveInterruptPolicy,
-) -> astra_vn_core::PresentationInterruptPolicy {
-    match value {
-        astra_plugin_abi::RuntimeLiveInterruptPolicy::Queue => {
-            astra_vn_core::PresentationInterruptPolicy::Queue
-        }
-        astra_plugin_abi::RuntimeLiveInterruptPolicy::ReplaceFromCurrent => {
-            astra_vn_core::PresentationInterruptPolicy::ReplaceFromCurrent
-        }
-        astra_plugin_abi::RuntimeLiveInterruptPolicy::SnapThenStart => {
-            astra_vn_core::PresentationInterruptPolicy::SnapThenStart
-        }
-        astra_plugin_abi::RuntimeLiveInterruptPolicy::Reject => {
-            astra_vn_core::PresentationInterruptPolicy::Reject
-        }
-    }
-}
-
-fn runtime_audio_bus(value: RuntimeLiveAudioBus) -> astra_vn_core::VnAudioBus {
-    match value {
-        RuntimeLiveAudioBus::Voice => astra_vn_core::VnAudioBus::Voice,
-        RuntimeLiveAudioBus::Bgm => astra_vn_core::VnAudioBus::Bgm,
-        RuntimeLiveAudioBus::Se => astra_vn_core::VnAudioBus::Se,
-        RuntimeLiveAudioBus::Movie => astra_vn_core::VnAudioBus::Movie,
     }
 }
 

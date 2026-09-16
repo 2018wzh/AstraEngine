@@ -2,7 +2,7 @@ use super::*;
 use astra_plugin::ProductRuntimeProvider;
 use astra_plugin_abi::{
     RuntimeOpenReport, RuntimePrepareReport, RuntimeProbeReport, RuntimeRestoreReport,
-    RuntimeShutdownReport, RuntimeStepOutput,
+    RuntimeShutdownReport,
 };
 
 pub(super) struct NativeVnRuntimeHost {
@@ -130,7 +130,7 @@ impl NativeVnRuntimeHost {
     pub(super) fn step(
         &mut self,
         input: NativeVnStepInput,
-    ) -> Result<RuntimeStepOutput, RuntimeHostError> {
+    ) -> Result<NativeVnStepOutput, RuntimeHostError> {
         self.validate_session(&input.session_id)?;
         self.require_healthy()?;
         if self.last_step.checked_add(1) != Some(input.fixed_step)
@@ -158,7 +158,13 @@ impl NativeVnRuntimeHost {
                         "NativeVN output belongs to another session",
                     ));
                 }
-                self.limits.validate_output_bounds(&output)?;
+                self.limits.validate_output_count(
+                    output
+                        .presentations
+                        .len()
+                        .saturating_add(output.audio.len())
+                        .saturating_add(output.timeline.len()),
+                )?;
                 Ok(output)
             });
         self.failed = result.is_err();
@@ -285,6 +291,27 @@ mod tests {
             slot: "slot.01".into(),
         })
         .unwrap()
+    }
+
+    #[test]
+    fn typed_presentation_output_still_enforces_the_host_budget() {
+        let mut source = source();
+        let host = &mut source.host;
+        host.limits = RuntimeHostLimits::new().with_bounds(0, 8 * 1024 * 1024);
+        let error = host
+            .step(step(host, 1, NativeVnStepCommand::LaunchDefault))
+            .unwrap_err();
+        assert!(error.to_string().contains("OUTPUT_COUNT"));
+        assert!(host.failed);
+        assert!(host
+            .step(step(
+                host,
+                2,
+                NativeVnStepCommand::Execute(VnPlayerCommand::Advance)
+            ))
+            .is_err());
+        source.release_resources().unwrap();
+        source.shutdown().unwrap();
     }
 
     #[test]

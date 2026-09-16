@@ -103,3 +103,7 @@ Player 的 NativeVN 主路径直接持有 NativeVnRuntimeProvider，移除 Produ
 ### NativeVN typed 命令入口
 
 NativeVnStepInput 将 tick/seed/mode 与 NativeVnStepCommand 分开表达。Player 直接传递已有 VnPlayerCommand；LaunchDefault 是独立变体，由权威 session 查找默认入口。删除 Player 的 runtime_step_fields 和 page/skip/reading/unlock 字符串映射，不再构造 RuntimeStepInput 的 action/argument/auxiliary/flag。NativeVnRuntimeProvider::step_native 是生产入口，旧 step 只在尚未迁移的 ABI 消费者边界解析字符串后调用同一实现。类型均为进程内数据，不新增序列化或存档字段；输出和 package descriptor 的后续迁移仍按总体计划执行。
+
+### NativeVN typed 演出输出
+
+NativeVnStepOutput 直接拥有 PresentationCommand、VnAudioCommand 和 VnTimelineTask，Player 移动消费这些值，不再转换为 RuntimeLive 演出类型后解码回来。仅旧 ABI step 在返回边界进行转换。输出数量仍合计演出、音频和 timeline，超过宿主预算终止执行；音频与演出按原顺序匹配，缺失或多余音频明确失败。当前 VN view state 仍使用原来的按需历史投影，后续单独迁移，不为本次改动复制完整 backlog。save/package 格式不变。
