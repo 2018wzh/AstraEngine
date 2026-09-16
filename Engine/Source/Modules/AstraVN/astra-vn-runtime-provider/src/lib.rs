@@ -536,15 +536,23 @@ impl NativeVnRuntimeProvider {
         } else {
             NativeVnStepCommand::Execute(runtime_command_from_input(&input)?)
         };
-        self.step_native(NativeVnStepInput {
-            session_id: input.session_id,
-            fixed_step: input.fixed_step,
-            delta_ns: input.delta_ns,
-            session_seed: input.session_seed,
-            mode: input.mode,
-            command,
-        })?
-        .into_abi()
+        let session_id = input.session_id;
+        self.session_mut(&session_id)?
+            .step(NativeVnStepInput {
+                timing: TickInput {
+                    fixed_step: input.fixed_step,
+                    delta_ns: input.delta_ns,
+                    seed: input.session_seed,
+                },
+                mode: match input.mode {
+                    RuntimeStepMode::Live => astra_runtime::TickMode::Live,
+                    RuntimeStepMode::RestoreContinuation => {
+                        astra_runtime::TickMode::RestoreContinuation
+                    }
+                },
+                command,
+            })?
+            .into_abi(session_id)
     }
 
     pub fn default_launch_command(
@@ -602,7 +610,12 @@ impl NativeVnRuntimeProvider {
                 "runtime session is not open",
             )
         })?;
-        Ok(session.close())
+        session.close();
+        Ok(RuntimeShutdownReport {
+            session_id,
+            status: "shutdown".into(),
+            diagnostics: vec![],
+        })
     }
 
     pub fn package_sections(&self) -> RuntimePackageSectionPlan {

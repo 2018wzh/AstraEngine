@@ -123,3 +123,7 @@ NativeVnSession::new 返回原生会话对象，Player 私有宿主直接拥有�
 ### 原生存档容器 v8
 
 NativeVnSession::save/restore 直接读写 Runtime SaveBlob，恢复返回 LoadReport（step/seed）。Player v8 保存明确 session_id 和自描述 Runtime 容器，删除 RuntimeSaveSections、section 元数据和重复外层 hash；Runtime 容器自身的 schema/codec/hash 校验、宿主大小限制与 package/typed state 预检保留；seed 在提交 World 和 VN state 前与创建配置匹配。v7 与更旧 Player 存档拒绝，不提供迁移或覆盖旧文件。旧 provider ABI 在边界包装同一个 SaveBlob；产品媒体、元数据和恢复后的作用域清理不变。
+
+### 原生 step 时间与关闭
+
+NativeVnStepInput 使用 Runtime TickInput/TickMode，与 NativeVnStepOutput 一起删除冗余 session id；直接持有的 NativeVnSession 决定执行对象，宿主继续校验 fixed step、seed 与恢复模式。旧 provider::step 在边界查找 session 并转换 ABI mode/输出身份，不再提供中间 step_native 转发入口。NativeVnSession::close 消费会话并返回 unit；仅旧 ABI 构造 RuntimeShutdownReport。存档 v8 格式不变。

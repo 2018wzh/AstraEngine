@@ -84,3 +84,5 @@
 - Player 的 NativeVnRuntimeHost 直接持有 NativeVnSession，step/save/restore 不再经 provider map；旧 ABI map 复用同一个 session 执行与关闭实现。创建、执行和保存模块已拆分，session API 校验调用身份，close 消费会话并取消作用域。provider 与 Player 单元测试通过，新增外来身份不变更状态、两个会话关闭隔离及 drop 取消回归。Engine 全量 fmt/clippy/build/test 通过：728 项通过、0 失败、9 项按原条件未执行；save/lifecycle ABI 数据类型、package descriptor 和剩余 ABI 消费者仍待迁移。
 
 - 原生 session 与 Player 保存恢复改用 Runtime SaveBlob/LoadReport，删除实时原生路径的通用 save/restore request 和 section 包装。Player 存档升级 v8，旧 v7 实际字段布局、错误版本、容器损坏与外来 session 均拒绝；成功恢复取消旧作用域。provider/Player 单元测试通过；seed 校验前移至提交前，加入合法容器下 seed 不匹配回归。Engine 全量 fmt/clippy/build/test 通过：729 项通过、0 失败、9 项按原条件未执行；关闭 report、step identity 和 package descriptor 仍待清理。
+
+- NativeVN step 输入统一使用 Runtime TickInput/TickMode，移除输入/输出 session id 与中间 step_native；时间参数直接进入 TickRequest，旧 ABI 仅在边界查找会话和适配模式/身份。原生 close 返回 unit，旧 ABI 单独生成关闭 report。原有 provider/Player 单元测试及新增五类非法时间参数、失败后恢复推进回归通过。Engine 全量 fmt/clippy/build/test 通过：730 项通过、0 失败、9 项按原条件未执行；存档 v8 不变，package descriptor、配置与其他 ABI 消费者仍待清理。

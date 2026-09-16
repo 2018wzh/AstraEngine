@@ -9,20 +9,16 @@ pub enum NativeVnStepCommand {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct NativeVnStepInput {
-    pub session_id: GameRuntimeSessionId,
-    pub fixed_step: u64,
-    pub delta_ns: u64,
-    pub session_seed: u64,
-    pub mode: RuntimeStepMode,
+    pub timing: TickInput,
+    pub mode: astra_runtime::TickMode,
     pub command: NativeVnStepCommand,
 }
 
 impl NativeVnSession {
     pub fn step(&mut self, input: NativeVnStepInput) -> Result<NativeVnStepOutput, CoreVnError> {
-        self.validate_id(&input.session_id)?;
         tracing::trace!(
             event = "vn.provider.session.step",
-            fixed_step = input.fixed_step,
+            fixed_step = input.timing.fixed_step,
             "AstraVN runtime session step started"
         );
         let command = match input.command {
@@ -43,14 +39,7 @@ impl NativeVnSession {
                 })?
             }
         };
-        let output = self.apply_command_at_step(
-            input.session_id,
-            command,
-            input.fixed_step,
-            input.delta_ns,
-            input.session_seed,
-            input.mode,
-        )?;
+        let output = self.apply_command_at_step(command, input.timing, input.mode)?;
         validate_audio_order(&output.presentations, &output.audio)?;
         Ok(output)
     }
@@ -59,7 +48,6 @@ impl NativeVnSession {
 /// Owned in-process presentation output with a typed display projection.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NativeVnStepOutput {
-    pub session_id: GameRuntimeSessionId,
     pub fixed_step: u64,
     pub vn_state: NativeVnStateView,
     pub presentations: Vec<PresentationCommand>,
@@ -69,7 +57,10 @@ pub struct NativeVnStepOutput {
 }
 
 impl NativeVnStepOutput {
-    pub(crate) fn into_abi(self) -> Result<RuntimeStepOutput, CoreVnError> {
+    pub(crate) fn into_abi(
+        self,
+        session_id: GameRuntimeSessionId,
+    ) -> Result<RuntimeStepOutput, CoreVnError> {
         let presentation_count = self.presentations.len();
         let audio_command_count = self.audio.len();
         let mut presentations = Vec::with_capacity(presentation_count);
@@ -110,7 +101,7 @@ impl NativeVnStepOutput {
             coverage_reached: self.coverage_reached,
         };
         Ok(RuntimeStepOutput {
-            session_id: self.session_id,
+            session_id,
             status: if presentation_count == 0 {
                 "idle".to_string()
             } else {
@@ -163,15 +154,6 @@ fn validate_audio_order(
         ));
     }
     Ok(())
-}
-
-impl NativeVnRuntimeProvider {
-    pub fn step_native(
-        &mut self,
-        input: NativeVnStepInput,
-    ) -> Result<NativeVnStepOutput, CoreVnError> {
-        self.session_mut(&input.session_id)?.step(input)
-    }
 }
 
 #[cfg(test)]

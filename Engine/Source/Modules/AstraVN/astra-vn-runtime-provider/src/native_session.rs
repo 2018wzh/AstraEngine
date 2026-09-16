@@ -30,14 +30,8 @@ impl NativeVnSession {
     }
 
     /// Consume the owned session and cancel all world-scoped work before returning.
-    pub fn close(self) -> RuntimeShutdownReport {
-        let id = self.id.clone();
+    pub fn close(self) {
         drop(self);
-        RuntimeShutdownReport {
-            session_id: id,
-            status: "shutdown".into(),
-            diagnostics: vec![],
-        }
     }
 }
 
@@ -67,18 +61,19 @@ mod tests {
     fn launch(session: &mut NativeVnSession) {
         session
             .step(NativeVnStepInput {
-                session_id: session.id().clone(),
-                fixed_step: 1,
-                delta_ns: 16_666_667,
-                session_seed: 23,
-                mode: RuntimeStepMode::Live,
+                timing: TickInput {
+                    fixed_step: 1,
+                    delta_ns: 16_666_667,
+                    seed: 23,
+                },
+                mode: astra_runtime::TickMode::Live,
                 command: NativeVnStepCommand::LaunchDefault,
             })
             .unwrap();
     }
 
     #[test]
-    fn foreign_step_save_and_restore_do_not_modify_owned_session() {
+    fn foreign_abi_save_and_restore_do_not_modify_owned_session() {
         let mut session = session("one");
         launch(&mut session);
         let state = session.state.clone();
@@ -89,18 +84,6 @@ mod tests {
             })
             .unwrap();
         let foreign = GameRuntimeSessionId("foreign".into());
-        assert!(session
-            .step(NativeVnStepInput {
-                session_id: foreign.clone(),
-                fixed_step: 2,
-                delta_ns: 16_666_667,
-                session_seed: 23,
-                mode: RuntimeStepMode::Live,
-                command: NativeVnStepCommand::Execute(CoreVnPlayerCommand::Advance),
-            })
-            .unwrap_err()
-            .to_string()
-            .contains("SESSION_MISMATCH"));
         assert!(session
             .save_abi(RuntimeSaveRequest {
                 session_id: foreign.clone(),
@@ -137,9 +120,7 @@ mod tests {
         launch(&mut first);
         let first_scope = first.world.task_scope();
         let second_scope = second.world.task_scope();
-        let first_id = first.id().clone();
-        let report = first.close();
-        assert_eq!(report.session_id, first_id);
+        first.close();
         assert!(first_scope.is_cancelled());
         assert!(!second_scope.is_cancelled());
         launch(&mut second);

@@ -3,13 +3,11 @@ use super::*;
 impl NativeVnSession {
     pub(super) fn apply_command_at_step(
         &mut self,
-        session_id: GameRuntimeSessionId,
         command: CoreVnPlayerCommand,
-        fixed_step: u64,
-        delta_ns: u64,
-        session_seed: u64,
-        mode: RuntimeStepMode,
+        timing: TickInput,
+        mode: astra_runtime::TickMode,
     ) -> Result<NativeVnStepOutput, CoreVnError> {
+        let fixed_step = timing.fixed_step;
         let session = self;
         let event_kind = vn_event_kind(&command).to_string();
         let previous_state = session.state.clone();
@@ -108,16 +106,10 @@ impl NativeVnSession {
                 },
             }),
         });
-        let timing = TickInput {
-            fixed_step,
-            delta_ns,
-            seed: session_seed,
-        };
-        let request = match mode {
-            RuntimeStepMode::Live => TickRequest::live(timing, ingress),
-            RuntimeStepMode::RestoreContinuation => {
-                TickRequest::restore_continuation(timing, ingress)
-            }
+        let request = TickRequest {
+            timing,
+            mode,
+            ingress,
         };
         let tick = session
             .world
@@ -174,7 +166,6 @@ impl NativeVnSession {
         });
         let live_vn_state = NativeVnStateView::project(&session.state);
         Ok(NativeVnStepOutput {
-            session_id,
             fixed_step,
             vn_state: live_vn_state,
             presentations: output.presentation,

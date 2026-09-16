@@ -1,5 +1,4 @@
 use super::*;
-use astra_plugin_abi::RuntimeShutdownReport;
 use astra_runtime::{LoadReport, SaveBlob};
 
 pub(super) struct NativeVnRuntimeHost {
@@ -9,7 +8,7 @@ pub(super) struct NativeVnRuntimeHost {
     session: Option<GameRuntimeSessionId>,
     seed: u64,
     last_step: u64,
-    next_mode: RuntimeStepMode,
+    next_mode: astra_runtime::TickMode,
     failed: bool,
     destroyed: bool,
 }
@@ -29,7 +28,7 @@ impl NativeVnRuntimeHost {
             session: None,
             seed: 0,
             last_step: 0,
-            next_mode: RuntimeStepMode::Live,
+            next_mode: astra_runtime::TickMode::Live,
             failed: false,
             destroyed: false,
         })
@@ -86,7 +85,7 @@ impl NativeVnRuntimeHost {
         self.session = Some(session_id.clone());
         self.seed = seed;
         self.last_step = 0;
-        self.next_mode = RuntimeStepMode::Live;
+        self.next_mode = astra_runtime::TickMode::Live;
         self.failed = false;
         Ok(session_id)
     }
@@ -95,12 +94,14 @@ impl NativeVnRuntimeHost {
         &mut self,
         input: NativeVnStepInput,
     ) -> Result<NativeVnStepOutput, RuntimeHostError> {
-        self.validate_session(&input.session_id)?;
+        self.validate_session(self.session.as_ref().ok_or_else(|| {
+            RuntimeHostError::new("ASTRA_RUNTIME_HOST_SESSION", "NativeVN session is not open")
+        })?)?;
         self.require_healthy()?;
-        if self.last_step.checked_add(1) != Some(input.fixed_step)
-            || input.delta_ns == 0
-            || input.delta_ns > 1_000_000_000
-            || input.session_seed != self.seed
+        if self.last_step.checked_add(1) != Some(input.timing.fixed_step)
+            || input.timing.delta_ns == 0
+            || input.timing.delta_ns > 1_000_000_000
+            || input.timing.seed != self.seed
             || input.mode != self.next_mode
         {
             self.failed = true;
@@ -109,7 +110,7 @@ impl NativeVnRuntimeHost {
                 "NativeVN step violates session timing, seed or restore mode",
             ));
         }
-        let step = input.fixed_step;
+        let step = input.timing.fixed_step;
         self.failed = true;
         let result = self
             .runtime
@@ -118,12 +119,6 @@ impl NativeVnRuntimeHost {
             .step(input)
             .map_err(|error| RuntimeHostError::new("ASTRA_RUNTIME_HOST_STEP", error.to_string()))
             .and_then(|output| {
-                if Some(&output.session_id) != self.session.as_ref() {
-                    return Err(RuntimeHostError::new(
-                        "ASTRA_RUNTIME_HOST_OUTPUT_SESSION",
-                        "NativeVN output belongs to another session",
-                    ));
-                }
                 self.limits.validate_output_count(
                     output
                         .presentations
@@ -136,7 +131,7 @@ impl NativeVnRuntimeHost {
         self.failed = result.is_err();
         if result.is_ok() {
             self.last_step = step;
-            self.next_mode = RuntimeStepMode::Live;
+            self.next_mode = astra_runtime::TickMode::Live;
         }
         result
     }
@@ -192,23 +187,22 @@ impl NativeVnRuntimeHost {
             ));
         }
         self.last_step = report.step;
-        self.next_mode = RuntimeStepMode::RestoreContinuation;
+        self.next_mode = astra_runtime::TickMode::RestoreContinuation;
         self.failed = false;
         Ok(report)
     }
 
-    pub(super) fn shutdown(&mut self) -> Result<RuntimeShutdownReport, RuntimeHostError> {
+    pub(super) fn shutdown(&mut self) -> Result<(), RuntimeHostError> {
         let session = self.session.clone().ok_or_else(|| {
             RuntimeHostError::new("ASTRA_RUNTIME_HOST_SESSION", "NativeVN session is not open")
         })?;
         self.validate_session(&session)?;
-        let report = self
-            .runtime
+        self.runtime
             .take()
             .expect("validated native session")
             .close();
         self.session = None;
-        Ok(report)
+        Ok(())
     }
 
     pub(super) fn destroy(&mut self) -> Result<(), RuntimeHostError> {
@@ -251,10 +245,11 @@ mod tests {
 
     fn step(host: &NativeVnRuntimeHost, n: u64, command: NativeVnStepCommand) -> NativeVnStepInput {
         NativeVnStepInput {
-            session_id: host.session.clone().unwrap(),
-            fixed_step: n,
-            delta_ns: 16_666_667,
-            session_seed: host.seed,
+            timing: astra_runtime::TickInput {
+                fixed_step: n,
+                delta_ns: 16_666_667,
+                seed: host.seed,
+            },
             mode: host.next_mode,
             command,
         }
@@ -262,6 +257,47 @@ mod tests {
 
     fn save(host: &mut NativeVnRuntimeHost) -> SaveBlob {
         host.save().unwrap()
+    }
+
+    #[test]
+    fn native_runtime_timing_rejects_invalid_seed_delta_step_and_mode_then_restores() {
+        let mut source = source();
+        let host = &mut source.host;
+        host.step(step(host, 1, NativeVnStepCommand::LaunchDefault))
+            .unwrap();
+        let saved = save(host);
+        for case in 0..5 {
+            let mut input = step(
+                host,
+                2,
+                NativeVnStepCommand::Execute(VnPlayerCommand::Advance),
+            );
+            match case {
+                0 => input.timing.fixed_step = 1,
+                1 => input.timing.seed = input.timing.seed.wrapping_add(1),
+                2 => input.timing.delta_ns = 0,
+                3 => input.timing.delta_ns = 1_000_000_001,
+                _ => input.mode = astra_runtime::TickMode::Live,
+            }
+            assert!(host
+                .step(input)
+                .unwrap_err()
+                .to_string()
+                .contains("STEP_ORDER"));
+            assert!(host.failed);
+            assert!(host.save().is_err());
+            host.restore(saved.clone()).unwrap();
+            assert!(!host.failed);
+        }
+        host.step(step(
+            host,
+            2,
+            NativeVnStepCommand::Execute(VnPlayerCommand::Advance),
+        ))
+        .unwrap();
+        assert_eq!(host.next_mode, astra_runtime::TickMode::Live);
+        source.release_resources().unwrap();
+        source.shutdown().unwrap();
     }
 
     #[test]
@@ -352,14 +388,14 @@ mod tests {
         assert!(host.save().is_err());
         host.restore(saved).unwrap();
         assert!(!host.failed);
-        assert_eq!(host.next_mode, RuntimeStepMode::RestoreContinuation);
+        assert_eq!(host.next_mode, astra_runtime::TickMode::RestoreContinuation);
         host.step(step(
             host,
             2,
             NativeVnStepCommand::Execute(VnPlayerCommand::Advance),
         ))
         .unwrap();
-        assert_eq!(host.next_mode, RuntimeStepMode::Live);
+        assert_eq!(host.next_mode, astra_runtime::TickMode::Live);
         source.release_resources().unwrap();
         source.host.shutdown().unwrap();
         source.host.destroy().unwrap();

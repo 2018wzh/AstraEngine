@@ -173,18 +173,21 @@ mod tests {
             .package
             .is_none());
         let step = |fixed_step, command, mode| NativeVnStepInput {
-            session_id: session_id.clone(),
-            fixed_step,
-            delta_ns: 16_666_667,
-            session_seed: 17,
+            timing: TickInput {
+                fixed_step,
+                delta_ns: 16_666_667,
+                seed: 17,
+            },
             mode,
             command,
         };
         provider
-            .step_native(step(
+            .session_mut(&session_id)
+            .unwrap()
+            .step(step(
                 1,
                 NativeVnStepCommand::LaunchDefault,
-                RuntimeStepMode::Live,
+                astra_runtime::TickMode::Live,
             ))
             .unwrap();
         let before = provider.state(&session_id).unwrap();
@@ -195,10 +198,12 @@ mod tests {
             })
             .unwrap();
         provider
-            .step_native(step(
+            .session_mut(&session_id)
+            .unwrap()
+            .step(step(
                 2,
                 NativeVnStepCommand::Execute(CoreVnPlayerCommand::Advance),
-                RuntimeStepMode::Live,
+                astra_runtime::TickMode::Live,
             ))
             .unwrap();
         let restored = provider
@@ -210,10 +215,12 @@ mod tests {
         assert_eq!(restored.restored_fixed_step, 1);
         assert_eq!(provider.state(&session_id).unwrap(), before);
         provider
-            .step_native(step(
+            .session_mut(&session_id)
+            .unwrap()
+            .step(step(
                 2,
                 NativeVnStepCommand::Execute(CoreVnPlayerCommand::Advance),
-                RuntimeStepMode::RestoreContinuation,
+                astra_runtime::TickMode::RestoreContinuation,
             ))
             .unwrap();
         let scope = provider.session(&session_id).unwrap().world.task_scope();

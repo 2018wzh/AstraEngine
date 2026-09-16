@@ -27,7 +27,7 @@ use astra_player_core::{
 };
 use astra_plugin::{RuntimeHostError, RuntimeHostLimits};
 use astra_plugin_abi::{
-    GameRuntimeSessionId, RuntimeExecutorConfig, RuntimeStepMode, RuntimeTickIntegrityMode,
+    GameRuntimeSessionId, RuntimeExecutorConfig, RuntimeTickIntegrityMode,
     ValidatedRuntimeProviderSelection, NATIVE_VN_PROVIDER_ID,
 };
 use astra_ui_core::{
@@ -157,7 +157,7 @@ pub struct NativeVnHostCommandSource {
     command_sequence: u64,
     fixed_step: u64,
     session_seed: u64,
-    next_step_mode: RuntimeStepMode,
+    next_step_mode: astra_runtime::TickMode,
     width: u32,
     height: u32,
     ui_viewport: UiViewport,
@@ -836,7 +836,7 @@ impl NativeVnHostCommandSource {
             command_sequence: 0,
             fixed_step: 0,
             session_seed: 0,
-            next_step_mode: RuntimeStepMode::Live,
+            next_step_mode: astra_runtime::TickMode::Live,
             width,
             height,
             ui_viewport: UiViewport {
@@ -1608,7 +1608,7 @@ impl NativeVnHostCommandSource {
         self.reset_pending_work();
         self.fixed_step = report.step;
         self.session_seed = report.seed;
-        self.next_step_mode = RuntimeStepMode::RestoreContinuation;
+        self.next_step_mode = astra_runtime::TickMode::RestoreContinuation;
         self.runtime_state = Some(restored_runtime_state);
         self.runtime_backlog_count = self
             .runtime_state
@@ -3751,10 +3751,11 @@ impl NativeVnHostCommandSource {
         let runtime_step_started =
             performance_phase_started(self.ui_host_performance_sampling_enabled);
         let output = self.host.step(NativeVnStepInput {
-            session_id: self.session_id.clone(),
-            fixed_step,
-            delta_ns: 16_666_667,
-            session_seed: self.session_seed,
+            timing: astra_runtime::TickInput {
+                fixed_step,
+                delta_ns: 16_666_667,
+                seed: self.session_seed,
+            },
             mode: self.next_step_mode,
             command,
         })?;
@@ -3767,7 +3768,7 @@ impl NativeVnHostCommandSource {
         let output_decode_started =
             performance_phase_started(self.ui_host_performance_sampling_enabled);
         self.fixed_step = fixed_step;
-        self.next_step_mode = RuntimeStepMode::Live;
+        self.next_step_mode = astra_runtime::TickMode::Live;
         let runtime_view = output.vn_state;
         self.runtime_backlog_count = runtime_view.backlog_count;
         self.runtime_state = Some(runtime_view.into_display_state());
