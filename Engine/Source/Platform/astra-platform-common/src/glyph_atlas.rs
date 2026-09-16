@@ -2729,7 +2729,11 @@ fn allocate_pending_atlas_slot(
                     .ok_or_else(|| invalid("glyph atlas row overflowed"))?;
                 allocator.row_height = 0;
             }
-            if allocator.cursor_y + required_height > allocator.height {
+            // Wrapping cannot make a resource wider than the atlas fit.
+            // Reject it before upload so the caller grows/re-packs the atlas.
+            if allocator.cursor_x + required_width > allocator.width
+                || allocator.cursor_y + required_height > allocator.height
+            {
                 return Err(invalid("glyph atlas capacity was exceeded"));
             }
             let placement = AtlasPlacement {
@@ -4015,6 +4019,29 @@ mod tests {
                 original.height + ATLAS_PADDING * 2
             )
         );
+    }
+
+    #[test]
+    fn wider_than_current_atlas_requires_repacking_after_row_wrap() {
+        let resources = BTreeMap::new();
+        let mutations = ResourceMutationJournal::new();
+        let packed = pack_atlas(&AtlasResourceView::new(&resources, &mutations)).unwrap();
+        assert_eq!(packed.width, 1024);
+        let mut allocator = AtlasAllocatorState::new(&packed);
+        assert!(allocate_pending_atlas_slot(&mut allocator, 1280, 720).is_err());
+
+        let resources = BTreeMap::from([(
+            "texture.stage".to_owned(),
+            AtlasResource::texture(TextureFrame {
+                width: 1280,
+                height: 720,
+                rgba8: Vec::new().into(),
+            }),
+        )]);
+        let repacked = pack_atlas(&AtlasResourceView::new(&resources, &mutations)).unwrap();
+        let placement = repacked.placements["texture.stage"];
+        assert!(placement.x + placement.width + ATLAS_PADDING <= repacked.width);
+        assert!(placement.y + placement.height + ATLAS_PADDING <= repacked.height);
     }
 
     #[test]

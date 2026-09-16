@@ -51,6 +51,44 @@ async fn large_scene_preserves_draw_order_and_rejects_duplicate_ids() {
 
 #[tokio::test]
 #[ignore = "requires a native hardware GPU runner"]
+async fn incremental_atlas_grows_for_wide_and_tall_textures() {
+    let mut renderer = WgpuOffscreenRenderer::new().await.unwrap();
+    assert_ne!(renderer.identity().device_type, "cpu");
+    for (index, (width, height, color)) in [
+        (2, 2, [255, 0, 0, 255]),
+        (1280, 720, [0, 255, 0, 255]),
+        (8, 2560, [0, 0, 255, 255]),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let capture = renderer
+            .render(&SceneFrame {
+                sequence: index as u64 + 1,
+                width: 8,
+                height: 8,
+                clear_rgba: [0, 0, 0, 255],
+                commands: vec![SceneCommand::Texture {
+                    id: "image".into(),
+                    frame: TextureFrame::from_vec(
+                        width,
+                        height,
+                        color.repeat((width * height) as usize),
+                    )
+                    .unwrap(),
+                    destination: astra_media_core::RectI::new(0, 0, 8, 8),
+                    opacity: 1.0,
+                    blend: astra_media_core::BlendMode::Alpha,
+                }],
+                semantics: None,
+            })
+            .unwrap();
+        assert!(capture.rgba8.as_chunks::<4>().0.iter().all(|p| *p == color));
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires a native hardware GPU runner"]
 async fn transient_texture_ids_reallocate_released_slots_across_frames() {
     let mut renderer = WgpuOffscreenRenderer::new().await.unwrap();
     for sequence in 1..=6 {
