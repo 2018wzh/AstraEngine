@@ -79,4 +79,14 @@ cargo build --manifest-path Emulator/Cargo.toml -p astra-emu-fvp --features dyna
 
 Classic 路线驱动 classic_y_route_acceptance.py 默认验证 Y→K 段；传入 --complete-route 后沿 --route-id 指定的生成路线执行到结局。驱动校验所有选择均已消费，再等待真实 VN session 的 vn.terminal_routes 匹配目标终局。完整路线的输入 tick 包含逐项等待超时预算；私有 Headless profile 的 input.max_tick 和 max_messages 应按生成输入配置。驱动在创建运行目录和启动 GPU 进程前检查这两项预算，不足时输出 required/configured 数值，不自动扩大配置。累计渲染帧与音频预算另按测试时长配置，不能用输入条数替代；限额失败不计路线通过。
 
+批量测试 Classic 时，先用同一生成器导出完整路线输入，再交给现有矩阵执行器。生成器逐条处理，全部通过终局、session、输入序号和关闭检查后才生成最终目录；失败清理自己的临时目录，已有输出不覆盖。stdout 的 `required_max_messages` 和 `required_max_tick` 是全部路线所需输入预算，不是运行完成统计。Modern 仍使用转换器生成的对应输入，不能把两种 UI 的输入混用。
+
+```sh
+python Tools/TsuiNoSora/classic_route_inputs.py \
+  --story-ir .tmp/tsuinosora/native_story_ir.json \
+  --output .tmp/tsuinosora/classic-matrix-inputs
+```
+
+将输出目录作为 `headless_route_matrix.py --automation-root`，并显式传入同一 Classic package、GPU profile、build identity 和独立产物目录。矩阵的 `--timeout-seconds` 是每条路线的实际运行时间上限，需按完整流程设置；输入生成成功不计入 37 路线验收。
+
 对白进入 pending wait 时，文字可能还在逐字显示。第一次推进输入会补全文字，后续输入才推进剧情。Headless 可通过只读观察项 `vn.text_reveal_complete` 等待当前文字显示完成，再发送物理按键；它来自真实演出状态，不修改剧情游标或显示进度。没有正在显示的文字时为 true。Classic 路线脚本已按此区分对白等待与普通输入等待，不能仅凭 `vn.pending_wait_command` 就假设一次 Enter 足以推进。
