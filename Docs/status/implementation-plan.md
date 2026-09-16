@@ -15,7 +15,7 @@
 
 ## 验收安排
 
-Artemis 接续检查确认独立 Emulator 依赖图不含 mlua，因此旧分支为合并 VN 而改用 Luau、移除 send 的适配不再需要；优先保持上游桌面 Lua 5.1。已准备完整历史的上游 0c06f37 加 PFS 分隔符修复 38993a9 候选，尚未接入活动 workspace。独立构建在 Cargo 清单解析阶段遇到上游可选 art3m1s-rfvp 对相邻 RFVP fork 的路径依赖，需要先解决构建边界；未声称 Artemis 编译或游戏验收通过。旧分支的延迟伪造视频完成和强制唤醒不可直接沿用。
+Artemis 接续检查确认独立 Emulator 依赖图不含 mlua，因此旧分支为合并 VN 而改用 Luau、移除 send 的适配不再需要；优先保持上游桌面 Lua 5.1。已准备完整历史的上游 0c06f37 加 PFS 分隔符修复 38993a9 候选，尚未接入活动 workspace。独立构建曾在 Cargo 清单解析阶段遇到可选 art3m1s-rfvp 对相邻 RFVP fork 的路径依赖。候选清单现将此可选依赖固定到 Alphaly2K/rfvp 的 ec204312e123b4839cec8e69e6237fb0374e5518，该版本提供 external-renderer 与 host-runtime；依赖解析已通过，Vulkan 配置正在编译，尚未确认编译或游戏验收通过。此依赖不启用为 AstraEMU 的 FVP 运行路径，也不改变其既定基线。Artemis 已有 FFmpeg 视频 session，应复用该实现而非伪造视频完成。旧分支的延迟伪造视频完成和强制唤醒不可直接沿用。
 
 Classic 物理输入驱动已支持指定生成路线执行到终局，不再只限 Y→K 段。路线追踪拒绝剩余未消费选择、不可用选项和目标终局不符；通过条件仍是实际 VN session 的终局观察。25 项相关 Python 回归通过。首条完整路线生成 46997 条输入，包含 39 次选择；私有测试 profile 按输入长度设置预算，未修改 Host 限制逻辑。完整路线尚未验收通过，37 路线完成数不变。
 
