@@ -51,7 +51,6 @@ impl NativeVnSession {
         let owner = world
             .create_actor("astra.vn.runtime", vec!["gameplay_runtime".to_string()])
             .map_err(|error| CoreVnError::message(error.to_string()))?;
-        let initial_state = initial_runtime.state().clone();
         world
             .attach_component(owner, "astra.vn.policy_state.v1", &VnPolicyState::default())
             .map_err(|err| CoreVnError::message(err.to_string()))?;
@@ -104,7 +103,8 @@ impl NativeVnSession {
             owner,
             compiled,
             runtime_index,
-            state: initial_state,
+            runtime: initial_runtime,
+            failed: false,
             pending_control,
             control_result,
             step_complexity: None,

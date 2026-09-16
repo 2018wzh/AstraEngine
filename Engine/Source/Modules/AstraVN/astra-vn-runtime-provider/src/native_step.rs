@@ -16,6 +16,15 @@ pub struct NativeVnStepInput {
 
 impl NativeVnSession {
     pub fn step(&mut self, input: NativeVnStepInput) -> Result<NativeVnStepOutput, CoreVnError> {
+        if self.failed {
+            return Err(CoreVnError::diagnostic(
+                "ASTRA_NATIVE_VN_SESSION_FAILED",
+                "failed session requires a successful restore before another step",
+            ));
+        }
+        // Set before any fallible execution, including panic unwinding.
+        self.failed = true;
+        let mut failure_scope = StepFailureScope(Some(self.world.task_scope()));
         tracing::trace!(
             event = "vn.provider.session.step",
             fixed_step = input.timing.fixed_step,
@@ -24,14 +33,7 @@ impl NativeVnSession {
         let command = match input.command {
             NativeVnStepCommand::Execute(command) => command,
             NativeVnStepCommand::LaunchDefault => {
-                let session = &*self;
-                CoreVnRuntime::from_shared_state_indexed(
-                    Arc::clone(&session.compiled),
-                    Arc::clone(&session.runtime_index),
-                    materialize_session_state(session)?,
-                )?
-                .default_launch_command()
-                .ok_or_else(|| {
+                self.runtime.default_launch_command().ok_or_else(|| {
                     CoreVnError::diagnostic(
                         "ASTRA_NATIVE_VN_LAUNCH_MISSING",
                         "compiled story has no launchable state",
@@ -41,7 +43,20 @@ impl NativeVnSession {
         };
         let output = self.apply_command_at_step(command, input.timing, input.mode)?;
         validate_audio_order(&output.presentations, &output.audio)?;
+        failure_scope.0 = None;
+        self.failed = false;
         Ok(output)
+    }
+}
+
+// Cancels outstanding work on both Result errors and panic unwinding.
+struct StepFailureScope(Option<astra_runtime::TaskScope>);
+
+impl Drop for StepFailureScope {
+    fn drop(&mut self) {
+        if let Some(scope) = &self.0 {
+            scope.cancel();
+        }
     }
 }
 

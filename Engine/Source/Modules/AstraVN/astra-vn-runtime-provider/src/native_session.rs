@@ -8,7 +8,8 @@ pub struct NativeVnSession {
     pub(super) owner: ActorId,
     pub(super) compiled: Arc<CoreCompiledStory>,
     pub(super) runtime_index: Arc<CoreVnRuntimeIndex>,
-    pub(super) state: VnRuntimeState,
+    pub(super) runtime: CoreVnRuntime,
+    pub(super) failed: bool,
     pub(super) pending_control: Arc<Mutex<Option<PreparedVnControl>>>,
     pub(super) control_result: Arc<Mutex<Option<astra_runtime::AwaitTokenId>>>,
     pub(super) step_complexity: Option<VnStepComplexityMetrics>,
@@ -76,7 +77,7 @@ mod tests {
     fn foreign_abi_save_and_restore_do_not_modify_owned_session() {
         let mut session = session("one");
         launch(&mut session);
-        let state = session.state.clone();
+        let state = session.runtime.state().clone();
         let save = session
             .save_abi(RuntimeSaveRequest {
                 session_id: session.id().clone(),
@@ -100,7 +101,7 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("SESSION_MISMATCH"));
-        assert_eq!(session.state, state);
+        assert_eq!(session.runtime.state(), &state);
         assert_eq!(
             session
                 .save_abi(RuntimeSaveRequest {
@@ -124,8 +125,109 @@ mod tests {
         assert!(first_scope.is_cancelled());
         assert!(!second_scope.is_cancelled());
         launch(&mut second);
-        assert!(second.state.pending_wait.is_some());
+        assert!(second.runtime.state().pending_wait.is_some());
         drop(second);
         assert!(second_scope.is_cancelled());
+    }
+    #[test]
+    fn ordinary_step_preserves_large_history_allocations() {
+        let mut session = session("history");
+        launch(&mut session);
+        let mut state = session.runtime.state().clone();
+        let entry = state.backlog[0].clone();
+        state.backlog.resize(4096, entry);
+        session.runtime = CoreVnRuntime::from_shared_state_indexed(
+            Arc::clone(&session.compiled),
+            Arc::clone(&session.runtime_index),
+            state,
+        )
+        .unwrap();
+        let history = session.runtime.state().backlog.as_ptr();
+        let first_key = session.runtime.state().backlog[0].key.as_ptr();
+        for fixed_step in 2..=20 {
+            session
+                .step(NativeVnStepInput {
+                    timing: TickInput {
+                        fixed_step,
+                        delta_ns: 16_666_667,
+                        seed: 23,
+                    },
+                    mode: astra_runtime::TickMode::Live,
+                    command: NativeVnStepCommand::Execute(CoreVnPlayerCommand::SetAuto {
+                        enabled: true,
+                    }),
+                })
+                .unwrap();
+            assert_eq!(session.runtime.state().backlog.len(), 4096);
+            assert_eq!(session.runtime.state().backlog.as_ptr(), history);
+            assert_eq!(session.runtime.state().backlog[0].key.as_ptr(), first_key);
+        }
+    }
+
+    #[test]
+    fn failed_execution_blocks_step_and_save_until_successful_restore() {
+        let mut session = session("failed");
+        launch(&mut session);
+        let saved = session.save().unwrap();
+        let old_scope = session.world.task_scope();
+        let input = |command, mode| NativeVnStepInput {
+            timing: TickInput {
+                fixed_step: 2,
+                delta_ns: 16_666_667,
+                seed: 23,
+            },
+            mode,
+            command: NativeVnStepCommand::Execute(command),
+        };
+        assert!(session
+            .step(input(
+                CoreVnPlayerCommand::ReturnSystem,
+                astra_runtime::TickMode::Live
+            ))
+            .is_err());
+        assert!(old_scope.is_cancelled());
+        assert!(session
+            .save()
+            .unwrap_err()
+            .to_string()
+            .contains("SESSION_FAILED"));
+        assert!(session.restore(SaveBlob(vec![0])).is_err());
+        assert!(session
+            .step(input(
+                CoreVnPlayerCommand::SetAuto { enabled: true },
+                astra_runtime::TickMode::Live
+            ))
+            .unwrap_err()
+            .to_string()
+            .contains("SESSION_FAILED"));
+        session.restore(saved).unwrap();
+        assert!(!session.world.task_scope().is_cancelled());
+        session
+            .step(input(
+                CoreVnPlayerCommand::SetAuto { enabled: true },
+                astra_runtime::TickMode::RestoreContinuation,
+            ))
+            .unwrap();
+        assert!(session.runtime.state().system.auto_enabled);
+        assert!(session.save().is_ok());
+    }
+    #[test]
+    fn wait_binding_rejects_stale_and_empty_replacements() {
+        let mut session = session("wait");
+        launch(&mut session);
+        let original = session.runtime.state().pending_wait.clone().unwrap();
+        assert!(session
+            .runtime
+            .bind_pending_wait(&original, String::new())
+            .is_err());
+        let bound = session
+            .runtime
+            .bind_pending_wait(&original, "host.await.new".into())
+            .unwrap();
+        assert!(session
+            .runtime
+            .bind_pending_wait(&original, "host.await.stale".into())
+            .is_err());
+        assert_eq!(session.runtime.state().pending_wait.as_ref(), Some(&bound));
     }
 }

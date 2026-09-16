@@ -24,7 +24,8 @@ fn fixture() -> (NativeVnRuntimeProvider, GameRuntimeSessionId) {
         owner,
         compiled,
         runtime_index,
-        state: runtime.state().clone(),
+        runtime,
+        failed: false,
         pending_control: Arc::new(Mutex::new(Some(PreparedVnControl {
             events: vec![],
             create_wait: None,
@@ -64,7 +65,7 @@ fn typed_restore_rejection_preserves_world_state_and_pending_control() {
         let (mut provider, id) = fixture();
         let session = provider.session(&id).unwrap();
         let before = session.world.save(SaveRequest::default()).unwrap();
-        let state_before = session.state.clone();
+        let state_before = session.runtime.state().clone();
         let mut snapshot = materialized_save_snapshot(session).unwrap();
         // This mutation would become visible if the world were committed before validation.
         snapshot.step = 99;
@@ -126,7 +127,7 @@ fn typed_restore_rejection_preserves_world_state_and_pending_control() {
             before.0,
             "{case}"
         );
-        assert_eq!(session.state, state_before, "{case}");
+        assert_eq!(session.runtime.state(), &state_before, "{case}");
         assert!(session.pending_control.lock().unwrap().is_some(), "{case}");
     }
 }
@@ -165,7 +166,12 @@ fn restore_checks_outer_integrity_then_commits_and_clears_old_controls() {
             .unwrap()
             .is_some());
     }
-    provider.session_mut(&id).unwrap().state.revision = 100;
+    provider
+        .session_mut(&id)
+        .unwrap()
+        .runtime
+        .apply_deferred(CoreVnPlayerCommand::SetAuto { enabled: true })
+        .unwrap();
     provider
         .session_mut(&id)
         .unwrap()
@@ -180,7 +186,7 @@ fn restore_checks_outer_integrity_then_commits_and_clears_old_controls() {
         .unwrap();
     assert_eq!(report.restored_fixed_step, 0);
     let session = provider.session_mut(&id).unwrap();
-    assert_eq!(session.state.revision, 0);
+    assert_eq!(session.runtime.state().revision, 0);
     assert!(session.pending_control.lock().unwrap().is_none());
     assert_eq!(
         session

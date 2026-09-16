@@ -1,3 +1,5 @@
+mod session_step;
+
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
@@ -317,16 +319,8 @@ impl VnRuntime {
     }
 
     pub fn apply(&mut self, command: VnPlayerCommand) -> Result<VnStepOutput, VnError> {
-        let before = self.state.revision;
-        let pending = self.apply_pending(command, before)?;
-        let after = before.checked_add(1).ok_or_else(|| {
-            VnError::diagnostic(
-                "ASTRA_VN_STATE_REVISION_OVERFLOW",
-                "VN state revision exhausted its deterministic range",
-            )
-        })?;
-        self.state.revision = after;
-        Ok(pending.finalize(after))
+        let pending = self.apply_deferred(command)?;
+        Ok(pending.finalize(self.state.revision))
     }
 
     fn apply_pending(
@@ -1388,18 +1382,6 @@ pub fn reduce_vn_step_indexed(
 ) -> Result<(VnRuntimeState, VnStepOutput), VnError> {
     let mut runtime = VnRuntime::from_shared_state_indexed(compiled, index, state)?;
     let output = runtime.apply(command)?;
-    Ok((runtime.state, output))
-}
-
-pub fn reduce_vn_step_indexed_pending(
-    compiled: Arc<CompiledStory>,
-    index: Arc<VnRuntimeIndex>,
-    state: VnRuntimeState,
-    command: VnPlayerCommand,
-) -> Result<(VnRuntimeState, PendingVnStepOutput), VnError> {
-    let mut runtime = VnRuntime::from_shared_state_indexed(compiled, index, state)?;
-    let before = runtime.state.revision;
-    let output = runtime.apply_pending(command, before)?;
     Ok((runtime.state, output))
 }
 

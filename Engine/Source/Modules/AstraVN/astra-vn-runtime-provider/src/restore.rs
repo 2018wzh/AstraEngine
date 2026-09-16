@@ -18,7 +18,7 @@ pub(super) fn restore_session(
     let expected_seed = session.seed;
     let compiled = Arc::clone(&session.compiled);
     let index = Arc::clone(&session.runtime_index);
-    let (_, (state, step, seed)) = session.world.load_with_validation(
+    let (_, (runtime, step, seed)) = session.world.load_with_validation(
         blob,
         &astra_core::SchemaMigrationRegistry::default(),
         |snapshot| {
@@ -40,13 +40,13 @@ pub(super) fn restore_session(
                 return Err(RuntimeError::message("ASTRA_NATIVE_VN_RESTORE_STATE_VERSION: unsupported VN state version"));
             }
             let state: VnRuntimeState = component.payload.decode()?;
-            CoreVnRuntime::from_shared_state_indexed(compiled, index, state.clone())
+            let runtime = CoreVnRuntime::from_shared_state_indexed(compiled, index, state)
                 .map_err(|error| RuntimeError::message(error.to_string()))?;
             snapshot.actors.detach_component(*component_id);
-            Ok((state, snapshot.step, snapshot.config.seed))
+            Ok((runtime, snapshot.step, snapshot.config.seed))
         },
     ).map_err(|error| CoreVnError::message(error.to_string()))?;
-    session.state = state;
+    session.runtime = runtime;
     *pending = None;
     *result = None;
     session.step_complexity = None;

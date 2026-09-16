@@ -135,3 +135,7 @@ NativeVnRuntimeExecution 直接声明 Runtime TickIntegrityMode 与 usize worker
 ### Package 原生 runtime 选择
 
 PackageReader::runtime_selection 返回只读 PackageRuntimeSelection（NativeVn、target、profile），不再公开插件 ValidatedRuntimeProviderSelection。builder/reader 继续完成现有 policy、registry、target 和 VFS 一致性验证，仅当前支持的 NativeVN/Scene2D 可生成原生选择；未知 runtime 或不匹配 provider 拒绝。现有序列化 policy 的 descriptor 暂留，后续整体改版移除；Player 打开包和发布检查仍在创建会话前校验其与编译入产品的描述完全一致，不将其存入运行宿主。发布行为检查直接创建 NativeVnSession，验证保存恢复字节一致和恢复后 typed step；不再建立通用 worker/mailbox、重复编解码剧情或伪造插件 lifecycle。此检查仍仅为局部 session conformance，不代表真实 Player 验收。
+
+### NativeVN 状态原位执行
+
+NativeVnSession 长期持有 VnRuntime，step 在同一份状态上执行，不复制 backlog/read-state/voice replay，也不临时重建 reducer。Core 的 apply_deferred 提交 revision 并返回待 Runtime 补齐 await 身份的输出；bind_pending_wait 只允许替换匹配的当前 wait，不公开可变状态。执行错误或 panic 时取消当前任务作用域，session 保持 failed，拒绝 step/save；成功 restore 才恢复可用，失败 restore 保留原状态与失败标记。存档仍在保存边界物化，容器格式不变。

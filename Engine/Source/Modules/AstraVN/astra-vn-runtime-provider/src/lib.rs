@@ -364,7 +364,7 @@ pub struct VnStepComplexityMetrics {
 }
 
 fn materialize_session_state(session: &NativeVnSession) -> Result<VnRuntimeState, CoreVnError> {
-    Ok(session.state.clone())
+    Ok(session.runtime.state().clone())
 }
 
 fn materialized_save_snapshot(session: &NativeVnSession) -> Result<RuntimeSnapshot, CoreVnError> {
@@ -412,7 +412,7 @@ impl NativeVnRuntimeProvider {
         session_id: &GameRuntimeSessionId,
     ) -> Result<VnRuntimeStorageMetrics, CoreVnError> {
         let session = self.session(session_id)?;
-        let backlog_count = materialize_session_state(session)?.backlog.len();
+        let backlog_count = session.runtime.state().backlog.len();
         Ok(VnRuntimeStorageMetrics {
             schema: "astra.vn.runtime_storage_metrics.v4".to_string(),
             backlog_count,
@@ -560,14 +560,7 @@ impl NativeVnRuntimeProvider {
         session_id: &GameRuntimeSessionId,
     ) -> Result<CoreVnPlayerCommand, CoreVnError> {
         let session = self.session(session_id)?;
-        let state = materialize_session_state(session)?;
-        CoreVnRuntime::from_shared_state_indexed(
-            Arc::clone(&session.compiled),
-            Arc::clone(&session.runtime_index),
-            state,
-        )?
-        .default_launch_command()
-        .ok_or_else(|| {
+        session.runtime.default_launch_command().ok_or_else(|| {
             CoreVnError::diagnostic(
                 "ASTRA_NATIVE_VN_LAUNCH_MISSING",
                 "compiled story has no launchable state",

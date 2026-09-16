@@ -10,27 +10,20 @@ impl NativeVnSession {
         let fixed_step = timing.fixed_step;
         let session = self;
         let event_kind = vn_event_kind(&command).to_string();
-        let previous_state = session.state.clone();
+        let previous_state = session.runtime.state();
         let pending_wait = previous_state.pending_wait.clone();
         let reading_mode = previous_state.system.reading_mode;
         let previous_backlog_count = previous_state.backlog.len();
-        let previous_wait = previous_state.pending_wait.clone();
-        let (mut next_state, mut pending_output) = astra_vn_core::reduce_vn_step_indexed_pending(
-            Arc::clone(&session.compiled),
-            Arc::clone(&session.runtime_index),
-            previous_state,
-            command.clone(),
-        )?;
+        let previous_wait = pending_wait.clone();
+        let mut pending_output = session.runtime.apply_deferred(command.clone())?;
+        let next_state = session.runtime.state();
         if next_state.backlog.len() < previous_backlog_count {
             return Err(CoreVnError::diagnostic(
                 "ASTRA_NATIVE_VN_HISTORY_TRUNCATION",
-                "VN reducer attempted to truncate append-only backlog history",
+                "VN execution attempted to truncate append-only backlog history",
             ));
         }
-        let next_revision = next_state.revision.checked_add(1).ok_or_else(|| {
-            CoreVnError::message("VN state revision exhausted its deterministic range")
-        })?;
-        next_state.revision = next_revision;
+        let next_revision = next_state.revision;
         let create_wait = if next_state.pending_wait != previous_wait {
             next_state.pending_wait.as_ref().and_then(|wait| {
                 let has_runtime_await_id = wait
@@ -127,17 +120,25 @@ impl NativeVnSession {
             .map_err(|_| CoreVnError::message("VN control result lock is poisoned"))?
             .take()
         {
-            let wait = next_state.pending_wait.as_mut().ok_or_else(|| {
-                CoreVnError::diagnostic(
-                    "ASTRA_NATIVE_VN_AWAIT_STATE_MISSING",
-                    "Runtime created an await token without VN wait state",
-                )
-            })?;
+            let wait = session
+                .runtime
+                .state()
+                .pending_wait
+                .clone()
+                .ok_or_else(|| {
+                    CoreVnError::diagnostic(
+                        "ASTRA_NATIVE_VN_AWAIT_STATE_MISSING",
+                        "Runtime created an await token without VN wait state",
+                    )
+                })?;
             let runtime_await_id = token_id.0.to_string();
-            wait.await_id = Some(runtime_await_id.clone());
-            pending_output.set_wait(wait.clone());
+            let wait = session
+                .runtime
+                .bind_pending_wait(&wait, runtime_await_id.clone())?;
+            pending_output.set_wait(wait);
             pending_output.push_await(runtime_await_id);
         }
+        let next_state = session.runtime.state();
         if next_state.pending_wait != previous_wait
             && next_state.pending_wait.as_ref().is_some_and(|wait| {
                 wait.await_id
@@ -153,7 +154,6 @@ impl NativeVnSession {
         let appended_backlog_entries = next_state.backlog.len() - previous_backlog_count;
         let output = pending_output.finalize(next_revision);
         let mutation_journal_entries = output.mutations.len();
-        session.state = next_state;
         session.step_complexity = Some(VnStepComplexityMetrics {
             schema: "astra.vn.step_complexity_metrics.v3".to_string(),
             previous_backlog_count,
@@ -164,7 +164,7 @@ impl NativeVnSession {
             encoded_hot_state_bytes: 0,
             mutation_journal_entries,
         });
-        let live_vn_state = NativeVnStateView::project(&session.state);
+        let live_vn_state = NativeVnStateView::project(session.runtime.state());
         Ok(NativeVnStepOutput {
             fixed_step,
             vn_state: live_vn_state,
