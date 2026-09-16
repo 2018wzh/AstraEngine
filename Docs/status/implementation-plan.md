@@ -15,6 +15,8 @@
 
 原生 Cargo 构建身份工具已移除对旧 Web UI 工具链预检的隐式依赖，不再要求 Node、jco 和外部 Luau analyzer 才能记录 Headless 构建。源码、工作树状态、Cargo 清单、依赖锁和 Rust 工具链及 feature 身份仍保留；未生成或伪造旧预检通过记录。新增原生构建回归覆盖存在旧 UI lock、缺少预检文件时的正常生成及身份摘要完整性。
 
+FVP Sandbox 自动播放进入后续剧情后因 `RFVP rejected save copy` 异常结束，Manager 正确显示失败。Family 文件适配层复制后以只读句柄调用同步，Windows 路径的成功复制回归已复现同类 IO 失败。现改为可写句柄同步并在原子替换前释放句柄，新增复制阶段、错误类别和系统码诊断；新建/覆盖复制与原有目标保护回归通过。FVP 30 项普通测试、导出 feature 全目标 Clippy 和格式检查通过，4 项显式 GPU 测试本次未执行。修复后的 Sandbox 长流程仍须重跑，完整结局尚未完成。
+
 CMVS 指令执行已移除整 VM 克隆与隐式回滚，直接保留现有缓冲。执行错误或 panic 后失败标志阻止后续指令和快照校验；正常等待与帧停止的前置检查不使 VM 失效。恢复须使用单独校验过的成功状态。145 项库测试通过，包含连续 1024 条指令复用同一 64 KiB 缓冲、部分修改后失败、恢复与等待边界；1 项显式 GPU 测试本次未运行。全目标 Clippy 和格式检查通过。此变更未完成 CMVS Family session 接入。
 
 SDK 音频解码改为同步借用源切片，直接复用 Symphonia 支持借用数据的 MediaSourceStream。Minori 的资产读取保留 AstraEngine OwnedByteBuffer，脚本、图片和音频消费者不再先复制整段归档数据；CMVS 普通音频与 MGV 内嵌 Ogg 同样删除解码前的整段复制。返回 PCM 独立持有采样，帧数预算、取消和格式错误语义不变。SDK 单元测试、CMVS 与 Minori 库测试通过，包含已有 GPU 会话、音频关闭与恢复回归；受影响三个 crate 的全目标 Clippy 和格式检查通过。尚未完成 CMVS Family session 与真实游戏验收。

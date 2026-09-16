@@ -267,13 +267,16 @@ impl RfvpFileSystem for NativeFileSystem {
         let destination = self.resolve_for_write(destination)?;
         let temporary = self.next_temp_path(&destination)?;
         let result = (|| {
-            fs::copy(&source, &temporary).map_err(|_| RfvpError::Io)?;
+            fs::copy(&source, &temporary).map_err(|cause| copy_error("copy", cause))?;
             let file = fs::OpenOptions::new()
-                .read(true)
+                // Windows FlushFileBuffers requires a writable handle.
+                .write(true)
                 .open(&temporary)
-                .map_err(|_| RfvpError::Io)?;
-            file.sync_all().map_err(|_| RfvpError::Io)?;
-            atomic_replace(&temporary, &destination).map_err(|_| RfvpError::Io)
+                .map_err(|cause| copy_error("open_temporary", cause))?;
+            file.sync_all()
+                .map_err(|cause| copy_error("flush", cause))?;
+            drop(file);
+            atomic_replace(&temporary, &destination).map_err(|cause| copy_error("replace", cause))
         })();
         if result.is_err() {
             let _ = fs::remove_file(&temporary);
@@ -303,6 +306,17 @@ impl RfvpFileSystem for NativeFileSystem {
     ) -> RfvpResult<()> {
         self.enumerate_directory(root, Some(extension.trim_start_matches('.')), visitor)
     }
+}
+
+fn copy_error(operation: &'static str, cause: std::io::Error) -> RfvpError {
+    tracing::debug!(
+        event = "astra.emu.fvp.save.copy_failed",
+        operation,
+        io_kind = ?cause.kind(),
+        os_code = cause.raw_os_error(),
+        "Native save copy failed"
+    );
+    RfvpError::Io
 }
 
 #[cfg(not(windows))]
@@ -407,6 +421,32 @@ mod tests {
 
         assert!(fs.write_all("save.bin", b"new state").is_err());
         assert!(target.is_dir(), "a failed replace must keep the old target");
+    }
+
+    #[test]
+    fn copy_creates_and_replaces_a_save_without_changing_the_source() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("source.bin"), b"source save").unwrap();
+        let mut fs = NativeFileSystem::new(root.path().to_str().unwrap()).unwrap();
+        fs.copy("source.bin", "save/slot.bin").unwrap();
+        assert_eq!(
+            std::fs::read(root.path().join("save/slot.bin")).unwrap(),
+            b"source save"
+        );
+        std::fs::write(root.path().join("source.bin"), b"new source save").unwrap();
+        fs.copy("source.bin", "save/slot.bin").unwrap();
+        assert_eq!(
+            std::fs::read(root.path().join("save/slot.bin")).unwrap(),
+            b"new source save"
+        );
+        assert_eq!(
+            std::fs::read(root.path().join("source.bin")).unwrap(),
+            b"new source save"
+        );
+        assert_eq!(
+            std::fs::read_dir(root.path().join("save")).unwrap().count(),
+            1
+        );
     }
 
     #[test]
