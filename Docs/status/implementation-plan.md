@@ -78,3 +78,5 @@
 - NativeVN step 输出改为直接拥有 PresentationCommand、VnAudioCommand 和 VnTimelineTask，Player 移动消费，删除内部 ABI 演出/timeline/音频转换及相应克隆。旧 ABI 只在返回边界适配；状态视图仍保留原有按需历史投影。新增音频缺失/多余/错序校验和超预算终止回归，provider 与 Player 单元测试通过。Engine 全量 fmt/clippy/build/test 通过：722 项通过、0 失败、9 项按原条件未执行；状态视图、package descriptor 和其他 ABI 消费者仍待迁移。
 
 - NativeVnStateView 直接携带 typed 显示投影，Player 删除 RuntimeLiveVnState 和 cursor/choice/wait/system 等往返转换；ABI 仅在旧输出边界适配。4096 条 backlog 回归验证常规显示只取末条，Backlog/VoiceReplay/RouteChart 按页展开，终局保留路线，投影排除私有变量、调用栈和 read_state；2 项针对性测试通过。Engine 全量 fmt/clippy/build/test 通过：724 项通过、0 失败、9 项按原条件未执行；通用 package/lifecycle ABI 与其他消费者仍待迁移，真实平台验收未完成。
+
+- NativeVN 新增 open_native 与 NativeVnSessionConfig，创建逻辑拆到 native_open；Player 与 runtime 共享同一 Arc<CompiledStory>，删除启动时的 Postcard 编码/hash/解码、临时 section、重复 prepare/probe 和通用 open request。原生入口支持无 package 嵌入；2 项回归验证剧情共享、无包存读档、恢复后推进、关闭取消、非法 worker 数与重复 session 不发布/覆盖。Engine 全量 fmt/clippy/build/test 通过：726 项通过、0 失败、9 项按原条件未执行；provider 内部 session map、save/lifecycle 数据类型与 package descriptor 仍待迁移。

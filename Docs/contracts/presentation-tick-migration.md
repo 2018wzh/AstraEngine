@@ -111,3 +111,7 @@ NativeVnStepOutput 直接拥有 PresentationCommand、VnAudioCommand 和 VnTimel
 ### NativeVN typed 状态视图
 
 NativeVnStateView 是进程内只读显示投影：直接复用 VN typed 字段，记录完整 backlog_count，但常规对话只复制最后一条 backlog。Backlog 页展开 backlog，VoiceReplay 页展开语音索引，RouteChart 或终局展开路线历史。call stack、variables、read_state 和 wait_sequence 不进入显示投影；权威状态与保存仍由 runtime 持有。Player 消费投影，不经过 RuntimeLiveVnState 往返转换；仅旧 ABI 输出边界适配。投影不提供 serde，不可用作存档恢复输入。
+
+### NativeVN 原生创建入口
+
+open_native 接收共享 Arc<CompiledStory>、VnRunConfig 与 NativeVnSessionConfig，配置直接声明 seed、worker_count、integrity_mode 和可选 PackageHandle。Player 与 runtime 共享已经校验、解码的剧情，不再生成中间 Postcard section/hash，也不重复 prepare/probe。package 仍在外层加载和 binding 校验；保存恢复身份检查不变。无 package 的嵌入式 NativeVN 可创建 session；旧 ABI open_compiled_story 只负责参数适配。非法 executor/worker_count 和重复 session 必须在发布会话前失败。

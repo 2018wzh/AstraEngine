@@ -1,9 +1,5 @@
 use super::*;
-use astra_plugin::ProductRuntimeProvider;
-use astra_plugin_abi::{
-    RuntimeOpenReport, RuntimePrepareReport, RuntimeProbeReport, RuntimeRestoreReport,
-    RuntimeShutdownReport,
-};
+use astra_plugin_abi::{RuntimeRestoreReport, RuntimeShutdownReport};
 
 pub(super) struct NativeVnRuntimeHost {
     provider: NativeVnRuntimeProvider,
@@ -48,17 +44,6 @@ impl NativeVnRuntimeHost {
         Ok(())
     }
 
-    fn validate_identity(&self, runtime: &str, provider: &str) -> Result<(), RuntimeHostError> {
-        if runtime != self.binding.descriptor().runtime_id || provider != self.binding.provider_id()
-        {
-            return Err(RuntimeHostError::new(
-                "ASTRA_RUNTIME_HOST_PROVIDER_IDENTITY",
-                "NativeVN report does not match the package binding",
-            ));
-        }
-        Ok(())
-    }
-
     fn validate_session(&self, session: &GameRuntimeSessionId) -> Result<(), RuntimeHostError> {
         if self.destroyed || self.session.as_ref() != Some(session) {
             return Err(RuntimeHostError::new(
@@ -79,52 +64,30 @@ impl NativeVnRuntimeHost {
         Ok(())
     }
 
-    pub(super) fn prepare(
-        &mut self,
-        request: RuntimePrepareRequest,
-    ) -> Result<RuntimePrepareReport, RuntimeHostError> {
-        self.validate_request(&request.target_id, &request.profile)?;
-        let report = self.provider.prepare(request);
-        self.validate_identity(&report.runtime_id, &report.provider_id)?;
-        Ok(report)
-    }
-
-    pub(super) fn probe(
-        &mut self,
-        request: RuntimeProbeRequest,
-    ) -> Result<RuntimeProbeReport, RuntimeHostError> {
-        self.validate_request(&request.target_id, &request.profile)?;
-        let report = self.provider.probe(request);
-        self.validate_identity(&report.runtime_id, &report.provider_id)?;
-        Ok(report)
-    }
-
     pub(super) fn open(
         &mut self,
-        request: RuntimeOpenRequest,
-    ) -> Result<RuntimeOpenReport, RuntimeHostError> {
-        self.validate_request(&request.target_id, &request.profile)?;
+        compiled: Arc<CompiledStory>,
+        config: VnRunConfig,
+        options: astra_vn_runtime_provider::NativeVnSessionConfig,
+    ) -> Result<GameRuntimeSessionId, RuntimeHostError> {
+        self.validate_request(&options.target_id, &config.profile)?;
         if self.session.is_some() {
             return Err(RuntimeHostError::new(
                 "ASTRA_RUNTIME_HOST_SESSION_DUPLICATE",
                 "NativeVN host already owns a session",
             ));
         }
-        self.limits.validate_sections(&request.sections)?;
-        request
-            .executor
-            .validate()
-            .map_err(|error| RuntimeHostError::new("ASTRA_RUNTIME_EXECUTOR_CONFIG", error))?;
-        let seed = request.seed;
-        let report = ProductRuntimeProvider::open(&mut self.provider, request)
-            .map_err(|error| RuntimeHostError::new("ASTRA_RUNTIME_HOST_OPEN", error))?;
-        self.session = Some(report.session_id.clone());
+        let seed = options.seed;
+        let session_id = self
+            .provider
+            .open_native(compiled, config, options)
+            .map_err(|error| RuntimeHostError::new("ASTRA_RUNTIME_HOST_OPEN", error.to_string()))?;
+        self.session = Some(session_id.clone());
         self.seed = seed;
-        self.validate_identity(&report.runtime_id, &report.provider_id)?;
         self.last_step = 0;
         self.next_mode = RuntimeStepMode::Live;
         self.failed = false;
-        Ok(report)
+        Ok(session_id)
     }
 
     pub(super) fn step(

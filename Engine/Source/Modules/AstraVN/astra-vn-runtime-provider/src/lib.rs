@@ -4,6 +4,8 @@
 //! `provider.rs`（NativeVnRuntimeProvider impl）`command.rs`（command 转换）
 //! `ffi.rs`（FfiProviderInstance 1200+ 行）；本轮仅库内Headless/指纹/Hash优先，拆分延至下次 PR 避免与 `973191ede` 合并冲突。
 
+mod native_open;
+pub use native_open::NativeVnSessionConfig;
 mod native_step;
 mod native_view;
 pub use native_step::{NativeVnStepCommand, NativeVnStepInput, NativeVnStepOutput};
@@ -502,125 +504,36 @@ impl NativeVnRuntimeProvider {
         config: VnRunConfig,
         request: RuntimeOpenRequest,
     ) -> Result<RuntimeOpenReport, CoreVnError> {
-        let compiled = Arc::new(compiled.into());
-        let runtime_index = Arc::new(CoreVnRuntimeIndex::build(&compiled)?);
-        tracing::info!(
-            event = "vn.provider.session.open.start",
-            target_id = %request.target_id,
-            seed = request.seed,
-            "AstraVN runtime session open started"
-        );
-        let session_id = GameRuntimeSessionId(format!(
-            "{}:{}:{}",
-            NATIVE_VN_RUNTIME_ID, request.target_id, request.seed
-        ));
-        if self.sessions.contains_key(&session_id.0) {
-            return Err(CoreVnError::diagnostic(
-                "ASTRA_NATIVE_VN_SESSION_DUPLICATE",
-                "runtime session id is already open",
-            ));
-        }
-        let initial_runtime = CoreVnRuntime::new_shared_indexed(
-            Arc::clone(&compiled),
-            Arc::clone(&runtime_index),
-            config,
-        )?;
-        let integrity_mode = match request.integrity_mode {
-            RuntimeTickIntegrityMode::Shipping => TickIntegrityMode::Shipping,
-            RuntimeTickIntegrityMode::Evidence => TickIntegrityMode::Evidence,
-        };
-        let mut world = RuntimeWorld::create_with_integrity(
-            RuntimeConfig {
-                seed: request.seed,
-                required_slots: Vec::new(),
-            },
-            integrity_mode,
-        )
-        .and_then(|world| {
-            world.with_package(PackageHandle {
-                package_id: request.package_hash.clone(),
-                target: request.target_id.clone(),
-                ..PackageHandle::default()
-            })
-        })
-        .map_err(|err| CoreVnError::message(err.to_string()))?;
         request
             .executor
             .validate()
             .map_err(|message| CoreVnError::diagnostic("ASTRA_RUNTIME_EXECUTOR_CONFIG", message))?;
-        world
-            .set_machine_worker_count(match request.executor.kind {
-                RuntimeExecutorKind::Serial => 1,
-                RuntimeExecutorKind::Parallel => usize::from(request.executor.worker_count),
-            })
-            .map_err(|error| CoreVnError::message(error.to_string()))?;
-        let owner = world
-            .create_actor("astra.vn.runtime", vec!["gameplay_runtime".to_string()])
-            .map_err(|error| CoreVnError::message(error.to_string()))?;
-        let initial_state = initial_runtime.state().clone();
-        world
-            .attach_component(owner, "astra.vn.policy_state.v1", &VnPolicyState::default())
-            .map_err(|err| CoreVnError::message(err.to_string()))?;
-        let pending_control = Arc::new(Mutex::new(None));
-        let control_result = Arc::new(Mutex::new(None));
-        world
-            .register_action(
-                NATIVE_VN_PROVIDER_ID,
-                VnStepAction {
-                    pending_control: Arc::clone(&pending_control),
-                    control_result: Arc::clone(&control_result),
+        let session_id = self.open_native(
+            Arc::new(compiled.into()),
+            config,
+            NativeVnSessionConfig {
+                target_id: request.target_id.clone(),
+                seed: request.seed,
+                package: Some(PackageHandle {
+                    package_id: request.package_hash,
+                    target: request.target_id,
+                    ..PackageHandle::default()
+                }),
+                integrity_mode: match request.integrity_mode {
+                    RuntimeTickIntegrityMode::Shipping => TickIntegrityMode::Shipping,
+                    RuntimeTickIntegrityMode::Evidence => TickIntegrityMode::Evidence,
                 },
-            )
-            .map_err(|err| CoreVnError::message(err.to_string()))?;
-        let running = astra_core::StableId::deterministic_v7(0, 1, request.seed);
-        world
-            .add_state_machine(StateMachineDefinition {
-                id: astra_core::StableId::deterministic_v7(0, 2, request.seed),
-                owner,
-                states: vec![StateDefinition {
-                    id: running,
-                    name: "vn.running".to_string(),
-                    terminal: false,
-                }],
-                transitions: vec![TransitionDefinition {
-                    from: running,
-                    to: running,
-                    guard: GuardExpr::Or {
-                        terms: vn_runtime_event_kinds()
-                            .into_iter()
-                            .map(|kind| GuardExpr::EventIs {
-                                kind: kind.to_string(),
-                            })
-                            .collect(),
-                    },
-                    actions: vec![ActionInvocation {
-                        action_id: "astra.vn.step".to_string(),
-                        input: BTreeMap::new(),
-                    }],
-                    priority: 0,
-                    source_ref: None,
-                }],
-                initial_state: running,
-            })
-            .map_err(|err| CoreVnError::message(err.to_string()))?;
-        self.sessions.insert(
-            session_id.0.clone(),
-            NativeVnSession {
-                world,
-                owner,
-                compiled,
-                runtime_index,
-                state: initial_state,
-                pending_control,
-                control_result,
-                step_complexity: None,
+                worker_count: match request.executor.kind {
+                    RuntimeExecutorKind::Serial => 1,
+                    RuntimeExecutorKind::Parallel => usize::from(request.executor.worker_count),
+                },
             },
-        );
+        )?;
         Ok(RuntimeOpenReport {
             session_id,
-            runtime_id: NATIVE_VN_RUNTIME_ID.to_string(),
-            provider_id: NATIVE_VN_PROVIDER_ID.to_string(),
-            diagnostics: Vec::new(),
+            runtime_id: NATIVE_VN_RUNTIME_ID.into(),
+            provider_id: NATIVE_VN_PROVIDER_ID.into(),
+            diagnostics: vec![],
         })
     }
 

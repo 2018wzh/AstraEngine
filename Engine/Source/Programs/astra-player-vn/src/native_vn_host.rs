@@ -27,9 +27,8 @@ use astra_player_core::{
 };
 use astra_plugin::{RuntimeHostError, RuntimeHostLimits};
 use astra_plugin_abi::{
-    GameRuntimeSessionId, RuntimeExecutorConfig, RuntimeOpenRequest, RuntimePrepareRequest,
-    RuntimeProbeRequest, RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeSaveSections,
-    RuntimeSectionCodec, RuntimeSectionPayload, RuntimeStepMode, RuntimeTickIntegrityMode,
+    GameRuntimeSessionId, RuntimeExecutorConfig, RuntimeRestoreRequest, RuntimeSaveRequest,
+    RuntimeSaveSections, RuntimeSectionCodec, RuntimeStepMode, RuntimeTickIntegrityMode,
     ValidatedRuntimeProviderSelection, NATIVE_VN_PROVIDER_ID,
 };
 use astra_ui_core::{
@@ -193,7 +192,7 @@ pub struct NativeVnHostCommandSource {
     pending_stage_completions: Vec<String>,
     next_media_resource_id: u64,
     stage_director: ProductStageDirector,
-    story: CompiledStory,
+    story: Arc<CompiledStory>,
     ui_blueprints: astra_ui_core::UiBlueprintBundle,
     ui_view_localization_keys: BTreeMap<String, BTreeSet<String>>,
     ui_bindings: astra_ui_core::UiBindingManifest,
@@ -449,7 +448,6 @@ struct ProductPresentationBinding {
 struct ProductPackageBinding {
     runtime_provider: ValidatedRuntimeProviderSelection,
     package_hash: Hash256,
-    package_section_ids: Vec<String>,
     presentation: ProductPresentationBinding,
     system_ui_policy: SystemUiProfilePolicy,
 }
@@ -659,12 +657,6 @@ impl NativeVnHostCommandSource {
             ProductPackageBinding {
                 runtime_provider,
                 package_hash: package.package_hash(),
-                package_section_ids: package
-                    .container()
-                    .entries()
-                    .iter()
-                    .map(|entry| entry.id.clone())
-                    .collect(),
                 presentation: ProductPresentationBinding {
                     asset_store,
                     localization,
@@ -709,17 +701,6 @@ impl NativeVnHostCommandSource {
             .filter(|node| node.terminal)
             .map(|node| node.id.clone())
             .collect();
-        let compiled_bytes = postcard::to_allocvec(&compiled.story)
-            .map_err(|err| NativeVnHostError::Serialize(err.to_string()))?;
-        let compiled_hash = Hash256::from_sha256(&compiled_bytes);
-        let compiled_section = RuntimeSectionPayload {
-            section_id: "vn.story".to_string(),
-            schema: "astra.vn.story".to_string(),
-            version: SchemaVersion::default(),
-            codec: RuntimeSectionCodec::Postcard,
-            hash: compiled_hash,
-            bytes: compiled_bytes,
-        };
         let stage_director = ProductStageDirector::new(
             binding.presentation.manifest.clone(),
             binding.runtime_provider.profile(),
@@ -781,51 +762,39 @@ impl NativeVnHostCommandSource {
             )));
         }
         let mut host = NativeVnRuntimeHost::new(runtime_provider, limits)?;
-        let prepare = match host.prepare(RuntimePrepareRequest {
-            target_id: runtime_provider.target().to_string(),
-            profile: config.profile.clone(),
-            package_hash: binding.package_hash.to_string(),
-            section_ids: binding.package_section_ids.clone(),
-        }) {
-            Ok(report) => report,
-            Err(error) => return Err(cleanup_runtime_host(&mut host, error)),
-        };
-        if prepare.status != "pass" || !prepare.diagnostics.is_empty() {
-            let error = NativeVnHostError::Package(format!(
-                "ASTRA_PLAYER_RUNTIME_PREPARE_BLOCKED: provider preparation returned {} with {} diagnostics",
-                prepare.status,
-                prepare.diagnostics.len()
-            ));
-            return Err(cleanup_runtime_host(&mut host, error));
-        }
-        let probe = match host.probe(RuntimeProbeRequest {
-            target_id: runtime_provider.target().to_string(),
-            profile: config.profile.clone(),
-            platform: None,
-            section_ids: binding.package_section_ids,
-        }) {
-            Ok(report) => report,
-            Err(error) => return Err(cleanup_runtime_host(&mut host, error)),
-        };
-        if probe.status != "pass" || !probe.diagnostics.is_empty() {
-            let error = NativeVnHostError::Package(format!(
-                "ASTRA_PLAYER_RUNTIME_PROBE_BLOCKED: provider probe returned {} with {} diagnostics",
-                probe.status,
-                probe.diagnostics.len()
-            ));
-            return Err(cleanup_runtime_host(&mut host, error));
-        }
-        let open = match host.open(RuntimeOpenRequest {
-            target_id: runtime_provider.target().to_string(),
-            profile: config.profile,
-            locale: config.locale,
-            seed: 0,
-            integrity_mode: runtime_execution.integrity_mode,
-            executor: runtime_execution.executor,
-            package_hash: binding.package_hash.to_string(),
-            sections: vec![compiled_section],
-        }) {
-            Ok(report) => report,
+        runtime_execution
+            .executor
+            .validate()
+            .map_err(|error| NativeVnHostError::Input(error.to_string()))?;
+        let story = Arc::new(compiled.story);
+        let open = match host.open(
+            Arc::clone(&story),
+            config,
+            astra_vn_runtime_provider::NativeVnSessionConfig {
+                target_id: runtime_provider.target().into(),
+                seed: 0,
+                package: Some(astra_runtime::PackageHandle {
+                    package_id: binding.package_hash.to_string(),
+                    target: runtime_provider.target().into(),
+                    ..Default::default()
+                }),
+                integrity_mode: match runtime_execution.integrity_mode {
+                    RuntimeTickIntegrityMode::Shipping => {
+                        astra_runtime::TickIntegrityMode::Shipping
+                    }
+                    RuntimeTickIntegrityMode::Evidence => {
+                        astra_runtime::TickIntegrityMode::Evidence
+                    }
+                },
+                worker_count: match runtime_execution.executor.kind {
+                    astra_plugin_abi::RuntimeExecutorKind::Serial => 1,
+                    astra_plugin_abi::RuntimeExecutorKind::Parallel => {
+                        usize::from(runtime_execution.executor.worker_count)
+                    }
+                },
+            },
+        ) {
+            Ok(session_id) => session_id,
             Err(error) => return Err(cleanup_runtime_host(&mut host, error)),
         };
         tracing::info!(
@@ -843,12 +812,12 @@ impl NativeVnHostCommandSource {
             .collect();
         let ui_view_localization_keys = blueprint_view_localization_keys(&compiled.ui_blueprints);
         let image_prefetch_windows =
-            image_prefetch_windows(&compiled.story, &binding.presentation.asset_store)?;
+            image_prefetch_windows(&story, &binding.presentation.asset_store)?;
         let image_prefetcher =
             PackageImagePrefetcher::start(Arc::clone(&binding.presentation.asset_store))?;
         Ok(Self {
             host,
-            session_id: open.session_id,
+            session_id: open,
             runtime_state: None,
             runtime_backlog_count: 0,
             font_families: ordered_font_families,
@@ -917,7 +886,7 @@ impl NativeVnHostCommandSource {
             presentation_failed: false,
             media_scope: astra_runtime::TaskScope::new(),
             video_scopes: BTreeMap::new(),
-            story: compiled.story,
+            story,
             ui_blueprints: compiled.ui_blueprints,
             ui_view_localization_keys,
             ui_bindings: compiled.ui_bindings,
