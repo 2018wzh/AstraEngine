@@ -2,6 +2,42 @@ use super::*;
 use rfvp::host_api::EncodedAudioKind;
 
 #[test]
+fn native_bgm_capacity_allows_overlap_without_discarding_fading_voices() {
+    use rfvp::host_api::{AudioParams, AudioSlotKind, RfvpError};
+    let mut mixer = SoftAudioMixer::new(SymphoniaBackend, mixer_config());
+    let samples = wav_pcm16(&[1_000, -1_000], 2, OUTPUT.sample_rate);
+    let params = AudioParams {
+        repeat: true,
+        ..Default::default()
+    };
+    for slot in 0..5 {
+        mixer
+            .load_encoded(AudioStreamId::bgm(slot), EncodedAudioKind::Wav, &samples)
+            .unwrap();
+    }
+    mixer.play(AudioStreamId::bgm(0), params, 0).unwrap();
+    mixer.stop(AudioStreamId::bgm(0), 1_000).unwrap();
+    mixer.play(AudioStreamId::bgm(1), params, 0).unwrap();
+    // The real-game failure occurred here: one playing plus one fading BGM.
+    assert_eq!(mixer.voice_count(AudioSlotKind::Bgm), 2);
+    assert!(!mixer.is_playing(AudioStreamId::bgm(0)));
+    mixer.play(AudioStreamId::bgm(2), params, 0).unwrap();
+    mixer.pause(AudioStreamId::bgm(1)).unwrap();
+    mixer.play(AudioStreamId::bgm(3), params, 0).unwrap();
+    assert_eq!(mixer.voice_count(AudioSlotKind::Bgm), 4);
+    assert_eq!(
+        mixer.play(AudioStreamId::bgm(4), params, 0),
+        Err(RfvpError::CapacityExceeded)
+    );
+    let mut pcm = vec![0; mixer.config().mix_frames * 2];
+    mixer.mix_next(&mut pcm).unwrap();
+    assert!(pcm.iter().any(|sample| *sample != 0));
+    assert_eq!(mixer.voice_count(AudioSlotKind::Bgm), 4);
+    mixer.destroy_stream(AudioStreamId::bgm(0));
+    mixer.play(AudioStreamId::bgm(4), params, 0).unwrap();
+}
+
+#[test]
 fn voice_capacity_failure_identifies_play_without_exposing_resource_data() {
     let mut mixer = SoftAudioMixer::new(
         SymphoniaBackend,

@@ -14,6 +14,12 @@ retains upstream history, workspace members, tools, licenses and platform crates
 The Family depends on `crates/rfvp` with `hosted-gpu`; native video, bitmap and
 Anzu feature dependencies retain their upstream definitions.
 
+The Family configures four active BGM voices, matching RFVP 0.6.0's native
+`BgmPlayer` slots instead of the hosted mixer's generic two-voice default.
+Paused and fading voices remain charged against capacity; playback is never
+made to succeed by dropping a voice or completing its fade early. SE and total
+limits remain unchanged. This configuration change stays outside the fork.
+
 The 0.6.0 update incorporates upstream text-wait completion, InputFlash,
 dissolve-wait and native global-save fixes. Hosted sessions own script globals per session and never use the process-global
 `GLOBAL`. Global/system persistence shares the upstream `GlobalSaveDataV1` type,

@@ -18,6 +18,9 @@ mod importer;
 mod inventory;
 mod private_output;
 
+#[cfg(test)]
+mod census_tests;
+
 #[derive(Debug, Parser)]
 #[command(name = "astra-emu-minori-cli")]
 struct Cli {
@@ -200,7 +203,7 @@ fn census_audio_resources(
             if token.contains('[') {
                 report.metadata_suffix_count += 1;
             }
-            if spec.resource == "-" {
+            if spec.resource == "*" {
                 report.stop_token_count += 1;
                 continue;
             }

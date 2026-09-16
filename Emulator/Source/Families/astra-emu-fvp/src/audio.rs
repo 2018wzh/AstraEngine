@@ -306,19 +306,23 @@ impl Drop for AudioBridge {
     }
 }
 
+fn mixer_config() -> SoftAudioConfig {
+    SoftAudioConfig {
+        output_sample_rate: OUTPUT.sample_rate,
+        // RFVP 0.6.0's native BgmPlayer owns four slots. A fading or paused
+        // voice still occupies its slot when the next BGM starts.
+        max_active_bgm: 4,
+        ..SoftAudioConfig::default()
+    }
+}
+
 fn run_worker(
     rx: Receiver<Job>,
     sink: Arc<AudioSinkBox>,
     cancelled: Arc<AtomicBool>,
     playback_states: Arc<Mutex<BTreeMap<u32, bool>>>,
 ) -> FamilyResult<()> {
-    let mut mixer = SoftAudioMixer::new(
-        SymphoniaBackend,
-        SoftAudioConfig {
-            output_sample_rate: OUTPUT.sample_rate,
-            ..SoftAudioConfig::default()
-        },
-    );
+    let mut mixer = SoftAudioMixer::new(SymphoniaBackend, mixer_config());
     let mix_samples = mixer
         .config()
         .mix_frames
