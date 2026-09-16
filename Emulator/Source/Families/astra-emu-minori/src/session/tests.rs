@@ -403,9 +403,9 @@ fn audio_close_cancels_blocked_write_and_joins_worker() {
 fn decoded_audio_rejects_expansion_budget_and_cancellation() {
     let bytes = fixture::wave();
     let stop = AtomicBool::new(false);
-    assert!(astra_emu_sdk::decode_audio(bytes.clone(), 100, &stop).is_err());
+    assert!(astra_emu_sdk::decode_audio(&bytes, 100, &stop).is_err());
     stop.store(true, Ordering::Release);
-    assert!(astra_emu_sdk::decode_audio(bytes, 4800, &stop).is_err());
+    assert!(astra_emu_sdk::decode_audio(&bytes, 4800, &stop).is_err());
 }
 
 #[test]

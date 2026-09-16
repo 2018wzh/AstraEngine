@@ -1,4 +1,5 @@
 use crate::{MinoriMountedVfs, MinoriRuntimeState, MinoriTextRenderer};
+use astra_byte_source::OwnedByteBuffer;
 use astra_emu_family_api::{FamilyError, FamilyResult};
 use astra_emu_sdk::TextureCache;
 use astra_media_core::{BlendMode, RectI, SceneCommand, TextureFrame};
@@ -13,7 +14,7 @@ pub(crate) fn read_asset(
     archive: &MinoriMountedVfs,
     uri: &str,
     limit: u64,
-) -> FamilyResult<Vec<u8>> {
+) -> FamilyResult<OwnedByteBuffer> {
     let stat = archive.stat(uri).map_err(core_error)?;
     if stat.size == 0 || stat.size > limit.min(MAX_ASSET_BYTES) {
         return Err(error(
@@ -23,7 +24,7 @@ pub(crate) fn read_asset(
     }
     archive
         .read_range(uri, 0, stat.size)
-        .map(|r| r.bytes.as_slice().to_vec())
+        .map(|r| r.bytes)
         .map_err(core_error)
 }
 

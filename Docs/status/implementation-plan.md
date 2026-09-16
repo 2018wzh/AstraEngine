@@ -15,6 +15,8 @@
 
 原生 Cargo 构建身份工具已移除对旧 Web UI 工具链预检的隐式依赖，不再要求 Node、jco 和外部 Luau analyzer 才能记录 Headless 构建。源码、工作树状态、Cargo 清单、依赖锁和 Rust 工具链及 feature 身份仍保留；未生成或伪造旧预检通过记录。新增原生构建回归覆盖存在旧 UI lock、缺少预检文件时的正常生成及身份摘要完整性。
 
+SDK 音频解码改为同步借用源切片，直接复用 Symphonia 支持借用数据的 MediaSourceStream。Minori 的资产读取保留 AstraEngine OwnedByteBuffer，脚本、图片和音频消费者不再先复制整段归档数据；CMVS 普通音频与 MGV 内嵌 Ogg 同样删除解码前的整段复制。返回 PCM 独立持有采样，帧数预算、取消和格式错误语义不变。SDK 单元测试、CMVS 与 Minori 库测试通过，包含已有 GPU 会话、音频关闭与恢复回归；受影响三个 crate 的全目标 Clippy 和格式检查通过。尚未完成 CMVS Family session 与真实游戏验收。
+
 FVP、Minori、Siglus 已改用 API 内可选 ProviderModule，共用单会话 ABI 管理；panic 后仍可关闭，模块释放会关闭遗留会话。API 16 项单元测试、FVP/Minori/Siglus 与 Manager 的增量测试、受影响 crate 全目标 Clippy 和格式检查已通过。FVP/Minori 显式开启 dynamic-plugin-export 后，三个实际插件均通过 Manager 的 ABI 布局与诊断接入检查（共 6 项）；导出 feature 的全目标 Clippy 和 FVP 在 1 MiB 栈上连续三次开关会话的回归也通过。核心 VM、媒体和原生存档实现未因 ABI 复用而改写。
 
 Headless 长流程新增逐输入开始/完成 TRACE，使用序号、输入种类和有效 tick 定位耗时，不输出观察值或商业内容。22 项单元测试通过，2 项显式性能测试未执行；逐输入日志现已用于修复版终之空完整路线运行。

@@ -20,8 +20,10 @@ use symphonia::core::{
 
 /// Decode bounded mono/stereo audio into Kira's native floating-point frames.
 /// Cancellation is checked before probing and between decoded packets.
+/// The encoded bytes are borrowed only for this synchronous call; the returned
+/// PCM owns its frames independently of the archive or container allocation.
 pub fn decode_audio(
-    bytes: Vec<u8>,
+    bytes: &[u8],
     max_frames: usize,
     cancelled: &AtomicBool,
 ) -> Result<StaticSoundData, CoreError> {
@@ -167,13 +169,13 @@ mod tests {
     #[test]
     fn decodes_complete_mono_wave_and_enforces_frame_budget() {
         let stop = AtomicBool::new(false);
-        let audio = decode_audio(wave(), 4, &stop).unwrap();
+        let audio = decode_audio(&wave(), 4, &stop).unwrap();
         assert_eq!(audio.sample_rate, 8000);
         assert_eq!(audio.frames.len(), 4);
         assert_eq!(audio.frames[1].left, 0.5);
         assert_eq!(audio.frames[1].right, 0.5);
         assert_eq!(
-            decode_audio(wave(), 3, &stop).err().unwrap().code(),
+            decode_audio(&wave(), 3, &stop).err().unwrap().code(),
             "ASTRA_EMU_AUDIO_BOUND"
         );
     }
@@ -181,14 +183,14 @@ mod tests {
     #[test]
     fn cancellation_precedes_parsing_and_corruption_is_an_error() {
         assert_eq!(
-            decode_audio(Vec::new(), 4, &AtomicBool::new(true))
+            decode_audio(&[], 4, &AtomicBool::new(true))
                 .err()
                 .unwrap()
                 .code(),
             "ASTRA_EMU_AUDIO_CANCELLED"
         );
         assert_eq!(
-            decode_audio(b"private-input".to_vec(), 4, &AtomicBool::new(false))
+            decode_audio(b"private-input", 4, &AtomicBool::new(false))
                 .err()
                 .unwrap()
                 .code(),

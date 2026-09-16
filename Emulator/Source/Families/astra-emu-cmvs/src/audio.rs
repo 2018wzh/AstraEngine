@@ -42,7 +42,7 @@ fn decode_source(
     } else {
         source
     };
-    decode_audio(audio.to_vec(), max_frames, cancelled)
+    decode_audio(audio, max_frames, cancelled)
 }
 
 #[cfg(test)]
