@@ -16,6 +16,9 @@ use crate::audio_executor::{AudioDeviceKind, HostAudioExecutor};
 #[path = "headless_input.rs"]
 mod input;
 
+#[path = "headless_captures.rs"]
+mod captures;
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Configuration {
@@ -26,6 +29,8 @@ struct Configuration {
     output: PathBuf,
     #[serde(default)]
     inputs: Vec<input::TimedInput>,
+    #[serde(default)]
+    capture_frames: Vec<u32>,
 }
 
 struct Capture(Option<image::RgbaImage>);
@@ -64,6 +69,7 @@ pub(crate) fn run(path: &Path) -> Result<(), String> {
         return Err("ASTRA_EMU_HEADLESS_FRAME_LIMIT".into());
     }
     let inputs = input::prepare(&config.inputs, config.frames)?;
+    let mut captures = captures::Captures::new(&config.capture_frames, config.frames, &config.output)?;
     let game = config
         .game
         .to_str()
@@ -125,6 +131,7 @@ pub(crate) fn run(path: &Path) -> Result<(), String> {
             session
                 .visit_frame(&mut capture)
                 .map_err(|error| error.to_string())?;
+            captures.write(index, capture.0.as_ref())?;
             tracing::trace!(event = "astra.emu.headless.frame.end", frame = index);
             if response.status == FamilyStatus::Finished {
                 break;
@@ -133,6 +140,7 @@ pub(crate) fn run(path: &Path) -> Result<(), String> {
                 std::thread::sleep(delay);
             }
         }
+        captures.finish()?;
         capture
             .0
             .ok_or("ASTRA_EMU_HEADLESS_FRAME_MISSING")?

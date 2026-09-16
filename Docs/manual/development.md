@@ -43,6 +43,8 @@ astra package bundle .tmp/game.astrapak \
 
 配置包含 `plugin`、`game`、`configuration`、`frames` 和 `output`。路径相对运行目录解析，游戏副本与输出放在 ignored 目录，测试前保护原存档。`frames` 范围为 1–36000。
 
+可选 `capture_frames` 在同一会话内保存指定帧，适合比较输入推进和存读档前后的画面。例如 `"capture_frames": [120, 240, 360]` 在各帧输入和推进完成后截图；帧从 0 开始，必须小于 `frames`，最多 128 项且不能重复。文件名在 `output` 文件名后追加 `.frame-120.png` 等后缀，最后一帧仍写入 `output`。游戏提前结束而未到达要求的截图帧，或截图缺失、写入失败时，测试明确失败并关闭会话；不会用最后一帧冒充未执行的帧。截图只能保存在 ignored 私有目录。
+
 FVP 的 RFVS v2 保存原生动画容器及剩余进度，读档后继续透明度、移动等演出。旧 RFVS v1 缺少这部分状态，读取时明确拒绝且保留文件；测试使用新空槽位，不覆盖旧档。RFVG 全局存档格式保持不变。
 
 Native VN 的 GPU Headless 使用 `render_policy: checkpoints` 时，独立资源变更可合并提交；同一资源再次变更前会先提交前一个待绘制帧，保留释放与重新上传的跨帧顺序。这些中间提交不执行像素回读，检查点仍读取最新画面。逐帧视听与性能测试使用 `all`。
