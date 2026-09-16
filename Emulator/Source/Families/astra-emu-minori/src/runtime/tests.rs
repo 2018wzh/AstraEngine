@@ -285,7 +285,8 @@ fn transition_configures_the_following_stage_without_guessing_star_as_a_resource
     let Some(MinoriVmEvent::Stage(stage)) = vm.step(1).unwrap() else {
         panic!("expected stage event")
     };
-    assert_eq!(stage.foreground, None);
+    assert_eq!(stage.resource_sequence, vec![None]);
+    assert_eq!(stage.reference_position, None);
     assert_eq!(
         stage.background,
         Some(MinoriStageLayer {

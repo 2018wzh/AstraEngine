@@ -4,7 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-pub const MINORI_RUNTIME_STATE_SCHEMA: &str = "astra.emu.minori.runtime_state.v7";
+pub const MINORI_RUNTIME_STATE_SCHEMA: &str = "astra.emu.minori.runtime_state.v8";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MinoriRuntimeState {
@@ -17,7 +17,7 @@ pub struct MinoriRuntimeState {
     pub wait: Option<MinoriWaitState>,
     pub message: Option<MinoriMessageState>,
     pub choice: Option<MinoriChoiceState>,
-    pub layers: BTreeMap<u32, MinoriLayerState>,
+    pub stage: Option<MinoriStageCommand>,
     pub transition: MinoriTransitionState,
     pub effect: Option<MinoriEffectState>,
     pub panel: Option<MinoriPanelState>,
@@ -69,17 +69,6 @@ pub struct MinoriChoiceState {
     pub selected_index: Option<u32>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct MinoriLayerState {
-    pub resource_uri: String,
-    pub x_milli: i32,
-    pub y_milli: i32,
-    pub scale_x_milli: i32,
-    pub scale_y_milli: i32,
-    pub opacity_milli: u16,
-    pub blend: String,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
 pub struct MinoriTransitionState {
     pub mode: i32,
@@ -122,26 +111,27 @@ pub struct MinoriEffectFrame {
     pub alpha_255: u16,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MinoriStageCommand {
-    pub foreground: Option<MinoriStageLayer>,
+    pub resource_sequence: Vec<Option<String>>,
+    pub reference_position: Option<[i32; 2]>,
     pub background: Option<MinoriStageLayer>,
     pub stands: Vec<MinoriStandLayer>,
     pub transition: MinoriTransitionState,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MinoriStageLayer {
     pub resource_uri: String,
     pub x: i32,
     pub y: i32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MinoriStandLayer {
     pub resource_uri: String,
     pub position: i32,
-    pub offset: i32,
+    pub resource_parameter: i32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

@@ -1,9 +1,11 @@
 mod effects;
 mod errors;
 mod model;
+mod stage;
 use effects::*;
 pub use errors::MinoriRuntimeError;
 pub use model::*;
+use stage::*;
 mod audio_commands;
 mod choices;
 use audio_commands::*;
@@ -93,7 +95,7 @@ impl MinoriVm {
             wait: None,
             message: None,
             choice: None,
-            layers: BTreeMap::new(),
+            stage: None,
             transition: MinoriTransitionState::default(),
             effect: None,
             panel: None,
@@ -119,6 +121,7 @@ impl MinoriVm {
     }
 
     pub fn encode_native_save(&self) -> Result<Vec<u8>, MinoriRuntimeError> {
+        validate_stage_state(self.state.stage.as_ref())?;
         postcard::to_allocvec(&self.state).map_err(|_| MinoriRuntimeError::NativeSaveFormat)
     }
 
@@ -128,6 +131,7 @@ impl MinoriVm {
         if state.schema != MINORI_RUNTIME_STATE_SCHEMA {
             return Err(MinoriRuntimeError::State);
         }
+        validate_stage_state(state.stage.as_ref())?;
         Ok(state)
     }
 
@@ -172,6 +176,7 @@ impl MinoriVm {
             return Err(MinoriRuntimeError::State);
         }
         choices::validate_choice(&self.script, &restored)?;
+        validate_stage_state(restored.stage.as_ref())?;
         let restored_tick = next_fixed_tick
             .checked_sub(1)
             .ok_or(MinoriRuntimeError::State)?;

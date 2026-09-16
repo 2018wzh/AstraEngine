@@ -317,15 +317,7 @@ impl MinoriSession {
                     .map_err(vm_error)?;
                 Ok(false)
             }
-            Some(MinoriVmEvent::Stage(stage)) => {
-                if !stage.stands.is_empty() {
-                    return Err(error(
-                        "ASTRA_EMU_MINORI_STAGE_STAND_POSITION",
-                        "stand positioning remains unverified",
-                    ));
-                }
-                Ok(true)
-            }
+            Some(MinoriVmEvent::Stage(_)) => Ok(true),
             Some(
                 MinoriVmEvent::Effect(_)
                 | MinoriVmEvent::EffectCleared

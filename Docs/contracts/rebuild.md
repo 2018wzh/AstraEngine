@@ -34,6 +34,8 @@ Rust Family 可选用 API crate 的 ProviderModule 复用 ABI 会话管理，FVP
 
 ### 外部核心与 SDK 的重构边界
 
+Minori 的原生 stage 以完整资源序列、参考坐标、背景与立绘参数保存于 `runtime_state.v8`，替换丢失参数的旧图层表示。正常绘制与读档重建共用 Family Scene；未实现的序列或立绘语义必须明确失败，不能丢弃参数。v7 及更早状态直接拒绝，格式与诊断见 [Minori 脚本执行](../emu/minori/script-execution.md)。
+
 吸收 `emu/krkr-hosted` 中外部核心 fork、最小适配提交和 submodule 的决策。来源提交 `dad452d2d` 将 RFVP、Siglus 改为 submodule，`bfc49f419` 引入 Artemis；这些提交用于确认来源，不整体移植旧 Family 接口。目标是保留完整上游历史，在固定上游基线上用一个适配提交承载必要差异，由主仓 gitlink 锁定精确提交。分支名只用于维护，不能替代提交固定。
 
 Family descriptor、配置、日志桥和 ABI 转换放在主仓适配层。fork 只补嵌入入口、原生 GPU 输出、PCM 接口及必要生命周期能力，尽量保持上游平台入口可用。核心自身缺陷整理最小复现后交上游 issue，禁止附带商业素材、私有路径和存档；必要临时适配说明原因和删除条件。不以本次重构为由重写外部 VM、渲染器或媒体系统。

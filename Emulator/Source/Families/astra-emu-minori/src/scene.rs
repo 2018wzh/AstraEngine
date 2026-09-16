@@ -10,6 +10,9 @@ use std::{num::NonZeroUsize, sync::Arc};
 const MAX_ASSET_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_IMAGE_BYTES: usize = 128 * 1024 * 1024;
 
+#[cfg(test)]
+mod tests;
+
 pub(crate) fn read_asset(
     archive: &MinoriMountedVfs,
     uri: &str,
@@ -124,27 +127,32 @@ impl Scene {
         let mut commands = vec![SceneCommand::Clear {
             rgba: [0, 0, 0, 255],
         }];
-        for (id, layer) in &state.layers {
-            if *id >= 16
-                || layer.x_milli % 1000 != 0
-                || layer.y_milli % 1000 != 0
-                || layer.scale_x_milli != 1000
-                || layer.scale_y_milli != 1000
-                || layer.blend != "alpha"
-                || layer.opacity_milli > 1000
-            {
+        if let Some(stage) = &state.stage {
+            if stage.resource_sequence.len() != 1 {
                 return Err(error(
-                    "ASTRA_EMU_MINORI_STAGE_STAND_POSITION",
-                    "stage positioning or blend is not verified",
+                    "ASTRA_EMU_MINORI_STAGE_SEQUENCE",
+                    "native stage resource sequence rendering is not implemented",
                 ));
             }
-            self.layer(
-                &mut commands,
-                &layer.resource_uri,
-                layer.x_milli / 1000,
-                layer.y_milli / 1000,
-                layer.opacity_milli as f32 / 1000.0,
-            )?;
+            if !stage.stands.is_empty() {
+                return Err(error(
+                    "ASTRA_EMU_MINORI_STAGE_STAND_POSITION",
+                    "native stand resource parameters require verified rendering",
+                ));
+            }
+            if let Some(background) = &stage.background {
+                self.layer(
+                    &mut commands,
+                    &background.resource_uri,
+                    background.x,
+                    background.y,
+                    1.0,
+                )?;
+            }
+            if let Some(uri) = &stage.resource_sequence[0] {
+                let [x, y] = stage.reference_position.unwrap_or([0, 0]);
+                self.layer(&mut commands, uri, x, y, 1.0)?;
+            }
         }
         if let Some(effect) = &state.effect {
             let current = effect
