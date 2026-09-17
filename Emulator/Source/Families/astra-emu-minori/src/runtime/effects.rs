@@ -8,11 +8,11 @@ pub(super) fn execute_effect(
         .map_err(|_| MinoriRuntimeError::Effect)?;
     if tokens.is_empty()
         || tokens.len() > 5
-        || !matches!(tokens[0].as_str(), "CrossFade2" | "CrossFade")
+        || !matches!(tokens[0].as_str(), "*" | "CrossFade2" | "CrossFade")
     {
         return Err(MinoriRuntimeError::Effect);
     }
-    if tokens.len() == 1 || (tokens.len() == 4 && tokens[1] == "*") {
+    if tokens[0] == "*" || tokens.len() == 1 || (tokens.len() == 4 && tokens[1] == "*") {
         next_effect_sequence(state)?;
         state.effect = None;
         return Ok(Some(MinoriVmEvent::EffectCleared));

@@ -448,6 +448,12 @@ pub enum SceneCommand {
     FilterGraph {
         graph: crate::FilterGraph,
     },
+    /// Intersect a screen-space, repeating 8x8 binary coverage mask.
+    /// Bit 63 covers pixel (0, 0), bit 0 covers (7, 7).
+    PushPixelMask {
+        bits: u64,
+    },
+    PopPixelMask,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -590,6 +596,7 @@ impl HeadlessRenderer {
         let mut mutations = Vec::new();
         let mut resource_overlay = BTreeMap::new();
         let mut clip_depth = 1_usize;
+        let mut pixel_mask_depth = 0_usize;
         let mut transform_depth = 1_usize;
         let mut opacity_depth = 1_usize;
         for (command_index, command) in commands.iter().enumerate() {
@@ -824,6 +831,12 @@ impl HeadlessRenderer {
                     validate_glyph(glyph)?;
                     validate_opacity(*opacity)?;
                 }
+                DrawCommand::PushPixelMask { .. } => pixel_mask_depth += 1,
+                DrawCommand::PopPixelMask => {
+                    pixel_mask_depth = pixel_mask_depth.checked_sub(1).ok_or_else(|| {
+                        MediaError::message("ASTRA_MEDIA_PIXEL_MASK_STACK: stack underflow")
+                    })?;
+                }
                 DrawCommand::PushClip { .. } => clip_depth += 1,
                 DrawCommand::PopClip => {
                     clip_depth = clip_depth.checked_sub(1).ok_or_else(|| {
@@ -869,7 +882,7 @@ impl HeadlessRenderer {
                 DrawCommand::Clear { .. } | DrawCommand::Rect { .. } => {}
             }
         }
-        if clip_depth != 1 || transform_depth != 1 || opacity_depth != 1 {
+        if pixel_mask_depth != 0 || clip_depth != 1 || transform_depth != 1 || opacity_depth != 1 {
             return Err(MediaError::message(
                 "ASTRA_MEDIA_SCENE_STACK: scene command stacks are unbalanced",
             ));
@@ -1412,6 +1425,9 @@ impl Renderer2D for HeadlessRenderer {
                         *opacity * opacities.last().copied().unwrap_or(1.0),
                         *blend,
                     )?;
+                }
+                DrawCommand::PushPixelMask { .. } | DrawCommand::PopPixelMask => {
+                    return Err(MediaError::message("ASTRA_MEDIA_PIXEL_MASK_GPU_REQUIRED: CPU renderer does not support pixel masks"));
                 }
                 DrawCommand::PushClip { rect } => {
                     let transformed =

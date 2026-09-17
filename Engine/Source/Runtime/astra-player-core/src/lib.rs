@@ -780,6 +780,8 @@ pub fn evidence_scene_command_hash(
             SceneCommand::PushOpacity { .. } => (17, None),
             SceneCommand::PopOpacity => (18, None),
             SceneCommand::FilterGraph { .. } => (19, None),
+            SceneCommand::PushPixelMask { .. } => (21, None),
+            SceneCommand::PopPixelMask => (22, None),
         };
         material.push(kind);
         if let Some(pixels) = pixels {

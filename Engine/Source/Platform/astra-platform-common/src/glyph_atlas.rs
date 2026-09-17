@@ -26,7 +26,7 @@ const MAX_SCENE_RESOURCE_BYTES: usize = MAX_ATLAS_WIDTH as usize * ATLAS_SIDE as
 const MAX_ATLAS_UPLOAD_BYTES: usize = ATLAS_SIDE as usize * ATLAS_SIDE as usize * 4;
 const ATLAS_STAGING_RING_SIZE: usize = 1;
 const ATLAS_STAGING_CHUNK_BYTES: u64 = 4 * 1024 * 1024;
-const VERTEX_STRIDE: wgpu::BufferAddress = 32;
+const VERTEX_STRIDE: wgpu::BufferAddress = 40;
 
 pub(crate) struct WgpuGlyphAtlasRenderer {
     resources: BTreeMap<String, AtlasResource>,
@@ -395,6 +395,7 @@ struct DrawQuad<'a> {
 }
 
 struct DrawRun<'a> {
+    pixel_mask: u64,
     // Classic text runs regularly contain more than eight glyphs. Keeping the
     // expected bounded run inline avoids a per-frame growth allocation while
     // retaining an explicit spill path for authored long text.
@@ -408,6 +409,7 @@ struct DrawRun<'a> {
 }
 
 struct MeshRun<'a> {
+    pixel_mask: u64,
     vertices: &'a [MeshVertex2D],
     indices: &'a [u32],
     texture_id: Option<&'a str>,
@@ -726,6 +728,7 @@ impl WgpuGlyphAtlasRenderer {
         let mut quad_runs: SmallVec<[DrawRun<'_>; 64]> = SmallVec::new();
         let mut draw_runs: SmallVec<[DrawPrimitive<'_>; 64]> = SmallVec::new();
         let mut clip_stack: SmallVec<[RectI; 16]> = SmallVec::new();
+        let mut pixel_masks: SmallVec<[u64; 16]> = SmallVec::new();
         let mut transform_stack: SmallVec<[Transform2D; 16]> = smallvec![Transform2D::IDENTITY];
         let mut camera = Transform2D::IDENTITY;
         let mut opacity_stack: SmallVec<[f32; 16]> = smallvec![1.0_f32];
@@ -882,6 +885,14 @@ impl WgpuGlyphAtlasRenderer {
                         ));
                     }
                 }
+                SceneCommand::PushPixelMask { bits } => {
+                    pixel_masks.push(pixel_masks.last().copied().unwrap_or(u64::MAX) & bits);
+                }
+                SceneCommand::PopPixelMask => {
+                    if pixel_masks.pop().is_none() {
+                        return Err(invalid("GPU pixel mask stack underflowed"));
+                    }
+                }
                 SceneCommand::PushClip { rect } => {
                     let rect =
                         transformed_bounds(current_transform(camera, &transform_stack), *rect)?;
@@ -937,6 +948,7 @@ impl WgpuGlyphAtlasRenderer {
                         &mut quad_runs,
                         &mut draw_runs,
                         DrawRun {
+                            pixel_mask: pixel_masks.last().copied().unwrap_or(u64::MAX),
                             compositing: self.default_compositing,
                             blend: *blend,
                             quads,
@@ -984,6 +996,7 @@ impl WgpuGlyphAtlasRenderer {
                         &mut quad_runs,
                         &mut draw_runs,
                         DrawRun {
+                            pixel_mask: pixel_masks.last().copied().unwrap_or(u64::MAX),
                             compositing: self.default_compositing,
                             blend: *blend,
                             quads: smallvec![DrawQuad {
@@ -1034,6 +1047,7 @@ impl WgpuGlyphAtlasRenderer {
                         &mut quad_runs,
                         &mut draw_runs,
                         DrawRun {
+                            pixel_mask: pixel_masks.last().copied().unwrap_or(u64::MAX),
                             compositing: self.default_compositing,
                             blend: BlendMode::Alpha,
                             quads: smallvec![DrawQuad {
@@ -1118,6 +1132,7 @@ impl WgpuGlyphAtlasRenderer {
                         _ => return Err(invalid("mesh material and texture binding mismatch")),
                     };
                     draw_runs.push(DrawPrimitive::Mesh(MeshRun {
+                        pixel_mask: pixel_masks.last().copied().unwrap_or(u64::MAX),
                         vertices,
                         indices,
                         texture_id: resolved_texture,
@@ -1209,6 +1224,7 @@ impl WgpuGlyphAtlasRenderer {
                             }
                         };
                         draw_runs.push(DrawPrimitive::Mesh(MeshRun {
+                            pixel_mask: pixel_masks.last().copied().unwrap_or(u64::MAX),
                             vertices: &vertices[vertex_start..vertex_end],
                             indices: &indices[index_start..index_end],
                             texture_id: resolved_texture,
@@ -1233,6 +1249,7 @@ impl WgpuGlyphAtlasRenderer {
                         &mut quad_runs,
                         &mut draw_runs,
                         DrawRun {
+                            pixel_mask: pixel_masks.last().copied().unwrap_or(u64::MAX),
                             compositing: self.default_compositing,
                             blend: BlendMode::Alpha,
                             quads: smallvec![DrawQuad {
@@ -1280,6 +1297,7 @@ impl WgpuGlyphAtlasRenderer {
                         &mut quad_runs,
                         &mut draw_runs,
                         DrawRun {
+                            pixel_mask: pixel_masks.last().copied().unwrap_or(u64::MAX),
                             compositing: self.default_compositing,
                             blend: *blend,
                             quads: smallvec![DrawQuad {
@@ -1328,6 +1346,7 @@ impl WgpuGlyphAtlasRenderer {
                         &mut quad_runs,
                         &mut draw_runs,
                         DrawRun {
+                            pixel_mask: pixel_masks.last().copied().unwrap_or(u64::MAX),
                             compositing: self.default_compositing,
                             blend: *blend,
                             quads: smallvec![DrawQuad {
@@ -1384,7 +1403,11 @@ impl WgpuGlyphAtlasRenderer {
                 }
             }
         }
-        if !clip_stack.is_empty() || transform_stack.len() != 1 || opacity_stack.len() != 1 {
+        if !pixel_masks.is_empty()
+            || !clip_stack.is_empty()
+            || transform_stack.len() != 1
+            || opacity_stack.len() != 1
+        {
             return Err(invalid("GPU scene command stacks are not balanced"));
         }
         let command_walk_allocation = astra_observability::thread_allocation_snapshot();
@@ -3370,6 +3393,10 @@ fn build_vertices(
         if clip.width == 0 || clip.height == 0 {
             continue;
         }
+        let pixel_mask = match primitive {
+            DrawPrimitive::Quads(index) => quad_runs[*index].pixel_mask,
+            DrawPrimitive::Mesh(run) => run.pixel_mask,
+        };
         let first_vertex = vertex_count;
         match primitive {
             DrawPrimitive::Quads(index) => {
@@ -3424,7 +3451,17 @@ fn build_vertices(
                             positions[corner].1,
                         );
                         let (u, v) = uv[corner];
-                        push_vertex(bytes, x, y, u, v, color, frame.width, frame.height);
+                        push_vertex(
+                            bytes,
+                            x,
+                            y,
+                            u,
+                            v,
+                            color,
+                            frame.width,
+                            frame.height,
+                            pixel_mask,
+                        );
                         vertex_count = vertex_count
                             .checked_add(1)
                             .ok_or_else(|| invalid("scene vertex count overflowed"))?;
@@ -3467,7 +3504,17 @@ fn build_vertices(
                             premultiplied_encoded(vertex.premultiplied_rgba, run.opacity)
                         }
                     };
-                    push_vertex(bytes, x, y, u, v, color, frame.width, frame.height);
+                    push_vertex(
+                        bytes,
+                        x,
+                        y,
+                        u,
+                        v,
+                        color,
+                        frame.width,
+                        frame.height,
+                        pixel_mask,
+                    );
                     vertex_count = vertex_count
                         .checked_add(1)
                         .ok_or_else(|| invalid("scene vertex count overflowed"))?;
@@ -3553,12 +3600,15 @@ fn push_vertex(
     color: [f32; 4],
     width: u32,
     height: u32,
+    pixel_mask: u64,
 ) {
     let ndc_x = x / width as f32 * 2.0 - 1.0;
     let ndc_y = 1.0 - y / height as f32 * 2.0;
     for value in [ndc_x, ndc_y, u, v, color[0], color[1], color[2], color[3]] {
         bytes.extend_from_slice(&value.to_ne_bytes());
     }
+    bytes.extend_from_slice(&(pixel_mask as u32).to_ne_bytes());
+    bytes.extend_from_slice(&((pixel_mask >> 32) as u32).to_ne_bytes());
 }
 
 fn intersect_clip(
@@ -3808,7 +3858,7 @@ fn create_blend_pipeline_set(
                 buffers: &[wgpu::VertexBufferLayout {
                     array_stride: VERTEX_STRIDE,
                     step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x4],
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x4, 3 => Uint32x2],
                 }],
             },
             fragment: Some(wgpu::FragmentState {
@@ -3887,11 +3937,13 @@ struct VertexInput {
     @location(0) position: vec2<f32>,
     @location(1) uv: vec2<f32>,
     @location(2) color: vec4<f32>,
+    @location(3) pixel_mask: vec2<u32>,
 };
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) uv: vec2<f32>,
     @location(1) color: vec4<f32>,
+    @location(2) @interpolate(flat) pixel_mask: vec2<u32>,
 };
 @group(0) @binding(0) var atlas: texture_2d<f32>;
 @group(0) @binding(1) var atlas_sampler: sampler;
@@ -3900,10 +3952,16 @@ struct VertexOutput {
     output.position = vec4<f32>(input.position, 0.0, 1.0);
     output.uv = input.uv;
     output.color = input.color;
+    output.pixel_mask = input.pixel_mask;
     return output;
 }
 @fragment fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let sample = textureSample(atlas, atlas_sampler, input.uv);
+    let pixel = vec2<u32>(input.position.xy) % vec2<u32>(8u);
+    let bit = 63u - (pixel.y * 8u + pixel.x);
+    if ((input.pixel_mask[bit / 32u] >> (bit % 32u)) & 1u) == 0u {
+        discard;
+    }
     let alpha = sample.a * input.color.a;
     return vec4<f32>(sample.rgb * input.color.rgb * sample.a, alpha);
 }

@@ -9,6 +9,7 @@ use abi_stable::{
 use crate::{FamilyError, FamilyResult};
 
 pub const MAX_DIAGNOSTIC_FIELDS: usize = 32;
+pub const MAX_DIAGNOSTIC_TEXT_BYTES: usize = 4096;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
@@ -27,7 +28,7 @@ pub enum DiagnosticValue {
     Signed(i64),
     Unsigned(u64),
     Number(f64),
-    Symbol(RString),
+    Text(RString),
 }
 
 #[repr(C)]
@@ -44,8 +45,8 @@ pub struct DiagnosticEvent {
     pub target: RString,
     pub event: RString,
     pub fields: RVec<DiagnosticField>,
-    /// Unreviewed text, Debug values and excess fields are never forwarded.
-    pub redacted_fields: u32,
+    /// Fields dropped because they exceed bounds or are invalid.
+    pub dropped_fields: u32,
 }
 
 pub fn diagnostic_symbol(value: &str) -> bool {
@@ -58,8 +59,10 @@ pub fn diagnostic_symbol(value: &str) -> bool {
 
 impl DiagnosticEvent {
     pub fn validate(&self) -> FamilyResult<()> {
-        let valid = diagnostic_symbol(&self.target)
-            && diagnostic_symbol(&self.event)
+        let valid = !self.target.is_empty()
+            && self.target.len() <= MAX_DIAGNOSTIC_TEXT_BYTES
+            && !self.event.is_empty()
+            && self.event.len() <= MAX_DIAGNOSTIC_TEXT_BYTES
             && self.fields.len() <= MAX_DIAGNOSTIC_FIELDS
             && self.fields.iter().enumerate().all(|(index, field)| {
                 diagnostic_symbol(&field.name)
@@ -67,7 +70,7 @@ impl DiagnosticEvent {
                         .iter()
                         .any(|previous| previous.name == field.name)
                     && match &field.value {
-                        DiagnosticValue::Symbol(value) => diagnostic_symbol(value),
+                        DiagnosticValue::Text(value) => value.len() <= MAX_DIAGNOSTIC_TEXT_BYTES,
                         DiagnosticValue::Number(value) => value.is_finite(),
                         _ => true,
                     }

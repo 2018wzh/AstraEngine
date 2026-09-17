@@ -34,7 +34,7 @@ fn choice_restores_focus_and_commits_the_selected_label() {
 
 #[test]
 fn musica_crossfade_reuses_timeline_and_empty_effect_releases_primary_slot() {
-    for clearing in ["CrossFade", "CrossFade2", "CrossFade * 320 100"] {
+    for clearing in ["*", "CrossFade", "CrossFade2", "CrossFade * 320 100"] {
         let source = format!(
             ".effect CrossFade first.png:second.png 32 100\r\n.effect {clearing}\r\n.end\r\n"
         );

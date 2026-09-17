@@ -10,7 +10,7 @@ use tracing_subscriber::{layer::Context, prelude::*, Layer};
 
 use crate::{
     diagnostic_symbol, DiagnosticEvent, DiagnosticField, DiagnosticLevel, DiagnosticSinkBox,
-    DiagnosticValue, FamilyError, FamilyResult, MAX_DIAGNOSTIC_FIELDS,
+    DiagnosticValue, FamilyError, FamilyResult, MAX_DIAGNOSTIC_FIELDS, MAX_DIAGNOSTIC_TEXT_BYTES,
 };
 
 static INSTALLATION: OnceLock<FamilyResult<()>> = OnceLock::new();
@@ -62,15 +62,10 @@ impl<S: Subscriber> Layer<S> for Bridge {
         let mut visitor = DiagnosticVisitor {
             event: DiagnosticEvent {
                 level: level(metadata.level()),
-                target: if diagnostic_symbol(metadata.target()) {
-                    metadata.target()
-                } else {
-                    "family"
-                }
-                .into(),
+                target: metadata.target().into(),
                 event: "family.unstructured_log".into(),
                 fields: Default::default(),
-                redacted_fields: u32::from(!diagnostic_symbol(metadata.target())),
+                dropped_fields: 0,
             },
         };
         if let Some(line) = metadata.line() {
@@ -86,8 +81,8 @@ struct DiagnosticVisitor {
 }
 
 impl DiagnosticVisitor {
-    fn redact(&mut self) {
-        self.event.redacted_fields = self.event.redacted_fields.saturating_add(1);
+    fn drop_field(&mut self) {
+        self.event.dropped_fields = self.event.dropped_fields.saturating_add(1);
     }
 
     fn push(&mut self, name: &str, value: DiagnosticValue) {
@@ -95,7 +90,7 @@ impl DiagnosticVisitor {
             || !diagnostic_symbol(name)
             || self.event.fields.iter().any(|field| field.name == name)
         {
-            self.redact();
+            self.drop_field();
             return;
         }
         self.event.fields.push(DiagnosticField {
@@ -119,45 +114,39 @@ impl Visit for DiagnosticVisitor {
         if value.is_finite() {
             self.push(field.name(), DiagnosticValue::Number(value));
         } else {
-            self.redact();
+            self.drop_field();
         }
     }
     fn record_str(&mut self, field: &Field, value: &str) {
-        // Lexical bounds are not a privacy policy. Only reviewed symbolic fields
-        // may carry strings; paths, dialogue, messages and Debug never cross.
+        if value.len() > MAX_DIAGNOSTIC_TEXT_BYTES {
+            self.drop_field();
+            return;
+        }
         match field.name() {
-            "event" if diagnostic_symbol(value) => self.event.event = value.into(),
-            "log.target" if diagnostic_symbol(value) => self.event.target = value.into(),
-            "code" | "operation" | "state" if diagnostic_symbol(value) => {
-                self.push(field.name(), DiagnosticValue::Symbol(value.into()));
-            }
-            "backend" if matches!(value, "dx12" | "vulkan" | "metal" | "unsupported") => {
-                self.push(field.name(), DiagnosticValue::Symbol(value.into()));
-            }
-            "device_type"
-                if matches!(
-                    value,
-                    "discrete_gpu" | "integrated_gpu" | "virtual_gpu" | "cpu" | "other"
-                ) =>
-            {
-                self.push(field.name(), DiagnosticValue::Symbol(value.into()));
-            }
-            "slot_kind" if matches!(value, "bgm" | "se" | "none") => {
-                self.push(field.name(), DiagnosticValue::Symbol(value.into()));
-            }
-            "script_hash"
-                if value.len() == 64
-                    && value
-                        .bytes()
-                        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)) =>
-            {
-                self.push(field.name(), DiagnosticValue::Symbol(value.into()));
-            }
-            _ => self.redact(),
+            "event" if !value.is_empty() => self.event.event = value.into(),
+            "log.target" if !value.is_empty() => self.event.target = value.into(),
+            _ => self.push(field.name(), DiagnosticValue::Text(value.into())),
         }
     }
-    fn record_debug(&mut self, _field: &Field, _value: &dyn fmt::Debug) {
-        self.redact();
+    fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
+        use fmt::Write;
+        let mut output = BoundedText(String::new());
+        if write!(&mut output, "{value:?}").is_err() {
+            self.drop_field();
+        } else {
+            self.record_str(field, &output.0);
+        }
+    }
+}
+
+struct BoundedText(String);
+impl fmt::Write for BoundedText {
+    fn write_str(&mut self, value: &str) -> fmt::Result {
+        if self.0.len().saturating_add(value.len()) > MAX_DIAGNOSTIC_TEXT_BYTES {
+            return Err(fmt::Error);
+        }
+        self.0.push_str(value);
+        Ok(())
     }
 }
 

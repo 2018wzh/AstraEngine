@@ -28,13 +28,13 @@ Host 只提供 game_path、初始 WindowState 和输入。Family 自持 VM、文
 
 API 的可选 `diagnostic-bridge` feature 复用 tracing-subscriber 与 tracing-log，供 FVP、Siglus、Minori 动态适配层使用；纯 ABI 消费者无需这些依赖。安装冲突返回 `ASTRA_EMU_FAMILY_DIAGNOSTIC_INIT` 并阻止加载。桥不打开文件、不另建队列或日志线程；Manager 通过既有 astra-observability 管理输出、过滤、丢弃统计和 flush。
 
-`DiagnosticEvent` 最多 32 个唯一字段；target/event/字段名/符号值为最多 128 bytes 的 ASCII 标识符。数值必须有限。共享桥保留数值与布尔字段，字符串仅接收 event、code、operation、state，以及 log 的来源 target；其他字符串与 Debug 不格式化，累计 `redacted_fields`。未结构化事件标为 `family.unstructured_log`，保留来源与源码行号，不传文件路径或 message。适配者必须审查日志字段，标识符格式校验本身不能证明内容无敏感数据。
+`DiagnosticEvent` 最多 32 个唯一字段，字段名使用最多 128 bytes 的 ASCII 标识符；target/event 和 Text 最多 4096 bytes，数值必须有限。日志桥不做内容脱敏或白名单过滤，字符串、message 和 Debug/Display 正常转发。超限、重复字段和非法数值累计 `dropped_fields`；格式化 Debug 时使用有界 writer。未结构化日志标为 `family.unstructured_log`，保留来源和源码行号。
 
 Manager 再验证边界和重复字段；非法记录输出 `family.diagnostics.invalid`，不打印原记录。正常记录在 `astra_emu::family` target 输出，原来源为 `core_target`。关键诊断仍需稳定事件和安全字段，错误继续由原操作返回，不以日志代替错误处理。
 
 ## 生命周期与迁移
 
-ABI fingerprint 为 `astra.emu.independent_family_abi.v3`，schema 为 `astra.emu.independent_family_api.v3`。v1/v2 插件必须重新构建安装，不提供兼容 reader/adapter。
+ABI fingerprint 为 `astra.emu.independent_family_abi.v4`，schema 为 `astra.emu.independent_family_api.v4`。v1/v2/v3 插件必须重新构建安装，不提供兼容 reader/adapter。
 
 动态库首次加载后一直驻留到进程退出，失败加载产生的 ABI 元数据也不会指向卸载的代码；更新插件必须重启 Manager。provider/module 对象按正常生命周期释放。会话 close 和 open 失败仍须取消 Host 请求、唤醒阻塞 PCM 写入并等待所有 worker 结束，错误不得跳过其他 worker 清理。驻留不允许保留已关闭会话的线程或 session callback；无 session 资源的进程级诊断 sink 除外。
 

@@ -41,7 +41,7 @@ impl DiagnosticSink for ManagerDiagnostics {
             ($level:expr) => {
                 tracing::event!(target: "astra_emu::family", $level,
                     event = diagnostic.event.as_str(), core_target = diagnostic.target.as_str(),
-                    fields = ?diagnostic.fields, redacted_fields = diagnostic.redacted_fields)
+                    fields = ?diagnostic.fields, dropped_fields = diagnostic.dropped_fields)
             };
         }
         match diagnostic.level {

@@ -26,11 +26,9 @@ FVP 共用 RFVP VM、原生媒体和存档，仅补必要接口。Minori 使用 
 
 全部适配核心采用最小必要修改，优先启用已有 GPU feature 和原生平台适配。Family API 的 CPU 最终帧借用只约束跨 ABI 交付方式，不要求 CPU 渲染：核心使用自己的 GPU 管线，交付时回读最终帧。不得为接入统一 Manager 复制一套核心渲染器。Windows Sandbox 通过 GPU 虚拟化执行视听测试；软件 adapter 明确失败，不能替代 GPU 验收。
 
-所有核心诊断接入 Manager，不能只写在动态库内部的独立日志系统。Family API v3 在 descriptor/probe/open 前安装进程级 DiagnosticSink；适配层可选用 API crate 的 diagnostic-bridge feature，将 tracing 与 log 统一转发。Manager 仍是日志 sink、过滤和 flush 的唯一所有者。初始化冲突明确失败，不保留无日志的启动路径。桥不改变核心 GPU、平台和存档实现，也不要求依赖旧 SDK。
+所有核心诊断接入 Manager，不能只写在动态库内部的独立日志系统。Family API v4 在 descriptor/probe/open 前安装进程级 DiagnosticSink；适配层可选用 API crate 的 diagnostic-bridge feature，将 tracing 与 log 统一转发。Manager 仍是日志 sink、过滤和 flush 的唯一所有者。初始化冲突明确失败，不保留无日志的启动路径。桥不改变核心 GPU、平台和存档实现，也不要求依赖旧 SDK。
 
-跨 ABI 只传有界 typed 事件：级别、来源、稳定 event、数值/布尔及经审查的符号字段；不传任意 message、Debug、路径或商业正文。未结构化日志保留级别、来源、行号与脱敏计数，关键故障需在根因边界补稳定事件。此计数不是成功标记，不替代原有错误传播。
 
-诊断桥对 `slot_kind` 仅接受 `bgm/se/none`，对 `script_hash` 仅接受 64 位小写十六进制摘要；调用方通过字符串字段提交已计算的摘要。`Debug` 和任意显示格式仍一律脱敏，不能借摘要字段透传路径或正文。此项不改变 Family ABI 布局。
 
 Rust Family 可选用 API crate 的 ProviderModule 复用 ABI 会话管理，FVP、Minori 和 Siglus 共用此实现。它直接适配现有 FamilyProvider/FamilySession，不引入引擎或 SDK 依赖，也不改变 Family ABI。一个模块只持有一个会话；打开、推进、帧借用和完整关闭共用互斥边界，关闭返回前不能重新打开。panic 后拒绝继续工作，但允许取回会话执行关闭；模块释放时也须关闭遗留会话。公共边界错误使用 ASTRA_EMU_FAMILY_SESSION_ACTIVE、SESSION、LOCK 和 PANIC 后缀，核心自身诊断保持原有代码，不保留旧 Family 私有边界错误别名。
 
@@ -70,4 +68,7 @@ Root workspace 管共享/Engine/VN/Player/工具；Editor 与 Emulator 使用独
 
 完整字体的覆盖声明可由 `astra_text::font_unicode_coverage(bytes, face_index)` 从字体字符映射生成，复用 cosmic-text 已有 skrifa，不新增解析器或依赖。返回有序、互不重叠的 Unicode 标量区间，排除缺失 glyph；字体或 face 无效、没有可用映射时明确失败。此接口不代替实际 shaping、缺字和 fallback 检查。Minori 使用该接口，避免手写区间遗漏日文标点与符号。文字错误只向 Manager 传递经过校验的诊断码，不透传正文。
 
-诊断桥允许 `backend` 的 dx12/vulkan/metal/unsupported 及 `device_type` 的 discrete_gpu/integrated_gpu/virtual_gpu/cpu/other 枚举值。调用方必须提交字符串字段，任意字符串和 Debug/Display 仍脱敏；设备名称不在白名单。此信息用于区分实际后端，不改变硬件 GPU 的选择与校验。
+
+共享 SceneCommand 提供 `PushPixelMask { bits }` / `PopPixelMask`：64 位遮罩按屏幕像素平铺为 8×8，最高位对应 (0,0)，最低位对应 (7,7)，不随场景变换移动；嵌套遮罩取交集，栈下溢或帧末未闭合明确失败。它限制作用域内绘制命令的片元覆盖，不改变资源上传及最终帧 FilterGraph。GPU shader 执行遮罩，CPU 测试 renderer 明确返回 `ASTRA_MEDIA_PIXEL_MASK_GPU_REQUIRED`，不展开像素裁剪或切换后端。命令追加到现有序列化枚举末尾，不改变既有 tag；使用新命令的运行端须同步更新。Director type 26 只生成一次入场场景，保留既有图案表、时序和显式场景恢复，遮罩命令不含外部 IO。
+
+日志桥按用户决定取消内容脱敏和字段白名单，正常转发字符串、message、Debug/Display；数值保留 typed 值。`DiagnosticValue::Text` 最大 4096 bytes，事件最多 32 个唯一字段；超限、重复字段及非有限数值计入 `dropped_fields`。Debug 使用有界 formatter，避免先分配任意大小字符串。来源、级别和事件保持可定位，Manager 继续拥有 sink。Family API/ABI 升为 v4，旧插件须同步重建安装，不保留旧脱敏模式。

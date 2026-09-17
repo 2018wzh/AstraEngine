@@ -5144,6 +5144,14 @@ fn compose_director_transition_scene(
     // namespaced by their transition role.  Resource ids deliberately remain
     // unchanged: they name retained GPU resources rather than draw instances.
     let mut commands = namespace_transition_scene_draw(&snapshot.source_draw, "source")?;
+    if snapshot.descriptor_id == "director.puppet.26" {
+        commands.push(SceneCommand::PushPixelMask {
+            bits: dissolve_pattern(progress)?,
+        });
+        commands.extend(namespace_transition_scene_draw(next, "incoming")?);
+        commands.push(SceneCommand::PopPixelMask);
+        return Ok(commands);
+    }
     let rectangles = match snapshot.descriptor_id.as_str() {
         "director.puppet.1" => vec![RectI::new(
             0,
@@ -5174,7 +5182,6 @@ fn compose_director_transition_scene(
             )]
         }
         "director.puppet.10" => edge_in_transition_rectangles(progress, width, height)?,
-        "director.puppet.26" => dissolve_pattern_rectangles(progress, width, height)?,
         _ => {
             return Err(NativeVnHostError::Asset(
                 "ASTRA_PLAYER_DIRECTOR_TRANSITION_DESCRIPTOR_UNSUPPORTED".into(),
@@ -5305,11 +5312,7 @@ fn edge_in_transition_rectangles(
     ])
 }
 
-fn dissolve_pattern_rectangles(
-    progress: u64,
-    width: u32,
-    height: u32,
-) -> Result<Vec<RectI>, NativeVnHostError> {
+fn dissolve_pattern(progress: u64) -> Result<u64, NativeVnHostError> {
     // Director's type 26 is not a random dissolve.  It reveals the next frame
     // through one of these ordered 8x8 bit patterns, tiled at native pixel
     // resolution.  Keeping the pattern table in the executor (rather than
@@ -5383,34 +5386,7 @@ fn dissolve_pattern_rectangles(
     ];
     let pattern_index = usize::try_from(progress.saturating_mul(63) / 1_000_000)
         .map_err(|_| NativeVnHostError::Asset("ASTRA_PLAYER_DIRECTOR_TRANSITION_RANGE".into()))?;
-    let pattern = PATTERNS[pattern_index];
-    let mut rectangles = Vec::new();
-    for y in 0..height {
-        let row = ((pattern >> ((7 - (y % 8)) * 8)) & 0xff) as u8;
-        let mut x = 0;
-        while x < width {
-            let bit = 0x80 >> (x % 8);
-            if row & bit == 0 {
-                x += 1;
-                continue;
-            }
-            let start = x;
-            while x < width && row & (0x80 >> (x % 8)) != 0 {
-                x += 1;
-            }
-            rectangles.push(RectI::new(
-                i32::try_from(start).map_err(|_| {
-                    NativeVnHostError::Asset("ASTRA_PLAYER_DIRECTOR_TRANSITION_RANGE".into())
-                })?,
-                i32::try_from(y).map_err(|_| {
-                    NativeVnHostError::Asset("ASTRA_PLAYER_DIRECTOR_TRANSITION_RANGE".into())
-                })?,
-                x - start,
-                1,
-            ));
-        }
-    }
-    Ok(rectangles)
+    Ok(PATTERNS[pattern_index])
 }
 
 #[cfg(test)]
@@ -5519,10 +5495,7 @@ mod director_transition_tests {
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(
-            ids.len() > 2,
-            "dissolve should draw more than one incoming clip"
-        );
+        assert_eq!(ids.len(), 2, "the incoming scene must be emitted only once");
         assert_eq!(ids.len(), ids.iter().collect::<BTreeSet<_>>().len());
         assert!(ids.iter().all(|id| id.starts_with("vn.transition.")));
     }
@@ -5539,18 +5512,17 @@ mod director_transition_tests {
         let second = compose_director_transition_scene(&snapshot, &next_scene(), 500_000, 32, 32)
             .expect("compose dissolve repeat");
         assert_eq!(first, second);
-        let clips = first
-            .iter()
-            .filter_map(|command| match command {
-                SceneCommand::PushClip { rect } => Some(*rect),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        assert!(clips.contains(&astra_media_core::RectI::new(0, 0, 1, 1)));
-        assert!(clips.contains(&astra_media_core::RectI::new(2, 0, 1, 1)));
-        assert!(
-            !clips.contains(&astra_media_core::RectI::new(1, 0, 1, 1)),
-            "the mid-transition pattern must preserve its masked pixels"
+        let SceneCommand::PushPixelMask { bits } = first[0] else {
+            panic!("missing mask")
+        };
+        assert_eq!(bits, 0xaa55aa55aa55aa55);
+        assert_eq!(first.len(), next_scene().len() + 2);
+        let large =
+            compose_director_transition_scene(&snapshot, &next_scene(), 500_000, 2560, 1440)
+                .expect("compose large dissolve");
+        assert_eq!(
+            first, large,
+            "command size must not scale with viewport pixels"
         );
     }
 }

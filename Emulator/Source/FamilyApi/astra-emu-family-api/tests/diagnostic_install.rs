@@ -44,7 +44,8 @@ fn worker_logs_and_repeated_install_use_one_process_sink() {
     assert_eq!(events[3].event, "core.save.restore");
     assert_eq!(events[4].target, "core::audio");
     assert_eq!(events[4].level, DiagnosticLevel::Warn);
-    assert!(events[4].redacted_fields > 0);
+    assert_eq!(events[4].dropped_fields, 0);
+    assert!(events[4].fields.iter().any(|field| field.name == "message"));
     for event in events.iter() {
         event.validate().unwrap();
     }
