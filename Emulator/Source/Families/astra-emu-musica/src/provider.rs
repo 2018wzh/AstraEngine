@@ -63,6 +63,7 @@ pub fn musica_descriptor() -> FamilyDescriptor {
         default: ConfigValue::Integer(50),
     });
     configuration.extend(crate::voice_preferences::VoicePreferences::fields());
+    configuration.extend(crate::audio::AudioPreferences::fields());
     FamilyDescriptor {
         family_id: "musica".into(),
         plugin_id: "astra.emu.musica".into(),
@@ -147,6 +148,7 @@ impl MusicaProvider {
                 "entry script must name one .sc file in the scr archive",
             ));
         }
+        let audio_preferences = crate::audio::AudioPreferences::resolve(&config)?;
         let lease = SessionLease::acquire()?;
         let root = Path::new(request.game_path.as_str());
         let archive = Arc::new(mount_musica(root, Path::new(&profile)).map_err(core_error)?);
@@ -193,6 +195,7 @@ impl MusicaProvider {
             .into_option()
             .ok_or_else(|| error("ASTRA_EMU_MUSICA_AUDIO_SINK", "PCM sink is required"))?;
         let audio = Audio::start(archive.clone(), sink)?;
+        audio.set_preferences(audio_preferences)?;
         self.next = self
             .next
             .checked_add(1)

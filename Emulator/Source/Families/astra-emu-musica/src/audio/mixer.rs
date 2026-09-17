@@ -1,4 +1,6 @@
+use super::preferences::bus_index;
 use super::*;
+use kira::track::{TrackBuilder, TrackHandle};
 
 struct CpuBackend {
     renderer: Option<Renderer>,
@@ -22,18 +24,46 @@ struct Sound {
 pub(super) struct Mixer {
     manager: AudioManager<CpuBackend>,
     sounds: BTreeMap<u32, Sound>,
+    buses: [TrackHandle; 3],
+    preferences: AudioPreferences,
 }
 impl Mixer {
     pub(super) fn new() -> FamilyResult<Self> {
+        Self::with_preferences(AudioPreferences::default())
+    }
+    fn with_preferences(preferences: AudioPreferences) -> FamilyResult<Self> {
+        let gains = preferences.gains()?;
+        let mut manager = AudioManager::new(AudioManagerSettings {
+            backend_settings: (),
+            ..Default::default()
+        })
+        .map_err(|_| error("ASTRA_EMU_MUSICA_MIXER", "mixer could not start"))?;
+        let mut add_bus = |gain| {
+            manager
+                .add_sub_track(TrackBuilder::new().volume(db(gain)))
+                .map_err(|_| error("ASTRA_EMU_MUSICA_AUDIO_BUS", "mixer could not create bus"))
+        };
+        let buses = [add_bus(gains[0])?, add_bus(gains[1])?, add_bus(gains[2])?];
         Ok(Self {
-            manager: AudioManager::new(AudioManagerSettings {
-                backend_settings: (),
-                ..Default::default()
-            })
-            .map_err(|_| error("ASTRA_EMU_MUSICA_MIXER", "mixer could not start"))?,
+            manager,
             sounds: BTreeMap::new(),
+            buses,
+            preferences,
         })
     }
+    pub(super) fn set_preferences(&mut self, preferences: AudioPreferences) -> FamilyResult<()> {
+        if self.sounds.is_empty() {
+            *self = Self::with_preferences(preferences)?;
+            return Ok(());
+        }
+        let gains = preferences.gains()?;
+        for (bus, gain) in self.buses.iter_mut().zip(gains) {
+            bus.set_volume(db(gain), immediate());
+        }
+        self.preferences = preferences;
+        Ok(())
+    }
+
     pub(super) fn duration_ms(&self, stream: u32) -> FamilyResult<u32> {
         let sound = self.sounds.get(&stream).ok_or_else(|| {
             error(
@@ -57,6 +87,7 @@ impl Mixer {
         archive: &MusicaMountedVfs,
         stop: &AtomicBool,
     ) -> FamilyResult<()> {
+        bus_index(uri)?;
         if self.sounds.len() >= 64 && !self.sounds.contains_key(&id) {
             return Err(error(
                 "ASTRA_EMU_MUSICA_AUDIO_STREAMS",
@@ -124,7 +155,7 @@ impl Mixer {
         }
         data.settings.fade_in_tween = None;
         sound.handle = Some(
-            self.manager
+            self.buses[bus_index(&sound.state.uri)?]
                 .play(data)
                 .map_err(|_| error("ASTRA_EMU_MUSICA_AUDIO_PLAY", "mixer rejected sound"))?,
         );
@@ -285,7 +316,7 @@ impl Mixer {
                 "snapshot contains too many sounds",
             ));
         }
-        let mut next = Self::new()?;
+        let mut next = Self::with_preferences(self.preferences.clone())?;
         for s in snapshot {
             if next.sounds.contains_key(&s.id) || !s.position.is_finite() || s.position < 0.0 {
                 return Err(error(
@@ -335,8 +366,7 @@ impl Mixer {
                 }
                 data.settings.start_position = kira::sound::PlaybackPosition::Seconds(s.position);
                 data.settings.fade_in_tween = None;
-                let mut handle = next
-                    .manager
+                let mut handle = next.buses[bus_index(&s.uri)?]
                     .play(data)
                     .map_err(|_| error("ASTRA_EMU_MUSICA_AUDIO_PLAY", "mixer rejected sound"))?;
                 handle.set_volume(Decibels(fade.to_db), fade.remaining_tween());

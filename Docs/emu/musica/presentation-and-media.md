@@ -8,7 +8,7 @@ Musica Family 自持归档、VM、媒体和原生存档，通过共享 GPU Scene
 
 ## 音频
 
-BGM、SE 和 voice 由 Family 的 Kira worker 混音，解码复用 SDK/Symphonia。PCM 经有界可取消 Host 队列输出；关闭先取消并等待 worker 结束。backlog 回放不推进剧情，角色语音和回放偏好由 Manager 配置，详见 [脚本执行](script-execution.md)。
+BGM、SE 和 voice 由 Family 的 Kira worker 混音，解码复用 SDK/Symphonia。 Manager 提供来源实现的 BGM、voice、SE 音量（0–100）及独立静音开关，默认 100 且不静音；se/se2/se3 共用 SE 用户音量。Kira 子音轨应用用户增益，声音本身保留剧情音量和渐变，因此保存与读档不会重复乘用户音量。启动和恢复时按当前配置构建音轨初始增益，静音也继续解码、计时并保留语音等待。PCM 经有界可取消 Host 队列输出；关闭先取消并等待 worker 结束。backlog 回放不推进剧情，角色语音和回放偏好由 Manager 配置，详见 [脚本执行](script-execution.md)。
 
 ## 电影接入
 

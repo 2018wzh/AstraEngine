@@ -12,6 +12,8 @@ cargo build --manifest-path Emulator/Cargo.toml -p astra-emu-musica --release --
 
 FFmpeg 使用当前工程的 vcpkg 配置；运行时必须能找到匹配的动态库。插件通过 Manager 本地安装入口装入，更新后重启 Manager。无 FFmpeg 构建遇到 movie 指令返回 `ASTRA_EMU_MUSICA_MOVIE_UNAVAILABLE`，不会把首帧或静音当作播放成功。
 
+Manager 的 Audio 分组提供 `bgm_volume`、`voice_volume`、`se_volume`（0–100）及对应 `*_muted`。这些选项启动前校验并由 Manager 持久化，不写入剧情存档；读档保留当前用户音量。电影 PCM 暂不归入这三个剧情音轨。
+
 ## 会话与恢复
 
 `probe/open/advance/visit_frame/close` 使用当前 Family 契约。核心每次运行到消息、选择、等待、错误或终点；场景使用共享 GPU renderer，文字使用 AstraText。音频 worker 混合 BGM、SE、voice 和电影 PCM，经同一有界可取消 Host 队列输出。

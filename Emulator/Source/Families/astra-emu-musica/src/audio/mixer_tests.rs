@@ -188,3 +188,77 @@ fn stopping_unplayed_resource_keeps_a_restorable_snapshot() {
         .restore(snapshot, &archive, &AtomicBool::new(false))
         .unwrap();
 }
+
+#[test]
+fn bus_gain_scales_waveform_without_changing_authored_volume_or_fade() {
+    let (_root, archive, mut full) = setup();
+    let mut quiet = Mixer::new().unwrap();
+    quiet
+        .set_preferences(AudioPreferences {
+            volume: [25, 100, 100],
+            muted: [false; 3],
+        })
+        .unwrap();
+    quiet
+        .load(1, "musica:/bgm/tone.ogg", &archive, &AtomicBool::new(false))
+        .unwrap();
+    for mixer in [&mut full, &mut quiet] {
+        mixer.play(1, 0.8, 0.0, true, 100).unwrap();
+    }
+    let expected = rendered(&mut full, 2048);
+    let actual = rendered(&mut quiet, 2048);
+    assert!(expected.iter().any(|v| v.abs() > 0.001));
+    let difference = expected[512..]
+        .iter()
+        .zip(&actual[512..])
+        .map(|(a, b)| (a * 0.25 - b).abs())
+        .fold(0.0_f32, f32::max);
+    assert!(difference < 0.0001, "bus gain difference={difference}");
+    assert_eq!(
+        postcard::to_allocvec(&full.snapshot()).unwrap(),
+        postcard::to_allocvec(&quiet.snapshot()).unwrap()
+    );
+    let snapshot = full.snapshot();
+    quiet
+        .restore(snapshot, &archive, &AtomicBool::new(false))
+        .unwrap();
+    assert_eq!(quiet.preferences.volume, [25, 100, 100]);
+    let expected = rendered(&mut full, 1024);
+    let actual = rendered(&mut quiet, 1024);
+    let difference = expected[32..]
+        .iter()
+        .zip(&actual[32..])
+        .map(|(a, b)| (a * 0.25 - b).abs())
+        .fold(0.0_f32, f32::max);
+    assert!(difference < 0.002, "restored gain difference={difference}");
+}
+
+#[test]
+fn bus_mute_preserves_cursor_and_does_not_mute_other_buses() {
+    let (_root, archive, mut mixer) = setup();
+    mixer
+        .set_preferences(AudioPreferences {
+            volume: [100; 3],
+            muted: [false, true, true],
+        })
+        .unwrap();
+    mixer.play(1, 0.8, 0.0, true, 0).unwrap();
+    assert!(rendered(&mut mixer, 1024).iter().any(|v| v.abs() > 0.001));
+    mixer
+        .set_preferences(AudioPreferences {
+            volume: [100; 3],
+            muted: [true; 3],
+        })
+        .unwrap();
+    rendered(&mut mixer, 512);
+    assert!(rendered(&mut mixer, 1024).iter().all(|v| v.abs() < 0.00001));
+    let snapshot = mixer.snapshot();
+    assert!(snapshot[0].playing && snapshot[0].position > 0.0);
+    assert_eq!(snapshot[0].volume, 0.8);
+    mixer
+        .restore(snapshot, &archive, &AtomicBool::new(false))
+        .unwrap();
+    assert!(rendered(&mut mixer, 1024).iter().all(|v| v.abs() < 0.00001));
+    mixer.set_preferences(AudioPreferences::default()).unwrap();
+    assert!(rendered(&mut mixer, 1024).iter().any(|v| v.abs() > 0.001));
+}

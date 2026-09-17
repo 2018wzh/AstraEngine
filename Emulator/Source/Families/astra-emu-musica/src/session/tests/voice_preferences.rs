@@ -154,3 +154,42 @@ fn backlog_voice_preference_does_not_remove_history() {
     assert_eq!(vm.state().backlog.len(), 1);
     assert!(vm.state().backlog[0].voice.is_some());
 }
+
+#[test]
+fn manager_bus_mute_is_applied_before_first_pcm_and_survives_restore() {
+    let _session = PROVIDER_SESSION.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    fixture::game(
+        root.path(),
+        b".message 1 aya-tone.ogg speaker Voice\\v\r\n.end\r\n",
+    );
+    fixture::asset(root.path(), "voice", "aya-tone.ogg", &fixture::wave());
+    let sink = Sink::default();
+    let mut req = request(root.path(), sink.clone());
+    req.configuration.push(ConfigEntry {
+        id: "voice_muted".into(),
+        value: ConfigValue::Bool(true),
+    });
+    let mut provider = MusicaProvider::default();
+    let mut opened = provider.open(req).unwrap();
+    opened.session.advance(16_666_667, &[]).unwrap();
+    opened.session.advance(0, &[key(KeyCode::F5)]).unwrap();
+    let saved = crate::storage::Storage::new(root.path())
+        .unwrap()
+        .read()
+        .unwrap();
+    assert_eq!(saved.sounds.iter().find(|s| s.id == 4).unwrap().volume, 1.0);
+    let state = MusicaVm::decode_native_save(&saved.vm).unwrap();
+    assert_eq!(state.audio[&4].volume_milli, 1000);
+    assert!(matches!(
+        state.wait,
+        Some(crate::MusicaWaitState::Voice {
+            milliseconds: Some(100),
+            ..
+        })
+    ));
+    opened.session.advance(0, &[key(KeyCode::F9)]).unwrap();
+    opened.session.advance(0, &[key(KeyCode::F5)]).unwrap();
+    assert!(!sink.nonzero.load(Ordering::Acquire));
+    opened.session.close().unwrap();
+}

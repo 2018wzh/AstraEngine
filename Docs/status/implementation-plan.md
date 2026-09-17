@@ -375,3 +375,7 @@ Classic route.coverage.013 完成同一 build/package 的 GPU Headless 输入流
 电影解码不再限制为每次呈现只取一个音视频包：SDK 支持同时限制包数和字节数的批次，Musica 每次最多四包，PCM 提交前检查整批帧数及包数余量。五项 worker、四项 PCM 和四项 Musica GPU 电影测试通过，覆盖完整内容一致性、字节边界、暂存包的 seek 失效、超限错误及关闭；长片与真实设备音画同步仍待验收。
 
 Classic route.coverage.014 完成同一 build/package 的 GPU Headless 输入流程，48,089 条输入、38 次选择到达 tsui.ending，无诊断。终点 PNG 已查看，仍为黑场；完整视听与真实 Player 验收保持开放。FVP Sandbox AUTO 已继续推进到机车库剧情，尚未到结局，仍使用测试音频设备。
+
+Musica 已接入来源配置中的 BGM、voice、SE 音量与静音，Manager 负责配置和持久化，Kira 子音轨负责增益。剧情 volume/fade/cursor 保持原值；启动与读档在首批 PCM 前应用当前设置，静音保留语音等待。11 项音频测试、31 项 Family 会话测试及新增 Manager 静音/恢复专项通过，受影响 Clippy 通过；完整原生配置页和剩余偏好继续移植。
+
+Classic route.coverage.015 完成同一 build/package 的 GPU Headless 输入流程，47,801 条输入、38 次选择到达 tsui.ending，无诊断。终点 PNG 已查看，仍为黑场；完整视听与真实 Player 验收保持开放。

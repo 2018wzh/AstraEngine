@@ -26,6 +26,8 @@ use std::{
 };
 mod fade;
 mod mixer;
+mod preferences;
+pub(crate) use preferences::AudioPreferences;
 #[cfg(feature = "ffmpeg-vcpkg")]
 mod movie;
 use fade::FadeSnapshot;
@@ -55,6 +57,7 @@ enum Command {
     Snapshot(SyncSender<FamilyResult<Vec<SoundSnapshot>>>),
     Restore(Vec<SoundSnapshot>, SyncSender<FamilyResult<()>>),
     Suspend(bool),
+    Preferences(AudioPreferences),
     Duration(u32, SyncSender<FamilyResult<u32>>),
 }
 pub(crate) struct Audio {
@@ -144,6 +147,10 @@ impl Audio {
     }
     pub fn apply(&self, commands: Vec<MusicaAudioCommand>) -> FamilyResult<()> {
         self.send(Command::Apply(commands))
+    }
+    pub fn set_preferences(&self, preferences: AudioPreferences) -> FamilyResult<()> {
+        preferences.gains()?;
+        self.send(Command::Preferences(preferences))
     }
     pub fn suspend(&self, value: bool) -> FamilyResult<()> {
         self.send(Command::Suspend(value))
@@ -244,6 +251,7 @@ fn run(
                     result?;
                 }
                 Command::Suspend(value) => suspended = value,
+                Command::Preferences(value) => mixer.set_preferences(value)?,
                 Command::Duration(stream, reply) => {
                     let result = mixer.duration_ms(stream);
                     let _ = reply.send(result.clone());
