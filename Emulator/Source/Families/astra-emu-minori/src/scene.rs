@@ -10,6 +10,8 @@ use std::{num::NonZeroUsize, sync::Arc};
 const MAX_ASSET_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_IMAGE_BYTES: usize = 128 * 1024 * 1024;
 
+mod stand;
+
 #[cfg(test)]
 mod tests;
 
@@ -44,6 +46,7 @@ pub(crate) struct Scene {
     sequence: u64,
     text: MinoriTextRenderer,
     textures: TextureCache,
+    stand_offsets: lru::LruCache<String, stand::Offsets>,
     width: u32,
     height: u32,
     pub pixels: Arc<[u8]>,
@@ -79,6 +82,7 @@ impl Scene {
                 })?,
             width,
             height,
+            stand_offsets: lru::LruCache::new(NonZeroUsize::new(32).unwrap()),
             pixels: vec![0; width as usize * height as usize * 4].into(),
         })
     }
@@ -134,10 +138,10 @@ impl Scene {
                     "native stage resource sequence rendering is not implemented",
                 ));
             }
-            if !stage.stands.is_empty() {
+            if !stage.stands.is_empty() && stage.resource_sequence[0].is_some() {
                 return Err(error(
-                    "ASTRA_EMU_MINORI_STAGE_STAND_POSITION",
-                    "native stand resource parameters require verified rendering",
+                    "ASTRA_EMU_MINORI_STAGE_LAYER_ORDER",
+                    "combined foreground and stand composition requires native layer ordering",
                 ));
             }
             if let Some(background) = &stage.background {
@@ -148,6 +152,9 @@ impl Scene {
                     background.y,
                     1.0,
                 )?;
+            }
+            for stand in &stage.stands {
+                self.stand(&mut commands, stand)?;
             }
             if let Some(uri) = &stage.resource_sequence[0] {
                 let [x, y] = stage.reference_position.unwrap_or([0, 0]);

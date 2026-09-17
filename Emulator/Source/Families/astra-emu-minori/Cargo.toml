@@ -28,6 +28,8 @@ crc32fast = "1.5"
 encoding_rs.workspace = true
 flate2.workspace = true
 image.workspace = true
+lru.workspace = true
+png = "=0.18.1"
 kira.workspace = true
 postcard.workspace = true
 rc4.workspace = true

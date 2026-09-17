@@ -698,6 +698,8 @@ dependencies = [
  "flate2",
  "image 0.25.10",
  "kira 0.12.2",
+ "lru",
+ "png 0.18.1",
  "pollster 0.4.0",
  "postcard",
  "rc4",
