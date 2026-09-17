@@ -545,3 +545,55 @@ fn native_gpu_control_keys_respect_release_focus_and_choice_boundaries() {
     );
     opened.session.close().unwrap();
 }
+
+#[test]
+fn native_gpu_screen_shake_advances_during_wait_and_restores_through_family_input() {
+    let _session = PROVIDER_SESSION.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    fixture::game(
+        root.path(),
+        b".stage BG.png 0 0 * 0 0\r\n.shakescreen V 4 30\r\n.wait 1000\r\n.end\r\n",
+    );
+    let mut provider = MusicaProvider::default();
+    let mut opened = provider
+        .open(request(root.path(), Sink::default()))
+        .unwrap();
+    let mut frame = Capture(Vec::new());
+    opened.session.advance(16_666_667, &[]).unwrap();
+    opened.session.visit_frame(&mut frame).unwrap();
+    let original = frame.0.clone();
+    opened.session.advance(16_666_667, &[]).unwrap();
+    assert_eq!(
+        opened.session.advance(30_000_000, &[]).unwrap().status,
+        FamilyStatus::Waiting
+    );
+    opened.session.visit_frame(&mut frame).unwrap();
+    let negative = frame.0.clone();
+    assert_ne!(negative, original);
+    opened.session.advance(0, &[key(KeyCode::F5)]).unwrap();
+    opened.session.advance(30_000_000, &[]).unwrap();
+    opened.session.visit_frame(&mut frame).unwrap();
+    let positive = frame.0.clone();
+    assert_ne!(positive, negative);
+    opened.session.advance(0, &[key(KeyCode::F9)]).unwrap();
+    opened.session.visit_frame(&mut frame).unwrap();
+    assert_eq!(frame.0, negative);
+    opened.session.advance(30_000_000, &[]).unwrap();
+    opened.session.visit_frame(&mut frame).unwrap();
+    assert_eq!(frame.0, positive);
+    opened
+        .session
+        .advance(0, &[FamilyEvent::WindowSuspended { suspended: true }])
+        .unwrap();
+    opened.session.advance(30_000_000, &[]).unwrap();
+    opened.session.visit_frame(&mut frame).unwrap();
+    assert_eq!(frame.0, positive);
+    opened
+        .session
+        .advance(0, &[FamilyEvent::WindowSuspended { suspended: false }])
+        .unwrap();
+    opened.session.advance(30_000_000, &[]).unwrap();
+    opened.session.visit_frame(&mut frame).unwrap();
+    assert_eq!(frame.0, negative);
+    opened.session.close().unwrap();
+}
