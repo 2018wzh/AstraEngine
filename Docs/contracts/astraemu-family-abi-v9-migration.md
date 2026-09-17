@@ -17,8 +17,8 @@ Surface lease 使用独占、不可复制的 `OwnedWritableByteBuffer`。它在 
 
 FVP 固定使用 `Ported + SingleLayer`。RFVP hosted feature 直接依赖固定 AstraEngine ABI commit；AstraEngine workspace 通过精确 Git source `[patch]` 映射到当前 path crate，并以 `cargo tree` 阻断双 package identity。`astra-emu-fvp` 只保留 dylib/root-module、build identity、descriptor、provider 构造与 shutdown、panic containment、最终错误映射和 observability 边界。
 
-Minori 固定使用 `Native + MultiLayer`，把 background、foreground/stand、effect、panel/text 映射为独立 retained layer。Siglus v8 不属于本迁移分支，必须单独迁移到 v9 后才能合并。
+Musica 固定使用 `Native + MultiLayer`，把 background、foreground/stand、effect、panel/text 映射为独立 retained layer。Siglus v8 不属于本迁移分支，必须单独迁移到 v9 后才能合并。
 
 ## 验收边界
 
-ABI milestone 已通过 ABI crates、schema generator、loader rejection、文档与格式聚焦验证。FVP/RFVP、Minori、Manager、CLI、Headless 和 WGPU renderer 已迁移；动态 Extension loader 与 CLI/Headless 显式 binding 已接入。完成条件仍包括唯一 ABI package identity复验、FVP/Minori/Host product tests、Performance E2 和最终 workspace gate。Headless 只形成 E2；Windows Manager 的真实输入、画面、音频与 shutdown 仍需独立 E3。
+ABI milestone 已通过 ABI crates、schema generator、loader rejection、文档与格式聚焦验证。FVP/RFVP、Musica、Manager、CLI、Headless 和 WGPU renderer 已迁移；动态 Extension loader 与 CLI/Headless 显式 binding 已接入。完成条件仍包括唯一 ABI package identity复验、FVP/Musica/Host product tests、Performance E2 和最终 workspace gate。Headless 只形成 E2；Windows Manager 的真实输入、画面、音频与 shutdown 仍需独立 E3。

@@ -57,7 +57,7 @@ body:
         - bgi
         - siglus
         - softpal
-        - minori
+        - musica
     validations:
       required: true
 

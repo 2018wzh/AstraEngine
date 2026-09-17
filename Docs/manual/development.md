@@ -66,7 +66,7 @@ Native VN 的 GPU Headless 使用 `render_policy: checkpoints` 时，独立资�
 
 适配优先启用核心现成的 GPU feature 和平台能力，仅修改嵌入入口、Family API 和必要生命周期边界；复用原生渲染、媒体、VM 及存档，不另建竞争路径。差异写入各 Family 的 MODIFICATIONS.md。CPU 最终帧是交付格式，不代表使用 CPU 渲染。
 
-动态核心的 tracing/log 由 Family API v3 日志桥接入 Manager。旧插件须重建后重新安装并重启 Manager；FVP/Minori 构建动态插件时开启 dynamic-plugin-export。静态核心使用宿主订阅器。
+动态核心的 tracing/log 由 Family API v3 日志桥接入 Manager。旧插件须重建后重新安装并重启 Manager；FVP/Musica 构建动态插件时开启 dynamic-plugin-export。静态核心使用宿主订阅器。
 
 ```sh
 RUST_LOG=info,astra_emu::family=debug astra-emu-manager

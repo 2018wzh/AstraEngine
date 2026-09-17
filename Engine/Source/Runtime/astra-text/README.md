@@ -1,6 +1,6 @@
 # astra-text
 
-直接从字体字节建立 font database，使用 cosmic-text 进行 shaping、fallback、排版和字形栅格化。实现从 astra-media 的文字模块迁出，Engine 通过 astra-media 使用同一套实现；Minori 可以直接依赖本 crate，不需要创建 RuntimeWorld、package、registry 或 Headless session。Minori 接入尚未完成。
+直接从字体字节建立 font database，使用 cosmic-text 进行 shaping、fallback、排版和字形栅格化。实现从 astra-media 的文字模块迁出，Engine 通过 astra-media 使用同一套实现；Musica 可以直接依赖本 crate，不需要创建 RuntimeWorld、package、registry 或 Headless session。Musica 接入尚未完成。
 
 ## 使用与所有权
 
@@ -33,4 +33,4 @@ cargo clippy -p astra-text --all-targets -- -D warnings
 cargo test -p astra-media --test text_layout
 ```
 
-原文字行为测试迁到本 crate，覆盖真实授权字体的 CJK/Arabic/emoji shaping、有序 fallback、竖排/ruby、wrap/ellipsis、glyph bitmap、资源事务/释放、缓存复用、字体替换和并发 single-flight。普通 Rust 测试直接运行，不启动 Headless。package 与 replay 的集成测试留在 astra-media。此验证证明库行为保留，不代表四平台产品或 Minori 完成验收。
+原文字行为测试迁到本 crate，覆盖真实授权字体的 CJK/Arabic/emoji shaping、有序 fallback、竖排/ruby、wrap/ellipsis、glyph bitmap、资源事务/释放、缓存复用、字体替换和并发 single-flight。普通 Rust 测试直接运行，不启动 Headless。package 与 replay 的集成测试留在 astra-media。此验证证明库行为保留，不代表四平台产品或 Musica 完成验收。

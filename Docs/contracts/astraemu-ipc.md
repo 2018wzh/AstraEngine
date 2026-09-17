@@ -22,7 +22,7 @@ Family 完成解码和混音，PCM 流在 open 时固定 sample rate、channel c
 
 OpenAI-compatible service 默认 timeout 15 秒且可配置；失败/超时显示诊断并返回原文处置，不自动重试，不跳过段落。退出取消。上下文限最近 8 段且总计不超过 6000 字符；译文 cache 只在 session 内有界保存，新游戏、读档和配置改变时清空。正文、上下文和 secret 不进入日志或持久化缓存。
 
-FVP 本轮必须声明此能力不可用，UI 禁用，不能伪造成功。端到端接入等待 Minori；本轮只测试独立服务与 ABI 错误边界。
+FVP 本轮必须声明此能力不可用，UI 禁用，不能伪造成功。端到端接入等待 Musica；本轮只测试独立服务与 ABI 错误边界。
 
 ## 滤镜与错误
 

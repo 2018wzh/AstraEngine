@@ -26,7 +26,7 @@ Host 只提供 game_path、初始 WindowState 和输入。Family 自持 VM、文
 
 加载器必须先调用 `initialize_diagnostics(DiagnosticSinkBox)`，成功后才能读取 descriptor、probe 或 open。sink 支持并发调用，作用域为进程，不捕获游戏、窗口、音频或 session 资源，也不得回调 Family。库驻留期间保留首个 sink；重复加载不叠加 subscriber。静态核心不安装桥，直接使用宿主 tracing/log 订阅器。
 
-API 的可选 `diagnostic-bridge` feature 复用 tracing-subscriber 与 tracing-log，供 FVP、Siglus、Minori 动态适配层使用；纯 ABI 消费者无需这些依赖。安装冲突返回 `ASTRA_EMU_FAMILY_DIAGNOSTIC_INIT` 并阻止加载。桥不打开文件、不另建队列或日志线程；Manager 通过既有 astra-observability 管理输出、过滤、丢弃统计和 flush。
+API 的可选 `diagnostic-bridge` feature 复用 tracing-subscriber 与 tracing-log，供 FVP、Siglus、Musica 动态适配层使用；纯 ABI 消费者无需这些依赖。安装冲突返回 `ASTRA_EMU_FAMILY_DIAGNOSTIC_INIT` 并阻止加载。桥不打开文件、不另建队列或日志线程；Manager 通过既有 astra-observability 管理输出、过滤、丢弃统计和 flush。
 
 `DiagnosticEvent` 最多 32 个唯一字段，字段名使用最多 128 bytes 的 ASCII 标识符；target/event 和 Text 最多 4096 bytes，数值必须有限。日志桥不做内容脱敏或白名单过滤，字符串、message 和 Debug/Display 正常转发。超限、重复字段和非法数值累计 `dropped_fields`；格式化 Debug 时使用有界 writer。未结构化日志标为 `family.unstructured_log`，保留来源和源码行号。
 

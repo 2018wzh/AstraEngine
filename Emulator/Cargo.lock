@@ -680,7 +680,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "astra-emu-minori"
+name = "astra-emu-musica"
 version = "0.1.0"
 dependencies = [
  "abi_stable",
@@ -713,11 +713,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "astra-emu-minori-cli"
+name = "astra-emu-musica-cli"
 version = "0.1.0"
 dependencies = [
  "astra-core",
- "astra-emu-minori",
+ "astra-emu-musica",
  "astra-observability",
  "clap",
  "flate2",

@@ -1,18 +1,20 @@
 # 全产品重构实施状态
 
-日志桥已按用户要求移除脱敏和字符串白名单，保留大小限制、非法字段计数及 Manager 统一 sink；API/ABI v4 要求插件同步重建。Minori 来源分支 00610272d 与当前未提交修改正在重新核对，已确认完整演出和系统页存在遗漏，后续按功能移植并复用 SDK，不把旧 Host 接口带回主路径。
+按用户要求，旧 Minori family 统一重命名为 Musica：crate、Rust 类型、诊断与配置命名空间、CLI、工具和文档路径同步更新，不保留旧入口或别名。来源分支名称 `codex/minori-runtime-followup` 保持不变；游戏素材和已有私有存档未修改。重命名后的 76 项核心测试、12 项 CLI 测试、三个 Python 工具入口检查及受影响 Clippy 已通过。
+
+日志桥已按用户要求移除脱敏和字符串白名单，保留大小限制、非法字段计数及 Manager 统一 sink；API/ABI v4 要求插件同步重建。Musica 来源分支 00610272d 与当前未提交修改正在重新核对，已确认完整演出和系统页存在遗漏，后续按功能移植并复用 SDK，不把旧 Host 接口带回主路径。
 
 点阵转场已改用共享 GPU 像素遮罩，入场场景只生成一次，命令数量不再随视口像素数增长。新增硬件 GPU 测试通过逐像素图案、嵌套交集、栈恢复和错误后重新提交检查；1440p 八层场景分配低于 128 MiB。真实 Classic 005 尚需用新构建重跑，不能据此关闭路线。
 
-Minori 长流程在 tick 4141、命令 55 的 `.effect *` 返回 `ASTRA_EMU_MINORI_RUNTIME_EFFECT`；现已从来源分支移植该命令的清除语义，76 项 Minori 测试通过（4 项显式 GPU 测试未在此命令运行），真实长流程仍需重跑。GPU 初始化日志已通过 Manager 显示 DX12 与 discrete_gpu。GPU 失败日志保留操作名和错误类别，日志桥现按用户要求取消脱敏。Classic route.coverage.005 重跑仍在 tick 7757 超限：总分配 309900288 字节，图集 33554432 字节，预算 268435456 字节。已定位点阵转场的几何放大路径：`dissolve_pattern_rectangles` 生成逐行像素区域，`compose_director_transition_scene` 为每个区域复制完整入场场景，渲染器再为每份场景生成完整顶点。后续改为共享 GPU 点阵遮罩，保留原始图案与时序；当前路线未通过，预算未放宽。
+Musica 长流程在 tick 4141、命令 55 的 `.effect *` 返回 `ASTRA_EMU_MUSICA_RUNTIME_EFFECT`；现已从来源分支移植该命令的清除语义，76 项 Musica 测试通过（4 项显式 GPU 测试未在此命令运行），真实长流程仍需重跑。GPU 初始化日志已通过 Manager 显示 DX12 与 discrete_gpu。GPU 失败日志保留操作名和错误类别，日志桥现按用户要求取消脱敏。Classic route.coverage.005 重跑仍在 tick 7757 超限：总分配 309900288 字节，图集 33554432 字节，预算 268435456 字节。已定位点阵转场的几何放大路径：`dissolve_pattern_rectangles` 生成逐行像素区域，`compose_director_transition_scene` 为每个区域复制完整入场场景，渲染器再为每份场景生成完整顶点。后续改为共享 GPU 点阵遮罩，保留原始图案与时序；当前路线未通过，预算未放宽。
 
-Minori 新插件的真实素材 GPU Headless 已越过双资源 stage 阻塞，生成第 120、240、600 帧；已查看第 600 帧的立绘、背景和日文文字。随后遇到文字渲染失败，公开标点测试复现了手写覆盖范围遗漏省略号等字符的问题。现改从字体实际字符映射生成覆盖范围，astra-text 的 17 项测试、Minori 的 76 项普通测试及显式 GPU 文字回归通过，相关 Clippy、格式与文档检查通过。真实素材同输入序列复测完成 3600 帧并正常关闭，已查看最终场景和含省略号的日文文字；NullAudioDevice 消费 2156640 帧，记录 3912658 个非零样本。这验证了该段剧情与测试音频队列，不代表真实可听音频、完整路线或结局通过。
+Musica 新插件的真实素材 GPU Headless 已越过双资源 stage 阻塞，生成第 120、240、600 帧；已查看第 600 帧的立绘、背景和日文文字。随后遇到文字渲染失败，公开标点测试复现了手写覆盖范围遗漏省略号等字符的问题。现改从字体实际字符映射生成覆盖范围，astra-text 的 17 项测试、Musica 的 76 项普通测试及显式 GPU 文字回归通过，相关 Clippy、格式与文档检查通过。真实素材同输入序列复测完成 3600 帧并正常关闭，已查看最终场景和含省略号的日文文字；NullAudioDevice 消费 2156640 帧，记录 3912658 个非零样本。这验证了该段剧情与测试音频队列，不代表真实可听音频、完整路线或结局通过。
 
-共享 GPU renderer 已支持命令默认颜色空间，Minori 场景选择 EncodedSrgb。Screen 半透明纹理在两种空间得到各自预期像素，透明像素保留背景；公共平台 crate 的 36 项测试通过，包含 7 项显式执行的硬件 GPU 测试。Minori 场景及立绘的 5 项回归通过，覆盖 GPU 绘制、裁剪、恢复和失败帧保护。双资源静态 stage 已接入，按背景、立绘、主前景、前缀顺序绘制；修复同一纹理重复出现时绘制 ID 冲突。场景回归增至 7 项，包含 3 项显式 GPU 测试，覆盖 Screen 混合、固定前缀原点、恢复和失败帧保留。`_ov.png` 原生混合及 SQZ 动画尚未实现，不能据此宣称 Minori 完整剧情可运行。
+共享 GPU renderer 已支持命令默认颜色空间，Musica 场景选择 EncodedSrgb。Screen 半透明纹理在两种空间得到各自预期像素，透明像素保留背景；公共平台 crate 的 36 项测试通过，包含 7 项显式执行的硬件 GPU 测试。Musica 场景及立绘的 5 项回归通过，覆盖 GPU 绘制、裁剪、恢复和失败帧保护。双资源静态 stage 已接入，按背景、立绘、主前景、前缀顺序绘制；修复同一纹理重复出现时绘制 ID 冲突。场景回归增至 7 项，包含 3 项显式 GPU 测试，覆盖 Screen 混合、固定前缀原点、恢复和失败帧保留。`_ov.png` 原生混合及 SQZ 动画尚未实现，不能据此宣称 Musica 完整剧情可运行。
 
 集显 GPU 提交计数已修复：timestamp resolve/copy 批次实际调用了 queue.submit，但旧计数只包含场景、atlas 与滤镜提交。现在按实际回读批次累计，下一帧开始重置；多个 pending frame 共用一个批次只计一次，轮询和再次读取同批次不重复计数。原先 3/2 次提交断言保持不变并通过，新增两帧批量回读和重置回归。公共平台全部 36 项测试通过（包含 7 项硬件 GPU 测试），全目标 Clippy 与格式检查通过；这只关闭提交计数缺陷，不代表整体验收或性能目标达成。
 
-公共 wgpu 后端已实现 Screen 混合，复用现有 BlendMode 和 atlas pipeline；Sprite/Glyph 的批次现保留声明的混合模式，不再固定为 Alpha。两项新硬件 GPU 测试验证编码颜色空间、线性光纹理、透明度及 opacity 的实际像素，受影响 Clippy 和格式检查通过。公共平台 35 项功能测试通过（含 6 项 GPU 测试）；此前集显性能测试暴露的队列提交漏计已在后续修复，原断言未放宽。Minori 原生 `_sc.png` 的 Screen 分派与查表公式已核对并写入脚本文档，完整双资源 stage 尚未接入。
+公共 wgpu 后端已实现 Screen 混合，复用现有 BlendMode 和 atlas pipeline；Sprite/Glyph 的批次现保留声明的混合模式，不再固定为 Alpha。两项新硬件 GPU 测试验证编码颜色空间、线性光纹理、透明度及 opacity 的实际像素，受影响 Clippy 和格式检查通过。公共平台 35 项功能测试通过（含 6 项 GPU 测试）；此前集显性能测试暴露的队列提交漏计已在后续修复，原断言未放宽。Musica 原生 `_sc.png` 的 Screen 分派与查表公式已核对并写入脚本文档，完整双资源 stage 尚未接入。
 
 当前原生 Windows Player 已完成 Release 构建，并以四条路线测试使用的同一 package 重新打包。直接在 Sandbox 共享目录提交 bundle 遇到文件占用；改在未共享的任务目录完成打包后复制，生成成功。Sandbox 已实际显示终之空标题页，点击开始后因 `audio.open / ProviderUnavailable` 退出；未进入剧情，音频设备与完整 Player 验收仍开放。FVP 在显式测试音频模式继续自动播放，尚未到结局。
 
@@ -20,41 +22,41 @@ Headless 启用 FFmpeg 后的构建阻塞已修复：原生解码器包含不能
 
 Classic route.coverage.004 已完成同一 Release build/package 的原生 VN GPU 输入流程，消费 47,815 条输入、38 次选择并到达 tsui.ending，运行校验通过且无诊断，使用 DX12 独显。终点 PNG 已查看，仍为黑场；该 profile 的视频解码仍关闭，因此只能确认路线推进与终止，不能关闭全程视听或真实 Player 验收。route.coverage.003 也已结束：47,771 条输入、36 次选择到达同一终点，校验通过；同样不能据此关闭全程视听验收。
 
-Minori 默认原点的静态 PNG 立绘已按原生 `ol/ot/or/ob` 边界与高度裁剪接入公共 GPU 渲染。PNG reader 复用现有锁定版本，元数据缓存有界，纹理沿用 SDK，裁剪不复制或改写像素。73 项普通测试、Minori/CLI Clippy 通过，另显式通过 GPU 定位、裁剪、保存恢复、恢复完整高度和失败帧保留测试。双资源前景、非默认原点配置及 SQZ 动画仍开放；不能以此关闭实际第 10 条 stage 或结局验收。
+Musica 默认原点的静态 PNG 立绘已按原生 `ol/ot/or/ob` 边界与高度裁剪接入公共 GPU 渲染。PNG reader 复用现有锁定版本，元数据缓存有界，纹理沿用 SDK，裁剪不复制或改写像素。73 项普通测试、Musica/CLI Clippy 通过，另显式通过 GPU 定位、裁剪、保存恢复、恢复完整高度和失败帧保留测试。双资源前景、非默认原点配置及 SQZ 动画仍开放；不能以此关闭实际第 10 条 stage 或结局验收。
 
-Minori 原生 stage 调用链已继续核对：冒号分隔的前景资源进入两个独立缓冲，不能套用 CrossFade2 时间序列；立绘附加参数参与可见高度裁剪，并受资源边界和原点模式影响；PNG 加载还会查找同名 SQZ 动画。具体规则已补入脚本执行文档。绘制顺序、边界来源和动画时序仍待接入，当前真实 stage 阻塞未关闭。
+Musica 原生 stage 调用链已继续核对：冒号分隔的前景资源进入两个独立缓冲，不能套用 CrossFade2 时间序列；立绘附加参数参与可见高度裁剪，并受资源边界和原点模式影响；PNG 加载还会查找同名 SQZ 动画。具体规则已补入脚本执行文档。绘制顺序、边界来源和动画时序仍待接入，当前真实 stage 阻塞未关闭。
 
 FVP 在 Windows Sandbox GPU 长流程中完成新槽 007 的原生保存与读取，恢复相同场景和对白后，物理点击继续推进文字，随后恢复自动播放。已有槽位保留；本次使用显式 NullAudioDevice，不计入可听音频或结局验收。
 
-Minori stage v8 真实 GPU 重跑返回 `ASTRA_EMU_MINORI_STAGE_SEQUENCE`（退出码 1），确认旧参数解析错误已越过，双资源序列绘制仍未实现。此前一次启动退出码为 101 且未捕获错误，原因未确认。Manager headless 现通过现有 astra-observability 在输出图像旁写入有界诊断日志，并记录关闭结果，避免只依赖控制台输出。
+Musica stage v8 真实 GPU 重跑返回 `ASTRA_EMU_MUSICA_STAGE_SEQUENCE`（退出码 1），确认旧参数解析错误已越过，双资源序列绘制仍未实现。此前一次启动退出码为 101 且未捕获错误，原因未确认。Manager headless 现通过现有 astra-observability 在输出图像旁写入有界诊断日志，并记录关闭结果，避免只依赖控制台输出。
 
-Minori stage 已由丢失立绘参数的通用图层映射改为完整原生状态：保留一至两个前景资源、参考坐标、背景和 `position[,resource_parameter]`。解析和存档共用参数校验，VM schema 升到 v8 并拒绝旧格式；正常绘制与恢复共用 Scene。70 项 Minori、12 项 CLI 测试及 Clippy 通过，另单独执行了 GPU 定位/恢复一致性与失败帧保留测试。双资源序列和立绘附加参数目前仍明确拒绝绘制，尚未关闭《夏空的英仙座》第 10 条 stage 的实际播放阻塞；本次补齐状态保存，未以忽略参数的画面代替原生实现。
+Musica stage 已由丢失立绘参数的通用图层映射改为完整原生状态：保留一至两个前景资源、参考坐标、背景和 `position[,resource_parameter]`。解析和存档共用参数校验，VM schema 升到 v8 并拒绝旧格式；正常绘制与恢复共用 Scene。70 项 Musica、12 项 CLI 测试及 Clippy 通过，另单独执行了 GPU 定位/恢复一致性与失败帧保留测试。双资源序列和立绘附加参数目前仍明确拒绝绘制，尚未关闭《夏空的英仙座》第 10 条 stage 的实际播放阻塞；本次补齐状态保存，未以忽略参数的画面代替原生实现。
 
 FVP 在 Windows Sandbox GPU 重测中确认容量失败根因：BGM 请求到来时已有 2 个占用声部，其中只有 1 个处于 Playing，触发 hosted 混音器默认的 2 声部上限。Family 现按 RFVP 0.6.0 原生 BgmPlayer 的 4 个槽位配置 BGM 容量；SE 和总上限不变，不提前结束淡出或移除暂停声部。33 项测试通过，4 项独立 GPU 测试未在本次单元测试中执行；新增回归覆盖淡出与播放交叠、暂停占用、第五声部拒绝和释放后重新播放。Clippy、插件构建通过，同一原生存档的修复版 GPU 重测已越过此前失败的咖啡店段并进入后续场景，Manager 未新增容量错误；长流程继续运行。使用显式 NullAudioDevice，尚不代表真实可听音频或结局验收。
 
-Minori CLI 的音频 census 原先将 `-` 识别为停止符，与运行时已有的原生 `*` 规则不符。现按 `*` 统计停止请求，不再将其列为缺失资源；不存在的普通资源仍报告缺失。12 项 CLI 测试及 Clippy 通过，真实归档重扫已通过：811 条音频引用中 410 条为停止请求，其余 401 条精确命中（BGM 167、SE 234），缺失、歧义与格式错误均为 0。旧 census 的 410 项 candidate missing 为误报；本次统计不验证音频解码和播放。
+Musica CLI 的音频 census 原先将 `-` 识别为停止符，与运行时已有的原生 `*` 规则不符。现按 `*` 统计停止请求，不再将其列为缺失资源；不存在的普通资源仍报告缺失。12 项 CLI 测试及 Clippy 通过，真实归档重扫已通过：811 条音频引用中 410 条为停止请求，其余 401 条精确命中（BGM 167、SE 234），缺失、歧义与格式错误均为 0。旧 census 的 410 项 candidate missing 为误报；本次统计不验证音频解码和播放。
 
 RFVP 的只读 `voice_count(kind)` 让 Manager 分别记录容量占用和 Playing 数量，暂停与淡出阶段仍占用槽位。fork 保持上游 0.6.0 基线加单个本地适配提交 73d3b44，本次容量配置修复仅在 Family，gitlink 不变，未推送。
 
-Minori 的第 10 条失败指令已确认为 `stage`：前景使用冒号分隔的资源序列，stand 的第二项使用逗号分隔参数；此前解析器把前者当作单一文件名、后者当作单个整数。现已吸收 Musica 的这两类解析，但来源 provider 未消费完整状态，仍不能直接以忽略附加参数的方式接入。失败前的第 240 帧已查看，物理确认键确实推进了对白。
+Musica 的第 10 条失败指令已确认为 `stage`：前景使用冒号分隔的资源序列，stand 的第二项使用逗号分隔参数；此前解析器把前者当作单一文件名、后者当作单个整数。现已吸收 Musica 的这两类解析，但来源 provider 未消费完整状态，仍不能直接以忽略附加参数的方式接入。失败前的第 240 帧已查看，物理确认键确实推进了对白。
 
 此前 FVP 同存档重测只记录到 Playing BGM 为 1、SE 为 0，未包含暂停或淡出声部，因此当时未调整容量；后续新增占用诊断才确认上述根因。
 
-Minori 真实 GPU 连续输入已定位为 tick 421、指令序号 10、字节位置 319 的六操作数指令失败；会话随后正常关闭。失败前指定帧截图成功写出，尚未到达后续截图帧。诊断桥现仅放行枚举通道类别和严格格式的脚本摘要，并继续拒绝任意 Debug、路径及非摘要字符串；3 项日志桥回归和 API/Minori 全目标 Clippy 通过。实际指令语义与 FVP 容量根因仍在排查。
+Musica 真实 GPU 连续输入已定位为 tick 421、指令序号 10、字节位置 319 的六操作数指令失败；会话随后正常关闭。失败前指定帧截图成功写出，尚未到达后续截图帧。诊断桥现仅放行枚举通道类别和严格格式的脚本摘要，并继续拒绝任意 Debug、路径及非摘要字符串；3 项日志桥回归和 API/Musica 全目标 Clippy 通过。实际指令语义与 FVP 容量根因仍在排查。
 
 Classic route.coverage.001 与 .002 已完成原生 VN GPU Headless 的完整输入序列，分别消费 46,997 与 47,793 条输入并到达 tsui.ending；运行校验通过且无诊断，使用同一 Release build、package 和 DX12 独显。终点截图已查看，均为黑场；这只能确认当前转换包的路线推进与终止，不能证明片尾影片或全程视听正确，profile 的 video_decode 仍为 disabled。Classic .003 与 .004 已继续运行，Modern、37 路线整体和真实 Player 验收保持开放。
 
-Minori 指令失败新增脚本摘要、指令序号、行号、字节位置和操作数数量诊断，不输出 opcode 原文或参数；FVP 音频失败补充通道类别、配置上限和仍播放的通道数量，区分播放状态与混音器内部 voice 占用。未调整容量或跳过失败操作。FVP 32 项、Minori 65 项测试、相关全目标 Clippy 和构建通过；5 项显式测试未执行。带新诊断的真实流程仍须重测。
+Musica 指令失败新增脚本摘要、指令序号、行号、字节位置和操作数数量诊断，不输出 opcode 原文或参数；FVP 音频失败补充通道类别、配置上限和仍播放的通道数量，区分播放状态与混音器内部 voice 占用。未调整容量或跳过失败操作。FVP 32 项、Musica 65 项测试、相关全目标 Clippy 和构建通过；5 项显式测试未执行。带新诊断的真实流程仍须重测。
 
-真实连续流程仍有两项阻塞：FVP 在 Sandbox 冷启动读取最新自动存档后再次终止，新增诊断将容量错误定位到 `audio play`；尚未确认是通道配置、重叠播放还是释放时机导致。Minori 的 3600 帧物理按键推进在完成前返回 `ASTRA_EMU_MINORI_RUNTIME_OPERAND`，须继续定位具体指令及参数约束；不能把此前初始显示通过当作连续剧情通过。
+真实连续流程仍有两项阻塞：FVP 在 Sandbox 冷启动读取最新自动存档后再次终止，新增诊断将容量错误定位到 `audio play`；尚未确认是通道配置、重叠播放还是释放时机导致。Musica 的 3600 帧物理按键推进在完成前返回 `ASTRA_EMU_MUSICA_RUNTIME_OPERAND`，须继续定位具体指令及参数约束；不能把此前初始显示通过当作连续剧情通过。
 
 Manager 的 GPU Headless 调试支持同一会话内按物理输入帧截图，用于比较真实游戏推进和存读档画面。请求数量、重复帧与范围在打开插件前检查；提前结束未到达所需帧会失败，图片写入失败保留关闭与 PCM 取消路径。指定像素写出、缺帧、请求边界及既有输入顺序共 3 项增量测试通过；真实存读档截图比较仍待运行。
 
-Minori 共享图集修复后的真实游戏 GPU 重测已正常完成 120 帧并退出，输出画面经查看确认背景、说话人和正文可见，未再触发纹理上传越界。该测试使用既有脚本入口与显式测试音频；只确认此入口的启动和初始显示，不表示新游戏全流程、真实声音或结局通过。已继续启动 3600 帧物理按键推进测试，结果待确认。
+Musica 共享图集修复后的真实游戏 GPU 重测已正常完成 120 帧并退出，输出画面经查看确认背景、说话人和正文可见，未再触发纹理上传越界。该测试使用既有脚本入口与显式测试音频；只确认此入口的启动和初始显示，不表示新游戏全流程、真实声音或结局通过。已继续启动 3600 帧物理按键推进测试，结果待确认。
 
-Minori 真实 GPU 启动触发共享图集的宽度越界：增量分配器换行后仅检查高度，错误接受比当前 1024 宽图集更宽的资源，最终在 wgpu 上传时 panic。新增回归先复现，再补齐换行后的宽度检查，让现有重排/扩容路径处理大纹理。13 项平台库测试、显式硬件 GPU 宽/高纹理连续上传回归、Clippy 和格式检查通过；受影响 Minori 65 项、CMVS 151 项普通测试通过。修复后的动态插件已重新启动同一真实入口，结果待确认。FVP 的容量失败是另一项未定位问题，不能由本修复关闭。
+Musica 真实 GPU 启动触发共享图集的宽度越界：增量分配器换行后仅检查高度，错误接受比当前 1024 宽图集更宽的资源，最终在 wgpu 上传时 panic。新增回归先复现，再补齐换行后的宽度检查，让现有重排/扩容路径处理大纹理。13 项平台库测试、显式硬件 GPU 宽/高纹理连续上传回归、Clippy 和格式检查通过；受影响 Musica 65 项、CMVS 151 项普通测试通过。修复后的动态插件已重新启动同一真实入口，结果待确认。FVP 的容量失败是另一项未定位问题，不能由本修复关闭。
 
-Minori 已准备独立的《夏空的英仙座》18 分卷测试副本，原游戏目录保持只读。新增 `list-garbro-titles`，与导入共用有界 NRBF graph，只列出 PAZ scheme 名称，不输出密钥或写文件；重复名称和损坏结构拒绝。实际数据库列出 19 项，以 `Natsuzora no Perseus` 成功生成新私有配置。CLI 11 项测试与 Clippy 通过，并修正文档中 `--profile` 相对游戏目录的用法。真实归档盘点已解析 89 个脚本、33695 条命令，未知 opcode 计数为零；这仅表示 parser 识别，不能表示 VM 全部实现。音频候选仍有未匹配项。已知入口的 GPU 启动继续运行，尚未确认首帧或结局。
+Musica 已准备独立的《夏空的英仙座》18 分卷测试副本，原游戏目录保持只读。新增 `list-garbro-titles`，与导入共用有界 NRBF graph，只列出 PAZ scheme 名称，不输出密钥或写文件；重复名称和损坏结构拒绝。实际数据库列出 19 项，以 `Natsuzora no Perseus` 成功生成新私有配置。CLI 11 项测试与 Clippy 通过，并修正文档中 `--profile` 相对游戏目录的用法。真实归档盘点已解析 89 个脚本、33695 条命令，未知 opcode 计数为零；这仅表示 parser 识别，不能表示 VM 全部实现。音频候选仍有未匹配项。已知入口的 GPU 启动继续运行，尚未确认首帧或结局。
 
 FVP Sandbox 长流程在后续校园剧情后以 `ASTRA_EMU_FVP_RFVP_CAPACITY` 终止，Manager 显示失败。当前信息只含通用 family operation，尚不能区分音频容量、播放状态同步或其他 hosted 边界，不能归因为已确认的上游缺陷。自动存档和手动存档此前的局部结果保留，完整结局仍未完成；下一步补齐适配操作诊断并从独立副本复现，不放宽容量或跳过失败。
 
@@ -62,7 +64,7 @@ FVP 适配层已为音频加载、播放、混音、提交与参数操作保留�
 
 共享 Symphonia 流式音频已修复截断输入被当作正常结束的问题。截断 WAV 回归先复现有效前缀输出后错误地返回完成，修复后返回结构化截断诊断；完整 WAV 和公开 MP3 仍正常结束，MP3 流式 PCM 与完整解码逐样本一致。14 项解码测试通过，不将此局部修复记作产品音频验收完成。
 
-Minori 与 CMVS 已移除 GPU 回读后的额外整帧复制。Minori 保留共享像素缓冲供 Family 借用，CMVS 使用公共 `OwnedPixelBuffer` 的共享缓冲转换；写时复制继续保护已保留的旧帧。14 项 media-core 测试、CMVS 148 项普通测试及显式硬件 GPU 合成测试、Minori 63 项测试通过，后者包含 GPU 选择、存读档和转场回归；Minori 的独立真实游戏测试仍未执行。本项不改变 Family ABI 或存档格式。
+Musica 与 CMVS 已移除 GPU 回读后的额外整帧复制。Musica 保留共享像素缓冲供 Family 借用，CMVS 使用公共 `OwnedPixelBuffer` 的共享缓冲转换；写时复制继续保护已保留的旧帧。14 项 media-core 测试、CMVS 148 项普通测试及显式硬件 GPU 合成测试、Musica 63 项测试通过，后者包含 GPU 选择、存读档和转场回归；Musica 的独立真实游戏测试仍未执行。本项不改变 Family ABI 或存档格式。
 
 基线：28f89d88。用户于 2026-09-12 确认重构范围，当前状态按实际代码与运行结果维护；历史 Stage 状态不代表新架构完成。
 
@@ -70,7 +72,7 @@ Minori 与 CMVS 已移除 GPU 回读后的额外整帧复制。Minori 保留共�
 | --- | --- | --- |
 | 0 规则与测试 | 进行中 | 新宪章/契约与轻量文档检查已落地；EMU 独立 workspace 和 xtask 已接通；541 处普通测试已迁移，强制 Headless 宏与旧状态矩阵已删除 |
 | 1 EMU 薄 API/FVP | 进行中 | typed 配置、可选翻译、驻留库与 FVP 编码适配已整合；待整合验证和真实游戏运行 |
-| 2 SDK/Minori | 未完成 | 独立 astra-text、Minori archive/profile、Family session、实际视听与自有存档已整合；完整 opcode、动画/长媒体和真实游戏验收待完成 |
+| 2 SDK/Musica | 未完成 | 独立 astra-text、Musica archive/profile、Family session、实际视听与自有存档已整合；完整 opcode、动画/长媒体和真实游戏验收待完成 |
 | 3 跨平台 EMU | 未完成 | 三桌面/Android Manager、核心与真实媒体运行 |
 | 4 Engine/VN | 未完成 | 演出 tick 去除整会话克隆并修复排队存档；无包 World 与 typed Actor/Component 存档已接通，Runtime 整帧回滚、通用 replay 与历史 hash chain 已删除；其余任务、可信 Luau、typed 产品主路径和 DSL 待完成 |
 | 5 Editor/Agent | 未完成 | GPUI、文本/图/时间线、独立预览、ACP/MCP 与两种编辑模式 |
@@ -89,7 +91,7 @@ FVP Sandbox 自动播放进入后续剧情后因 `RFVP rejected save copy` 异�
 
 CMVS 指令执行已移除整 VM 克隆与隐式回滚，直接保留现有缓冲。执行错误或 panic 后失败标志阻止后续指令和快照校验；正常等待与帧停止的前置检查不使 VM 失效。恢复须使用单独校验过的成功状态。命令执行文件按职责拆成 14 个私有模块，入口保留统一栈读取、弹出和日志；155 个原有处理分支逐项比较一致，最大子模块 457 行。145 项库测试通过，包含连续 1024 条指令复用同一 64 KiB 缓冲、部分修改后失败、恢复与等待边界；1 项显式 GPU 测试本次未运行。全目标 Clippy 和格式检查通过。此变更未完成 CMVS Family session 接入。
 
-SDK 音频解码改为同步借用源切片，直接复用 Symphonia 支持借用数据的 MediaSourceStream。Minori 的资产读取保留 AstraEngine OwnedByteBuffer，脚本、图片和音频消费者不再先复制整段归档数据；CMVS 普通音频与 MGV 内嵌 Ogg 同样删除解码前的整段复制。返回 PCM 独立持有采样，帧数预算、取消和格式错误语义不变。SDK 单元测试、CMVS 与 Minori 库测试通过，包含已有 GPU 会话、音频关闭与恢复回归；受影响三个 crate 的全目标 Clippy 和格式检查通过。尚未完成 CMVS Family session 与真实游戏验收。
+SDK 音频解码改为同步借用源切片，直接复用 Symphonia 支持借用数据的 MediaSourceStream。Musica 的资产读取保留 AstraEngine OwnedByteBuffer，脚本、图片和音频消费者不再先复制整段归档数据；CMVS 普通音频与 MGV 内嵌 Ogg 同样删除解码前的整段复制。返回 PCM 独立持有采样，帧数预算、取消和格式错误语义不变。SDK 单元测试、CMVS 与 Musica 库测试通过，包含已有 GPU 会话、音频关闭与恢复回归；受影响三个 crate 的全目标 Clippy 和格式检查通过。尚未完成 CMVS Family session 与真实游戏验收。
 
 FVP Sandbox 后续剧情已完成中途存读档往返：自动播放经过场景与人物切换后，在空槽 005 保存；原生存档页显示新缩略图和时间。返回剧情并推进下一段后，读取 005 直接恢复保存时的背景与文字，随后可继续自动播放。本次未复现早期槽位读取后停留在系统页的现象，但未与上游独立程序对照，不能据此认定相关行为已修复。测试仍使用 GPU 和显式 NullAudioDevice；完整结局、实际声音和损坏存档验收继续开放。
 
@@ -97,19 +99,19 @@ FVP 后续 GPU 设置页检查完成系统/演出、音量/文字、角色音量
 
 FVP 原生自动存档页已显示本轮持续播放生成的多个场景记录。读取最新记录后，存档页关闭，出现与缩略图对应的钟楼场景过渡，随后继续进入教室剧情；再次打开自动存档页读取同一记录也能继续播放，未出现此前的复制错误。本次确认自动存档生成、读取和继续运行，未逐项核对恢复后的全部变量，也未验证自动存档跨进程恢复。仍使用 Sandbox GPU 与显式无声测试后端，完整结局和实际声音验收保持开放。
 
-CMVS/Minori 共享能力改动整合后，独立 Emulator workspace 的默认 feature 构建、全部普通测试、全目标 Clippy（`-D warnings`）和所有活动成员格式检查通过。Minori 原生 GPU 场景、选择、恢复及取消阻塞音频写入回归通过；显式忽略的 GPU、动态插件、商业游戏与联网用例不计入本次通过范围。Siglus 上游编译警告仍保留，未为消除警告扩大 fork 修改。此次检查不代表根 Engine/Editor workspace 或全部平台已通过。
+CMVS/Musica 共享能力改动整合后，独立 Emulator workspace 的默认 feature 构建、全部普通测试、全目标 Clippy（`-D warnings`）和所有活动成员格式检查通过。Musica 原生 GPU 场景、选择、恢复及取消阻塞音频写入回归通过；显式忽略的 GPU、动态插件、商业游戏与联网用例不计入本次通过范围。Siglus 上游编译警告仍保留，未为消除警告扩大 fork 修改。此次检查不代表根 Engine/Editor workspace 或全部平台已通过。
 
 CMVS 配置改为 `astra.emu.cmvs.profile.v2`，归档从按 role 排序的映射改为有序列表，挂载和同名脚本查找遵循配置顺序。新增回归覆盖非字母顺序的归档优先级、重复 role、旧 schema 和旧对象格式拒绝，继续复用 SDK 文件路径校验。150 项普通测试、全目标 Clippy 与格式检查通过；既有显式 GPU 用例本次未重跑。实际 Family session、文字资源来源跟踪和媒体接入仍未完成。
 
 CMVS 解码缓存、范围读取和流复用 Engine `OwnedByteBuffer`，缓存命中不再复制完整条目。脚本加载也直接解析共享缓冲，删除经流读取整份输入的第二次分配，保留 64 MiB 限制和成功解析后才安装 VM 的顺序。新回归直接检查共享分配，并验证缓存/归档释放后既有范围与流仍有效，源文件变化仍拒绝新读取。151 项普通测试、全目标 Clippy、格式和文档检查通过；本次不新增真实 GPU 或游戏完成记录。
 
-Minori 音频恢复现按已解码音频的帧数与采样率校验游标上界，拒绝超过资源长度的存档，失败前不替换当前混音器。回归先复现越界游标被接受，再验证播放中与停止状态均被拒绝，原声音仍可继续播放；恰好位于音频末尾的停止状态仍可恢复。此项补齐存档恢复边界，不代表真实游戏长流程已完成。
+Musica 音频恢复现按已解码音频的帧数与采样率校验游标上界，拒绝超过资源长度的存档，失败前不替换当前混音器。回归先复现越界游标被接受，再验证播放中与停止状态均被拒绝，原声音仍可继续播放；恰好位于音频末尾的停止状态仍可恢复。此项补齐存档恢复边界，不代表真实游戏长流程已完成。
 
 Classic 批量输入生成器复用单路线驱动，保留物理输入、等待时序和终局断言，仅转换矩阵的 session/checkpoint 名称。当前私有 IR 的 37 条完整路线均已生成并通过既有矩阵输入检查，最大需求为 48,096 条输入与 343,278,530 个预算 tick。生成器逐路线处理，全部成功才提供最终目录；失败清理自身暂存文件，已有输出不覆盖。12 项 Classic 工具测试与 2 项矩阵测试通过。此次完成的是批量执行准备，尚不计任何新增路线验收通过。
 
 矩阵执行器已删除旧版运行报告读取，启动时显式传入 GPU 参数，并复用单路线的硬件 adapter、构建、包、检查点和 manifest 校验。全部路线先检查输入预算，再创建运行目录；旧的汇总文件续跑入口已移除。新增模拟子进程测试覆盖 GPU 参数与软件 adapter 拒绝，预算回归确认失败不启动进程。用真实 Classic 输入和首条路线的较小 profile 执行预检时，第二条路线因 47,793 条输入超过 46,997 配额明确失败，未创建运行目录；未启动第三个 GPU 流程。已有两条完整路线仍独立运行，矩阵真实全流程尚未完成。
 
-FVP、Minori、Siglus 已改用 API 内可选 ProviderModule，共用单会话 ABI 管理；panic 后仍可关闭，模块释放会关闭遗留会话。API 16 项单元测试、FVP/Minori/Siglus 与 Manager 的增量测试、受影响 crate 全目标 Clippy 和格式检查已通过。FVP/Minori 显式开启 dynamic-plugin-export 后，三个实际插件均通过 Manager 的 ABI 布局与诊断接入检查（共 6 项）；导出 feature 的全目标 Clippy 和 FVP 在 1 MiB 栈上连续三次开关会话的回归也通过。核心 VM、媒体和原生存档实现未因 ABI 复用而改写。
+FVP、Musica、Siglus 已改用 API 内可选 ProviderModule，共用单会话 ABI 管理；panic 后仍可关闭，模块释放会关闭遗留会话。API 16 项单元测试、FVP/Musica/Siglus 与 Manager 的增量测试、受影响 crate 全目标 Clippy 和格式检查已通过。FVP/Musica 显式开启 dynamic-plugin-export 后，三个实际插件均通过 Manager 的 ABI 布局与诊断接入检查（共 6 项）；导出 feature 的全目标 Clippy 和 FVP 在 1 MiB 栈上连续三次开关会话的回归也通过。核心 VM、媒体和原生存档实现未因 ABI 复用而改写。
 
 Headless 长流程新增逐输入开始/完成 TRACE，使用序号、输入种类和有效 tick 定位耗时，不输出观察值或商业内容。22 项单元测试通过，2 项显式性能测试未执行；逐输入日志现已用于修复版终之空完整路线运行。
 
@@ -135,29 +137,29 @@ Siglus 的完整 fork 已合成为上游 e762f9f 基线加单个本地适配提�
 
 RFVP 已由裁剪源码快照改为完整上游 fork 的 submodule。保留 0.6.0 基线 304e773387a9920c9db091ec1fd937c717aea949，单个本地适配提交为 4c67834；主仓 gitlink 固定精确提交，尚未推送。FVP 依赖改为上游 crates/rfvp 目录，恢复原生视频、bitmap、Anzu 等原有依赖和 feature 定义。hosted-gpu 编译、29 项常规测试、3 项显式 GPU 测试及 Clippy 通过；原生平台入口尚未逐平台构建，真实结局验收仍开放。
 
-Minori VM 已按状态模型、演出、音频命令、选择和错误定义拆分模块，保持既有状态格式与执行顺序。拆分后的 62 项默认回归和新增诊断隐私回归通过，Clippy 通过；未实现命令的 Family 诊断保留指令序号，删除对错误显示字符串的诊断码解析，避免透传脚本内容。
+Musica VM 已按状态模型、演出、音频命令、选择和错误定义拆分模块，保持既有状态格式与执行顺序。拆分后的 62 项默认回归和新增诊断隐私回归通过，Clippy 通过；未实现命令的 Family 诊断保留指令序号，删除对错误显示字符串的诊断码解析，避免透传脚本内容。
 
-Musica 的 select 已接通 Minori 解析、选择等待、键盘焦点、确认跳转与 GPU 文字显示。原生 Family GPU fixture 验证 F5/F9 恢复相同选择画面，VM 回归验证目标分支和损坏索引拒绝。新增 GPU 测试按进程单会话约束串行持有 provider；Minori 62 项默认测试通过，另显式执行独立文字 GPU 测试并通过，相关 Clippy 通过；此前 CLI 10 项测试通过。鼠标命中与 GPU 显示共用布局，回归覆盖悬停、无位置点击、行间空白、边界外点击及确认对应分支。原版界面一致性和真实路线仍待验证。
+Musica 的 select 已接通 Musica 解析、选择等待、键盘焦点、确认跳转与 GPU 文字显示。原生 Family GPU fixture 验证 F5/F9 恢复相同选择画面，VM 回归验证目标分支和损坏索引拒绝。新增 GPU 测试按进程单会话约束串行持有 provider；Musica 62 项默认测试通过，另显式执行独立文字 GPU 测试并通过，相关 Clippy 通过；此前 CLI 10 项测试通过。鼠标命中与 GPU 显示共用布局，回归覆盖悬停、无位置点击、行间空白、边界外点击及确认对应分支。原版界面一致性和真实路线仍待验证。
 
-Musica 的 CrossFade 名称和空效果清除行为已接入 Minori 原有时间线与 GPU scene。3 项演出逻辑回归、1 项原生 Family GPU 帧回归及相关 Clippy 通过；清除后 GPU 帧不再包含旧效果，存档保持清除状态。真实游戏演出仍待验收。
+Musica 的 CrossFade 名称和空效果清除行为已接入 Musica 原有时间线与 GPU scene。3 项演出逻辑回归、1 项原生 Family GPU 帧回归及相关 Clippy 通过；清除后 GPU 帧不再包含旧效果，存档保持清除状态。真实游戏演出仍待验收。
 
-Musica 的 playbgm2、playse4 与 deletevar 已合入 Minori，同一音频执行模块支持独立通道、停止和存档恢复。音频指令从 Runtime 大文件拆出，未新增平行核心。21 项 Runtime、14 项音频相关和 10 项 CLI 测试通过（集合有交叉），相关 Clippy 通过；实际新增通道设备播放仍未验收。
+Musica 的 playbgm2、playse4 与 deletevar 已合入 Musica，同一音频执行模块支持独立通道、停止和存档恢复。音频指令从 Runtime 大文件拆出，未新增平行核心。21 项 Runtime、14 项音频相关和 10 项 CLI 测试通过（集合有交叉），相关 Clippy 通过；实际新增通道设备播放仍未验收。
 
-Musica 来源分支的带标签 chain 已合入 Minori parser、VM 与原生 session；目标标签验证成功后才替换脚本，存读档保留目标位置。Minori 52 项及 CLI 10 项测试通过，独立 GPU 文字测试按原条件未在本轮执行；相关 Clippy 通过。Musica 其余功能仍待整合，未修改来源工作树。
+Musica 来源分支的带标签 chain 已合入 Musica parser、VM 与原生 session；目标标签验证成功后才替换脚本，存读档保留目标位置。Musica 52 项及 CLI 10 项测试通过，独立 GPU 文字测试按原条件未在本轮执行；相关 Clippy 通过。Musica 其余功能仍待整合，未修改来源工作树。
 
-Minori 音频请求超时现在取消 sink、保留失败状态并拒绝后续命令，恢复替换前检查取消。13 项音频相关增量测试通过，包括实际超时后解除阻塞写入、关闭等待 worker，以及取消空恢复保留原混音器。Clippy 通过。
+Musica 音频请求超时现在取消 sink、保留失败状态并拒绝后续命令，恢复替换前检查取消。13 项音频相关增量测试通过，包括实际超时后解除阻塞写入、关闭等待 worker，以及取消空恢复保留原混音器。Clippy 通过。
 
-SDK audio feature 已替代 Minori 独立解码模块，CMVS 普通音频与 MGV 内嵌 Ogg 使用同一 Symphonia/Kira 浮点解码入口。相关 15 项增量测试与受影响 Clippy 通过，包括解码预算、取消、损坏输入、Minori 阻塞 PCM 退出和 session 存读档。CMVS 播放 worker、长媒体及真实音频设备未验收。
+SDK audio feature 已替代 Musica 独立解码模块，CMVS 普通音频与 MGV 内嵌 Ogg 使用同一 Symphonia/Kira 浮点解码入口。相关 15 项增量测试与受影响 Clippy 通过，包括解码预算、取消、损坏输入、Musica 阻塞 PCM 退出和 session 存读档。CMVS 播放 worker、长媒体及真实音频设备未验收。
 
 CMVS 已迁入 VM、CMVS 3.90 指令契约和核心自有归档访问，141 项测试通过；状态/单步调度分开，opcode 表拆成 8 个有界模块。全部 65536 个 opcode 输入与来源契约逐项比较一致，临时比较源码与测试程序已清理。旧调试输出改为 tracing 的稳定事件与受限字段；未导入旧 provider 的私有日志和整体 Debug 内容。脚本加载已直接连接核心归档，成功解析后统一更新 frame 身份、入口 PC、索引、字符串表和初始数据；非法 frame 或路径保持 VM 不变，关联 8 项增量测试通过；重载全零或空数据段会清除旧的稀疏字表，两项回归覆盖其他 frame 隔离与字节布局。脚本调用查找已连接同一归档加载入口，按挂载顺序匹配裸文件名；路径越界和未找到资源明确失败，诊断不附带私有名称。CmvsScene 已复用 SDK 纹理缓存和公共 wgpu renderer，硬件 GPU 回归验证层级合成与同槽纹理尺寸更换；完整 Family session、媒体连接与大型执行分派细分仍待完成。
 
-2026-09-16，CMVS 的 CPZ、PB2/PB3/JBP、MGV、PS2A 与系统存档格式层从 `de4110e9e` 迁入，47 项既有格式测试通过。导入的大文件已按格式职责拆分，共用 SDK `CoreError`，删除 Minori 的重复错误类型。后续归档访问改为 `CmvsArchive`，typed profile 直接声明文件与 scheme，挂载前拒绝未支持的 CPZ 版本。来源 provider 的未提交改动尚未移植，真实 CPZ5 游戏流程未验收。
+2026-09-16，CMVS 的 CPZ、PB2/PB3/JBP、MGV、PS2A 与系统存档格式层从 `de4110e9e` 迁入，47 项既有格式测试通过。导入的大文件已按格式职责拆分，共用 SDK `CoreError`，删除 Musica 的重复错误类型。后续归档访问改为 `CmvsArchive`，typed profile 直接声明文件与 scheme，挂载前拒绝未支持的 CPZ 版本。来源 provider 的未提交改动尚未移植，真实 CPZ5 游戏流程未验收。
 
-SDK 的归档数据类型、有界私有配置读取和可选明文缓存已由 Minori 与 CMVS 共同使用，Minori 原有重复模块已删除。SDK 无默认 feature 及 archive/cache/text/image 各自单独启用均可编译；不要求 Engine/VN session。配置读取失败不回写文件，错误不含原始输入和路径；相对游戏目录的回归覆盖配置路径仅解析一次。最近一次增量检查中 Minori 48 项、CLI 10 项和 SDK 7 项测试通过，独立 GPU 文字测试仍按原条件单独执行。
+SDK 的归档数据类型、有界私有配置读取和可选明文缓存已由 Musica 与 CMVS 共同使用，Musica 原有重复模块已删除。SDK 无默认 feature 及 archive/cache/text/image 各自单独启用均可编译；不要求 Engine/VN session。配置读取失败不回写文件，错误不含原始输入和路径；相对游戏目录的回归覆盖配置路径仅解析一次。最近一次增量检查中 Musica 48 项、CLI 10 项和 SDK 7 项测试通过，独立 GPU 文字测试仍按原条件单独执行。
 
-2026-09-16，`astra-emu-sdk` 已进入 Emulator workspace，提取 Minori 的文字资源管理和纹理缓存，复用 `astra-text`、`astra-media-core`、`image` 和 `lru`。Minori 删除 CPU 文字中间图层与 CPU 场景合成，直接使用公共 `WgpuOffscreenRenderer`；不创建 Engine/VN session。GPU 回归暴露并修复公共图集在跨帧重用临时纹理 ID 时跳过重新分配的问题。Minori 50 项测试（含 GPU session 的输入、存读档和关闭重开）、SDK 2 项缓存测试、独立 GPU 文字测试、公共图集 GPU 回归和 12 项单元测试通过；受影响 crate 的 Clippy 通过。此项是 SDK 首批实际调用方迁移，CMVS/Musica 整合、Minori 长流程与 Sandbox 验收仍未完成。
+2026-09-16，`astra-emu-sdk` 已进入 Emulator workspace，提取 Musica 的文字资源管理和纹理缓存，复用 `astra-text`、`astra-media-core`、`image` 和 `lru`。Musica 删除 CPU 文字中间图层与 CPU 场景合成，直接使用公共 `WgpuOffscreenRenderer`；不创建 Engine/VN session。GPU 回归暴露并修复公共图集在跨帧重用临时纹理 ID 时跳过重新分配的问题。Musica 50 项测试（含 GPU session 的输入、存读档和关闭重开）、SDK 2 项缓存测试、独立 GPU 文字测试、公共图集 GPU 回归和 12 项单元测试通过；受影响 crate 的 Clippy 通过。此项是 SDK 首批实际调用方迁移，CMVS/Musica 整合、Musica 长流程与 Sandbox 验收仍未完成。
 
-2026-09-16 从 `1748dd68` 建立本地独占分支 `codex/local-product-rebuild`，先验证 FVP《樱花萌放》和 AstraVN 终之空原生 Player。KrKr、Siglus、Artemis、CMVS、Musica/Minori 的本地已提交及未提交成果均纳入，来源工作树保持原状；Siglus 已开始导入，其余成果尚未整合。ACP 外部 Agent + MCP 方案保持不变。公共 Runtime 命名与 VN 专属职责分离，具体见重构契约。
+2026-09-16 从 `1748dd68` 建立本地独占分支 `codex/local-product-rebuild`，先验证 FVP《樱花萌放》和 AstraVN 终之空原生 Player。KrKr、Siglus、Artemis、CMVS、Musica 的本地已提交及未提交成果均纳入，来源工作树保持原状；Siglus 已开始导入，其余成果尚未整合。ACP 外部 Agent + MCP 方案保持不变。公共 Runtime 命名与 VN 专属职责分离，具体见重构契约。
 
 用户于 2026-09-15 指定后续重构全部由主线程实施，不再使用子智能体；总体范围、阶段顺序和验收目标保持不变。
 
@@ -173,13 +175,13 @@ Agent 采用 ACP 外部进程与 MCP；不在 Editor 内置 OpenAI 模型循环�
 
 - 独占重构 worktree；并行子任务各用独立 worktree/target。
 - 新文档检查 222 页通过；7 个链接/卫生回归测试通过。
-- EMU 独立 workspace 全量 fmt/clippy/build/test 通过：169 项测试通过，3 项按 GPU/联网条件未执行；含 API v2、Manager、FVP 和 Minori CLI。
+- EMU 独立 workspace 全量 fmt/clippy/build/test 通过：169 项测试通过，3 项按 GPU/联网条件未执行；含 API v2、Manager、FVP 和 Musica CLI。
 - xtask 与 Linux platform all-target clippy 通过；修复 default build 的 audio fault-injection feature 组合错误。
 - 普通逻辑测试与独立文字库已整合：子任务验证包含 104 个普通测试、15 个独立文本测试和 5 个媒体适配测试。
 - Engine 全量 fmt/clippy/build/test 复验通过：666 项测试通过、0 失败、9 项按原条件未执行。修复了显式 Headless fixture 生命周期、无效 timeline fixture 和日志队列时序测试；已删除旧矩阵检查。
-- 演出改动子任务的 35 项测试、all-target clippy 和 Player VN 调用方编译通过；Minori archive/profile 子任务的 40 项测试与 clippy 通过。
-- Minori session 整合后 core/CLI fmt/clippy/build/test 通过，45 + 10 项测试通过。公开 fixture 覆盖 PAZ/SC、实际画面、PCM、输入、存读档和取消/关闭；动态库构建由子任务验证。尚未支持的 opcode、ANI/SQZ session 播放、长媒体流式解码和 Android 注册保持未完成。
-- Minori 音频渐变现进入 AMINSV02 自有存档，保存采样进度并按剩余时间恢复；实际 PCM 连续性、fade-out 停止边界、参数替换和未播放资源停止测试通过。最新 Minori/CLI 全 feature 50 + 10 项测试、clippy 和 fmt 通过；旧 AMINSV01 拒绝且不覆盖。
+- 演出改动子任务的 35 项测试、all-target clippy 和 Player VN 调用方编译通过；Musica archive/profile 子任务的 40 项测试与 clippy 通过。
+- Musica session 整合后 core/CLI fmt/clippy/build/test 通过，45 + 10 项测试通过。公开 fixture 覆盖 PAZ/SC、实际画面、PCM、输入、存读档和取消/关闭；动态库构建由子任务验证。尚未支持的 opcode、ANI/SQZ session 播放、长媒体流式解码和 Android 注册保持未完成。
+- Musica 音频渐变现进入 AMINSV02 自有存档，保存采样进度并按剩余时间恢复；实际 PCM 连续性、fade-out 停止边界、参数替换和未播放资源停止测试通过。最新 Musica/CLI 全 feature 50 + 10 项测试、clippy 和 fmt 通过；旧 AMINSV01 拒绝且不覆盖。
 - RuntimeWorld 构造不再要求 package；产品身份由宿主首 tick 前显式附加，无包/无 FSM 的 typed 更新、tick 和保存恢复已验证。Runtime world v5 与 NativeVN save_blob v5 同步，旧格式拒绝。Engine 最新全量 fmt/clippy/build/test 通过，669 项测试通过、9 项按原条件未执行。
 - RuntimeWorld 整帧事务 checkpoint 和五类撤销日志已删除；执行错误/动作 panic 会终止 World，预检错误仍可重试，保存和可变 API 显式传播错误。部分提交、写入/快照拒绝、损坏存档及成功恢复均通过测试。Engine 最新全量 fmt/clippy/build/test 通过：670 项通过、9 项按原条件未执行。
 - 真实 GPU/商业游戏/其他平台验收仍未执行。
@@ -265,7 +267,7 @@ Agent 采用 ACP 外部进程与 MCP；不在 Editor 内置 OpenAI 模型循环�
 
 - 使用 RFVP 已有有界 opcode 诊断环确认实际读档执行了脚本重建分支，没有据此改动 VM 指令语义。新增原生系统字体的 GPU 描边恢复回归，验证重建文字 surface 后像素一致；31 项 FVP 测试通过。实际读档的页面与文字异常仍开放，下一步检查其他协程及脚本重建状态。临时私有诊断入口已从源码移除。
 
-- Family API v3 新增进程级诊断 sink，FVP、Siglus、Minori 动态适配层共用可选 tracing/log 桥，Manager 统一接收。最小原生移植与诊断接入原则已写入宪章、重构契约、API 契约和开发手册。受影响 API/Manager core/三个核心共 117 项测试通过；另对 FVP、Siglus、Minori 实际动态库各连续加载三次，日志转发无重复。跨 worker 的 tracing/log、级别过滤及敏感字段脱敏检查通过，受影响 crate 和 Manager/Minori CLI 的全部目标 Clippy、fmt、构建与文档检查通过。Manager 的 FVP 原生 GPU Headless 运行完成 5100 帧，收到核心初始化、存档准备/写入/恢复和关闭日志，未出现非法诊断记录；使用 Null 音频，不计作实际声音或完整存读档视觉验收。
+- Family API v3 新增进程级诊断 sink，FVP、Siglus、Musica 动态适配层共用可选 tracing/log 桥，Manager 统一接收。最小原生移植与诊断接入原则已写入宪章、重构契约、API 契约和开发手册。受影响 API/Manager core/三个核心共 117 项测试通过；另对 FVP、Siglus、Musica 实际动态库各连续加载三次，日志转发无重复。跨 worker 的 tracing/log、级别过滤及敏感字段脱敏检查通过，受影响 crate 和 Manager/Musica CLI 的全部目标 Clippy、fmt、构建与文档检查通过。Manager 的 FVP 原生 GPU Headless 运行完成 5100 帧，收到核心初始化、存档准备/写入/恢复和关闭日志，未出现非法诊断记录；使用 Null 音频，不计作实际声音或完整存读档视觉验收。
 
 - FVP 的 Manager GPU 复测已收到 slot 1 的原生恢复事件，待处理线程请求为零；恢复后四次物理 Enter 能推进到后续演出，未出现完全失去响应。最终画面尚需与保存点及正常推进路径比较，音频与结局仍未验收。
 - Classic Y 字形修复后的等待超时定位到输入脚本：对白进入等待时仍在逐字显示，第一次 Enter 只补全文字。真实 Native VN 宿主回归验证了该行为；产品观察 v3 增加只读 `text_reveal_complete`，Headless 与路线脚本先等待显示完成，再投递物理推进输入。同包 GPU 长流程待复测。
@@ -302,4 +304,4 @@ Agent 采用 ACP 外部进程与 MCP；不在 Editor 内置 OpenAI 模型循环�
 
 - 修复版首次启动误用 RUST_LOG，未启用附加推进日志；已停止该测试进程，并按 Headless 实际使用的 ASTRA_LOG 重新启动。该次主动停止不计测试失败或路线完成，重开运行仍待结果。
 
-Manager 日志桥新增后端和 GPU 类型的固定枚举白名单，Minori 改以字符串字段提交这些值；设备名称、任意字符串以及 Debug/Display 对象继续脱敏。4 项日志桥回归及 Family API/Minori Clippy 通过。终之空 Classic 第 5 条路线已使用当前 Release Headless 启动；FFmpeg 依赖通过本次进程的运行库路径加载，结果待确认。
+Manager 日志桥新增后端和 GPU 类型的固定枚举白名单，Musica 改以字符串字段提交这些值；设备名称、任意字符串以及 Debug/Display 对象继续脱敏。4 项日志桥回归及 Family API/Musica Clippy 通过。终之空 Classic 第 5 条路线已使用当前 Release Headless 启动；FFmpeg 依赖通过本次进程的运行库路径加载，结果待确认。

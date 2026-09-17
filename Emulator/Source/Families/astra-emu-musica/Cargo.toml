@@ -1,0 +1,43 @@
+[package]
+name = "astra-emu-musica"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+doctest = false
+
+[features]
+default = []
+dynamic-plugin-export = []
+
+[dependencies]
+astra-emu-sdk = { path = "../../SDK/astra-emu-sdk", features = ["audio"] }
+astra-platform = { path = "../../../../Engine/Source/Platform/astra-platform" }
+astra-platform-common = { path = "../../../../Engine/Source/Platform/astra-platform-common" }
+pollster.workspace = true
+abi_stable.workspace = true
+astra-core = { path = "../../../../Engine/Source/Runtime/astra-core" }
+astra-byte-source = { path = "../../../../Engine/Source/Runtime/astra-byte-source" }
+astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api", features = ["diagnostic-bridge"] }
+astra-text = { path = "../../../../Engine/Source/Runtime/astra-text" }
+astra-media-core = { path = "../../../../Engine/Source/Runtime/astra-media-core" }
+blowfish.workspace = true
+crc32fast = "1.5"
+encoding_rs.workspace = true
+flate2.workspace = true
+image.workspace = true
+lru.workspace = true
+png = "=0.18.1"
+kira.workspace = true
+postcard.workspace = true
+rc4.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+tempfile.workspace = true

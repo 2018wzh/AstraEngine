@@ -24,7 +24,7 @@ Library SQLite schema 3 分别保存资料库、外观、全局手柄映射、�
 
 ## 翻译
 
-实现通用 OpenAI-compatible service、配置页与连接测试。FVP 本轮声明不支持文本替换，相关操作禁用，不修改 RFVP 翻译路径，也不以测试 Family 代替真实接入；端到端翻译等待 Minori。
+实现通用 OpenAI-compatible service、配置页与连接测试。FVP 本轮声明不支持文本替换，相关操作禁用，不修改 RFVP 翻译路径，也不以测试 Family 代替真实接入；端到端翻译等待 Musica。
 
 连接测试使用已经保存的 endpoint 与平台凭据异步请求模型列表，只显示成功耗时或错误。修改服务设置必须先退出游戏，并重新授予会话发送许可。凭据先写入新的 keyring reference，数据库保存失败时删除新凭据，避免旧配置指向被覆盖的 secret。
 

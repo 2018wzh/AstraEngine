@@ -76,8 +76,8 @@ exclude = [
     "Emulator/Source/FamilyApi/astra-emu-extension-api",
     "Emulator/Source/FamilyCore/astra-emu-family-core",
     "Emulator/Source/FamilySupport/astra-emu-family-support",
-    "Emulator/Source/Families/astra-emu-minori",
-    "Emulator/Source/Programs/astra-emu-minori-cli",
+    "Emulator/Source/Families/astra-emu-musica",
+    "Emulator/Source/Programs/astra-emu-musica-cli",
 ]
 
 [workspace.package]
