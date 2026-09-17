@@ -67,20 +67,26 @@ pub(super) fn execute_panel(
 ) -> Result<Option<MusicaVmEvent>, MusicaRuntimeError> {
     let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
         .map_err(|_| MusicaRuntimeError::Panel)?;
-    let [mode] = tokens.as_slice() else {
-        return Err(MusicaRuntimeError::Panel);
+    let panel = match tokens.as_slice() {
+        [mode] if mode == "0" => None,
+        [mode] if mode == "1" => Some(MusicaPanelState {
+            mode: 1,
+            resource_uri: "musica:/sys/msgPanel.png".into(),
+        }),
+        [mode, transition, filename] if mode == "1" && transition == "*" => {
+            validate_scene_filename(filename).map_err(|_| MusicaRuntimeError::Panel)?;
+            Some(MusicaPanelState {
+                mode: 1,
+                resource_uri: format!("musica:/sys/{filename}"),
+            })
+        }
+        [mode] if mode == "3" => Some(MusicaPanelState {
+            mode: 3,
+            resource_uri: "musica:/sys/fullPanel.png".into(),
+        }),
+        _ => return Err(MusicaRuntimeError::Panel),
     };
-    let mode = mode.parse::<u32>().map_err(|_| MusicaRuntimeError::Panel)?;
-    // The original CMessagePanel switch maps mode 1 to the default
-    // `msgPanel.png` resource. Other modes, the secondary transition operand,
-    // and filename overrides remain blocked until their behavior is verified.
-    if mode != 1 {
-        return Err(MusicaRuntimeError::Panel);
-    }
-    state.panel = Some(MusicaPanelState {
-        mode,
-        resource_uri: "musica:/sys/msgPanel.png".into(),
-    });
+    state.panel = panel;
     next_effect_sequence(state)?;
     Ok(Some(MusicaVmEvent::Panel {
         sequence: state.effect_sequence,

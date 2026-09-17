@@ -189,7 +189,11 @@ fn panel_mode_one_uses_the_verified_message_panel_resource() {
         vm.state().panel
     );
 
-    for source in [b".panel 0\r\n".as_slice(), b".panel 1 -1\r\n".as_slice()] {
+    for source in [
+        b".panel 2\r\n".as_slice(),
+        b".panel 1 -1\r\n".as_slice(),
+        b".panel 1 * ../private.png\r\n".as_slice(),
+    ] {
         let script = parse_sc(source, &ScOpcodeCatalog::observed_musica()).unwrap();
         let mut vm = MusicaVm::new(
             "musica:/scr/fixture.sc".into(),
@@ -658,4 +662,41 @@ fn assignment_uses_verified_three_and_five_token_forms() {
     )
     .unwrap();
     assert_eq!(vm.step(1).unwrap_err(), MusicaRuntimeError::Operand);
+}
+
+#[test]
+fn panel_modes_replace_clear_and_roundtrip_native_save() {
+    let source = b".panel 1 * custom.png\r\n.panel 3\r\n.panel 0\r\n.end\r\n";
+    let script = parse_sc(source, &ScOpcodeCatalog::observed_musica()).unwrap();
+    let mut vm = MusicaVm::new(
+        "musica:/scr/panel.sc".into(),
+        Hash256::from_sha256(source),
+        script,
+        1,
+    )
+    .unwrap();
+    for (tick, expected) in [
+        (
+            1,
+            Some(MusicaPanelState {
+                mode: 1,
+                resource_uri: "musica:/sys/custom.png".into(),
+            }),
+        ),
+        (
+            2,
+            Some(MusicaPanelState {
+                mode: 3,
+                resource_uri: "musica:/sys/fullPanel.png".into(),
+            }),
+        ),
+        (3, None),
+    ] {
+        assert!(
+            matches!(vm.step(tick).unwrap(), Some(MusicaVmEvent::Panel { sequence }) if sequence == tick)
+        );
+        assert_eq!(vm.state().panel, expected);
+        let restored = MusicaVm::decode_native_save(&vm.encode_native_save().unwrap()).unwrap();
+        assert_eq!(restored.panel, expected);
+    }
 }

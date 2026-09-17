@@ -120,3 +120,65 @@ fn dual_stage_screen_prefix_orders_layers_and_restores_without_partial_frames() 
     );
     assert_eq!(scene.pixels, valid);
 }
+
+#[test]
+#[ignore = "requires a hardware GPU"]
+fn panel_modes_draw_at_native_positions_and_clear_after_restore() {
+    let root = tempfile::tempdir().unwrap();
+    let source = b".panel 1 * custom.png\r\n.panel 3\r\n.panel 0\r\n.end\r\n";
+    crate::test_fixture::game(root.path(), source);
+    let archive =
+        Arc::new(mount_musica(root.path(), std::path::Path::new(MUSICA_PROFILE_FILE)).unwrap());
+    let make_vm = || {
+        MusicaVm::new(
+            "musica:/scr/test.sc".into(),
+            Hash256::from_sha256(source),
+            parse_sc(source, &ScOpcodeCatalog::observed_musica()).unwrap(),
+            1,
+        )
+        .unwrap()
+    };
+    let mut scene = Scene::new(archive, 16, 80).unwrap();
+    for (uri, color) in [
+        ("musica:/sys/custom.png", [255, 0, 0, 255]),
+        ("musica:/sys/fullPanel.png", [0, 255, 0, 255]),
+    ] {
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::RgbaImage::from_pixel(16, 80, image::Rgba(color))
+            .write_to(&mut png, image::ImageFormat::Png)
+            .unwrap();
+        scene
+            .textures
+            .decode(uri.into(), &png.into_inner())
+            .unwrap();
+    }
+    let mut vm = make_vm();
+    for tick in 1..=3 {
+        vm.step(tick).unwrap();
+        scene.render(vm.state(), None, None).unwrap();
+        let expected = scene.pixels.clone();
+        let top = &expected[..4];
+        let bottom = &expected[79 * 16 * 4..79 * 16 * 4 + 4];
+        match tick {
+            1 => {
+                assert_eq!(top, [0, 0, 0, 255]);
+                assert_eq!(bottom, [255, 0, 0, 255]);
+            }
+            2 => {
+                assert_eq!(top, [0, 255, 0, 255]);
+                assert_eq!(bottom, top);
+            }
+            3 => {
+                assert_eq!(top, [0, 0, 0, 255]);
+                assert_eq!(bottom, top);
+            }
+            _ => unreachable!(),
+        }
+        let mut restored = make_vm();
+        restored
+            .restore_native_save(&vm.encode_native_save().unwrap(), 1)
+            .unwrap();
+        scene.render(restored.state(), None, None).unwrap();
+        assert_eq!(scene.pixels, expected);
+    }
+}

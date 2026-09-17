@@ -184,20 +184,17 @@ impl Scene {
             }
         }
         if let Some(panel) = &state.panel {
-            if panel.mode != 1 {
-                return Err(error(
-                    "ASTRA_EMU_MUSICA_PANEL_MODE",
-                    "panel mode is not verified",
-                ));
-            }
-            let frame = self.texture(&panel.resource_uri)?;
-            self.layer(
-                &mut commands,
-                &panel.resource_uri,
-                0,
-                self.height as i32 - frame.height as i32 + 64,
-                1.0,
-            )?;
+            let y = match panel.mode {
+                1 => {
+                    let frame = self.texture(&panel.resource_uri)?;
+                    i32::try_from(i64::from(self.height) - i64::from(frame.height) + 64).map_err(
+                        |_| error("ASTRA_EMU_MUSICA_PANEL_POSITION", "panel position overflow"),
+                    )?
+                }
+                3 => 0,
+                _ => return Err(error("ASTRA_EMU_MUSICA_PANEL_MODE", "invalid panel mode")),
+            };
+            self.layer(&mut commands, &panel.resource_uri, 0, y, 1.0)?;
         }
         commands.extend(
             self.text
