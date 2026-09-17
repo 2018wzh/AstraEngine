@@ -401,3 +401,7 @@ Classic route.coverage.019 完成同一 build/package 的 GPU Headless 输入流
 Musica 已移植来源的 `.include` 展开：启动、chain 和读档复用统一加载入口，编码检测针对展开字节，存档校验完整展开内容。保留嵌套与行尾行为，并阻断循环、非法目标、深度、累计读取及展开大小超限。3 项加载器边界测试、39 项 Family 会话回归、Clippy、fmt 与文档检查通过，含真实 GPU include 执行、混合编码切换和保存恢复。原生标题、系统页、配置与画廊交互继续移植。
 
 Classic route.coverage.020 完成同一 build/package 的 GPU Headless 输入流程，46,702 条输入、38 次选择到达 tsui.ending，无诊断。终点 PNG 已查看，仍为黑场；完整视听与真实 Player 验收保持开放。
+
+Musica 原生存档页的状态与多槽持久化已接入：沿用 100 槽、每页 10 槽、手动页从槽 20 开始，以及分页/焦点环绕规则。保存/解码/恢复校验页面焦点，存储拒绝越界、损坏或异游戏覆盖；文件检查错误明确返回。7 项相关测试及 Clippy 通过，包含真实 GPU 的独立槽位恢复。页面绘制、物理输入和来源的快捷轮转仍待接入；现有 F5/F9 仍使用槽 0，本项不算完整系统页验收。
+
+Classic route.coverage.021 完成同一 build/package 的 GPU Headless 输入流程，47,800 条输入、37 次选择到达 tsui.ending，无诊断。终点 PNG 已查看，仍为黑场；完整视听与真实 Player 验收保持开放。

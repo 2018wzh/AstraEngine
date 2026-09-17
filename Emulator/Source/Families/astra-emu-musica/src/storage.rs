@@ -9,6 +9,10 @@ use std::{
 };
 const MAGIC: &[u8; 8] = b"AMINSV02";
 const MAX_SAVE: usize = 16 * 1024 * 1024;
+pub(crate) const SAVE_PAGE_WIDTH: u32 = 10;
+pub(crate) const SAVE_PAGE_COUNT: u32 = 10;
+pub(crate) const SAVE_MAX_SLOTS: u32 = SAVE_PAGE_WIDTH * SAVE_PAGE_COUNT;
+pub(crate) const MANUAL_SAVE_FIRST_SLOT: u32 = 20;
 #[derive(Serialize, Deserialize)]
 pub(crate) struct Snapshot {
     pub game: Hash256,
@@ -31,41 +35,78 @@ impl Storage {
             })?,
         })
     }
-    fn path(&self, create: bool) -> FamilyResult<PathBuf> {
+    fn path(&self, slot: u32, create: bool) -> FamilyResult<PathBuf> {
+        if slot >= SAVE_MAX_SLOTS {
+            return Err(error(
+                "ASTRA_EMU_MUSICA_SAVE_SLOT",
+                "save slot is outside the native page range",
+            ));
+        }
         let directory = self.root.join(".astra-musica").join("saves");
         for path in [self.root.join(".astra-musica"), directory.clone()] {
-            if let Ok(meta) = fs::symlink_metadata(&path) {
-                if meta.file_type().is_symlink() || !meta.is_dir() {
+            match fs::symlink_metadata(&path) {
+                Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir() => {
                     return Err(error(
                         "ASTRA_EMU_MUSICA_SAVE_PATH",
                         "save directory is not a native directory",
                     ));
                 }
-            } else if create {
-                fs::create_dir(&path).map_err(|_| {
-                    error(
-                        "ASTRA_EMU_MUSICA_SAVE_DIRECTORY",
-                        "save directory could not be created",
-                    )
-                })?;
+                Ok(_) => {}
+                Err(cause) if cause.kind() == std::io::ErrorKind::NotFound => {
+                    if create {
+                        fs::create_dir(&path).map_err(|_| {
+                            error(
+                                "ASTRA_EMU_MUSICA_SAVE_DIRECTORY",
+                                "save directory could not be created",
+                            )
+                        })?;
+                    }
+                }
+                Err(_) => {
+                    return Err(error(
+                        "ASTRA_EMU_MUSICA_SAVE_PATH",
+                        "save directory could not be inspected",
+                    ))
+                }
             }
         }
-        let path = directory.join("slot-000.asav");
-        if fs::symlink_metadata(&path).is_ok_and(|m| !m.is_file() || m.file_type().is_symlink()) {
-            return Err(error(
-                "ASTRA_EMU_MUSICA_SAVE_PATH",
-                "save slot is not a native regular file",
-            ));
+        let path = directory.join(format!("slot-{slot:03}.asav"));
+        match fs::symlink_metadata(&path) {
+            Ok(meta) if !meta.is_file() || meta.file_type().is_symlink() => {
+                return Err(error(
+                    "ASTRA_EMU_MUSICA_SAVE_PATH",
+                    "save slot is not a native regular file",
+                ))
+            }
+            Ok(_) => {}
+            Err(cause) if cause.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => {
+                return Err(error(
+                    "ASTRA_EMU_MUSICA_SAVE_PATH",
+                    "save slot could not be inspected",
+                ))
+            }
         }
         Ok(path)
     }
-    pub fn read(&self) -> FamilyResult<Snapshot> {
-        read(&self.path(false)?)
+    pub fn read(&self, slot: u32) -> FamilyResult<Snapshot> {
+        read(&self.path(slot, false)?)
     }
-    pub fn write(&self, snapshot: &Snapshot) -> FamilyResult<()> {
-        let path = self.path(true)?;
-        if path.exists() {
-            let _: Snapshot = read(&path)?;
+    pub fn write(&self, slot: u32, snapshot: &Snapshot) -> FamilyResult<()> {
+        let path = self.path(slot, true)?;
+        if path.try_exists().map_err(|_| {
+            error(
+                "ASTRA_EMU_MUSICA_SAVE_PATH",
+                "save slot could not be inspected",
+            )
+        })? {
+            let previous = read(&path)?;
+            if previous.game != snapshot.game {
+                return Err(error(
+                    "ASTRA_EMU_MUSICA_SAVE_GAME",
+                    "existing slot belongs to another game",
+                ));
+            }
         }
         let payload = postcard::to_allocvec(snapshot).map_err(|_| {
             error(
@@ -133,3 +174,7 @@ fn read(path: &Path) -> FamilyResult<Snapshot> {
     }
     postcard::from_bytes(&bytes[48..]).map_err(|_| fail())
 }
+
+#[cfg(test)]
+#[path = "storage/tests.rs"]
+mod tests;

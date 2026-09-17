@@ -197,3 +197,33 @@ fn native_gpu_text_shadow_uses_current_manager_setting_after_load() {
     );
     opened.session.close().unwrap();
 }
+
+#[test]
+fn native_gpu_manual_slots_restore_independent_story_positions() {
+    let _session = PROVIDER_SESSION.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    fixture::game(
+        root.path(),
+        b".message 1   First\r\n.message 2   Second\r\n.end\r\n",
+    );
+    let (_, mut session) = MusicaProvider::default()
+        .open_session(request(root.path(), Sink::default()))
+        .unwrap();
+    session.advance(16_666_667, &[]).unwrap();
+    session.save(20).unwrap();
+    session.advance(16_666_667, &[key(KeyCode::Enter)]).unwrap();
+    session.save(21).unwrap();
+    session.load(20).unwrap();
+    assert_eq!(session.message.as_ref().unwrap().0, "First");
+    let mut capture = Capture(Vec::new());
+    session.visit_frame(&mut capture).unwrap();
+    let first = capture.0.clone();
+    session.load(21).unwrap();
+    assert_eq!(session.message.as_ref().unwrap().0, "Second");
+    session.visit_frame(&mut capture).unwrap();
+    assert!(
+        capture.0 != first,
+        "different slots must render their own restored message"
+    );
+    Box::new(session).close().unwrap();
+}

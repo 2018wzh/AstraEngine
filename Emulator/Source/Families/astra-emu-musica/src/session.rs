@@ -451,7 +451,7 @@ impl MusicaSession {
             ));
         }
         if load {
-            self.load()?;
+            self.load(0)?;
         }
         let mut dirty = self.poll_text()? || choice_dirty;
         dirty |= self.advance_movie(elapsed_ns)?;
@@ -527,7 +527,7 @@ impl MusicaSession {
             )?;
         }
         if save {
-            self.save()?;
+            self.save(0)?;
         }
         Ok(AdvanceResponse {
             status: if self.finished {

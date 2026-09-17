@@ -6,6 +6,7 @@ mod model;
 pub(crate) mod particles;
 mod playback;
 mod read_state;
+mod save_pages;
 mod scroll;
 pub(crate) mod scroll_xf;
 pub(crate) mod shake;
@@ -163,6 +164,7 @@ impl MusicaVm {
     }
 
     pub fn encode_native_save(&self) -> Result<Vec<u8>, MusicaRuntimeError> {
+        save_pages::validate_state(&self.state)?;
         movie::validate_movie_state(&self.state)?;
         validate_stage_state(self.state.stage.as_ref())?;
         scroll::validate_state(&self.state)?;
@@ -179,6 +181,7 @@ impl MusicaVm {
             return Err(MusicaRuntimeError::State);
         }
         validate_stage_state(state.stage.as_ref())?;
+        save_pages::validate_state(&state)?;
         movie::validate_movie_state(&state)?;
         scroll::validate_state(&state)?;
         if let Some(shake) = &state.screen_shake {
@@ -238,6 +241,7 @@ impl MusicaVm {
             return Err(MusicaRuntimeError::State);
         }
         choices::validate_choice(&self.script, &restored)?;
+        save_pages::validate_state(&restored)?;
         movie::validate_movie_state(&restored)?;
         validate_stage_state(restored.stage.as_ref())?;
         scroll::validate_state(&restored)?;
@@ -273,6 +277,7 @@ impl MusicaVm {
             return Err(MusicaRuntimeError::Waiting);
         }
         if matches!(self.state.wait, Some(MusicaWaitState::Media { .. })) {
+            save_pages::validate_state(&self.state)?;
             movie::validate_movie_state(&self.state)?;
             self.state.movie = None;
         }

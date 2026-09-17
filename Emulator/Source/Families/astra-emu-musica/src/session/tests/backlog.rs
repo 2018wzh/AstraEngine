@@ -102,7 +102,7 @@ fn backlog_replay_does_not_replace_pending_message_voice_duration() {
         .unwrap();
     let saved = crate::storage::Storage::new(root.path())
         .unwrap()
-        .read()
+        .read(0)
         .unwrap();
     let state = MusicaVm::decode_native_save(&saved.vm).unwrap();
     assert!(matches!(

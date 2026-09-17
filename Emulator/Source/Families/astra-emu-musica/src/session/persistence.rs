@@ -1,24 +1,27 @@
 use super::*;
 impl MusicaSession {
-    pub(super) fn save(&mut self) -> FamilyResult<()> {
+    pub(super) fn save(&mut self, slot: u32) -> FamilyResult<()> {
         let sounds = self.audio.snapshot()?;
         self.poll_voice_duration()?;
         let vm = self
             .vm
             .encode_native_save()
             .map_err(|_| error("ASTRA_EMU_MUSICA_SAVE_STATE", "VM state cannot be saved"))?;
-        self.storage.write(&Snapshot {
-            game: self.game,
-            vm,
-            message: self.message.clone(),
-            wait_ns: self.wait_ns,
-            sounds,
-        })?;
-        tracing::info!(event = "astra.emu.musica.save.completed");
+        self.storage.write(
+            slot,
+            &Snapshot {
+                game: self.game,
+                vm,
+                message: self.message.clone(),
+                wait_ns: self.wait_ns,
+                sounds,
+            },
+        )?;
+        tracing::info!(event = "astra.emu.musica.save.completed", slot);
         Ok(())
     }
-    pub(super) fn load(&mut self) -> FamilyResult<()> {
-        let mut saved = self.storage.read()?;
+    pub(super) fn load(&mut self, slot: u32) -> FamilyResult<()> {
+        let mut saved = self.storage.read(slot)?;
         if saved.game != self.game {
             return Err(error(
                 "ASTRA_EMU_MUSICA_SAVE_GAME",
@@ -109,7 +112,7 @@ impl MusicaSession {
         self.input_pending = false;
         self.pointer = None;
         self.finished = self.vm.state().terminal;
-        tracing::info!(event = "astra.emu.musica.load.completed");
+        tracing::info!(event = "astra.emu.musica.load.completed", slot);
         Ok(())
     }
 }

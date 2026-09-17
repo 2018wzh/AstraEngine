@@ -477,8 +477,8 @@ fn corrupt_or_foreign_slot_is_never_overwritten() {
         wait_ns: 0,
         sounds: vec![],
     };
-    assert!(store.read().is_err());
-    assert!(store.write(&state).is_err());
+    assert!(store.read(0).is_err());
+    assert!(store.write(0, &state).is_err());
     assert_eq!(std::fs::read(slot).unwrap(), b"original commercial save");
 }
 #[test]
