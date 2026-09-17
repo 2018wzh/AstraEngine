@@ -1,6 +1,6 @@
 # 全产品重构实施状态
 
-Minori 长流程在 tick 4141、命令 55 的 `.effect *` 返回 `ASTRA_EMU_MINORI_RUNTIME_EFFECT`；当前解析仍明确拒绝该形式，原生参数归一化语义待核对。GPU 初始化日志已通过 Manager 显示 DX12 与 discrete_gpu。GPU 失败日志现保留已审查的操作名和错误类别，完整错误对象不透传。Classic route.coverage.005 在 tick 7757 遇到 GPU 驻留预算错误，尚未完成；宿主错误现附分配量、图集用量和预算，继续定位超限来源，未放宽预算。
+Minori 长流程在 tick 4141、命令 55 的 `.effect *` 返回 `ASTRA_EMU_MINORI_RUNTIME_EFFECT`；当前解析仍明确拒绝该形式，原生参数归一化语义待核对。GPU 初始化日志已通过 Manager 显示 DX12 与 discrete_gpu。GPU 失败日志现保留已审查的操作名和错误类别，完整错误对象不透传。Classic route.coverage.005 重跑仍在 tick 7757 超限：总分配 309900288 字节，图集 33554432 字节，预算 268435456 字节。已定位点阵转场的几何放大路径：`dissolve_pattern_rectangles` 生成逐行像素区域，`compose_director_transition_scene` 为每个区域复制完整入场场景，渲染器再为每份场景生成完整顶点。后续改为共享 GPU 点阵遮罩，保留原始图案与时序；当前路线未通过，预算未放宽。
 
 Minori 新插件的真实素材 GPU Headless 已越过双资源 stage 阻塞，生成第 120、240、600 帧；已查看第 600 帧的立绘、背景和日文文字。随后遇到文字渲染失败，公开标点测试复现了手写覆盖范围遗漏省略号等字符的问题。现改从字体实际字符映射生成覆盖范围，astra-text 的 17 项测试、Minori 的 76 项普通测试及显式 GPU 文字回归通过，相关 Clippy、格式与文档检查通过。真实素材同输入序列复测完成 3600 帧并正常关闭，已查看最终场景和含省略号的日文文字；NullAudioDevice 消费 2156640 帧，记录 3912658 个非零样本。这验证了该段剧情与测试音频队列，不代表真实可听音频、完整路线或结局通过。
 
