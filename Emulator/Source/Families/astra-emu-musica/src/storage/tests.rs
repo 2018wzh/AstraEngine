@@ -94,3 +94,24 @@ fn malformed_save_cards_and_previous_formats_are_not_replaced() {
     assert!(storage.write(20, &original).is_err());
     assert_eq!(std::fs::read(&path).unwrap(), old);
 }
+
+#[test]
+fn quick_cursor_is_bounded_persistent_and_rejects_foreign_or_corrupt_data() {
+    let root = tempfile::tempdir().unwrap();
+    let game = Hash256::from_sha256(b"game");
+    let storage = Storage::new(root.path()).unwrap();
+    assert_eq!(storage.quick_cursor(game).unwrap(), 0);
+    storage.write_quick_cursor(game, 9).unwrap();
+    let reopened = Storage::new(root.path()).unwrap();
+    assert_eq!(reopened.quick_cursor(game).unwrap(), 9);
+    let path = storage.named_path("quick-cursor.json", false).unwrap();
+    let original = std::fs::read(&path).unwrap();
+    assert!(storage.write_quick_cursor(game, 10).is_err());
+    assert!(storage
+        .write_quick_cursor(Hash256::from_sha256(b"other"), 0)
+        .is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), original);
+    std::fs::write(&path, b"corrupt cursor").unwrap();
+    assert!(storage.write_quick_cursor(game, 0).is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), b"corrupt cursor");
+}

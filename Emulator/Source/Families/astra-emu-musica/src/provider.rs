@@ -250,6 +250,7 @@ impl MusicaProvider {
         scene.set_text_shadow(text_shadow);
         scene.render(vm.state(), None, None)?;
         let storage = Storage::new(root)?;
+        let quick_cursor = storage.quick_cursor(game)?;
         let replacement = request.host.text_replacement.into_option();
         if let Some(service) = &replacement {
             service.reset(TextResetReason::NewGame).into_result()?;
@@ -295,6 +296,7 @@ impl MusicaProvider {
             focused,
             progress_in_background,
             primary_encoding,
+            quick_cursor,
         );
         tracing::info!(event = "astra.emu.musica.session.open");
         Ok((response, session))

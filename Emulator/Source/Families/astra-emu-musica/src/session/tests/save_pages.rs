@@ -132,3 +132,55 @@ fn native_gpu_save_page_rejects_corrupt_cards_without_overwriting() {
     assert_eq!(std::fs::read(&slot).unwrap(), b"original corrupt slot");
     Box::new(session).close().unwrap();
 }
+
+#[test]
+fn native_gpu_quick_save_rotates_skips_same_line_and_survives_restart() {
+    let _lock = PROVIDER_SESSION.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let script = (0..14)
+        .map(|i| format!(".message {}   Line{}\r\n", i + 1, i))
+        .collect::<String>()
+        + ".end\r\n";
+    fixture::game(root.path(), script.as_bytes());
+    let mut provider = MusicaProvider::default();
+    let (_, mut session) = provider
+        .open_session(request(root.path(), Sink::default()))
+        .unwrap();
+    session.advance(16_666_667, &[]).unwrap();
+    session.save(0).unwrap();
+    session.save(20).unwrap();
+    let storage = Storage::new(root.path()).unwrap();
+    for i in 0..12 {
+        if i > 0 {
+            session.advance(16_666_667, &[key(KeyCode::Enter)]).unwrap();
+        }
+        session.advance(0, &[key(KeyCode::F5)]).unwrap();
+        let cursor = (i + 1) % 10;
+        assert_eq!(session.quick_cursor, cursor);
+        assert_eq!(storage.quick_cursor(session.game).unwrap(), cursor);
+        session.advance(0, &[key(KeyCode::F5)]).unwrap();
+        assert_eq!(
+            session.quick_cursor, cursor,
+            "same source line must not consume another slot"
+        );
+    }
+    assert_eq!(storage.read(10).unwrap().message.unwrap().0, "Line10");
+    assert_eq!(storage.read(11).unwrap().message.unwrap().0, "Line11");
+    assert_eq!(storage.read(12).unwrap().message.unwrap().0, "Line2");
+    for slot in [0, 20] {
+        assert_eq!(storage.read(slot).unwrap().message.unwrap().0, "Line0");
+    }
+    Box::new(session).close().unwrap();
+    let (_, mut reopened) = provider
+        .open_session(request(root.path(), Sink::default()))
+        .unwrap();
+    assert_eq!(reopened.quick_cursor, 2);
+    reopened.advance(0, &[key(KeyCode::F9)]).unwrap();
+    assert_eq!(reopened.message.as_ref().unwrap().0, "Line11");
+    reopened
+        .advance(16_666_667, &[key(KeyCode::Enter)])
+        .unwrap();
+    reopened.advance(0, &[key(KeyCode::F5)]).unwrap();
+    assert_eq!(storage.read(12).unwrap().message.unwrap().0, "Line12");
+    Box::new(reopened).close().unwrap();
+}

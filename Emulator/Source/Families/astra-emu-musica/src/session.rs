@@ -49,6 +49,8 @@ pub(crate) struct MusicaSession {
     primary_encoding: crate::ScriptEncoding,
     gameplay_frame: Option<Arc<[u8]>>,
     save_cards: Vec<(u32, crate::storage::SaveCard)>,
+    quick_cursor: u32,
+    last_quick_save_pc_line: Option<u32>,
 }
 impl MusicaSession {
     #[allow(clippy::too_many_arguments)]
@@ -66,6 +68,7 @@ impl MusicaSession {
         focused: bool,
         progress_in_background: bool,
         primary_encoding: crate::ScriptEncoding,
+        quick_cursor: u32,
     ) -> Self {
         Self {
             id,
@@ -96,6 +99,8 @@ impl MusicaSession {
             primary_encoding,
             gameplay_frame: None,
             save_cards: Vec::new(),
+            quick_cursor,
+            last_quick_save_pc_line: None,
         }
     }
 
@@ -460,7 +465,7 @@ impl MusicaSession {
             ));
         }
         if load {
-            self.load(0)?;
+            self.quick_load()?;
         }
         let mut dirty = self.poll_text()? || choice_dirty;
         dirty |= self.advance_movie(elapsed_ns)?;
@@ -542,7 +547,7 @@ impl MusicaSession {
             )?;
         }
         if save {
-            self.save(0)?;
+            self.quick_save()?;
         }
         Ok(AdvanceResponse {
             status: if self.finished {

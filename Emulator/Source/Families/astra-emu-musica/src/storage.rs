@@ -8,6 +8,7 @@ use std::{
     path::{Path, PathBuf},
 };
 mod card;
+mod quick;
 pub(crate) use card::SaveCard;
 
 const MAGIC: &[u8; 8] = b"AMUSSV03";
@@ -46,6 +47,9 @@ impl Storage {
                 "save slot is outside the native page range",
             ));
         }
+        self.named_path(&format!("slot-{slot:03}.asav"), create)
+    }
+    fn named_path(&self, name: &str, create: bool) -> FamilyResult<PathBuf> {
         let directory = self.root.join(".astra-musica").join("saves");
         for path in [self.root.join(".astra-musica"), directory.clone()] {
             match fs::symlink_metadata(&path) {
@@ -74,7 +78,7 @@ impl Storage {
                 }
             }
         }
-        let path = directory.join(format!("slot-{slot:03}.asav"));
+        let path = directory.join(name);
         match fs::symlink_metadata(&path) {
             Ok(meta) if !meta.is_file() || meta.file_type().is_symlink() => {
                 return Err(error(

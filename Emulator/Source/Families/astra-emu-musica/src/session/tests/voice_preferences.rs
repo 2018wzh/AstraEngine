@@ -22,7 +22,7 @@ fn manager_voice_preferences_keep_history_and_authored_voice_wait() {
     opened.session.advance(0, &[key(KeyCode::F5)]).unwrap();
     let saved = crate::storage::Storage::new(root.path())
         .unwrap()
-        .read(0)
+        .read(10)
         .unwrap();
     let state = MusicaVm::decode_native_save(&saved.vm).unwrap();
     assert_eq!(state.backlog.len(), 2);
@@ -112,7 +112,7 @@ fn current_manager_preferences_override_saved_voice_playback() {
     loaded.session.advance(0, &[key(KeyCode::F5)]).unwrap();
     let saved = crate::storage::Storage::new(root.path())
         .unwrap()
-        .read(0)
+        .read(11)
         .unwrap();
     assert!(
         !saved
@@ -176,7 +176,7 @@ fn manager_bus_mute_is_applied_before_first_pcm_and_survives_restore() {
     opened.session.advance(0, &[key(KeyCode::F5)]).unwrap();
     let saved = crate::storage::Storage::new(root.path())
         .unwrap()
-        .read(0)
+        .read(10)
         .unwrap();
     assert_eq!(saved.sounds.iter().find(|s| s.id == 4).unwrap().volume, 1.0);
     let state = MusicaVm::decode_native_save(&saved.vm).unwrap();
