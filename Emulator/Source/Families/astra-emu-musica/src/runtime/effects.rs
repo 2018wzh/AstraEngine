@@ -6,21 +6,25 @@ pub(super) fn execute_effect(
 ) -> Result<Option<MusicaVmEvent>, MusicaRuntimeError> {
     let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
         .map_err(|_| MusicaRuntimeError::Effect)?;
+    if tokens
+        .first()
+        .is_some_and(|name| matches!(name.as_str(), "Snow" | "Firefly" | "end" | "fadeout"))
+    {
+        return super::particles::execute_primary(&tokens, state);
+    }
     if tokens.first().is_some_and(|name| name == "WScroll2") {
         return super::wscroll2::execute(&tokens, state);
     }
     if tokens.is_empty()
         || tokens.len() > 5
-        || !matches!(tokens[0].as_str(), "*" | "end" | "CrossFade2" | "CrossFade")
+        || !matches!(tokens[0].as_str(), "*" | "CrossFade2" | "CrossFade")
     {
-        return Err(MusicaRuntimeError::Effect);
-    }
-    if tokens[0] == "end" && tokens.len() != 1 {
         return Err(MusicaRuntimeError::Effect);
     }
     if tokens[0] == "*" || tokens.len() == 1 || (tokens.len() == 4 && tokens[1] == "*") {
         next_effect_sequence(state)?;
         state.effect = None;
+        state.firefly = None;
         state.wscroll2 = None;
         return Ok(Some(MusicaVmEvent::EffectCleared));
     }
@@ -61,6 +65,7 @@ pub(super) fn execute_effect(
     // original effect object, then advances the accumulator.
     effect.alpha_255 = effect.alpha_step;
     state.effect = Some(effect);
+    state.firefly = None;
     state.wscroll2 = None;
     next_effect_sequence(state)?;
     let mut frame = effect_frame(state.effect.as_ref().ok_or(MusicaRuntimeError::Effect)?)?;

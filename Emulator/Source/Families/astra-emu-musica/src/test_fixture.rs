@@ -21,31 +21,49 @@ fn encrypt(bytes: &[u8]) -> Vec<u8> {
     bytes
 }
 fn archive(role: &str, name: &str, payload: &[u8]) -> Vec<u8> {
-    let aligned = payload.len().div_ceil(8) * 8;
-    let mut index = 1u32.to_le_bytes().to_vec();
+    archive_entries(role, &[(name, payload)])
+}
+fn archive_entries(role: &str, entries: &[(&str, &[u8])]) -> Vec<u8> {
+    let mut index = (entries.len() as u32).to_le_bytes().to_vec();
     if role == "mov" {
         index.extend(0u8..=255);
     }
-    index.extend_from_slice(name.as_bytes());
-    index.push(0);
-    let offset = index.len();
-    index.extend_from_slice(&[0; 8]);
-    index.extend_from_slice(&(payload.len() as u32).to_le_bytes());
-    index.extend_from_slice(&(payload.len() as u32).to_le_bytes());
-    index.extend_from_slice(&(aligned as u32).to_le_bytes());
-    index.extend_from_slice(&0u32.to_le_bytes());
+    let mut offsets = Vec::new();
+    for (name, payload) in entries {
+        index.extend_from_slice(name.as_bytes());
+        index.push(0);
+        offsets.push(index.len());
+        index.extend_from_slice(&[0; 8]);
+        index.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+        index.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+        index.extend_from_slice(&((payload.len().div_ceil(8) * 8) as u32).to_le_bytes());
+        index.extend_from_slice(&0u32.to_le_bytes());
+    }
     index.resize(index.len().div_ceil(8) * 8, 0);
-    let end = 4 + index.len();
-    index[offset..offset + 8].copy_from_slice(&(end as u64).to_le_bytes());
+    let mut end = 4 + index.len();
+    let mut data = Vec::new();
+    for ((_, payload), offset) in entries.iter().zip(offsets) {
+        index[offset..offset + 8].copy_from_slice(&(end as u64).to_le_bytes());
+        let mut bytes = payload.to_vec();
+        bytes.resize(payload.len().div_ceil(8) * 8, 0);
+        end += bytes.len();
+        if role != "mov" {
+            bytes = encrypt(&bytes);
+        }
+        data.extend(bytes);
+    }
     let mut bytes = (index.len() as u32).to_le_bytes().to_vec();
     bytes.extend(encrypt(&index));
-    let mut data = payload.to_vec();
-    data.resize(aligned, 0);
-    if role != "mov" {
-        data = encrypt(&data);
-    }
     bytes.extend(data);
     bytes
+}
+
+pub(crate) fn assets(root: &Path, role: &str, entries: &[(&str, &[u8])]) {
+    std::fs::write(
+        root.join(format!("{role}.paz")),
+        archive_entries(role, entries),
+    )
+    .unwrap();
 }
 pub(crate) fn game(root: &Path, script: &[u8]) {
     let mut png = Cursor::new(Vec::new());

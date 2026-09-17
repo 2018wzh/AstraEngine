@@ -42,6 +42,12 @@ pub enum MusicaRuntimeError {
     ScrollXf,
     #[error("ASTRA_EMU_MUSICA_RUNTIME_WSCROLL2: invalid WScroll2 command or state")]
     WScroll2,
+    #[error("ASTRA_EMU_MUSICA_RUNTIME_FIREFLY: invalid Firefly command or state")]
+    Firefly,
+    #[error(
+        "ASTRA_EMU_MUSICA_RUNTIME_SECONDARY_EFFECT: invalid secondary effect command or state"
+    )]
+    SecondaryEffect,
 }
 
 impl MusicaRuntimeError {
@@ -60,6 +66,8 @@ impl MusicaRuntimeError {
             Self::ChainTarget => "ASTRA_EMU_MUSICA_RUNTIME_CHAIN",
             Self::AudioResource => "ASTRA_EMU_MUSICA_RUNTIME_AUDIO_RESOURCE",
             Self::Effect => "ASTRA_EMU_MUSICA_RUNTIME_EFFECT",
+            Self::Firefly => "ASTRA_EMU_MUSICA_RUNTIME_FIREFLY",
+            Self::SecondaryEffect => "ASTRA_EMU_MUSICA_RUNTIME_SECONDARY_EFFECT",
             Self::WScroll2 => "ASTRA_EMU_MUSICA_RUNTIME_WSCROLL2",
             Self::ScrollXf => "ASTRA_EMU_MUSICA_RUNTIME_SCROLL_XF",
             Self::LinearScroll => "ASTRA_EMU_MUSICA_RUNTIME_LINEAR_SCROLL",

@@ -55,6 +55,7 @@ pub(super) fn execute(
         .filter(|value| value.unsigned_abs() <= MUSICA_WSCROLL2_MAX_SPEED_TENTHS as u32)
         .ok_or(MusicaRuntimeError::WScroll2)?;
     state.effect = None;
+    state.firefly = None;
 
     state.wscroll2 = Some(MusicaWScroll2State {
         sync_resource_uri: format!("musica:/st/{sync_resource}"),

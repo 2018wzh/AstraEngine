@@ -658,3 +658,6 @@ fn native_gpu_linear_scroll_waits_and_restores_background_position() {
 
 #[path = "tests/wscroll2.rs"]
 mod wscroll2;
+
+#[path = "tests/particles.rs"]
+mod particles;

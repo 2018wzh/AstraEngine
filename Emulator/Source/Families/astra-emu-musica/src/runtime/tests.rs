@@ -715,7 +715,7 @@ fn musica_effect_end_rejects_operands_without_clearing_the_live_effect() {
     vm.advance_effect_clock(100_000_000).unwrap();
     let effect = vm.state().effect.clone();
     let sequence = vm.state().effect_sequence;
-    assert_eq!(vm.step(2).unwrap_err(), MusicaRuntimeError::Effect);
+    assert_eq!(vm.step(2).unwrap_err(), MusicaRuntimeError::Firefly);
     assert_eq!(vm.state().effect, effect);
     assert_eq!(vm.state().effect_sequence, sequence);
 }

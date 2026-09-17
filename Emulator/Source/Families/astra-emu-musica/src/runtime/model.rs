@@ -4,7 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-pub const MUSICA_RUNTIME_STATE_SCHEMA: &str = "astra.emu.musica.runtime_state.v14";
+pub const MUSICA_RUNTIME_STATE_SCHEMA: &str = "astra.emu.musica.runtime_state.v15";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MusicaRuntimeState {
@@ -20,6 +20,8 @@ pub struct MusicaRuntimeState {
     pub stage: Option<MusicaStageCommand>,
     pub transition: MusicaTransitionState,
     pub effect: Option<MusicaEffectState>,
+    pub firefly: Option<MusicaFireflyState>,
+    pub secondary_effect: Option<MusicaSecondaryEffectState>,
     pub wscroll2: Option<MusicaWScroll2State>,
     pub scroll_xf: Option<MusicaScrollXfState>,
     pub linear_scroll: Option<MusicaLinearScrollState>,
@@ -240,6 +242,14 @@ pub enum MusicaVmEvent {
     EffectCleared,
     ScrollXf(MusicaScrollXfFrame),
     WScroll2(MusicaWScroll2Frame),
+    Firefly(MusicaFireflyFrame),
+    FireflyCleared {
+        sequence: u64,
+    },
+    SecondaryEffect(MusicaSecondaryEffectFrame),
+    SecondaryEffectCleared {
+        sequence: u64,
+    },
     LinearScroll(MusicaLinearScrollFrame),
     AxisScroll(MusicaAxisScrollFrame),
     ScreenShake(MusicaScreenShakeFrame),
@@ -378,5 +388,66 @@ pub struct MusicaWScroll2State {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MusicaWScroll2Frame {
+    pub sequence: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MusicaFireflyState {
+    pub resources: [String; 3],
+    pub target_count: u32,
+    pub duration_ms: u32,
+    pub ending: bool,
+    pub fade_alpha_256: u16,
+    pub fade_elapsed_ns: u64,
+    pub particles: Vec<MusicaFireflyParticle>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MusicaFireflyParticle {
+    pub control_points: [[i32; 2]; 7],
+    pub kind: u8,
+    pub elapsed_ns: u64,
+    pub lifetime_ns: u64,
+    pub position: [i32; 2],
+    pub opacity_255: u16,
+    pub active: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MusicaSecondaryEffectState {
+    pub kind: MusicaSecondaryEffectKind,
+    pub resources: [String; 3],
+    pub ending: bool,
+    pub alpha_256: u16,
+    pub fade_elapsed_ns: u64,
+    pub motion_elapsed_ns: u64,
+    pub particles: Vec<MusicaSnowHParticle>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MusicaSecondaryEffectKind {
+    SnowHorizontal,
+    SnowVertical,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MusicaSnowHParticle {
+    pub fixed_position: [i64; 2],
+    pub horizontal_velocity: u32,
+    pub vertical_velocity: u32,
+    pub vertical_positive: bool,
+    pub kind: u8,
+    pub position: [i32; 2],
+    pub active: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MusicaFireflyFrame {
+    pub sequence: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MusicaSecondaryEffectFrame {
     pub sequence: u64,
 }

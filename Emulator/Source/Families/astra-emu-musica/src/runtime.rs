@@ -2,6 +2,7 @@ mod control;
 mod effects;
 mod errors;
 mod model;
+pub(crate) mod particles;
 mod scroll;
 pub(crate) mod scroll_xf;
 pub(crate) mod shake;
@@ -109,6 +110,8 @@ impl MusicaVm {
             linear_scroll: None,
             scroll_xf: None,
             wscroll2: None,
+            firefly: None,
+            secondary_effect: None,
             panel: None,
             audio: BTreeMap::new(),
             movie: None,
@@ -180,6 +183,8 @@ impl MusicaVm {
         self.state.axis_scroll = None;
         self.state.linear_scroll = None;
         self.state.wscroll2 = None;
+        self.state.firefly = None;
+        self.state.secondary_effect = None;
         self.state.terminal = false;
         Ok(())
     }
@@ -432,6 +437,7 @@ fn execute_control(
         "scroll" => scroll::execute_linear_scroll(command, state),
         "endscroll" => scroll::execute_end_scroll(command, state),
         "shakescreen" => shake::execute_screen_shake(command, state),
+        "effect2" => particles::execute_secondary_effect(command, state),
         "effect" => execute_effect(command, state),
         "panel" => execute_panel(command, state),
         "chain" => {

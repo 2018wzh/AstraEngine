@@ -10,6 +10,7 @@ use std::{num::NonZeroUsize, sync::Arc};
 const MAX_ASSET_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_IMAGE_BYTES: usize = 128 * 1024 * 1024;
 
+mod particles;
 mod stage;
 mod stand;
 mod wscroll2;
@@ -241,6 +242,7 @@ impl Scene {
             commands.push(SceneCommand::PopTransform);
             commands.push(SceneCommand::PopClip);
         }
+        self.particles(&mut commands, state)?;
         if state.screen_shake.is_some() {
             commands.push(SceneCommand::PopClip);
             commands.push(SceneCommand::PopTransform);
