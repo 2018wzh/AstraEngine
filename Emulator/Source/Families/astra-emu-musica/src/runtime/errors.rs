@@ -38,6 +38,8 @@ pub enum MusicaRuntimeError {
     AxisScroll,
     #[error("ASTRA_EMU_MUSICA_RUNTIME_LINEAR_SCROLL: invalid linear scroll command or state")]
     LinearScroll,
+    #[error("ASTRA_EMU_MUSICA_RUNTIME_SCROLL_XF: invalid scrollxf command or state")]
+    ScrollXf,
 }
 
 impl MusicaRuntimeError {
@@ -56,6 +58,7 @@ impl MusicaRuntimeError {
             Self::ChainTarget => "ASTRA_EMU_MUSICA_RUNTIME_CHAIN",
             Self::AudioResource => "ASTRA_EMU_MUSICA_RUNTIME_AUDIO_RESOURCE",
             Self::Effect => "ASTRA_EMU_MUSICA_RUNTIME_EFFECT",
+            Self::ScrollXf => "ASTRA_EMU_MUSICA_RUNTIME_SCROLL_XF",
             Self::LinearScroll => "ASTRA_EMU_MUSICA_RUNTIME_LINEAR_SCROLL",
             Self::AxisScroll => "ASTRA_EMU_MUSICA_RUNTIME_AXIS_SCROLL",
             Self::ScreenShake => "ASTRA_EMU_MUSICA_RUNTIME_SCREEN_SHAKE",

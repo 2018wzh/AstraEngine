@@ -74,6 +74,7 @@ pub(super) fn execute_stage(
     state.stage = Some(stage.clone());
     state.axis_scroll = None;
     state.linear_scroll = None;
+    state.scroll_xf = None;
     Ok(Some(MusicaVmEvent::Stage(stage)))
 }
 

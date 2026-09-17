@@ -323,3 +323,5 @@ FVP 在现有 Windows Sandbox 会话继续长流程：确认 Enter 与原生 AUT
 Classic route.coverage.007 完成 GPU Headless 输入流程，47,801 条输入、38 次选择到达 tsui.ending，DX12 独显且无运行诊断。终点 PNG 已查看，为黑场；完整视听与真实 Player 验收仍开放。
 
 Musica 的二维 `.scroll` 已从来源实现接入，与轴向滚动共用 endscroll、stage/chain 清除、Family 时钟和 GPU Scene。v12 保存二维轨迹，并拒绝互斥滚动同时占用、轨迹与背景不一致或非法时长的状态。已增加斜向中途恢复、强制结束、损坏存档拒绝和 Family F5/F9 GPU 回归；scrollxf、WScroll2 和完整演出仍待整合。
+
+Musica scrollxf 已从来源实现接入：按缓动变化裁剪窗口与偏移，使用共享 GPU clip/transform，保留场景/面板与文字分层。专项测试覆盖缓动、强制结束、中途恢复、跨脚本继续演出、stage 清除、空窗口与非法状态拒绝；v13 保存当前裁剪轨迹。WScroll2、Firefly、次级效果、人物动画和系统页仍待整合。

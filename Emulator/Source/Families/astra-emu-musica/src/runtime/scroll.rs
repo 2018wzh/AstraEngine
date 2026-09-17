@@ -48,7 +48,8 @@ pub(super) fn execute_axis_scroll(
     if tokens.len() > 2 {
         return Err(MusicaRuntimeError::AxisScroll);
     }
-    if state.linear_scroll.is_some()
+    if state.scroll_xf.is_some()
+        || state.linear_scroll.is_some()
         || state
             .axis_scroll
             .as_ref()
@@ -232,6 +233,12 @@ pub(super) fn validate_state(state: &MusicaRuntimeState) -> Result<(), MusicaRun
     } else if matches!(state.wait, Some(MusicaWaitState::LinearScroll { .. })) {
         return Err(MusicaRuntimeError::LinearScroll);
     }
+    if let Some(scroll) = &state.scroll_xf {
+        if state.stage.is_none() || state.axis_scroll.is_some() || state.linear_scroll.is_some() {
+            return Err(MusicaRuntimeError::ScrollXf);
+        }
+        super::scroll_xf::validate_scroll_xf_state(scroll)?;
+    }
     Ok(())
 }
 
@@ -312,7 +319,22 @@ pub(super) fn execute_end_scroll(
         state.wait = Some(wait.clone());
         return Ok(Some(MusicaVmEvent::Wait(wait)));
     }
-    Ok(None)
+    let Some(scroll) = state.scroll_xf.as_mut() else {
+        return Ok(None);
+    };
+    if !force_finish || scroll.completed {
+        return Ok(None);
+    }
+    scroll.elapsed_ns = u64::from(scroll.duration_ms)
+        .checked_mul(1_000_000)
+        .ok_or(MusicaRuntimeError::Overflow)?;
+    scroll.completed = true;
+    scroll.visible_extent = scroll.end_extent;
+    scroll.visible_offset = scroll.end_offset;
+    let sequence = next_effect_sequence(state)?;
+    Ok(Some(MusicaVmEvent::ScrollXf(MusicaScrollXfFrame {
+        sequence,
+    })))
 }
 
 #[cfg(test)]

@@ -3,6 +3,7 @@ mod effects;
 mod errors;
 mod model;
 mod scroll;
+pub(crate) mod scroll_xf;
 pub(crate) mod shake;
 mod stage;
 use effects::*;
@@ -105,6 +106,7 @@ impl MusicaVm {
             screen_shake: None,
             axis_scroll: None,
             linear_scroll: None,
+            scroll_xf: None,
             panel: None,
             audio: BTreeMap::new(),
             movie: None,
@@ -423,6 +425,7 @@ fn execute_control(
         "stage" => execute_stage(command, state),
         "hscroll" => scroll::execute_axis_scroll(command, state, MusicaAxisScrollAxis::Horizontal),
         "vscroll" => scroll::execute_axis_scroll(command, state, MusicaAxisScrollAxis::Vertical),
+        "scrollxf" => scroll_xf::execute_scroll_xf(command, state),
         "scroll" => scroll::execute_linear_scroll(command, state),
         "endscroll" => scroll::execute_end_scroll(command, state),
         "shakescreen" => shake::execute_screen_shake(command, state),

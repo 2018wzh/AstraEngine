@@ -42,7 +42,7 @@ Musica Family 自持 VM、归档、音频和原生 session。Manager 经 Family 
 
 ## 保存与恢复
 
-VM 数据使用 `astra.emu.musica.runtime_state.v12` 和 postcard，包含脚本身份、PC、变量、等待、完整 stage、transition、效果时间状态、面板和音频等字段。v11 及更早数据直接拒绝，不迁移旧图层表示。stage 的资源角色、名称、序列长度和立绘数量在保存、解码和恢复边界校验。
+VM 数据使用 `astra.emu.musica.runtime_state.v13` 和 postcard，包含脚本身份、PC、变量、等待、完整 stage、transition、效果时间状态、面板和音频等字段。v12 及更早数据直接拒绝，不迁移旧图层表示。stage 的资源角色、名称、序列长度和立绘数量在保存、解码和恢复边界校验。
 
 Family 存档容器另外保存当前显示消息、等待余量和音频快照。恢复先验证游戏及脚本身份，再构造候选 VM、GPU 场景和音频状态；场景重建失败不得将其标为恢复成功。归档解密后的完整素材和 GPU 资源不进入 VM 数据。损坏存档读取失败不得覆盖原文件。
 
@@ -56,10 +56,12 @@ Family 存档容器另外保存当前显示消息、等待余量和音频快照�
 
 消息面板沿用来源实现：`.panel 0` 清除当前面板，`.panel 1` 使用 `msgPanel.png`，`.panel 1 * filename` 使用指定 sys 图片，`.panel 3` 使用 `fullPanel.png`。模式 1 位于视口高度减图片高度加 64 的位置，模式 3 位于原点；替换与清除后的状态可存读档。未知模式、额外参数和非安全文件名返回面板错误，不忽略命令。
 
-`.pragma enable_control`、`disable_control`、`skip_enable`、`skip_disable` 沿用来源分支的独立开关：默认允许 skip、禁用 Control 快进。两个开关都允许时，按住 Ctrl 可推进正文并跳过时间等待；选择仍需明确确认，异步翻译尚未完成时不推进。脚本开关进入 v12 原生状态，物理按键只由当前 session 持有，失焦与挂起清除按键。未知或多参数 pragma 返回 `ASTRA_EMU_MUSICA_RUNTIME_PRAGMA`，不再静默忽略。已读跳读、自动模式及完整系统页仍待移植。
+`.pragma enable_control`、`disable_control`、`skip_enable`、`skip_disable` 沿用来源分支的独立开关：默认允许 skip、禁用 Control 快进。两个开关都允许时，按住 Ctrl 可推进正文并跳过时间等待；选择仍需明确确认，异步翻译尚未完成时不推进。脚本开关进入 v13 原生状态，物理按键只由当前 session 持有，失焦与挂起清除按键。未知或多参数 pragma 返回 `ASTRA_EMU_MUSICA_RUNTIME_PRAGMA`，不再静默忽略。已读跳读、自动模式及完整系统页仍待移植。
 
-`.shakescreen V amplitude interval_ms` 与 `R` 模式从来源提交 00610272d 移植，分别按时钟交替垂直偏移或从原生八方向表取偏移。保持来源的每次更新最多推进一次、丢弃超出间隔余量的行为。新震动替换旧震动，transition 与 chain 清除震动。场景和面板复用共享 GPU 变换与裁剪，文字层沿用来源分层；不增加 CPU 图像搬运。v12 存档保存方向、振幅、间隔、余时、更新序号、偏移和共享随机状态，保存/解码/恢复均拒绝非法状态。
+`.shakescreen V amplitude interval_ms` 与 `R` 模式从来源提交 00610272d 移植，分别按时钟交替垂直偏移或从原生八方向表取偏移。保持来源的每次更新最多推进一次、丢弃超出间隔余量的行为。新震动替换旧震动，transition 与 chain 清除震动。场景和面板复用共享 GPU 变换与裁剪，文字层沿用来源分层；不增加 CPU 图像搬运。v13 存档保存方向、振幅、间隔、余时、更新序号、偏移和共享随机状态，保存/解码/恢复均拒绝非法状态。
 
-`.hscroll target speed` 和 `.vscroll target speed` 已移植来源分支的轴向滚动，speed 为每毫秒十分之一像素的有符号速度；方向与目标冲突、零速度和越界参数明确失败。背景坐标由动画时钟更新，复用已有 GPU Scene，不另建绘制路径。`.endscroll false` 等待实际完成，`.endscroll true` 强制到达终点；新 stage 或 chain 清除滚动。v12 存档同时校验时长、余时、完成标记、当前坐标和 stage 坐标，恢复后继续剩余演出。scrollxf 与 WScroll2 仍待移植，不能由坐标滚动测试代替。
+`.hscroll target speed` 和 `.vscroll target speed` 已移植来源分支的轴向滚动，speed 为每毫秒十分之一像素的有符号速度；方向与目标冲突、零速度和越界参数明确失败。背景坐标由动画时钟更新，复用已有 GPU Scene，不另建绘制路径。`.endscroll false` 等待实际完成，`.endscroll true` 强制到达终点；新 stage 或 chain 清除滚动。v13 存档同时校验时长、余时、完成标记、当前坐标和 stage 坐标，恢复后继续剩余演出。WScroll2 仍待移植，不能由坐标滚动测试代替。
 
-`.scroll target_x target_y speed` 沿用来源的二维线性滚动，speed 为正数，按较长坐标轴的距离计算时长并插值两个坐标。与轴向滚动共用 endscroll、stage/chain 清除、Family 时钟和 GPU Scene。v12 状态增加二维轨迹，并拒绝两种滚动同时占用或轨迹与背景坐标不一致的存档。
+`.scroll target_x target_y speed` 沿用来源的二维线性滚动，speed 为正数，按较长坐标轴的距离计算时长并插值两个坐标。与轴向滚动共用 endscroll、stage/chain 清除、Family 时钟和 GPU Scene。v13 状态增加二维轨迹，并拒绝两种滚动同时占用或轨迹与背景坐标不一致的存档。
+
+`.scrollxf` 的十个参数为起始/结束窗口宽高、起始/结束偏移、时长与缓动（0 线性、1 二次加速、2 二次减速）。来源实现裁剪并平移场景与面板，不缩放像素；文字保留独立层。共享 GPU clip/transform 执行绘制，空窗口不显示场景。新 scrollxf 替换旧轨迹，stage 清除，chain 保留并继续演出，endscroll 为真时立即结束；为假时沿用来源语义继续异步演出。v13 保存轨迹和当前窗口，拒绝与 axis/linear 同时占用及不一致的当前状态。

@@ -235,3 +235,56 @@ fn screen_shake_gpu_preserves_composed_clipping_and_restores_mid_interval() {
     scene.render(vm.state(), None, None).unwrap();
     assert_eq!(scene.pixels, original);
 }
+
+#[test]
+#[ignore = "requires a hardware GPU"]
+fn scrollxf_gpu_crops_translates_and_accepts_empty_extent() {
+    let root = tempfile::tempdir().unwrap();
+    let source=b".stage * BG.png 0 0\r\n.scrollxf 16 16 8 8 0 0 8 8 100 0\r\n.scrollxf 0 0 0 0 0 0 0 0 100 0\r\n.end\r\n";
+    crate::test_fixture::game(root.path(), source);
+    let archive =
+        Arc::new(mount_musica(root.path(), std::path::Path::new(MUSICA_PROFILE_FILE)).unwrap());
+    let make_vm = || {
+        MusicaVm::new(
+            "musica:/scr/test.sc".into(),
+            Hash256::from_sha256(source),
+            parse_sc(source, &ScOpcodeCatalog::observed_musica()).unwrap(),
+            1,
+        )
+        .unwrap()
+    };
+    let mut vm = make_vm();
+    let mut scene = Scene::new(archive, 16, 16).unwrap();
+    vm.step(1).unwrap();
+    scene.render(vm.state(), None, None).unwrap();
+    let original = scene.pixels.clone();
+    vm.step(2).unwrap();
+    vm.advance_scroll_xf_clock(50_000_000).unwrap();
+    scene.render(vm.state(), None, None).unwrap();
+    let cropped = scene.pixels.clone();
+    for y in 0..16 {
+        for x in 0..16 {
+            let index = (y * 16 + x) * 4;
+            let expected = if x < 12 && y < 12 {
+                &original[((y + 4) * 16 + x + 4) * 4..((y + 4) * 16 + x + 4) * 4 + 4]
+            } else {
+                &[0, 0, 0, 255]
+            };
+            assert_eq!(&cropped[index..index + 4], expected);
+        }
+    }
+    let mut restored = make_vm();
+    restored
+        .restore_native_save(&vm.encode_native_save().unwrap(), 3)
+        .unwrap();
+    scene.render(restored.state(), None, None).unwrap();
+    assert_eq!(scene.pixels, cropped);
+    vm.step(3).unwrap();
+    scene.render(vm.state(), None, None).unwrap();
+    assert!(scene
+        .pixels
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .all(|pixel| pixel == &[0, 0, 0, 255]));
+}

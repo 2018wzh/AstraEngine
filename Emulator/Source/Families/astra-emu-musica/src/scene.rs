@@ -165,6 +165,24 @@ impl Scene {
                 },
             });
         }
+        if let Some(scroll) = &state.scroll_xf {
+            crate::runtime::scroll_xf::validate_scroll_xf_state(scroll)
+                .map_err(|cause| error(cause.diagnostic_code(), "invalid scrollxf state"))?;
+            commands.push(SceneCommand::PushClip {
+                rect: RectI {
+                    x: 0,
+                    y: 0,
+                    width: (scroll.visible_extent[0] as u32).min(self.width),
+                    height: (scroll.visible_extent[1] as u32).min(self.height),
+                },
+            });
+            commands.push(SceneCommand::PushTransform {
+                transform: astra_media_core::Transform2D::translation(
+                    -scroll.visible_offset[0] as f32,
+                    -scroll.visible_offset[1] as f32,
+                ),
+            });
+        }
         if let Some(stage) = &state.stage {
             self.stage(&mut commands, stage)?;
         }
@@ -213,6 +231,10 @@ impl Scene {
                 _ => return Err(error("ASTRA_EMU_MUSICA_PANEL_MODE", "invalid panel mode")),
             };
             self.layer(&mut commands, &panel.resource_uri, 0, y, 1.0)?;
+        }
+        if state.scroll_xf.is_some() {
+            commands.push(SceneCommand::PopTransform);
+            commands.push(SceneCommand::PopClip);
         }
         if state.screen_shake.is_some() {
             commands.push(SceneCommand::PopClip);
