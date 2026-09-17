@@ -383,3 +383,5 @@ Classic route.coverage.015 完成同一 build/package 的 GPU Headless 输入流
 Musica 已移植来源的后台播放偏好，默认失焦暂停，显式开启才继续；窗口挂起始终优先。初始焦点、剧情/演出/电影/音频暂停、失焦清除输入以及读档保留窗口状态均接入 Family。34 项会话测试及受影响 Clippy 通过，覆盖两种配置、初始失焦、显式挂起、快进键、电影和存读档；真实平台切换窗口验收仍开放。
 
 Classic route.coverage.016 完成同一 build/package 的 GPU Headless 输入流程，47,809 条输入、38 次选择到达 tsui.ending，无诊断。终点 PNG 已查看，仍为黑场；完整视听与真实 Player 验收保持开放。
+
+重新检查当前 Sandbox：AudioSrv 和 AudioEndpointBuilder 均运行，但没有枚举到 AudioEndpoint，终之空真实 Player 的音频入口仍受环境阻塞。Player 退出日志现保留 PlatformError 的具体 reason，便于区分无设备、格式不支持及开流失败；不切换静音后端或将 Headless 视为真实音频通过。新日志尚未替换正在使用的 Sandbox 产品包。

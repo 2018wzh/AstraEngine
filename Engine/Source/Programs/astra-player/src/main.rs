@@ -210,6 +210,7 @@ fn main() -> Result<(), PlayerCliError> {
                     event = "player.host.failed",
                     diagnostic = ?platform.code,
                     operation = %platform.operation,
+                    reason = %platform.message,
                     "Bundled Player terminated"
                 );
             } else {
