@@ -73,6 +73,7 @@ pub(super) fn execute_stage(
     next_effect_sequence(state)?;
     state.stage = Some(stage.clone());
     state.axis_scroll = None;
+    state.linear_scroll = None;
     Ok(Some(MusicaVmEvent::Stage(stage)))
 }
 

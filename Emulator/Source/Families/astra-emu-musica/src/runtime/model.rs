@@ -4,7 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-pub const MUSICA_RUNTIME_STATE_SCHEMA: &str = "astra.emu.musica.runtime_state.v11";
+pub const MUSICA_RUNTIME_STATE_SCHEMA: &str = "astra.emu.musica.runtime_state.v12";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MusicaRuntimeState {
@@ -20,6 +20,7 @@ pub struct MusicaRuntimeState {
     pub stage: Option<MusicaStageCommand>,
     pub transition: MusicaTransitionState,
     pub effect: Option<MusicaEffectState>,
+    pub linear_scroll: Option<MusicaLinearScrollState>,
     pub axis_scroll: Option<MusicaAxisScrollState>,
     pub screen_shake: Option<MusicaScreenShakeState>,
     pub panel: Option<MusicaPanelState>,
@@ -37,6 +38,10 @@ pub struct MusicaRuntimeState {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum MusicaWaitState {
+    LinearScroll {
+        token_id: String,
+        milliseconds: u32,
+    },
     AxisScroll {
         token_id: String,
         milliseconds: u32,
@@ -231,6 +236,7 @@ pub enum MusicaVmEvent {
     Stage(MusicaStageCommand),
     Effect(MusicaEffectFrame),
     EffectCleared,
+    LinearScroll(MusicaLinearScrollFrame),
     AxisScroll(MusicaAxisScrollFrame),
     ScreenShake(MusicaScreenShakeFrame),
     Choice,
@@ -316,5 +322,21 @@ pub enum MusicaAxisScrollAxis {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MusicaAxisScrollFrame {
+    pub sequence: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MusicaLinearScrollState {
+    pub start: [i32; 2],
+    pub target: [i32; 2],
+    pub speed_tenths: u32,
+    pub duration_ms: u32,
+    pub elapsed_ns: u64,
+    pub current: [i32; 2],
+    pub completed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MusicaLinearScrollFrame {
     pub sequence: u64,
 }

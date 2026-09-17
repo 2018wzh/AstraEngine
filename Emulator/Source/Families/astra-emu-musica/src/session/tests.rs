@@ -598,13 +598,12 @@ fn native_gpu_screen_shake_advances_during_wait_and_restores_through_family_inpu
     opened.session.close().unwrap();
 }
 
-#[test]
-fn native_gpu_axis_scroll_waits_and_restores_background_position() {
+fn assert_scroll_restores_background_position(command: &str, middle_pixel: usize) {
     let _session = PROVIDER_SESSION.lock().unwrap();
     let root = tempfile::tempdir().unwrap();
     fixture::game(
         root.path(),
-        b".stage * BG.png 0 0\r\n.hscroll 8 1\r\n.endscroll false\r\n.end\r\n",
+        format!(".stage * BG.png 0 0\r\n.{command}\r\n.endscroll false\r\n.end\r\n").as_bytes(),
     );
     let mut provider = MusicaProvider::default();
     let mut opened = provider
@@ -623,7 +622,10 @@ fn native_gpu_axis_scroll_waits_and_restores_background_position() {
     let middle = frame.0.clone();
     assert_ne!(middle, original);
     assert_eq!(&middle[..4], &[0, 0, 0, 255]);
-    assert_eq!(&middle[4 * 4..4 * 4 + 4], &original[..4]);
+    assert_eq!(
+        &middle[middle_pixel * 4..middle_pixel * 4 + 4],
+        &original[..4]
+    );
     opened.session.advance(0, &[key(KeyCode::F5)]).unwrap();
     assert_eq!(
         opened.session.advance(40_000_000, &[]).unwrap().status,
@@ -642,4 +644,14 @@ fn native_gpu_axis_scroll_waits_and_restores_background_position() {
     opened.session.visit_frame(&mut frame).unwrap();
     assert_eq!(frame.0, finished);
     opened.session.close().unwrap();
+}
+
+#[test]
+fn native_gpu_axis_scroll_waits_and_restores_background_position() {
+    assert_scroll_restores_background_position("hscroll 8 1", 4);
+}
+
+#[test]
+fn native_gpu_linear_scroll_waits_and_restores_background_position() {
+    assert_scroll_restores_background_position("scroll 8 4 1", 2 * 1280 + 4);
 }

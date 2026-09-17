@@ -1,4 +1,6 @@
+mod linear;
 use super::*;
+pub(super) use linear::execute_linear_scroll;
 const MUSICA_AXIS_SCROLL_MAX_COORDINATE: i32 = 65_536;
 const MUSICA_AXIS_SCROLL_MAX_SPEED_TENTHS: i32 = 10_000;
 impl MusicaVm {
@@ -46,10 +48,11 @@ pub(super) fn execute_axis_scroll(
     if tokens.len() > 2 {
         return Err(MusicaRuntimeError::AxisScroll);
     }
-    if state
-        .axis_scroll
-        .as_ref()
-        .is_some_and(|scroll| !scroll.completed)
+    if state.linear_scroll.is_some()
+        || state
+            .axis_scroll
+            .as_ref()
+            .is_some_and(|scroll| !scroll.completed)
     {
         return Err(MusicaRuntimeError::AxisScroll);
     }
@@ -215,6 +218,20 @@ pub(super) fn validate_state(state: &MusicaRuntimeState) -> Result<(), MusicaRun
     } else if matches!(state.wait, Some(MusicaWaitState::AxisScroll { .. })) {
         return Err(MusicaRuntimeError::AxisScroll);
     }
+    if state.axis_scroll.is_some() && state.linear_scroll.is_some() {
+        return Err(MusicaRuntimeError::LinearScroll);
+    }
+    if let Some(scroll) = &state.linear_scroll {
+        linear::validate_linear_scroll_state(
+            scroll,
+            state
+                .stage
+                .as_ref()
+                .ok_or(MusicaRuntimeError::LinearScroll)?,
+        )?;
+    } else if matches!(state.wait, Some(MusicaWaitState::LinearScroll { .. })) {
+        return Err(MusicaRuntimeError::LinearScroll);
+    }
     Ok(())
 }
 
@@ -257,6 +274,38 @@ pub(super) fn execute_end_scroll(
         let milliseconds = u32::try_from(remaining_ns.div_ceil(1_000_000))
             .map_err(|_| MusicaRuntimeError::Overflow)?;
         let wait = MusicaWaitState::AxisScroll {
+            token_id: format!("musica.scroll.{}", state.instruction_count),
+            milliseconds,
+        };
+        state.wait = Some(wait.clone());
+        return Ok(Some(MusicaVmEvent::Wait(wait)));
+    }
+    if state
+        .linear_scroll
+        .as_ref()
+        .is_some_and(|scroll| !scroll.completed)
+    {
+        if force_finish {
+            linear::complete_linear_scroll_state(state)?;
+            let sequence = next_effect_sequence(state)?;
+            return Ok(Some(MusicaVmEvent::LinearScroll(MusicaLinearScrollFrame {
+                sequence,
+            })));
+        }
+        let scroll = state
+            .linear_scroll
+            .as_ref()
+            .ok_or(MusicaRuntimeError::LinearScroll)?;
+        let duration_ns = u64::from(scroll.duration_ms)
+            .checked_mul(1_000_000)
+            .ok_or(MusicaRuntimeError::Overflow)?;
+        let remaining_ns = duration_ns
+            .checked_sub(scroll.elapsed_ns)
+            .filter(|remaining| *remaining > 0)
+            .ok_or(MusicaRuntimeError::LinearScroll)?;
+        let milliseconds = u32::try_from(remaining_ns.div_ceil(1_000_000))
+            .map_err(|_| MusicaRuntimeError::Overflow)?;
+        let wait = MusicaWaitState::LinearScroll {
             token_id: format!("musica.scroll.{}", state.instruction_count),
             milliseconds,
         };

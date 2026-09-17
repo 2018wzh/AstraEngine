@@ -267,6 +267,14 @@ impl MusicaSession {
                     self.vm.control_fast_forward_active()
                         || self.wait_ns >= u64::from(milliseconds) * 1_000_000,
                 ),
+                MusicaWaitState::LinearScroll { token_id, .. } => (
+                    token_id,
+                    self.vm
+                        .state()
+                        .linear_scroll
+                        .as_ref()
+                        .is_some_and(|scroll| scroll.completed),
+                ),
                 MusicaWaitState::AxisScroll { token_id, .. } => (
                     token_id,
                     self.vm
@@ -338,6 +346,7 @@ impl MusicaSession {
             Some(
                 MusicaVmEvent::Effect(_)
                 | MusicaVmEvent::EffectCleared
+                | MusicaVmEvent::LinearScroll(_)
                 | MusicaVmEvent::AxisScroll(_)
                 | MusicaVmEvent::ScreenShake(_)
                 | MusicaVmEvent::Panel { .. },
@@ -505,6 +514,11 @@ impl MusicaSession {
             dirty |= self
                 .vm
                 .advance_axis_scroll_clock(elapsed_ns)
+                .map_err(vm_error)?
+                .is_some();
+            dirty |= self
+                .vm
+                .advance_linear_scroll_clock(elapsed_ns)
                 .map_err(vm_error)?
                 .is_some();
             self.phase += u128::from(elapsed_ns) * 60;

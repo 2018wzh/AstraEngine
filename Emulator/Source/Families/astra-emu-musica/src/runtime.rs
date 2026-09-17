@@ -104,6 +104,7 @@ impl MusicaVm {
             effect: None,
             screen_shake: None,
             axis_scroll: None,
+            linear_scroll: None,
             panel: None,
             audio: BTreeMap::new(),
             movie: None,
@@ -173,6 +174,7 @@ impl MusicaVm {
         self.state.choice = None;
         self.state.screen_shake = None;
         self.state.axis_scroll = None;
+        self.state.linear_scroll = None;
         self.state.terminal = false;
         Ok(())
     }
@@ -213,7 +215,8 @@ impl MusicaVm {
             .as_ref()
             .ok_or(MusicaRuntimeError::Waiting)?;
         let expected = match current {
-            MusicaWaitState::AxisScroll { token_id, .. }
+            MusicaWaitState::LinearScroll { token_id, .. }
+            | MusicaWaitState::AxisScroll { token_id, .. }
             | MusicaWaitState::Time { token_id, .. }
             | MusicaWaitState::Input { token_id }
             | MusicaWaitState::Media { token_id, .. }
@@ -420,6 +423,7 @@ fn execute_control(
         "stage" => execute_stage(command, state),
         "hscroll" => scroll::execute_axis_scroll(command, state, MusicaAxisScrollAxis::Horizontal),
         "vscroll" => scroll::execute_axis_scroll(command, state, MusicaAxisScrollAxis::Vertical),
+        "scroll" => scroll::execute_linear_scroll(command, state),
         "endscroll" => scroll::execute_end_scroll(command, state),
         "shakescreen" => shake::execute_screen_shake(command, state),
         "effect" => execute_effect(command, state),

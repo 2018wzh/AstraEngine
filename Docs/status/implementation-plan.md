@@ -321,3 +321,5 @@ Musica 已移植 hscroll/vscroll 与轴向 endscroll，背景坐标直接进入�
 FVP 在现有 Windows Sandbox 会话继续长流程：确认 Enter 与原生 AUTO 可从月亮场景推进至人物对话，文字清晰。已通过原生保存页写入此前为空的 009 槽，再切换读取页恢复；恢复后的文字、背景和立绘正常显示，001–008 未覆盖，AUTO 已恢复运行。当前仍为显式 Null 音频，不计实际声音或完整结局验收。
 
 Classic route.coverage.007 完成 GPU Headless 输入流程，47,801 条输入、38 次选择到达 tsui.ending，DX12 独显且无运行诊断。终点 PNG 已查看，为黑场；完整视听与真实 Player 验收仍开放。
+
+Musica 的二维 `.scroll` 已从来源实现接入，与轴向滚动共用 endscroll、stage/chain 清除、Family 时钟和 GPU Scene。v12 保存二维轨迹，并拒绝互斥滚动同时占用、轨迹与背景不一致或非法时长的状态。已增加斜向中途恢复、强制结束、损坏存档拒绝和 Family F5/F9 GPU 回归；scrollxf、WScroll2 和完整演出仍待整合。
