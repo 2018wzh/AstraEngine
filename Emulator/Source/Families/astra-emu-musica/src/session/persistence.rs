@@ -73,10 +73,20 @@ impl MusicaSession {
                 sound.fade = None;
             }
         }
+        if let Some(movie) = self.movie.take() {
+            movie.close(&self.audio)?;
+        }
         self.audio.restore(saved.sounds)?;
+        let movie = vm
+            .state()
+            .movie
+            .as_ref()
+            .map(|state| crate::movie::Movie::open(&self.archive, state))
+            .transpose()?;
         vm.set_control_pressed(self.control_keys != 0);
         self.voice_duration = None;
         self.vm = vm;
+        self.movie = movie;
         self.scene = scene;
         self.message = saved.message;
         self.wait_ns = saved.wait_ns;

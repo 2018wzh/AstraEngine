@@ -1,5 +1,6 @@
 mod backlog;
 mod message;
+mod movie;
 mod persistence;
 use crate::{
     audio::Audio,
@@ -26,6 +27,7 @@ pub(crate) struct MusicaSession {
     vm: MusicaVm,
     scene: Scene,
     audio: Audio,
+    movie: Option<crate::movie::Movie>,
     replacement: Option<TextReplacementServiceBox>,
     pending: Option<PendingText>,
     voice_duration: Option<(std::sync::mpsc::Receiver<FamilyResult<u32>>, Instant)>,
@@ -64,6 +66,7 @@ impl MusicaSession {
             vm,
             scene,
             audio,
+            movie: None,
             replacement,
             storage,
             game,
@@ -154,7 +157,8 @@ impl MusicaSession {
                         .is_some_and(|scroll| scroll.completed),
                 ),
                 MusicaWaitState::Presentation { token_id, .. } => (token_id, true),
-                MusicaWaitState::Media { .. } | MusicaWaitState::Provider { .. } => {
+                MusicaWaitState::Media { token_id, .. } => (token_id, false),
+                MusicaWaitState::Provider { .. } => {
                     return Err(error(
                         "ASTRA_EMU_MUSICA_WAIT_UNSUPPORTED",
                         "script requires an unimplemented media or provider wait",
@@ -176,10 +180,16 @@ impl MusicaSession {
         }
         let event = self.vm.step(tick).map_err(vm_error)?;
         match event {
-            Some(MusicaVmEvent::Movie(_)) => Err(error(
-                "ASTRA_EMU_MUSICA_MOVIE_UNAVAILABLE",
-                "movie playback is not connected to this Family build",
-            )),
+            Some(MusicaVmEvent::Movie(state)) => {
+                if (state.width, state.height) != (self.info.width, self.info.height) {
+                    return Err(error(
+                        "ASTRA_EMU_MUSICA_MOVIE_STAGE_IDENTITY",
+                        "movie dimensions do not match the stage",
+                    ));
+                }
+                self.movie = Some(crate::movie::Movie::open(&self.archive, &state)?);
+                Ok(false)
+            }
             Some(MusicaVmEvent::Choice) => {
                 self.message = None;
                 Ok(true)
@@ -415,7 +425,9 @@ impl MusicaSession {
             self.load()?;
         }
         let mut dirty = self.poll_text()? || choice_dirty;
+        dirty |= self.advance_movie(elapsed_ns)?;
         if !self.suspended
+            && self.movie.is_none()
             && !self.finished
             && self.vm.state().system_ui.page == crate::MusicaSystemPage::None
         {
@@ -475,7 +487,7 @@ impl MusicaSession {
                 dirty |= self.tick()?;
             }
         }
-        if dirty {
+        if dirty && self.movie.is_none() {
             let choices = self.vm.choice_display().map_err(vm_error)?;
             self.scene.render(
                 self.vm.state(),
@@ -530,15 +542,24 @@ impl FamilySession for MusicaSession {
     }
     fn close(mut self: Box<Self>) -> FamilyResult<()> {
         let text = self.cancel_text();
+        let movie = self
+            .movie
+            .take()
+            .map(|movie| movie.close(&self.audio))
+            .transpose();
         let audio = self.audio.shutdown();
         tracing::info!(event = "astra.emu.musica.session.close");
         text?;
+        movie?;
         audio
     }
 }
 impl Drop for MusicaSession {
     fn drop(&mut self) {
         let _ = self.cancel_text();
+        if let Some(movie) = self.movie.take() {
+            let _ = movie.close(&self.audio);
+        }
         let _ = self.audio.shutdown();
     }
 }

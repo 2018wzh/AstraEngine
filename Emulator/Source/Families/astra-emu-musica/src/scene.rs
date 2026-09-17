@@ -285,6 +285,23 @@ impl Scene {
                 )
                 .map_err(|code| error(&code, "message could not be rendered"))?,
         );
+        self.submit(commands)
+    }
+    pub fn render_movie(&mut self, frame: TextureFrame) -> FamilyResult<()> {
+        self.submit(vec![SceneCommand::Texture {
+            id: "musica.movie".into(),
+            destination: RectI {
+                x: 0,
+                y: 0,
+                width: self.width,
+                height: self.height,
+            },
+            frame,
+            opacity: 1.0,
+            blend: BlendMode::Alpha,
+        }])
+    }
+    fn submit(&mut self, commands: Vec<SceneCommand>) -> FamilyResult<()> {
         let sequence = self
             .sequence
             .checked_add(1)

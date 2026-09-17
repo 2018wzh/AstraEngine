@@ -13,6 +13,24 @@ use std::{
 };
 // The provider intentionally permits one live session per process.
 static PROVIDER_SESSION: std::sync::Mutex<()> = std::sync::Mutex::new(());
+#[cfg(feature = "ffmpeg-vcpkg")]
+#[path = "tests/movie.rs"]
+mod movie;
+
+#[cfg(not(feature = "ffmpeg-vcpkg"))]
+#[test]
+fn movie_without_ffmpeg_is_an_explicit_feature_error() {
+    let _session = PROVIDER_SESSION.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    fixture::game(root.path(), b".movie 1 sample.mp4 1280 720 t\r\n.end\r\n");
+    let mut provider = MusicaProvider::default();
+    let mut opened = provider
+        .open(request(root.path(), Sink::default()))
+        .unwrap();
+    let error = opened.session.advance(16_666_667, &[]).err().unwrap();
+    assert_eq!(error.code.as_str(), "ASTRA_EMU_MUSICA_MOVIE_UNAVAILABLE");
+    opened.session.close().unwrap();
+}
 
 #[test]
 fn unsupported_command_diagnostic_keeps_ordinal_without_source_text() {

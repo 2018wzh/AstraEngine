@@ -18,8 +18,12 @@ BGM、SE 和 voice 由 Family 的 Kira worker 混音，解码复用 SDK/Symphoni
 
 `PcmQueue` 复用共享媒体包类型，向核心已有浮点混音缓冲加入 PCM，不新建音频设备。它保留逐包时间戳、限制完整驻留内存、拒绝旧代次和倒退包；重置时释放旧 PCM，缺包时不推进电影音频时钟。暂停和 Host 接受输出后的时钟发布由调用方控制。
 
-完整公共音视频样本解码与逐样本混音、时间戳/序号、目标 PCM 格式、seek、待完成请求关闭和非法输入测试已通过。整合测试同时修复了共享 FFmpeg 升采样缓冲不足及亚秒延迟导致尾部未排空的问题。这里只完成解码 worker 与 PCM 队列；Musica Family 的电影会话、GPU 逐帧呈现、音频 worker 接线、中途恢复和真实游戏验收仍待接入，不能把这些测试计作电影播放完成。
+Family 通过可选 `ffmpeg-vcpkg` feature 接入完整电影播放：从原生 PAZ 有界读取，调用 SDK worker 增量解码，逐帧交给现有 GPU Scene 全屏绘制。电影 PCM 混入现有 Kira worker 的同一 Host 输出；不新建设备。视频与 PCM 队列分别限额，暂停停止消费，关闭丢弃队列并等待解码器退出。
+
+有音轨时按 Host 已接受的电影 PCM 位置推进；无音轨及音频结束后的视频尾部使用宿主时间。读档关闭旧电影，按已保存的微秒位置重开并 seek；新的 PCM 实例隔离旧结果。Control 按来源的 movie `skippable` 标记停止影片，与消息 Skip/Control 设置独立。未启用 feature 时明确返回 `ASTRA_EMU_MUSICA_MOVIE_UNAVAILABLE`，解码失败不回退。
+
+公共完整音视频样本的 Family GPU 回归覆盖连续画面、非零 PCM、暂停、中途 F5/F9、播放结束、损坏输入、阻塞 PCM 关闭与重复开关。真实游戏电影、长影片吞吐、设备音画同步及各平台运行仍待验证；这些测试不关闭 Musica 结局验收。
 
 当前实施进度见 [实施状态](../../status/implementation-plan.md)。
 
-电影 VM 入口已接入来源命令、Media wait、播放位置及恢复校验，见 [脚本执行](script-execution.md)。VM 仅保存显式游标；解码器、PCM 队列和 GPU 资源不进入存档。Family 播放接线尚未完成，当前明确拒绝电影事件。
+电影 VM 入口已接入来源命令、Media wait、播放位置及恢复校验，见 [脚本执行](script-execution.md)。VM 仅保存显式游标；解码器、PCM 队列和 GPU 资源不进入存档。Family 现通过显式 FFmpeg feature 重建电影播放，默认无 FFmpeg 构建仍明确拒绝电影事件。

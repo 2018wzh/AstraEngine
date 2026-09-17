@@ -365,3 +365,5 @@ SDK 增量媒体增加有界 PCM 混音队列，复用共享媒体包；覆盖�
 Classic route.coverage.012 完成原 build/package 的 GPU Headless 输入流程，47,815 条输入、38 次选择到达 tsui.ending，DX12 独显且无诊断。终点 PNG 已查看，仍为黑场；完整视听与真实 Player 验收保持开放。FVP Sandbox AUTO 长流程持续推进，正文可见，尚未到结局且仍使用显式测试音频设备。
 
 Musica movie VM 入口从来源 00610272d 接入，保留原生参数、等待与现有 v20 游标字段；新增播放位置更新及保存/恢复关联校验。专项测试覆盖中途恢复、错误完成通知、旧身份/倒退位置、非法参数与损坏状态拒绝。133 项 Musica 测试（含显式运行的 9 项 GPU 测试）和 12 项 CLI 测试通过，相关 Clippy、fmt 与文档检查通过。Family 仍明确返回电影未接线诊断，GPU/PCM 播放和完整恢复继续开放。
+
+Musica Family 已通过 `ffmpeg-vcpkg` 接入完整电影样本：SDK 增量解码、现有 GPU Scene、同一音频 worker 的 PCM 混音，以及暂停、结束和按游标重开/seek。影片跳过沿用来源的 Control 与 movie 自身标记，独立于消息快进设置。含 GPU 的 136 项全量测试及新增跳过专项通过，电影四项专项覆盖连续画面/PCM、中途 F5/F9、损坏输入、阻塞 PCM 关闭和重复开关；无 FFmpeg 的明确错误测试通过。真实游戏电影、长片吞吐、设备音画同步与结局验收仍开放。

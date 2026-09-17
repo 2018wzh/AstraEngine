@@ -26,8 +26,12 @@ use std::{
 };
 mod fade;
 mod mixer;
+#[cfg(feature = "ffmpeg-vcpkg")]
+mod movie;
 use fade::FadeSnapshot;
 use mixer::Mixer;
+#[cfg(feature = "ffmpeg-vcpkg")]
+pub(crate) use movie::MoviePcm;
 
 pub(crate) const FORMAT: PcmFormatSpec = PcmFormatSpec {
     sample_rate: 48000,
@@ -54,6 +58,8 @@ enum Command {
     Duration(u32, SyncSender<FamilyResult<u32>>),
 }
 pub(crate) struct Audio {
+    #[cfg(feature = "ffmpeg-vcpkg")]
+    movie: Arc<Mutex<Option<Arc<MoviePcm>>>>,
     commands: SyncSender<Command>,
     sink: Arc<AudioSinkBox>,
     stop: Arc<AtomicBool>,
@@ -68,11 +74,22 @@ impl Audio {
         let failure = Arc::new(Mutex::new(None));
         let (tx, rx) = sync_channel(64);
         let (s, c, f) = (sink.clone(), stop.clone(), failure.clone());
+        #[cfg(feature = "ffmpeg-vcpkg")]
+        let movie = Arc::new(Mutex::new(None));
+        #[cfg(feature = "ffmpeg-vcpkg")]
+        let movie_worker = movie.clone();
         let worker = thread::Builder::new()
             .name("musica-audio".into())
             .spawn(move || {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    run(archive, s.clone(), c.clone(), rx)
+                    run(
+                        archive,
+                        s.clone(),
+                        c.clone(),
+                        rx,
+                        #[cfg(feature = "ffmpeg-vcpkg")]
+                        movie_worker,
+                    )
                 }));
                 let error = match result {
                     Ok(Ok(())) => None,
@@ -95,6 +112,8 @@ impl Audio {
                 )
             })?;
         Ok(Self {
+            #[cfg(feature = "ffmpeg-vcpkg")]
+            movie,
             commands: tx,
             sink,
             stop,
@@ -198,6 +217,7 @@ fn run(
     sink: Arc<AudioSinkBox>,
     stop: Arc<AtomicBool>,
     commands: Receiver<Command>,
+    #[cfg(feature = "ffmpeg-vcpkg")] movie: Arc<Mutex<Option<Arc<MoviePcm>>>>,
 ) -> FamilyResult<()> {
     let mut mixer = Mixer::new()?;
     let mut suspended = false;
@@ -235,8 +255,26 @@ fn run(
         if !suspended {
             mixer.render(&mut samples);
         }
+        #[cfg(feature = "ffmpeg-vcpkg")]
+        let movie_mix = if !suspended {
+            let track = movie
+                .lock()
+                .map_err(|_| error("ASTRA_EMU_MUSICA_AUDIO_STATE", "movie audio state poisoned"))?
+                .clone();
+            track
+                .map(|track| track.mix(&mut samples).map(|position| (track, position)))
+                .transpose()?
+        } else {
+            None
+        };
         match sink.write(PcmChunk::F32(samples.into())).into_result()? {
-            AudioWriteStatus::Accepted => {}
+            AudioWriteStatus::Accepted =>
+            {
+                #[cfg(feature = "ffmpeg-vcpkg")]
+                if let Some((track, position)) = movie_mix {
+                    track.accept(position);
+                }
+            }
             _ if stop.load(Ordering::Acquire) => break,
             _ => {
                 return Err(error(

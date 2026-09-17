@@ -1,4 +1,5 @@
 mod audio;
+mod movie;
 mod provider;
 mod scene;
 mod session;

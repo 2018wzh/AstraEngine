@@ -10,6 +10,7 @@ doctest = false
 
 [features]
 default = []
+ffmpeg-vcpkg = ["astra-emu-sdk/video-ffmpeg"]
 dynamic-plugin-export = []
 
 [dependencies]
