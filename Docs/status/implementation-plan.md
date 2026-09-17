@@ -371,3 +371,7 @@ Musica Family 已通过 `ffmpeg-vcpkg` 接入完整电影样本：SDK 增量解�
 Musica K06_01 通过当前 Family 动态插件与 GPU 完成 21,600 帧实际游戏 Headless 运行并正常退出；已查看末帧，背景、角色和正文可见。使用 NullAudioDevice，尚不证明电影播放、真实音频或结局。Manager Headless 现在在日志 sink 关闭前记录启动、输入配置及运行失败的完整原因；非法帧数的独立进程检查确认非零退出且诊断文件包含根因，相关三项输入测试及 Manager Clippy 通过。
 
 Classic route.coverage.013 完成同一 build/package 的 GPU Headless 输入流程，47,817 条输入、38 次选择到达 tsui.ending，DX12 独显且无诊断。已查看终点 PNG，仍为黑场；完整视听与真实 Player 验收保持开放。
+
+电影解码不再限制为每次呈现只取一个音视频包：SDK 支持同时限制包数和字节数的批次，Musica 每次最多四包，PCM 提交前检查整批帧数及包数余量。五项 worker、四项 PCM 和四项 Musica GPU 电影测试通过，覆盖完整内容一致性、字节边界、暂存包的 seek 失效、超限错误及关闭；长片与真实设备音画同步仍待验收。
+
+Classic route.coverage.014 完成同一 build/package 的 GPU Headless 输入流程，48,089 条输入、38 次选择到达 tsui.ending，无诊断。终点 PNG 已查看，仍为黑场；完整视听与真实 Player 验收保持开放。FVP Sandbox AUTO 已继续推进到机车库剧情，尚未到结局，仍使用测试音频设备。

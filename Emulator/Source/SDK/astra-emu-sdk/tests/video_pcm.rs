@@ -96,3 +96,18 @@ fn pcm_rejects_budget_format_overlap_and_sequence_without_mutating_queue() {
     track.mix_into(&mut out).unwrap();
     assert_eq!(out, [0.25; 2]);
 }
+
+#[test]
+fn pcm_batch_headroom_counts_packets_and_complete_allocations() {
+    let mut queue = PcmQueue::new(8000, 2, 1, 0, 8, 2).unwrap();
+    assert!(queue.can_buffer(8, 2));
+    assert!(!queue.can_buffer(9, 1));
+    assert!(!queue.can_buffer(1, 3));
+    queue.push(packet(1, 1, 0, 4), vec![0; 8]).unwrap();
+    queue.mix_into(&mut [0.0; 2]).unwrap();
+    assert!(queue.can_buffer(4, 1));
+    assert!(!queue.can_buffer(5, 1));
+    assert!(!queue.can_buffer(1, 2));
+    queue.mix_into(&mut [0.0; 6]).unwrap();
+    assert!(queue.can_buffer(8, 2));
+}

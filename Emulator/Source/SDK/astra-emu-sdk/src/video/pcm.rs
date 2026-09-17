@@ -176,6 +176,13 @@ impl PcmQueue {
         self.packets.is_empty()
     }
 
+    /// Check headroom before the single producer submits an asynchronous decode batch.
+    /// Consumers may free capacity concurrently; this does not reserve it for other producers.
+    pub fn can_buffer(&self, frames: usize, packets: usize) -> bool {
+        frames <= self.max_frames - self.resident_frames
+            && packets <= self.max_packets - self.packets.len()
+    }
+
     pub fn resident_frames(&self) -> usize {
         self.resident_frames
     }

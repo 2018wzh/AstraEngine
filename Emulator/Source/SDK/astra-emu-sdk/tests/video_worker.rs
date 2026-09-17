@@ -21,6 +21,14 @@ fn receive(worker: &mut VideoDecoderWorker) -> DecodeCompletion {
         std::thread::sleep(Duration::from_millis(1));
     }
 }
+fn receive_packet(worker: &mut VideoDecoderWorker) -> Option<DecodedMediaPacket> {
+    let DecodeCompletion::Packets { mut packets, eof } = receive(worker) else {
+        panic!("expected packets");
+    };
+    assert!(packets.len() <= 1);
+    assert!(!packets.is_empty() || eof);
+    packets.pop()
+}
 fn open() -> VideoDecoderWorker {
     VideoDecoderWorker::open(
         "mp4".into(),
@@ -36,7 +44,7 @@ fn open() -> VideoDecoderWorker {
 #[test]
 fn worker_decodes_complete_audio_video_stream_with_bounded_requests() {
     let mut worker = open();
-    assert!(worker.request_next().is_err());
+    assert!(worker.request_next(1, 64 * 1024 * 1024).is_err());
     let DecodeCompletion::Opened(config) = receive(&mut worker) else {
         panic!("expected open");
     };
@@ -47,10 +55,10 @@ fn worker_decodes_complete_audio_video_stream_with_bounded_requests() {
     let mut mixed_pcm = Vec::new();
     let mut last_pts = [0; 2];
     loop {
-        worker.request_next().unwrap();
-        assert!(worker.request_next().is_err());
-        match receive(&mut worker) {
-            DecodeCompletion::Packet(Some(DecodedMediaPacket::Video { packet, bgra8 })) => {
+        worker.request_next(1, 64 * 1024 * 1024).unwrap();
+        assert!(worker.request_next(1, 64 * 1024 * 1024).is_err());
+        match receive_packet(&mut worker) {
+            Some(DecodedMediaPacket::Video { packet, bgra8 }) => {
                 assert_eq!(packet.sequence, video + 1);
                 assert!(packet.pts_us >= last_pts[0]);
                 last_pts[0] = packet.pts_us;
@@ -60,7 +68,7 @@ fn worker_decodes_complete_audio_video_stream_with_bounded_requests() {
                 );
                 video += 1;
             }
-            DecodeCompletion::Packet(Some(DecodedMediaPacket::Audio { packet, samples })) => {
+            Some(DecodedMediaPacket::Audio { packet, samples }) => {
                 assert_eq!(packet.sequence, audio + 1);
                 assert!(packet.pts_us >= last_pts[1]);
                 last_pts[1] = packet.pts_us;
@@ -75,8 +83,7 @@ fn worker_decodes_complete_audio_video_stream_with_bounded_requests() {
                 }
                 audio += 1;
             }
-            DecodeCompletion::Packet(None) => break,
-            _ => panic!("unexpected completion"),
+            None => break,
         }
     }
     assert!(video > 8 && audio > 8);
@@ -99,24 +106,24 @@ fn worker_seek_replaces_generation_and_close_discards_pending_result() {
     let DecodeCompletion::Opened(config) = receive(&mut worker) else {
         panic!("expected open");
     };
-    worker.request_next().unwrap();
+    worker.request_next(1, 64 * 1024 * 1024).unwrap();
     receive(&mut worker);
     worker.request_seek(config.duration_us / 2).unwrap();
     assert!(matches!(
         receive(&mut worker),
         DecodeCompletion::Seeked { generation: 2 }
     ));
-    worker.request_next().unwrap();
-    match receive(&mut worker) {
-        DecodeCompletion::Packet(Some(DecodedMediaPacket::Video { packet, .. })) => {
+    worker.request_next(1, 64 * 1024 * 1024).unwrap();
+    match receive_packet(&mut worker) {
+        Some(DecodedMediaPacket::Video { packet, .. }) => {
             assert_eq!(packet.generation, 2)
         }
-        DecodeCompletion::Packet(Some(DecodedMediaPacket::Audio { packet, .. })) => {
+        Some(DecodedMediaPacket::Audio { packet, .. }) => {
             assert_eq!(packet.generation, 2)
         }
         _ => panic!("seek produced no media"),
     }
-    worker.request_next().unwrap();
+    worker.request_next(1, 64 * 1024 * 1024).unwrap();
     worker.close().unwrap();
     for _ in 0..3 {
         open().close().unwrap();
@@ -145,6 +152,128 @@ fn worker_open_error_is_reported_and_stops_further_requests() {
             Ok(Some(_)) => panic!("invalid input was accepted"),
         }
     }
-    assert!(worker.request_next().is_err());
+    assert!(worker.request_next(1, 64 * 1024 * 1024).is_err());
+    worker.close().unwrap();
+}
+
+#[test]
+fn batched_decode_preserves_every_packet_across_byte_boundaries_and_seek() {
+    fn signatures(
+        worker: &mut VideoDecoderWorker,
+        count: usize,
+    ) -> (Vec<(bool, u64, u64, astra_core::Hash256)>, usize) {
+        let mut output = Vec::new();
+        let mut batches = 0;
+        loop {
+            // Two sample video frames do not fit together, exercising carried packets.
+            let budget = 3 * 1024 * 1024;
+            worker.request_next(count, budget).unwrap();
+            let DecodeCompletion::Packets { packets, eof } = receive(worker) else {
+                panic!("expected packets");
+            };
+            assert!(packets.len() <= count);
+            let mut bytes = 0;
+            for packet in packets {
+                match packet {
+                    DecodedMediaPacket::Video { packet, bgra8 } => {
+                        bytes += bgra8.len();
+                        output.push((
+                            true,
+                            packet.sequence,
+                            packet.pts_us,
+                            astra_core::Hash256::from_sha256(bgra8.as_ref()),
+                        ));
+                    }
+                    DecodedMediaPacket::Audio { packet, samples } => {
+                        let raw: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
+                        bytes += raw.len();
+                        output.push((
+                            false,
+                            packet.sequence,
+                            packet.pts_us,
+                            astra_core::Hash256::from_sha256(&raw),
+                        ));
+                    }
+                }
+            }
+            assert!(bytes <= budget);
+            batches += 1;
+            if eof {
+                break;
+            }
+        }
+        (output, batches)
+    }
+    let mut worker = open();
+    receive(&mut worker);
+    assert!(worker.request_next(0, 1024).is_err());
+    assert!(worker.request_next(17, 1024).is_err());
+    assert!(worker.request_next(1, 0).is_err());
+    let (single, single_batches) = signatures(&mut worker, 1);
+    worker.close().unwrap();
+    let mut worker = open();
+    receive(&mut worker);
+    let (batched, batches) = signatures(&mut worker, 4);
+    assert!(
+        batched == single,
+        "single={} batched={} first mismatch={:?}",
+        single.len(),
+        batched.len(),
+        single.iter().zip(&batched).position(|(a, b)| a != b)
+    );
+    assert!(
+        batches * 3 < single_batches * 2,
+        "batching must remove the one packet per tick ceiling"
+    );
+    worker.close().unwrap();
+    let mut worker = open();
+    let DecodeCompletion::Opened(config) = receive(&mut worker) else {
+        panic!("expected open");
+    };
+    // This byte-limited batch leaves the next video packet carried by the worker.
+    worker.request_next(4, 3 * 1024 * 1024).unwrap();
+    receive(&mut worker);
+    worker.request_seek(config.duration_us / 2).unwrap();
+    assert!(matches!(
+        receive(&mut worker),
+        DecodeCompletion::Seeked { generation: 2 }
+    ));
+    worker.request_next(4, 3 * 1024 * 1024).unwrap();
+    let DecodeCompletion::Packets { packets, .. } = receive(&mut worker) else {
+        panic!("expected packets");
+    };
+    assert!(!packets.is_empty());
+    for packet in packets {
+        let generation = match packet {
+            DecodedMediaPacket::Video { packet, .. } => packet.generation,
+            DecodedMediaPacket::Audio { packet, .. } => packet.generation,
+        };
+        assert_eq!(generation, 2, "seek must discard the carried old packet");
+    }
+    // Queue a batch then close without polling: producer must unblock and join.
+    worker.request_next(4, 3 * 1024 * 1024).unwrap();
+    worker.close().unwrap();
+}
+
+#[test]
+fn packet_exceeding_batch_budget_fails_without_returning_a_partial_success() {
+    let mut worker = open();
+    receive(&mut worker);
+    worker.request_next(4, 1).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        match worker.poll() {
+            Err(error) => {
+                assert_eq!(error.code(), "ASTRA_EMU_VIDEO_BATCH");
+                break;
+            }
+            Ok(None) => {
+                assert!(Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            Ok(Some(_)) => panic!("oversized packet was accepted"),
+        }
+    }
+    assert!(worker.request_next(1, 1024).is_err());
     worker.close().unwrap();
 }

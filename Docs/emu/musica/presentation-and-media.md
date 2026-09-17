@@ -12,7 +12,7 @@ BGM、SE 和 voice 由 Family 的 Kira worker 混音，解码复用 SDK/Symphoni
 
 ## 电影接入
 
-来源实现复用 AstraMedia 的 FFmpeg 增量解码，不另写 AVI 容器或 codec。SDK 的可选 `video-ffmpeg` feature 提供 `VideoDecoderWorker`：在所属线程内创建、操作和释放解码器，异步返回初始化结果、逐包音视频或 seek 代次。一次只允许一个待完成请求，结果队列容量为一，解码预算沿用 `FfmpegStreamLimits`。
+来源实现复用 AstraMedia 的 FFmpeg 增量解码，不另写 AVI 容器或 codec。SDK 的可选 `video-ffmpeg` feature 提供 `VideoDecoderWorker`：在所属线程内创建、操作和释放解码器，异步返回初始化结果、有界音视频包批次或 seek 代次。一次只允许一个待完成请求，结果队列容量为一，解码预算沿用 `FfmpegStreamLimits`。每批另有包数和字节上限，worker 至多保留一个暂时装不下的包，seek 丢弃它；单包超过批次字节预算直接失败。Musica 每帧取至多四包，提交前检查 PCM 帧数和包数余量，避免将音视频总吞吐限制在呈现帧率。
 
 关闭会丢弃待处理结果、取消后续请求并等待 worker 释放原生资源；seek 返回新代次，后续包携带同一代次。失败明确返回，不能换 decoder 或退回首帧预览。默认 SDK feature 不要求 FFmpeg；显式选择该 feature 时需要匹配的原生依赖。
 

@@ -6,6 +6,10 @@ use std::{
     sync::{atomic::Ordering, Arc},
 };
 
+const BATCH_PACKETS: usize = 4;
+const AUDIO_PACKET_BYTES: usize = 64 * 1024;
+const VIDEO_BYTES: usize = 64 * 1024 * 1024;
+
 pub(crate) struct Movie {
     decoder: VideoDecoderWorker,
     audio: Option<Arc<MoviePcm>>,
@@ -48,7 +52,7 @@ impl Movie {
             Arc::from(bytes.as_ref()),
             FfmpegStreamLimits {
                 max_encoded_bytes: 512 * 1024 * 1024,
-                max_audio_packet_bytes: 64 * 1024,
+                max_audio_packet_bytes: AUDIO_PACKET_BYTES,
                 ..Default::default()
             },
             Some(FfmpegAudioOutputFormat {
@@ -118,21 +122,27 @@ impl Movie {
                     DecodeCompletion::Seeked { generation } => {
                         self.start_audio(host, generation)?
                     }
-                    DecodeCompletion::Packet(None) => self.eof = true,
-                    DecodeCompletion::Packet(Some(DecodedMediaPacket::Audio {
-                        packet,
-                        samples,
-                    })) => {
-                        self.audio
-                            .as_ref()
-                            .ok_or_else(|| {
-                                error("ASTRA_EMU_MUSICA_MOVIE_FORMAT", "unexpected audio packet")
-                            })?
-                            .push(packet, samples)?;
-                    }
-                    DecodeCompletion::Packet(Some(DecodedMediaPacket::Video { packet, bgra8 })) => {
-                        self.video_bytes += bgra8.len();
-                        self.frames.push_back((packet, bgra8));
+                    DecodeCompletion::Packets { packets, eof } => {
+                        self.eof = eof;
+                        for packet in packets {
+                            match packet {
+                                DecodedMediaPacket::Audio { packet, samples } => {
+                                    self.audio
+                                        .as_ref()
+                                        .ok_or_else(|| {
+                                            error(
+                                                "ASTRA_EMU_MUSICA_MOVIE_FORMAT",
+                                                "unexpected audio packet",
+                                            )
+                                        })?
+                                        .push(packet, samples)?;
+                                }
+                                DecodedMediaPacket::Video { packet, bgra8 } => {
+                                    self.video_bytes += bgra8.len();
+                                    self.frames.push_back((packet, bgra8));
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -140,17 +150,19 @@ impl Movie {
         if self.initialized
             && !self.pending
             && !self.eof
-            && self.frames.len() < 16
-            && self.video_bytes < 64 * 1024 * 1024
+            && self.frames.len() + BATCH_PACKETS <= 16
+            && self.video_bytes < VIDEO_BYTES
             && self
                 .audio
                 .as_ref()
-                .map(|a| a.buffered_frames())
+                .map(|a| a.can_buffer(BATCH_PACKETS * AUDIO_PACKET_BYTES / 4, BATCH_PACKETS))
                 .transpose()?
-                .unwrap_or(0)
-                < 48000
+                .unwrap_or(true)
         {
-            self.decoder.request_next().map_err(core_error)?;
+            // Reserve space for all four results, including worst-case PCM packets.
+            self.decoder
+                .request_next(BATCH_PACKETS, VIDEO_BYTES)
+                .map_err(core_error)?;
             self.pending = true;
         }
         let audio_drained = self

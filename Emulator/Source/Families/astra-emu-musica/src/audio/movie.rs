@@ -34,12 +34,12 @@ impl MoviePcm {
             .push(packet, samples)
             .map_err(crate::scene::core_error)
     }
-    pub fn buffered_frames(&self) -> FamilyResult<usize> {
+    pub fn can_buffer(&self, frames: usize, packets: usize) -> FamilyResult<bool> {
         Ok(self
             .queue
             .lock()
             .map_err(|_| state_error())?
-            .resident_frames())
+            .can_buffer(frames, packets))
     }
     pub fn position_us(&self) -> u64 {
         self.position.load(Ordering::Acquire)

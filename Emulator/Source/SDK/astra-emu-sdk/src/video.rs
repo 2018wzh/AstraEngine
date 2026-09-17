@@ -1,5 +1,5 @@
 //! Thread-owned incremental FFmpeg decode, independent of Engine/VN sessions.
-//! One outstanding operation and one bounded result prevent decoded payload accumulation.
+//! One outstanding operation and a bounded packet batch prevent decoded payload accumulation.
 use crate::CoreError;
 use astra_media::FfmpegPlaybackDecoder;
 pub use astra_media::{
@@ -15,14 +15,19 @@ use std::sync::{
 use std::thread::JoinHandle;
 
 enum Command {
-    Next,
+    Next { packets: usize, bytes: usize },
     Seek(u64),
 }
 #[derive(Debug)]
 pub enum DecodeCompletion {
     Opened(MediaPlaybackConfig),
-    Packet(Option<DecodedMediaPacket>),
-    Seeked { generation: u64 },
+    Packets {
+        packets: Vec<DecodedMediaPacket>,
+        eof: bool,
+    },
+    Seeked {
+        generation: u64,
+    },
 }
 
 pub struct VideoDecoderWorker {
@@ -56,8 +61,16 @@ impl VideoDecoderWorker {
             pending: true,
         })
     }
-    pub fn request_next(&mut self) -> Result<(), CoreError> {
-        self.submit(Command::Next)
+    /// Decode a bounded batch so packet throughput is independent of host frame rate.
+    /// A packet larger than the byte budget fails rather than exceeding the budget.
+    pub fn request_next(&mut self, packets: usize, bytes: usize) -> Result<(), CoreError> {
+        if !(1..=16).contains(&packets) || bytes == 0 || bytes > 256 * 1024 * 1024 {
+            return Err(CoreError::invalid(
+                "ASTRA_EMU_VIDEO_BATCH",
+                "invalid decode batch budget",
+            ));
+        }
+        self.submit(Command::Next { packets, bytes })
     }
     /// Seek is serialized with decode; its generation is carried by subsequent packets.
     pub fn request_seek(&mut self, position_us: u64) -> Result<(), CoreError> {
@@ -135,6 +148,9 @@ fn run(
     replies: mpsc::SyncSender<Result<DecodeCompletion, CoreError>>,
     stop: Arc<AtomicBool>,
 ) -> Result<(), CoreError> {
+    if stop.load(Ordering::Acquire) {
+        return Ok(());
+    }
     let mut decoder =
         match FfmpegPlaybackDecoder::open_with_audio_output(&codec, &bytes, limits, audio) {
             Ok(decoder) => decoder,
@@ -143,6 +159,7 @@ fn run(
                 return Ok(());
             }
         };
+    let mut carried = None;
     if !stop.load(Ordering::Acquire)
         && replies
             .send(Ok(DecodeCompletion::Opened(decoder.playback_config())))
@@ -153,12 +170,17 @@ fn run(
                 break;
             }
             let result = match request {
-                Command::Next => decoder.read_next().map(DecodeCompletion::Packet),
-                Command::Seek(position) => decoder
-                    .seek(position)
-                    .map(|generation| DecodeCompletion::Seeked { generation }),
-            }
-            .map_err(decode_error);
+                Command::Next { packets, bytes } => {
+                    read_batch(&mut decoder, &mut carried, packets, bytes, &stop)
+                }
+                Command::Seek(position) => {
+                    carried = None;
+                    decoder
+                        .seek(position)
+                        .map(|generation| DecodeCompletion::Seeked { generation })
+                        .map_err(decode_error)
+                }
+            };
             let failed = result.is_err();
             if stop.load(Ordering::Acquire) || replies.send(result).is_err() || failed {
                 break;
@@ -166,4 +188,43 @@ fn run(
         }
     }
     decoder.cancel().map_err(decode_error)
+}
+
+fn read_batch(
+    decoder: &mut FfmpegPlaybackDecoder,
+    carried: &mut Option<DecodedMediaPacket>,
+    max_packets: usize,
+    max_bytes: usize,
+    stop: &AtomicBool,
+) -> Result<DecodeCompletion, CoreError> {
+    let mut packets = Vec::with_capacity(max_packets);
+    let mut bytes = 0;
+    let mut eof = false;
+    while packets.len() < max_packets && !stop.load(Ordering::Acquire) {
+        let next = match carried.take() {
+            Some(packet) => Some(packet),
+            None => decoder.read_next().map_err(decode_error)?,
+        };
+        let Some(packet) = next else {
+            eof = true;
+            break;
+        };
+        let size = match &packet {
+            DecodedMediaPacket::Video { bgra8, .. } => bgra8.len(),
+            DecodedMediaPacket::Audio { samples, .. } => std::mem::size_of_val(samples.as_slice()),
+        };
+        if size > max_bytes {
+            return Err(CoreError::invalid(
+                "ASTRA_EMU_VIDEO_BATCH",
+                "decoded packet exceeds batch byte budget",
+            ));
+        }
+        if size > max_bytes - bytes {
+            *carried = Some(packet);
+            break;
+        }
+        bytes += size;
+        packets.push(packet);
+    }
+    Ok(DecodeCompletion::Packets { packets, eof })
 }
