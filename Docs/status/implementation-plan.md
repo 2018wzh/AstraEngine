@@ -359,3 +359,7 @@ Musica 已读集合与 Skip 从来源接入，替换原先独立 auto/skip 布�
 SDK 新增可选 FFmpeg 增量解码 worker，复用 AstraMedia，完成线程归属、单请求/单结果队列、seek 代次及取消关闭。公共完整音视频流、目标 PCM 格式、seek、待处理结果丢弃和非法输入的 3 项专项测试通过。Musica Family 电影会话、GPU 呈现和 PCM 调度尚未接入，此项不关闭电影或真实游戏长流程验收。
 
 Classic route.coverage.011 完成同一 build/package 的 GPU Headless 输入流程，47,805 条输入、38 次选择到达 tsui.ending，DX12 独显且无诊断。终点 PNG 已查看，仍为黑场；完整视听与真实 Player 验收保持开放。
+
+SDK 增量媒体增加有界 PCM 混音队列，复用共享媒体包；覆盖逐包混音、时间间隔、缺包停钟、seek 清空、迟到代次拒绝和驻留预算。完整样本整合测试发现并修复 AstraMedia 升采样缓冲不足、输出 PTS 未扣除 resampler 延迟及尾部未完全排空的问题，补充升降采样全时长回归。SDK 15 项测试、AstraMedia 含 FFmpeg 的 41 项测试通过；相关 Clippy、fmt 与文档检查通过。Family 电影会话与现有音频 worker 的接线尚未完成。
+
+Classic route.coverage.012 完成原 build/package 的 GPU Headless 输入流程，47,815 条输入、38 次选择到达 tsui.ending，DX12 独显且无诊断。终点 PNG 已查看，仍为黑场；完整视听与真实 Player 验收保持开放。FVP Sandbox AUTO 长流程持续推进，正文可见，尚未到结局且仍使用显式测试音频设备。

@@ -9,6 +9,8 @@ use tempfile::{Builder, NamedTempFile};
 use super::{decode_error, MediaError};
 use crate::{LateVideoPolicy, MediaPlaybackConfig};
 
+mod audio;
+use audio::*;
 mod backend;
 use backend::*;
 

@@ -46,3 +46,7 @@ required-features = ["archive"]
 [[test]]
 name = "video_worker"
 required-features = ["video-ffmpeg"]
+
+[[test]]
+name = "video_pcm"
+required-features = ["video-ffmpeg"]

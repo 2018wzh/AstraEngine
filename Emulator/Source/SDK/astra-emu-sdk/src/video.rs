@@ -3,8 +3,11 @@
 use crate::CoreError;
 use astra_media::FfmpegPlaybackDecoder;
 pub use astra_media::{
-    DecodedMediaPacket, FfmpegAudioOutputFormat, FfmpegStreamLimits, MediaPlaybackConfig,
+    AudioFramePacket, DecodedMediaPacket, FfmpegAudioOutputFormat, FfmpegStreamLimits,
+    MediaPlaybackConfig,
 };
+mod pcm;
+pub use pcm::{PcmMixResult, PcmQueue};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     mpsc, Arc,

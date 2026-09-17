@@ -277,6 +277,53 @@ fn media_pipeline_payload_budget_blocks_without_partial_state() {
     .is_err());
 }
 
+#[test]
+fn resampled_stream_preserves_full_duration_without_packet_gaps() {
+    // A complete 200 ms PCM source gives an exact output frame count at both rates.
+    let mut source = b"RIFF".to_vec();
+    source.extend(3236_u32.to_le_bytes());
+    source.extend(b"WAVEfmt ");
+    source.extend(16_u32.to_le_bytes());
+    source.extend(1_u16.to_le_bytes());
+    source.extend(1_u16.to_le_bytes());
+    source.extend(8000_u32.to_le_bytes());
+    source.extend(16000_u32.to_le_bytes());
+    source.extend(2_u16.to_le_bytes());
+    source.extend(16_u16.to_le_bytes());
+    source.extend(b"data");
+    source.extend(3200_u32.to_le_bytes());
+    for _ in 0..1600 {
+        source.extend(8192_i16.to_le_bytes());
+    }
+    for rate in [4000, 48000] {
+        let mut decoder = FfmpegPlaybackDecoder::open_with_audio_output(
+            "wav",
+            &source,
+            FfmpegStreamLimits::default(),
+            Some(FfmpegAudioOutputFormat {
+                sample_rate: rate,
+                channels: 1,
+            }),
+        )
+        .unwrap();
+        let mut frames = 0_u64;
+        let mut packets = 0;
+        while let Some(decoded) = decoder.read_next().unwrap() {
+            let DecodedMediaPacket::Audio { packet, samples } = decoded else {
+                panic!("unexpected video")
+            };
+            let expected_pts = frames * 1_000_000 / u64::from(rate);
+            assert!(packet.pts_us.abs_diff(expected_pts) <= 1_000_000 / u64::from(rate));
+            assert_eq!(samples.len(), packet.frame_count as usize);
+            assert!(samples.iter().all(|sample| sample.abs_diff(8192) <= 1));
+            frames += u64::from(packet.frame_count);
+            packets += 1;
+        }
+        assert!(packets >= 2);
+        assert_eq!(frames, u64::from(rate / 5));
+    }
+}
+
 fn fixture_bytes(file: &str) -> Vec<u8> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../../Fixtures/PublicDomainMedia")
