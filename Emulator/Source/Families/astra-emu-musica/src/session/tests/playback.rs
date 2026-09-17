@@ -150,3 +150,50 @@ fn native_gpu_initial_unfocused_window_obeys_background_preference() {
         Box::new(session).close().unwrap();
     }
 }
+
+#[test]
+fn native_gpu_text_shadow_uses_current_manager_setting_after_load() {
+    let _session = PROVIDER_SESSION.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    fixture::game(
+        root.path(),
+        b".stage BG.png 0 0 * 0 0\r\n.message 1  speaker Shadow\r\n.end\r\n",
+    );
+    let mut png = std::io::Cursor::new(Vec::new());
+    image::RgbaImage::from_pixel(1280, 720, image::Rgba([100, 150, 200, 255]))
+        .write_to(&mut png, image::ImageFormat::Png)
+        .unwrap();
+    fixture::asset(root.path(), "bg", "BG.png", &png.into_inner());
+    let mut provider = MusicaProvider::default();
+    let mut capture = Capture(Vec::new());
+    let mut opened = provider
+        .open(request(root.path(), Sink::default()))
+        .unwrap();
+    opened.session.advance(16_666_667, &[]).unwrap();
+    opened.session.advance(16_666_667, &[]).unwrap();
+    opened.session.advance(0, &[key(KeyCode::F5)]).unwrap();
+    opened.session.visit_frame(&mut capture).unwrap();
+    let outlined = capture.0.clone();
+    opened.session.close().unwrap();
+    let mut req = request(root.path(), Sink::default());
+    req.configuration.push(ConfigEntry {
+        id: "text_shadow".into(),
+        value: ConfigValue::Bool(false),
+    });
+    let mut opened = provider.open(req).unwrap();
+    opened.session.advance(16_666_667, &[]).unwrap();
+    opened.session.advance(16_666_667, &[]).unwrap();
+    opened.session.visit_frame(&mut capture).unwrap();
+    let plain = capture.0.clone();
+    assert!(
+        outlined != plain,
+        "shadow must change the rendered dialogue"
+    );
+    opened.session.advance(0, &[key(KeyCode::F9)]).unwrap();
+    opened.session.visit_frame(&mut capture).unwrap();
+    assert!(
+        plain == capture.0,
+        "load must retain the current shadow preference"
+    );
+    opened.session.close().unwrap();
+}

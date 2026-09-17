@@ -1,5 +1,5 @@
 use astra_core::Hash256;
-use astra_emu_sdk::{TextScene, TextSceneLayout};
+use astra_emu_sdk::{TextOutline, TextScene, TextSceneLayout};
 use astra_media_core::SceneCommand;
 use astra_text::{
     CosmicTextLayoutProvider, FontBindingContext, LayoutConstraint, OverflowPolicy, PackagedFont,
@@ -11,6 +11,7 @@ const FONT_ASSET_ID: &str = "asset:/font/emu/noto-sans-jp";
 
 pub struct MusicaTextRenderer {
     scene: TextScene,
+    pub(crate) shadow: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -52,6 +53,7 @@ impl MusicaTextRenderer {
         .map_err(|_| "ASTRA_EMU_MUSICA_TEXT_PROVIDER_CREATE".to_owned())?;
         Ok(Self {
             scene: TextScene::new(provider),
+            shadow: true,
         })
     }
 
@@ -111,6 +113,14 @@ impl MusicaTextRenderer {
                 },
             ));
         }
+        if self.shadow {
+            for region in &mut regions {
+                region.outline = Some(TextOutline {
+                    radius: 2,
+                    rgba: [0, 0, 0, 192],
+                });
+            }
+        }
         self.scene.frame(&regions).map_err(text_error)
     }
 }
@@ -164,6 +174,7 @@ pub(crate) fn choice_at(count: usize, x: f32, y: f32) -> Option<u32> {
 fn layout_request(layout_id: &str, text: &str, region: Region) -> TextSceneLayout {
     TextSceneLayout {
         translation: (region.x, region.y),
+        outline: None,
         rgba: [255, 255, 255, 255],
         request: TextLayoutRequest {
             key: layout_id.into(),
@@ -294,5 +305,67 @@ mod tests {
             .unwrap()
             .iter()
             .any(|command| matches!(command, SceneCommand::ReleaseResource { .. })));
+    }
+    #[test]
+    #[ignore = "requires a hardware GPU"]
+    fn gpu_shadow_toggle_reuses_glyphs_and_removes_outline_layers() {
+        let mut text = MusicaTextRenderer::new().unwrap();
+        let mut gpu = pollster::block_on(WgpuOffscreenRenderer::new()).unwrap();
+        let mut sequence = 0;
+        let mut draw = |text: &mut MusicaTextRenderer, shadow| {
+            text.shadow = shadow;
+            sequence += 1;
+            let commands = text
+                .commands(Some(("Outline", Some("Name"))), None)
+                .unwrap();
+            if sequence > 1 {
+                assert!(!commands.iter().any(|c| matches!(
+                    c,
+                    SceneCommand::UploadGlyph { .. } | SceneCommand::ReleaseResource { .. }
+                )));
+            }
+            gpu.render(&SceneFrame {
+                sequence,
+                width: 1280,
+                height: 720,
+                clear_rgba: [0, 0, 0, 0],
+                commands,
+                semantics: None,
+            })
+            .unwrap()
+            .rgba8
+        };
+        let outlined = draw(&mut text, true);
+        let plain = draw(&mut text, false);
+        let occupied = |rgba: &[u8]| rgba.as_chunks::<4>().0.iter().filter(|p| p[3] != 0).count();
+        assert!(occupied(&outlined) > occupied(&plain));
+        assert!(occupied(&plain) > 0);
+        assert_eq!(outlined, draw(&mut text, true));
+    }
+
+    #[test]
+    fn invalid_outline_rejects_before_mutating_glyph_ownership() {
+        let mut text = MusicaTextRenderer::new().unwrap();
+        text.commands(Some(("Outline", None)), None).unwrap();
+        for radius in [0, 9] {
+            let mut region = layout_request("invalid", "Text", choice_region(0));
+            region.outline = Some(TextOutline {
+                radius,
+                rgba: [0, 0, 0, 192],
+            });
+            assert!(text.scene.frame(&[region]).is_err());
+        }
+        let mut region = layout_request("overflow", "Text", choice_region(0));
+        region.translation = (i32::MAX, i32::MAX);
+        region.outline = Some(TextOutline {
+            radius: 2,
+            rgba: [0, 0, 0, 192],
+        });
+        assert!(text.scene.frame(&[region]).is_err());
+        assert!(!text
+            .commands(Some(("Outline", None)), None)
+            .unwrap()
+            .iter()
+            .any(|c| matches!(c, SceneCommand::UploadGlyph { .. })));
     }
 }

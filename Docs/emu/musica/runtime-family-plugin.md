@@ -27,3 +27,5 @@ Manager 的 Audio 分组提供 `bgm_volume`、`voice_volume`、`se_volume`（0�
 格式、key、资源、opcode、配置及解码错误明确返回，不更换算法或吞掉失败。已有存档读取失败不覆盖原文件。
 
 详细命令见 [脚本执行](script-execution.md)，共享绘制与媒体见 [呈现与媒体](presentation-and-media.md)，实际完成范围见 [实施状态](../../status/implementation-plan.md)。完整游戏结局与平台验收仍开放。
+
+`text_shadow` 默认开启，按来源实现为正文、说话人和 backlog 添加黑色圆形描边，选择项保持原样。关闭后仍使用同一 GPU 文字渲染路径；存档不保存此显示偏好，读档继续使用当前 Manager 设置。

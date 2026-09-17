@@ -23,7 +23,7 @@ mod texture;
 
 pub use error::CoreError;
 #[cfg(feature = "text")]
-pub use text::{TextScene, TextSceneLayout};
+pub use text::{TextOutline, TextScene, TextSceneLayout};
 #[cfg(feature = "image")]
 pub use texture::TextureCache;
 

@@ -49,6 +49,7 @@ impl MusicaSession {
         vm.set_auto_delay_units(self.vm.auto_delay_units())
             .map_err(vm_error)?;
         let mut scene = Scene::new(self.archive.clone(), self.info.width, self.info.height)?;
+        scene.set_text_shadow(self.scene.text_shadow());
         let choices = vm.choice_display().map_err(vm_error)?;
         scene.render(
             vm.state(),

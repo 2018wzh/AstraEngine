@@ -88,3 +88,5 @@ FFmpeg 增量解码按原生 resampler 的输出上界分配有界缓冲，用�
 Musica 的用户音量及静音独立于剧情音频状态：BGM、voice 和 SE（含 se2/se3）复用 Kira 子音轨增益，原生声音的 volume/fade/cursor 保存原值；恢复采用当前 Manager 配置，并在首批 PCM 前生效。静音不跳过资源解码、时长校验或 VM 等待。
 
 Musica 将来源的后台播放偏好放入 Family 启动配置：默认失焦暂停，显式启用才继续；窗口挂起优先于该偏好。剧情、演出、电影与音频共用暂停判定，焦点/挂起状态不写入剧情存档。失焦清除快进和待消费输入，恢复不积累暂停时长。
+
+Musica 的文字阴影沿用来源的圆形偏移描边：正文、说话人与 backlog 默认使用半径 2、黑色 alpha 192，选择项不套用。SDK `TextSceneLayout::outline` 接收可选 `TextOutline`，复用前景 shaping 与 GPU 字形资源；半径只接受 1–8，透明颜色、坐标溢出与布局标识冲突明确失败。关闭阴影释放描边布局，不重复上传仍可见的前景字形。Manager 的 `text_shadow` 是启动偏好，读档保留当前设置，不进入剧情存档。

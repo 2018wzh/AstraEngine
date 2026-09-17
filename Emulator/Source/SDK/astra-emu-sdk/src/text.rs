@@ -5,11 +5,19 @@ use astra_text::{
 };
 use std::collections::BTreeSet;
 
+/// Circular glyph outline; uses the same shaped glyph resources as the foreground.
+#[derive(Clone, Copy)]
+pub struct TextOutline {
+    pub radius: u8,
+    pub rgba: [u8; 4],
+}
+
 /// One core-owned text region. Layout policy and fonts remain explicit inputs.
 pub struct TextSceneLayout {
     pub request: TextLayoutRequest,
     pub translation: (i32, i32),
     pub rgba: [u8; 4],
+    pub outline: Option<TextOutline>,
 }
 
 /// Shaping and glyph residency shared by emulator families.
@@ -35,10 +43,43 @@ impl TextScene {
 
     pub fn frame(&mut self, regions: &[TextSceneLayout]) -> Result<Vec<SceneCommand>, MediaError> {
         let mut visible = BTreeSet::new();
-        for region in regions {
+        let mut layers = Vec::new();
+        for (index, region) in regions.iter().enumerate() {
             if region.request.key.trim().is_empty() || !visible.insert(region.request.key.clone()) {
                 return Err(MediaError::message("ASTRA_EMU_SDK_TEXT_LAYOUT_ID"));
             }
+            if let Some(outline) = region.outline {
+                if !(1..=8).contains(&outline.radius) || outline.rgba[3] == 0 {
+                    return Err(MediaError::message("ASTRA_EMU_SDK_TEXT_OUTLINE"));
+                }
+                let radius = i32::from(outline.radius);
+                for y in -radius..=radius {
+                    for x in -radius..=radius {
+                        if (x == 0 && y == 0) || x * x + y * y > radius * radius {
+                            continue;
+                        }
+                        let key = format!("{}.outline.{x}.{y}", region.request.key);
+                        if !visible.insert(key.clone()) {
+                            return Err(MediaError::message("ASTRA_EMU_SDK_TEXT_LAYOUT_ID"));
+                        }
+                        let translation = region
+                            .translation
+                            .0
+                            .checked_add(x)
+                            .zip(region.translation.1.checked_add(y))
+                            .ok_or_else(|| {
+                                MediaError::message("ASTRA_EMU_SDK_TEXT_OUTLINE_BOUNDS")
+                            })?;
+                        layers.push((key, index, translation, outline.rgba));
+                    }
+                }
+            }
+            layers.push((
+                region.request.key.clone(),
+                index,
+                region.translation,
+                region.rgba,
+            ));
         }
         let layouts = regions
             .iter()
@@ -55,15 +96,14 @@ impl TextScene {
                 Ok(layout)
             })
             .collect::<Result<Vec<_>, MediaError>>()?;
-        let updates = regions
+        let updates = layers
             .iter()
-            .zip(&layouts)
-            .map(|(region, layout)| TextRenderLayoutUpdate {
-                layout_id: &region.request.key,
-                layout,
-                shared_layout: Some(layout),
-                rgba: region.rgba,
-                translation: region.translation,
+            .map(|(id, index, translation, rgba)| TextRenderLayoutUpdate {
+                layout_id: id,
+                layout: &layouts[*index],
+                shared_layout: Some(&layouts[*index]),
+                rgba: *rgba,
+                translation: *translation,
             })
             .collect::<Vec<_>>();
         let removals = self

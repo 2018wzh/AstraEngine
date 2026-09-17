@@ -69,6 +69,13 @@ pub fn musica_descriptor() -> FamilyDescriptor {
         kind: ConfigKind::Bool,
         default: ConfigValue::Bool(false),
     });
+    configuration.push(ConfigField {
+        id: "text_shadow".into(),
+        label: "Text shadow".into(),
+        group: "Presentation".into(),
+        kind: ConfigKind::Bool,
+        default: ConfigValue::Bool(true),
+    });
     configuration.extend(crate::voice_preferences::VoicePreferences::fields());
     configuration.extend(crate::audio::AudioPreferences::fields());
     FamilyDescriptor {
@@ -169,6 +176,19 @@ impl MusicaProvider {
                 ))
             }
         };
+        let text_shadow = match config
+            .iter()
+            .find(|e| e.id == "text_shadow")
+            .map(|e| &e.value)
+        {
+            Some(ConfigValue::Bool(value)) => *value,
+            _ => {
+                return Err(error(
+                    "ASTRA_EMU_MUSICA_CONFIG",
+                    "text shadow preference is missing or invalid",
+                ))
+            }
+        };
         let focused = request.initial_window.focused;
         let lease = SessionLease::acquire()?;
         let root = Path::new(request.game_path.as_str());
@@ -204,6 +224,7 @@ impl MusicaProvider {
             )
         })?);
         let mut scene = Scene::new(archive.clone(), 1280, 720)?;
+        scene.set_text_shadow(text_shadow);
         scene.render(vm.state(), None, None)?;
         let storage = Storage::new(root)?;
         let replacement = request.host.text_replacement.into_option();

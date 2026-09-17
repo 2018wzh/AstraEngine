@@ -385,3 +385,7 @@ Musica 已移植来源的后台播放偏好，默认失焦暂停，显式开启�
 Classic route.coverage.016 完成同一 build/package 的 GPU Headless 输入流程，47,809 条输入、38 次选择到达 tsui.ending，无诊断。终点 PNG 已查看，仍为黑场；完整视听与真实 Player 验收保持开放。
 
 重新检查当前 Sandbox：AudioSrv 和 AudioEndpointBuilder 均运行，但没有枚举到 AudioEndpoint，终之空真实 Player 的音频入口仍受环境阻塞。Player 退出日志现保留 PlatformError 的具体 reason，便于区分无设备、格式不支持及开流失败；不切换静音后端或将 Headless 视为真实音频通过。新日志尚未替换正在使用的 Sandbox 产品包。
+
+Musica 已移植来源的 `text_shadow` 显示偏好及圆形描边，正文、说话人和 backlog 使用 SDK 共享 shaping/GPU 字形，选择项保持原样。开关不重复上传或释放仍可见的前景字形，非法半径和坐标溢出明确失败；读档保留当前 Manager 设置。7 项文字测试（含 GPU）、35 项会话回归、SDK/Musica Clippy、格式和文档检查通过。完整原生配置页与字体偏好仍继续移植。
+
+Classic route.coverage.017 完成同一 build/package 的 GPU Headless 输入流程，46,702 条输入、38 次选择到达 tsui.ending，DX12 独显且无诊断。终点 PNG 已查看，仍为黑场；完整视听与真实 Player 验收保持开放。

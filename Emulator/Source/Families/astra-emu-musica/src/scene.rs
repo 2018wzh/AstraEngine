@@ -98,6 +98,12 @@ impl Scene {
             pixels: vec![0; width as usize * height as usize * 4].into(),
         })
     }
+    pub fn set_text_shadow(&mut self, enabled: bool) {
+        self.text.shadow = enabled;
+    }
+    pub fn text_shadow(&self) -> bool {
+        self.text.shadow
+    }
     fn layer(
         &mut self,
         commands: &mut Vec<SceneCommand>,
