@@ -1,6 +1,6 @@
 use super::*;
 use crate::{MusicaLaunchMode, MusicaSystemPage};
-fn game(root: &std::path::Path) {
+pub(super) fn game(root: &std::path::Path) {
     fixture::game(
         root,
         b".setglobal custom = custom + 1\r\n.message 1   First\r\n.setglobal AYAME_CLEAR = 1\r\n.end\r\n",
@@ -40,14 +40,14 @@ fn game(root: &std::path::Path) {
             .collect::<Vec<_>>(),
     );
 }
-fn png(w: u32, h: u32, color: [u8; 4]) -> Vec<u8> {
+pub(super) fn png(w: u32, h: u32, color: [u8; 4]) -> Vec<u8> {
     let mut out = std::io::Cursor::new(Vec::new());
     image::RgbaImage::from_pixel(w, h, image::Rgba(color))
         .write_to(&mut out, image::ImageFormat::Png)
         .unwrap();
     out.into_inner()
 }
-fn title_request(root: &std::path::Path) -> OpenRequest {
+pub(super) fn title_request(root: &std::path::Path) -> OpenRequest {
     let mut req = request(root, Sink::default());
     req.configuration.push(ConfigEntry {
         id: "launch_mode".into(),

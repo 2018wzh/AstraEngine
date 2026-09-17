@@ -1,12 +1,8 @@
 use super::*;
 use crate::MusicaSystemPage;
 impl MusicaSession {
-    fn start_title_game(&mut self) -> FamilyResult<()> {
-        let loaded = crate::script_loader::load_script(
-            &self.archive,
-            &self.entry_uri,
-            self.primary_encoding,
-        )?;
+    pub(super) fn start_menu_script(&mut self, uri: String) -> FamilyResult<()> {
+        let loaded = crate::script_loader::load_script(&self.archive, &uri, self.primary_encoding)?;
         let generation = self.generation.checked_add(1).ok_or_else(|| {
             error(
                 "ASTRA_EMU_MUSICA_TEXT_SEQUENCE",
@@ -19,7 +15,7 @@ impl MusicaSession {
         }
         self.audio.restore(Vec::new())?;
         self.vm
-            .start_title_script(self.entry_uri.clone(), loaded.hash, loaded.script)
+            .start_menu_script(uri, loaded.hash, loaded.script)
             .map_err(vm_error)?;
         self.scene
             .set_text_encoding(self.vm.state().script_encoding);
@@ -39,7 +35,7 @@ impl MusicaSession {
             self.vm.title_variant(),
             self.vm.state().system_ui.focus_index,
         ) {
-            (_, 0) => self.start_title_game(),
+            (_, 0) => self.start_menu_script(self.entry_uri.clone()),
             (_, 1) => {
                 self.vm.open_title_load().map_err(vm_error)?;
                 self.load_from_title = true;
@@ -50,10 +46,10 @@ impl MusicaSession {
                 "ASTRA_EMU_MUSICA_CONFIG_PAGE_UNAVAILABLE",
                 "native configuration page is not integrated yet",
             )),
-            (2, 3) => Err(error(
-                "ASTRA_EMU_MUSICA_MEMORIES_UNAVAILABLE",
-                "native Memories page is not integrated yet",
-            )),
+            (2, 3) => self
+                .vm
+                .set_gallery_page(MusicaSystemPage::Memories, 0)
+                .map_err(vm_error),
             (_, 3) | (2, 4) => {
                 self.finished = true;
                 Ok(())

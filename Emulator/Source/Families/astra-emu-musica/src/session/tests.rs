@@ -724,5 +724,7 @@ mod includes;
 #[path = "tests/save_pages.rs"]
 mod save_pages;
 
+#[path = "tests/gallery.rs"]
+mod gallery;
 #[path = "tests/title.rs"]
 mod title;

@@ -2,6 +2,7 @@ mod backlog;
 mod control;
 mod effects;
 mod errors;
+pub(crate) mod gallery;
 mod model;
 pub(crate) mod particles;
 mod playback;

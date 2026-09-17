@@ -131,6 +131,36 @@ impl MusicaTextRenderer {
         self.frame(&mut regions)
     }
 
+    pub(crate) fn gallery_movies(&mut self, focus: u32) -> Result<Vec<SceneCommand>, String> {
+        if focus >= 4 {
+            return Err("ASTRA_EMU_MUSICA_GALLERY_FOCUS".into());
+        }
+        let text = crate::runtime::gallery::MOVIE_LABELS
+            .iter()
+            .enumerate()
+            .map(|(i, label)| format!("{} {label}", if i == focus as usize { ">" } else { " " }))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut layout = layout_request(
+            "musica.gallery.movie",
+            &text,
+            Region {
+                x: 160,
+                y: 112,
+                width: 520,
+                height: 280,
+                font_size: 32.0,
+                line_height: 52.0,
+                max_lines: 4,
+            },
+        );
+        layout.outline = Some(TextOutline {
+            radius: 2,
+            rgba: [0, 0, 0, 192],
+        });
+        self.frame(&mut [layout])
+    }
+
     pub fn commands(
         &mut self,
         message: Option<(&str, Option<&str>)>,

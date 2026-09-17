@@ -249,7 +249,7 @@ pub(super) fn execute_play_voice(
     stop_audio_stream(state, VOICE_STREAM_ID, fade_out_ms)
 }
 
-fn stop_audio_stream(
+pub(super) fn stop_audio_stream(
     state: &mut MusicaRuntimeState,
     stream_id: u32,
     fade_ms: u32,

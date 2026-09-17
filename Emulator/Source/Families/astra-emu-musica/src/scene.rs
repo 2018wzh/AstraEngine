@@ -11,6 +11,7 @@ const MAX_ASSET_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_IMAGE_BYTES: usize = 128 * 1024 * 1024;
 
 mod character;
+mod gallery;
 mod particles;
 pub(crate) mod save_pages;
 mod stage;

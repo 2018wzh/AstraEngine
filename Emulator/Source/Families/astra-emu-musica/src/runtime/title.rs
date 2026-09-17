@@ -51,13 +51,18 @@ pub(super) fn validate(state: &MusicaRuntimeState) -> Result<(), MusicaRuntimeEr
     Ok(())
 }
 impl MusicaVm {
-    pub(crate) fn start_title_script(
+    pub(crate) fn start_menu_script(
         &mut self,
         uri: String,
         hash: Hash256,
         script: ScScript,
     ) -> Result<(), MusicaRuntimeError> {
-        if self.state.system_ui.page != MusicaSystemPage::Title {
+        if !matches!(
+            self.state.system_ui.page,
+            MusicaSystemPage::Title
+                | MusicaSystemPage::GalleryReplay
+                | MusicaSystemPage::GalleryMovie
+        ) {
             return Err(MusicaRuntimeError::State);
         }
         self.replace_script(uri, hash, script, None)?;

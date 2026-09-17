@@ -240,6 +240,7 @@ pub(super) fn validate_state(state: &MusicaRuntimeState) -> Result<(), MusicaRun
     super::read_state::validate(state)?;
     super::progress::validate(&state.gallery_unlocks)?;
     super::title::validate(state)?;
+    super::gallery::validate(state)?;
     super::character::validate_state(state)?;
     super::particles::validate_state(state)?;
     if let Some(scroll) = &state.wscroll2 {
