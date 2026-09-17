@@ -316,14 +316,15 @@ fn message_uses_the_verified_four_operand_and_joined_tail_contract() {
         text,
         speaker,
         wait: MusicaWaitState::Input { token_id },
+        ..
     }) = vm.step(1).unwrap()
     else {
         panic!("expected message input wait")
     };
     assert_eq!(text, "hello world");
     assert_eq!(speaker.as_deref(), Some("speaker"));
-    assert_eq!(presentation_sequence, 1);
-    assert_eq!(capture_sequence, 2);
+    assert_eq!(presentation_sequence, 3);
+    assert_eq!(capture_sequence, 4);
     assert_eq!(token_id, "musica.message.1");
     let state = vm.state().message.as_ref().unwrap();
     assert_eq!(state.message_id, 42);

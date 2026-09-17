@@ -326,7 +326,7 @@ fn interpolate_character_replacement(
         u16::try_from(next).map_err(|_| MusicaRuntimeError::Character)?,
     ))
 }
-fn complete_character_replacement(
+pub(super) fn complete_character_replacement(
     character: &mut MusicaCharacterState,
 ) -> Result<(), MusicaRuntimeError> {
     let Some(replacement) = character.replacement.take() else {
@@ -367,7 +367,11 @@ pub(super) fn validate_state(state: &MusicaRuntimeState) -> Result<(), MusicaRun
             Ok(())
         }
         (
-            Some(MusicaWaitState::Input { token_id } | MusicaWaitState::Time { token_id, .. }),
+            Some(
+                MusicaWaitState::Input { token_id }
+                | MusicaWaitState::Time { token_id, .. }
+                | MusicaWaitState::Voice { token_id, .. },
+            ),
             Some(_),
         ) if token_id.starts_with("musica.message.") => Ok(()),
         (Some(MusicaWaitState::CharacterTransition { .. }), _) | (_, Some(_)) => {

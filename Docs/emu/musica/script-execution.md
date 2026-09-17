@@ -42,7 +42,7 @@ Musica Family 自持 VM、归档、音频和原生 session。Manager 经 Family 
 
 ## 保存与恢复
 
-VM 数据使用 `astra.emu.musica.runtime_state.v16` 和 postcard，包含脚本身份、PC、变量、等待、完整 stage、transition、效果时间状态、面板和音频等字段。v15 及更早数据直接拒绝，不迁移旧图层表示。stage 的资源角色、名称、序列长度和立绘数量在保存、解码和恢复边界校验。
+VM 数据使用 `astra.emu.musica.runtime_state.v17` 和 postcard，包含脚本身份、PC、变量、等待、完整 stage、transition、效果时间状态、面板和音频等字段。v16 及更早数据直接拒绝，不迁移旧图层表示。stage 的资源角色、名称、序列长度和立绘数量在保存、解码和恢复边界校验。
 
 Family 存档容器另外保存当前显示消息、等待余量和音频快照。恢复先验证游戏及脚本身份，再构造候选 VM、GPU 场景和音频状态；场景重建失败不得将其标为恢复成功。归档解密后的完整素材和 GPU 资源不进入 VM 数据。损坏存档读取失败不得覆盖原文件。
 
@@ -52,22 +52,24 @@ Family 存档容器另外保存当前显示消息、等待余量和音频快照�
 
 `_ov.png` 的模式 2 由 `sub_418C90` 构建查表，`sub_418D20` 先将源通道乘有效 alpha，再查表；目标 alpha 保留。令目标通道为 d，乘 alpha 后的源通道为 s：s < 128 时取 floor(2*d*s/256)，否则取 255-floor((511-2*s)*(255-d)/256)。零有效 alpha 跳过写入。其分支依据源通道，不能直接套用 Multiply 或按目标通道分支的 Overlay；GPU 实现仍待接入。
 
-本次接续以 `codex/minori-runtime-followup` 的 00610272d 为实现来源，并逐项核对其未提交修改。`.effect *` 与无参数 `.effect end` 已移植：释放主效果、推进效果序号，后续时钟不再产生旧效果帧，存档保存清除后的状态。`end` 带额外参数时失败并保留当前效果；Firefly 活动时 end 沿用来源执行渐停；无活动粒子时清除主效果。完整来源中的正文内延迟换图、电影及系统页仍需移植至新 Family/SDK 路径；不得因当前 CrossFade 已通过测试而将这些功能视为完成。
+本次接续以 `codex/minori-runtime-followup` 的 00610272d 为实现来源，并逐项核对其未提交修改。`.effect *` 与无参数 `.effect end` 已移植：释放主效果、推进效果序号，后续时钟不再产生旧效果帧，存档保存清除后的状态。`end` 带额外参数时失败并保留当前效果；Firefly 活动时 end 沿用来源执行渐停；无活动粒子时清除主效果。完整来源中的电影及系统页仍需移植至新 Family/SDK 路径；不得因当前 CrossFade 已通过测试而将这些功能视为完成。
 
 消息面板沿用来源实现：`.panel 0` 清除当前面板，`.panel 1` 使用 `msgPanel.png`，`.panel 1 * filename` 使用指定 sys 图片，`.panel 3` 使用 `fullPanel.png`。模式 1 位于视口高度减图片高度加 64 的位置，模式 3 位于原点；替换与清除后的状态可存读档。未知模式、额外参数和非安全文件名返回面板错误，不忽略命令。
 
-`.pragma enable_control`、`disable_control`、`skip_enable`、`skip_disable` 沿用来源分支的独立开关：默认允许 skip、禁用 Control 快进。两个开关都允许时，按住 Ctrl 可推进正文并跳过时间等待；选择仍需明确确认，异步翻译尚未完成时不推进。脚本开关进入 v16 原生状态，物理按键只由当前 session 持有，失焦与挂起清除按键。未知或多参数 pragma 返回 `ASTRA_EMU_MUSICA_RUNTIME_PRAGMA`，不再静默忽略。已读跳读、自动模式及完整系统页仍待移植。
+`.pragma enable_control`、`disable_control`、`skip_enable`、`skip_disable` 沿用来源分支的独立开关：默认允许 skip、禁用 Control 快进。两个开关都允许时，按住 Ctrl 可推进正文并跳过时间等待；选择仍需明确确认，异步翻译尚未完成时不推进。脚本开关进入 v17 原生状态，物理按键只由当前 session 持有，失焦与挂起清除按键。未知或多参数 pragma 返回 `ASTRA_EMU_MUSICA_RUNTIME_PRAGMA`，不再静默忽略。已读跳读、自动模式及完整系统页仍待移植。
 
-`.shakescreen V amplitude interval_ms` 与 `R` 模式从来源提交 00610272d 移植，分别按时钟交替垂直偏移或从原生八方向表取偏移。保持来源的每次更新最多推进一次、丢弃超出间隔余量的行为。新震动替换旧震动，transition 与 chain 清除震动。场景和面板复用共享 GPU 变换与裁剪，文字层沿用来源分层；不增加 CPU 图像搬运。v16 存档保存方向、振幅、间隔、余时、更新序号、偏移和共享随机状态，保存/解码/恢复均拒绝非法状态。
+`.shakescreen V amplitude interval_ms` 与 `R` 模式从来源提交 00610272d 移植，分别按时钟交替垂直偏移或从原生八方向表取偏移。保持来源的每次更新最多推进一次、丢弃超出间隔余量的行为。新震动替换旧震动，transition 与 chain 清除震动。场景和面板复用共享 GPU 变换与裁剪，文字层沿用来源分层；不增加 CPU 图像搬运。v17 存档保存方向、振幅、间隔、余时、更新序号、偏移和共享随机状态，保存/解码/恢复均拒绝非法状态。
 
-`.hscroll target speed` 和 `.vscroll target speed` 已移植来源分支的轴向滚动，speed 为每毫秒十分之一像素的有符号速度；方向与目标冲突、零速度和越界参数明确失败。背景坐标由动画时钟更新，复用已有 GPU Scene，不另建绘制路径。`.endscroll false` 等待实际完成，`.endscroll true` 强制到达终点；新 stage 或 chain 清除滚动。v16 存档同时校验时长、余时、完成标记、当前坐标和 stage 坐标，恢复后继续剩余演出。WScroll2 使用独立双层全景轨迹。
+`.hscroll target speed` 和 `.vscroll target speed` 已移植来源分支的轴向滚动，speed 为每毫秒十分之一像素的有符号速度；方向与目标冲突、零速度和越界参数明确失败。背景坐标由动画时钟更新，复用已有 GPU Scene，不另建绘制路径。`.endscroll false` 等待实际完成，`.endscroll true` 强制到达终点；新 stage 或 chain 清除滚动。v17 存档同时校验时长、余时、完成标记、当前坐标和 stage 坐标，恢复后继续剩余演出。WScroll2 使用独立双层全景轨迹。
 
-`.scroll target_x target_y speed` 沿用来源的二维线性滚动，speed 为正数，按较长坐标轴的距离计算时长并插值两个坐标。与轴向滚动共用 endscroll、stage/chain 清除、Family 时钟和 GPU Scene。v16 状态增加二维轨迹，并拒绝两种滚动同时占用或轨迹与背景坐标不一致的存档。
+`.scroll target_x target_y speed` 沿用来源的二维线性滚动，speed 为正数，按较长坐标轴的距离计算时长并插值两个坐标。与轴向滚动共用 endscroll、stage/chain 清除、Family 时钟和 GPU Scene。v17 状态增加二维轨迹，并拒绝两种滚动同时占用或轨迹与背景坐标不一致的存档。
 
-`.scrollxf` 的十个参数为起始/结束窗口宽高、起始/结束偏移、时长与缓动（0 线性、1 二次加速、2 二次减速）。来源实现裁剪并平移场景与面板，不缩放像素；文字保留独立层。共享 GPU clip/transform 执行绘制，空窗口不显示场景。新 scrollxf 替换旧轨迹，stage 清除，chain 保留并继续演出，endscroll 为真时立即结束；为假时沿用来源语义继续异步演出。v16 保存轨迹和当前窗口，拒绝与 axis/linear 同时占用及不一致的当前状态。
+`.scrollxf` 的十个参数为起始/结束窗口宽高、起始/结束偏移、时长与缓动（0 线性、1 二次加速、2 二次减速）。来源实现裁剪并平移场景与面板，不缩放像素；文字保留独立层。共享 GPU clip/transform 执行绘制，空窗口不显示场景。新 scrollxf 替换旧轨迹，stage 清除，chain 保留并继续演出，endscroll 为真时立即结束；为假时沿用来源语义继续异步演出。v17 保存轨迹和当前窗口，拒绝与 axis/linear 同时占用及不一致的当前状态。
 
-`.effect WScroll2 sync:文件 period_ticks speed_tenths` 沿用来源 00610272d 的 60 Hz 双层全景轨迹、远近速度与有符号取余规则。Family 时钟推进，场景复用共享 GPU 纹理与裁剪；仅接受来源支持的 1280×720、两层且不小于视口的全景。sync 文件有界读取与校验，最多缓存 16 个结果；来源没有用其值或 period 改变轨迹，本次不推测新增行为。新主效果、effect end 或 chain 结束该轨迹，stage 更换沿用来源保留轨迹。v16 保存并校验时钟、偏移及余数，与其他滚动互斥。
+`.effect WScroll2 sync:文件 period_ticks speed_tenths` 沿用来源 00610272d 的 60 Hz 双层全景轨迹、远近速度与有符号取余规则。Family 时钟推进，场景复用共享 GPU 纹理与裁剪；仅接受来源支持的 1280×720、两层且不小于视口的全景。sync 文件有界读取与校验，最多缓存 16 个结果；来源没有用其值或 period 改变轨迹，本次不推测新增行为。新主效果、effect end 或 chain 结束该轨迹，stage 更换沿用来源保留轨迹。v17 保存并校验时钟、偏移及余数，与其他滚动互斥。
 
-Firefly 与 Snow/SnowH 已直接移植来源机制。`.effect Firefly prefix count duration` 创建有界曲线粒子池，end/fadeout 渐停；`.effect2 SnowH`、`.effect2 Snow` 使用独立次级槽，`.effect Snow` 也创建垂直雪。主效果替换不清除次级雪，chain 清除两槽。所有粒子复用现有 GPU 纹理、裁剪与 alpha 合成，在场景和面板之后、文字之前绘制，并接受场景震动。v16 保存随机状态、粒子轨迹、余时与渐变进度；恢复后继续演出。雪状态校验分别使用横向/纵向主速度，并接受初始化产生的屏幕外边缘位置，避免合法状态无法保存。
+Firefly 与 Snow/SnowH 已直接移植来源机制。`.effect Firefly prefix count duration` 创建有界曲线粒子池，end/fadeout 渐停；`.effect2 SnowH`、`.effect2 Snow` 使用独立次级槽，`.effect Snow` 也创建垂直雪。主效果替换不清除次级雪，chain 清除两槽。所有粒子复用现有 GPU 纹理、裁剪与 alpha 合成，在场景和面板之后、文字之前绘制，并接受场景震动。v17 保存随机状态、粒子轨迹、余时与渐变进度；恢复后继续演出。雪状态校验分别使用横向/纵向主速度，并接受初始化产生的屏幕外边缘位置，避免合法状态无法保存。
 
-`.char load/pos/trans/vis/keep` 直接移植来源的人物槽机制，保留有符号槽号的镜像标记、中心/底部锚点、透明度等待和一次性 stage 保留标记。人物在场景之后、主效果与面板之前绘制，镜像复用 GPU transform。v16 保存人物槽、过渡及替换状态；Family 根据实际过渡完成状态解除等待，F5/F9 在中途恢复相同画面。正文内延迟 load 与替换的触发入口随消息机制接入，不以 char 命令回归代替完整消息验收。
+`.char load/pos/trans/vis/keep` 直接移植来源的人物槽机制，保留有符号槽号的镜像标记、中心/底部锚点、透明度等待和一次性 stage 保留标记。人物在场景之后、主效果与面板之前绘制，镜像复用 GPU transform。v17 保存人物槽、过渡及替换状态；Family 根据实际过渡完成状态解除等待，F5/F9 在中途恢复相同画面。正文内延迟 load 由消息标记触发，原生等待结束时提交剩余换图。
+
+消息标记直接采用来源解析器：`\a` 自动推进、`\v` 等待语音、`\x{load,...}` 安排延迟换图，标记不进入可见正文。换图沿用人物替换时钟，等待结束时提交尚未完成的替换。v17 保存延迟队列、人物过渡与语音等待状态。消息语音复用 Family 音频命令；时长由音频 worker 从已解码声音异步返回，不重复解码，超时或失败明确报错。读档丢弃旧查询接收端，关闭仍取消 PCM 并等待 worker 退出。Auto/已读跳读设置、backlog 和完整系统页仍随其来源模块继续整合。

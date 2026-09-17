@@ -14,6 +14,8 @@ pub use model::*;
 use stage::*;
 mod audio_commands;
 mod character;
+mod message;
+use message::execute_message;
 mod choices;
 use audio_commands::*;
 use choices::execute_select;
@@ -102,6 +104,7 @@ impl MusicaVm {
             global_variables: BTreeMap::new(),
             wait: None,
             message: None,
+            message_loads: Vec::new(),
             choice: None,
             stage: None,
             transition: MusicaTransitionState::default(),
@@ -180,6 +183,7 @@ impl MusicaVm {
         self.state.variables.clear();
         self.state.wait = None;
         self.state.message = None;
+        self.state.message_loads.clear();
         self.state.choice = None;
         self.state.screen_shake = None;
         self.state.axis_scroll = None;
@@ -227,7 +231,8 @@ impl MusicaVm {
             .as_ref()
             .ok_or(MusicaRuntimeError::Waiting)?;
         let expected = match current {
-            MusicaWaitState::CharacterTransition { token_id, .. }
+            MusicaWaitState::Voice { token_id, .. }
+            | MusicaWaitState::CharacterTransition { token_id, .. }
             | MusicaWaitState::LinearScroll { token_id, .. }
             | MusicaWaitState::AxisScroll { token_id, .. }
             | MusicaWaitState::Time { token_id, .. }
@@ -239,7 +244,13 @@ impl MusicaVm {
         if expected != token_id {
             return Err(MusicaRuntimeError::Waiting);
         }
-        if matches!(current, MusicaWaitState::CharacterTransition { .. }) {
+        if token_id.starts_with("musica.message.") {
+            message::finish_message_loads(&mut self.state)?;
+        }
+        if matches!(
+            self.state.wait,
+            Some(MusicaWaitState::CharacterTransition { .. })
+        ) {
             character::complete_character_transition_state(&mut self.state)?;
         }
         self.state.wait = None;
@@ -465,45 +476,6 @@ fn execute_control(
             ordinal: command.ordinal,
         }),
     }
-}
-
-fn execute_message(
-    command: &ScCommand,
-    state: &mut MusicaRuntimeState,
-) -> Result<Option<MusicaVmEvent>, MusicaRuntimeError> {
-    let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
-        .map_err(|_| MusicaRuntimeError::Operand)?;
-    let (message_id, speaker, text) = if tokens.len() >= 4 {
-        let message_id = tokens[0]
-            .parse::<i64>()
-            .map_err(|_| MusicaRuntimeError::Operand)?;
-        (
-            message_id,
-            (!tokens[2].is_empty()).then(|| tokens[2].clone()),
-            tokens[3..].join(" "),
-        )
-    } else {
-        // The original CommandMessage parser leaves constructor defaults intact when fewer
-        // than four operands are present, then still executes the empty message update.
-        (-1, None, String::new())
-    };
-    state.message = Some(MusicaMessageState {
-        source: command.span,
-        message_id,
-    });
-    let presentation_sequence = next_effect_sequence(state)?;
-    let capture_sequence = next_effect_sequence(state)?;
-    let wait = MusicaWaitState::Input {
-        token_id: format!("musica.message.{}", state.instruction_count),
-    };
-    state.wait = Some(wait.clone());
-    Ok(Some(MusicaVmEvent::Message {
-        presentation_sequence,
-        capture_sequence,
-        text,
-        speaker,
-        wait,
-    }))
 }
 
 fn validate_chain_target(target: &str) -> Result<(), MusicaRuntimeError> {

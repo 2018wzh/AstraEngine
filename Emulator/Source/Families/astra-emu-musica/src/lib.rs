@@ -6,9 +6,11 @@ mod storage;
 
 mod archive;
 mod image_container;
+mod message;
 mod paz;
 mod profile;
 mod runtime;
+pub use message::*;
 mod script;
 mod text_renderer;
 

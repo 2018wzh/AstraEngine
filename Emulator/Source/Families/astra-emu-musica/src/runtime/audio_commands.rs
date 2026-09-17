@@ -110,7 +110,7 @@ pub(super) fn execute_play_se(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn append_audio_load_and_play(
+pub(super) fn append_audio_load_and_play(
     state: &mut MusicaRuntimeState,
     commands: &mut Vec<MusicaAudioCommand>,
     stream_id: u32,
@@ -286,7 +286,7 @@ fn parse_optional_command_integer(
     u32::try_from(value).map_err(|_| MusicaRuntimeError::Operand)
 }
 
-fn validate_audio_relative_path(value: &str) -> Result<(), MusicaRuntimeError> {
+pub(super) fn validate_audio_relative_path(value: &str) -> Result<(), MusicaRuntimeError> {
     if value.len() > 256
         || value.starts_with('/')
         || value.contains('\\')

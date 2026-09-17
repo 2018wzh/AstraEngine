@@ -394,7 +394,16 @@ fn audio_close_cancels_blocked_write_and_joins_worker() {
     let mut audio =
         Audio::start(archive, AudioSink_TO::from_value(sink.clone(), TD_Opaque)).unwrap();
     until(|| sink.writes.load(Ordering::Acquire) > 0);
+    let duration = audio.duration(4).unwrap();
+    assert!(matches!(
+        duration.try_recv(),
+        Err(std::sync::mpsc::TryRecvError::Empty)
+    ));
     audio.shutdown().unwrap();
+    assert!(matches!(
+        duration.try_recv(),
+        Err(std::sync::mpsc::TryRecvError::Disconnected)
+    ));
     let writes = sink.writes.load(Ordering::Acquire);
     std::thread::sleep(Duration::from_millis(5));
     assert_eq!(sink.writes.load(Ordering::Acquire), writes);
@@ -664,3 +673,6 @@ mod particles;
 
 #[path = "tests/character.rs"]
 mod character;
+
+#[path = "tests/message.rs"]
+mod message;

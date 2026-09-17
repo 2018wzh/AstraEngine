@@ -4,7 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-pub const MUSICA_RUNTIME_STATE_SCHEMA: &str = "astra.emu.musica.runtime_state.v16";
+pub const MUSICA_RUNTIME_STATE_SCHEMA: &str = "astra.emu.musica.runtime_state.v17";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MusicaRuntimeState {
@@ -16,6 +16,7 @@ pub struct MusicaRuntimeState {
     pub global_variables: BTreeMap<String, i64>,
     pub wait: Option<MusicaWaitState>,
     pub message: Option<MusicaMessageState>,
+    pub message_loads: Vec<MusicaMessageLoadState>,
     pub choice: Option<MusicaChoiceState>,
     pub stage: Option<MusicaStageCommand>,
     pub transition: MusicaTransitionState,
@@ -43,6 +44,11 @@ pub struct MusicaRuntimeState {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum MusicaWaitState {
+    Voice {
+        token_id: String,
+        stream_id: u32,
+        milliseconds: Option<u32>,
+    },
     CharacterTransition {
         token_id: String,
         slot_id: u32,
@@ -236,6 +242,7 @@ pub enum MusicaVmEvent {
     Message {
         presentation_sequence: u64,
         capture_sequence: u64,
+        audio_commands: Vec<MusicaAudioCommand>,
         text: String,
         speaker: Option<String>,
         wait: MusicaWaitState,
@@ -509,4 +516,14 @@ pub struct MusicaCharacterReplacementState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MusicaCharacterFrame {
     pub sequence: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MusicaMessageLoadState {
+    pub delay_ms: u32,
+    pub elapsed_ns: u64,
+    pub slot_id: u32,
+    pub resource_uri: String,
+    pub transition_ms: u32,
+    pub opacity_256: u16,
 }

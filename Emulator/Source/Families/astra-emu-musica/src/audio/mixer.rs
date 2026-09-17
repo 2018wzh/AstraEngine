@@ -34,6 +34,22 @@ impl Mixer {
             sounds: BTreeMap::new(),
         })
     }
+    pub(super) fn duration_ms(&self, stream: u32) -> FamilyResult<u32> {
+        let sound = self.sounds.get(&stream).ok_or_else(|| {
+            error(
+                "ASTRA_EMU_MUSICA_AUDIO_UNKNOWN",
+                "duration requested for an unloaded stream",
+            )
+        })?;
+        let milliseconds =
+            (sound.data.frames.len() as u64 * 1000).div_ceil(u64::from(sound.data.sample_rate));
+        u32::try_from(milliseconds).map_err(|_| {
+            error(
+                "ASTRA_EMU_MUSICA_AUDIO_DURATION",
+                "audio duration exceeds supported range",
+            )
+        })
+    }
     fn load(
         &mut self,
         id: u32,

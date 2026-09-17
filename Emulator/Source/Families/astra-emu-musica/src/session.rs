@@ -1,3 +1,4 @@
+mod message;
 use crate::{
     audio::Audio,
     parse_sc,
@@ -25,6 +26,7 @@ pub(crate) struct MusicaSession {
     audio: Audio,
     replacement: Option<TextReplacementServiceBox>,
     pending: Option<PendingText>,
+    voice_duration: Option<(std::sync::mpsc::Receiver<FamilyResult<u32>>, Instant)>,
     generation: u64,
     storage: Storage,
     game: Hash256,
@@ -65,6 +67,7 @@ impl MusicaSession {
             game,
             _lease: lease,
             pending: None,
+            voice_duration: None,
             generation: 0,
             message: None,
             phase: 0,
@@ -77,92 +80,7 @@ impl MusicaSession {
             suspended: false,
         }
     }
-    fn cancel_text(&mut self) -> FamilyResult<()> {
-        if let Some(pending) = self.pending.take() {
-            if let Some(service) = &self.replacement {
-                service.cancel(pending.id.into()).into_result()?;
-            }
-        }
-        Ok(())
-    }
-    fn poll_text(&mut self) -> FamilyResult<bool> {
-        let Some(pending) = &self.pending else {
-            return Ok(false);
-        };
-        let service = self
-            .replacement
-            .as_ref()
-            .ok_or_else(|| error("ASTRA_EMU_MUSICA_TEXT_STATE", "text service is unavailable"))?;
-        if pending.started.elapsed() > Duration::from_secs(15) {
-            self.cancel_text()?;
-            tracing::warn!(event = "astra.emu.musica.translation.timeout");
-            return Ok(false);
-        }
-        match service.poll(pending.id.clone().into()).into_result() {
-            Ok(TextPollResult::Pending) => Ok(false),
-            Ok(TextPollResult::Ready(response)) => {
-                let valid = response.validate().is_ok() && response.request_id == pending.id;
-                self.pending = None;
-                if !valid {
-                    tracing::warn!(event = "astra.emu.musica.translation.invalid");
-                    return Ok(false);
-                }
-                if let Some((_, speaker)) = &self.message {
-                    let replacement = (response.replacement.to_string(), speaker.clone());
-                    if self
-                        .scene
-                        .render(self.vm.state(), Some(&replacement), None)
-                        .is_ok()
-                    {
-                        self.message = Some(replacement);
-                    } else {
-                        tracing::warn!(event = "astra.emu.musica.translation.render_failed");
-                    }
-                }
-                Ok(false)
-            }
-            Ok(TextPollResult::Cancelled | TextPollResult::Failed(_)) | Err(_) => {
-                self.pending = None;
-                tracing::warn!(event = "astra.emu.musica.translation.failed");
-                Ok(false)
-            }
-        }
-    }
-    fn message(&mut self, text: String, speaker: Option<String>) -> FamilyResult<()> {
-        self.cancel_text()?;
-        if text.len() > MAX_TEXT_BYTES
-            || speaker.as_ref().is_some_and(|s| s.len() > MAX_SYMBOL_BYTES)
-        {
-            return Err(error(
-                "ASTRA_EMU_MUSICA_TEXT_BOUND",
-                "message exceeds supported bounds",
-            ));
-        }
-        self.generation = self
-            .generation
-            .checked_add(1)
-            .ok_or_else(|| error("ASTRA_EMU_MUSICA_TEXT_SEQUENCE", "text sequence overflowed"))?;
-        self.message = Some((text.clone(), speaker.clone()));
-        if let Some(service) = &self.replacement {
-            let id = format!("{}.text.{}", self.id, self.generation);
-            let request = TextReplacementRequest {
-                request_id: id.clone().into(),
-                source: text.into(),
-                speaker: speaker.unwrap_or_default().into(),
-                ruby: "".into(),
-            };
-            match service.submit(request).into_result() {
-                Ok(()) => {
-                    self.pending = Some(PendingText {
-                        id,
-                        started: Instant::now(),
-                    })
-                }
-                Err(_) => tracing::warn!(event = "astra.emu.musica.translation.submit_failed"),
-            }
-        }
-        Ok(())
-    }
+
     fn save(&self) -> FamilyResult<()> {
         let vm = self
             .vm
@@ -227,6 +145,7 @@ impl MusicaSession {
         })?;
         self.audio.restore(saved.sounds)?;
         vm.set_control_pressed(self.control_keys != 0);
+        self.voice_duration = None;
         self.vm = vm;
         self.scene = scene;
         self.message = saved.message;
@@ -238,6 +157,7 @@ impl MusicaSession {
         tracing::info!(event = "astra.emu.musica.load.completed");
         Ok(())
     }
+
     fn tick(&mut self) -> FamilyResult<bool> {
         let tick = self
             .vm
@@ -245,11 +165,24 @@ impl MusicaSession {
             .fixed_tick
             .checked_add(1)
             .ok_or_else(|| error("ASTRA_EMU_MUSICA_TICK", "tick counter overflowed"))?;
+        self.poll_voice_duration()?;
         if let Some(wait) = self.vm.state().wait.clone() {
             let delta = ((u128::from(tick) * 1_000_000_000 / 60)
                 - (u128::from(tick - 1) * 1_000_000_000 / 60)) as u64;
             self.wait_ns = self.wait_ns.saturating_add(delta);
             let (id, ready) = match wait {
+                MusicaWaitState::Voice {
+                    token_id,
+                    milliseconds,
+                    ..
+                } => (
+                    token_id,
+                    self.pending.is_none()
+                        && (self.vm.control_fast_forward_active()
+                            || milliseconds.is_some_and(|duration| {
+                                self.wait_ns >= u64::from(duration) * 1_000_000
+                            })),
+                ),
                 MusicaWaitState::Input { token_id } => (
                     token_id,
                     (self.input_pending
@@ -264,8 +197,9 @@ impl MusicaSession {
                     ..
                 } => (
                     token_id,
-                    self.vm.control_fast_forward_active()
-                        || self.wait_ns >= u64::from(milliseconds) * 1_000_000,
+                    self.pending.is_none()
+                        && (self.vm.control_fast_forward_active()
+                            || self.wait_ns >= u64::from(milliseconds) * 1_000_000),
                 ),
                 MusicaWaitState::CharacterTransition {
                     token_id, slot_id, ..
@@ -321,7 +255,14 @@ impl MusicaSession {
                 self.message = None;
                 Ok(true)
             }
-            Some(MusicaVmEvent::Message { text, speaker, .. }) => {
+            Some(MusicaVmEvent::Message {
+                text,
+                speaker,
+                audio_commands,
+                ..
+            }) => {
+                self.voice_duration = None;
+                self.audio.apply(audio_commands)?;
                 self.wait_ns = 0;
                 self.message(text, speaker)?;
                 Ok(true)
@@ -562,6 +503,11 @@ impl MusicaSession {
             dirty |= self
                 .vm
                 .advance_character_clock(elapsed_ns)
+                .map_err(vm_error)?
+                .is_some();
+            dirty |= self
+                .vm
+                .advance_message_load_clock(elapsed_ns, true)
                 .map_err(vm_error)?
                 .is_some();
             self.phase += u128::from(elapsed_ns) * 60;

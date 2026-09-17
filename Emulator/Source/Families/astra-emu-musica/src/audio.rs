@@ -51,6 +51,7 @@ enum Command {
     Snapshot(SyncSender<FamilyResult<Vec<SoundSnapshot>>>),
     Restore(Vec<SoundSnapshot>, SyncSender<FamilyResult<()>>),
     Suspend(bool),
+    Duration(u32, SyncSender<FamilyResult<u32>>),
 }
 pub(crate) struct Audio {
     commands: SyncSender<Command>,
@@ -127,6 +128,11 @@ impl Audio {
     }
     pub fn suspend(&self, value: bool) -> FamilyResult<()> {
         self.send(Command::Suspend(value))
+    }
+    pub fn duration(&self, stream: u32) -> FamilyResult<Receiver<FamilyResult<u32>>> {
+        let (tx, rx) = sync_channel(1);
+        self.send(Command::Duration(stream, tx))?;
+        Ok(rx)
     }
     pub fn snapshot(&self) -> FamilyResult<Vec<SoundSnapshot>> {
         let (tx, rx) = sync_channel(1);
@@ -218,6 +224,11 @@ fn run(
                     result?;
                 }
                 Command::Suspend(value) => suspended = value,
+                Command::Duration(stream, reply) => {
+                    let result = mixer.duration_ms(stream);
+                    let _ = reply.send(result.clone());
+                    result?;
+                }
             }
         }
         let mut samples = vec![0.0; 512 * 2];
