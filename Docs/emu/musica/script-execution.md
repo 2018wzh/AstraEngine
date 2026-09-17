@@ -89,3 +89,5 @@ Manager 的 Musica 配置现提供独立 backlog 回放开关和 ren/sui/aya/tou
 `.movie id resource width height skippable` 已移植来源 00610272d 的 VM 入口：非零 id、受限文件名、1–8192 尺寸及 `t/f` 跳过标记，建立对应 Media wait。当前 v20 已有的 movie 字段保存资源、等待标识和微秒播放位置，无需改变容器格式；完成等待或更换脚本时清除电影状态。`update_movie_position` 只接受当前电影及等待标识，不接受倒退位置。保存/恢复校验 movie 与 Media wait 的双向关联，损坏存档不替换当前 VM。启用 `ffmpeg-vcpkg` 时，Family 使用 SDK 增量解码、现有 GPU Scene 和音频 worker 播放；读档按游标重开并 seek，Control 只受电影自身的跳过标记约束。未启用 feature 时返回 `ASTRA_EMU_MUSICA_MOVIE_UNAVAILABLE`。完整样本整合测试已通过，真实游戏电影与结局仍待验证。
 
 脚本 IR 升级为 `astra.emu.musica.script_ir.v3`：`ScriptEncoding` 显式标记脚本和原始操作数字节编码，`ScLine::language_guard` 保留来源的 `[j]`／`[e]` 条件。`parse_sc_with_encoding`、VM、反汇编与无损 round-trip 使用同一编码；`parse_sc` 保留作为明确的日文解析入口。原生 v21 保存脚本编码，恢复到不同编码会话明确拒绝，旧 v20 不迁移。GPU 中文、选择、脚本切换与存读档覆盖新 Family 整合路径，不能替代商业游戏完整验收。
+
+Family 在解析前展开 `.include file.sc`，支持嵌套，目标仅限脚本归档的直接文件名。被包含文件没有行尾而 include 行有行尾时补 CRLF，其他字节原样保留。展开限 32 层／16 MiB，累计读取限 64 MiB；循环、缺文件、非法目标或超限都停止加载。源位置是展开流中的偏移；保存校验展开内容，启动、脚本切换与读档不再维护独立的解析路径。

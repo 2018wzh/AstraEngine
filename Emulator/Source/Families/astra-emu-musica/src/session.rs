@@ -4,11 +4,10 @@ mod movie;
 mod persistence;
 use crate::{
     audio::Audio,
-    parse_sc_with_encoding,
     provider::SessionLease,
-    scene::{error, read_asset, Scene},
+    scene::{error, Scene},
     storage::{Snapshot, Storage},
-    MusicaMountedVfs, MusicaVm, MusicaVmEvent, MusicaWaitState, ScOpcodeCatalog,
+    MusicaMountedVfs, MusicaVm, MusicaVmEvent, MusicaWaitState,
 };
 use astra_core::Hash256;
 use astra_emu_family_api::*;
@@ -253,15 +252,11 @@ impl MusicaSession {
                         )
                     })?;
                 let uri = format!("musica:/scr/{file}");
-                let bytes = read_asset(&self.archive, &uri, 16 * 1024 * 1024)?;
-                let encoding = crate::ScriptEncoding::detect(&bytes, self.primary_encoding);
-                let script =
-                    parse_sc_with_encoding(&bytes, &ScOpcodeCatalog::observed_musica(), encoding)
-                        .map_err(|_| {
-                        error("ASTRA_EMU_MUSICA_SCRIPT", "chained script cannot be parsed")
-                    })?;
+                let loaded =
+                    crate::script_loader::load_script(&self.archive, &uri, self.primary_encoding)?;
+                let encoding = loaded.script.encoding;
                 self.vm
-                    .replace_script(uri, Hash256::from_sha256(&bytes), script, label)
+                    .replace_script(uri, loaded.hash, loaded.script, label)
                     .map_err(vm_error)?;
                 self.scene.set_text_encoding(encoding);
                 Ok(false)

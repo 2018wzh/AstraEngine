@@ -1,10 +1,10 @@
 use crate::{
     audio::Audio,
-    mount_musica, parse_sc_with_encoding,
-    scene::{core_error, error, read_asset, Scene},
+    mount_musica,
+    scene::{core_error, error, Scene},
     session::MusicaSession,
     storage::Storage,
-    MusicaVm, ScOpcodeCatalog, ScriptEncoding, MUSICA_PROFILE_FILE,
+    MusicaVm, ScriptEncoding, MUSICA_PROFILE_FILE,
 };
 use abi_stable::std_types::ROption;
 use astra_core::Hash256;
@@ -217,12 +217,10 @@ impl MusicaProvider {
         let root = Path::new(request.game_path.as_str());
         let archive = Arc::new(mount_musica(root, Path::new(&profile)).map_err(core_error)?);
         let uri = format!("musica:/scr/{entry}");
-        let bytes = read_asset(&archive, &uri, 16 * 1024 * 1024)?;
         let primary_encoding = encoding;
-        let encoding = ScriptEncoding::detect(&bytes, primary_encoding);
-        let script = parse_sc_with_encoding(&bytes, &ScOpcodeCatalog::observed_musica(), encoding)
-            .map_err(|_| error("ASTRA_EMU_MUSICA_SCRIPT", "entry script cannot be parsed"))?;
-        let mut vm = MusicaVm::new(uri, Hash256::from_sha256(&bytes), script, 0)
+        let loaded = crate::script_loader::load_script(&archive, &uri, primary_encoding)?;
+        let encoding = loaded.script.encoding;
+        let mut vm = MusicaVm::new(uri, loaded.hash, loaded.script, 0)
             .map_err(|_| error("ASTRA_EMU_MUSICA_VM", "entry script cannot be initialized"))?;
         vm.set_voice_preferences(crate::voice_preferences::VoicePreferences::resolve(
             &config,

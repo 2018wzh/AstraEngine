@@ -14,6 +14,7 @@ mod profile;
 mod runtime;
 pub use message::*;
 mod script;
+mod script_loader;
 mod text_renderer;
 
 pub use archive::*;

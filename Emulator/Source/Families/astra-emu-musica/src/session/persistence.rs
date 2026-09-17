@@ -27,25 +27,24 @@ impl MusicaSession {
         }
         let state = MusicaVm::decode_native_save(&saved.vm)
             .map_err(|_| error("ASTRA_EMU_MUSICA_SAVE_STATE", "VM save is invalid"))?;
-        let bytes = read_asset(&self.archive, &state.script_uri, 16 * 1024 * 1024)?;
-        if Hash256::from_sha256(&bytes) != state.script_hash {
+        let loaded = crate::script_loader::load_script(
+            &self.archive,
+            &state.script_uri,
+            self.primary_encoding,
+        )?;
+        if loaded.hash != state.script_hash {
             return Err(error(
                 "ASTRA_EMU_MUSICA_SAVE_SCRIPT",
-                "saved script has changed",
+                "saved script or include has changed",
             ));
         }
-        if state.script_encoding != crate::ScriptEncoding::detect(&bytes, self.primary_encoding) {
+        if loaded.script.encoding != state.script_encoding {
             return Err(error(
                 "ASTRA_EMU_MUSICA_SAVE_ENCODING",
-                "save uses a different script encoding",
+                "saved script encoding no longer matches",
             ));
         }
-        let script = parse_sc_with_encoding(
-            &bytes,
-            &ScOpcodeCatalog::observed_musica(),
-            state.script_encoding,
-        )
-        .map_err(|_| error("ASTRA_EMU_MUSICA_SCRIPT", "saved script cannot be parsed"))?;
+        let script = loaded.script;
         let mut vm = MusicaVm::new(
             state.script_uri,
             state.script_hash,

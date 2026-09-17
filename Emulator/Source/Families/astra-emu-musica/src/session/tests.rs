@@ -715,3 +715,6 @@ mod read_skip;
 
 #[path = "tests/encoding.rs"]
 mod encoding;
+
+#[path = "tests/includes.rs"]
+mod includes;
