@@ -467,3 +467,7 @@ Classic route.coverage.034 已通过，48,109 条输入到达 tsui.ending，27 �
 Sandbox 更新 Musica 后发现 Manager 因已安装 descriptor 变化直接退出，无法从界面重新安装。已改为注册前校验、失败插件停用、保留安装记录并持续显示错误；重新安装成功才清除对应错误。缺失插件及实际 Musica DLL descriptor 变化后的重新安装/再次启动回归通过，Manager Clippy 与构建通过；真实界面回归正在进行。
 
 Sandbox 已实际验证停用诊断显示、游戏库重新安装及重扫，错误清除后已重新启动 Musica 加载。配置与已有存档未重建；冷启动读档仍待加载完成后验证。FVP 保留原会话并恢复自动播放。
+
+Musica 在 Sandbox 中已完成冷启动标题读档、剧情推进后再次读档，以及两次恢复后的输入推进。使用原手动槽位 20，缩略图与保存时间保持不变；两次均恢复原对白，再按 Enter 进入下一句。Manager 记录两次 load.completed，GPU 为 DX12 discrete_gpu，未再次出现 ASTRA_EMU_MUSICA_ELAPSED。该代表流程仍使用显式 NullAudioDevice，不代表真实音频或完整结局验收；调试构建的大型归档同步校验仍造成冷启动界面长时间未响应。
+
+Classic route.coverage.035 与 036 均通过 DX12 独显 Headless 抽样运行，分别为 47,802 和 47,832 条输入到达 tsui.ending，各有 27 张过程样本及终局截图。已分别查看第 009 张，对白与场景可见；第 037 路线继续运行。Classic 早期仅终局截图的路线、Modern 及真实 Player 验收仍未关闭。
