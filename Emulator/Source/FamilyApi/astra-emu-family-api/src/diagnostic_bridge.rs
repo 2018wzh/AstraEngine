@@ -131,6 +131,17 @@ impl Visit for DiagnosticVisitor {
             "code" | "operation" | "state" if diagnostic_symbol(value) => {
                 self.push(field.name(), DiagnosticValue::Symbol(value.into()));
             }
+            "backend" if matches!(value, "dx12" | "vulkan" | "metal" | "unsupported") => {
+                self.push(field.name(), DiagnosticValue::Symbol(value.into()));
+            }
+            "device_type"
+                if matches!(
+                    value,
+                    "discrete_gpu" | "integrated_gpu" | "virtual_gpu" | "cpu" | "other"
+                ) =>
+            {
+                self.push(field.name(), DiagnosticValue::Symbol(value.into()));
+            }
             "slot_kind" if matches!(value, "bgm" | "se" | "none") => {
                 self.push(field.name(), DiagnosticValue::Symbol(value.into()));
             }

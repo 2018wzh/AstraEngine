@@ -69,3 +69,5 @@ Root workspace 管共享/Engine/VN/Player/工具；Editor 与 Emulator 使用独
 公共离屏 GPU renderer 通过 `WgpuOffscreenRenderer::with_default_compositing` 选择未显式声明颜色空间的 Sprite、文字、矩形和 Mesh2D 命令的混合空间，默认仍为 LinearSrgb。MeshBatch2D 保留自身声明，同一帧混用两种空间明确失败。Minori 使用 EncodedSrgb，在 GPU 上按原生编码颜色值混合，复用现有纹理、文字和裁剪管线。
 
 完整字体的覆盖声明可由 `astra_text::font_unicode_coverage(bytes, face_index)` 从字体字符映射生成，复用 cosmic-text 已有 skrifa，不新增解析器或依赖。返回有序、互不重叠的 Unicode 标量区间，排除缺失 glyph；字体或 face 无效、没有可用映射时明确失败。此接口不代替实际 shaping、缺字和 fallback 检查。Minori 使用该接口，避免手写区间遗漏日文标点与符号。文字错误只向 Manager 传递经过校验的诊断码，不透传正文。
+
+诊断桥允许 `backend` 的 dx12/vulkan/metal/unsupported 及 `device_type` 的 discrete_gpu/integrated_gpu/virtual_gpu/cpu/other 枚举值。调用方必须提交字符串字段，任意字符串和 Debug/Display 仍脱敏；设备名称不在白名单。此信息用于区分实际后端，不改变硬件 GPU 的选择与校验。

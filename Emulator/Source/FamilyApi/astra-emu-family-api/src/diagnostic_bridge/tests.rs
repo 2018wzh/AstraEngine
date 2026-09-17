@@ -112,3 +112,36 @@ fn reviewed_audio_kinds_and_script_hashes_remain_bounded_and_typed() {
         event.validate().unwrap();
     }
 }
+
+#[test]
+fn renderer_diagnostics_only_forward_reviewed_backend_and_device_types() {
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let sink = DiagnosticSink_TO::from_value(Recorder(events.clone()), TD_Opaque);
+    let subscriber = tracing_subscriber::registry().with(Bridge { sink });
+    tracing::subscriber::with_default(subscriber, || {
+        tracing::info!(
+            event = "core.gpu.created",
+            backend = "dx12",
+            device_type = "discrete_gpu"
+        );
+        tracing::info!(
+            event = "core.gpu.created",
+            backend = "private_backend",
+            device_type = "private_device"
+        );
+        tracing::info!(event = "core.gpu.created", backend = %"dx12", device_type = ?"discrete_gpu");
+    });
+    let events = events.lock().unwrap();
+    assert_eq!(events.len(), 3);
+    assert_eq!(events[0].redacted_fields, 0);
+    for (name, value) in [("backend", "dx12"), ("device_type", "discrete_gpu")] {
+        assert!(events[0].fields.iter().any(
+            |field| field.name == name && field.value == DiagnosticValue::Symbol(value.into())
+        ));
+    }
+    assert_eq!(events[1].redacted_fields, 2);
+    assert_eq!(events[2].redacted_fields, 2);
+    for event in events.iter() {
+        event.validate().unwrap();
+    }
+}

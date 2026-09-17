@@ -63,8 +63,11 @@ impl Scene {
                 )
             })?
             .with_default_compositing(astra_media_core::SceneCompositing2D::EncodedSrgb);
-        tracing::info!(event = "astra.emu.minori.gpu.created", backend = %renderer.identity().backend,
-            device_type = %renderer.identity().device_type);
+        tracing::info!(
+            event = "astra.emu.minori.gpu.created",
+            backend = renderer.identity().backend.as_str(),
+            device_type = renderer.identity().device_type.as_str()
+        );
         let text = MinoriTextRenderer::new().map_err(|_| {
             error(
                 "ASTRA_EMU_MINORI_FONT",
