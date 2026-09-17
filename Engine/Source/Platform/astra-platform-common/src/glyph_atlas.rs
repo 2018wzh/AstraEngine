@@ -35,6 +35,7 @@ pub(crate) struct WgpuGlyphAtlasRenderer {
     linear_sampler: wgpu::Sampler,
     nearest_sampler: wgpu::Sampler,
     pipelines: BlendPipelines,
+    default_compositing: SceneCompositing2D,
     output: Option<CachedOutput>,
     vertex_buffer: Option<wgpu::Buffer>,
     vertex_capacity: u64,
@@ -398,6 +399,7 @@ struct DrawRun<'a> {
     // expected bounded run inline avoids a per-frame growth allocation while
     // retaining an explicit spill path for authored long text.
     quads: SmallVec<[DrawQuad<'a>; 32]>,
+    compositing: SceneCompositing2D,
     blend: BlendMode,
     rgba: [u8; 4],
     opacity: f32,
@@ -477,6 +479,7 @@ impl WgpuGlyphAtlasRenderer {
             linear_sampler,
             nearest_sampler,
             pipelines,
+            default_compositing: SceneCompositing2D::LinearSrgb,
             output: None,
             vertex_buffer: None,
             vertex_capacity: 0,
@@ -497,6 +500,10 @@ impl WgpuGlyphAtlasRenderer {
             atlas_staging_index: 0,
             reserved_side,
         }
+    }
+
+    pub(super) fn set_default_compositing(&mut self, compositing: SceneCompositing2D) {
+        self.default_compositing = compositing;
     }
 
     pub(super) fn recover(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
@@ -930,6 +937,7 @@ impl WgpuGlyphAtlasRenderer {
                         &mut quad_runs,
                         &mut draw_runs,
                         DrawRun {
+                            compositing: self.default_compositing,
                             blend: *blend,
                             quads,
                             rgba: *rgba,
@@ -976,6 +984,7 @@ impl WgpuGlyphAtlasRenderer {
                         &mut quad_runs,
                         &mut draw_runs,
                         DrawRun {
+                            compositing: self.default_compositing,
                             blend: *blend,
                             quads: smallvec![DrawQuad {
                                 source: QuadSource::Resource {
@@ -1025,6 +1034,7 @@ impl WgpuGlyphAtlasRenderer {
                         &mut quad_runs,
                         &mut draw_runs,
                         DrawRun {
+                            compositing: self.default_compositing,
                             blend: BlendMode::Alpha,
                             quads: smallvec![DrawQuad {
                                 source: QuadSource::White,
@@ -1112,7 +1122,7 @@ impl WgpuGlyphAtlasRenderer {
                         indices,
                         texture_id: resolved_texture,
                         texture_filter: *texture_filter,
-                        compositing: SceneCompositing2D::LinearSrgb,
+                        compositing: self.default_compositing,
                         opacity: *opacity * opacity_stack.last().copied().unwrap_or(1.0),
                         blend: *blend,
                         clip: clip_stack.last().copied().unwrap_or(RectI::new(
@@ -1223,6 +1233,7 @@ impl WgpuGlyphAtlasRenderer {
                         &mut quad_runs,
                         &mut draw_runs,
                         DrawRun {
+                            compositing: self.default_compositing,
                             blend: BlendMode::Alpha,
                             quads: smallvec![DrawQuad {
                                 source: QuadSource::White,
@@ -1269,6 +1280,7 @@ impl WgpuGlyphAtlasRenderer {
                         &mut quad_runs,
                         &mut draw_runs,
                         DrawRun {
+                            compositing: self.default_compositing,
                             blend: *blend,
                             quads: smallvec![DrawQuad {
                                 source: QuadSource::Resource {
@@ -1316,6 +1328,7 @@ impl WgpuGlyphAtlasRenderer {
                         &mut quad_runs,
                         &mut draw_runs,
                         DrawRun {
+                            compositing: self.default_compositing,
                             blend: *blend,
                             quads: smallvec![DrawQuad {
                                 source: QuadSource::Resource {
@@ -3351,7 +3364,7 @@ fn build_vertices(
             DrawPrimitive::Mesh(run) => run.texture_filter,
         };
         let compositing = match primitive {
-            DrawPrimitive::Quads(_) => SceneCompositing2D::LinearSrgb,
+            DrawPrimitive::Quads(index) => quad_runs[*index].compositing,
             DrawPrimitive::Mesh(run) => run.compositing,
         };
         if clip.width == 0 || clip.height == 0 {
@@ -3361,7 +3374,7 @@ fn build_vertices(
         match primitive {
             DrawPrimitive::Quads(index) => {
                 let run = &quad_runs[*index];
-                let color = straight_to_premultiplied_linear(run.rgba, run.opacity);
+                let color = straight_to_premultiplied(run.rgba, run.opacity, run.compositing);
                 for quad in &run.quads {
                     let left = quad.destination.x as f32;
                     let top = quad.destination.y as f32;
@@ -3503,12 +3516,20 @@ fn premultiplied_encoded(rgba: [u8; 4], opacity: f32) -> [f32; 4] {
     ]
 }
 
-fn straight_to_premultiplied_linear(rgba: [u8; 4], opacity: f32) -> [f32; 4] {
+fn straight_to_premultiplied(
+    rgba: [u8; 4],
+    opacity: f32,
+    compositing: SceneCompositing2D,
+) -> [f32; 4] {
     let alpha = f32::from(rgba[3]) / 255.0 * opacity;
+    let channel = |value| match compositing {
+        SceneCompositing2D::LinearSrgb => srgb_byte_to_linear(value),
+        SceneCompositing2D::EncodedSrgb => f32::from(value) / 255.0,
+    };
     [
-        srgb_byte_to_linear(rgba[0]) * alpha,
-        srgb_byte_to_linear(rgba[1]) * alpha,
-        srgb_byte_to_linear(rgba[2]) * alpha,
+        channel(rgba[0]) * alpha,
+        channel(rgba[1]) * alpha,
+        channel(rgba[2]) * alpha,
         alpha,
     ]
 }

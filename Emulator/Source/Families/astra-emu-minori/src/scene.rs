@@ -54,12 +54,14 @@ pub(crate) struct Scene {
 
 impl Scene {
     pub fn new(archive: Arc<MinoriMountedVfs>, width: u32, height: u32) -> FamilyResult<Self> {
-        let renderer = pollster::block_on(WgpuOffscreenRenderer::new()).map_err(|_| {
-            error(
-                "ASTRA_EMU_MINORI_RENDERER",
-                "hardware GPU renderer could not be created",
-            )
-        })?;
+        let renderer = pollster::block_on(WgpuOffscreenRenderer::new())
+            .map_err(|_| {
+                error(
+                    "ASTRA_EMU_MINORI_RENDERER",
+                    "hardware GPU renderer could not be created",
+                )
+            })?
+            .with_default_compositing(astra_media_core::SceneCompositing2D::EncodedSrgb);
         tracing::info!(event = "astra.emu.minori.gpu.created", backend = %renderer.identity().backend,
             device_type = %renderer.identity().device_type);
         let text = MinoriTextRenderer::new().map_err(|_| {

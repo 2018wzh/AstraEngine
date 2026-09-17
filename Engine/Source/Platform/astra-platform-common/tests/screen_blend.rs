@@ -61,37 +61,49 @@ async fn screen_blends_premultiplied_colors_and_opacity_on_hardware() {
 
 #[tokio::test]
 #[ignore = "requires a native hardware GPU runner"]
-async fn screen_texture_uses_linear_light_and_preserves_transparent_pixels() {
-    let mut renderer = WgpuOffscreenRenderer::new().await.unwrap();
-    let captured = renderer
-        .render(&SceneFrame {
-            sequence: 1,
-            width: 3,
-            height: 1,
-            clear_rgba: [64, 128, 192, 255],
-            commands: vec![
-                SceneCommand::UploadTexture {
-                    resource_id: "screen.texture".into(),
-                    frame: TextureFrame {
-                        width: 3,
-                        height: 1,
-                        rgba8: vec![255, 0, 0, 255, 255, 0, 0, 128, 255, 0, 0, 0].into(),
+async fn screen_texture_respects_color_space_and_preserves_transparent_pixels() {
+    for (compositing, middle_red) in [
+        (SceneCompositing2D::LinearSrgb, 192),
+        (SceneCompositing2D::EncodedSrgb, 160),
+    ] {
+        let mut renderer = WgpuOffscreenRenderer::new()
+            .await
+            .unwrap()
+            .with_default_compositing(compositing);
+        assert!(matches!(
+            renderer.identity().device_type.as_str(),
+            "integrated_gpu" | "discrete_gpu"
+        ));
+        let captured = renderer
+            .render(&SceneFrame {
+                sequence: 1,
+                width: 3,
+                height: 1,
+                clear_rgba: [64, 128, 192, 255],
+                commands: vec![
+                    SceneCommand::UploadTexture {
+                        resource_id: "screen.texture".into(),
+                        frame: TextureFrame {
+                            width: 3,
+                            height: 1,
+                            rgba8: vec![255, 0, 0, 255, 255, 0, 0, 128, 255, 0, 0, 0].into(),
+                        },
                     },
-                },
-                SceneCommand::Sprite {
-                    id: "screen.sprite".into(),
-                    texture_id: "screen.texture".into(),
-                    source: None,
-                    destination: RectI::new(0, 0, 3, 1),
-                    opacity: 1.0,
-                    blend: BlendMode::Screen,
-                },
-            ],
-            semantics: None,
-        })
-        .unwrap();
-    assert_eq!(
-        captured.rgba8.as_ref(),
-        [255, 128, 192, 255, 192, 128, 192, 255, 64, 128, 192, 255]
-    );
+                    SceneCommand::Sprite {
+                        id: "screen.sprite".into(),
+                        texture_id: "screen.texture".into(),
+                        source: None,
+                        destination: RectI::new(0, 0, 3, 1),
+                        opacity: 1.0,
+                        blend: BlendMode::Screen,
+                    },
+                ],
+                semantics: None,
+            })
+            .unwrap();
+        assert_eq!(
+            captured.rgba8.as_ref(),
+            [255, 128, 192, 255, middle_red, 128, 192, 255, 64, 128, 192, 255]
+        );
+    }
 }

@@ -200,6 +200,16 @@ pub struct WgpuPendingProfile {
 }
 
 impl WgpuOffscreenRenderer {
+    /// Choose the color space of commands without an explicit compositing mode.
+    /// Mesh batches retain their own declaration; mixed spaces remain invalid.
+    pub fn with_default_compositing(
+        mut self,
+        compositing: astra_media_core::SceneCompositing2D,
+    ) -> Self {
+        self.scene_renderer.set_default_compositing(compositing);
+        self
+    }
+
     pub async fn new() -> Result<Self, PlatformError> {
         Self::new_internal(None, None).await
     }
