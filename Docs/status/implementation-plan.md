@@ -449,3 +449,6 @@ Classic route.coverage.031 完成 DX12 独显 Headless 抽样运行：47,870 条
 
 
 Classic route.coverage.032 完成 DX12 独显 Headless 抽样运行：47,846 条输入、38 次选择到达 tsui.ending，27 张沿途样本另加终局。第 009 张对白截图已查看，正文、人物与背景可见；第 033 路线继续运行。Sandbox 新 Manager 已从界面安装 Musica、扫描独立游戏副本并保存标题启动配置，商业归档加载日志正常进入 Manager，视听与窗口验收尚在进行。
+
+
+Musica 已在 Windows Sandbox 的真实 Manager 中通过原生标题/System 页面与全屏往返测试，核心日志为 DX12 discrete_gpu。实际观察到全屏时标题栏/任务栏退出显示，返回窗口模式后恢复；原生页面输入与 GPU 图像正常。该轮仍为 NullAudioDevice，真实音频、冷启动全屏恢复和商业结局保持开放。
