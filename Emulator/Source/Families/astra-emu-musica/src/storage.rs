@@ -1,3 +1,4 @@
+mod config;
 use crate::{audio::SoundSnapshot, scene::error};
 use astra_core::Hash256;
 use astra_emu_family_api::FamilyResult;

@@ -42,10 +42,11 @@ impl MusicaSession {
                 self.clear_input();
                 self.refresh_save_cards()
             }
-            (_, 2) => Err(error(
-                "ASTRA_EMU_MUSICA_CONFIG_PAGE_UNAVAILABLE",
-                "native configuration page is not integrated yet",
-            )),
+            (_, 2) => {
+                self.vm.open_config().map_err(vm_error)?;
+                self.clear_input();
+                Ok(())
+            }
             (2, 3) => self
                 .vm
                 .set_gallery_page(MusicaSystemPage::Memories, 0)

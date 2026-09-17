@@ -96,6 +96,14 @@ pub fn musica_descriptor() -> FamilyDescriptor {
     });
     configuration.extend(crate::voice_preferences::VoicePreferences::fields());
     configuration.extend(crate::audio::AudioPreferences::fields());
+    for field in &mut configuration {
+        if !matches!(
+            field.id.as_str(),
+            "profile_file" | "entry_script" | "launch_mode" | "script_encoding"
+        ) {
+            field.group = format!("Initial {} defaults", field.group).into();
+        }
+    }
     FamilyDescriptor {
         family_id: "musica".into(),
         plugin_id: "astra.emu.musica".into(),
@@ -265,6 +273,27 @@ impl MusicaProvider {
             )
         })?);
         let storage = Storage::new(root)?;
+        let mut settings = vm.config().clone();
+        [
+            settings.bgm_volume,
+            settings.voice_volume,
+            settings.se_volume,
+        ] = audio_preferences.volume;
+        [settings.bgm_muted, settings.voice_muted, settings.se_muted] = audio_preferences.muted;
+        settings.progress_in_background = progress_in_background;
+        settings.text_shadow = text_shadow;
+        let settings = storage.configuration(game)?.unwrap_or(settings);
+        if settings.fullscreen {
+            return Err(error(
+                "ASTRA_EMU_MUSICA_WINDOW_COMMAND_UNAVAILABLE",
+                "Family window commands are not integrated yet",
+            ));
+        }
+        let progress_in_background = settings.progress_in_background;
+        let text_shadow = settings.text_shadow;
+        let audio_preferences = settings.audio_preferences();
+        vm.set_config(settings)
+            .map_err(|_| error("ASTRA_EMU_MUSICA_CONFIG", "native configuration is invalid"))?;
         let quick_cursor = storage.quick_cursor(game)?;
         vm.merge_verified_gallery_unlocks(&storage.progress(game)?)
             .map_err(|_| {

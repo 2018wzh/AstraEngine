@@ -1,5 +1,6 @@
 mod backlog;
 mod config;
+mod config_audio;
 mod control;
 mod effects;
 mod errors;
@@ -283,6 +284,17 @@ impl MusicaVm {
         };
         if expected != token_id {
             return Err(MusicaRuntimeError::Waiting);
+        }
+        if !self.config.animation {
+            match self.state.wait.clone() {
+                Some(MusicaWaitState::LinearScroll { milliseconds, .. }) => {
+                    self.advance_linear_scroll_clock(u64::from(milliseconds) * 1_000_000)?;
+                }
+                Some(MusicaWaitState::AxisScroll { milliseconds, .. }) => {
+                    self.advance_axis_scroll_clock(u64::from(milliseconds) * 1_000_000)?;
+                }
+                _ => {}
+            }
         }
         if matches!(self.state.wait, Some(MusicaWaitState::Media { .. })) {
             save_pages::validate_state(&self.state)?;

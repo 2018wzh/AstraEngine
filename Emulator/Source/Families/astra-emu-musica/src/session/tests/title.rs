@@ -12,14 +12,32 @@ pub(super) fn game(root: &std::path::Path) {
         ("saveloadSelect.png", 344, 98),
         ("saveloadButtons.png", 356, 48),
         ("notsaved.png", 106, 60),
+        ("configBase.png", 1280, 720),
+        ("knob.png", 15, 25),
+        ("checkmark.png", 21, 32),
+        ("circle.png", 74, 74),
     ] {
-        assets.push((name.to_owned(), png(w, h, [20, 30, 40, 255])));
+        assets.push((
+            name.to_owned(),
+            png(
+                w,
+                h,
+                if name == "knob.png" {
+                    [200, 100, 50, 255]
+                } else {
+                    [20, 30, 40, 255]
+                },
+            ),
+        ));
     }
     for page in 0..10 {
         assets.push((
             format!("saveload_Page{page}.png"),
             png(208, 48, [30, 40, 50, 255]),
         ));
+    }
+    for name in ["BGMTest.wav", "VOICEtest.wav", "SEtest.wav"] {
+        assets.push((name.to_owned(), fixture::wave()));
     }
     for variant in 0..3 {
         assets.push((
@@ -133,13 +151,13 @@ fn native_gpu_title_starts_loads_returns_and_exits_without_consuming_story_input
     Box::new(session).close().unwrap();
 }
 #[test]
-fn native_gpu_title_unintegrated_pages_and_missing_art_fail_explicitly() {
+fn native_gpu_title_config_returns_and_missing_art_fails_explicitly() {
     let _lock = PROVIDER_SESSION.lock().unwrap();
     let root = tempfile::tempdir().unwrap();
     game(root.path());
     let mut provider = MusicaProvider::default();
     let (_, mut session) = provider.open_session(title_request(root.path())).unwrap();
-    let err = session
+    session
         .advance(
             0,
             &[
@@ -148,8 +166,10 @@ fn native_gpu_title_unintegrated_pages_and_missing_art_fail_explicitly() {
                 key(KeyCode::Enter),
             ],
         )
-        .unwrap_err();
-    assert_eq!(err.code(), "ASTRA_EMU_MUSICA_CONFIG_PAGE_UNAVAILABLE");
+        .unwrap();
+    assert_eq!(session.vm.state().system_ui.page, MusicaSystemPage::Config);
+    session.advance(0, &[key(KeyCode::Escape)]).unwrap();
+    assert_eq!(session.vm.state().system_ui.page, MusicaSystemPage::Title);
     Box::new(session).close().unwrap();
     let missing = tempfile::tempdir().unwrap();
     fixture::game(missing.path(), b".end\r\n");

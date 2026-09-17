@@ -1,7 +1,10 @@
+mod input;
 use crate::{MusicaPlayMode, MusicaRuntimeError};
+pub(crate) use input::config_control_at;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct MusicaConfigState {
     pub message_speed_unread: u8,
     pub message_speed_read: u8,
@@ -27,6 +30,13 @@ pub struct MusicaConfigState {
 }
 
 impl MusicaConfigState {
+    pub(crate) fn audio_preferences(&self) -> crate::audio::AudioPreferences {
+        crate::audio::AudioPreferences {
+            volume: [self.bgm_volume, self.voice_volume, self.se_volume],
+            muted: [self.bgm_muted, self.voice_muted, self.se_muted],
+        }
+    }
+
     pub fn validate(&self) -> Result<(), MusicaRuntimeError> {
         validate_config_state(self)
     }

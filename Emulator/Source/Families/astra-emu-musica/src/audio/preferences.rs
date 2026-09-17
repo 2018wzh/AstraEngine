@@ -77,6 +77,12 @@ fn invalid() -> FamilyError {
 }
 
 pub(super) fn bus_index(uri: &str) -> FamilyResult<usize> {
+    match uri {
+        "musica:/sys/BGMTest.wav" => return Ok(0),
+        "musica:/sys/VOICEtest.wav" => return Ok(1),
+        "musica:/sys/SEtest.wav" => return Ok(2),
+        _ => {}
+    }
     match uri
         .strip_prefix("musica:/")
         .and_then(|s| s.split_once('/'))

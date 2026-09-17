@@ -1,3 +1,4 @@
+mod config;
 use crate::{MusicaMountedVfs, MusicaRuntimeState, MusicaTextRenderer};
 use astra_byte_source::OwnedByteBuffer;
 use astra_emu_family_api::{FamilyError, FamilyResult};

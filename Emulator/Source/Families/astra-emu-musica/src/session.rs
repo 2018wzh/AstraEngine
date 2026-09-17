@@ -1,4 +1,5 @@
 mod backlog;
+mod config;
 mod gallery;
 mod lifecycle;
 mod tick;
@@ -46,6 +47,7 @@ pub(crate) struct MusicaSession {
     input_pending: bool,
     control_keys: u8,
     pointer: Option<(f32, f32)>,
+    config_pointer_down: bool,
     finished: bool,
     poisoned: bool,
     suspended: bool,
@@ -106,6 +108,7 @@ impl MusicaSession {
             input_pending: false,
             control_keys: 0,
             pointer: None,
+            config_pointer_down: false,
             finished: false,
             poisoned: false,
             suspended: false,
@@ -126,6 +129,7 @@ impl MusicaSession {
         self.control_keys = 0;
         self.input_pending = false;
         self.pointer = None;
+        self.config_pointer_down = false;
         self.vm.set_control_pressed(false);
     }
     fn update_pause(&self) -> FamilyResult<()> {
@@ -161,6 +165,10 @@ impl MusicaSession {
         let mut load = false;
         let mut choice_dirty = false;
         for event in events {
+            if self.config_event(event)? {
+                choice_dirty = true;
+                continue;
+            }
             if self.gallery_event(event)? {
                 choice_dirty = true;
                 continue;
@@ -327,54 +335,58 @@ impl MusicaSession {
             && !self.finished
             && self.vm.state().system_ui.page == crate::MusicaSystemPage::None
         {
+            if self.vm.config().animation {
+                dirty |= self
+                    .vm
+                    .advance_axis_scroll_clock(elapsed_ns)
+                    .map_err(vm_error)?
+                    .is_some();
+                dirty |= self
+                    .vm
+                    .advance_linear_scroll_clock(elapsed_ns)
+                    .map_err(vm_error)?
+                    .is_some();
+                dirty |= self
+                    .vm
+                    .advance_scroll_xf_clock(elapsed_ns)
+                    .map_err(vm_error)?
+                    .is_some();
+                dirty |= self
+                    .vm
+                    .advance_wscroll2_clock(elapsed_ns)
+                    .map_err(vm_error)?
+                    .is_some();
+                dirty |= self
+                    .vm
+                    .advance_firefly_clock(elapsed_ns)
+                    .map_err(vm_error)?
+                    .is_some();
+                dirty |= self
+                    .vm
+                    .advance_character_clock(elapsed_ns)
+                    .map_err(vm_error)?
+                    .is_some();
+                if self.vm.config().screen_effect {
+                    dirty |= self
+                        .vm
+                        .advance_effect_clock(elapsed_ns)
+                        .map_err(vm_error)?
+                        .is_some();
+                    dirty |= self
+                        .vm
+                        .advance_screen_shake_clock(elapsed_ns)
+                        .map_err(vm_error)?
+                        .is_some();
+                    dirty |= self
+                        .vm
+                        .advance_secondary_effect_clock(elapsed_ns)
+                        .map_err(vm_error)?
+                        .is_some();
+                }
+            }
             dirty |= self
                 .vm
-                .advance_effect_clock(elapsed_ns)
-                .map_err(vm_error)?
-                .is_some();
-            dirty |= self
-                .vm
-                .advance_screen_shake_clock(elapsed_ns)
-                .map_err(vm_error)?
-                .is_some();
-            dirty |= self
-                .vm
-                .advance_axis_scroll_clock(elapsed_ns)
-                .map_err(vm_error)?
-                .is_some();
-            dirty |= self
-                .vm
-                .advance_linear_scroll_clock(elapsed_ns)
-                .map_err(vm_error)?
-                .is_some();
-            dirty |= self
-                .vm
-                .advance_scroll_xf_clock(elapsed_ns)
-                .map_err(vm_error)?
-                .is_some();
-            dirty |= self
-                .vm
-                .advance_wscroll2_clock(elapsed_ns)
-                .map_err(vm_error)?
-                .is_some();
-            dirty |= self
-                .vm
-                .advance_firefly_clock(elapsed_ns)
-                .map_err(vm_error)?
-                .is_some();
-            dirty |= self
-                .vm
-                .advance_secondary_effect_clock(elapsed_ns)
-                .map_err(vm_error)?
-                .is_some();
-            dirty |= self
-                .vm
-                .advance_character_clock(elapsed_ns)
-                .map_err(vm_error)?
-                .is_some();
-            dirty |= self
-                .vm
-                .advance_message_load_clock(elapsed_ns, true)
+                .advance_message_load_clock(elapsed_ns, self.vm.config().animation)
                 .map_err(vm_error)?
                 .is_some();
             self.phase += u128::from(elapsed_ns) * 60;
@@ -386,7 +398,12 @@ impl MusicaSession {
                 dirty |= self.tick()?;
             }
         }
-        if dirty && self.vm.state().system_ui.page == crate::MusicaSystemPage::Title {
+        if dirty && self.vm.state().system_ui.page == crate::MusicaSystemPage::Config {
+            self.scene.render_config(
+                self.vm.config_for_presentation().map_err(vm_error)?,
+                self.pointer,
+            )?;
+        } else if dirty && self.vm.state().system_ui.page == crate::MusicaSystemPage::Title {
             self.scene
                 .render_title(self.vm.title_variant(), self.title_focus)?;
         } else if dirty && crate::runtime::gallery::count(&self.vm.state().system_ui.page).is_some()

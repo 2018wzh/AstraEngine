@@ -1,6 +1,14 @@
 use super::*;
 impl MusicaSession {
     pub(super) fn tick(&mut self) -> FamilyResult<bool> {
+        let visual_completion = matches!(
+            self.vm.state().wait,
+            Some(
+                MusicaWaitState::CharacterTransition { .. }
+                    | MusicaWaitState::LinearScroll { .. }
+                    | MusicaWaitState::AxisScroll { .. }
+            )
+        );
         let tick = self
             .vm
             .state()
@@ -44,31 +52,48 @@ impl MusicaSession {
                             || self.wait_ns >= u64::from(milliseconds) * 1_000_000),
                 ),
                 MusicaWaitState::CharacterTransition {
-                    token_id, slot_id, ..
+                    token_id,
+                    slot_id,
+                    milliseconds,
                 } => (
                     token_id,
-                    self.vm
-                        .state()
-                        .characters
-                        .get(&slot_id)
-                        .and_then(|character| character.transition.as_ref())
-                        .is_some_and(|transition| transition.completed),
+                    (!self.vm.config().animation
+                        && self.wait_ns >= u64::from(milliseconds) * 1_000_000)
+                        || self
+                            .vm
+                            .state()
+                            .characters
+                            .get(&slot_id)
+                            .and_then(|character| character.transition.as_ref())
+                            .is_some_and(|transition| transition.completed),
                 ),
-                MusicaWaitState::LinearScroll { token_id, .. } => (
+                MusicaWaitState::LinearScroll {
                     token_id,
-                    self.vm
-                        .state()
-                        .linear_scroll
-                        .as_ref()
-                        .is_some_and(|scroll| scroll.completed),
+                    milliseconds,
+                } => (
+                    token_id,
+                    (!self.vm.config().animation
+                        && self.wait_ns >= u64::from(milliseconds) * 1_000_000)
+                        || self
+                            .vm
+                            .state()
+                            .linear_scroll
+                            .as_ref()
+                            .is_some_and(|scroll| scroll.completed),
                 ),
-                MusicaWaitState::AxisScroll { token_id, .. } => (
+                MusicaWaitState::AxisScroll {
                     token_id,
-                    self.vm
-                        .state()
-                        .axis_scroll
-                        .as_ref()
-                        .is_some_and(|scroll| scroll.completed),
+                    milliseconds,
+                } => (
+                    token_id,
+                    (!self.vm.config().animation
+                        && self.wait_ns >= u64::from(milliseconds) * 1_000_000)
+                        || self
+                            .vm
+                            .state()
+                            .axis_scroll
+                            .as_ref()
+                            .is_some_and(|scroll| scroll.completed),
                 ),
                 MusicaWaitState::Presentation { token_id, .. } => (token_id, true),
                 MusicaWaitState::Media { token_id, .. } => (token_id, false),
@@ -93,7 +118,7 @@ impl MusicaSession {
             }
         }
         let event = self.vm.step(tick).map_err(vm_error)?;
-        match event {
+        let changed: FamilyResult<bool> = match event {
             Some(MusicaVmEvent::Movie(state)) => {
                 if (state.width, state.height) != (self.info.width, self.info.height) {
                     return Err(error(
@@ -176,6 +201,7 @@ impl MusicaSession {
                 }
             }
             None => Ok(false),
-        }
+        };
+        changed.map(|changed| changed || visual_completion)
     }
 }
