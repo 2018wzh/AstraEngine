@@ -2,6 +2,7 @@ mod backlog;
 mod message;
 mod movie;
 mod persistence;
+mod save_pages;
 use crate::{
     audio::Audio,
     provider::SessionLease,
@@ -46,6 +47,8 @@ pub(crate) struct MusicaSession {
     focused: bool,
     progress_in_background: bool,
     primary_encoding: crate::ScriptEncoding,
+    gameplay_frame: Option<Arc<[u8]>>,
+    save_cards: Vec<(u32, crate::storage::SaveCard)>,
 }
 impl MusicaSession {
     #[allow(clippy::too_many_arguments)]
@@ -91,6 +94,8 @@ impl MusicaSession {
             focused,
             progress_in_background,
             primary_encoding,
+            gameplay_frame: None,
+            save_cards: Vec::new(),
         }
     }
 
@@ -306,6 +311,10 @@ impl MusicaSession {
         let mut load = false;
         let mut choice_dirty = false;
         for event in events {
+            if self.save_page_event(event)? {
+                choice_dirty = true;
+                continue;
+            }
             if self.backlog_event(event)? {
                 choice_dirty = true;
                 continue;
@@ -516,7 +525,13 @@ impl MusicaSession {
                 dirty |= self.tick()?;
             }
         }
-        if dirty && self.movie.is_none() {
+        if dirty && self.is_save_page() {
+            self.scene.render_save_page(
+                self.vm.state().system_ui.page.clone(),
+                self.vm.state().system_ui.focus_index,
+                &self.save_cards,
+            )?;
+        } else if dirty && self.movie.is_none() {
             let choices = self.vm.choice_display().map_err(vm_error)?;
             self.scene.render(
                 self.vm.state(),

@@ -7,7 +7,10 @@ use std::{
     io::{Read, Write},
     path::{Path, PathBuf},
 };
-const MAGIC: &[u8; 8] = b"AMINSV02";
+mod card;
+pub(crate) use card::SaveCard;
+
+const MAGIC: &[u8; 8] = b"AMUSSV03";
 const MAX_SAVE: usize = 16 * 1024 * 1024;
 pub(crate) const SAVE_PAGE_WIDTH: u32 = 10;
 pub(crate) const SAVE_PAGE_COUNT: u32 = 10;
@@ -15,6 +18,7 @@ pub(crate) const SAVE_MAX_SLOTS: u32 = SAVE_PAGE_WIDTH * SAVE_PAGE_COUNT;
 pub(crate) const MANUAL_SAVE_FIRST_SLOT: u32 = 20;
 #[derive(Serialize, Deserialize)]
 pub(crate) struct Snapshot {
+    pub card: SaveCard,
     pub game: Hash256,
     pub vm: Vec<u8>,
     pub message: Option<(String, Option<String>)>,
@@ -92,7 +96,27 @@ impl Storage {
     pub fn read(&self, slot: u32) -> FamilyResult<Snapshot> {
         read(&self.path(slot, false)?)
     }
+    pub fn card(&self, slot: u32, game: Hash256) -> FamilyResult<Option<SaveCard>> {
+        let path = self.path(slot, false)?;
+        if !path.try_exists().map_err(|_| {
+            error(
+                "ASTRA_EMU_MUSICA_SAVE_PATH",
+                "save slot could not be inspected",
+            )
+        })? {
+            return Ok(None);
+        }
+        let saved = read(&path)?;
+        if saved.game != game {
+            return Err(error(
+                "ASTRA_EMU_MUSICA_SAVE_GAME",
+                "save belongs to another game",
+            ));
+        }
+        Ok(Some(saved.card))
+    }
     pub fn write(&self, slot: u32, snapshot: &Snapshot) -> FamilyResult<()> {
+        snapshot.card.validate()?;
         let path = self.path(slot, true)?;
         if path.try_exists().map_err(|_| {
             error(
@@ -172,7 +196,9 @@ fn read(path: &Path) -> FamilyResult<Snapshot> {
     {
         return Err(fail());
     }
-    postcard::from_bytes(&bytes[48..]).map_err(|_| fail())
+    let saved: Snapshot = postcard::from_bytes(&bytes[48..]).map_err(|_| fail())?;
+    saved.card.validate()?;
+    Ok(saved)
 }
 
 #[cfg(test)]

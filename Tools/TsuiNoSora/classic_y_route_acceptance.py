@@ -179,6 +179,40 @@ def _append_event(sequence: Sequence, event: dict) -> None:
     sequence.add(event, tick_advance=tick_advance)
 
 
+def _sample_checkpoints(events: list[dict], text_states: dict[str, str], prefix: str) -> dict[int, str]:
+    """Bounded samples at visible waits, before the next physical input.
+
+    First/last and evenly spaced intermediate samples cover the full route.
+    Scene samples use the first revealed dialogue in each visited story state;
+    they do not assert that a fade or animation has finished.
+    """
+    dialogue, choices, scenes = [], [], []
+    previous_state = None
+    for index, event in enumerate(events):
+        observation = event.get("observation", {})
+        if event.get("type") != "await":
+            continue
+        if observation.get("key") == "vn.text_reveal_complete":
+            dialogue.append(index)
+            wait = events[index - 1].get("observation", {}) if index else {}
+            state = text_states.get(wait.get("value_hash"))
+            if state is not None and state != previous_state:
+                scenes.append(index)
+                previous_state = state
+        elif observation.get("key") == "vn.focused_semantic_id" and index + 1 < len(events):
+            following = events[index + 1]
+            if following.get("type") == "keyboard" and following.get("physical_key") == "Enter" and following.get("state") == "pressed":
+                choices.append(index)
+    selected: dict[int, list[str]] = {}
+    for kind, candidates, budget in [("dialogue", dialogue, 12), ("choice", choices, 8), ("scene", scenes, 8)]:
+        count = min(len(candidates), budget)
+        indices = [candidates[0]] if count == 1 else [candidates[i * (len(candidates) - 1) // (count - 1)] for i in range(count)]
+        for index in indices:
+            selected.setdefault(index, []).append(kind)
+    return {index: f"{prefix}.sample.{number:03d}.{'.'.join(selected[index])}"
+            for number, index in enumerate(sorted(selected), 1)}
+
+
 def build_sequence(story: dict, route_id: str = ROUTE_ID, *, complete_route: bool = False) -> tuple[Sequence, dict]:
     if story.get("schema") != STORY_SCHEMA:
         raise YRouteAcceptanceError("Classic Y acceptance story schema is invalid")
@@ -235,10 +269,22 @@ def build_sequence(story: dict, route_id: str = ROUTE_ID, *, complete_route: boo
     sequence.pointer_click(*CLASSIC_CONFIG_FAST_FORWARD_POINT)
     sequence.await_value("vn.reading_mode", "fast_forward")
     sequence.key("Escape")
-    for event in _lower_transition_events(
+    events = _lower_transition_events(
         trace["transitions"], stable_wait_hashes, auto_fence_hashes, text_wait_hashes
-    ):
+    )
+    text_states = {
+        json_hash(command["command_id"]): state["state_id"]
+        for state in stories[0]["states"]
+        for command in state["scenes"][0]["commands"]
+        if command.get("kind") == "text"
+    }
+    samples = _sample_checkpoints(events, text_states, f"classic.{route_id}")
+    if not samples:
+        raise YRouteAcceptanceError("Classic route has no visible sampling points")
+    for index, event in enumerate(events):
         _append_event(sequence, event)
+        if index in samples:
+            sequence.checkpoint(samples[index])
     if complete_route:
         sequence.await_value("vn.terminal_routes", [f"state.{trace['terminal_id']}"], 18_000)
     else:
@@ -274,7 +320,9 @@ def run(arguments: argparse.Namespace) -> dict:
         "run_report_hash": result["run_report_hash"],
         "renderer_identity_hash": result["renderer_identity_hash"],
         "renderer_identity": result["renderer_identity"],
-        "checkpoint_id": sequence.checkpoints[0],
+        "checkpoint_id": sequence.checkpoints[-1],
+        "checkpoint_ids": result["checkpoint_ids"],
+        "sample_checkpoint_count": len(sequence.checkpoints) - 1,
         "diagnostics": [],
         "redaction": {
             "commercial_text": "omitted",

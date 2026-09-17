@@ -12,6 +12,7 @@ const MAX_IMAGE_BYTES: usize = 128 * 1024 * 1024;
 
 mod character;
 mod particles;
+pub(crate) mod save_pages;
 mod stage;
 mod stand;
 mod texture;

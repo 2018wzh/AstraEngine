@@ -98,6 +98,39 @@ impl MusicaTextRenderer {
         self.scene.frame(regions).map_err(text_error)
     }
 
+    pub(crate) fn save_cards(
+        &mut self,
+        cards: &[(u32, crate::storage::SaveCard)],
+    ) -> Result<Vec<SceneCommand>, String> {
+        let mut regions = cards
+            .iter()
+            .map(|(slot, card)| {
+                let (x, y) = crate::scene::save_pages::slot_position(slot % 10);
+                let text = if card.comment.is_empty() {
+                    card.timestamp.clone()
+                } else {
+                    format!("{}\n{}", card.timestamp, card.comment)
+                };
+                let mut layout = layout_request(
+                    &format!("musica.save.card.{slot}"),
+                    &text,
+                    Region {
+                        x: x + 124,
+                        y: y + 11,
+                        width: 218,
+                        height: 58,
+                        font_size: 18.0,
+                        line_height: 23.0,
+                        max_lines: 2,
+                    },
+                );
+                layout.rgba = [255, 0, 0, 255];
+                layout
+            })
+            .collect::<Vec<_>>();
+        self.frame(&mut regions)
+    }
+
     pub fn commands(
         &mut self,
         message: Option<(&str, Option<&str>)>,

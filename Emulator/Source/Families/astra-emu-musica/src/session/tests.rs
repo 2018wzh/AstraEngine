@@ -367,6 +367,7 @@ fn native_family_advances_real_archive_scene_audio_input_save_restore_and_close(
         .unwrap();
     reopened.session.close().unwrap();
     // A supplied enhancement pauses only the message; input received while pending is discarded.
+    let root = tempfile::tempdir().unwrap();
     fixture::game(root.path(), b".message 1   Hello\r\n.end\r\n");
     let translation = Translation::default();
     let mut req = request(root.path(), Sink::default());
@@ -471,6 +472,7 @@ fn corrupt_or_foreign_slot_is_never_overwritten() {
     std::fs::write(&slot, b"original commercial save").unwrap();
     let store = crate::storage::Storage::new(root.path()).unwrap();
     let state = crate::storage::Snapshot {
+        card: crate::storage::SaveCard::capture(1280, 720, &vec![255; 1280 * 720 * 4]).unwrap(),
         game: astra_core::Hash256::from_sha256(b"game"),
         vm: vec![],
         message: None,
@@ -718,3 +720,6 @@ mod encoding;
 
 #[path = "tests/includes.rs"]
 mod includes;
+
+#[path = "tests/save_pages.rs"]
+mod save_pages;

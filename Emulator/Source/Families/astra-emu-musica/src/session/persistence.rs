@@ -7,9 +7,22 @@ impl MusicaSession {
             .vm
             .encode_native_save()
             .map_err(|_| error("ASTRA_EMU_MUSICA_SAVE_STATE", "VM state cannot be saved"))?;
+        let mut state = MusicaVm::decode_native_save(&vm).map_err(vm_error)?;
+        if matches!(
+            state.system_ui.page,
+            crate::MusicaSystemPage::Save | crate::MusicaSystemPage::Load
+        ) {
+            state.system_ui.page = crate::MusicaSystemPage::None;
+            state.system_ui.focus_index = 0;
+        }
+        let vm = postcard::to_allocvec(&state)
+            .map_err(|_| error("ASTRA_EMU_MUSICA_SAVE_STATE", "VM state cannot be saved"))?;
+        let pixels = self.gameplay_frame.as_ref().unwrap_or(&self.scene.pixels);
+        let card = crate::storage::SaveCard::capture(self.info.width, self.info.height, pixels)?;
         self.storage.write(
             slot,
             &Snapshot {
+                card,
                 game: self.game,
                 vm,
                 message: self.message.clone(),
@@ -103,6 +116,8 @@ impl MusicaSession {
             .transpose()?;
         vm.set_control_pressed(self.control_keys != 0);
         self.voice_duration = None;
+        self.gameplay_frame = None;
+        self.save_cards.clear();
         self.vm = vm;
         self.movie = movie;
         self.scene = scene;
