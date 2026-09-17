@@ -655,3 +655,6 @@ fn native_gpu_axis_scroll_waits_and_restores_background_position() {
 fn native_gpu_linear_scroll_waits_and_restores_background_position() {
     assert_scroll_restores_background_position("scroll 8 4 1", 2 * 1280 + 4);
 }
+
+#[path = "tests/wscroll2.rs"]
+mod wscroll2;

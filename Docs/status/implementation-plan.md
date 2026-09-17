@@ -331,3 +331,5 @@ Musica 接入来源的无参数 `.effect end`，与主效果清除共用生命�
 Musica WScroll2 已从 00610272d 接入新 Family 时钟、v14 原生状态和共享 GPU 场景。专项测试通过，覆盖双层负向环绕像素、恢复、停止、非法替换及 sync 格式/数量边界。来源的 sync/period 保留为读取校验与状态，不宣称尚未实现的同步运动；真实游戏长流程仍开放。
 
 Classic route.coverage.008 完成 GPU Headless 输入流程，47,829 条输入、38 次选择到达 tsui.ending，DX12 独显且无运行诊断。终点 PNG 已查看，为黑场；完整视听与真实 Player 验收仍开放。
+
+WScroll2 的 Family GPU 回归通过：真实插件 session 经 F5/F9 保存与恢复，窗口挂起停止时钟，恢复后继续轨迹。FVP Sandbox 的 AUTO 长流程已推进到新的机舱场景，仍未到结局，当前为显式测试音频模式。后续按用户确认直接批量移植来源分支完整机制，保留整合回归，不再逐项重验原引擎语义。

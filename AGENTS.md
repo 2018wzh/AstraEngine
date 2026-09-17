@@ -13,6 +13,7 @@
 - 本地接续纳入 KrKr、Siglus、Artemis、CMVS、Musica 的已提交及未提交成果，在独占工作树逐项移植；不得覆盖来源工作树。旧 Minori family 统一重命名为 Musica。新增核心验证代表流程，FVP/Musica 各一结局与终之空 Classic/Modern 37 路线要求不变。
 - 所有适配核心采用最小原生移植原则：优先启用核心现有 GPU feature，复用其渲染、媒体和平台适配；改动限必要的嵌入入口、Family API 与生命周期边界。不得因统一 Host 而另写同一核心的执行或渲染路径。实际视听测试使用 GPU；Windows Sandbox 使用 GPU 虚拟化，软件 adapter 不算通过。
 - 外部核心采用完整上游 fork，以固定上游提交加一个最小适配提交作为整合目标，通过 Git submodule 固定精确提交；不在主仓复制源码。吸收 emu/krkr-hosted 的此项决策，不沿用其已废弃的 ABI。适配代码尽量留在 Family，核心自身缺陷优先整理上游 issue；不得借重构扩大核心功能。整理提交使用新的本地分支，不改写来源或已发布历史，差异与基线同步记录在 MODIFICATIONS.md。
+- 用户已确认 codex/minori-runtime-followup 的全部机制经过验证。接续以该分支完整实现为移植依据，按依赖批量接入，不再逐项重新逆向或验证原引擎语义；测试聚焦新 Family API、SDK/GPU 复用和生命周期的整合回归。不得遗漏机制，亦不得恢复旧 Host/provider 架构。
 - Musica 与 CMVS 是 astra-emu-sdk 的实际消费者：按共同需求提取模块，优先复用 AstraEngine 已有文字、绘制、媒体及字节源能力，删除被替代的重复实现。SDK 不依赖 VN、不强制创建 EngineSession，不要求成熟外部核心采用；统一使用 Musica 实现。
 - Rust 编译期组合和显式依赖注入是 NativeVN 主路径。内部通用 provider/动态 UI ABI 随消费者迁移删除，不新增序列化转发层。
 - Runtime 默认逻辑 60 Hz，呈现独立。只保证可靠存读档，不建设通用输入回放、跨平台逐位确定性或全程 hash 链。禁止每帧全量状态克隆和序列化；必要事务保留在编辑、存档和配置边界。

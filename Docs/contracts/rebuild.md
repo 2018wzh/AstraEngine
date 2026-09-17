@@ -72,3 +72,5 @@ Root workspace 管共享/Engine/VN/Player/工具；Editor 与 Emulator 使用独
 共享 SceneCommand 提供 `PushPixelMask { bits }` / `PopPixelMask`：64 位遮罩按屏幕像素平铺为 8×8，最高位对应 (0,0)，最低位对应 (7,7)，不随场景变换移动；嵌套遮罩取交集，栈下溢或帧末未闭合明确失败。它限制作用域内绘制命令的片元覆盖，不改变资源上传及最终帧 FilterGraph。GPU shader 执行遮罩，CPU 测试 renderer 明确返回 `ASTRA_MEDIA_PIXEL_MASK_GPU_REQUIRED`，不展开像素裁剪或切换后端。命令追加到现有序列化枚举末尾，不改变既有 tag；使用新命令的运行端须同步更新。Director type 26 只生成一次入场场景，保留既有图案表、时序和显式场景恢复，遮罩命令不含外部 IO。
 
 日志桥按用户决定取消内容脱敏和字段白名单，正常转发字符串、message、Debug/Display；数值保留 typed 值。`DiagnosticValue::Text` 最大 4096 bytes，事件最多 32 个唯一字段；超限、重复字段及非有限数值计入 `dropped_fields`。Debug 使用有界 formatter，避免先分配任意大小字符串。来源、级别和事件保持可定位，Manager 继续拥有 sink。Family API/ABI 升为 v4，旧插件须同步重建安装，不保留旧脱敏模式。
+
+Musica 接续直接采用 `codex/minori-runtime-followup` 已验证的完整机制，按依赖批量移植剩余实现。验证重点是新 Family API、共享 SDK/GPU 和 session 生命周期的整合回归，不重复原引擎语义研究。旧 Host/provider 层仍按新架构替换。
