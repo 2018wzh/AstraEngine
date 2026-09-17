@@ -239,7 +239,17 @@ impl AstraEmuManagerController {
                 .as_ref()
                 .map(|profile| profile.model.clone())
                 .unwrap_or_default(),
-            global_diagnostic: self.diagnostic.clone(),
+            global_diagnostic: self
+                .plugin_errors
+                .iter()
+                .map(|(id, error)| {
+                    format!("插件 {id} 已停用：{error}。请在游戏库重新安装插件，然后重新扫描。")
+                })
+                .chain(
+                    std::iter::once(self.diagnostic.clone()).filter(|message| !message.is_empty()),
+                )
+                .collect::<Vec<_>>()
+                .join("\n"),
             audio_device: self.audio_device.as_str().into(),
             translation_endpoint_kind: profile_kind(profile.clone()),
             translation_endpoint: profile

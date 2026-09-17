@@ -461,3 +461,9 @@ Family API v6 已增加一次性的 reset_clock，Musica 成功读档及标题�
 新版 Manager/Musica 构建及实际 DLL 布局、重复加载诊断桥测试通过；FVP/Siglus 的适配 crate Clippy 也通过，外部核心仍有既有警告。
 
 Classic route.coverage.033 已通过抽样运行，到达 tsui.ending，生成 27 张过程截图及终局截图；已查看第 009 张，对白与画面可见。第 034 路线需要 48,109 条输入，原配置不足，已使用独立路线配置补足输入预算后启动。
+
+Classic route.coverage.034 已通过，48,109 条输入到达 tsui.ending，27 张过程截图及终局截图；第 009 张对白截图已查看。第 035 路线继续运行。
+
+Sandbox 更新 Musica 后发现 Manager 因已安装 descriptor 变化直接退出，无法从界面重新安装。已改为注册前校验、失败插件停用、保留安装记录并持续显示错误；重新安装成功才清除对应错误。缺失插件及实际 Musica DLL descriptor 变化后的重新安装/再次启动回归通过，Manager Clippy 与构建通过；真实界面回归正在进行。
+
+Sandbox 已实际验证停用诊断显示、游戏库重新安装及重扫，错误清除后已重新启动 Musica 加载。配置与已有存档未重建；冷启动读档仍待加载完成后验证。FVP 保留原会话并恢复自动播放。

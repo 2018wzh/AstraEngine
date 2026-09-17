@@ -75,6 +75,7 @@ struct AstraEmuManagerController {
     selected_case_id: Option<String>,
     search_query: String,
     diagnostic: String,
+    plugin_errors: BTreeMap<String, String>,
     data_dir: PathBuf,
     game_roots: Vec<PathBuf>,
     mailbox: FrameMailbox,

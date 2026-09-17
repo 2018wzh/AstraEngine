@@ -13,6 +13,72 @@ fn desktop_library_starts_without_implicitly_registered_fvp() {
     assert!(app.registry.descriptor("astra.emu.fvp").is_none());
 }
 
+#[test]
+fn missing_installed_plugin_keeps_manager_available_and_error_visible() {
+    use astra_emu_manager_core::{FamilyCapability, FamilyPluginDescriptor, VerifiedPluginInstall};
+    let root = tempfile::tempdir().unwrap();
+    let mut app = controller(root.path());
+    let descriptor = FamilyPluginDescriptor {
+        family_id: "missing".into(),
+        plugin_id: "astra.emu.missing".into(),
+        abi_fingerprint: astra_emu_family_api::FAMILY_ABI_FINGERPRINT.into(),
+        version: "1.0.0".into(),
+        capabilities: vec![FamilyCapability::CpuFrame],
+        supported_formats: vec!["missing.test".into()],
+    };
+    let record = VerifiedPluginInstall::from_verified_descriptor(
+        descriptor,
+        root.path().join("missing.dll").to_str().unwrap().into(),
+        1,
+    )
+    .unwrap();
+    app.library.install_verified_plugin(&record).unwrap();
+    drop(app);
+    let mut app = controller(root.path());
+    assert!(app.registry.descriptor("astra.emu.missing").is_none());
+    assert!(app.plugin_errors.contains_key("astra.emu.missing"));
+    assert!(app
+        .rescan()
+        .unwrap()
+        .global_diagnostic
+        .contains("astra.emu.missing"));
+    assert_eq!(app.library.list_installed_plugins().unwrap().len(), 1);
+}
+
+#[test]
+#[ignore = "requires an explicitly built Family plugin binary"]
+fn changed_plugin_requires_explicit_reinstall_without_blocking_manager() {
+    use astra_emu_manager_core::{LoadedFamilyPlugin, VerifiedPluginInstall};
+    let path = PathBuf::from(std::env::var_os("ASTRA_EMU_TEST_PLUGIN").unwrap());
+    let plugin = LoadedFamilyPlugin::load(&path).unwrap();
+    let mut descriptor = plugin.manager_descriptor().clone();
+    let id = descriptor.plugin_id.clone();
+    descriptor.version = "obsolete-install".into();
+    let record = VerifiedPluginInstall::from_verified_descriptor(
+        descriptor,
+        path.to_str().unwrap().into(),
+        1,
+    )
+    .unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let mut app = controller(root.path());
+    app.library.install_verified_plugin(&record).unwrap();
+    drop(app);
+    let mut app = controller(root.path());
+    assert!(app.registry.descriptor(&id).is_none());
+    assert_eq!(
+        app.plugin_errors[&id],
+        "ASTRA_EMU_PLUGIN_INSTALL_DESCRIPTOR_CHANGED"
+    );
+    app.install_family_plugin(&path).unwrap();
+    assert!(app.plugin_errors.is_empty());
+    assert!(app.registry.descriptor(&id).is_some());
+    drop(app);
+    let app = controller(root.path());
+    assert!(app.plugin_errors.is_empty());
+    assert!(app.registry.descriptor(&id).is_some());
+}
+
 fn add_game(controller: &mut AstraEmuManagerController, id: &str) {
     controller
         .library

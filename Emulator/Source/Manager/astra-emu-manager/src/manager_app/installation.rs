@@ -53,6 +53,7 @@ impl AstraEmuManagerController {
             return Err(error.to_string());
         }
         self.diagnostic = "Family 插件已安装，重新扫描以发现支持的游戏。".into();
+        self.plugin_errors.remove(&id);
         self.model()
     }
 }

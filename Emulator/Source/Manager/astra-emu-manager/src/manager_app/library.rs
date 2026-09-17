@@ -20,6 +20,7 @@ impl AstraEmuManagerController {
             .map_err(|error| error.to_string())?;
 
         let mut registry = FamilyProviderRegistry::new();
+        let mut plugin_errors = BTreeMap::new();
         #[cfg(target_os = "android")]
         registry
             .register_provider(astra_emu_fvp::FvpProvider::default())
@@ -28,19 +29,28 @@ impl AstraEmuManagerController {
             .list_installed_plugins()
             .map_err(|e| e.to_string())?
         {
-            registry
-                .load_dynamic(&installed.location)
-                .map_err(|e| e.to_string())?;
-            let descriptor = registry
-                .descriptor(&installed.plugin_id)
-                .ok_or("ASTRA_EMU_PLUGIN_INSTALL_ID_MISMATCH")?;
-            if descriptor.family_id != installed.family_id
-                || descriptor.abi_fingerprint != installed.abi_fingerprint
-                || descriptor.version != installed.version
-                || descriptor.capabilities != installed.capabilities
-                || descriptor.supported_formats != installed.supported_formats
-            {
-                return Err("ASTRA_EMU_PLUGIN_INSTALL_DESCRIPTOR_CHANGED".into());
+            let result = (|| -> Result<(), String> {
+                let plugin = astra_emu_manager_core::LoadedFamilyPlugin::load(&installed.location)
+                    .map_err(|e| e.to_string())?;
+                let descriptor = plugin.manager_descriptor();
+                if descriptor.plugin_id != installed.plugin_id {
+                    return Err("ASTRA_EMU_PLUGIN_INSTALL_ID_MISMATCH".into());
+                }
+                if descriptor.family_id != installed.family_id
+                    || descriptor.abi_fingerprint != installed.abi_fingerprint
+                    || descriptor.version != installed.version
+                    || descriptor.capabilities != installed.capabilities
+                    || descriptor.supported_formats != installed.supported_formats
+                {
+                    return Err("ASTRA_EMU_PLUGIN_INSTALL_DESCRIPTOR_CHANGED".into());
+                }
+                registry
+                    .register_provider(plugin)
+                    .map_err(|e| e.to_string())
+            })();
+            if let Err(error) = result {
+                tracing::error!(event = "astra.emu.plugin.installation_blocked", plugin_id = %installed.plugin_id, diagnostic = %error);
+                plugin_errors.insert(installed.plugin_id, error);
             }
         }
 
@@ -63,6 +73,7 @@ impl AstraEmuManagerController {
             selected_case_id: None,
             search_query: String::new(),
             diagnostic: String::new(),
+            plugin_errors,
             data_dir,
             game_roots,
             mailbox,
