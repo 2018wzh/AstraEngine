@@ -182,3 +182,56 @@ fn panel_modes_draw_at_native_positions_and_clear_after_restore() {
         assert_eq!(scene.pixels, expected);
     }
 }
+
+#[test]
+#[ignore = "requires a hardware GPU"]
+fn screen_shake_gpu_preserves_composed_clipping_and_restores_mid_interval() {
+    let root = tempfile::tempdir().unwrap();
+    let source = b".stage BG.png 0 0 * 0 0\r\n.shakescreen V 4 30\r\n.transition 0 * 0\r\n.end\r\n";
+    crate::test_fixture::game(root.path(), source);
+    let archive =
+        Arc::new(mount_musica(root.path(), std::path::Path::new(MUSICA_PROFILE_FILE)).unwrap());
+    let make_vm = || {
+        MusicaVm::new(
+            "musica:/scr/test.sc".into(),
+            Hash256::from_sha256(source),
+            parse_sc(source, &ScOpcodeCatalog::observed_musica()).unwrap(),
+            1,
+        )
+        .unwrap()
+    };
+    let mut vm = make_vm();
+    let mut scene = Scene::new(archive, 16, 16).unwrap();
+    vm.step(1).unwrap();
+    scene.render(vm.state(), None, None).unwrap();
+    let original = scene.pixels.clone();
+    vm.step(2).unwrap();
+    vm.advance_screen_shake_clock(30_000_000).unwrap();
+    scene.render(vm.state(), None, None).unwrap();
+    let shifted = scene.pixels.clone();
+    for y in 0..16 {
+        for x in 0..16 {
+            let index = (y * 16 + x) * 4;
+            let expected = if y < 12 {
+                &original[((y + 4) * 16 + x) * 4..((y + 4) * 16 + x) * 4 + 4]
+            } else {
+                &[0, 0, 0, 255]
+            };
+            assert_eq!(&shifted[index..index + 4], expected);
+        }
+    }
+    vm.advance_screen_shake_clock(29_000_000).unwrap();
+    let mut restored = make_vm();
+    restored
+        .restore_native_save(&vm.encode_native_save().unwrap(), 3)
+        .unwrap();
+    vm.advance_screen_shake_clock(1_000_000).unwrap();
+    restored.advance_screen_shake_clock(1_000_000).unwrap();
+    scene.render(vm.state(), None, None).unwrap();
+    let expected = scene.pixels.clone();
+    scene.render(restored.state(), None, None).unwrap();
+    assert_eq!(scene.pixels, expected);
+    vm.step(3).unwrap();
+    scene.render(vm.state(), None, None).unwrap();
+    assert_eq!(scene.pixels, original);
+}

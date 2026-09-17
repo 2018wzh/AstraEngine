@@ -330,6 +330,7 @@ impl MusicaSession {
             Some(
                 MusicaVmEvent::Effect(_)
                 | MusicaVmEvent::EffectCleared
+                | MusicaVmEvent::ScreenShake(_)
                 | MusicaVmEvent::Panel { .. },
             ) => Ok(true),
             Some(MusicaVmEvent::Terminal) => {
@@ -485,6 +486,11 @@ impl MusicaSession {
             dirty |= self
                 .vm
                 .advance_effect_clock(elapsed_ns)
+                .map_err(vm_error)?
+                .is_some();
+            dirty |= self
+                .vm
+                .advance_screen_shake_clock(elapsed_ns)
                 .map_err(vm_error)?
                 .is_some();
             self.phase += u128::from(elapsed_ns) * 60;

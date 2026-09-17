@@ -2,6 +2,7 @@ mod control;
 mod effects;
 mod errors;
 mod model;
+pub(crate) mod shake;
 mod stage;
 use effects::*;
 pub use errors::MusicaRuntimeError;
@@ -100,6 +101,7 @@ impl MusicaVm {
             stage: None,
             transition: MusicaTransitionState::default(),
             effect: None,
+            screen_shake: None,
             panel: None,
             audio: BTreeMap::new(),
             movie: None,
@@ -125,6 +127,9 @@ impl MusicaVm {
 
     pub fn encode_native_save(&self) -> Result<Vec<u8>, MusicaRuntimeError> {
         validate_stage_state(self.state.stage.as_ref())?;
+        if let Some(shake) = &self.state.screen_shake {
+            shake::validate_screen_shake_state(shake)?;
+        }
         postcard::to_allocvec(&self.state).map_err(|_| MusicaRuntimeError::NativeSaveFormat)
     }
 
@@ -135,6 +140,9 @@ impl MusicaVm {
             return Err(MusicaRuntimeError::State);
         }
         validate_stage_state(state.stage.as_ref())?;
+        if let Some(shake) = &state.screen_shake {
+            shake::validate_screen_shake_state(shake)?;
+        }
         Ok(state)
     }
 
@@ -159,6 +167,7 @@ impl MusicaVm {
         self.state.wait = None;
         self.state.message = None;
         self.state.choice = None;
+        self.state.screen_shake = None;
         self.state.terminal = false;
         Ok(())
     }
@@ -180,6 +189,9 @@ impl MusicaVm {
         }
         choices::validate_choice(&self.script, &restored)?;
         validate_stage_state(restored.stage.as_ref())?;
+        if let Some(shake) = &restored.screen_shake {
+            shake::validate_screen_shake_state(shake)?;
+        }
         let restored_tick = next_fixed_tick
             .checked_sub(1)
             .ok_or(MusicaRuntimeError::State)?;
@@ -399,6 +411,7 @@ fn execute_control(
         "playvoice" => execute_play_voice(command, state),
         "transition" => execute_transition(command, state),
         "stage" => execute_stage(command, state),
+        "shakescreen" => shake::execute_screen_shake(command, state),
         "effect" => execute_effect(command, state),
         "panel" => execute_panel(command, state),
         "chain" => {

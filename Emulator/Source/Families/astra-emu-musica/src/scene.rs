@@ -147,6 +147,24 @@ impl Scene {
         let mut commands = vec![SceneCommand::Clear {
             rgba: [0, 0, 0, 255],
         }];
+        if let Some(shake) = &state.screen_shake {
+            crate::runtime::shake::validate_screen_shake_state(shake)
+                .map_err(|cause| error(cause.diagnostic_code(), "invalid screen shake state"))?;
+            commands.push(SceneCommand::PushTransform {
+                transform: astra_media_core::Transform2D::translation(
+                    shake.offset[0] as f32,
+                    shake.offset[1] as f32,
+                ),
+            });
+            commands.push(SceneCommand::PushClip {
+                rect: RectI {
+                    x: 0,
+                    y: 0,
+                    width: self.width,
+                    height: self.height,
+                },
+            });
+        }
         if let Some(stage) = &state.stage {
             self.stage(&mut commands, stage)?;
         }
@@ -195,6 +213,10 @@ impl Scene {
                 _ => return Err(error("ASTRA_EMU_MUSICA_PANEL_MODE", "invalid panel mode")),
             };
             self.layer(&mut commands, &panel.resource_uri, 0, y, 1.0)?;
+        }
+        if state.screen_shake.is_some() {
+            commands.push(SceneCommand::PopClip);
+            commands.push(SceneCommand::PopTransform);
         }
         commands.extend(
             self.text

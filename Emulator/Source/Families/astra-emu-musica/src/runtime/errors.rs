@@ -32,6 +32,8 @@ pub enum MusicaRuntimeError {
     Panel,
     #[error("ASTRA_EMU_MUSICA_RUNTIME_PRAGMA: unsupported or malformed pragma")]
     Pragma,
+    #[error("ASTRA_EMU_MUSICA_RUNTIME_SCREEN_SHAKE: invalid screen shake command or state")]
+    ScreenShake,
 }
 
 impl MusicaRuntimeError {
@@ -50,6 +52,7 @@ impl MusicaRuntimeError {
             Self::ChainTarget => "ASTRA_EMU_MUSICA_RUNTIME_CHAIN",
             Self::AudioResource => "ASTRA_EMU_MUSICA_RUNTIME_AUDIO_RESOURCE",
             Self::Effect => "ASTRA_EMU_MUSICA_RUNTIME_EFFECT",
+            Self::ScreenShake => "ASTRA_EMU_MUSICA_RUNTIME_SCREEN_SHAKE",
             Self::Pragma => "ASTRA_EMU_MUSICA_RUNTIME_PRAGMA",
             Self::Panel => "ASTRA_EMU_MUSICA_RUNTIME_PANEL",
         }

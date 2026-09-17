@@ -154,6 +154,7 @@ pub(super) fn execute_transition(
         resource,
         duration_ticks,
     };
+    state.screen_shake = None;
     Ok(None)
 }
 

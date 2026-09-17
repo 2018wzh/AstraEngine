@@ -4,7 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-pub const MUSICA_RUNTIME_STATE_SCHEMA: &str = "astra.emu.musica.runtime_state.v9";
+pub const MUSICA_RUNTIME_STATE_SCHEMA: &str = "astra.emu.musica.runtime_state.v10";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MusicaRuntimeState {
@@ -20,6 +20,7 @@ pub struct MusicaRuntimeState {
     pub stage: Option<MusicaStageCommand>,
     pub transition: MusicaTransitionState,
     pub effect: Option<MusicaEffectState>,
+    pub screen_shake: Option<MusicaScreenShakeState>,
     pub panel: Option<MusicaPanelState>,
     pub audio: BTreeMap<u32, MusicaAudioState>,
     pub movie: Option<MusicaMovieState>,
@@ -225,6 +226,7 @@ pub enum MusicaVmEvent {
     Stage(MusicaStageCommand),
     Effect(MusicaEffectFrame),
     EffectCleared,
+    ScreenShake(MusicaScreenShakeFrame),
     Choice,
     Panel {
         sequence: u64,
@@ -262,4 +264,26 @@ pub enum MusicaAudioCommand {
         pan: f32,
         repeat: bool,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MusicaScreenShakeState {
+    pub kind: MusicaScreenShakeKind,
+    pub amplitude: i32,
+    pub interval_ms: u32,
+    pub elapsed_ns: u64,
+    pub update_index: u64,
+    pub offset: [i32; 2],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MusicaScreenShakeKind {
+    Random,
+    Vertical,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MusicaScreenShakeFrame {
+    pub sequence: u64,
 }
