@@ -658,12 +658,15 @@ impl HostState {
             }
         };
         if let Some(renderer) = &self.surfaces.get(surface)?.gpu_renderer {
-            if renderer.performance_counters().gpu_resource_bytes
-                > self.profile.max_gpu_resource_bytes
-            {
-                return Err(invalid(
+            let counters = renderer.performance_counters();
+            if counters.gpu_resource_bytes > self.profile.max_gpu_resource_bytes {
+                return Err(PlatformError::new(
+                    PlatformErrorCode::InvalidState,
                     "surface.capture",
-                    "GPU resources exceed the profile-bound residency budget",
+                    format!(
+                        "GPU resources exceed the profile-bound residency budget: allocated_bytes={} atlas_bytes={} budget_bytes={}",
+                        counters.gpu_resource_bytes, counters.atlas_bytes, self.profile.max_gpu_resource_bytes,
+                    ),
                 ));
             }
         }

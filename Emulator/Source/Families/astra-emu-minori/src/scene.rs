@@ -222,8 +222,15 @@ impl Scene {
                 semantics: None,
             })
             .map_err(|cause| {
-                tracing::error!(event = "astra.emu.minori.gpu.failed", operation = %cause.operation,
-                    code = ?cause.code, "GPU scene composition failed");
+                // PlatformErrorCode is a payload-free enum; only its variant name
+                // is reviewed for forwarding, never the full PlatformError.
+                let code = format!("{:?}", cause.code);
+                tracing::error!(
+                    event = "astra.emu.minori.gpu.failed",
+                    operation = cause.operation.as_str(),
+                    code = code.as_str(),
+                    "GPU scene composition failed"
+                );
                 error("ASTRA_EMU_MINORI_RENDER", "GPU scene composition failed")
             })?
             .rgba8;
