@@ -1,3 +1,7 @@
+mod host_thread;
+
+use host_thread::spawn_host;
+
 use std::{
     collections::VecDeque,
     fmt::Debug,
@@ -143,19 +147,11 @@ impl PlatformHostFactory for HeadlessPlatformFactory {
                 profile.limits.command_queue_capacity,
                 profile.limits.event_queue_capacity,
             )?;
-            let performance_session = factory.performance_observer.is_some();
-            let state = HostState::new(factory, profile, backend)?;
+            spawn_host(factory, profile, backend).await?;
             tracing::info!(
                 event = "platform.headless.session.start",
                 "started isolated Headless platform session"
             );
-            if performance_session {
-                spawn_performance_host(state)?;
-            } else {
-                tokio::spawn(async move {
-                    state.run().await;
-                });
-            }
             Ok(PlatformHostSession {
                 client,
                 events,
@@ -163,52 +159,6 @@ impl PlatformHostFactory for HeadlessPlatformFactory {
             })
         })
     }
-}
-
-fn spawn_performance_host(state: HostState) -> Result<(), PlatformError> {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|error| performance_thread_error("runtime", error.to_string()))?;
-    let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
-    std::thread::Builder::new()
-        .name("astra-headless-performance-host".into())
-        .spawn(move || {
-            let scheduling = astra_platform_common::PerformanceSchedulingGuard::activate();
-            match scheduling {
-                Ok(scheduling) => {
-                    if ready_tx.send(Ok(())).is_err() {
-                        return;
-                    }
-                    runtime.block_on(state.run());
-                    if let Err(error) = scheduling.restore() {
-                        tracing::error!(
-                            event = "platform.headless.performance_scheduling.restore_failed",
-                            diagnostic = %error,
-                            "failed to restore Headless performance host scheduling policy"
-                        );
-                    }
-                }
-                Err(error) => {
-                    let _ = ready_tx.send(Err(error));
-                }
-            }
-        })
-        .map_err(|error| performance_thread_error("spawn", error.to_string()))?;
-    ready_rx
-        .recv()
-        .map_err(|error| performance_thread_error("handshake", error.to_string()))?
-        .map_err(|error| performance_thread_error("scheduling", error))
-}
-
-fn performance_thread_error(stage: &str, diagnostic: String) -> PlatformError {
-    PlatformError::new(
-        PlatformErrorCode::InvalidState,
-        "headless.performance.thread",
-        "dedicated performance host thread failed",
-    )
-    .with_field("stage", stage)
-    .with_field("diagnostic", diagnostic)
 }
 
 fn validate_provider_bindings(
@@ -1705,7 +1655,7 @@ fn next_headless_video_output(state: &mut DecodeState) -> Result<DecodeOutput, P
             duration_us: packet.duration_us,
             width: packet.width,
             height: packet.height,
-            bgra8: bgra8.into(),
+            bgra8,
         });
     }
     if stream.end_emitted {

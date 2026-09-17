@@ -1005,7 +1005,7 @@ async fn executes_render_audio_save_package_and_zero_leak_shutdown() {
 
 #[cfg(feature = "ffmpeg-vcpkg")]
 #[tokio::test]
-async fn ffmpeg_video_decode_returns_the_complete_ordered_frame_stream() {
+async fn ffmpeg_video_rejects_one_shot_decode() {
     let temp = tempfile::tempdir().unwrap();
     let package = b"video package identity";
     fs::write(temp.path().join("fixture.astrapkg"), package).unwrap();
@@ -1037,34 +1037,19 @@ async fn ffmpeg_video_decode_returns_the_complete_ordered_frame_stream() {
                 coded_height: None,
                 keyframe: true,
                 stream_action: astra_platform::DecodeStreamAction::OneShot,
-                bytes,
+                bytes: bytes.into(),
             },
         )
         .await
-        .unwrap();
-    let DecodeOutput::CpuBuffer {
-        format,
-        bytes,
-        hash: output_hash,
-    } = decoded
-    else {
-        panic!("headless FFmpeg returned a native media frame");
-    };
-    assert_eq!(format, "postcard:astra.decoded_video_stream.v1");
-    assert_eq!(output_hash, hash(&bytes));
-    let stream = astra_media::DecodedVideoStream::decode(&bytes, 1_000, 512 * 1024 * 1024).unwrap();
-    assert!(stream.frames.len() > 2);
-    assert_ne!(
-        stream.frames.first().unwrap().content_hash,
-        stream.frames.last().unwrap().content_hash
-    );
+        .unwrap_err();
+    assert_eq!(decoded.code, PlatformErrorCode::InvalidState);
     client.close_decode(session).await.unwrap();
     client.shutdown().await.unwrap();
 }
 
 #[cfg(feature = "ffmpeg-vcpkg")]
 #[tokio::test]
-async fn ffmpeg_video_stream_spools_complete_output_and_returns_one_frame_at_a_time() {
+async fn ffmpeg_video_stream_returns_complete_ordered_frames_incrementally() {
     let temp = tempfile::tempdir().unwrap();
     let package = b"streaming video package identity";
     fs::write(temp.path().join("fixture.astrapkg"), package).unwrap();
@@ -1096,18 +1081,25 @@ async fn ffmpeg_video_stream_spools_complete_output_and_returns_one_frame_at_a_t
                 coded_height: None,
                 keyframe: true,
                 stream_action: astra_platform::DecodeStreamAction::Start,
-                bytes: encoded,
+                bytes: encoded.into(),
             },
         )
         .await
         .unwrap();
-    let DecodeOutput::CpuBuffer { format, bytes, .. } = started else {
-        panic!("stream start returned a native media frame");
+    let DecodeOutput::VideoStreamStart {
+        duration_us,
+        frame_count,
+        decoded_byte_count,
+    } = started
+    else {
+        panic!("stream start returned an unexpected output");
     };
-    assert_eq!(format, "postcard:astra.decoded_video_stream_descriptor.v2");
-    let descriptor =
-        astra_media::DecodedVideoStreamDescriptor::decode(&bytes, 1_000, 512 * 1024 * 1024)
-            .unwrap();
+    let duration_us = duration_us.unwrap();
+    assert!(duration_us > 0);
+    assert_eq!(frame_count, None);
+    assert_eq!(decoded_byte_count, None);
+    let mut previous_pts = None;
+    let mut total_bytes = 0_u64;
 
     let mut sequence = 2_u64;
     let mut frames = Vec::new();
@@ -1126,26 +1118,43 @@ async fn ffmpeg_video_stream_spools_complete_output_and_returns_one_frame_at_a_t
                     coded_height: None,
                     keyframe: false,
                     stream_action: astra_platform::DecodeStreamAction::Next,
-                    bytes: Vec::new(),
+                    bytes: Vec::new().into(),
                 },
             )
             .await
             .unwrap();
         sequence += 1;
-        let DecodeOutput::CpuBuffer { format, bytes, .. } = output else {
-            panic!("stream next returned a native media frame");
-        };
-        if format == "postcard:astra.decoded_video_stream_end.v2" {
-            let end: astra_media::DecodedVideoStreamEnd = postcard::from_bytes(&bytes).unwrap();
-            end.validate_against(&descriptor).unwrap();
-            break;
+        match output {
+            DecodeOutput::VideoStreamEnd {
+                frame_count,
+                decoded_byte_count,
+            } => {
+                assert_eq!(frame_count, frames.len() as u64);
+                assert_eq!(decoded_byte_count, total_bytes);
+                break;
+            }
+            DecodeOutput::VideoFrame {
+                sequence,
+                pts_us,
+                duration_us: frame_duration,
+                width,
+                height,
+                bgra8,
+            } => {
+                assert_eq!(sequence, frames.len() as u64 + 1);
+                assert!(previous_pts.is_none_or(|previous| pts_us >= previous));
+                assert!(frame_duration > 0);
+                assert!(pts_us < duration_us);
+                assert!(width > 0 && height > 0);
+                assert_eq!(bgra8.len() as u64, u64::from(width) * u64::from(height) * 4);
+                total_bytes += bgra8.len() as u64;
+                previous_pts = Some(pts_us);
+                frames.push(hash(&bgra8));
+            }
+            _ => panic!("stream next returned an unexpected output"),
         }
-        assert_eq!(format, "postcard:astra.decoded_video_frame.v2");
-        let frame = astra_media::DecodedVideoFrame::decode(&bytes, 512 * 1024 * 1024).unwrap();
-        assert_eq!(frame.sequence, frames.len() as u64 + 1);
-        frames.push(frame.content_hash);
     }
-    assert_eq!(frames.len() as u64, descriptor.frame_count);
+    assert!(frames.len() > 2);
     assert_ne!(frames.first(), frames.last());
     client.close_decode(session).await.unwrap();
     client.shutdown().await.unwrap();
@@ -1294,6 +1303,32 @@ async fn rejects_legacy_profile_shape_and_audio_limit_before_commit() {
     session.client.close_audio(first.handle).await.unwrap();
     session.client.abort_audio(second.handle).await.unwrap();
     session.client.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn host_thread_initialization_failure_returns_and_allows_a_new_session() {
+    let temp = tempfile::tempdir().unwrap();
+    let run_root = temp.path().join("run");
+    fs::write(&run_root, b"not a directory").unwrap();
+    let profile = HeadlessHostProfile::reference(
+        "headless-start-test",
+        "com.example.start",
+        hash(b"build"),
+        hash(b"package"),
+    );
+    let factory = HeadlessPlatformFactory::new(&run_root, temp.path());
+    let failed = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        factory.start(profile.clone().into()),
+    )
+    .await
+    .expect("failed host initialization must complete its startup handshake");
+    assert!(failed.is_err());
+    fs::remove_file(&run_root).unwrap();
+    for _ in 0..3 {
+        let host = factory.start(profile.clone().into()).await.unwrap();
+        host.client.shutdown().await.unwrap();
+    }
 }
 
 #[tokio::test]

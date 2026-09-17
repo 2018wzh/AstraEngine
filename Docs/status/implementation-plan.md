@@ -1,6 +1,8 @@
 # 全产品重构实施状态
 
-Classic route.coverage.004 已完成同一 Release build/package 的原生 VN GPU 输入流程，消费 47,815 条输入、38 次选择并到达 tsui.ending，运行校验通过且无诊断，使用 DX12 独显。终点 PNG 已查看，仍为黑场；该 profile 的视频解码仍关闭，因此只能确认路线推进与终止，不能关闭全程视听或真实 Player 验收。route.coverage.003 仍在运行。
+Headless 启用 FFmpeg 后的构建阻塞已修复：原生解码器包含不能跨线程移动的状态，现改为在会话专属线程内创建、运行和释放 HostState，启动错误经异步握手返回。旧视频测试已迁到 typed 增量流接口，检查完整帧序列、PTS、像素变化、字节总量和关闭；旧 OneShot 视频请求明确拒绝。Release FFmpeg 构建、18 项宿主集成测试（含 4 项硬件 GPU 测试）及受影响全目标 Clippy 通过。当前终之空 IR 未生成 movie 播放命令，Director movie 章节名称不能证明视频播放；源素材与转换行为仍需核对，真实 Player 视频验收保持开放。
+
+Classic route.coverage.004 已完成同一 Release build/package 的原生 VN GPU 输入流程，消费 47,815 条输入、38 次选择并到达 tsui.ending，运行校验通过且无诊断，使用 DX12 独显。终点 PNG 已查看，仍为黑场；该 profile 的视频解码仍关闭，因此只能确认路线推进与终止，不能关闭全程视听或真实 Player 验收。route.coverage.003 也已结束：47,771 条输入、36 次选择到达同一终点，校验通过；同样不能据此关闭全程视听验收。
 
 Minori 默认原点的静态 PNG 立绘已按原生 `ol/ot/or/ob` 边界与高度裁剪接入公共 GPU 渲染。PNG reader 复用现有锁定版本，元数据缓存有界，纹理沿用 SDK，裁剪不复制或改写像素。73 项普通测试、Minori/CLI Clippy 通过，另显式通过 GPU 定位、裁剪、保存恢复、恢复完整高度和失败帧保留测试。双资源前景、非默认原点配置及 SQZ 动画仍开放；不能以此关闭实际第 10 条 stage 或结局验收。
 
