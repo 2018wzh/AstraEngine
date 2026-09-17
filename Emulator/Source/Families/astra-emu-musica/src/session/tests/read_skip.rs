@@ -39,3 +39,34 @@ fn native_gpu_read_skip_stops_on_unread_and_restores_mode() {
     assert_eq!(after.system_ui.play_mode, crate::MusicaPlayMode::Skip);
     Box::new(session).close().unwrap();
 }
+
+#[test]
+fn native_gpu_gallery_progress_survives_old_slot_and_cold_restart() {
+    let _session = PROVIDER_SESSION.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    fixture::game(root.path(), b".message 1  speaker Before\r\n.setglobal REN_CLEAR = 1\r\n.message 2  speaker After\r\n.end\r\n");
+    let mut provider = MusicaProvider::default();
+    let (_, mut session) = provider
+        .open_session(request(root.path(), Sink::default()))
+        .unwrap();
+    session.advance(16_666_667, &[]).unwrap();
+    session.save(20).unwrap();
+    session.advance(16_666_667, &[key(KeyCode::Enter)]).unwrap();
+    assert_eq!(session.vm.state().gallery_unlocks.len(), 1);
+    session.load(20).unwrap();
+    assert_eq!(session.vm.state().global_variables["REN_CLEAR"], 1);
+    assert_eq!(session.vm.state().gallery_unlocks.len(), 1);
+    Box::new(session).close().unwrap();
+    let (_, session) = provider
+        .open_session(request(root.path(), Sink::default()))
+        .unwrap();
+    assert_eq!(session.vm.state().global_variables["REN_CLEAR"], 1);
+    assert_eq!(session.vm.state().gallery_unlocks.len(), 1);
+    Box::new(session).close().unwrap();
+    let path = root.path().join(".astra-musica/saves/global-progress.json");
+    std::fs::write(&path, b"damaged").unwrap();
+    assert!(provider
+        .open_session(request(root.path(), Sink::default()))
+        .is_err());
+    assert_eq!(std::fs::read(path).unwrap(), b"damaged");
+}

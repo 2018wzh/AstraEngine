@@ -50,6 +50,7 @@ pub(crate) struct MusicaSession {
     gameplay_frame: Option<Arc<[u8]>>,
     save_cards: Vec<(u32, crate::storage::SaveCard)>,
     quick_cursor: u32,
+    persisted_unlocks: Vec<Hash256>,
     last_quick_save_pc_line: Option<u32>,
 }
 impl MusicaSession {
@@ -70,7 +71,9 @@ impl MusicaSession {
         primary_encoding: crate::ScriptEncoding,
         quick_cursor: u32,
     ) -> Self {
+        let persisted_unlocks = vm.state().gallery_unlocks.clone();
         Self {
+            persisted_unlocks,
             id,
             info,
             archive,
@@ -549,6 +552,7 @@ impl MusicaSession {
         if save {
             self.quick_save()?;
         }
+        self.persist_progress()?;
         Ok(AdvanceResponse {
             status: if self.finished {
                 FamilyStatus::Finished

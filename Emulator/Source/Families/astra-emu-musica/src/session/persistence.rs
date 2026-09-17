@@ -1,5 +1,13 @@
 use super::*;
 impl MusicaSession {
+    pub(super) fn persist_progress(&mut self) -> FamilyResult<()> {
+        let unlocks = &self.vm.state().gallery_unlocks;
+        if *unlocks != self.persisted_unlocks {
+            self.storage.write_progress(self.game, unlocks)?;
+            self.persisted_unlocks = unlocks.clone();
+        }
+        Ok(())
+    }
     pub(super) fn quick_save(&mut self) -> FamilyResult<()> {
         let pc_line = self.vm.state().pc_line;
         if self.last_quick_save_pc_line == Some(pc_line) {
@@ -92,6 +100,8 @@ impl MusicaSession {
         vm.set_voice_preferences(self.vm.voice_preferences().clone());
         vm.restore_native_save(&saved.vm, 1)
             .map_err(|_| error("ASTRA_EMU_MUSICA_SAVE_STATE", "saved VM state is invalid"))?;
+        vm.merge_verified_gallery_unlocks(&self.persisted_unlocks)
+            .map_err(vm_error)?;
         vm.set_auto_delay_units(self.vm.auto_delay_units())
             .map_err(vm_error)?;
         let mut scene = Scene::new(

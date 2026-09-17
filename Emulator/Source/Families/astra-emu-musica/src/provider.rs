@@ -246,11 +246,18 @@ impl MusicaProvider {
                 "archive identity cannot be encoded",
             )
         })?);
+        let storage = Storage::new(root)?;
+        let quick_cursor = storage.quick_cursor(game)?;
+        vm.merge_verified_gallery_unlocks(&storage.progress(game)?)
+            .map_err(|_| {
+                error(
+                    "ASTRA_EMU_MUSICA_GLOBAL_PROGRESS",
+                    "global progress cannot be applied",
+                )
+            })?;
         let mut scene = Scene::new(archive.clone(), 1280, 720, encoding)?;
         scene.set_text_shadow(text_shadow);
         scene.render(vm.state(), None, None)?;
-        let storage = Storage::new(root)?;
-        let quick_cursor = storage.quick_cursor(game)?;
         let replacement = request.host.text_replacement.into_option();
         if let Some(service) = &replacement {
             service.reset(TextResetReason::NewGame).into_result()?;

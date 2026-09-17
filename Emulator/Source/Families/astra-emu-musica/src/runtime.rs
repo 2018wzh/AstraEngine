@@ -5,6 +5,7 @@ mod errors;
 mod model;
 pub(crate) mod particles;
 mod playback;
+pub(crate) mod progress;
 mod read_state;
 mod save_pages;
 mod scroll;
@@ -124,6 +125,7 @@ impl MusicaVm {
             message: None,
             message_loads: Vec::new(),
             read_message_identities: Vec::new(),
+            gallery_unlocks: Vec::new(),
             backlog: Vec::new(),
             backlog_bytes: 0,
             choice: None,
@@ -436,6 +438,7 @@ fn execute_control(
                 state.variables.insert(key.to_owned(), value);
             } else {
                 state.global_variables.insert(key.to_owned(), value);
+                progress::record(state, key, value);
             }
             Ok(None)
         }

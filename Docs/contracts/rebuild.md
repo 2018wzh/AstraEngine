@@ -34,7 +34,7 @@ Rust Family 可选用 API crate 的 ProviderModule 复用 ABI 会话管理，FVP
 
 ### 外部核心与 SDK 的重构边界
 
-Musica 的原生 stage 以完整资源序列、参考坐标、背景与立绘参数保存于 `runtime_state.v21`，替换丢失参数的旧图层表示。正常绘制与读档重建共用 Family Scene；未实现的序列或立绘语义必须明确失败，不能丢弃参数。v20 及更早状态直接拒绝，格式与诊断见 [Musica 脚本执行](../emu/musica/script-execution.md)。
+Musica 的原生 stage 以完整资源序列、参考坐标、背景与立绘参数保存于 `runtime_state.v22`，替换丢失参数的旧图层表示。正常绘制与读档重建共用 Family Scene；未实现的序列或立绘语义必须明确失败，不能丢弃参数。v21 及更早状态直接拒绝，格式与诊断见 [Musica 脚本执行](../emu/musica/script-execution.md)。
 
 吸收 `emu/krkr-hosted` 中外部核心 fork、最小适配提交和 submodule 的决策。来源提交 `dad452d2d` 将 RFVP、Siglus 改为 submodule，`bfc49f419` 引入 Artemis；这些提交用于确认来源，不整体移植旧 Family 接口。目标是保留完整上游历史，在固定上游基线上用一个适配提交承载必要差异，由主仓 gitlink 锁定精确提交。分支名只用于维护，不能替代提交固定。
 
@@ -104,3 +104,5 @@ Musica 原生存读档页复用 GPU Scene 和 SDK 文字，保持来源素材尺
 NativeVN UI 帧复用同时检查逻辑模型版本与文字可见字数/总字数。呈现时钟独立推进，不能仅因逻辑步号不变而复用旧文字帧；逐字显示完成的观察值须对应实际提交的字形。静止页面继续复用既有 GPU 资源，不按帧序列化或复制完整 ViewModel。
 
 Musica 快捷存档沿用来源的 `pc_line` 去重与槽 10–19 轮转。安装目录中的独立游标在保存成功后原子持久化，不进入剧情快照，读档不能倒转轮转位置。游标绑定游戏身份并检查 0–9 范围，损坏或异游戏文件明确失败且不覆盖；F9 读取游标对应的最近快捷槽，不扫描或猜测替代槽位。
+
+Musica 路线解锁沿用来源分支的 TOHKA_CLEAR、AYAME_CLEAR、SUI_CLEAR、REN_CLEAR 白名单，仅脚本 setglobal 写入 1 时记录。解锁独立于剧情槽持久化，冷启动及读旧档合并保留；未知、重复、损坏或异游戏进度明确拒绝，读取失败不覆盖原文件。
