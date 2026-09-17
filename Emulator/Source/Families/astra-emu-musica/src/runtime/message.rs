@@ -92,6 +92,30 @@ pub(super) fn execute_message(
     } else if let Some(voice) = state.audio.get_mut(&4) {
         voice.playing = false;
     }
+    super::backlog::append_backlog_entry(
+        state,
+        MusicaBacklogEntry {
+            source: command.span,
+            message_id,
+            text: text.clone(),
+            speaker: speaker.clone(),
+            text_hash: Hash256::from_sha256(text.as_bytes()),
+            speaker_hash: speaker
+                .as_ref()
+                .map(|value| Hash256::from_sha256(value.as_bytes())),
+            voice_hash: voice
+                .as_ref()
+                .map(|value| Hash256::from_sha256(value.as_bytes())),
+            voice: voice.as_ref().map(|_| {
+                let value = &state.audio[&4];
+                MusicaMessageVoice {
+                    resource_uri: value.resource_uri.clone(),
+                    volume_milli: value.volume_milli,
+                    pan_milli: value.pan_milli,
+                }
+            }),
+        },
+    )?;
     state.message = Some(MusicaMessageState {
         source: command.span,
         message_id,
@@ -241,7 +265,7 @@ pub(super) fn validate_state(state: &MusicaRuntimeState) -> Result<(), MusicaRun
             || !state
                 .audio
                 .get(stream_id)
-                .is_some_and(|voice| voice.playing && !voice.looped)
+                .is_some_and(|voice| voice.bus == "voice" && !voice.looped)
         {
             return Err(MusicaRuntimeError::State);
         }

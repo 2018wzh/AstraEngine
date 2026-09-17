@@ -676,3 +676,6 @@ mod character;
 
 #[path = "tests/message.rs"]
 mod message;
+
+#[path = "tests/backlog.rs"]
+mod backlog;

@@ -235,6 +235,7 @@ pub(super) fn validate_state(state: &MusicaRuntimeState) -> Result<(), MusicaRun
         return Err(MusicaRuntimeError::LinearScroll);
     }
     super::message::validate_state(state)?;
+    super::backlog::validate_state(state)?;
     super::character::validate_state(state)?;
     super::particles::validate_state(state)?;
     if let Some(scroll) = &state.wscroll2 {

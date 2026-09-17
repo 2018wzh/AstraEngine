@@ -4,7 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-pub const MUSICA_RUNTIME_STATE_SCHEMA: &str = "astra.emu.musica.runtime_state.v17";
+pub const MUSICA_RUNTIME_STATE_SCHEMA: &str = "astra.emu.musica.runtime_state.v18";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MusicaRuntimeState {
@@ -16,6 +16,8 @@ pub struct MusicaRuntimeState {
     pub global_variables: BTreeMap<String, i64>,
     pub wait: Option<MusicaWaitState>,
     pub message: Option<MusicaMessageState>,
+    pub backlog: Vec<MusicaBacklogEntry>,
+    pub backlog_bytes: u64,
     pub message_loads: Vec<MusicaMessageLoadState>,
     pub choice: Option<MusicaChoiceState>,
     pub stage: Option<MusicaStageCommand>,
@@ -526,4 +528,23 @@ pub struct MusicaMessageLoadState {
     pub resource_uri: String,
     pub transition_ms: u32,
     pub opacity_256: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MusicaBacklogEntry {
+    pub source: SourceSpan,
+    pub message_id: i64,
+    pub text: String,
+    pub speaker: Option<String>,
+    pub text_hash: Hash256,
+    pub speaker_hash: Option<Hash256>,
+    pub voice_hash: Option<Hash256>,
+    pub voice: Option<MusicaMessageVoice>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MusicaMessageVoice {
+    pub resource_uri: String,
+    pub volume_milli: u16,
+    pub pan_milli: i16,
 }

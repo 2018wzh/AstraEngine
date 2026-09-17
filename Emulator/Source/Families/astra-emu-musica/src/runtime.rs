@@ -1,3 +1,4 @@
+mod backlog;
 mod control;
 mod effects;
 mod errors;
@@ -105,6 +106,8 @@ impl MusicaVm {
             wait: None,
             message: None,
             message_loads: Vec::new(),
+            backlog: Vec::new(),
+            backlog_bytes: 0,
             choice: None,
             stage: None,
             transition: MusicaTransitionState::default(),

@@ -137,6 +137,27 @@ impl Scene {
         message: Option<&(String, Option<String>)>,
         choices: Option<(&[String], u32)>,
     ) -> FamilyResult<()> {
+        let history = if state.system_ui.page == crate::MusicaSystemPage::Backlog {
+            let index = state.system_ui.backlog_cursor.ok_or_else(|| {
+                error("ASTRA_EMU_MUSICA_RUNTIME_BACKLOG", "missing backlog cursor")
+            })? as usize;
+            let entry = state.backlog.get(index).ok_or_else(|| {
+                error("ASTRA_EMU_MUSICA_RUNTIME_BACKLOG", "invalid backlog cursor")
+            })?;
+            Some((
+                entry.text.clone(),
+                Some(format!(
+                    "Backlog {}/{} | {}",
+                    index + 1,
+                    state.backlog.len(),
+                    entry.speaker.as_deref().unwrap_or("")
+                )),
+            ))
+        } else {
+            None
+        };
+        let message = history.as_ref().or(message);
+        let choices = if history.is_some() { None } else { choices };
         let mut commands = vec![SceneCommand::Clear {
             rgba: [0, 0, 0, 255],
         }];

@@ -46,6 +46,8 @@ pub enum MusicaRuntimeError {
     Firefly,
     #[error("ASTRA_EMU_MUSICA_RUNTIME_CHARACTER: invalid character command or state")]
     Character,
+    #[error("ASTRA_EMU_MUSICA_RUNTIME_BACKLOG: invalid or oversized backlog")]
+    Backlog,
     #[error(transparent)]
     MessageMarkup(#[from] crate::MusicaMessageMarkupError),
     #[error(
@@ -70,6 +72,7 @@ impl MusicaRuntimeError {
             Self::ChainTarget => "ASTRA_EMU_MUSICA_RUNTIME_CHAIN",
             Self::AudioResource => "ASTRA_EMU_MUSICA_RUNTIME_AUDIO_RESOURCE",
             Self::Effect => "ASTRA_EMU_MUSICA_RUNTIME_EFFECT",
+            Self::Backlog => "ASTRA_EMU_MUSICA_RUNTIME_BACKLOG",
             Self::MessageMarkup(_) => "ASTRA_EMU_MUSICA_MESSAGE_MARKUP",
             Self::Character => "ASTRA_EMU_MUSICA_RUNTIME_CHARACTER",
             Self::Firefly => "ASTRA_EMU_MUSICA_RUNTIME_FIREFLY",
