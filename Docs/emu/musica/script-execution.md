@@ -42,7 +42,7 @@ Musica Family 自持 VM、归档、音频和原生 session。Manager 经 Family 
 
 ## 保存与恢复
 
-VM 数据使用 `astra.emu.musica.runtime_state.v8` 和 postcard，包含脚本身份、PC、变量、等待、完整 stage、transition、效果时间状态、面板和音频等字段。v7 及更早数据直接拒绝，不迁移旧图层表示。stage 的资源角色、名称、序列长度和立绘数量在保存、解码和恢复边界校验。
+VM 数据使用 `astra.emu.musica.runtime_state.v9` 和 postcard，包含脚本身份、PC、变量、等待、完整 stage、transition、效果时间状态、面板和音频等字段。v8 及更早数据直接拒绝，不迁移旧图层表示。stage 的资源角色、名称、序列长度和立绘数量在保存、解码和恢复边界校验。
 
 Family 存档容器另外保存当前显示消息、等待余量和音频快照。恢复先验证游戏及脚本身份，再构造候选 VM、GPU 场景和音频状态；场景重建失败不得将其标为恢复成功。归档解密后的完整素材和 GPU 资源不进入 VM 数据。损坏存档读取失败不得覆盖原文件。
 
@@ -55,3 +55,5 @@ Family 存档容器另外保存当前显示消息、等待余量和音频快照�
 本次接续以 `codex/minori-runtime-followup` 的 00610272d 为实现来源，并逐项核对其未提交修改。`.effect *` 已移植：释放主效果、推进效果序号，后续时钟不再产生旧效果帧，存档保存清除后的状态。完整来源中的 Firefly、WScroll2、次级效果、滚动、人物动画、电影及系统页仍需移植至新 Family/SDK 路径；不得因当前 CrossFade 已通过测试而将这些功能视为完成。
 
 消息面板沿用来源实现：`.panel 0` 清除当前面板，`.panel 1` 使用 `msgPanel.png`，`.panel 1 * filename` 使用指定 sys 图片，`.panel 3` 使用 `fullPanel.png`。模式 1 位于视口高度减图片高度加 64 的位置，模式 3 位于原点；替换与清除后的状态可存读档。未知模式、额外参数和非安全文件名返回面板错误，不忽略命令。
+
+`.pragma enable_control`、`disable_control`、`skip_enable`、`skip_disable` 沿用来源分支的独立开关：默认允许 skip、禁用 Control 快进。两个开关都允许时，按住 Ctrl 可推进正文并跳过时间等待；选择仍需明确确认，异步翻译尚未完成时不推进。脚本开关进入 v9 原生状态，物理按键只由当前 session 持有，失焦与挂起清除按键。未知或多参数 pragma 返回 `ASTRA_EMU_MUSICA_RUNTIME_PRAGMA`，不再静默忽略。已读跳读、自动模式及完整系统页仍待移植。

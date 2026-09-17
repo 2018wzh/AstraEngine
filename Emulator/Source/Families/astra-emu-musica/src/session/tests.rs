@@ -467,3 +467,81 @@ fn non_yielding_variable_loop_is_bounded() {
     .unwrap();
     assert!(vm.step(1).is_err());
 }
+
+#[test]
+fn native_gpu_control_keys_respect_release_focus_and_choice_boundaries() {
+    let _session = PROVIDER_SESSION.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    fixture::game(root.path(), b".pragma enable_control\r\n.message 1   First\r\n.message 2   Second\r\n.select Confirm:done\r\n.label done\r\n.end\r\n");
+    let mut provider = MusicaProvider::default();
+    let mut opened = provider
+        .open(request(root.path(), Sink::default()))
+        .unwrap();
+    opened.session.advance(16_666_667, &[]).unwrap();
+    let mut capture = Capture(Vec::new());
+    opened.session.visit_frame(&mut capture).unwrap();
+    let first = capture.0.clone();
+    opened
+        .session
+        .advance(0, &[key(KeyCode::ControlLeft), key(KeyCode::ControlRight)])
+        .unwrap();
+    let mut release_left = key(KeyCode::ControlLeft);
+    if let FamilyEvent::Key { state, .. } = &mut release_left {
+        *state = KeyState::Released;
+    }
+    opened.session.advance(16_666_667, &[release_left]).unwrap();
+    opened.session.visit_frame(&mut capture).unwrap();
+    let second = capture.0.clone();
+    assert_ne!(first, second);
+    opened
+        .session
+        .advance(
+            100_000_000,
+            &[FamilyEvent::WindowFocused { focused: false }],
+        )
+        .unwrap();
+    opened.session.visit_frame(&mut capture).unwrap();
+    assert_eq!(capture.0, second);
+    opened
+        .session
+        .advance(
+            0,
+            &[
+                key(KeyCode::ControlRight),
+                FamilyEvent::WindowSuspended { suspended: true },
+            ],
+        )
+        .unwrap();
+    opened
+        .session
+        .advance(
+            100_000_000,
+            &[FamilyEvent::WindowSuspended { suspended: false }],
+        )
+        .unwrap();
+    opened.session.visit_frame(&mut capture).unwrap();
+    assert_eq!(capture.0, second);
+
+    opened
+        .session
+        .advance(16_666_667, &[key(KeyCode::ControlRight)])
+        .unwrap();
+    opened.session.visit_frame(&mut capture).unwrap();
+    let choice = capture.0.clone();
+    assert_ne!(choice, second);
+    assert_eq!(
+        opened.session.advance(100_000_000, &[]).unwrap().status,
+        FamilyStatus::Waiting
+    );
+    opened.session.visit_frame(&mut capture).unwrap();
+    assert_eq!(capture.0, choice);
+    assert_eq!(
+        opened
+            .session
+            .advance(16_666_667, &[key(KeyCode::Enter)])
+            .unwrap()
+            .status,
+        FamilyStatus::Finished
+    );
+    opened.session.close().unwrap();
+}

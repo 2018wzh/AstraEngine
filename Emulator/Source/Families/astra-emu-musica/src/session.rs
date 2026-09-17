@@ -33,6 +33,7 @@ pub(crate) struct MusicaSession {
     phase: u128,
     wait_ns: u64,
     input_pending: bool,
+    control_keys: u8,
     pointer: Option<(f32, f32)>,
     finished: bool,
     poisoned: bool,
@@ -69,6 +70,7 @@ impl MusicaSession {
             phase: 0,
             wait_ns: 0,
             input_pending: false,
+            control_keys: 0,
             pointer: None,
             finished: false,
             poisoned: false,
@@ -224,6 +226,7 @@ impl MusicaSession {
             )
         })?;
         self.audio.restore(saved.sounds)?;
+        vm.set_control_pressed(self.control_keys != 0);
         self.vm = vm;
         self.scene = scene;
         self.message = saved.message;
@@ -247,16 +250,22 @@ impl MusicaSession {
                 - (u128::from(tick - 1) * 1_000_000_000 / 60)) as u64;
             self.wait_ns = self.wait_ns.saturating_add(delta);
             let (id, ready) = match wait {
-                MusicaWaitState::Input { token_id } => {
-                    (token_id, self.input_pending && self.pending.is_none())
-                }
+                MusicaWaitState::Input { token_id } => (
+                    token_id,
+                    (self.input_pending
+                        || (self.vm.state().choice.is_none()
+                            && self.vm.control_fast_forward_active()
+                            && self.wait_ns >= 10_000_000))
+                        && self.pending.is_none(),
+                ),
                 MusicaWaitState::Time {
                     token_id,
                     milliseconds,
                     ..
                 } => (
                     token_id,
-                    self.wait_ns >= u64::from(milliseconds) * 1_000_000,
+                    self.vm.control_fast_forward_active()
+                        || self.wait_ns >= u64::from(milliseconds) * 1_000_000,
                 ),
                 MusicaWaitState::Presentation { token_id, .. } => (token_id, true),
                 MusicaWaitState::Media { .. } | MusicaWaitState::Provider { .. } => {
@@ -421,7 +430,38 @@ impl MusicaSession {
                         self.input_pending = true;
                     }
                 }
+                FamilyEvent::Key {
+                    code: KeyCode::ControlLeft | KeyCode::ControlRight,
+                    state,
+                    ..
+                } => {
+                    let mask = if matches!(
+                        event,
+                        FamilyEvent::Key {
+                            code: KeyCode::ControlLeft,
+                            ..
+                        }
+                    ) {
+                        1
+                    } else {
+                        2
+                    };
+                    if *state == KeyState::Pressed {
+                        self.control_keys |= mask;
+                    } else {
+                        self.control_keys &= !mask;
+                    }
+                    self.vm.set_control_pressed(self.control_keys != 0);
+                }
+                FamilyEvent::WindowFocused { focused: false } => {
+                    self.control_keys = 0;
+                    self.vm.set_control_pressed(false);
+                }
                 FamilyEvent::WindowSuspended { suspended } => {
+                    if *suspended {
+                        self.control_keys = 0;
+                        self.vm.set_control_pressed(false);
+                    }
                     self.suspended = *suspended;
                     self.audio.suspend(*suspended)?;
                 }

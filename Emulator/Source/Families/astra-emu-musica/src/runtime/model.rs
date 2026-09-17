@@ -4,7 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-pub const MUSICA_RUNTIME_STATE_SCHEMA: &str = "astra.emu.musica.runtime_state.v8";
+pub const MUSICA_RUNTIME_STATE_SCHEMA: &str = "astra.emu.musica.runtime_state.v9";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MusicaRuntimeState {
@@ -180,15 +180,33 @@ pub enum MusicaSystemPage {
     GalleryReplay,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MusicaSystemUiState {
     pub page: MusicaSystemPage,
     pub focus_index: u32,
     pub auto_mode: bool,
     pub skip_mode: bool,
+    pub skip_enabled: bool,
+    pub control_enabled: bool,
     pub backlog_cursor: Option<u32>,
     pub pending_save_slot: Option<u32>,
     pub pending_load_slot: Option<u32>,
+}
+
+impl Default for MusicaSystemUiState {
+    fn default() -> Self {
+        Self {
+            page: MusicaSystemPage::default(),
+            focus_index: 0,
+            auto_mode: false,
+            skip_mode: false,
+            skip_enabled: true,
+            control_enabled: false,
+            backlog_cursor: None,
+            pending_save_slot: None,
+            pending_load_slot: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

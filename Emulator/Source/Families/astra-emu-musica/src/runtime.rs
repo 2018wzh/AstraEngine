@@ -1,3 +1,4 @@
+mod control;
 mod effects;
 mod errors;
 mod model;
@@ -75,6 +76,7 @@ pub struct MusicaVm {
     script: ScScript,
     labels: BTreeMap<String, u32>,
     state: MusicaRuntimeState,
+    control_pressed: bool,
 }
 
 impl MusicaVm {
@@ -110,6 +112,7 @@ impl MusicaVm {
             terminal: false,
         };
         Ok(Self {
+            control_pressed: false,
             script,
             labels,
             state,
@@ -297,18 +300,19 @@ impl MusicaVm {
                 .checked_add(1)
                 .ok_or(MusicaRuntimeError::Overflow)?;
             let event =
-                execute_control(command, &self.labels, &mut self.state).inspect_err(|cause| {
-                    tracing::error!(
-                        event = "astra.emu.musica.command.failed",
-                        code = cause.diagnostic_code(),
-                        ordinal = command.ordinal,
-                        line = line_index,
-                        offset = command.span.offset,
-                        operand_count = command.operands.len(),
-                        script_hash = self.state.script_hash.to_hex().as_str(),
-                        tick = fixed_tick,
-                    );
-                })?;
+                execute_control(command, &self.labels, &mut self.state, self.control_pressed)
+                    .inspect_err(|cause| {
+                        tracing::error!(
+                            event = "astra.emu.musica.command.failed",
+                            code = cause.diagnostic_code(),
+                            ordinal = command.ordinal,
+                            line = line_index,
+                            offset = command.span.offset,
+                            operand_count = command.operands.len(),
+                            script_hash = self.state.script_hash.to_hex().as_str(),
+                            tick = fixed_tick,
+                        );
+                    })?;
             if let Some(event) = event {
                 return Ok(Some(event));
             }
@@ -320,9 +324,11 @@ fn execute_control(
     command: &ScCommand,
     labels: &BTreeMap<String, u32>,
     state: &mut MusicaRuntimeState,
+    control_pressed: bool,
 ) -> Result<Option<MusicaVmEvent>, MusicaRuntimeError> {
     match command.opcode.as_str() {
-        "pragma" | "label" => Ok(None),
+        "label" => Ok(None),
+        "pragma" => control::execute_pragma(command, state),
         "set" | "setglobal" => {
             let (key, value) = evaluate_assignment(&command.operands, state)?;
             if command.opcode == "set" {
@@ -362,6 +368,9 @@ fn execute_control(
             let milliseconds = timer_ticks
                 .checked_mul(10)
                 .ok_or(MusicaRuntimeError::Overflow)?;
+            if control::fast_forward_active(state, control_pressed) {
+                return Ok(None);
+            }
             let token_id = format!("musica.wait.{}", state.instruction_count);
             let wait = MusicaWaitState::Time {
                 token_id,

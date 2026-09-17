@@ -30,6 +30,8 @@ pub enum MusicaRuntimeError {
     Effect,
     #[error("ASTRA_EMU_MUSICA_RUNTIME_PANEL: panel operands or mode are invalid")]
     Panel,
+    #[error("ASTRA_EMU_MUSICA_RUNTIME_PRAGMA: unsupported or malformed pragma")]
+    Pragma,
 }
 
 impl MusicaRuntimeError {
@@ -48,6 +50,7 @@ impl MusicaRuntimeError {
             Self::ChainTarget => "ASTRA_EMU_MUSICA_RUNTIME_CHAIN",
             Self::AudioResource => "ASTRA_EMU_MUSICA_RUNTIME_AUDIO_RESOURCE",
             Self::Effect => "ASTRA_EMU_MUSICA_RUNTIME_EFFECT",
+            Self::Pragma => "ASTRA_EMU_MUSICA_RUNTIME_PRAGMA",
             Self::Panel => "ASTRA_EMU_MUSICA_RUNTIME_PANEL",
         }
     }
