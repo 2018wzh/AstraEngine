@@ -227,6 +227,6 @@ mod tests {
             TextPollResult::Cancelled,
             TextPollResult::Cancelled
         ));
-        assert_eq!(FAMILY_API_SCHEMA, "astra.emu.independent_family_api.v5");
+        assert_eq!(FAMILY_API_SCHEMA, "astra.emu.independent_family_api.v6");
     }
 }

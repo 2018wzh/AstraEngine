@@ -214,11 +214,15 @@ fn native_gpu_manual_slots_restore_independent_story_positions() {
     session.advance(16_666_667, &[key(KeyCode::Enter)]).unwrap();
     session.save(21).unwrap();
     session.load(20).unwrap();
+    assert!(session.advance(0, &[]).unwrap().reset_clock);
+    assert!(!session.advance(0, &[]).unwrap().reset_clock);
     assert_eq!(session.message.as_ref().unwrap().0, "First");
     let mut capture = Capture(Vec::new());
     session.visit_frame(&mut capture).unwrap();
     let first = capture.0.clone();
     session.load(21).unwrap();
+    assert!(session.advance(0, &[]).unwrap().reset_clock);
+    assert!(!session.advance(0, &[]).unwrap().reset_clock);
     assert_eq!(session.message.as_ref().unwrap().0, "Second");
     session.visit_frame(&mut capture).unwrap();
     assert!(

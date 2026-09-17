@@ -59,6 +59,7 @@ impl FamilySession for Session {
         assert!(!self.panic_on_advance, "test panic");
         Ok(AdvanceResponse {
             window_command: ROption::RSome(FamilyWindowCommand::SetFullscreen(true)),
+            reset_clock: true,
             ..AdvanceResponse::running()
         })
     }
@@ -132,7 +133,7 @@ fn active_session_rejects_replacement_and_close_allows_reopen() {
 }
 
 #[test]
-fn typed_window_command_crosses_the_family_vtable() {
+fn typed_window_command_and_clock_reset_cross_the_family_vtable() {
     let (module, closed) = module(false, false);
     let module =
         FamilyModule_TO::from_value(module, abi_stable::type_level::downcasting::TD_Opaque);
@@ -145,6 +146,7 @@ fn typed_window_command_crosses_the_family_vtable() {
         })
         .into_result()
         .unwrap();
+    assert!(response.reset_clock);
     assert_eq!(
         response.window_command,
         ROption::RSome(FamilyWindowCommand::SetFullscreen(true))

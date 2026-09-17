@@ -455,3 +455,9 @@ Musica 已在 Windows Sandbox 的真实 Manager 中通过原生标题/System 页
 
 
 Musica 商业素材手动保存成功，槽位显示实际缩略图与时间。继续对白后读取该槽位，会话因 ASTRA_EMU_MUSICA_ELAPSED 终止，读档未通过。当前 Host 从 advance 调用开始记录下一帧间隔，Musica 读档同步重建 Scene/GPU 及音频，重建耗时进入下一次补帧并超过一秒上限；需为显式恢复边界重置 Host 计时，不能仅放大上限或静默截断。新版 Manager 正确显示失败，原存档保留。
+
+Family API v6 已增加一次性的 reset_clock，Musica 成功读档及标题重新开始提交重置，Manager 在帧复制完成后重建计时起点。普通帧计时保持原行为。API 17 项单元测试、诊断安装测试、Manager 两项会话测试与 Musica GPU 双槽位读档回归通过；相关三个 crate 的 Clippy 通过。Sandbox 商业存档回归仍待部署新 ABI 后执行，尚不能将实际读档标为通过。
+
+新版 Manager/Musica 构建及实际 DLL 布局、重复加载诊断桥测试通过；FVP/Siglus 的适配 crate Clippy 也通过，外部核心仍有既有警告。
+
+Classic route.coverage.033 已通过抽样运行，到达 tsui.ending，生成 27 张过程截图及终局截图；已查看第 009 张，对白与画面可见。第 034 路线需要 48,109 条输入，原配置不足，已使用独立路线配置补足输入预算后启动。

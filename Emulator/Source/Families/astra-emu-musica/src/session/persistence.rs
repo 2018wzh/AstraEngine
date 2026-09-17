@@ -159,6 +159,7 @@ impl MusicaSession {
         self.input_pending = false;
         self.pointer = None;
         self.finished = self.vm.state().terminal;
+        self.reset_host_clock = true;
         tracing::info!(event = "astra.emu.musica.load.completed", slot);
         Ok(())
     }

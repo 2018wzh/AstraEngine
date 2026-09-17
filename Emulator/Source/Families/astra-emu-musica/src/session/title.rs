@@ -28,6 +28,7 @@ impl MusicaSession {
         self.last_quick_save_pc_line = None;
         self.clear_input();
         tracing::info!(event = "astra.emu.musica.title.start");
+        self.reset_host_clock = true;
         Ok(())
     }
     fn activate_title(&mut self) -> FamilyResult<()> {

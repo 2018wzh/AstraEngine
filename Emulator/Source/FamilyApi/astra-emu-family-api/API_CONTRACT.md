@@ -1,4 +1,4 @@
-# Independent Family API v5
+# Independent Family API v6
 
 `astra-emu-family-api` 是 Family 插件唯一必需的契约依赖。不依赖 RuntimeWorld、package/save、VFS、renderer/audio backend 或 UI。静态核心和动态核心共用 typed DTO；动态入口使用 `abi_stable` 的 `FamilyModule`，提供 descriptor/probe/open/advance/frame/close。
 
@@ -24,6 +24,8 @@ Host 只提供 game_path、初始 WindowState 和输入。Family 自持 VM、文
 
 ## 窗口请求
 
+`AdvanceResponse.reset_clock` 默认 false。成功读档或重新开始建立新的播放时间线时，核心提交一次 true；实时 Host 在本次 advance 和最终帧复制完成后重新计算计时起点与下一帧期限，避免把恢复资源的耗时计入新时间线。普通帧仍计入核心执行耗时，不放宽核心的 elapsed 上限。失败操作不提交重置；固定步长 Headless 不依赖墙钟，无需调整其步长。
+
 `AdvanceResponse.window_command` 为可选的 `FamilyWindowCommand::SetFullscreen(bool)`。每次 advance 最多提交一个窗口请求，无 native handle、回调或 UI 类型穿过 ABI。Manager 在窗口线程应用请求；设置保留到下一个请求或会话关闭，退出及错误关闭恢复普通窗口。无窗口的 Headless Host 遇到请求返回 `ASTRA_EMU_HEADLESS_WINDOW_COMMAND_UNAVAILABLE` 并走正常关闭流程，不静默忽略。核心在原生设置应用成功时提交请求，取消草稿不提交；需要恢复全屏的冷启动在首次 advance 提交。
 
 ## Manager 诊断
@@ -38,7 +40,7 @@ Manager 再验证边界和重复字段；非法记录输出 `family.diagnostics.
 
 ## 生命周期与迁移
 
-ABI fingerprint 为 `astra.emu.independent_family_abi.v5`，schema 为 `astra.emu.independent_family_api.v5`。v1/v2/v3/v4 插件必须重新构建安装，不提供兼容 reader/adapter。
+ABI fingerprint 为 `astra.emu.independent_family_abi.v6`，schema 为 `astra.emu.independent_family_api.v6`。v1/v2/v3/v4/v5 插件必须重新构建安装，不提供兼容 reader/adapter。
 
 动态库首次加载后一直驻留到进程退出，失败加载产生的 ABI 元数据也不会指向卸载的代码；更新插件必须重启 Manager。provider/module 对象按正常生命周期释放。会话 close 和 open 失败仍须取消 Host 请求、唤醒阻塞 PCM 写入并等待所有 worker 结束，错误不得跳过其他 worker 清理。驻留不允许保留已关闭会话的线程或 session callback；无 session 资源的进程级诊断 sink 除外。
 

@@ -49,6 +49,7 @@ pub(crate) struct MusicaSession {
     pointer: Option<(f32, f32)>,
     config_pointer_down: bool,
     pending_fullscreen: Option<bool>,
+    reset_host_clock: bool,
     finished: bool,
     poisoned: bool,
     suspended: bool,
@@ -112,6 +113,7 @@ impl MusicaSession {
             pointer: None,
             config_pointer_down: false,
             pending_fullscreen,
+            reset_host_clock: false,
             finished: false,
             poisoned: false,
             suspended: false,
@@ -436,6 +438,7 @@ impl MusicaSession {
         }
         self.persist_progress()?;
         Ok(AdvanceResponse {
+            reset_clock: std::mem::take(&mut self.reset_host_clock),
             status: if self.finished {
                 FamilyStatus::Finished
             } else if self.vm.state().wait.is_some() {

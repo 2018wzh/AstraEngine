@@ -98,7 +98,12 @@ impl ActiveFamilySession {
             self.fullscreen = value;
         }
         self.capture_frame()?;
-        self.last_tick = started;
+        self.last_tick = if response.reset_clock {
+            tracing::debug!(event = "astra.emu.host.clock_reset", family_id = %self.family_id);
+            Instant::now()
+        } else {
+            started
+        };
         self.next_deadline = self.last_tick + Duration::from_nanos(FIXED_FRAME_NS);
         Ok(())
     }
@@ -166,6 +171,43 @@ mod tests {
             })?)
         }
         fn close(self: Box<Self>) -> FamilyResult<()> { Ok(()) }
+    }
+
+    #[test]
+    fn restored_clock_starts_after_frame_capture_only_when_requested() {
+        struct ClockSession {
+            reset: bool,
+            captured: std::sync::Arc<std::sync::Mutex<Option<Instant>>>,
+        }
+        impl FamilySession for ClockSession {
+            fn advance(&mut self, _: u64, _: &[FamilyEvent]) -> FamilyResult<AdvanceResponse> {
+                Ok(AdvanceResponse { reset_clock: self.reset, ..AdvanceResponse::running() })
+            }
+            fn visit_frame(&self, _: &mut dyn FrameVisitor) -> FamilyResult<()> {
+                *self.captured.lock().unwrap() = Some(Instant::now());
+                Ok(())
+            }
+            fn close(self: Box<Self>) -> FamilyResult<()> { Ok(()) }
+        }
+        for reset in [false, true] {
+            let captured = std::sync::Arc::new(std::sync::Mutex::new(None));
+            let mut active = ActiveFamilySession {
+                family_id: "clock-test".into(),
+                session: Some(Box::new(ClockSession { reset, captured: captured.clone() })),
+                audio: None, text: None, mailbox: FrameMailbox::new(),
+                status: FamilyStatus::Running, fullscreen: false,
+                last_tick: Instant::now(), next_deadline: Instant::now(),
+            };
+            active.advance(1, &[]).unwrap();
+            let completion = captured.lock().unwrap().unwrap();
+            if reset {
+                assert!(active.last_tick >= completion);
+            } else {
+                assert!(active.last_tick <= completion);
+            }
+            assert_eq!(active.next_deadline, active.last_tick + Duration::from_nanos(FIXED_FRAME_NS));
+            active.close().unwrap();
+        }
     }
 
     #[test]
