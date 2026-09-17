@@ -103,7 +103,7 @@ impl MusicaSession {
                 } => (
                     token_id,
                     self.pending.is_none()
-                        && (self.vm.control_fast_forward_active()
+                        && (self.vm.fast_forward_active()
                             || milliseconds.is_some_and(|duration| {
                                 self.wait_ns >= u64::from(duration) * 1_000_000
                             })),
@@ -112,7 +112,7 @@ impl MusicaSession {
                     token_id,
                     (self.input_pending
                         || (self.vm.state().choice.is_none()
-                            && self.vm.control_fast_forward_active()
+                            && self.vm.fast_forward_active()
                             && self.wait_ns >= 10_000_000))
                         && self.pending.is_none(),
                 ),
@@ -123,7 +123,7 @@ impl MusicaSession {
                 } => (
                     token_id,
                     self.pending.is_none()
-                        && (self.vm.control_fast_forward_active()
+                        && (self.vm.fast_forward_active()
                             || self.wait_ns >= u64::from(milliseconds) * 1_000_000),
                 ),
                 MusicaWaitState::CharacterTransition {
@@ -314,11 +314,22 @@ impl MusicaSession {
                     choice_dirty = true;
                 }
                 FamilyEvent::Key {
-                    code: KeyCode::A,
+                    code: KeyCode::A | KeyCode::S,
                     state: KeyState::Pressed,
                     ..
                 } if !self.finished => {
-                    if self.vm.toggle_auto_mode().map_err(vm_error)? {
+                    let mode = if matches!(
+                        event,
+                        FamilyEvent::Key {
+                            code: KeyCode::S,
+                            ..
+                        }
+                    ) {
+                        crate::MusicaPlayMode::Skip
+                    } else {
+                        crate::MusicaPlayMode::Auto
+                    };
+                    if self.vm.toggle_play_mode(mode).map_err(vm_error)? {
                         self.wait_ns = 0;
                     }
                     self.input_pending = false;

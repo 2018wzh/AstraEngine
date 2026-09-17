@@ -5,6 +5,7 @@ mod errors;
 mod model;
 pub(crate) mod particles;
 mod playback;
+mod read_state;
 mod scroll;
 pub(crate) mod scroll_xf;
 pub(crate) mod shake;
@@ -119,6 +120,7 @@ impl MusicaVm {
             wait: None,
             message: None,
             message_loads: Vec::new(),
+            read_message_identities: Vec::new(),
             backlog: Vec::new(),
             backlog_bytes: 0,
             choice: None,
@@ -263,6 +265,7 @@ impl MusicaVm {
             return Err(MusicaRuntimeError::Waiting);
         }
         if token_id.starts_with("musica.message.") {
+            self.mark_active_message_read()?;
             message::finish_message_loads(&mut self.state)?;
         }
         if matches!(

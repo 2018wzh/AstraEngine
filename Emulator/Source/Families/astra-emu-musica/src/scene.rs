@@ -156,17 +156,26 @@ impl Scene {
         } else {
             None
         };
-        let auto_message = if state.system_ui.auto_mode && history.is_none() {
-            message.map(|(text, speaker)| {
-                (
-                    text.clone(),
-                    Some(format!("AUTO | {}", speaker.as_deref().unwrap_or(""))),
-                )
-            })
-        } else {
-            None
-        };
-        let message = history.as_ref().or(auto_message.as_ref()).or(message);
+        let mode_message =
+            if state.system_ui.play_mode != crate::MusicaPlayMode::Normal && history.is_none() {
+                message.map(|(text, speaker)| {
+                    (
+                        text.clone(),
+                        Some(format!(
+                            "{} | {}",
+                            if state.system_ui.play_mode == crate::MusicaPlayMode::Auto {
+                                "AUTO"
+                            } else {
+                                "SKIP"
+                            },
+                            speaker.as_deref().unwrap_or("")
+                        )),
+                    )
+                })
+            } else {
+                None
+            };
+        let message = history.as_ref().or(mode_message.as_ref()).or(message);
         let choices = if history.is_some() { None } else { choices };
         let mut commands = vec![SceneCommand::Clear {
             rgba: [0, 0, 0, 255],

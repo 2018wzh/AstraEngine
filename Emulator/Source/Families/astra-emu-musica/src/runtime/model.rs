@@ -4,7 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-pub const MUSICA_RUNTIME_STATE_SCHEMA: &str = "astra.emu.musica.runtime_state.v19";
+pub const MUSICA_RUNTIME_STATE_SCHEMA: &str = "astra.emu.musica.runtime_state.v20";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MusicaRuntimeState {
@@ -18,6 +18,7 @@ pub struct MusicaRuntimeState {
     pub message: Option<MusicaMessageState>,
     pub backlog: Vec<MusicaBacklogEntry>,
     pub backlog_bytes: u64,
+    pub read_message_identities: Vec<Hash256>,
     pub message_loads: Vec<MusicaMessageLoadState>,
     pub choice: Option<MusicaChoiceState>,
     pub stage: Option<MusicaStageCommand>,
@@ -88,6 +89,7 @@ pub enum MusicaWaitState {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MusicaMessageState {
+    pub read_identity: Hash256,
     pub auto_advance: bool,
     pub wait_for_voice: bool,
     pub source: SourceSpan,
@@ -215,8 +217,7 @@ pub enum MusicaSystemPage {
 pub struct MusicaSystemUiState {
     pub page: MusicaSystemPage,
     pub focus_index: u32,
-    pub auto_mode: bool,
-    pub skip_mode: bool,
+    pub play_mode: MusicaPlayMode,
     pub skip_enabled: bool,
     pub control_enabled: bool,
     pub backlog_cursor: Option<u32>,
@@ -229,8 +230,7 @@ impl Default for MusicaSystemUiState {
         Self {
             page: MusicaSystemPage::default(),
             focus_index: 0,
-            auto_mode: false,
-            skip_mode: false,
+            play_mode: MusicaPlayMode::Normal,
             skip_enabled: true,
             control_enabled: false,
             backlog_cursor: None,
@@ -549,4 +549,13 @@ pub struct MusicaMessageVoice {
     pub resource_uri: String,
     pub volume_milli: u16,
     pub pan_milli: i16,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MusicaPlayMode {
+    #[default]
+    Normal,
+    Auto,
+    Skip,
 }

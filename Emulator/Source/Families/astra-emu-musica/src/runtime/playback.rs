@@ -20,16 +20,20 @@ impl MusicaVm {
         self.rebind_auto_wait();
         Ok(())
     }
-    pub fn toggle_auto_mode(&mut self) -> Result<bool, MusicaRuntimeError> {
-        if self.state.system_ui.page != MusicaSystemPage::None || self.state.terminal {
+    pub fn toggle_play_mode(&mut self, mode: MusicaPlayMode) -> Result<bool, MusicaRuntimeError> {
+        if mode == MusicaPlayMode::Normal
+            || self.state.system_ui.page != MusicaSystemPage::None
+            || self.state.terminal
+        {
             return Err(MusicaRuntimeError::State);
         }
-        self.state.system_ui.auto_mode = !self.state.system_ui.auto_mode;
+        self.state.system_ui.play_mode = if self.state.system_ui.play_mode == mode {
+            MusicaPlayMode::Normal
+        } else {
+            mode
+        };
         let rebound = self.rebind_auto_wait();
-        tracing::debug!(
-            event = "astra.emu.musica.auto.changed",
-            enabled = self.state.system_ui.auto_mode
-        );
+        tracing::debug!(event = "astra.emu.musica.play_mode.changed", mode = ?self.state.system_ui.play_mode);
         Ok(rebound)
     }
     fn rebind_auto_wait(&mut self) -> bool {
@@ -48,7 +52,7 @@ impl MusicaVm {
         if !token_id.starts_with("musica.message.") {
             return false;
         }
-        self.state.wait = Some(if self.state.system_ui.auto_mode {
+        self.state.wait = Some(if self.state.system_ui.play_mode == MusicaPlayMode::Auto {
             auto_wait(token_id, self.auto_delay_units)
         } else {
             MusicaWaitState::Input { token_id }
@@ -76,7 +80,10 @@ mod tests {
             let mut machine = vm(source.as_bytes());
             machine.step(1).unwrap();
             let initial = machine.state().wait.clone();
-            assert_eq!(machine.toggle_auto_mode().unwrap(), suffix.is_empty());
+            assert_eq!(
+                machine.toggle_play_mode(MusicaPlayMode::Auto).unwrap(),
+                suffix.is_empty()
+            );
             if !suffix.is_empty() {
                 assert_eq!(machine.state().wait, initial);
             }
@@ -89,7 +96,7 @@ mod tests {
             machine.resolve_wait(&token).unwrap();
             machine.step(2).unwrap();
             let authored = machine.state().wait.clone();
-            assert!(!machine.toggle_auto_mode().unwrap());
+            assert!(!machine.toggle_play_mode(MusicaPlayMode::Auto).unwrap());
             assert_eq!(machine.state().wait, authored);
         }
     }
@@ -98,7 +105,7 @@ mod tests {
         let mut machine = vm(b".message 1  speaker First\r\n.end\r\n");
         assert!(machine.set_auto_delay_units(101).is_err());
         machine.set_auto_delay_units(0).unwrap();
-        machine.toggle_auto_mode().unwrap();
+        machine.toggle_play_mode(MusicaPlayMode::Auto).unwrap();
         machine.step(1).unwrap();
         assert!(matches!(
             machine.state().wait,
@@ -108,6 +115,6 @@ mod tests {
             })
         ));
         let state = MusicaVm::decode_native_save(&machine.encode_native_save().unwrap()).unwrap();
-        assert!(state.system_ui.auto_mode);
+        assert_eq!(state.system_ui.play_mode, MusicaPlayMode::Auto);
     }
 }

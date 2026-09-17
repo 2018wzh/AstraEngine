@@ -6,13 +6,16 @@ impl MusicaVm {
         self.control_pressed = pressed;
     }
 
-    pub fn control_fast_forward_active(&self) -> bool {
+    pub fn fast_forward_active(&self) -> bool {
         fast_forward_active(&self.state, self.control_pressed)
     }
 }
 
 pub(super) fn fast_forward_active(state: &MusicaRuntimeState, pressed: bool) -> bool {
-    state.system_ui.skip_enabled && state.system_ui.control_enabled && pressed
+    state.system_ui.skip_enabled
+        && ((state.system_ui.control_enabled && pressed)
+            || (state.system_ui.play_mode == MusicaPlayMode::Skip
+                && super::read_state::is_read(state)))
 }
 
 pub(super) fn execute_pragma(
@@ -63,7 +66,7 @@ mod tests {
             original.step(1).unwrap(),
             Some(MusicaVmEvent::Wait(_))
         ));
-        assert!(!original.control_fast_forward_active());
+        assert!(!original.fast_forward_active());
         let save = original.encode_native_save().unwrap();
         let mut restored = vm(source);
         restored.restore_native_save(&save, 2).unwrap();
@@ -81,7 +84,7 @@ mod tests {
         ));
         original.resolve_wait(&token).unwrap();
         assert_eq!(original.step(2).unwrap(), Some(MusicaVmEvent::Terminal));
-        assert!(original.control_fast_forward_active());
+        assert!(original.fast_forward_active());
     }
 
     #[test]
@@ -92,7 +95,7 @@ mod tests {
             machine.step(1).unwrap(),
             Some(MusicaVmEvent::Wait(_))
         ));
-        assert!(!machine.control_fast_forward_active());
+        assert!(!machine.fast_forward_active());
         for source in [
             b".pragma unknown\r\n".as_slice(),
             b".pragma enable_control extra\r\n",

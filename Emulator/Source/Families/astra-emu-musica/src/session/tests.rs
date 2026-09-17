@@ -685,3 +685,6 @@ mod voice_preferences;
 
 #[path = "tests/playback.rs"]
 mod playback;
+
+#[path = "tests/read_skip.rs"]
+mod read_skip;

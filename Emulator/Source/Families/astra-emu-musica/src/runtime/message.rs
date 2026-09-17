@@ -131,6 +131,12 @@ pub(super) fn execute_message(
         },
     )?;
     state.message = Some(MusicaMessageState {
+        read_identity: super::read_state::identity(
+            state.script_hash,
+            command.span,
+            message_id,
+            Hash256::from_sha256(text.as_bytes()),
+        ),
         auto_advance,
         wait_for_voice,
         source: command.span,
@@ -151,7 +157,7 @@ pub(super) fn execute_message(
             timer_ticks: 1,
             milliseconds: 10,
         }
-    } else if state.system_ui.auto_mode {
+    } else if state.system_ui.play_mode == MusicaPlayMode::Auto {
         super::playback::auto_wait(token_id, auto_delay_units)
     } else {
         MusicaWaitState::Input { token_id }
