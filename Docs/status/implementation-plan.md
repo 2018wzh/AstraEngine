@@ -443,3 +443,6 @@ Musica 原生 Config 页面已接入 GPU 绘制、滑块与开关、三路试听
 Classic route.coverage.030 完成 DX12 独显 Headless 抽样运行：46,731 条输入、38 次选择到达 tsui.ending，27 张沿途样本另加终局。第 009 张对白截图已查看，正文、人物与背景可见；第 031 路线继续运行。
 
 Family API v5 增加类型化全屏窗口请求，Musica 设置应用与冷启动已接入；Manager 在 Slint 窗口线程执行，正常退出及错误关闭回到普通窗口。Headless 明确拒绝窗口请求。ABI 旧插件需与 Manager 同步重建；运行中的 Sandbox FVP 组合保持不变。API 17 项单元测试及诊断安装测试、Manager 窗口状态测试、Musica 3 项设置 GPU 回归通过；四个受影响产品 crate 的 Clippy 通过。Manager Core 23 项常规测试与新构建 Musica DLL 的实际加载/重复加载测试通过，fmt 与文档检查通过。实际 Sandbox 全屏切换尚待验证。
+
+
+Classic route.coverage.031 完成 DX12 独显 Headless 抽样运行：47,870 条输入、38 次选择到达 tsui.ending，27 张沿途样本另加终局。第 009 张对白截图已查看，正文可见。FVP 已在新剧情场景保存到此前为空的槽位 012，并确认原生页面显示新缩略图；未覆盖已有槽位。新版 Manager 与 Musica 已构建并部署至隔离 Sandbox 目录，实际全屏切换继续验证。
