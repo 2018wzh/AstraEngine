@@ -76,26 +76,21 @@ struct BlendPipelineSet {
     opaque: wgpu::RenderPipeline,
     add: wgpu::RenderPipeline,
     multiply: wgpu::RenderPipeline,
+    screen: wgpu::RenderPipeline,
 }
 
 impl BlendPipelines {
-    fn select(
-        &self,
-        compositing: SceneCompositing2D,
-        blend: BlendMode,
-    ) -> Result<&wgpu::RenderPipeline, PlatformError> {
+    fn select(&self, compositing: SceneCompositing2D, blend: BlendMode) -> &wgpu::RenderPipeline {
         let pipelines = match compositing {
             SceneCompositing2D::LinearSrgb => &self.linear,
             SceneCompositing2D::EncodedSrgb => &self.encoded,
         };
         match blend {
-            BlendMode::Alpha => Ok(&pipelines.alpha),
-            BlendMode::Opaque => Ok(&pipelines.opaque),
-            BlendMode::Add => Ok(&pipelines.add),
-            BlendMode::Multiply => Ok(&pipelines.multiply),
-            BlendMode::Screen => Err(invalid(
-                "screen blend is unsupported by the semantic GPU path",
-            )),
+            BlendMode::Alpha => &pipelines.alpha,
+            BlendMode::Opaque => &pipelines.opaque,
+            BlendMode::Add => &pipelines.add,
+            BlendMode::Multiply => &pipelines.multiply,
+            BlendMode::Screen => &pipelines.screen,
         }
     }
 }
@@ -403,6 +398,7 @@ struct DrawRun<'a> {
     // expected bounded run inline avoids a per-frame growth allocation while
     // retaining an explicit spill path for authored long text.
     quads: SmallVec<[DrawQuad<'a>; 32]>,
+    blend: BlendMode,
     rgba: [u8; 4],
     opacity: f32,
     clip: RectI,
@@ -907,7 +903,6 @@ impl WgpuGlyphAtlasRenderer {
                         || !run_ids.insert(id)
                         || !opacity.is_finite()
                         || !(0.0..=1.0).contains(opacity)
-                        || *blend == BlendMode::Screen
                     {
                         return Err(invalid(
                             "glyph run identity, opacity, or blend mode is invalid",
@@ -935,6 +930,7 @@ impl WgpuGlyphAtlasRenderer {
                         &mut quad_runs,
                         &mut draw_runs,
                         DrawRun {
+                            blend: *blend,
                             quads,
                             rgba: *rgba,
                             opacity: *opacity * opacity_stack.last().copied().unwrap_or(1.0),
@@ -961,7 +957,6 @@ impl WgpuGlyphAtlasRenderer {
                         || !run_ids.insert(id)
                         || !opacity.is_finite()
                         || !(0.0..=1.0).contains(opacity)
-                        || *blend == BlendMode::Screen
                     {
                         return Err(invalid(
                             "sprite identity, opacity, or blend mode is invalid",
@@ -981,6 +976,7 @@ impl WgpuGlyphAtlasRenderer {
                         &mut quad_runs,
                         &mut draw_runs,
                         DrawRun {
+                            blend: *blend,
                             quads: smallvec![DrawQuad {
                                 source: QuadSource::Resource {
                                     resource_id: Cow::Borrowed(texture_id.as_str()),
@@ -1029,6 +1025,7 @@ impl WgpuGlyphAtlasRenderer {
                         &mut quad_runs,
                         &mut draw_runs,
                         DrawRun {
+                            blend: BlendMode::Alpha,
                             quads: smallvec![DrawQuad {
                                 source: QuadSource::White,
                                 destination: RectI::new(*x as i32, *y as i32, *width, *height),
@@ -1062,7 +1059,7 @@ impl WgpuGlyphAtlasRenderer {
                         || !run_ids.insert(id)
                         || !opacity.is_finite()
                         || !(0.0..=1.0).contains(opacity)
-                        || *blend != BlendMode::Alpha
+                        || !matches!(blend, BlendMode::Alpha | BlendMode::Screen)
                         || vertices.is_empty()
                         || indices.is_empty()
                         || indices.len() % 3 != 0
@@ -1167,7 +1164,6 @@ impl WgpuGlyphAtlasRenderer {
                             || !draw.index_count.is_multiple_of(3)
                             || !draw.opacity.is_finite()
                             || !(0.0..=1.0).contains(&draw.opacity)
-                            || draw.blend == BlendMode::Screen
                             || indices[index_start..index_end]
                                 .iter()
                                 .any(|index| *index as usize >= draw.vertex_count as usize)
@@ -1227,6 +1223,7 @@ impl WgpuGlyphAtlasRenderer {
                         &mut quad_runs,
                         &mut draw_runs,
                         DrawRun {
+                            blend: BlendMode::Alpha,
                             quads: smallvec![DrawQuad {
                                 source: QuadSource::White,
                                 destination: RectI::new(0, 0, frame.width, frame.height),
@@ -1272,6 +1269,7 @@ impl WgpuGlyphAtlasRenderer {
                         &mut quad_runs,
                         &mut draw_runs,
                         DrawRun {
+                            blend: *blend,
                             quads: smallvec![DrawQuad {
                                 source: QuadSource::Resource {
                                     resource_id: Cow::Owned(resource_id.clone()),
@@ -1318,6 +1316,7 @@ impl WgpuGlyphAtlasRenderer {
                         &mut quad_runs,
                         &mut draw_runs,
                         DrawRun {
+                            blend: *blend,
                             quads: smallvec![DrawQuad {
                                 source: QuadSource::Resource {
                                     resource_id: Cow::Owned(resource_id.clone()),
@@ -1679,7 +1678,7 @@ impl WgpuGlyphAtlasRenderer {
                         },
                         &[],
                     );
-                    pass.set_pipeline(self.pipelines.select(batch.compositing, batch.blend)?);
+                    pass.set_pipeline(self.pipelines.select(batch.compositing, batch.blend));
                     pass.set_scissor_rect(
                         batch.clip.x as u32,
                         batch.clip.y as u32,
@@ -3344,7 +3343,7 @@ fn build_vertices(
             DrawPrimitive::Mesh(run) => run.clip,
         };
         let blend = match primitive {
-            DrawPrimitive::Quads(_) => BlendMode::Alpha,
+            DrawPrimitive::Quads(index) => quad_runs[*index].blend,
             DrawPrimitive::Mesh(run) => run.blend,
         };
         let texture_filter = match primitive {
@@ -3578,7 +3577,7 @@ fn validate_draw_identity<'a>(
         || !run_ids.insert(id)
         || !opacity.is_finite()
         || !(0.0..=1.0).contains(opacity)
-        || blend != BlendMode::Alpha
+        || !matches!(blend, BlendMode::Alpha | BlendMode::Screen)
     {
         return Err(invalid("draw identity, opacity, or blend mode is invalid"));
     }
@@ -3832,6 +3831,17 @@ fn create_blend_pipeline_set(
                 alpha: wgpu::BlendComponent::OVER,
             },
             "multiply",
+        ),
+        screen: pipeline(
+            wgpu::BlendState {
+                color: wgpu::BlendComponent {
+                    src_factor: wgpu::BlendFactor::One,
+                    dst_factor: wgpu::BlendFactor::OneMinusSrc,
+                    operation: wgpu::BlendOperation::Add,
+                },
+                alpha: wgpu::BlendComponent::OVER,
+            },
+            "screen",
         ),
     }
 }
