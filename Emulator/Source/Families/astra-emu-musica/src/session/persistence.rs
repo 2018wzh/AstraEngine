@@ -46,6 +46,8 @@ impl MusicaSession {
         vm.set_voice_preferences(self.vm.voice_preferences().clone());
         vm.restore_native_save(&saved.vm, 1)
             .map_err(|_| error("ASTRA_EMU_MUSICA_SAVE_STATE", "saved VM state is invalid"))?;
+        vm.set_auto_delay_units(self.vm.auto_delay_units())
+            .map_err(vm_error)?;
         let mut scene = Scene::new(self.archive.clone(), self.info.width, self.info.height)?;
         let choices = vm.choice_display().map_err(vm_error)?;
         scene.render(

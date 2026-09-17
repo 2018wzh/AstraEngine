@@ -4,6 +4,7 @@ mod effects;
 mod errors;
 mod model;
 pub(crate) mod particles;
+mod playback;
 mod scroll;
 pub(crate) mod scroll_xf;
 pub(crate) mod shake;
@@ -86,6 +87,7 @@ pub struct MusicaVm {
     labels: BTreeMap<String, u32>,
     state: MusicaRuntimeState,
     control_pressed: bool,
+    auto_delay_units: u8,
     voice_preferences: crate::voice_preferences::VoicePreferences,
 }
 
@@ -144,6 +146,7 @@ impl MusicaVm {
         };
         Ok(Self {
             control_pressed: false,
+            auto_delay_units: 50,
             voice_preferences: Default::default(),
             script,
             labels,
@@ -369,6 +372,7 @@ impl MusicaVm {
                 &mut self.state,
                 self.control_pressed,
                 &self.voice_preferences,
+                self.auto_delay_units,
             )
             .inspect_err(|cause| {
                 tracing::error!(
@@ -395,6 +399,7 @@ fn execute_control(
     state: &mut MusicaRuntimeState,
     control_pressed: bool,
     voice_preferences: &crate::voice_preferences::VoicePreferences,
+    auto_delay_units: u8,
 ) -> Result<Option<MusicaVmEvent>, MusicaRuntimeError> {
     match command.opcode.as_str() {
         "label" => Ok(None),
@@ -450,7 +455,7 @@ fn execute_control(
             state.wait = Some(wait.clone());
             Ok(Some(MusicaVmEvent::Wait(wait)))
         }
-        "message" => execute_message(command, state, voice_preferences),
+        "message" => execute_message(command, state, voice_preferences, auto_delay_units),
         "deletevar" => {
             let [ScOperand::Symbol { value: key }] = command.operands.as_slice() else {
                 return Err(MusicaRuntimeError::Operand);

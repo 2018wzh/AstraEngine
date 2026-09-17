@@ -55,6 +55,13 @@ pub fn musica_descriptor() -> FamilyDescriptor {
         field("profile_file", "Private PAZ profile", MUSICA_PROFILE_FILE),
         field("entry_script", "Entry script in scr archive", "test.sc"),
     ];
+    configuration.push(ConfigField {
+        id: "message_speed_auto_play".into(),
+        label: "Auto message delay (10 ms units)".into(),
+        group: "Playback".into(),
+        kind: ConfigKind::Integer { min: 0, max: 100 },
+        default: ConfigValue::Integer(50),
+    });
     configuration.extend(crate::voice_preferences::VoicePreferences::fields());
     FamilyDescriptor {
         family_id: "musica".into(),
@@ -152,6 +159,21 @@ impl MusicaProvider {
         vm.set_voice_preferences(crate::voice_preferences::VoicePreferences::resolve(
             &config,
         )?);
+        let auto_delay = config
+            .iter()
+            .find(|entry| entry.id == "message_speed_auto_play")
+            .ok_or_else(|| error("ASTRA_EMU_MUSICA_CONFIG", "auto delay is missing"))?;
+        let ConfigValue::Integer(auto_delay) = auto_delay.value else {
+            return Err(error(
+                "ASTRA_EMU_MUSICA_CONFIG",
+                "auto delay type is invalid",
+            ));
+        };
+        vm.set_auto_delay_units(
+            u8::try_from(auto_delay)
+                .map_err(|_| error("ASTRA_EMU_MUSICA_CONFIG", "auto delay is out of bounds"))?,
+        )
+        .map_err(|_| error("ASTRA_EMU_MUSICA_CONFIG", "auto delay is out of bounds"))?;
         let game = Hash256::from_sha256(&serde_json::to_vec(archive.manifest()).map_err(|_| {
             error(
                 "ASTRA_EMU_MUSICA_IDENTITY",

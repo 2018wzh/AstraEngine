@@ -4,6 +4,7 @@ pub(super) fn execute_message(
     command: &ScCommand,
     state: &mut MusicaRuntimeState,
     preferences: &crate::voice_preferences::VoicePreferences,
+    auto_delay_units: u8,
 ) -> Result<Option<MusicaVmEvent>, MusicaRuntimeError> {
     let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
         .map_err(|_| MusicaRuntimeError::Operand)?;
@@ -130,6 +131,8 @@ pub(super) fn execute_message(
         },
     )?;
     state.message = Some(MusicaMessageState {
+        auto_advance,
+        wait_for_voice,
         source: command.span,
         message_id,
     });
@@ -148,6 +151,8 @@ pub(super) fn execute_message(
             timer_ticks: 1,
             milliseconds: 10,
         }
+    } else if state.system_ui.auto_mode {
+        super::playback::auto_wait(token_id, auto_delay_units)
     } else {
         MusicaWaitState::Input { token_id }
     };

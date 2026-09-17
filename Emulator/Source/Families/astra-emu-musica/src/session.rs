@@ -314,6 +314,17 @@ impl MusicaSession {
                     choice_dirty = true;
                 }
                 FamilyEvent::Key {
+                    code: KeyCode::A,
+                    state: KeyState::Pressed,
+                    ..
+                } if !self.finished => {
+                    if self.vm.toggle_auto_mode().map_err(vm_error)? {
+                        self.wait_ns = 0;
+                    }
+                    self.input_pending = false;
+                    choice_dirty = true;
+                }
+                FamilyEvent::Key {
                     code: KeyCode::F5,
                     state: KeyState::Pressed,
                     ..

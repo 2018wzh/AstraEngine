@@ -156,7 +156,17 @@ impl Scene {
         } else {
             None
         };
-        let message = history.as_ref().or(message);
+        let auto_message = if state.system_ui.auto_mode && history.is_none() {
+            message.map(|(text, speaker)| {
+                (
+                    text.clone(),
+                    Some(format!("AUTO | {}", speaker.as_deref().unwrap_or(""))),
+                )
+            })
+        } else {
+            None
+        };
+        let message = history.as_ref().or(auto_message.as_ref()).or(message);
         let choices = if history.is_some() { None } else { choices };
         let mut commands = vec![SceneCommand::Clear {
             rgba: [0, 0, 0, 255],

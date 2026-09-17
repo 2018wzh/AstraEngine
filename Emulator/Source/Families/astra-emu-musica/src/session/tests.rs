@@ -682,3 +682,6 @@ mod backlog;
 
 #[path = "tests/voice_preferences.rs"]
 mod voice_preferences;
+
+#[path = "tests/playback.rs"]
+mod playback;
