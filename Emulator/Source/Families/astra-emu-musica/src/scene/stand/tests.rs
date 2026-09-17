@@ -135,7 +135,7 @@ fn native_stand_gpu_uses_metadata_crop_and_restore_without_changing_cached_pixel
     };
     let mut vm = make_vm();
     vm.step(1).unwrap();
-    let mut scene = Scene::new(archive.clone(), 32, 32).unwrap();
+    let mut scene = Scene::new(archive.clone(), 32, 32, crate::ScriptEncoding::ShiftJis).unwrap();
     scene.render(vm.state(), None, None).unwrap();
     let pixel = |x: usize, y: usize| &scene.pixels[(y * 32 + x) * 4..(y * 32 + x + 1) * 4];
     assert_eq!(pixel(11, 26), &[0, 0, 0, 255]);
@@ -148,7 +148,7 @@ fn native_stand_gpu_uses_metadata_crop_and_restore_without_changing_cached_pixel
     restored_vm
         .restore_native_save(&vm.encode_native_save().unwrap(), 1)
         .unwrap();
-    let mut restored = Scene::new(archive, 32, 32).unwrap();
+    let mut restored = Scene::new(archive, 32, 32, crate::ScriptEncoding::ShiftJis).unwrap();
     restored.render(restored_vm.state(), None, None).unwrap();
     assert_eq!(restored.pixels, cropped);
     let mut state = vm.state().clone();

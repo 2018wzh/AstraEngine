@@ -23,8 +23,7 @@ fn options(command: &ScCommand) -> Result<Vec<(String, String)>, MusicaRuntimeEr
     let ScControlFlow::Choice { targets } = &command.control_flow else {
         return Err(MusicaRuntimeError::Operand);
     };
-    let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
-        .map_err(|_| MusicaRuntimeError::Operand)?;
+    let tokens = command.tokens().map_err(|_| MusicaRuntimeError::Operand)?;
     if command.opcode != "select"
         || !(1..=4).contains(&targets.len())
         || tokens.len() != targets.len()

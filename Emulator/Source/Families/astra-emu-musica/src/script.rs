@@ -1,6 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use encoding_rs::SHIFT_JIS;
+mod encoding;
+mod parser;
+pub use encoding::ScriptEncoding;
+#[cfg(test)]
+use parser::tokenize_operands;
+use parser::{parse_line, tokenize_operands_with_encoding};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -15,6 +20,7 @@ pub struct SourceSpan {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ScCommand {
+    pub encoding: ScriptEncoding,
     pub ordinal: u32,
     pub opcode: String,
     pub known: bool,
@@ -59,6 +65,7 @@ pub enum ScLineKind {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ScLine {
+    pub language_guard: Option<char>,
     pub span: SourceSpan,
     pub raw: Vec<u8>,
     pub kind: ScLineKind,
@@ -67,7 +74,7 @@ pub struct ScLine {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ScScript {
     pub schema: String,
-    pub encoding: String,
+    pub encoding: ScriptEncoding,
     pub lines: Vec<ScLine>,
 }
 
@@ -207,6 +214,14 @@ pub enum ScParseError {
 /// Parses the observed CP932, CRLF-oriented `.command operands` source form.
 /// Every source line and newline is retained verbatim for lossless round-trip.
 pub fn parse_sc(bytes: &[u8], catalog: &ScOpcodeCatalog) -> Result<ScScript, ScParseError> {
+    parse_sc_with_encoding(bytes, catalog, ScriptEncoding::ShiftJis)
+}
+
+pub fn parse_sc_with_encoding(
+    bytes: &[u8],
+    catalog: &ScOpcodeCatalog,
+    encoding: ScriptEncoding,
+) -> Result<ScScript, ScParseError> {
     let mut cursor = 0usize;
     let mut ordinal = 0u32;
     let mut lines = Vec::new();
@@ -221,17 +236,14 @@ pub fn parse_sc(bytes: &[u8], catalog: &ScOpcodeCatalog) -> Result<ScScript, ScP
             .or_else(|| raw.strip_suffix(b"\n"))
             .map_or(raw.len(), <[u8]>::len);
         let logical = &raw[..logical_end];
-        if SHIFT_JIS
-            .decode_without_bom_handling_and_without_replacement(logical)
-            .is_none()
-        {
+        if encoding.decode(logical).is_none() {
             return Err(ScParseError::Encoding(cursor));
         }
         let span = SourceSpan {
             offset: cursor as u64,
             length: u32::try_from(raw.len()).map_err(|_| ScParseError::SourceInvariant(cursor))?,
         };
-        let kind = parse_line(logical, span, ordinal, catalog)?;
+        let (kind, language_guard) = parse_line(logical, span, ordinal, catalog, encoding)?;
         if matches!(kind, ScLineKind::Command { .. }) {
             ordinal = ordinal
                 .checked_add(1)
@@ -241,13 +253,14 @@ pub fn parse_sc(bytes: &[u8], catalog: &ScOpcodeCatalog) -> Result<ScScript, ScP
             span,
             raw: raw.to_vec(),
             kind,
+            language_guard,
         });
         cursor = end;
     }
     validate_cfg(&lines)?;
     Ok(ScScript {
         schema: MUSICA_SCRIPT_IR_SCHEMA.into(),
-        encoding: "cp932".into(),
+        encoding,
         lines,
     })
 }
@@ -357,7 +370,7 @@ impl ScOperand {
 pub fn disassemble_sc(script: &ScScript) -> Result<String, ScParseError> {
     let mut output = String::new();
     for line in &script.lines {
-        let Some(decoded) = SHIFT_JIS.decode_without_bom_handling_and_without_replacement(
+        let Some(decoded) = script.encoding.decode(
             line.raw
                 .strip_suffix(b"\r\n")
                 .or_else(|| line.raw.strip_suffix(b"\n"))
@@ -368,171 +381,6 @@ pub fn disassemble_sc(script: &ScScript) -> Result<String, ScParseError> {
         output.push_str(&format!("{:08x}: {decoded}\n", line.span.offset));
     }
     Ok(output)
-}
-
-fn parse_line(
-    logical: &[u8],
-    span: SourceSpan,
-    ordinal: u32,
-    catalog: &ScOpcodeCatalog,
-) -> Result<ScLineKind, ScParseError> {
-    let start = logical
-        .iter()
-        .position(|byte| !matches!(byte, b' ' | b'\t'));
-    let Some(start) = start else {
-        return Ok(ScLineKind::Blank);
-    };
-    let trimmed = &logical[start..];
-    if trimmed.starts_with(b";") || trimmed.starts_with(b"#") || trimmed.starts_with(b"//") {
-        return Ok(ScLineKind::Comment);
-    }
-    if !trimmed.starts_with(b".") {
-        return Ok(ScLineKind::Unknown);
-    }
-    let token_end = trimmed[1..]
-        .iter()
-        .position(|byte| !byte.is_ascii_alphanumeric() && *byte != b'_')
-        .map_or(trimmed.len(), |relative| relative + 1);
-    if token_end == 1 {
-        return Ok(ScLineKind::Unknown);
-    }
-    let opcode_bytes = &trimmed[1..token_end];
-    if !opcode_bytes[0].is_ascii_alphabetic() && opcode_bytes[0] != b'_' {
-        return Ok(ScLineKind::Unknown);
-    }
-    let opcode = std::str::from_utf8(opcode_bytes)
-        .map_err(|_| ScParseError::OperandSchema(span.offset as usize))?
-        .to_ascii_lowercase();
-    let operand_start = trimmed[token_end..]
-        .iter()
-        .position(|byte| !matches!(byte, b' ' | b'\t'))
-        .map_or(trimmed.len(), |relative| token_end + relative);
-    let raw_operands = trimmed[operand_start..].to_vec();
-    let spec = catalog.specs.get(&opcode);
-    let operands = tokenize_operands(&raw_operands, span.offset as usize)?
-        .into_iter()
-        .map(classify_operand)
-        .collect();
-    let control_flow = spec.map_or(Ok(ScControlFlow::Unknown), |spec| {
-        decode_control_flow(&spec.control_flow, &raw_operands, span.offset as usize)
-    })?;
-    Ok(ScLineKind::Command {
-        command: ScCommand {
-            ordinal,
-            opcode,
-            known: spec.is_some(),
-            span,
-            raw_operands,
-            operands,
-            control_flow,
-        },
-    })
-}
-
-fn classify_operand(value: String) -> ScOperand {
-    if let Ok(value) = value.parse::<i64>() {
-        ScOperand::Integer { value }
-    } else if matches!(value.as_str(), "t" | "true") {
-        ScOperand::Boolean { value: true }
-    } else if matches!(value.as_str(), "f" | "false") {
-        ScOperand::Boolean { value: false }
-    } else if matches!(
-        value.as_str(),
-        "=" | "==" | "!=" | "<" | "<=" | ">" | ">=" | "+" | "-" | "*" | "/" | "%" | "|" | "&"
-    ) {
-        ScOperand::Operator { value }
-    } else if safe_symbol(&value) {
-        ScOperand::Symbol { value }
-    } else {
-        ScOperand::Text { value }
-    }
-}
-
-fn decode_control_flow(
-    kind: &ScControlFlowKind,
-    operands: &[u8],
-    offset: usize,
-) -> Result<ScControlFlow, ScParseError> {
-    match kind {
-        ScControlFlowKind::Next => return Ok(ScControlFlow::Next),
-        ScControlFlowKind::Return => return Ok(ScControlFlow::Return),
-        ScControlFlowKind::Terminate => return Ok(ScControlFlow::Terminate),
-        ScControlFlowKind::Unknown => return Ok(ScControlFlow::Unknown),
-        _ => {}
-    }
-    let tokens = tokenize_operands(operands, offset)?;
-    let symbol = |position: usize| {
-        tokens
-            .get(position)
-            .filter(|value| safe_symbol(value))
-            .cloned()
-            .ok_or(ScParseError::OperandSchema(offset))
-    };
-    Ok(match kind {
-        ScControlFlowKind::Next => unreachable!("handled before operand tokenization"),
-        ScControlFlowKind::LabelSymbol { operand } => ScControlFlow::Label {
-            id: symbol(*operand)?,
-        },
-        ScControlFlowKind::JumpSymbol { operand } => ScControlFlow::Jump {
-            target: symbol(*operand)?,
-        },
-        ScControlFlowKind::ConditionalJumpSymbol { operand } => ScControlFlow::ConditionalJump {
-            target: symbol(*operand)?,
-        },
-        ScControlFlowKind::ChainSymbol { operand } => ScControlFlow::Chain {
-            target: tokens
-                .get(*operand)
-                .filter(|target| chain_target_parts(target).is_some())
-                .cloned()
-                .ok_or(ScParseError::OperandSchema(offset))?,
-        },
-        ScControlFlowKind::Return => unreachable!("handled before operand tokenization"),
-        ScControlFlowKind::Terminate => unreachable!("handled before operand tokenization"),
-        ScControlFlowKind::ChoiceSymbols { operands } => ScControlFlow::Choice {
-            targets: operands
-                .iter()
-                .map(|operand| symbol(*operand))
-                .collect::<Result<_, _>>()?,
-        },
-        ScControlFlowKind::ChoicePairs => {
-            if tokens.is_empty() || tokens.len() > 4 {
-                return Err(ScParseError::OperandSchema(offset));
-            }
-            let targets = tokens
-                .iter()
-                .map(|token| {
-                    let (_, target) = token
-                        .split_once(':')
-                        .filter(|(display, target)| !display.is_empty() && safe_symbol(target))
-                        .ok_or(ScParseError::OperandSchema(offset))?;
-                    Ok(target.to_owned())
-                })
-                .collect::<Result<Vec<_>, ScParseError>>()?;
-            ScControlFlow::Choice { targets }
-        }
-        ScControlFlowKind::Unknown => unreachable!("handled before operand tokenization"),
-    })
-}
-
-pub(crate) fn tokenize_operands(bytes: &[u8], offset: usize) -> Result<Vec<String>, ScParseError> {
-    if bytes.is_empty() {
-        return Ok(Vec::new());
-    }
-    let mut tokens = Vec::new();
-    let mut start = 0usize;
-    for cursor in 0..=bytes.len() {
-        if cursor != bytes.len() && !matches!(bytes[cursor], b' ' | b'\t') {
-            continue;
-        }
-        let Some(decoded) =
-            SHIFT_JIS.decode_without_bom_handling_and_without_replacement(&bytes[start..cursor])
-        else {
-            return Err(ScParseError::Encoding(offset + start));
-        };
-        tokens.push(decoded.into_owned());
-        start = cursor + 1;
-    }
-    Ok(tokens)
 }
 
 fn validate_cfg(lines: &[ScLine]) -> Result<(), ScParseError> {
@@ -601,3 +449,13 @@ pub(crate) fn chain_target_parts(target: &str) -> Option<(&str, Option<&str>)> {
 #[cfg(test)]
 #[path = "script/tests.rs"]
 mod tests;
+
+impl ScCommand {
+    pub(crate) fn tokens(&self) -> Result<Vec<String>, ScParseError> {
+        tokenize_operands_with_encoding(
+            &self.raw_operands,
+            self.span.offset as usize,
+            self.encoding,
+        )
+    }
+}

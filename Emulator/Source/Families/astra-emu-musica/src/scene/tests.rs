@@ -21,7 +21,7 @@ fn native_stage_gpu_restore_preserves_position_and_rejects_invalid_sequences() {
     };
     let mut vm = make_vm();
     vm.step(1).unwrap();
-    let mut scene = Scene::new(archive.clone(), 32, 32).unwrap();
+    let mut scene = Scene::new(archive.clone(), 32, 32, crate::ScriptEncoding::ShiftJis).unwrap();
     scene.render(vm.state(), None, None).unwrap();
     let pixel = |x: usize, y: usize| &scene.pixels[(y * 32 + x) * 4..(y * 32 + x + 1) * 4];
     assert_eq!(pixel(0, 0), &[0, 0, 0, 255]);
@@ -32,7 +32,7 @@ fn native_stage_gpu_restore_preserves_position_and_rejects_invalid_sequences() {
     restored_vm
         .restore_native_save(&vm.encode_native_save().unwrap(), 1)
         .unwrap();
-    let mut restored_scene = Scene::new(archive, 32, 32).unwrap();
+    let mut restored_scene = Scene::new(archive, 32, 32, crate::ScriptEncoding::ShiftJis).unwrap();
     restored_scene
         .render(restored_vm.state(), None, None)
         .unwrap();
@@ -80,7 +80,8 @@ fn dual_stage_screen_prefix_orders_layers_and_restores_without_partial_frames() 
         .unwrap()
     };
     let make_scene = || {
-        let mut scene = Scene::new(archive.clone(), 16, 16).unwrap();
+        let mut scene =
+            Scene::new(archive.clone(), 16, 16, crate::ScriptEncoding::ShiftJis).unwrap();
         // Seed the shared decoded cache; the archive-backed background and stand
         // still exercise native resource loading and geometry.
         scene
@@ -138,7 +139,7 @@ fn panel_modes_draw_at_native_positions_and_clear_after_restore() {
         )
         .unwrap()
     };
-    let mut scene = Scene::new(archive, 16, 80).unwrap();
+    let mut scene = Scene::new(archive, 16, 80, crate::ScriptEncoding::ShiftJis).unwrap();
     for (uri, color) in [
         ("musica:/sys/custom.png", [255, 0, 0, 255]),
         ("musica:/sys/fullPanel.png", [0, 255, 0, 255]),
@@ -201,7 +202,7 @@ fn screen_shake_gpu_preserves_composed_clipping_and_restores_mid_interval() {
         .unwrap()
     };
     let mut vm = make_vm();
-    let mut scene = Scene::new(archive, 16, 16).unwrap();
+    let mut scene = Scene::new(archive, 16, 16, crate::ScriptEncoding::ShiftJis).unwrap();
     vm.step(1).unwrap();
     scene.render(vm.state(), None, None).unwrap();
     let original = scene.pixels.clone();
@@ -254,7 +255,7 @@ fn scrollxf_gpu_crops_translates_and_accepts_empty_extent() {
         .unwrap()
     };
     let mut vm = make_vm();
-    let mut scene = Scene::new(archive, 16, 16).unwrap();
+    let mut scene = Scene::new(archive, 16, 16, crate::ScriptEncoding::ShiftJis).unwrap();
     vm.step(1).unwrap();
     scene.render(vm.state(), None, None).unwrap();
     let original = scene.pixels.clone();

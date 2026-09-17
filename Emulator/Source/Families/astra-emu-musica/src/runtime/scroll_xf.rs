@@ -33,8 +33,7 @@ pub(super) fn execute_scroll_xf(
     command: &ScCommand,
     state: &mut MusicaRuntimeState,
 ) -> Result<Option<MusicaVmEvent>, MusicaRuntimeError> {
-    let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
-        .map_err(|_| MusicaRuntimeError::ScrollXf)?;
+    let tokens = command.tokens().map_err(|_| MusicaRuntimeError::ScrollXf)?;
     let [start_width, start_height, end_width, end_height, start_x, start_y, end_x, end_y, duration, easing] =
         tokens.as_slice()
     else {

@@ -27,7 +27,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use astra_core::Hash256;
 
-use crate::{script::tokenize_operands, ScCommand, ScControlFlow, ScLineKind, ScOperand, ScScript};
+use crate::{ScCommand, ScControlFlow, ScLineKind, ScOperand, ScScript};
 
 /// Reproduces the bounded part of the original audio resource parser:
 /// `resource[volume,pan]`, with volume clamped to 0..100 and pan to -100..100.
@@ -115,6 +115,7 @@ impl MusicaVm {
             schema: MUSICA_RUNTIME_STATE_SCHEMA.into(),
             script_uri,
             script_hash,
+            script_encoding: script.encoding,
             pc_line: 0,
             variables: BTreeMap::new(),
             global_variables: BTreeMap::new(),
@@ -198,6 +199,7 @@ impl MusicaVm {
             Some(label) => *labels.get(label).ok_or(MusicaRuntimeError::Label)?,
             None => 0,
         };
+        self.state.script_encoding = script.encoding;
         self.script = script;
         self.labels = labels;
         self.state.script_uri = script_uri;
@@ -229,6 +231,7 @@ impl MusicaVm {
         if restored.schema != MUSICA_RUNTIME_STATE_SCHEMA
             || restored.script_uri != self.state.script_uri
             || restored.script_hash != self.state.script_hash
+            || restored.script_encoding != self.script.encoding
             || restored.session_seed != self.state.session_seed
             || restored.pc_line as usize > self.script.lines.len()
         {
@@ -370,6 +373,12 @@ impl MusicaVm {
                 .pc_line
                 .checked_add(1)
                 .ok_or(MusicaRuntimeError::Overflow)?;
+            if line
+                .language_guard
+                .is_some_and(|language| language != self.script.encoding.language())
+            {
+                continue;
+            }
             let ScLineKind::Command { command } = &line.kind else {
                 continue;
             };
@@ -600,11 +609,23 @@ fn branch_target(control_flow: &ScControlFlow) -> Result<&str, MusicaRuntimeErro
 }
 
 fn build_labels(script: &ScScript) -> Result<BTreeMap<String, u32>, MusicaRuntimeError> {
+    if script.schema != crate::MUSICA_SCRIPT_IR_SCHEMA {
+        return Err(MusicaRuntimeError::State);
+    }
     let mut labels = BTreeMap::new();
     for (line_index, line) in script.lines.iter().enumerate() {
         let ScLineKind::Command { command } = &line.kind else {
             continue;
         };
+        if command.encoding != script.encoding {
+            return Err(MusicaRuntimeError::State);
+        }
+        if line
+            .language_guard
+            .is_some_and(|language| language != script.encoding.language())
+        {
+            continue;
+        }
         if let ScControlFlow::Label { id } = &command.control_flow {
             let target = u32::try_from(line_index + 1).map_err(|_| MusicaRuntimeError::Overflow)?;
             if labels.insert(id.clone(), target).is_some() {

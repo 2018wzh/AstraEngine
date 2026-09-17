@@ -37,7 +37,8 @@ pub(in crate::runtime) fn execute_linear_scroll(
     command: &ScCommand,
     state: &mut MusicaRuntimeState,
 ) -> Result<Option<MusicaVmEvent>, MusicaRuntimeError> {
-    let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
+    let tokens = command
+        .tokens()
         .map_err(|_| MusicaRuntimeError::LinearScroll)?;
     let [target_x, target_y, speed_tenths] = tokens.as_slice() else {
         return Err(MusicaRuntimeError::LinearScroll);

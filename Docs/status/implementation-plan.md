@@ -389,3 +389,7 @@ Classic route.coverage.016 完成同一 build/package 的 GPU Headless 输入流
 Musica 已移植来源的 `text_shadow` 显示偏好及圆形描边，正文、说话人和 backlog 使用 SDK 共享 shaping/GPU 字形，选择项保持原样。开关不重复上传或释放仍可见的前景字形，非法半径和坐标溢出明确失败；读档保留当前 Manager 设置。7 项文字测试（含 GPU）、35 项会话回归、SDK/Musica Clippy、格式和文档检查通过。完整原生配置页与字体偏好仍继续移植。
 
 Classic route.coverage.017 完成同一 build/package 的 GPU Headless 输入流程，46,702 条输入、38 次选择到达 tsui.ending，DX12 独显且无诊断。终点 PNG 已查看，仍为黑场；完整视听与真实 Player 验收保持开放。
+
+Musica 已接通来源的 CP932／GBK 脚本与语言条件行机制：Manager 显式选择编码，解析、操作数、正文、选择、脚本切换、反汇编及保存恢复共用严格解码；GBK 采用已有 Noto Sans SC 和共享 GPU 文字。IR v3／原生状态 v21 固定编码身份，损坏字节、非法条件前缀及编码不匹配明确失败。149 项核心/Family/GPU 测试及 12 项 CLI 测试通过；补充非法条件行后 12 项 parser 测试通过，受影响 Clippy 通过。来源的混合编码探测、完整原生配置页和商业长流程仍开放。
+
+Classic route.coverage.018 完成同一 build/package 的 GPU Headless 输入流程，46,703 条输入、38 次选择到达 tsui.ending，无诊断。终点 PNG 已查看，仍为黑场；完整视听与真实 Player 验收保持开放。FVP AUTO 曾停留在同一句对白，点击对话区域后继续进入下一场景；未据此确认停留原因，结局与可听音频验收仍开放。

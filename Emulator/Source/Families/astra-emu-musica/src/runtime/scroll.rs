@@ -43,7 +43,8 @@ pub(super) fn execute_axis_scroll(
     state: &mut MusicaRuntimeState,
     axis: MusicaAxisScrollAxis,
 ) -> Result<Option<MusicaVmEvent>, MusicaRuntimeError> {
-    let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
+    let tokens = command
+        .tokens()
         .map_err(|_| MusicaRuntimeError::AxisScroll)?;
     if tokens.len() > 2 {
         return Err(MusicaRuntimeError::AxisScroll);
@@ -263,7 +264,8 @@ pub(super) fn execute_end_scroll(
     command: &ScCommand,
     state: &mut MusicaRuntimeState,
 ) -> Result<Option<MusicaVmEvent>, MusicaRuntimeError> {
-    let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
+    let tokens = command
+        .tokens()
         .map_err(|_| MusicaRuntimeError::AxisScroll)?;
     let [finish] = tokens.as_slice() else {
         return Err(MusicaRuntimeError::AxisScroll);

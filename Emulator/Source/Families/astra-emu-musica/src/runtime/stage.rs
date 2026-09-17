@@ -8,8 +8,7 @@ pub(super) fn execute_stage(
     command: &ScCommand,
     state: &mut MusicaRuntimeState,
 ) -> Result<Option<MusicaVmEvent>, MusicaRuntimeError> {
-    let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
-        .map_err(|_| MusicaRuntimeError::Operand)?;
+    let tokens = command.tokens().map_err(|_| MusicaRuntimeError::Operand)?;
     // Native scripts may end the operand list with one empty field.
     let tokens = if tokens.last().is_some_and(String::is_empty) {
         &tokens[..tokens.len() - 1]

@@ -712,3 +712,6 @@ mod playback;
 
 #[path = "tests/read_skip.rs"]
 mod read_skip;
+
+#[path = "tests/encoding.rs"]
+mod encoding;

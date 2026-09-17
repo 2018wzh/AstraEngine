@@ -6,8 +6,7 @@ pub(super) fn execute_message(
     preferences: &crate::voice_preferences::VoicePreferences,
     auto_delay_units: u8,
 ) -> Result<Option<MusicaVmEvent>, MusicaRuntimeError> {
-    let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
-        .map_err(|_| MusicaRuntimeError::Operand)?;
+    let tokens = command.tokens().map_err(|_| MusicaRuntimeError::Operand)?;
     let (message_id, voice, speaker, authored_text) = if tokens.len() >= 4 {
         let message_id = tokens[0]
             .parse::<i64>()

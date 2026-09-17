@@ -4,13 +4,14 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-pub const MUSICA_RUNTIME_STATE_SCHEMA: &str = "astra.emu.musica.runtime_state.v20";
+pub const MUSICA_RUNTIME_STATE_SCHEMA: &str = "astra.emu.musica.runtime_state.v21";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MusicaRuntimeState {
     pub schema: String,
     pub script_uri: String,
     pub script_hash: Hash256,
+    pub script_encoding: crate::ScriptEncoding,
     pub pc_line: u32,
     pub variables: BTreeMap<String, i64>,
     pub global_variables: BTreeMap<String, i64>,

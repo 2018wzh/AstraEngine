@@ -122,3 +122,69 @@ fn chain_locations_reject_empty_or_escaping_segments() {
         assert!(parse_sc(source.as_bytes(), &ScOpcodeCatalog::observed_musica()).is_err());
     }
 }
+
+#[test]
+fn gbk_script_round_trips_and_disassembles_without_replacement() {
+    let source = "[j].message 1  speaker Japanese\r\n[e].message 2  姓名 中文剧情\r\n.end\r\n";
+    let (bytes, _, errors) = encoding_rs::GBK.encode(source);
+    assert!(!errors);
+    let script = parse_sc_with_encoding(
+        &bytes,
+        &ScOpcodeCatalog::observed_musica(),
+        ScriptEncoding::Gbk,
+    )
+    .unwrap();
+    assert_eq!(encode_sc(&script).unwrap(), bytes.as_ref());
+    assert!(disassemble_sc(&script).unwrap().contains("姓名 中文剧情"));
+    assert_eq!(script.lines[0].language_guard, Some('j'));
+    assert_eq!(script.lines[1].language_guard, Some('e'));
+    let ScLineKind::Command { command } = &script.lines[1].kind else {
+        panic!("message")
+    };
+    assert_eq!(command.tokens().unwrap(), ["2", "", "姓名", "中文剧情"]);
+    for encoding in [ScriptEncoding::ShiftJis, ScriptEncoding::Gbk] {
+        assert!(parse_sc_with_encoding(
+            b".message 1   \x81",
+            &ScOpcodeCatalog::observed_musica(),
+            encoding
+        )
+        .is_err());
+    }
+}
+
+#[test]
+fn native_save_rejects_a_different_script_encoding() {
+    let bytes = b".message 1   Hello\r\n.end\r\n";
+    let make = |encoding| {
+        crate::MusicaVm::new(
+            "musica:/scr/test.sc".into(),
+            astra_core::Hash256::from_sha256(bytes),
+            parse_sc_with_encoding(bytes, &ScOpcodeCatalog::observed_musica(), encoding).unwrap(),
+            0,
+        )
+        .unwrap()
+    };
+    let saved = make(ScriptEncoding::ShiftJis).encode_native_save().unwrap();
+    assert!(make(ScriptEncoding::Gbk)
+        .restore_native_save(&saved, 1)
+        .is_err());
+}
+
+#[test]
+fn malformed_language_guards_fail_before_execution() {
+    for source in [b"[z].end".as_slice(), b"[j.end", b"[].end"] {
+        assert!(parse_sc(source, &ScOpcodeCatalog::observed_musica()).is_err());
+    }
+    let source = b"[e].message 1   Wrong\r\n[j].message 2   Japanese\r\n.end\r\n";
+    let mut vm = crate::MusicaVm::new(
+        "musica:/scr/test.sc".into(),
+        astra_core::Hash256::from_sha256(source),
+        parse_sc(source, &ScOpcodeCatalog::observed_musica()).unwrap(),
+        0,
+    )
+    .unwrap();
+    let Some(crate::MusicaVmEvent::Message { text, .. }) = vm.step(1).unwrap() else {
+        panic!("message")
+    };
+    assert_eq!(text, "Japanese");
+}

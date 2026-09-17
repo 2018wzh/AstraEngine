@@ -47,7 +47,8 @@ pub(super) fn execute_screen_shake(
     command: &ScCommand,
     state: &mut MusicaRuntimeState,
 ) -> Result<Option<MusicaVmEvent>, MusicaRuntimeError> {
-    let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
+    let tokens = command
+        .tokens()
         .map_err(|_| MusicaRuntimeError::ScreenShake)?;
     let [kind, amplitude, interval_ms] = tokens.as_slice() else {
         return Err(MusicaRuntimeError::ScreenShake);

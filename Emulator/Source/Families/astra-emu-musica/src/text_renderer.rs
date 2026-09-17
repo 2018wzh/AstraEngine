@@ -11,6 +11,7 @@ const FONT_ASSET_ID: &str = "asset:/font/emu/noto-sans-jp";
 
 pub struct MusicaTextRenderer {
     scene: TextScene,
+    encoding: crate::ScriptEncoding,
     pub(crate) shadow: bool,
 }
 
@@ -26,19 +27,37 @@ struct Region {
 }
 
 impl MusicaTextRenderer {
-    pub fn new() -> Result<Self, String> {
-        let bytes =
-            include_bytes!("../../../../../Examples/NativeVN/Assets/Fonts/NotoSansJP-Variable.ttf")
-                .to_vec();
+    pub fn new(encoding: crate::ScriptEncoding) -> Result<Self, String> {
+        let (font_family, font_asset_id, language, bytes) = match encoding {
+            crate::ScriptEncoding::ShiftJis => (
+                FONT_FAMILY,
+                FONT_ASSET_ID,
+                "ja-JP",
+                include_bytes!(
+                    "../../../../../Examples/NativeVN/Assets/Fonts/NotoSansJP-Variable.ttf"
+                )
+                .as_slice(),
+            ),
+            crate::ScriptEncoding::Gbk => (
+                "Noto Sans SC",
+                "asset:/font/emu/noto-sans-sc",
+                "zh-Hans",
+                include_bytes!(
+                    "../../../../../Examples/NativeVN/Assets/Fonts/NotoSansSC-Variable.ttf"
+                )
+                .as_slice(),
+            ),
+        };
+        let bytes = bytes.to_vec();
         let provider = CosmicTextLayoutProvider::new(
             FontBindingContext {
                 target: "astra-emu-musica".into(),
                 profile: "musica.reference".into(),
-                default_locale: "ja-JP".into(),
+                default_locale: language.into(),
             },
             vec![PackagedFont {
-                asset_id: FONT_ASSET_ID.into(),
-                family: FONT_FAMILY.into(),
+                asset_id: font_asset_id.into(),
+                family: font_family.into(),
                 face_index: 0,
                 hash: Hash256::from_sha256(&bytes),
                 license_id: "OFL-1.1".into(),
@@ -53,8 +72,22 @@ impl MusicaTextRenderer {
         .map_err(|_| "ASTRA_EMU_MUSICA_TEXT_PROVIDER_CREATE".to_owned())?;
         Ok(Self {
             scene: TextScene::new(provider),
+            encoding,
             shadow: true,
         })
+    }
+
+    fn frame(&mut self, regions: &mut [TextSceneLayout]) -> Result<Vec<SceneCommand>, String> {
+        if self.encoding == crate::ScriptEncoding::Gbk {
+            for region in regions.iter_mut() {
+                region.request.font_families = vec!["Noto Sans SC".into()];
+                for run in &mut region.request.runs {
+                    run.language = "zh-Hans".into();
+                    run.script = Some("Hani".into());
+                }
+            }
+        }
+        self.scene.frame(regions).map_err(text_error)
     }
 
     pub fn commands(
@@ -63,7 +96,7 @@ impl MusicaTextRenderer {
         choices: Option<(&[String], u32)>,
     ) -> Result<Vec<SceneCommand>, String> {
         if let Some((labels, selected)) = choices {
-            let regions = labels
+            let mut regions = labels
                 .iter()
                 .enumerate()
                 .map(|(index, label)| {
@@ -80,7 +113,7 @@ impl MusicaTextRenderer {
                     layout
                 })
                 .collect::<Vec<_>>();
-            return self.scene.frame(&regions).map_err(text_error);
+            return self.frame(&mut regions);
         }
         let Some((text, speaker)) = message else {
             return Ok(self.scene.clear());
@@ -121,7 +154,7 @@ impl MusicaTextRenderer {
                 });
             }
         }
-        self.scene.frame(&regions).map_err(text_error)
+        self.frame(&mut regions)
     }
 }
 
@@ -209,7 +242,7 @@ mod tests {
 
     #[test]
     fn packaged_font_accepts_japanese_punctuation_and_symbols() {
-        let mut text = MusicaTextRenderer::new().unwrap();
+        let mut text = MusicaTextRenderer::new(crate::ScriptEncoding::ShiftJis).unwrap();
         text.commands(Some(("……――「テスト」！？ ♪", None)), None)
             .unwrap();
     }
@@ -251,7 +284,7 @@ mod tests {
     #[test]
     #[ignore = "requires a hardware GPU"]
     fn gpu_text_updates_shared_glyphs_and_releases_removed_regions() {
-        let mut text = MusicaTextRenderer::new().unwrap();
+        let mut text = MusicaTextRenderer::new(crate::ScriptEncoding::ShiftJis).unwrap();
         let mut gpu = pollster::block_on(WgpuOffscreenRenderer::new()).unwrap();
         let mut sequence = 0;
         let mut draw = |message| {
@@ -278,7 +311,7 @@ mod tests {
 
     #[test]
     fn duplicate_region_failure_preserves_the_previous_glyph_residency() {
-        let mut text = MusicaTextRenderer::new().unwrap();
+        let mut text = MusicaTextRenderer::new(crate::ScriptEncoding::ShiftJis).unwrap();
         text.commands(Some(("日本語", None)), None).unwrap();
         let region = || {
             layout_request(
@@ -309,7 +342,7 @@ mod tests {
     #[test]
     #[ignore = "requires a hardware GPU"]
     fn gpu_shadow_toggle_reuses_glyphs_and_removes_outline_layers() {
-        let mut text = MusicaTextRenderer::new().unwrap();
+        let mut text = MusicaTextRenderer::new(crate::ScriptEncoding::ShiftJis).unwrap();
         let mut gpu = pollster::block_on(WgpuOffscreenRenderer::new()).unwrap();
         let mut sequence = 0;
         let mut draw = |text: &mut MusicaTextRenderer, shadow| {
@@ -345,7 +378,7 @@ mod tests {
 
     #[test]
     fn invalid_outline_rejects_before_mutating_glyph_ownership() {
-        let mut text = MusicaTextRenderer::new().unwrap();
+        let mut text = MusicaTextRenderer::new(crate::ScriptEncoding::ShiftJis).unwrap();
         text.commands(Some(("Outline", None)), None).unwrap();
         for radius in [0, 9] {
             let mut region = layout_request("invalid", "Text", choice_region(0));

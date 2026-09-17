@@ -55,7 +55,8 @@ fn native_container_images_use_shared_gpu_cache_and_restore() {
         .unwrap();
         vm.step(1).unwrap();
         let saved = vm.encode_native_save().unwrap();
-        let mut scene = Scene::new(archive.clone(), 16, 16).unwrap();
+        let mut scene =
+            Scene::new(archive.clone(), 16, 16, crate::ScriptEncoding::ShiftJis).unwrap();
         scene.render(vm.state(), None, None).unwrap();
         assert_eq!(
             &scene.pixels[(3 * 16 + 2) * 4..(3 * 16 + 3) * 4],
@@ -82,7 +83,7 @@ fn native_container_images_use_shared_gpu_cache_and_restore() {
         assert_eq!(scene.pixels, expected);
         assert_eq!(scene.textures.resident_bytes(), 4);
         vm.restore_native_save(&saved, 1).unwrap();
-        let mut restored = Scene::new(archive, 16, 16).unwrap();
+        let mut restored = Scene::new(archive, 16, 16, crate::ScriptEncoding::ShiftJis).unwrap();
         restored.render(vm.state(), None, None).unwrap();
         assert_eq!(restored.pixels, expected);
     }

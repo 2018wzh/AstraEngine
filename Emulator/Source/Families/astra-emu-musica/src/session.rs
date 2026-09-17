@@ -4,7 +4,7 @@ mod movie;
 mod persistence;
 use crate::{
     audio::Audio,
-    parse_sc,
+    parse_sc_with_encoding,
     provider::SessionLease,
     scene::{error, read_asset, Scene},
     storage::{Snapshot, Storage},
@@ -251,10 +251,12 @@ impl MusicaSession {
                     })?;
                 let uri = format!("musica:/scr/{file}");
                 let bytes = read_asset(&self.archive, &uri, 16 * 1024 * 1024)?;
-                let script =
-                    parse_sc(&bytes, &ScOpcodeCatalog::observed_musica()).map_err(|_| {
-                        error("ASTRA_EMU_MUSICA_SCRIPT", "chained script cannot be parsed")
-                    })?;
+                let script = parse_sc_with_encoding(
+                    &bytes,
+                    &ScOpcodeCatalog::observed_musica(),
+                    self.vm.state().script_encoding,
+                )
+                .map_err(|_| error("ASTRA_EMU_MUSICA_SCRIPT", "chained script cannot be parsed"))?;
                 self.vm
                     .replace_script(uri, Hash256::from_sha256(&bytes), script, label)
                     .map_err(vm_error)?;

@@ -22,8 +22,7 @@ pub(super) fn execute_pragma(
     command: &ScCommand,
     state: &mut MusicaRuntimeState,
 ) -> Result<Option<MusicaVmEvent>, MusicaRuntimeError> {
-    let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
-        .map_err(|_| MusicaRuntimeError::Pragma)?;
+    let tokens = command.tokens().map_err(|_| MusicaRuntimeError::Pragma)?;
     let [pragma] = tokens.as_slice() else {
         return Err(MusicaRuntimeError::Pragma);
     };

@@ -6,8 +6,7 @@ pub(super) fn execute_play_se(
     loop_stream_id: u32,
     bus: &str,
 ) -> Result<Option<MusicaVmEvent>, MusicaRuntimeError> {
-    let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
-        .map_err(|_| MusicaRuntimeError::Operand)?;
+    let tokens = command.tokens().map_err(|_| MusicaRuntimeError::Operand)?;
     if tokens.is_empty() || tokens.len() > 4 {
         return Err(MusicaRuntimeError::Operand);
     }
@@ -142,8 +141,7 @@ pub(super) fn execute_play_bgm(
     bgm_stream_id: u32,
     bus: &str,
 ) -> Result<Option<MusicaVmEvent>, MusicaRuntimeError> {
-    let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
-        .map_err(|_| MusicaRuntimeError::Operand)?;
+    let tokens = command.tokens().map_err(|_| MusicaRuntimeError::Operand)?;
     if tokens.is_empty() || tokens.len() > 4 {
         return Err(MusicaRuntimeError::Operand);
     }
@@ -233,8 +231,7 @@ pub(super) fn execute_play_voice(
     state: &mut MusicaRuntimeState,
 ) -> Result<Option<MusicaVmEvent>, MusicaRuntimeError> {
     const VOICE_STREAM_ID: u32 = 4;
-    let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
-        .map_err(|_| MusicaRuntimeError::Operand)?;
+    let tokens = command.tokens().map_err(|_| MusicaRuntimeError::Operand)?;
     if tokens.is_empty() || tokens.len() > 4 {
         return Err(MusicaRuntimeError::Operand);
     }

@@ -29,3 +29,5 @@ Manager 的 Audio 分组提供 `bgm_volume`、`voice_volume`、`se_volume`（0�
 详细命令见 [脚本执行](script-execution.md)，共享绘制与媒体见 [呈现与媒体](presentation-and-media.md)，实际完成范围见 [实施状态](../../status/implementation-plan.md)。完整游戏结局与平台验收仍开放。
 
 `text_shadow` 默认开启，按来源实现为正文、说话人和 backlog 添加黑色圆形描边，选择项保持原样。关闭后仍使用同一 GPU 文字渲染路径；存档不保存此显示偏好，读档继续使用当前 Manager 设置。
+
+Manager 的 `script_encoding` 显式选择 `shift_jis`（默认）或 `gbk`。来源的 `[j]` / `[e]` 条件行分别跟随日文／GBK 选择；正文、说话人、选择项和命令操作数共用严格解码。GBK 使用仓库已有 Noto Sans SC，日文使用 Noto Sans JP。脚本切换保持启动编码，读档校验保存的编码；未知编码和损坏字节失败，不替换字符。PAZ 索引与 key 材料仍沿用原生 CP932。来源的混合编码探测尚未接入，当前必须选择与整套脚本一致的编码。

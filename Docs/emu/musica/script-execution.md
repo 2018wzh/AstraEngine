@@ -42,7 +42,7 @@ Musica Family 自持 VM、归档、音频和原生 session。Manager 经 Family 
 
 ## 保存与恢复
 
-VM 数据使用 `astra.emu.musica.runtime_state.v20` 和 postcard，包含脚本身份、PC、变量、等待、完整 stage、transition、效果时间状态、面板和音频等字段。v16 及更早数据直接拒绝，不迁移旧图层表示。stage 的资源角色、名称、序列长度和立绘数量在保存、解码和恢复边界校验。
+VM 数据使用 `astra.emu.musica.runtime_state.v21` 和 postcard，包含脚本身份、PC、变量、等待、完整 stage、transition、效果时间状态、面板和音频等字段。v20 及更早数据直接拒绝，不迁移旧图层表示。stage 的资源角色、名称、序列长度和立绘数量在保存、解码和恢复边界校验。
 
 Family 存档容器另外保存当前显示消息、等待余量和音频快照。恢复先验证游戏及脚本身份，再构造候选 VM、GPU 场景和音频状态；场景重建失败不得将其标为恢复成功。归档解密后的完整素材和 GPU 资源不进入 VM 数据。损坏存档读取失败不得覆盖原文件。
 
@@ -87,3 +87,5 @@ Manager 的 Musica 配置现提供独立 backlog 回放开关和 ren/sui/aya/tou
 已读跳读采用来源的 `Normal/Auto/Skip` 互斥模式，S 切换 Skip，A 切换 Auto；画面显示当前模式。消息完成后，按脚本 hash、source span、消息编号和正文 hash 生成的身份进入有界有序集合。不同位置或不同脚本版本的同文不会误判已读。Skip 仅推进已读消息，未读消息和选择保留等待，`skip_disable` 同时阻断 Skip 与 Control 快进。身份在消息建立时计算并缓存，tick 只做集合查询；v20 保存模式和已读集合，恢复前拒绝重复、乱序和不匹配的身份。完整系统页仍待移植。
 
 `.movie id resource width height skippable` 已移植来源 00610272d 的 VM 入口：非零 id、受限文件名、1–8192 尺寸及 `t/f` 跳过标记，建立对应 Media wait。当前 v20 已有的 movie 字段保存资源、等待标识和微秒播放位置，无需改变容器格式；完成等待或更换脚本时清除电影状态。`update_movie_position` 只接受当前电影及等待标识，不接受倒退位置。保存/恢复校验 movie 与 Media wait 的双向关联，损坏存档不替换当前 VM。启用 `ffmpeg-vcpkg` 时，Family 使用 SDK 增量解码、现有 GPU Scene 和音频 worker 播放；读档按游标重开并 seek，Control 只受电影自身的跳过标记约束。未启用 feature 时返回 `ASTRA_EMU_MUSICA_MOVIE_UNAVAILABLE`。完整样本整合测试已通过，真实游戏电影与结局仍待验证。
+
+脚本 IR 升级为 `astra.emu.musica.script_ir.v3`：`ScriptEncoding` 显式标记脚本和原始操作数字节编码，`ScLine::language_guard` 保留来源的 `[j]`／`[e]` 条件。`parse_sc_with_encoding`、VM、反汇编与无损 round-trip 使用同一编码；`parse_sc` 保留作为明确的日文解析入口。原生 v21 保存脚本编码，恢复到不同编码会话明确拒绝，旧 v20 不迁移。GPU 中文、选择、脚本切换与存读档覆盖新 Family 整合路径，不能替代商业游戏完整验收。

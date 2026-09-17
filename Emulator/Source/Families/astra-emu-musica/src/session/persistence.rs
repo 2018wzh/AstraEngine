@@ -34,8 +34,18 @@ impl MusicaSession {
                 "saved script has changed",
             ));
         }
-        let script = parse_sc(&bytes, &ScOpcodeCatalog::observed_musica())
-            .map_err(|_| error("ASTRA_EMU_MUSICA_SCRIPT", "saved script cannot be parsed"))?;
+        if state.script_encoding != self.vm.state().script_encoding {
+            return Err(error(
+                "ASTRA_EMU_MUSICA_SAVE_ENCODING",
+                "save uses a different script encoding",
+            ));
+        }
+        let script = parse_sc_with_encoding(
+            &bytes,
+            &ScOpcodeCatalog::observed_musica(),
+            state.script_encoding,
+        )
+        .map_err(|_| error("ASTRA_EMU_MUSICA_SCRIPT", "saved script cannot be parsed"))?;
         let mut vm = MusicaVm::new(
             state.script_uri,
             state.script_hash,
@@ -48,7 +58,12 @@ impl MusicaSession {
             .map_err(|_| error("ASTRA_EMU_MUSICA_SAVE_STATE", "saved VM state is invalid"))?;
         vm.set_auto_delay_units(self.vm.auto_delay_units())
             .map_err(vm_error)?;
-        let mut scene = Scene::new(self.archive.clone(), self.info.width, self.info.height)?;
+        let mut scene = Scene::new(
+            self.archive.clone(),
+            self.info.width,
+            self.info.height,
+            state.script_encoding,
+        )?;
         scene.set_text_shadow(self.scene.text_shadow());
         let choices = vm.choice_display().map_err(vm_error)?;
         scene.render(

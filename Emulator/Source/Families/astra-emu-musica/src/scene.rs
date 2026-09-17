@@ -59,7 +59,12 @@ pub(crate) struct Scene {
 }
 
 impl Scene {
-    pub fn new(archive: Arc<MusicaMountedVfs>, width: u32, height: u32) -> FamilyResult<Self> {
+    pub fn new(
+        archive: Arc<MusicaMountedVfs>,
+        width: u32,
+        height: u32,
+        encoding: crate::ScriptEncoding,
+    ) -> FamilyResult<Self> {
         let renderer = pollster::block_on(WgpuOffscreenRenderer::new())
             .map_err(|_| {
                 error(
@@ -73,7 +78,7 @@ impl Scene {
             backend = renderer.identity().backend.as_str(),
             device_type = renderer.identity().device_type.as_str()
         );
-        let text = MusicaTextRenderer::new().map_err(|_| {
+        let text = MusicaTextRenderer::new(encoding).map_err(|_| {
             error(
                 "ASTRA_EMU_MUSICA_FONT",
                 "font renderer could not be created",

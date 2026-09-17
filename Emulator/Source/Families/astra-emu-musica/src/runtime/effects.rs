@@ -4,8 +4,7 @@ pub(super) fn execute_effect(
     command: &ScCommand,
     state: &mut MusicaRuntimeState,
 ) -> Result<Option<MusicaVmEvent>, MusicaRuntimeError> {
-    let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
-        .map_err(|_| MusicaRuntimeError::Effect)?;
+    let tokens = command.tokens().map_err(|_| MusicaRuntimeError::Effect)?;
     if tokens
         .first()
         .is_some_and(|name| matches!(name.as_str(), "Snow" | "Firefly" | "end" | "fadeout"))
@@ -78,8 +77,7 @@ pub(super) fn execute_panel(
     command: &ScCommand,
     state: &mut MusicaRuntimeState,
 ) -> Result<Option<MusicaVmEvent>, MusicaRuntimeError> {
-    let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
-        .map_err(|_| MusicaRuntimeError::Panel)?;
+    let tokens = command.tokens().map_err(|_| MusicaRuntimeError::Panel)?;
     let panel = match tokens.as_slice() {
         [mode] if mode == "0" => None,
         [mode] if mode == "1" => Some(MusicaPanelState {
@@ -145,8 +143,7 @@ pub(super) fn execute_transition(
     command: &ScCommand,
     state: &mut MusicaRuntimeState,
 ) -> Result<Option<MusicaVmEvent>, MusicaRuntimeError> {
-    let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
-        .map_err(|_| MusicaRuntimeError::Operand)?;
+    let tokens = command.tokens().map_err(|_| MusicaRuntimeError::Operand)?;
     let [mode, resource, duration] = tokens.as_slice() else {
         return Err(MusicaRuntimeError::Operand);
     };
