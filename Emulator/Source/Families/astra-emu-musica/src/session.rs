@@ -44,6 +44,8 @@ pub(crate) struct MusicaSession {
     finished: bool,
     poisoned: bool,
     suspended: bool,
+    focused: bool,
+    progress_in_background: bool,
 }
 impl MusicaSession {
     #[allow(clippy::too_many_arguments)]
@@ -58,6 +60,8 @@ impl MusicaSession {
         storage: Storage,
         game: Hash256,
         lease: SessionLease,
+        focused: bool,
+        progress_in_background: bool,
     ) -> Self {
         Self {
             id,
@@ -83,7 +87,29 @@ impl MusicaSession {
             finished: false,
             poisoned: false,
             suspended: false,
+            focused,
+            progress_in_background,
         }
+    }
+
+    fn paused(&self) -> bool {
+        self.suspended || (!self.focused && !self.progress_in_background)
+    }
+    fn clear_input(&mut self) {
+        self.control_keys = 0;
+        self.input_pending = false;
+        self.pointer = None;
+        self.vm.set_control_pressed(false);
+    }
+    fn update_pause(&self) -> FamilyResult<()> {
+        self.audio.suspend(self.paused())?;
+        tracing::debug!(
+            event = "astra.emu.musica.window.pause",
+            focused = self.focused,
+            suspended = self.suspended,
+            paused = self.paused()
+        );
+        Ok(())
     }
 
     fn tick(&mut self) -> FamilyResult<bool> {
@@ -397,17 +423,19 @@ impl MusicaSession {
                     }
                     self.vm.set_control_pressed(self.control_keys != 0);
                 }
-                FamilyEvent::WindowFocused { focused: false } => {
-                    self.control_keys = 0;
-                    self.vm.set_control_pressed(false);
+                FamilyEvent::WindowFocused { focused } => {
+                    self.focused = *focused;
+                    if !focused {
+                        self.clear_input();
+                    }
+                    self.update_pause()?;
                 }
                 FamilyEvent::WindowSuspended { suspended } => {
                     if *suspended {
-                        self.control_keys = 0;
-                        self.vm.set_control_pressed(false);
+                        self.clear_input();
                     }
                     self.suspended = *suspended;
-                    self.audio.suspend(*suspended)?;
+                    self.update_pause()?;
                 }
                 FamilyEvent::WindowCloseRequested => {
                     self.finished = true;
@@ -426,7 +454,7 @@ impl MusicaSession {
         }
         let mut dirty = self.poll_text()? || choice_dirty;
         dirty |= self.advance_movie(elapsed_ns)?;
-        if !self.suspended
+        if !self.paused()
             && self.movie.is_none()
             && !self.finished
             && self.vm.state().system_ui.page == crate::MusicaSystemPage::None

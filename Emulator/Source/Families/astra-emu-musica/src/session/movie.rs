@@ -1,9 +1,9 @@
 use super::*;
 impl MusicaSession {
     pub(super) fn advance_movie(&mut self, elapsed_ns: u64) -> FamilyResult<bool> {
+        let paused =
+            self.paused() || self.vm.state().system_ui.page != crate::MusicaSystemPage::None;
         if let Some(movie) = &mut self.movie {
-            let paused =
-                self.suspended || self.vm.state().system_ui.page != crate::MusicaSystemPage::None;
             if let Some(frame) = movie.advance(&self.audio, elapsed_ns, paused)? {
                 self.scene.render_movie(frame)?;
             }

@@ -379,3 +379,7 @@ Classic route.coverage.014 完成同一 build/package 的 GPU Headless 输入流
 Musica 已接入来源配置中的 BGM、voice、SE 音量与静音，Manager 负责配置和持久化，Kira 子音轨负责增益。剧情 volume/fade/cursor 保持原值；启动与读档在首批 PCM 前应用当前设置，静音保留语音等待。11 项音频测试、31 项 Family 会话测试及新增 Manager 静音/恢复专项通过，受影响 Clippy 通过；完整原生配置页和剩余偏好继续移植。
 
 Classic route.coverage.015 完成同一 build/package 的 GPU Headless 输入流程，47,801 条输入、38 次选择到达 tsui.ending，无诊断。终点 PNG 已查看，仍为黑场；完整视听与真实 Player 验收保持开放。
+
+Musica 已移植来源的后台播放偏好，默认失焦暂停，显式开启才继续；窗口挂起始终优先。初始焦点、剧情/演出/电影/音频暂停、失焦清除输入以及读档保留窗口状态均接入 Family。34 项会话测试及受影响 Clippy 通过，覆盖两种配置、初始失焦、显式挂起、快进键、电影和存读档；真实平台切换窗口验收仍开放。
+
+Classic route.coverage.016 完成同一 build/package 的 GPU Headless 输入流程，47,809 条输入、38 次选择到达 tsui.ending，无诊断。终点 PNG 已查看，仍为黑场；完整视听与真实 Player 验收保持开放。

@@ -62,6 +62,13 @@ pub fn musica_descriptor() -> FamilyDescriptor {
         kind: ConfigKind::Integer { min: 0, max: 100 },
         default: ConfigValue::Integer(50),
     });
+    configuration.push(ConfigField {
+        id: "progress_in_background".into(),
+        label: "Continue playback in background".into(),
+        group: "Playback".into(),
+        kind: ConfigKind::Bool,
+        default: ConfigValue::Bool(false),
+    });
     configuration.extend(crate::voice_preferences::VoicePreferences::fields());
     configuration.extend(crate::audio::AudioPreferences::fields());
     FamilyDescriptor {
@@ -149,6 +156,20 @@ impl MusicaProvider {
             ));
         }
         let audio_preferences = crate::audio::AudioPreferences::resolve(&config)?;
+        let progress_in_background = match config
+            .iter()
+            .find(|entry| entry.id == "progress_in_background")
+            .map(|entry| &entry.value)
+        {
+            Some(ConfigValue::Bool(value)) => *value,
+            _ => {
+                return Err(error(
+                    "ASTRA_EMU_MUSICA_CONFIG",
+                    "background playback preference is missing or invalid",
+                ))
+            }
+        };
+        let focused = request.initial_window.focused;
         let lease = SessionLease::acquire()?;
         let root = Path::new(request.game_path.as_str());
         let archive = Arc::new(mount_musica(root, Path::new(&profile)).map_err(core_error)?);
@@ -196,6 +217,7 @@ impl MusicaProvider {
             .ok_or_else(|| error("ASTRA_EMU_MUSICA_AUDIO_SINK", "PCM sink is required"))?;
         let audio = Audio::start(archive.clone(), sink)?;
         audio.set_preferences(audio_preferences)?;
+        audio.suspend(!focused && !progress_in_background)?;
         self.next = self
             .next
             .checked_add(1)
@@ -226,6 +248,8 @@ impl MusicaProvider {
             storage,
             game,
             lease,
+            focused,
+            progress_in_background,
         );
         tracing::info!(event = "astra.emu.musica.session.open");
         Ok((response, session))

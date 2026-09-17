@@ -551,7 +551,13 @@ fn native_gpu_control_keys_respect_release_focus_and_choice_boundaries() {
 
     opened
         .session
-        .advance(16_666_667, &[key(KeyCode::ControlRight)])
+        .advance(
+            16_666_667,
+            &[
+                FamilyEvent::WindowFocused { focused: true },
+                key(KeyCode::ControlRight),
+            ],
+        )
         .unwrap();
     opened.session.visit_frame(&mut capture).unwrap();
     let choice = capture.0.clone();
