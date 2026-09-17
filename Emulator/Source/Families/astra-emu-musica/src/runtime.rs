@@ -13,6 +13,7 @@ pub use errors::MusicaRuntimeError;
 pub use model::*;
 use stage::*;
 mod audio_commands;
+mod character;
 mod choices;
 use audio_commands::*;
 use choices::execute_select;
@@ -110,6 +111,7 @@ impl MusicaVm {
             linear_scroll: None,
             scroll_xf: None,
             wscroll2: None,
+            characters: BTreeMap::new(),
             firefly: None,
             secondary_effect: None,
             panel: None,
@@ -225,7 +227,8 @@ impl MusicaVm {
             .as_ref()
             .ok_or(MusicaRuntimeError::Waiting)?;
         let expected = match current {
-            MusicaWaitState::LinearScroll { token_id, .. }
+            MusicaWaitState::CharacterTransition { token_id, .. }
+            | MusicaWaitState::LinearScroll { token_id, .. }
             | MusicaWaitState::AxisScroll { token_id, .. }
             | MusicaWaitState::Time { token_id, .. }
             | MusicaWaitState::Input { token_id }
@@ -235,6 +238,9 @@ impl MusicaVm {
         };
         if expected != token_id {
             return Err(MusicaRuntimeError::Waiting);
+        }
+        if matches!(current, MusicaWaitState::CharacterTransition { .. }) {
+            character::complete_character_transition_state(&mut self.state)?;
         }
         self.state.wait = None;
         Ok(())
@@ -437,6 +443,7 @@ fn execute_control(
         "scroll" => scroll::execute_linear_scroll(command, state),
         "endscroll" => scroll::execute_end_scroll(command, state),
         "shakescreen" => shake::execute_screen_shake(command, state),
+        "char" => character::execute_character(command, state),
         "effect2" => particles::execute_secondary_effect(command, state),
         "effect" => execute_effect(command, state),
         "panel" => execute_panel(command, state),

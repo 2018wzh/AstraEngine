@@ -267,6 +267,17 @@ impl MusicaSession {
                     self.vm.control_fast_forward_active()
                         || self.wait_ns >= u64::from(milliseconds) * 1_000_000,
                 ),
+                MusicaWaitState::CharacterTransition {
+                    token_id, slot_id, ..
+                } => (
+                    token_id,
+                    self.vm
+                        .state()
+                        .characters
+                        .get(&slot_id)
+                        .and_then(|character| character.transition.as_ref())
+                        .is_some_and(|transition| transition.completed),
+                ),
                 MusicaWaitState::LinearScroll { token_id, .. } => (
                     token_id,
                     self.vm
@@ -346,6 +357,7 @@ impl MusicaSession {
             Some(
                 MusicaVmEvent::Effect(_)
                 | MusicaVmEvent::EffectCleared
+                | MusicaVmEvent::Character(_)
                 | MusicaVmEvent::Firefly(_)
                 | MusicaVmEvent::FireflyCleared { .. }
                 | MusicaVmEvent::SecondaryEffect(_)
@@ -545,6 +557,11 @@ impl MusicaSession {
             dirty |= self
                 .vm
                 .advance_secondary_effect_clock(elapsed_ns)
+                .map_err(vm_error)?
+                .is_some();
+            dirty |= self
+                .vm
+                .advance_character_clock(elapsed_ns)
                 .map_err(vm_error)?
                 .is_some();
             self.phase += u128::from(elapsed_ns) * 60;

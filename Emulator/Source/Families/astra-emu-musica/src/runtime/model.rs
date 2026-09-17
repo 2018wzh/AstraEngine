@@ -4,7 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-pub const MUSICA_RUNTIME_STATE_SCHEMA: &str = "astra.emu.musica.runtime_state.v15";
+pub const MUSICA_RUNTIME_STATE_SCHEMA: &str = "astra.emu.musica.runtime_state.v16";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MusicaRuntimeState {
@@ -20,6 +20,7 @@ pub struct MusicaRuntimeState {
     pub stage: Option<MusicaStageCommand>,
     pub transition: MusicaTransitionState,
     pub effect: Option<MusicaEffectState>,
+    pub characters: BTreeMap<u32, MusicaCharacterState>,
     pub firefly: Option<MusicaFireflyState>,
     pub secondary_effect: Option<MusicaSecondaryEffectState>,
     pub wscroll2: Option<MusicaWScroll2State>,
@@ -42,6 +43,11 @@ pub struct MusicaRuntimeState {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum MusicaWaitState {
+    CharacterTransition {
+        token_id: String,
+        slot_id: u32,
+        milliseconds: u32,
+    },
     LinearScroll {
         token_id: String,
         milliseconds: u32,
@@ -242,6 +248,7 @@ pub enum MusicaVmEvent {
     EffectCleared,
     ScrollXf(MusicaScrollXfFrame),
     WScroll2(MusicaWScroll2Frame),
+    Character(MusicaCharacterFrame),
     Firefly(MusicaFireflyFrame),
     FireflyCleared {
         sequence: u64,
@@ -449,5 +456,57 @@ pub struct MusicaFireflyFrame {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MusicaSecondaryEffectFrame {
+    pub sequence: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MusicaCharacterState {
+    /// Original character manager key. The native engine normalizes signed
+    /// command ids with `abs` before lookup.
+    pub slot_id: u32,
+    /// The sign captured by `.char load`. Native CCharLayer stores it on both
+    /// sprite nodes and later position commands retain it.
+    pub positive_orientation: bool,
+    pub resource_uris: Vec<String>,
+    /// Native CCharLayer anchor: horizontal center and bottom-relative Y.
+    pub anchor_position: [i32; 2],
+    pub visible: bool,
+    pub opacity_256: u16,
+    pub transition: Option<MusicaCharacterTransitionState>,
+    /// Native inline `load` prepares a second sprite node and cross-fades it
+    /// against the current node before atomically promoting the replacement.
+    pub replacement: Option<MusicaCharacterReplacementState>,
+    /// A `.char load` prepares this slot for the next `.stage`. Native
+    /// `CCharLayerManager` keeps newly prepared layers while retiring older
+    /// unmarked layers at the stage boundary.
+    pub pending_stage: bool,
+    /// Native `CCharLayer` one-shot retention flag. `.char keep` sets it;
+    /// scene finalization consumes it when deciding which previous-scene
+    /// characters survive into the next scene.
+    pub keep_once: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MusicaCharacterTransitionState {
+    pub start_opacity_256: u16,
+    pub target_opacity_256: u16,
+    pub duration_ms: u32,
+    pub elapsed_ns: u64,
+    pub completed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MusicaCharacterReplacementState {
+    pub resource_uri: String,
+    pub start_opacity_256: u16,
+    pub target_opacity_256: u16,
+    pub next_opacity_256: u16,
+    pub duration_ms: u32,
+    pub elapsed_ns: u64,
+    pub completed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MusicaCharacterFrame {
     pub sequence: u64,
 }

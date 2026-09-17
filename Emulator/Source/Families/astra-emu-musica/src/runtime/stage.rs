@@ -71,6 +71,12 @@ pub(super) fn execute_stage(
     };
     validate_stage_state(Some(&stage))?;
     next_effect_sequence(state)?;
+    state.characters.retain(|_, character| {
+        let retained = character.keep_once || character.pending_stage;
+        character.keep_once = false;
+        character.pending_stage = false;
+        retained
+    });
     state.stage = Some(stage.clone());
     state.axis_scroll = None;
     state.linear_scroll = None;

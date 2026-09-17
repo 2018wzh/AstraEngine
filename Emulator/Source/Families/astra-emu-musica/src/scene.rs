@@ -10,6 +10,7 @@ use std::{num::NonZeroUsize, sync::Arc};
 const MAX_ASSET_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_IMAGE_BYTES: usize = 128 * 1024 * 1024;
 
+mod character;
 mod particles;
 mod stage;
 mod stand;
@@ -192,6 +193,7 @@ impl Scene {
         } else if let Some(stage) = &state.stage {
             self.stage(&mut commands, stage)?;
         }
+        self.characters(&mut commands, state)?;
         if let Some(effect) = &state.effect {
             let current = effect
                 .resources

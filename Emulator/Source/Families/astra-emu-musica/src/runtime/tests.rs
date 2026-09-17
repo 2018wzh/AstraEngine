@@ -142,7 +142,7 @@ fn deterministic_control_flow_wait_and_native_save_round_trip() {
 }
 
 #[test]
-fn unsupported_presentation_command_blocks_without_advancing_silently() {
+fn malformed_character_command_blocks_without_creating_a_slot() {
     let source = b".char 0\r\n.end\r\n";
     let script = parse_sc(source, &ScOpcodeCatalog::observed_musica()).unwrap();
     let mut vm = MusicaVm::new(
@@ -152,13 +152,8 @@ fn unsupported_presentation_command_blocks_without_advancing_silently() {
         1,
     )
     .unwrap();
-    assert_eq!(
-        vm.step(1).unwrap_err(),
-        MusicaRuntimeError::UnsupportedOpcode {
-            opcode: "char".into(),
-            ordinal: 0,
-        }
-    );
+    assert_eq!(vm.step(1).unwrap_err(), MusicaRuntimeError::Character);
+    assert!(vm.state().characters.is_empty());
 }
 
 #[test]

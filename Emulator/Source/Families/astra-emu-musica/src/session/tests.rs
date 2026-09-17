@@ -661,3 +661,6 @@ mod wscroll2;
 
 #[path = "tests/particles.rs"]
 mod particles;
+
+#[path = "tests/character.rs"]
+mod character;
