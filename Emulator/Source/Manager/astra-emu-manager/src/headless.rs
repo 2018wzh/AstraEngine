@@ -68,6 +68,14 @@ pub(crate) fn run(path: &Path) -> Result<(), String> {
     observability.log_dir = Some(config.output.with_extension("diagnostics"));
     let _observability = astra_observability::init_host(observability)
         .map_err(|_| "ASTRA_EMU_HEADLESS_LOG_INIT")?;
+    let result = run_configuration(config);
+    if let Err(cause) = &result {
+        tracing::error!(event = "astra.emu.headless.failed", error = %cause);
+    }
+    result
+}
+
+fn run_configuration(config: Configuration) -> Result<(), String> {
     if !(1..=36_000).contains(&config.frames) {
         return Err("ASTRA_EMU_HEADLESS_FRAME_LIMIT".into());
     }
@@ -161,11 +169,6 @@ pub(crate) fn run(path: &Path) -> Result<(), String> {
         tracing::info!(event = "astra.emu.headless.closed", succeeded = true);
         Ok(())
     } else {
-        tracing::error!(
-            event = "astra.emu.headless.closed",
-            succeeded = false,
-            error_count = errors.len(),
-        );
         Err(errors.join("; "))
     }
 }
