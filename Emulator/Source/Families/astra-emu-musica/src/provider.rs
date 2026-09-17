@@ -218,6 +218,8 @@ impl MusicaProvider {
         let archive = Arc::new(mount_musica(root, Path::new(&profile)).map_err(core_error)?);
         let uri = format!("musica:/scr/{entry}");
         let bytes = read_asset(&archive, &uri, 16 * 1024 * 1024)?;
+        let primary_encoding = encoding;
+        let encoding = ScriptEncoding::detect(&bytes, primary_encoding);
         let script = parse_sc_with_encoding(&bytes, &ScOpcodeCatalog::observed_musica(), encoding)
             .map_err(|_| error("ASTRA_EMU_MUSICA_SCRIPT", "entry script cannot be parsed"))?;
         let mut vm = MusicaVm::new(uri, Hash256::from_sha256(&bytes), script, 0)
@@ -294,6 +296,7 @@ impl MusicaProvider {
             lease,
             focused,
             progress_in_background,
+            primary_encoding,
         );
         tracing::info!(event = "astra.emu.musica.session.open");
         Ok((response, session))

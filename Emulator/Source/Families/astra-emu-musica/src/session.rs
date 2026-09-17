@@ -46,6 +46,7 @@ pub(crate) struct MusicaSession {
     suspended: bool,
     focused: bool,
     progress_in_background: bool,
+    primary_encoding: crate::ScriptEncoding,
 }
 impl MusicaSession {
     #[allow(clippy::too_many_arguments)]
@@ -62,6 +63,7 @@ impl MusicaSession {
         lease: SessionLease,
         focused: bool,
         progress_in_background: bool,
+        primary_encoding: crate::ScriptEncoding,
     ) -> Self {
         Self {
             id,
@@ -89,6 +91,7 @@ impl MusicaSession {
             suspended: false,
             focused,
             progress_in_background,
+            primary_encoding,
         }
     }
 
@@ -251,15 +254,16 @@ impl MusicaSession {
                     })?;
                 let uri = format!("musica:/scr/{file}");
                 let bytes = read_asset(&self.archive, &uri, 16 * 1024 * 1024)?;
-                let script = parse_sc_with_encoding(
-                    &bytes,
-                    &ScOpcodeCatalog::observed_musica(),
-                    self.vm.state().script_encoding,
-                )
-                .map_err(|_| error("ASTRA_EMU_MUSICA_SCRIPT", "chained script cannot be parsed"))?;
+                let encoding = crate::ScriptEncoding::detect(&bytes, self.primary_encoding);
+                let script =
+                    parse_sc_with_encoding(&bytes, &ScOpcodeCatalog::observed_musica(), encoding)
+                        .map_err(|_| {
+                        error("ASTRA_EMU_MUSICA_SCRIPT", "chained script cannot be parsed")
+                    })?;
                 self.vm
                     .replace_script(uri, Hash256::from_sha256(&bytes), script, label)
                     .map_err(vm_error)?;
+                self.scene.set_text_encoding(encoding);
                 Ok(false)
             }
             Some(MusicaVmEvent::Stage(_)) => Ok(true),

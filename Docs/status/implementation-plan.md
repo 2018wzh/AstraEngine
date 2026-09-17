@@ -393,3 +393,7 @@ Classic route.coverage.017 完成同一 build/package 的 GPU Headless 输入流
 Musica 已接通来源的 CP932／GBK 脚本与语言条件行机制：Manager 显式选择编码，解析、操作数、正文、选择、脚本切换、反汇编及保存恢复共用严格解码；GBK 采用已有 Noto Sans SC 和共享 GPU 文字。IR v3／原生状态 v21 固定编码身份，损坏字节、非法条件前缀及编码不匹配明确失败。149 项核心/Family/GPU 测试及 12 项 CLI 测试通过；补充非法条件行后 12 项 parser 测试通过，受影响 Clippy 通过。来源的混合编码探测、完整原生配置页和商业长流程仍开放。
 
 Classic route.coverage.018 完成同一 build/package 的 GPU Headless 输入流程，46,703 条输入、38 次选择到达 tsui.ending，无诊断。终点 PNG 已查看，仍为黑场；完整视听与真实 Player 验收保持开放。FVP AUTO 曾停留在同一句对白，点击对话区域后继续进入下一场景；未据此确认停留原因，结局与可听音频验收仍开放。
+
+Musica 来源的逐文件混合编码探测已接入启动、chain 与读档，保留启动首选与实际文件编码的区别；日文/GBK 切换复用同一文字 provider 与 GPU 字形资源。5 项编码相关测试、7 项文字测试、2 项 backlog 回归、Clippy、fmt 与文档检查通过，包含混合脚本、平局规则、损坏字节、跨编码读档及冷启动恢复。脚本 include 和完整原生配置页继续移植。
+
+Classic route.coverage.019 完成同一 build/package 的 GPU Headless 输入流程，46,701 条输入、38 次选择到达 tsui.ending，无诊断。终点 PNG 已查看，仍为黑场；完整视听与真实 Player 验收保持开放。

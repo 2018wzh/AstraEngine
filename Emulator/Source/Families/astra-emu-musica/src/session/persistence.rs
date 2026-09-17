@@ -34,7 +34,7 @@ impl MusicaSession {
                 "saved script has changed",
             ));
         }
-        if state.script_encoding != self.vm.state().script_encoding {
+        if state.script_encoding != crate::ScriptEncoding::detect(&bytes, self.primary_encoding) {
             return Err(error(
                 "ASTRA_EMU_MUSICA_SAVE_ENCODING",
                 "save uses a different script encoding",

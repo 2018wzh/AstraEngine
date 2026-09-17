@@ -28,45 +28,47 @@ struct Region {
 
 impl MusicaTextRenderer {
     pub fn new(encoding: crate::ScriptEncoding) -> Result<Self, String> {
-        let (font_family, font_asset_id, language, bytes) = match encoding {
-            crate::ScriptEncoding::ShiftJis => (
+        let fonts = [
+            (
                 FONT_FAMILY,
                 FONT_ASSET_ID,
-                "ja-JP",
                 include_bytes!(
                     "../../../../../Examples/NativeVN/Assets/Fonts/NotoSansJP-Variable.ttf"
                 )
                 .as_slice(),
             ),
-            crate::ScriptEncoding::Gbk => (
+            (
                 "Noto Sans SC",
                 "asset:/font/emu/noto-sans-sc",
-                "zh-Hans",
                 include_bytes!(
                     "../../../../../Examples/NativeVN/Assets/Fonts/NotoSansSC-Variable.ttf"
                 )
                 .as_slice(),
             ),
-        };
-        let bytes = bytes.to_vec();
+        ]
+        .into_iter()
+        .map(|(family, asset_id, bytes)| {
+            Ok(PackagedFont {
+                asset_id: asset_id.into(),
+                family: family.into(),
+                face_index: 0,
+                hash: Hash256::from_sha256(bytes),
+                license_id: "OFL-1.1".into(),
+                subset: None,
+                coverage: astra_text::font_unicode_coverage(bytes, 0).map_err(text_error)?,
+                targets: vec!["astra-emu-musica".into()],
+                profiles: vec!["musica.reference".into()],
+                bytes: bytes.to_vec(),
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
         let provider = CosmicTextLayoutProvider::new(
             FontBindingContext {
                 target: "astra-emu-musica".into(),
                 profile: "musica.reference".into(),
-                default_locale: language.into(),
+                default_locale: "ja-JP".into(),
             },
-            vec![PackagedFont {
-                asset_id: font_asset_id.into(),
-                family: font_family.into(),
-                face_index: 0,
-                hash: Hash256::from_sha256(&bytes),
-                license_id: "OFL-1.1".into(),
-                subset: None,
-                coverage: astra_text::font_unicode_coverage(&bytes, 0).map_err(text_error)?,
-                targets: vec!["astra-emu-musica".into()],
-                profiles: vec!["musica.reference".into()],
-                bytes,
-            }],
+            fonts,
             TextLayoutConfig::production_defaults(),
         )
         .map_err(|_| "ASTRA_EMU_MUSICA_TEXT_PROVIDER_CREATE".to_owned())?;
@@ -77,14 +79,20 @@ impl MusicaTextRenderer {
         })
     }
 
+    pub(crate) fn set_encoding(&mut self, encoding: crate::ScriptEncoding) {
+        self.encoding = encoding;
+    }
+
     fn frame(&mut self, regions: &mut [TextSceneLayout]) -> Result<Vec<SceneCommand>, String> {
-        if self.encoding == crate::ScriptEncoding::Gbk {
-            for region in regions.iter_mut() {
-                region.request.font_families = vec!["Noto Sans SC".into()];
-                for run in &mut region.request.runs {
-                    run.language = "zh-Hans".into();
-                    run.script = Some("Hani".into());
-                }
+        let (families, language, script) = match self.encoding {
+            crate::ScriptEncoding::ShiftJis => ([FONT_FAMILY, "Noto Sans SC"], "ja-JP", "Jpan"),
+            crate::ScriptEncoding::Gbk => (["Noto Sans SC", FONT_FAMILY], "zh-Hans", "Hani"),
+        };
+        for region in regions.iter_mut() {
+            region.request.font_families = families.into_iter().map(str::to_owned).collect();
+            for run in &mut region.request.runs {
+                run.language = language.into();
+                run.script = Some(script.into());
             }
         }
         self.scene.frame(regions).map_err(text_error)

@@ -103,6 +103,9 @@ impl Scene {
             pixels: vec![0; width as usize * height as usize * 4].into(),
         })
     }
+    pub fn set_text_encoding(&mut self, encoding: crate::ScriptEncoding) {
+        self.text.set_encoding(encoding);
+    }
     pub fn set_text_shadow(&mut self, enabled: bool) {
         self.text.shadow = enabled;
     }
