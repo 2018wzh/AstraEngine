@@ -100,6 +100,7 @@ impl MusicaSession {
         vm.set_voice_preferences(self.vm.voice_preferences().clone());
         vm.restore_native_save(&saved.vm, 1)
             .map_err(|_| error("ASTRA_EMU_MUSICA_SAVE_STATE", "saved VM state is invalid"))?;
+        vm.set_launch_mode(self.vm.state().launch_mode);
         vm.merge_verified_gallery_unlocks(&self.persisted_unlocks)
             .map_err(vm_error)?;
         vm.set_auto_delay_units(self.vm.auto_delay_units())
@@ -147,6 +148,8 @@ impl MusicaSession {
             .transpose()?;
         vm.set_control_pressed(self.control_keys != 0);
         self.voice_duration = None;
+        self.load_from_title = false;
+        self.title_focus = None;
         self.gameplay_frame = None;
         self.save_cards.clear();
         self.vm = vm;

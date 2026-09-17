@@ -16,6 +16,7 @@ pub(crate) mod save_pages;
 mod stage;
 mod stand;
 mod texture;
+mod title;
 mod wscroll2;
 
 #[cfg(test)]

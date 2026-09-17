@@ -4,7 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-pub const MUSICA_RUNTIME_STATE_SCHEMA: &str = "astra.emu.musica.runtime_state.v22";
+pub const MUSICA_RUNTIME_STATE_SCHEMA: &str = "astra.emu.musica.runtime_state.v23";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MusicaRuntimeState {
@@ -13,6 +13,7 @@ pub struct MusicaRuntimeState {
     pub script_hash: Hash256,
     pub script_encoding: crate::ScriptEncoding,
     pub pc_line: u32,
+    pub launch_mode: MusicaLaunchMode,
     pub variables: BTreeMap<String, i64>,
     pub global_variables: BTreeMap<String, i64>,
     pub wait: Option<MusicaWaitState>,
@@ -561,4 +562,12 @@ pub enum MusicaPlayMode {
     Normal,
     Auto,
     Skip,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum MusicaLaunchMode {
+    #[default]
+    Direct,
+    Title,
 }

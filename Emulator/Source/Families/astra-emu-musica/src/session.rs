@@ -1,8 +1,11 @@
 mod backlog;
+mod lifecycle;
+use lifecycle::vm_error;
 mod message;
 mod movie;
 mod persistence;
 mod save_pages;
+mod title;
 use crate::{
     audio::Audio,
     provider::SessionLease,
@@ -51,6 +54,9 @@ pub(crate) struct MusicaSession {
     save_cards: Vec<(u32, crate::storage::SaveCard)>,
     quick_cursor: u32,
     persisted_unlocks: Vec<Hash256>,
+    entry_uri: String,
+    title_focus: Option<u32>,
+    load_from_title: bool,
     last_quick_save_pc_line: Option<u32>,
 }
 impl MusicaSession {
@@ -72,8 +78,12 @@ impl MusicaSession {
         quick_cursor: u32,
     ) -> Self {
         let persisted_unlocks = vm.state().gallery_unlocks.clone();
+        let entry_uri = vm.state().script_uri.clone();
         Self {
             persisted_unlocks,
+            entry_uri,
+            title_focus: None,
+            load_from_title: false,
             id,
             info,
             archive,
@@ -291,8 +301,16 @@ impl MusicaSession {
                 | MusicaVmEvent::Panel { .. },
             ) => Ok(true),
             Some(MusicaVmEvent::Terminal) => {
-                self.finished = true;
-                Ok(false)
+                if self.vm.state().system_ui.page == crate::MusicaSystemPage::Title {
+                    self.audio.restore(Vec::new())?;
+                    self.message = None;
+                    self.title_focus = None;
+                    self.clear_input();
+                    Ok(true)
+                } else {
+                    self.finished = true;
+                    Ok(false)
+                }
             }
             None => Ok(false),
         }
@@ -319,6 +337,10 @@ impl MusicaSession {
         let mut load = false;
         let mut choice_dirty = false;
         for event in events {
+            if self.title_event(event)? {
+                choice_dirty = true;
+                continue;
+            }
             if self.save_page_event(event)? {
                 choice_dirty = true;
                 continue;
@@ -528,12 +550,18 @@ impl MusicaSession {
                 .map_err(vm_error)?
                 .is_some();
             self.phase += u128::from(elapsed_ns) * 60;
-            while self.phase >= 1_000_000_000 && !self.finished {
+            while self.phase >= 1_000_000_000
+                && !self.finished
+                && self.vm.state().system_ui.page == crate::MusicaSystemPage::None
+            {
                 self.phase -= 1_000_000_000;
                 dirty |= self.tick()?;
             }
         }
-        if dirty && self.is_save_page() {
+        if dirty && self.vm.state().system_ui.page == crate::MusicaSystemPage::Title {
+            self.scene
+                .render_title(self.vm.title_variant(), self.title_focus)?;
+        } else if dirty && self.is_save_page() {
             self.scene.render_save_page(
                 self.vm.state().system_ui.page.clone(),
                 self.vm.state().system_ui.focus_index,
@@ -564,71 +592,6 @@ impl MusicaSession {
         })
     }
 }
-impl FamilySession for MusicaSession {
-    fn advance(
-        &mut self,
-        elapsed_ns: u64,
-        events: &[FamilyEvent],
-    ) -> FamilyResult<AdvanceResponse> {
-        if self.poisoned {
-            return Err(error(
-                "ASTRA_EMU_MUSICA_POISONED",
-                "failed session must be closed",
-            ));
-        }
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            self.advance_inner(elapsed_ns, events)
-        }))
-        .unwrap_or_else(|_| {
-            Err(error(
-                "ASTRA_EMU_MUSICA_SESSION_PANIC",
-                "session panicked and must be closed",
-            ))
-        });
-        if result.is_err() {
-            self.poisoned = true;
-        }
-        result
-    }
-    fn visit_frame(&self, visitor: &mut dyn FrameVisitor) -> FamilyResult<()> {
-        visitor.accept(FrameView::from_slice(&self.scene.pixels, self.info)?)
-    }
-    fn close(mut self: Box<Self>) -> FamilyResult<()> {
-        let text = self.cancel_text();
-        let movie = self
-            .movie
-            .take()
-            .map(|movie| movie.close(&self.audio))
-            .transpose();
-        let audio = self.audio.shutdown();
-        tracing::info!(event = "astra.emu.musica.session.close");
-        text?;
-        movie?;
-        audio
-    }
-}
-impl Drop for MusicaSession {
-    fn drop(&mut self) {
-        let _ = self.cancel_text();
-        if let Some(movie) = self.movie.take() {
-            let _ = movie.close(&self.audio);
-        }
-        let _ = self.audio.shutdown();
-    }
-}
-fn vm_error(cause: crate::MusicaRuntimeError) -> FamilyError {
-    if let crate::MusicaRuntimeError::UnsupportedOpcode { ordinal, .. } = &cause {
-        return error(
-            cause.diagnostic_code(),
-            &format!("script command at ordinal {ordinal} is not implemented"),
-        );
-    }
-    error(
-        cause.diagnostic_code(),
-        "script execution failed at an unsupported or invalid operation",
-    )
-}
-
 #[cfg(test)]
 #[path = "session/tests.rs"]
 mod tests;

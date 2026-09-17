@@ -12,6 +12,7 @@ mod scroll;
 pub(crate) mod scroll_xf;
 pub(crate) mod shake;
 mod stage;
+pub(crate) mod title;
 mod wscroll2;
 use effects::*;
 pub use errors::MusicaRuntimeError;
@@ -119,6 +120,7 @@ impl MusicaVm {
             script_hash,
             script_encoding: script.encoding,
             pc_line: 0,
+            launch_mode: MusicaLaunchMode::Direct,
             variables: BTreeMap::new(),
             global_variables: BTreeMap::new(),
             wait: None,
@@ -524,7 +526,11 @@ fn execute_control(
             }))
         }
         "end" => {
-            state.terminal = true;
+            if state.launch_mode == MusicaLaunchMode::Title {
+                title::return_to_title(state);
+            } else {
+                state.terminal = true;
+            }
             Ok(Some(MusicaVmEvent::Terminal))
         }
         _ => Err(MusicaRuntimeError::UnsupportedOpcode {

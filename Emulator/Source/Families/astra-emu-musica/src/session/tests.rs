@@ -723,3 +723,6 @@ mod includes;
 
 #[path = "tests/save_pages.rs"]
 mod save_pages;
+
+#[path = "tests/title.rs"]
+mod title;

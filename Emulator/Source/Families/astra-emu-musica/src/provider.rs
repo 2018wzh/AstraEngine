@@ -56,6 +56,15 @@ pub fn musica_descriptor() -> FamilyDescriptor {
         field("entry_script", "Entry script in scr archive", "test.sc"),
     ];
     configuration.push(ConfigField {
+        id: "launch_mode".into(),
+        label: "Launch mode".into(),
+        group: "Playback".into(),
+        kind: ConfigKind::Enum {
+            choices: vec!["direct".into(), "title".into()].into(),
+        },
+        default: ConfigValue::Enum("direct".into()),
+    });
+    configuration.push(ConfigField {
         id: "message_speed_auto_play".into(),
         label: "Auto message delay (10 ms units)".into(),
         group: "Playback".into(),
@@ -212,6 +221,15 @@ impl MusicaProvider {
                 ))
             }
         };
+        let title_launch = match config
+            .iter()
+            .find(|e| e.id == "launch_mode")
+            .map(|e| &e.value)
+        {
+            Some(ConfigValue::Enum(value)) if value == "title" => true,
+            Some(ConfigValue::Enum(value)) if value == "direct" => false,
+            _ => return Err(error("ASTRA_EMU_MUSICA_CONFIG", "invalid launch mode")),
+        };
         let focused = request.initial_window.focused;
         let lease = SessionLease::acquire()?;
         let root = Path::new(request.game_path.as_str());
@@ -257,7 +275,13 @@ impl MusicaProvider {
             })?;
         let mut scene = Scene::new(archive.clone(), 1280, 720, encoding)?;
         scene.set_text_shadow(text_shadow);
-        scene.render(vm.state(), None, None)?;
+        if title_launch {
+            vm.begin_title_launch()
+                .map_err(|_| error("ASTRA_EMU_MUSICA_TITLE", "title session cannot start"))?;
+            scene.render_title(vm.title_variant(), None)?;
+        } else {
+            scene.render(vm.state(), None, None)?;
+        }
         let replacement = request.host.text_replacement.into_option();
         if let Some(service) = &replacement {
             service.reset(TextResetReason::NewGame).into_result()?;

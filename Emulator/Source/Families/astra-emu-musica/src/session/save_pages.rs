@@ -8,7 +8,7 @@ impl MusicaSession {
             MusicaSystemPage::Save | MusicaSystemPage::Load
         )
     }
-    fn refresh_save_cards(&mut self) -> FamilyResult<()> {
+    pub(super) fn refresh_save_cards(&mut self) -> FamilyResult<()> {
         let base = self.vm.state().system_ui.focus_index / SAVE_PAGE_WIDTH * SAVE_PAGE_WIDTH;
         let mut cards = Vec::new();
         for slot in base..base + SAVE_PAGE_WIDTH {
@@ -20,7 +20,13 @@ impl MusicaSession {
         Ok(())
     }
     fn close_save_page(&mut self) -> FamilyResult<()> {
-        self.vm.close_gameplay_system_page().map_err(vm_error)?;
+        if self.load_from_title {
+            self.vm.close_title_load().map_err(vm_error)?;
+            self.load_from_title = false;
+            self.title_focus = None;
+        } else {
+            self.vm.close_gameplay_system_page().map_err(vm_error)?;
+        }
         self.gameplay_frame = None;
         self.save_cards.clear();
         self.input_pending = false;
