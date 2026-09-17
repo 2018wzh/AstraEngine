@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [features]
+video-ffmpeg = ["dep:astra-media", "astra-media/ffmpeg-vcpkg"]
 audio = ["dep:kira", "dep:symphonia"]
 default = ["text", "image", "archive", "cache"]
 archive = ["dep:astra-core", "dep:astra-byte-source", "dep:serde", "dep:serde_json", "dep:schemars"]
@@ -13,6 +14,8 @@ text = ["dep:astra-core", "dep:astra-text", "dep:astra-media-core"]
 image = ["dep:image", "dep:lru", "dep:astra-media-core"]
 
 [dependencies]
+tracing.workspace = true
+astra-media = { path = "../../../../Engine/Source/Runtime/astra-media", optional = true }
 kira = { workspace = true, optional = true }
 symphonia = { workspace = true, optional = true }
 thiserror.workspace = true
@@ -39,3 +42,7 @@ required-features = ["image"]
 [[test]]
 name = "profile"
 required-features = ["archive"]
+
+[[test]]
+name = "video_worker"
+required-features = ["video-ffmpeg"]

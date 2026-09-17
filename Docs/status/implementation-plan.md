@@ -355,3 +355,7 @@ Musica 自动播放接入现有 Family 输入、GPU 文字标记与消息等待�
 FVP Sandbox 的 AUTO 长流程已推进到新的角色 CG，当前正文可见，尚未到结局；仍使用显式测试音频模式，不能据此关闭可听音频验收。
 
 Musica 已读集合与 Skip 从来源接入，替换原先独立 auto/skip 布尔字段为互斥模式。消息完成时标记已读，按来源身份区分脚本版本与文本位置，v20 保存/校验集合。新增未读停止、重复消息跳读、脚本禁用、GPU Family F5/F9 及损坏状态拒绝回归；完整系统页与其他核心整合继续开放。
+
+SDK 新增可选 FFmpeg 增量解码 worker，复用 AstraMedia，完成线程归属、单请求/单结果队列、seek 代次及取消关闭。公共完整音视频流、目标 PCM 格式、seek、待处理结果丢弃和非法输入的 3 项专项测试通过。Musica Family 电影会话、GPU 呈现和 PCM 调度尚未接入，此项不关闭电影或真实游戏长流程验收。
+
+Classic route.coverage.011 完成同一 build/package 的 GPU Headless 输入流程，47,805 条输入、38 次选择到达 tsui.ending，DX12 独显且无诊断。终点 PNG 已查看，仍为黑场；完整视听与真实 Player 验收保持开放。

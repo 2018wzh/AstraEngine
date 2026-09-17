@@ -1,54 +1,21 @@
-# Musica Presentation And Media
+# Musica 呈现与媒体
 
-## 资源分区
+## 场景与文字
 
-| Role | Archive | Runtime 命令 |
-| --- | --- | --- |
-| 背景/立绘/事件图 | `st.paz` | `SetBackground`, `ShowSprite`, `MoveSprite` |
-| UI/system | `sys.paz` | message window、config、save/load UI |
-| SE | `se.paz` | `PlaySe` |
-| Voice | `voice.paz` | `PlayVoice` |
-| Movie | `mov.paz` 或 loose | `PlayMovie` |
+Musica Family 自持归档、VM、媒体和原生存档，通过共享 GPU Scene 绘制背景、前景、人物槽、演出、消息面板与文字。`bg` 存放场景资源，`st` 存放立绘，`sys` 存放系统图片；各层和原生参数见 [脚本执行](script-execution.md)。
 
-## Layer Model
+文字复用 AstraText 的真实字体布局与字形资源，场景使用 GPU EncodedSrgb 合成。SDK TextureCache 管理有界纹理驻留；PNG 和 ANI／SQZ 静态帧复用现有解码器，动画立绘仍待接入。不存在旧 LegacyTextPresentation、Host VFS 或 CPU 产品呈现路径。
 
-AstraEMU Musica core 用固定 layer：
+## 音频
 
-```text
-background
-event
-character slots
-effects
-message window
-system overlay
-```
+BGM、SE 和 voice 由 Family 的 Kira worker 混音，解码复用 SDK/Symphonia。PCM 经有界可取消 Host 队列输出；关闭先取消并等待 worker 结束。backlog 回放不推进剧情，角色语音和回放偏好由 Manager 配置，详见 [脚本执行](script-execution.md)。
 
-每个 layer command 记录资源名、slot、坐标、alpha、transition、duration 和原始 opcode offset。
+## 电影接入
 
-## Text
+来源实现复用 AstraMedia 的 FFmpeg 增量解码，不另写 AVI 容器或 codec。SDK 的可选 `video-ffmpeg` feature 提供 `VideoDecoderWorker`：在所属线程内创建、操作和释放解码器，异步返回初始化结果、逐包音视频或 seek 代次。一次只允许一个待完成请求，结果队列容量为一，解码预算沿用 `FfmpegStreamLimits`。
 
-消息正文不进入可序列化 presentation DTO。Family 通过一次性 lease 把正文交给 Host，并用 `LegacyTextPresentationV1` 传递脱敏布局：`ja-JP`、显式 Noto Sans JP、body/speaker region、字号、行高、行数和 RGBA。Host 复用 `CosmicTextLayoutProvider`、`TextRenderResourceOwner` 与 `astra-media-core` 的 CPU Renderer2D；glyph resource 和合成像素只在当前运行中存在。
+关闭会丢弃待处理结果、取消后续请求并等待 worker 释放原生资源；seek 返回新代次，后续包携带同一代次。失败明确返回，不能换 decoder 或退回首帧预览。默认 SDK feature 不要求 FFmpeg；显式选择该 feature 时需要匹配的原生依赖。
 
-当前参考 stage 固定为 1280×720，原程序默认正文字号已由反编译确认是 26 px，ruby 为 12 px。body/speaker 的区域坐标结合已确认 panel 几何与外部截图结构建立。真实 Headless 首条 message checkpoint 已人工检查：日文字形完整可读，没有缺字方框、横向裁剪或拉伸，正文位于 panel 有效区域。该结果只构成当前布局的 E2 视觉证据，不是原版像素 parity。缺少精确 stage、字体或 provider 时直接返回稳定 diagnostic，不读取系统字体，也不切换到私有文字 rasterizer。
+完整公共音视频样本解码、时间戳/序号、目标 PCM 格式、seek、待完成请求关闭和非法输入测试已通过。这里只完成解码 worker；Musica Family 的电影会话、GPU 逐帧呈现、PCM 调度、中途恢复和真实游戏验收仍待接入，不能把这些测试计作电影播放完成。
 
-## Audio
-
-BGM、SE、voice 分离。Voice replay 从 backlog 触发时不能推进脚本 VM；只提交 `AudioCommand::PlayVoiceReplay`。
-
-## Movie
-
-当前样本 `mov.paz` 非空并含 5 个 entry。VFS 只负责准确解密和读取；`PlayMovie` command、媒体解码、时间轴与缺失资源策略属于下一阶段 runtime/media 接入，不能由 archive 可读性推断完成。
-
-## `bg` / `bgm` 真实 inventory
-
-八包 full verify 后，`census-media` 对 `bg`、`bgm` 做了 payload-free 格式核验：
-
-| 格式 | Entry | Frame | 验证路径 |
-| --- | ---: | ---: | --- |
-| PNG | 2655 | 2655 | workspace `image` provider |
-| ANI | 1951 | 6723 | GARbro contract 对应的纯 Rust 有界 adapter，输出 `image::RgbaImage` |
-| SQZ1 | 9 | 224 | 有界 zlib + BGRA32 adapter，逐 frame 校验精确输出大小 |
-| Ogg | 49 | 49 streams | `OggS` signature；实际播放仍需 Astra Symphonia binding |
-| metadata database | 1 | 不适用 | 只计数，不按图像或音频猜测 |
-
-本轮共读取 4183190587 decoded bytes，验证的图像 frame 合计 2977549990 pixels，最大观测尺寸为 3840×3600。这个 census 证明 container 与像素转换可读，不证明 Renderer2D 合成、音频播放或视觉 parity。
+当前实施进度见 [实施状态](../../status/implementation-plan.md)。

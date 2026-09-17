@@ -26,3 +26,6 @@ pub use error::CoreError;
 pub use text::{TextScene, TextSceneLayout};
 #[cfg(feature = "image")]
 pub use texture::TextureCache;
+
+#[cfg(feature = "video-ffmpeg")]
+pub mod video;

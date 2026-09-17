@@ -76,3 +76,5 @@ Root workspace 管共享/Engine/VN/Player/工具；Editor 与 Emulator 使用独
 Musica 接续直接采用 `codex/minori-runtime-followup` 已验证的完整机制，按依赖批量移植剩余实现。验证重点是新 Family API、共享 SDK/GPU 和 session 生命周期的整合回归，不重复原引擎语义研究。旧 Host/provider 层仍按新架构替换。
 
 Musica 的历史回放和五组角色语音开关由 Family descriptor 声明，Manager 保存并在启动时传入。它们属于安装/游戏配置，不属于剧情存档；读档继续采用当前开关，关闭播放不删除历史语音关联，也不缩短脚本要求的语音时长等待。
+
+SDK 可选 `video-ffmpeg` 复用 AstraMedia 增量解码器，解码器只在 worker 所属线程创建和释放；客户端每次只提交一个异步请求，结果有界，seek 代次传递到每个媒体包，关闭丢弃旧结果并 join。该能力不要求 Engine/VN session，不是 Family 电影播放的替代验收。
