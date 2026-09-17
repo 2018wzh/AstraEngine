@@ -446,3 +446,6 @@ Family API v5 增加类型化全屏窗口请求，Musica 设置应用与冷启�
 
 
 Classic route.coverage.031 完成 DX12 独显 Headless 抽样运行：47,870 条输入、38 次选择到达 tsui.ending，27 张沿途样本另加终局。第 009 张对白截图已查看，正文可见。FVP 已在新剧情场景保存到此前为空的槽位 012，并确认原生页面显示新缩略图；未覆盖已有槽位。新版 Manager 与 Musica 已构建并部署至隔离 Sandbox 目录，实际全屏切换继续验证。
+
+
+Classic route.coverage.032 完成 DX12 独显 Headless 抽样运行：47,846 条输入、38 次选择到达 tsui.ending，27 张沿途样本另加终局。第 009 张对白截图已查看，正文、人物与背景可见；第 033 路线继续运行。Sandbox 新 Manager 已从界面安装 Musica、扫描独立游戏副本并保存标题启动配置，商业归档加载日志正常进入 Manager，视听与窗口验收尚在进行。
