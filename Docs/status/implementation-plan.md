@@ -327,3 +327,7 @@ Musica 的二维 `.scroll` 已从来源实现接入，与轴向滚动共用 ends
 Musica scrollxf 已从来源实现接入：按缓动变化裁剪窗口与偏移，使用共享 GPU clip/transform，保留场景/面板与文字分层。专项测试覆盖缓动、强制结束、中途恢复、跨脚本继续演出、stage 清除、空窗口与非法状态拒绝；v13 保存当前裁剪轨迹。WScroll2、Firefly、次级效果、人物动画和系统页仍待整合。
 
 Musica 接入来源的无参数 `.effect end`，与主效果清除共用生命周期；额外参数明确失败，不清除正在运行的效果。专项测试覆盖清除后的时钟、存档与非法停止参数。WScroll2 的双层全景绘制和 sync 资源读取仍待整合。
+
+Musica WScroll2 已从 00610272d 接入新 Family 时钟、v14 原生状态和共享 GPU 场景。专项测试通过，覆盖双层负向环绕像素、恢复、停止、非法替换及 sync 格式/数量边界。来源的 sync/period 保留为读取校验与状态，不宣称尚未实现的同步运动；真实游戏长流程仍开放。
+
+Classic route.coverage.008 完成 GPU Headless 输入流程，47,829 条输入、38 次选择到达 tsui.ending，DX12 独显且无运行诊断。终点 PNG 已查看，为黑场；完整视听与真实 Player 验收仍开放。

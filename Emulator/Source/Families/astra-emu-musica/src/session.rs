@@ -346,6 +346,7 @@ impl MusicaSession {
             Some(
                 MusicaVmEvent::Effect(_)
                 | MusicaVmEvent::EffectCleared
+                | MusicaVmEvent::WScroll2(_)
                 | MusicaVmEvent::ScrollXf(_)
                 | MusicaVmEvent::LinearScroll(_)
                 | MusicaVmEvent::AxisScroll(_)
@@ -525,6 +526,11 @@ impl MusicaSession {
             dirty |= self
                 .vm
                 .advance_scroll_xf_clock(elapsed_ns)
+                .map_err(vm_error)?
+                .is_some();
+            dirty |= self
+                .vm
+                .advance_wscroll2_clock(elapsed_ns)
                 .map_err(vm_error)?
                 .is_some();
             self.phase += u128::from(elapsed_ns) * 60;

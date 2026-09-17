@@ -40,7 +40,8 @@ pub(super) fn execute_scroll_xf(
     else {
         return Err(MusicaRuntimeError::ScrollXf);
     };
-    if state.stage.is_none()
+    if state.wscroll2.is_some()
+        || state.stage.is_none()
         || state.linear_scroll.is_some()
         || state
             .axis_scroll

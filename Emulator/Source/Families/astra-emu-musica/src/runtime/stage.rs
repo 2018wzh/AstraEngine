@@ -114,7 +114,7 @@ pub(super) fn validate_stage_state(
     Ok(())
 }
 
-fn validate_uri(uri: &str, prefix: &str) -> Result<(), MusicaRuntimeError> {
+pub(super) fn validate_uri(uri: &str, prefix: &str) -> Result<(), MusicaRuntimeError> {
     let name = uri.strip_prefix(prefix).ok_or(MusicaRuntimeError::State)?;
     if name == "*" {
         return Err(MusicaRuntimeError::State);

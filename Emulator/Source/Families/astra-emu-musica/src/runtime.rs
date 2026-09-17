@@ -6,6 +6,7 @@ mod scroll;
 pub(crate) mod scroll_xf;
 pub(crate) mod shake;
 mod stage;
+mod wscroll2;
 use effects::*;
 pub use errors::MusicaRuntimeError;
 pub use model::*;
@@ -107,6 +108,7 @@ impl MusicaVm {
             axis_scroll: None,
             linear_scroll: None,
             scroll_xf: None,
+            wscroll2: None,
             panel: None,
             audio: BTreeMap::new(),
             movie: None,
@@ -177,6 +179,7 @@ impl MusicaVm {
         self.state.screen_shake = None;
         self.state.axis_scroll = None;
         self.state.linear_scroll = None;
+        self.state.wscroll2 = None;
         self.state.terminal = false;
         Ok(())
     }

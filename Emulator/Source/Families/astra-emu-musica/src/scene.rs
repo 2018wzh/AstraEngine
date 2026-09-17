@@ -12,6 +12,7 @@ const MAX_IMAGE_BYTES: usize = 128 * 1024 * 1024;
 
 mod stage;
 mod stand;
+mod wscroll2;
 
 #[cfg(test)]
 mod tests;
@@ -47,6 +48,7 @@ pub(crate) struct Scene {
     sequence: u64,
     text: MusicaTextRenderer,
     textures: TextureCache,
+    wscroll2_sync: lru::LruCache<String, Vec<i32>>,
     stand_offsets: lru::LruCache<String, stand::Offsets>,
     width: u32,
     height: u32,
@@ -88,6 +90,7 @@ impl Scene {
                 })?,
             width,
             height,
+            wscroll2_sync: lru::LruCache::new(NonZeroUsize::new(16).unwrap()),
             stand_offsets: lru::LruCache::new(NonZeroUsize::new(32).unwrap()),
             pixels: vec![0; width as usize * height as usize * 4].into(),
         })
@@ -183,7 +186,9 @@ impl Scene {
                 ),
             });
         }
-        if let Some(stage) = &state.stage {
+        if state.wscroll2.is_some() {
+            self.wscroll2_stage(&mut commands, state)?;
+        } else if let Some(stage) = &state.stage {
             self.stage(&mut commands, stage)?;
         }
         if let Some(effect) = &state.effect {

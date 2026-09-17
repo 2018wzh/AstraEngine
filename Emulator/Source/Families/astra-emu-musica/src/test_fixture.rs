@@ -119,3 +119,7 @@ pub(crate) fn wave() -> Vec<u8> {
 pub(crate) fn stand(root: &Path, png: &[u8]) {
     std::fs::write(root.join("st.paz"), archive("st", "Stand.png", png)).unwrap();
 }
+
+pub(crate) fn asset(root: &Path, role: &str, name: &str, bytes: &[u8]) {
+    std::fs::write(root.join(format!("{role}.paz")), archive(role, name, bytes)).unwrap();
+}

@@ -48,7 +48,8 @@ pub(super) fn execute_axis_scroll(
     if tokens.len() > 2 {
         return Err(MusicaRuntimeError::AxisScroll);
     }
-    if state.scroll_xf.is_some()
+    if state.wscroll2.is_some()
+        || state.scroll_xf.is_some()
         || state.linear_scroll.is_some()
         || state
             .axis_scroll
@@ -232,6 +233,17 @@ pub(super) fn validate_state(state: &MusicaRuntimeState) -> Result<(), MusicaRun
         )?;
     } else if matches!(state.wait, Some(MusicaWaitState::LinearScroll { .. })) {
         return Err(MusicaRuntimeError::LinearScroll);
+    }
+    if let Some(scroll) = &state.wscroll2 {
+        if state.stage.is_none()
+            || state.axis_scroll.is_some()
+            || state.linear_scroll.is_some()
+            || state.scroll_xf.is_some()
+            || state.effect.is_some()
+        {
+            return Err(MusicaRuntimeError::WScroll2);
+        }
+        super::wscroll2::validate_wscroll2_state(scroll)?;
     }
     if let Some(scroll) = &state.scroll_xf {
         if state.stage.is_none() || state.axis_scroll.is_some() || state.linear_scroll.is_some() {

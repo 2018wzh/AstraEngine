@@ -42,7 +42,8 @@ pub(in crate::runtime) fn execute_linear_scroll(
     let [target_x, target_y, speed_tenths] = tokens.as_slice() else {
         return Err(MusicaRuntimeError::LinearScroll);
     };
-    if state.scroll_xf.is_some()
+    if state.wscroll2.is_some()
+        || state.scroll_xf.is_some()
         || state.axis_scroll.is_some()
         || state
             .linear_scroll

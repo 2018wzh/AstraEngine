@@ -4,7 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-pub const MUSICA_RUNTIME_STATE_SCHEMA: &str = "astra.emu.musica.runtime_state.v13";
+pub const MUSICA_RUNTIME_STATE_SCHEMA: &str = "astra.emu.musica.runtime_state.v14";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MusicaRuntimeState {
@@ -20,6 +20,7 @@ pub struct MusicaRuntimeState {
     pub stage: Option<MusicaStageCommand>,
     pub transition: MusicaTransitionState,
     pub effect: Option<MusicaEffectState>,
+    pub wscroll2: Option<MusicaWScroll2State>,
     pub scroll_xf: Option<MusicaScrollXfState>,
     pub linear_scroll: Option<MusicaLinearScrollState>,
     pub axis_scroll: Option<MusicaAxisScrollState>,
@@ -238,6 +239,7 @@ pub enum MusicaVmEvent {
     Effect(MusicaEffectFrame),
     EffectCleared,
     ScrollXf(MusicaScrollXfFrame),
+    WScroll2(MusicaWScroll2Frame),
     LinearScroll(MusicaLinearScrollFrame),
     AxisScroll(MusicaAxisScrollFrame),
     ScreenShake(MusicaScreenShakeFrame),
@@ -359,5 +361,22 @@ pub struct MusicaScrollXfState {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MusicaScrollXfFrame {
+    pub sequence: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MusicaWScroll2State {
+    pub sync_resource_uri: String,
+    pub period_ticks: u32,
+    pub speed_tenths: i32,
+    pub elapsed_ns: u64,
+    pub elapsed_ticks: u64,
+    pub foreground_offset: i64,
+    pub background_offset: i64,
+    pub background_remainder: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MusicaWScroll2Frame {
     pub sequence: u64,
 }
