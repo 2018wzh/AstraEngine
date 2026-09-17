@@ -1664,6 +1664,7 @@ fn validate_scene_frame(frame: &SceneFrame, max_bytes: usize) -> Result<(), Plat
     }
     let mut resource_bytes = 0usize;
     let mut clip_depth = 0usize;
+    let mut pixel_mask_depth = 0usize;
     let mut transform_depth = 0usize;
     let mut opacity_depth = 0usize;
     for command in &frame.commands {
@@ -1896,6 +1897,8 @@ fn validate_scene_frame(frame: &SceneFrame, max_bytes: usize) -> Result<(), Plat
                     ));
                 }
             }
+            SceneCommand::PushPixelMask { .. } => pixel_mask_depth += 1,
+            SceneCommand::PopPixelMask if pixel_mask_depth > 0 => pixel_mask_depth -= 1,
             SceneCommand::PushClip { rect } => {
                 if rect.width == 0 || rect.height == 0 {
                     return Err(PlatformError::new(
@@ -2007,7 +2010,12 @@ fn validate_scene_frame(frame: &SceneFrame, max_bytes: usize) -> Result<(), Plat
             }
         }
     }
-    if resource_bytes > max_bytes || clip_depth != 0 || transform_depth != 0 || opacity_depth != 0 {
+    if resource_bytes > max_bytes
+        || pixel_mask_depth != 0
+        || clip_depth != 0
+        || transform_depth != 0
+        || opacity_depth != 0
+    {
         return Err(PlatformError::new(
             PlatformErrorCode::InvalidState,
             "surface.present_scene",
@@ -2104,6 +2112,27 @@ fn https_origin(value: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn platform_accepts_balanced_pixel_masks_and_rejects_underflow() {
+        use astra_media_core::SceneCommand;
+        let mut frame = super::SceneFrame {
+            sequence: 1,
+            width: 8,
+            height: 8,
+            clear_rgba: [0, 0, 0, 255],
+            commands: vec![
+                SceneCommand::PushPixelMask { bits: u64::MAX },
+                SceneCommand::PopPixelMask,
+            ],
+            semantics: None,
+        };
+        super::validate_scene_frame(&frame, 1024 * 1024).unwrap();
+        frame.commands.pop();
+        assert!(super::validate_scene_frame(&frame, 1024 * 1024).is_err());
+        frame.commands = vec![SceneCommand::PopPixelMask];
+        assert!(super::validate_scene_frame(&frame, 1024 * 1024).is_err());
+    }
+
     use super::AudioWakeRegistration;
     use std::{sync::Arc, thread, time::Duration};
 
