@@ -165,8 +165,8 @@ impl MusicaVm {
             .voice
             .clone();
         let voice = voice.filter(|voice| {
-            self.voice_preferences.backlog_voice_playback
-                && self.voice_preferences.enabled(&voice.resource_uri)
+            self.config.backlog_voice_playback
+                && self.config.voice_preferences().enabled(&voice.resource_uri)
         });
         let mut commands = Vec::new();
         if self

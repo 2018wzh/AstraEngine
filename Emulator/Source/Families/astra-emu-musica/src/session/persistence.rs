@@ -97,13 +97,11 @@ impl MusicaSession {
             state.session_seed,
         )
         .map_err(|_| error("ASTRA_EMU_MUSICA_SAVE_STATE", "saved script is invalid"))?;
-        vm.set_voice_preferences(self.vm.voice_preferences().clone());
+        vm.set_config(self.vm.config().clone()).map_err(vm_error)?;
         vm.restore_native_save(&saved.vm, 1)
             .map_err(|_| error("ASTRA_EMU_MUSICA_SAVE_STATE", "saved VM state is invalid"))?;
         vm.set_launch_mode(self.vm.state().launch_mode);
         vm.merge_verified_gallery_unlocks(&self.persisted_unlocks)
-            .map_err(vm_error)?;
-        vm.set_auto_delay_units(self.vm.auto_delay_units())
             .map_err(vm_error)?;
         let mut scene = Scene::new(
             self.archive.clone(),

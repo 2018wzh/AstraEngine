@@ -161,3 +161,25 @@ fn native_gpu_title_unintegrated_pages_and_missing_art_fail_explicitly() {
         .unwrap();
     opened.session.close().unwrap();
 }
+
+#[test]
+fn native_gpu_config_preferences_survive_session_load_without_restoring_slot_settings() {
+    let _lock = PROVIDER_SESSION.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    fixture::game(root.path(), b".message 1   First\r\n.end\r\n");
+    let mut provider = MusicaProvider::default();
+    let (_, mut session) = provider
+        .open_session(request(root.path(), Sink::default()))
+        .unwrap();
+    session.advance(16_666_667, &[]).unwrap();
+    session.save(20).unwrap();
+    let mut config = session.vm.config().clone();
+    config.message_speed_auto_play = 10;
+    config.se_volume = 35;
+    config.character_voice_enabled[2] = false;
+    config.text_shadow = false;
+    session.vm.set_config(config.clone()).unwrap();
+    session.load(20).unwrap();
+    assert_eq!(session.vm.config(), &config);
+    Box::new(session).close().unwrap();
+}

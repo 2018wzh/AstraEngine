@@ -1,3 +1,5 @@
+mod configuration;
+pub use configuration::*;
 mod audio;
 mod movie;
 mod provider;

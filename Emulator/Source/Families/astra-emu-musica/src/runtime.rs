@@ -1,4 +1,5 @@
 mod backlog;
+mod config;
 mod control;
 mod effects;
 mod errors;
@@ -93,8 +94,8 @@ pub struct MusicaVm {
     labels: BTreeMap<String, u32>,
     state: MusicaRuntimeState,
     control_pressed: bool,
-    auto_delay_units: u8,
-    voice_preferences: crate::voice_preferences::VoicePreferences,
+    config: crate::MusicaConfigState,
+    config_edit: Option<config::ConfigEdit>,
 }
 
 impl MusicaVm {
@@ -102,10 +103,11 @@ impl MusicaVm {
         &mut self,
         value: crate::voice_preferences::VoicePreferences,
     ) {
-        self.voice_preferences = value;
+        self.config.backlog_voice_playback = value.backlog_voice_playback;
+        self.config.character_voice_enabled = value.character_voice_enabled;
     }
-    pub(crate) fn voice_preferences(&self) -> &crate::voice_preferences::VoicePreferences {
-        &self.voice_preferences
+    pub(crate) fn voice_preferences(&self) -> crate::voice_preferences::VoicePreferences {
+        self.config.voice_preferences()
     }
 
     pub fn new(
@@ -156,8 +158,8 @@ impl MusicaVm {
         };
         Ok(Self {
             control_pressed: false,
-            auto_delay_units: 50,
-            voice_preferences: Default::default(),
+            config: Default::default(),
+            config_edit: None,
             script,
             labels,
             state,
@@ -257,6 +259,7 @@ impl MusicaVm {
             .checked_sub(1)
             .ok_or(MusicaRuntimeError::State)?;
         self.state = restored;
+        self.config_edit = None;
         self.state.fixed_tick = restored_tick;
         Ok(())
     }
@@ -402,8 +405,8 @@ impl MusicaVm {
                 &self.labels,
                 &mut self.state,
                 self.control_pressed,
-                &self.voice_preferences,
-                self.auto_delay_units,
+                &self.config.voice_preferences(),
+                self.config.message_speed_auto_play,
             )
             .inspect_err(|cause| {
                 tracing::error!(

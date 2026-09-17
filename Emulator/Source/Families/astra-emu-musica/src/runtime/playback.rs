@@ -9,14 +9,11 @@ pub(super) fn auto_wait(token_id: String, units: u8) -> MusicaWaitState {
     }
 }
 impl MusicaVm {
-    pub(crate) fn auto_delay_units(&self) -> u8 {
-        self.auto_delay_units
-    }
     pub(crate) fn set_auto_delay_units(&mut self, value: u8) -> Result<(), MusicaRuntimeError> {
         if value > 100 {
             return Err(MusicaRuntimeError::State);
         }
-        self.auto_delay_units = value;
+        self.config.message_speed_auto_play = value;
         self.rebind_auto_wait();
         Ok(())
     }
@@ -53,7 +50,7 @@ impl MusicaVm {
             return false;
         }
         self.state.wait = Some(if self.state.system_ui.play_mode == MusicaPlayMode::Auto {
-            auto_wait(token_id, self.auto_delay_units)
+            auto_wait(token_id, self.config.message_speed_auto_play)
         } else {
             MusicaWaitState::Input { token_id }
         });
