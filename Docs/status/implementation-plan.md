@@ -347,3 +347,5 @@ ANI／SQZ 静态帧从来源解码入口接入 SDK 纹理缓存与公共 GPU 场
 Musica backlog 已接入历史记录、游标浏览、语音回放、剧情暂停与 v18 保存恢复。Family GPU 回归通过输入导航、历史页 F5/F9、语音 PCM、等待和返回正文；损坏历史恢复保留原状态。来源配置偏好及完整系统页布局仍待整合。
 
 Classic route.coverage.010 完成同一 build/package 的 GPU Headless 输入流程，47,801 条输入、38 次选择到达 tsui.ending，DX12 独显且无诊断。终点 PNG 已查看，为黑场；完整视听与真实 Player 验收仍开放。
+
+Musica 已将来源的 backlog 回放和五组角色语音偏好接入 Manager/Family 配置。正文静音仍保留历史关联与原语音等待时长；读档保留当前配置并阻止禁用角色的旧音频快照恢复播放。专项覆盖 descriptor 类型检查、正文/历史播放选择、静音语音等待和恢复。其余配置功能仍开放。

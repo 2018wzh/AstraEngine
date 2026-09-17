@@ -86,9 +86,20 @@ pub struct MusicaVm {
     labels: BTreeMap<String, u32>,
     state: MusicaRuntimeState,
     control_pressed: bool,
+    voice_preferences: crate::voice_preferences::VoicePreferences,
 }
 
 impl MusicaVm {
+    pub(crate) fn set_voice_preferences(
+        &mut self,
+        value: crate::voice_preferences::VoicePreferences,
+    ) {
+        self.voice_preferences = value;
+    }
+    pub(crate) fn voice_preferences(&self) -> &crate::voice_preferences::VoicePreferences {
+        &self.voice_preferences
+    }
+
     pub fn new(
         script_uri: String,
         script_hash: Hash256,
@@ -133,6 +144,7 @@ impl MusicaVm {
         };
         Ok(Self {
             control_pressed: false,
+            voice_preferences: Default::default(),
             script,
             labels,
             state,
@@ -351,20 +363,25 @@ impl MusicaVm {
                 .instruction_count
                 .checked_add(1)
                 .ok_or(MusicaRuntimeError::Overflow)?;
-            let event =
-                execute_control(command, &self.labels, &mut self.state, self.control_pressed)
-                    .inspect_err(|cause| {
-                        tracing::error!(
-                            event = "astra.emu.musica.command.failed",
-                            code = cause.diagnostic_code(),
-                            ordinal = command.ordinal,
-                            line = line_index,
-                            offset = command.span.offset,
-                            operand_count = command.operands.len(),
-                            script_hash = self.state.script_hash.to_hex().as_str(),
-                            tick = fixed_tick,
-                        );
-                    })?;
+            let event = execute_control(
+                command,
+                &self.labels,
+                &mut self.state,
+                self.control_pressed,
+                &self.voice_preferences,
+            )
+            .inspect_err(|cause| {
+                tracing::error!(
+                    event = "astra.emu.musica.command.failed",
+                    code = cause.diagnostic_code(),
+                    ordinal = command.ordinal,
+                    line = line_index,
+                    offset = command.span.offset,
+                    operand_count = command.operands.len(),
+                    script_hash = self.state.script_hash.to_hex().as_str(),
+                    tick = fixed_tick,
+                );
+            })?;
             if let Some(event) = event {
                 return Ok(Some(event));
             }
@@ -377,6 +394,7 @@ fn execute_control(
     labels: &BTreeMap<String, u32>,
     state: &mut MusicaRuntimeState,
     control_pressed: bool,
+    voice_preferences: &crate::voice_preferences::VoicePreferences,
 ) -> Result<Option<MusicaVmEvent>, MusicaRuntimeError> {
     match command.opcode.as_str() {
         "label" => Ok(None),
@@ -432,7 +450,7 @@ fn execute_control(
             state.wait = Some(wait.clone());
             Ok(Some(MusicaVmEvent::Wait(wait)))
         }
-        "message" => execute_message(command, state),
+        "message" => execute_message(command, state, voice_preferences),
         "deletevar" => {
             let [ScOperand::Symbol { value: key }] = command.operands.as_slice() else {
                 return Err(MusicaRuntimeError::Operand);

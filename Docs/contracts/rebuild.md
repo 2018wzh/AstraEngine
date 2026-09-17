@@ -74,3 +74,5 @@ Root workspace 管共享/Engine/VN/Player/工具；Editor 与 Emulator 使用独
 日志桥按用户决定取消内容脱敏和字段白名单，正常转发字符串、message、Debug/Display；数值保留 typed 值。`DiagnosticValue::Text` 最大 4096 bytes，事件最多 32 个唯一字段；超限、重复字段及非有限数值计入 `dropped_fields`。Debug 使用有界 formatter，避免先分配任意大小字符串。来源、级别和事件保持可定位，Manager 继续拥有 sink。Family API/ABI 升为 v4，旧插件须同步重建安装，不保留旧脱敏模式。
 
 Musica 接续直接采用 `codex/minori-runtime-followup` 已验证的完整机制，按依赖批量移植剩余实现。验证重点是新 Family API、共享 SDK/GPU 和 session 生命周期的整合回归，不重复原引擎语义研究。旧 Host/provider 层仍按新架构替换。
+
+Musica 的历史回放和五组角色语音开关由 Family descriptor 声明，Manager 保存并在启动时传入。它们属于安装/游戏配置，不属于剧情存档；读档继续采用当前开关，关闭播放不删除历史语音关联，也不缩短脚本要求的语音时长等待。

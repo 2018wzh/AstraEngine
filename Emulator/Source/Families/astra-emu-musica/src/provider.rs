@@ -51,6 +51,11 @@ pub fn musica_descriptor() -> FamilyDescriptor {
         kind: ConfigKind::String { max_bytes: 256 },
         default: ConfigValue::String(default.into()),
     };
+    let mut configuration = vec![
+        field("profile_file", "Private PAZ profile", MUSICA_PROFILE_FILE),
+        field("entry_script", "Entry script in scr archive", "test.sc"),
+    ];
+    configuration.extend(crate::voice_preferences::VoicePreferences::fields());
     FamilyDescriptor {
         family_id: "musica".into(),
         plugin_id: "astra.emu.musica".into(),
@@ -64,11 +69,7 @@ pub fn musica_descriptor() -> FamilyDescriptor {
         ]
         .into(),
         supported_formats: vec!["musica.paz".into(), "musica.sc".into()].into(),
-        configuration: vec![
-            field("profile_file", "Private PAZ profile", MUSICA_PROFILE_FILE),
-            field("entry_script", "Entry script in scr archive", "test.sc"),
-        ]
-        .into(),
+        configuration: configuration.into(),
     }
 }
 impl FamilyProvider for MusicaProvider {
@@ -146,8 +147,11 @@ impl MusicaProvider {
         let bytes = read_asset(&archive, &uri, 16 * 1024 * 1024)?;
         let script = parse_sc(&bytes, &ScOpcodeCatalog::observed_musica())
             .map_err(|_| error("ASTRA_EMU_MUSICA_SCRIPT", "entry script cannot be parsed"))?;
-        let vm = MusicaVm::new(uri, Hash256::from_sha256(&bytes), script, 0)
+        let mut vm = MusicaVm::new(uri, Hash256::from_sha256(&bytes), script, 0)
             .map_err(|_| error("ASTRA_EMU_MUSICA_VM", "entry script cannot be initialized"))?;
+        vm.set_voice_preferences(crate::voice_preferences::VoicePreferences::resolve(
+            &config,
+        )?);
         let game = Hash256::from_sha256(&serde_json::to_vec(archive.manifest()).map_err(|_| {
             error(
                 "ASTRA_EMU_MUSICA_IDENTITY",

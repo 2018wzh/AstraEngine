@@ -3,6 +3,7 @@ mod provider;
 mod scene;
 mod session;
 mod storage;
+mod voice_preferences;
 
 mod archive;
 mod image_container;

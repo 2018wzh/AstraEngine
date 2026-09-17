@@ -18,7 +18,7 @@ impl MusicaSession {
         Ok(())
     }
     pub(super) fn load(&mut self) -> FamilyResult<()> {
-        let saved = self.storage.read()?;
+        let mut saved = self.storage.read()?;
         if saved.game != self.game {
             return Err(error(
                 "ASTRA_EMU_MUSICA_SAVE_GAME",
@@ -43,6 +43,7 @@ impl MusicaSession {
             state.session_seed,
         )
         .map_err(|_| error("ASTRA_EMU_MUSICA_SAVE_STATE", "saved script is invalid"))?;
+        vm.set_voice_preferences(self.vm.voice_preferences().clone());
         vm.restore_native_save(&saved.vm, 1)
             .map_err(|_| error("ASTRA_EMU_MUSICA_SAVE_STATE", "saved VM state is invalid"))?;
         let mut scene = Scene::new(self.archive.clone(), self.info.width, self.info.height)?;
@@ -64,6 +65,12 @@ impl MusicaSession {
                 "text generation overflowed",
             )
         })?;
+        for sound in &mut saved.sounds {
+            if sound.id == 4 && !self.vm.voice_preferences().enabled(&sound.uri) {
+                sound.playing = false;
+                sound.fade = None;
+            }
+        }
         self.audio.restore(saved.sounds)?;
         vm.set_control_pressed(self.control_keys != 0);
         self.voice_duration = None;

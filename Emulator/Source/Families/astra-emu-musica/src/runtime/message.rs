@@ -3,6 +3,7 @@ use crate::{parse_musica_message_markup, MusicaMessageControl};
 pub(super) fn execute_message(
     command: &ScCommand,
     state: &mut MusicaRuntimeState,
+    preferences: &crate::voice_preferences::VoicePreferences,
 ) -> Result<Option<MusicaVmEvent>, MusicaRuntimeError> {
     let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
         .map_err(|_| MusicaRuntimeError::Operand)?;
@@ -63,30 +64,49 @@ pub(super) fn execute_message(
             fade_ms: 0,
         });
     }
-    if let Some(token) = &voice {
-        let spec = parse_audio_resource_spec(token)?;
-        super::audio_commands::validate_audio_relative_path(&spec.resource)?;
-        let uri = format!("musica:/voice/{}", spec.resource);
-        super::audio_commands::append_audio_load_and_play(
-            state,
-            &mut audio_commands,
-            4,
-            &uri,
-            spec.volume_percent * 10,
-            spec.pan_percent * 10,
-            false,
-            0,
-        )?;
+    let voice_metadata = voice
+        .as_ref()
+        .map(|token| {
+            let spec = parse_audio_resource_spec(token)?;
+            super::audio_commands::validate_audio_relative_path(&spec.resource)?;
+            Ok::<_, MusicaRuntimeError>(MusicaMessageVoice {
+                resource_uri: format!("musica:/voice/{}", spec.resource),
+                volume_milli: spec.volume_percent * 10,
+                pan_milli: spec.pan_percent * 10,
+            })
+        })
+        .transpose()?;
+    if let Some(value) = &voice_metadata {
+        let enabled = preferences.enabled(&value.resource_uri);
+        if enabled {
+            super::audio_commands::append_audio_load_and_play(
+                state,
+                &mut audio_commands,
+                4,
+                &value.resource_uri,
+                value.volume_milli,
+                value.pan_milli,
+                false,
+                0,
+            )?;
+        } else if wait_for_voice {
+            // The source waits for authored voice duration even when this character is muted.
+            audio_commands.push(MusicaAudioCommand::LoadResource {
+                sequence: next_effect_sequence(state)?,
+                stream_id: 4,
+                resource_uri: value.resource_uri.clone(),
+            });
+        }
         state.audio.insert(
             4,
             MusicaAudioState {
                 bus: "voice".into(),
                 continuation_pts: 0,
-                resource_uri: uri,
+                resource_uri: value.resource_uri.clone(),
                 looped: false,
-                volume_milli: spec.volume_percent * 10,
-                pan_milli: spec.pan_percent * 10,
-                playing: true,
+                volume_milli: value.volume_milli,
+                pan_milli: value.pan_milli,
+                playing: enabled,
             },
         );
     } else if let Some(voice) = state.audio.get_mut(&4) {
@@ -106,14 +126,7 @@ pub(super) fn execute_message(
             voice_hash: voice
                 .as_ref()
                 .map(|value| Hash256::from_sha256(value.as_bytes())),
-            voice: voice.as_ref().map(|_| {
-                let value = &state.audio[&4];
-                MusicaMessageVoice {
-                    resource_uri: value.resource_uri.clone(),
-                    volume_milli: value.volume_milli,
-                    pan_milli: value.pan_milli,
-                }
-            }),
+            voice: voice_metadata,
         },
     )?;
     state.message = Some(MusicaMessageState {
