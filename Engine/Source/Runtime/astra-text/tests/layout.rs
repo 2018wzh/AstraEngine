@@ -195,3 +195,23 @@ mod multiscript;
 
 #[path = "layout/validation.rs"]
 mod validation;
+
+#[test]
+fn font_coverage_reads_real_character_map_and_rejects_missing_face() {
+    let bytes =
+        include_bytes!("../../../../../Examples/NativeVN/Assets/Fonts/NotoSansJP-Variable.ttf");
+    let ranges = astra_text::font_unicode_coverage(bytes, 0).unwrap();
+    let contains = |value: char| {
+        ranges
+            .iter()
+            .any(|range| range.start <= value as u32 && value as u32 <= range.end)
+    };
+    for character in ['A', 'あ', '漢', '…', '―', '♪'] {
+        assert!(contains(character), "{character:?}");
+    }
+    assert!(!contains('\u{10ffff}'));
+    assert!(ranges
+        .windows(2)
+        .all(|pair| pair[0].end + 1 < pair[1].start));
+    assert!(astra_text::font_unicode_coverage(bytes, 100).is_err());
+}

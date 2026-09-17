@@ -202,12 +202,7 @@ impl Scene {
                     message.map(|(text, speaker)| (text.as_str(), speaker.as_deref())),
                     choices,
                 )
-                .map_err(|_| {
-                    error(
-                        "ASTRA_EMU_MINORI_TEXT_RENDER",
-                        "message could not be rendered",
-                    )
-                })?,
+                .map_err(|code| error(&code, "message could not be rendered"))?,
         );
         let sequence = self
             .sequence

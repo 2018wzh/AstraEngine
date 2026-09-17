@@ -3,7 +3,7 @@ use astra_emu_sdk::{TextScene, TextSceneLayout};
 use astra_media_core::SceneCommand;
 use astra_text::{
     CosmicTextLayoutProvider, FontBindingContext, LayoutConstraint, OverflowPolicy, PackagedFont,
-    TextDirection, TextLayoutConfig, TextLayoutRequest, TextRun, UnicodeRange, WrapPolicy,
+    TextDirection, TextLayoutConfig, TextLayoutRequest, TextRun, WrapPolicy,
 };
 
 const FONT_FAMILY: &str = "Noto Sans JP";
@@ -42,24 +42,7 @@ impl MinoriTextRenderer {
                 hash: Hash256::from_sha256(&bytes),
                 license_id: "OFL-1.1".into(),
                 subset: None,
-                coverage: vec![
-                    UnicodeRange {
-                        start: 0x20,
-                        end: 0x7e,
-                    },
-                    UnicodeRange {
-                        start: 0x3000,
-                        end: 0x30ff,
-                    },
-                    UnicodeRange {
-                        start: 0x3400,
-                        end: 0x9fff,
-                    },
-                    UnicodeRange {
-                        start: 0xff00,
-                        end: 0xffef,
-                    },
-                ],
+                coverage: astra_text::font_unicode_coverage(&bytes, 0).map_err(text_error)?,
                 targets: vec!["astra-emu-minori".into()],
                 profiles: vec!["minori.reference".into()],
                 bytes,
@@ -95,10 +78,7 @@ impl MinoriTextRenderer {
                     layout
                 })
                 .collect::<Vec<_>>();
-            return self
-                .scene
-                .frame(&regions)
-                .map_err(|_| "ASTRA_EMU_MINORI_CHOICE_RENDER".to_owned());
+            return self.scene.frame(&regions).map_err(text_error);
         }
         let Some((text, speaker)) = message else {
             return Ok(self.scene.clear());
@@ -131,9 +111,26 @@ impl MinoriTextRenderer {
                 },
             ));
         }
-        self.scene
-            .frame(&regions)
-            .map_err(|_| "ASTRA_EMU_MINORI_TEXT_RENDER".to_owned())
+        self.scene.frame(&regions).map_err(text_error)
+    }
+}
+
+fn text_error(cause: astra_media_core::MediaError) -> String {
+    match cause {
+        astra_media_core::MediaError::Message(message) => {
+            let code = message.split(':').next().unwrap_or("");
+            if code.starts_with("ASTRA_")
+                && code.len() <= 128
+                && code
+                    .bytes()
+                    .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_')
+            {
+                code.to_owned()
+            } else {
+                "ASTRA_EMU_MINORI_TEXT_RENDER".into()
+            }
+        }
+        astra_media_core::MediaError::Diagnostics(_) => "ASTRA_EMU_MINORI_TEXT_DIAGNOSTICS".into(),
     }
 }
 
@@ -198,6 +195,28 @@ mod tests {
     use super::*;
     use astra_platform::SceneFrame;
     use astra_platform_common::WgpuOffscreenRenderer;
+
+    #[test]
+    fn packaged_font_accepts_japanese_punctuation_and_symbols() {
+        let mut text = MinoriTextRenderer::new().unwrap();
+        text.commands(Some(("……――「テスト」！？ ♪", None)), None)
+            .unwrap();
+    }
+
+    #[test]
+    fn text_errors_preserve_codes_without_forwarding_messages() {
+        use astra_media_core::MediaError;
+        assert_eq!(
+            text_error(MediaError::message(
+                "ASTRA_TEXT_GLYPH_MISSING: private content"
+            )),
+            "ASTRA_TEXT_GLYPH_MISSING"
+        );
+        assert_eq!(
+            text_error(MediaError::message("private content")),
+            "ASTRA_EMU_MINORI_TEXT_RENDER"
+        );
+    }
 
     #[test]
     fn choice_hit_testing_excludes_gaps_edges_and_invalid_coordinates() {
