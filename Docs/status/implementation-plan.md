@@ -1,6 +1,8 @@
 # 全产品重构实施状态
 
-公共 wgpu 后端已实现 Screen 混合，复用现有 BlendMode 和 atlas pipeline；Sprite/Glyph 的批次现保留声明的混合模式，不再固定为 Alpha。两项新硬件 GPU 测试验证编码颜色空间、线性光纹理、透明度及 opacity 的实际像素，受影响 Clippy 和格式检查通过。公共平台 35 项功能测试通过（含 6 项 GPU 测试）；另有既有集显性能测试失败，队列提交计数实际为 2、预期为 3，仍待核对批量 timestamp resolve 的计数归属，未放宽断言。Minori 原生 `_sc.png` 的 Screen 分派与查表公式已核对并写入脚本文档，完整双资源 stage 尚未接入。
+集显 GPU 提交计数已修复：timestamp resolve/copy 批次实际调用了 queue.submit，但旧计数只包含场景、atlas 与滤镜提交。现在按实际回读批次累计，下一帧开始重置；多个 pending frame 共用一个批次只计一次，轮询和再次读取同批次不重复计数。原先 3/2 次提交断言保持不变并通过，新增两帧批量回读和重置回归。公共平台全部 36 项测试通过（包含 7 项硬件 GPU 测试），全目标 Clippy 与格式检查通过；这只关闭提交计数缺陷，不代表整体验收或性能目标达成。
+
+公共 wgpu 后端已实现 Screen 混合，复用现有 BlendMode 和 atlas pipeline；Sprite/Glyph 的批次现保留声明的混合模式，不再固定为 Alpha。两项新硬件 GPU 测试验证编码颜色空间、线性光纹理、透明度及 opacity 的实际像素，受影响 Clippy 和格式检查通过。公共平台 35 项功能测试通过（含 6 项 GPU 测试）；此前集显性能测试暴露的队列提交漏计已在后续修复，原断言未放宽。Minori 原生 `_sc.png` 的 Screen 分派与查表公式已核对并写入脚本文档，完整双资源 stage 尚未接入。
 
 当前原生 Windows Player 已完成 Release 构建，并以四条路线测试使用的同一 package 重新打包。直接在 Sandbox 共享目录提交 bundle 遇到文件占用；改在未共享的任务目录完成打包后复制，生成成功。Sandbox 已实际显示终之空标题页，点击开始后因 `audio.open / ProviderUnavailable` 退出；未进入剧情，音频设备与完整 Player 验收仍开放。FVP 在显式测试音频模式继续自动播放，尚未到结局。
 

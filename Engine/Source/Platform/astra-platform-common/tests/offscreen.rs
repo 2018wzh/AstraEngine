@@ -250,4 +250,29 @@ async fn integrated_gpu_timestamp_profile_has_zero_stable_atlas_upload() {
     let counters = renderer.performance_counters();
     assert_eq!(counters.upload_bytes, 0);
     assert_eq!(counters.queue_submissions, 2);
+
+    // Two pending frames share one resolve/copy submission. Resolving another
+    // member of that batch must not count the same submission again.
+    frame.sequence += 1;
+    let pending_first = renderer.submit_frame_timestamped(&frame).unwrap();
+    frame.sequence += 1;
+    let pending_second = renderer.submit_frame_timestamped(&frame).unwrap();
+    assert_eq!(renderer.performance_counters().queue_submissions, 1);
+    if renderer
+        .try_resolve_profiled_submission(pending_first)
+        .unwrap()
+        .is_none()
+    {
+        assert_eq!(renderer.performance_counters().queue_submissions, 2);
+        renderer.resolve_profiled_submission(pending_first).unwrap();
+    }
+    assert_eq!(renderer.performance_counters().queue_submissions, 2);
+    renderer
+        .resolve_profiled_submission(pending_second)
+        .unwrap();
+    assert_eq!(renderer.performance_counters().queue_submissions, 2);
+
+    frame.sequence += 1;
+    renderer.submit_frame(&frame).unwrap();
+    assert_eq!(renderer.performance_counters().queue_submissions, 1);
 }

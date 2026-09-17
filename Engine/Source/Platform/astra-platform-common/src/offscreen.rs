@@ -121,6 +121,7 @@ struct GpuTimer {
     slots: Vec<GpuTimerSlot>,
     next_slot: usize,
     timestamp_period_ns: f32,
+    resolve_submissions_since_frame: u64,
 }
 
 struct GpuTimerSlot {
@@ -152,6 +153,8 @@ pub struct WgpuFramePerformanceCounters {
     pub upload_bytes: u64,
     pub readback_bytes: u64,
     pub draw_calls: u64,
+    /// Scene/filter submissions plus timestamp resolve batches issued since
+    /// the latest frame submission. Polling an existing batch adds nothing.
     pub queue_submissions: u64,
     pub pipeline_count: u64,
     pub engine_allocation_bytes: u64,
@@ -312,6 +315,7 @@ impl WgpuOffscreenRenderer {
                     .collect(),
                 next_slot: 0,
                 timestamp_period_ns: queue.get_timestamp_period(),
+                resolve_submissions_since_frame: 0,
             })
         } else {
             None
@@ -360,7 +364,11 @@ impl WgpuOffscreenRenderer {
             upload_bytes: self.scene_renderer.last_upload_bytes(),
             readback_bytes: self.last_readback_bytes,
             draw_calls: self.scene_renderer.last_draw_calls() + self.filter_outputs.len() as u64,
-            queue_submissions: self.last_queue_submissions,
+            queue_submissions: self.last_queue_submissions
+                + self
+                    .gpu_timer
+                    .as_ref()
+                    .map_or(0, |timer| timer.resolve_submissions_since_frame),
             pipeline_count: 1 + self.filter_pipelines.len() as u64,
             engine_allocation_bytes: self.scene_renderer.last_engine_allocation_bytes(),
             engine_allocation_count: self.scene_renderer.last_engine_allocation_count(),
@@ -411,6 +419,9 @@ impl WgpuOffscreenRenderer {
         self.pending_output = None;
         self.last_readback_bytes = 0;
         self.last_queue_submissions = 0;
+        if let Some(timer) = self.gpu_timer.as_mut() {
+            timer.resolve_submissions_since_frame = 0;
+        }
         tracing::info!(
             event = "platform.offscreen.performance.prewarm.complete",
             width,
@@ -520,6 +531,9 @@ impl WgpuOffscreenRenderer {
     ) -> Result<Option<WgpuPendingProfile>, PlatformError> {
         self.last_readback_bytes = 0;
         self.last_queue_submissions = 0;
+        if let Some(timer) = self.gpu_timer.as_mut() {
+            timer.resolve_submissions_since_frame = 0;
+        }
         let cpu_started = Instant::now();
         if self.device_lost.load(Ordering::Acquire) {
             return Err(PlatformError::new(
@@ -1038,6 +1052,7 @@ fn submit_recorded_timestamp_reads(
         encoder.copy_buffer_to_buffer(&slot.resolve_buffer, 0, &slot.read_buffer, 0, byte_length);
     }
     let submission = queue.submit([encoder.finish()]);
+    timer.resolve_submissions_since_frame += 1;
     for (index, query_count) in recorded {
         let slot = &mut timer.slots[index];
         let byte_length = u64::from(query_count) * 8;
