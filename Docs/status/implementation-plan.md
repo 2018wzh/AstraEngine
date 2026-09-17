@@ -452,3 +452,6 @@ Classic route.coverage.032 完成 DX12 独显 Headless 抽样运行：47,846 条
 
 
 Musica 已在 Windows Sandbox 的真实 Manager 中通过原生标题/System 页面与全屏往返测试，核心日志为 DX12 discrete_gpu。实际观察到全屏时标题栏/任务栏退出显示，返回窗口模式后恢复；原生页面输入与 GPU 图像正常。该轮仍为 NullAudioDevice，真实音频、冷启动全屏恢复和商业结局保持开放。
+
+
+Musica 商业素材手动保存成功，槽位显示实际缩略图与时间。继续对白后读取该槽位，会话因 ASTRA_EMU_MUSICA_ELAPSED 终止，读档未通过。当前 Host 从 advance 调用开始记录下一帧间隔，Musica 读档同步重建 Scene/GPU 及音频，重建耗时进入下一次补帧并超过一秒上限；需为显式恢复边界重置 Host 计时，不能仅放大上限或静默截断。新版 Manager 正确显示失败，原存档保留。
