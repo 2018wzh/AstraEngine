@@ -243,6 +243,7 @@ impl Default for MusicaSystemUiState {
 #[derive(Debug, Clone, PartialEq)]
 pub enum MusicaVmEvent {
     Wait(MusicaWaitState),
+    Movie(MusicaMovieState),
     Message {
         presentation_sequence: u64,
         capture_sequence: u64,

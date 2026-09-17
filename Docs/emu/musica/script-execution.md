@@ -85,3 +85,5 @@ Manager 的 Musica 配置现提供独立 backlog 回放开关和 ren/sui/aya/tou
 自动播放沿用来源的消息等待机制：A 切换自动模式，画面显示 AUTO；Manager 的 `message_speed_auto_play` 以 10 ms 为单位，范围 0–100、默认 50，0 按来源最短 10 ms 执行。模式切换仅重新绑定普通消息等待，不改写脚本 `.wait`、`\a` 或 `\v`；选择与未完成翻译仍需各自完成。历史页/挂起期间不累计自动等待。v20 保存模式、消息标记与等待状态，F5/F9 恢复剩余等待；延迟配置由 Manager 持有，读档沿用当前配置。已读跳读、完整系统页和其他表现偏好仍开放。
 
 已读跳读采用来源的 `Normal/Auto/Skip` 互斥模式，S 切换 Skip，A 切换 Auto；画面显示当前模式。消息完成后，按脚本 hash、source span、消息编号和正文 hash 生成的身份进入有界有序集合。不同位置或不同脚本版本的同文不会误判已读。Skip 仅推进已读消息，未读消息和选择保留等待，`skip_disable` 同时阻断 Skip 与 Control 快进。身份在消息建立时计算并缓存，tick 只做集合查询；v20 保存模式和已读集合，恢复前拒绝重复、乱序和不匹配的身份。完整系统页仍待移植。
+
+`.movie id resource width height skippable` 已移植来源 00610272d 的 VM 入口：非零 id、受限文件名、1–8192 尺寸及 `t/f` 跳过标记，建立对应 Media wait。当前 v20 已有的 movie 字段保存资源、等待标识和微秒播放位置，无需改变容器格式；完成等待或更换脚本时清除电影状态。`update_movie_position` 只接受当前电影及等待标识，不接受倒退位置。保存/恢复校验 movie 与 Media wait 的双向关联，损坏存档不替换当前 VM。Family 的解码、逐帧 GPU、PCM 和中途重建尚未接线，运行到该事件仍明确返回 `ASTRA_EMU_MUSICA_MOVIE_UNAVAILABLE`，不能视为电影播放完成。

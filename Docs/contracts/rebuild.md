@@ -81,4 +81,6 @@ SDK 可选 `video-ffmpeg` 复用 AstraMedia 增量解码器，解码器只在 wo
 
 同一模块的 `PcmQueue` 接收共享 `AudioFramePacket` 与 PCM，供核心已有音频 worker 混入输出，不创建设备或线程。格式、包数、完整驻留分配和时间顺序有界；seek 重置必须增加代次并清空旧 PCM，迟到包明确拒绝。无数据时停止电影音频时钟；只有后续包声明的时间间隔可作为静音推进。调用方在 Host 接受混音后发布播放位置，暂停时不消费队列。
 
+Musica 的 movie 状态与当前 Media wait 一一对应，播放位置更新须同时匹配 media id 和 fence id，且不得倒退。原生存档只保存资源、原生参数、等待标识和微秒位置；恢复前校验完整关联，运行资源由 Family 重建。该 VM 接口不代表尚未接线的 Family 电影播放已可用。
+
 FFmpeg 增量解码按原生 resampler 的输出上界分配有界缓冲，用微秒级内部延迟校正输出 PTS，直到 flush 不再返回样本才结束。不得按输入帧数分配升采样输出，或用整秒延迟判定流已排空；相同规则适用于 Engine 与 SDK 消费者。

@@ -176,6 +176,10 @@ impl MusicaSession {
         }
         let event = self.vm.step(tick).map_err(vm_error)?;
         match event {
+            Some(MusicaVmEvent::Movie(_)) => Err(error(
+                "ASTRA_EMU_MUSICA_MOVIE_UNAVAILABLE",
+                "movie playback is not connected to this Family build",
+            )),
             Some(MusicaVmEvent::Choice) => {
                 self.message = None;
                 Ok(true)

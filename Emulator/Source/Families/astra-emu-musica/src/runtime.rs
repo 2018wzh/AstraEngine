@@ -18,6 +18,7 @@ use stage::*;
 mod audio_commands;
 mod character;
 mod message;
+mod movie;
 use message::execute_message;
 mod choices;
 use audio_commands::*;
@@ -161,6 +162,7 @@ impl MusicaVm {
     }
 
     pub fn encode_native_save(&self) -> Result<Vec<u8>, MusicaRuntimeError> {
+        movie::validate_movie_state(&self.state)?;
         validate_stage_state(self.state.stage.as_ref())?;
         scroll::validate_state(&self.state)?;
         if let Some(shake) = &self.state.screen_shake {
@@ -176,6 +178,7 @@ impl MusicaVm {
             return Err(MusicaRuntimeError::State);
         }
         validate_stage_state(state.stage.as_ref())?;
+        movie::validate_movie_state(&state)?;
         scroll::validate_state(&state)?;
         if let Some(shake) = &state.screen_shake {
             shake::validate_screen_shake_state(shake)?;
@@ -205,6 +208,7 @@ impl MusicaVm {
         self.state.message = None;
         self.state.message_loads.clear();
         self.state.choice = None;
+        self.state.movie = None;
         self.state.screen_shake = None;
         self.state.axis_scroll = None;
         self.state.linear_scroll = None;
@@ -231,6 +235,7 @@ impl MusicaVm {
             return Err(MusicaRuntimeError::State);
         }
         choices::validate_choice(&self.script, &restored)?;
+        movie::validate_movie_state(&restored)?;
         validate_stage_state(restored.stage.as_ref())?;
         scroll::validate_state(&restored)?;
         if let Some(shake) = &restored.screen_shake {
@@ -263,6 +268,10 @@ impl MusicaVm {
         };
         if expected != token_id {
             return Err(MusicaRuntimeError::Waiting);
+        }
+        if matches!(self.state.wait, Some(MusicaWaitState::Media { .. })) {
+            movie::validate_movie_state(&self.state)?;
+            self.state.movie = None;
         }
         if token_id.starts_with("musica.message.") {
             self.mark_active_message_read()?;
@@ -459,6 +468,7 @@ fn execute_control(
             Ok(Some(MusicaVmEvent::Wait(wait)))
         }
         "message" => execute_message(command, state, voice_preferences, auto_delay_units),
+        "movie" => movie::execute_movie(command, state),
         "deletevar" => {
             let [ScOperand::Symbol { value: key }] = command.operands.as_slice() else {
                 return Err(MusicaRuntimeError::Operand);

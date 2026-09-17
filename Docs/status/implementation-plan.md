@@ -363,3 +363,5 @@ Classic route.coverage.011 完成同一 build/package 的 GPU Headless 输入流
 SDK 增量媒体增加有界 PCM 混音队列，复用共享媒体包；覆盖逐包混音、时间间隔、缺包停钟、seek 清空、迟到代次拒绝和驻留预算。完整样本整合测试发现并修复 AstraMedia 升采样缓冲不足、输出 PTS 未扣除 resampler 延迟及尾部未完全排空的问题，补充升降采样全时长回归。SDK 15 项测试、AstraMedia 含 FFmpeg 的 41 项测试通过；相关 Clippy、fmt 与文档检查通过。Family 电影会话与现有音频 worker 的接线尚未完成。
 
 Classic route.coverage.012 完成原 build/package 的 GPU Headless 输入流程，47,815 条输入、38 次选择到达 tsui.ending，DX12 独显且无诊断。终点 PNG 已查看，仍为黑场；完整视听与真实 Player 验收保持开放。FVP Sandbox AUTO 长流程持续推进，正文可见，尚未到结局且仍使用显式测试音频设备。
+
+Musica movie VM 入口从来源 00610272d 接入，保留原生参数、等待与现有 v20 游标字段；新增播放位置更新及保存/恢复关联校验。专项测试覆盖中途恢复、错误完成通知、旧身份/倒退位置、非法参数与损坏状态拒绝。133 项 Musica 测试（含显式运行的 9 项 GPU 测试）和 12 项 CLI 测试通过，相关 Clippy、fmt 与文档检查通过。Family 仍明确返回电影未接线诊断，GPU/PCM 播放和完整恢复继续开放。

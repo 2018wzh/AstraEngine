@@ -21,3 +21,5 @@ BGM、SE 和 voice 由 Family 的 Kira worker 混音，解码复用 SDK/Symphoni
 完整公共音视频样本解码与逐样本混音、时间戳/序号、目标 PCM 格式、seek、待完成请求关闭和非法输入测试已通过。整合测试同时修复了共享 FFmpeg 升采样缓冲不足及亚秒延迟导致尾部未排空的问题。这里只完成解码 worker 与 PCM 队列；Musica Family 的电影会话、GPU 逐帧呈现、音频 worker 接线、中途恢复和真实游戏验收仍待接入，不能把这些测试计作电影播放完成。
 
 当前实施进度见 [实施状态](../../status/implementation-plan.md)。
+
+电影 VM 入口已接入来源命令、Media wait、播放位置及恢复校验，见 [脚本执行](script-execution.md)。VM 仅保存显式游标；解码器、PCM 队列和 GPU 资源不进入存档。Family 播放接线尚未完成，当前明确拒绝电影事件。
