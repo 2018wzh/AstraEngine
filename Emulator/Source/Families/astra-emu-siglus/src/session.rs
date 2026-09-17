@@ -246,6 +246,7 @@ impl FamilySession for SiglusSession {
         if exit {
             return Ok(AdvanceResponse {
                 status: FamilyStatus::Finished,
+                ..AdvanceResponse::running()
             });
         }
         Ok(AdvanceResponse::running())

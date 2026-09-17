@@ -138,6 +138,9 @@ fn run_configuration(config: Configuration) -> Result<(), String> {
                     inputs.get(&index).map_or(&[], Vec::as_slice),
                 )
                 .map_err(|error| error.to_string())?;
+            if matches!(response.window_command, ROption::RSome(_)) {
+                return Err("ASTRA_EMU_HEADLESS_WINDOW_COMMAND_UNAVAILABLE".to_owned());
+            }
             audio.check_health()?;
             session
                 .visit_frame(&mut capture)

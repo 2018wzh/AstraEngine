@@ -153,7 +153,7 @@ fn native_gpu_disabled_animation_keeps_scroll_waits_bounded_and_finishes_at_targ
 }
 
 #[test]
-fn native_gpu_config_unavailable_window_change_does_not_persist() {
+fn native_gpu_config_requests_fullscreen_once_and_restores_on_cold_start() {
     let _lock = PROVIDER_SESSION.lock().unwrap();
     let root = tempfile::tempdir().unwrap();
     title::game(root.path());
@@ -172,18 +172,69 @@ fn native_gpu_config_unavailable_window_change_does_not_persist() {
         )
         .unwrap();
     session.advance(0, &click(340.0, 130.0)).unwrap();
+    let response = session.advance(0, &[key(KeyCode::Enter)]).unwrap();
+    assert_eq!(
+        response.window_command,
+        ROption::RSome(FamilyWindowCommand::SetFullscreen(true))
+    );
+    assert!(session.vm.config().fullscreen);
+    assert!(
+        session
+            .storage
+            .configuration(session.game)
+            .unwrap()
+            .unwrap()
+            .fullscreen
+    );
+    assert_eq!(
+        session.advance(0, &[]).unwrap().window_command,
+        ROption::RNone
+    );
+    Box::new(session).close().unwrap();
+    let (_, mut session) = provider
+        .open_session(title::title_request(root.path()))
+        .unwrap();
+    assert_eq!(
+        session.advance(0, &[]).unwrap().window_command,
+        ROption::RSome(FamilyWindowCommand::SetFullscreen(true))
+    );
+    session
+        .advance(
+            0,
+            &[
+                key(KeyCode::ArrowDown),
+                key(KeyCode::ArrowDown),
+                key(KeyCode::Enter),
+            ],
+        )
+        .unwrap();
+    session.advance(0, &click(340.0, 180.0)).unwrap();
+    assert_eq!(
+        session
+            .advance(0, &[key(KeyCode::Escape)])
+            .unwrap()
+            .window_command,
+        ROption::RNone
+    );
+    assert!(session.vm.config().fullscreen);
+    session
+        .advance(
+            0,
+            &[
+                key(KeyCode::ArrowDown),
+                key(KeyCode::ArrowDown),
+                key(KeyCode::Enter),
+            ],
+        )
+        .unwrap();
+    session.advance(0, &click(340.0, 180.0)).unwrap();
     assert_eq!(
         session
             .advance(0, &[key(KeyCode::Enter)])
-            .unwrap_err()
-            .code(),
-        "ASTRA_EMU_MUSICA_WINDOW_COMMAND_UNAVAILABLE"
+            .unwrap()
+            .window_command,
+        ROption::RSome(FamilyWindowCommand::SetFullscreen(false))
     );
-    assert!(session
-        .storage
-        .configuration(session.game)
-        .unwrap()
-        .is_none());
     assert!(!session.vm.config().fullscreen);
     Box::new(session).close().unwrap();
 }

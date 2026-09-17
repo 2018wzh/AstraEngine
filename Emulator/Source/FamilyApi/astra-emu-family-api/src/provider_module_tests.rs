@@ -57,7 +57,10 @@ impl FamilyProvider for Provider {
 impl FamilySession for Session {
     fn advance(&mut self, _: u64, _: &[FamilyEvent]) -> FamilyResult<AdvanceResponse> {
         assert!(!self.panic_on_advance, "test panic");
-        Ok(AdvanceResponse::running())
+        Ok(AdvanceResponse {
+            window_command: ROption::RSome(FamilyWindowCommand::SetFullscreen(true)),
+            ..AdvanceResponse::running()
+        })
     }
     fn visit_frame(&self, visitor: &mut dyn FrameVisitor) -> FamilyResult<()> {
         visitor.accept(FrameView::from_slice(&[0, 0, 0, 255], frame_info())?)
@@ -126,6 +129,28 @@ fn active_session_rejects_replacement_and_close_allows_reopen() {
     module.open(open_request()).into_result().unwrap();
     drop(module);
     assert_eq!(closed.get(), 2);
+}
+
+#[test]
+fn typed_window_command_crosses_the_family_vtable() {
+    let (module, closed) = module(false, false);
+    let module =
+        FamilyModule_TO::from_value(module, abi_stable::type_level::downcasting::TD_Opaque);
+    module.open(open_request()).into_result().unwrap();
+    let response = module
+        .advance(AdvanceRequest {
+            session_id: "test-session".into(),
+            elapsed_ns: 1,
+            events: Default::default(),
+        })
+        .into_result()
+        .unwrap();
+    assert_eq!(
+        response.window_command,
+        ROption::RSome(FamilyWindowCommand::SetFullscreen(true))
+    );
+    module.close(request()).into_result().unwrap();
+    assert_eq!(closed.get(), 1);
 }
 
 #[test]

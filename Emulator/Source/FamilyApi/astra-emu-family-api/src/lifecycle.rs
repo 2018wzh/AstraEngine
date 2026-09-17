@@ -115,14 +115,25 @@ pub enum FamilyStatus {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
+pub enum FamilyWindowCommand {
+    /// Request the host-owned game window's fullscreen mode. No native handle
+    /// crosses the ABI. Hosts must execute this on their window thread or fail
+    /// the session explicitly when window control is unavailable.
+    SetFullscreen(bool),
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
 pub struct AdvanceResponse {
     pub status: FamilyStatus,
+    pub window_command: ROption<FamilyWindowCommand>,
 }
 
 impl AdvanceResponse {
     pub fn running() -> Self {
         Self {
             status: FamilyStatus::Running,
+            window_command: ROption::RNone,
         }
     }
 }

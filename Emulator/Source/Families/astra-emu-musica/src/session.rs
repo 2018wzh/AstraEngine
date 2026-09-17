@@ -48,6 +48,7 @@ pub(crate) struct MusicaSession {
     control_keys: u8,
     pointer: Option<(f32, f32)>,
     config_pointer_down: bool,
+    pending_fullscreen: Option<bool>,
     finished: bool,
     poisoned: bool,
     suspended: bool,
@@ -83,6 +84,7 @@ impl MusicaSession {
     ) -> Self {
         let persisted_unlocks = vm.state().gallery_unlocks.clone();
         let entry_uri = vm.state().script_uri.clone();
+        let pending_fullscreen = vm.config().fullscreen.then_some(true);
         Self {
             persisted_unlocks,
             entry_uri,
@@ -109,6 +111,7 @@ impl MusicaSession {
             control_keys: 0,
             pointer: None,
             config_pointer_down: false,
+            pending_fullscreen,
             finished: false,
             poisoned: false,
             suspended: false,
@@ -440,6 +443,11 @@ impl MusicaSession {
             } else {
                 FamilyStatus::Running
             },
+            window_command: self
+                .pending_fullscreen
+                .take()
+                .map(FamilyWindowCommand::SetFullscreen)
+                .into(),
         })
     }
 }

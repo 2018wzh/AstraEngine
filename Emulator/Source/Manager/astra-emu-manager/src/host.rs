@@ -57,6 +57,9 @@ pub trait AstraUnderlayRenderer: 'static {
 }
 
 pub trait ManagerController: 'static {
+    fn game_fullscreen(&self) -> bool {
+        false
+    }
     fn set_window_state(&mut self, state: astra_emu_family_api::WindowState) -> Result<(), String>;
     fn physical_event(&mut self, event: astra_emu_family_api::FamilyEvent) -> Result<(), String>;
     fn is_game_active(&self) -> bool;
@@ -279,6 +282,14 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                     }
                 }
                 window.set_game_active(controller.borrow().is_game_active());
+                let fullscreen = controller.borrow().game_fullscreen();
+                if window.window().is_fullscreen() != fullscreen {
+                    window.window().set_fullscreen(fullscreen);
+                    tracing::debug!(
+                        event = "astra.emu.host.window.fullscreen_requested",
+                        fullscreen
+                    );
+                }
                 window.window().request_redraw();
             }
             if let Some(slot) = slot.upgrade() {
@@ -423,6 +434,7 @@ fn terminate_game<C: ManagerController>(
 ) {
     let cleanup = controller.borrow_mut().leave_game();
     window.set_game_active(false);
+    window.window().set_fullscreen(false);
     let message = match cleanup {
         Ok(model) => {
             apply_model(adapter, &model);

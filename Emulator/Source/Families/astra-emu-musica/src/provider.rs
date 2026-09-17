@@ -283,12 +283,6 @@ impl MusicaProvider {
         settings.progress_in_background = progress_in_background;
         settings.text_shadow = text_shadow;
         let settings = storage.configuration(game)?.unwrap_or(settings);
-        if settings.fullscreen {
-            return Err(error(
-                "ASTRA_EMU_MUSICA_WINDOW_COMMAND_UNAVAILABLE",
-                "Family window commands are not integrated yet",
-            ));
-        }
         let progress_in_background = settings.progress_in_background;
         let text_shadow = settings.text_shadow;
         let audio_preferences = settings.audio_preferences();

@@ -26,7 +26,7 @@ FVP 共用 RFVP VM、原生媒体和存档，仅补必要接口。Musica 使用 
 
 全部适配核心采用最小必要修改，优先启用已有 GPU feature 和原生平台适配。Family API 的 CPU 最终帧借用只约束跨 ABI 交付方式，不要求 CPU 渲染：核心使用自己的 GPU 管线，交付时回读最终帧。不得为接入统一 Manager 复制一套核心渲染器。Windows Sandbox 通过 GPU 虚拟化执行视听测试；软件 adapter 明确失败，不能替代 GPU 验收。
 
-所有核心诊断接入 Manager，不能只写在动态库内部的独立日志系统。Family API v4 在 descriptor/probe/open 前安装进程级 DiagnosticSink；适配层可选用 API crate 的 diagnostic-bridge feature，将 tracing 与 log 统一转发。Manager 仍是日志 sink、过滤和 flush 的唯一所有者。初始化冲突明确失败，不保留无日志的启动路径。桥不改变核心 GPU、平台和存档实现，也不要求依赖旧 SDK。
+所有核心诊断接入 Manager，不能只写在动态库内部的独立日志系统。Family API v5 在 descriptor/probe/open 前安装进程级 DiagnosticSink；适配层可选用 API crate 的 diagnostic-bridge feature，将 tracing 与 log 统一转发。Manager 仍是日志 sink、过滤和 flush 的唯一所有者。初始化冲突明确失败，不保留无日志的启动路径。桥不改变核心 GPU、平台和存档实现，也不要求依赖旧 SDK。
 
 
 
@@ -71,7 +71,7 @@ Root workspace 管共享/Engine/VN/Player/工具；Editor 与 Emulator 使用独
 
 共享 SceneCommand 提供 `PushPixelMask { bits }` / `PopPixelMask`：64 位遮罩按屏幕像素平铺为 8×8，最高位对应 (0,0)，最低位对应 (7,7)，不随场景变换移动；嵌套遮罩取交集，栈下溢或帧末未闭合明确失败。它限制作用域内绘制命令的片元覆盖，不改变资源上传及最终帧 FilterGraph。GPU shader 执行遮罩，CPU 测试 renderer 明确返回 `ASTRA_MEDIA_PIXEL_MASK_GPU_REQUIRED`，不展开像素裁剪或切换后端。命令追加到现有序列化枚举末尾，不改变既有 tag；使用新命令的运行端须同步更新。Director type 26 只生成一次入场场景，保留既有图案表、时序和显式场景恢复，遮罩命令不含外部 IO。
 
-日志桥按用户决定取消内容脱敏和字段白名单，正常转发字符串、message、Debug/Display；数值保留 typed 值。`DiagnosticValue::Text` 最大 4096 bytes，事件最多 32 个唯一字段；超限、重复字段及非有限数值计入 `dropped_fields`。Debug 使用有界 formatter，避免先分配任意大小字符串。来源、级别和事件保持可定位，Manager 继续拥有 sink。Family API/ABI 升为 v4，旧插件须同步重建安装，不保留旧脱敏模式。
+日志桥按用户决定取消内容脱敏和字段白名单，正常转发字符串、message、Debug/Display；数值保留 typed 值。`DiagnosticValue::Text` 最大 4096 bytes，事件最多 32 个唯一字段；超限、重复字段及非有限数值计入 `dropped_fields`。Debug 使用有界 formatter，避免先分配任意大小字符串。来源、级别和事件保持可定位，Manager 继续拥有 sink。Family API/ABI 当前为 v5，旧插件须同步重建安装，不保留旧脱敏模式。
 
 Musica 接续直接采用 `codex/minori-runtime-followup` 已验证的完整机制，按依赖批量移植剩余实现。验证重点是新 Family API、共享 SDK/GPU 和 session 生命周期的整合回归，不重复原引擎语义研究。旧 Host/provider 层仍按新架构替换。
 
@@ -108,3 +108,6 @@ Musica 快捷存档沿用来源的 `pc_line` 去重与槽 10–19 轮转。安�
 Musica 路线解锁沿用来源分支的 TOHKA_CLEAR、AYAME_CLEAR、SUI_CLEAR、REN_CLEAR 白名单，仅脚本 setglobal 写入 1 时记录。解锁独立于剧情槽持久化，冷启动及读旧档合并保留；未知、重复、损坏或异游戏进度明确拒绝，读取失败不覆盖原文件。
 
 Musica 原生启动模式使用 `MusicaLaunchMode::Direct/Title`。Title 会话的 end 返回原生标题，Direct 仍结束会话；标题菜单和恢复必须保留会话选择的启动方式，不恢复旧 Host semantic menu ABI。未接入的页面明确报错，不能静默开始剧情。
+
+
+Family API v5 增加可选 SetFullscreen 窗口命令，Manager 在 Slint 窗口线程执行，关闭会话恢复普通窗口。该命令不传 UI 类型或原生句柄；无窗口 Host 明确拒绝。Musica 原生设置通过同一通道应用与冷启动恢复全屏。

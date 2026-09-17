@@ -569,7 +569,10 @@ impl FamilySession for FvpSession {
         } else {
             FamilyStatus::Running
         };
-        Ok(AdvanceResponse { status })
+        Ok(AdvanceResponse {
+            status,
+            ..AdvanceResponse::running()
+        })
     }
     fn visit_frame(&self, visitor: &mut dyn FrameVisitor) -> FamilyResult<()> {
         let view = FrameView::from_slice(&self.frame, self.frame_info)?;

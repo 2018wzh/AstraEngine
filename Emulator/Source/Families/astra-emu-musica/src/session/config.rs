@@ -74,13 +74,10 @@ impl MusicaSession {
         };
         if control == MusicaConfigControl::Apply {
             let config = self.vm.config_for_presentation().map_err(vm_error)?;
-            if config.fullscreen != self.vm.config().fullscreen {
-                return Err(error(
-                    "ASTRA_EMU_MUSICA_WINDOW_COMMAND_UNAVAILABLE",
-                    "Family window commands are not integrated yet",
-                ));
-            }
             self.storage.write_configuration(self.game, config)?;
+            if config.fullscreen != self.vm.config().fullscreen {
+                self.pending_fullscreen = Some(config.fullscreen);
+            }
         }
         match self.vm.apply_config_control(control).map_err(vm_error)? {
             MusicaConfigChange::Present => {}

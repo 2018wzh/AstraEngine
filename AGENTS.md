@@ -24,6 +24,7 @@
 - Editor 使用 ACP 外部 Agent 和 MCP 编辑接口，提供自主/逐批确认模式。统一文档版本、批量编辑和撤销，不另写模型 API Agent 循环。
 - EMU 独立于 RuntimeWorld、VN、product package 和 Engine registry。Family 自持 VM、文件、渲染、解码、混音和存档，Host 接收 CPU 最终帧和有界 PCM。
 - 核心与插件的诊断日志必须接入 Manager 的 tracing/astra-observability 通道，覆盖初始化、运行、存读档及关闭。动态库由适配层安装共享日志桥，静态核心复用宿主订阅器；核心不另建文件 sink。保留稳定事件、级别、来源和有界字段；按用户决定，日志桥不做字段脱敏或白名单过滤，字符串、message 和 Debug/Display 正常转发，超限用 dropped_fields 计数。桥初始化失败阻止加载。
+- Family API v5 的窗口请求只传 typed SetFullscreen，不传 UI 类型或 native handle；Manager 在窗口线程执行，退出恢复普通窗口，无窗口 Host 明确拒绝。
 - Family API 使用 abi_stable；可选增强关闭不阻止基础播放。Manager 保存核心/游戏配置，启动时传入并由核心验证。库驻留至进程退出，更新重启 Manager；关闭会话仍须取消请求并等待 worker 结束。
 - FVP 保留成熟 RFVP，适配尽量小。上游基线为 0.6.0 revision 304e773387a9920c9db091ec1fd937c717aea949，差异写 MODIFICATIONS.md；共用上游 GlobalSaveDataV1/RFVG，不复制 hosted 存档结构。
 - Musica 使用可选 SDK，共享底层能力不要求创建 Engine session。短期采用核心自有存档，长期才做原版兼容。成熟核心无需采用 SDK。

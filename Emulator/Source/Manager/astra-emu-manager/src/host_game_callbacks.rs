@@ -47,6 +47,7 @@ pub(super) fn install<C: ManagerController, R: AstraUnderlayRenderer>(
         };
         let result = leave_controller.borrow_mut().leave_game();
         window.set_game_active(false);
+        window.window().set_fullscreen(false);
         match result {
             Ok(model) => {
                 apply_model(&leave_adapter, &model);
