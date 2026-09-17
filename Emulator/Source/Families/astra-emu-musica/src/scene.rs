@@ -14,6 +14,7 @@ mod character;
 mod particles;
 mod stage;
 mod stand;
+mod texture;
 mod wscroll2;
 
 #[cfg(test)]
@@ -96,19 +97,6 @@ impl Scene {
             stand_offsets: lru::LruCache::new(NonZeroUsize::new(32).unwrap()),
             pixels: vec![0; width as usize * height as usize * 4].into(),
         })
-    }
-    fn texture(&mut self, uri: &str) -> FamilyResult<TextureFrame> {
-        if let Some(frame) = self.textures.get(uri) {
-            return Ok(frame.clone());
-        }
-        let bytes = read_asset(&self.archive, uri, MAX_ASSET_BYTES)?;
-        let frame = self.textures.decode(uri.into(), &bytes).map_err(|_| {
-            error(
-                "ASTRA_EMU_MUSICA_IMAGE_DECODE",
-                "image could not be decoded within its bounds",
-            )
-        })?;
-        Ok(frame)
     }
     fn layer(
         &mut self,
