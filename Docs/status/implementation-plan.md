@@ -317,3 +317,7 @@ Musica 震动补充 Family 主入口 GPU 回归：从归档脚本执行 stage/sh
 Classic route.coverage.006 已使用修复后的 Release Headless 完成 DX12 独显运行，47,805 条输入、38 次选择到达 tsui.ending，运行无诊断。终点 PNG 已查看，为黑场；仅确认当前转换包的路线推进和终止，全程视听、真实 Player、Modern 与 37 路线总体验收仍开放。
 
 Musica 已移植 hscroll/vscroll 与轴向 endscroll，背景坐标直接进入已有 GPU Scene。三项专项测试通过：正负方向与亚毫秒余时恢复、强制结束及新 stage 清除、非法存档不修改现场，以及 Family F5/F9 输入后的真实 GPU 像素和等待完成。v11 保存滚动状态并交叉校验背景坐标。线性 scroll、scrollxf 和 WScroll2 仍待整合。
+
+FVP 在现有 Windows Sandbox 会话继续长流程：确认 Enter 与原生 AUTO 可从月亮场景推进至人物对话，文字清晰。已通过原生保存页写入此前为空的 009 槽，再切换读取页恢复；恢复后的文字、背景和立绘正常显示，001–008 未覆盖，AUTO 已恢复运行。当前仍为显式 Null 音频，不计实际声音或完整结局验收。
+
+Classic route.coverage.007 完成 GPU Headless 输入流程，47,801 条输入、38 次选择到达 tsui.ending，DX12 独显且无运行诊断。终点 PNG 已查看，为黑场；完整视听与真实 Player 验收仍开放。
