@@ -251,6 +251,7 @@ struct NativeVnUiFrameReuseKey {
     theme_revision: u64,
     model_schema: String,
     model_revision: u64,
+    text_reveal_progress: Option<(u32, u32)>,
 }
 
 impl NativeVnUiFrameReuseKey {
@@ -258,7 +259,11 @@ impl NativeVnUiFrameReuseKey {
     // `repaint_after_ns`; only outputs that explicitly declare no repaint are
     // admitted to this cache. Controller animation progress advances the
     // explicit model revision.
-    fn from_request(request: &UiFrameRequest, instance_id: &str) -> Self {
+    fn from_request(
+        request: &UiFrameRequest,
+        instance_id: &str,
+        text_reveal_progress: Option<(u32, u32)>,
+    ) -> Self {
         Self {
             session_id: request.session_id.clone(),
             generation: request.generation,
@@ -267,10 +272,16 @@ impl NativeVnUiFrameReuseKey {
             theme_revision: request.theme.revision,
             model_schema: request.model_schema.clone(),
             model_revision: request.model_revision,
+            text_reveal_progress,
         }
     }
 
-    fn matches(&self, request: &UiFrameRequest, instance_id: &str) -> bool {
+    fn matches(
+        &self,
+        request: &UiFrameRequest,
+        instance_id: &str,
+        text_reveal_progress: Option<(u32, u32)>,
+    ) -> bool {
         self.session_id == request.session_id
             && self.generation == request.generation
             && self.instance_id == instance_id
@@ -278,6 +289,7 @@ impl NativeVnUiFrameReuseKey {
             && self.theme_revision == request.theme.revision
             && self.model_schema == request.model_schema
             && self.model_revision == request.model_revision
+            && self.text_reveal_progress == text_reveal_progress
     }
 }
 
@@ -3344,13 +3356,21 @@ impl NativeVnHostCommandSource {
             },
         );
         self.active_ui_controller = Some(active);
+        // Presentation reveal advances independently of the 60 Hz runtime step.
+        // Reuse only when the visible text model is unchanged as well.
+        let text_reveal_progress = text_reveal
+            .as_ref()
+            .map(|text| (text.visible_graphemes, text.text_graphemes));
         let stable_frame = request.input.events.is_empty() && !active_changed;
         host_performance.frame_model_ns = performance_phase_duration(frame_model_started)?;
         if !active_changed {
             if let (Some(reuse), Some(semantics)) =
                 (self.ui_frame_reuse.as_mut(), self.ui_semantics.as_ref())
             {
-                if reuse.key.matches(&request, &instance_id) {
+                if reuse
+                    .key
+                    .matches(&request, &instance_id, text_reveal_progress)
+                {
                     if let Some(pointer_position) = reusable_pointer_position(
                         reuse.pointer_position,
                         &request.input.events,
@@ -3398,7 +3418,8 @@ impl NativeVnHostCommandSource {
                 }
             }
         }
-        let reuse_key = NativeVnUiFrameReuseKey::from_request(&request, &instance_id);
+        let reuse_key =
+            NativeVnUiFrameReuseKey::from_request(&request, &instance_id, text_reveal_progress);
         let pointer_position = pointer_position_after_events(
             self.ui_frame_reuse
                 .as_ref()

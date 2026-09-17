@@ -189,3 +189,61 @@ astra.ui.controller.register("test.alternate", {
     validate(source.release_resources().unwrap());
     source.shutdown().unwrap();
 }
+
+#[test]
+fn presentation_reveal_invalidates_cached_scroll_text_without_runtime_step() {
+    let ui = TEST_UI.replace("    text id:body value:$model.text_key", r#"    row id:dialogue position_x:56 position_y:484 min_width:688 max_width:688 max_height:80 gap:18 clip_children:true
+      text id:speaker_text value:$model.speaker_key min_width:92 max_width:92 max_height:72 font_size:20 max_lines:2
+      scroll id:body_scroll min_width:578 max_width:578 min_height:72 max_height:72 clip_children:true
+        text id:body value:$model.text_key visible_graphemes:$model.visible_graphemes max_width:562 font_size:22 max_lines:64 text_padding:0"#);
+    let bytes = product_package_with_ui_and_request(STORY, &ui, test_compile_options(), |_| {});
+    let package = PackageReader::open(&bytes).unwrap();
+    let mut source = NativeVnHostCommandSource::from_package(
+        &package,
+        VnRunConfig::classic("en"),
+        800,
+        600,
+        PlayerHostResourceId(1),
+    )
+    .unwrap();
+    source.launch().unwrap();
+    let batch = source.tick_presentation(1_000_000_000).unwrap().unwrap();
+    let semantics = source.ui_semantics().unwrap();
+    let body = semantics
+        .nodes
+        .iter()
+        .find(|node| node.id == "root/dialogue/body_scroll/body")
+        .unwrap();
+    assert!(
+        body.properties["text.visible_graphemes"]
+            .parse::<u32>()
+            .unwrap()
+            > 0
+    );
+    assert!(batch.commands.iter().any(|command| {
+        if let PlayerHostCommand::PresentScene {commands,..} = command {
+            commands.iter().any(|draw| matches!(draw, SceneCommand::GlyphRun {id,glyphs,..} if id.contains("body_scroll/body") && !glyphs.is_empty()))
+        } else {false}
+    }), "revealed scroll text must emit glyphs");
+    let viewport = semantics
+        .nodes
+        .iter()
+        .find(|node| node.id == "root/dialogue/body_scroll")
+        .unwrap();
+    assert!(
+        body.bounds_points.min.x >= viewport.bounds_points.min.x
+            && body.bounds_points.min.x < viewport.bounds_points.max.x,
+        "body {:?}, viewport {:?}",
+        body.bounds_points,
+        viewport.bounds_points
+    );
+    assert!(
+        body.bounds_points.min.y >= viewport.bounds_points.min.y
+            && body.bounds_points.min.y < viewport.bounds_points.max.y,
+        "body {:?}, viewport {:?}",
+        body.bounds_points,
+        viewport.bounds_points
+    );
+    source.release_resources().unwrap();
+    source.shutdown().unwrap();
+}
