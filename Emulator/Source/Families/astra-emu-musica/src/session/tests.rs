@@ -597,3 +597,49 @@ fn native_gpu_screen_shake_advances_during_wait_and_restores_through_family_inpu
     assert_eq!(frame.0, negative);
     opened.session.close().unwrap();
 }
+
+#[test]
+fn native_gpu_axis_scroll_waits_and_restores_background_position() {
+    let _session = PROVIDER_SESSION.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    fixture::game(
+        root.path(),
+        b".stage * BG.png 0 0\r\n.hscroll 8 1\r\n.endscroll false\r\n.end\r\n",
+    );
+    let mut provider = MusicaProvider::default();
+    let mut opened = provider
+        .open(request(root.path(), Sink::default()))
+        .unwrap();
+    let mut frame = Capture(Vec::new());
+    opened.session.advance(16_666_667, &[]).unwrap();
+    opened.session.visit_frame(&mut frame).unwrap();
+    let original = frame.0.clone();
+    opened.session.advance(16_666_667, &[]).unwrap();
+    assert_eq!(
+        opened.session.advance(40_000_000, &[]).unwrap().status,
+        FamilyStatus::Waiting
+    );
+    opened.session.visit_frame(&mut frame).unwrap();
+    let middle = frame.0.clone();
+    assert_ne!(middle, original);
+    assert_eq!(&middle[..4], &[0, 0, 0, 255]);
+    assert_eq!(&middle[4 * 4..4 * 4 + 4], &original[..4]);
+    opened.session.advance(0, &[key(KeyCode::F5)]).unwrap();
+    assert_eq!(
+        opened.session.advance(40_000_000, &[]).unwrap().status,
+        FamilyStatus::Finished
+    );
+    opened.session.visit_frame(&mut frame).unwrap();
+    let finished = frame.0.clone();
+    assert_ne!(finished, middle);
+    opened.session.advance(0, &[key(KeyCode::F9)]).unwrap();
+    opened.session.visit_frame(&mut frame).unwrap();
+    assert_eq!(frame.0, middle);
+    assert_eq!(
+        opened.session.advance(40_000_000, &[]).unwrap().status,
+        FamilyStatus::Finished
+    );
+    opened.session.visit_frame(&mut frame).unwrap();
+    assert_eq!(frame.0, finished);
+    opened.session.close().unwrap();
+}

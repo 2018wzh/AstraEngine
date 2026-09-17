@@ -4,7 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-pub const MUSICA_RUNTIME_STATE_SCHEMA: &str = "astra.emu.musica.runtime_state.v10";
+pub const MUSICA_RUNTIME_STATE_SCHEMA: &str = "astra.emu.musica.runtime_state.v11";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MusicaRuntimeState {
@@ -20,6 +20,7 @@ pub struct MusicaRuntimeState {
     pub stage: Option<MusicaStageCommand>,
     pub transition: MusicaTransitionState,
     pub effect: Option<MusicaEffectState>,
+    pub axis_scroll: Option<MusicaAxisScrollState>,
     pub screen_shake: Option<MusicaScreenShakeState>,
     pub panel: Option<MusicaPanelState>,
     pub audio: BTreeMap<u32, MusicaAudioState>,
@@ -36,6 +37,10 @@ pub struct MusicaRuntimeState {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum MusicaWaitState {
+    AxisScroll {
+        token_id: String,
+        milliseconds: u32,
+    },
     Time {
         token_id: String,
         timer_ticks: u32,
@@ -226,6 +231,7 @@ pub enum MusicaVmEvent {
     Stage(MusicaStageCommand),
     Effect(MusicaEffectFrame),
     EffectCleared,
+    AxisScroll(MusicaAxisScrollFrame),
     ScreenShake(MusicaScreenShakeFrame),
     Choice,
     Panel {
@@ -285,5 +291,30 @@ pub enum MusicaScreenShakeKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MusicaScreenShakeFrame {
+    pub sequence: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MusicaAxisScrollState {
+    pub axis: MusicaAxisScrollAxis,
+    pub start: i32,
+    pub target: i32,
+    /// Native scroll speed in tenths of a pixel per millisecond.
+    pub speed_tenths: i32,
+    pub duration_ms: u32,
+    pub elapsed_ns: u64,
+    pub current: i32,
+    pub completed: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MusicaAxisScrollAxis {
+    Horizontal,
+    Vertical,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MusicaAxisScrollFrame {
     pub sequence: u64,
 }

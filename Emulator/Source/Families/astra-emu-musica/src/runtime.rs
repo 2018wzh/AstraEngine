@@ -2,6 +2,7 @@ mod control;
 mod effects;
 mod errors;
 mod model;
+mod scroll;
 pub(crate) mod shake;
 mod stage;
 use effects::*;
@@ -102,6 +103,7 @@ impl MusicaVm {
             transition: MusicaTransitionState::default(),
             effect: None,
             screen_shake: None,
+            axis_scroll: None,
             panel: None,
             audio: BTreeMap::new(),
             movie: None,
@@ -127,6 +129,7 @@ impl MusicaVm {
 
     pub fn encode_native_save(&self) -> Result<Vec<u8>, MusicaRuntimeError> {
         validate_stage_state(self.state.stage.as_ref())?;
+        scroll::validate_state(&self.state)?;
         if let Some(shake) = &self.state.screen_shake {
             shake::validate_screen_shake_state(shake)?;
         }
@@ -140,6 +143,7 @@ impl MusicaVm {
             return Err(MusicaRuntimeError::State);
         }
         validate_stage_state(state.stage.as_ref())?;
+        scroll::validate_state(&state)?;
         if let Some(shake) = &state.screen_shake {
             shake::validate_screen_shake_state(shake)?;
         }
@@ -168,6 +172,7 @@ impl MusicaVm {
         self.state.message = None;
         self.state.choice = None;
         self.state.screen_shake = None;
+        self.state.axis_scroll = None;
         self.state.terminal = false;
         Ok(())
     }
@@ -189,6 +194,7 @@ impl MusicaVm {
         }
         choices::validate_choice(&self.script, &restored)?;
         validate_stage_state(restored.stage.as_ref())?;
+        scroll::validate_state(&restored)?;
         if let Some(shake) = &restored.screen_shake {
             shake::validate_screen_shake_state(shake)?;
         }
@@ -207,7 +213,8 @@ impl MusicaVm {
             .as_ref()
             .ok_or(MusicaRuntimeError::Waiting)?;
         let expected = match current {
-            MusicaWaitState::Time { token_id, .. }
+            MusicaWaitState::AxisScroll { token_id, .. }
+            | MusicaWaitState::Time { token_id, .. }
             | MusicaWaitState::Input { token_id }
             | MusicaWaitState::Media { token_id, .. }
             | MusicaWaitState::Presentation { token_id, .. }
@@ -411,6 +418,9 @@ fn execute_control(
         "playvoice" => execute_play_voice(command, state),
         "transition" => execute_transition(command, state),
         "stage" => execute_stage(command, state),
+        "hscroll" => scroll::execute_axis_scroll(command, state, MusicaAxisScrollAxis::Horizontal),
+        "vscroll" => scroll::execute_axis_scroll(command, state, MusicaAxisScrollAxis::Vertical),
+        "endscroll" => scroll::execute_end_scroll(command, state),
         "shakescreen" => shake::execute_screen_shake(command, state),
         "effect" => execute_effect(command, state),
         "panel" => execute_panel(command, state),

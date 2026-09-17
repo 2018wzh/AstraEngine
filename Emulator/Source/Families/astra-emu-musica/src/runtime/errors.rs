@@ -34,6 +34,8 @@ pub enum MusicaRuntimeError {
     Pragma,
     #[error("ASTRA_EMU_MUSICA_RUNTIME_SCREEN_SHAKE: invalid screen shake command or state")]
     ScreenShake,
+    #[error("ASTRA_EMU_MUSICA_RUNTIME_AXIS_SCROLL: invalid scroll command or state")]
+    AxisScroll,
 }
 
 impl MusicaRuntimeError {
@@ -52,6 +54,7 @@ impl MusicaRuntimeError {
             Self::ChainTarget => "ASTRA_EMU_MUSICA_RUNTIME_CHAIN",
             Self::AudioResource => "ASTRA_EMU_MUSICA_RUNTIME_AUDIO_RESOURCE",
             Self::Effect => "ASTRA_EMU_MUSICA_RUNTIME_EFFECT",
+            Self::AxisScroll => "ASTRA_EMU_MUSICA_RUNTIME_AXIS_SCROLL",
             Self::ScreenShake => "ASTRA_EMU_MUSICA_RUNTIME_SCREEN_SHAKE",
             Self::Pragma => "ASTRA_EMU_MUSICA_RUNTIME_PRAGMA",
             Self::Panel => "ASTRA_EMU_MUSICA_RUNTIME_PANEL",

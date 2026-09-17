@@ -313,3 +313,7 @@ Musica 控制 pragma 已从来源分支接入 Family 主路径，修复所有 pr
 Musica 屏幕震动已从来源提交 00610272d 移植，包含 V/R 指令、原生方向表、动画时钟、替换及 transition/chain 清除。场景与面板复用 GPU 变换和裁剪，未增加 CPU 图像搬运。v10 原生状态保存余时、偏移和随机状态；非法振幅先检查范围，避免损坏存档触发整数取负溢出。专项测试已覆盖中途恢复、逐像素裁剪、清除和非法状态拒绝。真实游戏震动与完整演出验收仍开放。
 
 Musica 震动补充 Family 主入口 GPU 回归：从归档脚本执行 stage/shakescreen/wait，经 F5/F9 输入保存和恢复，确认恢复后的像素与不中断演出一致，挂起停止时钟、恢复后继续。此测试覆盖 Host 调用路径，仍不替代商业游戏长流程验收。
+
+Classic route.coverage.006 已使用修复后的 Release Headless 完成 DX12 独显运行，47,805 条输入、38 次选择到达 tsui.ending，运行无诊断。终点 PNG 已查看，为黑场；仅确认当前转换包的路线推进和终止，全程视听、真实 Player、Modern 与 37 路线总体验收仍开放。
+
+Musica 已移植 hscroll/vscroll 与轴向 endscroll，背景坐标直接进入已有 GPU Scene。三项专项测试通过：正负方向与亚毫秒余时恢复、强制结束及新 stage 清除、非法存档不修改现场，以及 Family F5/F9 输入后的真实 GPU 像素和等待完成。v11 保存滚动状态并交叉校验背景坐标。线性 scroll、scrollxf 和 WScroll2 仍待整合。
