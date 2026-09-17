@@ -325,3 +325,5 @@ Classic route.coverage.007 完成 GPU Headless 输入流程，47,801 条输入�
 Musica 的二维 `.scroll` 已从来源实现接入，与轴向滚动共用 endscroll、stage/chain 清除、Family 时钟和 GPU Scene。v12 保存二维轨迹，并拒绝互斥滚动同时占用、轨迹与背景不一致或非法时长的状态。已增加斜向中途恢复、强制结束、损坏存档拒绝和 Family F5/F9 GPU 回归；scrollxf、WScroll2 和完整演出仍待整合。
 
 Musica scrollxf 已从来源实现接入：按缓动变化裁剪窗口与偏移，使用共享 GPU clip/transform，保留场景/面板与文字分层。专项测试覆盖缓动、强制结束、中途恢复、跨脚本继续演出、stage 清除、空窗口与非法状态拒绝；v13 保存当前裁剪轨迹。WScroll2、Firefly、次级效果、人物动画和系统页仍待整合。
+
+Musica 接入来源的无参数 `.effect end`，与主效果清除共用生命周期；额外参数明确失败，不清除正在运行的效果。专项测试覆盖清除后的时钟、存档与非法停止参数。WScroll2 的双层全景绘制和 sync 资源读取仍待整合。

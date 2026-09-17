@@ -52,7 +52,7 @@ Family 存档容器另外保存当前显示消息、等待余量和音频快照�
 
 `_ov.png` 的模式 2 由 `sub_418C90` 构建查表，`sub_418D20` 先将源通道乘有效 alpha，再查表；目标 alpha 保留。令目标通道为 d，乘 alpha 后的源通道为 s：s < 128 时取 floor(2*d*s/256)，否则取 255-floor((511-2*s)*(255-d)/256)。零有效 alpha 跳过写入。其分支依据源通道，不能直接套用 Multiply 或按目标通道分支的 Overlay；GPU 实现仍待接入。
 
-本次接续以 `codex/minori-runtime-followup` 的 00610272d 为实现来源，并逐项核对其未提交修改。`.effect *` 已移植：释放主效果、推进效果序号，后续时钟不再产生旧效果帧，存档保存清除后的状态。完整来源中的 Firefly、WScroll2、次级效果、滚动、人物动画、电影及系统页仍需移植至新 Family/SDK 路径；不得因当前 CrossFade 已通过测试而将这些功能视为完成。
+本次接续以 `codex/minori-runtime-followup` 的 00610272d 为实现来源，并逐项核对其未提交修改。`.effect *` 与无参数 `.effect end` 已移植：释放主效果、推进效果序号，后续时钟不再产生旧效果帧，存档保存清除后的状态。`end` 带额外参数时失败并保留当前效果；Firefly 的渐停分支随粒子实现接入。完整来源中的 Firefly、WScroll2、次级效果、滚动、人物动画、电影及系统页仍需移植至新 Family/SDK 路径；不得因当前 CrossFade 已通过测试而将这些功能视为完成。
 
 消息面板沿用来源实现：`.panel 0` 清除当前面板，`.panel 1` 使用 `msgPanel.png`，`.panel 1 * filename` 使用指定 sys 图片，`.panel 3` 使用 `fullPanel.png`。模式 1 位于视口高度减图片高度加 64 的位置，模式 3 位于原点；替换与清除后的状态可存读档。未知模式、额外参数和非安全文件名返回面板错误，不忽略命令。
 

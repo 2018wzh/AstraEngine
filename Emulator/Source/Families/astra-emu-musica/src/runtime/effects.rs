@@ -8,8 +8,11 @@ pub(super) fn execute_effect(
         .map_err(|_| MusicaRuntimeError::Effect)?;
     if tokens.is_empty()
         || tokens.len() > 5
-        || !matches!(tokens[0].as_str(), "*" | "CrossFade2" | "CrossFade")
+        || !matches!(tokens[0].as_str(), "*" | "end" | "CrossFade2" | "CrossFade")
     {
+        return Err(MusicaRuntimeError::Effect);
+    }
+    if tokens[0] == "end" && tokens.len() != 1 {
         return Err(MusicaRuntimeError::Effect);
     }
     if tokens[0] == "*" || tokens.len() == 1 || (tokens.len() == 4 && tokens[1] == "*") {

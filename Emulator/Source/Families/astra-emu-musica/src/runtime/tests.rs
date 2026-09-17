@@ -34,7 +34,7 @@ fn choice_restores_focus_and_commits_the_selected_label() {
 
 #[test]
 fn musica_crossfade_reuses_timeline_and_empty_effect_releases_primary_slot() {
-    for clearing in ["*", "CrossFade", "CrossFade2", "CrossFade * 320 100"] {
+    for clearing in ["*", "end", "CrossFade", "CrossFade2", "CrossFade * 320 100"] {
         let source = format!(
             ".effect CrossFade first.png:second.png 32 100\r\n.effect {clearing}\r\n.end\r\n"
         );
@@ -699,4 +699,23 @@ fn panel_modes_replace_clear_and_roundtrip_native_save() {
         let restored = MusicaVm::decode_native_save(&vm.encode_native_save().unwrap()).unwrap();
         assert_eq!(restored.panel, expected);
     }
+}
+
+#[test]
+fn musica_effect_end_rejects_operands_without_clearing_the_live_effect() {
+    let source = b".effect CrossFade2 first.png:second.png 32 100\r\n.effect end extra\r\n";
+    let mut vm = MusicaVm::new(
+        "musica:/scr/test.sc".into(),
+        Hash256::from_sha256(source),
+        parse_sc(source, &ScOpcodeCatalog::observed_musica()).unwrap(),
+        1,
+    )
+    .unwrap();
+    vm.step(1).unwrap();
+    vm.advance_effect_clock(100_000_000).unwrap();
+    let effect = vm.state().effect.clone();
+    let sequence = vm.state().effect_sequence;
+    assert_eq!(vm.step(2).unwrap_err(), MusicaRuntimeError::Effect);
+    assert_eq!(vm.state().effect, effect);
+    assert_eq!(vm.state().effect_sequence, sequence);
 }
