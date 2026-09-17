@@ -10,6 +10,7 @@ use std::{num::NonZeroUsize, sync::Arc};
 const MAX_ASSET_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_IMAGE_BYTES: usize = 128 * 1024 * 1024;
 
+mod stage;
 mod stand;
 
 #[cfg(test)]
@@ -109,9 +110,19 @@ impl Scene {
         y: i32,
         opacity: f32,
     ) -> FamilyResult<()> {
+        self.layer_with_blend(commands, uri, [x, y], opacity, BlendMode::Alpha)
+    }
+    fn layer_with_blend(
+        &mut self,
+        commands: &mut Vec<SceneCommand>,
+        uri: &str,
+        [x, y]: [i32; 2],
+        opacity: f32,
+        blend: BlendMode,
+    ) -> FamilyResult<()> {
         let frame = self.texture(uri)?;
         commands.push(SceneCommand::Texture {
-            id: uri.into(),
+            id: format!("layer:{}", commands.len()),
             destination: RectI {
                 x,
                 y,
@@ -120,7 +131,7 @@ impl Scene {
             },
             frame,
             opacity,
-            blend: BlendMode::Alpha,
+            blend,
         });
         Ok(())
     }
@@ -134,34 +145,7 @@ impl Scene {
             rgba: [0, 0, 0, 255],
         }];
         if let Some(stage) = &state.stage {
-            if stage.resource_sequence.len() != 1 {
-                return Err(error(
-                    "ASTRA_EMU_MINORI_STAGE_SEQUENCE",
-                    "native stage resource sequence rendering is not implemented",
-                ));
-            }
-            if !stage.stands.is_empty() && stage.resource_sequence[0].is_some() {
-                return Err(error(
-                    "ASTRA_EMU_MINORI_STAGE_LAYER_ORDER",
-                    "combined foreground and stand composition requires native layer ordering",
-                ));
-            }
-            if let Some(background) = &stage.background {
-                self.layer(
-                    &mut commands,
-                    &background.resource_uri,
-                    background.x,
-                    background.y,
-                    1.0,
-                )?;
-            }
-            for stand in &stage.stands {
-                self.stand(&mut commands, stand)?;
-            }
-            if let Some(uri) = &stage.resource_sequence[0] {
-                let [x, y] = stage.reference_position.unwrap_or([0, 0]);
-                self.layer(&mut commands, uri, x, y, 1.0)?;
-            }
+            self.stage(&mut commands, stage)?;
         }
         if let Some(effect) = &state.effect {
             let current = effect
