@@ -13,6 +13,7 @@ pub struct TextOutline {
 }
 
 /// One core-owned text region. Layout policy and fonts remain explicit inputs.
+#[derive(Clone)]
 pub struct TextSceneLayout {
     pub request: TextLayoutRequest,
     pub translation: (i32, i32),
@@ -42,6 +43,25 @@ impl TextScene {
     }
 
     pub fn frame(&mut self, regions: &[TextSceneLayout]) -> Result<Vec<SceneCommand>, MediaError> {
+        self.frame_scaled(regions, 1.0)
+    }
+
+    /// Build a frame at a physical raster density while keeping the caller's
+    /// layout in logical stage units. The provider receives scaled constraints
+    /// and therefore rasterizes glyphs at the requested density; the caller can
+    /// map the resulting commands back through its raster-to-logical transform.
+    pub fn frame_scaled(
+        &mut self,
+        regions: &[TextSceneLayout],
+        raster_scale: f32,
+    ) -> Result<Vec<SceneCommand>, MediaError> {
+        if !raster_scale.is_finite() || !(0.25..=8.0).contains(&raster_scale) {
+            return Err(MediaError::message("ASTRA_EMU_SDK_TEXT_SCALE"));
+        }
+        let regions = regions
+            .iter()
+            .map(|region| scale_layout(region, raster_scale))
+            .collect::<Result<Vec<_>, MediaError>>()?;
         let mut visible = BTreeSet::new();
         let mut layers = Vec::new();
         for (index, region) in regions.iter().enumerate() {
@@ -49,7 +69,7 @@ impl TextScene {
                 return Err(MediaError::message("ASTRA_EMU_SDK_TEXT_LAYOUT_ID"));
             }
             if let Some(outline) = region.outline {
-                if !(1..=8).contains(&outline.radius) || outline.rgba[3] == 0 {
+                if !(1..=64).contains(&outline.radius) || outline.rgba[3] == 0 {
                     return Err(MediaError::message("ASTRA_EMU_SDK_TEXT_OUTLINE"));
                 }
                 let radius = i32::from(outline.radius);
@@ -125,4 +145,60 @@ impl TextScene {
         self.visible.clear();
         self.resources.shutdown()
     }
+}
+
+fn scale_layout(region: &TextSceneLayout, scale: f32) -> Result<TextSceneLayout, MediaError> {
+    if let Some(outline) = region.outline {
+        if !(1..=8).contains(&outline.radius) || outline.rgba[3] == 0 {
+            return Err(MediaError::message("ASTRA_EMU_SDK_TEXT_OUTLINE"));
+        }
+    }
+    let mut request = region.request.clone();
+    request.constraint.max_width = scale_f32(request.constraint.max_width, scale)?;
+    request.constraint.max_height = request
+        .constraint
+        .max_height
+        .map(|value| scale_f32(value, scale))
+        .transpose()?;
+    request.constraint.font_size = scale_f32(request.constraint.font_size, scale)?;
+    request.constraint.line_height = scale_f32(request.constraint.line_height, scale)?;
+    let translation = (
+        scale_i32(region.translation.0, scale)?,
+        scale_i32(region.translation.1, scale)?,
+    );
+    let outline = region
+        .outline
+        .map(|outline| {
+            let radius = (f32::from(outline.radius) * scale).round();
+            if !radius.is_finite() || !(1.0..=64.0).contains(&radius) {
+                return Err(MediaError::message("ASTRA_EMU_SDK_TEXT_OUTLINE"));
+            }
+            Ok(TextOutline {
+                radius: radius as u8,
+                rgba: outline.rgba,
+            })
+        })
+        .transpose()?;
+    Ok(TextSceneLayout {
+        request,
+        translation,
+        rgba: region.rgba,
+        outline,
+    })
+}
+
+fn scale_f32(value: f32, scale: f32) -> Result<f32, MediaError> {
+    let scaled = value * scale;
+    if !scaled.is_finite() || scaled <= 0.0 {
+        return Err(MediaError::message("ASTRA_EMU_SDK_TEXT_SCALE"));
+    }
+    Ok(scaled)
+}
+
+fn scale_i32(value: i32, scale: f32) -> Result<i32, MediaError> {
+    let scaled = f64::from(value) * f64::from(scale);
+    if !scaled.is_finite() || scaled < f64::from(i32::MIN) || scaled > f64::from(i32::MAX) {
+        return Err(MediaError::message("ASTRA_EMU_SDK_TEXT_SCALE"));
+    }
+    Ok(scaled.round() as i32)
 }

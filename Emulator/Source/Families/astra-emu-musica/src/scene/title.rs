@@ -29,8 +29,11 @@ impl Scene {
             )
         };
         let base = format!("musica:/sys/{base}");
-        let frame = self.texture(&base)?;
-        if native_size && (frame.width, frame.height) != (self.width, self.height) {
+        let asset = self.texture_asset(&base)?;
+        if native_size
+            && (asset.logical_extent.width, asset.logical_extent.height)
+                != (self.width, self.height)
+        {
             return Err(error(
                 "ASTRA_EMU_MUSICA_TITLE_DIMENSIONS",
                 "title resource does not match the native stage",
@@ -50,8 +53,11 @@ impl Scene {
                     )
                 })?;
             let over = format!("musica:/sys/{over}");
-            let frame = self.texture(&over)?;
-            if native_size && (frame.width, frame.height) != (self.width, self.height) {
+            let asset = self.texture_asset(&over)?;
+            if native_size
+                && (asset.logical_extent.width, asset.logical_extent.height)
+                    != (self.width, self.height)
+            {
                 return Err(error(
                     "ASTRA_EMU_MUSICA_TITLE_DIMENSIONS",
                     "title hover resource does not match the native stage",

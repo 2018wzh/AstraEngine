@@ -86,6 +86,15 @@ pub fn musica_descriptor() -> FamilyDescriptor {
         default: ConfigValue::Bool(true),
     });
     configuration.push(ConfigField {
+        id: "render_scale".into(),
+        label: "GPU render scale".into(),
+        group: "Presentation".into(),
+        kind: ConfigKind::Enum {
+            choices: vec!["1.0".into(), "1.5".into(), "2.0".into(), "3.0".into()].into(),
+        },
+        default: ConfigValue::Enum("1.0".into()),
+    });
+    configuration.push(ConfigField {
         id: "script_encoding".into(),
         label: "Script encoding".into(),
         group: "Script".into(),
@@ -215,6 +224,30 @@ impl MusicaProvider {
                 ))
             }
         };
+        let (raster_width, raster_height, _raster_scale) = match config
+            .iter()
+            .find(|entry| entry.id == "render_scale")
+            .map(|entry| &entry.value)
+        {
+            Some(ConfigValue::Enum(value)) => match value.as_str() {
+                "1.0" => (1280, 720, 1.0),
+                "1.5" => (1920, 1080, 1.5),
+                "2.0" => (2560, 1440, 2.0),
+                "3.0" => (3840, 2160, 3.0),
+                _ => {
+                    return Err(error(
+                        "ASTRA_EMU_MUSICA_RENDER_SCALE",
+                        "render scale is not supported",
+                    ))
+                }
+            },
+            _ => {
+                return Err(error(
+                    "ASTRA_EMU_MUSICA_RENDER_SCALE",
+                    "render scale is missing or invalid",
+                ))
+            }
+        };
         let encoding = match config
             .iter()
             .find(|e| e.id == "script_encoding")
@@ -296,7 +329,14 @@ impl MusicaProvider {
                     "global progress cannot be applied",
                 )
             })?;
-        let mut scene = Scene::new(archive.clone(), 1280, 720, encoding)?;
+        let mut scene = Scene::new_scaled(
+            archive.clone(),
+            1280,
+            720,
+            raster_width,
+            raster_height,
+            encoding,
+        )?;
         scene.set_text_shadow(text_shadow);
         if title_launch {
             vm.begin_title_launch()
@@ -323,9 +363,13 @@ impl MusicaProvider {
             .ok_or_else(|| error("ASTRA_EMU_MUSICA_SESSION_ID", "session counter overflowed"))?;
         let id = format!("musica.{}", self.next);
         let info = FrameInfo {
-            width: 1280,
-            height: 720,
-            stride: 1280 * 4,
+            width: raster_width,
+            height: raster_height,
+            logical_width: 1280,
+            logical_height: 720,
+            stride: raster_width.checked_mul(4).ok_or_else(|| {
+                error("ASTRA_EMU_MUSICA_FRAME_SIZE", "frame stride overflows")
+            })?,
             format: FrameFormat::Rgba8Srgb {
                 alpha: FrameAlpha::Opaque,
             },

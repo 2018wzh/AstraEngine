@@ -27,6 +27,8 @@ pub(crate) struct ManagerStageRenderer {
     output_texture: Option<wgpu::Texture>,
     input_width: u32,
     input_height: u32,
+    logical_width: u32,
+    logical_height: u32,
     output_width: u32,
     output_height: u32,
     uploaded_generation: u64,
@@ -54,6 +56,8 @@ impl ManagerStageRenderer {
             output_texture: None,
             input_width: DEFAULT_STAGE_WIDTH,
             input_height: DEFAULT_STAGE_HEIGHT,
+            logical_width: DEFAULT_STAGE_WIDTH,
+            logical_height: DEFAULT_STAGE_HEIGHT,
             output_width: DEFAULT_STAGE_WIDTH,
             output_height: DEFAULT_STAGE_HEIGHT,
             uploaded_generation: 0,
@@ -176,7 +180,7 @@ impl AstraUnderlayRenderer for ManagerStageRenderer {
         self.texture_dirty = false;
         self.output_texture
             .clone()
-            .map(|texture| (texture, self.input_width, self.input_height))
+            .map(|texture| (texture, self.logical_width, self.logical_height))
     }
 
     fn render(&mut self, context: WgpuFrameContext<'_>) -> Result<(), String> {
@@ -244,6 +248,11 @@ impl AstraUnderlayRenderer for ManagerStageRenderer {
             self.output_height = output_height;
             self.texture_dirty = true;
         }
+        if self.logical_width != frame.logical_width || self.logical_height != frame.logical_height {
+            self.logical_width = frame.logical_width;
+            self.logical_height = frame.logical_height;
+            self.texture_dirty = true;
+        }
         let input = self
             .input_texture
             .as_ref()
@@ -302,6 +311,8 @@ impl AstraUnderlayRenderer for ManagerStageRenderer {
         self.input_texture = None;
         self.output_texture = None;
         self.device = None;
+        self.logical_width = DEFAULT_STAGE_WIDTH;
+        self.logical_height = DEFAULT_STAGE_HEIGHT;
         self.uploaded_generation = 0;
         self.texture_dirty = false;
         self.filter_engine = FilterEngine::new(self.dxc_path.clone());

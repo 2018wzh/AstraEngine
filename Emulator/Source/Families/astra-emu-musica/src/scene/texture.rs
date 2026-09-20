@@ -16,6 +16,8 @@ impl Scene {
                     error("ASTRA_EMU_MUSICA_ANI_FRAME_COUNT", "ANI contains no image")
                 })?;
                 validate_dimensions(first.width, first.height)?;
+                self.texture_origins
+                    .put(uri.to_owned(), [i32::from(first.offset_x), i32::from(first.offset_y)]);
                 Some(archive.decode_frame(0).map_err(core_error)?)
             }
             Some(value) if value.eq_ignore_ascii_case("sqz") => {
@@ -42,12 +44,22 @@ impl Scene {
                 })?;
             return Ok(frame);
         }
-        self.textures.decode(uri.into(), &bytes).map_err(|_| {
+        let frame = self.textures.decode(uri.into(), &bytes).map_err(|_| {
             error(
                 "ASTRA_EMU_MUSICA_IMAGE_DECODE",
                 "image could not be decoded within its bounds",
             )
-        })
+        })?;
+        self.texture_origins.put(uri.to_owned(), [0, 0]);
+        Ok(frame)
+    }
+
+    pub(super) fn texture_asset(&mut self, uri: &str) -> FamilyResult<TextureAsset> {
+        let frame = self.texture(uri)?;
+        let origin = self.texture_origins.get(uri).copied().unwrap_or([0, 0]);
+        TextureAsset::from_native_frame(frame)
+            .map(|asset| asset.with_origin(origin))
+            .map_err(core_error)
     }
 }
 

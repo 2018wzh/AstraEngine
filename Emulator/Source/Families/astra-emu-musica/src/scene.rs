@@ -2,8 +2,8 @@ mod config;
 use crate::{MusicaMountedVfs, MusicaRuntimeState, MusicaTextRenderer};
 use astra_byte_source::OwnedByteBuffer;
 use astra_emu_family_api::{FamilyError, FamilyResult};
-use astra_emu_sdk::TextureCache;
-use astra_media_core::{BlendMode, RectI, SceneCommand, TextureFrame};
+use astra_emu_sdk::{StageCanvas, TextureAsset, TextureCache};
+use astra_media_core::{BlendMode, Extent2D, RectI, SceneCommand, TextureFrame};
 use astra_platform::SceneFrame;
 use astra_platform_common::WgpuOffscreenRenderer;
 use std::{num::NonZeroUsize, sync::Arc};
@@ -55,20 +55,41 @@ pub(crate) struct Scene {
     sequence: u64,
     text: MusicaTextRenderer,
     textures: TextureCache,
+    texture_origins: lru::LruCache<String, [i32; 2]>,
     wscroll2_sync: lru::LruCache<String, Vec<i32>>,
     stand_offsets: lru::LruCache<String, stand::Offsets>,
     width: u32,
     height: u32,
+    raster_width: u32,
+    raster_height: u32,
+    canvas: StageCanvas,
     pub pixels: Arc<[u8]>,
 }
 
 impl Scene {
+    #[allow(dead_code)]
     pub fn new(
         archive: Arc<MusicaMountedVfs>,
         width: u32,
         height: u32,
         encoding: crate::ScriptEncoding,
     ) -> FamilyResult<Self> {
+        Self::new_scaled(archive, width, height, width, height, encoding)
+    }
+
+    pub fn new_scaled(
+        archive: Arc<MusicaMountedVfs>,
+        logical_width: u32,
+        logical_height: u32,
+        raster_width: u32,
+        raster_height: u32,
+        encoding: crate::ScriptEncoding,
+    ) -> FamilyResult<Self> {
+        let canvas = StageCanvas::new(
+            Extent2D::new(logical_width, logical_height),
+            Extent2D::new(raster_width, raster_height),
+        )
+        .map_err(|_| error("ASTRA_EMU_MUSICA_CANVAS", "stage extents are invalid"))?;
         let renderer = pollster::block_on(WgpuOffscreenRenderer::new())
             .map_err(|_| {
                 error(
@@ -82,12 +103,29 @@ impl Scene {
             backend = renderer.identity().backend.as_str(),
             device_type = renderer.identity().device_type.as_str()
         );
-        let text = MusicaTextRenderer::new(encoding).map_err(|_| {
+        let mut text = MusicaTextRenderer::new(encoding).map_err(|_| {
             error(
                 "ASTRA_EMU_MUSICA_FONT",
                 "font renderer could not be created",
             )
         })?;
+        text.set_raster_scale(canvas.scale())
+            .map_err(|_| error("ASTRA_EMU_MUSICA_TEXT_SCALE", "text raster scale is invalid"))?;
+        let pixel_bytes = usize::try_from(raster_width)
+            .ok()
+            .and_then(|width| {
+                usize::try_from(raster_height)
+                    .ok()
+                    .and_then(|height| width.checked_mul(height))
+            })
+            .and_then(|pixels| pixels.checked_mul(4))
+            .ok_or_else(|| error("ASTRA_EMU_MUSICA_FRAME_SIZE", "raster frame size overflows"))?;
+        if pixel_bytes > MAX_IMAGE_BYTES {
+            return Err(error(
+                "ASTRA_EMU_MUSICA_FRAME_SIZE",
+                "raster frame exceeds the GPU readback budget",
+            ));
+        }
         Ok(Self {
             archive,
             renderer,
@@ -100,11 +138,15 @@ impl Scene {
                         "invalid texture cache budget",
                     )
                 })?,
-            width,
-            height,
+            texture_origins: lru::LruCache::new(NonZeroUsize::new(32).unwrap()),
+            width: logical_width,
+            height: logical_height,
+            raster_width,
+            raster_height,
+            canvas,
             wscroll2_sync: lru::LruCache::new(NonZeroUsize::new(16).unwrap()),
             stand_offsets: lru::LruCache::new(NonZeroUsize::new(32).unwrap()),
-            pixels: vec![0; width as usize * height as usize * 4].into(),
+            pixels: vec![0; pixel_bytes].into(),
         })
     }
     pub fn set_text_encoding(&mut self, encoding: crate::ScriptEncoding) {
@@ -115,6 +157,13 @@ impl Scene {
     }
     pub fn text_shadow(&self) -> bool {
         self.text.shadow
+    }
+    fn append_text_commands(&self, target: &mut Vec<SceneCommand>, text: Vec<SceneCommand>) {
+        target.push(SceneCommand::PushTransform {
+            transform: self.canvas.raster_to_logical_transform(),
+        });
+        target.extend(text);
+        target.push(SceneCommand::PopTransform);
     }
     fn layer(
         &mut self,
@@ -134,16 +183,22 @@ impl Scene {
         opacity: f32,
         blend: BlendMode,
     ) -> FamilyResult<()> {
-        let frame = self.texture(uri)?;
+        let asset = self.texture_asset(uri)?;
+        let x = x.checked_add(asset.logical_origin[0]).ok_or_else(|| {
+            error("ASTRA_EMU_MUSICA_LAYER_POSITION", "layer x position overflows")
+        })?;
+        let y = y.checked_add(asset.logical_origin[1]).ok_or_else(|| {
+            error("ASTRA_EMU_MUSICA_LAYER_POSITION", "layer y position overflows")
+        })?;
         commands.push(SceneCommand::Texture {
             id: format!("layer:{}", commands.len()),
             destination: RectI {
                 x,
                 y,
-                width: frame.width,
-                height: frame.height,
+                width: asset.logical_extent.width,
+                height: asset.logical_extent.height,
             },
-            frame,
+            frame: asset.frame,
             opacity,
             blend,
         });
@@ -276,10 +331,13 @@ impl Scene {
         if let Some(panel) = &state.panel {
             let y = match panel.mode {
                 1 => {
-                    let frame = self.texture(&panel.resource_uri)?;
-                    i32::try_from(i64::from(self.height) - i64::from(frame.height) + 64).map_err(
-                        |_| error("ASTRA_EMU_MUSICA_PANEL_POSITION", "panel position overflow"),
-                    )?
+                    let asset = self.texture_asset(&panel.resource_uri)?;
+                    i32::try_from(
+                        i64::from(self.height) - i64::from(asset.logical_extent.height) + 64,
+                    )
+                    .map_err(|_| {
+                        error("ASTRA_EMU_MUSICA_PANEL_POSITION", "panel position overflow")
+                    })?
                 }
                 3 => 0,
                 _ => return Err(error("ASTRA_EMU_MUSICA_PANEL_MODE", "invalid panel mode")),
@@ -295,14 +353,14 @@ impl Scene {
             commands.push(SceneCommand::PopClip);
             commands.push(SceneCommand::PopTransform);
         }
-        commands.extend(
-            self.text
-                .commands(
-                    message.map(|(text, speaker)| (text.as_str(), speaker.as_deref())),
-                    choices,
-                )
-                .map_err(|code| error(&code, "message could not be rendered"))?,
-        );
+        let text_commands = self
+            .text
+            .commands(
+                message.map(|(text, speaker)| (text.as_str(), speaker.as_deref())),
+                choices,
+            )
+            .map_err(|code| error(&code, "message could not be rendered"))?;
+        self.append_text_commands(&mut commands, text_commands);
         self.submit(commands)
     }
     pub fn render_movie(&mut self, frame: TextureFrame) -> FamilyResult<()> {
@@ -324,14 +382,20 @@ impl Scene {
             .sequence
             .checked_add(1)
             .ok_or_else(|| error("ASTRA_EMU_MUSICA_FRAME_SEQUENCE", "frame sequence overflow"))?;
+        let mut mapped = Vec::with_capacity(commands.len() + 2);
+        mapped.push(SceneCommand::PushTransform {
+            transform: self.canvas.logical_to_raster_transform(),
+        });
+        mapped.extend(commands);
+        mapped.push(SceneCommand::PopTransform);
         self.pixels = self
             .renderer
             .render(&SceneFrame {
                 sequence,
-                width: self.width,
-                height: self.height,
+                width: self.raster_width,
+                height: self.raster_height,
                 clear_rgba: [0, 0, 0, 255],
-                commands,
+                commands: mapped,
                 semantics: None,
             })
             .map_err(|cause| {

@@ -64,13 +64,13 @@ impl Scene {
     ) -> FamilyResult<()> {
         let frames = resources
             .iter()
-            .map(|uri| self.texture(uri))
+            .map(|uri| self.texture_asset(uri))
             .collect::<FamilyResult<Vec<_>>>()?;
         for (kind, [x, y], opacity) in particles {
             if opacity == 0.0 {
                 continue;
             }
-            let frame = frames
+            let asset = frames
                 .get(usize::from(kind))
                 .ok_or_else(|| {
                     error(
@@ -82,12 +82,16 @@ impl Scene {
             commands.push(SceneCommand::Texture {
                 id: format!("particle:{}", commands.len()),
                 destination: RectI {
-                    x,
-                    y,
-                    width: frame.width,
-                    height: frame.height,
+                    x: x.checked_add(asset.logical_origin[0]).ok_or_else(|| {
+                        error("ASTRA_EMU_MUSICA_PARTICLE_POSITION", "particle x overflows")
+                    })?,
+                    y: y.checked_add(asset.logical_origin[1]).ok_or_else(|| {
+                        error("ASTRA_EMU_MUSICA_PARTICLE_POSITION", "particle y overflows")
+                    })?,
+                    width: asset.logical_extent.width,
+                    height: asset.logical_extent.height,
                 },
-                frame,
+                frame: asset.frame,
                 opacity,
                 blend: BlendMode::Alpha,
             });

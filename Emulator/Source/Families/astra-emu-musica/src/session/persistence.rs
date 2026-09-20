@@ -103,8 +103,10 @@ impl MusicaSession {
         vm.set_launch_mode(self.vm.state().launch_mode);
         vm.merge_verified_gallery_unlocks(&self.persisted_unlocks)
             .map_err(vm_error)?;
-        let mut scene = Scene::new(
+        let mut scene = Scene::new_scaled(
             self.archive.clone(),
+            self.info.logical_width,
+            self.info.logical_height,
             self.info.width,
             self.info.height,
             state.script_encoding,

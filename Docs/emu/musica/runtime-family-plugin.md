@@ -46,7 +46,9 @@ Config 使用来源的原生素材、控件坐标和共享 GPU Scene。Title 模
 
 `MusicaConfigState` 和编辑草稿由会话持有，设置及草稿不进入剧情存档。Config 打开期间拒绝保存；成功读档清除草稿并保留当前设置，失败则保留草稿。应用时原子写入 `.astra-musica/saves/configuration.json`，绑定当前游戏身份，限制为 8192 字节，损坏、未知字段或其他游戏的数据明确拒绝且不覆盖。Manager 中的偏好参数仅作为未建立原生配置时的初始值；原生配置存在后优先使用它，避免 Manager 补齐的默认值在冷启动时重置设置。
 
-全屏切换通过 Family API v6 的类型化窗口命令交给 Manager 窗口线程处理；应用配置时提交一次，冷启动恢复已保存的全屏设置，取消不提交。无窗口的 Headless Host 明确拒绝窗口命令。字体选择与正文速度字段保留来源当前语义，不宣称新增字体或逐字渲染能力。真实游戏 Config、窗口切换与完整结局继续验收。
+全屏切换通过 Family API v7 的类型化窗口命令交给 Manager 窗口线程处理；`FrameInfo` 同时报告 physical raster 和 logical stage 尺寸，Family 不生成 letterbox，Manager 负责窗口输出与 pointer 逆映射。应用配置时提交一次，冷启动恢复已保存的全屏设置，取消不提交。无窗口的 Headless Host 明确拒绝窗口命令。字体选择与正文速度字段保留来源当前语义，不宣称新增字体或逐字渲染能力。真实游戏 Config、窗口切换与完整结局继续验收。
+
+Musica 的逻辑舞台固定为 `1280x720`。`render_scale` 在启动时只能选择 `1.0`、`1.5`、`2.0` 或 `3.0`，对应 `1280x720`、`1920x1080`、`2560x1440` 和 `3840x2160` 的 GPU raster canvas；尺寸、宽高比和显存预算不满足时启动失败，不回退到其他 scale。资源的 physical pixels、ANI 原点和 `TextureAsset` logical extent 与 VM、存档和剧情时间分开。正文按 raster scale 使用 AstraText 重新 shaping/rasterize glyph，再映射回逻辑坐标，避免把低密度 glyph 放大。公共 `Canvas2D` 和 `SceneCommand` 负责根 transform，Family 不复制另一套渲染器。
 
 
 Windows Sandbox 已经由真实 Manager 完成插件安装、扫描、标题启动、打开原生 System 页面、应用全屏及返回窗口模式。核心日志确认 DX12 discrete_gpu；窗口尺寸变化后标题与设置输入正常。该轮显式使用 NullAudioDevice，仅验证图形与交互，不计入真实音频或完整结局验收。

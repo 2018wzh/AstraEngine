@@ -13,6 +13,7 @@ pub struct MusicaTextRenderer {
     scene: TextScene,
     encoding: crate::ScriptEncoding,
     pub(crate) shadow: bool,
+    raster_scale: f32,
 }
 
 #[derive(Clone, Copy)]
@@ -76,11 +77,20 @@ impl MusicaTextRenderer {
             scene: TextScene::new(provider),
             encoding,
             shadow: true,
+            raster_scale: 1.0,
         })
     }
 
     pub(crate) fn set_encoding(&mut self, encoding: crate::ScriptEncoding) {
         self.encoding = encoding;
+    }
+
+    pub(crate) fn set_raster_scale(&mut self, raster_scale: f32) -> Result<(), String> {
+        if !raster_scale.is_finite() || !(0.25..=8.0).contains(&raster_scale) {
+            return Err("ASTRA_EMU_MUSICA_TEXT_SCALE".into());
+        }
+        self.raster_scale = raster_scale;
+        Ok(())
     }
 
     fn frame(&mut self, regions: &mut [TextSceneLayout]) -> Result<Vec<SceneCommand>, String> {
@@ -95,7 +105,9 @@ impl MusicaTextRenderer {
                 run.script = Some(script.into());
             }
         }
-        self.scene.frame(regions).map_err(text_error)
+        self.scene
+            .frame_scaled(regions, self.raster_scale)
+            .map_err(text_error)
     }
 
     pub(crate) fn save_cards(

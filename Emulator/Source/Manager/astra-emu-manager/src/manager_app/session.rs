@@ -167,6 +167,7 @@ mod tests {
         fn visit_frame(&self, visitor: &mut dyn FrameVisitor) -> FamilyResult<()> {
             visitor.accept(FrameView::from_slice(&[0, 0, 0, 255], FrameInfo {
                 width: 1, height: 1, stride: 4,
+                logical_width: 1, logical_height: 1,
                 format: FrameFormat::Rgba8Srgb { alpha: FrameAlpha::Opaque },
             })?)
         }

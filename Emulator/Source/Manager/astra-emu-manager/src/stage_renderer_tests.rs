@@ -7,6 +7,8 @@ fn info(width: u32, height: u32, stride: u32, alpha: FrameAlpha) -> FrameInfo {
     FrameInfo {
         width,
         height,
+        logical_width: width,
+        logical_height: height,
         stride,
         format: FrameFormat::Rgba8Srgb { alpha },
     }

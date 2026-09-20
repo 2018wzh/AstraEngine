@@ -55,11 +55,14 @@ impl Scene {
                 "character requires a static PNG resource",
             ));
         }
-        let frame = self.texture(uri)?;
-        let left = i64::from(character.anchor_position[0]) - i64::from(frame.width) / 2;
+        let asset = self.texture_asset(uri)?;
+        let left = i64::from(character.anchor_position[0])
+            - i64::from(asset.logical_extent.width) / 2
+            + i64::from(asset.logical_origin[0]);
         let top = i64::from(self.height)
-            - i64::from(frame.height)
-            - i64::from(character.anchor_position[1]);
+            - i64::from(asset.logical_extent.height)
+            - i64::from(character.anchor_position[1])
+            + i64::from(asset.logical_origin[1]);
         let left = i32::try_from(left).map_err(|_| {
             error(
                 "ASTRA_EMU_MUSICA_CHARACTER_POSITION",
@@ -76,7 +79,12 @@ impl Scene {
         commands.push(SceneCommand::PushTransform {
             transform: astra_media_core::Transform2D {
                 m11: if mirrored { -1.0 } else { 1.0 },
-                tx: left as f32 + if mirrored { frame.width as f32 } else { 0.0 },
+                tx: left as f32
+                    + if mirrored {
+                        asset.logical_extent.width as f32
+                    } else {
+                        0.0
+                    },
                 ty: top as f32,
                 ..astra_media_core::Transform2D::IDENTITY
             },
@@ -86,10 +94,10 @@ impl Scene {
             destination: RectI {
                 x: 0,
                 y: 0,
-                width: frame.width,
-                height: frame.height,
+                width: asset.logical_extent.width,
+                height: asset.logical_extent.height,
             },
-            frame,
+            frame: asset.frame,
             opacity: f32::from(opacity) / 256.0,
             blend: BlendMode::Alpha,
         });

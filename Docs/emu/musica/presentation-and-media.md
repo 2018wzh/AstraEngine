@@ -2,7 +2,7 @@
 
 ## 场景与文字
 
-Musica Family 自持归档、VM、媒体和原生存档，通过共享 GPU Scene 绘制背景、前景、人物槽、演出、消息面板与文字。`bg` 存放场景资源，`st` 存放立绘，`sys` 存放系统图片；各层和原生参数见 [脚本执行](script-execution.md)。
+Musica Family 自持归档、VM、媒体和原生存档，通过共享 GPU Scene 绘制背景、前景、人物槽、演出、消息面板与文字。逻辑舞台固定 `1280x720`，物理 raster 由启动时的 `render_scale` 选择，Host 负责窗口 letterbox 和输入逆映射；资产物理像素不改变 VM、存档或动画几何。`bg` 存放场景资源，`st` 存放立绘，`sys` 存放系统图片；各层和原生参数见 [脚本执行](script-execution.md)。
 
 文字复用 AstraText 的真实字体布局与字形资源，场景使用 GPU EncodedSrgb 合成。SDK TextureCache 管理有界纹理驻留；PNG 和 ANI／SQZ 静态帧复用现有解码器，动画立绘仍待接入。不存在旧 LegacyTextPresentation、Host VFS 或 CPU 产品呈现路径。
 

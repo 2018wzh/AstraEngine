@@ -19,6 +19,8 @@ pub(super) struct CapturedFrame {
     pub(super) generation: u64,
     pub(super) width: u32,
     pub(super) height: u32,
+    pub(super) logical_width: u32,
+    pub(super) logical_height: u32,
     pub(super) stride: u32,
     pub(super) pixels: Arc<Vec<u8>>,
 }
@@ -148,6 +150,8 @@ impl FrameMailbox {
             generation: state.generation,
             width: frame.info.width,
             height: frame.info.height,
+            logical_width: frame.info.logical_width,
+            logical_height: frame.info.logical_height,
             stride: u32::try_from(upload_stride).map_err(|_| {
                 astra_emu_family_api::FamilyError::invalid(
                     "ASTRA_EMU_HOST_FRAME_STRIDE",

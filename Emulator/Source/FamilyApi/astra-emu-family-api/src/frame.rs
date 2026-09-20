@@ -22,8 +22,14 @@ pub enum FrameFormat {
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
 pub struct FrameInfo {
+    /// Physical raster width in pixels.
     pub width: u32,
+    /// Physical raster height in pixels.
     pub height: u32,
+    /// Logical stage width used for input and scene geometry.
+    pub logical_width: u32,
+    /// Logical stage height used for input and scene geometry.
+    pub logical_height: u32,
     pub stride: u32,
     pub format: FrameFormat,
 }
@@ -31,6 +37,15 @@ pub struct FrameInfo {
 impl FrameInfo {
     pub fn validate(&self) -> FamilyResult<()> {
         validate_dimensions(self.width, self.height)?;
+        validate_dimensions(self.logical_width, self.logical_height)?;
+        if u64::from(self.width) * u64::from(self.logical_height)
+            != u64::from(self.height) * u64::from(self.logical_width)
+        {
+            return Err(FamilyError::invalid(
+                "ASTRA_EMU_FAMILY_FRAME_ASPECT",
+                "physical raster and logical stage must have the same aspect ratio",
+            ));
+        }
         let row = self.width.checked_mul(4).ok_or_else(|| {
             FamilyError::invalid("ASTRA_EMU_FAMILY_FRAME_SIZE", "frame row size overflows")
         })?;

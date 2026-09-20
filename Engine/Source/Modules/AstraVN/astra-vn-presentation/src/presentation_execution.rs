@@ -1,8 +1,8 @@
 use astra_core::{Diagnostic, Hash256};
 use astra_media_core::{
-    BlendMode, CpuFilterExecutor, CpuRendererProvider, DrawCommand, FilterExecutionReport,
-    FilterGraph, MediaError, RectI, RenderTargetFormat, Renderer2DProvider, RendererCreateRequest,
-    TextureFrame, Transform2D,
+    BlendMode, Canvas2D, CpuFilterExecutor, CpuRendererProvider, DrawCommand, Extent2D,
+    FilterExecutionReport, FilterGraph, MediaError, RectI, RenderTargetFormat, Renderer2DProvider,
+    RendererCreateRequest, TextureFrame, Transform2D,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -57,7 +57,11 @@ impl VnHeadlessPresentationExecutor {
             })
             .map_err(media_error_to_vn_error)?;
 
-        let draw_commands = stage_draw_commands(&request.stage, &request.assets)?;
+        let canvas = request.stage.canvas_for_raster(Extent2D::new(
+            request.stage.viewport_width,
+            request.stage.viewport_height,
+        ))?;
+        let draw_commands = stage_draw_commands(&request.stage, &request.assets, canvas)?;
         let input_frame = renderer
             .capture_frame(&draw_commands)
             .map_err(media_error_to_vn_error)?;
@@ -121,10 +125,14 @@ fn validate_stage(stage: &StageModel) -> Result<(), VnError> {
 fn stage_draw_commands(
     stage: &StageModel,
     assets: &[VnPresentationAsset],
+    canvas: Canvas2D,
 ) -> Result<Vec<DrawCommand>, VnError> {
     validate_assets(assets)?;
     let mut commands = vec![
         DrawCommand::clear([0, 0, 0, 255]),
+        DrawCommand::PushTransform {
+            transform: canvas.logical_to_raster_transform(),
+        },
         DrawCommand::SetCamera {
             transform: camera_transform(stage),
         },
@@ -154,6 +162,7 @@ fn stage_draw_commands(
             "scene command count exceeds the declared frame budget",
         ));
     }
+    commands.push(DrawCommand::PopTransform);
     Ok(commands)
 }
 

@@ -191,6 +191,8 @@ impl FvpProvider {
         let frame_info = FrameInfo {
             width: config.virtual_width,
             height: config.virtual_height,
+            logical_width: config.virtual_width,
+            logical_height: config.virtual_height,
             stride: config.virtual_width.checked_mul(4).ok_or_else(|| {
                 error::invalid("ASTRA_EMU_FVP_FRAME_SIZE", "frame stride overflows")
             })?,

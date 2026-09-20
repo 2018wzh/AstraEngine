@@ -55,13 +55,14 @@ impl Scene {
             },
         });
         for (index, layer) in layers.into_iter().enumerate() {
-            let (frame, opacity, blend) = match layer {
+            let (frame, destination, opacity, blend) = match layer {
                 SceneCommand::Texture {
                     frame,
+                    destination,
                     opacity,
                     blend,
                     ..
-                } => (frame, opacity, blend),
+                } => (frame, destination, opacity, blend),
                 _ => {
                     return Err(error(
                         "ASTRA_EMU_MUSICA_WSCROLL2_STAGE_LAYERS",
@@ -69,7 +70,7 @@ impl Scene {
                     ))
                 }
             };
-            if frame.width < self.width || frame.height < self.height {
+            if destination.width < self.width || destination.height < self.height {
                 return Err(error(
                     "ASTRA_EMU_MUSICA_WSCROLL2_PANORAMA_BOUNDS",
                     "panorama is smaller than the viewport",
@@ -80,8 +81,8 @@ impl Scene {
             } else {
                 scroll.foreground_offset
             };
-            let source_x = offset.rem_euclid(i64::from(frame.width)) as i32;
-            for x in [-source_x, frame.width as i32 - source_x] {
+            let source_x = offset.rem_euclid(i64::from(destination.width)) as i32;
+            for x in [-source_x, destination.width as i32 - source_x] {
                 if x >= self.width as i32 {
                     continue;
                 }
@@ -90,8 +91,8 @@ impl Scene {
                     destination: RectI {
                         x,
                         y: 0,
-                        width: frame.width,
-                        height: frame.height,
+                        width: destination.width,
+                        height: destination.height,
                     },
                     frame: frame.clone(),
                     opacity,

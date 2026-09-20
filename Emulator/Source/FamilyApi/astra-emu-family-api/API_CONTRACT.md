@@ -1,4 +1,4 @@
-# Independent Family API v6
+# Independent Family API v7
 
 `astra-emu-family-api` 是 Family 插件唯一必需的契约依赖。不依赖 RuntimeWorld、package/save、VFS、renderer/audio backend 或 UI。静态核心和动态核心共用 typed DTO；动态入口使用 `abi_stable` 的 `FamilyModule`，提供 descriptor/probe/open/advance/frame/close。
 
@@ -18,9 +18,9 @@ Descriptor 必须声明 CpuFrame，拒绝重复 capability/format。`PcmAudio` �
 
 `TextReplacement` 仅表示可选能力：不传 service 为本次关闭翻译，不阻止基础播放。服务使用 typed reset/submit/poll/cancel；poll 为 Pending、Ready、Cancelled 或 Failed。正文缓存不超过最近八段、6000 字符，日志不含正文。FVP 不声明此能力。
 
-Host 只提供 game_path、初始 WindowState 和输入。Family 自持 VM、文件、解码、混音、渲染和原生存档。probe 返回 `ROption<ProbeReport>`，None 是普通未匹配；game_id 为 opaque UTF-8。事件保留键盘、指针、滚轮、文本及窗口顺序。PointerMove 为 letterbox 映射后的游戏帧像素，resize 为物理客户区像素；elapsed_ns 接受包括零在内的 u64，由核心决定 tick。
+Host 只提供 game_path、初始 WindowState 和输入。Family 自持 VM、文件、解码、混音、渲染和原生存档。probe 返回 `ROption<ProbeReport>`，None 是普通未匹配；game_id 为 opaque UTF-8。事件保留键盘、指针、滚轮、文本及窗口顺序。PointerMove 为 Host 逆映射后的逻辑舞台坐标，resize 为物理客户区像素；elapsed_ns 接受包括零在内的 u64，由核心决定 tick。
 
-`FrameView<'a>` 借用 CPU RGBA8 sRGB opaque 像素；`FrameConsumerRef<'_>` 只可在同步 frame 调用内使用。Host 返回前复制 stride × height 字节，不跨 ABI 传 GPU/native handle。
+`FrameView<'a>` 借用 CPU RGBA8 sRGB opaque 像素；`FrameConsumerRef<'_>` 只可在同步 frame 调用内使用。`FrameInfo.width/height` 是物理 raster 尺寸，`logical_width/logical_height` 是场景和输入使用的逻辑舞台尺寸。两者必须保持相同宽高比；Family 不在输出帧中加入 letterbox，Host 负责显示映射。Host 返回前复制 stride × height 字节，不跨 ABI 传 GPU/native handle。
 
 ## 窗口请求
 
@@ -40,7 +40,7 @@ Manager 再验证边界和重复字段；非法记录输出 `family.diagnostics.
 
 ## 生命周期与迁移
 
-ABI fingerprint 为 `astra.emu.independent_family_abi.v6`，schema 为 `astra.emu.independent_family_api.v6`。v1/v2/v3/v4/v5 插件必须重新构建安装，不提供兼容 reader/adapter。
+ABI fingerprint 为 `astra.emu.independent_family_abi.v7`，schema 为 `astra.emu.independent_family_api.v7`。v1/v2/v3/v4/v5/v6 插件必须重新构建安装，不提供兼容 reader/adapter。
 
 动态库首次加载后一直驻留到进程退出，失败加载产生的 ABI 元数据也不会指向卸载的代码；更新插件必须重启 Manager。provider/module 对象按正常生命周期释放。会话 close 和 open 失败仍须取消 Host 请求、唤醒阻塞 PCM 写入并等待所有 worker 结束，错误不得跳过其他 worker 清理。驻留不允许保留已关闭会话的线程或 session callback；无 session 资源的进程级诊断 sink 除外。
 

@@ -82,6 +82,8 @@ mod tests {
         let info = FrameInfo {
             width: 2,
             height: 2,
+            logical_width: 2,
+            logical_height: 2,
             stride: 8,
             format: FrameFormat::Rgba8Srgb {
                 alpha: FrameAlpha::Opaque,
@@ -94,6 +96,24 @@ mod tests {
         );
         let view = FrameView::from_slice(&[1_u8; 16], info).unwrap();
         assert_eq!(view.as_slice().len(), 16);
+    }
+
+    #[test]
+    fn frame_info_rejects_a_stretched_logical_stage() {
+        let info = FrameInfo {
+            width: 1920,
+            height: 1080,
+            logical_width: 1280,
+            logical_height: 800,
+            stride: 1920 * 4,
+            format: FrameFormat::Rgba8Srgb {
+                alpha: FrameAlpha::Opaque,
+            },
+        };
+        assert_eq!(
+            info.validate().unwrap_err().code(),
+            "ASTRA_EMU_FAMILY_FRAME_ASPECT"
+        );
     }
 
     struct RecordingFrameConsumer {
@@ -124,6 +144,8 @@ mod tests {
         let info = FrameInfo {
             width: 1,
             height: 1,
+            logical_width: 1,
+            logical_height: 1,
             stride: 4,
             format: FrameFormat::Rgba8Srgb {
                 alpha: FrameAlpha::Opaque,
@@ -179,6 +201,8 @@ mod tests {
             frame: FrameInfo {
                 width: 1,
                 height: 1,
+                logical_width: 1,
+                logical_height: 1,
                 stride: 4,
                 format: FrameFormat::Rgba8Srgb {
                     alpha: FrameAlpha::Opaque,
@@ -227,6 +251,6 @@ mod tests {
             TextPollResult::Cancelled,
             TextPollResult::Cancelled
         ));
-        assert_eq!(FAMILY_API_SCHEMA, "astra.emu.independent_family_api.v6");
+        assert_eq!(FAMILY_API_SCHEMA, "astra.emu.independent_family_api.v7");
     }
 }

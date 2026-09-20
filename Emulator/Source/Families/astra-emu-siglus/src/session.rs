@@ -179,6 +179,8 @@ fn frame_info(frame: &FrameSnapshot) -> FamilyResult<FrameInfo> {
     Ok(FrameInfo {
         width: frame.width.get(),
         height: frame.height.get(),
+        logical_width: frame.width.get(),
+        logical_height: frame.height.get(),
         stride: frame.width.get().checked_mul(4).ok_or_else(|| {
             error::invalid("ASTRA_EMU_SIGLUS_FRAME_SIZE", "frame stride overflows")
         })?,

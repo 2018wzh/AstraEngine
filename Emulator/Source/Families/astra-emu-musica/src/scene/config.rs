@@ -18,8 +18,8 @@ impl Scene {
             ("checkmark.png", (21, 32)),
             ("circle.png", (74, 74)),
         ] {
-            let texture = self.texture(&format!("musica:/sys/{name}"))?;
-            if (texture.width, texture.height) != size {
+            let texture = self.texture_asset(&format!("musica:/sys/{name}"))?;
+            if (texture.logical_extent.width, texture.logical_extent.height) != size {
                 return Err(error(
                     "ASTRA_EMU_MUSICA_CONFIG_RESOURCE_DIMENSIONS",
                     "native configuration resource dimensions are invalid",

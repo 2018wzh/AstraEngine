@@ -120,7 +120,9 @@ impl MusicaSession {
         let event = self.vm.step(tick).map_err(vm_error)?;
         let changed: FamilyResult<bool> = match event {
             Some(MusicaVmEvent::Movie(state)) => {
-                if (state.width, state.height) != (self.info.width, self.info.height) {
+                if (state.width, state.height)
+                    != (self.info.logical_width, self.info.logical_height)
+                {
                     return Err(error(
                         "ASTRA_EMU_MUSICA_MOVIE_STAGE_IDENTITY",
                         "movie dimensions do not match the stage",

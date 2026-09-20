@@ -517,6 +517,8 @@ mod tests {
         let info = FrameInfo {
             width: 1,
             height: 1,
+            logical_width: 1,
+            logical_height: 1,
             stride: 4,
             format: FrameFormat::Rgba8Srgb {
                 alpha: FrameAlpha::Opaque,

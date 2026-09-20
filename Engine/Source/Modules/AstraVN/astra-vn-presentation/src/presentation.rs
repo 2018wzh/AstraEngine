@@ -1,3 +1,4 @@
+use astra_media_core::{Canvas2D, Extent2D};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -38,6 +39,22 @@ impl StageModel {
             timelines: Vec::new(),
             timeline_tasks: Vec::new(),
         }
+    }
+
+    /// Build the product-neutral logical-to-raster mapping used by the VN
+    /// presentation executor. Stage state remains in logical coordinates;
+    /// raster density only changes the presentation target.
+    pub fn canvas_for_raster(&self, raster: Extent2D) -> Result<Canvas2D, crate::VnError> {
+        Canvas2D::new(
+            Extent2D::new(self.viewport_width, self.viewport_height),
+            raster,
+        )
+        .map_err(|_| {
+            crate::VnError::diagnostic(
+                "ASTRA_VN_STAGE_CANVAS",
+                "stage logical and raster extents are incompatible",
+            )
+        })
     }
 
     pub fn apply(&mut self, command: StandardPresentationCommand) {

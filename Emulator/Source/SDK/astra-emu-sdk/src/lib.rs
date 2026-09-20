@@ -12,6 +12,7 @@ pub use profile::{read_game_profile, resolve_game_file};
 #[cfg(feature = "cache")]
 mod cache;
 mod error;
+mod stage;
 #[cfg(feature = "archive")]
 pub use archive::*;
 #[cfg(feature = "cache")]
@@ -22,6 +23,7 @@ mod text;
 mod texture;
 
 pub use error::CoreError;
+pub use stage::{StageCanvas, TextureAsset};
 #[cfg(feature = "text")]
 pub use text::{TextOutline, TextScene, TextSceneLayout};
 #[cfg(feature = "image")]

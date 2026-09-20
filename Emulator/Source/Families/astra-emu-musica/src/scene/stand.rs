@@ -146,10 +146,10 @@ impl Scene {
             self.stand_offsets.put(uri.clone(), offsets);
             offsets
         };
-        let frame = self.texture(uri)?;
+        let asset = self.texture_asset(uri)?;
         let (_, destination) = offsets.placement(
-            frame.width,
-            frame.height,
+            asset.logical_extent.width,
+            asset.logical_extent.height,
             self.height,
             stand.position,
             stand.resource_parameter,
@@ -158,10 +158,10 @@ impl Scene {
         commands.push(SceneCommand::Texture {
             id: format!("stand:{}", commands.len()),
             destination: RectI {
-                height: frame.height,
+                height: asset.logical_extent.height,
                 ..destination
             },
-            frame,
+            frame: asset.frame,
             opacity: 1.0,
             blend: BlendMode::Alpha,
         });

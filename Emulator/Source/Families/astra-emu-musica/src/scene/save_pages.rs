@@ -33,8 +33,8 @@ impl Scene {
             ("saveloadButtons.png", (356, 48)),
             ("notsaved.png", (106, 60)),
         ] {
-            let frame = self.texture(&format!("musica:/sys/{name}"))?;
-            if (frame.width, frame.height) != dimensions {
+            let asset = self.texture_asset(&format!("musica:/sys/{name}"))?;
+            if (asset.logical_extent.width, asset.logical_extent.height) != dimensions {
                 return Err(error(
                     "ASTRA_EMU_MUSICA_SAVE_PAGE_DIMENSIONS",
                     "native save page resource dimensions are invalid",
@@ -101,11 +101,11 @@ impl Scene {
                 blend: BlendMode::Alpha,
             });
         }
-        commands.extend(
-            self.text
-                .save_cards(cards)
-                .map_err(|code| error(&code, "save card text could not be rendered"))?,
-        );
+        let text = self
+            .text
+            .save_cards(cards)
+            .map_err(|code| error(&code, "save card text could not be rendered"))?;
+        self.append_text_commands(&mut commands, text);
         self.submit(commands)
     }
 }

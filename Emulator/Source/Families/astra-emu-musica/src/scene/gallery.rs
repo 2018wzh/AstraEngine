@@ -10,8 +10,10 @@ impl Scene {
         opacity: f32,
     ) -> FamilyResult<()> {
         let uri = format!("musica:/sys/{name}");
-        let frame = self.texture(&uri)?;
-        if dimensions.is_some_and(|size| size != (frame.width, frame.height)) {
+        let asset = self.texture_asset(&uri)?;
+        if dimensions.is_some_and(|size| {
+            size != (asset.logical_extent.width, asset.logical_extent.height)
+        }) {
             return Err(error(
                 "ASTRA_EMU_MUSICA_GALLERY_DIMENSIONS",
                 "gallery resource dimensions are invalid",
@@ -41,11 +43,11 @@ impl Scene {
                     1.0,
                 )?;
                 if *page == MusicaSystemPage::GalleryMovie {
-                    commands.extend(
-                        self.text
-                            .gallery_movies(focus)
-                            .map_err(|code| error(&code, "movie labels could not be rendered"))?,
-                    );
+                    let text = self
+                        .text
+                        .gallery_movies(focus)
+                        .map_err(|code| error(&code, "movie labels could not be rendered"))?;
+                    self.append_text_commands(&mut commands, text);
                 }
             }
             MusicaSystemPage::GalleryBgm => {
