@@ -5,7 +5,7 @@
 Musica 的现有 `gpu.created` Manager 诊断事件现在同时记录成功创建的 logical/raster 宽高，只在创建阶段输出，便于确认实际 GPU 输出尺寸；不从配置字符串推导尺寸，也不增加逐帧日志。
 
 Musica 高清替换已接入真实 profile→PAZ archive→Scene→SDK `TextureCache` 路径。`texture_overrides` 只允许安全相对 PNG；静态 PNG 和单帧 ANI 的替换像素使用独立 cache identity，逻辑尺寸与 ANI 原点仍来自原资源，多帧 ANI、SQZ 和非法映射明确拒绝。profile/Scene 回归已通过；真实 Scene GPU 验证见下，完整 Player 与全游戏高倍率覆盖仍开放。
-默认无替换路径新增了省略 `texture_overrides` 字段的 profile GPU 回归，贯通 Provider、PAZ、Scene 和 WGPU 的原生纹理加载、标题、系统页、对白与存档；该路径通过。Sandbox v9 的黑屏尚未在此调用链复现，真实入口仍待受控基线比较，不能据此关闭该问题。
+默认无替换路径新增了省略 `texture_overrides` 字段的 profile GPU 回归，贯通 Provider、PAZ、Scene 和 WGPU 的原生纹理加载、大小写标题资源选择、ANI/SQZ 会话场景、系统页、对白与存档；该路径通过。Sandbox v9 的黑屏尚未在此调用链复现，真实入口仍待受控基线比较，不能据此关闭该问题。
 
 独立 Windows DX12 discrete GPU 已从真实 profile、PAZ archive、Scene 到 WGPU 路径验证 Musica 静态/ANI 替换的 1.0/1.5/2.0/3.0 输出，覆盖逻辑几何、crop、screen shake、ANI origin、cache 复用与释放重开；缺失源、SQZ 和多帧 ANI 的拒绝测试也通过。该验证覆盖 Scene 与纹理路径，不等同于完整 Player 长流程或高倍率全游戏验收。
 
