@@ -103,6 +103,8 @@ impl Scene {
             Extent2D::new(raster_width, raster_height),
         )
         .map_err(|_| error("ASTRA_EMU_MUSICA_CANVAS", "stage extents are invalid"))?;
+        let logical_extent = canvas.logical();
+        let raster_extent = canvas.raster();
         let renderer = pollster::block_on(WgpuOffscreenRenderer::new())
             .map_err(|_| {
                 error(
@@ -114,7 +116,11 @@ impl Scene {
         tracing::info!(
             event = "astra.emu.musica.gpu.created",
             backend = renderer.identity().backend.as_str(),
-            device_type = renderer.identity().device_type.as_str()
+            device_type = renderer.identity().device_type.as_str(),
+            logical_width = logical_extent.width,
+            logical_height = logical_extent.height,
+            raster_width = raster_extent.width,
+            raster_height = raster_extent.height
         );
         let mut text = MusicaTextRenderer::new(encoding).map_err(|_| {
             error(

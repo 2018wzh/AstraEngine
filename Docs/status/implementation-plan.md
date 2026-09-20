@@ -2,6 +2,8 @@
 
 本轮 Musica/SDK 重构已接通公共 `Canvas2D`、SDK `StageCanvas`/`TextureAsset`、AstraVN presentation 第二消费者及 Family API v7 logical/raster frame 元数据。Musica 启动配置提供 `render_scale` 的 1.0/1.5/2.0/3.0 矩阵，GPU Scene 和高密度 AstraText glyph 路径按 raster canvas 输出，原生 1280x720 逻辑舞台、ANI 原点和存档/VM 时间保持独立。Windows Sandbox GPU 代表流程和完整 Musica 结局仍待独立验证；同读档后自动播放再次触发 `ASTRA_EMU_MUSICA_ELAPSED` 的后续失败仍开放，本项没有放宽上限或静默截断。
 
+Musica 的现有 `gpu.created` Manager 诊断事件现在同时记录成功创建的 logical/raster 宽高，只在创建阶段输出，便于确认实际 GPU 输出尺寸；不从配置字符串推导尺寸，也不增加逐帧日志。
+
 Musica 高清替换已接入真实 profile→PAZ archive→Scene→SDK `TextureCache` 路径。`texture_overrides` 只允许安全相对 PNG；静态 PNG 和单帧 ANI 的替换像素使用独立 cache identity，逻辑尺寸与 ANI 原点仍来自原资源，多帧 ANI、SQZ 和非法映射明确拒绝。profile/Scene 回归已通过，真实 GPU 替换场景与完整高倍率覆盖仍待独立验证。
 
 Manager 与 Headless 的关闭顺序已调整为先关闭 Family session、取消并等待其 PCM worker，再释放 Host audio executor；NullAudio 的 open→PCM→close→reopen 回归通过。该修复只覆盖有界 worker 的关闭竞态；Sandbox 另一次新 session 的 `ASTRA_EMU_MUSICA_AUDIO_CLOSED` 仍需独立确认根因，不能把两者合并为同一验收结论。
