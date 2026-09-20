@@ -74,10 +74,15 @@ pub(super) fn title_request(root: &std::path::Path) -> OpenRequest {
     req
 }
 #[test]
-fn native_gpu_title_starts_loads_returns_and_exits_without_consuming_story_input() {
+fn native_gpu_title_without_texture_overrides_starts_loads_returns_and_exits() {
     let _lock = PROVIDER_SESSION.lock().unwrap();
     let root = tempfile::tempdir().unwrap();
     game(root.path());
+    let profile_path = root.path().join(MUSICA_PROFILE_FILE);
+    let mut profile: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&profile_path).unwrap()).unwrap();
+    profile.as_object_mut().unwrap().remove("texture_overrides");
+    std::fs::write(&profile_path, serde_json::to_vec(&profile).unwrap()).unwrap();
     let mut provider = MusicaProvider::default();
     let (_, mut session) = provider.open_session(title_request(root.path())).unwrap();
     assert_eq!(session.vm.state().system_ui.page, MusicaSystemPage::Title);
