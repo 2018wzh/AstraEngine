@@ -339,21 +339,3 @@ fn pointer_button(control: &str) -> Option<astra_emu_family_api::PointerButton> 
         _ => None,
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::combine_primary_cleanup;
-
-    #[test]
-    fn close_event_keeps_advance_error_before_cleanup_error() {
-        let result = combine_primary_cleanup(
-            Err("ASTRA_EMU_ADVANCE_FAILED".into()),
-            Err("ASTRA_EMU_CLOSE_FAILED".into()),
-        );
-
-        assert_eq!(
-            result,
-            Err("ASTRA_EMU_ADVANCE_FAILED; ASTRA_EMU_CLOSE_FAILED".into())
-        );
-    }
-}

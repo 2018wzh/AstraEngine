@@ -370,4 +370,54 @@ mod tests {
         assert!(!active.fullscreen);
         active.close().unwrap();
     }
+
+    #[test]
+    fn window_close_reports_advance_before_cleanup_error() {
+        struct FailingSession;
+
+        impl FamilySession for FailingSession {
+            fn advance(&mut self, _: u64, _: &[FamilyEvent]) -> FamilyResult<AdvanceResponse> {
+                Err(FamilyError::new(
+                    "ASTRA_TEST_ADVANCE",
+                    "advance failed",
+                ))
+            }
+
+            fn visit_frame(&self, _: &mut dyn FrameVisitor) -> FamilyResult<()> {
+                Ok(())
+            }
+
+            fn close(self: Box<Self>) -> FamilyResult<()> {
+                Err(FamilyError::new("ASTRA_TEST_CLOSE", "close failed"))
+            }
+        }
+
+        let root = tempfile::tempdir().unwrap();
+        let mut controller = AstraEmuManagerController::open_library(
+            root.path().to_owned(),
+            FrameMailbox::new(),
+            Vec::new(),
+        )
+        .unwrap();
+        controller.active = Some(ActiveFamilySession {
+            family_id: "error-order-test".into(),
+            session: Some(Box::new(FailingSession)),
+            audio: None,
+            text: None,
+            mailbox: FrameMailbox::new(),
+            status: FamilyStatus::Running,
+            fullscreen: false,
+            last_tick: Instant::now(),
+            next_deadline: Instant::now(),
+        });
+
+        let result = controller
+            .handle_physical_event(FamilyEvent::WindowCloseRequested)
+            .unwrap_err();
+
+        assert_eq!(
+            result,
+            "ASTRA_TEST_ADVANCE: advance failed; ASTRA_TEST_CLOSE: close failed"
+        );
+    }
 }
