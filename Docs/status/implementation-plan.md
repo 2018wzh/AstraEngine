@@ -4,7 +4,9 @@
 
 Musica 的现有 `gpu.created` Manager 诊断事件现在同时记录成功创建的 logical/raster 宽高，只在创建阶段输出，便于确认实际 GPU 输出尺寸；不从配置字符串推导尺寸，也不增加逐帧日志。
 
-Musica 高清替换已接入真实 profile→PAZ archive→Scene→SDK `TextureCache` 路径。`texture_overrides` 只允许安全相对 PNG；静态 PNG 和单帧 ANI 的替换像素使用独立 cache identity，逻辑尺寸与 ANI 原点仍来自原资源，多帧 ANI、SQZ 和非法映射明确拒绝。profile/Scene 回归已通过，真实 GPU 替换场景与完整高倍率覆盖仍待独立验证。
+Musica 高清替换已接入真实 profile→PAZ archive→Scene→SDK `TextureCache` 路径。`texture_overrides` 只允许安全相对 PNG；静态 PNG 和单帧 ANI 的替换像素使用独立 cache identity，逻辑尺寸与 ANI 原点仍来自原资源，多帧 ANI、SQZ 和非法映射明确拒绝。profile/Scene 回归已通过；真实 Scene GPU 验证见下，完整 Player 与全游戏高倍率覆盖仍开放。
+
+独立 Windows DX12 discrete GPU 已从真实 profile、PAZ archive、Scene 到 WGPU 路径验证 Musica 静态/ANI 替换的 1.0/1.5/2.0/3.0 输出，覆盖逻辑几何、crop、screen shake、ANI origin、cache 复用与释放重开；缺失源、SQZ 和多帧 ANI 的拒绝测试也通过。该验证覆盖 Scene 与纹理路径，不等同于完整 Player 长流程或高倍率全游戏验收。
 
 Manager 与 Headless 的关闭顺序已调整为先关闭 Family session、取消并等待其 PCM worker，再释放 Host audio executor；NullAudio 的 open→PCM→close→reopen 回归通过。该修复只覆盖有界 worker 的关闭竞态；Sandbox 另一次新 session 的 `ASTRA_EMU_MUSICA_AUDIO_CLOSED` 仍需独立确认根因，不能把两者合并为同一验收结论。
 
