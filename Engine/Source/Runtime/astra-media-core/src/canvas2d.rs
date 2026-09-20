@@ -173,6 +173,32 @@ mod tests {
     }
 
     #[test]
+    fn supported_raster_scales_preserve_logical_geometry() {
+        let logical = Extent2D::new(1280, 720);
+        for (raster, scale) in [
+            (Extent2D::new(1280, 720), 1.0),
+            (Extent2D::new(1920, 1080), 1.5),
+            (Extent2D::new(2560, 1440), 2.0),
+            (Extent2D::new(3840, 2160), 3.0),
+        ] {
+            let canvas = Canvas2D::new(logical, raster).expect("supported raster scale");
+            assert_eq!(canvas.uniform_scale(), Some(scale));
+            assert_eq!(
+                canvas
+                    .logical_to_raster_point([640.0, 360.0])
+                    .expect("center maps to raster"),
+                [640.0 * scale, 360.0 * scale]
+            );
+            assert_eq!(
+                canvas
+                    .raster_to_logical_point([640.0 * scale, 360.0 * scale])
+                    .expect("center maps back to logical stage"),
+                [640.0, 360.0]
+            );
+        }
+    }
+
+    #[test]
     fn rejects_empty_or_stretched_canvas() {
         assert!(Canvas2D::new(Extent2D::new(0, 720), Extent2D::new(1920, 1080)).is_err());
         assert!(Canvas2D::new(Extent2D::new(1280, 720), Extent2D::new(1920, 1200)).is_err());

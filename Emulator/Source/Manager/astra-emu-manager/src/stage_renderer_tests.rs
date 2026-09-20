@@ -122,6 +122,10 @@ fn filter_configuration_rolls_back_and_reuses_uploaded_input() {
     let adapter =
         pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
             .expect("a GPU adapter is required for this test");
+    assert!(matches!(
+        adapter.get_info().device_type,
+        wgpu::DeviceType::DiscreteGpu | wgpu::DeviceType::IntegratedGpu
+    ));
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
         required_features: FilterEngine::required_features(),
         ..Default::default()

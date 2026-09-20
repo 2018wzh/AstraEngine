@@ -460,6 +460,202 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires a hardware GPU"]
+    fn gpu_text_raster_density_preserves_logical_anchor() {
+        use astra_emu_sdk::StageCanvas;
+        use astra_media_core::Extent2D;
+
+        let logical = Extent2D::new(1280, 720);
+        let mut previous_glyph_pixels = 0_u64;
+        let mut reference_bounds: Option<(u32, u32, u32, u32)> = None;
+        for (raster, scale) in [
+            (Extent2D::new(1280, 720), 1.0_f32),
+            (Extent2D::new(1920, 1080), 1.5_f32),
+            (Extent2D::new(2560, 1440), 2.0_f32),
+            (Extent2D::new(3840, 2160), 3.0_f32),
+        ] {
+            let canvas = StageCanvas::new(logical, raster).expect("raster scale is valid");
+            let mut text = MusicaTextRenderer::new(crate::ScriptEncoding::ShiftJis).unwrap();
+            text.set_raster_scale(scale).unwrap();
+            let mut text_commands = text
+                .commands(Some(("日本語の文字", Some("話者"))), None)
+                .unwrap();
+            let glyph_pixels = text_commands
+                .iter()
+                .filter_map(|command| match command {
+                    SceneCommand::UploadGlyph { glyph, .. } => {
+                        Some(u64::from(glyph.width) * u64::from(glyph.height))
+                    }
+                    _ => None,
+                })
+                .sum::<u64>();
+            assert!(glyph_pixels > previous_glyph_pixels);
+            previous_glyph_pixels = glyph_pixels;
+
+            let mut commands = Vec::with_capacity(text_commands.len() + 4);
+            commands.push(SceneCommand::PushTransform {
+                transform: canvas.logical_to_raster_transform(),
+            });
+            commands.push(SceneCommand::PushTransform {
+                transform: canvas.raster_to_logical_transform(),
+            });
+            commands.append(&mut text_commands);
+            commands.push(SceneCommand::PopTransform);
+            commands.push(SceneCommand::PopTransform);
+            let mut gpu = pollster::block_on(WgpuOffscreenRenderer::new()).unwrap();
+            let pixels = gpu
+                .render(&SceneFrame {
+                    sequence: u64::from(raster.width),
+                    width: raster.width,
+                    height: raster.height,
+                    clear_rgba: [0, 0, 0, 0],
+                    commands,
+                    semantics: None,
+                })
+                .unwrap()
+                .rgba8;
+            let mut bounds = (raster.width, raster.height, 0_u32, 0_u32);
+            for (index, pixel) in pixels.as_chunks::<4>().0.iter().enumerate() {
+                if pixel[3] == 0 {
+                    continue;
+                }
+                let x = (index as u32) % raster.width;
+                let y = (index as u32) / raster.width;
+                bounds.0 = bounds.0.min(x);
+                bounds.1 = bounds.1.min(y);
+                bounds.2 = bounds.2.max(x);
+                bounds.3 = bounds.3.max(y);
+            }
+            assert!(bounds.0 <= bounds.2 && bounds.1 <= bounds.3);
+            if let Some(reference) = reference_bounds {
+                for (current, prior) in [
+                    (bounds.0, reference.0),
+                    (bounds.1, reference.1),
+                    (bounds.2, reference.2),
+                    (bounds.3, reference.3),
+                ] {
+                    assert!((current as f32 / scale - prior as f32).abs() <= 3.0);
+                }
+            } else {
+                reference_bounds = Some(bounds);
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "requires a hardware GPU"]
+    fn gpu_text_scale_lifecycle_keeps_repeated_layout_visible() {
+        use astra_emu_sdk::StageCanvas;
+        use astra_media_core::Extent2D;
+        use std::sync::Arc;
+
+        fn render_text(
+            text: &mut MusicaTextRenderer,
+            gpu: &mut WgpuOffscreenRenderer,
+            sequence: u64,
+            scale: f32,
+            raster: Extent2D,
+        ) -> (Arc<[u8]>, Vec<SceneCommand>) {
+            let canvas = StageCanvas::new(Extent2D::new(1280, 720), raster).unwrap();
+            text.set_raster_scale(scale).unwrap();
+            let mut text_commands = text
+                .commands(Some(("日本語の文字", Some("話者"))), None)
+                .unwrap();
+            let mut commands = Vec::with_capacity(text_commands.len() + 4);
+            commands.push(SceneCommand::PushTransform {
+                transform: canvas.logical_to_raster_transform(),
+            });
+            commands.push(SceneCommand::PushTransform {
+                transform: canvas.raster_to_logical_transform(),
+            });
+            commands.append(&mut text_commands);
+            commands.push(SceneCommand::PopTransform);
+            commands.push(SceneCommand::PopTransform);
+            let pixels = gpu
+                .render(&SceneFrame {
+                    sequence,
+                    width: raster.width,
+                    height: raster.height,
+                    clear_rgba: [0, 0, 0, 0],
+                    commands: commands.clone(),
+                    semantics: None,
+                })
+                .unwrap()
+                .rgba8;
+            (pixels, commands)
+        }
+
+        fn alpha_bounds(pixels: &[u8], width: u32, height: u32) -> Option<(u32, u32, u32, u32)> {
+            let mut bounds = (width, height, 0_u32, 0_u32);
+            for (index, pixel) in pixels.as_chunks::<4>().0.iter().enumerate() {
+                if pixel[3] == 0 {
+                    continue;
+                }
+                let x = (index as u32) % width;
+                let y = (index as u32) / width;
+                bounds.0 = bounds.0.min(x);
+                bounds.1 = bounds.1.min(y);
+                bounds.2 = bounds.2.max(x);
+                bounds.3 = bounds.3.max(y);
+            }
+            (bounds.0 <= bounds.2 && bounds.1 <= bounds.3).then_some(bounds)
+        }
+
+        let mut text = MusicaTextRenderer::new(crate::ScriptEncoding::ShiftJis).unwrap();
+        let mut gpu = pollster::block_on(WgpuOffscreenRenderer::new()).unwrap();
+        let first_raster = Extent2D::new(1280, 720);
+        let (first, first_commands) = render_text(&mut text, &mut gpu, 1, 1.0, first_raster);
+        assert!(first_commands
+            .iter()
+            .any(|command| matches!(command, SceneCommand::UploadGlyph { .. })));
+        let reference = alpha_bounds(&first, first_raster.width, first_raster.height)
+            .expect("first GPU text frame must contain visible glyphs");
+
+        let (repeated, repeated_commands) = render_text(&mut text, &mut gpu, 2, 1.0, first_raster);
+        assert!(!repeated_commands.iter().any(|command| matches!(
+            command,
+            SceneCommand::UploadGlyph { .. } | SceneCommand::ReleaseResource { .. }
+        )));
+        assert_eq!(first, repeated);
+
+        for (sequence, scale, raster) in [
+            (3, 1.5_f32, Extent2D::new(1920, 1080)),
+            (4, 2.0_f32, Extent2D::new(2560, 1440)),
+            (5, 3.0_f32, Extent2D::new(3840, 2160)),
+            (6, 1.0_f32, first_raster),
+        ] {
+            let (pixels, _) = render_text(&mut text, &mut gpu, sequence, scale, raster);
+            let bounds = alpha_bounds(&pixels, raster.width, raster.height)
+                .expect("GPU text must remain visible after a raster-scale change");
+            for (current, prior) in [
+                (bounds.0, reference.0),
+                (bounds.1, reference.1),
+                (bounds.2, reference.2),
+                (bounds.3, reference.3),
+            ] {
+                assert!((current as f32 / scale - prior as f32).abs() <= 3.0);
+            }
+        }
+
+        let release_commands = text.commands(None, None).unwrap();
+        assert!(release_commands
+            .iter()
+            .any(|command| matches!(command, SceneCommand::ReleaseResource { .. })));
+        let cleared = gpu
+            .render(&SceneFrame {
+                sequence: 7,
+                width: first_raster.width,
+                height: first_raster.height,
+                clear_rgba: [0, 0, 0, 0],
+                commands: release_commands,
+                semantics: None,
+            })
+            .unwrap()
+            .rgba8;
+        assert!(cleared.as_chunks::<4>().0.iter().all(|pixel| pixel[3] == 0));
+    }
+
+    #[test]
     fn invalid_outline_rejects_before_mutating_glyph_ownership() {
         let mut text = MusicaTextRenderer::new(crate::ScriptEncoding::ShiftJis).unwrap();
         text.commands(Some(("Outline", None)), None).unwrap();
