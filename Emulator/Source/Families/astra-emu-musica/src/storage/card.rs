@@ -2,6 +2,28 @@ use super::*;
 use astra_media_core::TextureFrame;
 use std::io::Cursor;
 
+const THUMBNAIL_WIDTH: u32 = 96;
+const THUMBNAIL_HEIGHT: u32 = 54;
+const SUPPORTED_RASTER_EXTENTS: &[(u32, u32)] =
+    &[(1280, 720), (1920, 1080), (2560, 1440), (3840, 2160)];
+
+fn expected_rgba_len(width: u32, height: u32) -> Option<usize> {
+    usize::try_from(width)
+        .ok()?
+        .checked_mul(usize::try_from(height).ok()?)?
+        .checked_mul(4)
+}
+
+fn is_supported_raster_extent(width: u32, height: u32) -> bool {
+    let Some(width_ratio) = u64::from(width).checked_mul(9) else {
+        return false;
+    };
+    let Some(height_ratio) = u64::from(height).checked_mul(16) else {
+        return false;
+    };
+    width_ratio == height_ratio && SUPPORTED_RASTER_EXTENTS.contains(&(width, height))
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct SaveCard {
     pub timestamp: String,
@@ -16,12 +38,18 @@ impl SaveCard {
                 "gameplay thumbnail could not be encoded",
             )
         };
-        if (width, height) != (1280, 720) {
+        if !is_supported_raster_extent(width, height)
+            || rgba.len() != expected_rgba_len(width, height).ok_or_else(fail)?
+        {
             return Err(fail());
         }
         let frame = image::RgbaImage::from_raw(width, height, rgba.to_vec()).ok_or_else(fail)?;
-        let thumbnail =
-            image::imageops::resize(&frame, 96, 54, image::imageops::FilterType::Triangle);
+        let thumbnail = image::imageops::resize(
+            &frame,
+            THUMBNAIL_WIDTH,
+            THUMBNAIL_HEIGHT,
+            image::imageops::FilterType::Triangle,
+        );
         let mut png = Cursor::new(Vec::new());
         thumbnail
             .write_to(&mut png, image::ImageFormat::Png)
@@ -96,18 +124,28 @@ impl SaveCard {
             image::ImageFormat::Png,
         );
         let mut limits = image::Limits::default();
-        limits.max_image_width = Some(96);
-        limits.max_image_height = Some(54);
+        limits.max_image_width = Some(THUMBNAIL_WIDTH);
+        limits.max_image_height = Some(THUMBNAIL_HEIGHT);
         limits.max_alloc = Some(1024 * 1024);
         reader.limits(limits);
         let image = reader.decode().map_err(|_| invalid())?;
-        if (image.width(), image.height()) != (96, 54) {
+        if (image.width(), image.height()) != (THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT) {
             return Err(invalid());
         }
         Ok(TextureFrame {
-            width: 96,
-            height: 54,
+            width: THUMBNAIL_WIDTH,
+            height: THUMBNAIL_HEIGHT,
             rgba8: image.into_rgba8().into_raw().into(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::expected_rgba_len;
+
+    #[test]
+    fn rgba_length_calculation_rejects_overflow() {
+        assert_eq!(expected_rgba_len(u32::MAX, u32::MAX), None);
     }
 }

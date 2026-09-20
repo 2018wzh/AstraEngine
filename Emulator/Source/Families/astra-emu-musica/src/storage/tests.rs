@@ -12,6 +12,29 @@ fn snapshot(game: &[u8], message: &str) -> Snapshot {
 }
 
 #[test]
+fn save_cards_accept_supported_rasters_and_reject_invalid_frames() {
+    for (width, height) in [(1280, 720), (1920, 1080), (2560, 1440), (3840, 2160)] {
+        let rgba = vec![255; width as usize * height as usize * 4];
+        let card = SaveCard::capture(width, height, &rgba).unwrap();
+        let thumbnail = card.texture().unwrap();
+        assert_eq!((thumbnail.width, thumbnail.height), (96, 54));
+        assert_eq!(thumbnail.rgba8.len(), 96 * 54 * 4);
+    }
+
+    for (width, height, rgba) in [
+        (1600, 900, vec![255; 1600 * 900 * 4]),
+        (1920, 1079, vec![255; 1920 * 1079 * 4]),
+        (1920, 1080, vec![255; 1920 * 1080 * 4 - 1]),
+    ] {
+        let error = match SaveCard::capture(width, height, &rgba) {
+            Ok(_) => panic!("invalid save card frame was accepted"),
+            Err(error) => error,
+        };
+        assert_eq!(error.code(), "ASTRA_EMU_MUSICA_SAVE_THUMBNAIL");
+    }
+}
+
+#[test]
 fn native_slots_are_independent_and_out_of_range_does_not_create_files() {
     let root = tempfile::tempdir().unwrap();
     let storage = Storage::new(root.path()).unwrap();
