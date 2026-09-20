@@ -10,7 +10,7 @@ Musica 高清替换已接入真实 profile→PAZ archive→Scene→SDK `TextureC
 
 Manager 与 Headless 的关闭顺序已调整为先关闭 Family session、取消并等待其 PCM worker，再释放 Host audio executor；NullAudio 的 open→PCM→close→reopen 回归通过。该修复只覆盖有界 worker 的关闭竞态；Sandbox 另一次新 session 的 `ASTRA_EMU_MUSICA_AUDIO_CLOSED` 仍需独立确认根因，不能把两者合并为同一验收结论。
 
-Manager 收到运行时 advance 错误后执行停止清理时，若关闭同时失败，诊断现在保留 advance 作为首个错误并附带清理错误；窗口关闭事件也遵循同一顺序。
+Manager 收到运行时 advance 错误后执行停止清理时，旧实现已保留 advance 作为首个错误，但在关闭同时失败时丢弃清理错误；现已将两者按 advance 优先拼接，窗口关闭事件也遵循同一顺序。
 
 Musica v4 导出插件与 Manager 已构建，动态 ABI 布局和日志进入 Manager 的两项测试通过。GPU 点阵转场首次真实重跑在平台入口校验处被拒绝；现已补齐平台的遮罩命令和栈校验，定向测试与 Clippy 通过，真实路线仍需继续重跑。
 
