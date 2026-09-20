@@ -11,9 +11,9 @@ impl Scene {
     ) -> FamilyResult<()> {
         let uri = format!("musica:/sys/{name}");
         let asset = self.texture_asset(&uri)?;
-        if dimensions.is_some_and(|size| {
-            size != (asset.logical_extent.width, asset.logical_extent.height)
-        }) {
+        if dimensions
+            .is_some_and(|size| size != (asset.logical_extent.width, asset.logical_extent.height))
+        {
             return Err(error(
                 "ASTRA_EMU_MUSICA_GALLERY_DIMENSIONS",
                 "gallery resource dimensions are invalid",

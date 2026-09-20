@@ -16,8 +16,10 @@ impl Scene {
                     error("ASTRA_EMU_MUSICA_ANI_FRAME_COUNT", "ANI contains no image")
                 })?;
                 validate_dimensions(first.width, first.height)?;
-                self.texture_origins
-                    .put(uri.to_owned(), [i32::from(first.offset_x), i32::from(first.offset_y)]);
+                self.texture_origins.put(
+                    uri.to_owned(),
+                    [i32::from(first.offset_x), i32::from(first.offset_y)],
+                );
                 Some(archive.decode_frame(0).map_err(core_error)?)
             }
             Some(value) if value.eq_ignore_ascii_case("sqz") => {

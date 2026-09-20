@@ -109,8 +109,12 @@ impl Scene {
                 "font renderer could not be created",
             )
         })?;
-        text.set_raster_scale(canvas.scale())
-            .map_err(|_| error("ASTRA_EMU_MUSICA_TEXT_SCALE", "text raster scale is invalid"))?;
+        text.set_raster_scale(canvas.scale()).map_err(|_| {
+            error(
+                "ASTRA_EMU_MUSICA_TEXT_SCALE",
+                "text raster scale is invalid",
+            )
+        })?;
         let pixel_bytes = usize::try_from(raster_width)
             .ok()
             .and_then(|width| {
@@ -185,10 +189,16 @@ impl Scene {
     ) -> FamilyResult<()> {
         let asset = self.texture_asset(uri)?;
         let x = x.checked_add(asset.logical_origin[0]).ok_or_else(|| {
-            error("ASTRA_EMU_MUSICA_LAYER_POSITION", "layer x position overflows")
+            error(
+                "ASTRA_EMU_MUSICA_LAYER_POSITION",
+                "layer x position overflows",
+            )
         })?;
         let y = y.checked_add(asset.logical_origin[1]).ok_or_else(|| {
-            error("ASTRA_EMU_MUSICA_LAYER_POSITION", "layer y position overflows")
+            error(
+                "ASTRA_EMU_MUSICA_LAYER_POSITION",
+                "layer y position overflows",
+            )
         })?;
         commands.push(SceneCommand::Texture {
             id: format!("layer:{}", commands.len()),

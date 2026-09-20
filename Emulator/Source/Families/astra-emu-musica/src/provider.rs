@@ -367,9 +367,9 @@ impl MusicaProvider {
             height: raster_height,
             logical_width: 1280,
             logical_height: 720,
-            stride: raster_width.checked_mul(4).ok_or_else(|| {
-                error("ASTRA_EMU_MUSICA_FRAME_SIZE", "frame stride overflows")
-            })?,
+            stride: raster_width
+                .checked_mul(4)
+                .ok_or_else(|| error("ASTRA_EMU_MUSICA_FRAME_SIZE", "frame stride overflows"))?,
             format: FrameFormat::Rgba8Srgb {
                 alpha: FrameAlpha::Opaque,
             },
