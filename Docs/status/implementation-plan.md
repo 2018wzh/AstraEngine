@@ -1,11 +1,11 @@
 # 全产品重构实施状态
 
-本轮 Musica/SDK 重构已接通公共 `Canvas2D`、SDK `StageCanvas`/`TextureAsset`、AstraVN presentation 第二消费者及 Family API v7 logical/raster frame 元数据。Musica 启动配置提供 `render_scale` 的 1.0/1.5/2.0/3.0 矩阵，GPU Scene 和高密度 AstraText glyph 路径按 raster canvas 输出，原生 1280x720 逻辑舞台、ANI 原点和存档/VM 时间保持独立。Windows Sandbox GPU 代表流程和完整 Musica 结局仍待独立验证；同读档后自动播放再次触发 `ASTRA_EMU_MUSICA_ELAPSED` 的后续失败仍开放，本项没有放宽上限或静默截断。
+本轮 Musica/SDK 重构已接通公共 `Canvas2D`、SDK `StageCanvas`/`TextureAsset`、AstraVN presentation 第二消费者及 Family API v7 logical/raster frame 元数据。Musica 启动配置提供 `render_scale` 的 1.0/1.5/2.0/3.0 矩阵，GPU Scene 和高密度 AstraText glyph 路径按 raster canvas 输出，原生 1280x720 逻辑舞台、ANI 原点和存档/VM 时间保持独立。Windows Sandbox 已完成本批固定入口的四档 GPU 尺寸、2.0x 原生存档进程重开恢复和 60 秒 Auto 短流程；完整 Musica 结局、真实声音、长流程、跨平台和性能验收仍开放。此前同读档后的 `ASTRA_EMU_MUSICA_ELAPSED` 在这次固定环境 Auto 流程中未复现，未放宽上限或静默截断。
 
 Musica 的现有 `gpu.created` Manager 诊断事件现在同时记录成功创建的 logical/raster 宽高，只在创建阶段输出，便于确认实际 GPU 输出尺寸；不从配置字符串推导尺寸，也不增加逐帧日志。
 
 Musica 高清替换已接入真实 profile→PAZ archive→Scene→SDK `TextureCache` 路径。`texture_overrides` 只允许安全相对 PNG；静态 PNG 和单帧 ANI 的替换像素使用独立 cache identity，逻辑尺寸与 ANI 原点仍来自原资源，多帧 ANI、SQZ 和非法映射明确拒绝。profile/Scene 回归已通过；真实 Scene GPU 验证见下，完整 Player 与全游戏高倍率覆盖仍开放。
-默认无替换路径新增了省略 `texture_overrides` 字段的 profile GPU 回归，贯通 Provider、PAZ、Scene 和 WGPU 的原生纹理加载、大小写标题资源选择、ANI/SQZ 会话场景、系统页、对白与存档；该路径通过。Sandbox v9 的黑屏尚未在此调用链复现，真实入口仍待受控基线比较，不能据此关闭该问题。
+默认无替换路径新增了省略 `texture_overrides` 字段的 profile GPU 回归，贯通 Provider、PAZ、Scene 和 WGPU 的原生纹理加载、大小写标题资源选择、ANI/SQZ 会话场景、系统页、对白与存档；该路径通过。Sandbox v9 先前的黑屏在固定同配置并充分等待后未复现；抽样仍可见转场短黑，不能据此断言所有显示问题已关闭。
 
 随后使用授权 Musica 源的隔离只读副本，通过 Manager Headless 的真实 Family/provider 路径运行 `launch_mode=title`、默认 `test.sc` 和 `render_scale=1.0`。DX12 discrete GPU 创建成功，Host 使用 `NullAudio`；物理标题导航、开始输入和后续 Enter 推进均产生了实际帧变化，标题背景、过渡后的背景与对白可见。开始后约 420 个 60 Hz tick 才进入稳定背景对白，中间黑帧和文字短暂消失与转场渐变一致；本次没有复现永久文字消失，也不能据此解释 Sandbox 的所有黑屏。F6 保存到新建 slot 20 后，独立进程从标题页分页读档，原生 `load.completed` 后恢复同一对白；session 和音频均正常关闭；该段结论只覆盖 title 入口，direct 对照见下文。
 
@@ -13,9 +13,11 @@ Musica 高清替换已接入真实 profile→PAZ archive→Scene→SDK `TextureC
 
 同一真实入口继续完成高倍率 headless 回归：`render_scale=1.5/2.0/3.0` 分别创建 `1920×1080`、`2560×1440`、`3840×2160` raster，逻辑舞台始终为 `1280×720`。三档均抽样检查了标题、转场和稳定对白；1.5x 在新建隔离存档中保存 slot 20 后，独立 2.0x session 从标题读档页收到原生 `load.completed`，并恢复背景与对白。三档日志均为 DX12 discrete GPU，使用显式 `NullAudio`；本轮未修改源存档，也未把短流程写成完整结局或 Sandbox GUI 验收。
 
+随后在固定 v9 Manager/Family 配对和固定游戏、数据目录下完成 Windows Sandbox 实机回归，实际使用 DX12 discrete GPU：1.0/1.5/2.0/3.0 分别使用 `1280×720`、`1920×1080`、`2560×1440`、`3840×2160` raster，logical extent 始终为 `1280×720`；四档均观察到稳定背景、对白和物理 Enter 推进。2.0x 新建 slot 23 后真正退出 Manager 进程，再用相同环境重启并选择显式 `NullAudio`，从 LoadData 页面收到 `load.completed` 且画面恢复；恢复后物理按键 A 运行 60 秒 Auto，推进多句且未触发 `ASTRA_EMU_MUSICA_ELAPSED`。各次运行正常退出并回到 Manager idle。此前 slot 21 的 `nodata` 发生在未固定 data/game 根的环境中，不能记为产品丢档；先前黑帧在充分等待下也未重现为永久黑屏。该结果不代表完整结局、真实声音、长流程或跨平台性能已完成。
+
 独立 Windows DX12 discrete GPU 已从真实 profile、PAZ archive、Scene 到 WGPU 路径验证 Musica 静态/ANI 替换的 1.0/1.5/2.0/3.0 输出，覆盖逻辑几何、crop、screen shake、ANI origin、cache 复用与释放重开；缺失源、SQZ 和多帧 ANI 的拒绝测试也通过。该验证覆盖 Scene 与纹理路径，不等同于完整 Player 长流程或高倍率全游戏验收。
 
-Manager 与 Headless 的关闭顺序已调整为先关闭 Family session、取消并等待其 PCM worker，再释放 Host audio executor；NullAudio 的 open→PCM→close→reopen 回归通过。该修复只覆盖有界 worker 的关闭竞态；Sandbox 另一次新 session 的 `ASTRA_EMU_MUSICA_AUDIO_CLOSED` 仍需独立确认根因，不能把两者合并为同一验收结论。
+Manager 与 Headless 的关闭顺序已调整为先关闭 Family session、取消并等待其 PCM worker，再释放 Host audio executor；NullAudio 的 open→PCM→close→reopen 回归通过。该修复只覆盖有界 worker 的关闭竞态；此前未固定数据/游戏根的 Sandbox `ASTRA_EMU_MUSICA_AUDIO_CLOSED` 不能作为产品根因，本批固定环境的各次实机 session 均正常退出且无相关 root error。
 
 Manager 收到运行时 advance 错误后执行停止清理时，旧实现已保留 advance 作为首个错误，但在关闭同时失败时丢弃清理错误；现已将两者按 advance 优先拼接，窗口关闭事件也遵循同一顺序。
 
