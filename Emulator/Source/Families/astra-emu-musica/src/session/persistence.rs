@@ -109,6 +109,7 @@ impl MusicaSession {
             self.info.logical_height,
             self.info.width,
             self.info.height,
+            self.scene.texture_overrides(),
             state.script_encoding,
         )?;
         scene.set_text_shadow(self.scene.text_shadow());

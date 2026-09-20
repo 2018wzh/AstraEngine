@@ -65,6 +65,7 @@ pub fn import(
         schema: MUSICA_PROFILE_SCHEMA.into(),
         paz_version: u8::try_from(version).map_err(|_| "ASTRA_EMU_GARBRO_VERSION")?,
         index_size_xor: 0,
+        texture_overrides: BTreeMap::new(),
         roles: roles
             .into_iter()
             .map(|(role, value)| {

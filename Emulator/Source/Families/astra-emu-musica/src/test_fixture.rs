@@ -88,6 +88,7 @@ pub(crate) fn game(root: &Path, script: &[u8]) {
         schema: MUSICA_PROFILE_SCHEMA.into(),
         paz_version: 0,
         index_size_xor: 0,
+        texture_overrides: BTreeMap::new(),
         roles: REQUIRED_ARCHIVE_ROLES
             .iter()
             .map(|role| {

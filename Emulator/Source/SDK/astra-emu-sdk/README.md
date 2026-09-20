@@ -14,6 +14,8 @@ SDK 提供移植核心共同使用的模块，当前替代 Musica 内部的文�
 
 `TextureCache` 复用 `astra-media-core::TextureFrame`、`image` 和 `lru`，同时限制条目数、尺寸和缓存持有的 RGBA 字节数。标准图片解码在转换 RGBA 前检查尺寸与分配预算；专用格式由核心解码后调用 `insert`。淘汰不会使外部持有的帧失效，预算不代表 GPU 或所有调用方的总内存。
 
+`StageCanvas` 只包装公共 `Canvas2D` 的逻辑舞台到 raster 输出映射；`TextureAsset` 将物理 `TextureFrame` 与显式 logical extent、logical origin 分开。Family 可以用原资源的逻辑几何承载不同密度的替换像素，SDK 不定义具体归档、命名或替换策略，也不创建第二套纹理缓存。
+
 SDK 不创建 EngineSession、VN session、PlatformHost 或 package，不拥有游戏存档与归档语义。Musica 直接使用 AstraEngine 的 `WgpuOffscreenRenderer`，SDK 无需再包一层渲染 provider。
 
 ```sh

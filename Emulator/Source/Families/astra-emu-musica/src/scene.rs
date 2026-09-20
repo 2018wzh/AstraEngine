@@ -1,5 +1,7 @@
 mod config;
-use crate::{MusicaMountedVfs, MusicaRuntimeState, MusicaTextRenderer};
+use crate::{
+    profile::MusicaTextureOverrides, MusicaMountedVfs, MusicaRuntimeState, MusicaTextRenderer,
+};
 use astra_byte_source::OwnedByteBuffer;
 use astra_emu_family_api::{FamilyError, FamilyResult};
 use astra_emu_sdk::{StageCanvas, TextureAsset, TextureCache};
@@ -55,7 +57,8 @@ pub(crate) struct Scene {
     sequence: u64,
     text: MusicaTextRenderer,
     textures: TextureCache,
-    texture_origins: lru::LruCache<String, [i32; 2]>,
+    texture_sources: lru::LruCache<String, texture::TextureSourceGeometry>,
+    texture_overrides: MusicaTextureOverrides,
     wscroll2_sync: lru::LruCache<String, Vec<i32>>,
     stand_offsets: lru::LruCache<String, stand::Offsets>,
     width: u32,
@@ -74,7 +77,15 @@ impl Scene {
         height: u32,
         encoding: crate::ScriptEncoding,
     ) -> FamilyResult<Self> {
-        Self::new_scaled(archive, width, height, width, height, encoding)
+        Self::new_scaled(
+            archive,
+            width,
+            height,
+            width,
+            height,
+            MusicaTextureOverrides::default(),
+            encoding,
+        )
     }
 
     pub fn new_scaled(
@@ -83,8 +94,10 @@ impl Scene {
         logical_height: u32,
         raster_width: u32,
         raster_height: u32,
+        texture_overrides: MusicaTextureOverrides,
         encoding: crate::ScriptEncoding,
     ) -> FamilyResult<Self> {
+        texture::validate_texture_overrides(&archive, &texture_overrides)?;
         let canvas = StageCanvas::new(
             Extent2D::new(logical_width, logical_height),
             Extent2D::new(raster_width, raster_height),
@@ -142,7 +155,8 @@ impl Scene {
                         "invalid texture cache budget",
                     )
                 })?,
-            texture_origins: lru::LruCache::new(NonZeroUsize::new(32).unwrap()),
+            texture_sources: lru::LruCache::new(NonZeroUsize::new(32).unwrap()),
+            texture_overrides,
             width: logical_width,
             height: logical_height,
             raster_width,
@@ -152,6 +166,9 @@ impl Scene {
             stand_offsets: lru::LruCache::new(NonZeroUsize::new(32).unwrap()),
             pixels: vec![0; pixel_bytes].into(),
         })
+    }
+    pub(crate) fn texture_overrides(&self) -> MusicaTextureOverrides {
+        self.texture_overrides.clone()
     }
     pub fn set_text_encoding(&mut self, encoding: crate::ScriptEncoding) {
         self.text.set_encoding(encoding);

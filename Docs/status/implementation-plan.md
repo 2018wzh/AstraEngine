@@ -2,6 +2,8 @@
 
 本轮 Musica/SDK 重构已接通公共 `Canvas2D`、SDK `StageCanvas`/`TextureAsset`、AstraVN presentation 第二消费者及 Family API v7 logical/raster frame 元数据。Musica 启动配置提供 `render_scale` 的 1.0/1.5/2.0/3.0 矩阵，GPU Scene 和高密度 AstraText glyph 路径按 raster canvas 输出，原生 1280x720 逻辑舞台、ANI 原点和存档/VM 时间保持独立。Windows Sandbox GPU 代表流程和完整 Musica 结局仍待独立验证；同读档后自动播放再次触发 `ASTRA_EMU_MUSICA_ELAPSED` 的后续失败仍开放，本项没有放宽上限或静默截断。
 
+Musica 高清替换已接入真实 profile→PAZ archive→Scene→SDK `TextureCache` 路径。`texture_overrides` 只允许安全相对 PNG；静态 PNG 和单帧 ANI 的替换像素使用独立 cache identity，逻辑尺寸与 ANI 原点仍来自原资源，多帧 ANI、SQZ 和非法映射明确拒绝。profile/Scene 回归已通过，真实 GPU 替换场景与完整高倍率覆盖仍待独立验证。
+
 Musica v4 导出插件与 Manager 已构建，动态 ABI 布局和日志进入 Manager 的两项测试通过。GPU 点阵转场首次真实重跑在平台入口校验处被拒绝；现已补齐平台的遮罩命令和栈校验，定向测试与 Clippy 通过，真实路线仍需继续重跑。
 
 按用户要求，旧 Minori family 统一重命名为 Musica：crate、Rust 类型、诊断与配置命名空间、CLI、工具和文档路径同步更新，不保留旧入口或别名。来源分支名称 `codex/minori-runtime-followup` 保持不变；游戏素材和已有私有存档未修改。重命名后的 76 项核心测试、12 项 CLI 测试、三个 Python 工具入口检查及受影响 Clippy 已通过。

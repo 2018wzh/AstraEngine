@@ -1,6 +1,6 @@
 use crate::{
     audio::Audio,
-    mount_musica,
+    profile::mount_musica_with_texture_overrides,
     scene::{core_error, error, Scene},
     session::MusicaSession,
     storage::Storage,
@@ -274,7 +274,9 @@ impl MusicaProvider {
         let focused = request.initial_window.focused;
         let lease = SessionLease::acquire()?;
         let root = Path::new(request.game_path.as_str());
-        let archive = Arc::new(mount_musica(root, Path::new(&profile)).map_err(core_error)?);
+        let (archive, texture_overrides) =
+            mount_musica_with_texture_overrides(root, Path::new(&profile)).map_err(core_error)?;
+        let archive = Arc::new(archive);
         let uri = format!("musica:/scr/{entry}");
         let primary_encoding = encoding;
         let loaded = crate::script_loader::load_script(&archive, &uri, primary_encoding)?;
@@ -335,6 +337,7 @@ impl MusicaProvider {
             720,
             raster_width,
             raster_height,
+            texture_overrides,
             encoding,
         )?;
         scene.set_text_shadow(text_shadow);
