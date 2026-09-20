@@ -56,7 +56,7 @@ platform behavior still requires platform-specific validation.
 
 ## Family adapter
 
-The local product rebuild adds the independent Family API v3 dynamic root
+The local product rebuild adds the independent Family API v7 dynamic root
 module and explicit configuration schema. The module rejects a second active
 session. Adapter-only game-specific trace output has been removed; bounded
 frame events use `tracing`. Failed startup also disables the hosted clock.
@@ -110,4 +110,4 @@ machine in `siglus_scene_vm`, not adapter changes.
 
 ## Manager diagnostics
 
-The Family adapter installs the shared optional Family API v3 diagnostic bridge before descriptor/probe/open. Existing core tracing and log events reach the Manager sink without adding a core logger or changing native rendering/platform behavior. Unreviewed text and Debug values are redacted with an explicit count.
+The Family adapter installs the shared optional Family API v7 diagnostic bridge before descriptor/probe/open. Existing core tracing and log events reach the Manager sink without adding a core logger or changing native rendering/platform behavior. The bridge forwards bounded text and Debug values without content redaction; Manager-side field and size limits remain in force.

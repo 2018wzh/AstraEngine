@@ -100,9 +100,9 @@ format.
 `Docs/emu/fvp/rfvp-fork-audit.md` records the historical v9 audit. It is not
 a description of the current independent-host source or its release status.
 
-## Family API v2 启动配置
+## Family API v7 启动配置
 
-Family adapter 声明 `script_encoding` enum（shift_jis/gbk/utf8），经 v2 typed schema 验证后传给已有 `HostedBootConfig.nls`。默认仍是 ShiftJIS；没有修改 RFVP VM、编解码器或 GlobalSaveDataV1/RFVG。翻译 capability 仍未声明。
+Family adapter 声明 `script_encoding` enum（shift_jis/gbk/utf8），经 v7 typed schema 验证后传给已有 `HostedBootConfig.nls`。默认仍是 ShiftJIS；没有修改 RFVP VM、编解码器或 GlobalSaveDataV1/RFVG。翻译 capability 仍未声明。
 
 ## 全局存档失败诊断
 
@@ -130,7 +130,7 @@ Family 的 session map 改为持有 `Box<FvpSession>`。原先第二次启动在
 
 ## Manager diagnostics
 
-The Family adapter installs the shared optional Family API v3 diagnostic bridge before descriptor/probe/open. Existing core tracing and log events reach the Manager sink without adding a core logger or changing native rendering/platform behavior. Unreviewed text and Debug values are redacted with an explicit count.
+The Family adapter installs the shared optional Family API v7 diagnostic bridge before descriptor/probe/open. Existing core tracing and log events reach the Manager sink without adding a core logger or changing native rendering/platform behavior. The bridge forwards bounded text and Debug values without content redaction; Manager-side field and size limits remain in force.
 
 Family audio errors retain the failed operation (load, play, mix, stream submission or parameter update), and command failures emit `astra.emu.fvp.audio.operation_failed` with only operation and diagnostic code. Playback-state synchronization and video completion have distinct error contexts. Mixer limits and core behavior are unchanged; these diagnostics narrow the unresolved capacity failure seen during the Sandbox playthrough.
 

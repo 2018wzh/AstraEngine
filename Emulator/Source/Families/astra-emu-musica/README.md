@@ -6,7 +6,7 @@ Musica 提供独立 `FamilyProvider`、`FamilySession` 和可选 `abi_stable` �
 
 ## 启动和输入
 
-`create_musica_provider()` 返回静态 provider；`dynamic-plugin-export` feature 导出独立 FamilyModule。descriptor 使用 Family API v3，接受 `profile_file`（默认 `musica.profile.json`）和 `entry_script`（默认 `test.sc`）两个 typed 启动配置。前者限游戏目录内安全相对路径；后者是 scr archive 内单个 `.sc` 文件名。`test.sc` 延续此前明确优先选择的观察入口，可按游戏修改。不会在入口失败后猜测另一个脚本。
+`create_musica_provider()` 返回静态 provider；`dynamic-plugin-export` feature 导出独立 FamilyModule。descriptor 使用 Family API v7，接受 `profile_file`（默认 `musica.profile.json`）和 `entry_script`（默认 `test.sc`）两个 typed 启动配置。前者限游戏目录内安全相对路径；后者是 scr archive 内单个 `.sc` 文件名。`test.sc` 延续此前明确优先选择的观察入口，可按游戏修改。不会在入口失败后猜测另一个脚本。
 
 已接入的渲染路径保留既有 1280×720 坐标与 Noto Sans JP 字体绑定。Host resize 只改变窗口，不改游戏内部布局。Session 按 60 Hz 逻辑处理有界 elapsed interval，显示纹理、消息、面板和已验证的 CrossFade2；字形结果与纹理有界缓存。Enter、Space 和鼠标主键推进消息；F5 保存，F9 读取。关闭和销毁都会取消文字请求、取消 PCM 写入并等待 audio worker 结束；同进程不能同时打开两个 Musica session。
 

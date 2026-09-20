@@ -6,6 +6,6 @@
 
 FVP 当前提供 `script_encoding`：`shift_jis`（默认）、`gbk`、`utf8`，直接传给 RFVP 已有的脚本解码配置。它不转换游戏文件，也不修改原生存档格式。翻译仍未支持。
 
-ABI v2 要求重新构建并安装旧插件；动态库在当前 Manager 进程中一直驻留，更新后重启 Manager。关闭作品仍会取消请求、结束音视频 worker、关闭核心会话。Manager schema 4 会明确重建旧 Manager 数据，不触碰游戏目录的原生存档。
+ABI v7 要求重新构建并安装旧插件；动态库在当前 Manager 进程中一直驻留，更新后重启 Manager。关闭作品仍会取消请求、结束音视频 worker、关闭核心会话。Manager schema 4 会明确重建旧 Manager 数据，不触碰游戏目录的原生存档。
 
 配置错误在启动前显示，错误中不包含配置值。修复字段后再保存；不支持的 key、损坏持久化值或不符合新核心 schema 的值不会被静默忽略。

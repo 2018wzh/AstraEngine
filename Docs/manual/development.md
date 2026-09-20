@@ -66,14 +66,14 @@ Native VN 的 GPU Headless 使用 `render_policy: checkpoints` 时，独立资�
 
 适配优先启用核心现成的 GPU feature 和平台能力，仅修改嵌入入口、Family API 和必要生命周期边界；复用原生渲染、媒体、VM 及存档，不另建竞争路径。差异写入各 Family 的 MODIFICATIONS.md。CPU 最终帧是交付格式，不代表使用 CPU 渲染。
 
-动态核心的 tracing/log 由 Family API v3 日志桥接入 Manager。旧插件须重建后重新安装并重启 Manager；FVP/Musica 构建动态插件时开启 dynamic-plugin-export。静态核心使用宿主订阅器。
+动态核心的 tracing/log 由 Family API v7 日志桥接入 Manager。旧插件须重建后重新安装并重启 Manager；FVP/Musica 构建动态插件时开启 dynamic-plugin-export。静态核心使用宿主订阅器。
 
 ```sh
 RUST_LOG=info,astra_emu::family=debug astra-emu-manager
 cargo build --manifest-path Emulator/Cargo.toml -p astra-emu-fvp --features dynamic-plugin-export
 ```
 
-`core_target` 保留核心来源，`event` 是稳定事件名；`fields` 为有界结构化字段。`redacted_fields` 表示未传出的字段数量。若只看到 `family.unstructured_log`，应在对应核心根因边界增加安全的稳定事件和数值字段，不能为排错直接透传游戏正文、路径或整个 Debug 对象。日志桥初始化失败会阻止加载；读取损坏存档仍必须返回错误且保留原文件。
+`core_target` 保留核心来源，`event` 是稳定事件名；`fields` 为有界结构化字段，超限字段计入 `dropped_fields`。日志桥不做内容脱敏或字符串白名单过滤，但产品日志仍不得主动记录游戏正文、路径或未经审计的整体 Debug 对象；若只看到 `family.unstructured_log`，应在对应核心根因边界增加安全的稳定事件和数值字段。日志桥初始化失败会阻止加载；读取损坏存档仍必须返回错误且保留原文件。
 
 ## VN 逐字显示与物理输入
 
