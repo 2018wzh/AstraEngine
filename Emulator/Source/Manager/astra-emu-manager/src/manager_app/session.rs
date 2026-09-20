@@ -94,7 +94,9 @@ impl ActiveFamilySession {
             .advance(elapsed_ns, events)
             .map_err(|error| error.to_string())?;
         self.status = response.status;
-        if let ROption::RSome(astra_emu_family_api::FamilyWindowCommand::SetFullscreen(value)) = response.window_command {
+        if let ROption::RSome(astra_emu_family_api::FamilyWindowCommand::SetFullscreen(value)) =
+            response.window_command
+        {
             self.fullscreen = value;
         }
         self.capture_frame()?;
@@ -109,17 +111,21 @@ impl ActiveFamilySession {
     }
 
     pub(super) fn close(&mut self) -> Result<(), String> {
+        // Let the family cancel and join its workers while their host sinks
+        // are still alive. Releasing the bounded PCM queue first races a
+        // family worker into ASTRA_EMU_AUDIO_CLOSED before it can observe its
+        // own stop flag.
+        let session_error = self
+            .session
+            .take()
+            .and_then(|session| session.close().err())
+            .map(|error| error.to_string());
         let text_error = self
             .text
             .take()
             .and_then(|text| text.close().err())
             .map(|error| error.to_string());
         let audio_error = self.audio.take().and_then(|audio| audio.close().err());
-        let session_error = self
-            .session
-            .take()
-            .and_then(|session| session.close().err())
-            .map(|error| error.to_string());
         let errors: Vec<_> = [
             text_error,
             audio_error,
@@ -160,18 +166,133 @@ mod tests {
     impl FamilySession for WindowSession {
         fn advance(&mut self, _: u64, _: &[FamilyEvent]) -> FamilyResult<AdvanceResponse> {
             Ok(AdvanceResponse {
-                window_command: self.0.pop_front().flatten().map(FamilyWindowCommand::SetFullscreen).into(),
+                window_command: self
+                    .0
+                    .pop_front()
+                    .flatten()
+                    .map(FamilyWindowCommand::SetFullscreen)
+                    .into(),
                 ..AdvanceResponse::running()
             })
         }
         fn visit_frame(&self, visitor: &mut dyn FrameVisitor) -> FamilyResult<()> {
-            visitor.accept(FrameView::from_slice(&[0, 0, 0, 255], FrameInfo {
-                width: 1, height: 1, stride: 4,
-                logical_width: 1, logical_height: 1,
-                format: FrameFormat::Rgba8Srgb { alpha: FrameAlpha::Opaque },
-            })?)
+            visitor.accept(FrameView::from_slice(
+                &[0, 0, 0, 255],
+                FrameInfo {
+                    width: 1,
+                    height: 1,
+                    stride: 4,
+                    logical_width: 1,
+                    logical_height: 1,
+                    format: FrameFormat::Rgba8Srgb {
+                        alpha: FrameAlpha::Opaque,
+                    },
+                },
+            )?)
         }
-        fn close(self: Box<Self>) -> FamilyResult<()> { Ok(()) }
+        fn close(self: Box<Self>) -> FamilyResult<()> {
+            Ok(())
+        }
+    }
+
+    struct AudioSession {
+        sink: AudioSinkBox,
+        stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        worker: Option<std::thread::JoinHandle<Result<(), String>>>,
+    }
+
+    impl FamilySession for AudioSession {
+        fn advance(&mut self, _: u64, _: &[FamilyEvent]) -> FamilyResult<AdvanceResponse> {
+            Ok(AdvanceResponse::running())
+        }
+
+        fn visit_frame(&self, _: &mut dyn FrameVisitor) -> FamilyResult<()> {
+            Ok(())
+        }
+
+        fn close(mut self: Box<Self>) -> FamilyResult<()> {
+            self.stop.store(true, std::sync::atomic::Ordering::Release);
+            self.sink.cancel().into_result()?;
+            self.worker
+                .take()
+                .expect("audio worker is present")
+                .join()
+                .map_err(|_| FamilyError::new("ASTRA_TEST_AUDIO_WORKER", "worker panicked"))?
+                .map_err(|error| FamilyError::new("ASTRA_TEST_AUDIO_WORKER", error))
+        }
+    }
+
+    fn active_with_audio() -> ActiveFamilySession {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::time::Duration;
+
+        let audio =
+            audio_executor::HostAudioExecutor::new(audio_executor::AudioDeviceKind::Null, None);
+        let sink = audio.sink();
+        sink.configure(PcmFormatSpec {
+            sample_rate: 48_000,
+            channels: 2,
+            format: PcmFormat::F32,
+        })
+        .into_result()
+        .unwrap();
+        let stop = std::sync::Arc::new(AtomicBool::new(false));
+        let started = std::sync::Arc::new(AtomicBool::new(false));
+        let worker_stop = stop.clone();
+        let worker_started = started.clone();
+        let worker_sink = audio.sink();
+        let worker = std::thread::spawn(move || {
+            worker_started.store(true, Ordering::Release);
+            loop {
+                let status = worker_sink
+                    .write(PcmChunk::F32(abi_stable::std_types::RVec::from(vec![
+                        0.0;
+                        960
+                    ])))
+                    .into_result()
+                    .map_err(|error| error.to_string())?;
+                match status {
+                    AudioWriteStatus::Accepted if !worker_stop.load(Ordering::Acquire) => {}
+                    AudioWriteStatus::Cancelled | AudioWriteStatus::Closed
+                        if worker_stop.load(Ordering::Acquire) =>
+                    {
+                        return Ok(())
+                    }
+                    status => return Err(format!("unexpected audio status: {status:?}")),
+                }
+            }
+        });
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while !started.load(Ordering::Acquire) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "audio worker did not start"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        ActiveFamilySession {
+            family_id: "audio-lifecycle-test".into(),
+            session: Some(Box::new(AudioSession {
+                sink,
+                stop,
+                worker: Some(worker),
+            })),
+            audio: Some(audio),
+            text: None,
+            mailbox: FrameMailbox::new(),
+            status: FamilyStatus::Running,
+            fullscreen: false,
+            last_tick: Instant::now(),
+            next_deadline: Instant::now(),
+        }
+    }
+
+    #[test]
+    fn close_joins_family_pcm_worker_before_releasing_null_audio_and_reopens() {
+        for _ in 0..2 {
+            let mut active = active_with_audio();
+            active.close().unwrap();
+        }
     }
 
     #[test]
@@ -182,22 +303,34 @@ mod tests {
         }
         impl FamilySession for ClockSession {
             fn advance(&mut self, _: u64, _: &[FamilyEvent]) -> FamilyResult<AdvanceResponse> {
-                Ok(AdvanceResponse { reset_clock: self.reset, ..AdvanceResponse::running() })
+                Ok(AdvanceResponse {
+                    reset_clock: self.reset,
+                    ..AdvanceResponse::running()
+                })
             }
             fn visit_frame(&self, _: &mut dyn FrameVisitor) -> FamilyResult<()> {
                 *self.captured.lock().unwrap() = Some(Instant::now());
                 Ok(())
             }
-            fn close(self: Box<Self>) -> FamilyResult<()> { Ok(()) }
+            fn close(self: Box<Self>) -> FamilyResult<()> {
+                Ok(())
+            }
         }
         for reset in [false, true] {
             let captured = std::sync::Arc::new(std::sync::Mutex::new(None));
             let mut active = ActiveFamilySession {
                 family_id: "clock-test".into(),
-                session: Some(Box::new(ClockSession { reset, captured: captured.clone() })),
-                audio: None, text: None, mailbox: FrameMailbox::new(),
-                status: FamilyStatus::Running, fullscreen: false,
-                last_tick: Instant::now(), next_deadline: Instant::now(),
+                session: Some(Box::new(ClockSession {
+                    reset,
+                    captured: captured.clone(),
+                })),
+                audio: None,
+                text: None,
+                mailbox: FrameMailbox::new(),
+                status: FamilyStatus::Running,
+                fullscreen: false,
+                last_tick: Instant::now(),
+                next_deadline: Instant::now(),
             };
             active.advance(1, &[]).unwrap();
             let completion = captured.lock().unwrap().unwrap();
@@ -206,7 +339,10 @@ mod tests {
             } else {
                 assert!(active.last_tick <= completion);
             }
-            assert_eq!(active.next_deadline, active.last_tick + Duration::from_nanos(FIXED_FRAME_NS));
+            assert_eq!(
+                active.next_deadline,
+                active.last_tick + Duration::from_nanos(FIXED_FRAME_NS)
+            );
             active.close().unwrap();
         }
     }
@@ -215,10 +351,16 @@ mod tests {
     fn window_request_persists_until_explicitly_replaced() {
         let mut active = ActiveFamilySession {
             family_id: "test".into(),
-            session: Some(Box::new(WindowSession([Some(true), None, Some(false)].into()))),
-            audio: None, text: None, mailbox: FrameMailbox::new(),
-            status: FamilyStatus::Running, fullscreen: false,
-            last_tick: Instant::now(), next_deadline: Instant::now(),
+            session: Some(Box::new(WindowSession(
+                [Some(true), None, Some(false)].into(),
+            ))),
+            audio: None,
+            text: None,
+            mailbox: FrameMailbox::new(),
+            status: FamilyStatus::Running,
+            fullscreen: false,
+            last_tick: Instant::now(),
+            next_deadline: Instant::now(),
         };
         active.advance(1, &[]).unwrap();
         assert!(active.fullscreen);

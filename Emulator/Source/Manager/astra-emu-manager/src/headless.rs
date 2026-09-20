@@ -66,8 +66,8 @@ pub(crate) fn run(path: &Path) -> Result<(), String> {
     let mut observability = astra_observability::HostObservabilityConfig::for_cli(filter);
     observability.role = astra_observability::HostRole::Test;
     observability.log_dir = Some(config.output.with_extension("diagnostics"));
-    let _observability = astra_observability::init_host(observability)
-        .map_err(|_| "ASTRA_EMU_HEADLESS_LOG_INIT")?;
+    let _observability =
+        astra_observability::init_host(observability).map_err(|_| "ASTRA_EMU_HEADLESS_LOG_INIT")?;
     let result = run_configuration(config);
     if let Err(cause) = &result {
         tracing::error!(event = "astra.emu.headless.failed", error = %cause);
@@ -80,7 +80,8 @@ fn run_configuration(config: Configuration) -> Result<(), String> {
         return Err("ASTRA_EMU_HEADLESS_FRAME_LIMIT".into());
     }
     let inputs = input::prepare(&config.inputs, config.frames)?;
-    let mut captures = captures::Captures::new(&config.capture_frames, config.frames, &config.output)?;
+    let mut captures =
+        captures::Captures::new(&config.capture_frames, config.frames, &config.output)?;
     let game = config
         .game
         .to_str()
@@ -161,9 +162,10 @@ fn run_configuration(config: Configuration) -> Result<(), String> {
             .save(&config.output)
             .map_err(|_| "ASTRA_EMU_HEADLESS_CAPTURE_WRITE".to_owned())
     })();
-    // Cancel blocked PCM writes before joining the family workers, including on failure.
-    let audio_result = audio.close();
+    // The family must cancel and join its PCM worker while the host queue is
+    // still alive. Release the host device only after the family is closed.
     let session_result = session.close().map_err(|error| error.to_string());
+    let audio_result = audio.close();
     let errors: Vec<_> = [result, audio_result, session_result]
         .into_iter()
         .filter_map(Result::err)
