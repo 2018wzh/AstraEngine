@@ -7,6 +7,8 @@ Musica 的现有 `gpu.created` Manager 诊断事件现在同时记录成功创�
 Musica 高清替换已接入真实 profile→PAZ archive→Scene→SDK `TextureCache` 路径。`texture_overrides` 只允许安全相对 PNG；静态 PNG 和单帧 ANI 的替换像素使用独立 cache identity，逻辑尺寸与 ANI 原点仍来自原资源，多帧 ANI、SQZ 和非法映射明确拒绝。profile/Scene 回归已通过；真实 Scene GPU 验证见下，完整 Player 与全游戏高倍率覆盖仍开放。
 默认无替换路径新增了省略 `texture_overrides` 字段的 profile GPU 回归，贯通 Provider、PAZ、Scene 和 WGPU 的原生纹理加载、大小写标题资源选择、ANI/SQZ 会话场景、系统页、对白与存档；该路径通过。Sandbox v9 的黑屏尚未在此调用链复现，真实入口仍待受控基线比较，不能据此关闭该问题。
 
+随后使用授权 Musica 源的隔离只读副本，通过 Manager Headless 的真实 Family/provider 路径运行 `launch_mode=title`、默认 `test.sc` 和 `render_scale=1.0`。DX12 discrete GPU 创建成功，Host 使用 `NullAudio`；物理标题导航、开始输入和后续 Enter 推进均产生了实际帧变化，标题背景、过渡后的背景与对白可见。开始后约 420 个 60 Hz tick 才进入稳定背景对白，中间黑帧和文字短暂消失与转场渐变一致；本次没有复现永久文字消失，也不能据此解释 Sandbox 的所有黑屏。F6 保存到新建 slot 20 后，独立进程从标题页分页读档，原生 `load.completed` 后恢复同一对白；session 和音频均正常关闭。`launch_mode=direct` 未在本轮实际源流程中验证，不能将其标为通过。
+
 独立 Windows DX12 discrete GPU 已从真实 profile、PAZ archive、Scene 到 WGPU 路径验证 Musica 静态/ANI 替换的 1.0/1.5/2.0/3.0 输出，覆盖逻辑几何、crop、screen shake、ANI origin、cache 复用与释放重开；缺失源、SQZ 和多帧 ANI 的拒绝测试也通过。该验证覆盖 Scene 与纹理路径，不等同于完整 Player 长流程或高倍率全游戏验收。
 
 Manager 与 Headless 的关闭顺序已调整为先关闭 Family session、取消并等待其 PCM worker，再释放 Host audio executor；NullAudio 的 open→PCM→close→reopen 回归通过。该修复只覆盖有界 worker 的关闭竞态；Sandbox 另一次新 session 的 `ASTRA_EMU_MUSICA_AUDIO_CLOSED` 仍需独立确认根因，不能把两者合并为同一验收结论。
