@@ -1025,6 +1025,8 @@ fn scene_command_kind(command: &astra_media::SceneCommand) -> &'static str {
         SceneCommand::SetCamera { .. } => "set_camera",
         SceneCommand::PushOpacity { .. } => "push_opacity",
         SceneCommand::PopOpacity => "pop_opacity",
+        SceneCommand::PushPixelMask { .. } => "push_pixel_mask",
+        SceneCommand::PopPixelMask => "pop_pixel_mask",
         SceneCommand::FilterGraph { .. } => "filter_graph",
     }
 }
