@@ -11,11 +11,6 @@ impl AstraEmuManagerController {
             state.visible = false;
         }
         state.validate().map_err(|error| error.to_string())?;
-        let host_window_changed = self.window_state.is_some_and(|previous| {
-            previous.focused != state.focused
-                || previous.visible != state.visible
-                || (previous.width, previous.height) != (state.width, state.height)
-        });
         if let Some(previous) = self.window_state {
             if previous.focused != state.focused {
                 self.handle_physical_event(FamilyEvent::WindowFocused {
@@ -35,9 +30,6 @@ impl AstraEmuManagerController {
             }
         }
         self.window_state = Some(state);
-        if host_window_changed {
-            self.host_work_complete();
-        }
         Ok(())
     }
 
@@ -67,6 +59,21 @@ impl AstraEmuManagerController {
             } else if !self.physical_keys.contains(code) {
                 self.physical_keys.push(*code);
             }
+        }
+        let lifecycle = matches!(
+            event,
+            FamilyEvent::WindowFocused { .. }
+                | FamilyEvent::WindowVisibility { .. }
+                | FamilyEvent::WindowSuspended { .. }
+        );
+        if lifecycle {
+            let mut events = std::mem::take(&mut self.pending_events);
+            events.push(event);
+            return self
+                .active
+                .as_mut()
+                .expect("active session checked above")
+                .advance_host_events(&events);
         }
         let closing = matches!(event, FamilyEvent::WindowCloseRequested);
         self.pending_events.push(event);

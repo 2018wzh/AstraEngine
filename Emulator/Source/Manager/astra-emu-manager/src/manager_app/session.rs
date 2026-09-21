@@ -140,6 +140,39 @@ impl ActiveFamilySession {
         Ok(())
     }
 
+    pub(super) fn advance_host_events(&mut self, events: &[FamilyEvent]) -> Result<(), String> {
+        let session = self
+            .session
+            .as_mut()
+            .ok_or_else(|| "ASTRA_EMU_FAMILY_SESSION_CLOSED".to_owned())?;
+        let response = match session.advance(0, events) {
+            Ok(response) => response,
+            Err(error) => {
+                tracing::error!(
+                    event = "astra.emu.host.advance_failed",
+                    family_id = %self.family_id,
+                    diagnostic_code = %error.code(),
+                    elapsed_ns = 0
+                );
+                return Err(error.to_string());
+            }
+        };
+        self.status = response.status;
+        if let ROption::RSome(astra_emu_family_api::FamilyWindowCommand::SetFullscreen(value)) =
+            response.window_command
+        {
+            self.fullscreen = value;
+        }
+        self.capture_frame()?;
+        if response.reset_clock {
+            tracing::debug!(event = "astra.emu.host.clock_reset", family_id = %self.family_id);
+            self.reset_clock_after_host_work("family_event");
+        } else {
+            self.next_deadline = self.last_tick + Duration::from_nanos(FIXED_FRAME_NS);
+        }
+        Ok(())
+    }
+
     pub(super) fn close(&mut self) -> Result<(), String> {
         // Let the family cancel and join its workers while their host sinks
         // are still alive. Releasing the bounded PCM queue first races a
@@ -368,6 +401,55 @@ mod tests {
                 assert!(active.last_tick >= completion);
             } else {
                 assert!(active.last_tick <= completion);
+            }
+            assert_eq!(
+                active.next_deadline,
+                active.last_tick + Duration::from_nanos(FIXED_FRAME_NS)
+            );
+            active.close().unwrap();
+        }
+    }
+
+    #[test]
+    fn host_event_clock_follows_family_reset_decision() {
+        struct HostEventSession {
+            reset: bool,
+        }
+        impl FamilySession for HostEventSession {
+            fn advance(&mut self, _: u64, _: &[FamilyEvent]) -> FamilyResult<AdvanceResponse> {
+                Ok(AdvanceResponse {
+                    reset_clock: self.reset,
+                    ..AdvanceResponse::running()
+                })
+            }
+            fn visit_frame(&self, _: &mut dyn FrameVisitor) -> FamilyResult<()> {
+                Ok(())
+            }
+            fn close(self: Box<Self>) -> FamilyResult<()> {
+                Ok(())
+            }
+        }
+
+        for reset in [false, true] {
+            let anchor = Instant::now();
+            let mut active = ActiveFamilySession {
+                family_id: "host-event-clock-test".into(),
+                session: Some(Box::new(HostEventSession { reset })),
+                audio: None,
+                text: None,
+                mailbox: FrameMailbox::new(),
+                status: FamilyStatus::Running,
+                fullscreen: false,
+                last_tick: anchor,
+                next_deadline: anchor + Duration::from_nanos(FIXED_FRAME_NS),
+            };
+            active
+                .advance_host_events(&[FamilyEvent::WindowFocused { focused: false }])
+                .unwrap();
+            if reset {
+                assert!(active.last_tick >= anchor);
+            } else {
+                assert_eq!(active.last_tick, anchor);
             }
             assert_eq!(
                 active.next_deadline,

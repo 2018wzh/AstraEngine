@@ -318,24 +318,36 @@ impl MusicaSession {
                     self.vm.set_control_pressed(self.control_keys != 0);
                 }
                 FamilyEvent::WindowFocused { focused } => {
+                    let changed = self.focused != *focused;
                     self.focused = *focused;
                     if !focused {
                         self.clear_input();
                     }
+                    if changed && !self.progress_in_background {
+                        self.reset_host_clock = true;
+                    }
                     self.update_pause()?;
                 }
                 FamilyEvent::WindowVisibility { visible } => {
+                    let changed = self.visible != *visible;
                     self.visible = *visible;
                     if !visible {
                         self.clear_input();
                     }
+                    if changed {
+                        self.reset_host_clock = true;
+                    }
                     self.update_pause()?;
                 }
                 FamilyEvent::WindowSuspended { suspended } => {
+                    let changed = self.suspended != *suspended;
                     if *suspended {
                         self.clear_input();
                     }
                     self.suspended = *suspended;
+                    if changed {
+                        self.reset_host_clock = true;
+                    }
                     self.update_pause()?;
                 }
                 FamilyEvent::WindowCloseRequested => {
