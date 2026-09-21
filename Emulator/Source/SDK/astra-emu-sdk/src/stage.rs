@@ -34,9 +34,9 @@ impl StageCanvas {
     }
 
     pub fn viewport_rect(self) -> Result<astra_media_core::RectI, CoreError> {
-        self.inner.viewport_rect().map_err(|error| {
-            CoreError::invalid("ASTRA_EMU_SDK_STAGE_CANVAS", error.to_string())
-        })
+        self.inner
+            .viewport_rect()
+            .map_err(|error| CoreError::invalid("ASTRA_EMU_SDK_STAGE_CANVAS", error.to_string()))
     }
 
     pub fn contains_raster_point(self, point: [f32; 2]) -> bool {
