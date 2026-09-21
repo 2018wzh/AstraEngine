@@ -71,18 +71,26 @@ impl AstraEmuManagerController {
             .iter()
             .map(
                 |(game, duration_ms, last_played_ms, cover_uri, compatibility_status)| {
+                    let selection_required = self.probe_choices.contains_key(&game.game_id);
+                    let launchable = self.launch_candidate_for_game(game).is_some();
                     GameCardViewModel {
                         case_id: game.game_id.clone(),
                         title: game.display_title().into(),
-                        family: if self.probe_choices.contains_key(&game.game_id) {
+                        family: if selection_required {
                             "selection required".into()
-                        } else if self.launch_candidate_for_game(game).is_some() {
+                        } else if launchable {
                             game.family_id.clone().unwrap_or_else(|| "unknown".into())
                         } else {
                             "probe required".into()
                         },
                         cover_uri: cover_uri.clone(),
-                        diagnostic: String::new(),
+                        diagnostic: if selection_required {
+                            "provider selection required".into()
+                        } else if launchable {
+                            String::new()
+                        } else {
+                            "family probe required".into()
+                        },
                         play_time: human_duration(*duration_ms),
                         last_played: last_played_ms
                             .map(|value| human_relative(value, now_ms))

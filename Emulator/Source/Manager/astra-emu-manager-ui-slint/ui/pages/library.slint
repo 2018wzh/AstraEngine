@@ -773,6 +773,7 @@ export component LibraryPage inherits Rectangle {
                         text: "立即启动";
                         icon: Icons.play;
                         primary: true;
+                        enabled: root.selected-family != "";
                         clicked => { root.launch(root.selected-case-id); }
                     }
 
@@ -1074,6 +1075,7 @@ export component LibraryPage inherits Rectangle {
 
                     Button {
                         text: "启动";
+                        enabled: root.selected-family != "";
                         clicked => { root.launch(root.selected-case-id); }
                     }
                 }

@@ -179,23 +179,8 @@ impl AstraEmuManagerController {
         candidates: Vec<FamilyProbeCandidate>,
     ) -> Result<String, String> {
         let game_id = path_id(path);
-        self.candidates.remove(&game_id);
-        self.probe_choices.remove(&game_id);
-        let location = path
-            .to_str()
-            .ok_or_else(|| "ASTRA_EMU_GAME_PATH_UTF8".to_owned())?
-            .to_owned();
-        self.library
-            .add_game(&GameRecord {
-                game_id: game_id.clone(),
-                title: title_for_path(path),
-                user_title: None,
-                location,
-                family_id: None,
-                content_fingerprint: None,
-                added_at_unix_ms: unix_time_ms()?,
-            })
-            .map_err(|error| error.to_string())?;
+        self.clear_probe_state(&game_id)?;
+        self.upsert_scanned_game(path, None)?;
         self.probe_choices.insert(game_id.clone(), candidates);
         Ok(game_id)
     }
@@ -232,6 +217,9 @@ impl AstraEmuManagerController {
     fn clear_probe_state(&mut self, game_id: &str) -> Result<(), String> {
         self.candidates.remove(game_id);
         self.probe_choices.remove(game_id);
+        if self.selected_case_id.as_deref() == Some(game_id) {
+            self.family_options.remove("family.plugin_id");
+        }
         if self
             .library
             .game(game_id)
@@ -245,28 +233,49 @@ impl AstraEmuManagerController {
         Ok(())
     }
 
+    fn upsert_scanned_game(
+        &mut self,
+        path: &Path,
+        family_id: Option<&str>,
+    ) -> Result<String, String> {
+        let game_id = path_id(path);
+        let location = path
+            .to_str()
+            .ok_or_else(|| "ASTRA_EMU_GAME_PATH_UTF8".to_owned())?
+            .to_owned();
+        let mut game = self
+            .library
+            .game(&game_id)
+            .map_err(|error| error.to_string())?
+            .unwrap_or(GameRecord {
+                game_id: game_id.clone(),
+                title: title_for_path(path),
+                user_title: None,
+                location: location.clone(),
+                family_id: None,
+                content_fingerprint: None,
+                added_at_unix_ms: unix_time_ms()?,
+            });
+        game.title = title_for_path(path);
+        game.location = location;
+        game.family_id = family_id.map(str::to_owned);
+        self.library
+            .add_game(&game)
+            .map_err(|error| error.to_string())?;
+        if self.selected_case_id.as_deref() == Some(game_id.as_str()) {
+            self.family_options.remove("family.plugin_id");
+        }
+        Ok(game_id)
+    }
+
     pub(super) fn scan_paths(&mut self, paths: &[PathBuf]) -> Result<(), String> {
         for root in paths {
             for path in enumerate_directories(root)? {
                 let selection = self.probe_directory(&path)?;
-                let location = path
-                    .to_str()
-                    .ok_or_else(|| "ASTRA_EMU_GAME_PATH_UTF8".to_owned())?
-                    .to_owned();
                 let game_id = path_id(&path);
                 match selection {
                     FamilyProbeSelection::Selected(candidate) => {
-                        self.library
-                            .add_game(&GameRecord {
-                                game_id: game_id.clone(),
-                                title: title_for_path(&path),
-                                user_title: None,
-                                location,
-                                family_id: Some(candidate.report.family_id.clone()),
-                                content_fingerprint: None,
-                                added_at_unix_ms: unix_time_ms()?,
-                            })
-                            .map_err(|error| error.to_string())?;
+                        self.upsert_scanned_game(&path, Some(&candidate.report.family_id))?;
                         self.probe_choices.remove(&game_id);
                         self.candidates.insert(game_id, *candidate);
                     }
