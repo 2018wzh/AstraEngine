@@ -23,6 +23,27 @@ mod support;
 struct ProductAudioTestLane {
     consumed_samples: Arc<AtomicU64>,
     underflow_count: u64,
+    dropped: Arc<AtomicBool>,
+    close_requested: Arc<AtomicBool>,
+    submissions_after_close: Arc<AtomicU64>,
+}
+
+impl ProductAudioTestLane {
+    fn new(consumed_samples: Arc<AtomicU64>, underflow_count: u64) -> Self {
+        Self {
+            consumed_samples,
+            underflow_count,
+            dropped: Arc::new(AtomicBool::new(false)),
+            close_requested: Arc::new(AtomicBool::new(false)),
+            submissions_after_close: Arc::new(AtomicU64::new(0)),
+        }
+    }
+}
+
+impl Drop for ProductAudioTestLane {
+    fn drop(&mut self) {
+        self.dropped.store(true, Ordering::Release);
+    }
 }
 
 impl AudioOutputLane for ProductAudioTestLane {
@@ -35,6 +56,9 @@ impl AudioOutputLane for ProductAudioTestLane {
     }
 
     fn submit(&mut self, samples: Vec<f32>) -> Result<Vec<f32>, PlatformError> {
+        if self.close_requested.load(Ordering::Acquire) {
+            self.submissions_after_close.fetch_add(1, Ordering::Release);
+        }
         self.consumed_samples
             .fetch_add(samples.len() as u64, Ordering::Release);
         Ok(samples)
@@ -53,6 +77,17 @@ fn source() -> NativeVnHostCommandSource {
     support::source_for(
         "story main #@id story.main\nstate start #@id state.start\n  scene room #@id scene.room\n    text key:line speaker:hero #@id line.one\n",
     )
+}
+
+fn assert_endpoint_consumed_is_monotonic(consumed_samples: &Arc<AtomicU64>, previous: &mut u64) {
+    let current = consumed_samples.load(Ordering::Acquire);
+    assert!(
+        current >= *previous,
+        "audio endpoint consumed sample count regressed from {} to {}",
+        *previous,
+        current
+    );
+    *previous = current;
 }
 
 #[tokio::test]
@@ -303,6 +338,14 @@ async fn shared_product_audio_host_owns_format_queue_control_and_cleanup() {
     let native_output = AudioOutputHandle::from_parts(3, 1).unwrap();
     let consumed_samples = Arc::new(AtomicU64::new(0));
     let backend_consumed_samples = Arc::clone(&consumed_samples);
+    let lane_dropped = Arc::new(AtomicBool::new(false));
+    let close_requested = Arc::new(AtomicBool::new(false));
+    let submissions_after_close = Arc::new(AtomicU64::new(0));
+    let backend_lane_dropped = Arc::clone(&lane_dropped);
+    let backend_close_lane_dropped = Arc::clone(&lane_dropped);
+    let backend_close_requested = Arc::clone(&close_requested);
+    let backend_close_flag = Arc::clone(&close_requested);
+    let backend_submissions_after_close = Arc::clone(&submissions_after_close);
     let backend_task = tokio::spawn(async move {
         match backend.next_command().await.unwrap() {
             HostCommand::OpenAudioOutput { request, reply } => {
@@ -318,6 +361,9 @@ async fn shared_product_audio_host_owns_format_queue_control_and_cleanup() {
                         lane: Box::new(ProductAudioTestLane {
                             consumed_samples: backend_consumed_samples,
                             underflow_count: 64,
+                            dropped: backend_lane_dropped,
+                            close_requested: backend_close_requested,
+                            submissions_after_close: backend_submissions_after_close,
                         }),
                         capture: None,
                     }))
@@ -328,6 +374,8 @@ async fn shared_product_audio_host_owns_format_queue_control_and_cleanup() {
         match backend.next_command().await.unwrap() {
             HostCommand::CloseAudio { output, reply } => {
                 assert_eq!(output, native_output);
+                assert!(backend_close_lane_dropped.load(Ordering::Acquire));
+                backend_close_flag.store(true, Ordering::Release);
                 reply.send(Ok(())).unwrap();
             }
             command => panic!("unexpected command: {}", command.operation()),
@@ -352,6 +400,7 @@ async fn shared_product_audio_host_owns_format_queue_control_and_cleanup() {
         samples: vec![0.25; 4_410],
     };
     let mut signals = BTreeSet::new();
+    let mut previous_endpoint_consumed = 0;
 
     host.start(&mut source, &mut executor, &request, audio, &mut signals)
         .await
@@ -376,6 +425,7 @@ async fn shared_product_audio_host_owns_format_queue_control_and_cleanup() {
     host.pump(&mut source, &mut executor, &mut signals, false)
         .await
         .unwrap();
+    assert_endpoint_consumed_is_monotonic(&consumed_samples, &mut previous_endpoint_consumed);
     assert_eq!(host.last_meter().unwrap().underflow_count, 64);
     host.control(
         &NativeVnAudioControlRequest {
@@ -413,6 +463,7 @@ async fn shared_product_audio_host_owns_format_queue_control_and_cleanup() {
     host.pump(&mut source, &mut executor, &mut signals, false)
         .await
         .unwrap();
+    assert_endpoint_consumed_is_monotonic(&consumed_samples, &mut previous_endpoint_consumed);
     let snapshot = host.snapshot();
     host.restore(snapshot).unwrap();
     assert!(host.is_active());
@@ -425,6 +476,10 @@ async fn shared_product_audio_host_owns_format_queue_control_and_cleanup() {
             host.pump(&mut source, &mut executor, &mut signals, false)
                 .await
                 .unwrap();
+            assert_endpoint_consumed_is_monotonic(
+                &consumed_samples,
+                &mut previous_endpoint_consumed,
+            );
             tokio::task::yield_now().await;
         }
     })
@@ -469,10 +524,13 @@ async fn shared_product_audio_host_owns_format_queue_control_and_cleanup() {
     host.shutdown(&mut source, &mut executor).await.unwrap();
     let final_meter = host.last_meter().unwrap();
     let endpoint_consumed = consumed_samples.load(Ordering::Acquire);
+    assert_endpoint_consumed_is_monotonic(&consumed_samples, &mut previous_endpoint_consumed);
     assert!(final_meter.consumed_samples <= endpoint_consumed);
-    assert!(endpoint_consumed - final_meter.consumed_samples <= 1_024);
+    assert!(final_meter.submitted_samples <= endpoint_consumed);
     assert!(final_meter.submitted_samples > 0);
     backend_task.await.unwrap();
+    assert!(lane_dropped.load(Ordering::Acquire));
+    assert_eq!(submissions_after_close.load(Ordering::Acquire), 0);
 }
 
 #[test]
@@ -599,10 +657,7 @@ async fn cold_product_restore_prepares_packaged_pcm_and_preserves_saved_cursor()
                     sample_rate: 48_000,
                     channels: 2,
                 },
-                lane: Box::new(ProductAudioTestLane {
-                    consumed_samples: Arc::new(AtomicU64::new(0)),
-                    underflow_count: 0,
-                }),
+                lane: Box::new(ProductAudioTestLane::new(Arc::new(AtomicU64::new(0)), 0)),
                 capture: None,
             }))
             .unwrap();
@@ -651,10 +706,7 @@ async fn cold_product_restore_prepares_packaged_pcm_and_preserves_saved_cursor()
                         sample_rate: 48_000,
                         channels: 2,
                     },
-                    lane: Box::new(ProductAudioTestLane {
-                        consumed_samples: Arc::new(AtomicU64::new(0)),
-                        underflow_count: 0,
-                    }),
+                    lane: Box::new(ProductAudioTestLane::new(Arc::new(AtomicU64::new(0)), 0)),
                     capture: None,
                 }))
                 .unwrap();
