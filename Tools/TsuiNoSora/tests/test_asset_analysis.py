@@ -141,6 +141,23 @@ class DirectorRuntimeAssetDerivationTests(unittest.TestCase):
             ],
         )
 
+    def test_title_audio_enters_the_runtime_asset_closure(self):
+        binding = {
+            "asset_id": "tsui.asset.title_audio",
+            "native_path": "native-assets/audio/title.mp3",
+        }
+        bindings = list(
+            _director_runtime_bindings(
+                {
+                    "scenes": [],
+                    "score_openings": [],
+                    "stage_layouts": [],
+                    "title_audio": {"binding": binding},
+                }
+            )
+        )
+        self.assertEqual(bindings, [(binding, "title_audio")])
+
     def test_stage_black_member_is_typed_as_palette_backed_solid(self):
         binding = {
             "asset_id": "tsui.asset.black",

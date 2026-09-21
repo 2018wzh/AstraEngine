@@ -50,6 +50,9 @@ def _director_runtime_bindings(binding_ir: dict):
             if isinstance(binding, dict) and binding.get("director_member") == "black":
                 role = "solid_black"
             yield binding, role
+    title_audio = binding_ir.get("title_audio")
+    if isinstance(title_audio, dict):
+        yield title_audio.get("binding"), "title_audio"
 
 
 def _derive_director_solid_black(source: Path, target: Path) -> bool:
