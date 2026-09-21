@@ -24,6 +24,30 @@ state route.two #@id state.route.two
     text key:line.route.two speaker:narrator window:main #@id line.route.two
 "#;
 
+const SKIP_BLOCKED_STORY: &str = r#"
+story main #@id story.main
+state prologue #@id state.prologue
+  scene room #@id scene.room
+    skip_allowed allowed:false #@id skip.blocked
+    text key:line.a speaker:narrator window:main #@id line.a
+    text key:line.b speaker:narrator window:main #@id line.b
+"#;
+
+const SKIP_TOGGLE_STORY: &str = r#"
+story main #@id story.main
+state prologue #@id state.prologue
+  scene room #@id scene.room
+    skip_allowed allowed:false #@id skip.blocked
+    text key:line.blocked speaker:narrator window:main #@id line.blocked
+    skip_allowed allowed:true #@id skip.resumed
+    text key:line.resumed speaker:narrator window:main #@id line.resumed
+    choice key:choice.next #@id choice.next
+      option key:choice.end -> ending.good #@id choice.end
+state ending.good #@id state.ending.good
+  scene ending #@id scene.ending
+    text key:ending speaker:narrator window:main #@id ending
+"#;
+
 #[test]
 fn skip_read_advances_past_read_dialogue_but_stops_at_unread_dialogue() {
     let compiled = compile_astra_project(
@@ -126,6 +150,76 @@ fn fast_forward_commits_skipped_dialogue_without_emitting_transient_dialogue_fra
         output.presentation.last(),
         Some(PresentationCommand::Choice { key, options })
             if key == "choice.next" && options.len() == 1
+    ));
+}
+
+#[test]
+fn skip_modes_respect_scripted_skip_block_and_resume_after_it_is_lifted() {
+    let compiled = compile_astra_project(
+        [AstraSource::story("skip-toggle.astra", SKIP_TOGGLE_STORY)],
+        Default::default(),
+    )
+    .unwrap();
+    let mut runtime = VnRuntime::new(compiled, VnRunConfig::classic("zh-Hans")).unwrap();
+
+    runtime
+        .apply(VnPlayerCommand::SetSkip {
+            mode: SkipMode::All,
+        })
+        .unwrap();
+    runtime
+        .apply(VnPlayerCommand::Launch {
+            story_id: "story.main".to_string(),
+            state_id: "state.prologue".to_string(),
+        })
+        .unwrap();
+    let blocked_all = runtime.state().clone();
+    assert!(matches!(
+        runtime.state().pending_wait.as_ref(),
+        Some(wait) if wait.command_id == "line.blocked"
+    ));
+    assert!(!blocked_all.system.skip_allowed);
+    let resumed = runtime.apply(VnPlayerCommand::Advance).unwrap();
+    assert!(resumed.presentation.iter().any(|command| matches!(
+        command,
+        PresentationCommand::Choice { key, .. } if key == "choice.next"
+    )));
+    assert!(!resumed.presentation.iter().any(|command| matches!(
+        command,
+        PresentationCommand::Dialogue { key, .. } if key == "line.resumed"
+    )));
+
+    let compiled = compile_astra_project(
+        [AstraSource::story("skip-blocked.astra", SKIP_BLOCKED_STORY)],
+        Default::default(),
+    )
+    .unwrap();
+    let mut runtime = VnRuntime::new(compiled, VnRunConfig::classic("zh-Hans")).unwrap();
+    runtime
+        .apply(VnPlayerCommand::Launch {
+            story_id: "story.main".to_string(),
+            state_id: "state.prologue".to_string(),
+        })
+        .unwrap();
+    runtime.apply(VnPlayerCommand::Advance).unwrap();
+    runtime.apply(VnPlayerCommand::Advance).unwrap();
+    runtime
+        .apply(VnPlayerCommand::SetSkip {
+            mode: SkipMode::Read,
+        })
+        .unwrap();
+    let blocked_read = runtime
+        .apply(VnPlayerCommand::Launch {
+            story_id: "story.main".to_string(),
+            state_id: "state.prologue".to_string(),
+        })
+        .unwrap();
+    assert!(matches!(
+        blocked_read.presentation.iter().find(|command| matches!(
+            command,
+            PresentationCommand::Dialogue { .. }
+        )),
+        Some(PresentationCommand::Dialogue { key, .. }) if key == "line.a"
     ));
 }
 

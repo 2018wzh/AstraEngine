@@ -1287,6 +1287,9 @@ impl VnRuntime {
     }
 
     fn should_skip_dialogue(&self, command_id: &str) -> bool {
+        if !self.state.system.skip_allowed {
+            return false;
+        }
         match self.state.system.skip_mode {
             SkipMode::None => false,
             SkipMode::Read => self.state.read_state.contains(command_id),
