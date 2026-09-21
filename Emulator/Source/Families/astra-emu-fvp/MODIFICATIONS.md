@@ -2,15 +2,17 @@
 
 `../../../ThirdParty/rfvp/` is a complete Git submodule fork of the `0.6.0` upstream commit
 `304e773387a9920c9db091ec1fd937c717aea949` from
-[`xmoezzz/rfvp`](https://github.com/xmoezzz/rfvp). The hosted adaptation originated
-from the `2018wzh/rfvp` fork at the immutable revision
-`f4f64a5bb726c1759350a666a35e0a454b810f61`. The covered source and the complete
-MPL-2.0 text are in `../../../ThirdParty/rfvp/crates/rfvp/` and `../../../ThirdParty/rfvp/LICENSE`.
+[`xmoezzz/rfvp`](https://github.com/xmoezzz/rfvp). The hosted adaptation used by AstraEngine is published in the
+[`2018wzh/rfvp` fork](https://github.com/2018wzh/rfvp/tree/codex/local-product-adaptation),
+branch `codex/local-product-adaptation`, at immutable revision
+`73d3b4413c95a3923cce695d98c3d9bf5b08ccf0`. It is the single adaptation commit
+directly on that upstream baseline. The parent repository pins its exact gitlink,
+and fetching the configured fork branch reproduces it. The covered source and the
+complete MPL-2.0 text are in `../../../ThirdParty/rfvp/crates/rfvp/` and
+`../../../ThirdParty/rfvp/LICENSE`.
 
-The local adaptation is a single commit, `73d3b44`, directly on that upstream
-baseline. The parent repository pins its exact gitlink. This commit has not been
-pushed; fetching the configured remote alone cannot reproduce it yet. The fork
-retains upstream history, workspace members, tools, licenses and platform crates.
+The fork retains upstream history, workspace members, tools, licenses and platform
+crates.
 The Family depends on `crates/rfvp` with `hosted-gpu`; native video, bitmap and
 Anzu feature dependencies retain their upstream definitions.
 

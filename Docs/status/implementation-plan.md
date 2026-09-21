@@ -67,7 +67,7 @@ FVP 在 Windows Sandbox GPU 重测中确认容量失败根因：BGM 请求到来
 
 Musica CLI 的音频 census 原先将 `-` 识别为停止符，与运行时已有的原生 `*` 规则不符。现按 `*` 统计停止请求，不再将其列为缺失资源；不存在的普通资源仍报告缺失。12 项 CLI 测试及 Clippy 通过，真实归档重扫已通过：811 条音频引用中 410 条为停止请求，其余 401 条精确命中（BGM 167、SE 234），缺失、歧义与格式错误均为 0。旧 census 的 410 项 candidate missing 为误报；本次统计不验证音频解码和播放。
 
-RFVP 的只读 `voice_count(kind)` 让 Manager 分别记录容量占用和 Playing 数量，暂停与淡出阶段仍占用槽位。fork 保持上游 0.6.0 基线加单个本地适配提交 73d3b44，本次容量配置修复仅在 Family，gitlink 不变，未推送。
+RFVP 的只读 `voice_count(kind)` 让 Manager 分别记录容量占用和 Playing 数量，暂停与淡出阶段仍占用槽位。fork 保持 RFVP 0.6.0 上游基线，当前 hosted 适配为已发布的 [`2018wzh/rfvp` fork](https://github.com/2018wzh/rfvp/tree/codex/local-product-adaptation) 分支 `codex/local-product-adaptation`、提交 `73d3b4413c95a3923cce695d98c3d9bf5b08ccf0`；本次容量配置修复仅在 Family，gitlink 不变。
 
 Musica 的第 10 条失败指令已确认为 `stage`：前景使用冒号分隔的资源序列，stand 的第二项使用逗号分隔参数；此前解析器把前者当作单一文件名、后者当作单个整数。现已吸收 Musica 的这两类解析，但来源 provider 未消费完整状态，仍不能直接以忽略附加参数的方式接入。失败前的第 240 帧已查看，物理确认键确实推进了对白。
 
@@ -166,7 +166,7 @@ Native VN 本地整合回归通过：Player 保留 UI 操作产生的字形生�
 
 Siglus 的完整 fork 已合成为上游 e762f9f 基线加单个本地适配提交 c6c4f99，保留原提交历史，主仓 gitlink 已更新，尚未推送。确认并移除了 117 个文件的纯格式差异及 18 个 manifest 的全局警告屏蔽，实际适配涉及 13 个文件。Family 配置和阻塞 PCM 关闭测试、显式 GPU 离屏回读以及 Family Clippy 通过；上游编译警告保持可见，三项需要授权素材的真实游戏测试未执行。
 
-RFVP 已由裁剪源码快照改为完整上游 fork 的 submodule。保留 0.6.0 基线 304e773387a9920c9db091ec1fd937c717aea949，单个本地适配提交为 4c67834；主仓 gitlink 固定精确提交，尚未推送。FVP 依赖改为上游 crates/rfvp 目录，恢复原生视频、bitmap、Anzu 等原有依赖和 feature 定义。hosted-gpu 编译、29 项常规测试、3 项显式 GPU 测试及 Clippy 通过；原生平台入口尚未逐平台构建，真实结局验收仍开放。
+RFVP 已由裁剪源码快照改为完整上游 fork 的 submodule。保留 RFVP 0.6.0 基线 `304e773387a9920c9db091ec1fd937c717aea949`，当前单个 hosted 适配提交为已发布的 `2018wzh/rfvp` 分支 `codex/local-product-adaptation`、完整 SHA `73d3b4413c95a3923cce695d98c3d9bf5b08ccf0`；主仓 gitlink 固定该精确提交，其他机器可从配置 fork 分支获取。FVP 依赖改为上游 crates/rfvp 目录，恢复原生视频、bitmap、Anzu 等原有依赖和 feature 定义。hosted-gpu 编译、29 项常规测试、3 项显式 GPU 测试及 Clippy 通过；原生平台入口尚未逐平台构建，真实结局验收仍开放。
 
 Musica VM 已按状态模型、演出、音频命令、选择和错误定义拆分模块，保持既有状态格式与执行顺序。拆分后的 62 项默认回归和新增诊断隐私回归通过，Clippy 通过；未实现命令的 Family 诊断保留指令序号，删除对错误显示字符串的诊断码解析，避免透传脚本内容。
 
@@ -501,6 +501,6 @@ Musica 在 Sandbox 中已完成冷启动标题读档、剧情推进后再次读�
 
 Classic route.coverage.035 与 036 均通过 DX12 独显 Headless 抽样运行，分别为 47,802 和 47,832 条输入到达 tsui.ending，各有 27 张过程样本及终局截图。已分别查看第 009 张，对白与场景可见；第 037 路线继续运行。Classic 早期仅终局截图的路线、Modern 及真实 Player 验收仍未关闭。
 
-最新 Windows Sandbox 实际回归使用旧任意尺寸包时，Manager 从 `data/cores/` 冷启动发现 Musica，真实游戏 probe/open 成功，显式 `NullAudioDevice` 可用；640×360、1001×777、1920×1200 和 720×1280 的 DX12 画面均通过输入与黑边检查。该包开启 Scale 时因未携带 DXC 运行库而显示缺失诊断。提交 `c1a33b5e2` 已让未设置 `ASTRA_EMU_DXC_PATH` 的默认路径按 Manager 可执行文件目录查找，并在匹配包中携带锁定的 `dxcompiler.dll`/`dxil.dll`；新包从非可执行文件工作目录启动后的 Scale 复测仍待完成，不能提前关闭滤镜验收。真实原生存读档入口已按现有标题与系统页物理输入路径继续验证，未用直接写 slot/state 替代 UI。
+此前 Windows Sandbox 实际回归使用旧任意尺寸包时，Manager 从 `data/cores/` 冷启动发现 Musica，真实游戏 probe/open 成功，显式 `NullAudioDevice` 可用；640×360、1001×777、1920×1200 和 720×1280 的 DX12 画面均通过输入与黑边检查。该旧包开启 Scale 时因未携带 DXC 运行库而显示缺失诊断，不能把旧包结果当作 DXC 修复后的验收。
 
-本轮 DXC 代码构建以 `c1a33b5e2e5131854faed7c3f01009339a809278` 为包内 build commit；随后 `3eb80f1da` 只修正 SDK 格式，手册补充了核心目录与 DXC 部署规则，均未改变该包。Manager 二进制定向测试 36 项通过、2 项忽略，Emulator workspace 测试退出码为 0，workspace Clippy 退出码为 0，12 个 Emulator 成员逐包格式检查通过，文档检查覆盖 224 页且无错误。未执行的硬件、真实音频、完整结局、跨平台和性能验收仍保持开放。
+本轮 DXC 代码构建以 `c1a33b5e2e5131854faed7c3f01009339a809278` 为包内 build commit；随后 `3eb80f1da` 只修正 SDK 格式，手册补充了核心目录与 DXC 部署规则，均未改变该包。Manager 二进制定向测试 36 项通过、2 项忽略，Emulator workspace 测试退出码为 0，workspace Clippy 退出码为 0，12 个 Emulator 成员逐包格式检查通过，文档检查覆盖 224 页且无错误。未执行的硬件、真实音频、完整结局、跨平台和性能验收仍保持开放。匹配 `c1a33b5e2` 包的最新 Windows Sandbox 回归从 Data 工作目录启动，工作目录不在 Manager 可执行文件目录；未设置 `ASTRA_EMU_DXC_PATH`，也未修改 PATH。Manager 冷启动自动从 `data/cores/` 发现 Musica，显式 `NullAudioDevice` 可用；Scale 已成功启用，实际画面的文字与黑边正常，GPU 诊断为 DX12 discrete_gpu，Manager 正常退出且无残留进程。真实物理输入完成标题读档→手动存档页→slot 24 保存/读取：slot 24 本批在游戏内由 F6→Down×4→Enter 创建，保存尺寸为 640×360；完整 Manager 进程退出重开后，核心自动扫描、显式 NullAudio 下读取成功，读取尺寸为 1001×777。720×1280 目前只验证画面、GPU 与比例，物理内容输入仍待完成。首次 Scale 会话在 Alt+Space 最大化标题阶段出现一次 `ASTRA_EMU_MUSICA_ELAPSED` 过渡窗口告警，冷启动后未复现，原因和长期稳定性尚未确认，不能将其称为已解决。真实可听音频、长流程、完整结局、跨平台和性能验收仍保持开放。

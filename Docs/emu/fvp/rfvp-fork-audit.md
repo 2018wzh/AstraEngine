@@ -1,6 +1,6 @@
 # RFVP fork v9 职责审计
 
-> 历史记录：本页描述旧 Family ABI v9 分支，不代表当前独立 Host 的实现。2026-09-11 已升级到 RFVP 0.6.0，删除 hosted snapshot/restore 与 canonical state hash API，并接入上游全局持久化。当前差异以 `Emulator/Source/Families/astra-emu-fvp/MODIFICATIONS.md` 为准。
+> 历史记录：本页描述旧 Family ABI v9 分支，不代表当前独立 Host 的实现。2026-09-11 已升级到 RFVP 0.6.0，删除 hosted snapshot/restore 与 canonical state hash API，并接入上游全局持久化。当前父仓 source identity 是 RFVP 0.6.0 上游 revision `304e773387a9920c9db091ec1fd937c717aea949` 加上已发布的 `2018wzh/rfvp` fork 分支 `codex/local-product-adaptation` revision `73d3b4413c95a3923cce695d98c3d9bf5b08ccf0`；当前差异以 `Emulator/Source/Families/astra-emu-fvp/MODIFICATIONS.md` 为准。下表中的旧 head 仅用于历史审计。
 
 ## 审计结论
 
@@ -14,7 +14,7 @@ Family ABI v9 release pin，也不能把现有 58 个增量提交直接标记为
 | 项目 | 值 |
 | --- | --- |
 | RFVP upstream base | `3b5ea6c96a925c12f95aef8554905e8fecbc77c3` |
-| hosted fork head | `f4f64a5bb726c1759350a666a35e0a454b810f61` |
+| historical hosted fork head | `f4f64a5bb726c1759350a666a35e0a454b810f61` |
 | 增量提交数 | 58 |
 | 文件差异 | 74 files, `+12,232/-648`（相对 upstream base） |
 | AstraEngine dependency | Git revision 固定，但 fork crate 仍把 AstraEngine dependency 写成旧的 `e6bc3d960b87373160acd8507faeac4cc589975b` |

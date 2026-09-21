@@ -15,11 +15,13 @@ RFVP fork 直接 acquire Host writable lease
     -> Host 校验并上传
 ```
 
-当前 pinned RFVP revision 为
-`f4f64a5bb726c1759350a666a35e0a454b810f61`。这个 revision 的 provider 已经能
-走 `Ported + SingleLayer`、Hook、writable-file 和 surface lease，但 fork 内仍
-保留旧的通用 hosted semantic-delta、snapshot/restore 和策略-limit 层，尚未达到
-最终 v9 形态。具体证据见 [RFVP fork audit](rfvp-fork-audit.md)。
+当前父仓 pinned RFVP source 是已发布的
+[`2018wzh/rfvp` fork](https://github.com/2018wzh/rfvp/tree/codex/local-product-adaptation)，
+分支 `codex/local-product-adaptation`、revision
+`73d3b4413c95a3923cce695d98c3d9bf5b08ccf0`，基于 RFVP 0.6.0 上游 revision
+`304e773387a9920c9db091ec1fd937c717aea949`。本页下文保留的是旧 Family ABI v9
+清理审计；历史审计对象和阻断项见 [RFVP fork audit](rfvp-fork-audit.md)，不能把
+旧审计 head 当作当前 fork 身份。
 
 ## 职责边界
 
