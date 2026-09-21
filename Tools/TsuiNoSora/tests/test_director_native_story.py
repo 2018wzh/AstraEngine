@@ -448,6 +448,53 @@ class DirectorNativeStoryAutomationTests(unittest.TestCase):
             },
         )
 
+    def test_non_skippable_dialogue_precedes_following_audio_fence_wait(self):
+        events = _resolve_pending_wait_events(
+            [
+                {"type": "_audio_start", "target": "bgm"},
+                {
+                    "type": "_audio_control",
+                    "action": "fade_stop",
+                    "target": "bgm",
+                    "fence": "bgm.end",
+                },
+                {
+                    "type": "_pending_wait",
+                    "command_id": "wait.first",
+                    "fence": "bgm.end",
+                },
+                {"type": "_await_next_wait", "timeout_ticks": 3600},
+                {"type": "_skip_allowed", "allowed": False},
+                {"type": "_dialogue_advance", "command_id": "line.locked"},
+                {"type": "_audio_start", "target": "bgm"},
+                {
+                    "type": "_audio_control",
+                    "action": "fade_stop",
+                    "target": "bgm",
+                    "fence": "bgm.end",
+                },
+                {
+                    "type": "_pending_wait",
+                    "command_id": "wait.second",
+                    "fence": "bgm.end",
+                },
+                {"type": "_await_next_wait", "timeout_ticks": 3600},
+                {"type": "_pending_wait", "command_id": "choice.next"},
+            ]
+        )
+        await_hashes = [
+            event["observation"]["value_hash"]
+            for event in events
+            if event["type"] == "await"
+        ]
+        self.assertEqual(
+            await_hashes,
+            [
+                observation_hash("line.locked"),
+                observation_hash("choice.next"),
+            ],
+        )
+
     def test_terminal_async_wait_targets_absent_pending_wait(self):
         events = _resolve_pending_wait_events(
             [
