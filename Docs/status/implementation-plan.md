@@ -2,6 +2,8 @@
 
 本轮 Musica/SDK 重构已接通公共 `Canvas2D`、SDK `StageCanvas`/`TextureAsset`、AstraVN presentation 第二消费者及 Family API v7 logical/raster frame 元数据。Musica 启动配置改为显式 `render_width`/`render_height` 正整数，GPU Scene 和 AstraText glyph 路径按实际 raster density 输出；统一 aspect-fit viewport 负责奇数、portrait、缩小和黑边，原生 1280x720 逻辑舞台、ANI 原点和存档/VM 时间保持独立。Windows Sandbox 已完成此前固定尺寸基线、原生存档进程重开恢复和 60 秒 Auto 短流程；任意尺寸的全流程 GPU、完整 Musica 结局、真实声音、长流程、跨平台和性能验收仍开放。此前同读档后的 `ASTRA_EMU_MUSICA_ELAPSED` 在这次固定环境 Auto 流程中未复现，未放宽上限或静默截断。
 
+本轮代码提交后的门禁记录：独立 Emulator workspace 的 `cargo clippy --workspace --all-targets -- -D warnings` 与 `cargo test --workspace` 均通过；根 workspace 的首次 `cargo test --workspace` 曾在 `astra-player-vn` 的 `shared_product_audio_host_owns_format_queue_control_and_cleanup` 处出现一次不稳定失败，失败断言为设备端 `consumed_samples` 与最后 meter 差值超过 1024，原因尚未确认。该测试随后单独重跑通过，根 workspace 完整命令再次重跑也通过；期间没有修改根 audio 实现。该条只记录测试波动，不把重跑成功解释为已确认根因。
+
 任意尺寸硬件回归曾发现 `1001×777` 在 aspect-fit 内容底边多绘制一行；现已让 `Canvas2D::viewport_rect()` 在 raster identity 空间成为根裁剪，再进入 logical→raster transform，保留一般旋转、错切和 fractional clip 的保守 bounds，不再按 transform 形状猜测根裁剪。CPU 回归覆盖 `1×1`、fractional nested clip 与边界计算；DX12 实际 GPU 的 `1×1`、`1×720`、`720×1` 及 `1600×900`、`1920×1200`、`1001×777`、`720×1280`、`640×360`、`96×54`、`1279×719` 测试通过；这只关闭通用裁剪缺陷，新的 Sandbox 任意尺寸包和完整产品流程仍待实际验证。
 
 Manager Family 核心现改为冷启动自动扫描数据目录的 `cores/`：只尝试当前平台扩展且以 `astra_emu_`（Unix 也接受 `libastra_emu_`）开头的文件，FFmpeg、音频和运行库依赖不会被误识别。每个核心沿既有 loader 复用 ABI/descriptor/capability 校验；损坏、ABI 不匹配、descriptor 错误和重复 plugin ID 按文件显示诊断，重复 ID 的冲突核心全部禁用，唯一核心继续加载。SQLite 不再保存或读取插件路径，旧 `plugin_installation` 表若存在也不参与注册；更新核心需要重启 Manager。Manager Core 定向测试覆盖空目录自动创建、依赖文件过滤、坏文件隔离和重启加载（真实 DLL 用显式插件测试环境运行）；完整商业游戏流程仍按下文状态执行。
