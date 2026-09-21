@@ -140,7 +140,7 @@ Windows 字形视觉回归由 `astra.windows_gpu_glyph_golden.v1` 绑定字体 r
 
 AstraEMU 首轮提供 Windows、Slint Manager 与 FVP。构建、插件加载和游戏运行不再使用 Engine product package、签名 Family manifest、旧 CLI、Headless report 或 RuntimeWorld。旧 Android/iOS 发布流程暂不适用于本轮。
 
-Manager 从本地安装的动态库读取独立 Family ABI descriptor，校验 ABI 和 capability；多个 probe 命中时由用户选择。游戏由 Family 直接读取原生文件和管理存档。资料库与设置使用新 schema，旧 Manager 数据重建，原生存档不迁移也不由 Host 改写。
+Manager 启动时从数据目录 `cores/` 自动发现 Family 动态库。桌面扫描当前平台动态库扩展，并只尝试 `astra_emu_` 前缀（Unix 也接受 `libastra_emu_`）的文件，因此发布目录中的 FFmpeg、音频和运行库依赖不会被误当作核心。每个文件复用独立 Family ABI 的 layout、descriptor 和 capability 校验；坏文件写入文件名诊断，其他核心继续可用，重复 plugin ID 的冲突文件全部禁用。更新核心需替换 `cores/` 文件并重启 Manager，运行期间不热加载。游戏由 Family 直接读取原生文件和管理存档；SQLite 不再保存或读取插件路径，旧 `plugin_installation` 表若存在也不参与注册。资料库与设置使用新 schema，原生存档不由 Host 改写。
 
 独立 Host 实现仍在本次重构中；具体命令与 Windows 游戏验证结果在集成完成后更新。本轮计划与边界见 [独立 Host 重构](../migrations/astraemu-independent-host.md)，当前进度见 [实施状态](../status/implementation-plan.md)。不生成或保留新的 EMU evidence/report 体系。
 

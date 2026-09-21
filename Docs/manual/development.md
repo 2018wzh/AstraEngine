@@ -39,7 +39,7 @@ astra package bundle .tmp/game.astrapak \
 
 ## EMU GPU Headless 调试
 
-`astra-emu-manager --headless .tmp/run.json` 加载显式指定的 Family 插件，以 60 Hz 推进并将最后一帧写入 PNG。插件继续使用自己的渲染器；FVP 要求硬件或 Sandbox 虚拟 GPU，拒绝软件 adapter。音频使用按采样时钟消费 PCM 的 Null 后端，因此此入口不验证实际声音。
+`astra-emu-manager --headless .tmp/run.json` 为调试入口显式指定 Family 插件，以 60 Hz 推进并将最后一帧写入 PNG；这条入口不写入 Manager 的 `cores/` 注册来源。插件继续使用自己的渲染器；FVP 要求硬件或 Sandbox 虚拟 GPU，拒绝软件 adapter。音频使用按采样时钟消费 PCM 的 Null 后端，因此此入口不验证实际声音。
 
 配置包含 `plugin`、`game`、`configuration`、`frames` 和 `output`。路径相对运行目录解析，游戏副本与输出放在 ignored 目录，测试前保护原存档。`frames` 范围为 1–36000。
 
@@ -66,7 +66,7 @@ Native VN 的 GPU Headless 使用 `render_policy: checkpoints` 时，独立资�
 
 适配优先启用核心现成的 GPU feature 和平台能力，仅修改嵌入入口、Family API 和必要生命周期边界；复用原生渲染、媒体、VM 及存档，不另建竞争路径。差异写入各 Family 的 MODIFICATIONS.md。CPU 最终帧是交付格式，不代表使用 CPU 渲染。
 
-动态核心的 tracing/log 由 Family API v7 日志桥接入 Manager。旧插件须重建后重新安装并重启 Manager；FVP/Musica 构建动态插件时开启 dynamic-plugin-export。静态核心使用宿主订阅器。
+动态核心的 tracing/log 由 Family API v7 日志桥接入 Manager。构建动态插件时开启 `dynamic-plugin-export`，再把生成的 `astra_emu_`（Unix 为 `libastra_emu_`）动态库和其依赖放入 Manager 数据目录 `cores/`；Manager 冷启动自动扫描并在加载失败时按文件给出诊断。更新核心需重启 Manager，运行期间不热加载。静态核心使用宿主订阅器。
 
 ```sh
 RUST_LOG=info,astra_emu::family=debug astra-emu-manager

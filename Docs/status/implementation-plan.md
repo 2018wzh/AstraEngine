@@ -2,7 +2,11 @@
 
 本轮 Musica/SDK 重构已接通公共 `Canvas2D`、SDK `StageCanvas`/`TextureAsset`、AstraVN presentation 第二消费者及 Family API v7 logical/raster frame 元数据。Musica 启动配置改为显式 `render_width`/`render_height` 正整数，GPU Scene 和 AstraText glyph 路径按实际 raster density 输出；统一 aspect-fit viewport 负责奇数、portrait、缩小和黑边，原生 1280x720 逻辑舞台、ANI 原点和存档/VM 时间保持独立。Windows Sandbox 已完成此前固定尺寸基线、原生存档进程重开恢复和 60 秒 Auto 短流程；任意尺寸的全流程 GPU、完整 Musica 结局、真实声音、长流程、跨平台和性能验收仍开放。此前同读档后的 `ASTRA_EMU_MUSICA_ELAPSED` 在这次固定环境 Auto 流程中未复现，未放宽上限或静默截断。
 
-任意尺寸硬件回归曾发现 `1001×777` 在 aspect-fit 内容底边多绘制一行；现已将正轴向、整数平移的根裁剪边界按 `Canvas2D` 的整数 viewport 计算，并保留旋转/错切裁剪的保守 bounds。CPU 边界回归与 DX12 实际 GPU 的 `1600×900`、`1920×1200`、`1001×777`、`720×1280`、`640×360`、`96×54`、`1279×719` 测试通过；这只关闭该通用裁剪缺陷，新的 Sandbox 任意尺寸包和完整产品流程仍待实际验证。
+任意尺寸硬件回归曾发现 `1001×777` 在 aspect-fit 内容底边多绘制一行；现已让 `Canvas2D::viewport_rect()` 在 raster identity 空间成为根裁剪，再进入 logical→raster transform，保留一般旋转、错切和 fractional clip 的保守 bounds，不再按 transform 形状猜测根裁剪。CPU 回归覆盖 `1×1`、fractional nested clip 与边界计算；DX12 实际 GPU 的 `1×1`、`1×720`、`720×1` 及 `1600×900`、`1920×1200`、`1001×777`、`720×1280`、`640×360`、`96×54`、`1279×719` 测试通过；这只关闭通用裁剪缺陷，新的 Sandbox 任意尺寸包和完整产品流程仍待实际验证。
+
+Manager Family 核心现改为冷启动自动扫描数据目录的 `cores/`：只尝试当前平台扩展且以 `astra_emu_`（Unix 也接受 `libastra_emu_`）开头的文件，FFmpeg、音频和运行库依赖不会被误识别。每个核心沿既有 loader 复用 ABI/descriptor/capability 校验；损坏、ABI 不匹配、descriptor 错误和重复 plugin ID 按文件显示诊断，重复 ID 的冲突核心全部禁用，唯一核心继续加载。SQLite 不再保存或读取插件路径，旧 `plugin_installation` 表若存在也不参与注册；更新核心需要重启 Manager。Manager Core 定向测试覆盖空目录自动创建、依赖文件过滤、坏文件隔离和重启加载（真实 DLL 用显式插件测试环境运行）；完整商业游戏流程仍按下文状态执行。
+
+Manager `cores/` 测试矩阵：空目录创建与无核心启动、非 Family 依赖过滤、损坏文件隔离、ABI/descriptor/capability 拒绝、重复 `plugin_id` 整组禁用，以及有效核心的启动→关闭→重启扫描分别由 Core/Manager 定向用例覆盖；需要真实动态库的用例通过显式测试插件环境运行，默认测试不假定本地商业核心存在。
 
 Musica 的现有 `gpu.created` Manager 诊断事件现在同时记录成功创建的 logical/raster 宽高，只在创建阶段输出，便于确认实际 GPU 输出尺寸；不从配置字符串推导尺寸，也不增加逐帧日志。
 
@@ -275,7 +279,7 @@ Agent 采用 ACP 外部进程与 MCP；不在 Editor 内置 OpenAI 模型循环�
 - Classic Y 段长流程发现旧包与当前研究 IR 的命令 ID 对应不同，原超时不能认定为 Runtime 故障。已固定私有 IR 快照并完成配套源码、输入和包的重建；转换器为六类舞台命令补全 `interrupt:replace_from_current`，真实 Rust 编译器回归测试通过。新包 GPU 长流程在输入 284、tick 11097 因未上传的字形引用失败，资源生命周期问题待修复，未计作路线通过。
 - 字形故障排查增加资源哈希、原驻留状态、当前帧变更状态和命令位置诊断，不记录正文或路径。包含逐字显示初始化和连续物理按键的上传顺序检查通过，Native VN 宿主测试共 32 项通过；该用例尚未复现商业包故障，不能据此认定修复。受影响 crate 的 Clippy 通过，同包 GPU 长流程继续定位。
 - GPU 重跑稳定复现输入 284 的错误：该字形从未上传，当前帧也没有对应上传命令。新增“布局缩放与剧情动作同批输入”回归复现了上传丢失；UI 资源 owner 已更新，但动作替换帧时丢弃了生命周期命令。现将这些命令保留到下一次实际提交，按顺序先上传再绘制；缓存 UI 只保留绘制命令，关闭也处理未提交的生命周期。失败回归已转为通过，44 项库测试、32 项宿主集成测试、Clippy、fmt 和文档检查通过。修复后的同包 GPU 长流程已越过原字形失败位置，随后在输入 285 等待剧情命令时超时；该等待问题继续排查，尚未计作路线通过。
-- 桌面 Manager 删除隐式静态 FVP 注册，避免与显式安装的动态插件冲突；25 项 Manager 测试通过，1 项 GPU 条件测试未运行。
+- 桌面 Manager 删除隐式静态 FVP 注册，改由 `data/cores/` 冷启动扫描动态核心，避免静态注册与目录核心冲突；Manager 定向测试覆盖空目录创建、依赖过滤、坏文件隔离，真实核心重启场景保留为显式插件测试。
 - FVP 现有全局存档的系统变量区与 HCB 不匹配，加载被拒绝且原文件保持不变。测试副本的新游戏与冷启动单帧通过；已有 CPU 软件渲染流程不计入 GPU 验收。
 - FVP 已通过 `hosted-gpu` 复用 RFVP 原生渲染器，删除 Family 内独立 GPU 管线。动态插件启动 1800 帧到达标题页；新增原生遮罩溶解，28 项测试（含硬件 GPU 转场和 1 MiB 栈动态模块重复开关）通过。Sandbox 已进入系统页、切换文字设置、返回标题并进入剧情首屏。独立 RFVP `gpu-render` 检查通过。动态模块 session map 改为堆上持有，修复第二次插入的栈溢出；Sandbox 同一进程重开已通过。音频输出、存读档及结局验收仍开放。
 - Slint 配置刷新保留未变更的 enum model，修复下拉列表被刷新关闭；回归与 Clippy 通过，Sandbox 已实际选择并保存配置。剧情乱码确认为启动编码选择问题，改为脚本对应的 Shift JIS 后，Sandbox 剧情首屏文字显示正常。Sandbox 没有可用系统音频设备，显式使用测试后端，不计入听感验收。
@@ -487,9 +491,9 @@ Classic route.coverage.033 已通过抽样运行，到达 tsui.ending，生成 2
 
 Classic route.coverage.034 已通过，48,109 条输入到达 tsui.ending，27 张过程截图及终局截图；第 009 张对白截图已查看。第 035 路线继续运行。
 
-Sandbox 更新 Musica 后发现 Manager 因已安装 descriptor 变化直接退出，无法从界面重新安装。已改为注册前校验、失败插件停用、保留安装记录并持续显示错误；重新安装成功才清除对应错误。缺失插件及实际 Musica DLL descriptor 变化后的重新安装/再次启动回归通过，Manager Clippy 与构建通过；真实界面回归正在进行。
+Sandbox 更新 Musica 后曾发现 Manager 因已安装 descriptor 变化直接退出；现已删除界面安装路径，改由 `data/cores/` 冷启动扫描，失败核心按文件停用并显示诊断，唯一核心继续可用。旧 `plugin_installation` 表不再参与注册，资料库、设置与原生存档不因核心扫描重建；真实界面回归正在进行。
 
-Sandbox 已实际验证停用诊断显示、游戏库重新安装及重扫，错误清除后已重新启动 Musica 加载。配置与已有存档未重建；冷启动读档仍待加载完成后验证。FVP 保留原会话并恢复自动播放。
+此前 Sandbox 已验证停用诊断显示以及旧界面重扫路径；该路径已删除，当前核心更新统一替换 `data/cores/` 文件并重启。配置与已有存档未重建；冷启动读档仍待加载完成后验证。FVP 保留原会话并恢复自动播放。
 
 Musica 在 Sandbox 中已完成冷启动标题读档、剧情推进后再次读档，以及两次恢复后的输入推进。使用原手动槽位 20，缩略图与保存时间保持不变；两次均恢复原对白，再按 Enter 进入下一句。Manager 记录两次 load.completed，GPU 为 DX12 discrete_gpu，未再次出现 ASTRA_EMU_MUSICA_ELAPSED。该代表流程仍使用显式 NullAudioDevice，不代表真实音频或完整结局验收；调试构建的大型归档同步校验仍造成冷启动界面长时间未响应。
 

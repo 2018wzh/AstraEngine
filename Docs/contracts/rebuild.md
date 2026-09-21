@@ -118,4 +118,4 @@ Musica 原生启动模式使用 `MusicaLaunchMode::Direct/Title`。Title 会话�
 
 Family API v7 增加可选 SetFullscreen 窗口命令及 logical/raster FrameInfo，Manager 在 Slint 窗口线程执行输出 letterbox 与 pointer 逆映射，关闭会话恢复普通窗口。该命令不传 UI 类型或原生句柄；无窗口 Host 明确拒绝。Musica 原生设置通过同一通道应用与冷启动恢复全屏。
 
-插件文件缺失、加载失败或安装 descriptor 变化时，Manager 保留安装记录，停用该插件并持续显示诊断；不能注册变化后的插件，也不能因单个插件失败关闭整个管理界面。用户在游戏库重新安装成功后清除对应错误，重新扫描后才恢复游戏启动。更新动态库仍需重启进程。
+核心文件缺失、加载失败、descriptor/capability 不匹配或重复 `plugin_id` 时，Manager 按 `data/cores/` 中的文件显示诊断并继续加载其他唯一核心；冲突 ID 的全部文件禁用。SQLite 不记录插件路径，更新核心需替换文件并重启 Manager。不能因单个核心失败关闭管理界面。

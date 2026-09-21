@@ -4,7 +4,7 @@ AstraEMU 是同仓的旧 VN 独立 Host。Manager 使用 Slint，Family 以 in-p
 
 Family 持有原生 VM、文件访问、媒体解码、混音、最终画面和原生存档。Host 管理资料库、窗口、物理输入、音频设备、最终帧 HLSL 滤镜、插件与可选翻译服务。一个进程同时只运行一个 session。
 
-保留现有资料库优先的 Slint 布局和元数据功能。新的资料库与设置 schema 明确重建旧数据；游戏原生存档独立于资料库。动态插件从本地显式安装，ABI/capability 校验失败即拒绝；多个 probe 命中由用户选择。
+保留现有资料库优先的 Slint 布局和元数据功能。新的资料库与设置 schema 明确重建旧数据；游戏原生存档独立于资料库。动态 Family 核心放在数据目录 `cores/`，Manager 冷启动自动扫描并复用 ABI/capability 校验；坏文件单独诊断，重复 plugin ID 的冲突核心全部拒绝，其他核心继续可用。多个 probe 命中由用户选择。
 
 翻译 service 与配置页本轮实现，FVP 声明不支持正文替换，因此相关操作禁用。端到端翻译等待 Musica，不修改 RFVP 翻译路径。滤镜直接消费 Family 最终帧，提供缩放、锐化、Anime4K Restore_S/Upscale_S 和外部 Magpie format 4 HLSL 的明确兼容子集。
 

@@ -1,6 +1,10 @@
 //! Registry and probe policy for static and dynamically loaded Family providers.
 
-use std::{collections::BTreeMap, path::Path};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    path::{Path, PathBuf},
+};
 
 use astra_emu_family_api::{
     FamilyCapability as AbiCapability, FamilyDescriptor as AbiDescriptor, FamilyOpen,
@@ -12,6 +16,55 @@ use crate::family::{
     FamilyProbeSelection,
 };
 use crate::family_loader::{host_owned_error, FamilyLoadError, LoadedFamilyPlugin};
+
+/// Result of one deterministic scan of a Manager `cores` directory.
+///
+/// A bad core is isolated to its file.  The caller can surface every error
+/// while still using providers that passed the ABI and descriptor gates.
+#[derive(Debug, Default)]
+pub struct FamilyDirectoryLoadReport {
+    pub loaded: usize,
+    pub errors: Vec<FamilyDirectoryLoadError>,
+}
+
+#[derive(Debug)]
+pub struct FamilyDirectoryLoadError {
+    pub path: PathBuf,
+    pub error: FamilyLoadError,
+}
+
+/// Family dynamic libraries use the same stable basename across platforms.
+/// Dependencies such as FFmpeg and the MSVC runtime intentionally do not use
+/// this prefix, so placing a release directory under `cores` cannot make the
+/// Manager probe every dependency DLL.
+pub fn is_family_library_path(path: &Path) -> bool {
+    let Some(file_name) = path.file_name().and_then(|value| value.to_str()) else {
+        return false;
+    };
+    let Some(extension) = path.extension().and_then(|value| value.to_str()) else {
+        return false;
+    };
+    if !extension.eq_ignore_ascii_case(std::env::consts::DLL_EXTENSION) {
+        return false;
+    }
+    let name = file_name.to_ascii_lowercase();
+    name.starts_with("astra_emu_") || name.starts_with("libastra_emu_")
+}
+
+fn discover_family_libraries(directory: &Path) -> Result<Vec<PathBuf>, FamilyLoadError> {
+    let entries = fs::read_dir(directory).map_err(|_| FamilyLoadError::Directory)?;
+    let mut paths = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|_| FamilyLoadError::Directory)?;
+        let file_type = entry.file_type().map_err(|_| FamilyLoadError::Directory)?;
+        if file_type.is_file() && is_family_library_path(&entry.path()) {
+            paths.push(entry.path());
+        }
+    }
+    paths.sort();
+    paths.dedup();
+    Ok(paths)
+}
 
 /// Runtime registry used by Manager and CLI. Static and dynamic providers are
 /// registered through the same descriptor validation and probe-selection path.
@@ -58,6 +111,72 @@ impl FamilyProviderRegistry {
 
     pub fn load_dynamic(&mut self, path: impl AsRef<Path>) -> Result<(), FamilyLoadError> {
         self.register_provider(LoadedFamilyPlugin::load(path)?)
+    }
+
+    /// Load every Family library in a directory using one deterministic pass.
+    ///
+    /// Descriptor collection happens before registration.  If two files
+    /// advertise the same plugin ID, both files are rejected and the ID is
+    /// left absent from the registry; this prevents a sorted filename from
+    /// becoming an accidental provider selection policy.
+    pub fn load_directory(
+        &mut self,
+        directory: impl AsRef<Path>,
+    ) -> Result<FamilyDirectoryLoadReport, FamilyLoadError> {
+        let paths = discover_family_libraries(directory.as_ref())?;
+        let mut candidates = BTreeMap::<String, (PathBuf, LoadedFamilyPlugin)>::new();
+        let mut duplicate_ids = BTreeSet::new();
+        let mut report = FamilyDirectoryLoadReport::default();
+
+        for path in paths {
+            let plugin = match LoadedFamilyPlugin::load(&path) {
+                Ok(plugin) => plugin,
+                Err(error) => {
+                    report.errors.push(FamilyDirectoryLoadError { path, error });
+                    continue;
+                }
+            };
+            let plugin_id = plugin.manager_descriptor().plugin_id.clone();
+            if duplicate_ids.contains(&plugin_id) {
+                report.errors.push(FamilyDirectoryLoadError {
+                    path,
+                    error: FamilyLoadError::DuplicatePlugin,
+                });
+                continue;
+            }
+            if let Some((first_path, _)) = candidates.remove(&plugin_id) {
+                duplicate_ids.insert(plugin_id);
+                report.errors.push(FamilyDirectoryLoadError {
+                    path: first_path,
+                    error: FamilyLoadError::DuplicatePlugin,
+                });
+                report.errors.push(FamilyDirectoryLoadError {
+                    path,
+                    error: FamilyLoadError::DuplicatePlugin,
+                });
+                continue;
+            }
+            candidates.insert(plugin_id, (path, plugin));
+        }
+
+        for plugin_id in &duplicate_ids {
+            self.remove(plugin_id);
+        }
+        for (plugin_id, (path, plugin)) in candidates {
+            if self.providers.contains_key(&plugin_id) {
+                self.remove(&plugin_id);
+                report.errors.push(FamilyDirectoryLoadError {
+                    path,
+                    error: FamilyLoadError::DuplicatePlugin,
+                });
+                continue;
+            }
+            match self.register_provider(plugin) {
+                Ok(()) => report.loaded += 1,
+                Err(error) => report.errors.push(FamilyDirectoryLoadError { path, error }),
+            }
+        }
+        Ok(report)
     }
 
     pub fn remove(&mut self, plugin_id: &str) -> bool {

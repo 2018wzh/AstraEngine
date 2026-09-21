@@ -46,7 +46,6 @@ mod controller;
 mod family_config;
 mod filters;
 mod input;
-mod installation;
 mod library;
 mod metadata;
 mod metadata_actions;

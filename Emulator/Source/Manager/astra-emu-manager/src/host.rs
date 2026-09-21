@@ -92,8 +92,6 @@ pub trait ManagerController: 'static {
     fn grant_translation_consent(&mut self) -> Result<ManagerViewModel, String>;
     fn test_translation_connection(&mut self) -> Result<ManagerViewModel, String>;
     fn add_game_directory(&mut self, path: &std::path::Path) -> Result<ManagerViewModel, String>;
-    fn install_family_plugin(&mut self, path: &std::path::Path)
-        -> Result<ManagerViewModel, String>;
     fn filter_settings(&self) -> astra_emu_manager_core::FilterSettings;
     fn pending_filter_settings(&self) -> Result<astra_emu_manager_core::FilterSettings, String>;
     fn commit_filter_settings(

@@ -1,8 +1,8 @@
 # Musica Family 插件
 
-Musica 实现当前 Family API，自持 PAZ、脚本 VM、媒体、GPU Scene 和原生存档。Manager 负责安装、配置、输入、最终帧及 PCM 输出，不创建 Engine/VN session。配置在启动时通过 descriptor 校验，诊断经共享日志桥进入 Manager。
+Musica 实现当前 Family API，自持 PAZ、脚本 VM、媒体、GPU Scene 和原生存档。Manager 负责从 `data/cores/` 发现核心、配置、输入、最终帧及 PCM 输出，不创建 Engine/VN session。配置在启动时通过 descriptor 校验，诊断经共享日志桥进入 Manager。
 
-## 构建与安装
+## 构建与放置
 
 基础插件不要求 FFmpeg。需要电影播放时显式选择原生依赖：
 
@@ -10,7 +10,7 @@ Musica 实现当前 Family API，自持 PAZ、脚本 VM、媒体、GPU Scene 和
 cargo build --manifest-path Emulator/Cargo.toml -p astra-emu-musica --release --features dynamic-plugin-export,ffmpeg-vcpkg
 ```
 
-FFmpeg 使用当前工程的 vcpkg 配置；运行时必须能找到匹配的动态库。插件通过 Manager 本地安装入口装入，更新后重启 Manager。无 FFmpeg 构建遇到 movie 指令返回 `ASTRA_EMU_MUSICA_MOVIE_UNAVAILABLE`，不会把首帧或静音当作播放成功。
+FFmpeg 使用当前工程的 vcpkg 配置；运行时必须能找到匹配的动态库。发布的 `astra_emu_musica` 核心放进 Manager 数据目录的 `cores/`，依赖 DLL 可以与它同目录，Manager 只按 Family 文件名前缀扫描核心并在启动时加载；更新后重启 Manager。无 FFmpeg 构建遇到 movie 指令返回 `ASTRA_EMU_MUSICA_MOVIE_UNAVAILABLE`，不会把首帧或静音当作播放成功。
 
 Manager 的 Audio 分组提供 `bgm_volume`、`voice_volume`、`se_volume`（0–100）及对应 `*_muted`。这些选项启动前校验并由 Manager 持久化，不写入剧情存档；读档保留当前用户音量。电影 PCM 暂不归入这三个剧情音轨。
 
@@ -51,4 +51,4 @@ Config 使用来源的原生素材、控件坐标和共享 GPU Scene。Title 模
 Musica 的逻辑舞台固定为 `1280x720`。启动配置显式提供正整数 `render_width` 与 `render_height`，GPU raster canvas 按设备和内存能力创建任意尺寸；零值、溢出、超限或无法分配时启动失败，不静默改选四档尺寸。公共 `Canvas2D` 按统一 scale 计算居中的 aspect-fit viewport，viewport 外的 raster 保持黑色，Host 只把 viewport 内指针逆映射到逻辑坐标。资源的 physical pixels、ANI 原点和 `TextureAsset` logical extent 与 VM、存档和剧情时间分开。正文按实际 raster density 使用 AstraText 重新 shaping/rasterize glyph，再映射回逻辑坐标，避免把低密度 glyph 放大。公共 `Canvas2D` 和 `SceneCommand` 负责根 transform 与裁剪，Family 不复制另一套渲染器。
 
 
-Windows Sandbox 已经由真实 Manager 完成插件安装、扫描、标题启动、打开原生 System 页面、应用全屏及返回窗口模式。核心日志确认 DX12 discrete_gpu；窗口尺寸变化后标题与设置输入正常。该轮显式使用 NullAudioDevice，仅验证图形与交互，不计入真实音频或完整结局验收。
+Windows Sandbox 已经由真实 Manager 完成 `cores/` 核心扫描、标题启动、打开原生 System 页面、应用全屏及返回窗口模式。核心日志确认 DX12 discrete_gpu；窗口尺寸变化后标题与设置输入正常。该轮显式使用 NullAudioDevice，仅验证图形与交互，不计入真实音频或完整结局验收。

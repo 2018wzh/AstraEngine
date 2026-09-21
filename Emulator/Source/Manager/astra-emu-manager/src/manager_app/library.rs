@@ -1,6 +1,23 @@
 use super::*;
 
 impl AstraEmuManagerController {
+    pub(super) fn add_game_directory(&mut self, path: &Path) -> Result<ManagerViewModel, String> {
+        if self.active.is_some() {
+            return Err("ASTRA_EMU_FAMILY_SESSION_ALREADY_ACTIVE".into());
+        }
+        self.scan_paths(&[path.to_owned()])?;
+        let games = self.library.list_games().map_err(|error| error.to_string())?;
+        if self.selected_case_id.is_none() {
+            self.selected_case_id = games.first().map(|game| game.game_id.clone());
+        }
+        self.diagnostic = if games.is_empty() {
+            "未发现受已发现 Family 核心支持的游戏。".into()
+        } else {
+            String::new()
+        };
+        self.model()
+    }
+
     pub(super) fn open(mailbox: FrameMailbox) -> Result<Self, String> {
         let mut controller = Self::open_library(platform_data_dir()?, mailbox, parse_game_roots())?;
         controller.rescan()?;
@@ -13,6 +30,8 @@ impl AstraEmuManagerController {
         game_roots: Vec<PathBuf>,
     ) -> Result<Self, String> {
         fs::create_dir_all(&data_dir).map_err(|_| "ASTRA_EMU_DATA_DIRECTORY_CREATE")?;
+        let _cores_dir = data_dir.join("cores");
+        fs::create_dir_all(&_cores_dir).map_err(|_| "ASTRA_EMU_CORES_DIRECTORY_CREATE")?;
         let mut library =
             Library::open(data_dir.join("library.sqlite3")).map_err(|error| error.to_string())?;
         library
@@ -25,33 +44,29 @@ impl AstraEmuManagerController {
         registry
             .register_provider(astra_emu_fvp::FvpProvider::default())
             .map_err(|error| error.to_string())?;
-        for installed in library
-            .list_installed_plugins()
-            .map_err(|e| e.to_string())?
-        {
-            let result = (|| -> Result<(), String> {
-                let plugin = astra_emu_manager_core::LoadedFamilyPlugin::load(&installed.location)
-                    .map_err(|e| e.to_string())?;
-                let descriptor = plugin.manager_descriptor();
-                if descriptor.plugin_id != installed.plugin_id {
-                    return Err("ASTRA_EMU_PLUGIN_INSTALL_ID_MISMATCH".into());
-                }
-                if descriptor.family_id != installed.family_id
-                    || descriptor.abi_fingerprint != installed.abi_fingerprint
-                    || descriptor.version != installed.version
-                    || descriptor.capabilities != installed.capabilities
-                    || descriptor.supported_formats != installed.supported_formats
-                {
-                    return Err("ASTRA_EMU_PLUGIN_INSTALL_DESCRIPTOR_CHANGED".into());
-                }
-                registry
-                    .register_provider(plugin)
-                    .map_err(|e| e.to_string())
-            })();
-            if let Err(error) = result {
-                tracing::error!(event = "astra.emu.plugin.installation_blocked", plugin_id = %installed.plugin_id, diagnostic = %error);
-                plugin_errors.insert(installed.plugin_id, error);
-            }
+        #[cfg(not(target_os = "android"))]
+        let core_report = registry
+            .load_directory(&_cores_dir)
+            .map_err(|error| error.to_string())?;
+        #[cfg(not(target_os = "android"))]
+        for failure in core_report.errors {
+            let file_name = failure
+                .path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or("<unknown-core>")
+                .to_owned();
+            let diagnostic = format!(
+                "{}: {}",
+                failure.error.diagnostic_code(),
+                failure.error.human_message()
+            );
+            tracing::error!(
+                event = "astra.emu.plugin.discovery_failed",
+                core = %file_name,
+                diagnostic = %diagnostic
+            );
+            plugin_errors.insert(file_name, diagnostic);
         }
 
         let input_mapping = library

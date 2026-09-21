@@ -10,7 +10,7 @@
 
 `validate_config_schema` 校验完整 schema；`resolve_config` 拒绝未知/重复 key、类型不匹配、无效默认值和越界，再按 schema 顺序补齐缺省值。错误 `ASTRA_EMU_FAMILY_CONFIG` 包含字段/值 index 和原因，不包含用户值。Host 在调用核心前验证，核心仍须调用 `validate_for_descriptor` 和 `resolve_config`。配置只在启动时生效，不能在线修改运行中的核心。配置不授予文件/网络等额外 Host 权限。
 
-Manager SQLite schema 4 按 plugin ID + game ID 保存 typed 值；空 game ID 为核心默认值，游戏覆盖优先，再使用 schema 默认值。每层先验证，未知旧键不会在合并时丢失。Manager 数据版本变化明确重建，不迁移旧 ABI/配置；核心原生存档不受影响。操作见 [配置手册](CONFIGURATION.md)。
+Manager SQLite schema 4 按 plugin ID + game ID 保存 typed 值；空 game ID 为核心默认值，游戏覆盖优先，再使用 schema 默认值。每层先验证，未知旧键不会在合并时丢失。动态 Family 二进制不写入 SQLite：Manager 启动时只扫描数据目录下的 `cores/`，按平台动态库扩展和 `astra_emu_`（Unix 也接受 `libastra_emu_`）文件名前缀发现核心，再复用 ABI、descriptor 和 capability 校验。现有旧 schema 中的 `plugin_installation` 表不再读取或写入，也不是插件注册来源；它可以随旧数据库保留，不触碰资料库、配置或游戏原生存档。更新核心需要替换 `cores/` 文件并重启 Manager，运行期间不热加载。操作见 [配置手册](CONFIGURATION.md)。
 
 ## 服务、输入和资源
 

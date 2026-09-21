@@ -10,9 +10,6 @@ impl ManagerController for AstraEmuManagerController {
     fn add_game_directory(&mut self, path: &Path) -> Result<ManagerViewModel, String> {
         AstraEmuManagerController::add_game_directory(self, path)
     }
-    fn install_family_plugin(&mut self, path: &Path) -> Result<ManagerViewModel, String> {
-        AstraEmuManagerController::install_family_plugin(self, path)
-    }
     fn test_translation_connection(&mut self) -> Result<ManagerViewModel, String> {
         AstraEmuManagerController::test_translation_connection(self)
     }

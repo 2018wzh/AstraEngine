@@ -243,7 +243,7 @@ impl AstraEmuManagerController {
                 .plugin_errors
                 .iter()
                 .map(|(id, error)| {
-                    format!("插件 {id} 已停用：{error}。请在游戏库重新安装插件，然后重新扫描。")
+                    format!("核心文件 {id} 未加载：{error}。修复 data/cores 中的文件后重启 Manager。")
                 })
                 .chain(
                     std::iter::once(self.diagnostic.clone()).filter(|message| !message.is_empty()),

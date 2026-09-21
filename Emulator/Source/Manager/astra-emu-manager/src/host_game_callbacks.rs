@@ -192,25 +192,5 @@ pub(super) fn install<C: ManagerController, R: AstraUnderlayRenderer>(
             }
         });
     }
-    {
-        let c = controller.clone();
-        let a = std::rc::Rc::downgrade(adapter);
-        let w = adapter.window().as_weak();
-        adapter.window().on_install_family_plugin(move || {
-            let Some(path) = rfd::FileDialog::new()
-                .add_filter("Family plugin", &[std::env::consts::DLL_EXTENSION])
-                .pick_file()
-            else {
-                return;
-            };
-            let result = c.borrow_mut().install_family_plugin(&path);
-            if let Some(window) = w.upgrade() {
-                match result {
-                    Ok(model) => apply_model(&a, &model),
-                    Err(error) => window.set_global_diagnostic(error.into()),
-                }
-            }
-        });
-    }
     filters::install(adapter, controller, renderer);
 }

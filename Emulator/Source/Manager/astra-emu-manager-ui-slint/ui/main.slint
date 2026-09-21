@@ -166,7 +166,6 @@ export component ManagerWindow inherits Window {
     callback open-filters();
     callback rescan();
     callback add-game-directory();
-    callback install-family-plugin();
     callback open-settings();
     callback set-library-sort(string);
     callback refresh-compatibility();
@@ -315,7 +314,6 @@ export component ManagerWindow inherits Window {
                     search(query) => { root.search(query); }
                     rescan => { root.rescan(); }
                     add-game-directory => { root.add-game-directory(); }
-                    install-family-plugin => { root.install-family-plugin(); }
                     set-library-sort(mode) => { root.set-library-sort(mode); }
                     refresh-compatibility => { root.refresh-compatibility(); }
                     set-compatibility-filter(filter) => { root.set-compatibility-filter(filter); }

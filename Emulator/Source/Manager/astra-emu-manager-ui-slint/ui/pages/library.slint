@@ -389,7 +389,6 @@ export component LibraryPage inherits Rectangle {
     callback search(string);
     callback rescan();
     callback add-game-directory();
-    callback install-family-plugin();
     callback set-library-sort(string);
     callback refresh-compatibility();
     callback set-compatibility-filter(string);
@@ -490,7 +489,6 @@ export component LibraryPage inherits Rectangle {
                 }
 
                 M3Button { text: "添加游戏"; primary: true; clicked => { root.add-game-directory(); } }
-                M3Button { text: "安装插件"; variant: "outlined"; clicked => { root.install-family-plugin(); } }
                 M3Button {
                     text: "扫描游戏";
                     icon: Icons.rotate;

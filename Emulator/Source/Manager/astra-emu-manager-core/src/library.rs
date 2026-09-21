@@ -13,11 +13,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{
-    family::{FamilyCapability, FamilyPluginDescriptor},
-    input_mapping::InputMapping,
-    work_settings::GameSettings,
-};
+use crate::{input_mapping::InputMapping, work_settings::GameSettings};
 
 #[path = "library_settings.rs"]
 mod settings;
@@ -37,6 +33,8 @@ const REQUIRED_TABLES: [&str; 10] = [
     "manager_settings",
     "game_settings",
     "translation_profile",
+    // Kept so an existing schema-4 database remains intact; core discovery
+    // never reads or writes this legacy table.
     "plugin_installation",
 ];
 
@@ -103,6 +101,8 @@ CREATE TABLE translation_profile (
     singleton INTEGER PRIMARY KEY NOT NULL CHECK(singleton = 1),
     profile_json TEXT NOT NULL
 );
+-- Legacy schema-4 table retained for in-place database compatibility. The
+-- Manager core scanner deliberately has no consumer for this table.
 CREATE TABLE plugin_installation (
     plugin_id TEXT PRIMARY KEY NOT NULL,
     family_id TEXT NOT NULL,
@@ -133,70 +133,6 @@ impl GameRecord {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct PluginInstallRecord {
-    pub plugin_id: String,
-    pub family_id: String,
-    pub location: String,
-    pub abi_fingerprint: String,
-    pub version: String,
-    pub capabilities: Vec<FamilyCapability>,
-    pub supported_formats: Vec<String>,
-    pub installed_at_unix_ms: i64,
-}
-
-impl PluginInstallRecord {
-    pub fn descriptor(&self) -> FamilyPluginDescriptor {
-        FamilyPluginDescriptor {
-            family_id: self.family_id.clone(),
-            plugin_id: self.plugin_id.clone(),
-            abi_fingerprint: self.abi_fingerprint.clone(),
-            version: self.version.clone(),
-            capabilities: self.capabilities.clone(),
-            supported_formats: self.supported_formats.clone(),
-        }
-    }
-}
-
-/// A database write token that can only be created by code which has already
-/// checked a real Family module's ABI layout and descriptor. The public record
-/// remains serializable for display/reporting, but cannot be passed to the
-/// persistence API as self-reported plugin metadata.
-#[derive(Debug, Clone)]
-pub struct VerifiedPluginInstall {
-    record: PluginInstallRecord,
-}
-
-impl VerifiedPluginInstall {
-    #[allow(dead_code)]
-    pub fn from_verified_descriptor(
-        descriptor: FamilyPluginDescriptor,
-        location: String,
-        installed_at_unix_ms: i64,
-    ) -> Result<Self, LibraryError> {
-        descriptor
-            .validate()
-            .map_err(|_| LibraryError::PluginDescriptor)?;
-        validate_location(&location)?;
-        Ok(Self {
-            record: PluginInstallRecord {
-                plugin_id: descriptor.plugin_id.clone(),
-                family_id: descriptor.family_id.clone(),
-                location,
-                abi_fingerprint: descriptor.abi_fingerprint.clone(),
-                version: descriptor.version.clone(),
-                capabilities: descriptor.capabilities.clone(),
-                supported_formats: descriptor.supported_formats.clone(),
-                installed_at_unix_ms,
-            },
-        })
-    }
-
-    pub fn record(&self) -> &PluginInstallRecord {
-        &self.record
-    }
-}
-
 #[derive(Debug, Error)]
 pub enum LibraryError {
     #[error("{0}")]
@@ -221,8 +157,6 @@ pub enum LibraryError {
     Serialization,
     #[error("ASTRA_EMU_LIBRARY_SETTINGS")]
     Settings,
-    #[error("ASTRA_EMU_LIBRARY_PLUGIN_DESCRIPTOR")]
-    PluginDescriptor,
 }
 
 pub struct Library {
@@ -509,9 +443,6 @@ pub(crate) fn validate_remote_id(value: &str) -> Result<(), LibraryError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::family::{
-        FamilyCapability, FamilyPluginDescriptor, INDEPENDENT_FAMILY_ABI_FINGERPRINT,
-    };
     use crate::input_mapping::default_vn_preset;
 
     fn game(id: &str, location: &str) -> GameRecord {
@@ -566,32 +497,5 @@ mod tests {
         assert!(library.add_game(&game("game-b", "same-location")).is_err());
         assert!(library.remove_game("game-a").unwrap());
         assert!(library.game("game-a").unwrap().is_none());
-    }
-
-    #[test]
-    fn only_verified_descriptor_can_be_persisted() {
-        let mut library = Library::in_memory().unwrap();
-        let descriptor = FamilyPluginDescriptor {
-            family_id: "fvp".into(),
-            plugin_id: "astra.emu.fvp".into(),
-            abi_fingerprint: INDEPENDENT_FAMILY_ABI_FINGERPRINT.into(),
-            version: "1.0.0".into(),
-            capabilities: vec![FamilyCapability::CpuFrame],
-            supported_formats: vec!["fvp.hcb".into()],
-        };
-        let verified = VerifiedPluginInstall::from_verified_descriptor(
-            descriptor,
-            "selected-plugin.dll".into(),
-            10,
-        )
-        .unwrap();
-        library.install_verified_plugin(&verified).unwrap();
-        let records = library.list_installed_plugins().unwrap();
-        assert_eq!(records.len(), 1);
-        assert_eq!(
-            records[0].abi_fingerprint,
-            INDEPENDENT_FAMILY_ABI_FINGERPRINT
-        );
-        assert_eq!(records[0].supported_formats, vec!["fvp.hcb"]);
     }
 }

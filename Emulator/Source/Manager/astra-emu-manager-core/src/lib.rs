@@ -23,12 +23,15 @@ pub use family::{
     INDEPENDENT_FAMILY_ABI_FINGERPRINT,
 };
 pub use family_loader::{FamilyLoadError, LoadedFamilyPlugin};
-pub use family_registry::FamilyProviderRegistry;
+pub use family_registry::{
+    is_family_library_path, FamilyDirectoryLoadError, FamilyDirectoryLoadReport,
+    FamilyProviderRegistry,
+};
 pub use filter_settings::{FilterConfiguration, FilterPreset, FilterSettings};
 pub use input_mapping::{
     default_vn_preset, input_key_code, GamepadDeadzone, GamepadInput, InputMapping,
 };
-pub use library::{GameRecord, Library, LibraryError, PluginInstallRecord, VerifiedPluginInstall};
+pub use library::{GameRecord, Library, LibraryError};
 pub use metadata::{
     DisplayTitle, DisplayTitleSource, ExternalIdentityRecord, MetadataSnapshotRecord,
     MetadataSnapshotState,

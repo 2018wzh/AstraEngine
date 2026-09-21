@@ -32,6 +32,8 @@ use crate::family_registry::manager_descriptor;
 pub enum FamilyLoadError {
     #[error("ASTRA_EMU_FAMILY_DIAGNOSTIC_INIT")]
     Diagnostics,
+    #[error("ASTRA_EMU_FAMILY_SCAN_DIRECTORY")]
+    Directory,
     #[error("ASTRA_EMU_FAMILY_LOAD_PATH")]
     InvalidPath,
     #[error("ASTRA_EMU_FAMILY_LOAD_LIBRARY")]
@@ -65,6 +67,7 @@ impl FamilyLoadError {
     pub fn diagnostic_code(&self) -> &str {
         match self {
             Self::Diagnostics => "ASTRA_EMU_FAMILY_DIAGNOSTIC_INIT",
+            Self::Directory => "ASTRA_EMU_FAMILY_SCAN_DIRECTORY",
             Self::InvalidPath => "ASTRA_EMU_FAMILY_LOAD_PATH",
             Self::Library => "ASTRA_EMU_FAMILY_LOAD_LIBRARY",
             Self::AbiLayout => "ASTRA_EMU_FAMILY_LOAD_ABI",
@@ -90,6 +93,7 @@ impl FamilyLoadError {
     pub fn human_message(&self) -> &str {
         match self {
             Self::Diagnostics => "the family diagnostic bridge could not initialize",
+            Self::Directory => "the family core directory could not be scanned",
             Self::DescriptorError(error) | Self::ProviderError(error) | Self::ProbeError(error) => {
                 error.message.as_str()
             }
