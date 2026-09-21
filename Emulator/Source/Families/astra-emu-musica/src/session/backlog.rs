@@ -60,6 +60,8 @@ impl MusicaSession {
                 tracing::debug!(event = "astra.emu.musica.backlog.voice");
             }
             FamilyEvent::WindowFocused { .. }
+            | FamilyEvent::WindowResized { .. }
+            | FamilyEvent::WindowVisibility { .. }
             | FamilyEvent::WindowSuspended { .. }
             | FamilyEvent::WindowCloseRequested
             | FamilyEvent::Key {

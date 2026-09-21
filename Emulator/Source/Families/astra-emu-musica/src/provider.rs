@@ -277,6 +277,7 @@ impl MusicaProvider {
             _ => return Err(error("ASTRA_EMU_MUSICA_CONFIG", "invalid launch mode")),
         };
         let focused = request.initial_window.focused;
+        let visible = request.initial_window.visible;
         let lease = SessionLease::acquire()?;
         let root = Path::new(request.game_path.as_str());
         let (archive, texture_overrides) =
@@ -364,7 +365,7 @@ impl MusicaProvider {
             .ok_or_else(|| error("ASTRA_EMU_MUSICA_AUDIO_SINK", "PCM sink is required"))?;
         let audio = Audio::start(archive.clone(), sink)?;
         audio.set_preferences(audio_preferences)?;
-        audio.suspend(!focused && !progress_in_background)?;
+        audio.suspend(!visible || (!focused && !progress_in_background))?;
         self.next = self
             .next
             .checked_add(1)
@@ -400,6 +401,7 @@ impl MusicaProvider {
             game,
             lease,
             focused,
+            visible,
             progress_in_background,
             primary_encoding,
             quick_cursor,

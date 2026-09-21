@@ -72,4 +72,10 @@ impl AstraEmuManagerController {
         }
         Ok(None)
     }
+
+    pub(super) fn host_work_complete(&mut self) {
+        if let Some(active) = self.active.as_mut() {
+            active.host_work_complete();
+        }
+    }
 }

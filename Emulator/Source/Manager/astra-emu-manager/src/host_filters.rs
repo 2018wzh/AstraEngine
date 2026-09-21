@@ -28,15 +28,20 @@ fn apply(
     renderer: &mut dyn AstraUnderlayRenderer,
 ) -> Result<ManagerViewModel, String> {
     let previous = controller.filter_settings();
-    let candidate = controller.pending_filter_settings()?;
-    configure(renderer, &candidate)?;
-    match controller.commit_filter_settings(candidate) {
-        Ok(model) => Ok(model),
-        Err(error) => {
-            configure(renderer, &previous).map_err(|rollback| format!("{error}; {rollback}"))?;
-            Err(error)
+    let result = (|| {
+        let candidate = controller.pending_filter_settings()?;
+        configure(renderer, &candidate)?;
+        match controller.commit_filter_settings(candidate) {
+            Ok(model) => Ok(model),
+            Err(error) => {
+                configure(renderer, &previous)
+                    .map_err(|rollback| format!("{error}; {rollback}"))?;
+                Err(error)
+            }
         }
-    }
+    })();
+    controller.host_work_complete();
+    result
 }
 
 pub(super) fn install<C: ManagerController, R: AstraUnderlayRenderer>(

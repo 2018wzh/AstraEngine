@@ -107,6 +107,8 @@ impl MusicaSession {
                 }
             }
             FamilyEvent::WindowFocused { .. }
+            | FamilyEvent::WindowResized { .. }
+            | FamilyEvent::WindowVisibility { .. }
             | FamilyEvent::WindowSuspended { .. }
             | FamilyEvent::WindowCloseRequested => return Ok(false),
             _ => {}

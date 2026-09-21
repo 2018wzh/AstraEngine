@@ -132,6 +132,9 @@ pub trait ManagerController: 'static {
     /// a single wake at this deadline; rendering never advances the runtime.
     fn runtime_deadline(&self) -> Option<Instant>;
     fn advance_runtime(&mut self) -> Result<Option<ManagerViewModel>, String>;
+    /// Re-anchor runtime time after a host operation that can block the UI
+    /// thread, such as a window transition or filter compilation.
+    fn host_work_complete(&mut self) {}
     /// Update the platform theme used by automatic appearance mode.
     fn set_system_theme(&mut self, dark: bool);
     fn set_theme(&mut self, _dark: bool) -> Result<(), String>;
@@ -293,6 +296,7 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                 let fullscreen = controller.borrow().game_fullscreen();
                 if window.window().is_fullscreen() != fullscreen {
                     window.window().set_fullscreen(fullscreen);
+                    controller.borrow_mut().host_work_complete();
                     tracing::debug!(
                         event = "astra.emu.host.window.fullscreen_requested",
                         fullscreen
@@ -345,6 +349,7 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                         .ok_or_else(|| "Manager window disappeared during renderer setup".to_string())?;
                     apply_stage_texture_update(&window, update)?;
                 }
+                event_controller.borrow_mut().host_work_complete();
                 Ok(())
             }
             slint::RenderingState::BeforeRendering => {

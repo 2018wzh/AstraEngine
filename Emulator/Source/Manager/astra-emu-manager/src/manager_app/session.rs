@@ -60,7 +60,7 @@ impl ActiveFamilySession {
             last_tick: Instant::now(),
             next_deadline: Instant::now() + Duration::from_nanos(FIXED_FRAME_NS),
         };
-        if let Err(error) = active.capture_frame() {
+        if let Err(error) = active.capture_initial_frame() {
             return match active.close() {
                 Ok(()) => Err(error),
                 Err(cleanup) => Err(format!("{error}; {cleanup}")),
@@ -80,6 +80,27 @@ impl ActiveFamilySession {
             .map_err(|error| error.to_string())
     }
 
+    fn capture_initial_frame(&mut self) -> Result<(), String> {
+        self.capture_frame()?;
+        self.reset_clock_after_host_work("initial_frame");
+        Ok(())
+    }
+
+    pub(super) fn host_work_complete(&mut self) {
+        self.reset_clock_after_host_work("host_work");
+    }
+
+    fn reset_clock_after_host_work(&mut self, reason: &'static str) {
+        let now = Instant::now();
+        self.last_tick = now;
+        self.next_deadline = now + Duration::from_nanos(FIXED_FRAME_NS);
+        tracing::debug!(
+            event = "astra.emu.host.clock_anchor",
+            family_id = %self.family_id,
+            reason
+        );
+    }
+
     pub(super) fn advance(
         &mut self,
         elapsed_ns: u64,
@@ -90,9 +111,18 @@ impl ActiveFamilySession {
             .session
             .as_mut()
             .ok_or_else(|| "ASTRA_EMU_FAMILY_SESSION_CLOSED".to_owned())?;
-        let response = session
-            .advance(elapsed_ns, events)
-            .map_err(|error| error.to_string())?;
+        let response = match session.advance(elapsed_ns, events) {
+            Ok(response) => response,
+            Err(error) => {
+                tracing::error!(
+                    event = "astra.emu.host.advance_failed",
+                    family_id = %self.family_id,
+                    diagnostic_code = %error.code(),
+                    elapsed_ns
+                );
+                return Err(error.to_string());
+            }
+        };
         self.status = response.status;
         if let ROption::RSome(astra_emu_family_api::FamilyWindowCommand::SetFullscreen(value)) =
             response.window_command
@@ -345,6 +375,63 @@ mod tests {
             );
             active.close().unwrap();
         }
+    }
+
+    #[test]
+    fn initial_clock_starts_after_initial_frame_capture() {
+        struct InitialFrameSession {
+            entered: std::sync::mpsc::SyncSender<()>,
+            release: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+            completed: std::sync::Arc<std::sync::Mutex<Option<Instant>>>,
+        }
+        impl FamilySession for InitialFrameSession {
+            fn advance(&mut self, _: u64, _: &[FamilyEvent]) -> FamilyResult<AdvanceResponse> {
+                Ok(AdvanceResponse::running())
+            }
+            fn visit_frame(&self, _: &mut dyn FrameVisitor) -> FamilyResult<()> {
+                self.entered.send(()).unwrap();
+                self.release.lock().unwrap().recv().unwrap();
+                *self.completed.lock().unwrap() = Some(Instant::now());
+                Ok(())
+            }
+            fn close(self: Box<Self>) -> FamilyResult<()> {
+                Ok(())
+            }
+        }
+
+        let (entered, entered_receiver) = std::sync::mpsc::sync_channel(0);
+        let (release, release_receiver) = std::sync::mpsc::sync_channel(0);
+        let completed = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let completed_for_session = completed.clone();
+        let releaser = std::thread::spawn(move || {
+            entered_receiver.recv().unwrap();
+            release.send(()).unwrap();
+        });
+        let mut active = ActiveFamilySession {
+            family_id: "initial-frame-clock-test".into(),
+            session: Some(Box::new(InitialFrameSession {
+                entered,
+                release: std::sync::Mutex::new(release_receiver),
+                completed: completed_for_session,
+            })),
+            audio: None,
+            text: None,
+            mailbox: FrameMailbox::new(),
+            status: FamilyStatus::Running,
+            fullscreen: false,
+            last_tick: Instant::now(),
+            next_deadline: Instant::now(),
+        };
+
+        active.capture_initial_frame().unwrap();
+        releaser.join().unwrap();
+        let completed = completed.lock().unwrap().unwrap();
+        assert!(active.last_tick >= completed);
+        assert_eq!(
+            active.next_deadline,
+            active.last_tick + Duration::from_nanos(FIXED_FRAME_NS)
+        );
+        active.close().unwrap();
     }
 
     #[test]

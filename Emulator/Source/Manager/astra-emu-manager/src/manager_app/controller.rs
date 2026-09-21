@@ -154,6 +154,10 @@ impl ManagerController for AstraEmuManagerController {
         AstraEmuManagerController::advance_runtime(self)
     }
 
+    fn host_work_complete(&mut self) {
+        AstraEmuManagerController::host_work_complete(self);
+    }
+
     fn game_fullscreen(&self) -> bool {
         self.active.as_ref().is_some_and(|active| active.fullscreen)
     }

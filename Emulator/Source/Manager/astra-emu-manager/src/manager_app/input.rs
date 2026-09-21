@@ -11,6 +11,11 @@ impl AstraEmuManagerController {
             state.visible = false;
         }
         state.validate().map_err(|error| error.to_string())?;
+        let host_window_changed = self.window_state.is_some_and(|previous| {
+            previous.focused != state.focused
+                || previous.visible != state.visible
+                || (previous.width, previous.height) != (state.width, state.height)
+        });
         if let Some(previous) = self.window_state {
             if previous.focused != state.focused {
                 self.handle_physical_event(FamilyEvent::WindowFocused {
@@ -30,6 +35,9 @@ impl AstraEmuManagerController {
             }
         }
         self.window_state = Some(state);
+        if host_window_changed {
+            self.host_work_complete();
+        }
         Ok(())
     }
 

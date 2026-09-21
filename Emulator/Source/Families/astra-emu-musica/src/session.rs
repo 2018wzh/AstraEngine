@@ -54,6 +54,7 @@ pub(crate) struct MusicaSession {
     poisoned: bool,
     suspended: bool,
     focused: bool,
+    visible: bool,
     progress_in_background: bool,
     primary_encoding: crate::ScriptEncoding,
     gameplay_frame: Option<Arc<[u8]>>,
@@ -79,6 +80,7 @@ impl MusicaSession {
         game: Hash256,
         lease: SessionLease,
         focused: bool,
+        visible: bool,
         progress_in_background: bool,
         primary_encoding: crate::ScriptEncoding,
         quick_cursor: u32,
@@ -118,6 +120,7 @@ impl MusicaSession {
             poisoned: false,
             suspended: false,
             focused,
+            visible,
             progress_in_background,
             primary_encoding,
             gameplay_frame: None,
@@ -128,7 +131,7 @@ impl MusicaSession {
     }
 
     fn paused(&self) -> bool {
-        self.suspended || (!self.focused && !self.progress_in_background)
+        self.suspended || !self.visible || (!self.focused && !self.progress_in_background)
     }
     fn clear_input(&mut self) {
         self.control_keys = 0;
@@ -160,6 +163,16 @@ impl MusicaSession {
         }
         .validate()?;
         if elapsed_ns > 1_000_000_000 {
+            tracing::warn!(
+                event = "astra.emu.musica.elapsed_rejected",
+                diagnostic_code = "ASTRA_EMU_MUSICA_ELAPSED",
+                elapsed_ns,
+                phase = self.phase,
+                wait_ns = self.wait_ns,
+                suspended = self.suspended,
+                focused = self.focused,
+                progress_in_background = self.progress_in_background
+            );
             return Err(error(
                 "ASTRA_EMU_MUSICA_ELAPSED",
                 "elapsed interval exceeds the bounded catch-up window",
@@ -307,6 +320,13 @@ impl MusicaSession {
                 FamilyEvent::WindowFocused { focused } => {
                     self.focused = *focused;
                     if !focused {
+                        self.clear_input();
+                    }
+                    self.update_pause()?;
+                }
+                FamilyEvent::WindowVisibility { visible } => {
+                    self.visible = *visible;
+                    if !visible {
                         self.clear_input();
                     }
                     self.update_pause()?;
