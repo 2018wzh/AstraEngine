@@ -119,6 +119,8 @@ astra emu probe <case-root> --family auto --report target/reports/emu-probe.yaml
 
 Expected report omits commercial payload and contains `emu.game_runtime_provider`、`emu.legacy_runtime_provider`、`emu.vm_state_machine_trace`、`emu.legacy_pack_vfs`、`emu.auto_probe`、trusted script isolation、text redaction、filter preset evidence、trace、TextCaptureEvent、snapshot ref、redaction status and Runtime replay hash.
 
+当前 `T-S5-FVP-01` 的真实 Windows Sandbox 补充结果：旧版 RFVP snapshot 的 slot 1 明确拒绝且文件未改变，V2 slot 185 可恢复画面并接受物理输入；输入修复 DLL 回归覆盖失焦点击抑制、恢复焦点后的 OPTION、主 `Return` 以及右下边缘点击，存档保持不变并正常退出。`NumpadEnter` 因当前输入适配器缺少 keypad scancode 未验证；本轮使用显式 `NullAudioDevice`，不计真实音频，完整结局仍开放。
+
 ## Stage 6：Platform Completion
 
 **闭环：** Linux、macOS、iOS 和 Android 分别提供真实 SDK、launcher/window、surface、platform decode、audio、save store、package source、resume 和 release evidence。Stage 6 只处理 Windows/Web 之外的平台完成，不改变 Stage 2 的 Windows/Web 完成边界。
