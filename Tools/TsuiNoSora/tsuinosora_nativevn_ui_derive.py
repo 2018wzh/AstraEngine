@@ -238,7 +238,7 @@ def _copy_classic_ui_assets(
             "copy",
         ),
         (
-            "native-assets/projectorrays/casts/GENERAL/GENERAL/chunks/BITD-1283.png",
+            "native-assets/projectorrays/casts/GENERAL/chunks/BITD-1283.png",
             "native-assets/ui/classic/dialogue.png",
             "tsui.ui.classic.dialogue",
             "sha256:7e68165e5d8783fc5950dff1a8b1164c2e91dd0a9937af5bf8bd2acf94ecf3a5",
