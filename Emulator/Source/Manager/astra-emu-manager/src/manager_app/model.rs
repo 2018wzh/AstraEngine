@@ -76,8 +76,10 @@ impl AstraEmuManagerController {
                         title: game.display_title().into(),
                         family: if self.probe_choices.contains_key(&game.game_id) {
                             "selection required".into()
-                        } else {
+                        } else if self.launch_candidate_for_game(game).is_some() {
                             game.family_id.clone().unwrap_or_else(|| "unknown".into())
+                        } else {
+                            "probe required".into()
                         },
                         cover_uri: cover_uri.clone(),
                         diagnostic: String::new(),
@@ -295,7 +297,10 @@ impl AstraEmuManagerController {
                 .unwrap_or_default(),
             selected_family: selected
                 .as_ref()
-                .and_then(|game| game.family_id.clone())
+                .and_then(|game| {
+                    self.launch_candidate_for_game(game)
+                        .map(|candidate| candidate.report.family_id.clone())
+                })
                 .unwrap_or_default(),
             selected_play_time,
             selected_last_played,

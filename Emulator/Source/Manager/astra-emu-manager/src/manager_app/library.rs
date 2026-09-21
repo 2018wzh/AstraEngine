@@ -179,6 +179,8 @@ impl AstraEmuManagerController {
         candidates: Vec<FamilyProbeCandidate>,
     ) -> Result<String, String> {
         let game_id = path_id(path);
+        self.candidates.remove(&game_id);
+        self.probe_choices.remove(&game_id);
         let location = path
             .to_str()
             .ok_or_else(|| "ASTRA_EMU_GAME_PATH_UTF8".to_owned())?
@@ -227,6 +229,22 @@ impl AstraEmuManagerController {
         self.probe_choices.get(game_id).map(Vec::as_slice)
     }
 
+    fn clear_probe_state(&mut self, game_id: &str) -> Result<(), String> {
+        self.candidates.remove(game_id);
+        self.probe_choices.remove(game_id);
+        if self
+            .library
+            .game(game_id)
+            .map_err(|error| error.to_string())?
+            .is_some()
+        {
+            self.library
+                .set_game_family(game_id, None)
+                .map_err(|error| error.to_string())?;
+        }
+        Ok(())
+    }
+
     pub(super) fn scan_paths(&mut self, paths: &[PathBuf]) -> Result<(), String> {
         for root in paths {
             for path in enumerate_directories(root)? {
@@ -252,7 +270,9 @@ impl AstraEmuManagerController {
                         self.probe_choices.remove(&game_id);
                         self.candidates.insert(game_id, *candidate);
                     }
-                    FamilyProbeSelection::NoMatch => {}
+                    FamilyProbeSelection::NoMatch => {
+                        self.clear_probe_state(&game_id)?;
+                    }
                     FamilyProbeSelection::RequiresUserChoice(candidates) => {
                         self.remember_probe_choice(&path, candidates)?;
                         self.diagnostic =

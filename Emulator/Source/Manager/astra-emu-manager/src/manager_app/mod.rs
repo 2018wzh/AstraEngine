@@ -51,6 +51,8 @@ mod metadata;
 mod metadata_actions;
 #[cfg(test)]
 mod metadata_tests;
+#[cfg(test)]
+mod probe_state_tests;
 mod model;
 mod navigation;
 mod preferences;

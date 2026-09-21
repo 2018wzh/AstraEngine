@@ -13,8 +13,8 @@ impl AstraEmuManagerController {
     }
 
     pub(super) fn candidate_descriptor(&self, game_id: &str) -> Option<FamilyPluginDescriptor> {
-        self.candidates
-            .get(game_id)
+        let game = self.game(game_id).ok()?;
+        self.launch_candidate_for_game(&game)
             .map(|candidate| candidate.descriptor.clone())
     }
 

@@ -1,6 +1,23 @@
 use super::*;
 
 impl AstraEmuManagerController {
+    pub(super) fn launch_candidate_for_game(
+        &self,
+        game: &GameRecord,
+    ) -> Option<&FamilyProbeCandidate> {
+        if self.probe_choices.contains_key(&game.game_id) {
+            return None;
+        }
+        let candidate = self.candidates.get(&game.game_id)?;
+        if game.family_id.as_deref() != Some(candidate.report.family_id.as_str())
+            || candidate.descriptor.family_id != candidate.report.family_id
+            || self.registry.descriptor(&candidate.report.plugin_id) != Some(&candidate.descriptor)
+        {
+            return None;
+        }
+        Some(candidate)
+    }
+
     pub(super) fn select_case(&mut self, case_id: &str) -> Result<ManagerViewModel, String> {
         if self.active.is_some() {
             return Err("ASTRA_EMU_FAMILY_SESSION_ALREADY_ACTIVE".into());
@@ -65,9 +82,11 @@ impl AstraEmuManagerController {
         }
         let game = self.game(case_id)?;
         self.load_game_input_mapping(case_id)?;
+        if self.probe_choices.contains_key(case_id) {
+            return Err("ASTRA_EMU_FAMILY_PROVIDER_SELECTION_REQUIRED".to_owned());
+        }
         let candidate = self
-            .candidates
-            .get(case_id)
+            .launch_candidate_for_game(&game)
             .cloned()
             .ok_or_else(|| "ASTRA_EMU_FAMILY_PROBE_REQUIRED".to_owned())?;
         let text = if self.translation_consent
