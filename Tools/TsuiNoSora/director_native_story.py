@@ -1686,42 +1686,50 @@ def _resolve_pending_wait_events(events):
         and expanded[index + 1]["type"] == "_await_next_wait"
     }
     resolved_reversed = []
-    next_wait_command_id = None
-    consumed_stable_waits = set()
+    next_wait_target = None
+    consumed_stable_wait_indexes = set()
+    emitted_stable_wait_indexes = set()
+    stable_wait_indexes = {
+        id(event): index
+        for index, event in enumerate(expanded)
+        if event["type"] == "_stable_wait"
+    }
     for index, event in reversed(list(enumerate(expanded))):
         if event["type"] == "_pending_wait":
             if index in async_pending_indexes:
                 continue
-            next_wait_command_id = event["command_id"]
+            next_wait_target = (index, event.get("command_id"))
             continue
         if event["type"] == "_stable_wait":
-            next_wait_command_id = event["command_id"]
+            next_wait_target = (index, event["command_id"])
             resolved_reversed.append(event)
             continue
         if event["type"] == "_await_next_wait":
-            value = json.dumps(next_wait_command_id, ensure_ascii=False, separators=(",", ":"))
-            resolved_reversed.append(
-                {
-                    "type": "await",
-                    "observation": {
-                        "kind": "equals",
-                        "key": "vn.pending_wait_command",
-                        "value_hash": f"sha256:{sha256(value.encode('utf-8')).hexdigest()}",
-                    },
-                    "timeout_ticks": event["timeout_ticks"],
-                    "continue_at_match": True,
-                }
-            )
-            if next_wait_command_id is not None:
-                consumed_stable_waits.add(next_wait_command_id)
-            next_wait_command_id = None
+            if next_wait_target is None or next_wait_target[0] not in emitted_stable_wait_indexes:
+                command_id = next_wait_target[1] if next_wait_target is not None else None
+                value = json.dumps(command_id, ensure_ascii=False, separators=(",", ":"))
+                resolved_reversed.append(
+                    {
+                        "type": "await",
+                        "observation": {
+                            "kind": "equals",
+                            "key": "vn.pending_wait_command",
+                            "value_hash": f"sha256:{sha256(value.encode('utf-8')).hexdigest()}",
+                        },
+                        "timeout_ticks": event["timeout_ticks"],
+                        "continue_at_match": True,
+                    }
+                )
+                if next_wait_target is not None:
+                    consumed_stable_wait_indexes.add(next_wait_target[0])
+                    emitted_stable_wait_indexes.add(next_wait_target[0])
             continue
         resolved_reversed.append(event)
     resolved_reversed.reverse()
     resolved = []
     for event in resolved_reversed:
         if event["type"] == "_stable_wait":
-            if event["command_id"] in consumed_stable_waits:
+            if stable_wait_indexes[id(event)] in consumed_stable_wait_indexes:
                 continue
             value = json.dumps(event["command_id"], ensure_ascii=False, separators=(",", ":"))
             resolved.append(

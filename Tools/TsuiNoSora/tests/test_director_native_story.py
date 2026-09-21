@@ -495,6 +495,91 @@ class DirectorNativeStoryAutomationTests(unittest.TestCase):
             ],
         )
 
+    def test_consecutive_audio_fences_share_one_following_dialogue_wait(self):
+        events = _resolve_pending_wait_events(
+            [
+                {"type": "_audio_start", "target": "bgm"},
+                {
+                    "type": "_audio_control",
+                    "action": "fade_stop",
+                    "target": "bgm",
+                    "fence": "bgm.end",
+                },
+                {
+                    "type": "_pending_wait",
+                    "command_id": "wait.audio.first",
+                    "fence": "bgm.end",
+                },
+                {"type": "_await_next_wait", "timeout_ticks": 3600},
+                {"type": "_audio_start", "target": "se"},
+                {
+                    "type": "_audio_control",
+                    "action": "fade_stop",
+                    "target": "se",
+                    "fence": "se.end",
+                },
+                {
+                    "type": "_pending_wait",
+                    "command_id": "wait.audio.second",
+                    "fence": "se.end",
+                },
+                {"type": "_await_next_wait", "timeout_ticks": 3600},
+                {"type": "_skip_allowed", "allowed": False},
+                {"type": "_dialogue_advance", "command_id": "line.after.audio"},
+            ]
+        )
+        await_hashes = [
+            event["observation"]["value_hash"]
+            for event in events
+            if event["type"] == "await"
+        ]
+        self.assertEqual(await_hashes, [observation_hash("line.after.audio")])
+
+    def test_repeated_dialogue_command_id_keeps_distinct_physical_waits(self):
+        events = _resolve_pending_wait_events(
+            [
+                {"type": "_audio_start", "target": "bgm"},
+                {
+                    "type": "_audio_control",
+                    "action": "fade_stop",
+                    "target": "bgm",
+                    "fence": "bgm.end",
+                },
+                {
+                    "type": "_pending_wait",
+                    "command_id": "wait.audio.first",
+                    "fence": "bgm.end",
+                },
+                {"type": "_await_next_wait", "timeout_ticks": 3600},
+                {"type": "_skip_allowed", "allowed": False},
+                {"type": "_dialogue_advance", "command_id": "line.repeat"},
+                {"type": "_audio_start", "target": "se"},
+                {
+                    "type": "_audio_control",
+                    "action": "fade_stop",
+                    "target": "se",
+                    "fence": "se.end",
+                },
+                {
+                    "type": "_pending_wait",
+                    "command_id": "wait.audio.second",
+                    "fence": "se.end",
+                },
+                {"type": "_await_next_wait", "timeout_ticks": 3600},
+                {"type": "_skip_allowed", "allowed": False},
+                {"type": "_dialogue_advance", "command_id": "line.repeat"},
+            ]
+        )
+        await_hashes = [
+            event["observation"]["value_hash"]
+            for event in events
+            if event["type"] == "await"
+        ]
+        self.assertEqual(
+            await_hashes,
+            [observation_hash("line.repeat"), observation_hash("line.repeat")],
+        )
+
     def test_terminal_async_wait_targets_absent_pending_wait(self):
         events = _resolve_pending_wait_events(
             [
