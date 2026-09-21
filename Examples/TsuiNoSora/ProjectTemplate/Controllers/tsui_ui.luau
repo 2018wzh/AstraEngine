@@ -108,13 +108,17 @@ for _, definition in controllers do
         end
     end
     if definition[1] == "tsui.choice.classic" or definition[1] == "tsui.choice.modern" then
+        local choice_root = "root/choices"
+        if definition[1] == "tsui.choice.modern" then
+            choice_root = "root/gold/choices"
+        end
         on_open = function(_context, model)
             for _, option_value in model.map.options.list do
                 local option = option_value.map
                 if option.enabled.bool then
                     return {
                         astra.ui.effect.focus(
-                            "root/choices/options/option/" .. option.option_id.string
+                            choice_root .. "/options/option/" .. option.option_id.string
                         ),
                     }
                 end
