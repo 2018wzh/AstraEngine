@@ -218,7 +218,11 @@ impl FvpProvider {
             fs,
             audio,
             clock,
-            input_state: events::InputState::new(request.initial_window),
+            input_state: events::InputState::new(
+                request.initial_window,
+                frame_info.logical_width,
+                frame_info.logical_height,
+            ),
             video: None,
             video_audio_id: None,
             frame,

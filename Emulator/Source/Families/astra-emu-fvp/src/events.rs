@@ -16,14 +16,18 @@ use rfvp::host_api::{InputModifiers, KeyCode, PointerButton as RfvpButton, RfvpE
 pub(crate) struct InputState {
     pub(crate) last_pointer: (i32, i32),
     pub(crate) window: WindowState,
+    logical_width: u32,
+    logical_height: u32,
     suspended: bool,
 }
 
 impl InputState {
-    pub(crate) const fn new(window: WindowState) -> Self {
+    pub(crate) const fn new(window: WindowState, logical_width: u32, logical_height: u32) -> Self {
         Self {
             last_pointer: (0, 0),
             window,
+            logical_width,
+            logical_height,
             suspended: false,
         }
     }
@@ -55,6 +59,7 @@ fn key(value: FamilyKey) -> KeyCode {
     match value {
         Escape => KeyCode::Escape,
         Enter => KeyCode::Return,
+        NumpadEnter => KeyCode::Return,
         Space => KeyCode::Space,
         Backspace => KeyCode::Backspace,
         Tab => KeyCode::Tab,
@@ -137,6 +142,12 @@ fn coordinate(value: f32) -> i32 {
     value.round().clamp(i32::MIN as f32, i32::MAX as f32) as i32
 }
 
+fn pointer_coordinate(value: f32, logical_extent: u32) -> i32 {
+    let rounded = coordinate(value);
+    let max = logical_extent.saturating_sub(1).min(i32::MAX as u32) as i32;
+    rounded.clamp(0, max)
+}
+
 pub(crate) fn convert(
     events: &[FamilyEvent],
     input_state: &mut InputState,
@@ -165,7 +176,10 @@ pub(crate) fn convert(
                 }),
             },
             FamilyEvent::PointerMove { x, y } => {
-                let pointer = (coordinate(*x), coordinate(*y));
+                let pointer = (
+                    pointer_coordinate(*x, input_state.logical_width),
+                    pointer_coordinate(*y, input_state.logical_height),
+                );
                 input_state.last_pointer = pointer;
                 out.push(RfvpEvent::PointerMove {
                     x: pointer.0,
@@ -253,7 +267,7 @@ mod tests {
 
     #[test]
     fn pointer_buttons_keep_latest_move_between_advances() {
-        let mut state = InputState::new(window());
+        let mut state = InputState::new(window(), 800, 600);
 
         let first = convert(
             &[FamilyEvent::PointerMove { x: 120.0, y: 80.0 }],
@@ -302,7 +316,7 @@ mod tests {
 
     #[test]
     fn visibility_and_suspend_follow_rfvp_focus_lifecycle() {
-        let mut state = InputState::new(window());
+        let mut state = InputState::new(window(), 800, 600);
         assert_eq!(
             convert(
                 &[FamilyEvent::WindowVisibility { visible: false }],
@@ -334,6 +348,69 @@ mod tests {
             )
             .unwrap(),
             vec![RfvpEvent::FocusGained]
+        );
+    }
+
+    #[test]
+    fn numpad_enter_uses_the_same_confirm_key_as_enter() {
+        let mut state = InputState::new(window(), 800, 600);
+        let modifiers = KeyModifiers {
+            shift: false,
+            control: false,
+            alt: false,
+            super_key: false,
+        };
+
+        assert_eq!(
+            convert(
+                &[
+                    FamilyEvent::Key {
+                        code: FamilyKey::NumpadEnter,
+                        state: KeyState::Pressed,
+                        modifiers,
+                    },
+                    FamilyEvent::Key {
+                        code: FamilyKey::NumpadEnter,
+                        state: KeyState::Released,
+                        modifiers,
+                    },
+                ],
+                &mut state,
+            )
+            .unwrap(),
+            vec![
+                RfvpEvent::KeyDown {
+                    key: KeyCode::Return,
+                    repeat: false,
+                    modifiers: InputModifiers::empty(),
+                },
+                RfvpEvent::KeyUp {
+                    key: KeyCode::Return,
+                    modifiers: InputModifiers::empty(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn pointer_edges_are_clamped_to_the_logical_frame() {
+        let mut state = InputState::new(window(), 1280, 720);
+        let converted = convert(
+            &[FamilyEvent::PointerMove {
+                x: 1279.68,
+                y: 719.68,
+            }],
+            &mut state,
+        )
+        .unwrap();
+
+        assert_eq!(
+            converted,
+            vec![RfvpEvent::PointerMove {
+                x: 1279,
+                y: 719,
+                in_screen: true,
+            }]
         );
     }
 }

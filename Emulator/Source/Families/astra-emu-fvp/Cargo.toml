@@ -38,5 +38,5 @@ tempfile.workspace = true
 upstream = "https://github.com/xmoezzz/rfvp"
 upstream_revision = "304e773387a9920c9db091ec1fd937c717aea949"
 hosted_fork = "https://github.com/2018wzh/rfvp"
-hosted_fork_revision = "73d3b4413c95a3923cce695d98c3d9bf5b08ccf0"
+hosted_fork_revision = "b2f385d5bf3330b6e21963783782208cf12d1fbd"
 license_notice = "THIRD_PARTY_NOTICES.md"

@@ -5,9 +5,10 @@
 [`xmoezzz/rfvp`](https://github.com/xmoezzz/rfvp). The hosted adaptation used by AstraEngine is published in the
 [`2018wzh/rfvp` fork](https://github.com/2018wzh/rfvp/tree/codex/local-product-adaptation),
 branch `codex/local-product-adaptation`, at immutable revision
-`73d3b4413c95a3923cce695d98c3d9bf5b08ccf0`. It is the single adaptation commit
-directly on that upstream baseline. The parent repository pins its exact gitlink,
-and fetching the configured fork branch reproduces it. The covered source and the
+`73d3b4413c95a3923cce695d98c3d9bf5b08ccf0`. The current parent gitlink adds the
+local input-lifecycle commit `b2f385d5bf3330b6e21963783782208cf12d1fbd` on top of
+that baseline. The parent repository pins its exact gitlink; the input-lifecycle
+commit remains local until it is separately published. The covered source and the
 complete MPL-2.0 text are in `../../../ThirdParty/rfvp/crates/rfvp/` and
 `../../../ThirdParty/rfvp/LICENSE`.
 
@@ -145,3 +146,13 @@ RFVS snapshot version 2 preserves the existing alpha, move, rotation, scale, dep
 Motion restore rejects out-of-range or duplicate image slots and unknown dissolve types before changing the current scene. Invalid slots are no longer skipped or applied in input order. This validation does not introduce another persistence format or rendering path.
 
 RFVS decoding now preserves a typed unsupported-version marker through the hosted load boundary. The Family maps that marker to `ASTRA_EMU_FVP_RFVP_UNSUPPORTED_SNAPSHOT_VERSION`; short or malformed payloads remain ordinary invalid-data failures. No older snapshot reader or migration path is added, and rejected source bytes are never rewritten.
+
+## Hosted input boundary
+
+Hosted `FocusLost` and `FocusGained` now mirror the native input lifecycle: focus loss
+flushes staged input state, while focus gain flushes state, suppresses only the activation
+click, and restores the cursor-inside state. The adapter maps `NumpadEnter` to RFVP's
+existing `Return` control, and clamps converted pointer coordinates to the session's
+reported logical frame dimensions. The host's aspect-fit and letterbox decision remains
+owned by the Manager; no physical window size or fixed virtual resolution is used for
+the clamp.
