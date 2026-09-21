@@ -500,3 +500,7 @@ Sandbox 更新 Musica 后曾发现 Manager 因已安装 descriptor 变化直接�
 Musica 在 Sandbox 中已完成冷启动标题读档、剧情推进后再次读档，以及两次恢复后的输入推进。使用原手动槽位 20，缩略图与保存时间保持不变；两次均恢复原对白，再按 Enter 进入下一句。Manager 记录两次 load.completed，GPU 为 DX12 discrete_gpu，未再次出现 ASTRA_EMU_MUSICA_ELAPSED。该代表流程仍使用显式 NullAudioDevice，不代表真实音频或完整结局验收；调试构建的大型归档同步校验仍造成冷启动界面长时间未响应。
 
 Classic route.coverage.035 与 036 均通过 DX12 独显 Headless 抽样运行，分别为 47,802 和 47,832 条输入到达 tsui.ending，各有 27 张过程样本及终局截图。已分别查看第 009 张，对白与场景可见；第 037 路线继续运行。Classic 早期仅终局截图的路线、Modern 及真实 Player 验收仍未关闭。
+
+最新 Windows Sandbox 实际回归使用旧任意尺寸包时，Manager 从 `data/cores/` 冷启动发现 Musica，真实游戏 probe/open 成功，显式 `NullAudioDevice` 可用；640×360、1001×777、1920×1200 和 720×1280 的 DX12 画面均通过输入与黑边检查。该包开启 Scale 时因未携带 DXC 运行库而显示缺失诊断。提交 `c1a33b5e2` 已让未设置 `ASTRA_EMU_DXC_PATH` 的默认路径按 Manager 可执行文件目录查找，并在匹配包中携带锁定的 `dxcompiler.dll`/`dxil.dll`；新包从非可执行文件工作目录启动后的 Scale 复测仍待完成，不能提前关闭滤镜验收。真实原生存读档入口已按现有标题与系统页物理输入路径继续验证，未用直接写 slot/state 替代 UI。
+
+本轮 DXC 代码构建以 `c1a33b5e2e5131854faed7c3f01009339a809278` 为包内 build commit；随后 `3eb80f1da` 只修正 SDK 格式，手册补充了核心目录与 DXC 部署规则，均未改变该包。Manager 二进制定向测试 36 项通过、2 项忽略，Emulator workspace 测试退出码为 0，workspace Clippy 退出码为 0，12 个 Emulator 成员逐包格式检查通过，文档检查覆盖 224 页且无错误。未执行的硬件、真实音频、完整结局、跨平台和性能验收仍保持开放。

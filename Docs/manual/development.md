@@ -68,6 +68,8 @@ Native VN 的 GPU Headless 使用 `render_policy: checkpoints` 时，独立资�
 
 动态核心的 tracing/log 由 Family API v7 日志桥接入 Manager。构建动态插件时开启 `dynamic-plugin-export`，再把生成的 `astra_emu_`（Unix 为 `libastra_emu_`）动态库和其依赖放入 Manager 数据目录 `cores/`；Manager 冷启动自动扫描并在加载失败时按文件给出诊断。更新核心需重启 Manager，运行期间不热加载。静态核心使用宿主订阅器。
 
+视觉滤镜使用锁定的 DirectXShaderCompiler 版本；Windows 发布目录需同时携带 `dxcompiler.dll` 和 `dxil.dll`，并与 Manager 可执行文件放在同一目录。Manager 默认按可执行文件目录定位 `dxcompiler.dll`，不会依赖启动时的工作目录或系统 PATH；`ASTRA_EMU_DXC_PATH` 只用于显式指定并校验一个替代位置，缺失或校验失败会直接报告滤镜诊断。
+
 ```sh
 RUST_LOG=info,astra_emu::family=debug astra-emu-manager
 cargo build --manifest-path Emulator/Cargo.toml -p astra-emu-fvp --features dynamic-plugin-export
