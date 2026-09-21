@@ -9,18 +9,23 @@ import shutil
 import struct
 import subprocess
 import sys
+import tempfile
 import zlib
 from collections import deque
 from pathlib import Path
 
 from tsuinosora_constants import *
-from native_story_ir import _blocked_report, _resolve_rust_validator, convert_native_story_ir
+from native_story_ir import MEDIA_COMMANDS, _blocked_report, _resolve_rust_validator, convert_native_story_ir
 from tsuinosora_diagnostics import _is_safe_report_relative_path, _is_safe_symbol, _write_json
 from tsuinosora_nativevn_font import _copy_tsuinosora_ui_template, _nativevn_package_input_files, _write_asset_sidecar
 from tsuinosora_nativevn_ui_derive import _copy_classic_ui_assets, _derive_director_background_transparent_sprite, _derive_director_character_sprite, _derive_director_dialogue_frame, _derive_director_solid_black, _director_runtime_bindings
 from tsuinosora_rendering import _read_json, _render_nativevn_project, _report_has_path_leak, _write_nativevn_section_inputs
 
-__all__ = ['write_nativevn_package_input', '_copy_native_assets_to_nativevn']
+__all__ = [
+    'write_nativevn_package_input',
+    '_copy_native_assets_to_nativevn',
+    '_nativevn_static_asset_diagnostics',
+]
 
 
 def write_nativevn_package_input(work_root: Path | str, routes: list[dict] | None = None) -> dict:
@@ -79,33 +84,71 @@ def write_nativevn_package_input(work_root: Path | str, routes: list[dict] | Non
                 "message": "NativeVN package input requires complete typed story conversion coverage",
             }
         )
-
     section_specs = []
     scenario_refs = []
     files = []
     wrote_story_inputs = False
+    asset_stage_root = None
     if not diagnostics:
-        section_root = nativevn_root / "PackageSections"
-        section_root.mkdir(parents=True, exist_ok=True)
-        section_specs = _write_nativevn_section_inputs(reports_root, section_root)
-        scenario_refs = sorted(
-            str(item["relative_path"])
-            for item in story_report.get("generated_files", [])
-            if isinstance(item, dict)
-            and str(item.get("relative_path", "")).startswith("Automation/")
+        asset_stage_root = Path(
+            tempfile.mkdtemp(prefix=f".{nativevn_root.name}.assets-", dir=nativevn_root.parent)
         )
-        wrote_story_inputs = True
-    if wrote_story_inputs:
-        derivation_report = _copy_native_assets_to_nativevn(
-            work_root, nativevn_root, conversion_report
-        )
-        _write_json(reports_root / "runtime_asset_derivation_report.json", derivation_report)
-        _copy_tsuinosora_ui_template(work_root, nativevn_root)
-        (nativevn_root / "project.yaml").write_text(
-            _render_nativevn_project(section_specs, scenario_refs),
-            encoding="utf-8",
-        )
-        files = _nativevn_package_input_files(nativevn_root, section_specs, scenario_refs)
+        try:
+            derivation_report = _copy_native_assets_to_nativevn(
+                work_root, asset_stage_root, conversion_report
+            )
+            static_asset_diagnostics = _nativevn_static_asset_diagnostics(
+                work_root,
+                asset_stage_root / "native-assets",
+            )
+            if static_asset_diagnostics:
+                diagnostics.extend(static_asset_diagnostics)
+                derivation_report["status"] = "blocked"
+                derivation_report.setdefault("diagnostics", []).extend(static_asset_diagnostics)
+                story_report["status"] = "blocked"
+                story_report.setdefault("diagnostics", []).extend(static_asset_diagnostics)
+                story_report["generated_files"] = []
+                _remove_generated_story_outputs(nativevn_root)
+                _write_json(reports_root / "full_conversion_coverage_report.json", story_report)
+                diagnostics.append(
+                    {
+                        "code": "TSUI_NATIVEVN_FULL_STORY_CONVERSION_BLOCKED",
+                        "message": "NativeVN package input requires complete typed story conversion coverage",
+                    }
+                )
+            elif (nativevn_root / "native-assets").exists():
+                diagnostics.append(
+                    {
+                        "code": "TSUI_NATIVEVN_ASSET_OUTPUT_CONFLICT",
+                        "message": "NativeVN asset output already exists; refusing to replace it",
+                    }
+                )
+                _remove_generated_story_outputs(nativevn_root)
+            else:
+                shutil.move(
+                    str(asset_stage_root / "native-assets"),
+                    str(nativevn_root / "native-assets"),
+                )
+                section_root = nativevn_root / "PackageSections"
+                section_root.mkdir(parents=True, exist_ok=True)
+                section_specs = _write_nativevn_section_inputs(reports_root, section_root)
+                scenario_refs = sorted(
+                    str(item["relative_path"])
+                    for item in story_report.get("generated_files", [])
+                    if isinstance(item, dict)
+                    and str(item.get("relative_path", "")).startswith("Automation/")
+                )
+                _copy_tsuinosora_ui_template(work_root, nativevn_root)
+                (nativevn_root / "project.yaml").write_text(
+                    _render_nativevn_project(section_specs, scenario_refs),
+                    encoding="utf-8",
+                )
+                files = _nativevn_package_input_files(nativevn_root, section_specs, scenario_refs)
+                wrote_story_inputs = True
+            _write_json(reports_root / "runtime_asset_derivation_report.json", derivation_report)
+        finally:
+            if asset_stage_root.exists():
+                shutil.rmtree(asset_stage_root)
 
     report = {
         "schema": "tsuinosora.nativevn_package_input_report.v1",
@@ -139,6 +182,53 @@ def write_nativevn_package_input(work_root: Path | str, routes: list[dict] | Non
     return report
 
 
+def _nativevn_static_asset_diagnostics(work_root: Path, asset_root: Path) -> list[dict]:
+    referenced: set[str] = set()
+    story_ir = _read_json(work_root / "private" / "native_story_ir.json")
+    for story in story_ir.get("stories", []):
+        for state in story.get("states", []):
+            for scene in state.get("scenes", []):
+                for command in scene.get("commands", []):
+                    if command.get("kind") in MEDIA_COMMANDS:
+                        asset_id = command.get("asset_id")
+                        if isinstance(asset_id, str):
+                            referenced.add(asset_id)
+    binding_path = work_root / "private" / "director_asset_bindings.json"
+    if binding_path.is_file():
+        binding_ir = _read_json(binding_path)
+        for binding, _role in _director_runtime_bindings(binding_ir):
+            if isinstance(binding, dict):
+                asset_id = binding.get("asset_id")
+                if isinstance(asset_id, str):
+                    referenced.add(asset_id)
+    if not referenced:
+        return []
+    sidecar_ids: set[str] = set()
+    for sidecar in sorted(asset_root.rglob("*.astra-asset.yaml")):
+        for line in sidecar.read_text(encoding="utf-8").splitlines():
+            prefix = "id: asset:/"
+            if line.startswith(prefix):
+                sidecar_ids.add(line[len(prefix) :].strip())
+                break
+    missing = sorted(referenced - sidecar_ids)
+    if not missing:
+        return []
+    return [
+        {
+            "code": "TSUI_NATIVEVN_STATIC_ASSET_SIDECAR_MISSING",
+            "message": "Typed story or Director UI bindings reference an asset without a generated sidecar",
+            "asset_ids": missing,
+        }
+    ]
+
+
+def _remove_generated_story_outputs(nativevn_root: Path) -> None:
+    for generated_name in ("Scripts", "Localization", "Automation"):
+        generated_path = nativevn_root / generated_name
+        if generated_path.exists():
+            shutil.rmtree(generated_path)
+
+
 def _copy_native_assets_to_nativevn(
     work_root: Path, nativevn_root: Path, conversion_report: dict
 ) -> dict:
@@ -150,6 +240,7 @@ def _copy_native_assets_to_nativevn(
     if not binding_path.is_file():
         coverage = _read_json(work_root / "reports" / "full_conversion_coverage_report.json")
         if coverage.get("counts", {}).get("media_commands") == 0:
+            target_root.mkdir(parents=True, exist_ok=True)
             return {
                 "schema": "tsuinosora.runtime_asset_derivation_report.v1",
                 "status": "pass",

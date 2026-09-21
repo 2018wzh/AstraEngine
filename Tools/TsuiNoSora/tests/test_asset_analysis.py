@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -40,6 +41,7 @@ from tsuinosora_tools import (  # noqa: E402
     _derive_director_background_transparent_sprite,
     _derive_director_solid_black,
     _director_runtime_bindings,
+    _nativevn_static_asset_diagnostics,
     _resolve_visual_capture_launch_command,
     _visual_capture_launch_environment,
 )
@@ -6063,6 +6065,121 @@ class AssetAnalysisTests(unittest.TestCase):
             self.assertNotIn("renderer: { providers: [webgpu], allow_software: false }", project)
             self.assertIn("package_sources: [{ kind: bundled }]", project)
             self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_nativevn_package_input_validates_typed_media_and_generated_sidecars(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            title = root / "Title.png"
+            game = root / "Game.png"
+            original = root / "original"
+            unpacked = root / "unpacked"
+            work = root / "work"
+            (original / "DATA").mkdir(parents=True)
+            unpacked.mkdir()
+            title.write_bytes(make_png(16, 9, fill=(10, 20, 30, 255)))
+            game.write_bytes(make_png(16, 9, fill=(30, 20, 10, 255)))
+            (original / "READY.dxr").write_bytes(b"synthetic director container")
+            (original / "DATA" / "SCENE.dxr").write_bytes(b"synthetic scene container")
+            (unpacked / "bg.png").write_bytes(make_png(8, 8, fill=(40, 80, 120, 255)))
+            write_cast_map(unpacked / "cast_map.json", "bg.png")
+            build_stage3_gate_report(
+                original_root=original,
+                work_root=work,
+                title_png=title,
+                game_png=game,
+                unpacked_root=unpacked,
+                routes=[
+                    {
+                        "route_id": "classic.main",
+                        "coverage": "covered",
+                        "terminal": "ending.good",
+                        "mount_assets": [
+                            {
+                                "alias": "original",
+                                "path": "native-assets/backgrounds/opening.png",
+                                "role": "background",
+                                "sha256": "sha256:" + "2" * 64,
+                            }
+                        ],
+                    }
+                ],
+                modern_features=[],
+            )
+            ir_path = write_native_story_ir_fixture(work)
+            story_ir = json.loads(ir_path.read_text(encoding="utf-8"))
+            command = story_ir["stories"][0]["states"][0]["scenes"][0]["commands"][0]
+            command["text"] = "private opening asset:/tsui.asset.literal_text"
+            story_ir["stories"][0]["states"][0]["scenes"][0]["commands"].insert(
+                0,
+                {
+                    "command_id": "preload.title_audio",
+                    "handler_id": "handler.start",
+                    "kind": "preload",
+                    "asset_id": "tsui.asset.title_audio",
+                },
+            )
+            story_ir["coverage"]["command_count"] += 1
+            ir_path.write_text(json.dumps(story_ir, ensure_ascii=False), encoding="utf-8")
+
+            audio = work / "native-assets" / "audio" / "title.mp3"
+            audio.parent.mkdir(parents=True, exist_ok=True)
+            audio.write_bytes(b"title audio fixture")
+            conversion_path = work / "reports" / "conversion_report.json"
+            conversion = json.loads(conversion_path.read_text(encoding="utf-8"))
+            conversion["resources"].append(
+                {
+                    "native_path": "native-assets/audio/title.mp3",
+                    "converted_hash": sha256_file(audio),
+                    "byte_size": audio.stat().st_size,
+                    "classification": "audio",
+                    "status": "converted",
+                }
+            )
+            conversion_path.write_text(json.dumps(conversion), encoding="utf-8")
+            binding = {
+                "asset_id": "tsui.asset.title_audio",
+                "native_path": "native-assets/audio/title.mp3",
+            }
+            binding_ir = {
+                "schema": "tsuinosora.director_asset_binding_ir.v1",
+                "scenes": [],
+                "score_openings": [],
+                "stage_layouts": [],
+            }
+            binding_path = work / "private" / "director_asset_bindings.json"
+            binding_path.parent.mkdir(parents=True, exist_ok=True)
+            binding_path.write_text(json.dumps(binding_ir), encoding="utf-8")
+
+            with patch(
+                "tsuinosora_nativevn_package._copy_classic_ui_assets"
+            ), patch("tsuinosora_nativevn_package._copy_tsuinosora_ui_template"):
+                blocked = write_nativevn_package_input(work)
+            self.assertEqual(blocked["status"], "blocked")
+            self.assertEqual(blocked["files"], [])
+            static_codes = {item["code"] for item in blocked["diagnostics"]}
+            self.assertIn("TSUI_NATIVEVN_STATIC_ASSET_SIDECAR_MISSING", static_codes)
+            self.assertFalse((work / "nativevn" / "Scripts").exists())
+
+            binding_ir["title_audio"] = {"binding": binding}
+            binding_path.write_text(json.dumps(binding_ir), encoding="utf-8")
+            with patch(
+                "tsuinosora_nativevn_package._copy_classic_ui_assets"
+            ), patch("tsuinosora_nativevn_package._copy_tsuinosora_ui_template"):
+                passed = write_nativevn_package_input(work)
+            self.assertEqual(passed["status"], "pass")
+            story = read_generated_story(work / "nativevn")
+            self.assertIn("preload asset:asset:/tsui.asset.title_audio", story)
+            sidecar = work / "nativevn" / "native-assets" / "audio" / "title.mp3.astra-asset.yaml"
+            self.assertTrue(sidecar.exists())
+            self.assertIn("id: asset:/tsui.asset.title_audio", sidecar.read_text(encoding="utf-8"))
+
+            sidecar.unlink()
+            missing_sidecar = _nativevn_static_asset_diagnostics(
+                work,
+                work / "nativevn" / "native-assets",
+            )
+            self.assertEqual(missing_sidecar[0]["asset_ids"], ["tsui.asset.title_audio"])
+            self.assertNotIn("tsui.asset.literal_text", missing_sidecar[0]["asset_ids"])
 
     def test_nativevn_package_input_preserves_route_choices_in_story_and_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:
