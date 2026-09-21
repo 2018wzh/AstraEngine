@@ -535,6 +535,12 @@ class DirectorNativeStoryAutomationTests(unittest.TestCase):
             ],
         )
         self.assertNotIn("pointer_button", types[:-2])
+        terminal_flag_wait = route["input_events"][-4]["event"]
+        self.assertEqual(terminal_flag_wait["type"], "await")
+        self.assertEqual(terminal_flag_wait["observation"]["key"], "vn.route_terminal")
+        self.assertEqual(
+            terminal_flag_wait["observation"]["value_hash"], observation_hash(True)
+        )
         terminal_wait = route["input_events"][-3]["event"]
         self.assertEqual(terminal_wait["type"], "await")
         self.assertEqual(terminal_wait["observation"]["key"], "vn.terminal_routes")

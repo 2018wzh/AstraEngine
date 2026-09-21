@@ -286,6 +286,7 @@ def build_sequence(story: dict, route_id: str = ROUTE_ID, *, complete_route: boo
         if index in samples:
             sequence.checkpoint(samples[index])
     if complete_route:
+        sequence.await_value("vn.route_terminal", True, 18_000)
         sequence.await_value("vn.terminal_routes", [f"state.{trace['terminal_id']}"], 18_000)
     else:
         sequence.await_value("vn.pending_wait_command", trace["boundary_wait_command"], 18_000)

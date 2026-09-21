@@ -13,6 +13,7 @@ class ClassicMatrixInputTests(unittest.TestCase):
         sequence = Sequence(f"tsui.classic.{route_id}.complete")
         sequence.start()
         sequence.key("Enter")
+        sequence.await_value("vn.route_terminal", True, 18000)
         sequence.await_value("vn.terminal_routes", ["state.ending"], 18000)
         sequence.checkpoint(f"classic.{route_id}.complete")
         sequence.finish()

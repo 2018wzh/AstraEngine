@@ -129,6 +129,18 @@ def _validate_route_input(path: Path, route: dict) -> RouteContract:
 
     events = [row.get("event") for row in rows]
     expected_terminal_hash = _json_hash([terminal_route_node_id])
+    terminal_flag_evidence = any(
+        isinstance(event, dict)
+        and event.get("type") == "await"
+        and event.get("observation")
+        == {
+            "kind": "equals",
+            "key": "vn.route_terminal",
+            "value_hash": _json_hash(True),
+        }
+        and event.get("continue_at_match") is True
+        for event in events
+    )
     terminal_evidence = any(
         isinstance(event, dict)
         and event.get("type") == "await"
@@ -143,6 +155,8 @@ def _validate_route_input(path: Path, route: dict) -> RouteContract:
     )
     if not terminal_evidence:
         raise RouteMatrixError(f"{route_id} does not assert its terminal route observation")
+    if not terminal_flag_evidence:
+        raise RouteMatrixError(f"{route_id} does not assert a completed terminal route state")
     if events[-2] != {"type": "checkpoint", "id": f"checkpoint.{route_id}"}:
         raise RouteMatrixError(f"{route_id} does not end at its required checkpoint")
     if events[-1] != {"type": "shutdown"}:

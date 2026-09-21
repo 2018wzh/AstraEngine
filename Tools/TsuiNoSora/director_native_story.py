@@ -1551,6 +1551,18 @@ def _route_from_path(index, path):
             "type": "await",
             "observation": {
                 "kind": "equals",
+                "key": "vn.route_terminal",
+                "value_hash": _hash_json(True),
+            },
+            "timeout_ticks": 3600,
+            "continue_at_match": True,
+        }
+    )
+    raw_events.append(
+        {
+            "type": "await",
+            "observation": {
+                "kind": "equals",
                 "key": "vn.terminal_routes",
                 "value_hash": _hash_json([terminal_route_node_id]),
             },

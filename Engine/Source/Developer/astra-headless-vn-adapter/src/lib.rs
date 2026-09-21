@@ -1046,6 +1046,10 @@ impl NativeVnHeadlessSession {
             hashed_observation("vn.pending_wait_await_id", &evidence.pending_wait_await_id)?,
             hashed_observation("vn.pending_choices", &evidence.pending_choice_ids)?,
             hashed_observation("vn.terminal_routes", &evidence.terminal_route_ids)?,
+            hashed_observation(
+                "vn.route_terminal",
+                &(!evidence.terminal_route_ids.is_empty()),
+            )?,
             hashed_observation("vn.ui_profile", &product.ui_profile)?,
             hashed_observation("vn.locale", &product.locale)?,
             hashed_observation("vn.system_page", &product.active_system_page)?,

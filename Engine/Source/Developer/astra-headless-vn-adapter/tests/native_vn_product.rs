@@ -98,6 +98,15 @@ async fn real_native_vn_package_accepts_physical_input_and_produces_cpu_frame() 
     assert!(observations
         .iter()
         .any(|item| item.key == "runtime.state_hash"));
+    let route_terminal_hash =
+        astra_core::Hash256::from_sha256(&serde_json::to_vec(&false).unwrap()).to_string();
+    assert_eq!(
+        observations
+            .iter()
+            .find(|item| item.key == "vn.route_terminal")
+            .map(|item| item.value_hash.as_str()),
+        Some(route_terminal_hash.as_str())
+    );
     product
         .consume(
             2,
