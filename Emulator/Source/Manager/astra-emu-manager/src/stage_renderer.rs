@@ -1,6 +1,6 @@
 use std::{
     env,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
 
@@ -45,7 +45,7 @@ impl ManagerStageRenderer {
     pub(crate) fn new(mailbox: FrameMailbox) -> Self {
         let dxc_path = env::var_os("ASTRA_EMU_DXC_PATH")
             .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("dxcompiler.dll"));
+            .unwrap_or_else(default_dxc_path);
         Self::with_dxc_path(mailbox, dxc_path)
     }
 
@@ -142,6 +142,23 @@ impl ManagerStageRenderer {
         self.uploaded_generation = 0;
         self.texture_dirty = true;
         Ok(())
+    }
+}
+
+fn default_dxc_path() -> PathBuf {
+    let executable = env::current_exe().unwrap_or_else(|_| PathBuf::from("astra-emu-manager"));
+    dxc_path_for_executable(&executable)
+}
+
+fn dxc_path_for_executable(executable: &Path) -> PathBuf {
+    let filename = format!(
+        "{}dxcompiler.{}",
+        std::env::consts::DLL_PREFIX,
+        std::env::consts::DLL_EXTENSION
+    );
+    match executable.parent() {
+        Some(directory) => directory.join(filename),
+        None => PathBuf::from(filename),
     }
 }
 

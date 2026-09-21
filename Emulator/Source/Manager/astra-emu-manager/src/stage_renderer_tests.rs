@@ -3,6 +3,17 @@ use astra_emu_family_api::FrameInfo;
 use astra_emu_manager::effects::FilterPreset;
 use std::{collections::BTreeMap, path::PathBuf};
 
+#[test]
+fn default_dxc_path_is_resolved_next_to_manager_executable() {
+    let executable = PathBuf::from("package").join("astra-emu-manager.exe");
+    let expected = PathBuf::from("package").join(format!(
+        "{}dxcompiler.{}",
+        std::env::consts::DLL_PREFIX,
+        std::env::consts::DLL_EXTENSION
+    ));
+    assert_eq!(super::dxc_path_for_executable(&executable), expected);
+}
+
 fn info(width: u32, height: u32, stride: u32, alpha: FrameAlpha) -> FrameInfo {
     FrameInfo {
         width,

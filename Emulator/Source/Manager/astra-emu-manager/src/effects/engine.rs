@@ -226,11 +226,16 @@ impl FilterEngine {
 }
 
 fn verify_dxc_path(path: &Path) -> Result<(), FilterError> {
+    let expected_name = format!(
+        "{}dxcompiler.{}",
+        std::env::consts::DLL_PREFIX,
+        std::env::consts::DLL_EXTENSION
+    );
     if !path.is_file()
         || !path
             .file_name()
             .and_then(|name| name.to_str())
-            .is_some_and(|name| name.eq_ignore_ascii_case("dxcompiler.dll"))
+            .is_some_and(|name| name.eq_ignore_ascii_case(&expected_name))
     {
         return Err(FilterError::DxcPathMissing);
     }
