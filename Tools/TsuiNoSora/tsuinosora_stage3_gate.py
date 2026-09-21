@@ -34,8 +34,89 @@ from tsuinosora_projectorrays_reader import _read_demo_slice_config
 from tsuinosora_projectorrays_report import _external_reader_satisfies_director_preflight, _extract_diagnostics_after_external_reader, _projectorrays_converted_asset_reports, _projectorrays_converted_resources_available, _run_projectorrays_from_demo_config
 from tsuinosora_rendering import _report_has_path_leak
 from tsuinosora_stage3_story_source import _run_director_story_source_from_demo_config
+from native_story_ir import (
+    _physical_input_rows,
+    _validate_native_story_payload,
+)
+from headless_route_matrix import RouteMatrixError, _validate_route_input
 
 __all__ = ['build_stage3_gate_report', '_authoritative_reference_expectations', '_is_authoritative_reference_path', 'run_local_gate', 'run_demo_slice_gate']
+
+
+def _load_native_story_ir_routes(work_root: Path) -> tuple[list[dict] | None, list[dict]]:
+    """Load the validated Director route authority for the Stage 3 gate.
+
+    The story source step writes this private IR before the local gate runs.  A
+    route graph extracted from unpacked files is useful for diagnostics, but it
+    cannot replace the typed routes and their physical input sequences once
+    the IR exists.
+    """
+    ir_path = work_root / "private" / "native_story_ir.json"
+    if not ir_path.is_file():
+        return None, []
+    try:
+        payload = json.loads(ir_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return [], [
+            {
+                "code": "TSUI_STAGE3_NATIVE_STORY_IR_UNREADABLE",
+                "message": "typed native story IR is required when present and must be valid JSON",
+            }
+        ]
+    validation_diagnostics: list[dict] = []
+    validated = _validate_native_story_payload(payload, validation_diagnostics)
+    if validated is None:
+        return [], validation_diagnostics
+    routes = validated["routes"]
+    route_ids: set[str] = set()
+    for route in routes:
+        route_id = route.get("route_id") if isinstance(route, dict) else None
+        if route_id in route_ids:
+            validation_diagnostics.append(
+                {
+                    "code": "TSUI_STAGE3_NATIVE_STORY_ROUTE_DUPLICATE",
+                    "route_id": route_id,
+                    "message": "typed native story route ids must be unique",
+                }
+            )
+        route_ids.add(route_id)
+    if validation_diagnostics:
+        return [], validation_diagnostics
+
+    records = []
+    for route in routes:
+        input_events = route["input_events"]
+        input_rows = _physical_input_rows(route)
+        try:
+            input_contract = _validate_route_input(ir_path, route, rows=input_rows)
+        except RouteMatrixError as error:
+            return [], [
+                {
+                    "code": "TSUI_STAGE3_NATIVE_STORY_INPUT_INVALID",
+                    "route_id": route["route_id"],
+                    "message": str(error),
+                }
+            ]
+        records.append(
+            {
+                "route_id": route["route_id"],
+                "coverage": "covered",
+                "terminal": route["terminal_id"],
+                "terminal_id": route["terminal_id"],
+                "terminal_route_node_id": route["terminal_route_node_id"],
+                "choices": list(route["choice_sequence"]),
+                "choice_ids": list(route["choice_ids"]),
+                "choice_sequence": list(route["choice_sequence"]),
+                "command_ids": list(route["command_ids"]),
+                "input_events": input_events,
+                "physical_input": {
+                    "event_count": len(input_events),
+                    "sequence_hash": input_contract.input_sequence_hash,
+                    "terminal_event": input_events[-1]["event"]["type"],
+                },
+            }
+        )
+    return records, []
 
 
 def build_stage3_gate_report(
@@ -146,9 +227,18 @@ def build_stage3_gate_report(
         if cast_source_map_report.get("status") != "pass":
             diagnostics.extend(cast_source_map_report.get("diagnostics", []))
 
+    native_ir_routes, native_ir_diagnostics = _load_native_story_ir_routes(work_root)
+    if native_ir_routes is not None:
+        # Once the typed IR exists it is the route authority.  The unpacked
+        # graph and source map remain useful only as optional reports; their
+        # route diagnostics must not veto a validated IR or provide fallback
+        # routes when the IR is invalid.
+        routes = native_ir_routes
+        diagnostics.extend(native_ir_diagnostics)
+
     route_graph_report = None
     script_source_map_report = None
-    if not routes and unpacked_root and unpacked_root.is_dir():
+    if native_ir_routes is None and not routes and unpacked_root and unpacked_root.is_dir():
         route_graph_report = build_route_graph_report(unpacked_root)
         _write_json(reports_root / "route_graph_report.json", route_graph_report)
         if route_graph_report.get("status") == "pass":

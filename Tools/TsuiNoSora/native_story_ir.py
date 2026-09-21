@@ -10,11 +10,15 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 
 
 SCHEMA = "tsuinosora.native_story_ir.v1"
 REPORT_SCHEMA = "tsuinosora.full_conversion_coverage_report.v1"
+INPUT_SCHEMA = "astra.user_input_sequence.v1"
 SAFE_SYMBOL = re.compile(r"^[A-Za-z0-9_.-]+$")
 SAFE_ASSET_ID = re.compile(r"^[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -78,26 +82,142 @@ PHYSICAL_INPUT_TYPES = {
 }
 
 
-def convert_native_story_ir(ir_path: Path, output_root: Path) -> dict:
+def _physical_input_rows(route: dict) -> list[dict]:
+    session = f"tsui.{route['route_id']}"
+    return [
+        {
+            "schema": INPUT_SCHEMA,
+            "session": session,
+            "sequence": sequence,
+            "tick": item["tick"],
+            "event": item["event"],
+        }
+        for sequence, item in enumerate(route["input_events"], start=1)
+    ]
+
+
+def _validate_native_story_payload(payload: object, diagnostics: list[dict]) -> dict | None:
+    if not isinstance(payload, dict) or payload.get("schema") != SCHEMA:
+        diagnostics.append(
+            _diagnostic(
+                "TSUI_NATIVE_STORY_IR_SCHEMA",
+                "private story IR schema is missing or unsupported",
+            )
+        )
+        return None
+    sources = _validate_sources(payload.get("sources"), diagnostics)
+    handlers = _validate_handlers(payload.get("handlers"), sources, diagnostics)
+    stories, command_records, state_ids = _validate_stories(
+        payload.get("stories"), handlers, diagnostics
+    )
+    _validate_command_links(command_records, state_ids, diagnostics)
+    routes = _validate_routes(payload.get("routes"), command_records, state_ids, diagnostics)
+    _validate_coverage(
+        payload.get("coverage"),
+        payload.get("source_locale"),
+        sources,
+        handlers,
+        command_records,
+        routes,
+        diagnostics,
+    )
+    return {
+        "sources": sources,
+        "handlers": handlers,
+        "stories": stories,
+        "commands": command_records,
+        "state_ids": state_ids,
+        "routes": routes,
+    }
+
+
+def _validate_written_input_with_rust(binary: Path, path: Path, expected_hash: str) -> str | None:
+    try:
+        completed = subprocess.run(
+            [str(binary), "validate-input", "--input", str(path)],
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return "Rust input validator could not be executed"
+    if completed.returncode != 0:
+        return "Rust input validator rejected the generated automation"
+    try:
+        report = json.loads(completed.stdout)
+    except json.JSONDecodeError:
+        return "Rust input validator returned invalid JSON"
+    if (
+        not isinstance(report, dict)
+        or report.get("schema") != "astra.headless_input_validation.v1"
+        or report.get("status") != "pass"
+        or report.get("input_sequence_hash") != expected_hash
+    ):
+        return "Rust input validator returned a mismatched canonical input hash"
+    return None
+
+
+def _resolve_rust_validator() -> Path | None:
+    repository_root = Path(__file__).resolve().parents[2]
+    for candidate in (
+        repository_root / "target" / "release" / "astra-headless.exe",
+        repository_root / "target" / "release" / "astra-headless",
+        repository_root / "target" / "debug" / "astra-headless.exe",
+        repository_root / "target" / "debug" / "astra-headless",
+    ):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def convert_native_story_ir(
+    ir_path: Path, output_root: Path, *, rust_validator: Path | None = None
+) -> dict:
     diagnostics: list[dict] = []
     try:
         payload = json.loads(ir_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return _blocked_report("TSUI_NATIVE_STORY_IR_UNREADABLE", "private story IR is missing or invalid JSON")
-    if not isinstance(payload, dict) or payload.get("schema") != SCHEMA:
-        return _blocked_report("TSUI_NATIVE_STORY_IR_SCHEMA", "private story IR schema is missing or unsupported")
-
-    sources = _validate_sources(payload.get("sources"), diagnostics)
-    handlers = _validate_handlers(payload.get("handlers"), sources, diagnostics)
-    stories, command_records, state_ids = _validate_stories(payload.get("stories"), handlers, diagnostics)
-    _validate_command_links(command_records, state_ids, diagnostics)
-    routes = _validate_routes(payload.get("routes"), command_records, state_ids, diagnostics)
-    _validate_coverage(payload.get("coverage"), payload.get("source_locale"), sources, handlers, command_records, routes, diagnostics)
+    validated = _validate_native_story_payload(payload, diagnostics)
+    if validated is None:
+        return _coverage_report({}, {}, {}, [], diagnostics)
+    sources = validated["sources"]
+    handlers = validated["handlers"]
+    stories = validated["stories"]
+    command_records = validated["commands"]
+    routes = validated["routes"]
     if diagnostics:
         return _coverage_report(sources, handlers, command_records, routes, diagnostics)
 
-    scripts_root = output_root / "Scripts"
-    localization_root = output_root / "Localization"
+    rust_validator = _resolve_rust_validator() if rust_validator is None else Path(rust_validator)
+    if rust_validator is None or not rust_validator.is_file():
+        diagnostics.append(
+            _diagnostic(
+                "TSUI_NATIVE_STORY_RUST_INPUT_VALIDATOR_MISSING",
+                "same-worktree astra-headless input validator is required before writing Automation",
+            )
+        )
+        return _coverage_report(sources, handlers, command_records, routes, diagnostics)
+    generated_names = ("Scripts", "Localization", "Automation")
+    conflicts = [name for name in generated_names if (output_root / name).exists()]
+    if conflicts:
+        diagnostics.append(
+            _diagnostic(
+                "TSUI_NATIVE_STORY_OUTPUT_CONFLICT",
+                "generated output already exists; refusing to replace it",
+                outputs=conflicts,
+            )
+        )
+        return _coverage_report(sources, handlers, command_records, routes, diagnostics)
+
+    output_root.parent.mkdir(parents=True, exist_ok=True)
+    staging_root = Path(
+        tempfile.mkdtemp(prefix=f".{output_root.name}.conversion-", dir=output_root.parent)
+    )
+
+    scripts_root = staging_root / "Scripts"
+    localization_root = staging_root / "Localization"
     scripts_root.mkdir(parents=True, exist_ok=True)
     localization_root.mkdir(parents=True, exist_ok=True)
     strings: dict[str, str] = {}
@@ -113,7 +233,7 @@ def convert_native_story_ir(ir_path: Path, output_root: Path) -> dict:
                 include_story=part == 0,
             )
             path.write_text(rendered, encoding="utf-8")
-            generated_files.append(_file_record(path, output_root))
+            generated_files.append(_file_record(path, staging_root))
     locale = payload.get("source_locale")
     localization_path = localization_root / f"{locale}.json"
     localization_path.write_text(
@@ -126,17 +246,100 @@ def convert_native_story_ir(ir_path: Path, output_root: Path) -> dict:
         + "\n",
         encoding="utf-8",
     )
-    generated_files.append(_file_record(localization_path, output_root))
-    automation_root = output_root / "Automation"
+    generated_files.append(_file_record(localization_path, staging_root))
+    automation_root = staging_root / "Automation"
     automation_root.mkdir(parents=True, exist_ok=True)
+    from headless_route_matrix import RouteMatrixError, _validate_route_input
+
+    input_contracts: dict[str, object] = {}
+    for route in routes:
+        automation_path = automation_root / f"{route['route_id']}.jsonl"
+        try:
+            input_contracts[route["route_id"]] = _validate_route_input(
+                automation_path,
+                route,
+                rows=_physical_input_rows(route),
+            )
+        except RouteMatrixError as error:
+            diagnostics.append(
+                _diagnostic(
+                    "TSUI_NATIVE_STORY_ROUTE_INPUT_INVALID",
+                    str(error),
+                    route_id=route.get("route_id"),
+                )
+            )
+    if diagnostics:
+        shutil.rmtree(staging_root)
+        return _coverage_report(sources, handlers, command_records, routes, diagnostics)
     for route in routes:
         automation_path = automation_root / f"{route['route_id']}.jsonl"
         _write_physical_input_sequence(automation_path, route)
-        generated_files.append(_file_record(automation_path, output_root))
+        try:
+            written_contract = _validate_route_input(automation_path, route)
+            if written_contract.input_sequence_hash != input_contracts[route["route_id"]].input_sequence_hash:
+                diagnostics.append(
+                    _diagnostic(
+                        "TSUI_NATIVE_STORY_ROUTE_INPUT_HASH_MISMATCH",
+                        "written automation input hash differs from its validated source rows",
+                        route_id=route["route_id"],
+                    )
+                )
+            if rust_validator is not None:
+                rust_error = _validate_written_input_with_rust(
+                    rust_validator,
+                    automation_path,
+                    written_contract.input_sequence_hash,
+                )
+                if rust_error is not None:
+                    diagnostics.append(
+                        _diagnostic(
+                            "TSUI_NATIVE_STORY_RUST_INPUT_INVALID",
+                            rust_error,
+                            route_id=route["route_id"],
+                        )
+                    )
+        except RouteMatrixError as error:
+            diagnostics.append(
+                _diagnostic(
+                    "TSUI_NATIVE_STORY_ROUTE_INPUT_OUTPUT_INVALID",
+                    str(error),
+                    route_id=route.get("route_id"),
+                )
+            )
+        generated_files.append(_file_record(automation_path, staging_root))
+    if diagnostics:
+        shutil.rmtree(staging_root)
+        return _coverage_report(sources, handlers, command_records, routes, diagnostics)
     report = _coverage_report(sources, handlers, command_records, routes, [])
     report["generated_files"] = generated_files
     report["localization_key_count"] = len(strings)
     report["source_locale"] = locale
+    moved: list[Path] = []
+    try:
+        output_root.mkdir(parents=True, exist_ok=True)
+        for name in generated_names:
+            source = staging_root / name
+            target = output_root / name
+            shutil.move(str(source), str(target))
+            moved.append(target)
+        shutil.rmtree(staging_root)
+    except OSError as error:
+        for target in reversed(moved):
+            shutil.rmtree(target)
+        if staging_root.exists():
+            shutil.rmtree(staging_root)
+        return _coverage_report(
+            sources,
+            handlers,
+            command_records,
+            routes,
+            [
+                _diagnostic(
+                    "TSUI_NATIVE_STORY_OUTPUT_PUBLISH_FAILED",
+                    "generated output could not be published",
+                )
+            ],
+        )
     return report
 
 
@@ -482,8 +685,22 @@ def _validate_routes(value, commands: dict[str, dict], state_ids: set[str], diag
             diagnostics.append(_diagnostic("TSUI_NATIVE_STORY_ROUTE_INPUT_INVALID", "route automation must contain only serialized physical input", route_id=route["route_id"]))
             continue
         signature = (route["terminal_route_node_id"], tuple(choice_sequence))
-        if route["route_id"] in signatures and signatures[route["route_id"]] != signature:
-            diagnostics.append(_diagnostic("TSUI_NATIVE_STORY_ROUTE_CONFLICT", "route id has conflicting signatures", route_id=route["route_id"]))
+        if route["route_id"] in signatures:
+            diagnostics.append(
+                _diagnostic(
+                    "TSUI_NATIVE_STORY_ROUTE_DUPLICATE",
+                    "route id must be unique",
+                    route_id=route["route_id"],
+                )
+            )
+            if signatures[route["route_id"]] != signature:
+                diagnostics.append(
+                    _diagnostic(
+                        "TSUI_NATIVE_STORY_ROUTE_CONFLICT",
+                        "route id has conflicting signatures",
+                        route_id=route["route_id"],
+                    )
+                )
         signatures[route["route_id"]] = signature
     return value
 
@@ -665,18 +882,11 @@ def _validate_input_events(value) -> bool:
 
 
 def _write_physical_input_sequence(path: Path, route: dict) -> None:
-    session = f"tsui.{route['route_id']}"
     lines = []
-    for sequence, item in enumerate(route["input_events"], start=1):
+    for row in _physical_input_rows(route):
         lines.append(
             json.dumps(
-                {
-                    "schema": "astra.user_input_sequence.v1",
-                    "session": session,
-                    "sequence": sequence,
-                    "tick": item["tick"],
-                    "event": item["event"],
-                },
+                row,
                 ensure_ascii=False,
                 separators=(",", ":"),
             )
@@ -703,6 +913,7 @@ def _coverage_report(sources, handlers, commands, routes, diagnostics) -> dict:
             "wait_commands": sum(1 for command in commands.values() if command["kind"] in WAIT_COMMANDS),
         },
         "command_kind_counts": dict(sorted(kind_counts.items())),
+        "generated_files": [],
         "diagnostics": diagnostics,
         "redaction": {"paths": "relative_only", "payload": "omitted", "commercial_text": "omitted"},
     }

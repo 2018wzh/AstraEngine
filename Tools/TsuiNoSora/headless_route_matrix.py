@@ -94,7 +94,12 @@ def _load_jsonl(path: Path) -> list[dict]:
     return rows
 
 
-def _validate_route_input(path: Path, route: dict) -> RouteContract:
+def _validate_route_input(
+    path: Path,
+    route: dict,
+    *,
+    rows: list[dict] | None = None,
+) -> RouteContract:
     route_id = route.get("route_id")
     terminal_id = route.get("terminal_id")
     terminal_route_node_id = route.get("terminal_route_node_id")
@@ -117,7 +122,7 @@ def _validate_route_input(path: Path, route: dict) -> RouteContract:
     ):
         raise RouteMatrixError(f"{route_id} has an invalid ordered choice sequence")
 
-    rows = _load_jsonl(path)
+    rows = _load_jsonl(path) if rows is None else rows
     expected_session = f"tsui.{route_id}"
     for expected_sequence, row in enumerate(rows, start=1):
         if row.get("schema") != INPUT_SCHEMA:

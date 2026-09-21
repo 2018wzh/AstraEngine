@@ -16,6 +16,14 @@ from pathlib import Path
 from tsuinosora_constants import *
 from tsuinosora_diagnostics import _write_json
 from tsuinosora_rendering import _read_json
+from director_asset_bindings import DirectorAssetBindingError, build_asset_binding_ir
+from director_lingo import DirectorLingoError, build_lingo_ir
+from director_native_story import DirectorNativeStoryError, build_native_story_ir
+from director_scene_dsl import DirectorSceneDslError, build_scene_dsl_ir
+from director_scene_semantics import DirectorSceneSemanticError, build_scene_semantic_ir
+from director_story_graph import DirectorStoryGraphError, build_story_graph
+from director_story_program import DirectorStoryProgramError, build_story_program_ir
+from director_story_source import DirectorStorySourceError, build_director_story_source
 
 __all__ = ['_run_director_story_source_from_demo_config', '_blocked_story_graph_report', '_blocked_scene_semantic_report', '_blocked_asset_binding_report', '_blocked_story_program_report']
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import io
 import json
 import os
@@ -16,6 +15,8 @@ from pathlib import Path
 from tsuinosora_constants import *
 from tsuinosora_diagnostics import _dedupe_diagnostics, _is_safe_report_relative_path, _is_safe_symbol, _is_sanitized_sha256, _looks_like_local_path
 from tsuinosora_rendering import _read_json, _report_has_path_leak
+from native_story_ir import _physical_input_rows
+from headless_route_matrix import _input_sequence_hash
 
 __all__ = ['rearrange_native_assets', 'build_conversion_report', '_conversion_route_record', 'build_route_scenarios', '_route_mount_assets', '_routes_with_native_mount_assets', 'build_mount_policy']
 
@@ -215,18 +216,52 @@ def build_conversion_report(
 
 def _conversion_route_record(route: dict) -> dict:
     route_id = str(route.get("route_id", "unknown")).strip() or "unknown"
+    terminal_id = str(route.get("terminal_id", "")).strip()
+    terminal_route_node_id = str(route.get("terminal_route_node_id", "")).strip()
     record = {
         "route_id": route_id,
         "coverage": route.get("coverage", "unknown"),
-        "terminal": route.get("terminal", ""),
+        "terminal": route.get("terminal", terminal_id),
     }
+    if terminal_id:
+        record["terminal_id"] = terminal_id
+    if terminal_route_node_id:
+        record["terminal_route_node_id"] = terminal_route_node_id
+    choice_ids = [
+        str(choice).strip()
+        for choice in route.get("choice_ids", []) or []
+        if str(choice).strip() and _is_safe_symbol(str(choice).strip())
+    ]
+    if choice_ids:
+        record["choice_ids"] = choice_ids
+    choice_sequence = route.get("choice_sequence", route.get("choices", [])) or []
     choices = [
         str(choice).strip()
-        for choice in route.get("choices", []) or []
+        for choice in choice_sequence
         if str(choice).strip() and _is_safe_symbol(str(choice).strip())
     ]
     if choices:
         record["choices"] = choices
+        record["choice_sequence"] = choices
+    command_ids = [
+        str(command_id).strip()
+        for command_id in route.get("command_ids", []) or []
+        if str(command_id).strip() and _is_safe_symbol(str(command_id).strip())
+    ]
+    if command_ids:
+        record["command_ids"] = command_ids
+    input_events = route.get("input_events", []) or []
+    if input_events:
+        input_rows = _physical_input_rows(route)
+        record["physical_input"] = {
+            "event_count": len(input_events),
+            "sequence_hash": _input_sequence_hash(input_rows),
+            "terminal_event": (
+                input_rows[-1].get("event", {}).get("type", "")
+                if input_rows and isinstance(input_rows[-1], dict)
+                else ""
+            ),
+        }
     mount_assets, _ = _route_mount_assets("tsuinosora-patch-game", "windows", route, route_id)
     if mount_assets:
         record["mount_assets"] = mount_assets

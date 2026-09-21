@@ -14,7 +14,7 @@ from collections import deque
 from pathlib import Path
 
 from tsuinosora_constants import *
-from native_story_ir import convert_native_story_ir
+from native_story_ir import _blocked_report, _resolve_rust_validator, convert_native_story_ir
 from tsuinosora_diagnostics import _is_safe_report_relative_path, _is_safe_symbol, _write_json
 from tsuinosora_nativevn_font import _copy_tsuinosora_ui_template, _nativevn_package_input_files, _write_asset_sidecar
 from tsuinosora_nativevn_ui_derive import _copy_classic_ui_assets, _derive_director_background_transparent_sprite, _derive_director_character_sprite, _derive_director_dialogue_frame, _derive_director_solid_black, _director_runtime_bindings
@@ -52,11 +52,25 @@ def write_nativevn_package_input(work_root: Path | str, routes: list[dict] | Non
                 "message": "NativeVN package input requires a passing asset analysis report",
             }
         )
-    for generated_dir in ("Scripts", "Localization", "Automation"):
-        path = nativevn_root / generated_dir
-        if path.exists():
-            shutil.rmtree(path)
-    story_report = convert_native_story_ir(work_root / "private" / "native_story_ir.json", nativevn_root)
+    rust_validator = _resolve_rust_validator()
+    if rust_validator is None:
+        diagnostics.append(
+            {
+                "code": "TSUI_NATIVEVN_INPUT_VALIDATOR_MISSING",
+                "message": "NativeVN package input requires the same-worktree astra-headless input validator",
+            }
+        )
+    if diagnostics:
+        story_report = _blocked_report(
+            "TSUI_NATIVEVN_PRECONDITION_BLOCKED",
+            "NativeVN story conversion was skipped because package preconditions are blocked",
+        )
+    else:
+        story_report = convert_native_story_ir(
+            work_root / "private" / "native_story_ir.json",
+            nativevn_root,
+            rust_validator=rust_validator,
+        )
     _write_json(reports_root / "full_conversion_coverage_report.json", story_report)
     if story_report.get("status") != "pass":
         diagnostics.append(
@@ -66,17 +80,21 @@ def write_nativevn_package_input(work_root: Path | str, routes: list[dict] | Non
             }
         )
 
-    section_root = nativevn_root / "PackageSections"
-    section_root.mkdir(parents=True, exist_ok=True)
-
-    section_specs = _write_nativevn_section_inputs(reports_root, section_root)
-    scenario_refs = sorted(
-        str(item["relative_path"])
-        for item in story_report.get("generated_files", [])
-        if isinstance(item, dict)
-        and str(item.get("relative_path", "")).startswith("Automation/")
-    )
-    wrote_story_inputs = not diagnostics
+    section_specs = []
+    scenario_refs = []
+    files = []
+    wrote_story_inputs = False
+    if not diagnostics:
+        section_root = nativevn_root / "PackageSections"
+        section_root.mkdir(parents=True, exist_ok=True)
+        section_specs = _write_nativevn_section_inputs(reports_root, section_root)
+        scenario_refs = sorted(
+            str(item["relative_path"])
+            for item in story_report.get("generated_files", [])
+            if isinstance(item, dict)
+            and str(item.get("relative_path", "")).startswith("Automation/")
+        )
+        wrote_story_inputs = True
     if wrote_story_inputs:
         derivation_report = _copy_native_assets_to_nativevn(
             work_root, nativevn_root, conversion_report
@@ -87,7 +105,7 @@ def write_nativevn_package_input(work_root: Path | str, routes: list[dict] | Non
             _render_nativevn_project(section_specs, scenario_refs),
             encoding="utf-8",
         )
-    files = _nativevn_package_input_files(nativevn_root, section_specs, scenario_refs)
+        files = _nativevn_package_input_files(nativevn_root, section_specs, scenario_refs)
 
     report = {
         "schema": "tsuinosora.nativevn_package_input_report.v1",

@@ -54,6 +54,10 @@ struct Args {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    ValidateInput {
+        #[arg(long)]
+        input: PathBuf,
+    },
     Run {
         #[arg(long)]
         gpu: bool,
@@ -253,6 +257,7 @@ async fn main() {
         }
     };
     let result = match Args::parse().command {
+        Command::ValidateInput { input } => validate_input(&input),
         Command::Serve {
             stdio,
             gpu,
@@ -948,6 +953,66 @@ struct RunRequest<'a> {
     performance_start_sequence: u64,
 }
 
+struct ValidatedInput {
+    messages: Vec<astra_headless_protocol::InputMessage>,
+    input_hash: String,
+}
+
+fn read_and_validate_input(
+    input_path: &Path,
+    limits: Option<(u64, u64)>,
+) -> Result<ValidatedInput, String> {
+    let input_bytes =
+        fs::read(input_path).map_err(|e| format!("ASTRA_HEADLESS_INPUT_OPEN_FAILED: {e}"))?;
+    let mut reader = JsonlReader::new(BufReader::new(input_bytes.as_slice()), 1024 * 1024)
+        .map_err(|e| e.to_string())?;
+    let mut sequence = SequenceValidator::default();
+    let mut messages = Vec::new();
+    while let Some(message) = reader
+        .read::<astra_headless_protocol::InputMessage>()
+        .map_err(|e| e.to_string())?
+    {
+        message.validate().map_err(|e| e.to_string())?;
+        sequence
+            .accept(&message.session, message.sequence, message.tick)
+            .map_err(|e| e.to_string())?;
+        if let Some((max_tick, max_messages)) = limits {
+            if message.tick > max_tick {
+                return Err("ASTRA_HEADLESS_INPUT_TICK_LIMIT_EXCEEDED".into());
+            }
+            if messages.len() as u64 >= max_messages {
+                return Err("ASTRA_HEADLESS_INPUT_LIMIT_EXCEEDED".into());
+            }
+        }
+        messages.push(message);
+    }
+    if !matches!(
+        messages.last().map(|message| &message.event),
+        Some(PhysicalInput::Shutdown)
+    ) {
+        return Err("ASTRA_HEADLESS_INPUT_SHUTDOWN_REQUIRED".into());
+    }
+    let input_hash = hash_input_messages(&messages)?;
+    Ok(ValidatedInput {
+        messages,
+        input_hash,
+    })
+}
+
+fn validate_input(input_path: &Path) -> Result<(), String> {
+    let validated = read_and_validate_input(input_path, None)?;
+    println!(
+        "{}",
+        serde_json::json!({
+            "schema": "astra.headless_input_validation.v1",
+            "status": "pass",
+            "message_count": validated.messages.len(),
+            "input_sequence_hash": validated.input_hash,
+        })
+    );
+    Ok(())
+}
+
 async fn run(request: RunRequest<'_>) -> Result<(), String> {
     let RunRequest {
         profile_path,
@@ -1114,37 +1179,14 @@ async fn run_execution(request: RunRequest<'_>) -> Result<(), String> {
         .map(|_| astra_platform_common::PerformanceSchedulingGuard::activate_coordinator())
         .transpose()?;
     fs::create_dir_all(artifact_root).map_err(|e| e.to_string())?;
-    let input_bytes =
-        fs::read(input_path).map_err(|e| format!("ASTRA_HEADLESS_INPUT_OPEN_FAILED: {e}"))?;
-    let mut reader = JsonlReader::new(BufReader::new(input_bytes.as_slice()), 1024 * 1024)
-        .map_err(|e| e.to_string())?;
-    let mut sequence = SequenceValidator::default();
-    let mut messages = Vec::new();
-    while let Some(message) = reader
-        .read::<astra_headless_protocol::InputMessage>()
-        .map_err(|e| e.to_string())?
-    {
-        message.validate().map_err(|e| e.to_string())?;
-        sequence
-            .accept(&message.session, message.sequence, message.tick)
-            .map_err(|e| e.to_string())?;
-        if message.tick > profile.input.max_tick {
-            return Err("ASTRA_HEADLESS_INPUT_TICK_LIMIT_EXCEEDED".into());
-        }
-        if messages.len() as u64 >= profile.input.max_messages {
-            return Err("ASTRA_HEADLESS_INPUT_LIMIT_EXCEEDED".into());
-        }
-        messages.push(message);
-    }
-    let input_hash = hash_input_messages(&messages)?;
+    let validated_input = read_and_validate_input(
+        input_path,
+        Some((profile.input.max_tick, profile.input.max_messages)),
+    )?;
+    let messages = validated_input.messages;
+    let input_hash = validated_input.input_hash;
     if let Some(observer) = &performance_observer {
         observer.record_memory_snapshot("input.loaded")?;
-    }
-    if !matches!(
-        messages.last().map(|message| &message.event),
-        Some(PhysicalInput::Shutdown)
-    ) {
-        return Err("ASTRA_HEADLESS_INPUT_SHUTDOWN_REQUIRED".into());
     }
     let checkpoint_config_root = checkpoint_config
         .and_then(Path::parent)

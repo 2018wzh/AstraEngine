@@ -44,7 +44,9 @@ from tsuinosora_tools import (  # noqa: E402
     _visual_capture_launch_environment,
 )
 from projectorrays_json import decode_projectorrays_byte_text, loads_projectorrays_json  # noqa: E402
+from headless_route_matrix import _input_sequence_hash  # noqa: E402
 from native_story_ir import convert_native_story_ir  # noqa: E402
+from tsuinosora_stage3_gate import _load_native_story_ir_routes  # noqa: E402
 
 
 class DirectorRuntimeAssetDerivationTests(unittest.TestCase):
@@ -278,7 +280,7 @@ def native_story_ir_fixture():
         ],
         "routes": [
             {
-                "route_id": "route.good",
+                "route_id": "route.coverage.001",
                 "terminal_id": "ending.good",
                 "terminal_route_node_id": "state.ending.good",
                 "choice_ids": ["choice.route.good"],
@@ -297,7 +299,34 @@ def native_story_ir_fixture():
                             "repeat": False,
                         },
                     },
-                    {"tick": 3, "event": {"type": "shutdown"}},
+                    {
+                        "tick": 3,
+                        "event": {
+                            "type": "await",
+                            "observation": {
+                                "kind": "equals",
+                                "key": "vn.route_terminal",
+                                "value_hash": "sha256:b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b",
+                            },
+                            "timeout_ticks": 10,
+                            "continue_at_match": True,
+                        },
+                    },
+                    {
+                        "tick": 13,
+                        "event": {
+                            "type": "await",
+                            "observation": {
+                                "kind": "equals",
+                                "key": "vn.terminal_routes",
+                                "value_hash": "sha256:d5345671ee7840da0a073a56ddbac4647c7b6d3ac16ba081361e16295b67c896",
+                            },
+                            "timeout_ticks": 10,
+                            "continue_at_match": True,
+                        },
+                    },
+                    {"tick": 23, "event": {"type": "checkpoint", "id": "checkpoint.route.coverage.001"}},
+                    {"tick": 24, "event": {"type": "shutdown"}},
                 ],
             }
         ],
@@ -330,7 +359,7 @@ class AssetAnalysisTests(unittest.TestCase):
             encoded_report = json.dumps(report, ensure_ascii=False, sort_keys=True)
             story = read_generated_story(output)
             localization = json.loads((output / "Localization" / "ja.json").read_text(encoding="utf-8"))
-            input_lines = (output / "Automation" / "route.good.jsonl").read_text(encoding="utf-8").splitlines()
+            input_lines = (output / "Automation" / "route.coverage.001.jsonl").read_text(encoding="utf-8").splitlines()
 
             self.assertEqual(report["status"], "pass")
             self.assertEqual(report["counts"]["commands"], 4)
@@ -414,6 +443,201 @@ class AssetAnalysisTests(unittest.TestCase):
 
             self.assertEqual(report["status"], "blocked")
             self.assertIn("TSUI_NATIVE_STORY_ROUTE_INPUT_INVALID", {item["code"] for item in report["diagnostics"]})
+
+    def test_native_story_ir_rejects_duplicate_route_ids_even_with_same_signature(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload = native_story_ir_fixture()
+            payload["routes"].append(json.loads(json.dumps(payload["routes"][0])))
+            payload["coverage"]["route_count"] = 2
+            ir = root / "native_story_ir.json"
+            ir.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+            report = convert_native_story_ir(ir, root / "output")
+
+            self.assertEqual(report["status"], "blocked")
+            self.assertIn(
+                "TSUI_NATIVE_STORY_ROUTE_DUPLICATE",
+                {item["code"] for item in report["diagnostics"]},
+            )
+            self.assertFalse((root / "output" / "Automation").exists())
+
+    def test_native_story_ir_preserves_existing_outputs_when_publish_is_blocked(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output = root / "output"
+            (output / "Scripts").mkdir(parents=True)
+            (output / "Automation").mkdir()
+            (output / "Scripts" / "existing.astra").write_text("old", encoding="utf-8")
+            (output / "Automation" / "existing.jsonl").write_text("old", encoding="utf-8")
+            ir = root / "native_story_ir.json"
+            ir.write_text(json.dumps(native_story_ir_fixture(), ensure_ascii=False), encoding="utf-8")
+
+            report = convert_native_story_ir(ir, output)
+
+            self.assertEqual(report["status"], "blocked")
+            self.assertIn(
+                "TSUI_NATIVE_STORY_OUTPUT_CONFLICT",
+                {item["code"] for item in report["diagnostics"]},
+            )
+            self.assertEqual(report["generated_files"], [])
+            self.assertEqual((output / "Scripts" / "existing.astra").read_text(encoding="utf-8"), "old")
+            self.assertEqual((output / "Automation" / "existing.jsonl").read_text(encoding="utf-8"), "old")
+
+    def test_native_story_ir_route_authority_preserves_same_terminal_choice_paths_and_physical_input(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload = native_story_ir_fixture()
+            choice_command = payload["stories"][0]["states"][0]["scenes"][0]["commands"][1]
+            choice_command["options"].append(
+                {
+                    "option_id": "choice.route.alt",
+                    "text": "private alternate choice",
+                    "target": "ending.good",
+                }
+            )
+            payload["routes"][0]["input_events"] = [
+                {"tick": 0, "event": {"type": "resume"}},
+                {"tick": 1, "event": {"type": "focus", "focused": True}},
+                {
+                    "tick": 2,
+                    "event": {
+                        "type": "keyboard",
+                        "physical_key": "Enter",
+                        "logical_key": "Enter",
+                        "state": "pressed",
+                        "repeat": False,
+                    },
+                },
+                {
+                    "tick": 3,
+                    "event": {
+                        "type": "await",
+                        "observation": {
+                            "kind": "equals",
+                            "key": "vn.route_terminal",
+                            "value_hash": "sha256:b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b",
+                        },
+                        "timeout_ticks": 10,
+                        "continue_at_match": True,
+                    },
+                },
+                {
+                    "tick": 13,
+                    "event": {
+                        "type": "await",
+                        "observation": {
+                            "kind": "equals",
+                            "key": "vn.terminal_routes",
+                            "value_hash": "sha256:d5345671ee7840da0a073a56ddbac4647c7b6d3ac16ba081361e16295b67c896",
+                        },
+                        "timeout_ticks": 10,
+                        "continue_at_match": True,
+                    },
+                },
+                {"tick": 23, "event": {"type": "checkpoint", "id": "checkpoint.route.coverage.001"}},
+                {"tick": 24, "event": {"type": "shutdown"}},
+            ]
+            second_route = json.loads(json.dumps(payload["routes"][0]))
+            second_route["route_id"] = "route.coverage.002"
+            second_route["choice_ids"] = ["choice.route.alt"]
+            second_route["choice_sequence"] = ["choice.route.alt"]
+            second_route["input_events"] = [
+                {"tick": 0, "event": {"type": "resume"}},
+                {"tick": 1, "event": {"type": "focus", "focused": True}},
+                {
+                    "tick": 2,
+                    "event": {
+                        "type": "keyboard",
+                        "physical_key": "ArrowDown",
+                        "logical_key": "ArrowDown",
+                        "state": "pressed",
+                        "repeat": False,
+                    },
+                },
+                {
+                    "tick": 3,
+                    "event": {
+                        "type": "await",
+                        "observation": {
+                            "kind": "equals",
+                            "key": "vn.route_terminal",
+                            "value_hash": "sha256:b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b",
+                        },
+                        "timeout_ticks": 10,
+                        "continue_at_match": True,
+                    },
+                },
+                {
+                    "tick": 13,
+                    "event": {
+                        "type": "await",
+                        "observation": {
+                            "kind": "equals",
+                            "key": "vn.terminal_routes",
+                            "value_hash": "sha256:d5345671ee7840da0a073a56ddbac4647c7b6d3ac16ba081361e16295b67c896",
+                        },
+                        "timeout_ticks": 10,
+                        "continue_at_match": True,
+                    },
+                },
+                {"tick": 23, "event": {"type": "checkpoint", "id": "checkpoint.route.coverage.002"}},
+                {"tick": 24, "event": {"type": "shutdown"}},
+            ]
+            payload["routes"].append(second_route)
+            payload["coverage"]["route_count"] = 2
+            ir = root / "private" / "native_story_ir.json"
+            ir.parent.mkdir(parents=True)
+            ir.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+            records, diagnostics = _load_native_story_ir_routes(root)
+            self.assertEqual(diagnostics, [])
+            self.assertEqual(len(records), 2)
+            self.assertEqual({record["terminal_id"] for record in records}, {"ending.good"})
+            self.assertEqual(
+                [record["choice_sequence"] for record in records],
+                [["choice.route.good"], ["choice.route.alt"]],
+            )
+            self.assertTrue(all(record["terminal_route_node_id"] == "state.ending.good" for record in records))
+            self.assertTrue(all(record["physical_input"]["terminal_event"] == "shutdown" for record in records))
+            self.assertTrue(all(record["physical_input"]["event_count"] >= 4 for record in records))
+
+            conversion = build_conversion_report(
+                {"root_alias": "original_install_root", "file_count": 0, "files": []},
+                {"status": "pass", "assets": [], "quarantine": []},
+                records,
+            )
+            self.assertEqual(conversion["status"], "pass")
+            self.assertEqual(conversion["counts"]["route_count"], 2)
+            self.assertEqual(conversion["routes"][1]["terminal_route_node_id"], "state.ending.good")
+            self.assertEqual(conversion["routes"][1]["physical_input"]["terminal_event"], "shutdown")
+
+            output = root / "nativevn"
+            story_report = convert_native_story_ir(ir, output)
+            self.assertEqual(story_report["status"], "pass")
+            for route_id in ("route.coverage.001", "route.coverage.002"):
+                lines = (output / "Automation" / f"{route_id}.jsonl").read_text(encoding="utf-8").splitlines()
+                rows = [json.loads(line) for line in lines]
+                events = [row["event"] for row in rows]
+                self.assertIn("await", [event["type"] for event in events])
+                self.assertIn("checkpoint", [event["type"] for event in events])
+                self.assertEqual(
+                    [
+                        event["observation"]["key"]
+                        for event in events
+                        if event["type"] == "await"
+                    ],
+                    ["vn.route_terminal", "vn.terminal_routes"],
+                )
+                self.assertEqual(
+                    [row["sequence"] for row in rows],
+                    list(range(1, len(rows) + 1)),
+                )
+                self.assertEqual(
+                    conversion["routes"][0 if route_id.endswith("001") else 1]["physical_input"]["sequence_hash"],
+                    _input_sequence_hash(rows),
+                )
+                self.assertEqual(events[-1]["type"], "shutdown")
 
     def test_projectorrays_json_codec_accepts_only_proven_extended_escapes(self):
         value = loads_projectorrays_json(r'{"vertical":"line\vbreak","byte":"\x81\x40","slash":"\\v"}')
@@ -4946,6 +5170,7 @@ class AssetAnalysisTests(unittest.TestCase):
                                 "route_id": "classic.main",
                                 "coverage": "covered",
                                 "terminal": "ending.good",
+                                "choices": ["choice.duplicate", "choice.duplicate"],
                             }
                         ],
                     }
@@ -4953,7 +5178,31 @@ class AssetAnalysisTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
+            payload = native_story_ir_fixture()
+            payload["stories"][0]["states"][0]["scenes"][0]["commands"][1]["options"].append(
+                {
+                    "option_id": "choice.route.alt",
+                    "text": "private alternate choice",
+                    "target": "ending.good",
+                }
+            )
+            second_route = json.loads(json.dumps(payload["routes"][0]))
+            second_route["route_id"] = "route.coverage.002"
+            second_route["choice_ids"] = ["choice.route.alt"]
+            second_route["choice_sequence"] = ["choice.route.alt"]
+            second_route["input_events"][2]["event"]["physical_key"] = "A"
+            second_route["input_events"][2]["event"]["logical_key"] = "a"
+            second_route["input_events"][-2]["event"]["id"] = "checkpoint.route.coverage.002"
+            payload["routes"].append(second_route)
+            payload["coverage"]["route_count"] = 2
             write_native_story_ir_fixture(work)
+            (work / "private" / "native_story_ir.json").write_text(
+                json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+            )
+            cast_map = json.loads((unpacked / "cast_map.json").read_text(encoding="utf-8"))
+            cast_map["members"][0]["route_ids"] = ["route.coverage.001", "route.coverage.002"]
+            cast_map["members"][0]["command_ids"] = ["line.opening"]
+            (unpacked / "cast_map.json").write_text(json.dumps(cast_map), encoding="utf-8")
             report = run_local_gate(
                 original_root=original,
                 work_root=work,
@@ -4972,7 +5221,27 @@ class AssetAnalysisTests(unittest.TestCase):
                 "reports/nativevn_package_input_report.json",
             )
             self.assertTrue((work / "reports" / "local_gate_report.json").exists())
+            self.assertFalse((work / "reports" / "route_graph_report.json").exists())
             self.assertTrue((work / "nativevn" / "project.yaml").exists())
+            conversion = json.loads((work / "reports" / "conversion_report.json").read_text(encoding="utf-8"))
+            self.assertEqual(
+                [route["route_id"] for route in conversion["routes"]],
+                ["route.coverage.001", "route.coverage.002"],
+            )
+            self.assertEqual(conversion["routes"][0]["terminal_route_node_id"], "state.ending.good")
+            self.assertEqual(conversion["routes"][1]["choice_sequence"], ["choice.route.alt"])
+            self.assertEqual(
+                conversion["routes"][0]["physical_input"]["terminal_event"],
+                "shutdown",
+            )
+            for route_id in ("route.coverage.001", "route.coverage.002"):
+                automation = (work / "nativevn" / "Automation" / f"{route_id}.jsonl").read_text(encoding="utf-8")
+                events = [json.loads(line)["event"] for line in automation.splitlines()]
+                self.assertEqual(events[-1]["type"], "shutdown")
+                self.assertEqual(
+                    [event["observation"]["key"] for event in events if event["type"] == "await"],
+                    ["vn.route_terminal", "vn.terminal_routes"],
+                )
             self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
 
     def test_demo_slice_gate_loads_private_config_and_writes_nativevn_without_path_leak(self):
@@ -5639,6 +5908,10 @@ class AssetAnalysisTests(unittest.TestCase):
             )
 
             write_native_story_ir_fixture(work)
+            cast_map = json.loads((unpacked / "cast_map.json").read_text(encoding="utf-8"))
+            cast_map["members"][0]["route_ids"] = ["route.coverage.001"]
+            cast_map["members"][0]["command_ids"] = ["line.opening"]
+            (unpacked / "cast_map.json").write_text(json.dumps(cast_map), encoding="utf-8")
             report = run_local_gate(
                 original_root=original,
                 work_root=work,
@@ -5662,13 +5935,13 @@ class AssetAnalysisTests(unittest.TestCase):
             )
             conversion = json.loads((work / "reports" / "conversion_report.json").read_text(encoding="utf-8"))
             story = read_generated_story(work / "nativevn")
-            input_lines = (work / "nativevn" / "Automation" / "route.good.jsonl").read_text(encoding="utf-8").splitlines()
+            input_lines = (work / "nativevn" / "Automation" / "route.coverage.001.jsonl").read_text(encoding="utf-8").splitlines()
             encoded = json.dumps(report, sort_keys=True)
 
             self.assertEqual(report["status"], "pass")
             self.assertEqual(report["route_count"], 1)
             self.assertEqual(nativevn_report["route_count"], 1)
-            self.assertEqual(conversion["routes"][0]["choices"], ["choice.start"])
+            self.assertEqual(conversion["routes"][0]["choices"], ["choice.route.good"])
             self.assertEqual(conversion["routes"][0]["mount_assets"][0]["path"], "native-assets/backgrounds/bg.png")
             self.assertIn("choice.route.good", story)
             self.assertTrue(all(json.loads(line)["schema"] == "astra.user_input_sequence.v1" for line in input_lines))
@@ -5762,15 +6035,15 @@ class AssetAnalysisTests(unittest.TestCase):
             self.assertFalse(
                 (work / "nativevn" / "native-assets" / "backgrounds" / "bg.png.astra-asset.yaml").exists()
             )
-            self.assertTrue((work / "nativevn" / "Automation" / "route.good.jsonl").exists())
+            self.assertTrue((work / "nativevn" / "Automation" / "route.coverage.001.jsonl").exists())
             self.assertIn("default_profile: modern", project)
             self.assertIn("ui_provider: astra.ui.yakui", project)
             self.assertIn("platform_profiles:", project)
             self.assertIn("windows-internal-release:", project)
-            self.assertIn("web-release-chrome:", project)
+            self.assertNotIn("web-release-chrome:", project)
             self.assertNotIn("windows-patch-release:", project)
             self.assertIn("renderer: { providers: [wgpu_hardware], allow_software: false }", project)
-            self.assertIn("renderer: { providers: [webgpu], allow_software: false }", project)
+            self.assertNotIn("renderer: { providers: [webgpu], allow_software: false }", project)
             self.assertIn("package_sources: [{ kind: bundled }]", project)
             self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
 
@@ -5969,6 +6242,9 @@ class AssetAnalysisTests(unittest.TestCase):
                 ],
             )
 
+            old_automation = work / "nativevn" / "Automation" / "old.jsonl"
+            old_automation.parent.mkdir(parents=True, exist_ok=True)
+            old_automation.write_text("old", encoding="utf-8")
             report = write_nativevn_package_input(work, invalid_routes)
             codes = {diagnostic["code"] for diagnostic in report["diagnostics"]}
 
@@ -5978,6 +6254,38 @@ class AssetAnalysisTests(unittest.TestCase):
             self.assertEqual(report["physical_input_sequence_count"], 0)
             self.assertIn("TSUI_NATIVEVN_EXPLICIT_ROUTE_INPUT_RETIRED", codes)
             self.assertFalse((work / "nativevn" / "project.yaml").exists())
+            self.assertEqual(report["files"], [])
+            self.assertEqual(old_automation.read_text(encoding="utf-8"), "old")
+
+    def test_nativevn_package_input_skips_story_conversion_when_preconditions_block(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp) / "work"
+            reports = work / "reports"
+            reports.mkdir(parents=True)
+            write_native_story_ir_fixture(work)
+            (reports / "conversion_report.json").write_text(
+                json.dumps({"status": "pass"}), encoding="utf-8"
+            )
+            (reports / "asset_analysis.json").write_text(
+                json.dumps({"status": "pass"}), encoding="utf-8"
+            )
+
+            report = write_nativevn_package_input(work, [])
+            story_report = json.loads(
+                (reports / "full_conversion_coverage_report.json").read_text(encoding="utf-8")
+            )
+
+            self.assertEqual(report["status"], "blocked")
+            self.assertEqual(report["files"], [])
+            self.assertEqual(story_report["status"], "blocked")
+            self.assertEqual(story_report["generated_files"], [])
+            self.assertFalse((work / "nativevn" / "Scripts").exists())
+            self.assertFalse((work / "nativevn" / "Localization").exists())
+            self.assertFalse((work / "nativevn" / "Automation").exists())
+            self.assertIn(
+                "TSUI_NATIVEVN_EXPLICIT_ROUTE_INPUT_RETIRED",
+                {diagnostic["code"] for diagnostic in report["diagnostics"]},
+            )
 
 
 def make_png(width, height, fill=(0, 0, 0, 0), rects=None):
