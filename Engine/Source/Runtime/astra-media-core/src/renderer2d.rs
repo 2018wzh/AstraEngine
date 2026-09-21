@@ -1431,7 +1431,7 @@ impl Renderer2D for HeadlessRenderer {
                 }
                 DrawCommand::PushClip { rect } => {
                     let transformed =
-                        transformed_bounds(current_transform(camera, &transforms), *rect)?;
+                        transformed_clip_bounds(current_transform(camera, &transforms), *rect)?;
                     clips.push(intersection(
                         *clips.last().expect("clip stack is initialized"),
                         transformed,
@@ -2103,6 +2103,59 @@ fn transformed_bounds(transform: Transform2D, rect: RectI) -> Result<RectI, Medi
     ))
 }
 
+/// Computes a clip rectangle without rounding an aspect-fit root's fractional
+/// far edge outward.  The regular transformed bounds remain conservative for
+/// rotated and sheared geometry; only a positive axis-aligned transform with
+/// integer translation (the Canvas2D root transform) uses the half-open edge
+/// rule shared by the integer raster viewport.
+fn transformed_clip_bounds(transform: Transform2D, rect: RectI) -> Result<RectI, MediaError> {
+    validate_transform(transform)?;
+    if transform.m12 == 0.0
+        && transform.m21 == 0.0
+        && transform.m11 > 0.0
+        && transform.m22 > 0.0
+        && transform.tx.fract() == 0.0
+        && transform.ty.fract() == 0.0
+    {
+        let x0 = transform.m11 * rect.x as f32 + transform.tx;
+        let y0 = transform.m22 * rect.y as f32 + transform.ty;
+        let x1 = transform.m11 * (rect.x as f32 + rect.width as f32) + transform.tx;
+        let y1 = transform.m22 * (rect.y as f32 + rect.height as f32) + transform.ty;
+        let left = clip_edge_to_i32(x0)?;
+        let top = clip_edge_to_i32(y0)?;
+        let right = clip_edge_to_i32(x1)?;
+        let bottom = clip_edge_to_i32(y1)?;
+        let width = u32::try_from(i64::from(right) - i64::from(left)).map_err(|_| {
+            MediaError::message("ASTRA_MEDIA_CLIP: transformed clip width overflowed")
+        })?;
+        let height = u32::try_from(i64::from(bottom) - i64::from(top)).map_err(|_| {
+            MediaError::message("ASTRA_MEDIA_CLIP: transformed clip height overflowed")
+        })?;
+        return Ok(RectI::new(left, top, width, height));
+    }
+    transformed_bounds(transform, rect)
+}
+
+/// `Canvas2D` stores its uniform scale as `f32`.  Snap only values that are
+/// within the representable error of an integer, then floor the actual edge;
+/// this preserves exact raster extents such as 1001 while keeping a genuine
+/// fractional edge such as 670.0625 at 670.
+fn clip_edge_to_i32(value: f32) -> Result<i32, MediaError> {
+    if !value.is_finite() || value < i32::MIN as f32 || value > i32::MAX as f32 {
+        return Err(MediaError::message(
+            "ASTRA_MEDIA_CLIP: transformed clip is outside supported coordinates",
+        ));
+    }
+    let nearest = value.round();
+    let precision = 4.0 * f32::EPSILON * value.abs().max(1.0);
+    let edge = if (value - nearest).abs() <= precision {
+        nearest
+    } else {
+        value.floor()
+    };
+    Ok(edge as i32)
+}
+
 fn intersection(left: RectI, right: RectI) -> RectI {
     let x0 = left.x.max(right.x);
     let y0 = left.y.max(right.y);
@@ -2181,6 +2234,57 @@ pub fn frame_hash(width: u32, height: u32, format: RenderTargetFormat, bytes: &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn aspect_fit_root_clip_uses_the_integer_viewport_edge() {
+        let transform = Transform2D {
+            m11: 1001.0 / 1280.0,
+            m22: 1001.0 / 1280.0,
+            tx: 0.0,
+            ty: 107.0,
+            ..Transform2D::IDENTITY
+        };
+        let clip = transformed_clip_bounds(transform, RectI::new(0, 0, 1280, 720)).unwrap();
+        assert_eq!(clip, RectI::new(0, 107, 1001, 563));
+
+        let mut renderer = CpuRendererProvider
+            .create(RendererCreateRequest {
+                width: 1001,
+                height: 777,
+                format: RenderTargetFormat::Rgba8Srgb,
+                profile: "aspect-fit-root-clip".into(),
+            })
+            .unwrap();
+        let frame = renderer
+            .capture_frame(&[
+                SceneCommand::clear([0, 0, 0, 255]),
+                SceneCommand::PushTransform { transform },
+                SceneCommand::PushClip {
+                    rect: RectI::new(0, 0, 1280, 720),
+                },
+                SceneCommand::rect("logical", 0, 0, 1280, 720, [255, 0, 0, 255]),
+                SceneCommand::PopClip,
+                SceneCommand::PopTransform,
+            ])
+            .unwrap();
+        let pixel = |x: usize, y: usize| &frame.bytes[(y * 1001 + x) * 4..(y * 1001 + x) * 4 + 4];
+        assert_eq!(pixel(0, 669), &[255, 0, 0, 255]);
+        assert_eq!(pixel(0, 670), &[0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn rotated_clip_keeps_conservative_bounds_rounding() {
+        let transform = Transform2D {
+            m11: 0.0,
+            m12: 1.0,
+            m21: -1.0,
+            m22: 0.0,
+            tx: 10.25,
+            ty: 20.25,
+        };
+        let clip = transformed_clip_bounds(transform, RectI::new(0, 0, 4, 2)).unwrap();
+        assert_eq!(clip, RectI::new(8, 20, 3, 5));
+    }
 
     #[test]
     fn owned_pixel_buffer_moves_the_pixel_allocation_without_copying() {

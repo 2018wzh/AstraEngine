@@ -2,6 +2,8 @@
 
 本轮 Musica/SDK 重构已接通公共 `Canvas2D`、SDK `StageCanvas`/`TextureAsset`、AstraVN presentation 第二消费者及 Family API v7 logical/raster frame 元数据。Musica 启动配置改为显式 `render_width`/`render_height` 正整数，GPU Scene 和 AstraText glyph 路径按实际 raster density 输出；统一 aspect-fit viewport 负责奇数、portrait、缩小和黑边，原生 1280x720 逻辑舞台、ANI 原点和存档/VM 时间保持独立。Windows Sandbox 已完成此前固定尺寸基线、原生存档进程重开恢复和 60 秒 Auto 短流程；任意尺寸的全流程 GPU、完整 Musica 结局、真实声音、长流程、跨平台和性能验收仍开放。此前同读档后的 `ASTRA_EMU_MUSICA_ELAPSED` 在这次固定环境 Auto 流程中未复现，未放宽上限或静默截断。
 
+任意尺寸硬件回归曾发现 `1001×777` 在 aspect-fit 内容底边多绘制一行；现已将正轴向、整数平移的根裁剪边界按 `Canvas2D` 的整数 viewport 计算，并保留旋转/错切裁剪的保守 bounds。CPU 边界回归与 DX12 实际 GPU 的 `1600×900`、`1920×1200`、`1001×777`、`720×1280`、`640×360`、`96×54`、`1279×719` 测试通过；这只关闭该通用裁剪缺陷，新的 Sandbox 任意尺寸包和完整产品流程仍待实际验证。
+
 Musica 的现有 `gpu.created` Manager 诊断事件现在同时记录成功创建的 logical/raster 宽高，只在创建阶段输出，便于确认实际 GPU 输出尺寸；不从配置字符串推导尺寸，也不增加逐帧日志。
 
 Musica 高清替换已接入真实 profile→PAZ archive→Scene→SDK `TextureCache` 路径。`texture_overrides` 只允许安全相对 PNG；静态 PNG 和单帧 ANI 的替换像素使用独立 cache identity，逻辑尺寸与 ANI 原点仍来自原资源，多帧 ANI、SQZ 和非法映射明确拒绝。profile/Scene 回归已通过；真实 Scene GPU 验证见下，完整 Player 与全游戏高倍率覆盖仍开放。
