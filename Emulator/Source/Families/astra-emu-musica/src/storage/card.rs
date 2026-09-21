@@ -1,27 +1,17 @@
 use super::*;
-use astra_media_core::TextureFrame;
+use astra_emu_sdk::StageCanvas;
+use astra_media_core::{Extent2D, TextureFrame};
 use std::io::Cursor;
 
 const THUMBNAIL_WIDTH: u32 = 96;
 const THUMBNAIL_HEIGHT: u32 = 54;
-const SUPPORTED_RASTER_EXTENTS: &[(u32, u32)] =
-    &[(1280, 720), (1920, 1080), (2560, 1440), (3840, 2160)];
+const MAX_CAPTURE_BYTES: usize = 128 * 1024 * 1024;
 
 fn expected_rgba_len(width: u32, height: u32) -> Option<usize> {
     usize::try_from(width)
         .ok()?
         .checked_mul(usize::try_from(height).ok()?)?
         .checked_mul(4)
-}
-
-fn is_supported_raster_extent(width: u32, height: u32) -> bool {
-    let Some(width_ratio) = u64::from(width).checked_mul(9) else {
-        return false;
-    };
-    let Some(height_ratio) = u64::from(height).checked_mul(16) else {
-        return false;
-    };
-    width_ratio == height_ratio && SUPPORTED_RASTER_EXTENTS.contains(&(width, height))
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -31,21 +21,45 @@ pub(crate) struct SaveCard {
     pub thumbnail_png: Vec<u8>,
 }
 impl SaveCard {
-    pub fn capture(width: u32, height: u32, rgba: &[u8]) -> FamilyResult<Self> {
+    pub fn capture(
+        logical_width: u32,
+        logical_height: u32,
+        width: u32,
+        height: u32,
+        rgba: &[u8],
+    ) -> FamilyResult<Self> {
         let fail = || {
             error(
                 "ASTRA_EMU_MUSICA_SAVE_THUMBNAIL",
                 "gameplay thumbnail could not be encoded",
             )
         };
-        if !is_supported_raster_extent(width, height)
-            || rgba.len() != expected_rgba_len(width, height).ok_or_else(fail)?
-        {
+        let expected = expected_rgba_len(width, height).ok_or_else(fail)?;
+        if expected > MAX_CAPTURE_BYTES || rgba.len() != expected {
+            return Err(fail());
+        }
+        let canvas = StageCanvas::new(
+            Extent2D::new(logical_width, logical_height),
+            Extent2D::new(width, height),
+        )
+        .map_err(|_| fail())?;
+        let viewport = canvas.viewport();
+        let right = viewport.x.checked_add(viewport.width).ok_or_else(fail)?;
+        let bottom = viewport.y.checked_add(viewport.height).ok_or_else(fail)?;
+        if right > width || bottom > height {
             return Err(fail());
         }
         let frame = image::RgbaImage::from_raw(width, height, rgba.to_vec()).ok_or_else(fail)?;
-        let thumbnail = image::imageops::resize(
+        let content = image::imageops::crop_imm(
             &frame,
+            viewport.x,
+            viewport.y,
+            viewport.width,
+            viewport.height,
+        )
+        .to_image();
+        let thumbnail = image::imageops::resize(
+            &content,
             THUMBNAIL_WIDTH,
             THUMBNAIL_HEIGHT,
             image::imageops::FilterType::Triangle,

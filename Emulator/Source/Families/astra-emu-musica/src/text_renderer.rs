@@ -86,7 +86,7 @@ impl MusicaTextRenderer {
     }
 
     pub(crate) fn set_raster_scale(&mut self, raster_scale: f32) -> Result<(), String> {
-        if !raster_scale.is_finite() || !(0.25..=8.0).contains(&raster_scale) {
+        if !raster_scale.is_finite() || raster_scale <= 0.0 {
             return Err("ASTRA_EMU_MUSICA_TEXT_SCALE".into());
         }
         self.raster_scale = raster_scale;
@@ -679,5 +679,17 @@ mod tests {
             .unwrap()
             .iter()
             .any(|c| matches!(c, SceneCommand::UploadGlyph { .. })));
+    }
+
+    #[test]
+    fn fractional_text_density_accepts_shrink_raster_without_changing_the_api() {
+        let mut text = MusicaTextRenderer::new(crate::ScriptEncoding::ShiftJis).unwrap();
+        text.set_raster_scale(0.05).unwrap();
+        let commands = text
+            .commands(Some(("日本語の文字", Some("話者"))), None)
+            .unwrap();
+        assert!(commands
+            .iter()
+            .any(|command| matches!(command, SceneCommand::UploadGlyph { .. })));
     }
 }

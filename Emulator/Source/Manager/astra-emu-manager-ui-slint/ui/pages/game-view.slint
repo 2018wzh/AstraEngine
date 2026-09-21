@@ -11,6 +11,12 @@ export component GameViewPage inherits Rectangle {
     in property <image> stage-frame;
     in-out property <float> stage-native-width: 1024;
     in-out property <float> stage-native-height: 768;
+    in-out property <float> stage-raster-width: 1024;
+    in-out property <float> stage-raster-height: 768;
+    in-out property <float> stage-content-x: 0;
+    in-out property <float> stage-content-y: 0;
+    in-out property <float> stage-content-width: 1024;
+    in-out property <float> stage-content-height: 768;
     callback game-input(string, bool, float);
     callback leave-game();
 
@@ -30,6 +36,10 @@ export component GameViewPage inherits Rectangle {
     property <length> stage-height: root.width / root.stage-available-height > root.stage-aspect ? root.stage-available-height : root.width / root.stage-aspect;
     property <length> stage-x: (root.width - root.stage-width) / 2;
     property <length> stage-y: root.toolbar-height + (root.stage-available-height - root.stage-height) / 2;
+    property <length> content-stage-x: root.stage-raster-width > 0 ? root.stage-x + root.stage-content-x / root.stage-raster-width * root.stage-width : root.stage-x;
+    property <length> content-stage-y: root.stage-raster-height > 0 ? root.stage-y + root.stage-content-y / root.stage-raster-height * root.stage-height : root.stage-y;
+    property <length> content-stage-width: root.stage-raster-width > 0 ? root.stage-content-width / root.stage-raster-width * root.stage-width : 0px;
+    property <length> content-stage-height: root.stage-raster-height > 0 ? root.stage-content-height / root.stage-raster-height * root.stage-height : 0px;
 
     // Diagnostics panel state
     in-out property <length> diagnostics-x: 40px;
@@ -65,9 +75,9 @@ export component GameViewPage inherits Rectangle {
         TouchArea {
             moved => {
                 if root.overlay-active { return; }
-                if root.stage-width > 0px && root.stage-height > 0px && self.mouse-x >= root.stage-x && self.mouse-x < root.stage-x + root.stage-width && self.mouse-y >= root.stage-y && self.mouse-y < root.stage-y + root.stage-height {
-                    root.game-input("pointer.x", true, (self.mouse-x - root.stage-x) / root.stage-width * root.stage-native-width);
-                    root.game-input("pointer.y", true, (self.mouse-y - root.stage-y) / root.stage-height * root.stage-native-height);
+                if root.content-stage-width > 0px && root.content-stage-height > 0px && self.mouse-x >= root.content-stage-x && self.mouse-x < root.content-stage-x + root.content-stage-width && self.mouse-y >= root.content-stage-y && self.mouse-y < root.content-stage-y + root.content-stage-height {
+                    root.game-input("pointer.x", true, (self.mouse-x - root.content-stage-x) / root.content-stage-width * root.stage-native-width);
+                    root.game-input("pointer.y", true, (self.mouse-y - root.content-stage-y) / root.content-stage-height * root.stage-native-height);
                 }
             }
             pointer-event(event) => {
@@ -79,14 +89,24 @@ export component GameViewPage inherits Rectangle {
                     return;
                 }
                 if event.kind != PointerEventKind.down && event.kind != PointerEventKind.up { return; }
-                if event.kind == PointerEventKind.down && (self.mouse-x < root.stage-x || self.mouse-x >= root.stage-x + root.stage-width || self.mouse-y < root.stage-y || self.mouse-y >= root.stage-y + root.stage-height) { return; }
-                root.game-input("pointer.x", true, (self.mouse-x - root.stage-x) / root.stage-width * root.stage-native-width);
-                root.game-input("pointer.y", true, (self.mouse-y - root.stage-y) / root.stage-height * root.stage-native-height);
+                if self.mouse-x < root.content-stage-x || self.mouse-x >= root.content-stage-x + root.content-stage-width || self.mouse-y < root.content-stage-y || self.mouse-y >= root.content-stage-y + root.content-stage-height {
+                    if event.kind == PointerEventKind.up {
+                        if event.button == PointerEventButton.left { root.game-input("pointer.primary", false, 0); }
+                        if event.button == PointerEventButton.right { root.game-input("pointer.secondary", false, 0); }
+                        if event.button == PointerEventButton.middle { root.game-input("pointer.middle", false, 0); }
+                    }
+                    return;
+                }
+                root.game-input("pointer.x", true, (self.mouse-x - root.content-stage-x) / root.content-stage-width * root.stage-native-width);
+                root.game-input("pointer.y", true, (self.mouse-y - root.content-stage-y) / root.content-stage-height * root.stage-native-height);
                 if event.button == PointerEventButton.left { root.game-input("pointer.primary", event.kind == PointerEventKind.down, 1); }
                 if event.button == PointerEventButton.right { root.game-input("pointer.secondary", event.kind == PointerEventKind.down, 1); }
                 if event.button == PointerEventButton.middle { root.game-input("pointer.middle", event.kind == PointerEventKind.down, 1); }
             }
             scroll-event(event) => {
+                if self.mouse-x < root.content-stage-x || self.mouse-x >= root.content-stage-x + root.content-stage-width || self.mouse-y < root.content-stage-y || self.mouse-y >= root.content-stage-y + root.content-stage-height {
+                    return reject;
+                }
                 root.game-input("wheel", false, event.delta-y / 60px);
                 return accept;
             }

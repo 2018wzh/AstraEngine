@@ -353,6 +353,24 @@ impl WgpuOffscreenRenderer {
         &self.identity
     }
 
+    /// Validate a product raster against the selected hardware device before
+    /// scene allocation. Callers still apply their own bounded readback or
+    /// cache budgets; this check only reports the device's actual texture
+    /// dimension capability.
+    pub fn validate_output_extent(&self, width: u32, height: u32) -> Result<(), PlatformError> {
+        let max = self.device.limits().max_texture_dimension_2d;
+        if width == 0 || height == 0 || width > max || height > max {
+            return Err(unavailable(
+                "offscreen.output_extent",
+                "requested raster exceeds the selected GPU texture dimension limit",
+            )
+            .with_field("width", width.to_string())
+            .with_field("height", height.to_string())
+            .with_field("max_texture_dimension_2d", max.to_string()));
+        }
+        Ok(())
+    }
+
     pub fn performance_counters(&self) -> WgpuFramePerformanceCounters {
         let filter_bytes = self.filter_outputs.iter().fold(0u64, |total, output| {
             total + u64::from(output.width) * u64::from(output.height) * 4

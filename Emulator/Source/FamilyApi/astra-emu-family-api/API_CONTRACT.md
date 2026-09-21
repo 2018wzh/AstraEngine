@@ -20,7 +20,7 @@ Descriptor 必须声明 CpuFrame，拒绝重复 capability/format。`PcmAudio` �
 
 Host 只提供 game_path、初始 WindowState 和输入。Family 自持 VM、文件、解码、混音、渲染和原生存档。probe 返回 `ROption<ProbeReport>`，None 是普通未匹配；game_id 为 opaque UTF-8。事件保留键盘、指针、滚轮、文本及窗口顺序。PointerMove 为 Host 逆映射后的逻辑舞台坐标，resize 为物理客户区像素；elapsed_ns 接受包括零在内的 u64，由核心决定 tick。
 
-`FrameView<'a>` 借用 CPU RGBA8 sRGB opaque 像素；`FrameConsumerRef<'_>` 只可在同步 frame 调用内使用。`FrameInfo.width/height` 是物理 raster 尺寸，`logical_width/logical_height` 是场景和输入使用的逻辑舞台尺寸。两者必须保持相同宽高比；Family 不在输出帧中加入 letterbox，Host 负责显示映射。Host 返回前复制 stride × height 字节，不跨 ABI 传 GPU/native handle。
+`FrameView<'a>` 借用 CPU RGBA8 sRGB opaque 像素；`FrameConsumerRef<'_>` 只可在同步 frame 调用内使用。`FrameInfo.width/height` 是物理 raster 尺寸，`logical_width/logical_height` 是场景和输入使用的逻辑舞台尺寸。两者可以有不同宽高比；Family 用统一比例渲染到居中的 content viewport，viewport 外的 raster 像素必须是黑边，Host 负责在窗口中继续按相同比例显示并逆映射输入。Host 返回前复制 stride × height 字节，不跨 ABI 传 GPU/native handle。
 
 ## 窗口请求
 

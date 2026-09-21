@@ -644,6 +644,7 @@ dependencies = [
  "astra-emu-manager-ui-slint",
  "astra-emu-metadata",
  "astra-emu-translation-openai-compatible",
+ "astra-media-core",
  "astra-observability",
  "clap",
  "cpal 0.17.1",

@@ -55,7 +55,7 @@ impl TextScene {
         regions: &[TextSceneLayout],
         raster_scale: f32,
     ) -> Result<Vec<SceneCommand>, MediaError> {
-        if !raster_scale.is_finite() || !(0.25..=8.0).contains(&raster_scale) {
+        if !raster_scale.is_finite() || raster_scale <= 0.0 {
             return Err(MediaError::message("ASTRA_EMU_SDK_TEXT_SCALE"));
         }
         let regions = regions
@@ -169,7 +169,7 @@ fn scale_layout(region: &TextSceneLayout, scale: f32) -> Result<TextSceneLayout,
     let outline = region
         .outline
         .map(|outline| {
-            let radius = (f32::from(outline.radius) * scale).round();
+            let radius = (f32::from(outline.radius) * scale).round().max(1.0);
             if !radius.is_finite() || !(1.0..=64.0).contains(&radius) {
                 return Err(MediaError::message("ASTRA_EMU_SDK_TEXT_OUTLINE"));
             }

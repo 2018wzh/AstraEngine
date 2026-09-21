@@ -51,6 +51,16 @@ pub fn musica_descriptor() -> FamilyDescriptor {
         kind: ConfigKind::String { max_bytes: 256 },
         default: ConfigValue::String(default.into()),
     };
+    let render_extent = |id: &str, label: &str, default: i64| ConfigField {
+        id: id.into(),
+        label: label.into(),
+        group: "Presentation".into(),
+        kind: ConfigKind::Integer {
+            min: 1,
+            max: i64::from(u32::MAX),
+        },
+        default: ConfigValue::Integer(default),
+    };
     let mut configuration = vec![
         field("profile_file", "Private PAZ profile", MUSICA_PROFILE_FILE),
         field("entry_script", "Entry script in scr archive", "test.sc"),
@@ -85,15 +95,8 @@ pub fn musica_descriptor() -> FamilyDescriptor {
         kind: ConfigKind::Bool,
         default: ConfigValue::Bool(true),
     });
-    configuration.push(ConfigField {
-        id: "render_scale".into(),
-        label: "GPU render scale".into(),
-        group: "Presentation".into(),
-        kind: ConfigKind::Enum {
-            choices: vec!["1.0".into(), "1.5".into(), "2.0".into(), "3.0".into()].into(),
-        },
-        default: ConfigValue::Enum("1.0".into()),
-    });
+    configuration.push(render_extent("render_width", "GPU render width", 1280));
+    configuration.push(render_extent("render_height", "GPU render height", 720));
     configuration.push(ConfigField {
         id: "script_encoding".into(),
         label: "Script encoding".into(),
@@ -224,30 +227,32 @@ impl MusicaProvider {
                 ))
             }
         };
-        let (raster_width, raster_height, _raster_scale) = match config
-            .iter()
-            .find(|entry| entry.id == "render_scale")
-            .map(|entry| &entry.value)
-        {
-            Some(ConfigValue::Enum(value)) => match value.as_str() {
-                "1.0" => (1280, 720, 1.0),
-                "1.5" => (1920, 1080, 1.5),
-                "2.0" => (2560, 1440, 2.0),
-                "3.0" => (3840, 2160, 3.0),
-                _ => {
-                    return Err(error(
-                        "ASTRA_EMU_MUSICA_RENDER_SCALE",
-                        "render scale is not supported",
-                    ))
-                }
-            },
-            _ => {
+        let render_extent = |key: &str| -> FamilyResult<u32> {
+            let value = config
+                .iter()
+                .find(|entry| entry.id == key)
+                .map(|entry| &entry.value)
+                .ok_or_else(|| {
+                    error(
+                        "ASTRA_EMU_MUSICA_RENDER_DIMENSIONS",
+                        "render dimension is missing",
+                    )
+                })?;
+            let ConfigValue::Integer(value) = value else {
                 return Err(error(
-                    "ASTRA_EMU_MUSICA_RENDER_SCALE",
-                    "render scale is missing or invalid",
-                ))
-            }
+                    "ASTRA_EMU_MUSICA_RENDER_DIMENSIONS",
+                    "render dimension must be a positive integer",
+                ));
+            };
+            u32::try_from(*value).map_err(|_| {
+                error(
+                    "ASTRA_EMU_MUSICA_RENDER_DIMENSIONS",
+                    "render dimension is outside the supported integer range",
+                )
+            })
         };
+        let raster_width = render_extent("render_width")?;
+        let raster_height = render_extent("render_height")?;
         let encoding = match config
             .iter()
             .find(|e| e.id == "script_encoding")

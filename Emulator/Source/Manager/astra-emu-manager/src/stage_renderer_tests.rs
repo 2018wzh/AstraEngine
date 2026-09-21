@@ -72,6 +72,31 @@ fn invalid_opaque_alpha_preserves_previous_frame() {
     assert_eq!(current.pixels, previous.pixels);
 }
 
+#[test]
+fn filtered_output_keeps_content_viewport_in_output_space() {
+    let content = super::content_viewport_for_output(1280, 720, 721, 1280, 1082, 1920).unwrap();
+    assert_eq!(
+        content,
+        astra_media_core::Viewport2D {
+            x: 0,
+            y: 655,
+            width: 1082,
+            height: 608,
+        }
+    );
+
+    let content = super::content_viewport_for_output(1280, 720, 1920, 1200, 2880, 1800).unwrap();
+    assert_eq!(
+        content,
+        astra_media_core::Viewport2D {
+            x: 0,
+            y: 90,
+            width: 2880,
+            height: 1620,
+        }
+    );
+}
+
 fn read_pixels(device: &wgpu::Device, queue: &wgpu::Queue, texture: &wgpu::Texture) -> Vec<u8> {
     let stride = align_row(texture.width() * 4).unwrap();
     let buffer = device.create_buffer(&wgpu::BufferDescriptor {

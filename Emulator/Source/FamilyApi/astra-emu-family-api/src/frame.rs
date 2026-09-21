@@ -38,14 +38,6 @@ impl FrameInfo {
     pub fn validate(&self) -> FamilyResult<()> {
         validate_dimensions(self.width, self.height)?;
         validate_dimensions(self.logical_width, self.logical_height)?;
-        if u64::from(self.width) * u64::from(self.logical_height)
-            != u64::from(self.height) * u64::from(self.logical_width)
-        {
-            return Err(FamilyError::invalid(
-                "ASTRA_EMU_FAMILY_FRAME_ASPECT",
-                "physical raster and logical stage must have the same aspect ratio",
-            ));
-        }
         let row = self.width.checked_mul(4).ok_or_else(|| {
             FamilyError::invalid("ASTRA_EMU_FAMILY_FRAME_SIZE", "frame row size overflows")
         })?;

@@ -18,7 +18,7 @@ GPU 回读缓冲可以在进程内保留共享所有权。`OwnedPixelBuffer::fro
 
 公共 `astra-media-core` 的 `Extent2D`/`Canvas2D` 负责逻辑舞台到 raster canvas 的比例校验、根变换和坐标映射，并复用 `RectI`、`Transform2D`、`TextureFrame`、`SceneCommand`。四个空间必须分开：逻辑舞台决定 VM、存档、时间和动画几何；资产保存物理像素并显式声明逻辑尺寸及格式原点；raster canvas 是 GPU 目标；窗口输出由 Host 做 letterbox 和 pointer 逆映射。`astra-emu-sdk` 只提供薄语义 `StageCanvas` 与 `TextureAsset`，不依赖 VN；AstraVN presentation 直接消费同一 `Canvas2D`，作为第二个真实调用方。
 
-Musica 固定逻辑舞台 `1280x720`，启动配置 `render_scale` 仅接受 `1.0`、`1.5`、`2.0`、`3.0`，对应 raster `1280x720`、`1920x1080`、`2560x1440`、`3840x2160`。配置无效或 raster 预算不足必须失败，不能静默降级。物理像素密度不能改变逻辑 quad、ANI 原点、动画 frame 几何、VM、存档或剧情时间；文字按 raster scale 重新 shaping/rasterize glyph，再由根逆变换回逻辑位置。Family 帧的 `FrameInfo` 同时声明 physical `width/height` 与 logical `logical_width/logical_height`，两者保持宽高比；Family 不生成黑边，Manager 统一负责输出和输入映射。无独立 SDK 的外部核心使用 logical=raster。
+Musica 固定逻辑舞台 `1280x720`，启动配置显式提供正整数 `render_width` 与 `render_height`，按设备和内存能力选择任意 raster 尺寸。配置无效或 raster 预算不足必须失败，不能静默降级。不同宽高比使用统一 scale 的居中 aspect-fit viewport，剩余像素清黑；viewport 外的指针不进入游戏。物理像素密度不能改变逻辑 quad、ANI 原点、动画 frame 几何、VM、存档或剧情时间；文字按实际 raster density 重新 shaping/rasterize glyph，再由根逆变换回逻辑位置。Family 帧的 `FrameInfo` 同时声明 physical `width/height` 与 logical `logical_width/logical_height`，Manager 和 Family 共用同一 viewport 计算完成输出与输入映射。无独立 SDK 的外部核心使用 logical=raster。
 
 本地接续同时整合 KrKr、Siglus、Artemis、CMVS 和 Musica 的已有成果，全部使用新 Family API；统一使用 Musica 名称。新增核心的完成标准为真实代表流程，包括启动、连续剧情、媒体、选择或系统页、存读档和退出重开。FVP 与 Musica 仍各验证一条结局。
 

@@ -29,6 +29,20 @@ impl StageCanvas {
         self.inner.scale_x()
     }
 
+    pub fn viewport(self) -> astra_media_core::Viewport2D {
+        self.inner.viewport()
+    }
+
+    pub fn viewport_rect(self) -> Result<astra_media_core::RectI, CoreError> {
+        self.inner.viewport_rect().map_err(|error| {
+            CoreError::invalid("ASTRA_EMU_SDK_STAGE_CANVAS", error.to_string())
+        })
+    }
+
+    pub fn contains_raster_point(self, point: [f32; 2]) -> bool {
+        self.inner.contains_raster_point(point)
+    }
+
     pub fn logical_to_raster_transform(self) -> astra_media_core::Transform2D {
         self.inner.logical_to_raster_transform()
     }
@@ -123,6 +137,10 @@ mod tests {
                 .expect("raster point maps to logical"),
             [640.0, 360.0]
         );
-        assert!(StageCanvas::new(Extent2D::new(1280, 720), Extent2D::new(1920, 1200)).is_err());
+        let portrait = StageCanvas::new(Extent2D::new(1280, 720), Extent2D::new(1920, 1200))
+            .expect("aspect-fit canvas");
+        assert_eq!(portrait.viewport().y, 60);
+        assert!(!portrait.contains_raster_point([0.0, 20.0]));
+        assert!(portrait.raster_to_logical_point([0.0, 20.0]).is_err());
     }
 }

@@ -1,8 +1,10 @@
 use super::*;
+use astra_emu_sdk::StageCanvas;
+use astra_media_core::Extent2D;
 
 fn snapshot(game: &[u8], message: &str) -> Snapshot {
     Snapshot {
-        card: SaveCard::capture(1280, 720, &vec![255; 1280 * 720 * 4]).unwrap(),
+        card: SaveCard::capture(1280, 720, 1280, 720, &vec![255; 1280 * 720 * 4]).unwrap(),
         game: Hash256::from_sha256(game),
         vm: vec![],
         message: Some((message.into(), None)),
@@ -12,31 +14,54 @@ fn snapshot(game: &[u8], message: &str) -> Snapshot {
 }
 
 #[test]
-fn save_cards_accept_all_supported_raster_scales() {
-    for (width, height) in [(1280, 720), (1920, 1080), (2560, 1440), (3840, 2160)] {
+fn save_cards_accept_arbitrary_raster_extents() {
+    for (width, height) in [(1280, 720), (721, 1280), (1279, 719), (641, 359), (17, 1)] {
         let rgba = vec![255; width as usize * height as usize * 4];
-        let card = SaveCard::capture(width, height, &rgba).unwrap();
+        let card = SaveCard::capture(1280, 720, width, height, &rgba).unwrap();
         let thumbnail = card.texture().unwrap();
         assert_eq!((thumbnail.width, thumbnail.height), (96, 54));
     }
 }
 
 #[test]
+fn save_card_crops_content_before_resizing_the_thumbnail() {
+    let width = 721_u32;
+    let height = 1280_u32;
+    let canvas = StageCanvas::new(Extent2D::new(1280, 720), Extent2D::new(width, height)).unwrap();
+    let viewport = canvas.viewport();
+    let mut rgba = vec![0_u8; width as usize * height as usize * 4];
+    for y in viewport.y..viewport.y + viewport.height {
+        for x in viewport.x..viewport.x + viewport.width {
+            let offset = ((y * width + x) * 4) as usize;
+            rgba[offset..offset + 4].copy_from_slice(&[255, 32, 16, 255]);
+        }
+    }
+    let card = SaveCard::capture(1280, 720, width, height, &rgba).unwrap();
+    let thumbnail = card.texture().unwrap();
+    assert!(thumbnail
+        .rgba8
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .all(|pixel| *pixel == [255, 32, 16, 255]));
+}
+
+#[test]
 fn save_cards_accept_supported_rasters_and_reject_invalid_frames() {
-    for (width, height) in [(1280, 720), (1920, 1080), (2560, 1440), (3840, 2160)] {
+    for (width, height) in [(1280, 720), (721, 1280), (1279, 719), (641, 359), (17, 1)] {
         let rgba = vec![255; width as usize * height as usize * 4];
-        let card = SaveCard::capture(width, height, &rgba).unwrap();
+        let card = SaveCard::capture(1280, 720, width, height, &rgba).unwrap();
         let thumbnail = card.texture().unwrap();
         assert_eq!((thumbnail.width, thumbnail.height), (96, 54));
         assert_eq!(thumbnail.rgba8.len(), 96 * 54 * 4);
     }
 
     for (width, height, rgba) in [
-        (1600, 900, vec![255; 1600 * 900 * 4]),
-        (1920, 1079, vec![255; 1920 * 1079 * 4]),
+        (0, 720, vec![]),
+        (720, 0, vec![]),
         (1920, 1080, vec![255; 1920 * 1080 * 4 - 1]),
     ] {
-        let error = match SaveCard::capture(width, height, &rgba) {
+        let error = match SaveCard::capture(1280, 720, width, height, &rgba) {
             Ok(_) => panic!("invalid save card frame was accepted"),
             Err(error) => error,
         };
@@ -45,18 +70,18 @@ fn save_cards_accept_supported_rasters_and_reject_invalid_frames() {
 }
 
 #[test]
-fn high_scale_save_cards_round_trip_through_storage() {
+fn arbitrary_size_save_cards_round_trip_through_storage() {
     let root = tempfile::tempdir().unwrap();
     let game = Hash256::from_sha256(b"high-scale-game");
     let storage = Storage::new(root.path()).unwrap();
     for (slot, (width, height)) in [
         (0, (1280, 720)),
-        (1, (1920, 1080)),
-        (2, (2560, 1440)),
-        (3, (3840, 2160)),
+        (1, (721, 1280)),
+        (2, (1279, 719)),
+        (3, (17, 1)),
     ] {
         let rgba = vec![255; width as usize * height as usize * 4];
-        let mut card = SaveCard::capture(width, height, &rgba).unwrap();
+        let mut card = SaveCard::capture(1280, 720, width, height, &rgba).unwrap();
         card.comment = format!("scale-{width}x{height}");
         let snapshot = Snapshot {
             card,
@@ -72,9 +97,9 @@ fn high_scale_save_cards_round_trip_through_storage() {
     let reopened = Storage::new(root.path()).unwrap();
     for (slot, (width, height)) in [
         (0, (1280, 720)),
-        (1, (1920, 1080)),
-        (2, (2560, 1440)),
-        (3, (3840, 2160)),
+        (1, (721, 1280)),
+        (2, (1279, 719)),
+        (3, (17, 1)),
     ] {
         let snapshot = reopened.read(slot).unwrap();
         let thumbnail = snapshot.card.texture().unwrap();

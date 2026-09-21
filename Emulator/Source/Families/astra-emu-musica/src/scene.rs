@@ -105,6 +105,21 @@ impl Scene {
         .map_err(|_| error("ASTRA_EMU_MUSICA_CANVAS", "stage extents are invalid"))?;
         let logical_extent = canvas.logical();
         let raster_extent = canvas.raster();
+        let pixel_bytes = usize::try_from(raster_width)
+            .ok()
+            .and_then(|width| {
+                usize::try_from(raster_height)
+                    .ok()
+                    .and_then(|height| width.checked_mul(height))
+            })
+            .and_then(|pixels| pixels.checked_mul(4))
+            .ok_or_else(|| error("ASTRA_EMU_MUSICA_FRAME_SIZE", "raster frame size overflows"))?;
+        if pixel_bytes > MAX_IMAGE_BYTES {
+            return Err(error(
+                "ASTRA_EMU_MUSICA_FRAME_SIZE",
+                "raster frame exceeds the GPU readback budget",
+            ));
+        }
         let renderer = pollster::block_on(WgpuOffscreenRenderer::new())
             .map_err(|_| {
                 error(
@@ -113,6 +128,14 @@ impl Scene {
                 )
             })?
             .with_default_compositing(astra_media_core::SceneCompositing2D::EncodedSrgb);
+        renderer
+            .validate_output_extent(raster_width, raster_height)
+            .map_err(|_| {
+                error(
+                    "ASTRA_EMU_MUSICA_FRAME_DIMENSIONS",
+                    "requested raster exceeds the selected GPU capability",
+                )
+            })?;
         tracing::info!(
             event = "astra.emu.musica.gpu.created",
             backend = renderer.identity().backend.as_str(),
@@ -134,21 +157,6 @@ impl Scene {
                 "text raster scale is invalid",
             )
         })?;
-        let pixel_bytes = usize::try_from(raster_width)
-            .ok()
-            .and_then(|width| {
-                usize::try_from(raster_height)
-                    .ok()
-                    .and_then(|height| width.checked_mul(height))
-            })
-            .and_then(|pixels| pixels.checked_mul(4))
-            .ok_or_else(|| error("ASTRA_EMU_MUSICA_FRAME_SIZE", "raster frame size overflows"))?;
-        if pixel_bytes > MAX_IMAGE_BYTES {
-            return Err(error(
-                "ASTRA_EMU_MUSICA_FRAME_SIZE",
-                "raster frame exceeds the GPU readback budget",
-            ));
-        }
         Ok(Self {
             archive,
             renderer,
@@ -415,11 +423,24 @@ impl Scene {
             .sequence
             .checked_add(1)
             .ok_or_else(|| error("ASTRA_EMU_MUSICA_FRAME_SEQUENCE", "frame sequence overflow"))?;
-        let mut mapped = Vec::with_capacity(commands.len() + 2);
+        let mut mapped = Vec::with_capacity(commands.len() + 4);
         mapped.push(SceneCommand::PushTransform {
             transform: self.canvas.logical_to_raster_transform(),
         });
+        // Commands are authored in the fixed logical stage. Applying this
+        // clip after the root transform keeps shake, negative-origin sprites,
+        // and any child command inside the content viewport; the clear still
+        // covers the complete raster so the surrounding bars remain black.
+        mapped.push(SceneCommand::PushClip {
+            rect: RectI {
+                x: 0,
+                y: 0,
+                width: self.width,
+                height: self.height,
+            },
+        });
         mapped.extend(commands);
+        mapped.push(SceneCommand::PopClip);
         mapped.push(SceneCommand::PopTransform);
         self.pixels = self
             .renderer

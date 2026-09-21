@@ -99,7 +99,7 @@ mod tests {
     }
 
     #[test]
-    fn frame_info_rejects_a_stretched_logical_stage() {
+    fn frame_info_accepts_a_letterboxed_logical_stage() {
         let info = FrameInfo {
             width: 1920,
             height: 1080,
@@ -110,10 +110,7 @@ mod tests {
                 alpha: FrameAlpha::Opaque,
             },
         };
-        assert_eq!(
-            info.validate().unwrap_err().code(),
-            "ASTRA_EMU_FAMILY_FRAME_ASPECT"
-        );
+        info.validate().unwrap();
     }
 
     struct RecordingFrameConsumer {

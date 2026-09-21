@@ -1,4 +1,5 @@
 use astra_emu_manager_core::InputMapping;
+use astra_media_core::Viewport2D;
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -37,6 +38,18 @@ pub struct WgpuFrameContext<'a> {
     pub queue: &'a wgpu::Queue,
 }
 
+/// A rendered stage plus the content rectangle in the texture shown by the
+/// Manager. The rectangle is in output-texture pixels, so it remains valid
+/// when a final-frame filter changes the texture dimensions.
+pub struct StageTextureUpdate {
+    pub texture: wgpu::Texture,
+    pub logical_width: u32,
+    pub logical_height: u32,
+    pub raster_width: u32,
+    pub raster_height: u32,
+    pub content: Viewport2D,
+}
+
 pub trait AstraUnderlayRenderer: 'static {
     fn configure_filter(
         &mut self,
@@ -46,11 +59,8 @@ pub trait AstraUnderlayRenderer: 'static {
         Err("ASTRA_EMU_FILTER_RENDERER_NOT_CONFIGURED".into())
     }
     fn setup(&mut self, context: WgpuFrameContext<'_>) -> Result<(), String>;
-    fn stage_texture(&self) -> Option<wgpu::Texture> {
-        None
-    }
-    fn take_stage_texture_update(&mut self) -> Option<(wgpu::Texture, u32, u32)> {
-        None
+    fn take_stage_texture_update(&mut self) -> Result<Option<StageTextureUpdate>, String> {
+        Ok(None)
     }
     fn render(&mut self, context: WgpuFrameContext<'_>) -> Result<(), String>;
     fn teardown(&mut self);
@@ -331,9 +341,11 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                     }
                 }
                 filters::configure(&mut *renderer_callback.borrow_mut(), &event_controller.borrow().filter_settings())?;
-                if let Some(texture) = renderer_callback.borrow().stage_texture() {
-                    let image = slint::Image::try_from(texture).map_err(|_| "WGPU stage texture import failed".to_string())?;
-                    window_weak.upgrade().ok_or_else(|| "Manager window disappeared during renderer setup".to_string())?.set_stage_frame(image);
+                if let Some(update) = renderer_callback.borrow_mut().take_stage_texture_update()? {
+                    let window = window_weak
+                        .upgrade()
+                        .ok_or_else(|| "Manager window disappeared during renderer setup".to_string())?;
+                    apply_stage_texture_update(&window, update)?;
                 }
                 Ok(())
             }
@@ -381,14 +393,9 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                 }
                 let mut renderer = renderer_callback.borrow_mut();
                 renderer.render(context)?;
-                if let Some((texture, width, height)) = renderer.take_stage_texture_update() {
-                    let aspect = texture.width() as f32 / texture.height() as f32;
-                    let image = slint::Image::try_from(texture).map_err(|_| "WGPU stage texture import failed".to_string())?;
+                if let Some(update) = renderer.take_stage_texture_update()? {
                     let window = window_weak.upgrade().ok_or_else(|| "Manager window disappeared during texture update".to_string())?;
-                    window.set_stage_frame(image);
-                    window.set_stage_output_aspect(aspect);
-                    window.set_stage_native_width(width as f32);
-                    window.set_stage_native_height(height as f32);
+                    apply_stage_texture_update(&window, update)?;
                 }
                 Ok(())
             },
@@ -410,6 +417,25 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
     if let Some(error) = fatal_error.borrow_mut().take() {
         return Err(HostError::Renderer(error));
     }
+    Ok(())
+}
+
+fn apply_stage_texture_update(
+    window: &astra_emu_manager_ui_slint::ManagerWindow,
+    update: StageTextureUpdate,
+) -> Result<(), String> {
+    let image = slint::Image::try_from(update.texture)
+        .map_err(|_| "WGPU stage texture import failed".to_string())?;
+    window.set_stage_frame(image);
+    window.set_stage_output_aspect(update.raster_width as f32 / update.raster_height as f32);
+    window.set_stage_native_width(update.logical_width as f32);
+    window.set_stage_native_height(update.logical_height as f32);
+    window.set_stage_raster_width(update.raster_width as f32);
+    window.set_stage_raster_height(update.raster_height as f32);
+    window.set_stage_content_x(update.content.x as f32);
+    window.set_stage_content_y(update.content.y as f32);
+    window.set_stage_content_width(update.content.width as f32);
+    window.set_stage_content_height(update.content.height as f32);
     Ok(())
 }
 

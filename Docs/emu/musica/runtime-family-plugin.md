@@ -48,7 +48,7 @@ Config 使用来源的原生素材、控件坐标和共享 GPU Scene。Title 模
 
 全屏切换通过 Family API v7 的类型化窗口命令交给 Manager 窗口线程处理；`FrameInfo` 同时报告 physical raster 和 logical stage 尺寸，Family 不生成 letterbox，Manager 负责窗口输出与 pointer 逆映射。应用配置时提交一次，冷启动恢复已保存的全屏设置，取消不提交。无窗口的 Headless Host 明确拒绝窗口命令。字体选择与正文速度字段保留来源当前语义，不宣称新增字体或逐字渲染能力。真实游戏 Config、窗口切换与完整结局继续验收。
 
-Musica 的逻辑舞台固定为 `1280x720`。`render_scale` 在启动时只能选择 `1.0`、`1.5`、`2.0` 或 `3.0`，对应 `1280x720`、`1920x1080`、`2560x1440` 和 `3840x2160` 的 GPU raster canvas；尺寸、宽高比和显存预算不满足时启动失败，不回退到其他 scale。资源的 physical pixels、ANI 原点和 `TextureAsset` logical extent 与 VM、存档和剧情时间分开。正文按 raster scale 使用 AstraText 重新 shaping/rasterize glyph，再映射回逻辑坐标，避免把低密度 glyph 放大。公共 `Canvas2D` 和 `SceneCommand` 负责根 transform，Family 不复制另一套渲染器。
+Musica 的逻辑舞台固定为 `1280x720`。启动配置显式提供正整数 `render_width` 与 `render_height`，GPU raster canvas 按设备和内存能力创建任意尺寸；零值、溢出、超限或无法分配时启动失败，不静默改选四档尺寸。公共 `Canvas2D` 按统一 scale 计算居中的 aspect-fit viewport，viewport 外的 raster 保持黑色，Host 只把 viewport 内指针逆映射到逻辑坐标。资源的 physical pixels、ANI 原点和 `TextureAsset` logical extent 与 VM、存档和剧情时间分开。正文按实际 raster density 使用 AstraText 重新 shaping/rasterize glyph，再映射回逻辑坐标，避免把低密度 glyph 放大。公共 `Canvas2D` 和 `SceneCommand` 负责根 transform 与裁剪，Family 不复制另一套渲染器。
 
 
 Windows Sandbox 已经由真实 Manager 完成插件安装、扫描、标题启动、打开原生 System 页面、应用全屏及返回窗口模式。核心日志确认 DX12 discrete_gpu；窗口尺寸变化后标题与设置输入正常。该轮显式使用 NullAudioDevice，仅验证图形与交互，不计入真实音频或完整结局验收。

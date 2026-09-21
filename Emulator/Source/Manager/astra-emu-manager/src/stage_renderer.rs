@@ -5,9 +5,10 @@ use std::{
 };
 
 use astra_emu_family_api::{FamilyResult, FrameAlpha, FrameFormat, FrameView, FrameVisitor};
+use astra_media_core::{Canvas2D, Extent2D, Viewport2D};
 use astra_emu_manager::{
     effects::{FilterConfiguration, FilterEngine},
-    AstraUnderlayRenderer, WgpuFrameContext,
+    AstraUnderlayRenderer, StageTextureUpdate, WgpuFrameContext,
 };
 use wgpu::{Extent3d, TextureUsages};
 
@@ -169,18 +170,31 @@ impl AstraUnderlayRenderer for ManagerStageRenderer {
         )
     }
 
-    fn stage_texture(&self) -> Option<wgpu::Texture> {
-        self.output_texture.clone()
-    }
-
-    fn take_stage_texture_update(&mut self) -> Option<(wgpu::Texture, u32, u32)> {
+    fn take_stage_texture_update(&mut self) -> Result<Option<StageTextureUpdate>, String> {
         if !self.texture_dirty {
-            return None;
+            return Ok(None);
         }
-        self.texture_dirty = false;
-        self.output_texture
+        let texture = self
+            .output_texture
             .clone()
-            .map(|texture| (texture, self.logical_width, self.logical_height))
+            .ok_or_else(|| "ASTRA_EMU_HOST_RENDERER_OUTPUT_MISSING".to_owned())?;
+        let content = content_viewport_for_output(
+            self.logical_width,
+            self.logical_height,
+            self.input_width,
+            self.input_height,
+            texture.width(),
+            texture.height(),
+        )?;
+        self.texture_dirty = false;
+        Ok(Some(StageTextureUpdate {
+            raster_width: texture.width(),
+            raster_height: texture.height(),
+            texture,
+            logical_width: self.logical_width,
+            logical_height: self.logical_height,
+            content,
+        }))
     }
 
     fn render(&mut self, context: WgpuFrameContext<'_>) -> Result<(), String> {
@@ -330,6 +344,74 @@ fn validate_dimensions(device: &wgpu::Device, width: u32, height: u32) -> Result
         ));
     }
     Ok(())
+}
+
+pub(crate) fn content_viewport_for_output(
+    logical_width: u32,
+    logical_height: u32,
+    input_width: u32,
+    input_height: u32,
+    output_width: u32,
+    output_height: u32,
+) -> Result<Viewport2D, String> {
+    if input_width == 0 || input_height == 0 || output_width == 0 || output_height == 0 {
+        return Err("ASTRA_EMU_HOST_FRAME_DIMENSIONS".into());
+    }
+    let canvas = Canvas2D::new(
+        Extent2D::new(logical_width, logical_height),
+        Extent2D::new(input_width, input_height),
+    )
+    .map_err(|_| "ASTRA_EMU_HOST_FRAME_DIMENSIONS".to_owned())?;
+    let input = canvas.viewport();
+    let right = input
+        .x
+        .checked_add(input.width)
+        .ok_or_else(|| "ASTRA_EMU_HOST_FRAME_DIMENSIONS".to_owned())?;
+    let bottom = input
+        .y
+        .checked_add(input.height)
+        .ok_or_else(|| "ASTRA_EMU_HOST_FRAME_DIMENSIONS".to_owned())?;
+    let x = scale_edge(input.x, output_width, input_width, false)?;
+    let y = scale_edge(input.y, output_height, input_height, false)?;
+    let output_right = scale_edge(right, output_width, input_width, true)?;
+    let output_bottom = scale_edge(bottom, output_height, input_height, true)?;
+    let right = output_right.min(output_width);
+    let bottom = output_bottom.min(output_height);
+    let width = right.saturating_sub(x).max(1);
+    let height = bottom.saturating_sub(y).max(1);
+    let right_edge = x
+        .checked_add(width)
+        .ok_or_else(|| "ASTRA_EMU_HOST_FRAME_DIMENSIONS".to_owned())?;
+    let bottom_edge = y
+        .checked_add(height)
+        .ok_or_else(|| "ASTRA_EMU_HOST_FRAME_DIMENSIONS".to_owned())?;
+    if x >= output_width
+        || y >= output_height
+        || right_edge > output_width
+        || bottom_edge > output_height
+    {
+        return Err("ASTRA_EMU_HOST_FRAME_DIMENSIONS".into());
+    }
+    Ok(Viewport2D {
+        x,
+        y,
+        width,
+        height,
+    })
+}
+
+fn scale_edge(value: u32, output: u32, input: u32, ceil: bool) -> Result<u32, String> {
+    let product = u128::from(value) * u128::from(output);
+    let denominator = u128::from(input);
+    let value = if ceil {
+        product
+            .checked_add(denominator - 1)
+            .ok_or_else(|| "ASTRA_EMU_HOST_FRAME_DIMENSIONS".to_owned())?
+            / denominator
+    } else {
+        product / denominator
+    };
+    u32::try_from(value).map_err(|_| "ASTRA_EMU_HOST_FRAME_DIMENSIONS".to_owned())
 }
 
 fn create_stage_texture(

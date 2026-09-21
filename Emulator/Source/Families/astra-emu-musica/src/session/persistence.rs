@@ -47,7 +47,13 @@ impl MusicaSession {
         let vm = postcard::to_allocvec(&state)
             .map_err(|_| error("ASTRA_EMU_MUSICA_SAVE_STATE", "VM state cannot be saved"))?;
         let pixels = self.gameplay_frame.as_ref().unwrap_or(&self.scene.pixels);
-        let card = crate::storage::SaveCard::capture(self.info.width, self.info.height, pixels)?;
+        let card = crate::storage::SaveCard::capture(
+            self.info.logical_width,
+            self.info.logical_height,
+            self.info.width,
+            self.info.height,
+            pixels,
+        )?;
         self.storage.write(
             slot,
             &Snapshot {
