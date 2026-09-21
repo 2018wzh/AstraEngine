@@ -20,6 +20,32 @@ pub(crate) fn rfvp_operation(error: RfvpError, operation: &'static str) -> Famil
         RfvpError::CapacityExceeded => "ASTRA_EMU_FVP_RFVP_CAPACITY",
         RfvpError::EndOfFile => "ASTRA_EMU_FVP_RFVP_EOF",
         RfvpError::Backend => "ASTRA_EMU_FVP_RFVP_BACKEND",
+        RfvpError::UnsupportedSnapshotVersion => "ASTRA_EMU_FVP_RFVP_UNSUPPORTED_SNAPSHOT_VERSION",
     };
-    FamilyError::invalid(code, format!("RFVP rejected {operation}"))
+    let message = if matches!(error, RfvpError::UnsupportedSnapshotVersion) {
+        format!("RFVP rejected {operation}: snapshot version is unsupported")
+    } else {
+        format!("RFVP rejected {operation}")
+    };
+    FamilyError::invalid(code, message)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::rfvp_operation;
+    use rfvp::host_api::RfvpError;
+
+    #[test]
+    fn unsupported_snapshot_version_has_stable_diagnostic() {
+        let error = rfvp_operation(RfvpError::UnsupportedSnapshotVersion, "snapshot restore");
+
+        assert_eq!(
+            error.code(),
+            "ASTRA_EMU_FVP_RFVP_UNSUPPORTED_SNAPSHOT_VERSION"
+        );
+        assert_eq!(
+            error.message.as_str(),
+            "RFVP rejected snapshot restore: snapshot version is unsupported"
+        );
+    }
 }
