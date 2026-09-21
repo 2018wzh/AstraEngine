@@ -127,9 +127,10 @@ pub enum FamilyWindowCommand {
 pub struct AdvanceResponse {
     pub status: FamilyStatus,
     pub window_command: ROption<FamilyWindowCommand>,
-    /// A successful restore or explicit session restart established a new
-    /// playback timeline. Start the next wall-time interval after this call
-    /// and its frame capture complete; do not replay loading time.
+    /// A successful restore, explicit session restart, or Family-defined
+    /// pause/resume transition established a new playback timeline. Start the
+    /// next wall-time interval after this call and its frame capture complete;
+    /// do not replay loading or paused time.
     pub reset_clock: bool,
 }
 

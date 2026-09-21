@@ -24,7 +24,7 @@ Host 只提供 game_path、初始 WindowState 和输入。Family 自持 VM、文
 
 ## 窗口请求
 
-`AdvanceResponse.reset_clock` 默认 false。成功读档或重新开始建立新的播放时间线时，核心提交一次 true；实时 Host 在本次 advance 和最终帧复制完成后重新计算计时起点与下一帧期限，避免把恢复资源的耗时计入新时间线。普通帧仍计入核心执行耗时，不放宽核心的 elapsed 上限。失败操作不提交重置；固定步长 Headless 不依赖墙钟，无需调整其步长。
+`AdvanceResponse.reset_clock` 默认 false。成功读档、重新开始或 Family 定义的暂停/恢复生命周期建立新的播放时间线时，核心提交一次 true；实时 Host 在本次 advance 和最终帧复制完成后重新计算计时起点与下一帧期限，避免把恢复、暂停或生命周期处理耗时计入新时间线。窗口暂停期间的墙钟累计由 Family 丢弃，恢复调用可以消费当前正常帧间隔，但不能补跑暂停累计。普通活动帧仍计入核心执行耗时，`elapsed_ns > 1s` 的 Musica 活动帧仍返回有界诊断，不静默截断。失败操作不提交重置；固定步长 Headless 不依赖墙钟，无需调整其步长。
 
 `AdvanceResponse.window_command` 为可选的 `FamilyWindowCommand::SetFullscreen(bool)`。每次 advance 最多提交一个窗口请求，无 native handle、回调或 UI 类型穿过 ABI。Manager 在窗口线程应用请求；设置保留到下一个请求或会话关闭，退出及错误关闭恢复普通窗口。无窗口的 Headless Host 遇到请求返回 `ASTRA_EMU_HEADLESS_WINDOW_COMMAND_UNAVAILABLE` 并走正常关闭流程，不静默忽略。核心在原生设置应用成功时提交请求，取消草稿不提交；需要恢复全屏的冷启动在首次 advance 提交。
 

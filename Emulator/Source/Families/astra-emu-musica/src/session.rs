@@ -162,6 +162,58 @@ impl MusicaSession {
             events: events.to_vec().into(),
         }
         .validate()?;
+        let mut focused = self.focused;
+        let mut visible = self.visible;
+        let mut suspended = self.suspended;
+        let mut was_paused = suspended
+            || !visible
+            || (!focused && !self.progress_in_background);
+        let mut discard_elapsed = false;
+        let mut resumed_from_pause = false;
+        for event in events {
+            match event {
+                FamilyEvent::WindowFocused { focused: value } => {
+                    focused = *value;
+                }
+                FamilyEvent::WindowVisibility { visible: value } => {
+                    visible = *value;
+                }
+                FamilyEvent::WindowSuspended { suspended: value } => {
+                    suspended = *value;
+                }
+                _ => {}
+            }
+            if matches!(
+                event,
+                FamilyEvent::WindowFocused { .. }
+                    | FamilyEvent::WindowVisibility { .. }
+                    | FamilyEvent::WindowSuspended { .. }
+            ) {
+                let paused = suspended
+                    || !visible
+                    || (!focused && !self.progress_in_background);
+                if !was_paused && paused {
+                    discard_elapsed = true;
+                } else if was_paused && !paused {
+                    resumed_from_pause = true;
+                }
+                was_paused = paused;
+            }
+        }
+        let lifecycle_paused = suspended
+            || !visible
+            || (!focused && !self.progress_in_background);
+        let elapsed_ns = if discard_elapsed || lifecycle_paused {
+            0
+        } else if resumed_from_pause {
+            if elapsed_ns > 1_000_000_000 {
+                0
+            } else {
+                elapsed_ns
+            }
+        } else {
+            elapsed_ns
+        };
         if elapsed_ns > 1_000_000_000 {
             tracing::warn!(
                 event = "astra.emu.musica.elapsed_rejected",

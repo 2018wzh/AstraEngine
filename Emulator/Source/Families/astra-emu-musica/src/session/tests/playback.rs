@@ -190,6 +190,85 @@ fn native_gpu_visibility_event_reaches_title_and_pauses_playback() {
 }
 
 #[test]
+fn native_gpu_lifecycle_precedes_elapsed_guard_and_drops_paused_wall_time() {
+    let _session = PROVIDER_SESSION.lock().unwrap();
+    for (pause, resume) in [
+        (
+            FamilyEvent::WindowFocused { focused: false },
+            FamilyEvent::WindowFocused { focused: true },
+        ),
+        (
+            FamilyEvent::WindowVisibility { visible: false },
+            FamilyEvent::WindowVisibility { visible: true },
+        ),
+        (
+            FamilyEvent::WindowSuspended { suspended: true },
+            FamilyEvent::WindowSuspended { suspended: false },
+        ),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        fixture::game(root.path(), b".wait 1000\r\n.end\r\n");
+        let mut req = request(root.path(), Sink::default());
+        req.configuration.push(ConfigEntry {
+            id: "launch_mode".into(),
+            value: ConfigValue::Enum("direct".into()),
+        });
+        let (_, mut session) = MusicaProvider::default().open_session(req).unwrap();
+        session.advance(16_666_667, &[]).unwrap();
+        let before = session.vm.state().fixed_tick;
+
+        let response = session.advance(1_000_000_001, &[pause]).unwrap();
+        assert!(response.reset_clock);
+        assert!(session.paused());
+        assert_eq!(session.vm.state().fixed_tick, before);
+
+        session.advance(1_000_000_001, &[]).unwrap();
+        assert_eq!(session.vm.state().fixed_tick, before);
+
+        let response = session.advance(1_000_000_001, &[resume]).unwrap();
+        assert!(response.reset_clock);
+        assert!(!session.paused());
+        assert_eq!(session.vm.state().fixed_tick, before);
+
+        session.advance(16_666_667, &[]).unwrap();
+        assert!(session.vm.state().fixed_tick > before);
+        Box::new(session).close().unwrap();
+    }
+}
+
+#[test]
+fn native_gpu_background_focus_remains_active_but_keeps_elapsed_guard() {
+    let _session = PROVIDER_SESSION.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    fixture::game(root.path(), b".wait 1000\r\n.end\r\n");
+    let mut req = request(root.path(), Sink::default());
+    req.configuration.push(ConfigEntry {
+        id: "launch_mode".into(),
+        value: ConfigValue::Enum("direct".into()),
+    });
+    req.configuration.push(ConfigEntry {
+        id: "progress_in_background".into(),
+        value: ConfigValue::Bool(true),
+    });
+    let (_, mut session) = MusicaProvider::default().open_session(req).unwrap();
+    session.advance(16_666_667, &[]).unwrap();
+    let before = session.vm.state().fixed_tick;
+    let response = session
+        .advance(
+            200_000_000,
+            &[FamilyEvent::WindowFocused { focused: false }],
+        )
+        .unwrap();
+    assert!(!response.reset_clock);
+    assert!(!session.paused());
+    assert!(session.vm.state().fixed_tick > before);
+
+    let error = session.advance(1_000_000_001, &[]).unwrap_err();
+    assert_eq!(error.code.as_str(), "ASTRA_EMU_MUSICA_ELAPSED");
+    Box::new(session).close().unwrap();
+}
+
+#[test]
 fn native_gpu_active_elapsed_remains_bounded() {
     let _session = PROVIDER_SESSION.lock().unwrap();
     let root = tempfile::tempdir().unwrap();
