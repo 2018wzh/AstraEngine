@@ -423,25 +423,22 @@ impl Scene {
             .sequence
             .checked_add(1)
             .ok_or_else(|| error("ASTRA_EMU_MUSICA_FRAME_SEQUENCE", "frame sequence overflow"))?;
+        let viewport = self
+            .canvas
+            .viewport_rect()
+            .map_err(|_| error("ASTRA_EMU_MUSICA_CANVAS", "stage viewport is invalid"))?;
         let mut mapped = Vec::with_capacity(commands.len() + 4);
+        // The viewport is a raster-space boundary. Push it while the command
+        // stack is still in identity space, then map logical commands into
+        // the viewport. This keeps the exact integer edge for fractional
+        // aspect-fit scales without changing nested clip semantics.
+        mapped.push(SceneCommand::PushClip { rect: viewport });
         mapped.push(SceneCommand::PushTransform {
             transform: self.canvas.logical_to_raster_transform(),
         });
-        // Commands are authored in the fixed logical stage. Applying this
-        // clip after the root transform keeps shake, negative-origin sprites,
-        // and any child command inside the content viewport; the clear still
-        // covers the complete raster so the surrounding bars remain black.
-        mapped.push(SceneCommand::PushClip {
-            rect: RectI {
-                x: 0,
-                y: 0,
-                width: self.width,
-                height: self.height,
-            },
-        });
         mapped.extend(commands);
-        mapped.push(SceneCommand::PopClip);
         mapped.push(SceneCommand::PopTransform);
+        mapped.push(SceneCommand::PopClip);
         self.pixels = self
             .renderer
             .render(&SceneFrame {

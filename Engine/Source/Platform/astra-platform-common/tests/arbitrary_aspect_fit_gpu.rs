@@ -35,6 +35,8 @@ async fn native_gpu_preserves_aspect_fit_bars_for_arbitrary_rasters() {
         Extent2D::new(720, 1280),
         Extent2D::new(640, 360),
         Extent2D::new(96, 54),
+        Extent2D::new(1, 720),
+        Extent2D::new(720, 1),
         Extent2D::new(1279, 719),
     ]
     .into_iter()
@@ -46,15 +48,15 @@ async fn native_gpu_preserves_aspect_fit_bars_for_arbitrary_rasters() {
             .unwrap();
         let viewport = canvas.viewport();
         let commands = vec![
+            SceneCommand::PushClip {
+                rect: canvas.viewport_rect().unwrap(),
+            },
             SceneCommand::PushTransform {
                 transform: canvas.logical_to_raster_transform(),
             },
-            SceneCommand::PushClip {
-                rect: RectI::new(0, 0, 1280, 720),
-            },
             SceneCommand::rect("full.logical", 0, 0, 1280, 720, [255, 255, 255, 255]),
             // A displaced oversized primitive models sprite crop plus shake;
-            // the logical root clip must still keep it out of the bars.
+            // The raster viewport clip must still keep it out of the bars.
             SceneCommand::PushTransform {
                 transform: Transform2D::translation(40.0, 40.0),
             },
@@ -126,15 +128,15 @@ async fn native_gpu_preserves_aspect_fit_bars_for_arbitrary_rasters() {
                 height: raster.height,
                 clear_rgba: [0, 0, 0, 255],
                 commands: vec![
+                    SceneCommand::PushClip {
+                        rect: canvas.viewport_rect().unwrap(),
+                    },
                     SceneCommand::PushTransform {
                         transform: canvas.logical_to_raster_transform(),
                     },
-                    SceneCommand::PushClip {
-                        rect: RectI::new(0, 0, 1280, 720),
-                    },
                     SceneCommand::rect("filtered.logical", 0, 0, 1280, 720, [255; 4]),
-                    SceneCommand::PopClip,
                     SceneCommand::PopTransform,
+                    SceneCommand::PopClip,
                     SceneCommand::FilterGraph {
                         graph: FilterGraph {
                             schema: "astra.filter_graph.v1".into(),
@@ -166,4 +168,73 @@ async fn native_gpu_preserves_aspect_fit_bars_for_arbitrary_rasters() {
             }
         }
     }
+}
+
+#[tokio::test]
+#[ignore = "requires a native hardware GPU runner"]
+async fn native_gpu_keeps_tiny_root_and_fractional_nested_clip_edges() {
+    let mut renderer = WgpuOffscreenRenderer::new().await.unwrap();
+    assert_ne!(renderer.identity().device_type, "cpu");
+
+    let tiny = Canvas2D::new(Extent2D::new(1280, 720), Extent2D::new(1, 1)).unwrap();
+    let tiny_frame = renderer
+        .render(&SceneFrame {
+            sequence: 1,
+            width: 1,
+            height: 1,
+            clear_rgba: [0, 0, 0, 255],
+            commands: vec![
+                SceneCommand::PushClip {
+                    rect: tiny.viewport_rect().unwrap(),
+                },
+                SceneCommand::PushTransform {
+                    transform: tiny.logical_to_raster_transform(),
+                },
+                SceneCommand::rect("tiny.logical", 0, 0, 1280, 720, [255, 0, 0, 255]),
+                SceneCommand::PopTransform,
+                SceneCommand::PopClip,
+            ],
+            semantics: None,
+        })
+        .unwrap();
+    assert_eq!(tiny_frame.rgba8.as_ref(), &[255, 0, 0, 255]);
+
+    let fractional = Transform2D::translation(0.25, 0.25);
+    let nested_frame = renderer
+        .render(&SceneFrame {
+            sequence: 2,
+            width: 4,
+            height: 4,
+            clear_rgba: [0, 0, 0, 255],
+            commands: vec![
+                SceneCommand::PushClip {
+                    rect: RectI::new(0, 0, 4, 4),
+                },
+                SceneCommand::PushTransform {
+                    transform: fractional,
+                },
+                SceneCommand::PushClip {
+                    rect: RectI::new(0, 0, 2, 2),
+                },
+                SceneCommand::rect("fractional.clip", 0, 0, 4, 4, [0, 255, 0, 255]),
+                SceneCommand::PopClip,
+                SceneCommand::PopTransform,
+                SceneCommand::PopClip,
+            ],
+            semantics: None,
+        })
+        .unwrap();
+    let pixels = nested_frame.rgba8.as_chunks::<4>().0;
+    assert_eq!(pixels[0], [0, 255, 0, 255]);
+    assert_eq!(pixels[1], [0, 255, 0, 255]);
+    assert_eq!(pixels[2], [0, 255, 0, 255]);
+    assert_eq!(pixels[3], [0, 0, 0, 255]);
+    assert_eq!(pixels[4], [0, 255, 0, 255]);
+    assert_eq!(pixels[5], [0, 255, 0, 255]);
+    assert_eq!(pixels[6], [0, 255, 0, 255]);
+    assert_eq!(pixels[7], [0, 0, 0, 255]);
+    assert_eq!(pixels[8], [0, 255, 0, 255]);
+    assert_eq!(pixels[9], [0, 255, 0, 255]);
+    assert_eq!(pixels[10], [0, 255, 0, 255]);
+    assert_eq!(pixels[11], [0, 0, 0, 255]);
 }

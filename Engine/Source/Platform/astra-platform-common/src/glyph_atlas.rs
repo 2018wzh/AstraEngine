@@ -894,10 +894,8 @@ impl WgpuGlyphAtlasRenderer {
                     }
                 }
                 SceneCommand::PushClip { rect } => {
-                    let rect = transformed_clip_bounds(
-                        current_transform(camera, &transform_stack),
-                        *rect,
-                    )?;
+                    let rect =
+                        transformed_bounds(current_transform(camera, &transform_stack), *rect)?;
                     let clip = intersect_clip(
                         clip_stack.last().copied(),
                         rect,
@@ -3770,51 +3768,6 @@ fn transformed_bounds(transform: Transform2D, rect: RectI) -> Result<RectI, Plat
     let height = u32::try_from(bottom - i64::from(top))
         .map_err(|_| invalid("transformed scene clip height overflowed"))?;
     Ok(RectI::new(left, top, width, height))
-}
-
-/// Keeps the integer content viewport closed at the same edge as Canvas2D.
-/// Rotated/sheared transforms retain the conservative four-corner bounds above;
-/// only the positive axis-aligned root path gets exact half-open edge rounding.
-fn transformed_clip_bounds(transform: Transform2D, rect: RectI) -> Result<RectI, PlatformError> {
-    validate_transform(transform)?;
-    if transform.m12 == 0.0
-        && transform.m21 == 0.0
-        && transform.m11 > 0.0
-        && transform.m22 > 0.0
-        && transform.tx.fract() == 0.0
-        && transform.ty.fract() == 0.0
-    {
-        let x0 = transform.m11 * rect.x as f32 + transform.tx;
-        let y0 = transform.m22 * rect.y as f32 + transform.ty;
-        let x1 = transform.m11 * (rect.x as f32 + rect.width as f32) + transform.tx;
-        let y1 = transform.m22 * (rect.y as f32 + rect.height as f32) + transform.ty;
-        let left = clip_edge_to_i32(x0)?;
-        let top = clip_edge_to_i32(y0)?;
-        let right = clip_edge_to_i32(x1)?;
-        let bottom = clip_edge_to_i32(y1)?;
-        let width = u32::try_from(i64::from(right) - i64::from(left))
-            .map_err(|_| invalid("transformed scene clip width overflowed"))?;
-        let height = u32::try_from(i64::from(bottom) - i64::from(top))
-            .map_err(|_| invalid("transformed scene clip height overflowed"))?;
-        return Ok(RectI::new(left, top, width, height));
-    }
-    transformed_bounds(transform, rect)
-}
-
-fn clip_edge_to_i32(value: f32) -> Result<i32, PlatformError> {
-    if !value.is_finite() || value < i32::MIN as f32 || value > i32::MAX as f32 {
-        return Err(invalid(
-            "transformed scene clip is outside supported coordinates",
-        ));
-    }
-    let nearest = value.round();
-    let precision = 4.0 * f32::EPSILON * value.abs().max(1.0);
-    let edge = if (value - nearest).abs() <= precision {
-        nearest
-    } else {
-        value.floor()
-    };
-    Ok(edge as i32)
 }
 
 fn create_pipelines(
