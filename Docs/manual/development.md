@@ -27,6 +27,10 @@ cargo xtask check --workspace engine
 
 Windows 完成长流程，Linux/macOS/Android 完成代表流程和平台特性；没有 GPU、音频设备或商业源时不得声称相关真实流程通过。
 
+Android Player 的构建入口是 `Tools/build_android.py`。AGP 9.3.0 配合 Gradle 9.5.0，构建脚本固定使用 JDK 17；设置 `JAVA_HOME` 时，校验与 Gradle 都使用该目录的 Java，而不是 PATH 中另一版本。SDK、NDK、Gradle 缓存只对当前构建进程设置，独占工作树的输出不能指向其他实例。
+
+Android 游戏包必须包含对应 Android host profile；不能把 Windows profile 的包改扩展名后当作 Android 包。Player 从包的 `player.display_config` 读取逻辑舞台尺寸，实际窗口尺寸和安全区由设备事件更新。设备验收应覆盖触控、系统返回、前后台、声音、存读档与重新启动，编译成功不代表这些流程已通过。
+
 Windows 独立 Player 包通过 `--windows-runtime` 显式提供与 Player 构建工具链匹配的 Microsoft VC x64 CRT 可再发行目录。打包器使用 object 解析器验证全部 DLL 为 x64 PE 动态库，再复制并加入既有 bundle 文件清单；截断 PE、错误架构或非 DLL 文件在复制运行库前失败。缺少 `msvcp140.dll`、`vcruntime140.dll` 或 `vcruntime140_1.dll` 时失败。目标机器无需依赖开发机已安装的 VC Runtime。目录须使用 Microsoft 允许随应用分发的运行库，不能用调试版 DLL 代替。
 
 ```sh

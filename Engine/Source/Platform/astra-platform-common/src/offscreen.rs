@@ -1324,6 +1324,7 @@ fn float_param(
 
 /// Reuses the backend policy of the corresponding native platform host.
 pub fn native_wgpu_instance() -> Result<wgpu::Instance, PlatformError> {
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
     #[cfg(target_os = "windows")]
     {
@@ -1340,11 +1341,12 @@ pub fn native_wgpu_instance() -> Result<wgpu::Instance, PlatformError> {
     }
     #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
     {
-        return Err(unavailable(
+        Err(unavailable(
             "offscreen.platform",
             "offscreen GPU is implemented only for Windows, Linux, and macOS",
-        ));
+        ))
     }
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     Ok(wgpu::Instance::new(descriptor))
 }
 

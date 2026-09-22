@@ -21,8 +21,24 @@ mod android {
         profiles: Vec<serde_json::Value>,
     }
 
+    #[derive(Deserialize)]
+    struct DisplayConfig {
+        schema: String,
+        original_resolution: DisplayResolution,
+    }
+
+    #[derive(Deserialize)]
+    struct DisplayResolution {
+        width: u32,
+        height: u32,
+    }
+
     #[unsafe(no_mangle)]
     pub fn android_main(app: AndroidApp) {
+        let mut logging = astra_observability::HostObservabilityConfig::for_cli("info");
+        logging.role = astra_observability::HostRole::Player;
+        let _logging = astra_observability::init_host(logging)
+            .expect("Android Player logging initialization failed");
         if let Err(error) = run(app) {
             tracing::error!(
                 event = "player.android.host.failed",
@@ -82,12 +98,28 @@ mod android {
         let locale = astra_vn_package::load_player_locale_config(&package)
             .map_err(|error| player_error("player.package.locale", error))?
             .default_locale;
+        let display: DisplayConfig = serde_json::from_slice(
+            &package
+                .container()
+                .read_section("player.display_config")
+                .map_err(|error| player_error("player.package.display", error))?,
+        )
+        .map_err(|error| player_error("player.package.display", error))?;
+        if display.schema != "astra.player_display_config.v1"
+            || !(1..=16_384).contains(&display.original_resolution.width)
+            || !(1..=16_384).contains(&display.original_resolution.height)
+        {
+            return Err(player_error(
+                "player.package.display",
+                "invalid display configuration",
+            ));
+        }
         let config = astra_player::NativeVnPlayerSessionConfig {
             profile: manifest.profile,
             locale,
             bundled_package_path: "game.astrapkg".to_string(),
-            width: 1280,
-            height: 720,
+            width: display.original_resolution.width,
+            height: display.original_resolution.height,
         };
         drop(package);
         astra_platform_android::run_player_host(

@@ -6,7 +6,9 @@ use std::sync::{
 };
 use std::{cell::Cell, fmt};
 
+// Android's fallback TLS expansion triggers this lint even with a const initializer.
 thread_local! {
+    #[cfg_attr(target_os = "android", allow(clippy::missing_const_for_thread_local))]
     static SCOPED_BROKER: Cell<Option<(*const BrokerInner, usize)>> = const { Cell::new(None) };
 }
 

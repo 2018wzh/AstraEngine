@@ -2,7 +2,7 @@ use std::{
     collections::BTreeMap,
     sync::{mpsc as std_mpsc, Arc},
     thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use android_activity::AndroidApp;

@@ -12,8 +12,8 @@ use astra_platform::{
 use astra_platform_common::{NativeAudioConsumer, NativeAudioProducer, NativeAudioQueue};
 use oboe::{
     AudioApi, AudioOutputCallback, AudioOutputStream, AudioStream, AudioStreamAsync,
-    AudioStreamBase, AudioStreamBuilder, AudioStreamSafe, ContentType, DataCallbackResult, Mono,
-    Output, PerformanceMode, SharingMode, Stereo, Usage,
+    AudioStreamBuilder, AudioStreamSafe, ContentType, DataCallbackResult, Mono, Output,
+    PerformanceMode, SharingMode, Stereo, Usage,
 };
 
 pub(crate) struct AndroidAudioResource {

@@ -99,7 +99,16 @@ def copy_cxx_runtime(sdk: pathlib.Path, jni_dir: pathlib.Path, abis: list[str]) 
 
 
 def validate_java() -> tuple[str, pathlib.Path]:
-    java = pathlib.Path(require_tool("java")).resolve()
+    # Inspect the same pinned JDK 17 launcher
+    # gradlew will use (JAVA_HOME takes precedence over PATH).
+    java_home = os.environ.get("JAVA_HOME")
+    java = (
+        pathlib.Path(java_home) / "bin" / ("java.exe" if os.name == "nt" else "java")
+        if java_home
+        else pathlib.Path(require_tool("java"))
+    ).resolve()
+    if not java.is_file():
+        raise BuildError("ASTRA_ANDROID_JDK_MISSING: JAVA_HOME has no Java launcher")
     output = subprocess.run(
         [java, "-version"], check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
     ).stdout

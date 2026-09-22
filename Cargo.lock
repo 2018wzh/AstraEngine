@@ -1040,6 +1040,7 @@ version = "0.1.0"
 dependencies = [
  "android-activity",
  "astra-core",
+ "astra-observability",
  "astra-package",
  "astra-platform",
  "astra-platform-android",

@@ -108,6 +108,19 @@ pub async fn run_native_vn_player_session(
         .map_err(|error| player_error_owned("player.host.execute", error))?;
 
     let mut pointer = (0.0_f64, 0.0_f64);
+    let mut viewport = UiViewport {
+        physical_width: config.width,
+        physical_height: config.height,
+        scale_factor: 1.0,
+        font_scale: 1.0,
+        safe_area_points: UiInsets {
+            left: 0.0,
+            top: 0.0,
+            right: 0.0,
+            bottom: 0.0,
+        },
+    };
+    let mut window_insets = [0_u32; 4];
     let mut save_transaction_id = 1000_u64;
     let timeline_clock = std::time::Instant::now();
     let mut media = NativeVnProductMediaHost::default();
@@ -162,35 +175,29 @@ pub async fn run_native_vn_player_session(
                     height,
                     scale_factor,
                 } if resized == window && width > 0 && height > 0 => {
+                    viewport.physical_width = width;
+                    viewport.physical_height = height;
+                    viewport.scale_factor = scale_factor as f32;
+                    viewport.safe_area_points = UiInsets {
+                        left: window_insets[0] as f32 / viewport.scale_factor,
+                        top: window_insets[1] as f32 / viewport.scale_factor,
+                        right: window_insets[2] as f32 / viewport.scale_factor,
+                        bottom: window_insets[3] as f32 / viewport.scale_factor,
+                    };
                     Some(UiInputEventKind::Resize {
-                        viewport: UiViewport {
-                            physical_width: width,
-                            physical_height: height,
-                            scale_factor: scale_factor as f32,
-                            font_scale: 1.0,
-                            safe_area_points: UiInsets {
-                                left: 0.0,
-                                top: 0.0,
-                                right: 0.0,
-                                bottom: 0.0,
-                            },
-                        },
+                        viewport: viewport.clone(),
                     })
                 }
                 PlatformEventKind::WindowInsetsChanged { insets, .. } => {
+                    window_insets = [insets.left, insets.top, insets.right, insets.bottom];
+                    viewport.safe_area_points = UiInsets {
+                        left: insets.left as f32 / viewport.scale_factor,
+                        top: insets.top as f32 / viewport.scale_factor,
+                        right: insets.right as f32 / viewport.scale_factor,
+                        bottom: insets.bottom as f32 / viewport.scale_factor,
+                    };
                     Some(UiInputEventKind::Resize {
-                        viewport: UiViewport {
-                            physical_width: config.width,
-                            physical_height: config.height,
-                            scale_factor: 1.0,
-                            font_scale: 1.0,
-                            safe_area_points: UiInsets {
-                                left: insets.left as f32,
-                                top: insets.top as f32,
-                                right: insets.right as f32,
-                                bottom: insets.bottom as f32,
-                            },
-                        },
+                        viewport: viewport.clone(),
                     })
                 }
                 PlatformEventKind::Keyboard {

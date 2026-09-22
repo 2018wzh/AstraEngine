@@ -24,7 +24,10 @@ static ALLOCATED_BYTES: AtomicU64 = AtomicU64::new(0);
 static ALLOCATION_COUNT: AtomicU64 = AtomicU64::new(0);
 
 thread_local! {
+    // Android's fallback TLS expansion is misdiagnosed despite const initialization.
+    #[cfg_attr(target_os = "android", allow(clippy::missing_const_for_thread_local))]
     static THREAD_ALLOCATED_BYTES: Cell<u64> = const { Cell::new(0) };
+    #[cfg_attr(target_os = "android", allow(clippy::missing_const_for_thread_local))]
     static THREAD_ALLOCATION_COUNT: Cell<u64> = const { Cell::new(0) };
 }
 

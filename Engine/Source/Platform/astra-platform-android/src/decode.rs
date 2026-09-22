@@ -326,7 +326,7 @@ fn decode_audio_media_codec(
     }
     let input = TempInput::create(temp_root, &request.bytes)?;
     let mut extractor = Extractor::new(&input.file)?;
-    let (track_index, mut track_format, mime) = extractor.select_track(request.kind)?;
+    let (track_index, track_format, mime) = extractor.select_track(request.kind)?;
     validate_codec_name(&request.codec, &mime, request.kind)?;
     let sample_rate = track_format
         .i32("sample-rate")
