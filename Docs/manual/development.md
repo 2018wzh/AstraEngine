@@ -1,6 +1,6 @@
 # 开发与测试
 
-在仓库根目录运行 `cargo xtask`。Engine/VN/Player/共享库由根 workspace 管理，EMU 使用 `Emulator/Cargo.toml` 和独立 lockfile/target；Editor 将在实际 GPUI 实现接入时加入独立 workspace。共享库通过路径依赖复用，不复制源文件或产物。
+在仓库根目录运行 `cargo xtask`。Engine/VN/Player/共享库由根 workspace 管理，EMU 使用 `Emulator/Cargo.toml` 和独立 lockfile/target；Editor 使用 `Editor/Cargo.toml` 和独立 lockfile/target，入口见 [Editor 手册](../../Editor/README.md)。共享库通过路径依赖复用，不复制源文件或产物。
 
 ```bash
 cargo xtask docs

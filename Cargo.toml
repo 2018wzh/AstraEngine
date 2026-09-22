@@ -66,6 +66,7 @@ members = [
     "Engine/Plugins/Fixtures/ui-component-provider",
 ]
 exclude = [
+    "Editor",
     "Emulator",
     "Emulator/Source/Families/anzu-hal",
     "Emulator/Source/Families/na_mpeg2_decoder",
