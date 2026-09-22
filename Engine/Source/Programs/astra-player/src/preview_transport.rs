@@ -231,6 +231,12 @@ mod tests {
         }
         let _ = transport.send(&PreviewResponse::Stopped);
         drop(transport);
+        if mode == "blocked_output" {
+            // Drop has joined both workers and restored blocking stdio. The parent
+            // deliberately leaves stdout full: libtest's final status line would
+            // block here even though transport shutdown has already completed.
+            std::process::exit(0);
+        }
     }
     #[test]
     fn pipe_workers_join_with_stdin_still_open() {

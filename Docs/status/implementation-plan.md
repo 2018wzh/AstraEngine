@@ -565,3 +565,6 @@ Classic route.coverage.035 与 036 均通过 DX12 独显 Headless 抽样运行�
 main surface 修复后真实 Cook/package 与 Vulkan 硬件离屏场景通过。完整 12 秒 VP9 视频分支通过 52 条物理输入、7 个 checkpoint，实际查看首段、中段和结束画面；输出 WAV 为 48kHz 双声道、22.176 秒、非静音，未验证真实设备听音。保存/读取后额外按 Escape 返回剧情的诊断流程通过；严格“读取后自动回剧情”在本批基线仍失败，等待接入主线修复，不能用诊断流程替代该回归。
 
 本批调整 shade、复用人物 entity、保存页文案与缩略图尺寸；进一步将 replacement 延长为 8 秒以观察中途取消，并给保存列表加 viewport 裁剪。这两项最新调整已 Cook/package，尚待 GPU 看图；工具测试另行执行。没有生成新媒体，也没有修改历史审查结论。错误退出仍可能触发 GPU 清理竞争；缩放输出与缩略图捕获入口差异已报告共享 Player owner。TaskGroup 新基线、冷启动恢复、原生窗口/音频、完整路线与性能未验收。
+
+
+2026-09-22 Linux 接入 a8dd4625c 后，预览满 stdout 管道测试初次超时。实际检查子进程仅剩主线程阻塞在 pipe write，transport worker 已 join；原因是恢复 blocking stdio 后 libtest 继续向故意不读取的管道写结果。仅让该子进程用例在 transport Drop 返回后退出，保留真实背压与 join 检查，不修改生产传输。Linux 6 项、Player 22 项测试通过，1 项 subprocess helper 按设计忽略；新基线 NativeVN Cook 通过，GPU 严格 Load 回归继续执行。
