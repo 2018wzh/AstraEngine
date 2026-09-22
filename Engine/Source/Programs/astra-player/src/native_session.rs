@@ -24,6 +24,16 @@ pub async fn run_native_vn_player_session(
     package: PackageReader,
     config: NativeVnPlayerSessionConfig,
 ) -> Result<(), PlatformError> {
+    let mut outcome = run_native_vn_player_session_inner(&mut session, package, config).await;
+    record_cleanup(&mut outcome, session.client.shutdown().await);
+    outcome
+}
+
+async fn run_native_vn_player_session_inner(
+    session: &mut PlatformHostSession,
+    package: PackageReader,
+    config: NativeVnPlayerSessionConfig,
+) -> Result<(), PlatformError> {
     if config.profile.is_empty()
         || config.locale.is_empty()
         || config.width == 0
@@ -94,10 +104,9 @@ pub async fn run_native_vn_player_session(
     };
     let mut window_insets = [0_u32; 4];
     let mut save_transaction_id = 1000_u64;
-    let mut timeline_clock =
-        super::native_session_clock::ActiveSessionClock::new(std::time::Instant::now());
     let mut media = NativeVnProductMediaHost::default();
     let player_result: Result<(), PlatformError> = async {
+    crate::hydrate_save_catalog(&mut vn, &mut executor).await?;
     executor
         .execute_batch(
             vn.launch()
@@ -105,6 +114,7 @@ pub async fn run_native_vn_player_session(
         )
         .await
         .map_err(|error| player_error_owned("player.host.execute", error))?;
+        let mut timeline_clock = super::native_session_clock::ActiveSessionClock::new(std::time::Instant::now());
         media
             .process(
                 &mut vn,
@@ -387,7 +397,6 @@ pub async fn run_native_vn_player_session(
     );
     record_cleanup(&mut outcome, session.client.destroy_surface(surface).await);
     record_cleanup(&mut outcome, session.client.destroy_window(window).await);
-    record_cleanup(&mut outcome, session.client.shutdown().await);
     outcome
 }
 

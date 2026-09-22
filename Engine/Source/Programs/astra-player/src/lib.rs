@@ -15,6 +15,9 @@ pub use web_cdp::*;
 mod bundled_observability;
 pub use bundled_observability::*;
 
+mod save_catalog;
+pub use save_catalog::hydrate_save_catalog;
+
 mod native_session;
 mod native_session_clock;
 pub use native_session::*;

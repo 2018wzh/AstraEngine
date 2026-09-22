@@ -1032,6 +1032,111 @@ fn native_vn_source_rejects_catalog_slot_identity_mismatch() {
 }
 
 #[test]
+fn unavailable_catalog_slot_is_protected_while_other_slots_remain_playable() {
+    let ui = TEST_UI.replace("save_slots:\"slot.01\"", "save_slots:\"slot.01,slot.02\"");
+    let bytes = product_package_with_ui_and_request(STORY, &ui, test_compile_options(), |_| {});
+    let package = PackageReader::open(&bytes).unwrap();
+    let mut source = NativeVnHostCommandSource::from_package(
+        &package,
+        VnRunConfig::classic("en"),
+        320,
+        180,
+        PlayerHostResourceId(1),
+    )
+    .unwrap();
+    let old_header = postcard::to_allocvec("astra.player_vn_save_envelope.v8").unwrap();
+    assert!(source
+        .ingest_save_catalog_entry("slot.01", &old_header)
+        .is_err());
+    source.reject_save_catalog_entry("slot.01");
+    source.launch().unwrap();
+    assert_eq!(
+        source
+            .product_observation_evidence()
+            .unwrap()
+            .occupied_save_slot_count,
+        1
+    );
+    assert!(source
+        .prepare_save_metadata("slot.01", "now".into(), 0)
+        .unwrap_err()
+        .to_string()
+        .contains("SAVE_SLOT_PROTECTED"));
+    assert!(source
+        .save("slot.01")
+        .unwrap_err()
+        .to_string()
+        .contains("SAVE_SLOT_PROTECTED"));
+    advance(&mut source);
+    prepare_test_save_metadata(&mut source, "slot.02");
+    let saved = source.save("slot.02").unwrap();
+    source.restore(&saved).unwrap();
+    advance(&mut source);
+    assert!(source
+        .prepare_save_metadata("slot.01", "later".into(), 1)
+        .unwrap_err()
+        .to_string()
+        .contains("SAVE_SLOT_PROTECTED"));
+    source.release_resources().unwrap();
+    source.shutdown().unwrap();
+}
+
+#[test]
+fn quick_keys_follow_declared_slot_and_reject_repeat_empty_and_protected_requests() {
+    let ui = TEST_UI
+        .replace("save_slots:\"slot.01\"", "save_slots:\"slot.01,slot.02\"")
+        .replace("quick_slot:\"\"", "quick_slot:\"slot.02\"");
+    let bytes = product_package_with_ui_and_request(STORY, &ui, test_compile_options(), |_| {});
+    let package = PackageReader::open(&bytes).unwrap();
+    let mut source = NativeVnHostCommandSource::from_package(
+        &package,
+        VnRunConfig::classic("en"),
+        320,
+        180,
+        PlayerHostResourceId(1),
+    )
+    .unwrap();
+    source.launch().unwrap();
+    let key = |name: &str, repeat| UiInputEventKind::Keyboard {
+        logical_key: name.into(),
+        physical_key: name.into(),
+        state: UiButtonState::Pressed,
+        repeat,
+        modifiers: 0,
+    };
+    source.dispatch_ui_event(key("F9", false)).unwrap();
+    assert!(source.take_ui_host_request().is_none());
+    source.dispatch_ui_event(key("F5", true)).unwrap();
+    assert!(source.take_ui_host_request().is_none());
+    source.dispatch_ui_event(key("F5", false)).unwrap();
+    assert!(
+        matches!(source.take_ui_host_request(), Some(astra_player_vn::VnUiHostRequest::Save { slot_id, .. }) if slot_id == "slot.02")
+    );
+    prepare_test_save_metadata(&mut source, "slot.02");
+    source.save("slot.02").unwrap();
+    source.mark_save_committed("slot.02").unwrap();
+    source.dispatch_ui_event(key("F9", false)).unwrap();
+    assert!(
+        matches!(source.take_ui_host_request(), Some(astra_player_vn::VnUiHostRequest::Load { slot_id }) if slot_id == "slot.02")
+    );
+    source.reject_save_catalog_entry("slot.02");
+    for name in ["F5", "F9"] {
+        source.dispatch_ui_event(key(name, false)).unwrap();
+        assert!(source.take_ui_host_request().is_none());
+    }
+    let mut no_quick = source_for(STORY);
+    no_quick.launch().unwrap();
+    for name in ["F5", "F9"] {
+        no_quick.dispatch_ui_event(key(name, false)).unwrap();
+        assert!(no_quick.take_ui_host_request().is_none());
+    }
+    source.release_resources().unwrap();
+    source.shutdown().unwrap();
+    no_quick.release_resources().unwrap();
+    no_quick.shutdown().unwrap();
+}
+
+#[test]
 fn native_vn_source_builds_atomic_platform_save_transaction() {
     let mut source = source_for(STORY);
     source.launch().unwrap();

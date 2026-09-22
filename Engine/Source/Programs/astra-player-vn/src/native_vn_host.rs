@@ -6,6 +6,7 @@ mod media_scope;
 mod presentation;
 mod product_save;
 mod runtime;
+mod save_catalog;
 mod viewport;
 use runtime::NativeVnRuntimeHost;
 
@@ -1081,6 +1082,11 @@ impl NativeVnHostCommandSource {
                 "ASTRA_PLAYER_SAVE_SLOT_UNKNOWN: UI requested undeclared slot {slot_id}"
             )));
         }
+        if !self.ui_save_slots[slot_id].can_write {
+            return Err(NativeVnHostError::Save(
+                "ASTRA_PLAYER_SAVE_SLOT_PROTECTED: unreadable save cannot be overwritten".into(),
+            ));
+        }
         if timestamp_text.trim().is_empty() || timestamp_text.len() > 64 {
             return Err(NativeVnHostError::Save(
                 "ASTRA_PLAYER_SAVE_TIMESTAMP: save timestamp must be a bounded non-empty string"
@@ -1504,6 +1510,15 @@ impl NativeVnHostCommandSource {
         if slot.trim().is_empty() {
             return Err(NativeVnHostError::Save(
                 "ASTRA_PLAYER_SAVE_SLOT_INVALID: save slot must not be empty".into(),
+            ));
+        }
+        if self
+            .ui_save_slots
+            .get(&slot)
+            .is_some_and(|entry| !entry.can_write)
+        {
+            return Err(NativeVnHostError::Save(
+                "ASTRA_PLAYER_SAVE_SLOT_PROTECTED: unreadable save cannot be overwritten".into(),
             ));
         }
         if self.runtime_state.is_none() {
@@ -2185,6 +2200,9 @@ impl NativeVnHostCommandSource {
     ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
         self.ensure_presentation_active()?;
         let events = self.map_window_input(events)?;
+        if self.handle_quick_slot_input(&events)? {
+            return self.present_current_scene(self.ui_draw.clone());
+        }
         self.last_ui_performance_sample = None;
         self.last_ui_host_performance_sample = self
             .ui_host_performance_sampling_enabled

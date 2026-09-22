@@ -122,7 +122,9 @@ ui_view ui.tsui.classic.save model:astra.vn.ui_model.save.v1 theme:tsui.theme.cl
       column id:body background:theme:system.body padding:6 gap:2 min_width:332 min_height:184 max_height:184
         virtual_list id:slots items:$model.slots item_key:slot_id overscan:0 item_extent:18 viewport_extent:144 min_width:248 min_height:144 max_height:144 gap:0 cross_align:start
           button id:slot min_width:248 min_height:18 max_height:18 enabled:$item.can_write background:theme:system.row text_color:theme:text.system_dark
-            text id:number value:$item.slot_id min_width:244 font_size:11 text_padding:1 text_align:start
+            row id:summary min_width:244 max_width:244 gap:4
+              text id:number value:$item.slot_id min_width:58 max_width:58 font_size:11 text_padding:1 text_align:start
+              text id:metadata value:$item.metadata_text min_width:178 max_width:178 font_size:10 text_padding:1 text_align:start max_lines:1
             on activate -> vn.request_save slot_id:$item.slot_id
         button id:back text:l10n:system.back min_width:60 min_height:18 max_height:18 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
           on activate -> vn.return_system
@@ -152,7 +154,9 @@ ui_view ui.tsui.classic.load model:astra.vn.ui_model.load.v1 theme:tsui.theme.cl
       column id:body background:theme:system.body padding:6 gap:2 min_width:332 min_height:184 max_height:184
         virtual_list id:slots items:$model.slots item_key:slot_id overscan:0 item_extent:18 viewport_extent:144 min_width:248 min_height:144 max_height:144 gap:0 cross_align:start
           button id:slot min_width:248 min_height:18 max_height:18 enabled:$item.can_load background:theme:system.row text_color:theme:text.system_dark
-            text id:number value:$item.slot_id min_width:244 font_size:11 text_padding:1 text_align:start
+            row id:summary min_width:244 max_width:244 gap:4
+              text id:number value:$item.slot_id min_width:58 max_width:58 font_size:11 text_padding:1 text_align:start
+              text id:metadata value:$item.metadata_text min_width:178 max_width:178 font_size:10 text_padding:1 text_align:start max_lines:1
             on activate -> vn.request_load slot_id:$item.slot_id
         button id:back text:l10n:system.back min_width:60 min_height:18 max_height:18 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
           on activate -> vn.return_system

@@ -213,3 +213,9 @@ python Tools/build_android.py --package Build/Game.astrapkg --target nativevn-ga
 
 
 Classic Player 可用鼠标选择标题与存读档槽，右键打开游戏内系统页；方向键/Enter 用于界面导航，Escape 返回上一页。系统页关闭后回到当前剧情。Windows 静音测试必须显式传入 `--test-null-audio`，窗口标题有测试标记；设备失败不会自动切换。
+
+
+Player 升级后，旧格式或损坏的存档槽显示 `Unavailable save`，不能读取或覆盖；原文件保留，其他槽和新游戏仍可使用。Classic 存档列表同时显示保存时间，便于区分空槽和已用槽。Android 与桌面在启动时读取同一套存档目录信息。
+
+
+F5/F9 仅在作品声明快捷槽时可用，按住按键不会重复发起存读档。Classic 当前没有快捷槽，请使用系统页；空槽或不可用槽不会被快捷键读取或覆盖。

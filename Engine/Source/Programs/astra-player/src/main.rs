@@ -264,8 +264,8 @@ fn run_bundled_game(test_null_audio: bool, preview_control: bool) -> Result<(), 
     use astra_core::Hash256;
     use astra_package::{PackageManifest, PackageReader};
     use astra_platform::{
-        FixedDeadlineScheduler, HostLaunchProfile, InputState, PackageSourceRequest,
-        PlatformEventKind, PlatformHostFactory, PlatformId, SurfaceRequest, WindowRequest,
+        FixedDeadlineScheduler, HostLaunchProfile, PackageSourceRequest, PlatformEventKind,
+        PlatformHostFactory, PlatformId, SurfaceRequest, WindowRequest,
     };
     use astra_player::{
         NativeVnHostCommandSource, PlatformCommandSink, PlayerHostCommandExecutor,
@@ -489,7 +489,7 @@ fn run_bundled_game(test_null_audio: bool, preview_control: bool) -> Result<(), 
         })?;
         let mut media = astra_player::NativeVnProductMediaHost::default();
         let player_result: Result<(), astra_platform::PlatformError> = async {
-            hydrate_save_catalog(&mut vn, &mut executor).await?;
+            astra_player::hydrate_save_catalog(&mut vn, &mut executor).await?;
             executor
                 .execute_batch(vn.launch().map_err(|error| {
                     astra_platform::PlatformError::new(
@@ -611,57 +611,6 @@ fn run_bundled_game(test_null_audio: bool, preview_control: bool) -> Result<(), 
                         state,
                         repeat,
                     } if input_window == window => {
-                        if state == InputState::Pressed && physical_key == "F5" {
-                            save_transaction_id =
-                                save_transaction_id.checked_add(1).ok_or_else(|| {
-                                    astra_platform::PlatformError::new(
-                                        astra_platform::PlatformErrorCode::InvalidState,
-                                        "player.save.transaction",
-                                        "ASTRA_PLAYER_SAVE_TRANSACTION_OVERFLOW",
-                                    )
-                                })?;
-                            if let Err(error) = execute_platform_save(
-                                &mut vn,
-                                &media,
-                                &mut executor,
-                                "slot.quick",
-                                PlayerHostResourceId(save_transaction_id),
-                                timeline_clock.elapsed_ms(std::time::Instant::now()),
-                            )
-                            .await
-                            {
-                                vn.mark_save_failed("slot.quick").map_err(|cleanup_error| {
-                                    player_platform_error("player.save.abort_state", cleanup_error)
-                                })?;
-                                return Err(error);
-                            }
-                            if let Some(batch) =
-                                vn.mark_save_committed("slot.quick").map_err(|error| {
-                                    player_platform_error("player.save.commit_state", error)
-                                })?
-                            {
-                                executor.execute_batch(batch).await.map_err(|error| {
-                                    player_platform_error("player.save.commit_completion", error)
-                                })?;
-                            }
-                            tracing::info!(
-                                event = "astra.player.save.committed",
-                                player_sequence,
-                                slot = "slot.quick",
-                                "Player committed platform save transaction"
-                            );
-                            continue;
-                        }
-                        if state == InputState::Pressed && physical_key == "F9" {
-                            execute_platform_load(&mut vn, &mut media, &mut executor, "slot.quick").await?;
-                            tracing::info!(
-                                event = "astra.player.save.restored",
-                                player_sequence,
-                                slot = "slot.quick",
-                                "Player restored platform save transaction"
-                            );
-                            continue;
-                        }
                         Some(UiInputEventKind::Keyboard {
                             logical_key: logical_key.unwrap_or_else(|| physical_key.clone()),
                             physical_key,
@@ -1136,56 +1085,6 @@ async fn execute_platform_load(
         .execute_batch(present)
         .await
         .map_err(|error| player_platform_error("player.save.present", error))?;
-    Ok(())
-}
-
-#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
-async fn hydrate_save_catalog(
-    source: &mut astra_player::NativeVnHostCommandSource,
-    executor: &mut astra_player::PlayerHostCommandExecutor<astra_player::PlatformCommandSink>,
-) -> Result<(), astra_platform::PlatformError> {
-    let results = executor
-        .execute_batch(
-            source
-                .list_saves()
-                .map_err(|error| player_platform_error("player.save.list.prepare", error))?,
-        )
-        .await
-        .map_err(|error| player_platform_error("player.save.list", error))?;
-    let slots = match results.as_slice() {
-        [PlayerHostCommandResult::SaveList { slots }] => slots.clone(),
-        _ => {
-            return Err(player_platform_error(
-                "player.save.list",
-                "ASTRA_PLAYER_SAVE_LIST_RESULT_INVALID: platform returned an unexpected result",
-            ));
-        }
-    };
-    for slot in &slots {
-        let results = executor
-            .execute_batch(source.read_save(slot).map_err(|error| {
-                player_platform_error("player.save.catalog.read.prepare", error)
-            })?)
-            .await
-            .map_err(|error| player_platform_error("player.save.catalog.read", error))?;
-        let bytes = match results.as_slice() {
-            [PlayerHostCommandResult::SaveRead { bytes }] => bytes,
-            _ => {
-                return Err(player_platform_error(
-                    "player.save.catalog.read",
-                    "ASTRA_PLAYER_SAVE_CATALOG_RESULT_INVALID: platform returned an unexpected result",
-                ));
-            }
-        };
-        source
-            .ingest_save_catalog_entry(slot, bytes)
-            .map_err(|error| player_platform_error("player.save.catalog.ingest", error))?;
-    }
-    tracing::trace!(
-        event = "player.save.catalog.hydrated",
-        slot_count = slots.len(),
-        "hydrated validated save metadata before launching the product runtime"
-    );
     Ok(())
 }
 
