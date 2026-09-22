@@ -1,3 +1,7 @@
+#[cfg(target_os = "linux")]
+#[path = "package_completion.rs"]
+mod package_completion;
+
 use astra_platform::{HostLaunchProfile, HostStartFuture, PlatformHostFactory};
 
 #[cfg(not(target_os = "linux"))]
@@ -56,6 +60,9 @@ impl PlatformHostFactory for LinuxPlatformFactory {
 
 #[cfg(target_os = "linux")]
 mod linux {
+    use super::package_completion::{
+        deliver_package_result, PackageCompletion, PackageSourceResource,
+    };
     use std::{
         collections::BTreeMap,
         sync::{
@@ -313,6 +320,7 @@ mod linux {
         package_completion_tx: std_mpsc::Sender<PackageCompletion>,
         package_completion_rx: std_mpsc::Receiver<PackageCompletion>,
         pending_package_opens: usize,
+        event_loop_proxy: EventLoopProxy<()>,
         save_transactions: ResourceTable<SaveTransaction, SaveTransactionHandle>,
         bundle_root: std::path::PathBuf,
         package_sources: ResourceTable<PackageSourceResource, PackageSourceHandle>,
@@ -386,6 +394,7 @@ mod linux {
                 package_completion_tx,
                 package_completion_rx,
                 pending_package_opens: 0,
+                event_loop_proxy,
                 save_transactions: ResourceTable::new("save_transaction"),
                 bundle_root: package.bundle_root,
                 package_sources: ResourceTable::new("package_source"),
@@ -714,7 +723,7 @@ mod linux {
                                 continue;
                             }
                         };
-                        let _ = reply.send(result);
+                        deliver_package_result(reply, result, &mut self.package_sources);
                     }
                     HostCommand::ReadPackageRange {
                         source,
@@ -829,6 +838,7 @@ mod linux {
             reply: oneshot::Sender<Result<PackageSourceHandle, PlatformError>>,
         ) {
             let completion_tx = self.package_completion_tx.clone();
+            let completion_proxy = self.event_loop_proxy.clone();
             let policies = self.package_source_policies.clone();
             let package_id = self.package_id.clone();
             let policy = self.package_cache_policy.clone();
@@ -847,18 +857,16 @@ mod linux {
                     runtime.block_on(client.fetch_into_cache(&url, &expected_hash, &mut cache))?;
                     cache.open_source(&expected_hash)
                 })();
-                let _ = completion_tx.send(PackageCompletion { reply, result });
+                PackageCompletion { reply, result }.publish(&completion_tx, || {
+                    let _ = completion_proxy.send_event(());
+                });
             });
         }
 
         fn process_package_completions(&mut self) {
             while let Ok(completion) = self.package_completion_rx.try_recv() {
                 self.pending_package_opens = self.pending_package_opens.saturating_sub(1);
-                let result = completion.result.and_then(|source| {
-                    self.package_sources
-                        .insert(PackageSourceResource::Cached(source))
-                });
-                let _ = completion.reply.send(result);
+                completion.deliver(&mut self.package_sources);
             }
         }
     }
@@ -977,25 +985,6 @@ mod linux {
         fn user_event(&mut self, event_loop: &ActiveEventLoop, _event: ()) {
             self.process_package_completions();
             self.process_commands(event_loop);
-        }
-    }
-
-    struct PackageCompletion {
-        reply: oneshot::Sender<Result<PackageSourceHandle, PlatformError>>,
-        result: Result<CachedPackageSource, PlatformError>,
-    }
-
-    enum PackageSourceResource {
-        Bundled(FilePackageSource),
-        Cached(CachedPackageSource),
-    }
-
-    impl PackageSourceResource {
-        fn read_range(&mut self, offset: u64, length: usize) -> Result<Vec<u8>, PlatformError> {
-            match self {
-                Self::Bundled(source) => source.read_range(offset, length),
-                Self::Cached(source) => source.read_range(offset, length),
-            }
         }
     }
 

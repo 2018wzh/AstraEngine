@@ -1,5 +1,9 @@
 # 全产品重构实施状态
 
+## Linux 包加载完成与取消回收
+
+Linux HTTPS 包 worker 现在先入队 completion，再唤醒处于 `ControlFlow::Wait` 的 event loop；无需等待额外键鼠输入。同步与异步包打开若向已取消的接收端发送句柄失败，立即移除句柄并释放缓存 lease。新增回归覆盖投递先于唤醒、取消后缓存预算淘汰和失败不分配句柄；`astra-platform-linux --all-targets` 的 4 项测试通过。该结果只证明局部完成投递及资源回收，不代表真实 HTTPS/窗口/音频或商业游戏已验收；下载 worker 本身的取消与完整关闭仍需继续检查。
+
 ## 2026-09-22 本轮边界
 
 本轮按三条独占工作线推进 EMU/SDK、Engine/VN 与 Classic/平台，集成仅在本地目标分支完成。Windows 六核心、公共会话/任务与旧 ABI 替换、Classic 代表流程及演出分类对照、《eden*》原版存档双向互通属于本轮范围。Android 继续实现并构建可运行 APK，真机连接后才关闭设备验收。Editor/Agent 产品功能、Modern 验收、完整结局、37 路线、macOS 验收与正式性能指标延后；Linux 已按后续授权由独立远端工作线实施。以下历史记录中的更大验收范围不作为本轮完成条件。
