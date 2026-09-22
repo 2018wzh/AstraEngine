@@ -2,7 +2,7 @@
 
 当前 Editor 使用 GPUI 与 gpui-component，独立 Cargo workspace 位于 `Editor/`。人工创作是主流程，外部 ACP Agent 和 MCP 共用版本化文档事务。当前边界以 [rebuild contract](../../contracts/rebuild.md)、[模块设计](../../modules/editor.md) 和 [shell](shell.md) 为准。
 
-UE Editor 是易用性目标。已接入项目源文件、资源搜索、Outliner 与 Details 共享选择、属性批量编辑、布局恢复、保存和撤销。Graph 与 Timeline 当前只有源命令投影，完整节点连线、关键帧拖动、曲线和二维场景操作仍需实现，不能据此宣称达到 UE 的创作体验。
+UE Editor 是易用性目标。已接入项目打开、资源搜索、Outliner 与 Details 共享选择、属性批量编辑、布局恢复、保存和撤销。Graph 绘制真实剧情连接，Timeline 支持时间/数值修改与关键帧插删；两者直接修改同一源文档。节点拖动与拖线创建、关键帧拖动、曲线和二维场景操作仍需实现，不能据此宣称达到 UE 的创作体验。
 
 ## 阅读顺序
 

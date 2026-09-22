@@ -31,7 +31,9 @@ impl Render for Editor {
                     cx.stop_propagation(); cx.notify();
                 }
             }))
-            .child(div().flex().gap_3().items_center()
+            .child(div().flex().flex_wrap().gap_3().items_center()
+                .child(Button::new("open-project").label("Open project").on_click(cx.listener(|this, _, window, cx| this.choose_project(window, cx))))
+                .child(Button::new("preview-config").label("Preview setup").on_click(cx.listener(|this, _, window, cx| this.choose_preview_config(window, cx))))
                 .child(format!("{}{} · v{}", self.project.active, if dirty { " *" } else { "" }, document.version))
                 .child(Button::new("save").label("Save").on_click(cx.listener(|this, _, _, cx| {
                     this.status = this.project.save_all().map(|_| "All sources saved".to_string()).unwrap_or_else(|e| e.to_string()); cx.notify();
@@ -111,6 +113,7 @@ impl Editor {
                 );
             for option in &permission.request.options {
                 let id = option.option_id.clone();
+                let call_id = permission.request.tool_call.tool_call_id.clone();
                 panel = panel.child(
                     Button::new(SharedString::from(id.to_string()))
                         .label(option.name.clone())
@@ -118,6 +121,12 @@ impl Editor {
                             if let Some(permission) = this.permission.take() {
                                 let outcome = if permission.generation == generation
                                     && generation == this.bridge.generation()
+                                    && permission.request.tool_call.tool_call_id == call_id
+                                    && permission
+                                        .request
+                                        .options
+                                        .iter()
+                                        .any(|option| option.option_id == id)
                                 {
                                     RequestPermissionOutcome::Selected(
                                         SelectedPermissionOutcome::new(id.clone()),

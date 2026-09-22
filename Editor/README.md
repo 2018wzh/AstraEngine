@@ -12,7 +12,9 @@ cargo run --manifest-path Editor/Cargo.toml -p astra-editor -- story.astra
 
 `AuthoringWorkspace` 保存文档版本，版本从 1 开始。`EditBatch` 内每个文档必须提供当前版本和不重叠的 UTF-8 字节范围；全部校验通过后一起应用。撤销和重做仍增加版本，旧 Agent 结果不能因内容恢复而重新生效。一个 batch 对应一次撤销。
 
-`attribute_edit` 使用现有 CST 的 attribute span 修改源码，保留周围注释和 source ID。Outliner、剧情结构、演出视图和 Details 共用 source ID 选择；点击命令定位源码，Details 把一组属性修改作为单个 batch 提交。源码版本改变后旧 Details 提交会被拒绝。当前 Graph/Timeline 仍是可选中和编辑属性的命令投影，完整节点连线、拖拽关键帧和曲线编辑尚未完成。
+`attribute_edit` 使用现有 CST 的 attribute span 修改源码，保留周围注释和 source ID。Outliner、剧情结构、演出视图和 Details 共用 source ID 选择；点击命令定位源码，Details 把一组属性修改作为单个 batch 提交。源码版本改变后旧 Details 提交会被拒绝。Graph 按实际 state、jump、option、branch 和 call 绘制连接，点击节点或路由后可在 Details 修改属性。Timeline 按实际时间绘制关键帧，可修改时间/数值、插入和删除；时间排序、重复时间和至少两个关键帧的约束在事务前检查，标量语义由编译器诊断。所有编辑仍写回同一 `.astra`，保留注释，并共用批量撤销。
+
+Open project 使用系统文件选择器，切换前处理未保存修改；打开失败保留原工程。Preview setup 可载入当前工程的产品预览配置。Graph 目前采用固定网格，尚无节点拖动与拖线创建；Timeline 尚无关键帧拖动、缩放和曲线编辑。二维场景操纵器、资源导入和完整 dock 面板管理也尚未实现，UE 易用性目标未达成。
 
 左右面板可调整宽度，布局保存在 ignored `.astra-cache/editor-layout.json`；Reset layout 恢复默认。Ctrl/Cmd+S 保存全部源文档，源编辑区的 Undo/Redo 快捷键进入共用 batch 历史。Agent 输入和未提交的属性字段保留自己的局部输入撤销。
 

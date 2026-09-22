@@ -7,6 +7,7 @@ use gpui_component::{
 };
 
 pub(super) struct WorkspacePanels {
+    pub(super) timeline_selection: Option<crate::timeline_panel::TimelineSelection>,
     tree: Entity<TreeState>,
     tree_revision: Option<(String, u64)>,
     filter: Entity<InputState>,
@@ -34,6 +35,7 @@ impl WorkspacePanels {
             cx.new(|cx| InputState::new(window, cx).placeholder("Search source and assets"));
         let subscription = cx.subscribe(&filter, |_, _, _: &InputEvent, cx| cx.notify());
         Self {
+            timeline_selection: None,
             tree: cx.new(|cx| TreeState::new(cx)),
             tree_revision: None,
             filter,
@@ -72,7 +74,12 @@ impl Editor {
         }
     }
 
-    fn select_command(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn select_command(
+        &mut self,
+        id: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.select_command_at(id, true, window, cx);
     }
 
@@ -119,6 +126,14 @@ impl Editor {
         let Some(command) = parsed.ast.commands().find(|c| c.source_id() == Some(&id)) else {
             return;
         };
+        if self
+            .panels
+            .timeline_selection
+            .as_ref()
+            .is_some_and(|selection| !selection.matches(&document.path, &id, document.version))
+        {
+            self.panels.timeline_selection = None;
+        }
         self.panels.fields = command
             .attributes()
             .map(|attribute| {
@@ -267,6 +282,7 @@ impl Editor {
                             this.status = error.to_string();
                         }
                         this.panels.selected = None;
+                        this.panels.timeline_selection = None;
                         this.panels.fields.clear();
                         this.sync(window, cx);
                     }))
@@ -352,8 +368,8 @@ impl Editor {
                 .min_h_0()
                 .child(Input::new(&self.input).h_full())
                 .into_any_element(),
-            ViewMode::Graph => self.command_cards(false, cx),
-            ViewMode::Timeline => self.command_cards(true, cx),
+            ViewMode::Graph => self.graph_panel(cx),
+            ViewMode::Timeline => self.timeline_panel(cx),
         };
         let details = div()
             .id("details")
@@ -428,62 +444,6 @@ impl Editor {
                 resizable_panel()
                     .size(px(self.panels.sizes[2]))
                     .child(details),
-            )
-            .into_any_element()
-    }
-
-    fn command_cards(&self, timeline: bool, cx: &mut Context<Self>) -> AnyElement {
-        let document = self
-            .project
-            .documents
-            .document(&self.project.active)
-            .unwrap();
-        let parsed = parse_astra_source(&document.path, &document.text);
-        let commands = parsed.ast.commands().filter(|c| {
-            if timeline {
-                matches!(
-                    c.keyword(),
-                    "timeline" | "move" | "transition" | "camera" | "shake" | "wait"
-                )
-            } else {
-                matches!(
-                    c.keyword(),
-                    "story" | "state" | "scene" | "jump" | "branch" | "choice" | "option"
-                )
-            }
-        });
-        div()
-            .id("command-cards")
-            .size_full()
-            .overflow_y_scroll()
-            .flex()
-            .flex_col()
-            .gap_3()
-            .p_3()
-            .children(
-                commands
-                    .filter_map(|c| c.source_id().map(|id| (id.to_string(), c)))
-                    .map(|(id, c)| {
-                        let label = format!("{}  {}", c.keyword(), id);
-                        let properties = c
-                            .attributes()
-                            .map(|a| format!("{}: {}", a.key(), a.value()))
-                            .collect::<Vec<_>>()
-                            .join("  ·  ");
-                        div()
-                            .border_1()
-                            .border_color(rgb(0x3c4655))
-                            .rounded_md()
-                            .p_3()
-                            .child(
-                                Button::new(SharedString::from(id.clone()))
-                                    .label(label)
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        this.select_command(id.clone(), window, cx)
-                                    })),
-                            )
-                            .child(properties)
-                    }),
             )
             .into_any_element()
     }
