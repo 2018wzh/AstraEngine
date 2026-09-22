@@ -638,6 +638,60 @@ astra.ui.controller.register("controller.test", {
     }
 
     #[test]
+    fn tsuinosora_save_focus_skips_protected_slots() {
+        let mut host = LuauUiControllerHost::new(PolicyExecutionBudget::default()).expect("host");
+        host.register_source(include_str!(
+            "../../../../../../Examples/TsuiNoSora/ProjectTemplate/Controllers/tsui_ui.luau"
+        ))
+        .expect("register controllers");
+        for (controller, prefix, suffix, back) in [
+            (
+                "tsui.system.save.classic",
+                "root/window/body/slots/slot/",
+                "",
+                "root/window/body/back",
+            ),
+            (
+                "tsui.system.save.modern",
+                "root/gold/content/slots/slot/",
+                "/write/slot.02",
+                "root/gold/content/back",
+            ),
+        ] {
+            for writable in [true, false] {
+                let slots = [("slot.01", false), ("slot.02", writable)]
+                    .into_iter()
+                    .map(|(id, can_write)| {
+                        UiValue::Map(BTreeMap::from([
+                            ("slot_id".into(), UiValue::String(id.into())),
+                            ("can_write".into(), UiValue::Bool(can_write)),
+                        ]))
+                    })
+                    .collect();
+                let model = UiValue::Map(BTreeMap::from([("slots".into(), UiValue::List(slots))]));
+                let effects = host
+                    .invoke_open(
+                        controller,
+                        "astra.vn.ui_model.save.v1",
+                        &model,
+                        &mut VnUiSessionState::default(),
+                    )
+                    .expect("open save page");
+                assert_eq!(
+                    effects,
+                    vec![VnUiControllerEffect::Focus {
+                        semantic_id: if writable {
+                            format!("{prefix}slot.02{suffix}")
+                        } else {
+                            back.into()
+                        },
+                    }]
+                );
+            }
+        }
+    }
+
+    #[test]
     fn tsuinosora_modern_save_controller_requires_overwrite_confirmation() {
         let mut host = LuauUiControllerHost::new(PolicyExecutionBudget::default()).expect("host");
         host.register_source(include_str!(

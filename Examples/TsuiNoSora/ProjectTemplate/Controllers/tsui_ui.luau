@@ -37,8 +37,16 @@ for _, definition in controllers do
         end
     end
     if definition[1] == "tsui.system.save.classic" then
-        on_open = function(_context, _model)
-            return { astra.ui.effect.focus("root/window/body/slots/slot/slot.01") }
+        on_open = function(_context, model)
+            for _, slot_value in model.map.slots.list do
+                local slot = slot_value.map
+                if slot.can_write.bool then
+                    return {
+                        astra.ui.effect.focus("root/window/body/slots/slot/" .. slot.slot_id.string),
+                    }
+                end
+            end
+            return { astra.ui.effect.focus("root/window/body/back") }
         end
     end
     if definition[1] == "tsui.system.load.classic" then
@@ -77,8 +85,19 @@ for _, definition in controllers do
         end
     end
     if definition[1] == "tsui.system.save.modern" then
-        on_open = function(_context, _model)
-            return { astra.ui.effect.focus("root/gold/content/slots/slot/slot.01/write/slot.01") }
+        on_open = function(_context, model)
+            for _, slot_value in model.map.slots.list do
+                local slot = slot_value.map
+                if slot.can_write.bool then
+                    return {
+                        astra.ui.effect.focus(
+                            "root/gold/content/slots/slot/" .. slot.slot_id.string
+                                .. "/write/" .. slot.slot_id.string
+                        ),
+                    }
+                end
+            end
+            return { astra.ui.effect.focus("root/gold/content/back") }
         end
     end
     if definition[1] == "tsui.system.load.modern" then

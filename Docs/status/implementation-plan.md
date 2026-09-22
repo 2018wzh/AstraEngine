@@ -25,7 +25,7 @@ Classic Windows 首批真实操作发现并修复两处启动/演出问题：首
 
 审查发现的 Player 关闭与读档问题已修复：Windows 错误路径继续执行媒体、资源、VN 和平台关闭；预取队列停止后丢弃未执行请求并 join 在途工作，读档换代拒绝旧完成值。候选舞台和转场源资源在 World 提交前验证，缺失资源拒绝后原游戏仍可继续并再次保存。新增三项回归与现有 Player-vn 共 48 项通过；平台集成与本批真实 Windows 复测尚未完成。原版 READY 启动页与转换后的 MENU 不是同一场景，当前不能据此断言颜色转换错误。
 
-任务组合已接入 VN coordinator：Sequence、All、Race 处理文字与多演出等待，保存格式升至 coordinator v6、Stage v10、Player v9，旧槽不迁移。根 workspace Clippy 与七个受影响 crate 回归通过；Editor 独立 workspace Clippy 与事务/取消回归通过。预览控制已集成，实际预览联动仍待验收。随后发现旧槽会阻断桌面启动、native 入口未读取已有槽目录，现统一目录读取并保护不可用槽，Classic 存档行增加状态/时间显示。两套 Player 完整回归、旧槽保护与快捷键定向回归、Clippy 和文档检查通过；F5/F9 现按包内快捷槽策略发起共享请求，未声明、空槽、受保护槽和重复按键不发起 IO。新构建的真实窗口复测仍待完成。
+任务组合已接入 VN coordinator：Sequence、All、Race 处理文字与多演出等待，保存格式升至 coordinator v6、Stage v10、Player v9，旧槽不迁移。根 workspace Clippy 与七个受影响 crate 回归通过；Editor 独立 workspace Clippy 与事务/取消回归通过。预览控制已集成，实际预览联动仍待验收。随后发现旧槽会阻断桌面启动、native 入口未读取已有槽目录，现统一目录读取并保护不可用槽，Classic 存档行增加状态/时间显示。两套 Player 完整回归、旧槽保护与快捷键定向回归、Clippy 和文档检查通过；F5/F9 现按包内快捷槽策略发起共享请求，未声明、空槽、受保护槽和重复按键不发起 IO。新版窗口已验证旧槽状态、拒绝点击、Escape 返回、新游戏和 F5/F9；保存页硬编码聚焦旧槽导致退出的问题已修复并加入 Controller 回归，保存闭环仍在复测。
 
 本轮 Musica/SDK 重构已接通公共 `Canvas2D`、SDK `StageCanvas`/`TextureAsset`、AstraVN presentation 第二消费者及 Family API v7 logical/raster frame 元数据。Musica 启动配置改为显式 `render_width`/`render_height` 正整数，GPU Scene 和 AstraText glyph 路径按实际 raster density 输出；统一 aspect-fit viewport 负责奇数、portrait、缩小和黑边，原生 1280x720 逻辑舞台、ANI 原点和存档/VM 时间保持独立。已验证的 Windows Sandbox 配对在 `data/cores/` 冷启动发现 Musica，Scale 从非可执行文件工作目录启用成功；640×360、1001×777、1920×1200 和 720×1280 的 DX12 discrete 画面与黑边检查通过，slot 24 在进程完整重启后仍可保存并读取。720×1280 的剧情内容输入仍待补测，真实可听声音、完整结局、长流程、跨平台和性能验收仍开放。
 
