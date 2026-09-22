@@ -2,7 +2,7 @@
 
 ## Linux 包加载完成与取消回收
 
-Linux HTTPS 包 worker 现在先入队 completion，再唤醒处于 `ControlFlow::Wait` 的 event loop；无需等待额外键鼠输入。同步与异步包打开若向已取消的接收端发送句柄失败，立即移除句柄并释放缓存 lease。新增回归覆盖投递先于唤醒、取消后缓存预算淘汰和失败不分配句柄；`astra-platform-linux --all-targets` 的 4 项测试通过。该结果只证明局部完成投递及资源回收，不代表真实 HTTPS/窗口/音频或商业游戏已验收；下载 worker 本身的取消与完整关闭仍需继续检查。
+Linux HTTPS 包 worker 现在先入队 completion，再唤醒处于 `ControlFlow::Wait` 的 event loop；无需等待额外键鼠输入。同步与异步包打开若向已取消的接收端发送句柄失败，立即移除句柄并释放缓存 lease。新增回归覆盖投递先于唤醒、取消后缓存预算淘汰和失败不分配句柄。下载 worker 由 Linux Host 持有；调用方取消会丢弃等待中的下载 future，Host 销毁先取消全部请求再 join，完成的 worker 在后续事件处理中回收。取消回归实际创建未完成 cache staging，并确认线程退出和临时文件删除。启用 `platform-test-driver` 的 Linux all-targets 6 项测试通过。共享离屏 renderer 的 4 项硬件 GPU 测试通过，覆盖绘制顺序、纹理扩容/回收和滤镜回读；这不代表真实 HTTPS、窗口、可听音频、商业游戏或正式性能已验收。
 
 ## 2026-09-22 本轮边界
 

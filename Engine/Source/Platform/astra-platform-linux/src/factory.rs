@@ -1,6 +1,9 @@
 #[cfg(target_os = "linux")]
 #[path = "package_completion.rs"]
 mod package_completion;
+#[cfg(target_os = "linux")]
+#[path = "package_worker.rs"]
+mod package_worker;
 
 use astra_platform::{HostLaunchProfile, HostStartFuture, PlatformHostFactory};
 
@@ -63,6 +66,7 @@ mod linux {
     use super::package_completion::{
         deliver_package_result, PackageCompletion, PackageSourceResource,
     };
+    use super::package_worker::{cancellable_fetch, PackageWorker};
     use std::{
         collections::BTreeMap,
         sync::{
@@ -320,6 +324,7 @@ mod linux {
         package_completion_tx: std_mpsc::Sender<PackageCompletion>,
         package_completion_rx: std_mpsc::Receiver<PackageCompletion>,
         pending_package_opens: usize,
+        package_workers: Vec<PackageWorker>,
         event_loop_proxy: EventLoopProxy<()>,
         save_transactions: ResourceTable<SaveTransaction, SaveTransactionHandle>,
         bundle_root: std::path::PathBuf,
@@ -394,6 +399,7 @@ mod linux {
                 package_completion_tx,
                 package_completion_rx,
                 pending_package_opens: 0,
+                package_workers: Vec::new(),
                 event_loop_proxy,
                 save_transactions: ResourceTable::new("save_transaction"),
                 bundle_root: package.bundle_root,
@@ -835,7 +841,7 @@ mod linux {
             &mut self,
             url: String,
             expected_hash: String,
-            reply: oneshot::Sender<Result<PackageSourceHandle, PlatformError>>,
+            mut reply: oneshot::Sender<Result<PackageSourceHandle, PlatformError>>,
         ) {
             let completion_tx = self.package_completion_tx.clone();
             let completion_proxy = self.event_loop_proxy.clone();
@@ -843,27 +849,34 @@ mod linux {
             let package_id = self.package_id.clone();
             let policy = self.package_cache_policy.clone();
             self.pending_package_opens += 1;
-            thread::spawn(move || {
-                let result = (|| {
-                    let cache_root = VerifiedPackageCache::platform_cache_root(&package_id)?;
-                    let mut cache = VerifiedPackageCache::open(cache_root, policy)?;
-                    let client = astra_platform_common::HttpRangeClient::from_policies(&policies)?;
-                    let runtime = tokio::runtime::Builder::new_current_thread()
-                        .enable_all()
-                        .build()
-                        .map_err(|_| {
-                            host_error("package.https.open", "HTTPS runtime could not start")
-                        })?;
-                    runtime.block_on(client.fetch_into_cache(&url, &expected_hash, &mut cache))?;
-                    cache.open_source(&expected_hash)
-                })();
-                PackageCompletion { reply, result }.publish(&completion_tx, || {
-                    let _ = completion_proxy.send_event(());
-                });
-            });
+            self.package_workers
+                .push(PackageWorker::spawn(move |cancelled| {
+                    let result = (|| {
+                        let cache_root = VerifiedPackageCache::platform_cache_root(&package_id)?;
+                        let mut cache = VerifiedPackageCache::open(cache_root, policy)?;
+                        let client =
+                            astra_platform_common::HttpRangeClient::from_policies(&policies)?;
+                        let runtime = tokio::runtime::Builder::new_current_thread()
+                            .enable_all()
+                            .build()
+                            .map_err(|_| {
+                                host_error("package.https.open", "HTTPS runtime could not start")
+                            })?;
+                        runtime.block_on(cancellable_fetch(
+                            &mut reply,
+                            cancelled,
+                            client.fetch_into_cache(&url, &expected_hash, &mut cache),
+                        ))?;
+                        cache.open_source(&expected_hash)
+                    })();
+                    PackageCompletion { reply, result }.publish(&completion_tx, || {
+                        let _ = completion_proxy.send_event(());
+                    });
+                }));
         }
 
         fn process_package_completions(&mut self) {
+            self.package_workers.retain(|worker| !worker.is_finished());
             while let Ok(completion) = self.package_completion_rx.try_recv() {
                 self.pending_package_opens = self.pending_package_opens.saturating_sub(1);
                 completion.deliver(&mut self.package_sources);
@@ -990,6 +1003,12 @@ mod linux {
 
     impl Drop for LinuxHostApp {
         fn drop(&mut self) {
+            // Signal every request before joining any worker. Dropping the
+            // fetch future also drops incomplete cache staging files.
+            for worker in &mut self.package_workers {
+                worker.cancel();
+            }
+            self.package_workers.clear();
             self.gamepad_stop.store(true, Ordering::Release);
             self.gamepad_events = std_mpsc::sync_channel(0).1;
             if let Some(worker) = self.gamepad_thread.take() {
