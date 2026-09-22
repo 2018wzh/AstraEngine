@@ -4,6 +4,7 @@ mod media_scope;
 mod presentation;
 mod product_save;
 mod runtime;
+mod viewport;
 use runtime::NativeVnRuntimeHost;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -157,6 +158,7 @@ pub struct NativeVnHostCommandSource {
     next_step_mode: astra_runtime::TickMode,
     width: u32,
     height: u32,
+    output_extent: astra_media_core::Extent2D,
     ui_viewport: UiViewport,
     textures: BTreeMap<String, TextureFrame>,
     texture_dimensions: BTreeMap<String, (u32, u32)>,
@@ -803,6 +805,7 @@ impl NativeVnHostCommandSource {
             next_step_mode: astra_runtime::TickMode::Live,
             width,
             height,
+            output_extent: astra_media_core::Extent2D { width, height },
             ui_viewport: UiViewport {
                 physical_width: width,
                 physical_height: height,
@@ -2073,11 +2076,11 @@ impl NativeVnHostCommandSource {
         events: Vec<UiInputEvent>,
     ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
         self.ensure_presentation_active()?;
+        let events = self.map_window_input(events)?;
         self.last_ui_performance_sample = None;
         self.last_ui_host_performance_sample = self
             .ui_host_performance_sampling_enabled
             .then(NativeVnUiHostPerformanceSample::default);
-        self.apply_ui_resize_events(&events)?;
         if events
             .iter()
             .any(|event| matches!(event.kind, UiInputEventKind::FixedTime { .. }))
@@ -2230,76 +2233,6 @@ impl NativeVnHostCommandSource {
             .resolve_retained_activation(semantics.generation, &target.id, event.sequence)
             .map(Some)
             .map_err(NativeVnHostError::Ui)
-    }
-
-    fn apply_ui_resize_events(&mut self, events: &[UiInputEvent]) -> Result<(), NativeVnHostError> {
-        let Some(viewport) = events.iter().rev().find_map(|event| match &event.kind {
-            UiInputEventKind::Resize { viewport } => Some(viewport),
-            _ => None,
-        }) else {
-            return Ok(());
-        };
-        viewport.validate()?;
-        let mut next_stage_director = self.stage_director.clone();
-        next_stage_director
-            .resize_viewport(astra_vn_package::StageViewport {
-                width: viewport.physical_width,
-                height: viewport.physical_height,
-            })
-            .map_err(stage_director_error)?;
-        self.ensure_stage_textures(next_stage_director.state())?;
-        let next_scene_draw = stage_scene_commands(
-            next_stage_director.state(),
-            &self.textures,
-            &self.texture_dimensions,
-            viewport.physical_width,
-            viewport.physical_height,
-        )?;
-        let texture_ids = scene_texture_ids(&next_scene_draw);
-        for asset_id in &texture_ids {
-            self.mark_texture_used(asset_id)?;
-        }
-        let missing_ids = texture_ids
-            .difference(&self.live_texture_ids)
-            .cloned()
-            .collect::<Vec<_>>();
-        let missing_bytes = missing_ids.iter().try_fold(0u64, |total, asset_id| {
-            total
-                .checked_add(self.texture(asset_id)?.rgba8.len() as u64)
-                .ok_or_else(|| {
-                    NativeVnHostError::Asset("ASTRA_PLAYER_GPU_RESIDENT_BYTES_OVERFLOW".into())
-                })
-        })?;
-        let mut lifecycle = Vec::new();
-        self.evict_gpu_textures_for(missing_bytes, &texture_ids, &mut lifecycle)?;
-        for asset_id in &missing_ids {
-            let frame = self.texture(asset_id)?.clone();
-            let frame_bytes = frame.rgba8.len() as u64;
-            self.resident_texture_bytes = self
-                .resident_texture_bytes
-                .checked_add(frame_bytes)
-                .ok_or_else(|| {
-                    NativeVnHostError::Asset("ASTRA_PLAYER_GPU_RESIDENT_BYTES_OVERFLOW".into())
-                })?;
-            self.live_texture_ids.insert(asset_id.clone());
-            self.live_texture_bytes
-                .insert(asset_id.clone(), frame_bytes);
-            lifecycle.push(SceneCommand::UploadTexture {
-                resource_id: asset_id.clone(),
-                frame,
-            });
-        }
-        self.pending_gpu_lifecycle.extend(lifecycle);
-        for asset_id in missing_ids {
-            self.remove_texture(&asset_id)?;
-            self.asset_store.release_uploaded_image(&asset_id)?;
-        }
-        self.width = viewport.physical_width;
-        self.height = viewport.physical_height;
-        self.ui_viewport = viewport.clone();
-        self.stage_director = next_stage_director;
-        self.scene_draw = next_scene_draw;
-        Ok(())
     }
 
     fn has_active_ui_surface(&self) -> bool {
@@ -3007,11 +2940,11 @@ impl NativeVnHostCommandSource {
             PlayerHostCommand::PresentScene {
                 sequence: self.next_command_sequence()?,
                 surface: self.surface,
-                width: self.width,
-                height: self.height,
-                clear_rgba: [8, 10, 16, 255],
-                commands,
-                semantics: self.ui_semantics.clone(),
+                width: self.output_extent.width,
+                height: self.output_extent.height,
+                clear_rgba: [0, 0, 0, 255],
+                commands: self.map_output_scene(commands)?,
+                semantics: self.output_semantics()?,
             },
         ])?)
     }
@@ -3605,10 +3538,10 @@ impl NativeVnHostCommandSource {
             PlayerHostCommand::PresentScene {
                 sequence: self.command_sequence,
                 surface: self.surface,
-                width: self.width,
-                height: self.height,
+                width: self.output_extent.width,
+                height: self.output_extent.height,
                 clear_rgba: [0, 0, 0, 255],
-                commands,
+                commands: self.map_output_scene(commands)?,
                 semantics: None,
             },
         ])?)
@@ -4282,11 +4215,11 @@ impl NativeVnHostCommandSource {
         let batch = PlayerHostCommandBatch::new(vec![PlayerHostCommand::PresentScene {
             sequence: self.command_sequence,
             surface: self.surface,
-            width: self.width,
-            height: self.height,
-            clear_rgba: [8, 10, 16, 255],
-            commands: lifecycle,
-            semantics: self.ui_semantics.clone(),
+            width: self.output_extent.width,
+            height: self.output_extent.height,
+            clear_rgba: [0, 0, 0, 255],
+            commands: self.map_output_scene(lifecycle)?,
+            semantics: self.output_semantics()?,
         }])?;
         for asset_id in uploaded_texture_ids {
             self.remove_texture(&asset_id)?;

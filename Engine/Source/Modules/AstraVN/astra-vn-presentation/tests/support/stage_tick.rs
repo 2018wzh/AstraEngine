@@ -85,56 +85,87 @@ fn malformed_queued_show_is_rejected_before_sequence_or_state_changes() {
 }
 
 #[test]
-fn failed_execution_terminates_session_without_rolling_back_the_frame() {
+fn hide_cancels_entity_tracks_without_a_false_completion_and_restores_cleanly() {
+    for duration_ms in [0, 100] {
+        let mut live = director();
+        configure(&mut live);
+        show_hero(&mut live);
+        live.tick(300_000_000).unwrap();
+        live.apply(&timeline(
+            "moving",
+            vec![track("x", 1_000_000)],
+            VnTimelineJoinPolicy::Block,
+        ))
+        .unwrap();
+        live.apply(&StageCommand::Hide {
+            id: "hero".into(),
+            duration_ms,
+            preset: None,
+            interrupt: PresentationInterruptPolicy::ReplaceFromCurrent,
+        })
+        .unwrap();
+        let outputs = live.tick(100_000_000).unwrap();
+        assert!(outputs.is_empty());
+        assert!(!live.state().entities.contains_key("hero"));
+        assert_eq!(live.active_timeline_count(), 0);
+        let saved = live.snapshot().unwrap();
+        let mut restored = ProductStageDirector::restore(
+            VnPresentationProviderManifest::standard(),
+            "advanced-vn",
+            &saved,
+        )
+        .unwrap();
+        assert_eq!(
+            live.tick(100_000_000).unwrap(),
+            restored.tick(100_000_000).unwrap()
+        );
+        assert_eq!(live.snapshot().unwrap(), restored.snapshot().unwrap());
+        restored
+            .apply(&StageCommand::Timeline(TimelineCommand::Cancel {
+                id: "moving".into(),
+                reason: "authored cleanup".into(),
+            }))
+            .unwrap();
+    }
+}
+
+#[test]
+fn clear_layer_cancels_only_removed_entity_tracks() {
     let mut live = director();
     configure(&mut live);
     show_hero(&mut live);
     live.tick(300_000_000).unwrap();
+    let camera = VnTimelineTrack {
+        target: "camera".into(),
+        property: "x".into(),
+        keyframes: track("x", 2_000_000).keyframes,
+    };
     live.apply(&timeline(
-        "moving",
-        vec![track("x", 1_000_000)],
+        "mixed",
+        vec![track("x", 1_000_000), camera],
         VnTimelineJoinPolicy::Block,
     ))
     .unwrap();
-    let last_save = live.snapshot().unwrap();
-    live.apply(&StageCommand::Hide {
-        id: "hero".into(),
+    live.apply(&StageCommand::ClearLayer {
+        layer: "characters".into(),
         duration_ms: 0,
-        preset: None,
         interrupt: PresentationInterruptPolicy::ReplaceFromCurrent,
     })
     .unwrap();
-    let frame = live.state().frame_index;
-    assert_eq!(
-        live.tick(100_000_000).unwrap_err().code(),
-        "ASTRA_VN_STAGE_ENTITY_UNKNOWN"
-    );
-    // Execution has started: caller must end the session, not retry a rolled-back tick.
-    assert_eq!(live.state().frame_index, frame + 1);
-    assert!(live.is_failed());
-    assert!(!live.requires_frame_tick());
-    assert_eq!(
-        live.tick(100_000_000).unwrap_err().code(),
-        "ASTRA_VN_STAGE_SESSION_FAILED"
-    );
-    assert_eq!(
-        live.snapshot().unwrap_err().code(),
-        "ASTRA_VN_STAGE_SESSION_FAILED"
-    );
-    assert_eq!(
-        live.apply(&StageCommand::SetSkipAllowed { allowed: false })
-            .unwrap_err()
-            .code(),
-        "ASTRA_VN_STAGE_SESSION_FAILED"
-    );
+    assert_eq!(live.active_timeline_count(), 1);
+    let saved = live.snapshot().unwrap();
     let mut restored = ProductStageDirector::restore(
         VnPresentationProviderManifest::standard(),
         "advanced-vn",
-        &last_save,
+        &saved,
     )
     .unwrap();
-    restored.tick(100_000_000).unwrap();
-    assert!(!restored.is_failed());
+    assert_eq!(
+        live.tick(1_000_000_000).unwrap(),
+        restored.tick(1_000_000_000).unwrap()
+    );
+    assert_eq!(live.state().camera.x, fixed(2_000_000));
+    assert_eq!(live.snapshot().unwrap(), restored.snapshot().unwrap());
 }
 
 #[test]

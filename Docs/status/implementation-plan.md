@@ -9,8 +9,10 @@
 | Player `--test-null-audio` | 已接入共享 PCM 队列、采样时钟、暂停与取消关闭；五项 PCM 队列/时钟/暂停/取消重开回归通过 | 新构建 Classic Windows 代表流程待运行；可听音频不计通过 |
 | EMU/SDK 六核心与《eden*》互通 | 实施中 | 每核短流程与原版双向读回待完成 |
 | Engine/VN 运行职责、任务、Luau、DSL 与旧 ABI 消费者 | 实施中 | 受影响回归及 Classic 集成待完成 |
-| Android Manager/VN Player | 实施中 | 真机未连接，设备验收待办 |
+| Android Manager/VN Player | 实施中；本轮真机已连接，由独立平台工作线接入 | 设备流程待完成 |
 
+
+Classic Windows 首批真实操作发现并修复两处启动/演出问题：首帧 GPU/IO 停顿超过四个 tick 会因 scheduler debt 退出，现改为保留欠账的有界连续追赶；开场清除实体时只取消 tween、留下 timeline 轨道，下一帧写已删除实体而退出，现统一取消目标轨道并保持其他轨道。第二项覆盖即时/渐隐删除、混合摄像机轨道与存档恢复；stage 18 项、Player-vn 45 项回归及相关 Clippy 通过。最大化时固定坐标内容偏左的问题已改用共享 Canvas2D 根变换与输入逆映射，新构建真实复测进行中。上述实现不代表 Classic 的选择、系统、存读档和退出重开已通过。
 
 本轮 Musica/SDK 重构已接通公共 `Canvas2D`、SDK `StageCanvas`/`TextureAsset`、AstraVN presentation 第二消费者及 Family API v7 logical/raster frame 元数据。Musica 启动配置改为显式 `render_width`/`render_height` 正整数，GPU Scene 和 AstraText glyph 路径按实际 raster density 输出；统一 aspect-fit viewport 负责奇数、portrait、缩小和黑边，原生 1280x720 逻辑舞台、ANI 原点和存档/VM 时间保持独立。已验证的 Windows Sandbox 配对在 `data/cores/` 冷启动发现 Musica，Scale 从非可执行文件工作目录启用成功；640×360、1001×777、1920×1200 和 720×1280 的 DX12 discrete 画面与黑边检查通过，slot 24 在进程完整重启后仍可保存并读取。720×1280 的剧情内容输入仍待补测，真实可听声音、完整结局、长流程、跨平台和性能验收仍开放。
 

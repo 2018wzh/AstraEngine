@@ -14,7 +14,7 @@ use crate::{
     VnTextRevealState, VnTimelineJoinPolicy,
 };
 
-pub const PRODUCT_STAGE_STATE_SCHEMA: &str = "astra.vn.product_stage_state.v8";
+pub const PRODUCT_STAGE_STATE_SCHEMA: &str = "astra.vn.product_stage_state.v9";
 const MAX_FRAME_DELTA_NS: u64 = 1_000_000_000;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -136,7 +136,7 @@ pub struct ProductStageDirector {
     state: ProductStageState,
     tweens: Vec<StageTween>,
     timelines: BTreeMap<String, ActiveTimeline>,
-    completed_timelines: BTreeSet<String>,
+    settled_timelines: BTreeSet<String>,
     shake: Option<ActiveShake>,
     coordinator: PresentationCoordinator,
     queued_region_commands: BTreeMap<String, StageCommand>,
@@ -185,7 +185,7 @@ impl ProductStageDirector {
             },
             tweens: Vec::new(),
             timelines: BTreeMap::new(),
-            completed_timelines: BTreeSet::new(),
+            settled_timelines: BTreeSet::new(),
             shake: None,
             coordinator: PresentationCoordinator::default(),
             queued_region_commands: BTreeMap::new(),
@@ -1123,7 +1123,7 @@ impl ProductStageDirector {
     fn apply_timeline(&mut self, command: &TimelineCommand) -> Result<(), VnError> {
         match command {
             TimelineCommand::Cancel { id, .. } => {
-                if self.timelines.remove(id).is_none() && !self.completed_timelines.remove(id) {
+                if self.timelines.remove(id).is_none() && !self.settled_timelines.remove(id) {
                     return Err(stage_error(
                         "ASTRA_VN_STAGE_TIMELINE_UNKNOWN",
                         "timeline cancel references an unknown timeline",
@@ -1138,7 +1138,7 @@ impl ProductStageDirector {
                         "timeline id is already active",
                     ));
                 }
-                self.completed_timelines.remove(&spec.id);
+                self.settled_timelines.remove(&spec.id);
                 if spec.join == VnTimelineJoinPolicy::ReplaceTarget {
                     let properties = timeline_properties(spec);
                     self.timelines.retain(|_, active| {
@@ -1188,6 +1188,7 @@ impl ProductStageDirector {
     fn advance_tweens(&mut self, delta_ns: u64) -> Result<(), VnError> {
         let mut active = Vec::with_capacity(self.tweens.len());
         let tweens = std::mem::take(&mut self.tweens);
+        let mut removed_entities = BTreeSet::new();
         for mut tween in tweens {
             tween.elapsed_ns = tween
                 .elapsed_ns
@@ -1207,7 +1208,7 @@ impl ProductStageDirector {
                             "only entity opacity tween can remove an entity",
                         ));
                     };
-                    self.state.entities.remove(id);
+                    removed_entities.insert(id.clone());
                 }
                 if tween.target == TweenTarget::Transition {
                     self.state.transition = None;
@@ -1217,6 +1218,10 @@ impl ProductStageDirector {
             }
         }
         self.tweens = active;
+        for id in removed_entities {
+            self.state.entities.remove(&id);
+            self.cancel_target(&TweenTarget::Entity(id));
+        }
         Ok(())
     }
 
@@ -1228,7 +1233,7 @@ impl ProductStageDirector {
             active.elapsed_ns = active.elapsed_ns.saturating_add(delta_ns).min(duration_ns);
             self.apply_timeline_sample(&active.spec, active.elapsed_ns)?;
             if active.elapsed_ns == duration_ns {
-                self.completed_timelines.insert(id.clone());
+                self.settled_timelines.insert(id.clone());
                 output.push(StageDirectorOutput::FenceCompleted {
                     kind: "timeline".to_string(),
                     id: active.spec.fence.unwrap_or(id),
@@ -1389,6 +1394,19 @@ impl ProductStageDirector {
                 ));
             }
         }
+        for tween in &self.tweens {
+            if let TweenTarget::Entity(id) = &tween.target {
+                self.entity(id)?;
+            }
+        }
+        for timeline in self.timelines.values() {
+            for track in &timeline.spec.tracks {
+                let (target, _) = timeline_target_property(&track.target, &track.property)?;
+                if let TweenTarget::Entity(id) = target {
+                    self.entity(&id)?;
+                }
+            }
+        }
         Ok(())
     }
 
@@ -1498,6 +1516,24 @@ impl ProductStageDirector {
 
     fn cancel_target(&mut self, target: &TweenTarget) {
         self.tweens.retain(|active| &active.target != target);
+        let TweenTarget::Entity(entity_id) = target else {
+            return;
+        };
+        let mut settled = Vec::new();
+        self.timelines.retain(|id, active| {
+            active
+                .spec
+                .tracks
+                .retain(|track| canonical_timeline_target(&track.target) != entity_id);
+            if active.spec.tracks.is_empty() {
+                settled.push(id.clone());
+                false
+            } else {
+                true
+            }
+        });
+        // A later authored cancel may retire this id, but removal is not a successful fence.
+        self.settled_timelines.extend(settled);
     }
 
     fn prepare_interrupt(&mut self, command: &StageCommand) -> Result<bool, VnError> {
@@ -1557,6 +1593,7 @@ impl ProductStageDirector {
                 }
                 for id in remove {
                     self.state.entities.remove(&id);
+                    self.cancel_target(&TweenTarget::Entity(id));
                 }
                 Ok(true)
             }

@@ -20,7 +20,7 @@ Region 队列保持原顺序并在活动过渡完成后激活；排队状态可�
 
 ## 数据格式迁移
 
-当前 Stage snapshot schema 为 `astra.vn.product_stage_state.v8`，coordinator 为 `astra.vn.presentation_coordinator.v5`。此前 v8/v4 布局已增加内部 failed 字段和背景 pending 标记；本轮 v5 增加等待组一致性校验，字段布局不变。`PresentationRegionCommand` 改用 serde 外部标记枚举，使非空队列可由 postcard 双向编码；旧内部标记表示只能写入，读取会失败。若使用 JSON，payload 形式相应改为如 `{"character": {...}}`，不再是 `{"region": "character", "command": {...}}`。
+当前 Stage snapshot schema 为 `astra.vn.product_stage_state.v9`，coordinator 为 `astra.vn.presentation_coordinator.v5`。此前 v8/v4 布局已增加内部 failed 字段和背景 pending 标记；本轮 v5 增加等待组一致性校验，字段布局不变。`PresentationRegionCommand` 改用 serde 外部标记枚举，使非空队列可由 postcard 双向编码；旧内部标记表示只能写入，读取会失败。若使用 JSON，payload 形式相应改为如 `{"character": {...}}`，不再是 `{"region": "character", "command": {...}}`。
 
 旧内部 snapshot 明确拒绝并重建，不提供迁移器。恢复时校验 coordinator schema、队列边界、区域匹配、排队策略和文字 reveal rate，拒绝损坏队列而不是延迟到 tick panic。商业游戏原生存档不属于此格式，不能覆盖。
 
@@ -143,3 +143,6 @@ NativeVnSession 长期持有 VnRuntime，step 在同一份状态上执行，不�
 ### NativeVN 移除转发 FSM
 
 NativeVN 由会话直接执行 typed command，Runtime tick 处理已有等待完成，随后会话以 Runtime 来源提交业务事件，并通过 RuntimeWorld::create_host_await 创建下一等待。新等待绑定当前 tick，事件进入有序队列供下一 tick 消费；保存保留队列和等待。删除专用单状态 FSM、转发 action、控制 Mutex 和字符串 PlayerInput 映射。Runtime 的通用 flat FSM 仍可选用。旧 NativeVN 存档中非空 StateMachineStore 返回 ASTRA_NATIVE_VN_RESTORE_LEGACY_MACHINE，预检失败不改变当前会话，不提供迁移。
+
+
+Stage v9 将已结束/已取消 timeline ID 统一保留为 settled ID，供脚本随后清理；删除实体时同时取消它的 tween 和 timeline track，其他实体/摄像机轨道继续运行。即时 hide、clear_layer 和渐隐完成均使用相同取消路径，取消不产生成功 fence；旧 v8 存档直接拒绝。存档与恢复校验禁止保留引用已删除实体的活动任务。

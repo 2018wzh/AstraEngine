@@ -131,3 +131,6 @@ Windows bundled Player 接受一次性 `--test-null-audio` 参数。默认仍打
 
 
 实时 Player 调度每次最多消费四个到期逻辑 tick，保持原 deadline 与连续 tick 编号，剩余欠账留到下一次事件循环；短暂 GPU/IO 停顿不再触发致命 scheduler debt 错误。每批之间允许平台输入和退出，不能一次无限追赶、静默跳步或把迟到时间归零。初始化仍在固定时钟启动前完成；该调度变化不暂停或替代设备播放时钟。
+
+
+NativeVN Player 保留启动时的逻辑舞台尺寸，窗口 resize 不改写剧情实体、摄像机或演出快照。实际 SceneFrame 使用窗口尺寸，并由公共 `Canvas2D` 对剧情与 Yakui UI 统一执行 aspect-fit 根变换及 viewport 裁剪，输出黑边；同一 viewport 逆映射鼠标和触控，黑边输入不送入游戏，accessibility bounds 映射到实际输出。恢复存档保持当前窗口尺寸，逻辑坐标来自剧情快照。Windows 与 Android 都经过共享 `NativeVnHostCommandSource`。
