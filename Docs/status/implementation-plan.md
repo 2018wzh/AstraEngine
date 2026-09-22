@@ -16,6 +16,8 @@ Eden 原商业短流程已完成原版保存、Musica 恢复并继续、导出 S
 
 ## NativeVN 样例配置接续
 
+Windows 完整样例的 Editor 编译、Cook 和打包已通过，Player 启动仍受媒体格式阻塞：当前显式 WMF provider 不支持样例 OGG/WebM。平台原先把 codec 拒绝与活动 stream 合并为同一错误，现拆出 `ASTRA_WMF_CODEC_UNSUPPORTED` 并保留请求序号；不会失败后更换 decoder。已有 WAV/MP4 素材的显式选用尚待接入，不能把当前失败称为预览通过。
+
 远端六批样例、测试和状态变更已集成；Windows 工具测试发现默认系统编码读取中文 `.astra` 失败，现显式使用 UTF-8，25 项工具回归与三项真实 pipe 子进程回归通过。Editor 已接手新版样例的作者纵向流程。远端 Vulkan 流程不替代 Windows Player 验收；保存列表的 Mesh 与单独绘制 AstraText 已接同一真实布局裁剪，空交集和相邻控件隔离有回归；设备复测仍待完成。键盘缩略图和 Headless 错误退出仍开放。
 
 保留《玻璃雨中的信号》的故事与授权素材，将旧 platform profile v2 迁到 v3，拆分 mixer/output、补齐限额并声明三桌面及 Android；修复 advanced-vn 系统页 policy 与 binding。项目工具不再覆盖作者 `.astra`。真实 Cook 的 284 个资产通过，工具测试 23 项通过、1 项跳过；产品交互、视听和存读档尚未验收。共享 target schema 仍强制 runtime_provider/ui_provider 元数据字段，样例保留到共享 schema 迁移，不引入动态 provider。

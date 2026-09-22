@@ -1913,13 +1913,26 @@ mod windows {
                 DecodeKind::Audio => astra_media::DecodeKind::Audio,
                 DecodeKind::Video => astra_media::DecodeKind::Video,
             };
+            if matches!(
+                request.stream_action,
+                astra_platform::DecodeStreamAction::OneShot
+                    | astra_platform::DecodeStreamAction::Start
+            ) && !capability
+                .codecs
+                .iter()
+                .any(|codec| codec == &request.codec)
+            {
+                return Err(PlatformError::new(
+                    PlatformErrorCode::ProviderUnavailable,
+                    "decode.submit",
+                    "the selected WMF provider does not support the requested codec",
+                )
+                .with_field("diagnostic_code", "ASTRA_WMF_CODEC_UNSUPPORTED")
+                .with_field("codec", request.codec));
+            }
             let output = match request.stream_action {
                 astra_platform::DecodeStreamAction::OneShot => {
                     if request.bytes.is_empty()
-                        || !capability
-                            .codecs
-                            .iter()
-                            .any(|codec| codec == &request.codec)
                         || !request.description.is_empty()
                         || request.sample_rate.is_some()
                         || request.channels.is_some()
@@ -1931,7 +1944,7 @@ mod windows {
                         return Err(PlatformError::new(
                             PlatformErrorCode::InvalidState,
                             "decode.submit",
-                            "one-shot decode request is invalid while a stream is active",
+                            "one-shot decode request has invalid metadata or an active stream",
                         ));
                     }
                     let result = self
@@ -1976,10 +1989,6 @@ mod windows {
                 astra_platform::DecodeStreamAction::Start => {
                     if request.bytes.is_empty()
                         || !matches!(request.kind, DecodeKind::Video | DecodeKind::Audio)
-                        || !capability
-                            .codecs
-                            .iter()
-                            .any(|codec| codec == &request.codec)
                         || !request.description.is_empty()
                         || request.sample_rate.is_some()
                         || request.channels.is_some()

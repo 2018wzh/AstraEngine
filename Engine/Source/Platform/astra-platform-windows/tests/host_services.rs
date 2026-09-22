@@ -150,3 +150,49 @@ async fn windows_host_uses_real_wasapi_stream_and_wmf_decode_session() {
     session.client.close_decode(decode).await.unwrap();
     session.client.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn unsupported_wmf_codec_is_reported_without_consuming_decode_sequence() {
+    let profile = PlatformHostProfile::windows_release("nativevn-game", "com.example.game");
+    let session = astra_platform_windows::factory()
+        .start(astra_platform::HostLaunchProfile::platform(profile))
+        .await
+        .unwrap();
+    let decode = session.client.open_decode(DecodeKind::Video).await.unwrap();
+    for (codec, diagnostic) in [
+        ("webm", "ASTRA_WMF_CODEC_UNSUPPORTED"),
+        ("ogg", "ASTRA_WMF_CODEC_UNSUPPORTED"),
+        ("mp4", "ASTRA_WMF_DECODE"),
+    ] {
+        let error = session
+            .client
+            .decode(
+                decode,
+                PlatformDecodeRequest {
+                    sequence: 1,
+                    kind: DecodeKind::Video,
+                    codec: codec.to_string(),
+                    description: Vec::new(),
+                    sample_rate: None,
+                    channels: None,
+                    coded_width: None,
+                    coded_height: None,
+                    keyframe: true,
+                    stream_action: astra_platform::DecodeStreamAction::OneShot,
+                    bytes: b"invalid-media".to_vec().into(),
+                },
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.fields.get("diagnostic_code").map(String::as_str),
+            Some(diagnostic)
+        );
+        if codec != "mp4" {
+            assert_eq!(error.code, PlatformErrorCode::ProviderUnavailable);
+            assert_eq!(error.fields.get("codec").map(String::as_str), Some(codec));
+        }
+    }
+    session.client.close_decode(decode).await.unwrap();
+    session.client.shutdown().await.unwrap();
+}
