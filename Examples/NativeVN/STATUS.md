@@ -46,3 +46,6 @@ main surface 修复后真实 Cook/package 与 Vulkan 硬件离屏场景通过。
 
 
 2026-09-22 合并 a8dd4625c 后，NativeVN 新包在 Vulkan 硬件离屏路径通过严格存读档：69 条物理输入、10 个 checkpoint、606 submitted/12 rasterized frames，diagnostics 为空，正常关闭。读取后直接回剧情，无额外 Escape；已查看恢复画面及 shade/取消恢复画面。保存列表的越界绘制仍在：clip_children 对应的 clip_rect_points 在 Yakui→Mesh2D 转换中未使用，截图仍显示槽位覆盖返回按钮；键盘入口缩略图仍捕获保存页。这两项不计通过，已报告共享 UI/Player owner。此轮不代表冷进程恢复、真实音频或完整产品验收。
+
+
+2026-09-22 接入 392ceec05 后修复 Headless 错误退出与保存缩略图入口：CLI run/serve 持有取消/join owner，最小硬件 GPU await-timeout 负例现在以预期 exit 2 退出，不再挂住；正常 69 输入/10 checkpoint 存读档 GPU 回归 exit 0。物理输入经 prepare_ui_input 按实际系统页转换在呈现前截图，三个宿主接收 Captured 结果；实际查看 slot.01，缩略图已显示保存前的剧情画面。126 项直接调用方测试通过、1 helper 忽略，线程析构 2 项局部测试与相关五 crate all-target Clippy 通过。随后使用另一进程读取同一存档，25 条物理输入、目录与恢复 checkpoint 均通过，已查看恢复画面；存档读取前后 hash 相同。列表 clip 丢失仍未修复，真实窗口/音频与多平台仍未验收。

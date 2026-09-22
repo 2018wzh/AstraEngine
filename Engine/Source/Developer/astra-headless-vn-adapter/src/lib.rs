@@ -612,13 +612,10 @@ impl NativeVnHeadlessSession {
                 return Ok(());
             }
         }
-        if self.source()?.should_capture_gameplay_surface(&event) {
-            self.capture_gameplay_surface().await?;
-        }
         let profile_started = self.profile_started();
         let batch = self
             .source()?
-            .dispatch_ui_event(event)
+            .prepare_ui_input(event)
             .map_err(|error| ProductHostError::Input(error.to_string()))?;
         let ui_sample = self.source()?.take_last_ui_performance_sample();
         let ui_host_sample = self.source()?.take_last_ui_host_performance_sample();
@@ -734,7 +731,19 @@ impl NativeVnHeadlessSession {
                     .map_err(ProductHostError::Output)?;
             }
         }
-        execution?;
+        for result in execution? {
+            if let PlayerHostCommandResult::Captured {
+                width,
+                height,
+                rgba8,
+                ..
+            } = result
+            {
+                self.source()?
+                    .cache_gameplay_surface(width, height, rgba8)
+                    .map_err(|error| ProductHostError::Input(error.to_string()))?;
+            }
+        }
         self.process_ui_host_request().await?;
         Ok(())
     }

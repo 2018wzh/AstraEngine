@@ -704,23 +704,26 @@ fn run_bundled_game(test_null_audio: bool, preview_control: bool) -> Result<(), 
                     _ => None,
                 };
                 if let Some(kind) = ui_input {
-                    if vn.should_capture_gameplay_surface(&kind) {
-                        capture_gameplay_surface(&mut vn, &mut executor).await?;
-                    }
-                    let batch = vn.dispatch_ui_event(kind).map_err(|error| {
+                    let batch = vn.prepare_ui_input(kind).map_err(|error| {
                         astra_platform::PlatformError::new(
                             astra_platform::PlatformErrorCode::InvalidState,
                             "player.runtime.ui_input",
                             error.to_string(),
                         )
                     })?;
-                    executor.execute_batch(batch).await.map_err(|error| {
+                    let results = executor.execute_batch(batch).await.map_err(|error| {
                         astra_platform::PlatformError::new(
                             astra_platform::PlatformErrorCode::InvalidState,
                             "player.host.execute",
                             error.to_string(),
                         )
                     })?;
+                    for result in results {
+                        if let PlayerHostCommandResult::Captured { width, height, rgba8, .. } = result {
+                            vn.cache_gameplay_surface(width, height, rgba8)
+                                .map_err(|error| player_platform_error("player.save.capture.cache", error))?;
+                        }
+                    }
                     if vn.exit_requested() {
                         tracing::info!(
                             event = "player.session.exit_requested",

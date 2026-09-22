@@ -1,4 +1,7 @@
 mod host_thread;
+mod thread_owner;
+
+pub use thread_owner::HeadlessThreadOwner;
 
 use host_thread::spawn_host;
 
@@ -51,6 +54,7 @@ pub struct HeadlessPlatformFactory {
     https_root_certificates: Vec<Vec<u8>>,
     gpu_enabled: bool,
     performance_observer: Option<Arc<dyn HeadlessPerformanceObserver>>,
+    thread_registry: Option<Arc<thread_owner::ThreadRegistry>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,10 +109,15 @@ impl HeadlessPlatformFactory {
             https_root_certificates: Vec::new(),
             gpu_enabled: false,
             performance_observer: None,
+            thread_registry: None,
         }
     }
     pub fn with_gpu(mut self, enabled: bool) -> Self {
         self.gpu_enabled = enabled;
+        self
+    }
+    pub fn with_thread_owner(mut self, owner: &HeadlessThreadOwner) -> Self {
+        self.thread_registry = Some(owner.registry.clone());
         self
     }
     pub fn with_performance_observer(

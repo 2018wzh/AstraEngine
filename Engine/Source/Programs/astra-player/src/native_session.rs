@@ -304,12 +304,18 @@ async fn run_native_vn_player_session_inner(
             };
             if let Some(kind) = ui_input {
                 let batch = vn
-                    .dispatch_ui_event(kind)
+                    .prepare_ui_input(kind)
                     .map_err(|error| player_error_owned("player.runtime.ui_input", error))?;
-                executor
+                let results = executor
                     .execute_batch(batch)
                     .await
                     .map_err(|error| player_error_owned("player.host.execute", error))?;
+                for result in results {
+                    if let PlayerHostCommandResult::Captured { width, height, rgba8, .. } = result {
+                        vn.cache_gameplay_surface(width, height, rgba8)
+                            .map_err(|error| player_error_owned("player.save.capture.cache", error))?;
+                    }
+                }
                 if let Some(request) = vn.take_ui_host_request() {
                     match request {
                         VnUiHostRequest::Save { slot_id, .. } => {

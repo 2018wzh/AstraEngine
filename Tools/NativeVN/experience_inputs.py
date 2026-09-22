@@ -8,7 +8,10 @@ import json
 from pathlib import Path
 
 
-def build_sequence(*, save_restore: bool = False, media: bool = False) -> list[dict]:
+def build_sequence(*, save_restore: bool = False, media: bool = False,
+                   cold_restore: bool = False) -> list[dict]:
+    if cold_restore and (save_restore or media):
+        raise ValueError("cold restore is a separate process input sequence")
     rows = []
     tick = 0
 
@@ -37,6 +40,23 @@ def build_sequence(*, save_restore: bool = False, media: bool = False) -> list[d
 
     add({"type": "resume"})
     add({"type": "focus", "focused": True})
+    if cold_restore:
+        # The runner must supply the previous process's save directory unchanged.
+        await_value("vn.occupied_save_slot_count", 1)
+        await_value("vn.pending_wait_command", "experience.read.first")
+        await_value("vn.text_reveal_complete", True)
+        for _ in range(4):
+            key("Tab")
+        key("Enter")
+        await_value("vn.system_page", "load")
+        add({"type": "checkpoint", "id": "experience.cold.catalog"})
+        key("Tab")
+        key("Enter")
+        await_value("vn.system_page", None)
+        await_value("vn.pending_wait_command", "experience.save.before")
+        add({"type": "checkpoint", "id": "experience.cold.restored"})
+        add({"type": "shutdown"})
+        return rows
     await_value("vn.pending_wait_command", "experience.read.first")
     await_value("vn.text_reveal_complete", True)
     add({"type": "checkpoint", "id": "experience.reading"})
@@ -109,8 +129,12 @@ def main():
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--save-restore", action="store_true")
     parser.add_argument("--media", action="store_true")
+    parser.add_argument("--cold-restore", action="store_true")
     args = parser.parse_args()
-    rows = build_sequence(save_restore=args.save_restore, media=args.media)
+    if args.cold_restore and (args.save_restore or args.media):
+        parser.error("--cold-restore cannot be combined with --save-restore or --media")
+    rows = build_sequence(save_restore=args.save_restore, media=args.media,
+                          cold_restore=args.cold_restore)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     # Existing sequences may be evidence from another build; do not overwrite them.
     with args.output.open("x", encoding="utf-8") as stream:

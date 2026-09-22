@@ -23,7 +23,7 @@ use astra_package::{
 use astra_platform::{
     HeadlessHostProfile, PackageSourceRequest, PlatformHostFactory, PlatformHostSession,
 };
-use astra_platform_headless::HeadlessPlatformFactory;
+use astra_platform_headless::{HeadlessPlatformFactory, HeadlessThreadOwner};
 use astra_product_host::{ProductAdapterRegistry, ProductOpenRequest, ProductSession};
 use clap::{Parser, Subcommand};
 use image::{codecs::png::PngEncoder, ExtendedColorType, ImageEncoder};
@@ -476,6 +476,7 @@ struct LiveSession {
 }
 
 async fn serve(build_identity: &Path, gpu: bool) -> Result<(), String> {
+    let thread_owner = HeadlessThreadOwner::default();
     let identity_hash = read_identity_hash(build_identity)?;
     let stdin = io::stdin();
     let stdout = io::stdout();
@@ -534,6 +535,7 @@ async fn serve(build_identity: &Path, gpu: bool) -> Result<(), String> {
                     .ok_or_else(|| "ASTRA_HEADLESS_PACKAGE_PATH_INVALID".to_string())?
                     .to_owned();
                 let host = HeadlessPlatformFactory::new(&root, package_root)
+                    .with_thread_owner(&thread_owner)
                     .with_gpu(gpu)
                     .start(profile.clone().into())
                     .await
@@ -1014,6 +1016,7 @@ fn validate_input(input_path: &Path) -> Result<(), String> {
 }
 
 async fn run(request: RunRequest<'_>) -> Result<(), String> {
+    let thread_owner = HeadlessThreadOwner::default();
     let RunRequest {
         profile_path,
         input_path,
@@ -1021,7 +1024,7 @@ async fn run(request: RunRequest<'_>) -> Result<(), String> {
         checkpoint_config,
         ..
     } = request;
-    match run_execution(request).await {
+    match run_execution(request, &thread_owner).await {
         Ok(()) => Ok(()),
         Err(error) => {
             fs::create_dir_all(artifact_root)
@@ -1132,7 +1135,10 @@ fn ensure_blocked_manifest(
     )
 }
 
-async fn run_execution(request: RunRequest<'_>) -> Result<(), String> {
+async fn run_execution(
+    request: RunRequest<'_>,
+    thread_owner: &HeadlessThreadOwner,
+) -> Result<(), String> {
     let RunRequest {
         profile_path,
         package_path,
@@ -1211,6 +1217,7 @@ async fn run_execution(request: RunRequest<'_>) -> Result<(), String> {
         .and_then(|value| value.to_str())
         .ok_or_else(|| "ASTRA_HEADLESS_PACKAGE_PATH_INVALID".to_string())?;
     let mut host_factory = HeadlessPlatformFactory::new(artifact_root, package_root)
+        .with_thread_owner(thread_owner)
         .with_gpu(gpu)
         .with_input_sequence_hash(input_hash.clone());
     if let Some(observer) = &performance_observer {

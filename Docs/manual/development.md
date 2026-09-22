@@ -113,3 +113,10 @@ python Tools/TsuiNoSora/classic_route_inputs.py \
 ## Editor Player 预览控制
 
 增量 cook/package/bundle 后，以 `astra-player --preview-control` 启动独立 Player，stdin/stdout 仅用于 `astra.vn.preview.v1`，stderr 接收日志。父进程须先发送 Attach、等 Ready 后显示运行；变更文档版本时停止并回收旧进程，不能复用旧 identity。Pause/Resume 和片段内精确 checkpoint 定位见[预览控制契约](../contracts/player-preview.md)。用户游戏存档槽不参与预览定位。
+
+
+### Headless 退出与缩略图调试
+
+CLI 的 run/serve 必须持有 HeadlessThreadOwner，并通过 factory.with_thread_owner 绑定会话线程。owner 的作用域包住产品/会话：正常关闭先执行产品 shutdown，失败返回或取消时再取消并 join 剩余 Host。只有资源所属线程完成析构后，CLI 才能退出；不能以 process::exit 或超时强杀代替此收尾。
+
+Player 的物理输入入口使用 NativeVnHostCommandSource::prepare_ui_input，先按批内顺序执行命令，再把 Captured 结果交给 cache_gameplay_surface，最后处理 UI save request。新增宿主不要恢复仅按右键判定截图的逻辑。NativeVN 输入工具的 --save-restore 覆盖写槽与读取；--cold-restore 用另一进程读取已存在的一份测试存档，不能与写槽或影片输入选项合并。

@@ -70,7 +70,7 @@ GPUI Editor 使用独立真实 GPU 预览窗口。seek 仅当前片段，重建�
 
 普通测试不依赖 Headless；视听测试按需启动宿主。错误、损坏数据、取消、保存恢复及资源释放均需测试。删除旧双轨时同步所有真实调用方，不删除仍有用的产品行为测试。
 
-Headless 的原生解码器和 GPU 资源在会话专属线程的 current-thread executor 内创建、使用和释放；客户端只跨线程传递 typed command 与结果。启动握手异步返回初始化错误，不阻塞调用方 executor。性能模式在同一资源所属线程设置并恢复调度策略，不为使构建通过而给原生指针补 `unsafe Send`。
+Headless 的原生解码器和 GPU 资源在会话专属线程的 current-thread executor 内创建、使用和释放；客户端只跨线程传递 typed command 与结果。启动握手异步返回初始化错误，不阻塞调用方 executor。性能模式在同一资源所属线程设置并恢复调度策略，不为使构建通过而给原生指针补 `unsafe Send`。 CLI 的 run/serve 还持有 HeadlessThreadOwner：正常会话先走 shutdown，错误或取消收尾时取消剩余 Host loop 并 join 专属线程，确认 executor/native resource 析构完成后才返回到进程退出。with_thread_owner 只绑定本地线程生命周期，不改变公共 PlatformHostClient 契约或错误结果。
 
 Root workspace 管共享/Engine/VN/Player/工具；Editor 与 Emulator 使用独立 workspace、lockfile 和产物。平台目标三桌面+Android，缺环境不声称通过。终之空本地转换私有包保留 Classic/Modern 37 路线，Windows 长流程、其余代表流程。旧内部 package/save 可重建，原商业存档必须保护。
 
@@ -161,3 +161,5 @@ F5/F9 由共享 VN 输入入口按 `quick_slot_id` 发起 typed 存读档请求�
 设置页的阅读模式和声音启用状态来自 `ConfigViewModel` 对 VN 权威系统状态的只读投影。Classic 按钮使用现有 `selected` 绑定，同时呈现持续选中外观和 accessibility selected 状态；键盘焦点移动不改变选择，点击只发 typed 请求，不在 UI 中保留第二份设置值。
 
 Yakui 的 `clip_rect_points` 必须以成对 `PushClip`/`PopClip` 进入共享 Scene2D，保持逻辑坐标并由 Canvas 统一变换。单独绘制的 AstraText 使用真实 Yakui `clipped_by` 祖先交集；布局层把整数范围投影为现有只读 semantic text properties 的 `text.clip.x/y/width/height`，Player 不从父控件尺寸猜测裁剪。空交集不绘文字，缺失部分字段、非有限或越界坐标拒绝；相邻控件不能继承前一控件的裁剪。
+
+NativeVN 宿主通过 prepare_ui_input 处理物理输入。只有剧情实际进入系统页或提出快捷保存时，才在该批首个呈现命令之前插入 CaptureSurface；宿主消费 Captured 结果后再处理保存请求。键盘、鼠标、导航与辅助功能入口使用同一状态转换判断，系统页内部切换不覆盖 gameplay thumbnail。直接 dispatch_ui_event 仍供不负责存档缩略图的预览/逻辑调用者使用。迁移宿主时须同时消费截图结果，不能仅替换方法名；回归检查截图在呈现前、序列递增、系统页内不重复捕获，并用真实保存页检查缩略图。

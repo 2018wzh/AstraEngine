@@ -984,18 +984,41 @@ impl NativeVnHostCommandSource {
         self.pending_ui_host_request.take()
     }
 
-    pub fn should_capture_gameplay_surface(&self, event: &UiInputEventKind) -> bool {
-        self.runtime_state.as_ref().is_some_and(|state| {
-            state.system_stack.is_empty()
-                && matches!(
-                    event,
-                    UiInputEventKind::PointerButton {
-                        button: astra_ui_core::UiPointerButton::Secondary,
-                        state: UiButtonState::Pressed,
-                        ..
-                    }
-                )
-        })
+    /// Dispatch physical input and capture the last gameplay frame before the
+    /// first system-page presentation (or a quick-save request). Hosts must cache
+    /// any Captured result before handling the resulting save request.
+    pub fn prepare_ui_input(
+        &mut self,
+        kind: UiInputEventKind,
+    ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
+        let gameplay = self
+            .runtime_state
+            .as_ref()
+            .is_some_and(|state| state.system_stack.is_empty());
+        let capture_sequence = if gameplay {
+            Some(self.next_command_sequence()?)
+        } else {
+            None
+        };
+        let mut batch = self.dispatch_ui_event(kind)?;
+        let opens_system = self
+            .runtime_state
+            .as_ref()
+            .is_some_and(|state| !state.system_stack.is_empty());
+        let saves_gameplay = matches!(
+            self.pending_ui_host_request,
+            Some(VnUiHostRequest::Save { .. })
+        );
+        if let Some(sequence) = capture_sequence.filter(|_| opens_system || saves_gameplay) {
+            batch.commands.insert(
+                0,
+                PlayerHostCommand::CaptureSurface {
+                    sequence,
+                    surface: self.surface,
+                },
+            );
+        }
+        Ok(batch)
     }
 
     pub fn prepare_surface_capture(&mut self) -> Result<PlayerHostCommandBatch, NativeVnHostError> {

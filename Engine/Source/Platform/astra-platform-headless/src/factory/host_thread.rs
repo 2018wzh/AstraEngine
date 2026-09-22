@@ -8,8 +8,11 @@ pub(super) async fn spawn_host(
     backend: astra_platform::PlatformBackendChannels,
 ) -> Result<(), PlatformError> {
     let performance = factory.performance_observer.is_some();
+    let registry = factory.thread_registry.clone();
+    let registry_enabled = registry.is_some();
+    let (cancel, cancelled) = tokio::sync::oneshot::channel();
     let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
-    std::thread::Builder::new()
+    let worker = std::thread::Builder::new()
         .name(if performance {
             "astra-headless-performance-host".into()
         } else {
@@ -43,7 +46,10 @@ pub(super) async fn spawn_host(
                 match HostState::new(factory, profile, backend) {
                     Ok(state) => {
                         if ready_tx.send(Ok(())).is_ok() {
-                            state.run().await;
+                            tokio::select! {
+                                _ = state.run() => {},
+                                _ = cancelled, if registry_enabled => {},
+                            }
                         }
                     }
                     Err(error) => {
@@ -62,6 +68,9 @@ pub(super) async fn spawn_host(
             }
         })
         .map_err(|error| thread_error("spawn", error.to_string()))?;
+    if let Some(registry) = registry {
+        registry.register(cancel, worker);
+    }
     ready_rx
         .await
         .map_err(|error| thread_error("handshake", error.to_string()))?
