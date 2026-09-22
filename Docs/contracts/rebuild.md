@@ -157,3 +157,5 @@ Activity 事件循环必须先于包读取启动。包读取分块让出事件�
 F5/F9 由共享 VN 输入入口按 `quick_slot_id` 发起 typed 存读档请求。未声明快捷槽、空槽读取、受保护槽或按键 repeat 不发起 IO；桌面不得硬编码 `slot.quick`，native 入口使用相同规则。
 
 用户读档在完整恢复剧情和媒体后，经 typed `ReturnSystem` 返回保存时的剧情等待，不停留在保存页或其他临时系统页。桌面、native 与 Headless 产品入口复用该行为。显式快照恢复和 Editor Preview checkpoint 仍完整恢复系统页，不能把用户读档收尾混入底层快照格式。
+
+设置页的阅读模式和声音启用状态来自 `ConfigViewModel` 对 VN 权威系统状态的只读投影。Classic 按钮使用现有 `selected` 绑定，同时呈现持续选中外观和 accessibility selected 状态；键盘焦点移动不改变选择，点击只发 typed 请求，不在 UI 中保留第二份设置值。

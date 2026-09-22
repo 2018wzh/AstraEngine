@@ -572,6 +572,11 @@ fn model_path_allowed(schema: &str, path: &[String]) -> bool {
             first,
             Some(
                 "master_volume"
+                    | "reading_hidden"
+                    | "reading_manual"
+                    | "reading_fast_forward"
+                    | "audio_enabled"
+                    | "audio_disabled"
                     | "text_speed"
                     | "auto_delay_ms"
                     | "high_contrast"

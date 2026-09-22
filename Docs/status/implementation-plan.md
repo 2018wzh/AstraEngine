@@ -2,7 +2,9 @@
 
 ## 2026-09-23 集成与 Classic 复测
 
-集成至 Eden Family 导入/导出第二批后，根 workspace 和 Emulator workspace 完整测试及 all-target Clippy 通过，Headless 构建通过；默认 ignored 的商业与独立硬件用例仍不计验收。原版私有副本已实际完成首句保存、推进和读回，保存及读取都会关闭系统窗回到正文。Classic 读取后停在保存页的差异已在共享产品恢复入口修复，局部回归确认剧情等待不变、显式快照仍保留系统页；新版 Windows 实玩复测尚未完成。
+集成至 Eden Family 导入/导出第二批后，根 workspace 和 Emulator workspace 完整测试及 all-target Clippy 通过，Headless 构建通过；默认 ignored 的商业与独立硬件用例仍不计验收。原版私有副本已实际完成首句保存、推进和读回，保存及读取都会关闭系统窗回到正文。Classic 读取后停在保存页的差异已在共享产品恢复入口修复，局部回归确认剧情等待不变、显式快照仍保留系统页；新版 Windows 已从标题读回正文并继续、从系统页读回选择并正常执行分支。
+
+设置页现从只读 ConfigViewModel 显示阅读模式与声音启用状态，Yakui 的 selected 同时驱动持续外观和 accessibility 状态；键盘焦点与当前选择分开。实测暴露的配置字段多包一层问题已按 DSL 平铺 schema 修复。三个改动 crate 的 52 项测试、五个直接影响 crate 的 all-target Clippy、Release/Cook 通过；Windows 实测默认值、鼠标切换、Tab 移动焦点和切页后状态保持通过。重 Cook 后另发现旧包槽在目录显示可读、实际读取因包身份不符退出，目录完整身份预检与读取失败恢复仍待修复。测试槽已备份后释放 Sandbox 给 Eden 工作线；这批设置代码不能沿用前一基线的全 workspace 结果。
 
 新版 Classic 在 Windows Sandbox 完成正常新游戏、右键系统页、slot.02 保存/读取、退出重开和键盘恢复后继续；旧 slot.01 显示不可用且不能读写。正常快进在选择处停下，鼠标选择分支后进入后续场景；slot.03 和 slot.04 分别保留选择前及屋顶独白的正常游玩位置。保存页曾因聚焦受保护旧槽退出，已修复并实际复测。窗口关闭仍没有确认，逐类演出与完整 UX 对照继续进行，NullAudio 不计可听音频验收。
 

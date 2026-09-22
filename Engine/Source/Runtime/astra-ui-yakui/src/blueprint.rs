@@ -38,6 +38,7 @@ struct PendingSemantic {
     value: Option<String>,
     enabled: bool,
     focused: bool,
+    selected: bool,
     checked: Option<bool>,
     actions: BTreeSet<UiSemanticAction>,
     properties: BTreeMap<String, String>,
@@ -344,8 +345,10 @@ impl BlueprintYakuiRenderer {
         } else {
             Color::CLEAR
         };
+        let selected = property_bool(node, "selected", frame, item)?.unwrap_or(false);
         let fill =
             property_color(node, "background", frame, item, request)?.unwrap_or(default_fill);
+        let fill = if selected { fill.adjust(0.75) } else { fill };
         if let Some(text_key) = name.as_deref() {
             let localized_text = frame
                 .localization
@@ -858,6 +861,7 @@ impl BlueprintYakuiRenderer {
             value: semantic_value,
             enabled,
             focused: response.focused,
+            selected,
             checked: semantic_checked,
             actions: semantic_actions,
             properties: semantic_properties,
@@ -1403,6 +1407,7 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
                     value: None,
                     enabled: true,
                     focused: response.focused,
+                    selected: false,
                     checked: None,
                     actions: BTreeSet::from([UiSemanticAction::Focus, UiSemanticAction::Dismiss]),
                     properties: BTreeMap::new(),
@@ -1538,7 +1543,7 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
                     pending.focused && pending.actions.contains(&UiSemanticAction::Focus),
                     |expected| expected == &pending.id,
                 ),
-                selected: false,
+                selected: pending.selected,
                 checked: pending.checked,
                 actions: pending.actions.clone(),
                 properties: pending.properties.clone(),

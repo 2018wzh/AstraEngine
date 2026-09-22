@@ -2,7 +2,8 @@ use std::collections::BTreeMap;
 
 use astra_ui_core::{UiValidationError, UiValue, ValidateUi};
 use astra_vn_script::{
-    CompiledStory, SkipMode, SystemPageKind, VnRuntimeState, VnTextRevealState, VnWaitKind,
+    CompiledStory, ReadingMode, SkipMode, SystemPageKind, VnRuntimeState, VnTextRevealState,
+    VnWaitKind,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -93,6 +94,8 @@ pub struct TextInputViewModel {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ConfigViewModel {
+    pub reading_mode: ReadingMode,
+    pub audio_enabled: bool,
     pub master_volume: i64,
     pub text_speed: i64,
     pub auto_delay_ms: i64,
@@ -183,7 +186,7 @@ impl VnUiPageModel {
                     UiValue::String(skip_mode_name(*skip_mode).into()),
                 ),
             ]),
-            Self::Config { config } => ui_map([("config", config.to_ui_value())]),
+            Self::Config { config } => config.to_ui_value(),
             Self::Save { slots } | Self::Load { slots } => ui_map([(
                 "slots",
                 UiValue::List(slots.iter().map(SaveSlotViewModel::to_ui_value).collect()),
@@ -503,6 +506,8 @@ impl VnUiModelContext<'_> {
 
     fn config_model(&self) -> Result<ConfigViewModel, UiValidationError> {
         Ok(ConfigViewModel {
+            reading_mode: self.runtime.system.reading_mode,
+            audio_enabled: self.runtime.system.audio_enabled,
             master_volume: config_integer(
                 &self.runtime.system.config,
                 "audio.master",
@@ -775,6 +780,20 @@ impl TextInputViewModel {
 impl ConfigViewModel {
     fn to_ui_value(&self) -> UiValue {
         ui_map([
+            (
+                "reading_hidden",
+                UiValue::Bool(self.reading_mode == ReadingMode::Hidden),
+            ),
+            (
+                "reading_manual",
+                UiValue::Bool(self.reading_mode == ReadingMode::Manual),
+            ),
+            (
+                "reading_fast_forward",
+                UiValue::Bool(self.reading_mode == ReadingMode::FastForward),
+            ),
+            ("audio_enabled", UiValue::Bool(self.audio_enabled)),
+            ("audio_disabled", UiValue::Bool(!self.audio_enabled)),
             ("master_volume", UiValue::Integer(self.master_volume)),
             ("text_speed", UiValue::Integer(self.text_speed)),
             ("auto_delay_ms", UiValue::Integer(self.auto_delay_ms)),
@@ -837,6 +856,52 @@ mod tests {
     };
     use astra_ui_core::UiValue;
     use std::collections::BTreeMap;
+
+    #[test]
+    fn config_binding_fields_match_the_declared_flat_schema_and_current_selection() {
+        use super::{ConfigViewModel, ReadingMode, TextInputViewModel};
+        for mode in [
+            ReadingMode::Hidden,
+            ReadingMode::Manual,
+            ReadingMode::FastForward,
+        ] {
+            let value = VnUiPageModel::Config {
+                config: ConfigViewModel {
+                    reading_mode: mode,
+                    audio_enabled: false,
+                    master_volume: 50,
+                    text_speed: 50,
+                    auto_delay_ms: 1200,
+                    high_contrast: false,
+                    locale: "en".into(),
+                    available_locales: vec!["en".into()],
+                    player_name: TextInputViewModel {
+                        input_id: "name".into(),
+                        value: String::new(),
+                        multiline: false,
+                        max_graphemes: 32,
+                        character_policy: "single_line".into(),
+                    },
+                },
+            }
+            .to_ui_value()
+            .unwrap();
+            let UiValue::Map(fields) = value else {
+                panic!("config fields");
+            };
+            assert_eq!(fields["master_volume"], UiValue::Integer(50));
+            assert!(!fields.contains_key("config"));
+            assert_eq!(fields["audio_enabled"], UiValue::Bool(false));
+            assert_eq!(fields["audio_disabled"], UiValue::Bool(true));
+            for (field, expected) in [
+                ("reading_hidden", ReadingMode::Hidden),
+                ("reading_manual", ReadingMode::Manual),
+                ("reading_fast_forward", ReadingMode::FastForward),
+            ] {
+                assert_eq!(fields[field], UiValue::Bool(mode == expected));
+            }
+        }
+    }
 
     #[test]
     fn config_values_are_schema_checked_instead_of_silently_clamped() {

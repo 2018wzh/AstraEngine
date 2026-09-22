@@ -693,6 +693,12 @@ fn accessibility_range_action_uses_typed_change_binding_and_is_consumed() {
 #[test]
 fn requested_focus_activates_a_button_without_prior_navigation() {
     let mut button = node("confirm", "button");
+    button.properties.insert(
+        "selected".into(),
+        UiValueExpr::Literal {
+            value: UiValue::Bool(true),
+        },
+    );
     button.events.push(UiEventBinding {
         event: "activate".into(),
         action_id: "vn.advance".into(),
@@ -844,6 +850,16 @@ fn requested_focus_activates_a_button_without_prior_navigation() {
         .nodes
         .iter()
         .any(|node| node.id == "root/alternate" && node.focused));
+    assert!(navigated
+        .semantics
+        .nodes
+        .iter()
+        .any(|node| node.id == "root/confirm" && node.selected && !node.focused));
+    assert!(navigated
+        .semantics
+        .nodes
+        .iter()
+        .any(|node| node.id == "root/alternate" && !node.selected));
     backend
         .render_frame(request(
             None,

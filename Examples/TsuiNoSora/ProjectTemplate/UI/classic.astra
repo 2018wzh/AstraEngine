@@ -185,16 +185,16 @@ ui_view ui.tsui.classic.config model:astra.vn.ui_model.config.v1 theme:tsui.them
           on activate -> vn.return_system
       scroll id:body background:theme:system.body padding:8 gap:4 min_width:332 min_height:184 max_height:184 clip_children:true
         row id:reading_modes min_height:22 max_height:22 gap:4
-          button id:hidden text:l10n:system.text_hidden min_width:96 min_height:22 max_height:22 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+          button id:hidden selected:$model.reading_hidden text:l10n:system.text_hidden min_width:96 min_height:22 max_height:22 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
             on activate -> vn.set_reading_mode mode:"hidden"
-          button id:manual text:l10n:system.text_manual min_width:96 min_height:22 max_height:22 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+          button id:manual selected:$model.reading_manual text:l10n:system.text_manual min_width:96 min_height:22 max_height:22 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
             on activate -> vn.set_reading_mode mode:"manual"
-          button id:fast text:l10n:system.fast_forward min_width:96 min_height:22 max_height:22 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+          button id:fast selected:$model.reading_fast_forward text:l10n:system.fast_forward min_width:96 min_height:22 max_height:22 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
             on activate -> vn.set_reading_mode mode:"fast_forward"
         row id:audio min_height:22 max_height:22 gap:4
-          button id:audio_on text:l10n:system.audio_on min_width:148 min_height:22 max_height:22 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+          button id:audio_on selected:$model.audio_enabled text:l10n:system.audio_on min_width:148 min_height:22 max_height:22 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
             on activate -> vn.set_audio_enabled enabled:true
-          button id:audio_off text:l10n:system.audio_off min_width:148 min_height:22 max_height:22 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+          button id:audio_off selected:$model.audio_disabled text:l10n:system.audio_off min_width:148 min_height:22 max_height:22 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
             on activate -> vn.set_audio_enabled enabled:false
         button id:back text:l10n:system.back min_width:60 min_height:18 max_height:18 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
           on activate -> vn.return_system

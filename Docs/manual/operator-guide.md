@@ -4,6 +4,8 @@ Operator 负责构建、打包、平台适配、Release Gate 与 crash bundle；
 
 Player 用户存档读取成功后返回保存时的剧情等待，关闭临时系统页。Editor Preview 的显式检查点仍恢复完整系统页；两者共享快照校验，但操作完成后的界面不同。旧格式或损坏槽保持不可用，不能用新存档覆盖。
 
+Classic 设置页以持续的深色按钮标出当前阅读模式和声音开关。键盘焦点与当前选项分开；移动焦点不应用设置，确认后才改变选中项。NullAudio 测试标记不随声音开关消失，声音启用也不代表设备输出可听。
+
 ## Worktree 内 Cargo 验证
 
 每次验证都应在当前实例独占的 worktree 中直接执行 Cargo。workspace test 依赖 Headless test driver，因此先构建对应 binary：
