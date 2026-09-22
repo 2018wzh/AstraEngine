@@ -28,4 +28,4 @@ python -m unittest discover Tools/NativeVN/tests
 
 OpenRouter 辅助听审只从 `OPENROUTER_API_KEY` 读取凭据。当前批准设置是 `xiaomi/mimo-v2.5`、`temperature=0`、固定 seed、`json_object` 和 128 kbps 临时 MP3；该模型是在当前区域对 audio input 做 capability preflight 后选定，`openrouter/auto` 及更高档音频端点因能力或区域限制没有进入正式批次。
 
-`experience_inputs.py` 默认生成阅读、位移、shade 与取消/恢复 checkpoint。`--media` 继续选择影片并等待完整播放结束；`--save-restore` 通过键盘实际写槽和读取，严格要求读取后回剧情。工具不使用直接修改状态的语义快捷命令。主线 Load 修复接入前该严格流程仍失败，诊断用额外 Escape 返回不能算此测试通过。
+`experience_inputs.py` 默认生成阅读、位移、shade 与取消/恢复 checkpoint。`--media` 继续选择影片并等待完整播放结束；`--save-restore` 通过键盘实际写槽和读取，严格要求读取后回剧情。工具不使用直接修改状态的语义快捷命令。合并 a8dd4625c 后严格存读档流程已通过硬件离屏运行；读取后无需额外 Escape。保存页裁剪与缩略图问题仍待共享 UI/Player 修复。

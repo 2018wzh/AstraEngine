@@ -43,3 +43,6 @@
 main surface 修复后真实 Cook/package 与 Vulkan 硬件离屏场景通过。完整 12 秒 VP9 视频分支通过 52 条物理输入、7 个 checkpoint，实际查看首段、中段和结束画面；输出 WAV 为 48kHz 双声道、22.176 秒、非静音，未验证真实设备听音。保存/读取后额外按 Escape 返回剧情的诊断流程通过；严格“读取后自动回剧情”在本批基线仍失败，等待接入主线修复，不能用诊断流程替代该回归。
 
 本批调整 shade、复用人物 entity、保存页文案与缩略图尺寸；进一步将 replacement 延长为 8 秒以观察中途取消，并给保存列表加 viewport 裁剪。这两项最新调整已 Cook/package，尚待 GPU 看图；工具测试另行执行。没有生成新媒体，也没有修改历史审查结论。错误退出仍可能触发 GPU 清理竞争；缩放输出与缩略图捕获入口差异已报告共享 Player owner。TaskGroup 新基线、冷启动恢复、原生窗口/音频、完整路线与性能未验收。
+
+
+2026-09-22 合并 a8dd4625c 后，NativeVN 新包在 Vulkan 硬件离屏路径通过严格存读档：69 条物理输入、10 个 checkpoint、606 submitted/12 rasterized frames，diagnostics 为空，正常关闭。读取后直接回剧情，无额外 Escape；已查看恢复画面及 shade/取消恢复画面。保存列表的越界绘制仍在：clip_children 对应的 clip_rect_points 在 Yakui→Mesh2D 转换中未使用，截图仍显示槽位覆盖返回按钮；键盘入口缩略图仍捕获保存页。这两项不计通过，已报告共享 UI/Player owner。此轮不代表冷进程恢复、真实音频或完整产品验收。

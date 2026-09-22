@@ -568,3 +568,8 @@ main surface 修复后真实 Cook/package 与 Vulkan 硬件离屏场景通过。
 
 
 2026-09-22 Linux 接入 a8dd4625c 后，预览满 stdout 管道测试初次超时。实际检查子进程仅剩主线程阻塞在 pipe write，transport worker 已 join；原因是恢复 blocking stdio 后 libtest 继续向故意不读取的管道写结果。仅让该子进程用例在 transport Drop 返回后退出，保留真实背压与 join 检查，不修改生产传输。Linux 6 项、Player 22 项测试通过，1 项 subprocess helper 按设计忽略；新基线 NativeVN Cook 通过，GPU 严格 Load 回归继续执行。
+
+
+2026-09-22 合并 a8dd4625c 后，NativeVN 新包在 Vulkan 硬件离屏路径通过严格存读档：69 条物理输入、10 个 checkpoint、606 submitted/12 rasterized frames，diagnostics 为空，正常关闭。读取后直接回剧情，无额外 Escape；已查看恢复画面及 shade/取消恢复画面。保存列表的越界绘制仍在：clip_children 对应的 clip_rect_points 在 Yakui→Mesh2D 转换中未使用，截图仍显示槽位覆盖返回按钮；键盘入口缩略图仍捕获保存页。这两项不计通过，已报告共享 UI/Player owner。此轮不代表冷进程恢复、真实音频或完整产品验收。
+
+新基线四事件错误退出回归写出 ASTRA_HEADLESS_AWAIT_TIMEOUT 后未正常退出，主线程停在 rt_mutex_schedule，Host线程仍存在；附加gdb被本机ptrace权限拒绝，已终止本次测试进程。旧基线曾段错误/abort，本批只能确认错误退出挂起，不能认定同一栈已再次验证。共享Headless生命周期修复仍开放。
