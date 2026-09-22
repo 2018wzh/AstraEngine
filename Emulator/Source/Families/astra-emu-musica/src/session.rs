@@ -165,9 +165,7 @@ impl MusicaSession {
         let mut focused = self.focused;
         let mut visible = self.visible;
         let mut suspended = self.suspended;
-        let mut was_paused = suspended
-            || !visible
-            || (!focused && !self.progress_in_background);
+        let mut was_paused = suspended || !visible || (!focused && !self.progress_in_background);
         let mut discard_elapsed = false;
         let mut resumed_from_pause = false;
         for event in events {
@@ -189,9 +187,7 @@ impl MusicaSession {
                     | FamilyEvent::WindowVisibility { .. }
                     | FamilyEvent::WindowSuspended { .. }
             ) {
-                let paused = suspended
-                    || !visible
-                    || (!focused && !self.progress_in_background);
+                let paused = suspended || !visible || (!focused && !self.progress_in_background);
                 if !was_paused && paused {
                     discard_elapsed = true;
                 } else if was_paused && !paused {
@@ -200,9 +196,7 @@ impl MusicaSession {
                 was_paused = paused;
             }
         }
-        let lifecycle_paused = suspended
-            || !visible
-            || (!focused && !self.progress_in_background);
+        let lifecycle_paused = suspended || !visible || (!focused && !self.progress_in_background);
         let elapsed_ns = if discard_elapsed || lifecycle_paused {
             0
         } else if resumed_from_pause {

@@ -414,6 +414,7 @@ fn run_bundled_game(test_null_audio: bool) -> Result<(), PlayerCliError> {
         #[cfg(target_os = "linux")]
         let factory = astra_platform_linux::factory();
         let mut session = factory.start(HostLaunchProfile::platform(profile)).await?;
+        let session_result: Result<(), astra_platform::PlatformError> = async {
         let source = session
             .client
             .open_package(PackageSourceRequest::Bundled {
@@ -470,28 +471,28 @@ fn run_bundled_game(test_null_audio: bool) -> Result<(), PlayerCliError> {
                 error.to_string(),
             )
         })?;
-        hydrate_save_catalog(&mut vn, &mut executor).await?;
-        executor
-            .execute_batch(vn.launch().map_err(|error| {
-                astra_platform::PlatformError::new(
-                    astra_platform::PlatformErrorCode::InvalidState,
-                    "player.runtime.launch",
-                    error.to_string(),
-                )
-            })?)
-            .await
-            .map_err(|error| {
-                astra_platform::PlatformError::new(
-                    astra_platform::PlatformErrorCode::InvalidState,
-                    "player.host.execute",
-                    error.to_string(),
-                )
-            })?;
-        let mut pointer = (0.0_f64, 0.0_f64);
-        let mut save_transaction_id = 1000_u64;
-        let timeline_clock = std::time::Instant::now();
         let mut media = astra_player::NativeVnProductMediaHost::default();
         let player_result: Result<(), astra_platform::PlatformError> = async {
+            hydrate_save_catalog(&mut vn, &mut executor).await?;
+            executor
+                .execute_batch(vn.launch().map_err(|error| {
+                    astra_platform::PlatformError::new(
+                        astra_platform::PlatformErrorCode::InvalidState,
+                        "player.runtime.launch",
+                        error.to_string(),
+                    )
+                })?)
+                .await
+                .map_err(|error| {
+                    astra_platform::PlatformError::new(
+                        astra_platform::PlatformErrorCode::InvalidState,
+                        "player.host.execute",
+                        error.to_string(),
+                    )
+                })?;
+            let mut pointer = (0.0_f64, 0.0_f64);
+            let mut save_transaction_id = 1000_u64;
+            let timeline_clock = std::time::Instant::now();
             media
                 .process(
                     &mut vn,
@@ -850,9 +851,6 @@ fn run_bundled_game(test_null_audio: bool) -> Result<(), PlayerCliError> {
         if let Err(error) = session.client.destroy_window(window).await {
             failures.push(error);
         }
-        if let Err(error) = session.client.shutdown().await {
-            failures.push(error);
-        }
         #[cfg(target_os = "windows")]
         for process in &mut ui_component_processes {
             if let Err(error) = process.invoke(astra_ui_plugin_abi::UiComponentRequest::Shutdown) {
@@ -873,6 +871,16 @@ fn run_bundled_game(test_null_audio: bool) -> Result<(), PlayerCliError> {
             ));
         }
         Ok::<(), astra_platform::PlatformError>(())
+        }.await;
+        // The host owns partially created package, window and surface resources too.
+        let shutdown_result = session.client.shutdown().await;
+        match (session_result, shutdown_result) {
+            (Ok(()), result) | (result, Ok(())) => result,
+            (Err(error), Err(cleanup)) => Err(player_platform_error(
+                "player.session",
+                format!("{error}; cleanup: {cleanup}"),
+            )),
+        }
     };
     #[cfg(target_os = "macos")]
     runner.run(player)??;
