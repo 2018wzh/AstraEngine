@@ -20,7 +20,7 @@ Region 队列保持原顺序并在活动过渡完成后激活；排队状态可�
 
 ## 数据格式迁移
 
-当前 Stage snapshot schema 为 `astra.vn.product_stage_state.v9`，coordinator 为 `astra.vn.presentation_coordinator.v5`。此前 v8/v4 布局已增加内部 failed 字段和背景 pending 标记；本轮 v5 增加等待组一致性校验，字段布局不变。`PresentationRegionCommand` 改用 serde 外部标记枚举，使非空队列可由 postcard 双向编码；旧内部标记表示只能写入，读取会失败。若使用 JSON，payload 形式相应改为如 `{"character": {...}}`，不再是 `{"region": "character", "command": {...}}`。
+当前 Stage snapshot schema 为 `astra.vn.product_stage_state.v10`，coordinator 为 `astra.vn.presentation_coordinator.v6`；新增显式任务组合进度，字段布局已改变。Player envelope 与 payload 同步升级到 `astra.player.native_vn_save.v9` 和 `astra.player.native_vn_save_payload.v9`。各字节入口先读取 schema，拒绝旧版本后才解码变化字段，避免把旧布局误报为损坏。`PresentationRegionCommand` 改用 serde 外部标记枚举，使非空队列可由 postcard 双向编码；旧内部标记表示只能写入，读取会失败。若使用 JSON，payload 形式相应改为如 `{"character": {...}}`，不再是 `{"region": "character", "command": {...}}`。
 
 旧内部 snapshot 明确拒绝并重建，不提供迁移器。恢复时校验 coordinator schema、队列边界、区域匹配、排队策略和文字 reveal rate，拒绝损坏队列而不是延迟到 tick panic。商业游戏原生存档不属于此格式，不能覆盖。
 
@@ -34,7 +34,9 @@ Region 队列保持原顺序并在活动过渡完成后激活；排队状态可�
 
 共用 fence id 的 Character/Background/Text/Video 命令组成 all-of 等待组，包含区域队列中的成员；同组未完成成员的 command id 必须唯一，冲突在批次提交前拒绝。只有所有成员都完成，coordinator 才发出一次完成通知；文字立即显示或视频先结束不能提前放行其他成员。任一成员失败或被新命令替换，组保持 Failed，后续成员完成不能覆盖失败；其他轨道继续执行。已经终结且没有活动成员的 fence id 可以用于新一组命令，重新进入 Pending。
 
-成员身份直接来自现有活动/排队命令，保存同一 coordinator state，不另建线程池或任务 registry。新 coordinator schema 为 v5，旧 v4 快照拒绝重建；StageDirector 外层仍为 v8，恢复时校验内层 schema 与 fence 引用。跨区域并行、顺序排队、文字点击、视频完成/失败、替换与中途保存恢复均需要普通产品状态测试；通用 Runtime 任务组合和产品异步 IO 接入仍未完成。
+成员身份直接来自现有活动/排队命令，局部 All 进度保存于同一 coordinator state，不另建线程池或全局任务 registry。追加成员保留此前完成项；失败和替换取消该等待组，其他轨道仍继续。文字 Sequence 和揭示 Race 的取消、失败及恢复规则见[任务作用域](task-scope.md)。旧 Stage v9、coordinator v5 和 Player v8 存档直接拒绝；保留旧槽只读，使用新槽执行本轮冷启动回归，不在读取失败后写回，也不修改商业原版存档。
+
+当前 `.astra` 可用两个 `movie ... end:continue fence:movies.done` 后接 `wait fence:movies.done` 表达并行视频层的全部完成等待；普通 `text` 使用上述揭示与独立确认序列。背景和人物命令当前没有 DSL fence 参数，不应写不存在的语法。现有 parser 与 coordinator 回归覆盖该片段；真实素材、GPU 和音频验收不由这些测试替代。
 
 ## Player 呈现会话
 

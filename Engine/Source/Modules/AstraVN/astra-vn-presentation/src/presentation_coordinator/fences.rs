@@ -1,5 +1,18 @@
 use super::*;
+use astra_runtime::{TaskGroupMode, TaskGroupState, TaskMemberState, TaskTerminal};
 use std::collections::BTreeSet;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct FenceTaskGroup {
+    ids: Vec<String>,
+    progress: TaskGroupState,
+}
+
+impl FenceTaskGroup {
+    pub(super) fn cancel(&mut self) {
+        self.progress.cancel();
+    }
+}
 
 fn members(state: &PresentationCoordinatorState) -> Vec<(&str, &str)> {
     fn insert<'a>(set: &mut Vec<(&'a str, &'a str)>, id: &'a str, fence: &'a Option<String>) {
@@ -38,6 +51,11 @@ pub(super) fn validate_commands(
     commands: &[PresentationCommandEnvelope],
 ) -> Result<(), VnError> {
     let mut identities: BTreeSet<_> = members(state).into_iter().collect();
+    for (fence, group) in &state.fence_tasks {
+        if state.fences.get(fence) == Some(&FenceStatus::Pending) {
+            identities.extend(group.ids.iter().map(|id| (fence.as_str(), id.as_str())));
+        }
+    }
     for command in commands {
         if let Some(fence) = command.fence.as_deref() {
             if !identities.insert((fence, command.command_id.as_str())) {
@@ -67,6 +85,37 @@ impl PresentationCoordinator {
                 }
             }
         }
+        let affected: BTreeSet<_> = commands.iter().filter_map(|c| c.fence.clone()).collect();
+        for fence in affected {
+            let old = if previous.iter().any(|(id, _)| *id == fence) {
+                self.state.fence_tasks.get(&fence).cloned()
+            } else {
+                None
+            };
+            let mut ids = old.as_ref().map(|g| g.ids.clone()).unwrap_or_default();
+            for command in commands.iter().filter(|c| c.fence.as_ref() == Some(&fence)) {
+                if !ids.contains(&command.command_id) {
+                    ids.push(command.command_id.clone());
+                }
+            }
+            let mut progress = TaskGroupState::new(TaskGroupMode::All, ids.len())
+                .expect("fence has incoming members");
+            if let Some(old) = old {
+                for (index, status) in old.progress.members().iter().enumerate() {
+                    if let TaskMemberState::Terminal(result) = status {
+                        progress
+                            .complete(index, *result)
+                            .expect("distinct fence member");
+                    }
+                }
+            }
+            if self.state.fences.get(&fence) == Some(&FenceStatus::Failed) {
+                progress.cancel();
+            }
+            self.state
+                .fence_tasks
+                .insert(fence, FenceTaskGroup { ids, progress });
+        }
         let current = members(&self.state);
         let lost: BTreeSet<String> = previous
             .into_iter()
@@ -80,6 +129,9 @@ impl PresentationCoordinator {
             .map(|(fence, _)| fence.to_string())
             .collect();
         for fence in lost {
+            if let Some(group) = self.state.fence_tasks.get_mut(&fence) {
+                group.progress.cancel();
+            }
             self.state.fences.insert(fence, FenceStatus::Failed);
         }
     }
@@ -90,10 +142,33 @@ impl PresentationCoordinator {
         }
         candidates.sort();
         candidates.dedup();
-        let pending = members(&self.state);
+        let pending: Vec<_> = members(&self.state)
+            .into_iter()
+            .map(|(fence, id)| (fence.to_owned(), id.to_owned()))
+            .collect();
         candidates.retain(|fence| {
-            self.state.fences.get(fence) == Some(&FenceStatus::Pending)
-                && !pending.iter().any(|(id, _)| *id == fence)
+            if self.state.fences.get(fence) != Some(&FenceStatus::Pending) {
+                return false;
+            }
+            let Some(group) = self.state.fence_tasks.get_mut(fence) else {
+                return false;
+            };
+            let completed: Vec<_> = group
+                .progress
+                .active()
+                .filter(|i| {
+                    !pending
+                        .iter()
+                        .any(|(id, command)| id == fence && command == &group.ids[*i])
+                })
+                .collect();
+            for member in completed {
+                group
+                    .progress
+                    .complete(member, TaskTerminal::Completed)
+                    .expect("pending fence member");
+            }
+            group.progress.terminal() == Some(TaskTerminal::Completed)
         });
         for fence in &candidates {
             self.state
@@ -105,6 +180,64 @@ impl PresentationCoordinator {
 
     pub(super) fn validate_fences(&self) -> Result<(), VnError> {
         let pending = members(&self.state);
+        for (fence, group) in &self.state.fence_tasks {
+            group.progress.validate().map_err(|_| {
+                coordinator_error(
+                    "ASTRA_VN_PRESENTATION_FENCE_STATE",
+                    "saved task group is invalid",
+                )
+            })?;
+            if group.progress.mode() != TaskGroupMode::All
+                || group.ids.len() != group.progress.members().len()
+                || group.ids.iter().collect::<BTreeSet<_>>().len() != group.ids.len()
+            {
+                return Err(coordinator_error(
+                    "ASTRA_VN_PRESENTATION_FENCE_STATE",
+                    "saved fence task members are invalid",
+                ));
+            }
+            let status = self.state.fences.get(fence);
+            if status.is_none()
+                || (status == Some(&FenceStatus::Completed)
+                    && group.progress.terminal() != Some(TaskTerminal::Completed))
+                || (status == Some(&FenceStatus::Failed)
+                    && group.progress.terminal() != Some(TaskTerminal::Cancelled))
+            {
+                return Err(coordinator_error(
+                    "ASTRA_VN_PRESENTATION_FENCE_STATE",
+                    "saved fence outcome differs from its task group",
+                ));
+            }
+            if status == Some(&FenceStatus::Pending) {
+                let active: BTreeSet<_> = group
+                    .progress
+                    .active()
+                    .map(|i| group.ids[i].as_str())
+                    .collect();
+                let actual: BTreeSet<_> = pending
+                    .iter()
+                    .filter(|(id, _)| *id == fence)
+                    .map(|(_, id)| *id)
+                    .collect();
+                if active != actual || group.progress.terminal().is_some() {
+                    return Err(coordinator_error(
+                        "ASTRA_VN_PRESENTATION_FENCE_STATE",
+                        "saved task progress differs from active fence members",
+                    ));
+                }
+            }
+        }
+        if self
+            .state
+            .fences
+            .keys()
+            .any(|id| !self.state.fence_tasks.contains_key(id))
+        {
+            return Err(coordinator_error(
+                "ASTRA_VN_PRESENTATION_FENCE_STATE",
+                "saved fence has no task group",
+            ));
+        }
         let bad_reference = pending.iter().any(|(fence, _)| {
             !matches!(
                 self.state.fences.get(*fence),

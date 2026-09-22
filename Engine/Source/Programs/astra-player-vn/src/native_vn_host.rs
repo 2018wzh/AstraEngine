@@ -1525,7 +1525,7 @@ impl NativeVnHostCommandSource {
             ));
         }
         let payload = NativeVnPlayerSavePayload {
-            schema: "astra.player.native_vn_save_payload.v8".into(),
+            schema: "astra.player.native_vn_save_payload.v9".into(),
             slot,
             session_id: self.session_id.clone(),
             runtime,
@@ -1538,7 +1538,7 @@ impl NativeVnHostCommandSource {
             save_metadata: save_metadata_for_persistence(&save_metadata),
         };
         postcard::to_allocvec(&NativeVnPlayerSaveEnvelope {
-            schema: "astra.player.native_vn_save.v8".into(),
+            schema: "astra.player.native_vn_save.v9".into(),
             payload,
         })
         .map_err(|error| NativeVnHostError::Save(error.to_string()))
@@ -6813,11 +6813,17 @@ fn format_playtime(playtime_ms: u64) -> String {
 }
 
 fn decode_save_envelope(bytes: &[u8]) -> Result<NativeVnPlayerSaveEnvelope, NativeVnHostError> {
+    let (schema, _) = postcard::take_from_bytes::<String>(bytes).map_err(|error| {
+        NativeVnHostError::Save(format!("ASTRA_PLAYER_SAVE_INTEGRITY: {error}"))
+    })?;
+    if schema != "astra.player.native_vn_save.v9" {
+        return Err(NativeVnHostError::Save("ASTRA_PLAYER_SAVE_SCHEMA: unsupported save version; retain the old file and use a new slot".into()));
+    }
     let envelope: NativeVnPlayerSaveEnvelope = postcard::from_bytes(bytes).map_err(|error| {
         NativeVnHostError::Save(format!("ASTRA_PLAYER_SAVE_INTEGRITY: {error}"))
     })?;
-    if envelope.schema != "astra.player.native_vn_save.v8"
-        || envelope.payload.schema != "astra.player.native_vn_save_payload.v8"
+    if envelope.schema != "astra.player.native_vn_save.v9"
+        || envelope.payload.schema != "astra.player.native_vn_save_payload.v9"
     {
         return Err(NativeVnHostError::Save(
             "ASTRA_PLAYER_SAVE_VERSION_UNSUPPORTED: save schema is not supported".into(),

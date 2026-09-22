@@ -168,3 +168,66 @@ mod tick_regressions;
 
 #[path = "support/fence_groups.rs"]
 mod fence_groups;
+
+#[test]
+fn text_sequence_race_preserves_partial_restore_and_click_boundaries() {
+    for click_first in [false, true] {
+        let mut c = PresentationCoordinator::default();
+        c.apply_batch(&[text(1)], 1).unwrap();
+        c.tick(250_000_000).unwrap();
+        let mut c = PresentationCoordinator::restore(&c.snapshot().unwrap()).unwrap();
+        assert_eq!(c.state().text.active.as_ref().unwrap().visible_graphemes, 5);
+        assert!(c.acknowledge_story_advance().is_err());
+        if click_first {
+            assert_eq!(
+                c.request_text_advance(),
+                TextAdvanceDisposition::RevealCompleted
+            );
+            assert!(c.tick(750_000_000).unwrap().is_empty());
+        } else {
+            assert_eq!(c.tick(750_000_000).unwrap(), vec!["fence.text.1"]);
+        }
+        let mut c = PresentationCoordinator::restore(&c.snapshot().unwrap()).unwrap();
+        assert_eq!(
+            c.state().text.active.as_ref().unwrap().visible_graphemes,
+            20
+        );
+        assert!(c.tick(1).unwrap().is_empty());
+        assert_eq!(
+            c.request_text_advance(),
+            TextAdvanceDisposition::StoryAdvanceRequested
+        );
+        c.acknowledge_story_advance().unwrap();
+        assert_eq!(
+            c.request_text_advance(),
+            TextAdvanceDisposition::NoActiveText
+        );
+        assert!(c.acknowledge_story_advance().is_err());
+    }
+}
+
+#[test]
+fn current_dsl_expresses_parallel_movie_wait_and_independent_dialogue() {
+    astra_vn_script::compile_astra_project([astra_vn_script::AstraSource::story("tasks.astra", r#"
+story tasks #@id story.tasks
+state start #@id state.start
+  scene demo #@id scene.demo
+    stage viewport:1280x720 safe_area:16:9 #@id stage.configure
+    layer id:movie.left kind:video z:10 blend:normal clip:stage #@id layer.left
+    layer id:movie.right kind:video z:11 blend:normal clip:stage #@id layer.right
+    movie layer:movie.left asset:asset:/movie/short end:continue fence:movies.done interrupt:reject #@id movie.left
+    movie layer:movie.right asset:asset:/movie/long end:continue fence:movies.done interrupt:reject #@id movie.right
+    wait fence:movies.done #@id wait.movies
+    text key:tasks.reveal speaker:narrator #@id text.reveal
+    text key:tasks.next speaker:narrator #@id text.next
+"#)], Default::default()).unwrap();
+}
+
+#[test]
+fn old_coordinator_header_is_rejected_before_decoding_changed_fields() {
+    let old = postcard::to_allocvec("astra.vn.presentation_coordinator.v5").unwrap();
+    assert!(PresentationCoordinator::restore(&old)
+        .unwrap_err()
+        .to_string()
+        .contains("ASTRA_VN_PRESENTATION_SNAPSHOT_SCHEMA"));
+}

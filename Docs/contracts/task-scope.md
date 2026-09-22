@@ -17,3 +17,13 @@
 ## 验证
 
 普通 Runtime 测试覆盖顺序短路、并行成功/失败/取消、未启动就取消、父子与兄弟隔离、丢弃 future 后的资源释放，以及成功/拒绝读档和 World 退出。发布前执行 Engine workspace 的 fmt/clippy/build/test；这些逻辑测试不能替代真实平台异步资源和产品长流程验证。
+
+## 可恢复任务组合
+
+`TaskGroupState` 保存局部任务的 Sequence、All 或 Race 进度；`TaskGroup` 为运行中的成员分配现有 `TaskScope` 子作用域。它不创建线程池，也不持有 worker。Sequence 只激活当前一步，成功后激活下一步，失败或取消终止后续步骤。All 等待每个成员到达终态，结果优先级为 Failed、Cancelled、Completed。Race 接受第一个终态（包括失败和取消），取消其余成员；重复完成、已取消句柄和恢复前的句柄均被拒绝。
+
+组取消不取消父作用域，后继 AwaitToken 可绑定父作用域继续运行。关闭由任务所有者先取消再 join；丢弃组合不能代替 worker 回收。snapshot 记录已完成成员与当前步骤，restore 校验状态并创建新作用域，不启动外部 IO。恢复调用方只恢复显式业务状态，不能重新执行已完成步骤或重放按键。
+
+VN coordinator 是实际消费者：共用 fence 使用 All；文字使用“揭示、独立确认”的 Sequence，其中揭示由时钟与点击 Race 决定。第一次点击只完成未揭示文字，下一次独立输入才能推进剧情。保存包括可见字数、剩余计时与组合进度。它们不保存脚本栈、回调或任务句柄。
+
+[任务组合回归](../../Engine/Source/Runtime/astra-runtime/tests/task_group.rs)覆盖短路、全终态、竞态败者取消、重复结果、恢复代次、父子隔离和 worker 回收。产品数据迁移见[演出帧推进迁移](presentation-tick-migration.md)。真实设备演出仍须另行验证。

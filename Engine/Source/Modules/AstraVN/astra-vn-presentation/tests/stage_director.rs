@@ -471,3 +471,13 @@ fn product_movie_fence_waits_for_both_layers() {
         vec!["movies.done"]
     );
 }
+
+#[test]
+fn old_stage_header_is_rejected_before_changed_fields_are_decoded() {
+    let manifest = VnPresentationProviderManifest::standard();
+    let old = postcard::to_allocvec(&(&manifest, "astra.vn.product_stage_state.v9")).unwrap();
+    let error = ProductStageDirector::restore(manifest, "advanced-vn", &old).unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("ASTRA_VN_STAGE_SNAPSHOT_IDENTITY"));
+}

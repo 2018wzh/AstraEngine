@@ -14,7 +14,7 @@ use crate::{
     VnTextRevealState, VnTimelineJoinPolicy,
 };
 
-pub const PRODUCT_STAGE_STATE_SCHEMA: &str = "astra.vn.product_stage_state.v9";
+pub const PRODUCT_STAGE_STATE_SCHEMA: &str = "astra.vn.product_stage_state.v10";
 const MAX_FRAME_DELTA_NS: u64 = 1_000_000_000;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -435,6 +435,14 @@ impl ProductStageDirector {
         profile: &str,
         bytes: &[u8],
     ) -> Result<Self, VnError> {
+        let (_, state_bytes) = postcard::take_from_bytes::<VnPresentationProviderManifest>(bytes)?;
+        let (schema, _) = postcard::take_from_bytes::<String>(state_bytes)?;
+        if schema != PRODUCT_STAGE_STATE_SCHEMA {
+            return Err(stage_error(
+                "ASTRA_VN_STAGE_SNAPSHOT_IDENTITY",
+                "unsupported stage snapshot; retain the old save and create a new slot",
+            ));
+        }
         let restored: Self = postcard::from_bytes(bytes)?;
         manifest.profile(profile).map_err(VnError::Diagnostic)?;
         if restored.state.schema != PRODUCT_STAGE_STATE_SCHEMA

@@ -113,3 +113,23 @@ fn ambiguous_member_identity_is_rejected_before_batch_commit() {
     assert!(c.apply_batch(&[duplicate], 1).is_err());
     assert_eq!(c, before);
 }
+
+#[test]
+fn appending_after_partial_completion_preserves_members_and_restore() {
+    let mut c = PresentationCoordinator::default();
+    c.apply_batch(
+        &[joined(character(1, "hero")), joined(background(2, "bg"))],
+        1,
+    )
+    .unwrap();
+    c.tick(500_000_000).unwrap();
+    c.apply_batch(&[joined(video(3, "movie"))], 1).unwrap();
+    let mut c = PresentationCoordinator::restore(&c.snapshot().unwrap()).unwrap();
+    assert!(c.tick(500_000_000).unwrap().is_empty());
+    let mut duplicate = joined(character(4, "other"));
+    duplicate.command_id = "character.1".into();
+    assert!(c.apply_batch(&[duplicate], 1).is_err());
+    assert_eq!(c.complete_video("opening").unwrap(), vec!["all"]);
+    assert!(c.complete_video("opening").unwrap().is_empty());
+    PresentationCoordinator::restore(&c.snapshot().unwrap()).unwrap();
+}

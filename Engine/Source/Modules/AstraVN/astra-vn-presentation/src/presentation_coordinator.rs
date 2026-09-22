@@ -1,4 +1,7 @@
 mod fences;
+pub use fences::FenceTaskGroup;
+mod text_tasks;
+pub use text_tasks::TextTaskProgress;
 
 use std::collections::{BTreeMap, VecDeque};
 
@@ -9,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{MovieLoopMode, PresentationInterruptPolicy, VnError, VnMovieEndBehavior};
 
-pub const PRESENTATION_COORDINATOR_SCHEMA: &str = "astra.vn.presentation_coordinator.v5";
+pub const PRESENTATION_COORDINATOR_SCHEMA: &str = "astra.vn.presentation_coordinator.v6";
 const MAX_REGION_QUEUE: usize = 4_096;
 const MAX_FRAME_DELTA_NS: u64 = 1_000_000_000;
 
@@ -147,6 +150,7 @@ pub struct TextPresentationState {
     pub graphemes_per_second: u16,
     pub layout_pending: bool,
     pub auto_timer_ns: Option<u64>,
+    pub tasks: TextTaskProgress,
     pub fence: Option<String>,
 }
 
@@ -208,6 +212,7 @@ pub struct PresentationCoordinatorState {
     pub text: TextRegionState,
     pub video: VideoRegionState,
     pub fences: BTreeMap<String, FenceStatus>,
+    pub fence_tasks: BTreeMap<String, FenceTaskGroup>,
     pub activated_commands: VecDeque<String>,
     pub last_fixed_step: u64,
     pub last_sequence: Option<u64>,
@@ -234,6 +239,7 @@ impl Default for PresentationCoordinatorState {
                 queued: VecDeque::new(),
             },
             fences: BTreeMap::new(),
+            fence_tasks: BTreeMap::new(),
             activated_commands: VecDeque::new(),
             last_fixed_step: 0,
             last_sequence: None,
@@ -326,7 +332,7 @@ impl PresentationCoordinator {
                 PresentationRegion::Background => prepare_background(background.clone(), commands)
                     .map(|(state, delta)| PreparedRegion::Background(state, delta)),
                 PresentationRegion::Text => prepare_text(text.clone(), commands)
-                    .map(|(state, delta)| PreparedRegion::Text(state, delta)),
+                    .map(|(state, delta)| PreparedRegion::Text(Box::new(state), delta)),
                 PresentationRegion::Video => prepare_video(video.clone(), commands)
                     .map(|(state, delta)| PreparedRegion::Video(state, delta)),
             }
@@ -401,7 +407,7 @@ impl PresentationCoordinator {
                     delta
                 }
                 PreparedRegion::Text(state, delta) => {
-                    next.state.text = state;
+                    next.state.text = *state;
                     delta
                 }
                 PreparedRegion::Video(state, delta) => {
@@ -489,6 +495,7 @@ impl PresentationCoordinator {
                 .min(u128::from(text.grapheme_count)) as u32;
             text.visible_graphemes = text.visible_graphemes.max(visible);
             if text.reveal_complete() {
+                text.tasks.finish_reveal(0)?;
                 if let Some(fence) = text.fence.take() {
                     completed.push(fence);
                 }
@@ -529,6 +536,10 @@ impl PresentationCoordinator {
         };
         if !text.reveal_complete() {
             text.visible_graphemes = text.grapheme_count;
+            // This click only finishes reveal; it is not reused for story advance.
+            text.tasks
+                .finish_reveal(1)
+                .expect("active text task state was validated");
             if let Some(fence) = text.fence.take() {
                 self.finish_fences(vec![fence]);
             }
@@ -570,6 +581,13 @@ impl PresentationCoordinator {
                 "story advance cannot acknowledge an incomplete text reveal",
             ));
         }
+        self.state
+            .text
+            .active
+            .as_mut()
+            .expect("validated active text")
+            .tasks
+            .acknowledge()?;
         self.state.text.active = None;
         let (text, activated) = drain_text_queue(std::mem::replace(
             &mut self.state.text,
@@ -672,6 +690,9 @@ impl PresentationCoordinator {
                 })?;
             video.phase = VideoPhase::Failed;
             if let Some(fence) = video.fence.take() {
+                if let Some(group) = self.state.fence_tasks.get_mut(&fence) {
+                    group.cancel();
+                }
                 self.state.fences.insert(fence, FenceStatus::Failed);
             }
             video.fallback.clone()
@@ -700,6 +721,13 @@ impl PresentationCoordinator {
     }
 
     pub fn restore(bytes: &[u8]) -> Result<Self, VnError> {
+        let (schema, _) = postcard::take_from_bytes::<String>(bytes)?;
+        if schema != PRESENTATION_COORDINATOR_SCHEMA {
+            return Err(coordinator_error(
+                "ASTRA_VN_PRESENTATION_SNAPSHOT_SCHEMA",
+                "unsupported presentation snapshot; retain the old save and create a new slot",
+            ));
+        }
         let restored: Self = postcard::from_bytes(bytes)?;
         restored.validate_restored_state()?;
         Ok(restored)
@@ -714,6 +742,9 @@ impl PresentationCoordinator {
         }
         self.ensure_active()?;
         validate_queues(&self.state)?;
+        if let Some(text) = &self.state.text.active {
+            text.tasks.validate(text.reveal_complete())?;
+        }
         self.validate_fences()
     }
 }
@@ -721,7 +752,7 @@ impl PresentationCoordinator {
 enum PreparedRegion {
     Character(CharacterRegionState, PresentationRegionDelta),
     Background(BackgroundRegionState, PresentationRegionDelta),
-    Text(TextRegionState, PresentationRegionDelta),
+    Text(Box<TextRegionState>, PresentationRegionDelta),
     Video(VideoRegionState, PresentationRegionDelta),
 }
 
@@ -954,6 +985,7 @@ fn prepare_text(
             graphemes_per_second: command.graphemes_per_second,
             layout_pending: true,
             auto_timer_ns: None,
+            tasks: TextTaskProgress::new(command.grapheme_count == 0),
             fence: envelope.fence.clone(),
         });
         applied.push(envelope.command_id);

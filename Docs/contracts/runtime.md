@@ -147,7 +147,7 @@ NativeVN 在提交前检查外层 section 的 hash、v5 数字版本、package �
 
 `TaskScope::cancel()` 是跨线程取消请求；`cancelled().await` 唤醒异步等待，`run` 返回 typed `TaskOutcome`，顺序和并行组合见[异步任务作用域](task-scope.md)。worker 也可通过句柄状态协作停止，World 在下一 tick 移除对应待完成 token 和尚未消费的结果，并发出 `await.cancelled`。`cancel_await(token_id)` 由 World owner 立即取消指定 token，使用同一终态与事件路径。子作用域取消不影响父或兄弟，根作用域取消后不再接收新任务，直到成功恢复或重建 World。取消请求在 tick 前尚未提交时，存档仍表示此前状态。
 
-已进入 AwaitQueue 的结果是可序列化提交数据，保存后恢复继续消费；新恢复的未完成任务必须由宿主重新启动并取得新句柄，不能恢复线程/协程。await token 与容器 v5 二进制布局不变；调用方把裸 AwaitResult ingress 改为句柄构造的完成消息。验证覆盖真实 worker 迟到结果、跨 World、恢复拒绝/成功、scope 取消、已排队结果取消、重复完成和 World 销毁。任务组合器与产品异步 IO 的完整接入仍按实施状态推进。
+已进入 AwaitQueue 的结果是可序列化提交数据，保存后恢复继续消费；新恢复的未完成任务必须由宿主重新启动并取得新句柄，不能恢复线程/协程。await token 与容器 v5 二进制布局不变；调用方把裸 AwaitResult ingress 改为句柄构造的完成消息。验证覆盖真实 worker 迟到结果、跨 World、恢复拒绝/成功、scope 取消、已排队结果取消、重复完成和 World 销毁。`TaskGroup` 的顺序、全部完成和竞争完成以及 VN 消费者见[任务作用域](task-scope.md)；产品异步 IO 的其他接入仍按实施状态推进。
 
 本次同时将 AwaitReplayPolicy/RecordedResult/DeterministicTimeout 重命名为 AwaitCompletionPolicy/HostResult/TickTimeout，字段改为 completion_policy/timeout_step；Postcard 字段顺序和 enum variant 顺序不变，文本 schema 使用新名称，不提供 alias。NativeVnRuntimeProvider 无消费者的局部 save_slot/load_slot 接口删除，产品存读档统一使用完整 Runtime save/restore，避免只恢复 VN state 而保留旧 World 工作。独立 VnRuntime 的数据级 save_slot 不受影响。
 

@@ -128,12 +128,37 @@ mod tests {
     }
 
     #[test]
-    fn v8_runtime_container_roundtrips_and_rejects_v7_corruption_and_foreign_identity() {
+    fn v9_runtime_container_roundtrips_and_rejects_v8_corruption_and_foreign_identity() {
         use astra_plugin_abi::{RuntimeSaveSections, RuntimeSectionCodec, RuntimeSectionPayload};
         let mut source = source();
         let bytes = source.save("slot.01").unwrap();
         let envelope = decode_save_envelope(&bytes).unwrap();
-        assert_eq!(envelope.schema, "astra.player.native_vn_save.v8");
+        assert_eq!(envelope.schema, "astra.player.native_vn_save.v9");
+        for schema in [
+            "astra.player.native_vn_save.v7",
+            "astra.player.native_vn_save.v8",
+        ] {
+            // No valid payload follows: version rejection must precede payload decoding.
+            let old_bytes = postcard::to_allocvec(schema).unwrap();
+            let before = old_bytes.clone();
+            let error = source.restore(&old_bytes).unwrap_err().to_string();
+            assert!(error.contains("ASTRA_PLAYER_SAVE_SCHEMA"));
+            assert_eq!(old_bytes, before);
+        }
+        let mut cold = self::source();
+        cold.restore(&bytes).unwrap();
+        let restored = cold.runtime_state.as_ref().unwrap();
+        let original = source.runtime_state.as_ref().unwrap();
+        assert_eq!(restored.cursor, original.cursor);
+        assert_eq!(restored.pending_wait, original.pending_wait);
+        cold.cache_gameplay_surface(320, 180, vec![0x40; 320 * 180 * 4])
+            .unwrap();
+        cold.prepare_save_metadata("slot.01", "2000-01-01T00:00:01Z".into(), 1)
+            .unwrap();
+        let resaved = cold.save("slot.01").unwrap();
+        cold.restore(&resaved).unwrap();
+        cold.release_resources().unwrap();
+        cold.shutdown().unwrap();
         let state = source.runtime_state.clone();
         let scope = source.media_scope.child();
         let payload = &envelope.payload;
@@ -149,7 +174,7 @@ mod tests {
             }],
             diagnostics: vec![],
         };
-        // Serialize the actual v7 field layout, not just a renamed v8 envelope.
+        // Preserve rejection of the actual v7 field layout as well.
         let legacy = postcard::to_allocvec(&(
             "astra.player.native_vn_save.v7",
             (

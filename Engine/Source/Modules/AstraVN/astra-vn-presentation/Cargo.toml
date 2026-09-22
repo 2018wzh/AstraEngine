@@ -5,6 +5,7 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+astra-runtime = { path = "../../../Runtime/astra-runtime" }
 tracing.workspace = true
 astra-core = { path = "../../../Runtime/astra-core" }
 astra-media-core = { path = "../../../Runtime/astra-media-core" }
