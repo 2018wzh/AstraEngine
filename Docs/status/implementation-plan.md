@@ -12,7 +12,7 @@
 
 Editor 的项目工作区、真实 Player 预览管道、ACP/MCP 审批事务、路由连接图及关键帧编辑已集成；Graph 路由连线、单次撤销的关键帧拖动、可停靠工作区和图片资产导入也已集成；独立 workspace 的 14 项库测试、1 项布局测试、all-target Clippy 和格式检查通过。真实产品用例由负责工作线显式运行，本次集成未重复执行默认 ignored 的外部 Agent 和 GPU 预览测试；拖拽曲线及完整创作体验仍未关闭。《eden*》严格 checkpoint、Family 只读导入及内部存档到原版格式导出已集成，13 项格式/恢复和 13 项 CLI 测试通过；GPU 合成 fixture 覆盖导入后继续、保存和导出，商业原版读回仍未完成。
 
-Eden 原商业短流程已完成原版保存、Musica 恢复并继续、导出 SAV 与实际 GPU 缩略图、原版读取并继续；复存核对剧情位置、历史和变量一致。其他不支持状态仍明确拒绝，NullAudio 不计可听音频验收。新集成基线的根 workspace Clippy 和 Headless 构建通过，完整测试发现 CLI 最小样例夹具未同步 scoped UI；修复后四项定向测试通过，完整测试继续执行，不能沿用旧基线结果。
+Eden 原商业短流程已完成原版保存、Musica 恢复并继续、导出 SAV 与实际 GPU 缩略图、原版读取并继续；复存核对剧情位置、历史和变量一致。其他不支持状态仍明确拒绝，NullAudio 不计可听音频验收。集成至 `fdfe6d54b` 后，根 workspace 与 Emulator workspace 的完整测试、all-target Clippy、格式及文档检查通过，根 Headless 已先构建。回归发现的 CLI 最小样例 scoped UI 夹具和 Windows 单事件循环测试隔离问题均已修复。默认 ignored 的商业及独立设备用例未计入；后续缩略图、素材格式和窗口复测不能沿用这批结果。
 
 ## NativeVN 样例配置接续
 
