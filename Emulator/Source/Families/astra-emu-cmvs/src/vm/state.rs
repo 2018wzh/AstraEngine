@@ -197,6 +197,9 @@ pub struct CmvsPs2aVmState {
     /// The last streamed pointer position in stage coordinates. The original
     /// input-manager object stores it at fields 180/181 every frame
     /// (`sub_461630`) and the hit-test commands read it through `sub_45CF40`.
+    pub input_confirm_held: bool,
+    pub input_advance_release: bool,
+    pub input_advance_press: bool,
     pub pointer_x: i32,
     pub pointer_y: i32,
     /// The bounded global string-slot table the message buffer materializes
@@ -262,6 +265,9 @@ impl CmvsPs2aVmState {
             message_buffer_segments: Vec::new(),
             message_string_slots: BTreeMap::new(),
             save_image_owner: None,
+            input_confirm_held: false,
+            input_advance_release: false,
+            input_advance_press: false,
             pointer_x: 0,
             pointer_y: 0,
             dispatch_stopped: false,

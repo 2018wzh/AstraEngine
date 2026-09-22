@@ -24,7 +24,7 @@ CmvsArchive::load_audio 有界读取普通音频，或先校验 MGV 内嵌 Ogg�
 
 当前可构建 Family 动态库，但还不能完成代表游戏流程。`profile_file` 默认读取 `cmvs.profile.json`，`entry_script` 默认 `start.ps3`。探测检查根目录及原生 `data/pack` 目录的 CPZ5 标头；配置错误、重复会话、未接通动作均返回 Manager 可显示的诊断。关闭与失败释放进程级会话租约，允许重新启动。暂停和恢复清空时钟积累，单次推进受指令及 tick 预算限制。指针移动使用 Host 逆映射后的舞台坐标。
 
-文字、媒体、存档和按键动作尚未接通；命中这些动作后会话失败，后续推进和帧访问拒绝继续，不吞掉动作或伪造成功。只有纹理资源及已有 GPU 合成路径可用，未声明 NativeSave 或 PCM 能力。未移植来源中的特定作品修补、CPU 改帧、猜测字符串和忽略存档请求。原生菜单写入字符串槽、输入 latch 与存档恢复等语义仍需独立补齐。
+文字、媒体和存档动作尚未接通；命中这些动作后会话失败，后续推进和帧访问拒绝继续，不吞掉动作或伪造成功。只有纹理资源及已有 GPU 合成路径可用，未声明 NativeSave 或 PCM 能力。未移植来源中的特定作品修补、CPU 改帧、猜测字符串和忽略存档请求。原生菜单写入字符串槽与存档恢复等语义仍需独立补齐。
 
 ```sh
 cargo test --manifest-path Emulator/Cargo.toml -p astra-emu-cmvs
@@ -32,3 +32,7 @@ cargo clippy --manifest-path Emulator/Cargo.toml -p astra-emu-cmvs --all-targets
 ```
 
 原始游戏文件、密钥配置、解码结果和截图只进入 ignored 私有工作区。
+
+本轮修正了输入轮询的原生命名和行为：case 416 读取确认键的释放锁存与按住状态，重复轮询不消费；case 417 只清除按下、释放锁存。Enter、Space、数字键盘 Enter 和主指针按钮分别跟踪，同一 tick 内的按下/释放不会丢失；失焦或挂起清空输入，不生成推进操作。新增状态只用于核心 VM，既有内部序列化状态不迁移。
+
+case 160/164 原先误命名为 Message，实际把一至两个音频资源交给交替的两个音频通道；161 停止两通道，162 淡出当前通道。现改为 PlayCrossfadeAudio、StopAudio 和 FadeOutAudio，并保留淡出时长；未连接播放时返回 MEDIA_UNBOUND，不再报文字未接通。正文不能从这组命令生成，需继续接入真正的文字表面与 SDK TextScene。该命名修正及输入测试不代表 PCM、正文或代表游戏流程完成。

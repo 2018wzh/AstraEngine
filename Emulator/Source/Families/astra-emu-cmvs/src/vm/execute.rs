@@ -1,9 +1,9 @@
+mod crossfade_audio;
 mod effect_channels;
 mod effect_elements;
 mod effect_quads;
 mod filters;
 mod memory;
-mod messages;
 mod objects;
 mod presentation;
 mod resources;
@@ -171,7 +171,8 @@ pub(super) fn execute_command(
         | CmvsPs2aCommandEffectKind::QueryEffectPointerHit { .. } => {
             effect_quads::execute(state, effect_kind, &values)
         }
-        CmvsPs2aCommandEffectKind::QueryTextureManagerState { .. }
+        CmvsPs2aCommandEffectKind::ConsumeAdvanceLatch
+        | CmvsPs2aCommandEffectKind::ReadInputLatches { .. }
         | CmvsPs2aCommandEffectKind::StoreTextureReadyFlag { .. }
         | CmvsPs2aCommandEffectKind::ClearTextureChannelTable { .. }
         | CmvsPs2aCommandEffectKind::LoadTextureParentResource { .. }
@@ -225,10 +226,12 @@ pub(super) fn execute_command(
         | CmvsPs2aCommandEffectKind::ConfigureTextureAuxiliaryWord { .. } => {
             texture_children::execute(state, effect_kind, &values)
         }
-        CmvsPs2aCommandEffectKind::ClearMessagePanel
-        | CmvsPs2aCommandEffectKind::ResetMessagePanel
-        | CmvsPs2aCommandEffectKind::MessageBody
-        | CmvsPs2aCommandEffectKind::MessageSpeakerBody => messages::execute(effect_kind, &values),
+        CmvsPs2aCommandEffectKind::FadeOutAudio
+        | CmvsPs2aCommandEffectKind::StopAudio
+        | CmvsPs2aCommandEffectKind::PlayAudio
+        | CmvsPs2aCommandEffectKind::PlayPairedAudio => {
+            crossfade_audio::execute(effect_kind, &values)
+        }
         _ => Err(invalid(
             "ASTRA_EMU_CMVS_VM_COMMAND_CONTRACT",
             "CMVS PS2A command stack words do not match the recovered effect contract",

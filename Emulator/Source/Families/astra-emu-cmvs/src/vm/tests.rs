@@ -38,7 +38,7 @@ fn push_immediate(value: u32) -> CmvsPs2aInstructionFrame {
 }
 
 #[test]
-fn emits_a_payload_free_message_action_from_the_proven_command_stack() {
+fn emits_crossfade_audio_with_resource_reference_and_fade() {
     let mut state = CmvsPs2aVmState::new(0);
     execute_cmvs390_frame(&mut state, &push_immediate(1)).unwrap();
     execute_cmvs390_frame(&mut state, &push_immediate(7)).unwrap();
@@ -54,13 +54,13 @@ fn emits_a_payload_free_message_action_from_the_proven_command_stack() {
     .unwrap();
     assert_eq!(
         action,
-        Some(CmvsPs2aVmAction::Message {
-            speaker: None,
-            body: CmvsPs2aPrivateStringReference {
+        Some(CmvsPs2aVmAction::PlayCrossfadeAudio {
+            secondary: None,
+            primary: CmvsPs2aPrivateStringReference {
                 relative_offset: 19,
             },
-            opaque_value: 7,
-            enabled: true,
+            fade_ms: 7,
+            playback_flag: true,
         })
     );
     assert_eq!(state.stack_cursor_bytes, 0);
@@ -2562,4 +2562,58 @@ fn executes_a_name_index_call_and_exact_stack_return() {
     assert_eq!(state.program_counter, 14);
     assert_eq!(state.stack_cursor_bytes, 0);
     assert_eq!(state.call_frame_bases, vec![0]);
+}
+
+#[test]
+fn native_input_poll_retains_edges_until_explicit_consume() {
+    let mut state = CmvsPs2aVmState::new(0);
+    state.input_confirm_held = true;
+    state.input_advance_press = true;
+    state.input_advance_release = true;
+    let command = |command_id| CmvsPs2aInstructionFrame::Command {
+        span: SPAN,
+        command_id,
+    };
+    execute_cmvs390_frame(&mut state, &command(416)).unwrap();
+    assert_eq!(state.interpreter_words[&81220], 1);
+    assert_eq!(state.interpreter_words[&81236], 1);
+    execute_cmvs390_frame(&mut state, &command(416)).unwrap();
+    assert_eq!(state.interpreter_words[&81220], 1);
+    execute_cmvs390_frame(&mut state, &command(417)).unwrap();
+    assert!(!state.input_advance_press);
+    assert!(!state.input_advance_release);
+    assert!(state.input_confirm_held);
+    execute_cmvs390_frame(&mut state, &command(416)).unwrap();
+    assert_eq!(state.interpreter_words[&81220], 0);
+    assert_eq!(state.interpreter_words[&81236], 1);
+}
+
+#[test]
+fn native_crossfade_stop_preserves_duration_and_consumes_only_its_argument() {
+    let mut state = CmvsPs2aVmState::new(0);
+    execute_cmvs390_frame(&mut state, &push_immediate(17)).unwrap();
+    execute_cmvs390_frame(&mut state, &push_immediate(250)).unwrap();
+    let action = execute_cmvs390_frame(
+        &mut state,
+        &CmvsPs2aInstructionFrame::Command {
+            span: SPAN,
+            command_id: 162,
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        action,
+        Some(CmvsPs2aVmAction::FadeOutAudio { fade_ms: 250 })
+    );
+    assert_eq!(state.stack_cursor_bytes, 4);
+    let action = execute_cmvs390_frame(
+        &mut state,
+        &CmvsPs2aInstructionFrame::Command {
+            span: SPAN,
+            command_id: 161,
+        },
+    )
+    .unwrap();
+    assert_eq!(action, Some(CmvsPs2aVmAction::StopAudio));
+    assert_eq!(state.stack_cursor_bytes, 4);
 }

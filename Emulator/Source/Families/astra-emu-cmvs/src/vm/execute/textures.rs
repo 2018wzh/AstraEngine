@@ -7,17 +7,23 @@ pub(super) fn execute(
 ) -> Result<Option<CmvsPs2aVmAction>, CoreError> {
     match (effect_kind, values) {
         (
-            CmvsPs2aCommandEffectKind::QueryTextureManagerState {
-                state_field_offset,
-                aux_field_offset,
+            CmvsPs2aCommandEffectKind::ReadInputLatches {
+                release_field_offset,
+                held_field_offset,
             },
             [],
         ) => {
-            // The headless texture manager never has a pending load or a
-            // failed operation, so the recovered manager status pair reads
-            // as idle/zero (`sub_479C20` -> `sub_45CCB0`).
-            state.interpreter_words.insert(state_field_offset, 0);
-            state.interpreter_words.insert(aux_field_offset, 0);
+            state
+                .interpreter_words
+                .insert(release_field_offset, u32::from(state.input_advance_release));
+            state
+                .interpreter_words
+                .insert(held_field_offset, u32::from(state.input_confirm_held));
+            Ok(None)
+        }
+        (CmvsPs2aCommandEffectKind::ConsumeAdvanceLatch, []) => {
+            state.input_advance_release = false;
+            state.input_advance_press = false;
             Ok(None)
         }
         (

@@ -242,7 +242,7 @@ fn exposes_only_static_cmvs390_recovered_contracts() {
         Some(CmvsPs2aCommandContract {
             command_id: 160,
             stack_pop_bytes: 12,
-            effect_kind: CmvsPs2aCommandEffectKind::MessageBody,
+            effect_kind: CmvsPs2aCommandEffectKind::PlayAudio,
             stack_words: vec![
                 CmvsPs2aCommandStackWord {
                     offset_from_top_bytes: 4,
@@ -264,7 +264,7 @@ fn exposes_only_static_cmvs390_recovered_contracts() {
         Some(CmvsPs2aCommandContract {
             command_id: 164,
             stack_pop_bytes: 16,
-            effect_kind: CmvsPs2aCommandEffectKind::MessageSpeakerBody,
+            effect_kind: CmvsPs2aCommandEffectKind::PlayPairedAudio,
             stack_words: vec![
                 CmvsPs2aCommandStackWord {
                     offset_from_top_bytes: 4,

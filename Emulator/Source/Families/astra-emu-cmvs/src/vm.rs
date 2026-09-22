@@ -279,19 +279,17 @@ pub enum CmvsPs2aStorageRequest {
 /// private script pool only when it needs to issue an ephemeral text lease.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum CmvsPs2aVmAction {
-    Message {
-        speaker: Option<CmvsPs2aPrivateStringReference>,
-        body: CmvsPs2aPrivateStringReference,
-        opaque_value: u32,
-        enabled: bool,
+    /// Cases 160/164: alternate two audio channels, optionally crossfading.
+    PlayCrossfadeAudio {
+        primary: CmvsPs2aPrivateStringReference,
+        secondary: Option<CmvsPs2aPrivateStringReference>,
+        fade_ms: u32,
+        playback_flag: bool,
     },
-    /// Case 162: the message-panel text buffers reset and the consumed word
-    /// routes to the panel voice object. No panel state is observable beyond
-    /// the trace action.
-    ClearMessagePanel,
-    /// Case 161: the panel fully resets (text buffers, voice channels and
-    /// playback bit).
-    ResetMessagePanel,
+    /// Case 162: fade out the active channel and clear its resource names.
+    FadeOutAudio { fade_ms: u32 },
+    /// Case 161: stop both channels and reset the channel selector.
+    StopAudio,
     /// Case 778: one bounded table slot object is released.
     DestroyBoundedSlotObject { table_dword_index: u32, slot: u32 },
     /// Case 349: the effect playback objects for one channel/effect pair

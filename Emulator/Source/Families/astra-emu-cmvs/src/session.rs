@@ -3,6 +3,7 @@ use crate::*;
 use astra_emu_family_api::*;
 use astra_media_core::TextureFrame;
 use std::{collections::BTreeMap, sync::Arc};
+mod input;
 const MAX_INSTRUCTIONS: u32 = 1_048_576;
 const MAX_SCRIPT_RESIDENT: u64 = 256 * 1024 * 1024;
 pub(crate) struct CmvsSession {
@@ -14,6 +15,7 @@ pub(crate) struct CmvsSession {
     selected: Option<CmvsTextureSlot>,
     phase: u64,
     suspended: bool,
+    input: input::InputState,
     failure: Option<FamilyError>,
     _lease: Lease,
 }
@@ -40,6 +42,7 @@ impl CmvsSession {
             selected: None,
             phase: 0,
             suspended: false,
+            input: input::InputState::default(),
             failure: None,
             _lease: lease,
         })
@@ -143,11 +146,11 @@ impl CmvsSession {
                 ));
                 Ok(())
             }
-            CmvsPs2aVmAction::Message { .. }
-            | CmvsPs2aVmAction::ClearMessagePanel
-            | CmvsPs2aVmAction::ResetMessagePanel => Err(error(
-                "ASTRA_EMU_CMVS_TEXT_UNBOUND",
-                "native text surface is not connected",
+            CmvsPs2aVmAction::PlayCrossfadeAudio { .. }
+            | CmvsPs2aVmAction::FadeOutAudio { .. }
+            | CmvsPs2aVmAction::StopAudio => Err(error(
+                "ASTRA_EMU_CMVS_MEDIA_UNBOUND",
+                "native crossfade audio is not connected",
             )),
             CmvsPs2aVmAction::StorageRequest(_) => Err(error(
                 "ASTRA_EMU_CMVS_STORAGE_UNBOUND",
@@ -201,6 +204,7 @@ impl CmvsSession {
     ) -> FamilyResult<AdvanceResponse> {
         let mut changed = false;
         for event in events {
+            self.input.event(&mut self.vm, event);
             match event {
                 FamilyEvent::WindowCloseRequested => {
                     return Ok(AdvanceResponse {
@@ -216,10 +220,7 @@ impl CmvsSession {
                     self.vm.pointer_x = *x as i32;
                     self.vm.pointer_y = *y as i32;
                 }
-                FamilyEvent::Key { .. }
-                | FamilyEvent::PointerButton { .. }
-                | FamilyEvent::Wheel { .. }
-                | FamilyEvent::TextInput { .. } => {
+                FamilyEvent::TextInput { .. } => {
                     return Err(error(
                         "ASTRA_EMU_CMVS_INPUT_UNBOUND",
                         "native input handling is not connected",

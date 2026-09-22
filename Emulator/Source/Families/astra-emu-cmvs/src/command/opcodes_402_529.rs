@@ -107,16 +107,19 @@ pub(super) fn lookup(command_id: u16) -> Option<CommandFields> {
             CmvsPs2aCommandEffectKind::ResetPresentationBuffers,
             &[] as &[CmvsPs2aCommandStackWord],
         ),
-        // Handler `sub_479C20` (case 416): copies the texture manager
-        // status pair (`sub_45CCB0` reads manager dwords 271/272) into the
-        // interpreter words at byte offsets 81220/81236 and takes no stack
-        // operands. Returns 0x4000.
+        // sub_479C20 reads input manager dwords 271/272.
         416 => (
             0,
-            CmvsPs2aCommandEffectKind::QueryTextureManagerState {
-                state_field_offset: 81220,
-                aux_field_offset: 81236,
+            CmvsPs2aCommandEffectKind::ReadInputLatches {
+                release_field_offset: 81220,
+                held_field_offset: 81236,
             },
+            &[] as &[CmvsPs2aCommandStackWord],
+        ),
+        // sub_45CB80 consumes the advance latch (dwords 271/273).
+        417 => (
+            0,
+            CmvsPs2aCommandEffectKind::ConsumeAdvanceLatch,
             &[] as &[CmvsPs2aCommandStackWord],
         ),
         // Handler `sub_47A0B0` (case 424): writes the scene layer group at

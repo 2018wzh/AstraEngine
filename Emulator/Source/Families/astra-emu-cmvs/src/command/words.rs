@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) const MESSAGE_BODY_WORDS: [CmvsPs2aCommandStackWord; 3] = [
+pub(super) const AUDIO_WORDS: [CmvsPs2aCommandStackWord; 3] = [
     CmvsPs2aCommandStackWord {
         offset_from_top_bytes: 4,
         kind: CmvsPs2aCommandStackWordKind::TaggedStringReference,
@@ -14,7 +14,7 @@ pub(super) const MESSAGE_BODY_WORDS: [CmvsPs2aCommandStackWord; 3] = [
         kind: CmvsPs2aCommandStackWordKind::BooleanU32,
     },
 ];
-pub(super) const MESSAGE_SPEAKER_BODY_WORDS: [CmvsPs2aCommandStackWord; 4] = [
+pub(super) const PAIRED_AUDIO_WORDS: [CmvsPs2aCommandStackWord; 4] = [
     CmvsPs2aCommandStackWord {
         offset_from_top_bytes: 4,
         kind: CmvsPs2aCommandStackWordKind::TaggedStringReference,

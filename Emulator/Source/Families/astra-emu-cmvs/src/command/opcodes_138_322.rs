@@ -113,31 +113,25 @@ pub(super) fn lookup(command_id: u16) -> Option<CommandFields> {
         ),
         160 => (
             12,
-            CmvsPs2aCommandEffectKind::MessageBody,
-            &MESSAGE_BODY_WORDS as &[CmvsPs2aCommandStackWord],
+            CmvsPs2aCommandEffectKind::PlayAudio,
+            &AUDIO_WORDS as &[CmvsPs2aCommandStackWord],
         ),
-        // Handler inline in `sub_472F10`: `sub_48EC20(panel)` clears both
-        // text buffers, stops both voice channels and clears the playback
-        // bit. Consumes no stack words. Returns 0x4000.
+        // Stop both alternating audio channels; no stack words.
         161 => (
             0,
-            CmvsPs2aCommandEffectKind::ResetMessagePanel,
+            CmvsPs2aCommandEffectKind::StopAudio,
             &[] as &[CmvsPs2aCommandStackWord],
         ),
-        // Both handlers pass resolved PS2A string(s) to the message-panel
-        // constructor and return 0x400c / 0x4010 respectively.
-        // Handler `sub_478BB0` resets the message-panel text buffers and
-        // forwards the consumed word to the panel voice object. Returns
-        // 0x4004.
+        // Fade out the active audio channel using the consumed duration.
         162 => (
             4,
-            CmvsPs2aCommandEffectKind::ClearMessagePanel,
+            CmvsPs2aCommandEffectKind::FadeOutAudio,
             &OPAQUE_WORD as &[CmvsPs2aCommandStackWord],
         ),
         164 => (
             16,
-            CmvsPs2aCommandEffectKind::MessageSpeakerBody,
-            &MESSAGE_SPEAKER_BODY_WORDS as &[CmvsPs2aCommandStackWord],
+            CmvsPs2aCommandEffectKind::PlayPairedAudio,
+            &PAIRED_AUDIO_WORDS as &[CmvsPs2aCommandStackWord],
         ),
         // Handler `sub_48A110` registers one resource channel slot record
         // (slot/name/enabled/loop/volume) in the fixed table at byte

@@ -32,18 +32,12 @@ pub enum CmvsPs2aCommandEffectKind {
     /// interpreter dispatch cycle. It is not evidence that the entire game
     /// session has reached a terminal state.
     StopDispatch,
-    /// Creates a message-panel entry using the default speaker field held by
-    /// the original engine.
-    MessageBody,
-    /// `sub_478BB0` clears both 64-byte message-panel text buffers through
-    /// `sub_48EB60` and hands the consumed word to the panel's voice object
-    /// (`sub_48C0E0`), toggling the panel playback bit. The voice object is
-    /// outside the recovered subset; the consumed word stays opaque.
-    ClearMessagePanel,
-    /// Case 161 (`sub_48EC20` on the panel): both text buffers clear, the
-    /// status word resets, the voice object stops both channels and the
-    /// playback bit clears. No stack words are consumed.
-    ResetMessagePanel,
+    /// Case 160: play a resource through the alternating audio channels.
+    PlayAudio,
+    /// Case 162: clear resource names and fade out the active audio channel.
+    FadeOutAudio,
+    /// Case 161: stop both audio channels and reset the channel selector.
+    StopAudio,
     /// Case 778 (`sub_47C920`): releases the object in one of three slots at
     /// dword indices 796..=798; a selector above two raises the 0x1000000
     /// error mask.
@@ -136,14 +130,13 @@ pub enum CmvsPs2aCommandEffectKind {
         second_field_offset: u32,
         third_field_offset: u32,
     },
-    /// `sub_479C20` (case 416): copy the texture manager status words
-    /// (`sub_45CCB0` reads manager dwords 271/272) into the interpreter
-    /// state fields. The command takes no stack operands and returns
-    /// `0x4000`, so the dispatcher pops nothing.
-    QueryTextureManagerState {
-        state_field_offset: u32,
-        aux_field_offset: u32,
+    /// Case 416 reads the input manager advance release latch and held state.
+    ReadInputLatches {
+        release_field_offset: u32,
+        held_field_offset: u32,
     },
+    /// Case 417 consumes advance edges without releasing physical buttons.
+    ConsumeAdvanceLatch,
     /// `sub_4793B0` (case 751): texture-readiness poll. When the override
     /// field is zero the canonical readiness value is stored; any non-zero
     /// override forces success. No stack operands; returns `0x4000`.
@@ -372,8 +365,8 @@ pub enum CmvsPs2aCommandEffectKind {
         channel_error_mask: u32,
         effect_error_mask: u32,
     },
-    /// Creates a message-panel entry with an explicit speaker and body.
-    MessageSpeakerBody,
+    /// Case 164: play a paired resource through the alternating audio channels.
+    PlayPairedAudio,
     /// Stores one opaque word in a CMVS interpreter-owned field. The field
     /// offset is part of the version-pinned contract; its game-level meaning
     /// remains deliberately unnamed until a consumer is recovered.
@@ -1187,8 +1180,8 @@ pub fn cmvs390_command_contract(command_id: u16) -> Option<CmvsPs2aCommandContra
         | 349 | 350 | 351 | 352 | 353 | 354 => opcodes_323_354::lookup(command_id),
         368 | 376 | 377 | 378 | 379 | 380 | 382 | 383 | 384 | 385 | 386 | 387 | 388 | 389 | 390
         | 391 | 397 | 400 | 401 => opcodes_368_401::lookup(command_id),
-        402 | 403 | 404 | 405 | 406 | 410 | 416 | 424 | 425 | 426 | 427 | 428 | 429 | 430 | 431
-        | 432 | 433 | 463 | 464 | 465 | 466 | 468 | 469 | 470 | 471 | 524 | 528 | 529 => {
+        402 | 403 | 404 | 405 | 406 | 410 | 416 | 417 | 424 | 425 | 426 | 427 | 428 | 429 | 430
+        | 431 | 432 | 433 | 463 | 464 | 465 | 466 | 468 | 469 | 470 | 471 | 524 | 528 | 529 => {
             opcodes_402_529::lookup(command_id)
         }
         530 | 531 | 532 | 533 | 534 | 535 | 544 | 545 | 548 | 549 | 550 | 551 | 552 | 553 | 554
