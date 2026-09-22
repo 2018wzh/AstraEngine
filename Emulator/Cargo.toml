@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "Source/SDK/astra-emu-sdk",
     "Source/Families/astra-emu-cmvs",
+    "Source/Families/astra-emu-artemis",
     "Source/FamilyApi/astra-emu-family-api",
     "Source/Families/astra-emu-fvp",
     "Source/Families/astra-emu-siglus",

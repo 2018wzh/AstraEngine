@@ -1,0 +1,37 @@
+[package]
+name = "astra-emu-artemis"
+version.workspace = true
+edition.workspace = true
+license = "MPL-2.0"
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+doctest = false
+
+[dependencies]
+abi_stable.workspace = true
+astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api", features = ["diagnostic-bridge"] }
+art3m1s-core = { path = "../../../ThirdParty/art3m1s-core", default-features = false, features = [
+    "vulkan-backend",
+
+] }
+encoding_rs = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json.workspace = true
+astra-emu-sdk = { path = "../../SDK/astra-emu-sdk", default-features = false, features = ["audio"] }
+kira.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+env_logger = "0.11"
+image = { workspace = true, features = ["png"] }
+tempfile.workspace = true
+
+[package.metadata.astra]
+upstream = "https://github.com/Alphaly2K/art3m1s-core"
+upstream_revision = "0c06f37160961c9ff75d4937d5e6bb0500d0bef9"
+hosted_fork = "https://github.com/2018wzh/art3m1s-core"
+hosted_fork_branch = "astra-hosted"
+hosted_fork_revision = "13e55ffa98b8ea2fec4b294d210bd50567106a08"
+license_notice = "THIRD_PARTY_NOTICES.md"
+modifications = "MODIFICATIONS.md"

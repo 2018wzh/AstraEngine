@@ -10,8 +10,8 @@ audio = ["dep:kira", "dep:symphonia"]
 default = ["text", "image", "archive", "cache"]
 archive = ["dep:astra-core", "dep:astra-byte-source", "dep:serde", "dep:serde_json", "dep:schemars"]
 cache = ["dep:astra-core", "dep:lru", "dep:windows"]
-text = ["dep:astra-core", "dep:astra-text", "dep:astra-media-core"]
-image = ["dep:image", "dep:lru", "dep:astra-media-core"]
+text = ["dep:astra-core", "dep:astra-text"]
+image = ["dep:image", "dep:lru"]
 
 [dependencies]
 tracing.workspace = true
@@ -26,7 +26,7 @@ schemars = { workspace = true, optional = true }
 image = { workspace = true, optional = true }
 lru = { workspace = true, optional = true }
 astra-core = { path = "../../../../Engine/Source/Runtime/astra-core", optional = true }
-astra-media-core = { path = "../../../../Engine/Source/Runtime/astra-media-core", optional = true }
+astra-media-core = { path = "../../../../Engine/Source/Runtime/astra-media-core" }
 astra-text = { path = "../../../../Engine/Source/Runtime/astra-text", optional = true }
 
 [dev-dependencies]
