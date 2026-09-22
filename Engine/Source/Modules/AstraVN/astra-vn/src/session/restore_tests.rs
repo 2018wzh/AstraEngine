@@ -112,8 +112,9 @@ fn typed_restore_rejection_preserves_world_state_and_scope() {
             }
             _ => unreachable!(),
         }
-        let error = session
-            .restore(astra_runtime::write_runtime_save(snapshot, SaveRequest::default()).unwrap());
+        let blob = astra_runtime::write_runtime_save(snapshot, SaveRequest::default()).unwrap();
+        assert!(session.validate_save(&blob).is_err(), "{case}");
+        let error = session.restore(blob);
         assert!(error.is_err(), "{case}");
         if case == "legacy_machine" {
             assert!(error
@@ -142,6 +143,8 @@ fn corrupt_container_preserves_scope_and_valid_restore_replaces_it() {
     let mut session = fixture();
     let saved = session.save().unwrap();
     let old_scope = session.engine.world().task_scope();
+    session.validate_save(&saved).unwrap();
+    assert!(!old_scope.is_cancelled());
     let mut corrupt = saved.clone();
     corrupt.0[0] ^= 1;
     assert!(session.restore(corrupt).is_err());

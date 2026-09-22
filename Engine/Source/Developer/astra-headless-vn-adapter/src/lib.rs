@@ -1005,7 +1005,7 @@ impl NativeVnHeadlessSession {
             .source
             .as_mut()
             .ok_or_else(|| ProductHostError::Input("runtime source is unavailable".into()))?
-            .restore_product_session(&bytes, &mut self.media, &mut self.executor)
+            .load_product_session(slot, &bytes, &mut self.media, &mut self.executor)
             .await
             .map_err(|error| ProductHostError::Input(error.to_string()))?;
         self.executor

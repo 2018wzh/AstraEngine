@@ -192,6 +192,19 @@ impl NativeVnRuntimeHost {
         Ok(report)
     }
 
+    pub(super) fn validate_save(&self, blob: &SaveBlob) -> Result<(), RuntimeHostError> {
+        self.limits.validate_save_bytes(blob.0.len())?;
+        self.runtime
+            .as_ref()
+            .ok_or_else(|| {
+                RuntimeHostError::new("ASTRA_RUNTIME_HOST_SESSION", "NativeVN session is not open")
+            })?
+            .validate_save(blob)
+            .map_err(|error| {
+                RuntimeHostError::new("ASTRA_RUNTIME_HOST_SAVE_CANDIDATE", error.to_string())
+            })
+    }
+
     pub(super) fn shutdown(&mut self) -> Result<(), RuntimeHostError> {
         let session = self.session.clone().ok_or_else(|| {
             RuntimeHostError::new("ASTRA_RUNTIME_HOST_SESSION", "NativeVN session is not open")

@@ -57,7 +57,8 @@ pub struct AwaitDrain {
 }
 
 impl AwaitQueue {
-    pub(crate) fn validate(&self) -> Result<(), Diagnostic> {
+    /// Validate a decoded queue before a caller commits a saved candidate.
+    pub fn validate(&self) -> Result<(), Diagnostic> {
         let mut tokens = std::collections::BTreeMap::new();
         for token in &self.pending {
             token.validate()?;

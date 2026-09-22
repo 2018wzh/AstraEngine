@@ -1845,6 +1845,7 @@ impl NativeVnHostCommandSource {
         }
         let metadata = restore_save_metadata(envelope.payload.save_metadata)?;
         validate_save_metadata(&metadata, expected_slot)?;
+        self.host.validate_save(&envelope.payload.runtime)?;
         self.apply_save_metadata(metadata)
     }
 

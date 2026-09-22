@@ -33,6 +33,46 @@ impl NativeVnHostCommandSource {
         })
     }
 
+    /// Load a user-selected slot, retaining the current session if its candidate is rejected.
+    pub async fn load_product_session(
+        &mut self,
+        slot: &str,
+        bytes: &[u8],
+        media: &mut NativeVnProductMediaHost,
+        executor: &mut astra_player_core::PlayerHostCommandExecutor<
+            astra_player_core::PlatformCommandSink,
+        >,
+    ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
+        let previous_scope = self.media_scope.child();
+        let result = match decode_save_envelope(bytes) {
+            Ok(envelope) if envelope.payload.slot == slot => {
+                self.restore_product_session(bytes, media, executor).await
+            }
+            Ok(_) => Err(NativeVnHostError::Save(
+                "ASTRA_PLAYER_SAVE_SLOT_MISMATCH: save belongs to another slot".into(),
+            )),
+            Err(error) => Err(error),
+        };
+        match result {
+            Ok(batch) => Ok(batch),
+            Err(error) if self.presentation_failed || previous_scope.is_cancelled() => Err(error),
+            Err(_) => {
+                tracing::warn!(
+                    target: "astra_player_vn::save",
+                    event = "player.save.candidate_rejected",
+                    diagnostic_code = "ASTRA_PLAYER_SAVE_CANDIDATE_REJECTED",
+                    "Saved candidate rejected; current session retained"
+                );
+                self.reject_save_catalog_entry(slot);
+                // Re-open the same view against the updated read-only catalog so
+                // its controller selects an enabled target, without changing story state.
+                self.base_ui_instance_id = None;
+                self.pending_ui_focus = None;
+                self.render_with_stage_refresh(&[], 0, true)
+            }
+        }
+    }
+
     pub async fn restore_product_session(
         &mut self,
         bytes: &[u8],
@@ -48,6 +88,7 @@ impl NativeVnHostCommandSource {
                     .into(),
             ));
         }
+        self.host.validate_save(&envelope.payload.runtime)?;
         let encoded = envelope
             .payload
             .product_media_snapshot_json
@@ -113,8 +154,10 @@ mod tests {
     }
 
     fn source() -> NativeVnHostCommandSource {
-        let bytes = test_native_package::product_package_with_request(
-            "story main #@id story.main\nstate start #@id state.start\n  scene room #@id scene.room\n    text key:line.one speaker:hero #@id line.one\nstory system #@id story.system\nstate save #@id state.system.save\n  scene save #@id scene.system.save\n    system_page kind:save policy:astra.policy.standard #@id page.save\n", |_| {},
+        let bytes = test_native_package::product_package_with_ui_and_request(
+            "story main #@id story.main\nstate start #@id state.start\n  scene room #@id scene.room\n    text key:line.one speaker:hero #@id line.one\nstory system #@id story.system\nstate save #@id state.system.save\n  scene save #@id scene.system.save\n    system_page kind:save policy:astra.policy.standard #@id page.save\n",
+            &test_native_package::TEST_UI.replace("save_slots:\"slot.01\"", "save_slots:\"slot.01,slot.02\""),
+            test_native_package::test_compile_options(), |_| {},
         );
         let package = astra_package::PackageReader::open(&bytes).unwrap();
         let mut source = NativeVnHostCommandSource::from_package(
@@ -233,6 +276,65 @@ mod tests {
             state.as_ref().unwrap().system
         );
         assert!(scope.is_cancelled());
+        source.release_resources().unwrap();
+        source.shutdown().unwrap();
+    }
+
+    #[tokio::test]
+    async fn foreign_catalog_and_rejected_user_load_preserve_the_live_session() {
+        let mut source = source();
+        let mut executor = executor();
+        let mut media = NativeVnProductMediaHost::default();
+        let bytes = saved(&mut source, &media);
+        let mut envelope = decode_save_envelope(&bytes).unwrap();
+        let mut snapshot = astra_runtime::read_runtime_save(
+            &envelope.payload.runtime,
+            &astra_core::SchemaMigrationRegistry::default(),
+        )
+        .unwrap();
+        snapshot.package.as_mut().unwrap().package_id = "foreign.package".into();
+        envelope.payload.runtime =
+            astra_runtime::write_runtime_save(snapshot, astra_runtime::SaveRequest::default())
+                .unwrap();
+        let foreign = postcard::to_allocvec(&envelope).unwrap();
+        source
+            .command(VnPlayerCommand::OpenSystem {
+                page: SystemPageKind::Save,
+            })
+            .unwrap();
+        let state = source.runtime_state.clone();
+        let scope = source.media_scope.child();
+        let media_before = serde_json::to_value(media.snapshot()).unwrap();
+        assert!(source
+            .ingest_save_catalog_entry("slot.01", &foreign)
+            .is_err());
+        assert!(!source.ui_save_slots["slot.01"].can_load);
+        for invalid in [&foreign[..], &[0xff][..]] {
+            source
+                .load_product_session("slot.01", invalid, &mut media, &mut executor)
+                .await
+                .unwrap();
+            assert_eq!(source.runtime_state, state);
+            assert!(!scope.is_cancelled());
+            assert!(!source.presentation_failed);
+            assert_eq!(
+                serde_json::to_value(media.snapshot()).unwrap(),
+                media_before
+            );
+            let rejected = &source.ui_save_slots["slot.01"];
+            assert!(rejected.occupied);
+            assert!(!rejected.can_load && !rejected.can_write);
+        }
+        source
+            .command(VnPlayerCommand::SetAudioEnabled { enabled: false })
+            .unwrap();
+        source
+            .cache_gameplay_surface(320, 180, vec![0x40; 320 * 180 * 4])
+            .unwrap();
+        source
+            .prepare_save_metadata("slot.02", "2000-01-01T00:00:01Z".into(), 1)
+            .unwrap();
+        assert!(source.save("slot.02").is_ok());
         source.release_resources().unwrap();
         source.shutdown().unwrap();
     }

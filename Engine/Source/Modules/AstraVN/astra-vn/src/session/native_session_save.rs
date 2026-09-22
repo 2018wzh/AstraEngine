@@ -1,6 +1,10 @@
 use super::*;
 
 impl VnSession {
+    /// Validate a saved candidate without changing the live world or cancelling work.
+    pub fn validate_save(&self, blob: &SaveBlob) -> Result<(), CoreVnError> {
+        restore::validate_session_save(self, blob)
+    }
     pub fn save(&self) -> Result<SaveBlob, CoreVnError> {
         if self.failed {
             return Err(CoreVnError::diagnostic(

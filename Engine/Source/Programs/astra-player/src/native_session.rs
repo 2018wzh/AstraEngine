@@ -470,7 +470,7 @@ async fn execute_platform_load(
         }
     };
     let restore = vn
-        .restore_product_session(payload, media, executor)
+        .load_product_session(slot, payload, media, executor)
         .await
         .map_err(|error| player_error_owned("player.load.restore", error))?;
     executor
