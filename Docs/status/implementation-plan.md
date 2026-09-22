@@ -2,7 +2,7 @@
 
 ## 2026-09-23 集成与 Classic 复测
 
-Editor 的过期项目操作拒绝、CMVS 输入锁存及调用脚本名称的 source frame 修复已整合；Editor 17 项测试、CMVS 158 项普通测试及各自 all-target Clippy、fmt 通过。默认 ignored 的外部产品和 GPU 用例未执行，CMVS 文字、PCM 与商业短流程仍待完成。共享 Player 阶段门禁正在重新执行，不能沿用此前基线。
+Editor 的过期项目操作拒绝、CMVS 输入锁存及调用脚本名称的 source frame 修复已整合；Editor 17 项测试、CMVS 158 项普通测试及各自 all-target Clippy、fmt 通过。默认 ignored 的外部产品和 GPU 用例未执行，CMVS 文字、PCM 与商业短流程仍待完成。`60dc3e58b` 阶段根 workspace 完整测试通过（830 通过、19 按原条件未执行），前置 Headless 构建、全 workspace all-target Clippy 和 fmt 通过。后续 `800bd36d3` 的 CMVS 自动推进查询修复另行通过 158 项普通测试、all-target Clippy 与 fmt，GPU 用例未执行。
 
 集成 `b8a7ba2cb` 的统一系统页截图和 Headless worker 回收后，五个受影响 crate 的 168 项测试、all-target Clippy、fmt、文档及 Headless 构建通过。Windows 新 Release 实测旧槽拒绝、正文读回继续、最大化、选择恢复后系统页返回保持同一选择、手动分支选择、新 slot.05 保存、退出重开读回并继续通过。Classic 使用平面槽列表，不能据此宣布 NativeVN 缩略图卡片的视觉裁剪已验收。实测还发现重开窗口底部超出工作区、存档 UTC 时间缺少标识；已增加工作区放置和 desktop/native 本地时间显示，增量回归通过。`9f9e55d86` Windows 实测窗口完整居中于任务栏工作区，新 slot.06 显示本地日期时间并与系统钟一致；原槽未改写。
 
