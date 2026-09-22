@@ -66,16 +66,28 @@ impl CmvsSession {
         Ok(info)
     }
     fn name(&self, reference: CmvsPs2aPrivateStringReference) -> FamilyResult<String> {
+        self.name_in_frame(self.vm.current_frame, reference)
+    }
+    fn name_in_frame(
+        &self,
+        frame: u16,
+        reference: CmvsPs2aPrivateStringReference,
+    ) -> FamilyResult<String> {
         let script = self
             .scripts
-            .get(&self.vm.current_frame)
+            .get(&frame)
             .ok_or_else(|| error("ASTRA_EMU_CMVS_SCRIPT_FRAME", "script frame is not loaded"))?;
         script
             .resolve_private_string_relative(reference.relative_offset)
             .map_err(core)
     }
-    fn load(&mut self, frame: u16, name: CmvsPs2aPrivateStringReference) -> FamilyResult<()> {
-        let name = self.name(name)?;
+    fn load(
+        &mut self,
+        source_frame: u16,
+        frame: u16,
+        name: CmvsPs2aPrivateStringReference,
+    ) -> FamilyResult<()> {
+        let name = self.name_in_frame(source_frame, name)?;
         let script = self
             .archive
             .load_called_script(&name, frame, &mut self.vm)
@@ -99,8 +111,14 @@ impl CmvsSession {
     }
     fn action(&mut self, action: CmvsPs2aVmAction) -> FamilyResult<()> {
         match action {
-            CmvsPs2aVmAction::CallScript { frame, name } => self.load(frame, name),
-            CmvsPs2aVmAction::ReloadRootScript { name } => self.load(0, name),
+            CmvsPs2aVmAction::CallScript {
+                source_frame,
+                frame,
+                name,
+            } => self.load(source_frame, frame, name),
+            CmvsPs2aVmAction::ReloadRootScript { source_frame, name } => {
+                self.load(source_frame, 0, name)
+            }
             CmvsPs2aVmAction::LoadTextureParentResource {
                 parent_slot,
                 resource,

@@ -36,3 +36,5 @@ cargo clippy --manifest-path Emulator/Cargo.toml -p astra-emu-cmvs --all-targets
 本轮修正了输入轮询的原生命名和行为：case 416 读取确认键的释放锁存与按住状态，重复轮询不消费；case 417 只清除按下、释放锁存。Enter、Space、数字键盘 Enter 和主指针按钮分别跟踪，同一 tick 内的按下/释放不会丢失；失焦或挂起清空输入，不生成推进操作。新增状态只用于核心 VM，既有内部序列化状态不迁移。
 
 case 160/164 原先误命名为 Message，实际把一至两个音频资源交给交替的两个音频通道；161 停止两通道，162 淡出当前通道。现改为 PlayCrossfadeAudio、StopAudio 和 FadeOutAudio，并保留淡出时长；未连接播放时返回 MEDIA_UNBOUND，不再报文字未接通。正文不能从这组命令生成，需继续接入真正的文字表面与 SDK TextScene。该命名修正及输入测试不代表 PCM、正文或代表游戏流程完成。
+
+脚本调用和根脚本替换的动作携带名称来源 frame。VM 先切换 current_frame 后，Family 仍从调用者的脚本池解析名称，不会把相同偏移误用为目标脚本的字符串。全局字符串槽跨脚本复制的所有权仍待补齐，不能据此宣称完整菜单切换已通过。

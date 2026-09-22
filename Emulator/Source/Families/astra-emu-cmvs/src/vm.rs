@@ -415,12 +415,14 @@ pub enum CmvsPs2aVmAction {
     /// The recovered case-129 path asks the host to load the named script
     /// into the given frame and continue dispatch there.
     CallScript {
+        source_frame: u16,
         frame: u16,
         name: CmvsPs2aPrivateStringReference,
     },
     /// The recovered case-128 path asks the host to load the named script as
     /// the new root frame-0 script and continue dispatch at its entry PC.
     ReloadRootScript {
+        source_frame: u16,
         name: CmvsPs2aPrivateStringReference,
     },
 }
