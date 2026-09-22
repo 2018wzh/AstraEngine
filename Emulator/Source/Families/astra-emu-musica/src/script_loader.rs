@@ -20,8 +20,19 @@ pub(crate) fn load_script(
     uri: &str,
     primary: ScriptEncoding,
 ) -> FamilyResult<LoadedScript> {
-    let mut read =
-        |uri: &str| read_asset(archive, uri, MAX_SCRIPT_BYTES as u64).map(|bytes| bytes.to_vec());
+    let mut read = |uri: &str| {
+        // Native Windows script references are ASCII case-insensitive. Resolve
+        // against the actual archive spelling and reject case collisions.
+        let canonical = resolve_script_uri(
+            uri,
+            archive
+                .manifest()
+                .entries
+                .iter()
+                .map(|entry| entry.uri.as_str()),
+        )?;
+        read_asset(archive, canonical, MAX_SCRIPT_BYTES as u64).map(|bytes| bytes.to_vec())
+    };
     let bytes = expand(uri, &mut read)?;
     let encoding = ScriptEncoding::detect(&bytes, primary);
     let script = parse_sc_with_encoding(&bytes, &ScOpcodeCatalog::observed_musica(), encoding)
@@ -33,6 +44,41 @@ pub(crate) fn load_script(
         hash: Hash256::from_sha256(&bytes),
         script,
     })
+}
+
+fn resolve_script_uri<'a>(
+    requested: &str,
+    entries: impl Iterator<Item = &'a str>,
+) -> FamilyResult<&'a str> {
+    let mut matches = entries.filter(|entry| entry.eq_ignore_ascii_case(requested));
+    let found = matches.next().ok_or_else(|| {
+        error(
+            "ASTRA_EMU_MUSICA_SCRIPT_NOT_FOUND",
+            "script is absent from the mounted archive",
+        )
+    })?;
+    if matches.next().is_some() {
+        return Err(error(
+            "ASTRA_EMU_MUSICA_SCRIPT_AMBIGUOUS",
+            "script names collide under native case rules",
+        ));
+    }
+    Ok(found)
+}
+
+#[cfg(test)]
+mod native_names {
+    use super::*;
+    #[test]
+    fn resolves_native_case_without_choosing_between_colliding_entries() {
+        let uri = "musica:/scr/Scene.SC";
+        assert_eq!(
+            resolve_script_uri(uri, ["musica:/scr/scene.sc"].into_iter()).unwrap(),
+            "musica:/scr/scene.sc"
+        );
+        assert!(resolve_script_uri(uri, ["musica:/scr/other.sc"].into_iter()).is_err());
+        assert!(resolve_script_uri(uri, [uri, "musica:/scr/scene.sc"].into_iter()).is_err());
+    }
 }
 
 fn expand(

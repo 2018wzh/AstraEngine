@@ -13,6 +13,7 @@ use astra_emu_musica::{
 use clap::{Parser, Subcommand};
 use serde::Serialize;
 
+mod eden_save;
 mod garbro_nrbf;
 mod importer;
 mod inventory;
@@ -30,6 +31,28 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Validate native eden restoration against mounted scripts; no device playback.
+    CheckEdenRestore {
+        #[arg(long)]
+        file: PathBuf,
+        #[arg(long)]
+        game_dir: PathBuf,
+        #[arg(long)]
+        profile: PathBuf,
+        #[arg(long, value_enum)]
+        edition: eden_save::Edition,
+        #[arg(long, value_enum)]
+        encoding: eden_save::Encoding,
+    },
+    /// Inspect a native eden container without restoring or changing it.
+    InspectEdenSave {
+        #[arg(long)]
+        file: PathBuf,
+        #[arg(long, value_enum)]
+        edition: eden_save::Edition,
+        #[arg(long, value_enum)]
+        encoding: eden_save::Encoding,
+    },
     ScanArchives {
         #[arg(long)]
         game_dir: PathBuf,
@@ -66,6 +89,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _observability = astra_observability::init_host(observability)?;
     let command = Cli::parse().command;
     let action = match &command {
+        Command::CheckEdenRestore { .. } => "check_eden_restore",
+        Command::InspectEdenSave { .. } => "inspect_eden_save",
         Command::ScanArchives { .. } => "scan_archives",
         Command::ImportGarbroScheme { .. } => "import_garbro_scheme",
         Command::ListGarbroTitles { .. } => "list_garbro_titles",
@@ -74,6 +99,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     tracing::info!(event = "astra.emu.musica_cli.start", action);
     let result = match command {
+        Command::CheckEdenRestore {
+            file,
+            game_dir,
+            profile,
+            edition,
+            encoding,
+        } => eden_save::check_restore(&file, &game_dir, &profile, edition, encoding),
+        Command::InspectEdenSave {
+            file,
+            edition,
+            encoding,
+        } => eden_save::inspect(&file, edition, encoding),
         Command::ScanArchives { game_dir } => {
             let report = inventory::scan_archive_inventory(&game_dir)?;
             println!("{}", serde_json::to_string(&report)?);

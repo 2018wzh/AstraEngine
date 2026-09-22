@@ -2,6 +2,7 @@ mod backlog;
 mod config;
 mod config_audio;
 mod control;
+mod eden;
 mod effects;
 mod errors;
 pub(crate) mod gallery;
