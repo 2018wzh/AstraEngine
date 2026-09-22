@@ -736,12 +736,15 @@ fn write_nativevn_minimal_fixture(root: &Path, case_dir: &Path) -> PathBuf {
     let flagship_ui = fs::read_to_string(root.join("Examples/NativeVN/UI/flagship.astra"))
         .expect("checked-in flagship UI fixture")
         .lines()
-        .map(|line| {
-            if line.starts_with("ui_bind ") && !line.contains(" profile:") {
-                line.replacen("ui_bind ", "ui_bind profile:minimal ", 1)
-            } else {
-                line.to_string()
+        .flat_map(|line| {
+            let mut bindings = vec![line.to_string()];
+            if line.starts_with("ui_bind profile:classic ") {
+                bindings.push(
+                    line.replacen("profile:classic", "profile:minimal", 1)
+                        .replacen("#@id ", "#@id minimal.", 1),
+                );
             }
+            bindings
         })
         .collect::<Vec<_>>()
         .join("\n");
@@ -850,7 +853,10 @@ package_sections:
 }
 
 fn nativevn_minimal_story() -> &'static str {
-    r#"story main #@id story.main
+    r#"system_action jump:state.prologue #@id nativevn.story.start
+system_action jump:state.prologue #@id nativevn.experience.open
+
+story main #@id story.main
 state prologue #@id state.prologue
   scene room #@id scene.room
     text key:line.hello speaker:narrator #@id line.hello
