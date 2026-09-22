@@ -180,7 +180,7 @@ pub(super) fn store_process_string_range(
     state: &mut CmvsPs2aVmState,
     start: u32,
     count: u32,
-    value: CmvsPs2aPrivateStringReference,
+    value: u32,
 ) -> Result<(), CoreError> {
     let end = start.checked_add(count).ok_or_else(|| {
         invalid(
@@ -190,8 +190,10 @@ pub(super) fn store_process_string_range(
     })?;
     let effective_end = end.min(MAX_PROCESS_STRING_SLOTS);
     if start < effective_end {
+        let bytes = resolve_tagged_string_bytes(state, value)?.to_vec();
+        validate_native_string_slot(&bytes)?;
         for index in start..effective_end {
-            state.process_string_slots.insert(index, value);
+            state.process_string_slots.insert(index, bytes.clone());
         }
     }
     Ok(())

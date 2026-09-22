@@ -71,6 +71,28 @@ pub struct CmvsScript {
 }
 
 impl CmvsScript {
+    /// Session-local copies used by the native string evaluator. The cache
+    /// is rebound from the source script after restore, not serialized.
+    pub(crate) fn private_string_value_table(
+        &self,
+    ) -> Result<std::collections::BTreeMap<u32, Vec<u8>>, CoreError> {
+        let mut values = std::collections::BTreeMap::new();
+        for (offset, length) in self.private_string_length_table() {
+            let start = offset as usize;
+            let end = start.checked_add(length as usize).ok_or_else(|| {
+                invalid("ASTRA_EMU_CMVS_PS2A_STRING_RANGE", "string range overflow")
+            })?;
+            let bytes = self.string_pool.get(start..end).ok_or_else(|| {
+                invalid(
+                    "ASTRA_EMU_CMVS_PS2A_STRING_RANGE",
+                    "string range exceeds pool",
+                )
+            })?;
+            values.insert(offset, bytes.to_vec());
+        }
+        Ok(values)
+    }
+
     /// Builds the payload-free table mapping each validated pool-relative
     /// string offset to its `lstrlenA` byte length (the terminator is not
     /// counted). The recovered case-248 handler needs only this length, so

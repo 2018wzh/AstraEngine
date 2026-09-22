@@ -63,6 +63,7 @@ impl CmvsPs2aVmState {
         validate_archive_uri("cmvs:/", uri)?;
         let name_index = script.name_index.clone();
         let string_lengths = script.private_string_length_table();
+        let string_values = script.private_string_value_table()?;
         self.install_script_data(frame, &script.data_segment)?;
         self.script_frames.insert(
             frame,
@@ -73,6 +74,7 @@ impl CmvsPs2aVmState {
         );
         self.script_name_indices.insert(frame, name_index);
         self.frame_string_lengths.insert(frame, string_lengths);
+        self.frame_string_values.insert(frame, string_values);
         self.program_counter = script.header.initial_pc;
         Ok(())
     }
@@ -94,6 +96,12 @@ impl CmvsPs2aVmState {
             .collect();
         self.script_data_segment_sizes
             .insert(frame, bytes.len() as u32);
+        let tail = bytes.as_chunks::<4>().1;
+        if tail.is_empty() {
+            self.script_data_segment_tail.remove(&frame);
+        } else {
+            self.script_data_segment_tail.insert(frame, tail.to_vec());
+        }
         if words.is_empty() {
             self.script_data_segment_words.remove(&frame);
         } else {

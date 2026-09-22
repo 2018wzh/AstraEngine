@@ -1,15 +1,11 @@
 use super::*;
 
-fn pool(offset: u32) -> CmvsMessageBufferSegment {
-    CmvsMessageBufferSegment::PoolString {
-        reference: CmvsPs2aPrivateStringReference {
-            relative_offset: offset,
-        },
-    }
+fn bind(state: &mut CmvsPs2aVmState, frame: u16, bytes: &[u8]) {
+    state
+        .frame_string_values
+        .insert(frame, BTreeMap::from([(42, bytes.to_vec())]));
 }
-
-fn reload(state: &mut CmvsPs2aVmState) -> Result<Option<CmvsPs2aVmAction>, CoreError> {
-    push_word(state, 0x8000_0000)?;
+fn command(state: &mut CmvsPs2aVmState, id: u16) -> Result<Option<CmvsPs2aVmAction>, CoreError> {
     execute_cmvs390_frame(
         state,
         &CmvsPs2aInstructionFrame::Command {
@@ -17,114 +13,144 @@ fn reload(state: &mut CmvsPs2aVmState) -> Result<Option<CmvsPs2aVmAction>, CoreE
                 offset: 0,
                 byte_length: 2,
             },
-            command_id: 128,
+            command_id: id,
         },
     )
 }
-
 #[test]
-fn reload_resolves_one_nested_script_name_before_resetting_the_root() {
+fn global_assignment_copies_bytes_before_slot_and_script_replacement() {
     let mut state = CmvsPs2aVmState::new(0);
-    state.current_frame = 3;
+    bind(&mut state, 0, b"first.ps3");
+    append_value_entry_to_buffer(&mut state, 0x120, 42).unwrap();
+    materialize_message_buffer(&mut state, 0x121, 0).unwrap();
+    state.message_buffer.clear();
+    append_value_entry_to_buffer(&mut state, 0x121, 0).unwrap();
+    materialize_message_buffer(&mut state, 0x121, 1).unwrap();
+    bind(&mut state, 0, b"replacement.ps3");
     state
-        .message_string_slots
-        .insert(0, vec![CmvsMessageBufferSegment::StringSlot { index: 1 }]);
-    state.message_string_slots.insert(1, vec![pool(42)]);
+        .process_string_slots
+        .insert(0, b"changed.ps3".to_vec());
+    state.current_frame = 3;
+    push_word(&mut state, 0x8000_0001).unwrap();
     assert_eq!(
-        reload(&mut state).unwrap(),
+        command(&mut state, 128).unwrap(),
         Some(CmvsPs2aVmAction::ReloadRootScript {
-            source_frame: 3,
-            name: CmvsPs2aPrivateStringReference {
-                relative_offset: 42,
-            },
+            name: "first.ps3".into()
         })
     );
     assert_eq!(state.current_frame, 0);
-    assert_eq!(state.stack_cursor_bytes, 0);
-    assert!(!state.execution_failed);
 }
-
 #[test]
-fn unresolved_script_names_fail_before_root_replacement() {
-    for segments in [
-        None,
-        Some(vec![]),
-        Some(vec![pool(1), pool(2)]),
-        Some(vec![CmvsMessageBufferSegment::StringSlot { index: 1 }]),
-        Some(vec![CmvsMessageBufferSegment::StringSlot { index: 0 }]),
-    ] {
-        let mut state = CmvsPs2aVmState::new(0);
-        state.current_frame = 3;
-        if let Some(segments) = segments {
-            state.message_string_slots.insert(0, segments);
-        }
-        assert_eq!(
-            reload(&mut state).unwrap_err().code(),
-            "ASTRA_EMU_CMVS_VM_SCRIPT_NAME"
-        );
-        assert_eq!(state.current_frame, 3);
-        assert!(state.execution_failed);
-        assert_eq!(
-            reload(&mut state).unwrap_err().code(),
-            "ASTRA_EMU_CMVS_VM_FAILED"
-        );
-    }
-}
-
-#[test]
-fn script_name_nesting_keeps_the_declared_bound() {
+fn call_copies_name_before_switching_to_destination_frame() {
     let mut state = CmvsPs2aVmState::new(0);
-    for index in 0..7 {
-        state.message_string_slots.insert(
-            index,
-            vec![CmvsMessageBufferSegment::StringSlot { index: index + 1 }],
-        );
-    }
-    state.message_string_slots.insert(7, vec![pool(42)]);
-    assert_eq!(
-        script_name_reference(&state, 0x8000_0000)
-            .unwrap()
-            .relative_offset,
-        42
-    );
-    state
-        .message_string_slots
-        .insert(7, vec![CmvsMessageBufferSegment::StringSlot { index: 8 }]);
-    state.message_string_slots.insert(8, vec![pool(42)]);
-    assert_eq!(
-        script_name_reference(&state, 0x8000_0000)
-            .unwrap_err()
-            .code(),
-        "ASTRA_EMU_CMVS_VM_SCRIPT_NAME"
-    );
-}
-
-#[test]
-fn call_retains_name_source_before_switching_to_destination_frame() {
-    let mut state = CmvsPs2aVmState::new(0);
+    bind(&mut state, 3, b"caller.ps3");
+    bind(&mut state, 1, b"wrong.ps3");
     state.current_frame = 3;
     push_word(&mut state, 42).unwrap();
     push_word(&mut state, 0).unwrap();
-    let action = execute_cmvs390_frame(
-        &mut state,
-        &CmvsPs2aInstructionFrame::Command {
-            span: crate::CmvsPs2aSourceSpan {
-                offset: 0,
-                byte_length: 2,
-            },
-            command_id: 129,
-        },
-    )
-    .unwrap();
     assert_eq!(
-        action,
+        command(&mut state, 129).unwrap(),
         Some(CmvsPs2aVmAction::CallScript {
-            source_frame: 3,
             frame: 1,
-            name: CmvsPs2aPrivateStringReference {
-                relative_offset: 42
-            },
+            name: "caller.ps3".into()
         })
     );
     assert_eq!(state.current_frame, 1);
+}
+#[test]
+fn native_slots_reject_overflow_nul_and_invalid_encoding_without_overwrite() {
+    for bytes in [vec![b'x'; 1024], vec![0], vec![0x81]] {
+        let mut state = CmvsPs2aVmState::new(0);
+        state.process_string_slots.insert(0, b"safe".to_vec());
+        state.message_buffer = bytes;
+        assert!(materialize_message_buffer(&mut state, 0x121, 0).is_err());
+        assert_eq!(state.process_string_slots[&0], b"safe");
+    }
+}
+#[test]
+fn slot_concatenation_and_length_use_copied_native_bytes() {
+    let mut state = CmvsPs2aVmState::new(0);
+    state.process_string_slots.insert(0, b"chapter".to_vec());
+    bind(&mut state, 0, b".ps3");
+    append_value_entry_to_buffer(&mut state, 0x121, 0).unwrap();
+    append_value_entry_to_buffer(&mut state, 0x120, 42).unwrap();
+    materialize_message_buffer(&mut state, 0x121, 1).unwrap();
+    assert_eq!(
+        resolve_resource_name(&state, 0x8000_0001).unwrap(),
+        "chapter.ps3"
+    );
+    assert_eq!(
+        resolve_tagged_string_length(&state, 0x8000_0001).unwrap(),
+        11
+    );
+}
+#[test]
+fn restore_retains_slot_values_without_serializing_script_pool() {
+    let mut state = CmvsPs2aVmState::new(0);
+    bind(&mut state, 0, b"private-pool.ps3");
+    state.process_string_slots.insert(0, b"saved.ps3".to_vec());
+    let encoded = postcard::to_allocvec(&state).unwrap();
+    assert!(!encoded
+        .windows(b"private-pool.ps3".len())
+        .any(|s| s == b"private-pool.ps3"));
+    let restored: CmvsPs2aVmState = postcard::from_bytes(&encoded).unwrap();
+    assert_eq!(
+        resolve_resource_name(&restored, 0x8000_0000).unwrap(),
+        "saved.ps3"
+    );
+    assert!(resolve_resource_name(&restored, 42).is_err());
+}
+
+#[test]
+fn legacy_and_unknown_snapshot_versions_are_rejected_at_the_prefix() {
+    for bytes in [vec![0], vec![1], vec![3]] {
+        assert!(postcard::from_bytes::<CmvsPs2aVmState>(&bytes).is_err());
+    }
+    let mut state = CmvsPs2aVmState::new(0);
+    state.process_string_slots.insert(128, b"invalid".to_vec());
+    assert!(validate_cmvs390_vm_state(&state).is_err());
+    state.process_string_slots.clear();
+    state.process_string_slots.insert(0, vec![0x81]);
+    assert!(validate_cmvs390_vm_state(&state).is_err());
+}
+#[test]
+fn missing_or_external_pool_never_falls_back_to_a_different_frame() {
+    let mut state = CmvsPs2aVmState::new(0);
+    bind(&mut state, 1, b"wrong.ps3");
+    assert!(resolve_resource_name(&state, 42).is_err());
+    assert!(resolve_resource_name(&state, 0xc000_002a).is_err());
+    assert!(resolve_resource_name(&state, 0x8000_0000).is_err());
+    assert!(resolve_tagged_string_bytes(&state, 0x8000_0080).is_err());
+}
+
+#[test]
+fn native_range_copy_reads_source_once_even_when_overwriting_it() {
+    let mut state = CmvsPs2aVmState::new(0);
+    state.process_string_slots.insert(0, b"copied".to_vec());
+    store_process_string_range(&mut state, 0, 3, 0x8000_0000).unwrap();
+    state.process_string_slots.insert(0, b"changed".to_vec());
+    assert_eq!(state.process_string_slots[&1], b"copied");
+    assert_eq!(state.process_string_slots[&2], b"copied");
+}
+
+#[test]
+fn data_string_domain_reads_mutable_segment_and_preserves_partial_tail() {
+    let mut state = CmvsPs2aVmState::new(0);
+    state.install_script_data(0, b"name\0x\0").unwrap();
+    assert_eq!(resolve_resource_name(&state, 0x4000_0000).unwrap(), "name");
+    assert_eq!(resolve_resource_name(&state, 0x4000_0005).unwrap(), "x");
+    append_value_entry_to_buffer(&mut state, 0x125, 0).unwrap();
+    materialize_message_buffer(&mut state, 0x121, 0).unwrap();
+    state
+        .script_data_segment_words
+        .get_mut(&0)
+        .unwrap()
+        .insert(0, u32::from_le_bytes(*b"edit"));
+    assert_eq!(resolve_resource_name(&state, 0x4000_0000).unwrap(), "edit");
+    assert_eq!(resolve_resource_name(&state, 0x8000_0000).unwrap(), "name");
+    let restored: CmvsPs2aVmState =
+        postcard::from_bytes(&postcard::to_allocvec(&state).unwrap()).unwrap();
+    assert_eq!(resolve_resource_name(&restored, 0x4000_0005).unwrap(), "x");
+    state.install_script_data(0, b"unterminated").unwrap();
+    assert!(resolve_resource_name(&state, 0x4000_0000).is_err());
 }

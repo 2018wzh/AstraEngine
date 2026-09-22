@@ -22,8 +22,7 @@ pub(super) fn execute(
                     "CMVS nested script frame index overflowed",
                 )
             })?;
-            let source_frame = state.current_frame;
-            let name = script_name_reference(state, *name)?;
+            let name = resolve_resource_name(state, *name)?;
             // The loader pops both operands through the contract's
             // `stack_pop_bytes` before this branch runs; the dispatcher
             // result 0 adds no further pop.  It then pushes the frame
@@ -51,18 +50,13 @@ pub(super) fn execute(
                 );
             }
             state.current_frame = frame;
-            Ok(Some(CmvsPs2aVmAction::CallScript {
-                source_frame,
-                frame,
-                name,
-            }))
+            Ok(Some(CmvsPs2aVmAction::CallScript { frame, name }))
         }
         (
             CmvsPs2aCommandEffectKind::ReloadRootScript,
             [(CmvsPs2aCommandStackWordKind::TaggedStringReference, name)],
         ) => {
-            let source_frame = state.current_frame;
-            let name = script_name_reference(state, *name)?;
+            let name = resolve_resource_name(state, *name)?;
             // `sub_4781B0` resets the data stack, the frame stack-table
             // words and the current frame before the new root script takes
             // over; the expression-result field is zeroed with its flag bit.
@@ -94,10 +88,7 @@ pub(super) fn execute(
                     state.interpreter_words.insert(base, 0);
                 }
             }
-            Ok(Some(CmvsPs2aVmAction::ReloadRootScript {
-                source_frame,
-                name,
-            }))
+            Ok(Some(CmvsPs2aVmAction::ReloadRootScript { name }))
         }
         (
             CmvsPs2aCommandEffectKind::ResumeInterpreterCoroutineRecord {

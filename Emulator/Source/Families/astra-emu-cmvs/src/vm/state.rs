@@ -1,10 +1,13 @@
 use super::*;
 
-/// Serializable, payload-free state for the recovered PS2A execution subset.
-/// A string reference is only a numeric offset/tag; script bytes remain owned
-/// by the active VFS-backed `CmvsScript` and are never copied here.
+mod version;
+use version::VmVersion;
+
+/// Core-private native state. Copied global strings are part of a private
+/// game save; source script pools are rebound from verified files instead.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CmvsPs2aVmState {
+    format_version: VmVersion,
     /// An instruction failed or unwound after beginning execution. Only a new
     /// machine or a validated successful snapshot may resume execution.
     pub(super) execution_failed: bool,
@@ -35,8 +38,8 @@ pub struct CmvsPs2aVmState {
     pub process_indexed_words: BTreeMap<u32, u32>,
     /// Opaque raw f32 bit-patterns mutated through the recovered float table.
     pub process_float_words: BTreeMap<u32, u32>,
-    /// Private script references copied by the recovered process string table.
-    pub process_string_slots: BTreeMap<u32, CmvsPs2aPrivateStringReference>,
+    /// Bounded Shift-JIS values copied into the native 128-slot string table.
+    pub process_string_slots: BTreeMap<u32, Vec<u8>>,
     /// Opaque component fields keyed by packed parent-component and field
     /// offsets from the recovered CMVS 3.90 object graph.
     pub component_words: BTreeMap<u32, u32>,
@@ -181,16 +184,15 @@ pub struct CmvsPs2aVmState {
     /// a zero length makes every access out of bounds, matching a script
     /// without a declared segment.
     pub script_data_segment_sizes: BTreeMap<u16, u32>,
+    /// Final bytes outside the segment's complete writable dwords.
+    pub script_data_segment_tail: BTreeMap<u16, Vec<u8>>,
     /// Written dwords of each frame's data segment, keyed by byte offset.
     /// Unwritten words read as their loaded initial value, which is zero
     /// for every recovered case; the provider materializes non-zero
     /// initial dwords at script load.
     pub script_data_segment_words: BTreeMap<u16, BTreeMap<u32, u32>>,
-    /// The recovered ephemeral message buffer as ordered payload-free
-    /// segments, mirroring the original interpreter buffer that the `0x201`
-    /// evaluator resets and assembles. String content stays owned by the
-    /// active script pool.
-    pub message_buffer_segments: Vec<CmvsMessageBufferSegment>,
+    /// Native evaluator assembly buffer; global stores copy its bytes.
+    pub message_buffer: Vec<u8>,
     /// The recovered screenshot owner at the version-pinned handle field
     /// (byte offset 3256), absent until case 549 recreates it.
     pub save_image_owner: Option<CmvsSaveImageOwnerState>,
@@ -204,15 +206,16 @@ pub struct CmvsPs2aVmState {
     pub input_advance_press: bool,
     pub pointer_x: i32,
     pub pointer_y: i32,
-    /// The bounded global string-slot table the message buffer materializes
-    /// into, keyed by slot index (`sub_48AC90` bounds indices to 0x7f).
-    pub message_string_slots: BTreeMap<u32, Vec<CmvsMessageBufferSegment>>,
+    /// Rebound from verified scripts after restore; never written into saves.
+    #[serde(skip)]
+    pub frame_string_values: BTreeMap<u16, BTreeMap<u32, Vec<u8>>>,
     pub dispatch_stopped: bool,
 }
 
 impl CmvsPs2aVmState {
     pub fn new(program_counter: u32) -> Self {
         Self {
+            format_version: VmVersion,
             program_counter,
             current_value: None,
             condition_flag: false,
@@ -263,9 +266,10 @@ impl CmvsPs2aVmState {
             script_name_indices: BTreeMap::new(),
             frame_string_lengths: BTreeMap::new(),
             script_data_segment_sizes: BTreeMap::new(),
+            script_data_segment_tail: BTreeMap::new(),
             script_data_segment_words: BTreeMap::new(),
-            message_buffer_segments: Vec::new(),
-            message_string_slots: BTreeMap::new(),
+            message_buffer: Vec::new(),
+            frame_string_values: BTreeMap::new(),
             save_image_owner: None,
             input_confirm_held: false,
             input_skip_mode: false,

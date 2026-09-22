@@ -715,6 +715,9 @@ fn stack_expression_reads_and_writes_the_loaded_data_segment() {
 #[test]
 fn reload_root_script_invalidates_frame_zero_coroutine_records() {
     let mut state = CmvsPs2aVmState::new(0);
+    state
+        .frame_string_values
+        .insert(0, BTreeMap::from([(0, b"root.ps3".to_vec())]));
     for value in [9_u32, 8, 7, 0x4321, 5] {
         execute_cmvs390_frame(
             &mut state,
@@ -1290,8 +1293,11 @@ fn stores_raw_float_bits_from_command_147() {
 }
 
 #[test]
-fn stores_private_string_references_from_command_148() {
+fn copies_native_string_values_from_command_148() {
     let mut state = CmvsPs2aVmState::new(0);
+    state
+        .frame_string_values
+        .insert(0, BTreeMap::from([(11, b"menu.ps3".to_vec())]));
     for value in [11, 2, 3] {
         execute_cmvs390_frame(
             &mut state,
@@ -1311,9 +1317,7 @@ fn stores_private_string_references_from_command_148() {
         },
     )
     .unwrap();
-    let reference = CmvsPs2aPrivateStringReference {
-        relative_offset: 11,
-    };
+    let reference = b"menu.ps3".to_vec();
     assert_eq!(state.process_string_slots.get(&3), Some(&reference));
     assert_eq!(state.process_string_slots.get(&4), Some(&reference));
     assert_eq!(state.stack_cursor_bytes, 0);
@@ -1465,17 +1469,18 @@ fn commands_48_and_64_bind_and_initialize_a_live_texture_parent() {
     push(&mut state, 7);
     run_command(&mut state, 32);
 
-    let resource = CmvsPs2aPrivateStringReference {
-        relative_offset: 23,
-    };
+    let resource = "texture.pb3".to_owned();
+    state
+        .frame_string_values
+        .insert(0, BTreeMap::from([(23, resource.as_bytes().to_vec())]));
     // Handler stack order is resource below the topmost parent id.
-    push(&mut state, resource.relative_offset);
+    push(&mut state, 23);
     push(&mut state, 7);
     assert_eq!(
         run_command_with_action(&mut state, 48),
         Some(CmvsPs2aVmAction::LoadTextureParentResource {
             parent_slot: 7,
-            resource,
+            resource: resource.clone(),
         })
     );
     assert_eq!(state.interpreter_words.get(&81220), Some(&1));
@@ -1557,6 +1562,9 @@ fn texture_child_commands_retain_the_recovered_hierarchy_and_fields() {
         Some(&CmvsTextureChildState::default())
     );
 
+    state
+        .frame_string_values
+        .insert(0, BTreeMap::from([(41, b"child.pb3".to_vec())]));
     // case 56: resource, child, parent.
     push(&mut state, 41);
     push(&mut state, 11);
@@ -1566,9 +1574,7 @@ fn texture_child_commands_retain_the_recovered_hierarchy_and_fields() {
         Some(CmvsPs2aVmAction::LoadTextureResource {
             parent_slot: 7,
             child_id: 11,
-            resource: CmvsPs2aPrivateStringReference {
-                relative_offset: 41,
-            },
+            resource: "child.pb3".into(),
         })
     );
 
@@ -1598,12 +1604,7 @@ fn texture_child_commands_retain_the_recovered_hierarchy_and_fields() {
     run_command(&mut state, 71);
 
     let child = &state.texture_children[&7][&11];
-    assert_eq!(
-        child.resource,
-        Some(CmvsPs2aPrivateStringReference {
-            relative_offset: 41,
-        })
-    );
+    assert_eq!(child.resource, Some("child.pb3".into()));
     assert!(child.surface_initialized);
     assert_eq!(child.rect_words, Some([101, 102, 103, 104]));
     assert_eq!(child.position_words, Some([201, 202]));

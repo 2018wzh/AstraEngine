@@ -52,20 +52,6 @@ pub(super) const MESSAGE_STRING_SLOT_MAX: u32 = 0x7f;
 /// evaluation (`sub_46F180` writes it at byte offset 81216).
 pub(super) const VALUE_EXPRESSION_RESULT_FIELD: u32 = 81216;
 
-/// One payload-free segment of the recovered ephemeral message buffer.
-/// String content itself stays owned by the active script pool or slot
-/// table; only the ordered references are retained.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub enum CmvsMessageBufferSegment {
-    /// The rendering of one bounded global string slot (`sub_48AA40`).
-    StringSlot { index: u32 },
-    /// One resolved tag-zero private string reference from the active
-    /// script's pool.
-    PoolString {
-        reference: CmvsPs2aPrivateStringReference,
-    },
-}
-
 /// Executes one recovered `0x201` value expression against the VM state.
 ///
 /// The recovered subset follows `sub_46F180`: the assembly buffer is reset,
@@ -80,7 +66,7 @@ pub(super) fn run_value_expression(
 ) -> Result<(), CoreError> {
     // The original copies an empty default string into the assembly buffer
     // before reading any token.
-    state.message_buffer_segments.clear();
+    state.message_buffer.clear();
     let mut entries: Vec<(u16, u32)> = Vec::new();
     for token in &expression.tokens {
         match token {
@@ -182,60 +168,35 @@ pub(super) fn append_value_entry_to_buffer(
     tag: u16,
     payload: u32,
 ) -> Result<(), CoreError> {
-    match tag {
-        0x120 | 0x125 | 0x127 => {
-            let reference = tag_zero_reference(payload)?;
-            state
-                .message_buffer_segments
-                .push(CmvsMessageBufferSegment::PoolString { reference });
-        }
-        0x121 => {
-            let index = payload & 0x3fff_ffff;
-            if index <= MESSAGE_STRING_SLOT_MAX {
-                state
-                    .message_buffer_segments
-                    .push(CmvsMessageBufferSegment::StringSlot { index });
-            }
-        }
+    let word = match tag {
+        0x120 => payload,
+        0x125 => payload | 0x4000_0000,
+        0x127 => payload | 0xc000_0000,
+        0x121 => payload | 0x8000_0000,
         0x122 => {
             let offset = u8::try_from(payload).map_err(|_| {
                 invalid(
                     "ASTRA_EMU_CMVS_VM_VALUE_EXPRESSION",
-                    "CMVS value-expression stack read exceeds the word bound",
+                    "stack string offset exceeds bound",
                 )
             })?;
-            let word = read_stack_word_from_top(state, offset)?;
-            match word & 0xc000_0000 {
-                0 => {
-                    let reference = tag_zero_reference(word)?;
-                    state
-                        .message_buffer_segments
-                        .push(CmvsMessageBufferSegment::PoolString { reference });
-                }
-                0x4000_0000 => {
-                    let reference = tag_zero_reference(word & 0x3fff_ffff)?;
-                    state
-                        .message_buffer_segments
-                        .push(CmvsMessageBufferSegment::PoolString { reference });
-                }
-                0x8000_0000 => {
-                    let index = word & 0x3fff_ffff;
-                    if index <= MESSAGE_STRING_SLOT_MAX {
-                        state
-                            .message_buffer_segments
-                            .push(CmvsMessageBufferSegment::StringSlot { index });
-                    }
-                }
-                _ => {
-                    return Err(invalid(
-                        "ASTRA_EMU_CMVS_VM_VALUE_EXPRESSION",
-                        "CMVS stack-string buffer copy is not recovered",
-                    ));
-                }
-            }
+            read_stack_word_from_top(state, offset)?
         }
-        _ => {}
+        _ => return Ok(()),
+    };
+    let bytes = resolve_tagged_string_bytes(state, word)?.to_vec();
+    if state
+        .message_buffer
+        .len()
+        .checked_add(bytes.len())
+        .is_none_or(|n| n > MAX_SCRIPT_BYTES)
+    {
+        return Err(invalid(
+            "ASTRA_EMU_CMVS_VM_STRING_BOUND",
+            "string evaluator buffer exceeds byte budget",
+        ));
     }
+    state.message_buffer.extend_from_slice(&bytes);
     Ok(())
 }
 
@@ -251,9 +212,10 @@ pub(super) fn materialize_message_buffer(
         0x121 => {
             let index = target_payload & 0x3fff_ffff;
             if index <= MESSAGE_STRING_SLOT_MAX {
+                validate_native_string_slot(&state.message_buffer)?;
                 state
-                    .message_string_slots
-                    .insert(index, state.message_buffer_segments.clone());
+                    .process_string_slots
+                    .insert(index, state.message_buffer.clone());
             }
             Ok(())
         }

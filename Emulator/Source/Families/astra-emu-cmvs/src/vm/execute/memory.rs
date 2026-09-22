@@ -417,7 +417,7 @@ pub(super) fn execute(
             CmvsPs2aCommandEffectKind::StoreProcessStringRange,
             [(CmvsPs2aCommandStackWordKind::OpaqueU32, start), (CmvsPs2aCommandStackWordKind::OpaqueU32, count), (CmvsPs2aCommandStackWordKind::TaggedStringReference, value)],
         ) => {
-            store_process_string_range(state, *start, *count, tag_zero_reference(*value)?)?;
+            store_process_string_range(state, *start, *count, *value)?;
             Ok(None)
         }
         _ => Err(invalid(

@@ -50,7 +50,7 @@ pub(super) fn execute(
             },
             [(CmvsPs2aCommandStackWordKind::OpaqueU32, parent), (CmvsPs2aCommandStackWordKind::OpaqueU32, child), (CmvsPs2aCommandStackWordKind::TaggedStringReference, name)],
         ) => {
-            let resource = tag_zero_reference(*name)?;
+            let resource = resolve_resource_name(state, *name)?;
             if !texture_parent_is_live(state, texture_table_base_offset, max_parent_slot, *parent)?
             {
                 raise_error_flag(state, error_flag_field_offset, error_flag_mask)?;
@@ -74,7 +74,7 @@ pub(super) fn execute(
                         "CMVS texture resource targets a child that was not created",
                     )
                 })?;
-            child_state.resource = Some(resource);
+            child_state.resource = Some(resource.clone());
             child_state.resource_frame = Some(state.current_frame);
             Ok(Some(CmvsPs2aVmAction::LoadTextureResource {
                 parent_slot: *parent as u8,

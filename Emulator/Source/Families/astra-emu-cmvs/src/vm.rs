@@ -70,6 +70,21 @@ const MAX_FILTER_CHAIN_RECORDS_PER_BANK: usize = 4096;
 /// execution. The wire payload is untrusted even when its outer envelope and
 /// hash are valid.
 pub fn validate_cmvs390_vm_state(state: &CmvsPs2aVmState) -> Result<(), CoreError> {
+    for (index, bytes) in &state.process_string_slots {
+        if *index >= MAX_PROCESS_STRING_SLOTS {
+            return Err(invalid(
+                "ASTRA_EMU_CMVS_VM_STRING_BOUND",
+                "string slot index exceeds native table",
+            ));
+        }
+        validate_native_string_slot(bytes)?;
+    }
+    if state.message_buffer.len() > MAX_SCRIPT_BYTES {
+        return Err(invalid(
+            "ASTRA_EMU_CMVS_VM_STRING_BOUND",
+            "string evaluator buffer exceeds byte budget",
+        ));
+    }
     if state.execution_failed {
         return Err(invalid(
             "ASTRA_EMU_CMVS_VM_FAILED",
@@ -160,6 +175,27 @@ pub fn validate_cmvs390_vm_state(state: &CmvsPs2aVmState) -> Result<(), CoreErro
             ));
         }
     }
+    for (frame, tail) in &state.script_data_segment_tail {
+        if state
+            .script_data_segment_sizes
+            .get(frame)
+            .is_none_or(|size| tail.len() != (*size as usize & 3))
+            || tail.is_empty()
+        {
+            return Err(invalid(
+                "ASTRA_EMU_CMVS_VM_DATA_SEGMENT",
+                "data segment tail does not match its declared size",
+            ));
+        }
+    }
+    for (frame, size) in &state.script_data_segment_sizes {
+        if *size & 3 != 0 && !state.script_data_segment_tail.contains_key(frame) {
+            return Err(invalid(
+                "ASTRA_EMU_CMVS_VM_DATA_SEGMENT",
+                "data segment tail is missing",
+            ));
+        }
+    }
     for (frame, words) in &state.script_data_segment_words {
         let Some(size) = state.script_data_segment_sizes.get(frame) else {
             return Err(invalid(
@@ -199,7 +235,7 @@ pub struct CmvsResourceChannelSlotRecord {
 /// Recovered state of one child texture below a case-32 container.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CmvsTextureChildState {
-    pub resource: Option<CmvsPs2aPrivateStringReference>,
+    pub resource: Option<String>,
     pub resource_frame: Option<u16>,
     pub surface_initialized: bool,
     pub rect_words: Option<[u32; 4]>,
@@ -210,7 +246,7 @@ pub struct CmvsTextureChildState {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CmvsTextureParentState {
-    pub resource: Option<CmvsPs2aPrivateStringReference>,
+    pub resource: Option<String>,
     pub resource_frame: Option<u16>,
     pub surface_initialized: bool,
     pub rect_words: Option<[u32; 4]>,
@@ -275,8 +311,8 @@ pub enum CmvsPs2aStorageRequest {
     LoadSystemState { path_buffer_offset: u16 },
 }
 
-/// A payload-free command boundary. The host resolves a reference against the
-/// private script pool only when it needs to issue an ephemeral text lease.
+/// Core-private command boundary. Resolved names stay within the Family;
+/// callers must not serialize actions into diagnostics or public reports.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum CmvsPs2aVmAction {
     /// Cases 160/164: alternate two audio channels, optionally crossfading.
@@ -355,14 +391,11 @@ pub enum CmvsPs2aVmAction {
     LoadTextureResource {
         parent_slot: u8,
         child_id: u16,
-        resource: CmvsPs2aPrivateStringReference,
+        resource: String,
     },
     /// The recovered case-48 path binds a private PB resource directly to a
     /// top-level texture container.
-    LoadTextureParentResource {
-        parent_slot: u8,
-        resource: CmvsPs2aPrivateStringReference,
-    },
+    LoadTextureParentResource { parent_slot: u8, resource: String },
     /// Case 71 completes the recovered four-stage surface configuration.
     /// The host may present the selected parent or child only after this
     /// boundary; preceding setters remain state-only mutations.
@@ -414,17 +447,10 @@ pub enum CmvsPs2aVmAction {
     FilterChainSelectionWait { bank: u8 },
     /// The recovered case-129 path asks the host to load the named script
     /// into the given frame and continue dispatch there.
-    CallScript {
-        source_frame: u16,
-        frame: u16,
-        name: CmvsPs2aPrivateStringReference,
-    },
+    CallScript { frame: u16, name: String },
     /// The recovered case-128 path asks the host to load the named script as
     /// the new root frame-0 script and continue dispatch at its entry PC.
-    ReloadRootScript {
-        source_frame: u16,
-        name: CmvsPs2aPrivateStringReference,
-    },
+    ReloadRootScript { name: String },
 }
 
 mod effect;

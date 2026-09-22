@@ -78,10 +78,8 @@ pub(super) fn execute(
             },
             [(CmvsPs2aCommandStackWordKind::OpaqueU32, parent), (CmvsPs2aCommandStackWordKind::TaggedStringReference, name)],
         ) => {
-            // A 0x80-tagged name names a global message slot whose content
-            // is the resolved texture name; unfold nested slots down to the
-            // single pool string (same resolution as command 128 names).
-            let resource = script_name_reference(state, *name)?;
+            // Resolve and copy before later script or global-slot writes.
+            let resource = resolve_resource_name(state, *name)?;
             if !texture_parent_is_live(state, texture_table_base_offset, max_parent_slot, *parent)?
             {
                 raise_error_flag(state, error_flag_field_offset, error_flag_mask)?;
@@ -94,7 +92,7 @@ pub(super) fn execute(
                     "CMVS live texture parent has no specialized state",
                 )
             })?;
-            parent_state.resource = Some(resource);
+            parent_state.resource = Some(resource.clone());
             parent_state.resource_frame = Some(state.current_frame);
             // The host blocks the step if VFS resolution or decode fails;
             // continuation therefore observes the original non-zero loader
@@ -114,7 +112,7 @@ pub(super) fn execute(
             },
             [(CmvsPs2aCommandStackWordKind::OpaqueU32, parent), (CmvsPs2aCommandStackWordKind::TaggedStringReference, name), (CmvsPs2aCommandStackWordKind::OpaqueU32, _word_a), (CmvsPs2aCommandStackWordKind::OpaqueU32, _word_b), (CmvsPs2aCommandStackWordKind::OpaqueU32, _word_c)],
         ) => {
-            let resource = tag_zero_reference(*name)?;
+            let resource = resolve_resource_name(state, *name)?;
             if *parent >= 256 {
                 raise_error_flag(state, error_flag_field_offset, error_flag_mask)?;
                 return Ok(None);
@@ -138,7 +136,7 @@ pub(super) fn execute(
                 identity
             });
             let parent_state = state.texture_parents.entry(parent_slot).or_default();
-            parent_state.resource = Some(resource);
+            parent_state.resource = Some(resource.clone());
             parent_state.resource_frame = Some(state.current_frame);
             state.interpreter_words.insert(result_field_offset, 1);
             state.interpreter_words.insert(3260, 1);
