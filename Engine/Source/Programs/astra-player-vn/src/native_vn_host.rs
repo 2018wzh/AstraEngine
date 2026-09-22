@@ -168,6 +168,7 @@ pub struct NativeVnHostCommandSource {
     image_prefetch_inflight: BTreeSet<String>,
     image_prefetch_failure: Option<String>,
     live_texture_ids: BTreeSet<String>,
+    gpu_resources_invalidated: bool,
     live_texture_bytes: BTreeMap<String, u64>,
     pending_gpu_lifecycle: Vec<SceneCommand>,
     texture_last_used: BTreeMap<String, u64>,
@@ -826,6 +827,7 @@ impl NativeVnHostCommandSource {
             image_prefetch_inflight: BTreeSet::new(),
             image_prefetch_failure: None,
             live_texture_ids: BTreeSet::new(),
+            gpu_resources_invalidated: false,
             live_texture_bytes: BTreeMap::new(),
             pending_gpu_lifecycle: Vec::new(),
             texture_last_used: BTreeMap::new(),
@@ -950,6 +952,7 @@ impl NativeVnHostCommandSource {
     }
 
     pub fn invalidate_gpu_resources(&mut self) {
+        self.gpu_resources_invalidated = true;
         let released_count = self.live_texture_ids.len();
         let released_glyph_count = self.text_resources.invalidate_device_resources();
         self.live_texture_ids.clear();
@@ -3004,6 +3007,16 @@ impl NativeVnHostCommandSource {
         &mut self,
         ui_draw: Vec<SceneCommand>,
     ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
+        if self.gpu_resources_invalidated {
+            self.pending_gpu_lifecycle.extend(
+                ui_draw
+                    .iter()
+                    .filter(|command| is_ui_resource_lifecycle(command))
+                    .cloned(),
+            );
+            self.ui_draw = reusable_ui_draw_commands(&ui_draw);
+            return self.render_with_stage_refresh(&[], 0, true);
+        }
         let mut commands = vec![SceneCommand::rect(
             "vn.frame.clear",
             0,
@@ -4077,16 +4090,32 @@ impl NativeVnHostCommandSource {
             performance_phase_started(self.ui_host_performance_sampling_enabled);
         let mut lifecycle = std::mem::take(&mut self.pending_gpu_lifecycle);
         let mut uploaded_texture_ids = Vec::new();
-        let next_stage_scene = if next_stage_director.is_some() || refresh_stage {
+        let next_stage_scene = if next_stage_director.is_some()
+            || refresh_stage
+            || self.gpu_resources_invalidated
+        {
             let stage_texture_started =
                 performance_phase_started(self.ui_host_performance_sampling_enabled);
-            let (required, cpu_required) = presentation::stage_texture_requirements(
+            let (mut required, mut cpu_required) = presentation::stage_texture_requirements(
                 next_stage_director
                     .as_ref()
                     .unwrap_or(&self.stage_director)
                     .state(),
                 &self.textures,
             );
+            let outgoing_state = if transition_request.is_some() {
+                Some(self.stage_director.state())
+            } else {
+                self.director_transition_snapshot
+                    .as_ref()
+                    .map(|snapshot| &snapshot.source_state)
+            };
+            if let Some(state) = outgoing_state {
+                let (outgoing, outgoing_cpu) =
+                    presentation::stage_texture_requirements(state, &self.textures);
+                required.extend(outgoing);
+                cpu_required.extend(outgoing_cpu);
+            }
             self.ensure_stage_texture_assets(required, cpu_required)?;
             let stage_texture_ns = performance_phase_duration(stage_texture_started)?;
             if let Some(sample) = self.last_ui_host_performance_sample.as_mut() {
@@ -4327,6 +4356,7 @@ impl NativeVnHostCommandSource {
         if let Some(sample) = self.last_ui_host_performance_sample.as_mut() {
             sample.scene_compose_ns = sample.scene_compose_ns.saturating_add(scene_compose_ns);
         }
+        self.gpu_resources_invalidated = false;
         Ok(batch)
     }
 

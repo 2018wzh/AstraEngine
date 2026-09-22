@@ -21,6 +21,8 @@ Android 旧构建在设备启动时曾长时间停留于系统启动画面，并
 
 Classic Windows 首批真实操作发现并修复两处启动/演出问题：首帧 GPU/IO 停顿超过四个 tick 会因 scheduler debt 退出，现改为保留欠账的有界连续追赶；开场清除实体时只取消 tween、留下 timeline 轨道，下一帧写已删除实体而退出，现统一取消目标轨道并保持其他轨道。第二项覆盖即时/渐隐删除、混合摄像机轨道与存档恢复；stage 18 项、Player-vn 45 项回归及相关 Clippy 通过。最大化时固定坐标内容偏左的问题已改用共享 Canvas2D 根变换与输入逆映射，新构建真实复测确认最大化黑边与鼠标命中正确。随后发现命名键被平台传成调试包装/控制字符，已修复四个 winit 适配点；Windows Sandbox 复测方向键、Enter 打开读档、Escape 返回及恢复后 Enter 推进通过。真实操作已完成空槽保存、推进后读取、关闭进程后从标题读取同一槽并继续；尚未完成选择、逐类演出、原版系统习惯与真实声音。静止/切页时观察到短暂黑帧，原版标题对照还发现明显颜色差异，需继续定位，不能据此关闭视觉验收。
 
+阶段全 workspace 回归发现 GPU 资源失效后 Resize 未重新上传背景；固定逻辑舞台后不能再靠修改舞台尺寸触发重建。现用显式失效标记统一覆盖完整渲染与静止场景重绘，并重新准备转场源纹理；原失败用例已复测通过。此阶段根 workspace 与 Emulator workspace 的完整测试、all-target Clippy、格式和文档检查均通过；独立硬件/商业授权用例的原有 ignored 项仍未计入验收。
+
 审查发现的 Player 关闭与读档问题已修复：Windows 错误路径继续执行媒体、资源、VN 和平台关闭；预取队列停止后丢弃未执行请求并 join 在途工作，读档换代拒绝旧完成值。候选舞台和转场源资源在 World 提交前验证，缺失资源拒绝后原游戏仍可继续并再次保存。新增三项回归与现有 Player-vn 共 48 项通过；平台集成与本批真实 Windows 复测尚未完成。原版 READY 启动页与转换后的 MENU 不是同一场景，当前不能据此断言颜色转换错误。
 
 本轮 Musica/SDK 重构已接通公共 `Canvas2D`、SDK `StageCanvas`/`TextureAsset`、AstraVN presentation 第二消费者及 Family API v7 logical/raster frame 元数据。Musica 启动配置改为显式 `render_width`/`render_height` 正整数，GPU Scene 和 AstraText glyph 路径按实际 raster density 输出；统一 aspect-fit viewport 负责奇数、portrait、缩小和黑边，原生 1280x720 逻辑舞台、ANI 原点和存档/VM 时间保持独立。已验证的 Windows Sandbox 配对在 `data/cores/` 冷启动发现 Musica，Scale 从非可执行文件工作目录启用成功；640×360、1001×777、1920×1200 和 720×1280 的 DX12 discrete 画面与黑边检查通过，slot 24 在进程完整重启后仍可保存并读取。720×1280 的剧情内容输入仍待补测，真实可听声音、完整结局、长流程、跨平台和性能验收仍开放。
