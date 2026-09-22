@@ -135,6 +135,7 @@ impl MusicaVm {
             gallery_unlocks: Vec::new(),
             backlog: Vec::new(),
             backlog_bytes: 0,
+            eden_export: crate::eden_save::EdenExportState::Unavailable,
             choice: None,
             stage: None,
             transition: MusicaTransitionState::default(),
@@ -173,6 +174,7 @@ impl MusicaVm {
     }
 
     pub fn encode_native_save(&self) -> Result<Vec<u8>, MusicaRuntimeError> {
+        eden::validate_context(&self.state)?;
         save_pages::validate_state(&self.state)?;
         movie::validate_movie_state(&self.state)?;
         validate_stage_state(self.state.stage.as_ref())?;
@@ -189,6 +191,7 @@ impl MusicaVm {
         if state.schema != MUSICA_RUNTIME_STATE_SCHEMA {
             return Err(MusicaRuntimeError::State);
         }
+        eden::validate_context(&state)?;
         validate_stage_state(state.stage.as_ref())?;
         save_pages::validate_state(&state)?;
         movie::validate_movie_state(&state)?;
@@ -250,6 +253,7 @@ impl MusicaVm {
             return Err(MusicaRuntimeError::State);
         }
         choices::validate_choice(&self.script, &restored)?;
+        eden::validate_context(&restored)?;
         save_pages::validate_state(&restored)?;
         movie::validate_movie_state(&restored)?;
         validate_stage_state(restored.stage.as_ref())?;

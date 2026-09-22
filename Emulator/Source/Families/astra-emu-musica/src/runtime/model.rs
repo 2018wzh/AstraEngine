@@ -4,7 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-pub const MUSICA_RUNTIME_STATE_SCHEMA: &str = "astra.emu.musica.runtime_state.v24";
+pub const MUSICA_RUNTIME_STATE_SCHEMA: &str = "astra.emu.musica.runtime_state.v25";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MusicaRuntimeState {
@@ -20,6 +20,7 @@ pub struct MusicaRuntimeState {
     pub message: Option<MusicaMessageState>,
     pub backlog: Vec<MusicaBacklogEntry>,
     pub backlog_bytes: u64,
+    pub eden_export: crate::eden_save::EdenExportState,
     pub read_message_identities: Vec<Hash256>,
     pub gallery_unlocks: Vec<Hash256>,
     pub message_loads: Vec<MusicaMessageLoadState>,

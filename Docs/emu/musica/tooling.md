@@ -25,3 +25,15 @@ cargo run --manifest-path Emulator/Cargo.toml -p astra-emu-musica-cli -- check-e
 `Tools/AstraEMU/musica_probe.py`、`musica_paz.py` 和 `musica_sc.py` 仍用于格式研究，不是当前 Host 的生产路径。输入数据库、key、解包内容和 disassembly 保持本地私有。
 
 以往实验结果见 [历史移植记录](porting-log.md)；其中的命令和测试结果不能作为新 Host 的当前状态。
+
+## 从核心槽导出 eden 存档
+
+Family 启动配置 `eden_import_file` 指向游戏副本内的只读原版存档，`eden_import_edition` 与 `script_encoding` 必须匹配文件。使用 direct 模式进入恢复的消息后，正常推进并通过 F5 或保存页产生核心自有槽，关闭会话后执行：
+
+```sh
+cargo run --manifest-path Emulator/Cargo.toml -p astra-emu-musica-cli -- export-eden-save \
+  --game-dir private-copy/game --profile musica.profile.json --slot 10 \
+  --output private-export/eden0020.sav
+```
+
+输出父目录须已存在，目标文件须不存在。CLI 校验游戏身份、脚本、消息历史、当前场景和音频快照后才发布文件；已有文件、损坏槽或不可表达状态均拒绝，读取失败不修改输入。导出不复用原版未知字段。当前 GPU fixture 已覆盖 Family 导入、继续、保存和导出，原商业片段及原版程序读回仍待完成。

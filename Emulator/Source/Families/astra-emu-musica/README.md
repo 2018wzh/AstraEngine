@@ -20,11 +20,11 @@ Musica 提供独立 `FamilyProvider`、`FamilySession` 和可选 `abi_stable` �
 
 PAZ 的边界/重叠校验、分卷读取、Blowfish/RC4、XOR、解压和源文件变化校验保留。SDK 的 `ArchiveManifest` 是核心本地索引，不是 Host VFS 或产品 package。私有配置有界读取与明文缓存也由 SDK 共用；配置相对路径以游戏目录为基准，公共读取错误使用 `ASTRA_EMU_PROFILE_*`。导入/读取不运行 managed helper、BinaryFormatter 或 executable patch。
 
-核心自有 slot 位于游戏目录 `.astra-musica/saves/slot-000.asav`。容器 `AMINSV02` 包含长度、SHA-256 与 postcard snapshot，保存 VM、当前文本、等待进度以及 sound resource/播放位置/volume/pan/repeat。它绑定同一 archive/profile identity；加载重建脚本、场景和声音后提交。临时文件 flush 后原子替换；损坏、异版本或外部格式文件拒绝覆盖。此格式不宣称兼容原版存档。加载恢复声音的当前参数、位置与尚未完成的音量渐变。渐变保存分贝起止值、总采样数、已推进采样数和结束停止意图；按剩余采样继续，暂停不推进渐变。新音量命令替换旧渐变。旧 AMINSV01 内部格式明确拒绝，不覆盖旧 slot。
+核心自有 slot 位于游戏目录 `.astra-musica/saves/slot-000.asav`。容器 `AMUSSV04` 包含长度、SHA-256 与 postcard snapshot，保存 VM、当前文本、等待进度以及 sound resource/播放位置/volume/pan/repeat。它绑定同一 archive/profile identity；加载重建脚本、场景和声音后提交。临时文件 flush 后原子替换；损坏、异版本或外部格式文件拒绝覆盖。此格式不宣称兼容原版存档。加载恢复声音的当前参数、位置与尚未完成的音量渐变。渐变保存分贝起止值、总采样数、已推进采样数和结束停止意图；按剩余采样继续，暂停不推进渐变。新音量命令替换旧渐变。旧 AMUSSV03 及更早内部格式明确拒绝，不覆盖旧 slot。
 
 ## eden 原版存档与检查点
 
-`eden_save::EdenSave` 提供有界读取与容器编码，已补充严格检查点投影和 VM 恢复候选接口，Family 设备恢复与准确原版导出仍待完成。`EdenEdition` 显式区分日文 CD-ROM 签名和本地 Steam English 签名：前者为 `;\n!`、`0xAA` 与 `eden 1.00`，后者为四个零字节与 `eden_en 1.00`。签名后依次为 NUL、有界注释、NUL、四字节 route 和单个 zlib 流。不会搜索压缩魔数来猜测偏移。
+`eden_save::EdenSave` 提供有界读取与容器编码，已补充严格检查点投影和 VM 恢复候选接口，Family 已接入严格子集的设备恢复和当前消息导出；原版读回仍待验收。`EdenEdition` 显式区分日文 CD-ROM 签名和本地 Steam English 签名：前者为 `;\n!`、`0xAA` 与 `eden 1.00`，后者为四个零字节与 `eden_en 1.00`。签名后依次为 NUL、有界注释、NUL、四字节 route 和单个 zlib 流。不会搜索压缩魔数来猜测偏移。
 
 `EdenSaveEncoding` 由调用方显式选择 Shift-JIS、GBK 或 Windows-1252。解码须无替换字符，重新编码须还原原字节；写入不可表达字符直接失败。变量及 backlog 保留原字段顺序，包括多语言 `L1_0` 等字段，不补默认字段或丢弃未知字段。重复字段、结构注入、截尾、压缩校验失败、追加压缩流和大小超限均拒绝；容器和解压体各限 16 MiB。类型不实现 Debug，避免误打出正文。
 
@@ -40,7 +40,7 @@ cargo run --manifest-path Emulator/Cargo.toml -p astra-emu-musica-cli -- inspect
 
 `EdenCheckpoint` 将已知消息检查点字段转换为显式类型。`MusicaVm::from_eden_save` 读取实际挂载脚本后准备恢复候选；`restore_eden_save` 校验历史消息，再一次性替换 VM 状态。Fixture 已验证恢复不执行保存点之前的命令、继续剧情、再次存读档以及失败时保留活动 VM。当前严格投影只接受七个槽中的一个，含 897 条普通消息历史；选择记录、未知字段、旋转、滤色、活动效果和不可恢复时钟等状态仍明确拒绝。
 
-实际挂载 PAZ 的恢复检查已完成该槽的 897 条历史及当前消息 VM。原版脚本名按 ASCII 大小写不敏感规则解析；名称碰撞明确拒绝。Family GPU/音频恢复、准确导出和原版独立副本读回仍待完成，其他游戏不声明原版互通。CLI `check-eden-restore` 只检查 VM 候选，不打开设备或写出存档。
+实际挂载 PAZ 的恢复检查已完成该槽的 897 条历史及当前消息 VM。原版脚本名按 ASCII 大小写不敏感规则解析；名称碰撞明确拒绝。Family 支持只读 `eden_import_file`、显式 `eden_import_edition` 和既有 `script_encoding`；导入要求 direct 启动，恢复静态场景、消息和按原版加载边界重新开始的 BGM/语音。已有 GPU fixture 验证导入、物理输入推进、F5 保存、关闭和从该槽导出。真实商业片段的 Family 演出与原版独立副本读回尚未验收，其他游戏不声明原版互通。CLI `check-eden-restore` 只检查 VM 候选，不打开设备或写出存档。
 
 ## Musica 成果整合
 
@@ -73,3 +73,5 @@ cargo build --manifest-path Emulator/Cargo.toml -p astra-emu-musica --features d
 现有未验证 stand positioning、movie、choice、系统页相关 opcode 仍明确失败，不能把这一可运行子集说成完整 Musica 兼容。ANI/SQZ decoder 有独立真实格式 fixture，尚未接入 session 动画播放。尚无授权完整游戏、真实设备音视频、原版 save compatibility、冷启动/完整结局、Android 静态注册或跨平台验收。
 
 VM 的可序列化状态集中在 runtime/model.rs，演出命令在 runtime/effects.rs，音频命令在 runtime/audio_commands.rs，选择处理在 runtime/choices.rs。调度与存读档保留在 runtime.rs，共享演出序号仍由 VM 分配。运行错误通过 typed diagnostic_code() 返回稳定标识；未实现命令只向 Family/Manager 返回指令序号，不透传脚本文本。
+
+`export-eden-save` 从核心自有槽读取权威 VM 与音频快照，重建已知原版字段；只允许导入后仍可准确表示的普通消息检查点。选择、未知变量、动态演出、活动音频渐变等状态拒绝导出。输出必须为不存在的新文件，不覆盖原版槽。内部 VM 格式升级为 v25，保留具名历史状态而非未知原版字段；旧槽在外层 AMUSSV04 检查时拒绝，读取失败不覆盖文件。当前导出仅生成 SAV，原版缩略图和原版加载后的媒体语义仍须实际核对。

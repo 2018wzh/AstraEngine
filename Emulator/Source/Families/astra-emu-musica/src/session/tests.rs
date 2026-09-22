@@ -727,6 +727,8 @@ mod save_pages;
 
 #[path = "tests/config.rs"]
 mod config;
+#[path = "tests/eden.rs"]
+mod eden;
 #[path = "tests/gallery.rs"]
 mod gallery;
 #[path = "tests/title.rs"]

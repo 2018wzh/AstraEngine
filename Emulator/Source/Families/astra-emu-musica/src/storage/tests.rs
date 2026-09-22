@@ -187,11 +187,14 @@ fn malformed_save_cards_and_previous_formats_are_not_replaced() {
     bad.card = original.card.clone();
     bad.card.comment = "invalid\ncomment".into();
     assert!(storage.write(20, &bad).is_err());
-    let mut old = bytes.clone();
-    old[..8].copy_from_slice(b"AMINSV02");
-    std::fs::write(&path, &old).unwrap();
-    assert!(storage.write(20, &original).is_err());
-    assert_eq!(std::fs::read(&path).unwrap(), old);
+    for magic in [b"AMINSV02", b"AMUSSV03"] {
+        let mut old = bytes.clone();
+        old[..8].copy_from_slice(magic);
+        std::fs::write(&path, &old).unwrap();
+        assert!(storage.read(20).is_err());
+        assert!(storage.write(20, &original).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), old);
+    }
 }
 
 #[test]

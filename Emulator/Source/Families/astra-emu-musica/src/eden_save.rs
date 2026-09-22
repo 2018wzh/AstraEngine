@@ -3,8 +3,13 @@
 mod body;
 mod checkpoint;
 mod position;
+mod slot;
+mod state;
+pub use slot::export_slot;
+mod write_checkpoint;
 pub use checkpoint::{EdenCheckpoint, EdenHistoryMessage};
 pub use position::EdenMessagePosition;
+pub use state::{EdenExportRejection, EdenExportState};
 #[cfg(test)]
 mod checkpoint_tests;
 #[cfg(test)]
@@ -17,7 +22,9 @@ use std::io::Write;
 const MAX_CONTAINER: usize = 16 * 1024 * 1024;
 const MAX_BODY: usize = 16 * 1024 * 1024;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub enum EdenEdition {
     Japanese,
     English,
@@ -36,7 +43,9 @@ impl EdenEdition {
         }
     }
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub enum EdenSaveEncoding {
     ShiftJis,
     Gbk,

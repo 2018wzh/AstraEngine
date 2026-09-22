@@ -12,6 +12,21 @@ pub(crate) enum Encoding {
     Gbk,
     Windows1252,
 }
+pub(crate) fn export(
+    game_dir: &Path,
+    profile: &Path,
+    slot: u32,
+    output: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if std::fs::symlink_metadata(output).is_ok() {
+        return Err("ASTRA_EMU_EDEN_SAVE_OUTPUT_EXISTS: choose a new output file".into());
+    }
+    let save = astra_emu_musica::eden_save::export_slot(game_dir, profile, slot)?;
+    let bytes = save.encode()?;
+    super::private_output::write_new_private(output, &bytes)?;
+    println!("Exported one native eden message checkpoint into a new file. Original-game readback was not performed.");
+    Ok(())
+}
 pub(crate) fn inspect(
     file: &Path,
     edition: Edition,
@@ -60,4 +75,18 @@ fn read(
         Encoding::Windows1252 => EdenSaveEncoding::Windows1252,
     };
     Ok(EdenSave::decode(&bytes, edition, encoding)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn export_never_replaces_an_existing_target_even_if_the_source_is_invalid() {
+        let root = tempfile::tempdir().unwrap();
+        let output = root.path().join("eden0000.sav");
+        std::fs::write(&output, b"original commercial slot").unwrap();
+        assert!(export(root.path(), Path::new("missing.profile"), 0, &output).is_err());
+        assert_eq!(std::fs::read(&output).unwrap(), b"original commercial slot");
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
+    }
 }

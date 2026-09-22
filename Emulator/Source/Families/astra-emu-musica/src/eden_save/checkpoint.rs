@@ -19,7 +19,7 @@ pub struct EdenCheckpoint {
 }
 
 /// Historical presentation is retained as named native state, not an opaque blob.
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct EdenHistoryMessage {
     pub script: String,
     pub next_line: u32,
@@ -35,6 +35,14 @@ pub struct EdenHistoryMessage {
     pub bgm_volume: u16,
     pub sound_effects: [String; 2],
     pub transition_ticks: u32,
+}
+
+impl std::fmt::Debug for EdenHistoryMessage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EdenHistoryMessage")
+            .field("message_id", &self.message_id)
+            .finish_non_exhaustive()
+    }
 }
 
 struct Fields<'a>(BTreeMap<&'a str, &'a str>);
@@ -141,6 +149,8 @@ impl EdenSave {
         };
         fields.finish()?;
         if checkpoint.next_line == 0
+            || i32::try_from(checkpoint.next_line).is_err()
+            || i32::try_from(checkpoint.message_id).is_err()
             || checkpoint.bgm_volume > 100
             || checkpoint.script != last.script
             || checkpoint.next_line != last.next_line
@@ -206,6 +216,9 @@ impl EdenHistoryMessage {
         };
         fields.finish()?;
         if message.next_line == 0
+            || i32::try_from(message.next_line).is_err()
+            || i32::try_from(message.message_id).is_err()
+            || i32::try_from(message.transition_ticks).is_err()
             || message.bgm_volume > 100
             || !matches!(message.panel_mode, 0 | 1 | 3)
         {
@@ -217,7 +230,7 @@ impl EdenHistoryMessage {
 
 fn script_name(name: &str) -> Result<String, CoreError> {
     let value = resource_name(name)?;
-    if !value.ends_with(".sc") {
+    if !value.to_ascii_lowercase().ends_with(".sc") {
         return Err(unsupported());
     }
     Ok(value)

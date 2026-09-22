@@ -16,6 +16,7 @@ use std::{
         Arc,
     },
 };
+mod eden;
 static ACTIVE: AtomicBool = AtomicBool::new(false);
 pub(crate) struct SessionLease;
 impl SessionLease {
@@ -64,7 +65,13 @@ pub fn musica_descriptor() -> FamilyDescriptor {
     let mut configuration = vec![
         field("profile_file", "Private PAZ profile", MUSICA_PROFILE_FILE),
         field("entry_script", "Entry script in scr archive", "test.sc"),
+        field(
+            "eden_import_file",
+            "Native eden save to import (read only)",
+            "",
+        ),
     ];
+    configuration.push(eden::edition_field());
     configuration.push(ConfigField {
         id: "launch_mode".into(),
         label: "Launch mode".into(),
@@ -111,7 +118,12 @@ pub fn musica_descriptor() -> FamilyDescriptor {
     for field in &mut configuration {
         if !matches!(
             field.id.as_str(),
-            "profile_file" | "entry_script" | "launch_mode" | "script_encoding"
+            "profile_file"
+                | "entry_script"
+                | "launch_mode"
+                | "script_encoding"
+                | "eden_import_file"
+                | "eden_import_edition"
         ) {
             field.group = format!("Initial {} defaults", field.group).into();
         }
@@ -283,8 +295,23 @@ impl MusicaProvider {
         let (archive, texture_overrides) =
             mount_musica_with_texture_overrides(root, Path::new(&profile)).map_err(core_error)?;
         let archive = Arc::new(archive);
-        let uri = format!("musica:/scr/{entry}");
         let primary_encoding = encoding;
+        let imported =
+            eden::read_import(root, &get("eden_import_file")?, &config, primary_encoding)?;
+        if imported.is_some() && title_launch {
+            return Err(error(
+                "ASTRA_EMU_EDEN_SAVE_LAUNCH",
+                "native eden import requires direct launch",
+            ));
+        }
+        let script_name = imported
+            .as_ref()
+            .map(|save| {
+                save.variable("script_Filename")
+                    .expect("read_import validated the checkpoint")
+            })
+            .unwrap_or(&entry);
+        let uri = format!("musica:/scr/{script_name}");
         let loaded = crate::script_loader::load_script(&archive, &uri, primary_encoding)?;
         let encoding = loaded.script.encoding;
         let mut vm = MusicaVm::new(uri, loaded.hash, loaded.script, 0)
@@ -330,6 +357,10 @@ impl MusicaProvider {
         vm.set_config(settings)
             .map_err(|_| error("ASTRA_EMU_MUSICA_CONFIG", "native configuration is invalid"))?;
         let quick_cursor = storage.quick_cursor(game)?;
+        let restored_message = imported
+            .as_ref()
+            .map(|save| eden::restore_vm(&mut vm, save, &archive, primary_encoding))
+            .transpose()?;
         vm.merge_verified_gallery_unlocks(&storage.progress(game)?)
             .map_err(|_| {
                 error(
@@ -352,11 +383,17 @@ impl MusicaProvider {
                 .map_err(|_| error("ASTRA_EMU_MUSICA_TITLE", "title session cannot start"))?;
             scene.render_title(vm.title_variant(), None)?;
         } else {
-            scene.render(vm.state(), None, None)?;
+            scene.render(vm.state(), restored_message.as_ref(), None)?;
         }
         let replacement = request.host.text_replacement.into_option();
         if let Some(service) = &replacement {
-            service.reset(TextResetReason::NewGame).into_result()?;
+            service
+                .reset(if imported.is_some() {
+                    TextResetReason::Load
+                } else {
+                    TextResetReason::NewGame
+                })
+                .into_result()?;
         }
         let sink = request
             .host
@@ -366,6 +403,9 @@ impl MusicaProvider {
         let audio = Audio::start(archive.clone(), sink)?;
         audio.set_preferences(audio_preferences)?;
         audio.suspend(!visible || (!focused && !progress_in_background))?;
+        if imported.is_some() {
+            eden::restore_audio(&audio, vm.state())?;
+        }
         self.next = self
             .next
             .checked_add(1)
@@ -389,7 +429,7 @@ impl MusicaProvider {
             audio_format: ROption::RSome(crate::audio::FORMAT),
         };
         response.validate_for_descriptor(&descriptor)?;
-        let session = MusicaSession::new(
+        let mut session = MusicaSession::new(
             id,
             info,
             archive,
@@ -406,6 +446,9 @@ impl MusicaProvider {
             primary_encoding,
             quick_cursor,
         );
+        if let Some((text, speaker)) = restored_message {
+            session.install_imported_message(text, speaker)?;
+        }
         tracing::info!(event = "astra.emu.musica.session.open");
         Ok((response, session))
     }

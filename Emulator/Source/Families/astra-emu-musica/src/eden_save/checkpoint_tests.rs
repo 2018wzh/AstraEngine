@@ -95,6 +95,10 @@ pub(super) fn checkpoint_fixture() -> EdenSave {
 
 fn vm() -> MusicaVm {
     let bytes = b".set before = 99\n.message 7  speaker saved\n.set after = 3\n.message 8  speaker continued\n.end\n";
+    vm_for(bytes)
+}
+
+fn vm_for(bytes: &[u8]) -> MusicaVm {
     let script = crate::parse_sc_with_encoding(
         bytes,
         &ScOpcodeCatalog::observed_musica(),
@@ -108,6 +112,73 @@ fn vm() -> MusicaVm {
         42,
     )
     .unwrap()
+}
+
+#[test]
+fn exports_new_message_state_after_internal_restore_without_reusing_raw_native_fields() {
+    let mut vm = vm_for(b"; fixture\n.message 7  speaker saved\n.message 8  speaker second\n.message 9  speaker third\n.end\n");
+    vm.restore_eden_save(&checkpoint_fixture(), |_| panic!("same script"), 1)
+        .unwrap();
+    for tick in 1..=2 {
+        let Some(MusicaWaitState::Input { token_id }) = vm.state().wait.clone() else {
+            panic!("message wait")
+        };
+        vm.resolve_wait(&token_id).unwrap();
+        vm.step(tick).unwrap();
+        let saved = vm.encode_native_save().unwrap();
+        vm.restore_native_save(&saved, tick + 1).unwrap();
+    }
+    let exported = vm.export_eden_save().unwrap();
+    assert_eq!(exported.variable("script_ID"), Some("9"));
+    assert_eq!(exported.variable("script_Pointer"), Some("4"));
+    assert_eq!(exported.backlog.len(), 3);
+    let decoded = EdenSave::decode(
+        &exported.encode().unwrap(),
+        exported.edition,
+        exported.encoding,
+    )
+    .unwrap();
+    assert_eq!(decoded.checkpoint().unwrap().message_id, 9);
+    let mut restored = vm_for(b"; fixture\n.message 7  speaker saved\n.message 8  speaker second\n.message 9  speaker third\n.end\n");
+    restored
+        .restore_eden_save(&decoded, |_| panic!("same script"), 1)
+        .unwrap();
+    assert_eq!(restored.state().backlog, vm.state().backlog);
+}
+
+#[test]
+fn unrepresentable_execution_disables_export_without_stopping_gameplay() {
+    let mut vm = vm();
+    vm.restore_eden_save(&checkpoint_fixture(), |_| panic!("same script"), 1)
+        .unwrap();
+    assert!(vm.export_eden_save().is_ok());
+    let Some(MusicaWaitState::Input { token_id }) = vm.state().wait.clone() else {
+        panic!("message wait")
+    };
+    vm.resolve_wait(&token_id).unwrap();
+    vm.step(1).unwrap();
+    assert!(matches!(
+        vm.state().eden_export,
+        EdenExportState::Rejected(EdenExportRejection::Variables)
+    ));
+    assert!(vm.export_eden_save().is_err());
+    assert!(vm.encode_native_save().is_ok());
+}
+
+#[test]
+fn corrupted_interchange_history_cannot_replace_active_internal_state() {
+    let mut vm = vm();
+    vm.restore_eden_save(&checkpoint_fixture(), |_| panic!("same script"), 1)
+        .unwrap();
+    let original = vm.encode_native_save().unwrap();
+    let mut changed = MusicaVm::decode_native_save(&original).unwrap();
+    let EdenExportState::Ready { history, .. } = &mut changed.eden_export else {
+        panic!("native history")
+    };
+    history[0].text = "different".into();
+    let bytes = postcard::to_allocvec(&changed).unwrap();
+    assert!(vm.restore_native_save(&bytes, 1).is_err());
+    assert_eq!(vm.encode_native_save().unwrap(), original);
 }
 
 #[test]

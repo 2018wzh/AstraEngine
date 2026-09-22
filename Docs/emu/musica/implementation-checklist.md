@@ -68,3 +68,9 @@
 
 - [ ] 本地 case report 只包含 hash、coverage、diagnostics 和命令。
 - [ ] 不包含 payload、截图、音频、视频、完整脚本或 key。
+
+## eden 导入和导出实现更新
+
+Family 已接入只读原版导入与静态消息设备恢复；VM v25 保存显式原版历史上下文，CLI 从核心槽重建受支持的原版 SAV。未知字段不透传，不可表达状态明确拒绝。AMUSSV04 在解码前拒绝旧槽并保留原文件。
+
+增量回归覆盖 13 项 eden codec/恢复/导出、58 项 Runtime、11 项存储、13 项 CLI，以及真实 GPU Family fixture 的导入、继续剧情、保存和槽导出。原版独立副本读取并继续、真实片段画面与音频对照尚未验收，不声明双向互通通过。

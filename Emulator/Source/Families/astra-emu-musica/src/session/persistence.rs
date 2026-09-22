@@ -1,5 +1,12 @@
 use super::*;
 impl MusicaSession {
+    pub(crate) fn install_imported_message(
+        &mut self,
+        text: String,
+        speaker: Option<String>,
+    ) -> FamilyResult<()> {
+        self.message(text, speaker)
+    }
     pub(super) fn persist_progress(&mut self) -> FamilyResult<()> {
         let unlocks = &self.vm.state().gallery_unlocks;
         if *unlocks != self.persisted_unlocks {

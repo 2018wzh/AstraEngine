@@ -13,7 +13,7 @@ mod progress;
 mod quick;
 pub(crate) use card::SaveCard;
 
-const MAGIC: &[u8; 8] = b"AMUSSV03";
+const MAGIC: &[u8; 8] = b"AMUSSV04";
 const MAX_SAVE: usize = 16 * 1024 * 1024;
 pub(crate) const SAVE_PAGE_WIDTH: u32 = 10;
 pub(crate) const SAVE_PAGE_COUNT: u32 = 10;

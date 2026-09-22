@@ -31,6 +31,17 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Export an eligible core-owned slot into a new native eden save file.
+    ExportEdenSave {
+        #[arg(long)]
+        game_dir: PathBuf,
+        #[arg(long)]
+        profile: PathBuf,
+        #[arg(long)]
+        slot: u32,
+        #[arg(long)]
+        output: PathBuf,
+    },
     /// Validate native eden restoration against mounted scripts; no device playback.
     CheckEdenRestore {
         #[arg(long)]
@@ -89,6 +100,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _observability = astra_observability::init_host(observability)?;
     let command = Cli::parse().command;
     let action = match &command {
+        Command::ExportEdenSave { .. } => "export_eden_save",
         Command::CheckEdenRestore { .. } => "check_eden_restore",
         Command::InspectEdenSave { .. } => "inspect_eden_save",
         Command::ScanArchives { .. } => "scan_archives",
@@ -99,6 +111,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     tracing::info!(event = "astra.emu.musica_cli.start", action);
     let result = match command {
+        Command::ExportEdenSave {
+            game_dir,
+            profile,
+            slot,
+            output,
+        } => eden_save::export(&game_dir, &profile, slot, &output),
         Command::CheckEdenRestore {
             file,
             game_dir,
