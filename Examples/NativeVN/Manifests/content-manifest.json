@@ -18224,8 +18224,8 @@
       "locator": {
         "relative_path": "Localization/en.json"
       },
-      "sha256": "cde8ddc440399a77213f018158aba89a05cd6ea5215326fadaa0d68e4cb6aabc",
-      "byte_size": 28439,
+      "sha256": "3ce2f22f1062f3d33c41ab9e1b243e6f527651bfa1fcb1a3f6df6511a3bce151",
+      "byte_size": 30093,
       "media": {
         "kind": "data",
         "mime_type": "application/json"
@@ -18270,8 +18270,8 @@
       "locator": {
         "relative_path": "Localization/zh-Hans.json"
       },
-      "sha256": "5a843d8e6390a21527c67e472ddebbf3a2e3438212765e2f1c06eb507522390c",
-      "byte_size": 26947,
+      "sha256": "47aecfb035db70439bd40a1d06b1df748b56ae95ee88951ea4b80563d3a83c03",
+      "byte_size": 28660,
       "media": {
         "kind": "data",
         "mime_type": "application/json"
@@ -18500,8 +18500,8 @@
       "locator": {
         "relative_path": "project.yaml"
       },
-      "sha256": "c214b5d47345ebd399f3febd7b4eaa903d4b89c3db51218e510d06ea048b3434",
-      "byte_size": 3616,
+      "sha256": "a28e72a7a57af64e7498ad626f424856b8fb222a49aa08f0b0a31978edd5d88d",
+      "byte_size": 4919,
       "media": {
         "kind": "data",
         "mime_type": "application/octet-stream"
@@ -18523,8 +18523,8 @@
       "locator": {
         "relative_path": "README.md"
       },
-      "sha256": "7d60da4b598da29e0a5ed54163b515843ddd2c8805d70e15b844c6c1904afbb5",
-      "byte_size": 2712,
+      "sha256": "5c55d2074f3a0e2944f1c353a99f78cf4f2264877ca233c3adb1fd6de33c240a",
+      "byte_size": 5053,
       "media": {
         "kind": "document",
         "mime_type": "text/markdown"
@@ -18638,8 +18638,8 @@
       "locator": {
         "relative_path": "Scripts/main.astra"
       },
-      "sha256": "b758e07b3a2891d6325390505a1411d4a999b7971116e1f415cf51d0a16726d8",
-      "byte_size": 53974,
+      "sha256": "352e8e96db82235e7404f271a05deed86d2c9e4ad0be179928b295c8fcdbcaf9",
+      "byte_size": 46742,
       "media": {
         "kind": "data",
         "mime_type": "application/octet-stream"
@@ -18661,8 +18661,8 @@
       "locator": {
         "relative_path": "Scripts/system.astra"
       },
-      "sha256": "8056b340e3a1212fde83fc2d3fed3e50638fbc039b2325416cacef6cf3eb9955",
-      "byte_size": 1693,
+      "sha256": "5cfff1df39351a192f7271e808d2551d0c1fa96615840cec14f31389b129cc49",
+      "byte_size": 1842,
       "media": {
         "kind": "data",
         "mime_type": "application/octet-stream"
@@ -18684,8 +18684,8 @@
       "locator": {
         "relative_path": "STATUS.md"
       },
-      "sha256": "9652c2228339fdc5f21cf0ae54fbff808848b5a1a0f31c193a6b61f8bf0f1004",
-      "byte_size": 2411,
+      "sha256": "58bc7ade071ee05bef4a258bc98855e6803e4b1f8c21a8386ca8bcd32b22c736",
+      "byte_size": 4458,
       "media": {
         "kind": "document",
         "mime_type": "text/markdown"
@@ -18753,8 +18753,8 @@
       "locator": {
         "relative_path": "UI/flagship.astra"
       },
-      "sha256": "9e892b6da6ef05e5231424c228a5a959b9e73e6261b37790885f388c3b57e5fa",
-      "byte_size": 15490,
+      "sha256": "1f4a95cb9320440b5ebaf1c2eb75c8f30e29155783b68ec18e223829f099d3d3",
+      "byte_size": 16720,
       "media": {
         "kind": "data",
         "mime_type": "application/octet-stream"
@@ -18776,8 +18776,8 @@
       "locator": {
         "relative_path": "Visual/alt-text.json"
       },
-      "sha256": "cf29e19fb561d4f6b6c2f1bdf169fa76cf3acf40f663ca1bc2fe8d2889d62048",
-      "byte_size": 28364,
+      "sha256": "df5fb8e2863cd0bcc562652f66ed0df151968201ae95e5e5760dfe099db9985e",
+      "byte_size": 27726,
       "media": {
         "kind": "data",
         "mime_type": "application/json"
@@ -20608,8 +20608,8 @@
       "locator": {
         "relative_path": "Visual/prompts.json"
       },
-      "sha256": "5460bfe99a31cbc7877d984f7986f7827509c7877d3ea3417d13fbc543a8668a",
-      "byte_size": 39719,
+      "sha256": "89deb13de03b7f61f6787475ceab4e23bf9280cf62395a000d48730be8ea8409",
+      "byte_size": 38672,
       "media": {
         "kind": "data",
         "mime_type": "application/json"
@@ -21021,6 +21021,29 @@
         "kind": "code_native",
         "method": "layered-video",
         "tool": "nativevn-video-generator"
+      },
+      "license_status": "approved",
+      "license_evidence": {
+        "relative_path": "README.md"
+      },
+      "release_eligible": true
+    },
+    {
+      "id": "asset.scripts.experience.astra",
+      "role": "review_evidence",
+      "locator": {
+        "relative_path": "Scripts/experience.astra"
+      },
+      "sha256": "f8053fe9004e6dd2213f0eff082106d7c48598edff87494bc1701eef7ac63b26",
+      "byte_size": 6544,
+      "media": {
+        "kind": "data",
+        "mime_type": "application/octet-stream"
+      },
+      "generation_source": {
+        "kind": "hand_authored",
+        "method": "editorial",
+        "tool": "codex"
       },
       "license_status": "approved",
       "license_evidence": {

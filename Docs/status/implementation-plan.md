@@ -557,4 +557,4 @@ Classic route.coverage.035 与 036 均通过 DX12 独显 Headless 抽样运行�
 
 随后使用 RFVP `b2f385da` 与输入修复 DLL（SHA-256 前缀 `b0e262cf`）完成独立输入回归：失焦后点击游戏区未误触发菜单，恢复焦点后点击 OPTION 可进入原生设置页，聚焦控件上的主 `Return` 可返回，右下边缘点击未见越界或崩溃。Sandbox 输入适配器未提供 keypad scancode，`NumpadEnter` 未验证。slot 1/185 保持不变，Manager/FVP 正常退出；真实音频、完整结局及其余长流程验收仍开放。
 
-2026-09-22 NativeVN 连续分层演出开始接入：复用已授权素材，作者 `.astra` 组织雨夜相遇、人物位移/透明度、镜头缩放、替换/取消及可保存时刻；旧故事仍可进入，场景不再重复声明 layer。DSL、真实 Cook/package、23 项工具测试和29条物理输入格式验证通过。GPU启动实际发现 `window:main` 缺 main surface binding，已补 classic/advanced-vn 显式绑定，等待重跑；失败退出另有 Vulkan device 销毁路径崩溃，根因未确认。现有内容 manifest 的文本 hash 需刷新。未将演出、影片、演出中保存/恢复或完整路线标为通过；此样例尚未接入后续 TaskGroup 版本。
+2026-09-22 NativeVN 连续分层演出开始接入：复用已授权素材，作者 `.astra` 组织雨夜相遇、人物位移/透明度、镜头缩放、替换/取消及可保存时刻；旧故事仍可进入，场景不再重复声明 layer。DSL、真实 Cook/package、23 项工具测试和29条物理输入格式验证通过。GPU启动实际发现 `window:main` 缺 main surface binding，已补 classic/advanced-vn 显式绑定，等待重跑；失败退出另有 Vulkan device 销毁路径崩溃，根因未确认。现有内容 manifest/provenance 已刷新源码 hash，并补新场景；879 项 manifest 引用/hash/大小定向检查通过，历史审查结论未改写。未将演出、影片、演出中保存/恢复或完整路线标为通过；此样例尚未接入后续 TaskGroup 版本。

@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+import re
 import tempfile
 import unittest
 from unittest import mock
@@ -9,6 +10,29 @@ import build_nativevn_project as project
 
 
 class ProjectRefreshTests(unittest.TestCase):
+    def test_authored_dialogue_windows_resolve_in_every_ui_profile(self):
+        # Player resolves MessageViewModel.window as the surface name. Cook alone
+        # does not reject a story referencing an unbound window.
+        windows = set()
+        for source in (project.PACK / "Scripts").glob("*.astra"):
+            for line in source.read_text().splitlines():
+                if line.strip().startswith("text "):
+                    match = re.search(r"\bwindow:([\w.-]+)", line)
+                    windows.add(match.group(1) if match else "message")
+        profiles = set()
+        surfaces = {}
+        for line in (project.PACK / "UI/flagship.astra").read_text().splitlines():
+            attrs = dict(re.findall(r"([a-z_]+):([\w.-]+)", line))
+            if line.startswith("ui_policy "):
+                profiles.add(attrs["profile"])
+            if line.startswith("ui_bind ") and "surface" in attrs:
+                surfaces.setdefault(attrs.get("profile"), set()).add(attrs["surface"])
+        self.assertTrue(windows)
+        self.assertTrue(profiles)
+        for profile in profiles:
+            missing = windows - surfaces.get(None, set()) - surfaces.get(profile, set())
+            self.assertFalse(missing, f"{profile}: unbound dialogue windows {sorted(missing)}")
+
     def test_refresh_preserves_authored_astra_and_controller_bytes(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

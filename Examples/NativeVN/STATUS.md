@@ -36,4 +36,4 @@
 
 默认入口改为雨夜相遇的连续片段，复用旧素材，保留稳定命令 ID。修复原故事每场重新声明同名 layer 的运行错误；bootstrap 只声明一次，后续场景更新内容。移除对白/选项页作为真实背景的 UI 视觉稿，改为实际布局面板，避免素材里画出的按钮与可操作按钮混淆。
 
-DSL 编译通过；工具单元测试 23 项通过、1 项跳过。前一版实际 Vulkan GPU 输入运行在进入原故事时触发重复 layer，随后退出路径在 vkDestroyDevice 附近崩溃；修订版 Cook 和 package 通过（389479454 字节），29 条物理输入格式通过；GPU 启动失败于 `ASTRA_VN_UI_BINDING_MISSING`，随后段错误退出。原因已定位：`text window:main` 请求 main surface，原绑定只有 message；已补两种 profile 的 main surface binding，但该补丁尚未重跑 Cook/GPU。未验证媒体全播放、演出中存读档、原生窗口或全部旧路线。素材扫描完成 79 张图片、205 OGG、205 WAV，但历史 manifest 的九项文本 hash/大小过期，内容校验仍 blocked，不能计作通过。
+DSL 编译通过；工具单元测试 23 项通过、1 项跳过。前一版实际 Vulkan GPU 输入运行在进入原故事时触发重复 layer，随后退出路径在 vkDestroyDevice 附近崩溃；修订版 Cook 和 package 通过（389479454 字节），29 条物理输入格式通过；GPU 启动失败于 `ASTRA_VN_UI_BINDING_MISSING`，随后段错误退出。原因已定位：`text window:main` 请求 main surface，原绑定只有 message；已补两种 profile 的 main surface binding，但该补丁尚未重跑 Cook/GPU。未验证媒体全播放、演出中存读档、原生窗口或全部旧路线。素材扫描完成 79 张图片、205 OGG、205 WAV；初次校验因历史文本 hash/大小过期 blocked。现仅刷新源码索引与新场景记录，879 项 manifest 引用/hash/大小定向检查通过；保留历史审查记录，不据此声称新演出已通过人工审查。
