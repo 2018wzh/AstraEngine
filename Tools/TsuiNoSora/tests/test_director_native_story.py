@@ -168,8 +168,9 @@ class DirectorNativeStoryAutomationTests(unittest.TestCase):
         )
         self.assertEqual(events[0]["type"], "await")
         self.assertEqual(events[0]["observation"]["key"], "vn.pending_wait_command")
-        self.assertEqual(events[1]["physical_key"], "Enter")
+        self.assertEqual(events[1]["observation"]["key"], "vn.text_reveal_complete")
         self.assertEqual(events[2]["physical_key"], "Enter")
+        self.assertEqual(events[3]["physical_key"], "Enter")
 
     def test_movie_entry_snapshot_preserves_initial_black_character_layer(self):
         lowering = _Lowering(
@@ -486,12 +487,25 @@ class DirectorNativeStoryAutomationTests(unittest.TestCase):
             event["observation"]["value_hash"]
             for event in events
             if event["type"] == "await"
+            and event["observation"].get("key") == "vn.pending_wait_command"
         ]
         self.assertEqual(
             await_hashes,
             [
                 observation_hash("line.locked"),
                 observation_hash("choice.next"),
+            ],
+        )
+        self.assertEqual(
+            [
+                (event["type"], event.get("observation", {}).get("key"))
+                for event in events[:4]
+            ],
+            [
+                ("await", "vn.pending_wait_command"),
+                ("await", "vn.text_reveal_complete"),
+                ("keyboard", None),
+                ("keyboard", None),
             ],
         )
 
@@ -532,8 +546,26 @@ class DirectorNativeStoryAutomationTests(unittest.TestCase):
             event["observation"]["value_hash"]
             for event in events
             if event["type"] == "await"
+            and event["observation"].get("key") == "vn.pending_wait_command"
         ]
         self.assertEqual(await_hashes, [observation_hash("line.after.audio")])
+
+    def test_non_skippable_dialogue_waits_for_reveal_before_enter(self):
+        events = _resolve_pending_wait_events(
+            [
+                {"type": "_skip_allowed", "allowed": False},
+                {"type": "_dialogue_advance", "command_id": "line.locked"},
+            ]
+        )
+        self.assertEqual(
+            [event["type"] for event in events],
+            ["await", "await", "keyboard", "keyboard"],
+        )
+        self.assertEqual(
+            [event["observation"]["key"] for event in events[:2]],
+            ["vn.pending_wait_command", "vn.text_reveal_complete"],
+        )
+        self.assertEqual(events[1]["observation"]["value_hash"], observation_hash(True))
 
     def test_repeated_dialogue_command_id_keeps_distinct_physical_waits(self):
         events = _resolve_pending_wait_events(
@@ -574,6 +606,7 @@ class DirectorNativeStoryAutomationTests(unittest.TestCase):
             event["observation"]["value_hash"]
             for event in events
             if event["type"] == "await"
+            and event["observation"].get("key") == "vn.pending_wait_command"
         ]
         self.assertEqual(
             await_hashes,

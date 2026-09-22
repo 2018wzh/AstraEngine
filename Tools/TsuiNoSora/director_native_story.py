@@ -1673,6 +1673,7 @@ def _resolve_pending_wait_events(events):
                         "type": "_stable_wait",
                         "command_id": event["command_id"],
                         "timeout_ticks": 14_400,
+                        "dialogue": True,
                     }
                 )
                 expanded.extend(_key_events("Enter"))
@@ -1698,16 +1699,34 @@ def _resolve_pending_wait_events(events):
         if event["type"] == "_pending_wait":
             if index in async_pending_indexes:
                 continue
-            next_wait_target = (index, event.get("command_id"))
+            next_wait_target = (index, event.get("command_id"), False, None)
             continue
         if event["type"] == "_stable_wait":
-            next_wait_target = (index, event["command_id"])
+            next_wait_target = (
+                index,
+                event["command_id"],
+                event.get("dialogue", False),
+                event.get("timeout_ticks"),
+            )
             resolved_reversed.append(event)
             continue
         if event["type"] == "_await_next_wait":
             if next_wait_target is None or next_wait_target[0] not in emitted_stable_wait_indexes:
                 command_id = next_wait_target[1] if next_wait_target is not None else None
                 value = json.dumps(command_id, ensure_ascii=False, separators=(",", ":"))
+                if next_wait_target is not None and next_wait_target[2]:
+                    resolved_reversed.append(
+                        {
+                            "type": "await",
+                            "observation": {
+                                "kind": "equals",
+                                "key": "vn.text_reveal_complete",
+                                "value_hash": _hash_json(True),
+                            },
+                            "timeout_ticks": next_wait_target[3] or 14_400,
+                            "continue_at_match": True,
+                        }
+                    )
                 resolved_reversed.append(
                     {
                         "type": "await",
@@ -1744,6 +1763,19 @@ def _resolve_pending_wait_events(events):
                     "continue_at_match": True,
                 }
             )
+            if event.get("dialogue"):
+                resolved.append(
+                    {
+                        "type": "await",
+                        "observation": {
+                            "kind": "equals",
+                            "key": "vn.text_reveal_complete",
+                            "value_hash": _hash_json(True),
+                        },
+                        "timeout_ticks": event["timeout_ticks"],
+                        "continue_at_match": True,
+                    }
+                )
         else:
             resolved.append(event)
     return resolved
