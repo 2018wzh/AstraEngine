@@ -68,7 +68,7 @@ impl NativeVnHostCommandSource {
         media
             .validate_restore(&snapshot)
             .map_err(|error| NativeVnHostError::Save(error.to_string()))?;
-        let present = self.restore(bytes)?;
+        let mut present = self.restore(bytes)?;
         if let Err(error) = media.restore_product_media(self, executor, snapshot).await {
             self.presentation_failed = true;
             self.media_scope.cancel();
@@ -76,7 +76,18 @@ impl NativeVnHostCommandSource {
                 "ASTRA_PLAYER_MEDIA_RESTORE_FAILED: {error}"
             )));
         }
-        Ok(present)
+        // A user load resumes gameplay, not the transient system page from which
+        // the save was requested. Explicit preview checkpoints use restore directly.
+        while self
+            .runtime_state
+            .as_ref()
+            .is_some_and(|state| !state.system_stack.is_empty())
+        {
+            present
+                .commands
+                .extend(self.command(VnPlayerCommand::ReturnSystem)?.commands);
+        }
+        Ok(PlayerHostCommandBatch::new(present.commands)?)
     }
 }
 
@@ -103,7 +114,7 @@ mod tests {
 
     fn source() -> NativeVnHostCommandSource {
         let bytes = test_native_package::product_package_with_request(
-            "story main #@id story.main\nstate start #@id state.start\n  scene room #@id scene.room\n    text key:line.one speaker:hero #@id line.one\n", |_| {},
+            "story main #@id story.main\nstate start #@id state.start\n  scene room #@id scene.room\n    text key:line.one speaker:hero #@id line.one\nstory system #@id story.system\nstate save #@id state.system.save\n  scene save #@id scene.system.save\n    system_page kind:save policy:astra.policy.standard #@id page.save\n", |_| {},
         );
         let package = astra_package::PackageReader::open(&bytes).unwrap();
         let mut source = NativeVnHostCommandSource::from_package(
@@ -222,6 +233,38 @@ mod tests {
             state.as_ref().unwrap().system
         );
         assert!(scope.is_cancelled());
+        source.release_resources().unwrap();
+        source.shutdown().unwrap();
+    }
+
+    #[tokio::test]
+    async fn user_load_returns_to_gameplay_but_explicit_restore_preserves_system_page() {
+        let mut source = source();
+        let mut executor = executor();
+        let mut media = NativeVnProductMediaHost::default();
+        let gameplay = source.runtime_state.clone().unwrap();
+        source
+            .command(VnPlayerCommand::OpenSystem {
+                page: SystemPageKind::Save,
+            })
+            .unwrap();
+        let bytes = saved(&mut source, &media);
+        source.restore(&bytes).unwrap();
+        assert!(!source
+            .runtime_state
+            .as_ref()
+            .unwrap()
+            .system_stack
+            .is_empty());
+        let batch = source
+            .restore_product_session(&bytes, &mut media, &mut executor)
+            .await
+            .unwrap();
+        assert!(batch.commands.len() >= 2);
+        let restored = source.runtime_state.as_ref().unwrap();
+        assert!(restored.system_stack.is_empty());
+        assert_eq!(restored.cursor, gameplay.cursor);
+        assert_eq!(restored.pending_wait, gameplay.pending_wait);
         source.release_resources().unwrap();
         source.shutdown().unwrap();
     }

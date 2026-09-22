@@ -2,6 +2,8 @@
 
 Operator 负责构建、打包、平台适配、Release Gate 与 crash bundle；AstraEMU 使用下述独立 Host 流程。
 
+Player 用户存档读取成功后返回保存时的剧情等待，关闭临时系统页。Editor Preview 的显式检查点仍恢复完整系统页；两者共享快照校验，但操作完成后的界面不同。旧格式或损坏槽保持不可用，不能用新存档覆盖。
+
 ## Worktree 内 Cargo 验证
 
 每次验证都应在当前实例独占的 worktree 中直接执行 Cargo。workspace test 依赖 Headless test driver，因此先构建对应 binary：
