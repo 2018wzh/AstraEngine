@@ -11,7 +11,7 @@
 - `update_manifest.py`：更新音频 hash、byte size、格式与检测结果；
 - `analyze_audio.py`：用 ffmpeg 测量响度、true peak、频谱活动、静音、削波和循环接缝，并单独保留人工听审状态；
 - `review_audio_openrouter.py`：用 OpenRouter 音频模型逐项完成结构化辅助听审；API key 只从环境变量读取，不能替代人工签核；
-- `build_nativevn_project.py`：从 canonical screenplay 和素材生成 `.astra`、runtime localization、UI/theme/controller、asset sidecar 与 `project.yaml`；
+- `build_nativevn_project.py`：刷新 runtime localization、asset sidecar 与当前四平台 `project.yaml`；只检查 `.astra`、UI/theme/controller 是否存在，不重写作者源码；
 - `update_content_metadata.py`：更新内容 manifest、provenance、review、prompt 和 alt text 索引；
 - `build_contact_sheet.py`：把人工视觉审查表写入 ignored `.local/review/`；
 - `validate_content_pack.py`：校验双语引用、路线、媒体、透明通道、hash、授权状态和公开树安全。

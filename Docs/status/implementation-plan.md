@@ -11,6 +11,9 @@
 原版私有副本进入真实 MENU 后确认同样使用绿底黑云，先前蓝白云属于 READY 初始化页，不是颜色转换错误。原配启动器把新增 savefile.tns 当作发行文件差异；私有副本的旧存档移到独立目录保留后可启动，新测试档也写入独立目录。用户原目录未改动。本树补丁器已把根目录 savefile.tns 视为原版可变文件，其余发行文件仍逐项校验；23 项回归和 Clippy 通过。该工具与用户副本的 manifest 代次不同，本轮没有改写或迁移用户 manifest。
 
 Editor 的项目工作区、真实 Player 预览管道、ACP/MCP 审批事务、路由连接图及关键帧编辑已集成；Graph 路由连线、单次撤销的关键帧拖动、可停靠工作区和图片资产导入也已集成；独立 workspace 的 14 项库测试、1 项布局测试、all-target Clippy 和格式检查通过。真实产品用例由负责工作线显式运行，本次集成未重复执行默认 ignored 的外部 Agent 和 GPU 预览测试；拖拽曲线及完整创作体验仍未关闭。《eden*》严格 checkpoint、Family 只读导入及内部存档到原版格式导出已集成，13 项格式/恢复和 13 项 CLI 测试通过；GPU 合成 fixture 覆盖导入后继续、保存和导出，商业原版读回仍未完成。
+## NativeVN 样例配置接续
+
+保留《玻璃雨中的信号》的故事与授权素材，将旧 platform profile v2 迁到 v3，拆分 mixer/output、补齐限额并声明三桌面及 Android；修复 advanced-vn 系统页 policy 与 binding。项目工具不再覆盖作者 `.astra`。真实 Cook 的 284 个资产通过，工具测试 23 项通过、1 项跳过；产品交互、视听和存读档尚未验收。共享 target schema 仍强制 runtime_provider/ui_provider 元数据字段，样例保留到共享 schema 迁移，不引入动态 provider。
 
 ## Linux 包加载完成与取消回收
 

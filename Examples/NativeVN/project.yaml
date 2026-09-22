@@ -2,45 +2,62 @@ schema: astra.target_manifest.v2
 id: com.astra.nativevn.signal-glass-rain
 platform_profiles:
   windows-release:
-    schema: astra.platform_host_profile.v2
+    schema: astra.platform_host_profile.v3
     id: windows-release
     platform: windows
     target: nativevn-flagship-game
     package_id: com.astra.nativevn.signal-glass-rain
     renderer: { providers: [wgpu_hardware], allow_software: false }
     decode: { providers: [wmf], allow_software: false }
-    audio: { providers: [wasapi], allow_software: false }
+    audio_mixer: { providers: [kira], allow_software: false }
+    audio_output: { providers: [wasapi], allow_software: false }
     save: { providers: [saved_games], allow_software: false }
     package_sources: [{ kind: bundled }, { kind: user_authorized }]
-    limits: { command_queue_capacity: 256, event_queue_capacity: 1024, max_frame_bytes: 67108864, max_audio_frames: 192000, max_package_read_bytes: 8388608 }
+    limits: { command_queue_capacity: 256, event_queue_capacity: 1024, max_frame_bytes: 67108864, max_audio_frames: 192000, audio_pcm_cache_bytes: 268435456, audio_chunk_frames: 512, max_package_read_bytes: 8388608 }
     package_cache: { max_entry_bytes: 17179869184, max_total_bytes: 68719476736 }
-  web-release-chrome:
-    schema: astra.platform_host_profile.v2
-    id: web-release-chrome
-    platform: web
+  linux-steam-sniper-release:
+    schema: astra.platform_host_profile.v3
+    id: linux-steam-sniper-release
+    platform: linux
     target: nativevn-flagship-game
     package_id: com.astra.nativevn.signal-glass-rain
-    renderer: { providers: [webgpu], allow_software: false }
-    decode: { providers: [webcodecs], allow_software: false }
-    audio: { providers: [webaudio], allow_software: false }
-    save: { providers: [opfs], allow_software: false }
+    renderer: { providers: [wgpu_vulkan], allow_software: false }
+    decode: { providers: [gstreamer], allow_software: false }
+    audio_mixer: { providers: [kira], allow_software: false }
+    audio_output: { providers: [alsa], allow_software: false }
+    save: { providers: [xdg_data], allow_software: false }
     package_sources: [{ kind: bundled }, { kind: user_authorized }]
-    limits: { command_queue_capacity: 256, event_queue_capacity: 1024, max_frame_bytes: 67108864, max_audio_frames: 192000, max_package_read_bytes: 8388608 }
+    limits: { command_queue_capacity: 256, event_queue_capacity: 1024, max_frame_bytes: 67108864, max_audio_frames: 192000, audio_pcm_cache_bytes: 268435456, audio_chunk_frames: 512, max_package_read_bytes: 8388608 }
+    package_cache: { max_entry_bytes: 17179869184, max_total_bytes: 68719476736 }
+  macos-release:
+    schema: astra.platform_host_profile.v3
+    id: macos-release
+    platform: macos
+    target: nativevn-flagship-game
+    package_id: com.astra.nativevn.signal-glass-rain
+    renderer: { providers: [wgpu_metal], allow_software: false }
+    decode: { providers: [avfoundation], allow_software: false }
+    audio_mixer: { providers: [kira], allow_software: false }
+    audio_output: { providers: [coreaudio], allow_software: false }
+    save: { providers: [application_support], allow_software: false }
+    package_sources: [{ kind: bundled }, { kind: user_authorized }]
+    limits: { command_queue_capacity: 256, event_queue_capacity: 1024, max_frame_bytes: 67108864, max_audio_frames: 192000, audio_pcm_cache_bytes: 268435456, audio_chunk_frames: 512, max_package_read_bytes: 8388608 }
     package_cache: { max_entry_bytes: 17179869184, max_total_bytes: 68719476736 }
   android-release:
-    schema: astra.platform_host_profile.v2
+    schema: astra.platform_host_profile.v3
     id: android-release
     platform: android
     target: nativevn-flagship-game
     package_id: com.astra.nativevn.signal-glass-rain
     renderer: { providers: [wgpu_vulkan], allow_software: false }
     decode: { providers: [mediacodec], allow_software: false }
-    audio: { providers: [oboe_aaudio, oboe_opensl_es], allow_software: false }
+    audio_mixer: { providers: [kira], allow_software: false }
+    audio_output: { providers: [oboe_aaudio, oboe_opensl_es], allow_software: false }
     save: { providers: [android_app_storage], allow_software: false }
     package_sources:
       - { kind: bundled }
       - { kind: user_authorized }
-    limits: { command_queue_capacity: 256, event_queue_capacity: 1024, max_frame_bytes: 67108864, max_audio_frames: 192000, max_package_read_bytes: 8388608 }
+    limits: { command_queue_capacity: 256, event_queue_capacity: 1024, max_frame_bytes: 67108864, max_audio_frames: 192000, audio_pcm_cache_bytes: 268435456, audio_chunk_frames: 512, max_package_read_bytes: 8388608 }
     package_cache: { max_entry_bytes: 17179869184, max_total_bytes: 68719476736 }
 targets:
   - id: nativevn-flagship-game
@@ -49,7 +66,7 @@ targets:
     default_profile: advanced-vn
     runtime_provider: native_vn
     ui_provider: astra.ui.yakui
-    platforms: [windows, web, android]
+    platforms: [windows, linux, macos, android]
     packaged: true
 nativevn:
   default_locale: zh-Hans

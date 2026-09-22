@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the checked-in NativeVN flagship project from canonical content data."""
+"""Refresh NativeVN derived assets and descriptors; .astra sources stay authoritative."""
 
 from __future__ import annotations
 
@@ -12,37 +12,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 PACK = ROOT / "Examples" / "NativeVN"
 PROFILE = "advanced-vn"
-
-BACKGROUND_BY_SCENE = {
-    "scn_common_01_glass_train": "metro-station",
-    "scn_common_02_archive_lobby": "archive-room",
-    "scn_common_03_signal_booth": "apartment-studio",
-    "scn_common_04_rain_trace": "rain-street",
-    "scn_common_05_memory_room": "underground-relay",
-    "scn_common_06_decision_bridge": "glass-corridor",
-    "scn_truth_01_observatory": "rooftop-antenna",
-    "scn_truth_02_public_array": "archive-room",
-    "scn_truth_03_after_rain": "dawn-city",
-    "scn_silence_01_blackout_corridor": "glass-corridor",
-    "scn_silence_02_null_room": "underground-relay",
-    "scn_silence_03_morning_platform": "metro-station",
-    "scn_signal_01_service_tunnel": "rain-street",
-    "scn_signal_02_controlled_link": "underground-relay",
-    "scn_signal_03_dawn_rooftop": "rooftop-antenna",
-}
-
-ROUTE_BGM = {
-    "common": "glass-rain",
-    "truth": "carrier-noise",
-    "silence": "thin-line",
-    "signal": "after-signal",
-}
-
-ENDING_CG = {
-    "truth": "ending-truth",
-    "silence": "ending-silence",
-    "signal": "ending-signal",
-}
 
 SYSTEM_STRINGS = {
     "speaker.lin_yao": {"zh-Hans": "林瑶", "en": "Lin Yao"},
@@ -193,68 +162,6 @@ def suffix_is_image(source: str) -> bool:
     return Path(source).suffix.lower() == ".png"
 
 
-def scene_order(graph: dict) -> tuple[list[str], dict[str, str]]:
-    ordered = []
-    successor = {}
-    for route in graph["routes"]:
-        scenes = route["scene_ids"]
-        ordered.extend(scenes)
-        for left, right in zip(scenes, scenes[1:]):
-            successor[left] = right
-    return ordered, successor
-
-
-def build_story() -> None:
-    screenplay = read_json(PACK / "Narrative" / "screenplay.zh-Hans.json")
-    graph = read_json(PACK / "Narrative" / "route-graph.json")
-    scenes = {scene["id"]: scene for scene in screenplay["scenes"]}
-    choices = {choice["scene_id"]: choice for choice in screenplay["choices"]}
-    ordered, successor = scene_order(graph)
-    lines = ["story signal_in_the_glass_rain #@id story.signal_in_the_glass_rain", ""]
-    route_first = {route["entry_scene_id"] for route in graph["routes"]}
-    route_last = {route["scene_ids"][-1]: route["route_scope"] for route in graph["routes"] if route["route_scope"] != "common"}
-    for scene_id in ordered:
-        scene = scenes[scene_id]
-        scope = scene["route_scope"]
-        lines.extend([
-            f"state {scene_id} #@id state.{scene_id}",
-            f"  scene {scene_id} #@id scene.{scene_id}",
-            "    stage viewport:1920x1080 safe_area:16:9 #@id stage.%s" % scene_id,
-            "    layer id:bg kind:background z:0 blend:normal #@id layer.%s.bg" % scene_id,
-            "    layer id:character kind:sprite z:100 blend:normal clip:stage #@id layer.%s.character" % scene_id,
-            "    layer id:video kind:video z:200 blend:screen clip:stage #@id layer.%s.video" % scene_id,
-            "    layer id:ui kind:text z:900 blend:normal input:message #@id layer.%s.ui" % scene_id,
-            f"    background asset:asset:/background/{BACKGROUND_BY_SCENE[scene_id]} layer:bg preset:soft_fade duration:400 #@id bg.{scene_id}",
-        ])
-        if scene_id == ordered[0]:
-            lines.append("    movie layer:video asset:asset:/movie/rain-signal-loop alpha:0.18 loop:true end:continue fallback:asset:/background/metro-station #@id movie.opening")
-        if scene_id in route_first:
-            lines.append(f"    bgm asset:asset:/bgm/{ROUTE_BGM[scope]} loop:true fade:600 #@id bgm.{scope}")
-        expression = {"common": "guarded", "truth": "determined", "silence": "worried", "signal": "relieved"}[scope]
-        lines.append(f"    show id:lin_yao asset:asset:/character/sprites/lin-yao/{expression}-center pose:{expression} layer:character at:left preset:soft_fade #@id sprite.{scene_id}.lin_yao")
-        lines.append(f"    show id:zhou_heng asset:asset:/character/sprites/zhou-heng/{expression}-center pose:{expression} layer:character at:right preset:soft_fade #@id sprite.{scene_id}.zhou_heng")
-        for dialogue in scene["lines"]:
-            cue_id = dialogue["voice_cue_id"]
-            lines.append(f"    voice asset:asset:/voice/{cue_id} sync:text #@id voice.{cue_id}")
-            lines.append(f"    text key:line.{dialogue['id']} speaker:speaker.{dialogue['speaker']} voice:voice.{cue_id} window:main #@id line.{dialogue['id']}")
-        if scene_id in choices:
-            choice = choices[scene_id]
-            lines.append(f"    choice key:choice.{choice['id']} #@id choice.{choice['id']}")
-            for option in choice["options"]:
-                lines.append(f"      option key:choice.{option['id']} -> {option['target_scene_id']} #@id {option['id']}")
-        elif scene_id in successor:
-            lines.append(f"    jump target:{successor[scene_id]} #@id jump.{scene_id}")
-        elif scene_id in route_last:
-            scope = route_last[scene_id]
-            lines.extend([
-                f"    background asset:asset:/cg/{ENDING_CG[scope]} layer:bg preset:soft_fade duration:800 #@id cg.ending.{scope}",
-                f"    se asset:asset:/stinger/{scope} bus:se #@id stinger.{scope}",
-                f"    system_page kind:route_chart policy:astra.policy.standard #@id system.ending.{scope}.route_chart",
-            ])
-        lines.append("")
-    write_text(PACK / "Scripts" / "main.astra", "\n".join(lines))
-
-
 def build_localization() -> None:
     payloads = {
         "zh-Hans": read_json(PACK / "Narrative" / "screenplay.zh-Hans.json"),
@@ -294,45 +201,62 @@ def build_project_descriptor() -> None:
 id: com.astra.nativevn.signal-glass-rain
 platform_profiles:
   windows-release:
-    schema: astra.platform_host_profile.v2
+    schema: astra.platform_host_profile.v3
     id: windows-release
     platform: windows
     target: nativevn-flagship-game
     package_id: com.astra.nativevn.signal-glass-rain
     renderer: { providers: [wgpu_hardware], allow_software: false }
     decode: { providers: [wmf], allow_software: false }
-    audio: { providers: [wasapi], allow_software: false }
+    audio_mixer: { providers: [kira], allow_software: false }
+    audio_output: { providers: [wasapi], allow_software: false }
     save: { providers: [saved_games], allow_software: false }
     package_sources: [{ kind: bundled }, { kind: user_authorized }]
-    limits: { command_queue_capacity: 256, event_queue_capacity: 1024, max_frame_bytes: 67108864, max_audio_frames: 192000, max_package_read_bytes: 8388608 }
+    limits: { command_queue_capacity: 256, event_queue_capacity: 1024, max_frame_bytes: 67108864, max_audio_frames: 192000, audio_pcm_cache_bytes: 268435456, audio_chunk_frames: 512, max_package_read_bytes: 8388608 }
     package_cache: { max_entry_bytes: 17179869184, max_total_bytes: 68719476736 }
-  web-release-chrome:
-    schema: astra.platform_host_profile.v2
-    id: web-release-chrome
-    platform: web
+  linux-steam-sniper-release:
+    schema: astra.platform_host_profile.v3
+    id: linux-steam-sniper-release
+    platform: linux
     target: nativevn-flagship-game
     package_id: com.astra.nativevn.signal-glass-rain
-    renderer: { providers: [webgpu], allow_software: false }
-    decode: { providers: [webcodecs], allow_software: false }
-    audio: { providers: [webaudio], allow_software: false }
-    save: { providers: [opfs], allow_software: false }
+    renderer: { providers: [wgpu_vulkan], allow_software: false }
+    decode: { providers: [gstreamer], allow_software: false }
+    audio_mixer: { providers: [kira], allow_software: false }
+    audio_output: { providers: [alsa], allow_software: false }
+    save: { providers: [xdg_data], allow_software: false }
     package_sources: [{ kind: bundled }, { kind: user_authorized }]
-    limits: { command_queue_capacity: 256, event_queue_capacity: 1024, max_frame_bytes: 67108864, max_audio_frames: 192000, max_package_read_bytes: 8388608 }
+    limits: { command_queue_capacity: 256, event_queue_capacity: 1024, max_frame_bytes: 67108864, max_audio_frames: 192000, audio_pcm_cache_bytes: 268435456, audio_chunk_frames: 512, max_package_read_bytes: 8388608 }
+    package_cache: { max_entry_bytes: 17179869184, max_total_bytes: 68719476736 }
+  macos-release:
+    schema: astra.platform_host_profile.v3
+    id: macos-release
+    platform: macos
+    target: nativevn-flagship-game
+    package_id: com.astra.nativevn.signal-glass-rain
+    renderer: { providers: [wgpu_metal], allow_software: false }
+    decode: { providers: [avfoundation], allow_software: false }
+    audio_mixer: { providers: [kira], allow_software: false }
+    audio_output: { providers: [coreaudio], allow_software: false }
+    save: { providers: [application_support], allow_software: false }
+    package_sources: [{ kind: bundled }, { kind: user_authorized }]
+    limits: { command_queue_capacity: 256, event_queue_capacity: 1024, max_frame_bytes: 67108864, max_audio_frames: 192000, audio_pcm_cache_bytes: 268435456, audio_chunk_frames: 512, max_package_read_bytes: 8388608 }
     package_cache: { max_entry_bytes: 17179869184, max_total_bytes: 68719476736 }
   android-release:
-    schema: astra.platform_host_profile.v2
+    schema: astra.platform_host_profile.v3
     id: android-release
     platform: android
     target: nativevn-flagship-game
     package_id: com.astra.nativevn.signal-glass-rain
     renderer: { providers: [wgpu_vulkan], allow_software: false }
     decode: { providers: [mediacodec], allow_software: false }
-    audio: { providers: [oboe_aaudio, oboe_opensl_es], allow_software: false }
+    audio_mixer: { providers: [kira], allow_software: false }
+    audio_output: { providers: [oboe_aaudio, oboe_opensl_es], allow_software: false }
     save: { providers: [android_app_storage], allow_software: false }
     package_sources:
       - { kind: bundled }
       - { kind: user_authorized }
-    limits: { command_queue_capacity: 256, event_queue_capacity: 1024, max_frame_bytes: 67108864, max_audio_frames: 192000, max_package_read_bytes: 8388608 }
+    limits: { command_queue_capacity: 256, event_queue_capacity: 1024, max_frame_bytes: 67108864, max_audio_frames: 192000, audio_pcm_cache_bytes: 268435456, audio_chunk_frames: 512, max_package_read_bytes: 8388608 }
     package_cache: { max_entry_bytes: 17179869184, max_total_bytes: 68719476736 }
 targets:
   - id: nativevn-flagship-game
@@ -341,7 +265,7 @@ targets:
     default_profile: advanced-vn
     runtime_provider: native_vn
     ui_provider: astra.ui.yakui
-    platforms: [windows, web, android]
+    platforms: [windows, linux, macos, android]
     packaged: true
 nativevn:
   default_locale: zh-Hans
@@ -390,7 +314,6 @@ def copy_fonts() -> None:
 
 def main() -> int:
     copy_fonts()
-    build_story()
     build_localization()
     build_ui()
     build_sidecars()

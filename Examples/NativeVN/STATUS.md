@@ -2,7 +2,7 @@
 
 标题：**玻璃雨中的信号 / Signal in the Glass Rain**
 
-## 固定状态
+## 内容基线（历史制作批次）
 
 | Key | Status | 当前含义 |
 | --- | --- | --- |
@@ -22,6 +22,12 @@
 
 原始 24 kHz MP3 响应只保留在 ignored 私有目录。发行树提交经过统一响度与边界处理的 48 kHz/24-bit WAV master 和 48 kHz OGG distribution；授权依据、模型、声线、源 hash、请求文本 hash 和逐 cue 绑定记录在 `Manifests/voice-release.json`。
 
-## 下一步与停止条件
+## 后续实施
 
-本轮停止在 Cook 成功，不执行 scenario、Player 或 Runtime 测试。后续必须另行取得 Windows/Web native-input、视觉、音频、route、save/load 和同 run identity evidence；在这些证据闭合前，`S3-FLAGSHIP-DEMO-01` 保持 `IN_PROGRESS`。
+继续用当前 Cook/package 与真实 Player 验证输入、视觉、音频、路线及存读档。历史内容批次的“停止在 Cook”不再是接续任务的停止条件；尚未执行的产品行为仍保持未验收。
+
+## 2026-09-22 配置迁移
+
+重跑旧配置实际失败于 `profile.migrate`，原因是 platform profile v2 已不受支持。现已改为 v3，拆分 mixer/output、补齐音频限额并声明四平台；修复 advanced-vn 系统页空 allowlist 和错误 profile 绑定。项目刷新不再生成/覆盖 `.astra`，保留故事、注释和稳定 ID。真实 Cook 与后续产品验证结果另行记录，不沿用历史 cook-ready 标记作为当前通过证明。
+
+本批真实 `astra cook` 通过：284 个资产均经当前 Cook，生成两种 profile 的 typed VN package section；随后工具测试通过 23 项、跳过 1 项。没有重生成声音或图片。此记录只关闭配置/源码编译与素材 Cook，不关闭窗口、视听、路线或恢复。
