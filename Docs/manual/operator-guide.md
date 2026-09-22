@@ -205,3 +205,8 @@ python Tools/build_android.py --package Build/Game.astrapkg --target nativevn-ga
 ```
 
 配置或 cross-build 通过只算 E1/E2。正式 E3 还必须在 API 28/36 emulator 与 arm64 Vulkan 真机上执行安装、启动、输入、TalkBack、MediaCodec、AAudio/focus、旋转/insets、SAF、save/recreate 和 zero-leak，并把同一 package/profile/build/session/input 的 host、Player、frame、audio、route 与人工 review 报告送入 release validator。OpenSL ES 只能用于显式 compatibility profile，实际报告为 OpenSL ES 时不得声称 AAudio。
+
+
+### Windows Player 静音测试
+
+在 bundled Player 目录运行 `astra-player --test-null-audio`，窗口标题显示 `[TEST NULL AUDIO]`。选项仅对本次进程生效；正文、解码、混音、媒体时钟和关闭流程继续运行，但没有设备声音。正常启动不带此参数，设备不可用时会明确报错。测试输出不能作为可听音频验收。

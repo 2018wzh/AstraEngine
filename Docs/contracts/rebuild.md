@@ -119,3 +119,8 @@ Musica 原生启动模式使用 `MusicaLaunchMode::Direct/Title`。Title 会话�
 Family API v7 增加可选 SetFullscreen 窗口命令及 logical/raster FrameInfo，Manager 在 Slint 窗口线程执行输出 letterbox 与 pointer 逆映射，关闭会话恢复普通窗口。该命令不传 UI 类型或原生句柄；无窗口 Host 明确拒绝。Musica 原生设置通过同一通道应用与冷启动恢复全屏。
 
 核心文件缺失、加载失败、descriptor/capability 不匹配或重复 `plugin_id` 时，Manager 按 `data/cores/` 中的文件显示诊断并继续加载其他唯一核心；冲突 ID 的全部文件禁用。SQLite 不记录插件路径，更新核心需替换文件并重启 Manager。不能因单个核心失败关闭管理界面。
+
+
+### Player 显式静音测试输出
+
+Windows bundled Player 接受一次性 `--test-null-audio` 参数。默认仍打开系统音频设备，失败返回诊断，不自动选择测试输出。测试参数不写入配置、package 或存档；窗口标题持续显示 `[TEST NULL AUDIO]`。测试输出复用 `NativeAudioQueue`，按采样率消费解码和 Kira 混音结果，保留暂停、恢复、播放时钟、队列背压、取消及关闭 worker 的路径，只替换设备输出。该模式不代表可听音频验收。其他平台与自动化子命令拒绝此参数。

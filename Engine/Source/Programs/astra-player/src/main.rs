@@ -36,6 +36,7 @@ fn main() -> Result<(), PlayerCliError> {
     let mut log_max_file_bytes = astra_observability::DEFAULT_MAX_FILE_BYTES;
     let mut log_max_archives = astra_observability::DEFAULT_MAX_ARCHIVES;
     let mut show_help = false;
+    let mut test_null_audio = false;
     let mut script = None;
     let mut transcript = None;
     let mut windows_bundle = None;
@@ -87,6 +88,7 @@ fn main() -> Result<(), PlayerCliError> {
             "--web-bundle" => web_bundle = args.next().map(PathBuf::from),
             "--browser-executable" => browser_executable = args.next().map(PathBuf::from),
             "--web-headless" => web_headless = true,
+            "--test-null-audio" => test_null_audio = true,
             "--visual-comparison-report" => {
                 visual_comparison_report = args.next().map(PathBuf::from)
             }
@@ -113,6 +115,9 @@ fn main() -> Result<(), PlayerCliError> {
         && windows_bundle.is_none()
         && web_bundle.is_none()
         && !show_help;
+    if test_null_audio && (!cfg!(target_os = "windows") || (!bundled_mode && !show_help)) {
+        return Err("--test-null-audio requires a bundled Windows Player".into());
+    }
     let observability = if bundled_mode {
         load_bundled_observability(
             &bundled_player_resource_root().map_err(|error| -> PlayerCliError { error.into() })?,
@@ -139,7 +144,7 @@ fn main() -> Result<(), PlayerCliError> {
     tracing::info!(event = "player.host.start", "AstraPlayer host started");
     if show_help {
         println!(
-            "Usage:\n  astra-player --script <automation.json> --transcript <transcript.json>\n  astra-player --windows-bundle <dir> --visual-comparison-report <report.json> --host-conformance-report <report.json> [--output-report <report.json>] [--output-script <script.json>] [--output-transcript <transcript.json>] [--output-trace-log <trace.log>] [--timeout-ms <ms>]\n  astra-player --web-bundle <dir> --browser-executable <chromium> --visual-comparison-report <report.json> --host-conformance-report <report.json> [--web-headless] [--output-report <report.json>] [--output-script <script.json>] [--output-transcript <transcript.json>] [--timeout-ms <ms>] [--log-filter <filter>] [--log-format compact|json] [--log-dir <dir>]"
+            "Usage:\n  astra-player [--test-null-audio] (bundled Windows game; silent test output)\n  astra-player --script <automation.json> --transcript <transcript.json>\n  astra-player --windows-bundle <dir> --visual-comparison-report <report.json> --host-conformance-report <report.json> [--output-report <report.json>] [--output-script <script.json>] [--output-transcript <transcript.json>] [--output-trace-log <trace.log>] [--timeout-ms <ms>]\n  astra-player --web-bundle <dir> --browser-executable <chromium> --visual-comparison-report <report.json> --host-conformance-report <report.json> [--web-headless] [--output-report <report.json>] [--output-script <script.json>] [--output-transcript <transcript.json>] [--timeout-ms <ms>] [--log-filter <filter>] [--log-format compact|json] [--log-dir <dir>]"
         );
         return Ok(());
     }
@@ -203,7 +208,7 @@ fn main() -> Result<(), PlayerCliError> {
     }
 
     if script.is_none() && transcript.is_none() {
-        let result = run_bundled_game();
+        let result = run_bundled_game(test_null_audio);
         if let Err(error) = &result {
             if let Some(platform) = error.downcast_ref::<astra_platform::PlatformError>() {
                 tracing::error!(
@@ -240,7 +245,7 @@ fn main() -> Result<(), PlayerCliError> {
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
-fn run_bundled_game() -> Result<(), PlayerCliError> {
+fn run_bundled_game(test_null_audio: bool) -> Result<(), PlayerCliError> {
     use astra_core::Hash256;
     use astra_package::{PackageManifest, PackageReader};
     use astra_platform::{
@@ -405,7 +410,7 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
     let (mut runner, factory) = astra_platform_macos::main_thread_host()?;
     let player = async move {
         #[cfg(target_os = "windows")]
-        let factory = astra_platform_windows::factory();
+        let factory = astra_platform_windows::factory().with_test_null_audio(test_null_audio);
         #[cfg(target_os = "linux")]
         let factory = astra_platform_linux::factory();
         let mut session = factory.start(HostLaunchProfile::platform(profile)).await?;
@@ -424,7 +429,11 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
         let window = session
             .client
             .create_window(WindowRequest {
-                title: manifest.package_id,
+                title: if test_null_audio {
+                    format!("{} [TEST NULL AUDIO]", manifest.package_id)
+                } else {
+                    manifest.package_id
+                },
                 width,
                 height,
                 visible: true,
@@ -1204,7 +1213,7 @@ fn log_consumed_vn_step(
 }
 
 #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
-fn run_bundled_game() -> Result<(), PlayerCliError> {
+fn run_bundled_game(_test_null_audio: bool) -> Result<(), PlayerCliError> {
     Err("native AstraPlayer bundle host is unavailable on this platform".into())
 }
 

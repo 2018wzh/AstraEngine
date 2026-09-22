@@ -1,5 +1,17 @@
 # 全产品重构实施状态
 
+## 2026-09-22 本轮边界
+
+本轮按三条独占工作线推进 EMU/SDK、Engine/VN 与 Classic/平台，集成仅在本地目标分支完成。Windows 六核心、公共会话/任务与旧 ABI 替换、Classic 代表流程及演出分类对照、《eden*》原版存档双向互通属于本轮范围。Android 继续实现并构建可运行 APK，真机连接后才关闭设备验收。Editor/Agent 产品功能、Modern 验收、完整结局、37 路线、Linux/macOS 验收与正式性能指标延后。以下历史记录中的更大验收范围不作为本轮完成条件。
+
+| 工作项 | 实现 | 设备/游戏验收 |
+| --- | --- | --- |
+| Player `--test-null-audio` | 已接入共享 PCM 队列、采样时钟、暂停与取消关闭；五项 PCM 队列/时钟/暂停/取消重开回归通过 | 新构建 Classic Windows 代表流程待运行；可听音频不计通过 |
+| EMU/SDK 六核心与《eden*》互通 | 实施中 | 每核短流程与原版双向读回待完成 |
+| Engine/VN 运行职责、任务、Luau、DSL 与旧 ABI 消费者 | 实施中 | 受影响回归及 Classic 集成待完成 |
+| Android Manager/VN Player | 实施中 | 真机未连接，设备验收待办 |
+
+
 本轮 Musica/SDK 重构已接通公共 `Canvas2D`、SDK `StageCanvas`/`TextureAsset`、AstraVN presentation 第二消费者及 Family API v7 logical/raster frame 元数据。Musica 启动配置改为显式 `render_width`/`render_height` 正整数，GPU Scene 和 AstraText glyph 路径按实际 raster density 输出；统一 aspect-fit viewport 负责奇数、portrait、缩小和黑边，原生 1280x720 逻辑舞台、ANI 原点和存档/VM 时间保持独立。已验证的 Windows Sandbox 配对在 `data/cores/` 冷启动发现 Musica，Scale 从非可执行文件工作目录启用成功；640×360、1001×777、1920×1200 和 720×1280 的 DX12 discrete 画面与黑边检查通过，slot 24 在进程完整重启后仍可保存并读取。720×1280 的剧情内容输入仍待补测，真实可听声音、完整结局、长流程、跨平台和性能验收仍开放。
 
 本批最新实现状态：Family Manager 的扫描缓存现在随每次 probe 结果替换，NoMatch、候选冲突和失效候选都会清理当前候选、临时 provider 选择及持久 family 关联；卡片、详情启动按钮和 `try_launch` 共用当前候选资格。rescan 更新游戏记录时保留用户标题、内容指纹和创建时间，不重建资料库或存档。对应的 A→B→NoMatch、重新匹配、用户元数据保留和 UI 诊断回归已加入 Manager 定向测试。Native VN 的终局观察由真实 `terminal_route_ids` 推导 `vn.route_terminal`，路线输入同时等待该布尔状态和精确终局 ID；生成器、校验器和空集合/错误布尔回归已同步，尚未用新构建重新跑完整商业路线。FVP dynamic-plugin-export 的真实 DLL 已在完整依赖图中完成 descriptor、capability、probe、open/close 与重启注册测试；该用例只覆盖 provider 合约，不替代商业流程验收。

@@ -6,6 +6,8 @@ use astra_platform::{PlatformError, PlatformErrorCode, PlatformId};
 #[derive(Debug, Clone, Default)]
 pub struct WindowsPlatformFactory {
     #[cfg(target_os = "windows")]
+    test_null_audio: bool,
+    #[cfg(target_os = "windows")]
     roots: Option<HostRoots>,
 }
 
@@ -33,6 +35,7 @@ pub fn factory_with_test_roots(
     bundle_root: impl AsRef<std::path::Path>,
 ) -> WindowsPlatformFactory {
     WindowsPlatformFactory {
+        test_null_audio: false,
         roots: Some(HostRoots {
             save_base: save_base.as_ref().to_path_buf(),
             bundle_root: bundle_root.as_ref().to_path_buf(),
@@ -40,11 +43,24 @@ pub fn factory_with_test_roots(
     }
 }
 
+#[cfg(target_os = "windows")]
+impl WindowsPlatformFactory {
+    /// Select a clocked silent output for this test process only.
+    pub fn with_test_null_audio(mut self, enabled: bool) -> Self {
+        self.test_null_audio = enabled;
+        self
+    }
+}
+
 impl PlatformHostFactory for WindowsPlatformFactory {
     fn start(&self, profile: HostLaunchProfile) -> HostStartFuture {
         #[cfg(target_os = "windows")]
         {
-            Box::pin(crate::factory::windows::start(profile, self.roots.clone()))
+            Box::pin(crate::factory::windows::start(
+                profile,
+                self.roots.clone(),
+                self.test_null_audio,
+            ))
         }
         #[cfg(not(target_os = "windows"))]
         {
@@ -125,6 +141,7 @@ mod windows {
     pub async fn start(
         launch_profile: HostLaunchProfile,
         roots: Option<super::HostRoots>,
+        test_null_audio: bool,
     ) -> Result<PlatformHostSession, PlatformError> {
         let profile = launch_profile.require_platform()?.clone();
         if profile.platform != astra_platform::PlatformId::Windows {
@@ -155,6 +172,7 @@ mod windows {
                     ready_tx,
                     backend_profile,
                     roots,
+                    test_null_audio,
                     instance_guard,
                 )
             })
@@ -265,8 +283,8 @@ mod windows {
                 };
                 match command {
                     HostCommand::OpenAudioOutput { request, reply } => {
-                        let result = AudioResource::new(request, backend.audio_wake()).and_then(
-                            |(resource, lane, format)| {
+                        let result = AudioResource::new(request, backend.audio_wake(), false)
+                            .and_then(|(resource, lane, format)| {
                                 let handle = audio_outputs.insert(resource)?;
                                 Ok(OpenedAudioOutput {
                                     handle,
@@ -274,8 +292,7 @@ mod windows {
                                     lane: Box::new(lane),
                                     capture: None,
                                 })
-                            },
-                        );
+                            });
                         let _ = reply.send(result);
                     }
                     HostCommand::PauseAudio { output, reply } => {
@@ -349,6 +366,7 @@ mod windows {
         ready: std_mpsc::SyncSender<Result<(), PlatformError>>,
         profile: PlatformHostProfile,
         roots: Option<super::HostRoots>,
+        test_null_audio: bool,
         _instance_guard: SingleInstanceGuard,
     ) {
         let roots = match roots.or_else(default_roots) {
@@ -415,6 +433,7 @@ mod windows {
                 bundle_root: roots.bundle_root,
             },
             event_loop_proxy,
+            test_null_audio,
         ) {
             Ok(app) => app,
             Err(_) => return,
@@ -481,6 +500,7 @@ mod windows {
     }
 
     struct WindowsHostApp {
+        test_null_audio: bool,
         backend: PlatformBackendChannels,
         ready: Option<std_mpsc::SyncSender<Result<(), PlatformError>>>,
         windows: ResourceTable<Arc<Window>, WindowHandle>,
@@ -526,6 +546,7 @@ mod windows {
             package_cache: VerifiedPackageCache,
             package: PackageHostConfig,
             event_loop_proxy: EventLoopProxy<()>,
+            test_null_audio: bool,
         ) -> Result<Self, PlatformError> {
             let gamepads = gilrs::Gilrs::new().map_err(|_| {
                 let error = host_error(
@@ -560,6 +581,7 @@ mod windows {
             let (package_completion_tx, package_completion_rx) = std_mpsc::channel();
             let (audio_completion_tx, audio_completion_rx) = std_mpsc::channel();
             Ok(Self {
+                test_null_audio,
                 backend,
                 ready: Some(ready),
                 windows: ResourceTable::new("window"),
@@ -1089,9 +1111,10 @@ mod windows {
             let completion_tx = self.audio_completion_tx.clone();
             let event_loop_proxy = self.event_loop_proxy.clone();
             let audio_wake = self.backend.audio_wake();
+            let test_null_audio = self.test_null_audio;
             self.pending_audio_opens += 1;
             thread::spawn(move || {
-                let result = AudioResource::new(request, audio_wake);
+                let result = AudioResource::new(request, audio_wake, test_null_audio);
                 if completion_tx
                     .send(AudioCompletion { reply, result })
                     .is_ok()
@@ -1488,8 +1511,13 @@ mod windows {
         readback.finish()
     }
 
+    enum AudioStream {
+        Device(cpal::Stream),
+        TestNull(astra_platform_common::NullAudioDevice),
+    }
+
     struct AudioResource {
-        stream: cpal::Stream,
+        stream: AudioStream,
         #[cfg(feature = "platform-test-driver")]
         stream_error: Arc<AtomicBool>,
         paused: bool,
@@ -1499,6 +1527,7 @@ mod windows {
         fn new(
             request: AudioOutputRequest,
             audio_wake: AudioWakeRegistration,
+            test_null_audio: bool,
         ) -> Result<
             (
                 Self,
@@ -1507,12 +1536,34 @@ mod windows {
             ),
             PlatformError,
         > {
-            if request.sample_rate == 0 || request.channels == 0 || request.max_buffered_frames == 0
+            if request.sample_rate == 0
+                || request.channels == 0
+                || request.max_buffered_frames == 0
+                || request.chunk_frames == 0
             {
                 return Err(PlatformError::new(
                     PlatformErrorCode::InvalidState,
                     "audio.open",
                     "audio output format and queue capacity must be non-zero",
+                ));
+            }
+            if test_null_audio {
+                let format = AudioDeviceFormat {
+                    sample_rate: request.sample_rate,
+                    channels: request.channels,
+                };
+                let paused = request.start_paused;
+                let (stream, producer) =
+                    astra_platform_common::NullAudioDevice::open(request, audio_wake)?;
+                return Ok((
+                    Self {
+                        stream: AudioStream::TestNull(stream),
+                        #[cfg(feature = "platform-test-driver")]
+                        stream_error: Arc::new(AtomicBool::new(false)),
+                        paused,
+                    },
+                    producer,
+                    format,
                 ));
             }
             let host = cpal::default_host();
@@ -1626,7 +1677,7 @@ mod windows {
             }
             Ok((
                 Self {
-                    stream,
+                    stream: AudioStream::Device(stream),
                     #[cfg(feature = "platform-test-driver")]
                     stream_error,
                     paused: request.start_paused,
@@ -1647,9 +1698,12 @@ mod windows {
                     "WASAPI output is already paused",
                 ));
             }
-            self.stream
-                .pause()
-                .map_err(|_| host_error("audio.pause", "WASAPI output could not pause"))?;
+            match &self.stream {
+                AudioStream::Device(stream) => stream
+                    .pause()
+                    .map_err(|_| host_error("audio.pause", "WASAPI output could not pause"))?,
+                AudioStream::TestNull(stream) => stream.pause()?,
+            }
             self.paused = true;
             Ok(())
         }
@@ -1662,9 +1716,12 @@ mod windows {
                     "WASAPI output is not paused",
                 ));
             }
-            self.stream
-                .play()
-                .map_err(|_| host_error("audio.resume", "WASAPI output could not resume"))?;
+            match &self.stream {
+                AudioStream::Device(stream) => stream
+                    .play()
+                    .map_err(|_| host_error("audio.resume", "WASAPI output could not resume"))?,
+                AudioStream::TestNull(stream) => stream.resume()?,
+            }
             self.paused = false;
             Ok(())
         }
