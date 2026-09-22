@@ -1,8 +1,8 @@
 schema: astra.asset.v1
 id: asset:/voice/vc_ln_t01_007
-source: Audio/Voice/Distribution/zhou_heng/vc_ln_t01_007.ogg
-source_hash: sha256:8d2d9c7d419fbe4157911dfc313be2fac25995cd4056a63a9656ebba50acd80b
-type: audio.ogg
+source: Audio/Voice/Master/zhou_heng/vc_ln_t01_007.wav
+source_hash: sha256:595fcbbe482aff86621e4858aa57956beea3af55a790d9bb6a8dd9b7ab1a222a
+type: audio.wav
 license: project-owned-generated
 importer: astra.import.audio
 cook:

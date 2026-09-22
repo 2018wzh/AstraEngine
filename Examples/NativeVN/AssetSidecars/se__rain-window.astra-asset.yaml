@@ -1,8 +1,8 @@
 schema: astra.asset.v1
 id: asset:/se/rain-window
-source: Audio/Distribution/se/rain-window.ogg
-source_hash: sha256:40097a9ce1a7c4d4f88f2f3cf3f77172c1b8aaeebb354282bd00586f817bdfa4
-type: audio.ogg
+source: Audio/Master/se/rain-window.wav
+source_hash: sha256:04829832bbc397ceca411583e067822be610ab2ebe9de6efa2aae69dcd54d4d7
+type: audio.wav
 license: project-owned-generated
 importer: astra.import.audio
 cook:

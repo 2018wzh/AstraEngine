@@ -1,8 +1,8 @@
 schema: astra.asset.v1
 id: asset:/se/distant-thunder
-source: Audio/Distribution/se/distant-thunder.ogg
-source_hash: sha256:2cb20584ab7f5c9bfb851e8cd48b8d67cdf637b854b5988ec897d637aa1a659d
-type: audio.ogg
+source: Audio/Master/se/distant-thunder.wav
+source_hash: sha256:467d187ed0b4de8fdaaf0d9320d0a62151b9bc8055ef77f44b18869f9fe4ca73
+type: audio.wav
 license: project-owned-generated
 importer: astra.import.audio
 cook:

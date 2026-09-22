@@ -1,8 +1,8 @@
 schema: astra.asset.v1
 id: asset:/bgm/carrier-noise
-source: Audio/Distribution/bgm/carrier-noise.ogg
-source_hash: sha256:2c7ec40cabf27d86913f82f0d8f1e0cf620ae6b56c68aeed7079f3672f8793cf
-type: audio.ogg
+source: Audio/Master/bgm/carrier-noise.wav
+source_hash: sha256:9143feb1e4a48099d5a5dfd7d4717e45e5176bd1313db055bff22c796bdcccb4
+type: audio.wav
 license: project-owned-generated
 importer: astra.import.audio
 cook:

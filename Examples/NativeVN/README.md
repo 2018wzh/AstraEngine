@@ -28,6 +28,8 @@
 
 完整状态见 [STATUS.md](STATUS.md)，迁移边界见 [NativeVN Flagship Demo Migration](../../Docs/migrations/nativevn-flagship-demo-migration.md)。
 
+运行时媒体统一绑定现有 205 份 WAV master 和 `rain-signal-loop.mp4`。逻辑 asset ID、显式 decode provider 与许可保持不变；OGG/WebM 保留为来源资产，不进入本项目的运行时 sidecar。当前契约没有按平台选择候选格式或解码失败后切换的行为。
+
 ## Cook
 
 ```sh

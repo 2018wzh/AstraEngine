@@ -1,8 +1,8 @@
 schema: astra.asset.v1
 id: asset:/voice/vc_ln_g01_002
-source: Audio/Voice/Distribution/lin_yao/vc_ln_g01_002.ogg
-source_hash: sha256:b394dff79a7cf4187d78526610514158a27e403dcf9f9168601316328b2ca30c
-type: audio.ogg
+source: Audio/Voice/Master/lin_yao/vc_ln_g01_002.wav
+source_hash: sha256:50537045f8905c1d283d6974c218e9a9054a78d0cebe4cedfd5390aa6f755b26
+type: audio.wav
 license: project-owned-generated
 importer: astra.import.audio
 cook:

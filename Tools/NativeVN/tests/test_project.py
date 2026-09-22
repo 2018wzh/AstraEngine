@@ -1,6 +1,7 @@
 from pathlib import Path
 import sys
 import re
+import shutil
 import tempfile
 import unittest
 from unittest import mock
@@ -10,6 +11,46 @@ import build_nativevn_project as project
 
 
 class ProjectRefreshTests(unittest.TestCase):
+    def test_runtime_media_and_font_sidecars_regenerate_without_drift(self):
+        fonts = {
+            f"Assets/Fonts/NotoSans{language}-Variable.ttf": f"font__notosans{language.lower()}-variable.astra-asset.yaml"
+            for language in ("JP", "SC")
+        }
+        expected_fonts = {
+            name: (project.PACK / "AssetSidecars" / name).read_bytes() for name in fonts.values()
+        }
+        media = {
+            "Audio/Master/bgm/theme.wav": ("bgm/theme", "audio.wav"),
+            "Audio/Master/se/rain.wav": ("se/rain", "audio.wav"),
+            "Audio/Master/stinger/chime.wav": ("stinger/chime", "audio.wav"),
+            "Audio/Voice/Master/speaker/line.wav": ("voice/line", "audio.wav"),
+            "Visual/Video/rain-signal-loop.mp4": ("movie/rain-signal-loop", "video.mp4"),
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for name in media:
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"media-source")
+            for source in fonts:
+                (root / source).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(project.PACK / source, root / source)
+            with mock.patch.object(project, "PACK", root):
+                self.assertEqual(set(project.discover_runtime_assets()), {*media, *fonts})
+                project.build_sidecars()
+                sidecars = root / "AssetSidecars"
+                first = {p.name: p.read_bytes() for p in sidecars.iterdir()}
+                for name, data in expected_fonts.items():
+                    self.assertEqual(first[name], data)
+                for source, (logical_id, kind) in media.items():
+                    name = logical_id.replace("/", "__") + ".astra-asset.yaml"
+                    text = first[name].decode("utf-8")
+                    self.assertIn(f"id: asset:/{logical_id}\n", text)
+                    self.assertIn(f"source: {source}\n", text)
+                    self.assertIn(f"type: {kind}\n", text)
+                project.build_sidecars()
+                self.assertEqual(first, {p.name: p.read_bytes() for p in sidecars.iterdir()})
+
     def test_authored_dialogue_windows_resolve_in_every_ui_profile(self):
         # Player resolves MessageViewModel.window as the surface name. Cook alone
         # does not reject a story referencing an unbound window.

@@ -1,8 +1,8 @@
 schema: astra.asset.v1
 id: asset:/se/choice-open
-source: Audio/Distribution/se/choice-open.ogg
-source_hash: sha256:16139422dbdd1f401645dc1d633a3afb0dbfbeea1441530c7c644aecc5116123
-type: audio.ogg
+source: Audio/Master/se/choice-open.wav
+source_hash: sha256:30e3913067f4f725a233a51ecfb94a349bc5eae7ac792f2f762bbffb5b0d82b0
+type: audio.wav
 license: project-owned-generated
 importer: astra.import.audio
 cook:

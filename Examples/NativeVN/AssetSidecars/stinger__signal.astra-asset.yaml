@@ -1,8 +1,8 @@
 schema: astra.asset.v1
 id: asset:/stinger/signal
-source: Audio/Distribution/stinger/signal.ogg
-source_hash: sha256:ab07954f0f76192c3b49cc62970d00f36e1afafc8f0f016efa28ac0c8725d75c
-type: audio.ogg
+source: Audio/Master/stinger/signal.wav
+source_hash: sha256:bde6c13ff21d95d72226d5409353f9e3692dfe9d1c6adbfdfc6609ce3acf68c6
+type: audio.wav
 license: project-owned-generated
 importer: astra.import.audio
 cook:

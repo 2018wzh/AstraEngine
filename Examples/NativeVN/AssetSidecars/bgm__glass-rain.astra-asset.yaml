@@ -1,8 +1,8 @@
 schema: astra.asset.v1
 id: asset:/bgm/glass-rain
-source: Audio/Distribution/bgm/glass-rain.ogg
-source_hash: sha256:8aa81183f8005a4ac39be9784383b39c424cb949f5ad5d5bdd1bd635f6a8e7ed
-type: audio.ogg
+source: Audio/Master/bgm/glass-rain.wav
+source_hash: sha256:908e4971c6b45fb56b35c0ff27957bcc86afb604f3317d76a778931a35564bdb
+type: audio.wav
 license: project-owned-generated
 importer: astra.import.audio
 cook:

@@ -1,8 +1,8 @@
 schema: astra.asset.v1
 id: asset:/stinger/truth
-source: Audio/Distribution/stinger/truth.ogg
-source_hash: sha256:072c905ca838b825fda86dda2868e20706e8aef33d367502f36e401fffb41c5e
-type: audio.ogg
+source: Audio/Master/stinger/truth.wav
+source_hash: sha256:30514cb0571b20a722dd213baf2a7e7b85ac4672593916f89aa4fab9f2a3c108
+type: audio.wav
 license: project-owned-generated
 importer: astra.import.audio
 cook:

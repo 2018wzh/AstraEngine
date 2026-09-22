@@ -1,8 +1,8 @@
 schema: astra.asset.v1
 id: asset:/bgm/thin-line
-source: Audio/Distribution/bgm/thin-line.ogg
-source_hash: sha256:20e3c4886747aa4e7dc10c8ee0405c7ecc293833dd799b982b8fa34beca7f546
-type: audio.ogg
+source: Audio/Master/bgm/thin-line.wav
+source_hash: sha256:e7d2b4f4554510731af199fdbca6b7da51ed4fc17c41d1f955dc285c38556dd5
+type: audio.wav
 license: project-owned-generated
 importer: astra.import.audio
 cook:

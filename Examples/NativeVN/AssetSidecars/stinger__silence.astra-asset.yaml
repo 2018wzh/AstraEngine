@@ -1,8 +1,8 @@
 schema: astra.asset.v1
 id: asset:/stinger/silence
-source: Audio/Distribution/stinger/silence.ogg
-source_hash: sha256:fc8db5aeada835c71ed700428ca0412440afec753bcb6b6c0b32a366c8a0e6b7
-type: audio.ogg
+source: Audio/Master/stinger/silence.wav
+source_hash: sha256:738167c21add47952592463ffbac4e102d9bf5ea625ce15bc2c7107242341563
+type: audio.wav
 license: project-owned-generated
 importer: astra.import.audio
 cook:

@@ -1,8 +1,8 @@
 schema: astra.asset.v1
 id: asset:/se/terminal-deny
-source: Audio/Distribution/se/terminal-deny.ogg
-source_hash: sha256:ff843f1240c817be0ba1070edf1e874e8fc7b4270ff3900402b5ba92a7b66077
-type: audio.ogg
+source: Audio/Master/se/terminal-deny.wav
+source_hash: sha256:0aa06b05c41d6b1f373e35a2e484a29100b0cedf1a26e1c949476f12c5d13e79
+type: audio.wav
 license: project-owned-generated
 importer: astra.import.audio
 cook:

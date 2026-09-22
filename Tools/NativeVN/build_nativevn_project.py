@@ -120,13 +120,13 @@ def asset_id(source: str) -> str:
         return f"asset:/ui/{parts[-1]}"
     if parts[:2] == ["Visual", "Video"]:
         return f"asset:/movie/{parts[-1]}"
-    if parts[:3] == ["Audio", "Distribution", "bgm"]:
+    if parts[:3] == ["Audio", "Master", "bgm"]:
         return f"asset:/bgm/{parts[-1]}"
-    if parts[:3] == ["Audio", "Distribution", "se"]:
+    if parts[:3] == ["Audio", "Master", "se"]:
         return f"asset:/se/{parts[-1]}"
-    if parts[:3] == ["Audio", "Distribution", "stinger"]:
+    if parts[:3] == ["Audio", "Master", "stinger"]:
         return f"asset:/stinger/{parts[-1]}"
-    if parts[:3] == ["Audio", "Voice", "Distribution"]:
+    if parts[:3] == ["Audio", "Voice", "Master"]:
         return f"asset:/voice/{parts[-1]}"
     if parts[:2] == ["Assets", "Fonts"]:
         return f"asset:/font/{parts[-1].lower()}"
@@ -137,10 +137,10 @@ def asset_type(source: str) -> tuple[str, str, str]:
     suffix = Path(source).suffix.lower()
     if suffix == ".png":
         return "image.png", "astra.import.image", "astra.cook.texture2d"
-    if suffix == ".ogg":
-        return "audio.ogg", "astra.import.audio", "astra.cook.audio"
-    if suffix == ".webm":
-        return "video.webm", "astra.import.video", "astra.cook.video"
+    if suffix == ".wav":
+        return "audio.wav", "astra.import.audio", "astra.cook.audio"
+    if suffix == ".mp4":
+        return "video.mp4", "astra.import.video", "astra.cook.video"
     if suffix == ".ttf":
         return "font.ttf", "astra.import.font", "astra.cook.font"
     raise ValueError(f"unsupported asset type: {source}")
@@ -152,13 +152,13 @@ def discover_runtime_assets() -> list[str]:
         relative = path.relative_to(PACK).as_posix()
         if "/Video/Source/" not in f"/{relative}":
             sources.append(relative)
-    sources.append("Visual/Video/rain-signal-loop.webm")
+    sources.append("Visual/Video/rain-signal-loop.mp4")
     for category in ("bgm", "se", "stinger"):
-        for path in sorted((PACK / "Audio" / "Distribution" / category).glob("*.ogg")):
+        for path in sorted((PACK / "Audio" / "Master" / category).glob("*.wav")):
             sources.append(path.relative_to(PACK).as_posix())
-    for path in sorted((PACK / "Audio" / "Voice" / "Distribution").rglob("*.ogg")):
+    for path in sorted((PACK / "Audio" / "Voice" / "Master").rglob("*.wav")):
         sources.append(path.relative_to(PACK).as_posix())
-    sources.append("Assets/Fonts/NotoSansJP-Variable.ttf")
+    sources.extend(["Assets/Fonts/NotoSansJP-Variable.ttf", "Assets/Fonts/NotoSansSC-Variable.ttf"])
     return sources
 
 
@@ -181,15 +181,17 @@ def build_sidecars() -> None:
         if kind.startswith("font."):
             lines.extend([
                 "font:",
-                "  family: Noto Sans JP",
+                "  family: Noto Sans SC" if "NotoSansSC" in source else "  family: Noto Sans JP",
                 "  face_index: 0",
                 "  subset: cjk-production",
                 "  coverage:",
                 "    - { start: 32, end: 126 }",
+                "    - { start: 8220, end: 8221 }",
                 "    - { start: 12288, end: 12543 }",
-                "    - { start: 13312, end: 40959 }",
-                "    - { start: 65280, end: 65519 }",
             ])
+            if "NotoSansSC" in source:
+                lines.append("    - { start: 13312, end: 40959 }")
+            lines.append("    - { start: 65280, end: 65519 }")
         lines.extend([
             "cook:",
             f"  processor: {processor}",
@@ -350,6 +352,8 @@ def copy_fonts() -> None:
     required = [
         PACK / "Assets" / "Fonts" / "NotoSansJP-Variable.ttf",
         PACK / "Assets" / "Fonts" / "OFL-NotoSansJP.txt",
+        PACK / "Assets" / "Fonts" / "NotoSansSC-Variable.ttf",
+        PACK / "Assets" / "Fonts" / "OFL.txt",
     ]
     missing = [path.relative_to(PACK).as_posix() for path in required if not path.is_file()]
     if missing:

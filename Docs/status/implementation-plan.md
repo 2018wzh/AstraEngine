@@ -27,6 +27,8 @@ Windows 完整样例的 Editor 编译、Cook 和打包已通过，Player 启动�
 保留《玻璃雨中的信号》的故事与授权素材，将旧 platform profile v2 迁到 v3，拆分 mixer/output、补齐限额并声明三桌面及 Android；修复 advanced-vn 系统页 policy 与 binding。项目工具不再覆盖作者 `.astra`。真实 Cook 的 284 个资产通过，工具测试 23 项通过、1 项跳过；产品交互、视听和存读档尚未验收。共享 target schema 仍强制 runtime_provider/ui_provider 元数据字段，样例保留到共享 schema 迁移，不引入动态 provider。
 Editor 补齐项目切换的迟到结果隔离：资源与预览配置选择器按请求取消，Graph/Timeline 拖动绑定项目会话，关闭和切项目确认绑定全部文档版本。定向回归覆盖编辑、撤销、保存及同路径重开；实际桌面交互仍待用户恢复授权。新版 NativeVN 的 Windows 全链预览等待明确兼容 WMF 的样例素材提交，不重复运行已知不支持的 OGG/WebM。
 
+NativeVN 运行时媒体已统一绑定现有 205 份 WAV master 与 MP4；206 个 sidecar 只改 source/hash/type，逻辑 ID、provider 和许可不变。生成器补齐 JP/SC 字体及原有 coverage，两份字体 sidecar 与此前字节一致。26 项工具回归、实际样例 Graph/Timeline 编辑与撤销重编译、重生成无漂移和 manifest/provenance 文件身份检查通过；284 个资源 Cook 与 727,189,934 字节 package build 通过。Windows Player 全链联调随后进行，不能据此声明可听音频或影片已验收。
+
 ## Linux 包加载完成与取消回收
 
 Linux HTTPS 包 worker 现在先入队 completion，再唤醒处于 `ControlFlow::Wait` 的 event loop；无需等待额外键鼠输入。同步与异步包打开若向已取消的接收端发送句柄失败，立即移除句柄并释放缓存 lease。新增回归覆盖投递先于唤醒、取消后缓存预算淘汰和失败不分配句柄。下载 worker 由 Linux Host 持有；调用方取消会丢弃等待中的下载 future，Host 销毁先取消全部请求再 join，完成的 worker 在后续事件处理中回收。取消回归实际创建未完成 cache staging，并确认线程退出和临时文件删除。启用 `platform-test-driver` 的 Linux all-targets 6 项测试通过。共享离屏 renderer 的 4 项硬件 GPU 测试通过，覆盖绘制顺序、纹理扩容/回收和滤镜回读；这不代表真实 HTTPS、窗口、可听音频、商业游戏或正式性能已验收。

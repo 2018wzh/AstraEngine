@@ -1,8 +1,8 @@
 schema: astra.asset.v1
 id: asset:/se/message-arrive
-source: Audio/Distribution/se/message-arrive.ogg
-source_hash: sha256:f59a68427d3cf4311c20cee3dfb90fcebc9526e1ae26fb0783b13fd1b072b85e
-type: audio.ogg
+source: Audio/Master/se/message-arrive.wav
+source_hash: sha256:b65768d90dcf49a245572d919974ed21a5ce7567dd409df145fcafd685557d9f
+type: audio.wav
 license: project-owned-generated
 importer: astra.import.audio
 cook:

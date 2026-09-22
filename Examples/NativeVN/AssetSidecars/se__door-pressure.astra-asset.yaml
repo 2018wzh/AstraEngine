@@ -1,8 +1,8 @@
 schema: astra.asset.v1
 id: asset:/se/door-pressure
-source: Audio/Distribution/se/door-pressure.ogg
-source_hash: sha256:57e038594627a781edc63c03988ef5fd818eac75db12f555ac4b9c6f6ea0c3e9
-type: audio.ogg
+source: Audio/Master/se/door-pressure.wav
+source_hash: sha256:c62e2ffe5f34d31c56cbdbeebf3dde7b8a0341a80e48e5c7ce12f6bac483c185
+type: audio.wav
 license: project-owned-generated
 importer: astra.import.audio
 cook:

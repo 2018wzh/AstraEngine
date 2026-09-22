@@ -1,8 +1,8 @@
 schema: astra.asset.v1
 id: asset:/se/terminal-key
-source: Audio/Distribution/se/terminal-key.ogg
-source_hash: sha256:83bee3813e0378b367dd511309b94084a12db6ae894ba71e52fd18845a19afc8
-type: audio.ogg
+source: Audio/Master/se/terminal-key.wav
+source_hash: sha256:a53210889504f0982f679979a837cd934603389008b5e861368519495225fa18
+type: audio.wav
 license: project-owned-generated
 importer: astra.import.audio
 cook:
