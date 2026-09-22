@@ -60,14 +60,14 @@ ui_view ui.system.title model:astra.vn.ui_model.title.v1 theme:astra.vn.theme.cl
 ui_view ui.system.save model:astra.vn.ui_model.save.v1 theme:astra.vn.theme.classic #@id ui.system.save
   screen id:root background:theme:surface.system
     column id:content
-      virtual_grid id:slots items:$model.slots item_key:slot_id columns:3 overscan:2 item_extent:220
-        column id:slot min_height:200 background:theme:panel.button
-          image id:thumbnail asset:$item.thumbnail_asset visible:$item.has_thumbnail min_width:280 min_height:120
+      virtual_grid id:slots items:$model.slots item_key:slot_id columns:3 overscan:2 item_extent:320 viewport_extent:640 min_height:640 max_height:640 fill_width:true clip_children:true
+        column id:slot min_height:320 background:theme:panel.button
+          image id:thumbnail asset:$item.thumbnail_asset visible:$item.has_thumbnail min_width:280 max_width:400 min_height:120 max_height:120
           text id:slot_id value:$item.slot_id
           text id:title value:$item.title_key
           text id:timestamp value:$item.timestamp_text
           text id:playtime value:$item.playtime_text
-          button id:write min_height:56 value:$item.slot_id enabled:$item.can_write
+          button id:write min_height:48 text:l10n:system.save enabled:$item.can_write
             on activate -> vn.request_save slot_id:$item.slot_id
       button id:back min_height:56 text:l10n:system.back
         on activate -> vn.return_system
@@ -75,14 +75,14 @@ ui_view ui.system.save model:astra.vn.ui_model.save.v1 theme:astra.vn.theme.clas
 ui_view ui.system.load model:astra.vn.ui_model.load.v1 theme:astra.vn.theme.classic #@id ui.system.load
   screen id:root background:theme:surface.system
     column id:content
-      virtual_grid id:slots items:$model.slots item_key:slot_id columns:3 overscan:2 item_extent:220
-        column id:slot min_height:200 background:theme:panel.button
-          image id:thumbnail asset:$item.thumbnail_asset visible:$item.has_thumbnail min_width:280 min_height:120
+      virtual_grid id:slots items:$model.slots item_key:slot_id columns:3 overscan:2 item_extent:320 viewport_extent:640 min_height:640 max_height:640 fill_width:true clip_children:true
+        column id:slot min_height:320 background:theme:panel.button
+          image id:thumbnail asset:$item.thumbnail_asset visible:$item.has_thumbnail min_width:280 max_width:400 min_height:120 max_height:120
           text id:slot_id value:$item.slot_id
           text id:title value:$item.title_key
           text id:timestamp value:$item.timestamp_text
           text id:playtime value:$item.playtime_text
-          button id:read min_height:56 value:$item.slot_id enabled:$item.can_load
+          button id:read min_height:48 text:l10n:system.load enabled:$item.can_load
             on activate -> vn.request_load slot_id:$item.slot_id
       button id:back min_height:56 text:l10n:system.back
         on activate -> vn.return_system
@@ -183,7 +183,6 @@ ui_view ui.message.modern model:astra.vn.ui_model.message.v2 theme:astra.vn.them
       column id:content
         row id:header
           text id:speaker value:$model.speaker_key font_size:28
-          text id:mode value:l10n:system.backlog font_size:18
         text id:body value:$model.text_key font_size:32 max_lines:5
         row id:commands
           button id:backlog min_height:48 text:l10n:system.backlog

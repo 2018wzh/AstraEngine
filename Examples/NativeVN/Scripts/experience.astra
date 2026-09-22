@@ -47,11 +47,13 @@ state experience_stage #@id state.experience_stage
     # 演出与对白同时运行；下一条替换同一对象的属性，而非冻结整个舞台。
     timeline id:experience.fade target:experience.actor property:opacity keyframes:0=0.2,20000=1 join:fire_and_forget budget_ms:2 #@id experience.fade.start
     text key:experience.stage.first window:main #@id experience.stage.first
-    timeline id:experience.replace target:experience.actor property:opacity keyframes:0=1,800=0.35 join:replace_target budget_ms:2 #@id experience.fade.replace
+    shade color:122238ff opacity:0.2 #@id experience.signal.dim
+    timeline id:experience.replace target:experience.actor property:opacity keyframes:0=1,8000=0.35 join:replace_target budget_ms:2 #@id experience.fade.replace
     text key:experience.stage.second window:main #@id experience.stage.second
     # cancellation 使用现有 TimelineCommand，不假造尚未接入的 TaskGroup DSL。
     timeline id:experience.replace action:cancel reason:author_requested #@id experience.fade.cancel
     timeline id:experience.finish target:experience.actor property:opacity keyframes:0=0.35,800=1 join:block fence:experience.finished budget_ms:2 #@id experience.fade.finish
+    shade color:122238ff opacity:0 #@id experience.signal.clear
     text key:experience.stage.third window:main #@id experience.stage.third
     jump target:experience_save #@id experience.stage.continue
 
@@ -66,9 +68,9 @@ state experience_media #@id state.experience_media
 
 state experience_save #@id state.experience_save
   scene keepsake #@id scene.experience.keepsake
-    show id:experience.keepsake asset:asset:/character/sprites/zhou-heng/relieved-center layer:character at:left opacity:0.25 interrupt:replace_from_current #@id experience.keepsake.show
+    show id:experience.witness asset:asset:/character/sprites/zhou-heng/relieved-center layer:foreground at:right opacity:0.25 interrupt:replace_from_current #@id experience.keepsake.show
     # 存档由现有系统页提出 request；禁止脚本直接写入存档或复制执行状态。
-    timeline id:experience.keepsake.fade target:experience.keepsake property:opacity keyframes:0=0.25,60000=1 join:fire_and_forget budget_ms:2 #@id experience.keepsake.fade
+    timeline id:experience.keepsake.fade target:experience.witness property:opacity keyframes:0=0.25,60000=1 join:fire_and_forget budget_ms:2 #@id experience.keepsake.fade
     text key:experience.save.before window:main #@id experience.save.before
     text key:experience.save.after window:main #@id experience.save.after
     choice key:experience.read.question #@id experience.save.choice

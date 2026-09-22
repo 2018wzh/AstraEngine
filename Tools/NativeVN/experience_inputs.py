@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 
 
-def build_sequence() -> list[dict]:
+def build_sequence(*, save_restore: bool = False, media: bool = False) -> list[dict]:
     rows = []
     tick = 0
 
@@ -48,12 +48,58 @@ def build_sequence() -> list[dict]:
     await_value("vn.text_reveal_complete", True)
     add({"type": "checkpoint", "id": "experience.approach"})
     key("Enter")
-    dialogue("experience.stage.second")
-    dialogue("experience.stage.third")
+    await_value("vn.pending_wait_command", "experience.stage.second")
+    await_value("vn.text_reveal_complete", True)
+    add({"type": "checkpoint", "id": "experience.signal.dim"})
+    key("Enter")
+    await_value("vn.pending_wait_command", "experience.stage.third")
+    await_value("vn.text_reveal_complete", True)
+    add({"type": "checkpoint", "id": "experience.signal.restored"})
+    key("Enter")
     await_value("vn.pending_wait_command", "experience.save.before")
     await_value("vn.text_reveal_complete", True)
     add({"type": "checkpoint", "id": "experience.keepsake"})
-    # Saving/restoring and full video need separate input cases.
+    if save_restore:
+        # All actions go through real focus navigation and the rendered system UI.
+        # The full-screen advance panel is the first focusable control.
+        key("Tab")
+        key("Tab")
+        key("Tab")
+        key("Enter")
+        await_value("vn.system_page", "save")
+        add({"type": "checkpoint", "id": "experience.save_page"})
+        key("Tab")
+        key("Enter")
+        await_value("vn.occupied_save_slot_count", 1)
+        add({"type": "checkpoint", "id": "experience.saved"})
+        key("Escape")
+        await_value("vn.system_page", None)
+        key("Tab")
+        key("Tab")
+        key("Tab")
+        key("Tab")
+        key("Enter")
+        await_value("vn.system_page", "load")
+        add({"type": "checkpoint", "id": "experience.load_page"})
+        key("Tab")
+        key("Enter")
+        await_value("vn.system_page", None)
+        await_value("vn.pending_wait_command", "experience.save.before")
+        add({"type": "checkpoint", "id": "experience.restored"})
+    if media:
+        dialogue("experience.save.before")
+        dialogue("experience.save.after")
+        await_value("vn.pending_choices", ["experience.save.rain", "experience.save.back"])
+        key("Tab")
+        key("Enter")
+        dialogue("experience.media.before")
+        await_value("media.active_video", True)
+        add({"type": "checkpoint", "id": "experience.video.start"}, 360)
+        add({"type": "checkpoint", "id": "experience.video.middle"})
+        await_value("vn.pending_wait_command", "experience.media.after", timeout=1200)
+        await_value("media.active_video", False)
+        add({"type": "checkpoint", "id": "experience.video.end"})
+    # Cold-process restore needs a separate input case.
     add({"type": "shutdown"})
     return rows
 
@@ -61,8 +107,10 @@ def build_sequence() -> list[dict]:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--save-restore", action="store_true")
+    parser.add_argument("--media", action="store_true")
     args = parser.parse_args()
-    rows = build_sequence()
+    rows = build_sequence(save_restore=args.save_restore, media=args.media)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     # Existing sequences may be evidence from another build; do not overwrite them.
     with args.output.open("x", encoding="utf-8") as stream:
