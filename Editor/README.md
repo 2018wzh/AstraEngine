@@ -6,13 +6,15 @@ Editor 使用独立 Cargo workspace 和 GPUI 窗口。共享编辑逻辑位于 `
 cargo run --manifest-path Editor/Cargo.toml -p astra-editor -- story.astra
 ```
 
-当前入口打开一个已有 `.astra` 文件。文本输入、外部 Agent 写入和 MCP batch 都进入同一份未保存文档。Save 写入临时文件后原子替换；磁盘内容已变化时拒绝覆盖。关闭有未保存修改的窗口时，可以取消、保存或丢弃。
+入口接受已有 `.astra` 文件或 NativeVN `project.yaml`。工程模式同时载入剧情、UI、主题和 Controller；Content Browser 搜索源文件及声明的资源 sidecar，切换源文件保留未保存修改。文本输入、外部 Agent 写入和 MCP batch 都进入同一份未保存文档。Save 写入临时文件后原子替换；磁盘内容已变化时拒绝覆盖。关闭有未保存修改的窗口时，可以取消、保存或丢弃。
 
 ## 编辑与诊断
 
 `AuthoringWorkspace` 保存文档版本，版本从 1 开始。`EditBatch` 内每个文档必须提供当前版本和不重叠的 UTF-8 字节范围；全部校验通过后一起应用。撤销和重做仍增加版本，旧 Agent 结果不能因内容恢复而重新生效。一个 batch 对应一次撤销。
 
-`attribute_edit` 使用现有 CST 的 attribute span 修改源码，保留周围注释和 source ID。Graph、Timeline 和 Inspector 应调用这个接口，不维护第二份剧情数据。当前桌面入口已接文本编辑；图和时间线交互仍待实现。
+`attribute_edit` 使用现有 CST 的 attribute span 修改源码，保留周围注释和 source ID。Outliner、剧情结构、演出视图和 Details 共用 source ID 选择；点击命令定位源码，Details 把一组属性修改作为单个 batch 提交。源码版本改变后旧 Details 提交会被拒绝。当前 Graph/Timeline 仍是可选中和编辑属性的命令投影，完整节点连线、拖拽关键帧和曲线编辑尚未完成。
+
+左右面板可调整宽度，布局保存在 ignored `.astra-cache/editor-layout.json`；Reset layout 恢复默认。Ctrl/Cmd+S 保存全部源文档，源编辑区的 Undo/Redo 快捷键进入共用 batch 历史。Agent 输入和未提交的属性字段保留自己的局部输入撤销。
 
 编辑后直接调用现有 `.astra` 编译器。诊断显示 source、行列和错误内容，并可跳转到输入位置。成功编译沿用 compiler source map，不生成另一套位置映射。
 

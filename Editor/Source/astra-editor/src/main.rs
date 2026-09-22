@@ -13,6 +13,8 @@ use gpui_component::{
     input::{Input, InputEvent, InputState},
     Disableable, Root,
 };
+mod panels;
+mod render;
 
 struct Editor {
     project: Project,
@@ -33,6 +35,8 @@ struct Editor {
     runtime: tokio::runtime::Handle,
     agent_task: Option<tokio::task::JoinHandle<()>>,
     diagnostic_position: Option<gpui_component::input::Position>,
+    diagnostic_source: Option<String>,
+    panels: panels::WorkspacePanels,
     _subscription: Subscription,
 }
 
@@ -65,7 +69,11 @@ impl Editor {
             .unwrap()
             .text
             .clone();
-        let input = cx.new(|cx| InputState::new(window, cx).multi_line(true));
+        let input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .code_editor("text")
+                .line_number(true)
+        });
         let agent_prompt = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder("Ask the external ACP agent to edit this source")
@@ -77,12 +85,14 @@ impl Editor {
                 if let Err(error) = this.project.replace(text) {
                     this.status = error.to_string();
                 } else {
+                    this.preview = None;
                     this.diagnose();
                 }
                 cx.notify();
             }
         });
         let mut editor = Self {
+            panels: panels::WorkspacePanels::new(window, cx),
             project,
             input,
             status: String::new(),
@@ -101,6 +111,7 @@ impl Editor {
             runtime,
             agent_task: None,
             diagnostic_position: None,
+            diagnostic_source: None,
             _subscription: subscription,
         };
         editor.agent.begin(editor.mode).expect("new agent turn");
@@ -110,6 +121,7 @@ impl Editor {
                 .await;
             if this
                 .update_in(cx, |this, window, cx| {
+                    this.follow_source_cursor(window, cx);
                     while let Ok(request) = this.requests.try_recv() {
                         match request {
                             Request::AgentMessage { generation, text } => {
@@ -183,18 +195,21 @@ impl Editor {
         })
         .detach();
         editor.diagnose();
+        editor.load_layout();
         editor
     }
 
     fn diagnose(&mut self) {
         self.diagnostic_position = None;
-        self.status = match self.project.documents.compile(Default::default()) {
+        self.diagnostic_source = None;
+        self.status = match self.project.compile() {
             Ok(project) => format!(
                 "Compiled · {} source locations",
                 project.story.source_map.len()
             ),
             Err(astra_vn_editor::VnError::Diagnostic(error)) => {
                 if let Some(source) = error.source {
+                    self.diagnostic_source = Some(source.source.clone());
                     self.diagnostic_position = Some(gpui_component::input::Position::new(
                         source.line.saturating_sub(1),
                         source.column.saturating_sub(1),
@@ -269,6 +284,7 @@ impl Editor {
     }
 
     fn sync(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.preview = None;
         self.syncing = true;
         let text = self
             .project
@@ -285,65 +301,6 @@ impl Editor {
     }
 }
 
-impl Render for Editor {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let document = self
-            .project
-            .documents
-            .document(&self.project.active)
-            .unwrap();
-        let dirty = self
-            .project
-            .documents
-            .is_dirty(&self.project.active)
-            .unwrap();
-        div().flex().flex_col().size_full().p_4().gap_3().bg(rgb(0x181b22)).text_color(rgb(0xe4e8ef))
-            .child(div().flex().gap_3().items_center()
-                .child(format!("{}{} · v{}", self.project.active, if dirty { " *" } else { "" }, document.version))
-                .child(Button::new("save").label("Save").on_click(cx.listener(|this, _, _, cx| {
-                    this.status = this.project.save().map(|_| "Saved".to_string()).unwrap_or_else(|e| e.to_string()); cx.notify();
-                })))
-                .child(Button::new("undo").label("Undo batch").on_click(cx.listener(|this, _, window, cx| {
-                    match this.project.documents.undo() { Ok(()) => this.sync(window, cx), Err(e) => { this.status = e.to_string(); cx.notify(); } }
-                })))
-                .child(Button::new("redo").label("Redo").on_click(cx.listener(|this, _, window, cx| {
-                    match this.project.documents.redo() { Ok(()) => this.sync(window, cx), Err(e) => { this.status = e.to_string(); cx.notify(); } }
-                })))
-                .child(Button::new("preview").label("Save & Preview").on_click(cx.listener(|this, _, _, cx| {
-                    let result = (|| -> anyhow::Result<()> {
-                        let config = this.preview_config.as_ref().ok_or_else(|| anyhow::anyhow!("Open with a preview configuration to bind project, target, profile and built tools"))?;
-                        this.project.documents.compile(Default::default())?;
-                        this.project.save()?;
-                        this.preview = None;
-                        let version = this.project.documents.document(&this.project.active)?.version;
-                        this.preview = Some(Preview::start(config, version)?);
-                        Ok(())
-                    })();
-                    if let Err(error) = result { this.status = error.to_string(); }
-                    cx.notify();
-                })))
-                .child(Button::new("stop").label("Stop preview").on_click(cx.listener(|this, _, _, cx| {
-                    this.preview = None; cx.notify();
-                }))))
-            .child(div().flex_1().min_h_0().child(Input::new(&self.input).h_full()))
-            .child(div().flex().gap_3().child(self.status.clone()).child(Button::new("locate-diagnostic").label("Go to diagnostic").disabled(self.diagnostic_position.is_none()).on_click(cx.listener(|this, _, window, cx| {
-                if let Some(position) = this.diagnostic_position { this.input.update(cx, |input, cx| input.set_cursor_position(position, window, cx)); }
-            }))))
-            .child(div().flex().gap_3()
-                .child(Button::new("agent-mode").label(format!("Agent: {:?}", self.mode)).on_click(cx.listener(|this, _, _, cx| {
-                    this.mode = if this.mode == EditMode::Autonomous { EditMode::ReviewEachBatch } else { EditMode::Autonomous };
-                    this.cancel_agent(); cx.notify();
-                })))
-                .child(Button::new("cancel-agent").label("Cancel agent").on_click(cx.listener(|this, _, _, cx| { this.cancel_agent(); cx.notify(); })))
-                .child(Button::new("approve").label("Apply batch").disabled(self.pending_reply.is_none()).on_click(cx.listener(|this, _, window, cx| { this.review(true, window, cx); })))
-                .child(Button::new("reject").label("Reject batch").disabled(self.pending_reply.is_none()).on_click(cx.listener(|this, _, window, cx| { this.review(false, window, cx); }))))
-            .child(self.agent.pending().map(|batch| serde_json::to_string_pretty(batch).unwrap_or_default()).unwrap_or_default())
-            .child(div().flex().gap_3().child(Input::new(&self.agent_prompt)).child(Button::new("send-agent").label("Send").on_click(cx.listener(|this, _, _, cx| { this.prompt_agent(cx); cx.notify(); }))))
-            .child(self.agent_output.clone())
-            .child(self.preview.as_ref().map(|p| p.status.clone()).unwrap_or_default())
-    }
-}
-
 #[derive(Parser)]
 struct Args {
     source: PathBuf,
@@ -353,11 +310,22 @@ struct Args {
     agent: Option<String>,
     #[arg(long)]
     mcp: bool,
+    #[arg(long)]
+    check_project: bool,
 }
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let project = Project::open(&args.source)?;
+    if args.check_project {
+        let compiled = project.compile()?;
+        println!(
+            "Compiled {} source documents, {} source locations",
+            project.documents.documents().count(),
+            compiled.story.source_map.len()
+        );
+        return Ok(());
+    }
     let preview_config = args
         .preview_config
         .map(|path| -> anyhow::Result<PreviewConfig> {
@@ -399,13 +367,7 @@ fn main() -> anyhow::Result<()> {
                 let weak = editor.downgrade();
                 window.on_window_should_close(cx, move |window, cx| {
                     weak.update(cx, |editor, cx| {
-                        if editor.close_confirmed
-                            || !editor
-                                .project
-                                .documents
-                                .is_dirty(&editor.project.active)
-                                .unwrap_or(true)
-                        {
+                        if editor.close_confirmed || !editor.project.any_dirty() {
                             return true;
                         }
                         let answer = window.prompt(
@@ -422,7 +384,7 @@ fn main() -> anyhow::Result<()> {
                             }
                             let _ = this.update_in(cx, |this, window, cx| {
                                 if choice == 1 {
-                                    if let Err(error) = this.project.save() {
+                                    if let Err(error) = this.project.save_all() {
                                         this.status = error.to_string();
                                         cx.notify();
                                         return;

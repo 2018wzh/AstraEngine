@@ -8,6 +8,9 @@ license.workspace = true
 astra-vn-editor = { path = "../../../Engine/Source/Modules/AstraVN/astra-vn-editor" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+serde_yaml = "0.9"
+astra-ui-core = { path = "../../../Engine/Source/Runtime/astra-ui-core" }
+astra-vn-policy = { path = "../../../Engine/Source/Modules/AstraVN/astra-vn-policy" }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 tempfile = "3"

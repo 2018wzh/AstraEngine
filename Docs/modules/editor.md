@@ -1,59 +1,21 @@
-# AstraEditor Module
+# AstraEditor
 
-AstraEditor 使用 Qt/QML + Rust core。Editor 是 creator workflow 和 debugger，不是 packaged runtime 的前置条件。Editor shell 不绑定单一玩法类型，项目必须通过 `ProductRuntimeProvider` 显式选择 AstraVN、AstraEMU 或后续 AstraRPG。
+AstraEditor 使用 GPUI，产品目标是达到 Unreal Editor 同等级的易用性，主要服务 NativeVN 的 2D 分层场景、剧情、演出和 UI 创作。这个目标尚未达成。旧 Qt/QML、动态 Runtime Provider 切换和嵌入式模型请求循环不再是实施方向。
 
-## V1 面板
+## 人工创作主流程
 
-- Project Wizard / Template Browser
-- Project Settings / Plugin Manager
-- Command Palette
-- Content Browser / Import Wizard
-- Inspector / Details Panel
-- Script Editor
-- Graph Editor
-- Timeline Editor
-- FilterGraph / AudioGraph Editor
-- PIE Viewport
-- Runtime Debugger
-- Save/Replay Inspector
-- Package / Release Gate Panel
-- AI Review Queue / Trusted Session Audit
+用户打开项目后，从 Content Browser 查找源文件和资源，在 Outliner、Graph 或 Timeline 选择对象，再通过 Details 修改同一份 `.astra`。源码是唯一权威；面板选择、布局和展开状态属于 Editor 状态。人工流程不依赖 Agent。
 
-## Runtime Provider Switching
+Save、Undo、Redo、脏状态和关闭确认共用文档事务。编译诊断和对象选择使用 compiler source map/CST source ID 定位。Play 运行真实 Player，构建中、运行、停止和失败必须可区分；缺少宿主能力时不显示虚假的 Pause 或 Seek 控件。
 
-Project Wizard、Project Settings、Plugin Manager、PIE、Debugger 和 Release Gate 都读取 selected `ProductRuntimeProvider` 的 `RuntimeEditorMetadata`。公共 shell 保持不变；Script、Graph、Timeline、Map、Quest、legacy trace 等玩法面板由 provider metadata 决定。
+## 实现边界
 
-NativeVN 当前提供 `.astra` Script、VN Graph、Timeline、System UI 和 Luau policy surface。AstraEMU 是 planned peer runtime；AstraRPG 是 Stage 7 planned gameplay runtime，`rpg.trpg` 只作为 AstraRPG 内部 profile/ruleset 暴露 metadata。Editor 只预留 case profile、legacy pack VFS、family trace、Map、Quest、Battle/Party/Inventory、TRPG seat/transcript 等接入边界，不把它们写成已实现 UI，也不创建独立 AstraTRPG 顶层模块或 provider。
+版本化编辑、GPUI 文本输入、文件保存冲突、ACP/MCP 共用事务桥和预览进程管理已接入。工程浏览、联动 Details、布局和图/演出视图正在完善。当前还不能把命令列表当作完整图形节点编辑器，或把 keyframe 文本字段当作完整曲线编辑器。
 
-## Editor Runtime Session
+外部 Agent 通过 ACP 连接，模型配置由 Agent 管理。自主和逐批确认模式经过相同版本、范围和取消检查。MCP 编辑访问当前未保存的文档，不绕过 UI 审批。
 
-PIE 使用同一 RuntimeWorld public API，并由 selected gameplay runtime provider 打开 Game target session。Editor 通过 debug session 查看 Actor、Component、StateMachine、EventQueue、AwaitToken、ScriptSnapshot、FilterGraph、AudioGraph、RuntimeEditorMetadata 和 ReleaseReport。
+## 参考与入口
 
-## Plugin Manager
+交互参考 Epic 的 [Editor Interface](https://dev.epicgames.com/documentation/en-us/unreal-engine/unreal-editor-interface)、[Content Browser](https://dev.epicgames.com/documentation/en-us/unreal-engine/content-browser-in-unreal-engine) 和 [Play & Simulate](https://dev.epicgames.com/documentation/en-us/unreal-engine/ineditor-testing-play-and-simulate-in-unreal-engine)：统一选择驱动 Details、可恢复工作区、可搜索资源、明确的运行模式。
 
-Plugin Manager 使用 ExtensionRegistry 报告，不直接加载私有 UI。它显示 load phase、extension point、dependency graph、enablement、权限、冲突、packaged 裁剪和 release check。菜单、面板、资产类型、Graph node、Timeline track、Inspector widget 和 release check 都必须能跳到 descriptor source 或 diagnostic source。
-
-## Luau Policy Visualization
-
-Luau 策略像可视化基类，Graph/Timeline 是创作者派生层。策略包必须暴露节点、端口、Inspector 控件、Timeline track、preview input/output、source map 和 diagnostics；Editor 默认按段落/场景级编辑，复杂 Luau 内部逻辑显示为策略节点。
-
-PIE/Preview 可以刷新 Luau 策略；发布 runtime 不支持策略热重载。
-
-## Trusted Session
-
-项目授权后，AI 可以直写 canonical source、Luau 策略和 Graph/Timeline 派生层。Editor UI 必须能查看、回滚和解释每次 patch、graph diff、audit event 和 release check。
-
-## UE 级创作者工作流
-
-v1 面板必须覆盖空状态、加载中、错误、可编辑、只读和 release blocked 状态。Project Wizard、Project Settings、Plugin Manager、Command Palette、Content Browser、Script、Graph、Timeline、Inspector、PIE、Debugger、Package Gate 和 AI Review Queue 的数据来源、操作和验收见 [Editor Workflow Blueprint](../implementation/editor-workflow.md)。
-
-## 详细设计文档（Stage 4 前端设计稿）
-
-| 文档 | 内容 |
-| --- | --- |
-| [editor/README.md](../implementation/editor/README.md) | 前端设计总索引和所有决策摘要 |
-| [editor/shell.md](../implementation/editor/shell.md) | cxx-qt bridge（Qt 6.5 LTS）、Dock 布局、设计系统、PIE Viewport（平台收束表面）、Inspector、Content Browser |
-| [editor/graph.md](../implementation/editor/graph.md) | Graph Editor（NodeEditor-Qt，dagre 布局，500 节点目标）、Timeline、FilterGraph/AudioGraph |
-| [editor/script-editor.md](../implementation/editor/script-editor.md) | Script Editor（tree-sitter + ropey，行号 gutter，错误 marker，source map badge）|
-| [editor/ai-copilot.md](../implementation/editor/ai-copilot.md) | AI Copilot（分级写入，Review Queue 五步确认，Trusted session）|
-| [ADR 0013](../adr/0013-cxx-qt-bridge.md) | cxx-qt 作为 Rust↔Qt Bridge 实现的架构决策记录 |
+契约见 [重构契约](../contracts/rebuild.md)，操作和增量测试见 [Editor 手册](../../Editor/README.md)，结构见 [Shell](../implementation/editor/shell.md)，总体状态见 [实施计划](../status/implementation-plan.md)。

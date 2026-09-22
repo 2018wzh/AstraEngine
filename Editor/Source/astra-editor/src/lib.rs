@@ -4,3 +4,4 @@ pub mod bridge;
 pub mod mcp;
 pub mod preview;
 pub mod project;
+mod project_files;
