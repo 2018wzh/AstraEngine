@@ -1,5 +1,7 @@
 # Game Runtime Provider Migration
 
+NativeVN 当前入口已改为 `astra-vn::VnSession`；旧 NativeVnRuntimeProvider、Factory、FFI 和独立 provider crate 已删除。本页其余动态 provider 内容描述尚未迁移的公共消费者，不能用于 NativeVN 新代码。目标边界见[重构契约](../contracts/rebuild.md)。
+
 本计划只迁移已经存在的 AstraVN runtime facade、VN extension manifest、package sections 和 release checks，使它们对齐 [Game Runtime Provider Contract](../contracts/game-runtime-provider.md)。执行前先完成 [AstraVN Module Layout Migration](astra-vn-module-layout-migration.md) 和 [AstraVN Crate Split Migration](astra-vn-crate-split-migration.md)。AstraEMU/AstraRPG 代码尚未存在，不列为迁移对象。
 
 ## 迁移前实现入口

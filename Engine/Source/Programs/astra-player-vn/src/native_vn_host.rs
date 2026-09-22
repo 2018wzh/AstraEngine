@@ -41,6 +41,7 @@ use astra_ui_yakui::{
     ui_frame_to_scene_commands, AstraTextMeasureRequest, AstraTextMeasureResult, AstraTextMeasurer,
     AstraYakuiBackend, BlueprintYakuiRenderer,
 };
+use astra_vn::{NativeVnStepCommand, NativeVnStepInput, NativeVnStepOutput};
 #[cfg(test)]
 use astra_vn_core::SystemActionEffect;
 use astra_vn_core::{
@@ -58,7 +59,6 @@ use astra_vn_package::{
     VnSystemUiProfileManifest,
 };
 use astra_vn_policy::LuauUiControllerHost;
-use astra_vn_runtime_provider::{NativeVnStepCommand, NativeVnStepInput, NativeVnStepOutput};
 use astra_vn_ui::{
     resolve_binding, SaveSlotViewModel, VnUiAction, VnUiBindingError, VnUiBindingRequest,
     VnUiControllerEffect, VnUiControllerUpdate, VnUiModelContext, VnUiSessionState,
@@ -541,9 +541,7 @@ impl NativeVnHostCommandSource {
         let policy: astra_plugin_abi::ProviderPolicy =
             serde_json::from_value(read_package_json(package, "provider.policy")?)
                 .map_err(|error| NativeVnHostError::Package(error.to_string()))?;
-        if policy.runtime_provider
-            != astra_vn_runtime_provider::NativeVnRuntimeProvider::descriptor()
-        {
+        if policy.runtime_provider != astra_vn::native_vn_descriptor() {
             return Err(NativeVnHostError::Package(
                 "ASTRA_RUNTIME_PROVIDER_LINKED_DESCRIPTOR_MISMATCH: package declarations do not match the compiled NativeVN runtime".into(),
             ));
@@ -748,7 +746,7 @@ impl NativeVnHostCommandSource {
         let open = match host.open(
             Arc::clone(&story),
             config,
-            astra_vn_runtime_provider::NativeVnSessionConfig {
+            astra_vn::VnSessionConfig {
                 target_id: runtime_provider.target().into(),
                 seed: 0,
                 package: Some(astra_runtime::PackageHandle {

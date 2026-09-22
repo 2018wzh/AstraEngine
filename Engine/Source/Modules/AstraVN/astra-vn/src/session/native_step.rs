@@ -14,7 +14,7 @@ pub struct NativeVnStepInput {
     pub command: NativeVnStepCommand,
 }
 
-impl NativeVnSession {
+impl VnSession {
     pub fn step(&mut self, input: NativeVnStepInput) -> Result<NativeVnStepOutput, CoreVnError> {
         if self.failed {
             return Err(CoreVnError::diagnostic(
@@ -24,12 +24,15 @@ impl NativeVnSession {
         }
         // Set before any fallible execution, including panic unwinding.
         self.failed = true;
-        let mut failure_scope = StepFailureScope(Some(self.world.task_scope()));
+        let mut failure_scope = StepFailureScope(Some(self.engine.world().task_scope()));
         tracing::trace!(
             event = "vn.provider.session.step",
             fixed_step = input.timing.fixed_step,
             "AstraVN runtime session step started"
         );
+        self.engine
+            .validate_step(input.timing, input.mode)
+            .map_err(|error| CoreVnError::message(error.to_string()))?;
         let command = match input.command {
             NativeVnStepCommand::Execute(command) => command,
             NativeVnStepCommand::LaunchDefault => {
@@ -69,76 +72,6 @@ pub struct NativeVnStepOutput {
     pub audio: Vec<VnAudioCommand>,
     pub timeline: Vec<astra_vn_core::VnTimelineTask>,
     pub coverage_reached: Vec<String>,
-}
-
-impl NativeVnStepOutput {
-    pub(crate) fn into_abi(
-        self,
-        session_id: GameRuntimeSessionId,
-    ) -> Result<RuntimeStepOutput, CoreVnError> {
-        let presentation_count = self.presentations.len();
-        let audio_command_count = self.audio.len();
-        let mut presentations = Vec::with_capacity(presentation_count);
-        let mut audio_cues = Vec::with_capacity(audio_command_count);
-        let mut audio = self.audio.into_iter();
-        for (presentation_index, command) in self.presentations.into_iter().enumerate() {
-            let sequence = presentation_index
-                .checked_add(1)
-                .and_then(|index| u64::try_from(index).ok())
-                .ok_or_else(|| CoreVnError::message("VN presentation sequence overflow"))?;
-            let has_audio = matches!(&command, PresentationCommand::Stage(StageCommand::Audio(_)));
-            if has_audio {
-                let audio_command = audio.next().ok_or_else(|| {
-                    CoreVnError::diagnostic(
-                        "ASTRA_NATIVE_VN_AUDIO_ORDER_MISSING",
-                        "typed audio presentation has no matching audio output",
-                    )
-                })?;
-                audio_cues.push(runtime_live_audio_cue(sequence, &audio_command));
-            }
-            presentations.push(runtime_live_presentation(sequence, command));
-        }
-        if audio.next().is_some() {
-            return Err(CoreVnError::diagnostic(
-                "ASTRA_NATIVE_VN_AUDIO_ORDER_EXTRA",
-                "audio output has no matching typed presentation command",
-            ));
-        }
-        let timeline = self
-            .timeline
-            .into_iter()
-            .map(|task| astra_plugin_abi::RuntimeLiveTimelineTask {
-                command_id: task.command_id,
-                command: runtime_live_timeline(task.command),
-            })
-            .collect();
-        let vn_step = astra_plugin_abi::RuntimeLiveVnStep {
-            coverage_reached: self.coverage_reached,
-        };
-        Ok(RuntimeStepOutput {
-            session_id,
-            status: if presentation_count == 0 {
-                "idle".to_string()
-            } else {
-                "blocked".to_string()
-            },
-            live: astra_plugin_abi::RuntimeLiveOutput {
-                state_revision: self.fixed_step,
-                coverage: RuntimeLiveCoverage {
-                    presentation_commands: presentation_count as u64,
-                    audio_commands: audio_command_count as u64,
-                    ..RuntimeLiveCoverage::default()
-                },
-                audio_cues,
-                presentations,
-                timeline,
-                vn_state: Some(runtime_live_vn_state(&self.vn_state)),
-                vn_step: Some(vn_step),
-                ..astra_plugin_abi::RuntimeLiveOutput::default()
-            },
-            diagnostics: Vec::new(),
-        })
-    }
 }
 
 fn validate_audio_order(

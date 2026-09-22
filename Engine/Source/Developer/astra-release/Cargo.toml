@@ -25,7 +25,6 @@ astra-vn = { path = "../../Modules/AstraVN/astra-vn" }
 astra-vn-core = { path = "../../Modules/AstraVN/astra-vn-core" }
 astra-vn-package = { path = "../../Modules/AstraVN/astra-vn-package" }
 astra-vn-policy = { path = "../../Modules/AstraVN/astra-vn-policy" }
-astra-vn-runtime-provider = { path = "../../Modules/AstraVN/astra-vn-runtime-provider", default-features = false }
 astra-vn-script = { path = "../../Modules/AstraVN/astra-vn-script" }
 astra-vn-system = { path = "../../Modules/AstraVN/astra-vn-system" }
 postcard.workspace = true

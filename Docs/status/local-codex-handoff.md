@@ -53,7 +53,7 @@ FVP 保持 RFVP 0.6.0 revision `304e773387a9920c9db091ec1fd937c717aea949`，共�
 | SDK/Musica | 独立 astra-text；PAZ/profile/纯 Rust importer；独立 session、CPU 画面、PCM、输入、AMINSV02 保存与音频渐变恢复 | 完整 opcode、choice/系统页/影片、ANI/SQZ session 播放、长媒体流式解码、真实结局/Android |
 | Runtime | 无包 World、typed Actor/Component 保存；删除整帧回滚与通用 replay/hash chain；TaskScope/scoped completion/cancel | 其他平台资源取消、完整可信 Luau/产品异步 IO 接入 |
 | Player/媒体 | 原位呈现；fence all-of；视频作用域；产品存档包含音视频/timeline；播放时钟、冷启动 PCM、output 重建、pending open/close 回收 | 真实 GPU/audio/decoder 组合、长流程、暂停/恢复/冷启动及性能 |
-| NativeVN | Player 直接持有 NativeVnSession；typed input/output/view/config；共享 Arc 剧情；原生 SaveBlob；原位 VnRuntime；失败取消/恢复；本轮删除转发 FSM/控制锁 | serialized policy descriptor、其他 generic provider/FFI/UI ABI 消费者、DSL/可信 Luau/标准产品能力仍需完成 |
+| NativeVN | Player 直接持有 VnSession；typed input/output/view/config；共享 Arc 剧情；原生 SaveBlob；原位 VnRuntime；失败取消/恢复；本轮删除转发 FSM/控制锁 | serialized policy descriptor、其他 generic provider/FFI/UI ABI 消费者、DSL/可信 Luau/标准产品能力仍需完成 |
 | Package/发布 | PackageRuntimeSelection；构建/读取一致性与未知 runtime 拒绝；产品入口匹配编译描述；发布检查直接执行原生 session 并验证恢复后推进 | 序列化 policy/registry/target 的整体改版与残留契约清理；不能把局部发布检查当真实产品验收 |
 | Editor/Agent | 有目标与契约，部分旧代码仍在 | GPUI 产品实现、统一源码编辑、预览、ACP/MCP 工作流尚未完成 |
 | 终之空 | 旧研究/转换资料与样例可供核对 | 新 `.astra` 工程、Classic/Modern 全路线、私有四平台包未验收 |
@@ -68,7 +68,7 @@ Emulator 历史完整检查为 169 passed、3 ignored；后续 Musica/CLI all-fe
 
 | 提交 | 内容 |
 | --- | --- |
-| `b74c0c59` | Player 直接拥有 NativeVnSession，旧 provider map 仅留 ABI 边界 |
+| `b74c0c59` | Player 直接拥有 VnSession，旧 provider map 仅留 ABI 边界 |
 | `a894205b` | 原生 Runtime SaveBlob/LoadReport；Player 存档 v8，拒绝 v7 |
 | `df6ea264` | 原生 step 使用 Runtime TickInput/TickMode；close 消费会话 |
 | `4af26102` | 原生执行配置脱离 ABI executor/mode |
@@ -78,7 +78,7 @@ Emulator 历史完整检查为 169 passed、3 ignored；后续 Musica/CLI all-fe
 
 当前主要入口：
 
-- `Engine/Source/Modules/AstraVN/astra-vn-runtime-provider/src/native_open.rs`、`native_session.rs`、`native_step.rs`、`native_session_step.rs`、`native_session_save.rs`、`restore.rs`。
+- `Engine/Source/Modules/AstraVN/astra-vn/src/session/native_open.rs`、`native_session.rs`、`native_step.rs`、`native_session_step.rs`、`native_session_save.rs`、`restore.rs`。
 - `Engine/Source/Modules/AstraVN/astra-vn-core/src/runtime/session_step.rs`：原位 apply_deferred 与匹配当前 wait 的绑定，不公开可变状态。
 - `Engine/Source/Runtime/astra-runtime/src/world/tasks.rs`：create_host_await 与 scoped completion；通用 FSM 仍保留。
 - `Engine/Source/Programs/astra-player-vn/src/native_vn_host/` 以及 `product_media_host/`：产品执行、存档、媒体/作用域。
@@ -147,3 +147,7 @@ cargo build --manifest-path Emulator/Cargo.toml -p astra-emu-musica --features d
 ## 9. 给接手 Codex 的启动指令
 
 > 请先阅读本文件及链接的新宪章/重构契约，核对 `codex/architecture-rebuild` 的提交。由主线程在独占 worktree 继续整个重构，不使用子智能体。优先利用本地合法《樱花萌放》《夏空的英仙座》和终之空素材，完成真实游戏与设备验证，按实际阻塞补齐实现；不要把局部 fixture、旧 Stage 状态或已有测试数量当成完成。常规实现、测试、修复和本地提交已获授权，无需重复确认。保留原商业存档与私有素材边界；每阶段同步真实进度。先报告代码/设备/游戏可用性和第一个具体执行项，然后开始工作。
+
+NativeVN typed session 已并入 astra-vn；删除 runtime-provider crate、Factory、FFI 和 map，Player/CLI/release 直接消费 VnSession。公共 EngineSession 负责 world 与步序校验。通用 gameplay/UI ABI 的其他消费者尚未迁完。
+
+本批回归：astra-vn 的 13 项单元测试及 1 项 facade 测试、astra-runtime 现有测试、astra-player-vn 的 44 项单元测试、release_report 的 43 项测试通过；受影响 5 个 crate 的 all-targets Clippy、fmt 与文档检查通过。尚未执行整合后全部活动 workspace 检查，也未把这些回归计作平台实玩。

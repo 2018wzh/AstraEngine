@@ -1,5 +1,7 @@
 # Game Runtime Provider Contract
 
+NativeVN 当前入口已改为 `astra-vn::VnSession`；旧 NativeVnRuntimeProvider、Factory、FFI 和独立 provider crate 已删除。本页其余动态 provider 内容描述尚未迁移的公共消费者，不能用于 NativeVN 新代码。目标边界见[重构契约](rebuild.md)。
+
 `GameRuntimeProvider` 是 packaged `Game` target 的玩法 runtime 选择层。EngineCore 仍只提供 `RuntimeWorld`、Actor/Component、StateMachine、AwaitToken、Save/Replay、Plugin、Asset/VFS、Media 和 Release Gate；具体玩法由 provider 把产品语义映射成 Runtime action、event、presentation/audio command、package section 和 release check。
 
 这个契约用于 AstraVN 和后续 AstraRPG runtime provider。AstraVN 不作为所有游戏类型的基类；它只实现 VN 语义。AstraEMU 已选择独立 Host，不再属于本契约的 runtime provider，见 [独立 Host 重构](../migrations/astraemu-independent-host.md)。TRPG 不新增 peer provider；桌面规则书玩法落在 `AstraRpgRuntimeProvider` 的 `rpg.trpg` profile/ruleset layer。

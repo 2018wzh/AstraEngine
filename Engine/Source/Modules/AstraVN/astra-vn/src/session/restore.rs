@@ -1,15 +1,15 @@
 use super::*;
 
 pub(super) fn restore_session(
-    session: &mut NativeVnSession,
+    session: &mut VnSession,
     blob: SaveBlob,
 ) -> Result<(u64, u64), CoreVnError> {
-    let package = session.world.package_handle().cloned();
+    let package = session.engine.world().package_handle().cloned();
     let owner = session.owner;
-    let expected_seed = session.seed;
+    let expected_seed = session.engine.seed();
     let compiled = Arc::clone(&session.compiled);
     let index = Arc::clone(&session.runtime_index);
-    let (_, (runtime, step, seed)) = session.world.load_with_validation(
+    let (_, (runtime, step, seed)) = session.engine.world_mut().load_with_validation(
         blob,
         &astra_core::SchemaMigrationRegistry::default(),
         |snapshot| {

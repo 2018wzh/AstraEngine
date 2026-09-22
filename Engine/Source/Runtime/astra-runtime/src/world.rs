@@ -381,6 +381,10 @@ impl RuntimeWorld {
         })
     }
 
+    pub fn seed(&self) -> u64 {
+        self.config.seed
+    }
+
     pub fn tick_integrity_mode(&self) -> TickIntegrityMode {
         self.integrity_mode
     }
@@ -823,7 +827,7 @@ impl RuntimeWorld {
         result
     }
 
-    fn validate_tick_request(&self, request: &TickRequest) -> Result<(), RuntimeError> {
+    pub(crate) fn validate_tick_request(&self, request: &TickRequest) -> Result<(), RuntimeError> {
         let input = request.timing;
         if request.mode != self.required_tick_mode {
             return Err(RuntimeError::diagnostic(

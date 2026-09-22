@@ -62,7 +62,8 @@ impl NativeVnStateView {
         self.state
     }
 
-    pub(crate) fn state(&self) -> &VnRuntimeState {
+    #[cfg(test)]
+    fn state(&self) -> &VnRuntimeState {
         &self.state
     }
 }
@@ -131,10 +132,6 @@ mod tests {
         assert_eq!(display.cursor, state.cursor);
         assert_eq!(display.pending_wait, state.pending_wait);
         assert_eq!(display.system, state.system);
-        let abi = runtime_live_vn_state(&view);
-        assert_eq!(abi.backlog_count, 4096);
-        assert_eq!(abi.backlog.len(), 1);
-        assert_eq!(abi.backlog[0].command_id, "line.4095");
     }
 
     #[test]

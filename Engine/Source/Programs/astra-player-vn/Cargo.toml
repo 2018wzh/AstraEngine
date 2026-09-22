@@ -10,6 +10,7 @@ platform-test-driver = ["astra-platform-windows/platform-test-driver"]
 headless-test-fixtures = []
 
 [dependencies]
+astra-vn = { path = "../../Modules/AstraVN/astra-vn" }
 astra-core = { path = "../../Runtime/astra-core" }
 astra-byte-source = { path = "../../Runtime/astra-byte-source" }
 astra-asset = { path = "../../Runtime/astra-asset" }
@@ -26,7 +27,6 @@ astra-worker-budget = { path = "../../Runtime/astra-worker-budget" }
 astra-runtime = { path = "../../Runtime/astra-runtime" }
 astra-platform = { path = "../../Platform/astra-platform" }
 astra-vn-core = { path = "../../Modules/AstraVN/astra-vn-core" }
-astra-vn-runtime-provider = { path = "../../Modules/AstraVN/astra-vn-runtime-provider", default-features = false }
 astra-vn-package = { path = "../../Modules/AstraVN/astra-vn-package" }
 astra-vn-presentation = { path = "../../Modules/AstraVN/astra-vn-presentation" }
 astra-vn-system = { path = "../../Modules/AstraVN/astra-vn-system" }

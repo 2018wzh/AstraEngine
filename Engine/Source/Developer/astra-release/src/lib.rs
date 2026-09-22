@@ -1742,11 +1742,9 @@ fn runtime_provider_native_vn_check(package: &PackageReader) -> ReleaseCheckReco
 fn native_vn_behavioral_evidence(
     package: &PackageReader,
 ) -> Result<Vec<ReleaseEvidence>, (&'static str, String)> {
-    use astra_vn_runtime_provider::{
-        NativeVnSession, NativeVnSessionConfig, NativeVnStepCommand, NativeVnStepInput,
-    };
+    use astra_vn::{NativeVnStepCommand, NativeVnStepInput, VnSession, VnSessionConfig};
     let policy = read_typed_json_section::<ProviderPolicy>(package, "provider.policy")?;
-    if policy.runtime_provider != astra_vn_runtime_provider::NativeVnRuntimeProvider::descriptor() {
+    if policy.runtime_provider != astra_vn::native_vn_descriptor() {
         return Err((
             "ASTRA_RUNTIME_PROVIDER_LINKED_DESCRIPTOR_MISMATCH",
             "package declarations do not match the compiled NativeVN runtime".into(),
@@ -1761,13 +1759,13 @@ fn native_vn_behavioral_evidence(
     match selection.kind() {
         astra_package::PackageRuntimeKind::NativeVn => {}
     }
-    let mut session = NativeVnSession::new(
+    let mut session = VnSession::new(
         std::sync::Arc::new(compiled.story),
         astra_vn_core::VnRunConfig {
             profile: selection.profile().into(),
             locale,
         },
-        NativeVnSessionConfig {
+        VnSessionConfig {
             target_id: selection.target().into(),
             seed: 0xA57A,
             package: Some(astra_runtime::PackageHandle {

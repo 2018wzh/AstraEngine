@@ -8,6 +8,12 @@ version.workspace = true
 crate-type = ["rlib", "dylib"]
 
 [dependencies]
+astra-vn-policy = { path = "../astra-vn-policy" }
+tracing.workspace = true
+serde.workspace = true
+astra-core = { path = "../../../Runtime/astra-core" }
+astra-runtime = { path = "../../../Runtime/astra-runtime" }
+astra-plugin-abi = { path = "../../../Runtime/astra-plugin-abi", default-features = false }
 astra-vn-core = { path = "../astra-vn-core" }
 astra-vn-presentation = { path = "../astra-vn-presentation" }
 astra-vn-script = { path = "../astra-vn-script" }

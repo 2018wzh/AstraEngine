@@ -3092,7 +3092,7 @@ fn production_package_request(
         schema: astra_plugin_abi::PROVIDER_POLICY_SCHEMA.to_string(),
         profile: profile.clone(),
         renderer: "astra.renderer.wgpu".to_string(),
-        runtime_provider: astra_vn_runtime_provider::NativeVnRuntimeProvider::descriptor(),
+        runtime_provider: astra_vn::native_vn_descriptor(),
         bindings: bindings.clone(),
     })?;
     let plugin_extension_registry =

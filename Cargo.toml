@@ -24,7 +24,6 @@ members = [
     "Engine/Source/Modules/AstraVN/astra-vn-package",
     "Engine/Source/Modules/AstraVN/astra-vn-plugin",
     "Engine/Source/Modules/AstraVN/astra-vn-editor",
-    "Engine/Source/Modules/AstraVN/astra-vn-runtime-provider",
     "Engine/Source/Modules/AstraVN/astra-vn",
     "Engine/Source/Runtime/astra-runtime",
     "Engine/Source/Runtime/astra-engine",

@@ -1,6 +1,6 @@
 use super::*;
 
-impl NativeVnSession {
+impl VnSession {
     pub(super) fn apply_command_at_step(
         &mut self,
         command: CoreVnPlayerCommand,
@@ -58,9 +58,10 @@ impl NativeVnSession {
                 astra_core::StableId::parse(await_id)
                     .map_err(|err| CoreVnError::message(err.to_string()))?,
             );
-            let scope = session.world.task_scope();
+            let scope = session.engine.world().task_scope();
             let handle = session
-                .world
+                .engine
+                .world_mut()
                 .await_handle(token_id, &scope)
                 .map_err(|error| CoreVnError::message(error.to_string()))?;
             ingress.push(OrderedTickIngress {
@@ -78,7 +79,7 @@ impl NativeVnSession {
             ingress,
         };
         let tick = session
-            .world
+            .engine
             .tick(request)
             .map_err(|err| CoreVnError::message(err.to_string()))?;
         if let Some(diagnostic) = tick.diagnostics.first() {
@@ -89,7 +90,8 @@ impl NativeVnSession {
         }
         for event in pending_output.events() {
             session
-                .world
+                .engine
+                .world_mut()
                 .emit_event(
                     astra_runtime::EventSource::Runtime,
                     EventPayload {
@@ -103,7 +105,8 @@ impl NativeVnSession {
         }
         if let Some(kind) = create_wait {
             let token_id = session
-                .world
+                .engine
+                .world_mut()
                 .create_host_await(kind)
                 .map_err(|error| CoreVnError::message(error.to_string()))?;
             let wait = session

@@ -13,3 +13,5 @@
 [CMVS](../../Emulator/Source/Families/astra-emu-cmvs/README.md) 的格式、VM、归档和 GPU scene 已进入 Emulator workspace，复用 SDK 错误、归档、缓存与纹理模块；完整 Family session 和媒体尚待接通，不能列为已安装可玩核心。
 
 NativeVN 内部动态 ABI、Headless 宏、纯转发 crate 随真实消费者迁移删除。尚未实现的 RPG/AI/平台模块不进入活动 workspace。新增 crate 须承担真实独立职责或替换旧模块，不能用空 facade 证明能力完成。
+
+NativeVN 的 typed session 已并入 `astra-vn`，删除 `astra-vn-runtime-provider` workspace 成员及依赖。公共 EngineSession 位于现有 `astra-runtime`，不新增 crate。

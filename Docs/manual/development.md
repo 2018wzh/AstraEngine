@@ -96,3 +96,9 @@ python Tools/TsuiNoSora/classic_route_inputs.py \
 矩阵仅接受显式 `wgpu_offscreen` 配置，启动前检查每条输入的消息数和 tick 预算；实际运行传入 `--gpu`，共用单路线的原生硬件 adapter、构建、包与检查点校验。旧版 `--resume-report` 已移除，不再仅凭汇总文件跳过路线。输入预算不足或 GPU 校验失败均不得计作通过。
 
 对白进入 pending wait 时，文字可能还在逐字显示。第一次推进输入会补全文字，后续输入才推进剧情。Headless 可通过只读观察项 `vn.text_reveal_complete` 等待当前文字显示完成，再发送物理按键；它来自真实演出状态，不修改剧情游标或显示进度。没有正在显示的文字时为 true。Classic 路线脚本已按此区分对白等待与普通输入等待，不能仅凭 `vn.pending_wait_command` 就假设一次 Enter 足以推进。
+
+## NativeVN 嵌入接口
+
+使用 `astra_vn::{VnSession, VnSessionConfig, NativeVnStepInput}` 创建和推进会话，保存/恢复传递 `astra_runtime::SaveBlob`，关闭消费 VnSession。原 `astra-vn-runtime-provider` 依赖须改为 `astra-vn`，不提供旧名称别名。包元数据使用 `astra_vn::native_vn_descriptor()`；无需注册 Factory 或传递 ABI request。EngineSession 的任务作用域由会话持有，调用方不得在退出后继续提交结果。
+
+本接口的增量回归包括 `cargo test -p astra-vn -p astra-runtime` 和 `cargo test -p astra-player-vn --lib`；包检查修改另运行 `cargo test -p astra-release --test release_report`。这些测试不代替 Windows/Android 实玩。

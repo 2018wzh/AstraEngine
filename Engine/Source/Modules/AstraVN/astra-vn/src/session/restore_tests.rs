@@ -1,6 +1,6 @@
 use super::*;
 
-fn fixture() -> (NativeVnRuntimeProvider, GameRuntimeSessionId) {
+fn fixture() -> VnSession {
     let compiled: Arc<CoreCompiledStory> = Arc::new(compile_astra_project(
         [AstraSource::story("restore.astra", "story main #@id story.main\n\nstate start #@id state.start\n  scene room #@id scene.room\n    text key:hello speaker:narrator #@id hello\n")],
         Default::default(),
@@ -17,32 +17,15 @@ fn fixture() -> (NativeVnRuntimeProvider, GameRuntimeSessionId) {
         .with_package(PackageHandle::default())
         .unwrap();
     let owner = world.create_actor("vn", vec![]).unwrap();
-    let session = NativeVnSession {
+    VnSession {
         id: GameRuntimeSessionId("restore.test".into()),
-        seed: RuntimeConfig::default().seed,
-        world,
+        engine: EngineSession::from_world(world),
         owner,
         compiled,
         runtime_index,
         runtime,
         failed: false,
         step_complexity: None,
-    };
-    let id = GameRuntimeSessionId("restore.test".into());
-    let mut provider = NativeVnRuntimeProvider::default();
-    provider.sessions.insert(id.0.clone(), session);
-    (provider, id)
-}
-
-fn section(snapshot: RuntimeSnapshot) -> RuntimeSectionPayload {
-    let save = astra_runtime::write_runtime_save(snapshot, SaveRequest::default()).unwrap();
-    RuntimeSectionPayload {
-        section_id: "runtime.world".into(),
-        schema: "astra.runtime.save_blob.v5".into(),
-        version: SchemaVersion::new(5, 0, 0),
-        codec: RuntimeSectionCodec::Raw,
-        hash: astra_core::Hash256::from_sha256(&save.0),
-        bytes: save.0,
     }
 }
 
@@ -58,12 +41,11 @@ fn typed_restore_rejection_preserves_world_state_and_scope() {
         "seed",
         "legacy_machine",
     ] {
-        let (mut provider, id) = fixture();
-        let session = provider.session(&id).unwrap();
-        let before = session.world.save(SaveRequest::default()).unwrap();
+        let mut session = fixture();
+        let before = session.engine.world().save(SaveRequest::default()).unwrap();
         let state_before = session.runtime.state().clone();
-        let scope_before = session.world.task_scope();
-        let mut snapshot = materialized_save_snapshot(session).unwrap();
+        let scope_before = session.engine.world().task_scope();
+        let mut snapshot = materialized_save_snapshot(&session).unwrap();
         // This mutation would become visible if the world were committed before validation.
         snapshot.step = 99;
         let component = snapshot
@@ -130,10 +112,8 @@ fn typed_restore_rejection_preserves_world_state_and_scope() {
             }
             _ => unreachable!(),
         }
-        let error = provider.restore(RuntimeRestoreRequest {
-            session_id: id.clone(),
-            sections: vec![section(snapshot)],
-        });
+        let error = session
+            .restore(astra_runtime::write_runtime_save(snapshot, SaveRequest::default()).unwrap());
         assert!(error.is_err(), "{case}");
         if case == "legacy_machine" {
             assert!(error
@@ -141,73 +121,44 @@ fn typed_restore_rejection_preserves_world_state_and_scope() {
                 .to_string()
                 .contains("ASTRA_NATIVE_VN_RESTORE_LEGACY_MACHINE"));
         }
-        let session = provider.session(&id).unwrap();
         assert_eq!(
-            session.world.save(SaveRequest::default()).unwrap().0,
+            session
+                .engine
+                .world()
+                .save(SaveRequest::default())
+                .unwrap()
+                .0,
             before.0,
             "{case}"
         );
         assert_eq!(session.runtime.state(), &state_before, "{case}");
-        assert_eq!(session.world.task_scope(), scope_before, "{case}");
+        assert_eq!(session.engine.world().task_scope(), scope_before, "{case}");
         assert!(!scope_before.is_cancelled());
     }
 }
 
 #[test]
-fn restore_checks_outer_integrity_then_commits_and_cancels_old_scope() {
-    let (mut provider, id) = fixture();
-    let saved = provider
-        .save(RuntimeSaveRequest {
-            session_id: id.clone(),
-            slot: "test".into(),
-        })
-        .unwrap();
-    let old_scope = provider.session(&id).unwrap().world.task_scope();
-    assert_eq!(saved.sections[0].version, SchemaVersion::new(5, 0, 0));
-    for wrong_version in [true, false] {
-        let mut sections = saved.sections.clone();
-        if wrong_version {
-            sections[0].version = SchemaVersion::new(4, 0, 0);
-        } else {
-            sections[0].hash = astra_core::Hash256::from_sha256(b"wrong");
-        }
-        let error = provider
-            .restore(RuntimeRestoreRequest {
-                session_id: id.clone(),
-                sections,
-            })
-            .unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("ASTRA_NATIVE_VN_RESTORE_INTEGRITY"));
-        assert!(!old_scope.is_cancelled());
-    }
-    provider
-        .session_mut(&id)
-        .unwrap()
-        .runtime
-        .apply_deferred(CoreVnPlayerCommand::SetAuto { enabled: true })
-        .unwrap();
-    provider
-        .session_mut(&id)
-        .unwrap()
-        .world
+fn corrupt_container_preserves_scope_and_valid_restore_replaces_it() {
+    let mut session = fixture();
+    let saved = session.save().unwrap();
+    let old_scope = session.engine.world().task_scope();
+    let mut corrupt = saved.clone();
+    corrupt.0[0] ^= 1;
+    assert!(session.restore(corrupt).is_err());
+    assert!(!old_scope.is_cancelled());
+    session
+        .engine
+        .world_mut()
         .create_actor("discarded", vec![])
         .unwrap();
-    let report = provider
-        .restore(RuntimeRestoreRequest {
-            session_id: id.clone(),
-            sections: saved.sections,
-        })
-        .unwrap();
-    assert_eq!(report.restored_fixed_step, 0);
-    let session = provider.session_mut(&id).unwrap();
-    assert_eq!(session.runtime.state().revision, 0);
+    let report = session.restore(saved).unwrap();
+    assert_eq!(report.step, 0);
     assert!(old_scope.is_cancelled());
-    assert!(!session.world.task_scope().is_cancelled());
+    assert!(!session.engine.world().task_scope().is_cancelled());
     assert_eq!(
         session
-            .world
+            .engine
+            .world()
             .snapshot()
             .unwrap()
             .actors
@@ -215,22 +166,5 @@ fn restore_checks_outer_integrity_then_commits_and_cancels_old_scope() {
             .len(),
         1
     );
-    assert!(session
-        .world
-        .snapshot()
-        .unwrap()
-        .actors
-        .component_ids_for_actor_schema(session.owner, &VN_RUNTIME_STATE_SCHEMA.to_string())
-        .is_empty());
-    session
-        .world
-        .tick(TickRequest::restore_continuation(
-            TickInput {
-                fixed_step: 1,
-                delta_ns: 16_666_667,
-                seed: 0,
-            },
-            vec![],
-        ))
-        .unwrap();
+    session.restore(session.save().unwrap()).unwrap();
 }

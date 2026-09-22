@@ -1347,7 +1347,7 @@ fn release_gate_blocks_compiled_runtime_capability_drift() {
     let mut request = PackageBuildRequest::fixture("com.example.nativevn", "classic", sections);
     let mut policy: astra_plugin_abi::ProviderPolicy =
         serde_json::from_slice(&request.provider_policy).unwrap();
-    policy.runtime_provider = astra_vn_runtime_provider::NativeVnRuntimeProvider::descriptor();
+    policy.runtime_provider = astra_vn::native_vn_descriptor();
     policy
         .runtime_provider
         .capabilities
@@ -2070,7 +2070,7 @@ fn bind_request_to_target(
     policy.profile = profile.to_string();
     policy.bindings = bindings.clone();
     if use_native_vn {
-        policy.runtime_provider = astra_vn_runtime_provider::NativeVnRuntimeProvider::descriptor();
+        policy.runtime_provider = astra_vn::native_vn_descriptor();
     }
     registry.bindings = bindings;
     request.provider_policy = serde_json::to_vec(&policy).unwrap();

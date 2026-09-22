@@ -9,9 +9,9 @@ use astra_plugin_abi::{
     ProviderExtensionRecord, ProviderPolicy, PLUGIN_EXTENSION_REGISTRY_SCHEMA,
     PROVIDER_POLICY_SCHEMA,
 };
+use astra_vn::native_vn_descriptor;
 use astra_vn_core::{compile_astra_project, AstraSource, CompileAstraProjectOptions};
 use astra_vn_package::{package_sections_for_project, PLAYER_LOCALE_CONFIG_SCHEMA};
-use astra_vn_runtime_provider::NativeVnRuntimeProvider;
 
 pub(crate) const TEST_UI: &str = r#"
 ui_policy profile:classic save_slots:"slot.01" quick_slot:"" allowed_pages:"quick_panel,save,load,config" reading_modes:"manual" audio_toggle:false save_completion:stay custom_actions:"" #@id ui.policy.test.classic
@@ -298,7 +298,7 @@ pub(crate) fn bind_product_provider_authority(request: &mut PackageBuildRequest)
         schema: PROVIDER_POLICY_SCHEMA.to_string(),
         profile: request.profile.clone(),
         renderer: "astra.renderer.wgpu".to_string(),
-        runtime_provider: NativeVnRuntimeProvider::descriptor(),
+        runtime_provider: native_vn_descriptor(),
         bindings: bindings.clone(),
     })
     .unwrap();

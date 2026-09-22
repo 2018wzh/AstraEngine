@@ -1,10 +1,9 @@
 use super::*;
 
 /// An owned NativeVN session. Dropping it cancels its world-scoped tasks.
-pub struct NativeVnSession {
+pub struct VnSession {
     pub(super) id: GameRuntimeSessionId,
-    pub(super) seed: u64,
-    pub(super) world: RuntimeWorld,
+    pub(super) engine: EngineSession,
     pub(super) owner: ActorId,
     pub(super) compiled: Arc<CoreCompiledStory>,
     pub(super) runtime_index: Arc<CoreVnRuntimeIndex>,
@@ -13,19 +12,9 @@ pub struct NativeVnSession {
     pub(super) step_complexity: Option<VnStepComplexityMetrics>,
 }
 
-impl NativeVnSession {
+impl VnSession {
     pub fn id(&self) -> &GameRuntimeSessionId {
         &self.id
-    }
-
-    pub(super) fn validate_id(&self, id: &GameRuntimeSessionId) -> Result<(), CoreVnError> {
-        if id != &self.id {
-            return Err(CoreVnError::diagnostic(
-                "ASTRA_NATIVE_VN_SESSION_MISMATCH",
-                "request belongs to a different NativeVN session",
-            ));
-        }
-        Ok(())
     }
 
     /// Consume the owned session and cancel all world-scoped work before returning.
@@ -38,15 +27,15 @@ impl NativeVnSession {
 mod tests {
     use super::*;
 
-    fn session(target: &str) -> NativeVnSession {
+    fn session(target: &str) -> VnSession {
         let compiled = compile_astra_project(
             [AstraSource::story("owned.astra", "story main #@id story.main\nstate start #@id state.start\n  scene room #@id scene.room\n    text key:hello speaker:narrator #@id hello\n")],
             Default::default(),
         ).unwrap();
-        NativeVnSession::new(
+        VnSession::new(
             Arc::new(compiled.into()),
             VnRunConfig::classic("en"),
-            NativeVnSessionConfig {
+            VnSessionConfig {
                 target_id: target.into(),
                 seed: 23,
                 package: None,
@@ -57,7 +46,7 @@ mod tests {
         .unwrap()
     }
 
-    fn launch(session: &mut NativeVnSession) {
+    fn launch(session: &mut VnSession) {
         session
             .step(NativeVnStepInput {
                 timing: TickInput {
@@ -72,44 +61,28 @@ mod tests {
     }
 
     #[test]
-    fn foreign_abi_save_and_restore_do_not_modify_owned_session() {
-        let mut session = session("one");
-        launch(&mut session);
-        let state = session.runtime.state().clone();
-        let save = session
-            .save_abi(RuntimeSaveRequest {
-                session_id: session.id().clone(),
-                slot: "slot".into(),
-            })
-            .unwrap();
-        let foreign = GameRuntimeSessionId("foreign".into());
-        assert!(session
-            .save_abi(RuntimeSaveRequest {
-                session_id: foreign.clone(),
-                slot: "slot".into()
-            })
-            .unwrap_err()
-            .to_string()
-            .contains("SESSION_MISMATCH"));
-        assert!(session
-            .restore_abi(RuntimeRestoreRequest {
-                session_id: foreign,
-                sections: save.sections.clone()
-            })
-            .unwrap_err()
-            .to_string()
-            .contains("SESSION_MISMATCH"));
-        assert_eq!(session.runtime.state(), &state);
-        assert_eq!(
-            session
-                .save_abi(RuntimeSaveRequest {
-                    session_id: session.id().clone(),
-                    slot: "slot".into()
+    fn invalid_engine_step_does_not_mutate_story_state() {
+        for (step, seed, mode) in [
+            (2, 23, astra_runtime::TickMode::Live),
+            (1, 99, astra_runtime::TickMode::Live),
+            (1, 23, astra_runtime::TickMode::RestoreContinuation),
+        ] {
+            let mut session = session("invalid-step");
+            let before = session.runtime.state().clone();
+            assert!(session
+                .step(NativeVnStepInput {
+                    timing: TickInput {
+                        fixed_step: step,
+                        delta_ns: 16_666_667,
+                        seed
+                    },
+                    mode,
+                    command: NativeVnStepCommand::LaunchDefault,
                 })
-                .unwrap(),
-            save
-        );
-        session.close();
+                .is_err());
+            assert_eq!(session.runtime.state(), &before);
+            assert!(session.engine.world().task_scope().is_cancelled());
+        }
     }
 
     #[test]
@@ -117,8 +90,8 @@ mod tests {
         let mut first = session("one");
         let mut second = session("two");
         launch(&mut first);
-        let first_scope = first.world.task_scope();
-        let second_scope = second.world.task_scope();
+        let first_scope = first.engine.world().task_scope();
+        let second_scope = second.engine.world().task_scope();
         first.close();
         assert!(first_scope.is_cancelled());
         assert!(!second_scope.is_cancelled());
@@ -167,7 +140,7 @@ mod tests {
         let mut session = session("failed");
         launch(&mut session);
         let saved = session.save().unwrap();
-        let old_scope = session.world.task_scope();
+        let old_scope = session.engine.world().task_scope();
         let input = |command, mode| NativeVnStepInput {
             timing: TickInput {
                 fixed_step: 2,
@@ -199,7 +172,7 @@ mod tests {
             .to_string()
             .contains("SESSION_FAILED"));
         session.restore(saved).unwrap();
-        assert!(!session.world.task_scope().is_cancelled());
+        assert!(!session.engine.world().task_scope().is_cancelled());
         session
             .step(input(
                 CoreVnPlayerCommand::SetAuto { enabled: true },
@@ -232,7 +205,7 @@ mod tests {
     fn direct_wait_survives_save_and_completes_without_a_state_machine() {
         let mut session = session("direct");
         launch(&mut session);
-        let snapshot = session.world.snapshot().unwrap();
+        let snapshot = session.engine.world().snapshot().unwrap();
         assert_eq!(
             snapshot.machines,
             astra_runtime::StateMachineStore::default()
@@ -270,7 +243,7 @@ mod tests {
                 command: NativeVnStepCommand::Execute(CoreVnPlayerCommand::Advance),
             })
             .unwrap();
-        let after = session.world.snapshot().unwrap();
+        let after = session.engine.world().snapshot().unwrap();
         assert!(after.awaits.pending().is_empty());
         assert_eq!(after.machines, astra_runtime::StateMachineStore::default());
         assert!(session.runtime.state().pending_wait.is_none());

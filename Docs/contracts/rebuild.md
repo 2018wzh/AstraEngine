@@ -8,6 +8,10 @@
 
 共享文字、图像、绘制、解码、混音与字节源可不创建 World/package/registry 而使用。Engine/VN 与 Musica 是实际消费者。NativeVN 以普通 Rust typed API 组合，FSM 不作为唯一修改入口；固定 60 Hz 逻辑和独立呈现共用明确生命周期。任务具有句柄、作用域、完成/取消/失败结果；旧代次结果拒绝。存档保存显式状态，删除通用回放和帧内全量事务。
 
+`astra-vn::VnSession` 是 NativeVN 的 typed 产品入口，持有剧情、变量和系统状态，并组合 `astra-runtime::EngineSession`。EngineSession 创建和持有 RuntimeWorld、任务作用域及逻辑步生命周期；VN 在修改剧情前校验步序、seed 和恢复模式。关闭会话取消其任务，不影响其他会话。保存仍使用原有 SaveBlob 容器，读取失败保留当前状态。
+
+旧 `astra-vn-runtime-provider` crate、NativeVnRuntimeProvider/Factory、FFI 转换和会话 map 已删除。Player、CLI、发布检查改用 `astra-vn`；`native_vn_descriptor()` 只提供现有包格式需要的元数据，不创建或选择动态 provider。其他公共 gameplay/UI ABI 消费者仍须继续迁移，不因本次删除视为全部完成。
+
 ## EMU Family API
 
 Manager headless 使用现有 `astra-observability` 的有界日志，与本次输出图像放在一起：将输出文件扩展名替换为 `.diagnostics` 作为日志目录。日志不写入游戏目录或存档，不属于 package；测试结束后按临时产物规则清理。

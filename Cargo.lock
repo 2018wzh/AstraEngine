@@ -558,7 +558,6 @@ dependencies = [
  "astra-vn-core",
  "astra-vn-package",
  "astra-vn-policy",
- "astra-vn-runtime-provider",
  "astra-vn-script",
  "base64",
  "clap",
@@ -1094,11 +1093,11 @@ dependencies = [
  "astra-runtime",
  "astra-ui-core",
  "astra-ui-yakui",
+ "astra-vn",
  "astra-vn-core",
  "astra-vn-package",
  "astra-vn-policy",
  "astra-vn-presentation",
- "astra-vn-runtime-provider",
  "astra-vn-system",
  "astra-vn-ui",
  "astra-worker-budget",
@@ -1239,7 +1238,6 @@ dependencies = [
  "astra-vn-core",
  "astra-vn-package",
  "astra-vn-policy",
- "astra-vn-runtime-provider",
  "astra-vn-script",
  "astra-vn-system",
  "postcard",
@@ -1374,10 +1372,16 @@ dependencies = [
 name = "astra-vn"
 version = "0.1.0"
 dependencies = [
+ "astra-core",
+ "astra-plugin-abi",
+ "astra-runtime",
  "astra-vn-core",
+ "astra-vn-policy",
  "astra-vn-presentation",
  "astra-vn-script",
  "astra-vn-system",
+ "serde",
+ "tracing",
 ]
 
 [[package]]
@@ -1479,35 +1483,6 @@ dependencies = [
  "postcard",
  "schemars",
  "serde",
- "thiserror 1.0.69",
- "tracing",
-]
-
-[[package]]
-name = "astra-vn-runtime-provider"
-version = "0.1.0"
-dependencies = [
- "abi_stable",
- "astra-core",
- "astra-headless-test",
- "astra-package",
- "astra-plugin",
- "astra-plugin-abi",
- "astra-runtime",
- "astra-target",
- "astra-vn-commands",
- "astra-vn-core",
- "astra-vn-editor",
- "astra-vn-package",
- "astra-vn-plugin",
- "astra-vn-presentation",
- "astra-vn-save",
- "astra-vn-script",
- "astra-vn-system",
- "postcard",
- "schemars",
- "serde",
- "serde_json",
  "thiserror 1.0.69",
  "tracing",
 ]

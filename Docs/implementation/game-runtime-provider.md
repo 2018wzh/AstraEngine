@@ -1,5 +1,7 @@
 # Game Runtime Provider Blueprint
 
+NativeVN 当前入口已改为 `astra-vn::VnSession`；旧 NativeVnRuntimeProvider、Factory、FFI 和独立 provider crate 已删除。本页其余动态 provider 内容描述尚未迁移的公共消费者，不能用于 NativeVN 新代码。目标边界见[重构契约](../contracts/rebuild.md)。
+
 本页描述 [Game Runtime Provider Contract](../contracts/game-runtime-provider.md) 的实现落点。目标是把“玩法类型”变成可替换 runtime provider，而不是让某个垂直模块成为所有玩法的父类。
 
 ## Selection

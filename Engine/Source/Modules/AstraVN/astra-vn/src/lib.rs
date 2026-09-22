@@ -1,10 +1,4 @@
-//! AstraVN compatibility facade.
-//!
-//! This is a compatibility facade, not an umbrella crate. A glob re-export of
-//! every implementation crate made a Windows Rust `dylib` export every
-//! transitive public symbol, exceeding the PE export-table limit before Player
-//! packaging could start. Keep this in-process product surface deliberately
-//! small; feature crates remain the owner of their public APIs.
+//! Typed AstraVN product sessions and authoring entry points.
 
 pub use astra_vn_core::{VnPlayerCommand, VnRunConfig, VnRuntime, VnWaitKind};
 pub use astra_vn_presentation::{StageModel, VnPresentationProviderManifest};
@@ -13,3 +7,11 @@ pub use astra_vn_script::{
     FormatOptions, SystemStoryValidationStatus,
 };
 pub use astra_vn_system::{SystemStoryManifest, VnSystemUiProfileManifest};
+
+mod descriptor;
+pub use descriptor::native_vn_descriptor;
+mod session;
+pub use session::{
+    NativeVnStateView, NativeVnStepCommand, NativeVnStepInput, NativeVnStepOutput, VnSession,
+    VnSessionConfig,
+};

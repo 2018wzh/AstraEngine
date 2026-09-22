@@ -2,7 +2,7 @@ use super::*;
 use astra_runtime::{LoadReport, SaveBlob};
 
 pub(super) struct NativeVnRuntimeHost {
-    runtime: Option<astra_vn_runtime_provider::NativeVnSession>,
+    runtime: Option<astra_vn::VnSession>,
     binding: astra_package::PackageRuntimeSelection,
     limits: RuntimeHostLimits,
     session: Option<GameRuntimeSessionId>,
@@ -68,7 +68,7 @@ impl NativeVnRuntimeHost {
         &mut self,
         compiled: Arc<CompiledStory>,
         config: VnRunConfig,
-        options: astra_vn_runtime_provider::NativeVnSessionConfig,
+        options: astra_vn::VnSessionConfig,
     ) -> Result<GameRuntimeSessionId, RuntimeHostError> {
         self.validate_request(&options.target_id, &config.profile)?;
         if self.session.is_some() {
@@ -78,7 +78,7 @@ impl NativeVnRuntimeHost {
             ));
         }
         let seed = options.seed;
-        let runtime = astra_vn_runtime_provider::NativeVnSession::new(compiled, config, options)
+        let runtime = astra_vn::VnSession::new(compiled, config, options)
             .map_err(|error| RuntimeHostError::new("ASTRA_RUNTIME_HOST_OPEN", error.to_string()))?;
         let session_id = runtime.id().clone();
         self.runtime = Some(runtime);

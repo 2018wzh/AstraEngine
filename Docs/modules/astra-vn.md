@@ -2,19 +2,13 @@
 
 AstraVN 是原生 VN 垂直模块。它使用 EngineCore 的 Runtime、Script、Media、Asset/VFS 和 Save/Replay。AstraVN Core 持有 VN 权威语义；Luau 策略和插件只负责表现、系统页和演出扩展。
 
-代码布局采用 `Engine/Source/Modules/AstraVN/`。`astra-vn` 只作为 facade crate 存在，负责 `rlib`/Rust ABI `dylib` 输出和兼容 re-export；parser、runtime、policy、presentation、system、save、package、plugin、editor metadata 和 runtime provider 都拆到独立功能 crate。
+代码位于 `Engine/Source/Modules/AstraVN/`。`astra-vn` 对外提供 VnSession、构造配置和 typed step 输入输出；会话实现放在内部 session 模块，lib.rs 保持薄入口。其余功能继续按 parser、Core、policy、presentation、system、save 和 package 分工。
 
-## Gameplay Runtime Provider
+## 会话与共享运行层
 
-AstraVN 作为 `NativeVnRuntimeProvider` 接入 [Game Runtime Provider](../contracts/game-runtime-provider.md)。Provider 位于 `astra-vn-runtime-provider`，组合 `.astra` compiler、VN Core、Luau policy、presentation/system UI、VN package sections 和 VN release checks，把 dialogue、choice、wait、system page 和 presentation step 转成 Runtime effect、AwaitToken、PresentationCommand、AudioCommand、save section 和 release evidence。
+VnSession 持有 VN 业务状态，通过 EngineSession 使用 RuntimeWorld、Actor/Component、await 和任务作用域。普通剧情推进直接调用 VnRuntime，不再创建转发 FSM 或动态 provider。EngineSession 先校验逻辑步，VN 才提交剧情变更；恢复先验证完整存档，成功后取消旧任务作用域。逻辑仍为 60 Hz，呈现由 Player 独立推进。
 
-`NativeVnRuntimeProvider` 不作为所有玩法类型的基类。AstraEMU 和后续 AstraRPG 通过各自 runtime provider 与 AstraVN 同级接入；它们不能复用 VN Core 来表达非 VN 的权威状态。
-
-## Rust Dylib Boundary
-
-`astra-vn` 设计为同时产出 `rlib` 和 Rust ABI `dylib` 的 facade。它 re-export AstraVN 子 crate 的 public API，保留现有 `astra_vn::*` 消费路径，但不承载业务实现。这个 dylib 只承诺同 engine version、rustc fingerprint 和 feature fingerprint 下的 Rust-side 动态链接；跨语言或跨编译器稳定边界仍是 `.astra`、package section 和 Stage 1 plugin ABI。
-
-`astra-vn` public API 不传递 Luau VM handle、renderer/audio native handle、Actor 指针或 Editor widget。需要跨插件暴露的能力必须落到 ExtensionRegistry、provider descriptor、package section 和 release report evidence。
+旧 runtime-provider crate、Factory 和 FFI 转发已删除。现有包仍校验 `native_vn_descriptor()` 返回的元数据；该函数不提供动态加载能力。其他 gameplay/UI ABI 尚有消费者，见 [重构契约](../contracts/rebuild.md)。
 
 ## Crate Split
 
@@ -30,8 +24,7 @@ AstraVN 作为 `NativeVnRuntimeProvider` 接入 [Game Runtime Provider](../contr
 | `astra-vn-package` | `vn.*` package section plans、profile manifest、commercial baseline、advanced presentation manifest、package evidence |
 | `astra-vn-plugin` | VN extension points、extension manifest、provider slot ids |
 | `astra-vn-editor` | Graph/Timeline authoring metadata、source round-trip metadata、NativeVN `RuntimeEditorMetadata` |
-| `astra-vn-runtime-provider` | `NativeVnRuntimeProvider` composition |
-| `astra-vn` | facade、`rlib`/Rust ABI `dylib`、兼容 re-export |
+| `astra-vn` | VnSession、typed 产品入口和 package 元数据 |
 
 功能 crate 不允许依赖 `astra-vn` facade。需要共享的 DTO 下沉到更底层 crate，不能通过 facade 回引。
 
