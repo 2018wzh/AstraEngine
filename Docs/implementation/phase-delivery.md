@@ -65,7 +65,7 @@ Expected report includes `package.integrity`, `target.manifest`, `platform.capab
 
 **Sample:** `Examples/NativeVN`；当前旗舰里程碑不提交 scenario，Runtime/Player evidence 保持开放。
 
-TsuiNoSora Modern 当前仍处于定向修复和路线重测阶段。Modern choice controller 的焦点路径、标题音频 sidecar 收集以及媒体 fence 与禁跳过对白的等待顺序已修正；生成器会等待文字渐显完成后再发送物理 Enter，Runtime 的 Skip All/Skip Read 也尊重脚本的 `skip_allowed`。同树 `astra-headless` release build `7837e6166` 与既有 package 绑定的定向回归已通过；Python 工具相关测试为 285 项。Modern007 曾因过小的 100,000 submitted-frame 预算触发长流程 `QueueOverflow`，后续 profile 已采用既有 Classic 的 864,000 上限。Modern008 首次采样把 checkpoint 放在 reveal await 起始 tick，运行触发 `ASTRA_HEADLESS_AWAIT_TICK_SHIFT_INVALID`；失败产物保留，Modern009 已将 checkpoint 移到 await 预算结束、下一次 Enter 前并通过输入校验，新的 GPU 结果尚未关闭正式 Modern Player、系统页、真实音频或 37 路线验收。
+TsuiNoSora Modern 当前仍处于定向修复和路线重测阶段。Modern choice controller 的焦点路径、标题音频 sidecar 收集以及媒体 fence 与禁跳过对白的等待顺序已修正；生成器会等待文字渐显完成后再发送物理 Enter，Runtime 的 Skip All/Skip Read 也尊重脚本的 `skip_allowed`。同树 `astra-headless` release build `7837e6166` 与既有 package 绑定的定向回归已通过；Python 工具相关测试为 285 项。Modern007 曾因过小的 100,000 submitted-frame 预算触发长流程 `QueueOverflow`，后续 profile 已采用既有 Classic 的 864,000 上限。Modern008 首次采样把 checkpoint 放在 reveal await 起始 tick，运行触发 `ASTRA_HEADLESS_AWAIT_TICK_SHIFT_INVALID`；失败产物保留。随后 Modern009 将 checkpoint 移到 await 预算结束、下一次 Enter 前，并完成 DX12 GPU route 001：46,687 条输入、244,745 次 submitted frame、30 次 rasterized frame、28 个 checkpoint 和两个 typed terminal await 均通过，诊断为空；首、中、末过程帧可见开场文字、角色对白场景和结尾文字。该结果不关闭正式 Modern Player、系统页、真实音频或 37 路线验收。
 
 **Report Schema:** `astra.scenario_report.v1` + `astra.release_report.v1`
 
