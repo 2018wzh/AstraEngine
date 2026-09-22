@@ -822,50 +822,55 @@ fn run_bundled_game(test_null_audio: bool) -> Result<(), PlayerCliError> {
             Ok(())
         }
         .await;
-        let audio_cleanup = media.shutdown(&mut vn, &mut executor).await;
-        match (player_result, audio_cleanup) {
-            (Err(error), Err(cleanup)) => {
-                return Err(player_platform_error(
-                    "player.session",
-                    format!("{error}; audio cleanup failed: {cleanup}"),
-                ));
-            }
-            (Err(error), Ok(())) => return Err(error),
-            (Ok(()), Err(cleanup)) => return Err(cleanup),
-            (Ok(()), Ok(())) => {}
+        // Every owner closes even when gameplay, media, or GPU submission failed.
+        let mut failures = player_result.err().into_iter().collect::<Vec<_>>();
+        if let Err(error) = media.shutdown(&mut vn, &mut executor).await {
+            failures.push(error);
         }
-        let shutdown_batch = vn.release_resources().map_err(|error| {
-            astra_platform::PlatformError::new(
-                astra_platform::PlatformErrorCode::InvalidState,
+        match vn.release_resources() {
+            Ok(batch) => {
+                if let Err(error) = executor.execute_batch(batch).await {
+                    failures.push(player_platform_error(
+                        "player.host.release_resources",
+                        error,
+                    ));
+                }
+            }
+            Err(error) => failures.push(player_platform_error(
                 "player.runtime.release_resources",
-                error.to_string(),
-            )
-        })?;
-        executor
-            .execute_batch(shutdown_batch)
-            .await
-            .map_err(|error| {
-                astra_platform::PlatformError::new(
-                    astra_platform::PlatformErrorCode::InvalidState,
-                    "player.host.release_resources",
-                    error.to_string(),
-                )
-            })?;
-        vn.shutdown().map_err(|error| {
-            astra_platform::PlatformError::new(
-                astra_platform::PlatformErrorCode::InvalidState,
-                "player.runtime.shutdown",
-                error.to_string(),
-            )
-        })?;
-        session.client.destroy_surface(surface).await?;
-        session.client.destroy_window(window).await?;
-        session.client.shutdown().await?;
+                error,
+            )),
+        }
+        if let Err(error) = vn.shutdown() {
+            failures.push(player_platform_error("player.runtime.shutdown", error));
+        }
+        if let Err(error) = session.client.destroy_surface(surface).await {
+            failures.push(error);
+        }
+        if let Err(error) = session.client.destroy_window(window).await {
+            failures.push(error);
+        }
+        if let Err(error) = session.client.shutdown().await {
+            failures.push(error);
+        }
         #[cfg(target_os = "windows")]
         for process in &mut ui_component_processes {
-            process
-                .invoke(astra_ui_plugin_abi::UiComponentRequest::Shutdown)
-                .map_err(|error| player_platform_error("player.ui_component.shutdown", error))?;
+            if let Err(error) = process.invoke(astra_ui_plugin_abi::UiComponentRequest::Shutdown) {
+                failures.push(player_platform_error("player.ui_component.shutdown", error));
+            }
+        }
+        if failures.len() == 1 {
+            return Err(failures.remove(0));
+        }
+        if !failures.is_empty() {
+            return Err(player_platform_error(
+                "player.session",
+                failures
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("; cleanup: "),
+            ));
         }
         Ok::<(), astra_platform::PlatformError>(())
     };

@@ -1,10 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    sync::{
-        mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError},
-        Arc, Mutex,
-    },
-    thread::{self, JoinHandle},
+    sync::{Arc, Mutex},
 };
 
 use astra_asset::{AssetCatalog, VfsManifest, VfsSourceRef};
@@ -15,6 +11,9 @@ use astra_ui_core::UiValidationError;
 use astra_ui_yakui::UiImageResourceProvider;
 
 use crate::NativeVnHostError;
+
+mod prefetch;
+pub(crate) use prefetch::PackageImagePrefetcher;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AssetKind {
@@ -180,143 +179,6 @@ pub(crate) struct PackageAssetStore {
     package: PackageReader,
     descriptors: BTreeMap<String, AssetDescriptor>,
     cache: Mutex<AssetCache>,
-}
-
-enum ImagePrefetchCommand {
-    Load(String),
-    Shutdown,
-}
-
-struct ImagePrefetchCompletion {
-    asset_id: String,
-    result: Result<(), String>,
-}
-
-pub(crate) type ImagePrefetchResult = (String, Result<(), String>);
-
-pub(crate) struct PackageImagePrefetcher {
-    commands: SyncSender<ImagePrefetchCommand>,
-    completions: Receiver<ImagePrefetchCompletion>,
-    workers: Vec<JoinHandle<()>>,
-}
-
-impl PackageImagePrefetcher {
-    const QUEUE_CAPACITY: usize = 32;
-    const WORKER_COUNT: usize = 2;
-
-    pub fn start(store: Arc<PackageAssetStore>) -> Result<Self, NativeVnHostError> {
-        let (commands, worker_commands) = mpsc::sync_channel(Self::QUEUE_CAPACITY);
-        let (worker_completions, completions) = mpsc::channel();
-        let worker_commands = Arc::new(Mutex::new(worker_commands));
-        let mut workers: Vec<JoinHandle<()>> = Vec::with_capacity(Self::WORKER_COUNT);
-        for worker_index in 0..Self::WORKER_COUNT {
-            let worker_store = Arc::clone(&store);
-            let worker_commands = Arc::clone(&worker_commands);
-            let worker_completions = worker_completions.clone();
-            let worker_budget = astra_plugin::WorkerBudgetBroker::global().clone();
-            let worker = match thread::Builder::new()
-                .name(format!("astra-image-prefetch-{worker_index}"))
-                .spawn(move || loop {
-                    let command = worker_commands
-                        .lock()
-                        .expect("image prefetch command queue was poisoned")
-                        .recv();
-                    match command {
-                        Ok(ImagePrefetchCommand::Load(asset_id)) => {
-                            let result = worker_budget
-                                .run_scoped(|| {
-                                    worker_store
-                                        .load_image(&asset_id)
-                                        .map(|_| ())
-                                        .map_err(|error| error.to_string())
-                                })
-                                .map_err(|error| error.to_string())
-                                .and_then(|result| result);
-                            if worker_completions
-                                .send(ImagePrefetchCompletion { asset_id, result })
-                                .is_err()
-                            {
-                                break;
-                            }
-                        }
-                        Ok(ImagePrefetchCommand::Shutdown) | Err(_) => break,
-                    }
-                }) {
-                Ok(worker) => worker,
-                Err(error) => {
-                    for _ in 0..workers.len() {
-                        let _ = commands.send(ImagePrefetchCommand::Shutdown);
-                    }
-                    for worker in workers {
-                        let _ = worker.join();
-                    }
-                    return Err(NativeVnHostError::Asset(format!(
-                        "ASTRA_PLAYER_IMAGE_PREFETCH_THREAD: {error}"
-                    )));
-                }
-            };
-            workers.push(worker);
-        }
-        drop(worker_completions);
-        Ok(Self {
-            commands,
-            completions,
-            workers,
-        })
-    }
-
-    pub fn try_schedule(&self, asset_id: String) -> Result<bool, NativeVnHostError> {
-        match self.commands.try_send(ImagePrefetchCommand::Load(asset_id)) {
-            Ok(()) => Ok(true),
-            Err(TrySendError::Full(_)) => Ok(false),
-            Err(TrySendError::Disconnected(_)) => Err(NativeVnHostError::Asset(
-                "ASTRA_PLAYER_IMAGE_PREFETCH_DISCONNECTED".into(),
-            )),
-        }
-    }
-
-    fn try_recv(&self) -> Result<Option<ImagePrefetchCompletion>, NativeVnHostError> {
-        match self.completions.try_recv() {
-            Ok(completion) => Ok(Some(completion)),
-            Err(TryRecvError::Empty) => Ok(None),
-            Err(TryRecvError::Disconnected) => Err(NativeVnHostError::Asset(
-                "ASTRA_PLAYER_IMAGE_PREFETCH_COMPLETION_DISCONNECTED".into(),
-            )),
-        }
-    }
-
-    pub fn drain_completions(&self) -> Result<Vec<ImagePrefetchResult>, NativeVnHostError> {
-        let mut completed = Vec::new();
-        while let Some(completion) = self.try_recv()? {
-            completed.push((completion.asset_id, completion.result));
-        }
-        Ok(completed)
-    }
-
-    pub fn shutdown(&mut self) -> Result<Vec<ImagePrefetchResult>, NativeVnHostError> {
-        if self.workers.is_empty() {
-            return Err(NativeVnHostError::Asset(
-                "ASTRA_PLAYER_IMAGE_PREFETCH_SHUTDOWN_ORDER".into(),
-            ));
-        }
-        for _ in 0..self.workers.len() {
-            self.commands
-                .send(ImagePrefetchCommand::Shutdown)
-                .map_err(|_| {
-                    NativeVnHostError::Asset("ASTRA_PLAYER_IMAGE_PREFETCH_DISCONNECTED".into())
-                })?;
-        }
-        for worker in self.workers.drain(..) {
-            worker.join().map_err(|_| {
-                NativeVnHostError::Asset("ASTRA_PLAYER_IMAGE_PREFETCH_PANICKED".into())
-            })?;
-        }
-        let mut completed = Vec::new();
-        while let Ok(completion) = self.completions.try_recv() {
-            completed.push((completion.asset_id, completion.result));
-        }
-        Ok(completed)
-    }
 }
 
 impl PackageAssetStore {

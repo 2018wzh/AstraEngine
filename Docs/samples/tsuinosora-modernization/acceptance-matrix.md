@@ -51,3 +51,6 @@ modern profile 的增强风格限定为修复增强，不做强风格重制。�
 | Release Gate | joined source/conversion/modern/manual report with blocker summary |
 
 Demo 不能只靠自动 scenario 宣称完成。完整验收必须同时具备 release report 和 `tsuinosora.manual_signoff.v1`，并且人工完整通关、听音、画面和 alias/replacement review 都没有阻断项。
+
+
+本轮关闭/恢复回归：旧图片预取失败在成功读档换代后被拒绝；停止时未执行队列丢弃，在途任务全部 join；缺失转场源资源的合法容器在 World 提交前拒绝，原场景继续且可再次保存。以上为开发回归，Windows 真实选择与逐类演出对照仍未关闭。

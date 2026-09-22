@@ -452,6 +452,22 @@ impl ProductStageDirector {
         Ok(restored)
     }
 
+    /// Validate a decoded candidate against this session before replacing live state.
+    pub fn validate_restore_candidate(&self, candidate: &Self) -> Result<(), VnError> {
+        if candidate.state.schema != PRODUCT_STAGE_STATE_SCHEMA
+            || candidate.state.profile != self.state.profile
+            || candidate.manifest != self.manifest
+        {
+            return Err(stage_error(
+                "ASTRA_VN_STAGE_SNAPSHOT_IDENTITY",
+                "presentation snapshot identity does not match the active session",
+            ));
+        }
+        candidate.ensure_active()?;
+        candidate.coordinator.validate_restored_state()?;
+        candidate.validate_state()
+    }
+
     fn region_envelope(
         &mut self,
         command: &StageCommand,

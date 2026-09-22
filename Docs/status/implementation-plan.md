@@ -14,6 +14,8 @@
 
 Classic Windows 首批真实操作发现并修复两处启动/演出问题：首帧 GPU/IO 停顿超过四个 tick 会因 scheduler debt 退出，现改为保留欠账的有界连续追赶；开场清除实体时只取消 tween、留下 timeline 轨道，下一帧写已删除实体而退出，现统一取消目标轨道并保持其他轨道。第二项覆盖即时/渐隐删除、混合摄像机轨道与存档恢复；stage 18 项、Player-vn 45 项回归及相关 Clippy 通过。最大化时固定坐标内容偏左的问题已改用共享 Canvas2D 根变换与输入逆映射，新构建真实复测确认最大化黑边与鼠标命中正确。随后发现命名键被平台传成调试包装/控制字符，已修复四个 winit 适配点；Windows Sandbox 复测方向键、Enter 打开读档、Escape 返回及恢复后 Enter 推进通过。真实操作已完成空槽保存、推进后读取、关闭进程后从标题读取同一槽并继续；尚未完成选择、逐类演出、原版系统习惯与真实声音。静止/切页时观察到短暂黑帧，原版标题对照还发现明显颜色差异，需继续定位，不能据此关闭视觉验收。
 
+审查发现的 Player 关闭与读档问题已修复：Windows 错误路径继续执行媒体、资源、VN 和平台关闭；预取队列停止后丢弃未执行请求并 join 在途工作，读档换代拒绝旧完成值。候选舞台和转场源资源在 World 提交前验证，缺失资源拒绝后原游戏仍可继续并再次保存。新增三项回归与现有 Player-vn 共 48 项通过；平台集成与本批真实 Windows 复测尚未完成。原版 READY 启动页与转换后的 MENU 不是同一场景，当前不能据此断言颜色转换错误。
+
 本轮 Musica/SDK 重构已接通公共 `Canvas2D`、SDK `StageCanvas`/`TextureAsset`、AstraVN presentation 第二消费者及 Family API v7 logical/raster frame 元数据。Musica 启动配置改为显式 `render_width`/`render_height` 正整数，GPU Scene 和 AstraText glyph 路径按实际 raster density 输出；统一 aspect-fit viewport 负责奇数、portrait、缩小和黑边，原生 1280x720 逻辑舞台、ANI 原点和存档/VM 时间保持独立。已验证的 Windows Sandbox 配对在 `data/cores/` 冷启动发现 Musica，Scale 从非可执行文件工作目录启用成功；640×360、1001×777、1920×1200 和 720×1280 的 DX12 discrete 画面与黑边检查通过，slot 24 在进程完整重启后仍可保存并读取。720×1280 的剧情内容输入仍待补测，真实可听声音、完整结局、长流程、跨平台和性能验收仍开放。
 
 本批最新实现状态：Family Manager 的扫描缓存现在随每次 probe 结果替换，NoMatch、候选冲突和失效候选都会清理当前候选、临时 provider 选择及持久 family 关联；卡片、详情启动按钮和 `try_launch` 共用当前候选资格。rescan 更新游戏记录时保留用户标题、内容指纹和创建时间，不重建资料库或存档。对应的 A→B→NoMatch、重新匹配、用户元数据保留和 UI 诊断回归已加入 Manager 定向测试。Native VN 的终局观察由真实 `terminal_route_ids` 推导 `vn.route_terminal`，路线输入同时等待该布尔状态和精确终局 ID；生成器、校验器和空集合/错误布尔回归已同步，尚未用新构建重新跑完整商业路线。FVP dynamic-plugin-export 的真实 DLL 已在完整依赖图中完成 descriptor、capability、probe、open/close 与重启注册测试；该用例只覆盖 provider 合约，不替代商业流程验收。

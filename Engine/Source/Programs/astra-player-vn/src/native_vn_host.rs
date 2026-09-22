@@ -1574,9 +1574,102 @@ impl NativeVnHostCommandSource {
                 "ASTRA_PLAYER_RESTORE_LOCALE_UNAVAILABLE: locale {restored_locale} is not packaged"
             )));
         }
+        // Decode and validate every saved presentation reference before World changes.
+        self.stage_director
+            .validate_restore_candidate(&envelope.payload.stage_director)
+            .map_err(stage_director_error)?;
+        if !self.ui_save_slots.contains_key(&save_metadata.slot_id) {
+            return Err(NativeVnHostError::Save(
+                "ASTRA_PLAYER_SAVE_METADATA_SLOT: metadata references an undeclared slot".into(),
+            ));
+        }
+        let next_ui_generation = self
+            .ui_generation
+            .checked_add(1)
+            .ok_or(NativeVnHostError::SequenceOverflow)?;
+        self.command_sequence
+            .checked_add(1)
+            .ok_or(NativeVnHostError::SequenceOverflow)?;
+        let mut required = presentation::stage_texture_requirements(
+            envelope.payload.stage_director.state(),
+            &BTreeMap::new(),
+        )
+        .0;
+        let saved_transition_id = envelope
+            .payload
+            .stage_director
+            .state()
+            .transition
+            .as_ref()
+            .and_then(|transition| transition.descriptor_id.as_deref());
+        if saved_transition_id
+            != envelope
+                .payload
+                .director_transition_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.descriptor_id.as_str())
+        {
+            return Err(NativeVnHostError::Save(
+                "ASTRA_PLAYER_RESTORE_TRANSITION_IDENTITY".into(),
+            ));
+        }
+        if let Some(snapshot) = envelope.payload.director_transition_snapshot.as_ref() {
+            let target = envelope.payload.stage_director.state();
+            if snapshot.source_state.schema != target.schema
+                || snapshot.source_state.profile != target.profile
+                || target
+                    .transition
+                    .as_ref()
+                    .and_then(|transition| transition.descriptor_id.as_deref())
+                    != Some(snapshot.descriptor_id.as_str())
+            {
+                return Err(NativeVnHostError::Save(
+                    "ASTRA_PLAYER_RESTORE_TRANSITION_IDENTITY".into(),
+                ));
+            }
+            required.extend(
+                presentation::stage_texture_requirements(&snapshot.source_state, &BTreeMap::new())
+                    .0,
+            );
+        }
+        let mut prepared_textures = BTreeMap::new();
+        let mut prepared_dimensions = BTreeMap::new();
+        let mut prepared_bytes = 0u64;
+        for asset_id in &required {
+            let frame = self.stage_texture_for_viewport(self.asset_store.load_image(asset_id)?)?;
+            prepared_bytes = prepared_bytes
+                .checked_add(frame.rgba8.len() as u64)
+                .ok_or(NativeVnHostError::SequenceOverflow)?;
+            if prepared_bytes > self.texture_cpu_budget_bytes
+                || prepared_bytes > self.gpu_texture_budget_bytes
+            {
+                return Err(NativeVnHostError::Save(
+                    "ASTRA_PLAYER_RESTORE_TEXTURE_BUDGET".into(),
+                ));
+            }
+            prepared_dimensions.insert(asset_id.clone(), (frame.width, frame.height));
+            prepared_textures.insert(asset_id.clone(), frame);
+        }
+        stage_scene_commands(
+            envelope.payload.stage_director.state(),
+            &prepared_textures,
+            &prepared_dimensions,
+            self.width,
+            self.height,
+        )?;
+        let restored_transition_snapshot = restore_director_transition_snapshot(
+            envelope.payload.director_transition_snapshot.as_ref(),
+            &prepared_textures,
+            &prepared_dimensions,
+            self.width,
+            self.height,
+        )?;
         let report = self.host.restore(envelope.payload.runtime)?;
         *committed = true;
         self.reset_pending_work();
+        self.image_prefetcher.reset_generation();
+        self.image_prefetch_inflight.clear();
+        self.image_prefetch_failure = None;
         self.fixed_step = report.step;
         self.session_seed = report.seed;
         self.next_step_mode = astra_runtime::TickMode::RestoreContinuation;
@@ -1587,16 +1680,9 @@ impl NativeVnHostCommandSource {
             .map_or(0, |state| state.backlog.len());
         self.activate_locale(&restored_locale)?;
         self.stage_director = envelope.payload.stage_director;
-        if let Some(snapshot) = envelope.payload.director_transition_snapshot.as_ref() {
-            self.ensure_stage_textures(&snapshot.source_state)?;
+        for (asset_id, frame) in prepared_textures {
+            self.store_texture(asset_id, frame, &required)?;
         }
-        let restored_transition_snapshot = restore_director_transition_snapshot(
-            envelope.payload.director_transition_snapshot.as_ref(),
-            &self.textures,
-            &self.texture_dimensions,
-            self.width,
-            self.height,
-        )?;
         self.director_transition_snapshot = restored_transition_snapshot;
         self.last_step_evidence = Some(envelope.payload.step_evidence);
         self.apply_save_metadata(save_metadata)?;
@@ -1614,10 +1700,7 @@ impl NativeVnHostCommandSource {
             restore_lifecycle.extend(self.text_resources.remove_layout(&layout_id)?);
         }
         self.live_layout_ids.clear();
-        self.ui_generation = self
-            .ui_generation
-            .checked_add(1)
-            .ok_or(NativeVnHostError::SequenceOverflow)?;
+        self.ui_generation = next_ui_generation;
         // The UI model has changed under the same session identity. The Yakui
         // backend emits an ordered release/resync transaction so the retained
         // Scene2D resources remain synchronized with this restored state.
@@ -3490,17 +3573,15 @@ impl NativeVnHostCommandSource {
         }
         self.reset_pending_work();
         self.media_scope.cancel();
-        for (asset_id, result) in self.image_prefetcher.shutdown()? {
-            self.image_prefetch_inflight.remove(&asset_id);
-            if let Err(error) = result {
-                self.image_prefetch_failure =
-                    Some(format!("ASTRA_PLAYER_IMAGE_PREFETCH_FAILED: {error}"));
+        let completions = self.image_prefetcher.shutdown()?;
+        self.image_prefetch_inflight.clear();
+        for completion in completions {
+            if self.image_prefetcher.is_current(&completion.scope) {
+                if let Err(error) = completion.result {
+                    self.image_prefetch_failure =
+                        Some(format!("ASTRA_PLAYER_IMAGE_PREFETCH_FAILED: {error}"));
+                }
             }
-        }
-        if !self.image_prefetch_inflight.is_empty() {
-            return Err(NativeVnHostError::Asset(
-                "ASTRA_PLAYER_IMAGE_PREFETCH_INFLIGHT_AT_SHUTDOWN".into(),
-            ));
         }
         self.ui_text_measurer.begin_frame()?;
         self.ui_frame_reuse = None;
@@ -4030,7 +4111,24 @@ impl NativeVnHostCommandSource {
 
             let stage_lifecycle_started =
                 performance_phase_started(self.ui_host_performance_sampling_enabled);
-            let texture_ids = scene_texture_ids(&scene_draw);
+            let mut texture_ids = scene_texture_ids(&scene_draw);
+            // Both halves of a transition must survive residency eviction, including
+            // a restored outgoing scene that has never been uploaded by this process.
+            if transition_request.is_some() {
+                texture_ids.extend(scene_texture_ids(&self.scene_draw));
+            } else if next_stage_director
+                .as_ref()
+                .unwrap_or(&self.stage_director)
+                .state()
+                .transition
+                .as_ref()
+                .and_then(|value| value.descriptor_id.as_ref())
+                .is_some()
+            {
+                if let Some(snapshot) = &self.director_transition_snapshot {
+                    texture_ids.extend(scene_texture_ids(&snapshot.source_draw));
+                }
+            }
             for asset_id in &texture_ids {
                 self.mark_texture_used(asset_id)?;
             }
@@ -4230,15 +4328,6 @@ impl NativeVnHostCommandSource {
             sample.scene_compose_ns = sample.scene_compose_ns.saturating_add(scene_compose_ns);
         }
         Ok(batch)
-    }
-
-    fn ensure_stage_textures(
-        &mut self,
-        state: &ProductStageState,
-    ) -> Result<(), NativeVnHostError> {
-        let (required, cpu_required) =
-            presentation::stage_texture_requirements(state, &self.textures);
-        self.ensure_stage_texture_assets(required, cpu_required)
     }
 
     fn store_texture(
@@ -4458,9 +4547,13 @@ impl NativeVnHostCommandSource {
         if let Some(error) = &self.image_prefetch_failure {
             return Err(NativeVnHostError::Asset(error.clone()));
         }
-        for (asset_id, result) in self.image_prefetcher.drain_completions()? {
+        for completion in self.image_prefetcher.drain_completions()? {
+            if !self.image_prefetcher.is_current(&completion.scope) {
+                continue;
+            }
+            let asset_id = completion.asset_id;
             self.image_prefetch_inflight.remove(&asset_id);
-            if let Err(error) = result {
+            if let Err(error) = completion.result {
                 let error = format!("ASTRA_PLAYER_IMAGE_PREFETCH_FAILED: {error}");
                 self.image_prefetch_failure = Some(error.clone());
                 return Err(NativeVnHostError::Asset(error));

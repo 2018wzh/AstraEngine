@@ -104,6 +104,66 @@ fn source_for(story: &str) -> NativeVnHostCommandSource {
 }
 
 #[test]
+fn invalid_transition_asset_restore_keeps_live_world_and_work() {
+    let mut source = source_for(
+        r#"
+story main #@id story.main
+state start #@id state.start
+  scene first #@id scene.first
+    stage viewport:320x180 safe_area:16:9 #@id stage.main
+    layer id:bg kind:background z:0 blend:normal clip:stage #@id layer.bg
+    background asset:asset:/background/apartment-night layer:bg duration:0 interrupt:replace_from_current #@id background.first
+    text key:line.one speaker:hero #@id line.one
+  scene second #@id scene.second
+    transition preset:director_puppet_9 duration:250 descriptor:director.puppet.9 #@id transition.center
+    background asset:asset:/background/apartment-night layer:bg duration:0 interrupt:replace_from_current #@id background.second
+    text key:line.two speaker:hero #@id line.two
+"#,
+    );
+    for _ in 0..2 {
+        source.command(VnPlayerCommand::Advance).unwrap();
+    }
+    source.tick_presentation(16_666_667).unwrap();
+    source
+        .cache_gameplay_surface(320, 180, vec![0x40; 320 * 180 * 4])
+        .unwrap();
+    source
+        .prepare_save_metadata("slot.01", "2000-01-01T00:00:00Z".into(), 0)
+        .unwrap();
+    let saved = source.save("slot.01").unwrap();
+    let mut envelope = decode_save_envelope(&saved).unwrap();
+    let snapshot = envelope
+        .payload
+        .director_transition_snapshot
+        .as_mut()
+        .unwrap();
+    snapshot
+        .source_state
+        .entities
+        .values_mut()
+        .next()
+        .unwrap()
+        .asset = "asset:/missing".into();
+    let corrupted = postcard::to_allocvec(&envelope).unwrap();
+    let world = source.host.save().unwrap().0;
+    let scope = source.media_scope.clone();
+    let step = source.fixed_step;
+    assert!(source.restore(&corrupted).is_err());
+    assert_eq!(source.host.save().unwrap().0, world);
+    assert_eq!(source.fixed_step, step);
+    assert_eq!(source.media_scope, scope);
+    assert!(!scope.is_cancelled());
+    assert!(!source.presentation_failed);
+    source.tick_presentation(16_666_667).unwrap();
+    source
+        .prepare_save_metadata("slot.01", "2000-01-01T00:00:00Z".into(), 0)
+        .unwrap();
+    assert!(source.save("slot.01").is_ok());
+    source.release_resources().unwrap();
+    source.shutdown().unwrap();
+}
+
+#[test]
 fn frame_failure_keeps_advanced_state_and_requires_successful_restore() {
     let mut source = source();
     source
