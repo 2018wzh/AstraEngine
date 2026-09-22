@@ -6,7 +6,7 @@
 
 左侧 Content Browser 和 Outliner、中间源文档/剧情结构/演出视图、右侧 Details 共用 source ID 选择。Details 批量应用各属性的 CST value span，版本变化后拒绝旧面板内容。调整后的面板宽度保存到 ignored `.astra-cache`；Reset layout 恢复默认工作区。
 
-Graph 从当前源文档的 state 和实际路由目标绘制连接，点击节点/路由定位同一份 Details。Timeline 从源 `keyframes` 属性派生时间刻度与帧选择，关键帧修改、插入、删除通过 `attribute_edit` 提交；它不保存另一份演出数据。项目打开与预览配置使用 GPUI 系统文件选择器，项目切换处理保存、丢弃与取消，打开失败保留当前工程。
+Graph 从当前源文档的 state 和实际路由目标绘制连接，点击节点/路由定位同一份 Details。Timeline 从源 `keyframes` 属性派生时间刻度与帧选择，关键帧修改、插入、删除通过 `attribute_edit` 提交；它不保存另一份演出数据。关键帧拖动仅在原轨道释放时提交一次版本事务，取消不修改源码。Graph 连接端口创建经过目标校验的 jump，删除路由删除完整命令；源码编译继续负责可达性诊断。项目打开与预览配置使用 GPUI 系统文件选择器，项目切换处理保存、丢弃与取消，打开失败保留当前工程。
 
 Agent 为辅助面板。每个 ACP 回合拥有一个有随机令牌的 loopback MCP 服务，与 stdio MCP 共用 EditorBridge。每次提交先检查文档版本，再按自主或逐批确认模式应用。外部权限面板展示关联工具详情；批准还必须匹配原 tool call、选项与 generation。取消推进 generation，待审查响应返回取消，旧 Agent 不能继续写入。
 

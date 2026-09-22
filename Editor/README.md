@@ -14,7 +14,7 @@ cargo run --manifest-path Editor/Cargo.toml -p astra-editor -- story.astra
 
 `attribute_edit` 使用现有 CST 的 attribute span 修改源码，保留周围注释和 source ID。Outliner、剧情结构、演出视图和 Details 共用 source ID 选择；点击命令定位源码，Details 把一组属性修改作为单个 batch 提交。源码版本改变后旧 Details 提交会被拒绝。Graph 按实际 state、jump、option、branch 和 call 绘制连接，点击节点或路由后可在 Details 修改属性。Timeline 按实际时间绘制关键帧，可修改时间/数值、插入和删除；时间排序、重复时间和至少两个关键帧的约束在事务前检查，标量语义由编译器诊断。所有编辑仍写回同一 `.astra`，保留注释，并共用批量撤销。
 
-Open project 使用系统文件选择器，切换前处理未保存修改；打开失败保留原工程。Preview setup 可载入当前工程的产品预览配置。Graph 目前采用固定网格，尚无节点拖动与拖线创建；Timeline 尚无关键帧拖动、缩放和曲线编辑。二维场景操纵器、资源导入和完整 dock 面板管理也尚未实现，UE 易用性目标未达成。
+Open project 使用系统文件选择器，切换前处理未保存修改；打开失败保留原工程。Preview setup 可载入当前工程的产品预览配置。Graph 的连接端口可拖到目标 state 创建 jump，要求源 state 有 scene 且尚无控制流；目标必须唯一存在。Delete route 删除完整路由命令（branch 的两个出口一起删除），可能产生的不可达状态由编译诊断显示。Graph 目前仍采用固定网格，尚无节点布局拖动。Timeline 可在原轨道拖动关键帧，释放时提交一次事务，离开轨道释放即取消；一个手势对应一次撤销，过期版本和重复时间会拒绝。当前引擎 timeline 仅支持线性插值，未添加虚假的曲线属性；缩放和曲线编辑尚未实现。二维场景操纵器、资源导入和完整 dock 面板管理也尚未实现，UE 易用性目标未达成。
 
 左右面板可调整宽度，布局保存在 ignored `.astra-cache/editor-layout.json`；Reset layout 恢复默认。Ctrl/Cmd+S 保存全部源文档，源编辑区的 Undo/Redo 快捷键进入共用 batch 历史。Agent 输入和未提交的属性字段保留自己的局部输入撤销。
 

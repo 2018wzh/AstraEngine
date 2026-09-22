@@ -1,6 +1,17 @@
 use super::*;
 use astra_vn_editor::parse_astra_source;
 
+#[derive(Clone)]
+struct StateDrag {
+    path: String,
+    version: u64,
+    source_id: String,
+}
+impl Render for StateDrag {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().p_2().bg(rgb(0x405878)).child("Connect state")
+    }
+}
 struct Node {
     name: String,
     source_id: String,
@@ -14,6 +25,23 @@ struct Edge {
 }
 
 impl Editor {
+    fn finish_graph_edit(
+        &mut self,
+        batch: anyhow::Result<astra_vn_editor::EditBatch>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match batch.and_then(|batch| Ok(self.project.documents.apply(batch)?)) {
+            Ok(_) => {
+                self.cancel_agent();
+                self.sync(window, cx);
+            }
+            Err(error) => {
+                self.status = error.to_string();
+                cx.notify();
+            }
+        }
+    }
     /// Rebuild the graph from source IDs and route targets; layout has no story authority.
     pub(super) fn graph_panel(&self, cx: &mut Context<Self>) -> AnyElement {
         let document = self
@@ -114,8 +142,30 @@ impl Editor {
         for (index, node) in nodes.into_iter().enumerate() {
             let (x, y) = origin(index);
             let id = node.source_id.clone();
+            let path = document.path.clone();
+            let version = document.version;
+            let target = node.name.clone();
+            let drag = StateDrag {
+                path: path.clone(),
+                version,
+                source_id: id.clone(),
+            };
             let card =
                 div()
+                    .id(SharedString::from(format!("graph-card-{index}")))
+                    .on_drop(cx.listener(move |this, drag: &StateDrag, window, cx| {
+                        if this.project.active != drag.path || drag.path != path {
+                            return;
+                        }
+                        let batch = astra_editor::graph::connect(
+                            &this.project.documents,
+                            &drag.path,
+                            drag.version,
+                            &drag.source_id,
+                            &target,
+                        );
+                        this.finish_graph_edit(batch, window, cx);
+                    }))
                     .absolute()
                     .left(px(x))
                     .top(px(y))
@@ -129,6 +179,12 @@ impl Editor {
                     .flex()
                     .flex_col()
                     .gap_2()
+                    .child(
+                        div()
+                            .id(SharedString::from(format!("graph-port-{index}")))
+                            .on_drag(drag, |drag, _, _, cx| cx.new(|_| drag.clone()))
+                            .child("Drag to connect →"),
+                    )
                     .child(
                         Button::new(SharedString::from(format!("graph-node-{id}")))
                             .label(node.name)
@@ -146,13 +202,39 @@ impl Editor {
                             .gap_1()
                             .children(node.edges.into_iter().enumerate().map(
                                 |(edge_index, edge)| {
-                                    Button::new(SharedString::from(format!(
-                                        "graph-edge-{index}-{edge_index}"
-                                    )))
-                                    .label(format!("{} → {}", edge.label, edge.target))
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        this.select_command(edge.source_id.clone(), window, cx)
-                                    }))
+                                    let remove_id = edge.source_id.clone();
+                                    let remove_path = document.path.clone();
+                                    div()
+                                        .flex()
+                                        .gap_1()
+                                        .child(
+                                            Button::new(SharedString::from(format!(
+                                                "graph-edge-{index}-{edge_index}"
+                                            )))
+                                            .label(format!("{} → {}", edge.label, edge.target))
+                                            .on_click(cx.listener(move |this, _, window, cx| {
+                                                this.select_command(
+                                                    edge.source_id.clone(),
+                                                    window,
+                                                    cx,
+                                                )
+                                            })),
+                                        )
+                                        .child(
+                                            Button::new(SharedString::from(format!(
+                                                "remove-route-{index}-{edge_index}"
+                                            )))
+                                            .label("Delete route")
+                                            .on_click(cx.listener(move |this, _, window, cx| {
+                                                let batch = astra_editor::graph::remove(
+                                                    &this.project.documents,
+                                                    &remove_path,
+                                                    version,
+                                                    &remove_id,
+                                                );
+                                                this.finish_graph_edit(batch, window, cx);
+                                            })),
+                                        )
                                 },
                             )),
                     );
@@ -162,7 +244,7 @@ impl Editor {
             .id("story-graph")
             .size_full()
             .overflow_scroll()
-            .child("Select a state or route; edit its source properties in Details.")
+            .child("Drag a state port onto a target to add a jump. Delete route removes its command (both branch ports).")
             .child(surface)
             .into_any_element()
     }

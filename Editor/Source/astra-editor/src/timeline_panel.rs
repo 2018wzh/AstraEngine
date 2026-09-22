@@ -1,6 +1,24 @@
 use super::*;
 use astra_editor::timeline::{self, Keyframe, KeyframeEdit};
 
+#[derive(Clone)]
+struct KeyframeDrag {
+    path: String,
+    source_id: String,
+    version: u64,
+    index: usize,
+    frame: Keyframe,
+    duration: u32,
+    start_x: std::rc::Rc<std::cell::Cell<f32>>,
+}
+impl Render for KeyframeDrag {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .p_2()
+            .bg(rgb(0x405878))
+            .child(format!("Key at {} ms", self.frame.time_ms))
+    }
+}
 pub(super) struct TimelineSelection {
     path: String,
     source_id: String,
@@ -111,6 +129,38 @@ impl Editor {
         }
     }
 
+    fn drop_keyframe(&mut self, drag: &KeyframeDrag, window: &mut Window, cx: &mut Context<Self>) {
+        let delta = f32::from(window.mouse_position().x) - drag.start_x.get();
+        let time_ms = timeline::drag_time(drag.frame.time_ms, delta, drag.duration);
+        if time_ms == drag.frame.time_ms {
+            return;
+        }
+        let result = timeline::edit(
+            &self.project.documents,
+            &drag.path,
+            drag.version,
+            &drag.source_id,
+            KeyframeEdit::Set {
+                index: drag.index,
+                frame: Keyframe {
+                    time_ms,
+                    value: drag.frame.value.clone(),
+                },
+            },
+        )
+        .and_then(|batch| Ok(self.project.documents.apply(batch)?));
+        match result {
+            Ok(_) => {
+                self.cancel_agent();
+                self.panels.timeline_selection = None;
+                self.sync(window, cx);
+            }
+            Err(error) => {
+                self.status = error.to_string();
+                cx.notify();
+            }
+        }
+    }
     pub(super) fn timeline_panel(&self, cx: &mut Context<Self>) -> AnyElement {
         let document = self
             .project
@@ -136,7 +186,7 @@ impl Editor {
             .flex_col()
             .gap_3()
             .p_3()
-            .child("Timeline · select a keyframe to edit its time and value")
+            .child("Timeline · drag keys to retime; select to edit · linear interpolation")
             .child(format!(
                 "0 ms ────────────────────────────────────── {duration} ms"
             ));
@@ -146,7 +196,18 @@ impl Editor {
             );
         }
         for track in tracks {
+            let drop_id = track.source_id.clone();
+            let drop_path = document.path.clone();
             let mut lane = div()
+                .id(SharedString::from(format!("lane-{}", track.source_id)))
+                .on_drop(cx.listener(move |this, drag: &KeyframeDrag, window, cx| {
+                    if drag.path == drop_path
+                        && drag.source_id == drop_id
+                        && this.project.active == drop_path
+                    {
+                        this.drop_keyframe(drag, window, cx);
+                    }
+                }))
                 .relative()
                 .w(px(640.))
                 .h(px(44.))
@@ -157,18 +218,47 @@ impl Editor {
                 let source_id = track.source_id.clone();
                 let offset = frame.time_ms as f32 / duration as f32 * 520.;
                 lane = lane.child(
-                    div().absolute().left(px(offset)).top(px(5.)).child(
-                        Button::new(SharedString::from(format!(
-                            "keyframe-{}-{index}",
+                    div()
+                        .id(SharedString::from(format!(
+                            "drag-{}-{index}",
                             track.source_id
                         )))
-                        .label(format!("◆ {}", frame.time_ms))
-                        .on_click(cx.listener(
-                            move |this, _, window, cx| {
-                                this.select_keyframe(source_id.clone(), version, index, window, cx)
+                        .on_drag(
+                            KeyframeDrag {
+                                path: document.path.clone(),
+                                source_id: track.source_id.clone(),
+                                version,
+                                index,
+                                frame: frame.clone(),
+                                duration,
+                                start_x: std::rc::Rc::new(std::cell::Cell::new(0.)),
                             },
-                        )),
-                    ),
+                            |drag, _, window, cx| {
+                                drag.start_x.set(f32::from(window.mouse_position().x));
+                                cx.new(|_| drag.clone())
+                            },
+                        )
+                        .absolute()
+                        .left(px(offset))
+                        .top(px(5.))
+                        .child(
+                            Button::new(SharedString::from(format!(
+                                "keyframe-{}-{index}",
+                                track.source_id
+                            )))
+                            .label(format!("◆ {}", frame.time_ms))
+                            .on_click(cx.listener(
+                                move |this, _, window, cx| {
+                                    this.select_keyframe(
+                                        source_id.clone(),
+                                        version,
+                                        index,
+                                        window,
+                                        cx,
+                                    )
+                                },
+                            )),
+                        ),
                 );
             }
             panel = panel.child(
