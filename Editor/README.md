@@ -52,7 +52,7 @@ Save & Preview 先保存并编译当前文档，再执行现有 `cook → packag
 
 Stop 请求真实 Player 关闭会话与设备，超过三秒仍未退出则回收子进程；文档改变、构建取消或编辑器关闭会回收旧进程。管道读写使用有界队列和有界 JSONL，子进程退出后 join 两个通信 worker。旧身份、控制拒绝、断管、启动失败与超时显示为错误。
 
-公开最小工程已经通过真实 Windows Player 的 cook/package/bundle、Ready、Pause、当前片段精确 checkpoint 恢复、Resume 与正常 Stop。复测需设置 `ASTRA_EDITOR_PREVIEW_CONFIG`，运行 `cargo test --manifest-path Editor/Cargo.toml -p astra-editor --test preview_product -- --ignored`；它会启动 GPU 窗口。此测试检查产品进程与协议状态，不检查画面、音频质量或手动操作；NativeVN 旗舰工程、连续创作和窗口交互仍需验收。
+公开最小工程已经通过真实 Windows Player 的 cook/package/bundle、Ready、Pause、当前片段精确 checkpoint 恢复、Resume 与正常 Stop。复测需设置 `ASTRA_EDITOR_PREVIEW_CONFIG`，运行 `cargo test --manifest-path Editor/Cargo.toml -p astra-editor --test preview_product -- --ignored`；它会启动 GPU 窗口。此测试检查产品进程与协议状态，不检查画面、音频质量或手动操作；桌面窗口交互、画面与可听音频仍需验收。
 
 完整 NativeVN 作者回归使用同一配置，显式运行：
 
@@ -62,7 +62,7 @@ cargo test --manifest-path Editor/Cargo.toml --test preview_product nativevn_gra
 
 此测试临时把 Graph 入口连接到分层演出、延长行走关键帧，保存后执行完整 cook/package/bundle 与真实 Player 控制，再撤销、保存、重开并比较原项目 hash。它会暂时修改所选 NativeVN 工程源码，须在独占工作树运行；正常结束或断言失败会恢复本次写入，外部修改不会被覆盖。不能用该流程代替桌面拖动、画面和音频验收。
 
-当前新版 NativeVN 的四文档编译和完整 cook/package/bundle 已通过，Windows Player 在 Ready 前因 `player.audio.decode` 失败退出。旧诊断把不支持的 codec、非法请求与活动 stream 合并报告；源码排查发现样例 OGG 不在 Windows 显式 WMF 能力列表中，尚不能据此断言 stream 生命周期冲突。准确诊断及 codec/资产绑定问题已交共享 Runtime 维护者；完整作者预览回归尚未通过，不能沿用最小工程成功结果代替。普通 `nativevn_graph_timeline_roundtrip` 测试单独检查真实样例的编辑、编译、注释保留和撤销，不启动 Player。
+新版 NativeVN 已使用现有 WAV/MP4 完成上述完整作者回归：实际 Player 到达 `experience.stage.first`，Pause、当前片段精确 checkpoint Seek、Resume 和正常 Stop 通过；三批撤销恢复原源码与编译 hash，保存重开一致。首次构建和连接允许 600 秒，Ready 后每次控制等待限 30 秒；生产管道自身的 120 秒握手、3 秒停止限制不变。普通 `nativevn_graph_timeline_roundtrip` 测试单独检查真实样例的编辑、编译、注释保留和撤销，不启动 Player。
 
 ## 依赖与检查
 

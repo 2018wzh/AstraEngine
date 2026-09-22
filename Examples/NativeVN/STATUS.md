@@ -51,4 +51,4 @@ main surface 修复后真实 Cook/package 与 Vulkan 硬件离屏场景通过。
 2026-09-22 接入 392ceec05 后修复 Headless 错误退出与保存缩略图入口：CLI run/serve 持有取消/join owner，最小硬件 GPU await-timeout 负例现在以预期 exit 2 退出，不再挂住；正常 69 输入/10 checkpoint 存读档 GPU 回归 exit 0。物理输入经 prepare_ui_input 按实际系统页转换在呈现前截图，三个宿主接收 Captured 结果；实际查看 slot.01，缩略图已显示保存前的剧情画面。126 项直接调用方测试通过、1 helper 忽略，线程析构 2 项局部测试与相关五 crate all-target Clippy 通过。随后使用另一进程读取同一存档，25 条物理输入、目录与恢复 checkpoint 均通过，已查看恢复画面；存档读取前后 hash 相同。列表 clip 丢失仍未修复，真实窗口/音频与多平台仍未验收。
 ## Windows 媒体绑定修正
 
-运行时 sidecar 改用现有 205 份 WAV master 与 MP4，保留逻辑资源 ID、许可和 provider 选择。生成器同步维护 JP/SC 两份字体及各自 coverage；重生成不再删除 SC 字体或改写 JP coverage。26 项工具测试通过，真实 Windows Player 联调尚未完成。
+运行时 sidecar 改用现有 205 份 WAV master 与 MP4，保留逻辑资源 ID、许可和 provider 选择。生成器同步维护 JP/SC 两份字体及各自 coverage；重生成不再删除 SC 字体或改写 JP coverage。26 项工具测试通过。Editor 作者管道已在真实 Windows Player 完成 Graph/Timeline 编辑、编译预览、暂停、片段 checkpoint 恢复、继续、停止及撤销后保存重开；源码与编译 hash 恢复一致。桌面拖动、画面、可听音频及影片播放仍需验收。

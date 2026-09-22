@@ -25,9 +25,9 @@ Windows 完整样例的 Editor 编译、Cook 和打包已通过，Player 启动�
 远端六批样例、测试和状态变更已集成；Windows 工具测试发现默认系统编码读取中文 `.astra` 失败，现显式使用 UTF-8，25 项工具回归与三项真实 pipe 子进程回归通过。Editor 已接手新版样例的作者纵向流程。远端 Vulkan 流程不替代 Windows Player 验收；保存列表的 Mesh 与单独绘制 AstraText 已接同一真实布局裁剪，空交集和相邻控件隔离有回归；设备复测仍待完成。键盘缩略图和 Headless 错误退出仍开放。
 
 保留《玻璃雨中的信号》的故事与授权素材，将旧 platform profile v2 迁到 v3，拆分 mixer/output、补齐限额并声明三桌面及 Android；修复 advanced-vn 系统页 policy 与 binding。项目工具不再覆盖作者 `.astra`。真实 Cook 的 284 个资产通过，工具测试 23 项通过、1 项跳过；产品交互、视听和存读档尚未验收。共享 target schema 仍强制 runtime_provider/ui_provider 元数据字段，样例保留到共享 schema 迁移，不引入动态 provider。
-Editor 补齐项目切换的迟到结果隔离：资源与预览配置选择器按请求取消，Graph/Timeline 拖动绑定项目会话，关闭和切项目确认绑定全部文档版本。定向回归覆盖编辑、撤销、保存及同路径重开；实际桌面交互仍待用户恢复授权。新版 NativeVN 的 Windows 全链预览等待明确兼容 WMF 的样例素材提交，不重复运行已知不支持的 OGG/WebM。
+Editor 补齐项目切换的迟到结果隔离：资源与预览配置选择器按请求取消，Graph/Timeline 拖动绑定项目会话，关闭和切项目确认绑定全部文档版本。定向回归覆盖编辑、撤销、保存及同路径重开；实际桌面交互仍待用户恢复授权。新版 NativeVN 已改用明确的 WAV/MP4 绑定。
 
-NativeVN 运行时媒体已统一绑定现有 205 份 WAV master 与 MP4；206 个 sidecar 只改 source/hash/type，逻辑 ID、provider 和许可不变。生成器补齐 JP/SC 字体及原有 coverage，两份字体 sidecar 与此前字节一致。26 项工具回归、实际样例 Graph/Timeline 编辑与撤销重编译、重生成无漂移和 manifest/provenance 文件身份检查通过；284 个资源 Cook 与 727,189,934 字节 package build 通过。Windows Player 全链联调随后进行，不能据此声明可听音频或影片已验收。
+NativeVN 运行时媒体已统一绑定现有 205 份 WAV master 与 MP4；206 个 sidecar 只改 source/hash/type，逻辑 ID、provider 和许可不变。生成器补齐 JP/SC 字体及原有 coverage，两份字体 sidecar 与此前字节一致。26 项工具回归、实际样例 Graph/Timeline 编辑与撤销重编译、重生成无漂移和 manifest/provenance 文件身份检查通过；284 个资源 Cook 与 727,189,934 字节 package build 通过。Windows 真实作者管道随后在 382.76 秒内通过：Graph 路由编辑、Timeline 关键帧修改、完整预览构建、真实 Player 当前片段 Pause/精确 Seek/Resume/Stop，以及三批撤销、保存重开和编译 hash 恢复。第一次运行受测试总构建预算 300 秒限制；已拆为初次构建 600 秒、Ready 后控制 30 秒，生产握手与停止期限不变。没有恢复桌面操作，也未把协议通过当作画面、可听音频或影片验收。
 
 ## Linux 包加载完成与取消回收
 

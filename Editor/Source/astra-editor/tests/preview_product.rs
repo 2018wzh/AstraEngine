@@ -7,7 +7,10 @@ use astra_vn_editor::{PreviewCommand, PreviewDocumentRevision, PreviewIdentity};
 use std::time::{Duration, Instant};
 
 fn until(preview: &mut Preview, project: &Project, ready: impl Fn(&Preview) -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(300);
+    // Initial startup includes cooking and bundling the full sample. Control
+    // responses after Ready must not inherit that much larger build budget.
+    let budget = if preview.live.is_none() { 600 } else { 30 };
+    let deadline = Instant::now() + Duration::from_secs(budget);
     loop {
         preview.poll(&project.documents).unwrap();
         assert!(
