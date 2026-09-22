@@ -60,7 +60,7 @@ cargo test --manifest-path Editor/Cargo.toml --test preview_product nativevn_gra
 
 此测试临时把 Graph 入口连接到分层演出、延长行走关键帧，保存后执行完整 cook/package/bundle 与真实 Player 控制，再撤销、保存、重开并比较原项目 hash。它会暂时修改所选 NativeVN 工程源码，须在独占工作树运行；正常结束或断言失败会恢复本次写入，外部修改不会被覆盖。不能用该流程代替桌面拖动、画面和音频验收。
 
-当前新版 NativeVN 的四文档编译和完整 cook/package/bundle 已通过，Windows Player 在 Ready 前因 `player.audio.decode` 失败退出：活动 stream 期间拒绝 one-shot decode。此问题已交共享 Runtime 维护者；完整作者预览回归尚未通过，不能沿用最小工程成功结果代替。普通 `nativevn_graph_timeline_roundtrip` 测试单独检查真实样例的编辑、编译、注释保留和撤销，不启动 Player。
+当前新版 NativeVN 的四文档编译和完整 cook/package/bundle 已通过，Windows Player 在 Ready 前因 `player.audio.decode` 失败退出。旧诊断把不支持的 codec、非法请求与活动 stream 合并报告；源码排查发现样例 OGG 不在 Windows 显式 WMF 能力列表中，尚不能据此断言 stream 生命周期冲突。准确诊断及 codec/资产绑定问题已交共享 Runtime 维护者；完整作者预览回归尚未通过，不能沿用最小工程成功结果代替。普通 `nativevn_graph_timeline_roundtrip` 测试单独检查真实样例的编辑、编译、注释保留和撤销，不启动 Player。
 
 ## 依赖与检查
 
