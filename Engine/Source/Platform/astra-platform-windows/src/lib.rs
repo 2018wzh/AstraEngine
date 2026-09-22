@@ -3,6 +3,8 @@ mod factory;
 mod source_directory;
 #[cfg(all(target_os = "windows", feature = "platform-test-driver"))]
 mod test_driver;
+#[cfg(target_os = "windows")]
+mod window_placement;
 
 pub use factory::*;
 #[cfg(target_os = "windows")]

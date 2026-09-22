@@ -1001,15 +1001,7 @@ async fn execute_platform_save(
     if !source.has_gameplay_thumbnail_capture() {
         capture_gameplay_surface(source, executor).await?;
     }
-    let now = time::OffsetDateTime::now_utc();
-    let timestamp = format!(
-        "{:04}-{:02}-{:02} {:02}:{:02}",
-        now.year(),
-        u8::from(now.month()),
-        now.day(),
-        now.hour(),
-        now.minute()
-    );
+    let timestamp = astra_player::current_save_timestamp();
     source
         .prepare_save_metadata(slot, timestamp, playtime_ms)
         .map_err(|error| player_platform_error("player.save.metadata", error))?;

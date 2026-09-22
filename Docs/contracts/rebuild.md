@@ -163,3 +163,5 @@ F5/F9 由共享 VN 输入入口按 `quick_slot_id` 发起 typed 存读档请求�
 Yakui 的 `clip_rect_points` 必须以成对 `PushClip`/`PopClip` 进入共享 Scene2D，保持逻辑坐标并由 Canvas 统一变换。单独绘制的 AstraText 使用真实 Yakui `clipped_by` 祖先交集；布局层把整数范围投影为现有只读 semantic text properties 的 `text.clip.x/y/width/height`，Player 不从父控件尺寸猜测裁剪。空交集不绘文字，缺失部分字段、非有限或越界坐标拒绝；相邻控件不能继承前一控件的裁剪。
 
 NativeVN 宿主通过 prepare_ui_input 处理物理输入。只有剧情实际进入系统页或提出快捷保存时，才在该批首个呈现命令之前插入 CaptureSurface；宿主消费 Captured 结果后再处理保存请求。键盘、鼠标、导航与辅助功能入口使用同一状态转换判断，系统页内部切换不覆盖 gameplay thumbnail。直接 dispatch_ui_event 仍供不负责存档缩略图的预览/逻辑调用者使用。迁移宿主时须同时消费截图结果，不能仅替换方法名；回归检查截图在呈现前、序列递增、系统页内不重复捕获，并用真实保存页检查缩略图。
+
+Windows 新建窗口在首次显示前按所在显示器的 work area 放置，外框不得因系统级联位置挡住底部操作；可用区域不足时缩小物理客户区，剧情逻辑尺寸仍由共享 Canvas 管理。桌面和 native Player 的 `current_save_timestamp` 共用本地墙钟显示，时区不可得时明确附加 UTC 标识；Headless 保留确定性的 T+ 时间。既有槽的显示字符串不改写。

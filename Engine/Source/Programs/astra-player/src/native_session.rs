@@ -437,12 +437,8 @@ async fn execute_platform_save(
         vn.cache_gameplay_surface(*width, *height, rgba8.clone())
             .map_err(|error| player_error_owned("player.save.capture.cache", error))?;
     }
-    vn.prepare_save_metadata(
-        slot,
-        time::OffsetDateTime::now_utc().to_string(),
-        playtime_ms,
-    )
-    .map_err(|error| player_error_owned("player.save.metadata", error))?;
+    vn.prepare_save_metadata(slot, crate::current_save_timestamp(), playtime_ms)
+        .map_err(|error| player_error_owned("player.save.metadata", error))?;
     let plan = vn
         .prepare_product_save_transaction(slot, transaction, media)
         .map_err(|error| player_error_owned("player.save.prepare", error))?;

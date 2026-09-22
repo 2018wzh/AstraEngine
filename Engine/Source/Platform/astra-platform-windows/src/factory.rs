@@ -657,6 +657,7 @@ mod windows {
                             .create_window(attributes)
                             .map_err(|_| host_error("window.create", "window creation failed"))
                             .and_then(|window| {
+                                crate::window_placement::fit_to_work_area(&window)?;
                                 let window = Arc::new(window);
                                 window.set_ime_allowed(true);
                                 let id = window.id();

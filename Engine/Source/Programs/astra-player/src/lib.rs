@@ -15,6 +15,9 @@ pub use web_cdp::*;
 mod bundled_observability;
 pub use bundled_observability::*;
 
+mod save_timestamp;
+pub use save_timestamp::current_save_timestamp;
+
 mod save_catalog;
 pub use save_catalog::hydrate_save_catalog;
 

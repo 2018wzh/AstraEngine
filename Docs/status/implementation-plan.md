@@ -2,6 +2,8 @@
 
 ## 2026-09-23 集成与 Classic 复测
 
+集成 `b8a7ba2cb` 的统一系统页截图和 Headless worker 回收后，五个受影响 crate 的 168 项测试、all-target Clippy、fmt、文档及 Headless 构建通过。Windows 新 Release 实测旧槽拒绝、正文读回继续、最大化、选择恢复后系统页返回保持同一选择、手动分支选择、新 slot.05 保存、退出重开读回并继续通过。Classic 使用平面槽列表，不能据此宣布 NativeVN 缩略图卡片的视觉裁剪已验收。实测还发现重开窗口底部超出工作区、存档 UTC 时间缺少标识；已增加工作区放置和 desktop/native 本地时间显示，增量回归通过，修复后的窗口复测待完成。
+
 集成至 Eden Family 导入/导出第二批后，根 workspace 和 Emulator workspace 完整测试及 all-target Clippy 通过，Headless 构建通过；默认 ignored 的商业与独立硬件用例仍不计验收。原版私有副本已实际完成首句保存、推进和读回，保存及读取都会关闭系统窗回到正文。Classic 读取后停在保存页的差异已在共享产品恢复入口修复，局部回归确认剧情等待不变、显式快照仍保留系统页；新版 Windows 已从标题读回正文并继续、从系统页读回选择并正常执行分支。
 
 设置页现从只读 ConfigViewModel 显示阅读模式与声音启用状态，Yakui 的 selected 同时驱动持续外观和 accessibility 状态；键盘焦点与当前选择分开。实测暴露的配置字段多包一层问题已按 DSL 平铺 schema 修复。三个改动 crate 的 52 项测试、五个直接影响 crate 的 all-target Clippy、Release/Cook 通过；Windows 实测默认值、鼠标切换、Tab 移动焦点和切页后状态保持通过。重 Cook 后另发现旧包槽在目录显示可读、实际读取因包身份不符退出，现已增加目录完整 Runtime 身份预检，并让用户读取在候选拒绝时保留当前会话、保护该槽；53 项 Player-vn 单元、36 项 Source 集成、9 项 Player 调用方及 4 项 VN 恢复回归通过；五个受影响 crate 的 all-target Clippy、fmt 和文档检查通过，新版设备复测仍待完成。测试槽已备份后释放 Sandbox 给 Eden 工作线；这批设置代码不能沿用前一基线的全 workspace 结果。
