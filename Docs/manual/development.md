@@ -31,6 +31,9 @@ Android Player 的构建入口是 `Tools/build_android.py`。AGP 9.3.0 配合 Gr
 
 Android 游戏包必须包含对应 Android host profile；不能把 Windows profile 的包改扩展名后当作 Android 包。Player 从包的 `player.display_config` 读取逻辑舞台尺寸，实际窗口尺寸和安全区由设备事件更新。设备验收应覆盖触控、系统返回、前后台、声音、存读档与重新启动，编译成功不代表这些流程已通过。
 
+Android Player 启动时先进入 Activity 事件循环，每轮最多读取 1 MiB 包数据；界面显示已读字节和当前阶段。后台仅校验 owned bytes，一次完整 storage audit 后将同一 PackageReader 交给 session，保留 section 读取校验。加载期间可返回，挂起会取消加载；重试沿用当前事件循环，关闭会等待工作线程回收。运行期挂起冻结演出与媒体时间、暂停设备输出，并仅释放系统 surface；恢复沿用 GPU 资源并重设调度期限。新加载 UI、无障碍事件防护、触控和前后台恢复仍需真机复测，本轮已按用户要求暂停设备验收。
+
+
 Windows 独立 Player 包通过 `--windows-runtime` 显式提供与 Player 构建工具链匹配的 Microsoft VC x64 CRT 可再发行目录。打包器使用 object 解析器验证全部 DLL 为 x64 PE 动态库，再复制并加入既有 bundle 文件清单；截断 PE、错误架构或非 DLL 文件在复制运行库前失败。缺少 `msvcp140.dll`、`vcruntime140.dll` 或 `vcruntime140_1.dll` 时失败。目标机器无需依赖开发机已安装的 VC Runtime。目录须使用 Microsoft 允许随应用分发的运行库，不能用调试版 DLL 代替。
 
 ```sh

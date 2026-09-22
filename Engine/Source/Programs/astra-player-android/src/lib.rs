@@ -4,14 +4,19 @@
 //! state, package validation, platform resources, and the Player session remain
 //! owned by Rust.
 
+#[cfg(any(target_os = "android", test))]
+mod package_source;
+
 pub const ANDROID_PLAYER_LIBRARY_NAME: &str = "astra_player_android";
 
 #[cfg(target_os = "android")]
 mod android {
-    use std::{ffi::CString, io::Read};
+    use crate::package_source::CancellableSource;
+    use astra_byte_source::MemoryByteSource;
+    use std::sync::{atomic::AtomicBool, Arc, OnceLock};
 
     use android_activity::AndroidApp;
-    use astra_package::{PackageManifest, PackageReader};
+    use astra_package::{AstraContainerReader, PackageManifest, PackageReader};
     use astra_platform::{HostLaunchProfile, PlatformError, PlatformErrorCode, PlatformId};
     use serde::Deserialize;
 
@@ -35,10 +40,13 @@ mod android {
 
     #[unsafe(no_mangle)]
     pub fn android_main(app: AndroidApp) {
-        let mut logging = astra_observability::HostObservabilityConfig::for_cli("info");
-        logging.role = astra_observability::HostRole::Player;
-        let _logging = astra_observability::init_host(logging)
-            .expect("Android Player logging initialization failed");
+        static LOGGING: OnceLock<astra_observability::ObservabilityGuard> = OnceLock::new();
+        LOGGING.get_or_init(|| {
+            let mut logging = astra_observability::HostObservabilityConfig::for_cli("info");
+            logging.role = astra_observability::HostRole::Player;
+            astra_observability::init_host(logging)
+                .expect("Android Player logging initialization failed")
+        });
         if let Err(error) = run(app) {
             tracing::error!(
                 event = "player.android.host.failed",
@@ -46,13 +54,25 @@ mod android {
                 operation = %error.operation,
                 "Android Player host terminated"
             );
-            panic!("Android Player host failed: {error}");
         }
     }
 
     fn run(app: AndroidApp) -> Result<(), PlatformError> {
-        let package_bytes = read_asset(&app, "game.astrapkg")?;
-        let package = PackageReader::open(&package_bytes)
+        astra_platform_android::run_player_host(app, prepare)
+    }
+
+    fn prepare(
+        package_bytes: Arc<Vec<u8>>,
+        cancelled: Arc<AtomicBool>,
+    ) -> Result<astra_platform_android::AndroidPreparedPlayer, PlatformError> {
+        let source = Arc::new(CancellableSource {
+            source: MemoryByteSource::from_shared(package_bytes),
+            cancelled,
+        });
+        let (container, storage_hash) =
+            AstraContainerReader::open_storage_audited_source(source)
+                .map_err(|error| player_error("player.package.audit", error))?;
+        let package = PackageReader::open_verified_container(container)
             .map_err(|error| player_error("player.package.open", error))?;
         let manifest: PackageManifest = package
             .container()
@@ -117,51 +137,22 @@ mod android {
         let config = astra_player::NativeVnPlayerSessionConfig {
             profile: manifest.profile,
             locale,
-            bundled_package_path: "game.astrapkg".to_string(),
             width: display.original_resolution.width,
             height: display.original_resolution.height,
         };
-        drop(package);
-        astra_platform_android::run_player_host(
-            app,
-            HostLaunchProfile::platform(profile),
-            move |session| {
+        Ok(astra_platform_android::AndroidPreparedPlayer {
+            profile: HostLaunchProfile::platform(profile),
+            storage_hash: storage_hash.to_string(),
+            player: Box::new(move |session| {
                 let runtime = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
                     .map_err(|error| player_error("player.runtime.start", error))?;
                 runtime.block_on(astra_player::run_native_vn_player_session(
-                    session,
-                    package_bytes,
-                    config,
+                    session, package, config,
                 ))
-            },
-        )
-    }
-
-    fn read_asset(app: &AndroidApp, name: &str) -> Result<Vec<u8>, PlatformError> {
-        let name =
-            CString::new(name).map_err(|error| player_error("player.package.asset", error))?;
-        let mut asset = app.asset_manager().open(&name).ok_or_else(|| {
-            PlatformError::new(
-                PlatformErrorCode::InvalidState,
-                "player.package.asset",
-                "bundled game.astrapkg asset is missing",
-            )
-        })?;
-        let expected = asset.length();
-        let mut bytes = Vec::with_capacity(expected);
-        asset
-            .read_to_end(&mut bytes)
-            .map_err(|error| player_error("player.package.asset", error))?;
-        if bytes.len() != expected || bytes.is_empty() {
-            return Err(PlatformError::new(
-                PlatformErrorCode::InvalidState,
-                "player.package.asset",
-                "bundled package asset length is invalid",
-            ));
-        }
-        Ok(bytes)
+            }),
+        })
     }
 
     fn player_error(operation: &'static str, error: impl std::fmt::Display) -> PlatformError {

@@ -104,12 +104,13 @@ impl AndroidAccessibilityBridge {
         let activity = ManuallyDrop::new(unsafe {
             JObject::from_raw(app.activity_as_ptr() as accesskit_android::jni::sys::jobject)
         });
-        let window_object = env
-            .call_method(&*activity, "getWindow", "()Landroid/view/Window;", &[])
-            .and_then(|value| value.l())
-            .map_err(|_| accessibility_state_error("Activity window is unavailable"))?;
         let decor_view = env
-            .call_method(&window_object, "getDecorView", "()Landroid/view/View;", &[])
+            .call_method(
+                &*activity,
+                "getAstraAccessibilityView",
+                "()Landroid/view/View;",
+                &[],
+            )
             .and_then(|value| value.l())
             .map_err(|_| accessibility_state_error("Activity decor view is unavailable"))?;
         let latest = Arc::new(Mutex::new(None));

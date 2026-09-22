@@ -43,4 +43,4 @@ pub fn probe(target: Option<&str>) -> PlatformCapabilityReport {
 }
 
 #[cfg(target_os = "android")]
-pub use native::run_player_host;
+pub use native::{run_player_host, AndroidPlayerEntry, AndroidPreparedPlayer};

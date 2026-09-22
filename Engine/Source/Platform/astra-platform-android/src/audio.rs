@@ -21,6 +21,9 @@ pub(crate) struct AndroidAudioResource {
     disconnected: Arc<AtomicBool>,
     gain_bits: Arc<AtomicU32>,
     paused: bool,
+    requested_pause: bool,
+    suspended: bool,
+    focus_lost: bool,
 }
 
 enum AndroidAudioStream {
@@ -155,6 +158,7 @@ impl AndroidAudioResource {
     pub(crate) fn new(
         request: AudioOutputRequest,
         audio_wake: AudioWakeRegistration,
+        suspended: bool,
     ) -> Result<(Self, NativeAudioProducer, AudioDeviceFormat), PlatformError> {
         if request.sample_rate == 0
             || !matches!(request.channels, 1 | 2)
@@ -229,9 +233,14 @@ impl AndroidAudioResource {
             stream,
             disconnected,
             gain_bits,
-            paused: false,
+            paused: request.start_paused || suspended,
+            requested_pause: request.start_paused,
+            suspended,
+            focus_lost: false,
         };
-        resource.stream.request_start()?;
+        if !resource.paused {
+            resource.stream.request_start()?;
+        }
         Ok((
             resource,
             producer,
@@ -243,19 +252,30 @@ impl AndroidAudioResource {
     }
 
     pub(crate) fn pause(&mut self) -> Result<(), PlatformError> {
-        self.ensure_connected("audio.pause")?;
-        if !self.paused {
-            self.stream.request_pause()?;
-            self.paused = true;
-        }
-        Ok(())
+        self.requested_pause = true;
+        self.sync_pause()
     }
 
     pub(crate) fn resume(&mut self) -> Result<(), PlatformError> {
-        self.ensure_connected("audio.resume")?;
-        if self.paused {
-            self.stream.request_start()?;
-            self.paused = false;
+        self.requested_pause = false;
+        self.sync_pause()
+    }
+
+    pub(crate) fn set_suspended(&mut self, suspended: bool) -> Result<(), PlatformError> {
+        self.suspended = suspended;
+        self.sync_pause()
+    }
+
+    fn sync_pause(&mut self) -> Result<(), PlatformError> {
+        self.ensure_connected("audio.pause_state")?;
+        let paused = self.requested_pause || self.suspended || self.focus_lost;
+        if paused != self.paused {
+            if paused {
+                self.stream.request_pause()?;
+            } else {
+                self.stream.request_start()?;
+            }
+            self.paused = paused;
         }
         Ok(())
     }
@@ -268,7 +288,8 @@ impl AndroidAudioResource {
         match focus {
             AudioFocusState::Gained => {
                 self.gain_bits.store(1.0_f32.to_bits(), Ordering::Release);
-                self.resume()
+                self.focus_lost = false;
+                self.sync_pause()
             }
             AudioFocusState::Duck => {
                 self.gain_bits.store(0.2_f32.to_bits(), Ordering::Release);
@@ -276,7 +297,8 @@ impl AndroidAudioResource {
             }
             AudioFocusState::Lost | AudioFocusState::LostTransient => {
                 self.gain_bits.store(0.0_f32.to_bits(), Ordering::Release);
-                self.pause()
+                self.focus_lost = true;
+                self.sync_pause()
             }
         }
     }

@@ -16,6 +16,7 @@ mod bundled_observability;
 pub use bundled_observability::*;
 
 mod native_session;
+mod native_session_clock;
 pub use native_session::*;
 
 pub use astra_player_vn::*;

@@ -2,7 +2,6 @@ use std::{
     collections::BTreeMap,
     sync::{mpsc as std_mpsc, Arc},
     thread,
-    time::Duration,
 };
 
 use android_activity::AndroidApp;
@@ -24,8 +23,7 @@ use winit::{
         ElementState, Ime, MouseButton, MouseScrollDelta, TouchPhase as WinitTouchPhase,
         WindowEvent,
     },
-    event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
-    platform::android::EventLoopBuilderExtAndroid,
+    event_loop::{ActiveEventLoop, ControlFlow},
     window::{Window, WindowAttributes, WindowId},
 };
 
@@ -35,14 +33,14 @@ use crate::decode::AndroidDecodeWorker;
 
 type SurfaceCore = astra_platform_common::WgpuPresentationCore;
 
-pub(super) fn run<F>(
+pub(super) fn create_host(
     app: AndroidApp,
     launch_profile: HostLaunchProfile,
-    player: F,
-) -> Result<(), PlatformError>
-where
-    F: FnOnce(PlatformHostSession) -> Result<(), PlatformError> + Send + 'static,
-{
+    bundled_package: Arc<Vec<u8>>,
+    bundled_package_hash: String,
+    player: super::AndroidPlayerEntry,
+    proxy: winit::event_loop::EventLoopProxy<()>,
+) -> Result<AndroidHostApp, PlatformError> {
     let profile = launch_profile.require_platform()?.clone();
     if profile.platform != astra_platform::PlatformId::Android {
         return Err(host_error(
@@ -67,7 +65,6 @@ where
         .max_frame_bytes
         .checked_mul(256)
         .ok_or_else(|| host_error("host.start", "Android decode output budget overflows"))?;
-    let bundled_package = read_bundled_package(&app)?;
     let command_wake = PlatformCommandWakeRegistration::default();
     let (client, backend, events) = host_channel_with_command_wake(
         launch_profile.clone(),
@@ -80,24 +77,18 @@ where
         events,
         profile: launch_profile,
     };
-    let mut event_loop = EventLoop::builder();
-    event_loop.with_android_app(app.clone());
-    let event_loop = event_loop
-        .build()
-        .map_err(|_| host_error("host.start", "Android event loop creation failed"))?;
-    let proxy = event_loop.create_proxy();
     command_wake.bind(move || {
         let _ = proxy.send_event(());
     })?;
-    event_loop.set_control_flow(ControlFlow::Wait);
     let (player_result_tx, player_result_rx) = std_mpsc::sync_channel(1);
     let (package_completion_tx, package_completion_rx) = std_mpsc::channel();
-    let mut host = AndroidHostApp {
+    Ok(AndroidHostApp {
         backend,
         player: Some(Box::new(move || {
             let result = player(session);
             let _ = player_result_tx.send(result);
         })),
+        player_thread: None,
         player_result_rx,
         player_result: None,
         app,
@@ -120,35 +111,23 @@ where
         package_completion_tx,
         package_completion_rx,
         pending_package_opens: 0,
-        bundled_package: Arc::new(bundled_package),
+        bundled_package,
+        bundled_package_hash,
         imports_root,
         max_package_entry_bytes: profile.package_cache.max_entry_bytes,
         event_sequence: 0,
-    };
-    event_loop
-        .run_app(&mut host)
-        .map_err(|_| host_error("host.run", "Android event loop failed"))?;
-    if host.player_result.is_none() {
-        host.player_result = host
-            .player_result_rx
-            .recv_timeout(Duration::from_secs(5))
-            .ok();
-    }
-    host.player_result.take().unwrap_or_else(|| {
-        Err(host_error(
-            "player.session",
-            "Android Activity was destroyed before Player shutdown completed",
-        ))
+        first_frame: true,
     })
 }
 
 type PlayerStart = Box<dyn FnOnce() + Send>;
 
-struct AndroidHostApp {
+pub(super) struct AndroidHostApp {
     backend: PlatformBackendChannels,
     player: Option<PlayerStart>,
+    player_thread: Option<thread::JoinHandle<()>>,
     player_result_rx: std_mpsc::Receiver<Result<(), PlatformError>>,
-    player_result: Option<Result<(), PlatformError>>,
+    pub(super) player_result: Option<Result<(), PlatformError>>,
     app: AndroidApp,
     resumed: bool,
     windows: ResourceTable<Arc<Window>, WindowHandle>,
@@ -170,9 +149,11 @@ struct AndroidHostApp {
     package_completion_rx: std_mpsc::Receiver<PackageCompletion>,
     pending_package_opens: usize,
     bundled_package: Arc<Vec<u8>>,
+    bundled_package_hash: String,
     imports_root: std::path::PathBuf,
     max_package_entry_bytes: u64,
     event_sequence: u64,
+    first_frame: bool,
 }
 
 struct SurfaceSlot {
@@ -224,6 +205,26 @@ impl MemoryPackageSource {
 }
 
 impl AndroidHostApp {
+    pub(super) fn finish(self) -> Result<(), PlatformError> {
+        let Self {
+            backend,
+            player_thread,
+            player_result,
+            player_result_rx,
+            ..
+        } = self;
+        // Closing the receiver releases outstanding client awaits before joining.
+        drop(backend);
+        if let Some(thread) = player_thread {
+            thread
+                .join()
+                .map_err(|_| host_error("player.shutdown", "Android Player worker panicked"))?;
+        }
+        player_result
+            .or_else(|| player_result_rx.try_recv().ok())
+            .unwrap_or(Ok(()))
+    }
+
     fn next_sequence(&mut self) -> u64 {
         self.event_sequence = self.event_sequence.saturating_add(1);
         self.event_sequence
@@ -259,13 +260,9 @@ impl AndroidHostApp {
     fn restore_surfaces(&mut self) -> Result<(), PlatformError> {
         let handles = self.surfaces.handles().collect::<Vec<_>>();
         for handle in handles {
-            let needs_restore = self.surfaces.get(handle)?.core.is_none();
-            if needs_restore {
-                let core = {
-                    let slot = self.surfaces.get(handle)?;
-                    self.create_surface_core(slot)?
-                };
-                self.surfaces.get_mut(handle)?.core = Some(core);
+            let window = self.windows.get(self.surfaces.get(handle)?.window)?.clone();
+            if let Some(core) = self.surfaces.get_mut(handle)?.core.as_mut() {
+                core.attach_surface(window)?;
             }
         }
         Ok(())
@@ -275,7 +272,9 @@ impl AndroidHostApp {
         let handles = self.surfaces.handles().collect::<Vec<_>>();
         for handle in handles {
             if let Ok(slot) = self.surfaces.get_mut(handle) {
-                slot.core = None;
+                if let Some(core) = slot.core.as_mut() {
+                    core.detach_surface();
+                }
             }
         }
     }
@@ -367,7 +366,7 @@ impl AndroidHostApp {
                         .map_err(|_| host_error("window.create", "Android window creation failed"))
                         .and_then(|window| {
                             let window = Arc::new(window);
-                            window.set_ime_allowed(true);
+                            window.set_ime_allowed(false);
                             let id = window.id();
                             let handle = self.windows.insert(window)?;
                             self.window_ids.insert(id, handle);
@@ -444,6 +443,10 @@ impl AndroidHostApp {
                             .update(semantics)
                     });
                 self.recover_surface_error(surface, &result);
+                if result.is_ok() && self.first_frame {
+                    self.first_frame = false;
+                    super::set_loading_state(&self.app, "", false);
+                }
                 let _ = reply.send(result);
             }
             HostCommand::CaptureSurface { surface, reply } => {
@@ -467,17 +470,18 @@ impl AndroidHostApp {
                 let _ = reply.send(result);
             }
             HostCommand::OpenAudioOutput { request, reply } => {
-                let result = AndroidAudioResource::new(request, self.backend.audio_wake())
-                    .and_then(|(resource, lane, format)| {
-                        self.audio_outputs
-                            .insert(resource)
-                            .map(|handle| OpenedAudioOutput {
-                                handle,
-                                format,
-                                lane: Box::new(lane),
-                                capture: None,
-                            })
-                    });
+                let result =
+                    AndroidAudioResource::new(request, self.backend.audio_wake(), !self.resumed)
+                        .and_then(|(resource, lane, format)| {
+                            self.audio_outputs
+                                .insert(resource)
+                                .map(|handle| OpenedAudioOutput {
+                                    handle,
+                                    format,
+                                    lane: Box::new(lane),
+                                    capture: None,
+                                })
+                        });
                 let _ = reply.send(result);
             }
             HostCommand::PauseAudio { output, reply } => {
@@ -588,9 +592,7 @@ impl AndroidHostApp {
                         relative_path,
                         expected_hash,
                     } if relative_path == "game.astrapkg" => {
-                        let actual =
-                            Hash256::from_sha256(self.bundled_package.as_slice()).to_string();
-                        if actual != expected_hash {
+                        if self.bundled_package_hash != expected_hash {
                             Err(PlatformError::new(
                                 PlatformErrorCode::InvalidState,
                                 "package.open",
@@ -802,17 +804,29 @@ impl ApplicationHandler for AndroidHostApp {
             self.player_result = Some(Err(error));
             return;
         }
+        for handle in self.audio_outputs.handles().collect::<Vec<_>>() {
+            if let Err(error) = self
+                .audio_outputs
+                .get_mut(handle)
+                .and_then(|audio| audio.set_suspended(false))
+            {
+                self.player_result = Some(Err(error));
+                return;
+            }
+        }
         self.emit(PlatformEventKind::Resumed);
         if let Some(player) = self.player.take() {
-            if thread::Builder::new()
+            match thread::Builder::new()
                 .name("astra-player-android".to_string())
                 .spawn(player)
-                .is_err()
             {
-                self.player_result = Some(Err(host_error(
-                    "player.start",
-                    "Android Player thread could not be started",
-                )));
+                Ok(thread) => self.player_thread = Some(thread),
+                Err(_) => {
+                    self.player_result = Some(Err(host_error(
+                        "player.start",
+                        "Android Player thread could not be started",
+                    )))
+                }
             }
         }
     }
@@ -822,6 +836,15 @@ impl ApplicationHandler for AndroidHostApp {
             return;
         }
         self.resumed = false;
+        for handle in self.audio_outputs.handles().collect::<Vec<_>>() {
+            if let Err(error) = self
+                .audio_outputs
+                .get_mut(handle)
+                .and_then(|audio| audio.set_suspended(true))
+            {
+                self.player_result = Some(Err(error));
+            }
+        }
         self.suspend_surfaces();
         self.emit(PlatformEventKind::Suspended);
     }
@@ -990,43 +1013,6 @@ impl ApplicationHandler for AndroidHostApp {
         self.process_commands(event_loop);
         self.process_package_completions();
     }
-}
-
-fn read_bundled_package(app: &AndroidApp) -> Result<Vec<u8>, PlatformError> {
-    use std::{ffi::CString, io::Read};
-    let name = CString::new("game.astrapkg").map_err(|_| {
-        host_error(
-            "package.asset.open",
-            "bundled package asset name is invalid",
-        )
-    })?;
-    let mut asset = app.asset_manager().open(&name).ok_or_else(|| {
-        host_error(
-            "package.asset.open",
-            "bundled game.astrapkg asset is missing",
-        )
-    })?;
-    let length = asset.length();
-    if length == 0 {
-        return Err(host_error(
-            "package.asset.open",
-            "bundled package asset is empty",
-        ));
-    }
-    let mut bytes = Vec::with_capacity(length);
-    asset.read_to_end(&mut bytes).map_err(|_| {
-        host_error(
-            "package.asset.read",
-            "bundled package asset could not be read",
-        )
-    })?;
-    if bytes.len() != length {
-        return Err(host_error(
-            "package.asset.read",
-            "bundled package asset length changed during read",
-        ));
-    }
-    Ok(bytes)
 }
 
 fn capture_surface(surface: &mut SurfaceCore) -> Result<CapturedFrame, PlatformError> {

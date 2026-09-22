@@ -1,7 +1,7 @@
 use astra_package::{PackageManifest, PackageReader};
 use astra_platform::{
-    FixedDeadlineScheduler, InputState, PackageSourceRequest, PlatformError, PlatformErrorCode,
-    PlatformEventKind, PlatformHostSession, SurfaceRequest, WindowRequest,
+    FixedDeadlineScheduler, InputState, PlatformError, PlatformErrorCode, PlatformEventKind,
+    PlatformHostSession, SurfaceRequest, WindowRequest,
 };
 use astra_ui_core::{UiInputEventKind, UiInsets, UiPoint, UiTouchPhase, UiViewport};
 use astra_vn_core::VnRunConfig;
@@ -15,19 +15,17 @@ use crate::{
 pub struct NativeVnPlayerSessionConfig {
     pub profile: String,
     pub locale: String,
-    pub bundled_package_path: String,
     pub width: u32,
     pub height: u32,
 }
 
 pub async fn run_native_vn_player_session(
     mut session: PlatformHostSession,
-    package_bytes: Vec<u8>,
+    package: PackageReader,
     config: NativeVnPlayerSessionConfig,
 ) -> Result<(), PlatformError> {
     if config.profile.is_empty()
         || config.locale.is_empty()
-        || config.bundled_package_path.is_empty()
         || config.width == 0
         || config.height == 0
     {
@@ -36,9 +34,6 @@ pub async fn run_native_vn_player_session(
             "Player session config is incomplete",
         ));
     }
-    let package_storage_hash = Hash256::from_sha256(&package_bytes).to_string();
-    let package = PackageReader::open(&package_bytes)
-        .map_err(|error| player_error_owned("player.package.open", error))?;
     let manifest: PackageManifest = package
         .container()
         .decode_postcard("package.manifest")
@@ -49,22 +44,6 @@ pub async fn run_native_vn_player_session(
             "Player config/package profile mismatch",
         ));
     }
-    let source = session
-        .client
-        .open_package(PackageSourceRequest::Bundled {
-            relative_path: config.bundled_package_path,
-            expected_hash: package_storage_hash,
-        })
-        .await?;
-    let header = session.client.read_package_range(source, 0, 16).await?;
-    if header.len() != 16 {
-        return Err(player_error(
-            "player.package.read",
-            "platform package source returned a short container header",
-        ));
-    }
-    session.client.close_package(source).await?;
-
     let window = session
         .client
         .create_window(WindowRequest {
@@ -99,13 +78,6 @@ pub async fn run_native_vn_player_session(
         runtime_execution,
     )
     .map_err(|error| player_error_owned("player.runtime.open", error))?;
-    executor
-        .execute_batch(
-            vn.launch()
-                .map_err(|error| player_error_owned("player.runtime.launch", error))?,
-        )
-        .await
-        .map_err(|error| player_error_owned("player.host.execute", error))?;
 
     let mut pointer = (0.0_f64, 0.0_f64);
     let mut viewport = UiViewport {
@@ -122,14 +94,22 @@ pub async fn run_native_vn_player_session(
     };
     let mut window_insets = [0_u32; 4];
     let mut save_transaction_id = 1000_u64;
-    let timeline_clock = std::time::Instant::now();
+    let mut timeline_clock =
+        super::native_session_clock::ActiveSessionClock::new(std::time::Instant::now());
     let mut media = NativeVnProductMediaHost::default();
     let player_result: Result<(), PlatformError> = async {
+    executor
+        .execute_batch(
+            vn.launch()
+                .map_err(|error| player_error_owned("player.runtime.launch", error))?,
+        )
+        .await
+        .map_err(|error| player_error_owned("player.host.execute", error))?;
         media
             .process(
                 &mut vn,
                 &mut executor,
-                timeline_clock.elapsed().as_millis() as u64,
+                timeline_clock.elapsed_ms(std::time::Instant::now()),
                 Vec::new(),
             )
             .await?;
@@ -139,8 +119,9 @@ pub async fn run_native_vn_player_session(
         .map_err(|code| player_error("player.runtime.scheduler", code))?;
         loop {
             let event = tokio::select! {
+                biased;
                 event = session.events.recv() => event?,
-                _ = tokio::time::sleep_until(tokio::time::Instant::from_std(timeline_tick.next_deadline())) => {
+                _ = tokio::time::sleep_until(tokio::time::Instant::from_std(timeline_tick.next_deadline())), if !timeline_clock.is_paused() => {
                     let due = timeline_tick.consume_due(std::time::Instant::now()).map_err(|code| {
                         player_error_owned(
                             "player.runtime.scheduler",
@@ -159,7 +140,7 @@ pub async fn run_native_vn_player_session(
                             media.poll_and_process(
                                 &mut vn,
                                 &mut executor,
-                                timeline_clock.elapsed().as_millis() as u64,
+                                timeline_clock.elapsed_ms(std::time::Instant::now()),
                             ).await?;
                         }
                     }
@@ -169,6 +150,20 @@ pub async fn run_native_vn_player_session(
             let player_sequence = event.sequence;
             let ui_input = match event.kind {
                 PlatformEventKind::WindowClosed { window: closed } if closed == window => break,
+
+                PlatformEventKind::Suspended => {
+                    timeline_clock.pause(std::time::Instant::now());
+                    continue;
+                }
+                PlatformEventKind::Resumed => {
+                    if timeline_clock.resume(std::time::Instant::now()) {
+                        timeline_tick = FixedDeadlineScheduler::new(std::time::Duration::from_nanos(16_666_667))
+                            .map_err(|code| player_error("player.runtime.scheduler", code))?;
+                    }
+                    continue;
+                }
+                _ if timeline_clock.is_paused() => continue,
+
                 PlatformEventKind::WindowResized {
                     window: resized,
                     width,
@@ -321,7 +316,7 @@ pub async fn run_native_vn_player_session(
                                 &mut executor,
                                 &slot_id,
                                 PlayerHostResourceId(save_transaction_id),
-                                timeline_clock.elapsed().as_millis() as u64,
+                                timeline_clock.elapsed_ms(std::time::Instant::now()),
                             )
                             .await
                             {
@@ -360,7 +355,7 @@ pub async fn run_native_vn_player_session(
                     .process(
                         &mut vn,
                         &mut executor,
-                        timeline_clock.elapsed().as_millis() as u64,
+                        timeline_clock.elapsed_ms(std::time::Instant::now()),
                         Vec::new(),
                     )
                     .await?;
@@ -371,31 +366,29 @@ pub async fn run_native_vn_player_session(
     }
     .await;
 
-    let media_cleanup = media.shutdown(&mut vn, &mut executor).await;
-    match (player_result, media_cleanup) {
-        (Err(error), Err(cleanup)) => {
-            return Err(player_error_owned(
-                "player.session",
-                format!("{error}; media cleanup failed: {cleanup}"),
-            ));
-        }
-        (Err(error), Ok(())) => return Err(error),
-        (Ok(()), Err(cleanup)) => return Err(cleanup),
-        (Ok(()), Ok(())) => {}
-    }
-    let release = vn
-        .release_resources()
-        .map_err(|error| player_error_owned("player.runtime.release_resources", error))?;
-    executor
-        .execute_batch(release)
-        .await
-        .map_err(|error| player_error_owned("player.host.release_resources", error))?;
-    vn.shutdown()
-        .map_err(|error| player_error_owned("player.runtime.shutdown", error))?;
-    session.client.destroy_surface(surface).await?;
-    session.client.destroy_window(window).await?;
-    session.client.shutdown().await?;
-    Ok(())
+    let mut outcome = player_result;
+    record_cleanup(&mut outcome, media.shutdown(&mut vn, &mut executor).await);
+    let release = match vn.release_resources() {
+        Ok(batch) => executor
+            .execute_batch(batch)
+            .await
+            .map(|_| ())
+            .map_err(|error| player_error_owned("player.host.release_resources", error)),
+        Err(error) => Err(player_error_owned(
+            "player.runtime.release_resources",
+            error,
+        )),
+    };
+    record_cleanup(&mut outcome, release);
+    record_cleanup(
+        &mut outcome,
+        vn.shutdown()
+            .map_err(|error| player_error_owned("player.runtime.shutdown", error)),
+    );
+    record_cleanup(&mut outcome, session.client.destroy_surface(surface).await);
+    record_cleanup(&mut outcome, session.client.destroy_window(window).await);
+    record_cleanup(&mut outcome, session.client.shutdown().await);
+    outcome
 }
 
 async fn execute_platform_save(
@@ -546,4 +539,14 @@ fn player_error_owned(operation: &'static str, error: impl std::fmt::Display) ->
         error.to_string(),
     )
 }
-use astra_core::Hash256;
+
+fn record_cleanup(outcome: &mut Result<(), PlatformError>, cleanup: Result<(), PlatformError>) {
+    if let Err(error) = cleanup {
+        if outcome.is_ok() {
+            *outcome = Err(error);
+        } else {
+            tracing::error!(event = "player.session.cleanup.failed", operation = %error.operation,
+                diagnostic_code = ?error.code, "Player cleanup failed after an earlier session error");
+        }
+    }
+}

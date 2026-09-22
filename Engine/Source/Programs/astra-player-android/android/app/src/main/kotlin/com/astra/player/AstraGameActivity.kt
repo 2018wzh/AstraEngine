@@ -11,6 +11,17 @@ import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.WindowInsets
+import android.view.View
+import android.view.ViewGroup
+import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityManager
+import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.TextView
+import android.widget.ProgressBar
+import android.widget.Button
+import android.view.Gravity
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import com.google.androidgamesdk.GameActivity
 import java.io.File
@@ -21,6 +32,12 @@ import java.util.concurrent.Executors
 
 class AstraGameActivity : GameActivity(), AudioManager.OnAudioFocusChangeListener,
     InputManager.InputDeviceListener {
+    private lateinit var loadingPanel: LinearLayout
+    private lateinit var loadingText: TextView
+    private lateinit var loadingProgress: ProgressBar
+    private lateinit var retryButton: Button
+    private lateinit var accessibilityHost: View
+    private var loading = true
     private val packageImportExecutor = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "astra-saf-import")
     }
@@ -65,6 +82,41 @@ class AstraGameActivity : GameActivity(), AudioManager.OnAudioFocusChangeListene
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val content = findViewById<ViewGroup>(android.R.id.content)
+        accessibilityHost = content.getChildAt(0)
+        content.removeView(accessibilityHost)
+        val accessibilityParent = object : FrameLayout(this) {
+            override fun requestSendAccessibilityEvent(child: View, event: AccessibilityEvent): Boolean {
+                val manager = getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
+                if (!manager.isEnabled) return false
+                return try { super.requestSendAccessibilityEvent(child, event) }
+                catch (error: IllegalStateException) {
+                    if (!manager.isEnabled) false else throw error
+                }
+            }
+        }
+        accessibilityParent.addView(accessibilityHost, FrameLayout.LayoutParams(-1, -1))
+        content.addView(accessibilityParent, ViewGroup.LayoutParams(-1, -1))
+        loadingPanel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(48, 48, 48, 48)
+            setBackgroundColor(0xff202124.toInt())
+        }
+        loadingText = TextView(this).apply { text = "正在读取游戏包…"; textSize = 18f; setTextColor(0xffffffff.toInt()); gravity = Gravity.CENTER }
+        loadingProgress = ProgressBar(this)
+        retryButton = Button(this).apply { text = "重试"; visibility = View.GONE; setOnClickListener { visibility = View.GONE; nativeRetryLoading() } }
+        val cancel = Button(this).apply { text = "返回"; setOnClickListener { finish() } }
+        loadingPanel.addView(loadingText)
+        loadingPanel.addView(loadingProgress)
+        loadingPanel.addView(retryButton)
+        loadingPanel.addView(cancel)
+        content.addView(loadingPanel, ViewGroup.LayoutParams(-1, -1))
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (loading) finish() else { isEnabled = false; onBackPressedDispatcher.onBackPressed() }
+            }
+        })
         window.decorView.setOnApplyWindowInsetsListener { _, insets ->
             val bars = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
             nativeOnInsets(bars.left, bars.top, bars.right, bars.bottom)
@@ -73,6 +125,19 @@ class AstraGameActivity : GameActivity(), AudioManager.OnAudioFocusChangeListene
         nativeOnRecreated(savedInstanceState != null)
         inputManager.registerInputDeviceListener(this, null)
         inputManager.inputDeviceIds.forEach(::registerGamepad)
+    }
+
+    fun getAstraAccessibilityView(): View = accessibilityHost
+
+    fun setLoadingState(message: String, failed: Boolean) {
+        runOnUiThread {
+            if (isFinishing || isDestroyed) return@runOnUiThread
+            loading = message.isNotEmpty()
+            loadingPanel.visibility = if (loading) View.VISIBLE else View.GONE
+            loadingText.text = message
+            loadingProgress.visibility = if (failed) View.GONE else View.VISIBLE
+            retryButton.visibility = if (failed) View.VISIBLE else View.GONE
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -203,6 +268,7 @@ class AstraGameActivity : GameActivity(), AudioManager.OnAudioFocusChangeListene
         runOnUiThread { packagePicker.launch(arrayOf("application/octet-stream")) }
     }
 
+    private external fun nativeRetryLoading()
     private external fun nativeOnInsets(left: Int, top: Int, right: Int, bottom: Int)
     private external fun nativeOnAudioFocus(change: Int)
     private external fun nativeOnGamepadDevice(deviceId: Int, connected: Boolean)

@@ -14,7 +14,7 @@ use crate::glyph_atlas::WgpuGlyphAtlasRenderer;
 /// resize, loss classification, and padded readback layout.
 pub struct WgpuPresentationCore {
     _instance: wgpu::Instance,
-    surface: wgpu::Surface<'static>,
+    surface: Option<wgpu::Surface<'static>>,
     adapter: wgpu::Adapter,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -98,7 +98,7 @@ impl WgpuPresentationCore {
         let glyph_renderer = WgpuGlyphAtlasRenderer::new(&device);
         Ok(Self {
             _instance: instance,
-            surface,
+            surface: Some(surface),
             adapter,
             device,
             queue,
@@ -115,6 +115,39 @@ impl WgpuPresentationCore {
             #[cfg(feature = "platform-test-driver")]
             test_device_loss: AtomicBool::new(false),
         })
+    }
+
+    /// Release the native window while retaining device-owned scene resources.
+    pub fn detach_surface(&mut self) {
+        self.surface = None;
+    }
+
+    /// Rebind a recreated window to the same adapter and retained renderer.
+    pub fn attach_surface(
+        &mut self,
+        target: impl Into<wgpu::SurfaceTarget<'static>>,
+    ) -> Result<(), PlatformError> {
+        let surface = self
+            ._instance
+            .create_surface(target)
+            .map_err(|_| unavailable("surface.attach", "native surface recreation failed"))?;
+        let capabilities = surface.get_capabilities(&self.adapter);
+        if !capabilities.formats.contains(&self.config.format)
+            || !capabilities
+                .present_modes
+                .contains(&self.config.present_mode)
+        {
+            return Err(unavailable(
+                "surface.attach",
+                "recreated surface is incompatible with the retained device",
+            ));
+        }
+        surface.configure(&self.device, &self.config);
+        self.surface = Some(surface);
+        if let Some(upload) = self.last_upload.as_ref() {
+            self.present_texture(&upload.texture, "surface.attach")?;
+        }
+        Ok(())
     }
 
     pub fn present(&mut self, frame: RgbaFrame) -> Result<(), PlatformError> {
@@ -163,7 +196,9 @@ impl WgpuPresentationCore {
             );
             self.config.width = frame.width;
             self.config.height = frame.height;
-            self.surface.configure(&self.device, &self.config);
+            if let Some(surface) = self.surface.as_ref() {
+                surface.configure(&self.device, &self.config);
+            }
         }
         let texture = upload_frame(&self.device, &self.queue, &frame);
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -181,7 +216,18 @@ impl WgpuPresentationCore {
                 },
             ],
         });
-        let output = match self.surface.get_current_texture() {
+        let Some(surface) = self.surface.as_ref() else {
+            self.last_sequence = Some(frame.sequence);
+            self.last_upload = Some(UploadFrame {
+                texture,
+                width: frame.width,
+                height: frame.height,
+            });
+            self.last_frame = Some(frame);
+            self.last_scene_frame = None;
+            return Ok(());
+        };
+        let output = match surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(value)
             | wgpu::CurrentSurfaceTexture::Suboptimal(value) => value,
             wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Outdated => {
@@ -268,7 +314,9 @@ impl WgpuPresentationCore {
         if frame.width != self.config.width || frame.height != self.config.height {
             self.config.width = frame.width;
             self.config.height = frame.height;
-            self.surface.configure(&self.device, &self.config);
+            if let Some(surface) = self.surface.as_ref() {
+                surface.configure(&self.device, &self.config);
+            }
         }
         let render_started = std::time::Instant::now();
         let prepared = self
@@ -366,7 +414,9 @@ impl WgpuPresentationCore {
                 "surface dimensions must be non-zero",
             ));
         }
-        self.surface.configure(&self.device, &self.config);
+        if let Some(surface) = self.surface.as_ref() {
+            surface.configure(&self.device, &self.config);
+        }
         tracing::warn!(
             event = "platform.wgpu.surface.reconfigured",
             width = self.config.width,
@@ -428,7 +478,9 @@ impl WgpuPresentationCore {
         let device_lost = Arc::new(AtomicBool::new(false));
         install_device_lost_callback(&device, Arc::clone(&device_lost));
         let (layout, sampler, pipeline) = pipeline(&device, self.config.format);
-        self.surface.configure(&device, &self.config);
+        if let Some(surface) = self.surface.as_ref() {
+            surface.configure(&device, &self.config);
+        }
         self.glyph_renderer.recover(&device, &queue);
         let last_upload = if let Some(frame) = self.last_frame.as_ref() {
             Some(UploadFrame {
@@ -511,7 +563,10 @@ impl WgpuPresentationCore {
                 },
             ],
         });
-        let output = match self.surface.get_current_texture() {
+        let Some(surface) = self.surface.as_ref() else {
+            return Ok(());
+        };
+        let output = match surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(value)
             | wgpu::CurrentSurfaceTexture::Suboptimal(value) => value,
             wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Outdated => {

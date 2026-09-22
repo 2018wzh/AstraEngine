@@ -11,20 +11,59 @@ pub async fn start_registered_activity(
     ))
 }
 
-pub fn run_player_host<F>(
-    app: AndroidApp,
-    profile: HostLaunchProfile,
-    player: F,
-) -> Result<(), PlatformError>
+pub type AndroidPlayerEntry =
+    Box<dyn FnOnce(PlatformHostSession) -> Result<(), PlatformError> + Send + 'static>;
+
+pub struct AndroidPreparedPlayer {
+    pub profile: HostLaunchProfile,
+    pub storage_hash: String,
+    pub player: AndroidPlayerEntry,
+}
+
+pub fn run_player_host<F>(app: AndroidApp, prepare: F) -> Result<(), PlatformError>
 where
-    F: FnOnce(PlatformHostSession) -> Result<(), PlatformError> + Send + 'static,
+    F: Fn(
+            std::sync::Arc<Vec<u8>>,
+            std::sync::Arc<std::sync::atomic::AtomicBool>,
+        ) -> Result<AndroidPreparedPlayer, PlatformError>
+        + Send
+        + Sync
+        + 'static,
 {
     tracing::info!(
         event = "platform.android.host.starting",
         provider = "android.game_activity",
         "Android host is entering the GameActivity event loop"
     );
-    crate::native::host::run(app, profile, player)
+    startup::run(app, prepare)
+}
+
+pub(super) fn set_loading_state(app: &AndroidApp, message: &str, failed: bool) {
+    let Ok(vm) = (unsafe { accesskit_android::jni::JavaVM::from_raw(app.vm_as_ptr().cast()) })
+    else {
+        return;
+    };
+    let Ok(mut env) = vm.attach_current_thread() else {
+        return;
+    };
+    let activity = std::mem::ManuallyDrop::new(unsafe {
+        accesskit_android::jni::objects::JObject::from_raw(app.activity_as_ptr().cast())
+    });
+    let Ok(text) = env.new_string(message) else {
+        return;
+    };
+    if env
+        .call_method(
+            &*activity,
+            "setLoadingState",
+            "(Ljava/lang/String;Z)V",
+            &[(&text).into(), failed.into()],
+        )
+        .is_err()
+    {
+        let _ = env.exception_describe();
+        let _ = env.exception_clear();
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -325,3 +364,14 @@ pub(super) fn take_saf_import() -> Option<SafImport> {
 
 #[path = "native_host.rs"]
 mod host;
+
+#[path = "startup.rs"]
+mod startup;
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_astra_player_AstraGameActivity_nativeRetryLoading(
+    _env: *mut jni::sys::JNIEnv,
+    _activity: jni::sys::jobject,
+) {
+    startup::request_retry();
+}

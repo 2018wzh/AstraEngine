@@ -199,6 +199,14 @@ impl MemoryByteSource {
             revision: SourceRevision(1),
         }
     }
+
+    /// Shares an immutable allocation without copying its package payload.
+    pub fn from_shared(bytes: Arc<Vec<u8>>) -> Self {
+        Self {
+            bytes,
+            revision: SourceRevision(1),
+        }
+    }
 }
 
 impl BoundedByteSource for MemoryByteSource {
