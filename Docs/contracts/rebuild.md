@@ -124,3 +124,6 @@ Family API v7 增加可选 SetFullscreen 窗口命令及 logical/raster FrameInf
 ### Player 显式静音测试输出
 
 Windows bundled Player 接受一次性 `--test-null-audio` 参数。默认仍打开系统音频设备，失败返回诊断，不自动选择测试输出。测试参数不写入配置、package 或存档；窗口标题持续显示 `[TEST NULL AUDIO]`。测试输出复用 `NativeAudioQueue`，按采样率消费解码和 Kira 混音结果，保留暂停、恢复、播放时钟、队列背压、取消及关闭 worker 的路径，只替换设备输出。该模式不代表可听音频验收。其他平台与自动化子命令拒绝此参数。
+
+
+实时 Player 调度每次最多消费四个到期逻辑 tick，保持原 deadline 与连续 tick 编号，剩余欠账留到下一次事件循环；短暂 GPU/IO 停顿不再触发致命 scheduler debt 错误。每批之间允许平台输入和退出，不能一次无限追赶、静默跳步或把迟到时间归零。初始化仍在固定时钟启动前完成；该调度变化不暂停或替代设备播放时钟。

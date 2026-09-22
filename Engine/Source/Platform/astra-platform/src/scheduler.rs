@@ -1,8 +1,8 @@
 use std::time::{Duration, Instant};
 
 /// Maximum number of fixed steps that a real-time host may consume while
-/// catching up after a wakeup.  A larger debt is a timing failure, not a
-/// reason to silently skip simulation steps.
+/// catching up after a wakeup. Remaining debt stays on the original timeline
+/// for the next wakeup; input and shutdown can run between bounded batches.
 pub const MAX_FIXED_CATCH_UP_STEPS: u32 = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -17,12 +17,6 @@ pub struct FixedDeadlineScheduler {
 pub struct FixedDeadlineDue {
     pub steps: u32,
     pub first_step: u64,
-    pub lateness: Duration,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct FixedDeadlineDebt {
-    pub overdue_steps: u64,
     pub lateness: Duration,
 }
 
@@ -100,32 +94,35 @@ impl FixedDeadlineScheduler {
         now >= self.next_deadline
     }
 
-    /// Consume all currently due fixed steps without rebasing the timeline.
+    /// Consume a bounded batch of due fixed steps without rebasing the timeline.
     /// The caller must execute the returned consecutive steps in order.
-    pub fn consume_due(
-        &mut self,
-        now: Instant,
-    ) -> Result<Option<FixedDeadlineDue>, FixedDeadlineDebt> {
+    pub fn consume_due(&mut self, now: Instant) -> Result<Option<FixedDeadlineDue>, &'static str> {
         if now < self.next_deadline {
             return Ok(None);
         }
         let elapsed = now.duration_since(self.next_deadline);
         let overdue_steps = elapsed.as_nanos() / self.step.as_nanos();
         let due_steps = overdue_steps.saturating_add(1);
-        if due_steps > u128::from(MAX_FIXED_CATCH_UP_STEPS) {
-            return Err(FixedDeadlineDebt {
-                overdue_steps: u64::try_from(due_steps).unwrap_or(u64::MAX),
-                lateness: now.duration_since(self.next_deadline),
-            });
-        }
-        let steps = u32::try_from(due_steps).expect("bounded fixed deadline steps fit u32");
-        let first_step = self.fixed_step.saturating_add(1);
-        let lateness = now.duration_since(self.next_deadline);
-        self.fixed_step = self.fixed_step.saturating_add(u64::from(steps));
-        self.next_deadline = self
+        let steps = due_steps.min(u128::from(MAX_FIXED_CATCH_UP_STEPS)) as u32;
+        let first_step = self
+            .fixed_step
+            .checked_add(1)
+            .ok_or("ASTRA_FIXED_DEADLINE_STEP_OVERFLOW")?;
+        let fixed_step = self
+            .fixed_step
+            .checked_add(u64::from(steps))
+            .ok_or("ASTRA_FIXED_DEADLINE_STEP_OVERFLOW")?;
+        let next_deadline = self
             .next_deadline
-            .checked_add(self.step.saturating_mul(steps))
-            .unwrap_or_else(|| self.origin + Duration::from_secs(u64::MAX));
+            .checked_add(
+                self.step
+                    .checked_mul(steps)
+                    .ok_or("ASTRA_FIXED_DEADLINE_TIME_OVERFLOW")?,
+            )
+            .ok_or("ASTRA_FIXED_DEADLINE_TIME_OVERFLOW")?;
+        let lateness = now.duration_since(self.next_deadline);
+        self.fixed_step = fixed_step;
+        self.next_deadline = next_deadline;
         Ok(Some(FixedDeadlineDue {
             steps,
             first_step,
@@ -152,14 +149,19 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unbounded_debt_instead_of_skipping() {
+    fn catches_up_in_bounded_batches_without_skipping_or_rebasing() {
         let origin = Instant::now();
-        let mut scheduler =
-            FixedDeadlineScheduler::with_origin(origin, Duration::from_millis(1)).unwrap();
-        let debt = scheduler
-            .consume_due(origin + Duration::from_millis(4))
-            .unwrap_err();
-        assert_eq!(debt.overdue_steps, 5);
+        let step = Duration::from_millis(1);
+        let mut scheduler = FixedDeadlineScheduler::with_origin(origin, step).unwrap();
+        let now = origin + step * 13;
+        for (first, steps) in [(1, 4), (5, 4), (9, 4), (13, 2)] {
+            let due = scheduler.consume_due(now).unwrap().unwrap();
+            assert_eq!(due.first_step, first);
+            assert_eq!(due.steps, steps);
+        }
+        assert_eq!(scheduler.fixed_step(), 14);
+        assert_eq!(scheduler.next_deadline(), origin + step * 14);
+        assert!(scheduler.consume_due(now).unwrap().is_none());
     }
 
     #[test]

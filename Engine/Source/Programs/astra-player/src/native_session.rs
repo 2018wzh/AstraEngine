@@ -128,10 +128,10 @@ pub async fn run_native_vn_player_session(
             let event = tokio::select! {
                 event = session.events.recv() => event?,
                 _ = tokio::time::sleep_until(tokio::time::Instant::from_std(timeline_tick.next_deadline())) => {
-                    let due = timeline_tick.consume_due(std::time::Instant::now()).map_err(|debt| {
+                    let due = timeline_tick.consume_due(std::time::Instant::now()).map_err(|code| {
                         player_error_owned(
-                            "player.runtime.scheduler_debt",
-                            format!("{}:{}", debt.overdue_steps, debt.lateness.as_nanos()),
+                            "player.runtime.scheduler",
+                            code,
                         )
                     })?.ok_or_else(|| player_error("player.runtime.scheduler", "scheduler woke before its deadline"))?;
                     for _ in 0..due.steps {

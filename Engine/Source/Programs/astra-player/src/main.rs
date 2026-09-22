@@ -512,11 +512,11 @@ fn run_bundled_game(test_null_audio: bool) -> Result<(), PlayerCliError> {
                 let event = tokio::select! {
                     event = session.events.recv() => event?,
                     _ = tokio::time::sleep_until(tokio::time::Instant::from_std(timeline_tick.next_deadline())) => {
-                        let due = timeline_tick.consume_due(std::time::Instant::now()).map_err(|debt| {
+                        let due = timeline_tick.consume_due(std::time::Instant::now()).map_err(|code| {
                             astra_platform::PlatformError::new(
                                 astra_platform::PlatformErrorCode::InvalidState,
-                                "player.runtime.scheduler_debt",
-                                format!("{}:{}", debt.overdue_steps, debt.lateness.as_nanos()),
+                                "player.runtime.scheduler",
+                                code,
                             )
                         })?.ok_or_else(|| astra_platform::PlatformError::new(
                             astra_platform::PlatformErrorCode::InvalidState,
