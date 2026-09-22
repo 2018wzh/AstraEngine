@@ -36,7 +36,9 @@ Agent 命令和模型由用户配置，Editor 不持有模型 API 密钥，也�
 
 Save & Preview 先保存并编译当前文档，再执行现有 `cook → package build → package bundle → Player`。Player 创建独立 GPU 窗口，通过现有产品主路径使用真实 VnSession；Editor 没有另外实现 renderer。编辑版本改变、再次启动预览或点击 Stop preview 会终止旧进程，等待回收并清理临时输出。构建或 Player 失败显示退出状态和日志尾部。
 
-当前入口没有片段 seek。它需要 Player 提供绑定编译身份、session generation、fragment source ID 和 presentation time 的 typed 控制接口；仅恢复当前片段 checkpoint，不能重新执行外部 IO。缺少 checkpoint、超出片段和旧代次必须返回错误，不能从头重放作为替代。
+预览使用 [typed Player 控制协议](../Docs/contracts/player-preview.md)。编译 project hash、全部文档版本/内容 hash 和启动 generation 固定到同一次 cook；只有 Player 返回 Ready 后才显示 Playing 与 Pause。暂停后显示当前片段实际保留的 checkpoint，可点击精确位置恢复，不重新执行剧情或外部 IO。没有 checkpoint 时不显示定位按钮。位置使用 Player 返回的当前 presentation time，不从检查点列表末尾推断。
+
+Stop 请求真实 Player 关闭会话与设备，超过三秒仍未退出则回收子进程；文档改变、构建取消或编辑器关闭会回收旧进程。管道读写使用有界队列和有界 JSONL，子进程退出后 join 两个通信 worker。旧身份、控制拒绝、断管、启动失败与超时显示为错误。该消费者通过局部协议检查；实际素材的 GPU/音频、连续定位及窗口交互仍需联调验收。
 
 ## 依赖与检查
 

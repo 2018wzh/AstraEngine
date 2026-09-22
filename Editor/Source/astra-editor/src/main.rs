@@ -23,6 +23,7 @@ struct Editor {
     syncing: bool,
     preview_config: Option<PreviewConfig>,
     preview: Option<Preview>,
+    preview_generation: u64,
     close_confirmed: bool,
     bridge: EditorBridge,
     requests: tokio::sync::mpsc::Receiver<Request>,
@@ -99,6 +100,7 @@ impl Editor {
             syncing: false,
             preview_config,
             preview: None,
+            preview_generation: 0,
             close_confirmed: false,
             bridge,
             requests,
@@ -175,13 +177,7 @@ impl Editor {
                         cx.notify();
                     }
                     if let Some(preview) = &mut this.preview {
-                        let version = this
-                            .project
-                            .documents
-                            .document(&this.project.active)
-                            .unwrap()
-                            .version;
-                        if let Err(error) = preview.poll(version) {
+                        if let Err(error) = preview.poll(&this.project.documents) {
                             this.status = error.to_string();
                             this.preview = None;
                         }

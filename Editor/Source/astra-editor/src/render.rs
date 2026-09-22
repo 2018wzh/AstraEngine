@@ -45,19 +45,28 @@ impl Render for Editor {
                 .child(Button::new("preview").label("Save & Preview").on_click(cx.listener(|this, _, _, cx| {
                     let result = (|| -> anyhow::Result<()> {
                         let config = this.preview_config.as_ref().ok_or_else(|| anyhow::anyhow!("Open with a preview configuration to bind project, target, profile and built tools"))?;
-                        this.project.compile()?;
+                        let compiled = this.project.compile()?;
                         this.project.save_all()?;
                         this.preview = None;
-                        let version = this.project.documents.document(&this.project.active)?.version;
-                        this.preview = Some(Preview::start(config, version)?);
+                        this.preview_generation = this.preview_generation.checked_add(1).ok_or_else(|| anyhow::anyhow!("Preview generation exhausted"))?;
+                        let identity = astra_vn_editor::PreviewIdentity {
+                            project_hash: compiled.project_hash,
+                            generation: this.preview_generation,
+                            documents: this.project.documents.documents().map(|document| (document.path.clone(), astra_vn_editor::PreviewDocumentRevision {
+                                version: document.version,
+                                content_hash: astra_core::Hash256::from_sha256(document.text.as_bytes()),
+                            })).collect(),
+                        };
+                        this.preview = Some(Preview::start(config, identity)?);
                         Ok(())
                     })();
                     if let Err(error) = result { this.status = error.to_string(); }
                     cx.notify();
                 })))
                 .child(Button::new("stop").label("Stop preview").on_click(cx.listener(|this, _, _, cx| {
-                    this.preview = None; cx.notify();
+                    if let Some(preview) = &mut this.preview { if let Err(error) = preview.stop() { this.status = error.to_string(); this.preview = None; } } cx.notify();
                 }))))
+            .child(self.preview_controls(cx))
             .child(div().flex_1().min_h_0().child(self.workspace_panels(window, cx)))
             .child(div().flex().gap_3().child(self.status.clone()).child(Button::new("locate-diagnostic").label("Go to diagnostic").disabled(self.diagnostic_position.is_none()).on_click(cx.listener(|this, _, window, cx| {
                 if let (Some(position), Some(source)) = (this.diagnostic_position, this.diagnostic_source.clone()) {
@@ -79,5 +88,66 @@ impl Render for Editor {
             .child(div().flex().gap_3().child(Input::new(&self.agent_prompt)).child(Button::new("send-agent").label("Send").on_click(cx.listener(|this, _, _, cx| { this.prompt_agent(cx); cx.notify(); }))))
             .child(div().id("agent-output").max_h(px(120.)).overflow_y_scroll().child(self.agent_output.clone()))
             .child(self.preview.as_ref().map(|p| p.status.clone()).unwrap_or_default())
+    }
+}
+
+impl Editor {
+    fn preview_controls(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let mut controls = div().flex().gap_2();
+        if let Some(live) = self
+            .preview
+            .as_ref()
+            .and_then(|preview| preview.live.as_ref())
+        {
+            let paused = live.paused;
+            controls = controls.child(
+                Button::new("pause-preview")
+                    .label(if paused { "Resume" } else { "Pause" })
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if let Some(preview) = &mut this.preview {
+                            if let Err(error) = preview.send(if paused {
+                                astra_vn_editor::PreviewCommand::Resume
+                            } else {
+                                astra_vn_editor::PreviewCommand::Pause
+                            }) {
+                                this.status = error.to_string();
+                            }
+                        }
+                        cx.notify();
+                    })),
+            );
+            if paused {
+                if let Some(source_id) = &live.source_id {
+                    for checkpoint in &live.checkpoints {
+                        let source_id = source_id.clone();
+                        let id = checkpoint.id;
+                        controls = controls.child(
+                            Button::new(("seek-preview", id))
+                                .label(format!(
+                                    "{:.2}s",
+                                    checkpoint.presentation_time_ns as f64 / 1_000_000_000.
+                                ))
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    if let Some(preview) = &mut this.preview {
+                                        if let Err(error) = preview.send(
+                                            astra_vn_editor::PreviewCommand::SeekWithinFragment {
+                                                source_id: source_id.clone(),
+                                                checkpoint: id,
+                                            },
+                                        ) {
+                                            this.status = error.to_string();
+                                        }
+                                    }
+                                    cx.notify();
+                                })),
+                        );
+                    }
+                }
+            }
+        }
+        div()
+            .id("preview-controls")
+            .overflow_x_scroll()
+            .child(controls)
     }
 }
