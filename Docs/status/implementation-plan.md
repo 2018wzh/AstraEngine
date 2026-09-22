@@ -2,7 +2,9 @@
 
 ## 2026-09-23 集成与 Classic 复测
 
-集成 `b8a7ba2cb` 的统一系统页截图和 Headless worker 回收后，五个受影响 crate 的 168 项测试、all-target Clippy、fmt、文档及 Headless 构建通过。Windows 新 Release 实测旧槽拒绝、正文读回继续、最大化、选择恢复后系统页返回保持同一选择、手动分支选择、新 slot.05 保存、退出重开读回并继续通过。Classic 使用平面槽列表，不能据此宣布 NativeVN 缩略图卡片的视觉裁剪已验收。实测还发现重开窗口底部超出工作区、存档 UTC 时间缺少标识；已增加工作区放置和 desktop/native 本地时间显示，增量回归通过，修复后的窗口复测待完成。
+Editor 的过期项目操作拒绝、CMVS 输入锁存及调用脚本名称的 source frame 修复已整合；Editor 17 项测试、CMVS 158 项普通测试及各自 all-target Clippy、fmt 通过。默认 ignored 的外部产品和 GPU 用例未执行，CMVS 文字、PCM 与商业短流程仍待完成。共享 Player 阶段门禁正在重新执行，不能沿用此前基线。
+
+集成 `b8a7ba2cb` 的统一系统页截图和 Headless worker 回收后，五个受影响 crate 的 168 项测试、all-target Clippy、fmt、文档及 Headless 构建通过。Windows 新 Release 实测旧槽拒绝、正文读回继续、最大化、选择恢复后系统页返回保持同一选择、手动分支选择、新 slot.05 保存、退出重开读回并继续通过。Classic 使用平面槽列表，不能据此宣布 NativeVN 缩略图卡片的视觉裁剪已验收。实测还发现重开窗口底部超出工作区、存档 UTC 时间缺少标识；已增加工作区放置和 desktop/native 本地时间显示，增量回归通过。`9f9e55d86` Windows 实测窗口完整居中于任务栏工作区，新 slot.06 显示本地日期时间并与系统钟一致；原槽未改写。
 
 集成至 Eden Family 导入/导出第二批后，根 workspace 和 Emulator workspace 完整测试及 all-target Clippy 通过，Headless 构建通过；默认 ignored 的商业与独立硬件用例仍不计验收。原版私有副本已实际完成首句保存、推进和读回，保存及读取都会关闭系统窗回到正文。Classic 读取后停在保存页的差异已在共享产品恢复入口修复，局部回归确认剧情等待不变、显式快照仍保留系统页；新版 Windows 已从标题读回正文并继续、从系统页读回选择并正常执行分支。
 
@@ -12,7 +14,7 @@
 
 原版私有副本进入真实 MENU 后确认同样使用绿底黑云，先前蓝白云属于 READY 初始化页，不是颜色转换错误。原配启动器把新增 savefile.tns 当作发行文件差异；私有副本的旧存档移到独立目录保留后可启动，新测试档也写入独立目录。用户原目录未改动。本树补丁器已把根目录 savefile.tns 视为原版可变文件，其余发行文件仍逐项校验；23 项回归和 Clippy 通过。该工具与用户副本的 manifest 代次不同，本轮没有改写或迁移用户 manifest。
 
-Editor 的项目工作区、真实 Player 预览管道、ACP/MCP 审批事务、路由连接图及关键帧编辑已集成；Graph 路由连线、单次撤销的关键帧拖动、可停靠工作区和图片资产导入也已集成；独立 workspace 的 14 项库测试、1 项布局测试、all-target Clippy 和格式检查通过。真实产品用例由负责工作线显式运行，本次集成未重复执行默认 ignored 的外部 Agent 和 GPU 预览测试；拖拽曲线及完整创作体验仍未关闭。《eden*》严格 checkpoint、Family 只读导入及内部存档到原版格式导出已集成，13 项格式/恢复和 13 项 CLI 测试通过；GPU 合成 fixture 覆盖导入后继续、保存和导出，商业原版读回仍未完成。
+Editor 的项目工作区、真实 Player 预览管道、ACP/MCP 审批事务、路由连接图及关键帧编辑已集成；Graph 路由连线、单次撤销的关键帧拖动、可停靠工作区和图片资产导入也已集成；独立 workspace 的 14 项库测试、1 项布局测试、all-target Clippy 和格式检查通过。真实产品用例由负责工作线显式运行，本次集成未重复执行默认 ignored 的外部 Agent 和 GPU 预览测试；拖拽曲线及完整创作体验仍未关闭。《eden*》严格 checkpoint、Family 只读导入及内部存档到原版格式导出已集成，13 项格式/恢复和 13 项 CLI 测试通过；GPU 合成 fixture 覆盖导入后继续、保存和导出，商业原版读回见下段，已完成限定短流程。
 
 Eden 原商业短流程已完成原版保存、Musica 恢复并继续、导出 SAV 与实际 GPU 缩略图、原版读取并继续；复存核对剧情位置、历史和变量一致。其他不支持状态仍明确拒绝，NullAudio 不计可听音频验收。集成至 `fdfe6d54b` 后，根 workspace 与 Emulator workspace 的完整测试、all-target Clippy、格式及文档检查通过，根 Headless 已先构建。回归发现的 CLI 最小样例 scoped UI 夹具和 Windows 单事件循环测试隔离问题均已修复。默认 ignored 的商业及独立设备用例未计入；后续缩略图、素材格式和窗口复测不能沿用这批结果。
 
