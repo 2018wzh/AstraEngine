@@ -14,7 +14,7 @@ cargo run --manifest-path Editor/Cargo.toml -p astra-editor -- story.astra
 
 `attribute_edit` 使用现有 CST 的 attribute span 修改源码，保留周围注释和 source ID。Outliner、剧情结构、演出视图和 Details 共用 source ID 选择；点击命令定位源码，Details 把一组属性修改作为单个 batch 提交。源码版本改变后旧 Details 提交会被拒绝。Graph 按实际 state、jump、option、branch 和 call 绘制连接，点击节点或路由后可在 Details 修改属性。Timeline 按实际时间绘制关键帧，可修改时间/数值、插入和删除；时间排序、重复时间和至少两个关键帧的约束在事务前检查，标量语义由编译器诊断。所有编辑仍写回同一 `.astra`，保留注释，并共用批量撤销。
 
-Open project 使用系统文件选择器，切换前处理未保存修改；打开失败保留原工程。Preview setup 可载入当前工程的产品预览配置。Graph 的连接端口可拖到目标 state 创建 jump，要求源 state 有 scene 且尚无控制流；目标必须唯一存在。Delete route 删除完整路由命令（branch 的两个出口一起删除），可能产生的不可达状态由编译诊断显示。Graph 目前仍采用固定网格，尚无节点布局拖动。Timeline 可在原轨道拖动关键帧，释放时提交一次事务，离开轨道释放即取消；一个手势对应一次撤销，过期版本和重复时间会拒绝。当前引擎 timeline 仅支持线性插值，未添加虚假的曲线属性；缩放和曲线编辑尚未实现。二维场景操纵器和资源导入尚未实现，UE 易用性目标未达成。
+Open project 使用系统文件选择器，切换前处理未保存修改；打开失败保留原工程。Preview setup 可载入当前工程的产品预览配置。Graph 的连接端口可拖到目标 state 创建 jump，要求源 state 有 scene 且尚无控制流；目标必须唯一存在。Delete route 删除完整路由命令（branch 的两个出口一起删除），可能产生的不可达状态由编译诊断显示。Graph 目前仍采用固定网格，尚无节点布局拖动。Timeline 可在原轨道拖动关键帧，释放时提交一次事务，离开轨道释放即取消；一个手势对应一次撤销，过期版本和重复时间会拒绝。当前引擎 timeline 仅支持线性插值，未添加虚假的曲线属性；缩放和曲线编辑尚未实现。二维场景操纵器尚未实现，UE 易用性目标未达成。
 
 工作区使用 gpui-component DockArea：Content & Outliner、Authoring、Details 可拖动停靠、组合标签页、调整分区和放大。布局保存在 ignored `.astra-cache/editor-layout.json`，重开项目恢复；Reset layout 恢复默认三栏。布局损坏、版本变化或缺失/重复作者面板时显示诊断并使用默认布局。三个必要面板不可关闭，避免丢失人工编辑入口；旧的仅宽度布局直接重建。停靠交互尚未进行桌面操作验收。Ctrl/Cmd+S 保存全部源文档，源编辑区的 Undo/Redo 快捷键进入共用 batch 历史。Agent 输入和未提交的属性字段保留自己的局部输入撤销。
 
@@ -33,6 +33,12 @@ Agent 命令和模型由用户配置，Editor 不持有模型 API 密钥，也�
 `--mcp` 同时启动官方 rmcp stdio server，工具为 `read_document` 和 `apply_batch`。工具访问正在显示的同一份文档；后者接收 JSON batch 和读取时返回的 generation。逐批确认时，工具等待 UI 决定。stdout 属于 MCP 协议，诊断写 stderr。
 
 已用官方 codex-acp 1.12.0 的真实回合验证读取、权限确认、MCP batch、逐批审批与撤销，测试确认 Agent 没有直接修改磁盘文件。该测试使用公开临时源，不替代实际窗口操作验收。复测需显式设置 `ASTRA_EDITOR_ACP_COMMAND`，运行 `cargo test --manifest-path Editor/Cargo.toml -p astra-editor --test acp_product -- --ignored`；模型配置和认证保留在外部 Agent 中。
+
+## 资源导入
+
+Content Browser 的 Import image 支持 PNG、JPEG、WebP。选择图片后确认项目相对目标路径、asset ID、许可和已配置的 sidecar 根目录；使用工程的 cook profiles。后台调用现有 astra-cook 图片 importer 解码和计算 hash，再写入源图片与 `.astra-asset.yaml`，重开工程仍可浏览。取消或切换项目后，迟到的解码结果不会写入工程。
+
+重名路径或 asset ID 会拒绝导入，保留表单供改名或取消；不会覆盖现有资源。目标目录必须留在项目内，sidecar 必须位于 manifest 配置的 asset_roots。单文件工程需要先打开项目。导入立即写入资源文件，不属于 `.astra` 的 Undo 历史；图片通过 asset ID 在源属性中引用。当前没有音频/视频/字体导入表单和资源缩略图，导入窗口交互仍待桌面验收。
 
 ## 产品预览
 

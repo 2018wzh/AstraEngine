@@ -7,6 +7,8 @@ use std::{
 pub(crate) struct ProjectFiles {
     pub sources: Vec<AstraSource>,
     pub content: Vec<String>,
+    pub asset_roots: Vec<String>,
+    pub profiles: Vec<String>,
     pub options: CompileAstraProjectOptions,
 }
 
@@ -21,6 +23,8 @@ pub(crate) fn load(manifest: &Path) -> anyhow::Result<ProjectFiles> {
     let mut result = ProjectFiles {
         sources: Vec::new(),
         content: Vec::new(),
+        asset_roots: config_list(vn, "asset_roots")?,
+        profiles: config_list(vn, "profiles")?,
         options: Default::default(),
     };
     for (field, default, ui) in [("sources", "Scripts", false), ("ui_sources", "UI", true)] {
@@ -165,4 +169,23 @@ fn paths(
     }
     files.sort();
     Ok(files)
+}
+
+fn config_list(config: &serde_yaml::Value, key: &str) -> anyhow::Result<Vec<String>> {
+    config
+        .get(key)
+        .map(|value| {
+            value
+                .as_sequence()
+                .ok_or_else(|| anyhow::anyhow!("{key} must be a list"))?
+                .iter()
+                .map(|value| {
+                    value
+                        .as_str()
+                        .map(str::to_owned)
+                        .ok_or_else(|| anyhow::anyhow!("{key} entries must be text"))
+                })
+                .collect()
+        })
+        .unwrap_or_else(|| Ok(Vec::new()))
 }

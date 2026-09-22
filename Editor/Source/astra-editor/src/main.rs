@@ -14,6 +14,7 @@ use gpui_component::{
     Disableable, Root,
 };
 mod agent_actions;
+mod asset_panel;
 mod dock_panels;
 mod graph_panel;
 mod panels;
@@ -31,6 +32,7 @@ struct PermissionReview {
 }
 
 struct Editor {
+    asset_import: Option<asset_panel::ImportForm>,
     project: Project,
     input: Entity<InputState>,
     status: String,
@@ -111,6 +113,7 @@ impl Editor {
         });
         let mut editor = Self {
             panels: panels::WorkspacePanels::new(window, cx),
+            asset_import: None,
             project,
             input,
             status: String::new(),

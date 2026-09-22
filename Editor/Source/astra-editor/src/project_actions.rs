@@ -69,6 +69,7 @@ impl Editor {
                         this.preview = None;
                         // A new project must bind its own packaging target/tools explicitly.
                         this.preview_config = None;
+                        this.asset_import = None;
                         this.project = project;
                         this.panels = panels::WorkspacePanels::new(window, cx);
                         this.sync(window, cx);

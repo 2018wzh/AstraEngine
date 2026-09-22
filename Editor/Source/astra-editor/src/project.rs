@@ -6,7 +6,9 @@ use astra_vn_editor::{AstraSource, AuthoringWorkspace, DocumentEdits, EditBatch,
 pub struct Project {
     pub documents: AuthoringWorkspace,
     pub active: String,
-    root: PathBuf,
+    pub(crate) root: PathBuf,
+    pub asset_roots: Vec<String>,
+    pub profiles: Vec<String>,
     disk_text: BTreeMap<String, String>,
     pub content: Vec<String>,
     options: astra_vn_editor::CompileAstraProjectOptions,
@@ -39,6 +41,8 @@ impl Project {
                 root: path.parent().unwrap().to_path_buf(),
                 disk_text,
                 content: files.content,
+                asset_roots: files.asset_roots,
+                profiles: files.profiles,
                 options: files.options,
             });
         }
@@ -56,6 +60,8 @@ impl Project {
             root: path.parent().unwrap().to_path_buf(),
             disk_text: BTreeMap::from([(active.clone(), text)]),
             content: Vec::new(),
+            asset_roots: Vec::new(),
+            profiles: Vec::new(),
             options: Default::default(),
         })
     }

@@ -296,6 +296,7 @@ impl Editor {
             .gap_2()
             .p_2()
             .child("Content Browser")
+            .child(self.asset_import_panel(cx))
             .child(Input::new(&self.panels.filter))
             .child(
                 div()

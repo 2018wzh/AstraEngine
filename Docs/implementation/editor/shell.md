@@ -10,8 +10,10 @@ Graph 从当前源文档的 state 和实际路由目标绘制连接，点击节�
 
 Agent 为辅助面板。每个 ACP 回合拥有一个有随机令牌的 loopback MCP 服务，与 stdio MCP 共用 EditorBridge。每次提交先检查文档版本，再按自主或逐批确认模式应用。外部权限面板展示关联工具详情；批准还必须匹配原 tool call、选项与 generation。取消推进 generation，待审查响应返回取消，旧 Agent 不能继续写入。
 
-独立 Player 预览复用现有 cook/package/bundle。Editor 持有子进程并负责停止、回收和错误显示；公共 preview wire/checkpoint 契约由 Runtime/Player 维护。完整视觉编辑、曲线编辑、资源导入和跨桌面交互验收仍需继续实施，不能以已有面板数量宣称完成。
+独立 Player 预览复用现有 cook/package/bundle。Editor 持有子进程并负责停止、回收和错误显示；公共 preview wire/checkpoint 契约由 Runtime/Player 维护。完整视觉编辑、曲线编辑、多媒体资源导入和跨桌面交互验收仍需继续实施，不能以已有面板数量宣称完成。
 
 详见 [Editor 手册](../../../Editor/README.md) 和 [模块目标](../../modules/editor.md)。
 
 工作区停靠直接使用 gpui-component 的 DockArea、Panel 与 dump/load，不维护第二套布局树。三个作者面板观察同一 Editor 状态，移动与组合标签不改变文档权威；布局为项目本地缓存，保存前后保留三个必要面板。损坏布局回到默认三栏并显示原因，完整桌面交互验收仍待进行。
+
+图片导入复用 astra-cook DefaultMetadataImporter，Editor 只承担项目相对目标校验、重名拒绝、后台任务取消和源文件/sidecar 写入。新增文件使用 no-clobber；sidecar 写入失败时删除本次创建的图片。不会把导入审计另存成一套报告。

@@ -361,6 +361,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "astra-cook"
+version = "0.1.0"
+dependencies = [
+ "astra-asset",
+ "astra-core",
+ "astra-package",
+ "camino",
+ "image",
+ "postcard",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "thiserror 1.0.69",
+ "tracing",
+]
+
+[[package]]
 name = "astra-core"
 version = "0.1.0"
 dependencies = [
@@ -381,6 +399,8 @@ version = "0.1.0"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
+ "astra-asset",
+ "astra-cook",
  "astra-core",
  "astra-ui-core",
  "astra-vn-editor",
@@ -389,6 +409,7 @@ dependencies = [
  "clap",
  "gpui",
  "gpui-component",
+ "image",
  "rmcp",
  "schemars 1.2.2",
  "serde",
