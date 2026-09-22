@@ -4,6 +4,9 @@
 
 ## Classic Profile
 
+2026-09-22 本轮按代表流程与演出分类对照验收，不要求完整路线或新的 signoff 产物。Windows Sandbox 的真实 GPU/显式 NullAudio 已完成新游戏至正文、右键系统页、空槽保存、推进后读回及退出重开读取；命名键修复后方向键、Enter、Escape 已复测。最大化保持 4:3 内容与正确点击位置。选择、逐类演出与原版习惯对照仍未完成；切页黑帧与标题颜色差异保持待修。NullAudio 不计作可听声音通过，旧比较容差不自动豁免本轮明显颜色差异。
+
+
 | Area | Acceptance target | Automatic evidence | Manual evidence | Blocks release |
 | --- | --- | --- | --- | --- |
 | Source inventory | 原版资源被脱敏登记，未知项可解释 | `tsuinosora.source_inventory.v1`、hash、count、coverage | source boundary review | 本地路径泄露、payload 进入仓库、coverage 缺口无解释 |

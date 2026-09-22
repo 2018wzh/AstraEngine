@@ -859,8 +859,15 @@ impl ApplicationHandler for AndroidHostApp {
             }
             WindowEvent::KeyboardInput { event, .. } => Some(PlatformEventKind::Keyboard {
                 window,
-                physical_key: format!("{:?}", event.physical_key),
-                logical_key: event.logical_key.to_text().map(str::to_string),
+                physical_key: match event.physical_key {
+                    winit::keyboard::PhysicalKey::Code(code) => format!("{code:?}"),
+                    winit::keyboard::PhysicalKey::Unidentified(code) => format!("{code:?}"),
+                },
+                logical_key: match event.logical_key {
+                    winit::keyboard::Key::Named(key) => Some(format!("{key:?}")),
+                    winit::keyboard::Key::Character(text) => Some(text.to_string()),
+                    winit::keyboard::Key::Dead(_) | winit::keyboard::Key::Unidentified(_) => None,
+                },
                 state: input_state(event.state),
                 repeat: event.repeat,
             }),

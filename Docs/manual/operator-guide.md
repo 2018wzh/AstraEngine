@@ -210,3 +210,6 @@ python Tools/build_android.py --package Build/Game.astrapkg --target nativevn-ga
 ### Windows Player 静音测试
 
 在 bundled Player 目录运行 `astra-player --test-null-audio`，窗口标题显示 `[TEST NULL AUDIO]`。选项仅对本次进程生效；正文、解码、混音、媒体时钟和关闭流程继续运行，但没有设备声音。正常启动不带此参数，设备不可用时会明确报错。测试输出不能作为可听音频验收。
+
+
+Classic Player 可用鼠标选择标题与存读档槽，右键打开游戏内系统页；方向键/Enter 用于界面导航，Escape 返回上一页。系统页关闭后回到当前剧情。Windows 静音测试必须显式传入 `--test-null-audio`，窗口标题有测试标记；设备失败不会自动切换。

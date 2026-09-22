@@ -134,3 +134,6 @@ Windows bundled Player 接受一次性 `--test-null-audio` 参数。默认仍打
 
 
 NativeVN Player 保留启动时的逻辑舞台尺寸，窗口 resize 不改写剧情实体、摄像机或演出快照。实际 SceneFrame 使用窗口尺寸，并由公共 `Canvas2D` 对剧情与 Yakui UI 统一执行 aspect-fit 根变换及 viewport 裁剪，输出黑边；同一 viewport 逆映射鼠标和触控，黑边输入不送入游戏，accessibility bounds 映射到实际输出。恢复存档保持当前窗口尺寸，逻辑坐标来自剧情快照。Windows 与 Android 都经过共享 `NativeVnHostCommandSource`。
+
+
+平台键盘事件使用 winit 的物理键内部名称（如 `Enter`、`F5`）与命名逻辑键（如 `Escape`、`ArrowDown`）；字符键保留实际字符。不得把 `Code(...)` 调试包装或 Enter 的控制字符交给 UI 绑定。Windows、Linux、macOS 和 Android 的适配点保持相同规则，设备验收分别记录。
