@@ -17,3 +17,5 @@ Agent 为辅助面板。每个 ACP 回合拥有一个有随机令牌的 loopback
 工作区停靠直接使用 gpui-component 的 DockArea、Panel 与 dump/load，不维护第二套布局树。三个作者面板观察同一 Editor 状态，移动与组合标签不改变文档权威；布局为项目本地缓存，保存前后保留三个必要面板。损坏布局回到默认三栏并显示原因，完整桌面交互验收仍待进行。
 
 图片导入复用 astra-cook DefaultMetadataImporter，Editor 只承担项目相对目标校验、重名拒绝、后台任务取消和源文件/sidecar 写入。新增文件使用 no-clobber；sidecar 写入失败时删除本次创建的图片。不会把导入审计另存成一套报告。
+
+新版 NativeVN 已用于真实作者回归。完整包暴露的 Editor 问题已处理：预览临时数据改存项目卷，结束后立即释放，启动等待覆盖较大包加载，断管错误附带有界 stderr。Windows 当前仍在 Ready 前因活动 stream 与 one-shot audio decode 冲突退出；Runtime 修复前不把完整作者预览流程写成通过。

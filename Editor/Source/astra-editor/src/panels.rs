@@ -290,6 +290,8 @@ impl Editor {
                 })
         });
         let browser = div()
+            .id("content-browser")
+            .overflow_y_scroll()
             .flex()
             .flex_col()
             .size_full()
@@ -310,7 +312,7 @@ impl Editor {
                     .children(assets),
             )
             .child("Outliner")
-            .child(div().flex_1().min_h_0().child(outliner));
+            .child(div().flex_1().min_h(px(160.)).child(outliner));
         browser.into_any_element()
     }
 

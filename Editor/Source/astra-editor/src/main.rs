@@ -234,6 +234,9 @@ impl Editor {
                         if let Err(error) = preview.poll(&this.project.documents) {
                             this.status = error.to_string();
                             this.preview = None;
+                        } else if preview.is_finished() {
+                            this.status = preview.status.clone();
+                            this.preview = None;
                         }
                         cx.notify();
                     }

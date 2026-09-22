@@ -66,7 +66,16 @@ impl Preview {
                 && serde_json::to_vec(&identity)?.len() <= 32768,
             "Preview identity exceeds protocol limits"
         );
-        let temporary = tempfile::tempdir()?;
+        // Cooked assets and the bundled package can be large. Keep preview
+        // intermediates on the project's volume and remove this unique run on Drop.
+        let project = config.project.canonicalize()?;
+        let cache = project
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("Project directory is missing"))?
+            .join(".astra-cache")
+            .join("preview");
+        std::fs::create_dir_all(&cache)?;
+        let temporary = tempfile::Builder::new().prefix("run-").tempdir_in(cache)?;
         let root = temporary.path();
         let cooked = root.join("cooked");
         let package = root.join("preview.astrapak");
@@ -192,7 +201,7 @@ impl Preview {
                     child.stdout.take().unwrap(),
                 ));
                 self.attach_deadline =
-                    Some(std::time::Instant::now() + std::time::Duration::from_secs(15));
+                    Some(std::time::Instant::now() + std::time::Duration::from_secs(120));
             }
             self.child = Some(child);
             self.status = step.label.into();
@@ -224,7 +233,7 @@ impl Preview {
             let response = match response {
                 Ok(response) => response,
                 Err(_) if self.stop_deadline.is_some() => break,
-                Err(error) => return Err(error),
+                Err(error) => anyhow::bail!("{error}\n{}", self.log_tail()),
             };
             match response {
                 PreviewResponse::Ready {
@@ -269,7 +278,8 @@ impl Preview {
                     .pipe
                     .as_ref()
                     .is_some_and(|pipe| pipe.reader_finished()),
-            "Player control stream ended unexpectedly"
+            "Player control stream ended unexpectedly\n{}",
+            self.log_tail()
         );
         if self.stop_deadline.is_some_and(|deadline| now >= deadline) {
             self.cancel()?;
@@ -278,7 +288,8 @@ impl Preview {
         }
         anyhow::ensure!(
             !self.attach_deadline.is_some_and(|deadline| now >= deadline),
-            "Player connection timed out"
+            "Player connection timed out\n{}",
+            self.log_tail()
         );
         let Some(child) = self.child.as_mut() else {
             return Ok(());
@@ -293,28 +304,34 @@ impl Preview {
             self.attach_deadline = None;
             if !status.success() {
                 self.steps.clear();
-                use std::io::{Read, Seek, SeekFrom};
-                let mut file = File::open(self.temporary.path().join("process.log"))?;
-                let length = file.metadata()?.len();
-                file.seek(SeekFrom::Start(length.saturating_sub(16_384)))?;
-                let mut bytes = Vec::new();
-                file.take(16_384).read_to_end(&mut bytes)?;
-                let log = String::from_utf8_lossy(&bytes);
-                let tail = log
-                    .lines()
-                    .rev()
-                    .take(12)
-                    .collect::<Vec<_>>()
-                    .into_iter()
-                    .rev()
-                    .collect::<Vec<_>>()
-                    .join("\n");
+                let tail = self.log_tail();
                 self.status = format!("Preview failed ({status}):\n{tail}");
             } else {
                 self.next()?;
             }
         }
         Ok(())
+    }
+
+    fn log_tail(&self) -> String {
+        use std::io::{Read, Seek, SeekFrom};
+        let read = || -> std::io::Result<String> {
+            let mut file = File::open(self.temporary.path().join("process.log"))?;
+            let length = file.metadata()?.len();
+            file.seek(SeekFrom::Start(length.saturating_sub(16_384)))?;
+            let mut bytes = Vec::new();
+            file.take(16_384).read_to_end(&mut bytes)?;
+            Ok(String::from_utf8_lossy(&bytes)
+                .lines()
+                .rev()
+                .take(12)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect::<Vec<_>>()
+                .join("\n"))
+        };
+        read().unwrap_or_else(|error| format!("Could not read preview diagnostics: {error}"))
     }
 
     pub fn cancel(&mut self) -> anyhow::Result<()> {

@@ -44,13 +44,23 @@ Content Browser 的 Import image 支持 PNG、JPEG、WebP。选择图片后确�
 
 `--preview-config` 接收本地 JSON 配置，包含 `project`、`cli`、`player`、`profile`、`target`。Windows 还必须提供 `windows_runtime`（匹配的 Microsoft VC x64 CRT 目录）与 `crash_reporter`（构建的 AstraCrashReporter）。路径指向当前工作树自行构建的工具和工程，配置不应提交私有路径。
 
-Save & Preview 先保存并编译当前文档，再执行现有 `cook → package build → package bundle → Player`。Player 创建独立 GPU 窗口，通过现有产品主路径使用真实 VnSession；Editor 没有另外实现 renderer。编辑版本改变、再次启动预览或点击 Stop preview 会终止旧进程，等待回收并清理临时输出。构建或 Player 失败显示退出状态和日志尾部。
+Save & Preview 先保存并编译当前文档，再执行现有 `cook → package build → package bundle → Player`。Player 创建独立 GPU 窗口，通过现有产品主路径使用真实 VnSession；Editor 没有另外实现 renderer。编辑版本改变、再次启动预览或点击 Stop preview 会终止旧进程，等待回收并清理临时输出。构建或 Player 失败显示退出状态和日志尾部，启动断管和超时也保留有界诊断。完整包的中间产物位于项目 `.astra-cache/preview` 下的独占目录，结束或取消后回收；启动等待上限为两分钟，期间可以取消。
 
 预览使用 [typed Player 控制协议](../Docs/contracts/player-preview.md)。编译 project hash、全部文档版本/内容 hash 和启动 generation 固定到同一次 cook；只有 Player 返回 Ready 后才显示 Playing 与 Pause。暂停后显示当前片段实际保留的 checkpoint，可点击精确位置恢复，不重新执行剧情或外部 IO。没有 checkpoint 时不显示定位按钮。位置使用 Player 返回的当前 presentation time，不从检查点列表末尾推断。
 
 Stop 请求真实 Player 关闭会话与设备，超过三秒仍未退出则回收子进程；文档改变、构建取消或编辑器关闭会回收旧进程。管道读写使用有界队列和有界 JSONL，子进程退出后 join 两个通信 worker。旧身份、控制拒绝、断管、启动失败与超时显示为错误。
 
 公开最小工程已经通过真实 Windows Player 的 cook/package/bundle、Ready、Pause、当前片段精确 checkpoint 恢复、Resume 与正常 Stop。复测需设置 `ASTRA_EDITOR_PREVIEW_CONFIG`，运行 `cargo test --manifest-path Editor/Cargo.toml -p astra-editor --test preview_product -- --ignored`；它会启动 GPU 窗口。此测试检查产品进程与协议状态，不检查画面、音频质量或手动操作；NativeVN 旗舰工程、连续创作和窗口交互仍需验收。
+
+完整 NativeVN 作者回归使用同一配置，显式运行：
+
+```sh
+cargo test --manifest-path Editor/Cargo.toml --test preview_product nativevn_graph_timeline_preview_and_undo -- --ignored
+```
+
+此测试临时把 Graph 入口连接到分层演出、延长行走关键帧，保存后执行完整 cook/package/bundle 与真实 Player 控制，再撤销、保存、重开并比较原项目 hash。它会暂时修改所选 NativeVN 工程源码，须在独占工作树运行；正常结束或断言失败会恢复本次写入，外部修改不会被覆盖。不能用该流程代替桌面拖动、画面和音频验收。
+
+当前新版 NativeVN 的四文档编译和完整 cook/package/bundle 已通过，Windows Player 在 Ready 前因 `player.audio.decode` 失败退出：活动 stream 期间拒绝 one-shot decode。此问题已交共享 Runtime 维护者；完整作者预览回归尚未通过，不能沿用最小工程成功结果代替。普通 `nativevn_graph_timeline_roundtrip` 测试单独检查真实样例的编辑、编译、注释保留和撤销，不启动 Player。
 
 ## 依赖与检查
 

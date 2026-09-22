@@ -118,20 +118,30 @@ pub fn remove(
         matches!(command.keyword(), "jump" | "call" | "branch" | "option"),
         "Select a route command"
     );
-    let start = usize::from(command.keyword_span().start);
+    let mut start = usize::from(command.keyword_span().start);
     let id_end = usize::from(
         command
             .source_id_span()
             .ok_or_else(|| anyhow::anyhow!("Missing route source ID"))?
             .end,
     );
+    let line_end = document.text[id_end..]
+        .find('\n')
+        .map(|offset| id_end + offset + 1)
+        .unwrap_or(document.text.len());
+    let end = if document.text[id_end..line_end].trim().is_empty() {
+        start -= command.indent();
+        line_end
+    } else {
+        id_end
+    };
     Ok(EditBatch {
         documents: vec![DocumentEdits {
             path: path.into(),
             version,
             edits: vec![TextEdit {
                 start,
-                end: id_end,
+                end,
                 replacement: String::new(),
             }],
         }],
@@ -173,6 +183,12 @@ mod tests {
         // Removing the only incoming route leaves an unreachable state; the normal
         // compiler diagnostic remains visible until the author reconnects it.
         assert!(workspace.compile(Default::default()).is_err());
+        assert!(!workspace
+            .document("main.astra")
+            .unwrap()
+            .text
+            .lines()
+            .any(|line| !line.is_empty() && line.trim().is_empty()));
         workspace.undo().unwrap();
         workspace.undo().unwrap();
         assert_eq!(workspace.document("main.astra").unwrap().text, source);
