@@ -12,6 +12,7 @@
 - `analyze_audio.py`：用 ffmpeg 测量响度、true peak、频谱活动、静音、削波和循环接缝，并单独保留人工听审状态；
 - `review_audio_openrouter.py`：用 OpenRouter 音频模型逐项完成结构化辅助听审；API key 只从环境变量读取，不能替代人工签核；
 - `build_nativevn_project.py`：刷新 runtime localization、asset sidecar 与当前四平台 `project.yaml`；只检查 `.astra`、UI/theme/controller 是否存在，不重写作者源码；
+- `experience_inputs.py`：生成连续分层演出的物理输入 JSONL，供真实 GPU Headless 产品路径运行；
 - `update_content_metadata.py`：更新内容 manifest、provenance、review、prompt 和 alt text 索引；
 - `build_contact_sheet.py`：把人工视觉审查表写入 ignored `.local/review/`；
 - `validate_content_pack.py`：校验双语引用、路线、媒体、透明通道、hash、授权状态和公开树安全。
@@ -26,3 +27,5 @@ python -m unittest discover Tools/NativeVN/tests
 当前发行项目包含用户明确授权的 OpenRouter 配音，逐 cue release eligibility 由 `Manifests/voice-release.json` 管理；`--release` 仍要求完整人工音频听审。旧 ElevenLabs 入口只生成 ignored 私有候选：API key 只从 `ELEVENLABS_API_KEY` 读取；两名角色的 Voice Design id 分别从 `ELEVENLABS_LIN_YAO_VOICE_ID` 和 `ELEVENLABS_ZHOU_HENG_VOICE_ID` 读取。API key 不得写入参数文件、日志、manifest 或仓库。
 
 OpenRouter 辅助听审只从 `OPENROUTER_API_KEY` 读取凭据。当前批准设置是 `xiaomi/mimo-v2.5`、`temperature=0`、固定 seed、`json_object` 和 128 kbps 临时 MP3；该模型是在当前区域对 audio input 做 capability preflight 后选定，`openrouter/auto` 及更高档音频端点因能力或区域限制没有进入正式批次。
+
+`experience_inputs.py` 通过物理 Enter 推进默认片段，捕获阅读、人物接近前后和可保存时刻；仅测试已支持的 timeline。它没有证明媒体播放或实际写槽/读档，后两项需要独立输入案例。

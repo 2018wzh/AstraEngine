@@ -35,6 +35,50 @@ SYSTEM_STRINGS = {
 }
 
 
+SYSTEM_STRINGS.update(
+{'experience.back': {'en': 'Return to the rainy platform', 'zh-Hans': '返回雨中的站台'},
+ 'experience.media': {'en': 'Watch and listen to the rain', 'zh-Hans': '听雨与看雨'},
+ 'experience.media.after': {'en': 'The rain clears. The city remains. At last they can read the '
+                                  'overdue letter.',
+                            'zh-Hans': '雨幕散开，城市还在。他们终于可以把那封迟来的信读下去了。'},
+ 'experience.media.before': {'en': 'The platform lights go out, but the signal holds. Listen until '
+                                   'the distant thunder passes.',
+                             'zh-Hans': '站台的灯熄了，信号却没有断。听一会儿雨，等远处的雷声过去。'},
+ 'experience.read': {'en': 'A few words', 'zh-Hans': '读一句话'},
+ 'experience.read.again': {'en': 'Read it again', 'zh-Hans': '再读一次'},
+ 'experience.read.first': {'en': 'The last train has left, but a reflection remains. Tap once to '
+                                 'reveal the sentence, then again to continue.',
+                           'zh-Hans': '末班列车已经离站，玻璃上的倒影却留在原处。轻触一下读完这句话，再轻触一次继续。'},
+ 'experience.read.question': {'en': 'What remains in the rain?', 'zh-Hans': '雨声里还有什么？'},
+ 'experience.read.second': {'en': 'Someone calls Lin Yao. The rain is close; the voice sounds '
+                                  'years away.',
+                            'zh-Hans': '林瑶听见有人叫她。雨声很近，那个人的声音却像隔着许多年。'},
+ 'experience.save': {'en': 'Keep this moment', 'zh-Hans': '留住这一刻'},
+ 'experience.save.after': {'en': '“I can hear you,” she says. This time, the man behind the glass '
+                                 'nods.',
+                           'zh-Hans': '“我听见了。”她说。这次，玻璃另一侧的人点了点头。'},
+ 'experience.save.before': {'en': 'Zhou Heng slowly comes into focus. Use Save below to keep this '
+                                  'moment and Load to return, or continue onward.',
+                            'zh-Hans': '周衡的身影慢慢清晰起来。想留住现在的光影，可以点下方“保存”，再用“读取”回到这一刻；也可以继续向前。'},
+ 'experience.stage': {'en': 'A moment on stage', 'zh-Hans': '看一段演出'},
+ 'experience.stage.first': {'en': 'She steps out of the shadows. Zhou Heng waits on the other side '
+                                  'of the glass.',
+                            'zh-Hans': '她走出暗处。周衡没有上前，只在玻璃另一侧等她。'},
+ 'experience.stage.second': {'en': '“Stay there.” The signal dims. She stops, watching the face '
+                                   'fade.',
+                             'zh-Hans': '“别动。”信号忽然暗下去。她停住脚步，盯着那张正在消失的脸。'},
+ 'experience.stage.third': {'en': 'She steadies the receiver. The image holds. Rain falls; neither '
+                                  'of them leaves.',
+                            'zh-Hans': '她按住接收器，终于让影子稳定下来。雨还在落，两个人都没有离开。'},
+ 'experience.story': {'en': 'Begin the full story', 'zh-Hans': '开始完整故事'},
+ 'experience.title': {'en': 'Return to the title', 'zh-Hans': '返回标题'},
+ 'experience.welcome': {'en': 'Where shall we begin before the rain stops?',
+                        'zh-Hans': '雨停之前，想从哪里开始？'},
+ 'system.experience': {'en': 'Moments in the rain', 'zh-Hans': '雨中的片刻'},
+ 'system.new_game': {'en': 'Start story', 'zh-Hans': '开始故事'}}
+)
+
+
 def read_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 

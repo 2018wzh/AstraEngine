@@ -1,15 +1,15 @@
-ui_bind surface:message view:ui.message.classic controller:message.classic policy:astra.policy.standard theme:astra.vn.theme.classic #@id ui.bind.message.classic
-ui_bind surface:choice view:ui.choice.classic controller:choice.classic policy:astra.policy.standard theme:astra.vn.theme.classic #@id ui.bind.choice.classic
-ui_bind system_page:title view:ui.system.title controller:system.standard policy:astra.policy.standard theme:astra.vn.theme.classic #@id ui.bind.title.classic
-ui_bind system_page:save view:ui.system.save controller:system.save policy:astra.policy.standard theme:astra.vn.theme.classic #@id ui.bind.save.classic
-ui_bind system_page:load view:ui.system.load controller:system.load policy:astra.policy.standard theme:astra.vn.theme.classic #@id ui.bind.load.classic
-ui_bind system_page:config view:ui.system.config controller:system.config policy:astra.policy.standard theme:astra.vn.theme.classic #@id ui.bind.config.classic
-ui_bind system_page:backlog view:ui.system.backlog controller:system.backlog policy:astra.policy.standard theme:astra.vn.theme.classic #@id ui.bind.backlog.classic
-ui_bind system_page:gallery view:ui.system.gallery controller:system.gallery policy:astra.policy.standard theme:astra.vn.theme.classic #@id ui.bind.gallery.classic
-ui_bind system_page:replay view:ui.system.replay controller:system.replay policy:astra.policy.standard theme:astra.vn.theme.classic #@id ui.bind.replay.classic
-ui_bind system_page:voice_replay view:ui.system.voice_replay controller:system.voice policy:astra.policy.standard theme:astra.vn.theme.classic #@id ui.bind.voice.classic
-ui_bind system_page:route_chart view:ui.system.route_chart controller:system.route policy:astra.policy.standard theme:astra.vn.theme.classic #@id ui.bind.route.classic
-ui_bind system_page:localization_preview view:ui.system.localization controller:system.localization policy:astra.policy.standard theme:astra.vn.theme.classic #@id ui.bind.localization.classic
+ui_bind profile:classic surface:message view:ui.message.classic controller:message.classic policy:astra.policy.standard theme:astra.vn.theme.classic #@id ui.bind.message.classic
+ui_bind profile:classic surface:choice view:ui.choice.classic controller:choice.classic policy:astra.policy.standard theme:astra.vn.theme.classic #@id ui.bind.choice.classic
+ui_bind profile:classic system_page:title view:ui.system.title controller:system.standard policy:astra.policy.standard theme:astra.vn.theme.classic #@id ui.bind.title.classic
+ui_bind profile:classic system_page:save view:ui.system.save controller:system.save policy:astra.policy.standard theme:astra.vn.theme.classic #@id ui.bind.save.classic
+ui_bind profile:classic system_page:load view:ui.system.load controller:system.load policy:astra.policy.standard theme:astra.vn.theme.classic #@id ui.bind.load.classic
+ui_bind profile:classic system_page:config view:ui.system.config controller:system.config policy:astra.policy.standard theme:astra.vn.theme.classic #@id ui.bind.config.classic
+ui_bind profile:classic system_page:backlog view:ui.system.backlog controller:system.backlog policy:astra.policy.standard theme:astra.vn.theme.classic #@id ui.bind.backlog.classic
+ui_bind profile:classic system_page:gallery view:ui.system.gallery controller:system.gallery policy:astra.policy.standard theme:astra.vn.theme.classic #@id ui.bind.gallery.classic
+ui_bind profile:classic system_page:replay view:ui.system.replay controller:system.replay policy:astra.policy.standard theme:astra.vn.theme.classic #@id ui.bind.replay.classic
+ui_bind profile:classic system_page:voice_replay view:ui.system.voice_replay controller:system.voice policy:astra.policy.standard theme:astra.vn.theme.classic #@id ui.bind.voice.classic
+ui_bind profile:classic system_page:route_chart view:ui.system.route_chart controller:system.route policy:astra.policy.standard theme:astra.vn.theme.classic #@id ui.bind.route.classic
+ui_bind profile:classic system_page:localization_preview view:ui.system.localization controller:system.localization policy:astra.policy.standard theme:astra.vn.theme.classic #@id ui.bind.localization.classic
 ui_bind profile:advanced-vn system_page:title view:ui.system.title controller:system.modern policy:astra.policy.standard theme:astra.vn.theme.modern #@id ui.bind.title.modern
 ui_bind profile:advanced-vn system_page:save view:ui.system.save controller:system.save.modern policy:astra.policy.standard theme:astra.vn.theme.modern #@id ui.bind.save.modern
 ui_bind profile:advanced-vn system_page:load view:ui.system.load controller:system.load.modern policy:astra.policy.standard theme:astra.vn.theme.modern #@id ui.bind.load.modern
@@ -42,6 +42,10 @@ ui_view ui.system.title model:astra.vn.ui_model.title.v1 theme:astra.vn.theme.cl
     image id:backdrop asset:theme:system.backdrop min_width:1280 min_height:720
     column id:content
       text id:title value:l10n:system.title
+      button id:new_game min_height:56 text:l10n:system.new_game
+        on activate -> vn.invoke_system_action action_id:"nativevn.story.start"
+      button id:experience min_height:56 text:l10n:system.experience
+        on activate -> vn.invoke_system_action action_id:"nativevn.experience.open"
       button id:continue min_height:56 text:l10n:system.continue enabled:$model.can_continue
         on activate -> vn.return_system
       button id:config min_height:56 text:l10n:system.config
@@ -175,7 +179,7 @@ ui_view ui.message.modern model:astra.vn.ui_model.message.v2 theme:astra.vn.them
   screen id:root background:theme:surface.clear
     panel id:advance fill:true
       on activate -> vn.advance
-    nine_slice id:message_panel texture:theme:panel.message.frame min_height:280
+    column id:message_panel background:theme:panel.message min_height:280 fill_width:true anchor:bottom
       column id:content
         row id:header
           text id:speaker value:$model.speaker_key font_size:28
@@ -186,15 +190,20 @@ ui_view ui.message.modern model:astra.vn.ui_model.message.v2 theme:astra.vn.them
             on activate -> vn.open_system page:"backlog"
           button id:save min_height:48 text:l10n:system.save
             on activate -> vn.open_system page:"save"
+          button id:load min_height:48 text:l10n:system.load
+            on activate -> vn.open_system page:"load"
           button id:config min_height:48 text:l10n:system.config
             on activate -> vn.open_system page:"config"
 
 ui_view ui.choice.modern model:astra.vn.ui_model.choice.v1 theme:astra.vn.theme.modern #@id ui.choice.modern
   screen id:root background:theme:surface.dim
-    nine_slice id:choice_panel texture:theme:panel.choice.frame min_width:760 min_height:420
-      column id:choices
+    column id:choice_panel background:theme:panel.message min_width:760 anchor:center
+      column id:choices fill_width:true
         text id:prompt value:$model.prompt_key font_size:30
         virtual_list id:options items:$model.options item_key:option_id overscan:2 item_extent:72
-          button id:option min_height:68 value:$item.text_key enabled:$item.enabled
+          button id:option min_height:68 fill_width:true value:$item.text_key enabled:$item.enabled
             on activate -> vn.choose option_id:$item.option_id
-ui_policy profile:advanced-vn save_slots:"slot.quick,slot.01,slot.02,slot.03,slot.04,slot.05,slot.06,slot.07,slot.08,slot.09,slot.10,slot.11,slot.12,slot.13,slot.14,slot.15,slot.16,slot.17,slot.18,slot.19,slot.20,slot.21,slot.22,slot.23,slot.24" quick_slot:slot.quick allowed_pages:"title,save,load,config,backlog,gallery,replay,voice_replay,route_chart,localization_preview" reading_modes:"manual,fast_forward" audio_toggle:true save_completion:stay custom_actions:"" #@id ui.policy.flagship.advanced
+ui_policy profile:advanced-vn save_slots:"slot.quick,slot.01,slot.02,slot.03,slot.04,slot.05,slot.06,slot.07,slot.08,slot.09,slot.10,slot.11,slot.12,slot.13,slot.14,slot.15,slot.16,slot.17,slot.18,slot.19,slot.20,slot.21,slot.22,slot.23,slot.24" quick_slot:slot.quick allowed_pages:"title,save,load,config,backlog,gallery,replay,voice_replay,route_chart,localization_preview" reading_modes:"manual,fast_forward" audio_toggle:true save_completion:stay custom_actions:"nativevn.story.start,nativevn.experience.open" #@id ui.policy.flagship.advanced
+ui_policy profile:classic save_slots:"slot.quick,slot.01,slot.02,slot.03,slot.04,slot.05,slot.06,slot.07,slot.08,slot.09,slot.10,slot.11,slot.12,slot.13,slot.14,slot.15,slot.16,slot.17,slot.18,slot.19,slot.20,slot.21,slot.22,slot.23,slot.24" quick_slot:slot.quick allowed_pages:"title,save,load,config,backlog,gallery,replay,voice_replay,route_chart,localization_preview" reading_modes:"manual,fast_forward" audio_toggle:true save_completion:stay custom_actions:"nativevn.story.start,nativevn.experience.open" #@id ui.policy.flagship.classic
+ui_bind profile:classic surface:main view:ui.message.classic controller:message.classic policy:astra.policy.standard theme:astra.vn.theme.classic #@id ui.bind.main.classic
+ui_bind profile:advanced-vn surface:main view:ui.message.modern controller:message.modern policy:astra.policy.standard theme:astra.vn.theme.modern #@id ui.bind.main.modern

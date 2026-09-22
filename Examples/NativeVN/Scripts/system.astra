@@ -1,3 +1,6 @@
+system_action jump:state.scn_common_01_glass_train #@id nativevn.story.start
+system_action jump:state.experience_read #@id nativevn.experience.open
+
 story system #@id story.system
 
 state title #@id state.system.title

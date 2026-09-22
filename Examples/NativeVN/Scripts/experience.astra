@@ -1,0 +1,81 @@
+# 雨中的片刻：从雨夜相遇到留住信号的连续分层演出。
+# main.astra 保留旧故事素材的可玩分支；此文件是新演出的作者源码。
+# story.main 是当前 Player 的显式默认故事；每个命令保留稳定 source-map ID。
+story main #@id story.main
+
+state prologue #@id state.prologue
+  scene welcome #@id scene.experience.welcome
+    stage viewport:1920x1080 safe_area:16:9 #@id experience.stage
+    layer id:bg kind:background z:0 blend:normal #@id experience.layer.bg
+    layer id:character kind:sprite z:100 blend:normal clip:stage #@id experience.layer.character
+    layer id:foreground kind:sprite z:150 blend:normal clip:stage #@id experience.layer.foreground
+    layer id:effects kind:effect z:250 blend:normal clip:stage #@id experience.layer.effects
+    layer id:video kind:video z:200 blend:normal clip:stage #@id experience.layer.video
+    layer id:ui kind:text z:900 blend:normal input:message #@id experience.layer.ui
+    preload asset:asset:/key-art/title-background #@id experience.preload.background
+    jump target:experience_read #@id experience.bootstrap.read
+
+state experience_menu #@id state.experience_menu
+  scene welcome #@id scene.experience.menu
+    camera target:main x:0 y:0 zoom:1 rotation:0 duration:0 #@id experience.menu.camera
+    clear_layer layer:foreground duration:0 interrupt:replace_from_current #@id experience.clear.foreground
+    background asset:asset:/key-art/title-background layer:bg duration:0 interrupt:replace_from_current #@id experience.background
+    clear_layer layer:character duration:0 interrupt:replace_from_current #@id experience.clear.character
+    clear_layer layer:video duration:0 interrupt:replace_from_current #@id experience.clear.video
+    choice key:experience.welcome #@id experience.menu
+      option key:experience.story -> scn_common_01_glass_train #@id experience.option.story
+      option key:experience.read -> experience_read #@id experience.option.read
+      option key:experience.stage -> experience_stage #@id experience.option.stage
+      option key:experience.media -> experience_media #@id experience.option.media
+      option key:experience.save -> experience_save #@id experience.option.save
+      option key:experience.title -> experience_title #@id experience.option.title
+
+state experience_read #@id state.experience_read
+  scene reading #@id scene.experience.reading
+    background asset:asset:/background/metro-station layer:bg duration:0 interrupt:replace_from_current #@id experience.read.background
+    # 两次物理推进分别补全文字与继续；旧台词和配音仍只在原故事中使用。
+    text key:experience.read.first window:main #@id experience.read.first
+    text key:experience.read.second window:main #@id experience.read.second
+    jump target:experience_stage #@id experience.read.continue
+
+state experience_stage #@id state.experience_stage
+  scene performance #@id scene.experience.performance
+    show id:experience.actor asset:asset:/character/sprites/lin-yao/neutral-center layer:character at:left opacity:0.2 interrupt:replace_from_current #@id experience.actor.show
+    show id:experience.witness asset:asset:/character/sprites/zhou-heng/guarded-center layer:foreground at:right opacity:0.75 interrupt:replace_from_current #@id experience.witness.show
+    timeline id:experience.walk target:experience.actor property:x keyframes:0=320,4000=760 join:fire_and_forget budget_ms:2 #@id experience.walk.start
+    timeline id:experience.camera target:camera.main property:zoom keyframes:0=1,4000=1.12 join:fire_and_forget budget_ms:2 #@id experience.camera.start
+    # 演出与对白同时运行；下一条替换同一对象的属性，而非冻结整个舞台。
+    timeline id:experience.fade target:experience.actor property:opacity keyframes:0=0.2,20000=1 join:fire_and_forget budget_ms:2 #@id experience.fade.start
+    text key:experience.stage.first window:main #@id experience.stage.first
+    timeline id:experience.replace target:experience.actor property:opacity keyframes:0=1,800=0.35 join:replace_target budget_ms:2 #@id experience.fade.replace
+    text key:experience.stage.second window:main #@id experience.stage.second
+    # cancellation 使用现有 TimelineCommand，不假造尚未接入的 TaskGroup DSL。
+    timeline id:experience.replace action:cancel reason:author_requested #@id experience.fade.cancel
+    timeline id:experience.finish target:experience.actor property:opacity keyframes:0=0.35,800=1 join:block fence:experience.finished budget_ms:2 #@id experience.fade.finish
+    text key:experience.stage.third window:main #@id experience.stage.third
+    jump target:experience_save #@id experience.stage.continue
+
+state experience_media #@id state.experience_media
+  scene rain #@id scene.experience.rain
+    text key:experience.media.before window:main #@id experience.media.before
+    se asset:asset:/se/distant-thunder bus:se #@id experience.media.sound
+    # 播放完整既有 12 秒影片并等待结束，不把首帧当作视频。
+    movie layer:video asset:asset:/movie/rain-signal-loop loop:false end:wait fence:experience.movie.done fallback:asset:/key-art/title-background interrupt:replace_from_current #@id experience.media.movie
+    text key:experience.media.after window:main #@id experience.media.after
+    jump target:experience_menu #@id experience.media.back
+
+state experience_save #@id state.experience_save
+  scene keepsake #@id scene.experience.keepsake
+    show id:experience.keepsake asset:asset:/character/sprites/zhou-heng/relieved-center layer:character at:left opacity:0.25 interrupt:replace_from_current #@id experience.keepsake.show
+    # 存档由现有系统页提出 request；禁止脚本直接写入存档或复制执行状态。
+    timeline id:experience.keepsake.fade target:experience.keepsake property:opacity keyframes:0=0.25,60000=1 join:fire_and_forget budget_ms:2 #@id experience.keepsake.fade
+    text key:experience.save.before window:main #@id experience.save.before
+    text key:experience.save.after window:main #@id experience.save.after
+    choice key:experience.read.question #@id experience.save.choice
+      option key:experience.media -> experience_media #@id experience.save.rain
+      option key:experience.back -> experience_menu #@id experience.save.back
+
+state experience_title #@id state.experience_title
+  scene title #@id scene.experience.title
+    system_page kind:title policy:astra.policy.standard #@id experience.title.page
+    jump target:experience_menu #@id experience.title.back

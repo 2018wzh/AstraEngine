@@ -15,6 +15,7 @@ class ProjectRefreshTests(unittest.TestCase):
             authored = {
                 "Scripts/main.astra": b"# author comment\nstory custom #@id stable.story\n",
                 "Scripts/system.astra": b"# system actions remain authored\n",
+                "Scripts/experience.astra": b"# independently authored layered performance\n",
                 "UI/flagship.astra": b"# authored view\n",
                 "Controllers/standard_ui.luau": b"-- authored controller\n",
                 "Themes/classic.json": b"{}\n",

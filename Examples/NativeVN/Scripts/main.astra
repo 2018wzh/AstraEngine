@@ -1,12 +1,9 @@
+# 舞台与 layer 在 experience.astra 的 prologue 中声明一次。
+# 场景切换只更新呈现内容，避免重复声明同名 layer。
 story signal_in_the_glass_rain #@id story.signal_in_the_glass_rain
 
 state scn_common_01_glass_train #@id state.scn_common_01_glass_train
   scene scn_common_01_glass_train #@id scene.scn_common_01_glass_train
-    stage viewport:1920x1080 safe_area:16:9 #@id stage.scn_common_01_glass_train
-    layer id:bg kind:background z:0 blend:normal #@id layer.scn_common_01_glass_train.bg
-    layer id:character kind:sprite z:100 blend:normal clip:stage #@id layer.scn_common_01_glass_train.character
-    layer id:video kind:video z:200 blend:screen clip:stage #@id layer.scn_common_01_glass_train.video
-    layer id:ui kind:text z:900 blend:normal input:message #@id layer.scn_common_01_glass_train.ui
     background asset:asset:/background/metro-station layer:bg preset:soft_fade duration:400 interrupt:replace_from_current #@id bg.scn_common_01_glass_train
     movie layer:video asset:asset:/movie/rain-signal-loop alpha:0.18 loop:true end:continue fallback:asset:/background/metro-station interrupt:reject #@id movie.opening
     bgm asset:asset:/bgm/glass-rain loop:true fade:600 #@id bgm.common
@@ -40,11 +37,6 @@ state scn_common_01_glass_train #@id state.scn_common_01_glass_train
 
 state scn_common_02_archive_lobby #@id state.scn_common_02_archive_lobby
   scene scn_common_02_archive_lobby #@id scene.scn_common_02_archive_lobby
-    stage viewport:1920x1080 safe_area:16:9 #@id stage.scn_common_02_archive_lobby
-    layer id:bg kind:background z:0 blend:normal #@id layer.scn_common_02_archive_lobby.bg
-    layer id:character kind:sprite z:100 blend:normal clip:stage #@id layer.scn_common_02_archive_lobby.character
-    layer id:video kind:video z:200 blend:screen clip:stage #@id layer.scn_common_02_archive_lobby.video
-    layer id:ui kind:text z:900 blend:normal input:message #@id layer.scn_common_02_archive_lobby.ui
     background asset:asset:/background/archive-room layer:bg preset:soft_fade duration:400 interrupt:replace_from_current #@id bg.scn_common_02_archive_lobby
     show id:lin_yao asset:asset:/character/sprites/lin-yao/guarded-center pose:guarded layer:character at:left preset:soft_fade interrupt:replace_from_current #@id sprite.scn_common_02_archive_lobby.lin_yao
     show id:zhou_heng asset:asset:/character/sprites/zhou-heng/guarded-center pose:guarded layer:character at:right preset:soft_fade interrupt:replace_from_current #@id sprite.scn_common_02_archive_lobby.zhou_heng
@@ -76,11 +68,6 @@ state scn_common_02_archive_lobby #@id state.scn_common_02_archive_lobby
 
 state scn_common_03_signal_booth #@id state.scn_common_03_signal_booth
   scene scn_common_03_signal_booth #@id scene.scn_common_03_signal_booth
-    stage viewport:1920x1080 safe_area:16:9 #@id stage.scn_common_03_signal_booth
-    layer id:bg kind:background z:0 blend:normal #@id layer.scn_common_03_signal_booth.bg
-    layer id:character kind:sprite z:100 blend:normal clip:stage #@id layer.scn_common_03_signal_booth.character
-    layer id:video kind:video z:200 blend:screen clip:stage #@id layer.scn_common_03_signal_booth.video
-    layer id:ui kind:text z:900 blend:normal input:message #@id layer.scn_common_03_signal_booth.ui
     background asset:asset:/background/apartment-studio layer:bg preset:soft_fade duration:400 interrupt:replace_from_current #@id bg.scn_common_03_signal_booth
     show id:lin_yao asset:asset:/character/sprites/lin-yao/guarded-center pose:guarded layer:character at:left preset:soft_fade interrupt:replace_from_current #@id sprite.scn_common_03_signal_booth.lin_yao
     show id:zhou_heng asset:asset:/character/sprites/zhou-heng/guarded-center pose:guarded layer:character at:right preset:soft_fade interrupt:replace_from_current #@id sprite.scn_common_03_signal_booth.zhou_heng
@@ -114,11 +101,6 @@ state scn_common_03_signal_booth #@id state.scn_common_03_signal_booth
 
 state scn_common_04_rain_trace #@id state.scn_common_04_rain_trace
   scene scn_common_04_rain_trace #@id scene.scn_common_04_rain_trace
-    stage viewport:1920x1080 safe_area:16:9 #@id stage.scn_common_04_rain_trace
-    layer id:bg kind:background z:0 blend:normal #@id layer.scn_common_04_rain_trace.bg
-    layer id:character kind:sprite z:100 blend:normal clip:stage #@id layer.scn_common_04_rain_trace.character
-    layer id:video kind:video z:200 blend:screen clip:stage #@id layer.scn_common_04_rain_trace.video
-    layer id:ui kind:text z:900 blend:normal input:message #@id layer.scn_common_04_rain_trace.ui
     background asset:asset:/background/rain-street layer:bg preset:soft_fade duration:400 interrupt:replace_from_current #@id bg.scn_common_04_rain_trace
     show id:lin_yao asset:asset:/character/sprites/lin-yao/guarded-center pose:guarded layer:character at:left preset:soft_fade interrupt:replace_from_current #@id sprite.scn_common_04_rain_trace.lin_yao
     show id:zhou_heng asset:asset:/character/sprites/zhou-heng/guarded-center pose:guarded layer:character at:right preset:soft_fade interrupt:replace_from_current #@id sprite.scn_common_04_rain_trace.zhou_heng
@@ -152,11 +134,6 @@ state scn_common_04_rain_trace #@id state.scn_common_04_rain_trace
 
 state scn_common_05_memory_room #@id state.scn_common_05_memory_room
   scene scn_common_05_memory_room #@id scene.scn_common_05_memory_room
-    stage viewport:1920x1080 safe_area:16:9 #@id stage.scn_common_05_memory_room
-    layer id:bg kind:background z:0 blend:normal #@id layer.scn_common_05_memory_room.bg
-    layer id:character kind:sprite z:100 blend:normal clip:stage #@id layer.scn_common_05_memory_room.character
-    layer id:video kind:video z:200 blend:screen clip:stage #@id layer.scn_common_05_memory_room.video
-    layer id:ui kind:text z:900 blend:normal input:message #@id layer.scn_common_05_memory_room.ui
     background asset:asset:/background/underground-relay layer:bg preset:soft_fade duration:400 interrupt:replace_from_current #@id bg.scn_common_05_memory_room
     show id:lin_yao asset:asset:/character/sprites/lin-yao/guarded-center pose:guarded layer:character at:left preset:soft_fade interrupt:replace_from_current #@id sprite.scn_common_05_memory_room.lin_yao
     show id:zhou_heng asset:asset:/character/sprites/zhou-heng/guarded-center pose:guarded layer:character at:right preset:soft_fade interrupt:replace_from_current #@id sprite.scn_common_05_memory_room.zhou_heng
@@ -190,11 +167,6 @@ state scn_common_05_memory_room #@id state.scn_common_05_memory_room
 
 state scn_common_06_decision_bridge #@id state.scn_common_06_decision_bridge
   scene scn_common_06_decision_bridge #@id scene.scn_common_06_decision_bridge
-    stage viewport:1920x1080 safe_area:16:9 #@id stage.scn_common_06_decision_bridge
-    layer id:bg kind:background z:0 blend:normal #@id layer.scn_common_06_decision_bridge.bg
-    layer id:character kind:sprite z:100 blend:normal clip:stage #@id layer.scn_common_06_decision_bridge.character
-    layer id:video kind:video z:200 blend:screen clip:stage #@id layer.scn_common_06_decision_bridge.video
-    layer id:ui kind:text z:900 blend:normal input:message #@id layer.scn_common_06_decision_bridge.ui
     background asset:asset:/background/glass-corridor layer:bg preset:soft_fade duration:400 interrupt:replace_from_current #@id bg.scn_common_06_decision_bridge
     show id:lin_yao asset:asset:/character/sprites/lin-yao/guarded-center pose:guarded layer:character at:left preset:soft_fade interrupt:replace_from_current #@id sprite.scn_common_06_decision_bridge.lin_yao
     show id:zhou_heng asset:asset:/character/sprites/zhou-heng/guarded-center pose:guarded layer:character at:right preset:soft_fade interrupt:replace_from_current #@id sprite.scn_common_06_decision_bridge.zhou_heng
@@ -229,11 +201,6 @@ state scn_common_06_decision_bridge #@id state.scn_common_06_decision_bridge
 
 state scn_truth_01_observatory #@id state.scn_truth_01_observatory
   scene scn_truth_01_observatory #@id scene.scn_truth_01_observatory
-    stage viewport:1920x1080 safe_area:16:9 #@id stage.scn_truth_01_observatory
-    layer id:bg kind:background z:0 blend:normal #@id layer.scn_truth_01_observatory.bg
-    layer id:character kind:sprite z:100 blend:normal clip:stage #@id layer.scn_truth_01_observatory.character
-    layer id:video kind:video z:200 blend:screen clip:stage #@id layer.scn_truth_01_observatory.video
-    layer id:ui kind:text z:900 blend:normal input:message #@id layer.scn_truth_01_observatory.ui
     background asset:asset:/background/rooftop-antenna layer:bg preset:soft_fade duration:400 interrupt:replace_from_current #@id bg.scn_truth_01_observatory
     bgm asset:asset:/bgm/carrier-noise loop:true fade:600 #@id bgm.truth
     show id:lin_yao asset:asset:/character/sprites/lin-yao/determined-center pose:determined layer:character at:left preset:soft_fade interrupt:replace_from_current #@id sprite.scn_truth_01_observatory.lin_yao
@@ -266,11 +233,6 @@ state scn_truth_01_observatory #@id state.scn_truth_01_observatory
 
 state scn_truth_02_public_array #@id state.scn_truth_02_public_array
   scene scn_truth_02_public_array #@id scene.scn_truth_02_public_array
-    stage viewport:1920x1080 safe_area:16:9 #@id stage.scn_truth_02_public_array
-    layer id:bg kind:background z:0 blend:normal #@id layer.scn_truth_02_public_array.bg
-    layer id:character kind:sprite z:100 blend:normal clip:stage #@id layer.scn_truth_02_public_array.character
-    layer id:video kind:video z:200 blend:screen clip:stage #@id layer.scn_truth_02_public_array.video
-    layer id:ui kind:text z:900 blend:normal input:message #@id layer.scn_truth_02_public_array.ui
     background asset:asset:/background/archive-room layer:bg preset:soft_fade duration:400 interrupt:replace_from_current #@id bg.scn_truth_02_public_array
     show id:lin_yao asset:asset:/character/sprites/lin-yao/determined-center pose:determined layer:character at:left preset:soft_fade interrupt:replace_from_current #@id sprite.scn_truth_02_public_array.lin_yao
     show id:zhou_heng asset:asset:/character/sprites/zhou-heng/determined-center pose:determined layer:character at:right preset:soft_fade interrupt:replace_from_current #@id sprite.scn_truth_02_public_array.zhou_heng
@@ -302,11 +264,6 @@ state scn_truth_02_public_array #@id state.scn_truth_02_public_array
 
 state scn_truth_03_after_rain #@id state.scn_truth_03_after_rain
   scene scn_truth_03_after_rain #@id scene.scn_truth_03_after_rain
-    stage viewport:1920x1080 safe_area:16:9 #@id stage.scn_truth_03_after_rain
-    layer id:bg kind:background z:0 blend:normal #@id layer.scn_truth_03_after_rain.bg
-    layer id:character kind:sprite z:100 blend:normal clip:stage #@id layer.scn_truth_03_after_rain.character
-    layer id:video kind:video z:200 blend:screen clip:stage #@id layer.scn_truth_03_after_rain.video
-    layer id:ui kind:text z:900 blend:normal input:message #@id layer.scn_truth_03_after_rain.ui
     background asset:asset:/background/dawn-city layer:bg preset:soft_fade duration:400 interrupt:replace_from_current #@id bg.scn_truth_03_after_rain
     show id:lin_yao asset:asset:/character/sprites/lin-yao/determined-center pose:determined layer:character at:left preset:soft_fade interrupt:replace_from_current #@id sprite.scn_truth_03_after_rain.lin_yao
     show id:zhou_heng asset:asset:/character/sprites/zhou-heng/determined-center pose:determined layer:character at:right preset:soft_fade interrupt:replace_from_current #@id sprite.scn_truth_03_after_rain.zhou_heng
@@ -338,11 +295,6 @@ state scn_truth_03_after_rain #@id state.scn_truth_03_after_rain
 
 state scn_silence_01_blackout_corridor #@id state.scn_silence_01_blackout_corridor
   scene scn_silence_01_blackout_corridor #@id scene.scn_silence_01_blackout_corridor
-    stage viewport:1920x1080 safe_area:16:9 #@id stage.scn_silence_01_blackout_corridor
-    layer id:bg kind:background z:0 blend:normal #@id layer.scn_silence_01_blackout_corridor.bg
-    layer id:character kind:sprite z:100 blend:normal clip:stage #@id layer.scn_silence_01_blackout_corridor.character
-    layer id:video kind:video z:200 blend:screen clip:stage #@id layer.scn_silence_01_blackout_corridor.video
-    layer id:ui kind:text z:900 blend:normal input:message #@id layer.scn_silence_01_blackout_corridor.ui
     background asset:asset:/background/glass-corridor layer:bg preset:soft_fade duration:400 interrupt:replace_from_current #@id bg.scn_silence_01_blackout_corridor
     bgm asset:asset:/bgm/thin-line loop:true fade:600 #@id bgm.silence
     show id:lin_yao asset:asset:/character/sprites/lin-yao/worried-center pose:worried layer:character at:left preset:soft_fade interrupt:replace_from_current #@id sprite.scn_silence_01_blackout_corridor.lin_yao
@@ -375,11 +327,6 @@ state scn_silence_01_blackout_corridor #@id state.scn_silence_01_blackout_corrid
 
 state scn_silence_02_null_room #@id state.scn_silence_02_null_room
   scene scn_silence_02_null_room #@id scene.scn_silence_02_null_room
-    stage viewport:1920x1080 safe_area:16:9 #@id stage.scn_silence_02_null_room
-    layer id:bg kind:background z:0 blend:normal #@id layer.scn_silence_02_null_room.bg
-    layer id:character kind:sprite z:100 blend:normal clip:stage #@id layer.scn_silence_02_null_room.character
-    layer id:video kind:video z:200 blend:screen clip:stage #@id layer.scn_silence_02_null_room.video
-    layer id:ui kind:text z:900 blend:normal input:message #@id layer.scn_silence_02_null_room.ui
     background asset:asset:/background/underground-relay layer:bg preset:soft_fade duration:400 interrupt:replace_from_current #@id bg.scn_silence_02_null_room
     show id:lin_yao asset:asset:/character/sprites/lin-yao/worried-center pose:worried layer:character at:left preset:soft_fade interrupt:replace_from_current #@id sprite.scn_silence_02_null_room.lin_yao
     show id:zhou_heng asset:asset:/character/sprites/zhou-heng/worried-center pose:worried layer:character at:right preset:soft_fade interrupt:replace_from_current #@id sprite.scn_silence_02_null_room.zhou_heng
@@ -411,11 +358,6 @@ state scn_silence_02_null_room #@id state.scn_silence_02_null_room
 
 state scn_silence_03_morning_platform #@id state.scn_silence_03_morning_platform
   scene scn_silence_03_morning_platform #@id scene.scn_silence_03_morning_platform
-    stage viewport:1920x1080 safe_area:16:9 #@id stage.scn_silence_03_morning_platform
-    layer id:bg kind:background z:0 blend:normal #@id layer.scn_silence_03_morning_platform.bg
-    layer id:character kind:sprite z:100 blend:normal clip:stage #@id layer.scn_silence_03_morning_platform.character
-    layer id:video kind:video z:200 blend:screen clip:stage #@id layer.scn_silence_03_morning_platform.video
-    layer id:ui kind:text z:900 blend:normal input:message #@id layer.scn_silence_03_morning_platform.ui
     background asset:asset:/background/metro-station layer:bg preset:soft_fade duration:400 interrupt:replace_from_current #@id bg.scn_silence_03_morning_platform
     show id:lin_yao asset:asset:/character/sprites/lin-yao/worried-center pose:worried layer:character at:left preset:soft_fade interrupt:replace_from_current #@id sprite.scn_silence_03_morning_platform.lin_yao
     show id:zhou_heng asset:asset:/character/sprites/zhou-heng/worried-center pose:worried layer:character at:right preset:soft_fade interrupt:replace_from_current #@id sprite.scn_silence_03_morning_platform.zhou_heng
@@ -447,11 +389,6 @@ state scn_silence_03_morning_platform #@id state.scn_silence_03_morning_platform
 
 state scn_signal_01_service_tunnel #@id state.scn_signal_01_service_tunnel
   scene scn_signal_01_service_tunnel #@id scene.scn_signal_01_service_tunnel
-    stage viewport:1920x1080 safe_area:16:9 #@id stage.scn_signal_01_service_tunnel
-    layer id:bg kind:background z:0 blend:normal #@id layer.scn_signal_01_service_tunnel.bg
-    layer id:character kind:sprite z:100 blend:normal clip:stage #@id layer.scn_signal_01_service_tunnel.character
-    layer id:video kind:video z:200 blend:screen clip:stage #@id layer.scn_signal_01_service_tunnel.video
-    layer id:ui kind:text z:900 blend:normal input:message #@id layer.scn_signal_01_service_tunnel.ui
     background asset:asset:/background/rain-street layer:bg preset:soft_fade duration:400 interrupt:replace_from_current #@id bg.scn_signal_01_service_tunnel
     bgm asset:asset:/bgm/after-signal loop:true fade:600 #@id bgm.signal
     show id:lin_yao asset:asset:/character/sprites/lin-yao/relieved-center pose:relieved layer:character at:left preset:soft_fade interrupt:replace_from_current #@id sprite.scn_signal_01_service_tunnel.lin_yao
@@ -484,11 +421,6 @@ state scn_signal_01_service_tunnel #@id state.scn_signal_01_service_tunnel
 
 state scn_signal_02_controlled_link #@id state.scn_signal_02_controlled_link
   scene scn_signal_02_controlled_link #@id scene.scn_signal_02_controlled_link
-    stage viewport:1920x1080 safe_area:16:9 #@id stage.scn_signal_02_controlled_link
-    layer id:bg kind:background z:0 blend:normal #@id layer.scn_signal_02_controlled_link.bg
-    layer id:character kind:sprite z:100 blend:normal clip:stage #@id layer.scn_signal_02_controlled_link.character
-    layer id:video kind:video z:200 blend:screen clip:stage #@id layer.scn_signal_02_controlled_link.video
-    layer id:ui kind:text z:900 blend:normal input:message #@id layer.scn_signal_02_controlled_link.ui
     background asset:asset:/background/underground-relay layer:bg preset:soft_fade duration:400 interrupt:replace_from_current #@id bg.scn_signal_02_controlled_link
     show id:lin_yao asset:asset:/character/sprites/lin-yao/relieved-center pose:relieved layer:character at:left preset:soft_fade interrupt:replace_from_current #@id sprite.scn_signal_02_controlled_link.lin_yao
     show id:zhou_heng asset:asset:/character/sprites/zhou-heng/relieved-center pose:relieved layer:character at:right preset:soft_fade interrupt:replace_from_current #@id sprite.scn_signal_02_controlled_link.zhou_heng
@@ -520,11 +452,6 @@ state scn_signal_02_controlled_link #@id state.scn_signal_02_controlled_link
 
 state scn_signal_03_dawn_rooftop #@id state.scn_signal_03_dawn_rooftop
   scene scn_signal_03_dawn_rooftop #@id scene.scn_signal_03_dawn_rooftop
-    stage viewport:1920x1080 safe_area:16:9 #@id stage.scn_signal_03_dawn_rooftop
-    layer id:bg kind:background z:0 blend:normal #@id layer.scn_signal_03_dawn_rooftop.bg
-    layer id:character kind:sprite z:100 blend:normal clip:stage #@id layer.scn_signal_03_dawn_rooftop.character
-    layer id:video kind:video z:200 blend:screen clip:stage #@id layer.scn_signal_03_dawn_rooftop.video
-    layer id:ui kind:text z:900 blend:normal input:message #@id layer.scn_signal_03_dawn_rooftop.ui
     background asset:asset:/background/rooftop-antenna layer:bg preset:soft_fade duration:400 interrupt:replace_from_current #@id bg.scn_signal_03_dawn_rooftop
     show id:lin_yao asset:asset:/character/sprites/lin-yao/relieved-center pose:relieved layer:character at:left preset:soft_fade interrupt:replace_from_current #@id sprite.scn_signal_03_dawn_rooftop.lin_yao
     show id:zhou_heng asset:asset:/character/sprites/zhou-heng/relieved-center pose:relieved layer:character at:right preset:soft_fade interrupt:replace_from_current #@id sprite.scn_signal_03_dawn_rooftop.zhou_heng
