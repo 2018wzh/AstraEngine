@@ -1,4 +1,4 @@
-//! CMVS format readers; Family session integration is in progress.
+//! CMVS formats, recovered VM, and independent Family sessions.
 mod archive;
 mod audio;
 mod profile;
@@ -34,3 +34,7 @@ pub use command::*;
 pub use vm::*;
 
 pub const CMVS_DECRYPT_DESCRIPTOR_SCHEMA: &str = "astra.emu.cmvs.cpz5_descriptor.v1";
+
+mod family;
+mod session;
+pub use family::{cmvs_descriptor, CmvsProvider};

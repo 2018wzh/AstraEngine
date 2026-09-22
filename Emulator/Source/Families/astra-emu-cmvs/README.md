@@ -1,6 +1,6 @@
 # CMVS
 
-当前回归为 151 项普通测试通过，全目标 Clippy 和格式检查通过；1 项显式硬件 GPU 测试此前通过，本次配置和字节缓冲修改未重跑。以下格式与 VM 的局部结果不代表 Family session 或真实游戏流程已完成。
+当前 Family 插件导出 v7 descriptor 和 typed 配置，复用现有 CPZ5、PS2A VM 与硬件 GPU Scene。153 项普通回归及 1 项显式硬件 GPU 回归通过；格式与 VM 的局部结果不代表真实游戏流程已完成。
 
 脚本切换只接受已解析的名称引用。进程字符串槽缺失、为空、包含多个片段、循环引用或超过八层时，返回 `ASTRA_EMU_CMVS_VM_SCRIPT_NAME` 并使本次执行失败；不再生成哨兵偏移交给适配层猜测目标脚本。正常单片段和有界嵌套引用继续使用原有调用路径。原生菜单向字符串槽写入脚本名的逻辑仍待接入，不能用特定作品的脚本名硬编码代替。
 
@@ -14,7 +14,7 @@ VM 和 CMVS 3.90 指令契约已迁入，状态、单步调度和 opcode 表拆�
 
 `CmvsArchive::load_script` 直接解析核心归档返回的共享字节，不再经流复制整份输入。输入上限仍为 64 MiB，读取与解码成功后才通过 `install_script_frame` 更新入口 PC、脚本身份、名称索引、字符串长度表与初始数据段。frame 限 0–3，非法 frame 或路径在修改 VM 前拒绝。`install_script_data` 在重载时替换稀疏字表，全零或空数据段会删除旧字，其他 frame 不受影响。加载日志只记录 frame 和解码字节数，不记录资源名或正文。帧安装及关联脚本路径的 8 项增量回归通过。
 
-`load_called_script` 经 `resolve_script_uri` 解析调用操作数后走同一加载入口。裸文件名沿用 ASCII 大小写不敏感、按归档挂载顺序首次命中的规则，不受 URI 字母排序影响；显式目录支持游戏使用的两种分隔符，越界路径拒绝。未找到脚本时返回稳定诊断，不附带原始名称。VM 调度与呈现的完整 session 尚未接通。
+`load_called_script` 经 `resolve_script_uri` 解析调用操作数后走同一加载入口。裸文件名沿用 ASCII 大小写不敏感、按归档挂载顺序首次命中的规则，不受 URI 字母排序影响；显式目录支持游戏使用的两种分隔符，越界路径拒绝。未找到脚本时返回稳定诊断，不附带原始名称。Family session 已调用该入口，按 60 Hz 调度真实 VM，并处理脚本切换和纹理提交。
 
 `CmvsScene` 使用公共 `WgpuOffscreenRenderer` 和 SDK `TextureCache` 合成父/子纹理层，核心自行解码 PB 图片。保留已实现的矩形、位置、层级排序和视口范围规则，GPU 完成合成后回读最终帧；不创建 Engine/VN session。硬件 GPU 回归覆盖层级顺序及同槽纹理尺寸更换。当前 141 项测试通过，其中 GPU 测试需要显式运行 `--include-ignored`。
 
@@ -22,7 +22,9 @@ VM 和 CMVS 3.90 指令契约已迁入，状态、单步调度和 opcode 表拆�
 
 CmvsArchive::load_audio 有界读取普通音频，或先校验 MGV 内嵌 Ogg，再调用 SDK 的浮点解码器。最大输入为 64 MiB，输出由调用方帧预算限制；不创建播放 worker，不推断 MGV 视频时间线，CMVS 实际播放仍待接通。
 
-这还不是可安装的 Family 插件。Scene 与完整 VM session、媒体、存读档和新 Family API 的连接正在迁移，大型 effect enum 仍待按职责细分。不导入旧 Runtime provider 或 Host VFS 契约。来源工作树中 provider 的未提交修改保留，待检查日志与错误处理后整合。当前测试不能代替真实 CPZ5 游戏挂载和代表流程。
+当前可构建 Family 动态库，但还不能完成代表游戏流程。`profile_file` 默认读取 `cmvs.profile.json`，`entry_script` 默认 `start.ps3`。探测检查根目录及原生 `data/pack` 目录的 CPZ5 标头；配置错误、重复会话、未接通动作均返回 Manager 可显示的诊断。关闭与失败释放进程级会话租约，允许重新启动。暂停和恢复清空时钟积累，单次推进受指令及 tick 预算限制。指针移动使用 Host 逆映射后的舞台坐标。
+
+文字、媒体、存档和按键动作尚未接通；命中这些动作后会话失败，后续推进和帧访问拒绝继续，不吞掉动作或伪造成功。只有纹理资源及已有 GPU 合成路径可用，未声明 NativeSave 或 PCM 能力。未移植来源中的特定作品修补、CPU 改帧、猜测字符串和忽略存档请求。原生菜单写入字符串槽、输入 latch 与存档恢复等语义仍需独立补齐。
 
 ```sh
 cargo test --manifest-path Emulator/Cargo.toml -p astra-emu-cmvs

@@ -36,6 +36,10 @@ impl CmvsScene {
         })
     }
 
+    pub(crate) fn clear(&mut self, width: u32, height: u32) -> Result<TextureFrame, CoreError> {
+        self.draw(width, height, Vec::new())
+    }
+
     pub fn bind(
         &mut self,
         slot: CmvsTextureSlot,
