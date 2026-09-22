@@ -136,6 +136,26 @@ fn explicit_max_size_bounds_an_absolutely_positioned_window() {
         window.bounds_points.max.y - window.bounds_points.min.y,
         242.0
     );
+    let child = output
+        .semantics
+        .nodes
+        .iter()
+        .find(|node| node.id == "root/window/oversized")
+        .unwrap();
+    for (key, value) in [
+        ("x", "232"),
+        ("y", "166"),
+        ("width", "336"),
+        ("height", "242"),
+    ] {
+        assert_eq!(
+            child
+                .properties
+                .get(&format!("text.clip.{key}"))
+                .map(String::as_str),
+            Some(value)
+        );
+    }
 }
 
 #[test]

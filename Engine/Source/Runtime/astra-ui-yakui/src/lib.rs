@@ -4,6 +4,7 @@ mod backend;
 mod blueprint;
 mod input;
 mod paint;
+mod semantic_clip;
 mod text_input;
 mod text_measure;
 mod virtual_collection;

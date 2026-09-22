@@ -1520,6 +1520,8 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
                 )
             })?;
             let rect = layout.rect;
+            let mut properties = pending.properties.clone();
+            crate::semantic_clip::append_layout_clip(yakui.layout_dom(), layout, &mut properties)?;
             nodes.push(UiSemanticNode {
                 id: pending.id.clone(),
                 parent_id: pending.parent_id.clone(),
@@ -1546,7 +1548,7 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
                 selected: pending.selected,
                 checked: pending.checked,
                 actions: pending.actions.clone(),
-                properties: pending.properties.clone(),
+                properties,
             });
         }
         let root_id = self

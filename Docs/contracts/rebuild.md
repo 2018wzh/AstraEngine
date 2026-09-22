@@ -159,3 +159,5 @@ F5/F9 由共享 VN 输入入口按 `quick_slot_id` 发起 typed 存读档请求�
 用户读档在完整恢复剧情和媒体后，经 typed `ReturnSystem` 返回保存时的剧情等待，不停留在保存页或其他临时系统页。桌面、native 与 Headless 产品入口复用该行为。显式快照恢复和 Editor Preview checkpoint 仍完整恢复系统页，不能把用户读档收尾混入底层快照格式。
 
 设置页的阅读模式和声音启用状态来自 `ConfigViewModel` 对 VN 权威系统状态的只读投影。Classic 按钮使用现有 `selected` 绑定，同时呈现持续选中外观和 accessibility selected 状态；键盘焦点移动不改变选择，点击只发 typed 请求，不在 UI 中保留第二份设置值。
+
+Yakui 的 `clip_rect_points` 必须以成对 `PushClip`/`PopClip` 进入共享 Scene2D，保持逻辑坐标并由 Canvas 统一变换。单独绘制的 AstraText 使用真实 Yakui `clipped_by` 祖先交集；布局层把整数范围投影为现有只读 semantic text properties 的 `text.clip.x/y/width/height`，Player 不从父控件尺寸猜测裁剪。空交集不绘文字，缺失部分字段、非有限或越界坐标拒绝；相邻控件不能继承前一控件的裁剪。

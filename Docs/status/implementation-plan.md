@@ -13,7 +13,7 @@
 Editor 的项目工作区、真实 Player 预览管道、ACP/MCP 审批事务、路由连接图及关键帧编辑已集成；Graph 路由连线、单次撤销的关键帧拖动、可停靠工作区和图片资产导入也已集成；独立 workspace 的 14 项库测试、1 项布局测试、all-target Clippy 和格式检查通过。真实产品用例由负责工作线显式运行，本次集成未重复执行默认 ignored 的外部 Agent 和 GPU 预览测试；拖拽曲线及完整创作体验仍未关闭。《eden*》严格 checkpoint、Family 只读导入及内部存档到原版格式导出已集成，13 项格式/恢复和 13 项 CLI 测试通过；GPU 合成 fixture 覆盖导入后继续、保存和导出，商业原版读回仍未完成。
 ## NativeVN 样例配置接续
 
-远端六批样例、测试和状态变更已集成；Windows 工具测试发现默认系统编码读取中文 `.astra` 失败，现显式使用 UTF-8，25 项工具回归与三项真实 pipe 子进程回归通过。Editor 已接手新版样例的作者纵向流程。远端 Vulkan 流程不替代 Windows Player 验收；保存列表裁剪、键盘缩略图和 Headless 错误退出仍开放。
+远端六批样例、测试和状态变更已集成；Windows 工具测试发现默认系统编码读取中文 `.astra` 失败，现显式使用 UTF-8，25 项工具回归与三项真实 pipe 子进程回归通过。Editor 已接手新版样例的作者纵向流程。远端 Vulkan 流程不替代 Windows Player 验收；保存列表的 Mesh 与单独绘制 AstraText 已接同一真实布局裁剪，空交集和相邻控件隔离有回归；设备复测仍待完成。键盘缩略图和 Headless 错误退出仍开放。
 
 保留《玻璃雨中的信号》的故事与授权素材，将旧 platform profile v2 迁到 v3，拆分 mixer/output、补齐限额并声明三桌面及 Android；修复 advanced-vn 系统页 policy 与 binding。项目工具不再覆盖作者 `.astra`。真实 Cook 的 284 个资产通过，工具测试 23 项通过、1 项跳过；产品交互、视听和存读档尚未验收。共享 target schema 仍强制 runtime_provider/ui_provider 元数据字段，样例保留到共享 schema 迁移，不引入动态 provider。
 

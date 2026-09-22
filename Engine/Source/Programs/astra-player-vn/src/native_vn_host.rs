@@ -7,6 +7,7 @@ mod presentation;
 mod product_save;
 mod runtime;
 mod save_catalog;
+mod ui_clip;
 mod viewport;
 use runtime::NativeVnRuntimeHost;
 
@@ -3575,7 +3576,13 @@ impl NativeVnHostCommandSource {
                         .into(),
                 ));
             }
+            if let Some(rect) = pending.clip {
+                text_draw.push(SceneCommand::PushClip { rect });
+            }
             text_draw.extend(draw.commands);
+            if pending.clip.is_some() {
+                text_draw.push(SceneCommand::PopClip);
+            }
         }
         let mut composed_draw = text_frame.lifecycle;
         composed_draw.extend(draw);
@@ -5969,6 +5976,7 @@ fn append_text_value(
     rgba: [u8; 4],
     horizontal_align: UiTextAlignment,
     vertical_align: UiTextAlignment,
+    clip: Option<RectI>,
 ) -> Result<(), NativeVnHostError> {
     if measured.text != text
         || measured.font_size.to_bits() != font_size.to_bits()
@@ -6006,6 +6014,7 @@ fn append_text_value(
         rgba,
         aligned_x,
         aligned_y,
+        clip,
     });
     Ok(())
 }
@@ -6016,6 +6025,7 @@ struct PendingUiTextLayout {
     rgba: [u8; 4],
     aligned_x: i32,
     aligned_y: i32,
+    clip: Option<RectI>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -6037,6 +6047,10 @@ fn append_ui_semantic_text(
                 | UiSemanticRole::Select
                 | UiSemanticRole::TextInput
         ) {
+            continue;
+        }
+        let clip = ui_clip::semantic_text_clip(node)?;
+        if clip.is_some_and(|clip| clip.width == 0 || clip.height == 0) {
             continue;
         }
         let Some(name) = node.name.as_deref() else {
@@ -6106,6 +6120,7 @@ fn append_ui_semantic_text(
             rgba,
             horizontal_align,
             vertical_align,
+            clip,
         )?;
     }
     Ok(())

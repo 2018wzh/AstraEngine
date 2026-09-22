@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use astra_media_core::{
-    BlendMode, MeshMaterial2D, MeshVertex2D, SceneCommand, TextureFilter2D, TextureFrame,
+    BlendMode, MeshMaterial2D, MeshVertex2D, RectI, SceneCommand, TextureFilter2D, TextureFrame,
 };
 use astra_ui_core::{
     UiMaterialKind, UiMeshPrimitive, UiPoint, UiRect, UiRenderFrame, UiTextureDelta,
@@ -347,6 +347,11 @@ pub fn ui_frame_to_scene_commands(
         });
     }
     for primitive in &frame.primitives {
+        if let Some(clip) = primitive.clip_rect_points {
+            commands.push(SceneCommand::PushClip {
+                rect: scene_clip(clip)?,
+            });
+        }
         let texture_id = primitive
             .texture
             .zip(primitive.texture_generation)
@@ -374,8 +379,48 @@ pub fn ui_frame_to_scene_commands(
             opacity: 1.0,
             blend: BlendMode::Alpha,
         });
+        if primitive.clip_rect_points.is_some() {
+            commands.push(SceneCommand::PopClip);
+        }
     }
     Ok(commands)
+}
+
+pub(crate) fn scene_clip(clip: UiRect) -> Result<RectI, UiValidationError> {
+    if !clip.is_finite_and_ordered() {
+        return Err(UiValidationError::invalid(
+            "ASTRA_UI_MESH_CLIP",
+            "UI clip is not finite and ordered",
+        ));
+    }
+    let left = f64::from(clip.min.x).floor();
+    let top = f64::from(clip.min.y).floor();
+    let right = f64::from(clip.max.x).ceil();
+    let bottom = f64::from(clip.max.y).ceil();
+    if left < f64::from(i32::MIN)
+        || top < f64::from(i32::MIN)
+        || right > f64::from(i32::MAX)
+        || bottom > f64::from(i32::MAX)
+    {
+        return Err(UiValidationError::invalid(
+            "ASTRA_UI_MESH_CLIP_RANGE",
+            "UI clip exceeds Scene2D coordinates",
+        ));
+    }
+    Ok(RectI::new(
+        left as i32,
+        top as i32,
+        if clip.min.x == clip.max.x {
+            0
+        } else {
+            (right - left) as u32
+        },
+        if clip.min.y == clip.max.y {
+            0
+        } else {
+            (bottom - top) as u32
+        },
+    ))
 }
 
 /// Scene2D `TextureFrame` pixels are straight-alpha RGBA. The UI transport is
@@ -424,152 +469,4 @@ fn texture_resource_id_for_session(session_id: &str, id: UiTextureId, generation
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{scene_texture_rgba8, texture_resource_id_for_session, YakuiPaintConverter};
-    use astra_ui_core::{UiTextureFormat, UiTextureId, UiTextureUpload};
-    use yakui_core::geometry::UVec2;
-    use yakui_core::paint::{Texture, TextureFormat};
-
-    #[test]
-    fn glyph_mask_upload_becomes_straight_alpha_scene_texture() {
-        let upload = UiTextureUpload {
-            id: UiTextureId(1),
-            generation: 1,
-            width: 2,
-            height: 1,
-            format: UiTextureFormat::R8Unorm,
-            pixels: vec![64, 255].into(),
-        };
-
-        assert_eq!(
-            scene_texture_rgba8(&upload),
-            vec![255, 255, 255, 64, 255, 255, 255, 255]
-        );
-    }
-
-    #[test]
-    fn premultiplied_ui_upload_is_unpremultiplied_at_scene_boundary() {
-        let upload = UiTextureUpload {
-            id: UiTextureId(2),
-            generation: 1,
-            width: 2,
-            height: 1,
-            format: UiTextureFormat::Rgba8SrgbPremultiplied,
-            pixels: vec![100, 50, 25, 128, 0, 0, 0, 0].into(),
-        };
-
-        assert_eq!(
-            scene_texture_rgba8(&upload),
-            vec![199, 100, 50, 128, 0, 0, 0, 0]
-        );
-    }
-
-    #[test]
-    fn texture_resource_identity_is_stable_across_ui_render_generations() {
-        let first = texture_resource_id_for_session("vn.ui.demo:0", UiTextureId(7), 3);
-        let repeated = texture_resource_id_for_session("vn.ui.demo:0", UiTextureId(7), 3);
-        let updated = texture_resource_id_for_session("vn.ui.demo:0", UiTextureId(7), 4);
-
-        assert_eq!(first, repeated);
-        assert_ne!(first, updated);
-    }
-
-    #[test]
-    fn recreated_managed_texture_uses_explicit_lifecycle_identity() {
-        let mut converter = YakuiPaintConverter::new();
-        let texture = Texture::new(TextureFormat::R8, UVec2::new(2, 1), vec![42, 84]);
-        let mut initial = Vec::new();
-        converter
-            .sync_managed_texture("ManagedTextureId(1)".into(), &texture, false, &mut initial)
-            .unwrap();
-        let first = converter
-            .managed_textures
-            .get("ManagedTextureId(1)")
-            .copied()
-            .unwrap();
-        assert_eq!(initial.len(), 1);
-
-        let release = converter
-            .remove_managed_texture("ManagedTextureId(1)")
-            .unwrap();
-        let mut replacement = Vec::new();
-        converter
-            .sync_managed_texture(
-                "ManagedTextureId(2)".into(),
-                &texture,
-                false,
-                &mut replacement,
-            )
-            .unwrap();
-        let second = converter
-            .managed_textures
-            .get("ManagedTextureId(2)")
-            .copied()
-            .unwrap();
-
-        assert_ne!(first.id, second.id);
-        assert_eq!(release.id, first.id);
-        assert_eq!(replacement.len(), 1);
-    }
-
-    #[test]
-    fn changed_managed_texture_uploads_new_content_and_releases_old_resource() {
-        let mut converter = YakuiPaintConverter::new();
-        let first_texture = Texture::new(TextureFormat::R8, UVec2::new(1, 1), vec![42]);
-        let second_texture = Texture::new(TextureFormat::R8, UVec2::new(1, 1), vec![84]);
-        let mut initial = Vec::new();
-        converter
-            .sync_managed_texture(
-                "ManagedTextureId(1)".into(),
-                &first_texture,
-                false,
-                &mut initial,
-            )
-            .unwrap();
-        let old = initial[0].id;
-        let release = converter
-            .remove_managed_texture("ManagedTextureId(1)")
-            .unwrap();
-        let mut replacement = Vec::new();
-        converter
-            .sync_managed_texture(
-                "ManagedTextureId(1)".into(),
-                &second_texture,
-                false,
-                &mut replacement,
-            )
-            .unwrap();
-
-        assert_eq!(replacement.len(), 1);
-        assert_ne!(replacement[0].id, old);
-        assert_eq!(release.id, old);
-    }
-
-    #[test]
-    fn full_resync_releases_live_resources_before_reusing_their_identity() {
-        let mut converter = YakuiPaintConverter::new();
-        let texture = Texture::new(TextureFormat::R8, UVec2::new(1, 1), vec![42]);
-        let mut initial = Vec::new();
-        converter
-            .sync_managed_texture("ManagedTextureId(1)".into(), &texture, false, &mut initial)
-            .unwrap();
-        let binding = converter
-            .managed_textures
-            .get("ManagedTextureId(1)")
-            .copied()
-            .unwrap();
-
-        let releases = converter.release_live_textures_for_resync().unwrap();
-        assert_eq!(releases.len(), 1);
-        assert_eq!(releases[0].id, binding.id);
-        assert_eq!(releases[0].generation, binding.generation);
-
-        let mut replay = Vec::new();
-        converter
-            .sync_managed_texture("ManagedTextureId(1)".into(), &texture, true, &mut replay)
-            .unwrap();
-        assert_eq!(replay.len(), 1);
-        assert_eq!(replay[0].id, binding.id);
-        assert_eq!(replay[0].generation, binding.generation + 1);
-    }
-}
+mod tests;
