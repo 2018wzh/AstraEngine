@@ -10,6 +10,7 @@ use crate::bridge::EditorBridge;
 pub struct EditorMcp {
     bridge: EditorBridge,
     tool_router: ToolRouter<Self>,
+    generation: Option<u64>,
 }
 
 #[derive(serde::Deserialize, schemars::JsonSchema)]
@@ -26,18 +27,37 @@ impl EditorMcp {
         Self {
             bridge,
             tool_router: Self::tool_router(),
+            generation: None,
         }
+    }
+
+    pub(crate) fn for_turn(bridge: EditorBridge) -> Self {
+        let generation = Some(bridge.generation());
+        Self {
+            bridge,
+            generation,
+            tool_router: Self::tool_router(),
+        }
+    }
+
+    fn active(&self) -> bool {
+        self.generation
+            .is_none_or(|generation| self.bridge.generation() == generation)
     }
 
     #[tool(
         description = "Read the active unsaved Astra source and its version and agent generation."
     )]
     async fn read_document(&self) -> String {
+        if !self.active() {
+            return serde_json::json!({"error":"Agent turn cancelled"}).to_string();
+        }
         match self.bridge.read().await {
-            Ok(document) => {
+            Ok(document) if self.active() => {
                 serde_json::json!({"document":document,"generation":self.bridge.generation()})
                     .to_string()
             }
+            Ok(_) => serde_json::json!({"error":"Agent turn cancelled"}).to_string(),
             Err(error) => serde_json::json!({"error":error.to_string()}).to_string(),
         }
     }
@@ -48,10 +68,21 @@ impl EditorMcp {
     async fn apply_batch(
         &self,
         Parameters(args): Parameters<ApplyArgs>,
+        context: rmcp::service::RequestContext<rmcp::RoleServer>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
+        if !self.active() {
+            return Err(rmcp::ErrorData::invalid_request(
+                "Agent turn cancelled",
+                None,
+            ));
+        }
         let batch = serde_json::from_value(args.batch)
             .map_err(|e| rmcp::ErrorData::invalid_params(e.to_string(), None))?;
-        match self.bridge.apply(args.generation, batch).await {
+        let applied = tokio::select! {
+            result = self.bridge.apply(args.generation, batch) => result,
+            _ = context.ct.cancelled() => Err(anyhow::anyhow!("MCP request cancelled")),
+        };
+        match applied {
             Ok(()) => Ok(CallToolResult::success(vec![ContentBlock::text("Applied")])),
             Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(
                 error.to_string(),

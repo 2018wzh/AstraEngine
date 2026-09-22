@@ -62,7 +62,7 @@ CMVS 私有配置 `astra.emu.cmvs.profile.v2` 用有序 `archives: [{ role, path
 
 GPUI Editor 使用独立真实 GPU 预览窗口。seek 仅当前片段，重建不重复外部 IO。统一版本化编辑 API 服务 UI、ACP 和 MCP；自主/逐批确认模式都支持取消、冲突检查、批量撤销。ACP 的模型配置由外部 Agent 持有。
 
-`astra-vn-editor::AuthoringWorkspace` 是编辑事务 owner。`EditBatch` 使用 project-relative `.astra` 路径、预期文档版本和 UTF-8 字节范围；多文档全部校验后原子应用。undo/redo 不复用旧版本。CST attribute editing 只替换原 value span，保留注释和 source ID。ACP 文件写入绑定最近读取版本；MCP batch 另绑定客户端读取的 session generation。逐批确认延迟提交，人工修改造成的版本冲突、取消和关闭后的迟到结果必须拒绝。具体入口见 [Editor](../../Editor/README.md)。
+`astra-vn-editor::AuthoringWorkspace` 是编辑事务 owner。`EditBatch` 使用 project-relative `.astra` 路径、预期文档版本和 UTF-8 字节范围；多文档全部校验后原子应用。undo/redo 不复用旧版本。CST attribute editing 只替换原 value span，保留注释和 source ID。ACP 通过回合内的 loopback HTTP MCP 服务访问同一文档，随机令牌仅留在该回合；MCP batch 同时绑定客户端读取的 version 和 session generation。外部权限请求单独交给用户，不能替代编辑事务审批。逐批确认延迟提交，人工修改造成的版本冲突、取消和关闭后的迟到结果必须拒绝。具体入口见 [Editor](../../Editor/README.md)。
 
 首轮预览复用 cook/package/bundle 和独立 Player 进程，由产品主路径间接持有 VnSession。Editor 负责版本绑定、构建取消、错误反馈与进程回收；该入口不等于内嵌 session 或片段 seek 已完成。
 

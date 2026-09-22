@@ -15,6 +15,15 @@ use gpui_component::{
 };
 mod panels;
 mod render;
+use agent_client_protocol::schema::v1::{
+    RequestPermissionOutcome, RequestPermissionRequest, SelectedPermissionOutcome,
+};
+
+struct PermissionReview {
+    generation: u64,
+    request: Box<RequestPermissionRequest>,
+    reply: tokio::sync::oneshot::Sender<RequestPermissionOutcome>,
+}
 
 struct Editor {
     project: Project,
@@ -30,6 +39,7 @@ struct Editor {
     agent: AgentEdits,
     mode: EditMode,
     pending_reply: Option<tokio::sync::oneshot::Sender<anyhow::Result<()>>>,
+    permission: Option<PermissionReview>,
     agent_command: Option<String>,
     agent_prompt: Entity<InputState>,
     agent_output: String,
@@ -86,6 +96,7 @@ impl Editor {
                 if let Err(error) = this.project.replace(text) {
                     this.status = error.to_string();
                 } else {
+                    this.cancel_agent();
                     this.preview = None;
                     this.diagnose();
                 }
@@ -107,6 +118,7 @@ impl Editor {
             agent: AgentEdits::default(),
             mode: EditMode::ReviewEachBatch,
             pending_reply: None,
+            permission: None,
             agent_command,
             agent_prompt,
             agent_output: String::new(),
@@ -126,11 +138,35 @@ impl Editor {
                     this.follow_source_cursor(window, cx);
                     while let Ok(request) = this.requests.try_recv() {
                         match request {
+                            Request::Permission {
+                                generation,
+                                request,
+                                reply,
+                            } => {
+                                if generation != this.bridge.generation()
+                                    || this.permission.is_some()
+                                    || reply.is_closed()
+                                {
+                                    let _ = reply.send(RequestPermissionOutcome::Cancelled);
+                                } else {
+                                    this.permission = Some(PermissionReview {
+                                        generation,
+                                        request,
+                                        reply,
+                                    });
+                                    cx.notify();
+                                }
+                            }
                             Request::AgentMessage { generation, text } => {
                                 if generation == this.bridge.generation()
                                     && this.agent_output.len() < 16_384
                                 {
-                                    this.agent_output.push_str(&text);
+                                    for character in text.chars() {
+                                        if this.agent_output.len() + character.len_utf8() > 16_384 {
+                                            break;
+                                        }
+                                        this.agent_output.push(character);
+                                    }
                                     cx.notify();
                                 }
                             }
@@ -174,6 +210,14 @@ impl Editor {
                     }
                     if this.pending_reply.as_ref().is_some_and(|r| r.is_closed()) {
                         this.cancel_agent();
+                        cx.notify();
+                    }
+                    if this
+                        .permission
+                        .as_ref()
+                        .is_some_and(|permission| permission.reply.is_closed())
+                    {
+                        this.permission = None;
                         cx.notify();
                     }
                     if let Some(preview) = &mut this.preview {
@@ -223,6 +267,9 @@ impl Editor {
     }
 
     fn cancel_agent(&mut self) {
+        if let Some(permission) = self.permission.take() {
+            let _ = permission.reply.send(RequestPermissionOutcome::Cancelled);
+        }
         self.bridge.cancel();
         self.agent.cancel();
         if let Some(reply) = self.pending_reply.take() {

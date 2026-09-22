@@ -176,6 +176,7 @@ impl Editor {
         })();
         match result {
             Ok(()) => {
+                self.cancel_agent();
                 self.preview = None;
                 self.sync(window, cx);
                 if let Some(id) = self.panels.selected.clone() {

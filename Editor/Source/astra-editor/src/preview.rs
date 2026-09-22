@@ -21,6 +21,7 @@ pub struct PreviewConfig {
     pub profile: String,
     pub target: String,
     pub windows_runtime: Option<PathBuf>,
+    pub crash_reporter: Option<PathBuf>,
 }
 
 struct Step {
@@ -48,6 +49,16 @@ impl Preview {
     }
 
     pub fn start(config: &PreviewConfig, identity: PreviewIdentity) -> anyhow::Result<Self> {
+        if cfg!(windows) {
+            anyhow::ensure!(config.windows_runtime.as_ref().is_some_and(|path| path.is_dir()), "Windows preview requires windows_runtime pointing to the matching VC x64 CRT directory");
+            anyhow::ensure!(
+                config
+                    .crash_reporter
+                    .as_ref()
+                    .is_some_and(|path| path.is_file()),
+                "Windows preview requires a built crash_reporter executable"
+            );
+        }
         anyhow::ensure!(
             identity.generation > 0
                 && !identity.documents.is_empty()
@@ -91,6 +102,9 @@ impl Preview {
         ];
         if let Some(runtime) = &config.windows_runtime {
             bundle_args.extend(["--windows-runtime".into(), runtime.clone().into()]);
+        }
+        if let Some(reporter) = &config.crash_reporter {
+            bundle_args.extend(["--crash-reporter".into(), reporter.clone().into()]);
         }
         let steps = VecDeque::from([
             Step {

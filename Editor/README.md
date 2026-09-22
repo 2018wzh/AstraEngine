@@ -24,21 +24,25 @@ cargo run --manifest-path Editor/Cargo.toml -p astra-editor -- story.astra
 cargo run --manifest-path Editor/Cargo.toml -p astra-editor -- story.astra --agent 'your-acp-agent'
 ```
 
-Agent 命令和模型由用户配置，Editor 不持有模型 API 密钥，也不实现模型请求循环。ACP 使用官方 Rust SDK，外部进程通过客户端文件接口读取和修改当前打开的文件；没有 terminal 权限。每次写入必须先读取，写入绑定所读版本。
+Agent 命令和模型由用户配置，Editor 不持有模型 API 密钥，也不实现模型请求循环。ACP 使用官方 Rust SDK，并要求 Agent 声明 HTTP MCP 能力。每个回合启动一个只监听 loopback 的临时 MCP 服务，通过随机 Bearer 令牌授权，把同一个 EditorBridge 传给外部 Agent。Agent 使用 `read_document` 读取当前未保存源，再用 `apply_batch` 提交预期版本和 generation；没有第二套文件写入路径。
 
-默认逐批确认：修改保存在待审查 batch，点击 Apply batch 后才应用；Reject batch 返回拒绝。自主模式直接提交经过相同校验的 batch。切换模式、取消任务或关闭 Editor 会使旧代次失效。取消会通知 ACP Agent，并关闭未及时结束的连接。未授权的其他路径和权限请求被拒绝。
+默认逐批确认：修改保存在待审查 batch，点击 Apply batch 后才应用；Reject batch 返回拒绝。自主模式直接提交经过相同校验的 batch。外部 Agent 的权限请求单独显示工具详情与该 Agent 提供的选项；它不等同于源修改审批。人工编辑、切换模式、取消任务或关闭 Editor 会使旧代次失效，并拒绝迟到批准。取消通知 ACP Agent、关闭临时 MCP 服务，并回收未及时结束的连接。Editor 不提供 terminal 客户端能力；外部进程自身的 sandbox 由所选 Agent 配置。
 
 `--mcp` 同时启动官方 rmcp stdio server，工具为 `read_document` 和 `apply_batch`。工具访问正在显示的同一份文档；后者接收 JSON batch 和读取时返回的 generation。逐批确认时，工具等待 UI 决定。stdout 属于 MCP 协议，诊断写 stderr。
 
+已用官方 codex-acp 1.12.0 的真实回合验证读取、权限确认、MCP batch、逐批审批与撤销，测试确认 Agent 没有直接修改磁盘文件。该测试使用公开临时源，不替代实际窗口操作验收。复测需显式设置 `ASTRA_EDITOR_ACP_COMMAND`，运行 `cargo test --manifest-path Editor/Cargo.toml -p astra-editor --test acp_product -- --ignored`；模型配置和认证保留在外部 Agent 中。
+
 ## 产品预览
 
-`--preview-config` 接收本地 JSON 配置，包含 `project`、`cli`、`player`、`profile`、`target`，Windows 可提供 `windows_runtime`。路径指向当前工作树自行构建的工具和工程，配置不应提交私有路径。
+`--preview-config` 接收本地 JSON 配置，包含 `project`、`cli`、`player`、`profile`、`target`。Windows 还必须提供 `windows_runtime`（匹配的 Microsoft VC x64 CRT 目录）与 `crash_reporter`（构建的 AstraCrashReporter）。路径指向当前工作树自行构建的工具和工程，配置不应提交私有路径。
 
 Save & Preview 先保存并编译当前文档，再执行现有 `cook → package build → package bundle → Player`。Player 创建独立 GPU 窗口，通过现有产品主路径使用真实 VnSession；Editor 没有另外实现 renderer。编辑版本改变、再次启动预览或点击 Stop preview 会终止旧进程，等待回收并清理临时输出。构建或 Player 失败显示退出状态和日志尾部。
 
 预览使用 [typed Player 控制协议](../Docs/contracts/player-preview.md)。编译 project hash、全部文档版本/内容 hash 和启动 generation 固定到同一次 cook；只有 Player 返回 Ready 后才显示 Playing 与 Pause。暂停后显示当前片段实际保留的 checkpoint，可点击精确位置恢复，不重新执行剧情或外部 IO。没有 checkpoint 时不显示定位按钮。位置使用 Player 返回的当前 presentation time，不从检查点列表末尾推断。
 
-Stop 请求真实 Player 关闭会话与设备，超过三秒仍未退出则回收子进程；文档改变、构建取消或编辑器关闭会回收旧进程。管道读写使用有界队列和有界 JSONL，子进程退出后 join 两个通信 worker。旧身份、控制拒绝、断管、启动失败与超时显示为错误。该消费者通过局部协议检查；实际素材的 GPU/音频、连续定位及窗口交互仍需联调验收。
+Stop 请求真实 Player 关闭会话与设备，超过三秒仍未退出则回收子进程；文档改变、构建取消或编辑器关闭会回收旧进程。管道读写使用有界队列和有界 JSONL，子进程退出后 join 两个通信 worker。旧身份、控制拒绝、断管、启动失败与超时显示为错误。
+
+公开最小工程已经通过真实 Windows Player 的 cook/package/bundle、Ready、Pause、当前片段精确 checkpoint 恢复、Resume 与正常 Stop。复测需设置 `ASTRA_EDITOR_PREVIEW_CONFIG`，运行 `cargo test --manifest-path Editor/Cargo.toml -p astra-editor --test preview_product -- --ignored`；它会启动 GPU 窗口。此测试检查产品进程与协议状态，不检查画面、音频质量或手动操作；NativeVN 旗舰工程、连续创作和窗口交互仍需验收。
 
 ## 依赖与检查
 

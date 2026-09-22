@@ -21,13 +21,13 @@ impl Render for Editor {
             }))
             .capture_action(cx.listener(|this, _: &gpui_component::input::Undo, window, cx| {
                 if this.input.read(cx).focus_handle(cx).is_focused(window) {
-                    if let Err(error) = this.project.documents.undo() { this.status = error.to_string(); } else { this.preview = None; this.sync(window, cx); }
+                    if let Err(error) = this.project.documents.undo() { this.status = error.to_string(); } else { this.cancel_agent(); this.preview = None; this.sync(window, cx); }
                     cx.stop_propagation(); cx.notify();
                 }
             }))
             .capture_action(cx.listener(|this, _: &gpui_component::input::Redo, window, cx| {
                 if this.input.read(cx).focus_handle(cx).is_focused(window) {
-                    if let Err(error) = this.project.documents.redo() { this.status = error.to_string(); } else { this.preview = None; this.sync(window, cx); }
+                    if let Err(error) = this.project.documents.redo() { this.status = error.to_string(); } else { this.cancel_agent(); this.preview = None; this.sync(window, cx); }
                     cx.stop_propagation(); cx.notify();
                 }
             }))
@@ -37,10 +37,10 @@ impl Render for Editor {
                     this.status = this.project.save_all().map(|_| "All sources saved".to_string()).unwrap_or_else(|e| e.to_string()); cx.notify();
                 })))
                 .child(Button::new("undo").label("Undo batch").on_click(cx.listener(|this, _, window, cx| {
-                    match this.project.documents.undo() { Ok(()) => this.sync(window, cx), Err(e) => { this.status = e.to_string(); cx.notify(); } }
+                    match this.project.documents.undo() { Ok(()) => { this.cancel_agent(); this.sync(window, cx); }, Err(e) => { this.status = e.to_string(); cx.notify(); } }
                 })))
                 .child(Button::new("redo").label("Redo").on_click(cx.listener(|this, _, window, cx| {
-                    match this.project.documents.redo() { Ok(()) => this.sync(window, cx), Err(e) => { this.status = e.to_string(); cx.notify(); } }
+                    match this.project.documents.redo() { Ok(()) => { this.cancel_agent(); this.sync(window, cx); }, Err(e) => { this.status = e.to_string(); cx.notify(); } }
                 })))
                 .child(Button::new("preview").label("Save & Preview").on_click(cx.listener(|this, _, _, cx| {
                     let result = (|| -> anyhow::Result<()> {
@@ -87,11 +87,54 @@ impl Render for Editor {
             .child(div().id("pending-patch").max_h(px(180.)).overflow_y_scroll().child(self.agent.pending().map(|batch| serde_json::to_string_pretty(batch).unwrap_or_default()).unwrap_or_default()))
             .child(div().flex().gap_3().child(Input::new(&self.agent_prompt)).child(Button::new("send-agent").label("Send").on_click(cx.listener(|this, _, _, cx| { this.prompt_agent(cx); cx.notify(); }))))
             .child(div().id("agent-output").max_h(px(120.)).overflow_y_scroll().child(self.agent_output.clone()))
+            .child(self.permission_panel(cx))
             .child(self.preview.as_ref().map(|p| p.status.clone()).unwrap_or_default())
     }
 }
 
 impl Editor {
+    fn permission_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let mut panel = div().flex().flex_col().gap_2();
+        if let Some(permission) = &self.permission {
+            let generation = permission.generation;
+            panel = panel
+                .child("External Agent permission (separate from source batch approval)")
+                .child(
+                    div()
+                        .id("agent-permission-details")
+                        .max_h(px(120.))
+                        .overflow_y_scroll()
+                        .child(
+                            serde_json::to_string_pretty(&permission.request.tool_call)
+                                .unwrap_or_default(),
+                        ),
+                );
+            for option in &permission.request.options {
+                let id = option.option_id.clone();
+                panel = panel.child(
+                    Button::new(SharedString::from(id.to_string()))
+                        .label(option.name.clone())
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if let Some(permission) = this.permission.take() {
+                                let outcome = if permission.generation == generation
+                                    && generation == this.bridge.generation()
+                                {
+                                    RequestPermissionOutcome::Selected(
+                                        SelectedPermissionOutcome::new(id.clone()),
+                                    )
+                                } else {
+                                    RequestPermissionOutcome::Cancelled
+                                };
+                                let _ = permission.reply.send(outcome);
+                            }
+                            cx.notify();
+                        })),
+                );
+            }
+        }
+        panel
+    }
+
     fn preview_controls(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let mut controls = div().flex().gap_2();
         if let Some(live) = self
