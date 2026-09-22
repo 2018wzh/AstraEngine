@@ -42,6 +42,9 @@ struct Editor {
     preview_generation: u64,
     close_confirmed: bool,
     project_dialog: bool,
+    close_dialog: bool,
+    preview_dialog: Option<uuid::Uuid>,
+    asset_dialog: Option<uuid::Uuid>,
     bridge: EditorBridge,
     requests: tokio::sync::mpsc::Receiver<Request>,
     agent: AgentEdits,
@@ -123,6 +126,9 @@ impl Editor {
             preview_generation: 0,
             close_confirmed: false,
             project_dialog: false,
+            close_dialog: false,
+            preview_dialog: None,
+            asset_dialog: None,
             bridge,
             requests,
             agent: AgentEdits::default(),
@@ -365,6 +371,11 @@ fn main() -> anyhow::Result<()> {
                         if editor.close_confirmed || !editor.project.any_dirty() {
                             return true;
                         }
+                        if editor.close_dialog {
+                            return false;
+                        }
+                        editor.close_dialog = true;
+                        let revision = editor.project.revision();
                         let answer = window.prompt(
                             PromptLevel::Warning,
                             "Unsaved source changes",
@@ -374,10 +385,16 @@ fn main() -> anyhow::Result<()> {
                         );
                         cx.spawn_in(window, async move |this, cx| {
                             let choice = answer.await.unwrap_or(0);
-                            if choice == 0 {
-                                return;
-                            }
                             let _ = this.update_in(cx, |this, window, cx| {
+                                this.close_dialog = false;
+                                if choice == 0 {
+                                    return;
+                                }
+                                if this.project.revision() != revision {
+                                    this.status = "Project changed while confirming; close again to review current changes".into();
+                                    cx.notify();
+                                    return;
+                                }
                                 if choice == 1 {
                                     if let Err(error) = this.project.save_all() {
                                         this.status = error.to_string();

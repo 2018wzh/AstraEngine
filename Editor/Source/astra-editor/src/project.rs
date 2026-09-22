@@ -3,7 +3,14 @@ use std::path::{Path, PathBuf};
 
 use astra_vn_editor::{AstraSource, AuthoringWorkspace, DocumentEdits, EditBatch, TextEdit};
 
+#[derive(Clone, PartialEq, Eq)]
+pub struct ProjectRevision {
+    session: uuid::Uuid,
+    documents: BTreeMap<String, u64>,
+}
+
 pub struct Project {
+    session: uuid::Uuid,
     pub documents: AuthoringWorkspace,
     pub active: String,
     pub(crate) root: PathBuf,
@@ -15,6 +22,22 @@ pub struct Project {
 }
 
 impl Project {
+    pub fn session_id(&self) -> uuid::Uuid {
+        self.session
+    }
+
+    /// Capture the exact source revisions a destructive confirmation refers to.
+    pub fn revision(&self) -> ProjectRevision {
+        ProjectRevision {
+            session: self.session,
+            documents: self
+                .documents
+                .documents()
+                .map(|d| (d.path.clone(), d.version))
+                .collect(),
+        }
+    }
+
     pub fn layout_path(&self) -> PathBuf {
         self.root.join(".astra-cache/editor-layout.json")
     }
@@ -36,6 +59,7 @@ impl Project {
                 documents.open(source)?;
             }
             return Ok(Self {
+                session: uuid::Uuid::new_v4(),
                 documents,
                 active,
                 root: path.parent().unwrap().to_path_buf(),
@@ -55,6 +79,7 @@ impl Project {
         let mut documents = AuthoringWorkspace::default();
         documents.open(AstraSource::story(&active, &text))?;
         Ok(Self {
+            session: uuid::Uuid::new_v4(),
             documents,
             active: active.clone(),
             root: path.parent().unwrap().to_path_buf(),
@@ -147,6 +172,26 @@ impl Project {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn confirmation_revision_rejects_reopen_and_edit_undo() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("main.astra");
+        std::fs::write(&path, "# original\n").unwrap();
+        let mut project = Project::open(&path).unwrap();
+        let confirmation = project.revision();
+        assert!(project.revision() == confirmation);
+        project.save_all().unwrap();
+        assert!(project.revision() == confirmation);
+        project.replace("# changed\n".into()).unwrap();
+        assert!(project.revision() != confirmation);
+        project.documents.undo().unwrap();
+        assert!(!project.any_dirty());
+        assert!(project.revision() != confirmation);
+        let reopened = Project::open(&path).unwrap();
+        assert!(reopened.revision() != confirmation);
+        assert_ne!(reopened.session_id(), project.session_id());
+    }
 
     #[test]
     fn project_switch_keeps_unsaved_documents_and_batch_undo() {

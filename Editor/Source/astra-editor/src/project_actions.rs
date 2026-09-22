@@ -33,7 +33,8 @@ impl Editor {
                 return;
             };
             let confirmation = this.update_in(cx, |this, window, cx| {
-                this.project.any_dirty().then(|| {
+                let revision = this.project.revision();
+                let confirmation = this.project.any_dirty().then(|| {
                     window.prompt(
                         PromptLevel::Warning,
                         "Unsaved source changes",
@@ -41,9 +42,10 @@ impl Editor {
                         &["Cancel", "Save and open", "Discard and open"],
                         cx,
                     )
-                })
+                });
+                (revision, confirmation)
             });
-            let Ok(confirmation) = confirmation else {
+            let Ok((revision, confirmation)) = confirmation else {
                 return;
             };
             let choice = match confirmation {
@@ -53,6 +55,13 @@ impl Editor {
             let _ = this.update_in(cx, |this, window, cx| {
                 this.project_dialog = false;
                 if choice == 0 {
+                    cx.notify();
+                    return;
+                }
+                if this.project.revision() != revision {
+                    this.status =
+                        "Project changed while confirming; open again to review current changes"
+                            .into();
                     cx.notify();
                     return;
                 }
@@ -70,6 +79,8 @@ impl Editor {
                         // A new project must bind its own packaging target/tools explicitly.
                         this.preview_config = None;
                         this.asset_import = None;
+                        this.asset_dialog = None;
+                        this.preview_dialog = None;
                         this.project = project;
                         this.panels = panels::WorkspacePanels::new(window, cx);
                         this.sync(window, cx);
@@ -85,6 +96,8 @@ impl Editor {
     }
 
     pub fn choose_preview_config(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let token = uuid::Uuid::new_v4();
+        self.preview_dialog = Some(token);
         let selected = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
@@ -99,8 +112,12 @@ impl Editor {
                 Ok(Err(error)) => Some(Err(error)),
                 _ => None,
             };
-            if let Some(result) = result {
-                let _ = this.update_in(cx, |this, _, cx| {
+            let _ = this.update_in(cx, |this, _, cx| {
+                if this.preview_dialog != Some(token) {
+                    return;
+                }
+                this.preview_dialog = None;
+                if let Some(result) = result {
                     match result {
                         Ok(config) => {
                             this.preview = None;
@@ -110,8 +127,8 @@ impl Editor {
                         Err(error) => this.status = error.to_string(),
                     }
                     cx.notify();
-                });
-            }
+                }
+            });
         })
         .detach();
     }

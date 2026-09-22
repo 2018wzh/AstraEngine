@@ -8,6 +8,8 @@ cargo run --manifest-path Editor/Cargo.toml -p astra-editor -- story.astra
 
 入口接受已有 `.astra` 文件或 NativeVN `project.yaml`。工程模式同时载入剧情、UI、主题和 Controller；Content Browser 搜索源文件及声明的资源 sidecar，切换源文件保留未保存修改。文本输入、外部 Agent 写入和 MCP batch 都进入同一份未保存文档。Save 写入临时文件后原子替换；磁盘内容已变化时拒绝覆盖。关闭有未保存修改的窗口时，可以取消、保存或丢弃。
 
+切换项目会取消旧 Agent、预览、导入及文件选择请求。即使重开同一项目，旧 Graph/Timeline 拖动也不能提交到新会话。关闭或切换项目的确认绑定当时的全部文档版本；确认期间发生编辑或撤销时，本次操作停止并提示重新确认，保留当前输入。重复关闭不会叠加确认框。
+
 ## 编辑与诊断
 
 `AuthoringWorkspace` 保存文档版本，版本从 1 开始。`EditBatch` 内每个文档必须提供当前版本和不重叠的 UTF-8 字节范围；全部校验通过后一起应用。撤销和重做仍增加版本，旧 Agent 结果不能因内容恢复而重新生效。一个 batch 对应一次撤销。

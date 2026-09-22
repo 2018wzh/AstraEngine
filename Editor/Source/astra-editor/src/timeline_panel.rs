@@ -3,6 +3,7 @@ use astra_editor::timeline::{self, Keyframe, KeyframeEdit};
 
 #[derive(Clone)]
 struct KeyframeDrag {
+    session: uuid::Uuid,
     path: String,
     source_id: String,
     version: u64,
@@ -201,7 +202,8 @@ impl Editor {
             let mut lane = div()
                 .id(SharedString::from(format!("lane-{}", track.source_id)))
                 .on_drop(cx.listener(move |this, drag: &KeyframeDrag, window, cx| {
-                    if drag.path == drop_path
+                    if this.project.session_id() == drag.session
+                        && drag.path == drop_path
                         && drag.source_id == drop_id
                         && this.project.active == drop_path
                     {
@@ -225,6 +227,7 @@ impl Editor {
                         )))
                         .on_drag(
                             KeyframeDrag {
+                                session: self.project.session_id(),
                                 path: document.path.clone(),
                                 source_id: track.source_id.clone(),
                                 version,

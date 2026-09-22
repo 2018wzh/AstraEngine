@@ -3,6 +3,7 @@ use astra_vn_editor::parse_astra_source;
 
 #[derive(Clone)]
 struct StateDrag {
+    session: uuid::Uuid,
     path: String,
     version: u64,
     source_id: String,
@@ -146,6 +147,7 @@ impl Editor {
             let version = document.version;
             let target = node.name.clone();
             let drag = StateDrag {
+                session: self.project.session_id(),
                 path: path.clone(),
                 version,
                 source_id: id.clone(),
@@ -154,7 +156,10 @@ impl Editor {
                 div()
                     .id(SharedString::from(format!("graph-card-{index}")))
                     .on_drop(cx.listener(move |this, drag: &StateDrag, window, cx| {
-                        if this.project.active != drag.path || drag.path != path {
+                        if this.project.session_id() != drag.session
+                            || this.project.active != drag.path
+                            || drag.path != path
+                        {
                             return;
                         }
                         let batch = astra_editor::graph::connect(

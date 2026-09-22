@@ -18,7 +18,8 @@ impl Editor {
             cx.notify();
             return;
         }
-        let project_root = self.project.layout_path();
+        let token = uuid::Uuid::new_v4();
+        self.asset_dialog = Some(token);
         let chosen = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
@@ -26,17 +27,24 @@ impl Editor {
             prompt: Some("Import image".into()),
         });
         cx.spawn_in(window, async move |this, cx| {
-            let path = match chosen.await {
-                Ok(Ok(Some(paths))) => paths.into_iter().next(),
-                _ => None,
-            };
-            let Some(path) = path else {
-                return;
-            };
+            let result = chosen.await;
             let _ = this.update_in(cx, |this, window, cx| {
-                if this.project.layout_path() != project_root {
+                if this.asset_dialog != Some(token) {
                     return;
                 }
+                this.asset_dialog = None;
+                let path = match result {
+                    Ok(Ok(Some(paths))) => paths.into_iter().next(),
+                    Ok(Err(error)) => {
+                        this.status = error.to_string();
+                        cx.notify();
+                        return;
+                    }
+                    _ => None,
+                };
+                let Some(path) = path else {
+                    return;
+                };
                 let filename = path.file_name().unwrap_or_default().to_string_lossy();
                 let stem = path
                     .file_stem()
@@ -172,6 +180,7 @@ impl Editor {
                             .child(Button::new("cancel-import").label("Cancel").on_click(
                                 cx.listener(|this, _, _, cx| {
                                     this.asset_import = None;
+                                    this.asset_dialog = None;
                                     cx.notify();
                                 }),
                             )),
