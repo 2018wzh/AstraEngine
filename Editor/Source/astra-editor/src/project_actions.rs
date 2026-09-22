@@ -71,7 +71,6 @@ impl Editor {
                         this.preview_config = None;
                         this.project = project;
                         this.panels = panels::WorkspacePanels::new(window, cx);
-                        this.load_layout();
                         this.sync(window, cx);
                     }
                     Err(error) => {

@@ -2,7 +2,6 @@ use super::*;
 use astra_vn_editor::{parse_astra_source, EditBatch};
 use gpui_component::{
     list::ListItem,
-    resizable::{h_resizable, resizable_panel, ResizableState},
     tree::{tree, TreeItem, TreeState},
 };
 
@@ -15,9 +14,8 @@ pub(super) struct WorkspacePanels {
     selected_version: u64,
     last_cursor: Option<(String, u64, u32)>,
     fields: Vec<(String, Entity<InputState>)>,
-    split: Entity<ResizableState>,
-    layout_epoch: usize,
-    sizes: [f32; 3],
+    pub(super) dock: Option<Entity<gpui_component::dock::DockArea>>,
+    pub(super) dock_subscription: Option<Subscription>,
     mode: ViewMode,
     _filter_subscription: Subscription,
 }
@@ -43,9 +41,8 @@ impl WorkspacePanels {
             selected_version: 0,
             last_cursor: None,
             fields: Vec::new(),
-            split: cx.new(|_| ResizableState::default()),
-            layout_epoch: 0,
-            sizes: [250., 560., 280.],
+            dock: None,
+            dock_subscription: None,
             mode: ViewMode::Source,
             _filter_subscription: subscription,
         }
@@ -53,27 +50,6 @@ impl WorkspacePanels {
 }
 
 impl Editor {
-    pub fn load_layout(&mut self) {
-        let path = self.project.layout_path();
-        if !path.exists() {
-            return;
-        }
-        let result = (|| -> anyhow::Result<[f32; 3]> {
-            let sizes: [f32; 3] = serde_json::from_slice(&std::fs::read(path)?)?;
-            anyhow::ensure!(
-                sizes
-                    .iter()
-                    .all(|s| s.is_finite() && (100.0..=8000.0).contains(s)),
-                "Invalid panel sizes"
-            );
-            Ok(sizes)
-        })();
-        match result {
-            Ok(sizes) => self.panels.sizes = sizes,
-            Err(error) => self.status = format!("Layout reset: {error}"),
-        }
-    }
-
     pub(super) fn select_command(
         &mut self,
         id: String,
@@ -205,7 +181,11 @@ impl Editor {
         }
     }
 
-    pub fn workspace_panels(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn content_panel(
+        &mut self,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let document = self
             .project
             .documents
@@ -330,39 +310,11 @@ impl Editor {
             )
             .child("Outliner")
             .child(div().flex_1().min_h_0().child(outliner));
-        let modes = [
-            ("Source", ViewMode::Source),
-            ("Graph", ViewMode::Graph),
-            ("Timeline", ViewMode::Timeline),
-        ];
-        let toolbar = div()
-            .flex()
-            .gap_2()
-            .children(modes.into_iter().map(|(label, mode)| {
-                Button::new(label)
-                    .label(label)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.panels.mode = mode;
-                        cx.notify();
-                    }))
-            }))
-            .child(
-                Button::new("reset-layout")
-                    .label("Reset layout")
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.panels.split = cx.new(|_| ResizableState::default());
-                        this.panels.layout_epoch += 1;
-                        this.panels.sizes = [250., 560., 280.];
-                        let path = this.project.layout_path();
-                        if path.exists() {
-                            if let Err(error) = std::fs::remove_file(path) {
-                                this.status = format!("Could not reset saved layout: {error}");
-                            }
-                        }
-                        cx.notify();
-                    })),
-            );
-        let center = match self.panels.mode {
+        browser.into_any_element()
+    }
+
+    pub(super) fn authoring_panel(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        match self.panels.mode {
             ViewMode::Source => div()
                 .flex_1()
                 .min_h_0()
@@ -370,7 +322,10 @@ impl Editor {
                 .into_any_element(),
             ViewMode::Graph => self.graph_panel(cx),
             ViewMode::Timeline => self.timeline_panel(cx),
-        };
+        }
+    }
+
+    pub(super) fn details_panel(&self, cx: &mut Context<Self>) -> AnyElement {
         let details = div()
             .id("details")
             .overflow_y_scroll()
@@ -400,50 +355,53 @@ impl Editor {
                     .disabled(self.panels.fields.is_empty())
                     .on_click(cx.listener(|this, _, window, cx| this.apply_details(window, cx))),
             );
-        let _ = window;
-        h_resizable(("editor-workspace", self.panels.layout_epoch))
-            .with_state(&self.panels.split)
-            .on_resize(cx.listener(|this, state: &Entity<ResizableState>, _, cx| {
-                let sizes = state
-                    .read(cx)
-                    .sizes()
-                    .iter()
-                    .map(|size| f32::from(*size))
-                    .collect::<Vec<_>>();
-                let result = (|| -> anyhow::Result<()> {
-                    let path = this.project.layout_path();
-                    std::fs::create_dir_all(path.parent().unwrap())?;
-                    let mut temporary = tempfile::NamedTempFile::new_in(path.parent().unwrap())?;
-                    use std::io::Write;
-                    temporary.write_all(&serde_json::to_vec(&sizes)?)?;
-                    temporary.persist(path)?;
-                    Ok(())
-                })();
-                if let Err(error) = result {
-                    this.status = format!("Could not save layout: {error}");
-                    cx.notify();
-                }
+        details.into_any_element()
+    }
+
+    pub fn workspace_panels(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        self.ensure_dock(window, cx);
+        let modes = [
+            ("Source", ViewMode::Source),
+            ("Graph", ViewMode::Graph),
+            ("Timeline", ViewMode::Timeline),
+        ];
+        let toolbar = div()
+            .flex()
+            .gap_2()
+            .children(modes.into_iter().map(|(label, mode)| {
+                Button::new(label)
+                    .label(label)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.panels.mode = mode;
+                        cx.notify();
+                    }))
             }))
             .child(
-                resizable_panel()
-                    .size(px(self.panels.sizes[0]))
-                    .child(browser),
-            )
+                Button::new("reset-layout")
+                    .label("Reset layout")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.panels.dock = None;
+                        this.panels.dock_subscription = None;
+                        let path = this.project.layout_path();
+                        if path.exists() {
+                            if let Err(error) = std::fs::remove_file(path) {
+                                this.status = format!("Could not reset layout: {error}");
+                            }
+                        }
+                        cx.notify();
+                    })),
+            );
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(toolbar)
             .child(
-                resizable_panel().size(px(self.panels.sizes[1])).child(
-                    div()
-                        .size_full()
-                        .flex()
-                        .flex_col()
-                        .gap_2()
-                        .child(toolbar)
-                        .child(center),
-                ),
-            )
-            .child(
-                resizable_panel()
-                    .size(px(self.panels.sizes[2]))
-                    .child(details),
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .child(self.panels.dock.as_ref().unwrap().clone()),
             )
             .into_any_element()
     }

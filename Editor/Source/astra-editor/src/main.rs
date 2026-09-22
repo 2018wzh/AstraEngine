@@ -14,6 +14,7 @@ use gpui_component::{
     Disableable, Root,
 };
 mod agent_actions;
+mod dock_panels;
 mod graph_panel;
 mod panels;
 mod project_actions;
@@ -241,7 +242,6 @@ impl Editor {
         })
         .detach();
         editor.diagnose();
-        editor.load_layout();
         editor
     }
 

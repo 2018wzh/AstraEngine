@@ -13,3 +13,5 @@ Agent 为辅助面板。每个 ACP 回合拥有一个有随机令牌的 loopback
 独立 Player 预览复用现有 cook/package/bundle。Editor 持有子进程并负责停止、回收和错误显示；公共 preview wire/checkpoint 契约由 Runtime/Player 维护。完整视觉编辑、曲线编辑、资源导入和跨桌面交互验收仍需继续实施，不能以已有面板数量宣称完成。
 
 详见 [Editor 手册](../../../Editor/README.md) 和 [模块目标](../../modules/editor.md)。
+
+工作区停靠直接使用 gpui-component 的 DockArea、Panel 与 dump/load，不维护第二套布局树。三个作者面板观察同一 Editor 状态，移动与组合标签不改变文档权威；布局为项目本地缓存，保存前后保留三个必要面板。损坏布局回到默认三栏并显示原因，完整桌面交互验收仍待进行。
