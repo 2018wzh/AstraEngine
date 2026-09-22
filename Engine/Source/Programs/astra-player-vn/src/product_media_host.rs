@@ -256,6 +256,14 @@ impl NativeVnProductMediaHost {
         self.audio.submitted_timeline()
     }
 
+    pub async fn set_output_paused(
+        &mut self,
+        paused: bool,
+        executor: &PlayerHostCommandExecutor<PlatformCommandSink>,
+    ) -> Result<(), PlatformError> {
+        self.audio.set_output_paused(paused, executor).await
+    }
+
     pub fn snapshot(&self) -> NativeVnProductMediaSnapshot {
         NativeVnProductMediaSnapshot {
             schema: "astra.player.native_vn_media_snapshot.v3".into(),

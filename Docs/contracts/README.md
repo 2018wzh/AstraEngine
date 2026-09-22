@@ -15,6 +15,7 @@
 | Runtime UI | [ui.md](ui.md) |
 | UI Component Plugin | [ui-component-plugin.md](ui-component-plugin.md) |
 | Performance | [performance.md](performance.md) |
+| Player 片段预览 | [player-preview.md](player-preview.md) |
 | Script / VN | [script-vn.md](script-vn.md) |
 | 演出帧推进迁移 | [presentation-tick-migration.md](presentation-tick-migration.md) |
 | AstraRPG / `rpg.trpg` | [rpg-trpg.md](rpg-trpg.md) |

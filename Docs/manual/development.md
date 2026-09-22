@@ -109,3 +109,7 @@ python Tools/TsuiNoSora/classic_route_inputs.py \
 使用 `astra_vn::{VnSession, VnSessionConfig, NativeVnStepInput}` 创建和推进会话，保存/恢复传递 `astra_runtime::SaveBlob`，关闭消费 VnSession。原 `astra-vn-runtime-provider` 依赖须改为 `astra-vn`，不提供旧名称别名。包元数据使用 `astra_vn::native_vn_descriptor()`；无需注册 Factory 或传递 ABI request。EngineSession 的任务作用域由会话持有，调用方不得在退出后继续提交结果。
 
 本接口的增量回归包括 `cargo test -p astra-vn -p astra-runtime` 和 `cargo test -p astra-player-vn --lib`；包检查修改另运行 `cargo test -p astra-release --test release_report`。这些测试不代替 Windows/Android 实玩。
+
+## Editor Player 预览控制
+
+增量 cook/package/bundle 后，以 `astra-player --preview-control` 启动独立 Player，stdin/stdout 仅用于 `astra.vn.preview.v1`，stderr 接收日志。父进程须先发送 Attach、等 Ready 后显示运行；变更文档版本时停止并回收旧进程，不能复用旧 identity。Pause/Resume 和片段内精确 checkpoint 定位见[预览控制契约](../contracts/player-preview.md)。用户游戏存档槽不参与预览定位。

@@ -1,3 +1,8 @@
+mod native_session_clock;
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+mod preview_control;
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+mod preview_transport;
 use astra_observability::{init_host, ConsoleFormat, HostObservabilityConfig, HostRole};
 use astra_player::{
     bundled_player_resource_root, load_bundled_observability, AndroidInputHost, LinuxUinputHost,
@@ -37,6 +42,7 @@ fn main() -> Result<(), PlayerCliError> {
     let mut log_max_archives = astra_observability::DEFAULT_MAX_ARCHIVES;
     let mut show_help = false;
     let mut test_null_audio = false;
+    let mut preview_control = false;
     let mut script = None;
     let mut transcript = None;
     let mut windows_bundle = None;
@@ -89,6 +95,7 @@ fn main() -> Result<(), PlayerCliError> {
             "--browser-executable" => browser_executable = args.next().map(PathBuf::from),
             "--web-headless" => web_headless = true,
             "--test-null-audio" => test_null_audio = true,
+            "--preview-control" => preview_control = true,
             "--visual-comparison-report" => {
                 visual_comparison_report = args.next().map(PathBuf::from)
             }
@@ -144,9 +151,17 @@ fn main() -> Result<(), PlayerCliError> {
     tracing::info!(event = "player.host.start", "AstraPlayer host started");
     if show_help {
         println!(
-            "Usage:\n  astra-player [--test-null-audio] (bundled Windows game; silent test output)\n  astra-player --script <automation.json> --transcript <transcript.json>\n  astra-player --windows-bundle <dir> --visual-comparison-report <report.json> --host-conformance-report <report.json> [--output-report <report.json>] [--output-script <script.json>] [--output-transcript <transcript.json>] [--output-trace-log <trace.log>] [--timeout-ms <ms>]\n  astra-player --web-bundle <dir> --browser-executable <chromium> --visual-comparison-report <report.json> --host-conformance-report <report.json> [--web-headless] [--output-report <report.json>] [--output-script <script.json>] [--output-transcript <transcript.json>] [--timeout-ms <ms>] [--log-filter <filter>] [--log-format compact|json] [--log-dir <dir>]"
+            "Usage:\n  astra-player [--test-null-audio] [--preview-control] (bundled desktop game; preview uses bounded JSONL stdin/stdout)\n  astra-player --script <automation.json> --transcript <transcript.json>\n  astra-player --windows-bundle <dir> --visual-comparison-report <report.json> --host-conformance-report <report.json> [--output-report <report.json>] [--output-script <script.json>] [--output-transcript <transcript.json>] [--output-trace-log <trace.log>] [--timeout-ms <ms>]\n  astra-player --web-bundle <dir> --browser-executable <chromium> --visual-comparison-report <report.json> --host-conformance-report <report.json> [--web-headless] [--output-report <report.json>] [--output-script <script.json>] [--output-transcript <transcript.json>] [--timeout-ms <ms>] [--log-filter <filter>] [--log-format compact|json] [--log-dir <dir>]"
         );
         return Ok(());
+    }
+    if preview_control
+        && (windows_bundle.is_some()
+            || web_bundle.is_some()
+            || script.is_some()
+            || transcript.is_some())
+    {
+        return Err("--preview-control requires an ordinary bundled Player session".into());
     }
     if windows_bundle.is_some() && web_bundle.is_some() {
         return Err("--windows-bundle and --web-bundle are mutually exclusive".into());
@@ -208,7 +223,7 @@ fn main() -> Result<(), PlayerCliError> {
     }
 
     if script.is_none() && transcript.is_none() {
-        let result = run_bundled_game(test_null_audio);
+        let result = run_bundled_game(test_null_audio, preview_control);
         if let Err(error) = &result {
             if let Some(platform) = error.downcast_ref::<astra_platform::PlatformError>() {
                 tracing::error!(
@@ -245,7 +260,7 @@ fn main() -> Result<(), PlayerCliError> {
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
-fn run_bundled_game(test_null_audio: bool) -> Result<(), PlayerCliError> {
+fn run_bundled_game(test_null_audio: bool, preview_control: bool) -> Result<(), PlayerCliError> {
     use astra_core::Hash256;
     use astra_package::{PackageManifest, PackageReader};
     use astra_platform::{
@@ -414,6 +429,7 @@ fn run_bundled_game(test_null_audio: bool) -> Result<(), PlayerCliError> {
         #[cfg(target_os = "linux")]
         let factory = astra_platform_linux::factory();
         let mut session = factory.start(HostLaunchProfile::platform(profile)).await?;
+        let mut preview: Option<preview_control::PreviewControl> = None;
         let session_result: Result<(), astra_platform::PlatformError> = async {
         let source = session
             .client
@@ -492,15 +508,19 @@ fn run_bundled_game(test_null_audio: bool) -> Result<(), PlayerCliError> {
                 })?;
             let mut pointer = (0.0_f64, 0.0_f64);
             let mut save_transaction_id = 1000_u64;
-            let timeline_clock = std::time::Instant::now();
+            let mut timeline_clock = native_session_clock::ActiveSessionClock::new(std::time::Instant::now());
             media
                 .process(
                     &mut vn,
                     &mut executor,
-                    timeline_clock.elapsed().as_millis() as u64,
+                    timeline_clock.elapsed_ms(std::time::Instant::now()),
                     Vec::new(),
                 )
                 .await?;
+            preview = if preview_control {
+                Some(preview_control::PreviewControl::attach(&mut vn, &media).await?)
+            } else { None };
+            timeline_clock = native_session_clock::ActiveSessionClock::new(std::time::Instant::now());
             let mut timeline_tick = FixedDeadlineScheduler::new(
                 std::time::Duration::from_nanos(16_666_667),
             )
@@ -511,8 +531,18 @@ fn run_bundled_game(test_null_audio: bool) -> Result<(), PlayerCliError> {
             ))?;
             loop {
                 let event = tokio::select! {
+                    control = async { preview.as_mut().expect("preview branch enabled").recv().await }, if preview.is_some() => {
+                        let request = control?;
+                        if !preview.as_mut().unwrap().request(request, &mut vn, &mut media, &mut executor).await? { break; }
+                        if preview.as_ref().unwrap().is_paused() {
+                            timeline_clock.pause(std::time::Instant::now());
+                        } else if timeline_clock.resume(std::time::Instant::now()) {
+                            timeline_tick = FixedDeadlineScheduler::new(std::time::Duration::from_nanos(16_666_667)).map_err(|code| player_platform_error("player.preview.resume", code))?;
+                        }
+                        continue;
+                    }
                     event = session.events.recv() => event?,
-                    _ = tokio::time::sleep_until(tokio::time::Instant::from_std(timeline_tick.next_deadline())) => {
+                    _ = tokio::time::sleep_until(tokio::time::Instant::from_std(timeline_tick.next_deadline())), if !timeline_clock.is_paused() => {
                         let due = timeline_tick.consume_due(std::time::Instant::now()).map_err(|code| {
                             astra_platform::PlatformError::new(
                                 astra_platform::PlatformErrorCode::InvalidState,
@@ -541,16 +571,18 @@ fn run_bundled_game(test_null_audio: bool) -> Result<(), PlayerCliError> {
                                 })?;
                             }
                             if media.is_active() {
-                                let now_ms = timeline_clock.elapsed().as_millis() as u64;
+                                let now_ms = timeline_clock.elapsed_ms(std::time::Instant::now());
                                 media.poll_and_process(&mut vn, &mut executor, now_ms).await?;
                             }
                         }
+                        if let Some(preview) = preview.as_mut() { preview.record(&mut vn, &media)?; }
                         continue;
                     }
                 };
                 let player_sequence = event.sequence;
                 let ui_input = match event.kind {
                     PlatformEventKind::WindowClosed { window: closed } if closed == window => break,
+                    _ if timeline_clock.is_paused() => continue,
                     PlatformEventKind::WindowResized {
                         window: resized,
                         width,
@@ -594,7 +626,7 @@ fn run_bundled_game(test_null_audio: bool) -> Result<(), PlayerCliError> {
                                 &mut executor,
                                 "slot.quick",
                                 PlayerHostResourceId(save_transaction_id),
-                                timeline_clock.elapsed().as_millis() as u64,
+                                timeline_clock.elapsed_ms(std::time::Instant::now()),
                             )
                             .await
                             {
@@ -765,7 +797,7 @@ fn run_bundled_game(test_null_audio: bool) -> Result<(), PlayerCliError> {
                                     &mut executor,
                                     &slot_id,
                                     PlayerHostResourceId(save_transaction_id),
-                                    timeline_clock.elapsed().as_millis() as u64,
+                                    timeline_clock.elapsed_ms(std::time::Instant::now()),
                                 )
                                 .await
                                 {
@@ -812,7 +844,7 @@ fn run_bundled_game(test_null_audio: bool) -> Result<(), PlayerCliError> {
                         .process_with_audio_tick(
                             &mut vn,
                             &mut executor,
-                            timeline_clock.elapsed().as_millis() as u64,
+                            timeline_clock.elapsed_ms(std::time::Instant::now()),
                             Vec::new(),
                             false,
                         )
@@ -874,13 +906,17 @@ fn run_bundled_game(test_null_audio: bool) -> Result<(), PlayerCliError> {
         }.await;
         // The host owns partially created package, window and surface resources too.
         let shutdown_result = session.client.shutdown().await;
-        match (session_result, shutdown_result) {
+        let result = match (session_result, shutdown_result) {
             (Ok(()), result) | (result, Ok(())) => result,
             (Err(error), Err(cleanup)) => Err(player_platform_error(
                 "player.session",
                 format!("{error}; cleanup: {cleanup}"),
             )),
+        };
+        if let Some(preview) = &preview {
+            preview.finished(result.is_ok());
         }
+        result
     };
     #[cfg(target_os = "macos")]
     runner.run(player)??;
@@ -1226,7 +1262,7 @@ fn log_consumed_vn_step(
 }
 
 #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
-fn run_bundled_game(_test_null_audio: bool) -> Result<(), PlayerCliError> {
+fn run_bundled_game(_test_null_audio: bool, _preview_control: bool) -> Result<(), PlayerCliError> {
     Err("native AstraPlayer bundle host is unavailable on this platform".into())
 }
 

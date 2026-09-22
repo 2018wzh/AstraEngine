@@ -20,6 +20,7 @@ use astra_player_core::{PlatformCommandSink, PlayerDecodedAudio, PlayerHostComma
 pub struct NativeVnProductAudioHost {
     service: Option<AudioServiceSession>,
     output: Option<AudioOutputHandle>,
+    output_paused: bool,
     pending_open: Option<output::OpenFuture>,
     pending_close: Option<output::CloseFuture>,
     prepared_assets: BTreeMap<String, AudioAssetRevision>,
@@ -84,6 +85,7 @@ impl NativeVnProductAudioHost {
         Self {
             service: None,
             output: None,
+            output_paused: false,
             pending_open: None,
             pending_close: None,
             prepared_assets: BTreeMap::new(),

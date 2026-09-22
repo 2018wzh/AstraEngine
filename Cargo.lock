@@ -1024,6 +1024,7 @@ dependencies = [
  "astra-vn-core",
  "astra-vn-package",
  "base64",
+ "libc",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -1032,6 +1033,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tungstenite",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

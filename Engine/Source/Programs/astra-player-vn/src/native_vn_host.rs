@@ -1,3 +1,5 @@
+mod preview;
+pub use preview::NativeVnPreview;
 mod execution;
 pub use execution::NativeVnRuntimeExecution;
 mod media_scope;
@@ -136,6 +138,7 @@ pub enum VnUiHostRequest {
 
 pub struct NativeVnHostCommandSource {
     presentation_failed: bool,
+    compiled_project_hash: Hash256,
     media_scope: astra_runtime::TaskScope,
     video_scopes: BTreeMap<String, astra_runtime::TaskScope>,
     host: NativeVnRuntimeHost,
@@ -853,6 +856,7 @@ impl NativeVnHostCommandSource {
             next_media_resource_id: 10_000,
             stage_director,
             presentation_failed: false,
+            compiled_project_hash: compiled.project_hash,
             media_scope: astra_runtime::TaskScope::new(),
             video_scopes: BTreeMap::new(),
             story,
@@ -1570,7 +1574,22 @@ impl NativeVnHostCommandSource {
         }
         let save_metadata = restore_save_metadata(envelope.payload.save_metadata.clone())?;
         validate_save_metadata(&save_metadata, &envelope.payload.slot)?;
-        let restored_runtime_state = saved_runtime_state(&envelope.payload.runtime)?;
+        let state = product_save::NativeVnRestoreState {
+            runtime: envelope.payload.runtime,
+            stage_director: envelope.payload.stage_director,
+            director_transition_snapshot: envelope.payload.director_transition_snapshot,
+            step_evidence: envelope.payload.step_evidence,
+        };
+        self.restore_explicit_state(state, Some(save_metadata), committed)
+    }
+
+    fn restore_explicit_state(
+        &mut self,
+        state: product_save::NativeVnRestoreState,
+        save_metadata: Option<NativeVnSaveMetadata>,
+        committed: &mut bool,
+    ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
+        let restored_runtime_state = saved_runtime_state(&state.runtime)?;
         let restored_locale = restored_runtime_state.locale.clone();
         if !self.localizations.contains_key(&restored_locale) {
             return Err(NativeVnHostError::Localization(format!(
@@ -1579,9 +1598,12 @@ impl NativeVnHostCommandSource {
         }
         // Decode and validate every saved presentation reference before World changes.
         self.stage_director
-            .validate_restore_candidate(&envelope.payload.stage_director)
+            .validate_restore_candidate(&state.stage_director)
             .map_err(stage_director_error)?;
-        if !self.ui_save_slots.contains_key(&save_metadata.slot_id) {
+        if save_metadata
+            .as_ref()
+            .is_some_and(|metadata| !self.ui_save_slots.contains_key(&metadata.slot_id))
+        {
             return Err(NativeVnHostError::Save(
                 "ASTRA_PLAYER_SAVE_METADATA_SLOT: metadata references an undeclared slot".into(),
             ));
@@ -1594,20 +1616,18 @@ impl NativeVnHostCommandSource {
             .checked_add(1)
             .ok_or(NativeVnHostError::SequenceOverflow)?;
         let mut required = presentation::stage_texture_requirements(
-            envelope.payload.stage_director.state(),
+            state.stage_director.state(),
             &BTreeMap::new(),
         )
         .0;
-        let saved_transition_id = envelope
-            .payload
+        let saved_transition_id = state
             .stage_director
             .state()
             .transition
             .as_ref()
             .and_then(|transition| transition.descriptor_id.as_deref());
         if saved_transition_id
-            != envelope
-                .payload
+            != state
                 .director_transition_snapshot
                 .as_ref()
                 .map(|snapshot| snapshot.descriptor_id.as_str())
@@ -1616,8 +1636,8 @@ impl NativeVnHostCommandSource {
                 "ASTRA_PLAYER_RESTORE_TRANSITION_IDENTITY".into(),
             ));
         }
-        if let Some(snapshot) = envelope.payload.director_transition_snapshot.as_ref() {
-            let target = envelope.payload.stage_director.state();
+        if let Some(snapshot) = state.director_transition_snapshot.as_ref() {
+            let target = state.stage_director.state();
             if snapshot.source_state.schema != target.schema
                 || snapshot.source_state.profile != target.profile
                 || target
@@ -1654,20 +1674,20 @@ impl NativeVnHostCommandSource {
             prepared_textures.insert(asset_id.clone(), frame);
         }
         stage_scene_commands(
-            envelope.payload.stage_director.state(),
+            state.stage_director.state(),
             &prepared_textures,
             &prepared_dimensions,
             self.width,
             self.height,
         )?;
         let restored_transition_snapshot = restore_director_transition_snapshot(
-            envelope.payload.director_transition_snapshot.as_ref(),
+            state.director_transition_snapshot.as_ref(),
             &prepared_textures,
             &prepared_dimensions,
             self.width,
             self.height,
         )?;
-        let report = self.host.restore(envelope.payload.runtime)?;
+        let report = self.host.restore(state.runtime)?;
         *committed = true;
         self.reset_pending_work();
         self.image_prefetcher.reset_generation();
@@ -1682,13 +1702,15 @@ impl NativeVnHostCommandSource {
             .as_ref()
             .map_or(0, |state| state.backlog.len());
         self.activate_locale(&restored_locale)?;
-        self.stage_director = envelope.payload.stage_director;
+        self.stage_director = state.stage_director;
         for (asset_id, frame) in prepared_textures {
             self.store_texture(asset_id, frame, &required)?;
         }
         self.director_transition_snapshot = restored_transition_snapshot;
-        self.last_step_evidence = Some(envelope.payload.step_evidence);
-        self.apply_save_metadata(save_metadata)?;
+        self.last_step_evidence = Some(state.step_evidence);
+        if let Some(metadata) = save_metadata {
+            self.apply_save_metadata(metadata)?;
+        }
         self.ui_controller_sessions.clear();
         self.base_ui_instance_id = None;
         self.base_ui_theme_id = None;

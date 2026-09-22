@@ -1,6 +1,13 @@
 use super::*;
 use crate::{NativeVnProductMediaHost, NativeVnProductMediaSnapshot};
 
+#[derive(Clone, serde::Serialize)]
+pub(super) struct NativeVnRestoreState {
+    pub runtime: astra_runtime::SaveBlob,
+    pub stage_director: ProductStageDirector,
+    pub director_transition_snapshot: Option<SavedDirectorTransitionSnapshot>,
+    pub step_evidence: NativeVnStepEvidence,
+}
 impl NativeVnHostCommandSource {
     pub fn prepare_product_save_transaction(
         &mut self,

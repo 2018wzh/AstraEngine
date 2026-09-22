@@ -6,6 +6,22 @@ pub(super) type OpenFuture =
 pub(super) type CloseFuture = Pin<Box<dyn Future<Output = Result<(), PlatformError>> + Send>>;
 
 impl NativeVnProductAudioHost {
+    pub(crate) async fn set_output_paused(
+        &mut self,
+        paused: bool,
+        executor: &PlayerHostCommandExecutor<PlatformCommandSink>,
+    ) -> Result<(), PlatformError> {
+        if let Some(output) = self.output {
+            if paused {
+                executor.sink().client().pause_audio(output).await?;
+            } else {
+                executor.sink().client().resume_audio(output).await?;
+            }
+        }
+        self.output_paused = paused;
+        Ok(())
+    }
+
     pub async fn ensure_open(
         &mut self,
         _source: &mut crate::NativeVnHostCommandSource,
@@ -30,7 +46,7 @@ impl NativeVnProductAudioHost {
                 channels: CANONICAL_CHANNELS,
                 chunk_frames: limits.audio_chunk_frames,
                 max_buffered_frames: Self::BUFFERED_FRAMES,
-                start_paused: false,
+                start_paused: self.output_paused,
                 capture_samples,
             };
             let owner = client.clone();
