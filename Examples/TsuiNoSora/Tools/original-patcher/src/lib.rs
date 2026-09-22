@@ -113,18 +113,34 @@ fn verify_root(root: &Path) -> PatchResult<PatchManifest> {
     let manifest = PatchManifest::read(root)?;
     manifest.validate_contract()?;
     let actual_files = filesystem::collect_file_digests(root, Some(PATCH_MANIFEST_NAME))?;
-    if actual_files != manifest.output_files {
-        return Err(PatchError::validation(
-            "TSUI_PATCH_OUTPUT_FILESET_MISMATCH",
-            "patched output files do not match patch-manifest.json",
-        ));
-    }
+    verify_distribution_files(&actual_files, &manifest.output_files)?;
     let menu = filesystem::join_relative(root, PATCHED_MENU_PATH)?;
     director::verify_exit_to_debug(&menu)?;
     window_policy::verify(root)?;
     locale_emulator::verify_installed(root)?;
     window_launcher::verify_installed(root)?;
     Ok(manifest)
+}
+
+fn verify_distribution_files(
+    actual: &[filesystem::FileDigest],
+    expected: &[filesystem::FileDigest],
+) -> PatchResult<()> {
+    // The original game owns this mutable file. It may appear, change, or be
+    // removed after patching; never rewrite it while verifying the distribution.
+    let distribution_file =
+        |file: &&filesystem::FileDigest| !file.relative_path.eq_ignore_ascii_case("savefile.tns");
+    if !actual
+        .iter()
+        .filter(distribution_file)
+        .eq(expected.iter().filter(distribution_file))
+    {
+        return Err(PatchError::validation(
+            "TSUI_PATCH_OUTPUT_FILESET_MISMATCH",
+            "patched output files do not match patch-manifest.json",
+        ));
+    }
+    Ok(())
 }
 
 pub fn launch_windowed(game_root: &Path) -> PatchResult<()> {

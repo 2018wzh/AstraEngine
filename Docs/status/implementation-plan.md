@@ -1,5 +1,13 @@
 # 全产品重构实施状态
 
+## 2026-09-23 集成与 Classic 复测
+
+新版 Classic 在 Windows Sandbox 完成正常新游戏、右键系统页、slot.02 保存/读取、退出重开和键盘恢复后继续；旧 slot.01 显示不可用且不能读写。正常快进在选择处停下，鼠标选择分支后进入后续场景；slot.03 和 slot.04 分别保留选择前及屋顶独白的正常游玩位置。保存页曾因聚焦受保护旧槽退出，已修复并实际复测。窗口关闭仍没有确认，逐类演出与完整 UX 对照继续进行，NullAudio 不计可听音频验收。
+
+原版私有副本进入真实 MENU 后确认同样使用绿底黑云，先前蓝白云属于 READY 初始化页，不是颜色转换错误。原配启动器把新增 savefile.tns 当作发行文件差异；私有副本的旧存档移到独立目录保留后可启动，新测试档也写入独立目录。用户原目录未改动。本树补丁器已把根目录 savefile.tns 视为原版可变文件，其余发行文件仍逐项校验；23 项回归和 Clippy 通过。该工具与用户副本的 manifest 代次不同，本轮没有改写或迁移用户 manifest。
+
+Editor 的项目工作区、真实 Player 预览管道、ACP/MCP 审批事务、路由连接图及关键帧编辑已集成；独立 workspace 的 10 项测试、all-target Clippy 和格式检查通过。真实产品用例由负责工作线显式运行，本次集成未重复执行默认 ignored 的外部 Agent 和 GPU 预览测试；拖拽曲线及完整创作体验仍未关闭。《eden*》严格 checkpoint 恢复首批已集成，10 项格式/恢复测试通过；Family GPU/媒体恢复和原版导出读回仍未完成。
+
 ## Linux 包加载完成与取消回收
 
 Linux HTTPS 包 worker 现在先入队 completion，再唤醒处于 `ControlFlow::Wait` 的 event loop；无需等待额外键鼠输入。同步与异步包打开若向已取消的接收端发送句柄失败，立即移除句柄并释放缓存 lease。新增回归覆盖投递先于唤醒、取消后缓存预算淘汰和失败不分配句柄。下载 worker 由 Linux Host 持有；调用方取消会丢弃等待中的下载 future，Host 销毁先取消全部请求再 join，完成的 worker 在后续事件处理中回收。取消回归实际创建未完成 cache staging，并确认线程退出和临时文件删除。启用 `platform-test-driver` 的 Linux all-targets 6 项测试通过。共享离屏 renderer 的 4 项硬件 GPU 测试通过，覆盖绘制顺序、纹理扩容/回收和滤镜回读；这不代表真实 HTTPS、窗口、可听音频、商业游戏或正式性能已验收。
@@ -10,7 +18,7 @@ Linux HTTPS 包 worker 现在先入队 completion，再唤醒处于 `ControlFlow
 
 | 工作项 | 实现 | 设备/游戏验收 |
 | --- | --- | --- |
-| Player `--test-null-audio` | 已接入共享 PCM 队列、采样时钟、暂停与取消关闭；五项 PCM 队列/时钟/暂停/取消重开回归通过 | Windows 已完成标题、新游戏至正文、右键系统页、空槽保存、推进后读取及进程重启读取；选择与演出对照仍待完成，可听音频不计通过 |
+| Player `--test-null-audio` | 已接入共享 PCM 队列、采样时钟、暂停与取消关闭；五项 PCM 队列/时钟/暂停/取消重开回归通过 | 新版 Windows 已完成新游戏、连续剧情、选择分支、系统页、新槽保存/读取及进程重启读取；逐类演出对照仍待完成，可听音频不计通过 |
 | EMU/SDK 六核心与《eden*》互通 | 实施中 | 每核短流程与原版双向读回待完成 |
 | Engine/VN 运行职责、任务、Luau、DSL 与旧 ABI 消费者 | 实施中 | 受影响回归及 Classic 集成待完成 |
 | Android Manager/VN Player | Player 分块加载、单次 storage audit、阶段反馈与生命周期修复已实现，arm64 Release/Clippy 与 14 项增量回归通过；Manager 未验收 | 按用户要求暂停真机验收，新行为未实机验证 |
