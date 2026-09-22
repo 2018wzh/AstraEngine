@@ -382,18 +382,28 @@ fn stores_command_30_word_without_assigning_game_semantics() {
 }
 
 #[test]
-fn command_751_stores_texture_readiness_without_operands() {
-    let mut state = CmvsPs2aVmState::new(0);
-    execute_cmvs390_frame(
-        &mut state,
-        &CmvsPs2aInstructionFrame::Command {
-            span: SPAN,
-            command_id: 751,
-        },
-    )
-    .unwrap();
-    assert_eq!(state.interpreter_words.get(&81220), Some(&1));
-    assert_eq!(state.stack_cursor_bytes, 0);
+fn command_751_reads_input_modes_without_inventing_gpu_readiness() {
+    for (skip, auto, force, expected) in [
+        (false, false, 0, 0),
+        (true, false, 0, 1),
+        (false, true, 0, 1),
+        (false, false, 1, 1),
+    ] {
+        let mut state = CmvsPs2aVmState::new(0);
+        state.input_skip_mode = skip;
+        state.input_auto_mode = auto;
+        state.interpreter_words.insert(1464, force);
+        execute_cmvs390_frame(
+            &mut state,
+            &CmvsPs2aInstructionFrame::Command {
+                span: SPAN,
+                command_id: 751,
+            },
+        )
+        .unwrap();
+        assert_eq!(state.interpreter_words.get(&81220), Some(&expected));
+        assert_eq!(state.stack_cursor_bytes, 0);
+    }
 }
 
 #[test]

@@ -34,14 +34,10 @@ pub(super) fn lookup(command_id: u16) -> Option<CommandFields> {
             },
             &[] as &[CmvsPs2aCommandStackWord],
         ),
-        // Handler `sub_4793B0` (case 751): the texture-readiness poll. The
-        // original stores `(manager 293 != 0 || manager 296 != 0)` while the
-        // override field at byte offset 1464 is zero and forces success
-        // otherwise; the headless texture pipeline decodes synchronously, so
-        // the canonical readiness value is always success. Returns 0x4000.
+        // Native input modes 293/296, or interpreter override 1464.
         751 => (
             0,
-            CmvsPs2aCommandEffectKind::StoreTextureReadyFlag {
+            CmvsPs2aCommandEffectKind::ReadAutomaticAdvance {
                 result_field_offset: 81220,
                 override_field_offset: 1464,
             },

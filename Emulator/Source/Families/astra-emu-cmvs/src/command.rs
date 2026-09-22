@@ -137,10 +137,8 @@ pub enum CmvsPs2aCommandEffectKind {
     },
     /// Case 417 consumes advance edges without releasing physical buttons.
     ConsumeAdvanceLatch,
-    /// `sub_4793B0` (case 751): texture-readiness poll. When the override
-    /// field is zero the canonical readiness value is stored; any non-zero
-    /// override forces success. No stack operands; returns `0x4000`.
-    StoreTextureReadyFlag {
+    /// Case 751: read skip/auto input modes or the interpreter override.
+    ReadAutomaticAdvance {
         result_field_offset: u32,
         override_field_offset: u32,
     },

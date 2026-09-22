@@ -198,6 +198,8 @@ pub struct CmvsPs2aVmState {
     /// input-manager object stores it at fields 180/181 every frame
     /// (`sub_461630`) and the hit-test commands read it through `sub_45CF40`.
     pub input_confirm_held: bool,
+    pub input_skip_mode: bool,
+    pub input_auto_mode: bool,
     pub input_advance_release: bool,
     pub input_advance_press: bool,
     pub pointer_x: i32,
@@ -266,6 +268,8 @@ impl CmvsPs2aVmState {
             message_string_slots: BTreeMap::new(),
             save_image_owner: None,
             input_confirm_held: false,
+            input_skip_mode: false,
+            input_auto_mode: false,
             input_advance_release: false,
             input_advance_press: false,
             pointer_x: 0,

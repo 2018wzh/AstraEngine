@@ -173,7 +173,7 @@ pub(super) fn execute_command(
         }
         CmvsPs2aCommandEffectKind::ConsumeAdvanceLatch
         | CmvsPs2aCommandEffectKind::ReadInputLatches { .. }
-        | CmvsPs2aCommandEffectKind::StoreTextureReadyFlag { .. }
+        | CmvsPs2aCommandEffectKind::ReadAutomaticAdvance { .. }
         | CmvsPs2aCommandEffectKind::ClearTextureChannelTable { .. }
         | CmvsPs2aCommandEffectKind::LoadTextureParentResource { .. }
         | CmvsPs2aCommandEffectKind::LoadTextureParentResourceExtended { .. }

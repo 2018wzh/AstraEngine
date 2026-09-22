@@ -27,23 +27,23 @@ pub(super) fn execute(
             Ok(None)
         }
         (
-            CmvsPs2aCommandEffectKind::StoreTextureReadyFlag {
+            CmvsPs2aCommandEffectKind::ReadAutomaticAdvance {
                 result_field_offset,
                 override_field_offset,
             },
             [],
         ) => {
-            // The headless texture pipeline decodes synchronously, so the
-            // recovered readiness pair (`sub_45CC20`/`sub_45D2D0`) always
-            // reports ready; the override field still forces success, which
-            // is already one here.
-            let _overridden = state
+            // Native manager fields 293/296 are input modes, not GPU fences.
+            let overridden = state
                 .interpreter_words
                 .get(&override_field_offset)
                 .copied()
                 .unwrap_or_default()
                 != 0;
-            state.interpreter_words.insert(result_field_offset, 1);
+            let automatic = state.input_skip_mode || state.input_auto_mode || overridden;
+            state
+                .interpreter_words
+                .insert(result_field_offset, u32::from(automatic));
             Ok(None)
         }
         (
