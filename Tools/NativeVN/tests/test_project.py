@@ -15,13 +15,13 @@ class ProjectRefreshTests(unittest.TestCase):
         # does not reject a story referencing an unbound window.
         windows = set()
         for source in (project.PACK / "Scripts").glob("*.astra"):
-            for line in source.read_text().splitlines():
+            for line in source.read_text(encoding="utf-8").splitlines():
                 if line.strip().startswith("text "):
                     match = re.search(r"\bwindow:([\w.-]+)", line)
                     windows.add(match.group(1) if match else "message")
         profiles = set()
         surfaces = {}
-        for line in (project.PACK / "UI/flagship.astra").read_text().splitlines():
+        for line in (project.PACK / "UI/flagship.astra").read_text(encoding="utf-8").splitlines():
             attrs = dict(re.findall(r"([a-z_]+):([\w.-]+)", line))
             if line.startswith("ui_policy "):
                 profiles.add(attrs["profile"])
@@ -57,8 +57,8 @@ class ProjectRefreshTests(unittest.TestCase):
             for name, content in authored.items():
                 self.assertEqual((root / name).read_bytes(), content, name)
             self.assertEqual(
-                (root / "project.yaml").read_text(),
-                (project.PACK / "project.yaml").read_text(),
+                (root / "project.yaml").read_text(encoding="utf-8"),
+                (project.PACK / "project.yaml").read_text(encoding="utf-8"),
                 "refresh must not resurrect the obsolete platform descriptor",
             )
 
