@@ -34,6 +34,8 @@ pub struct EdenHistoryMessage {
     pub bgm: String,
     pub bgm_volume: u16,
     pub sound_effects: [String; 2],
+    /// Native historical panel transition setting; no active timer is encoded.
+    pub panel_fade: u32,
     pub transition_ticks: u32,
 }
 
@@ -177,7 +179,6 @@ impl EdenHistoryMessage {
         fields.expect("CF1", "16777215")?;
         fields.expect("CF2", "22")?;
         fields.expect("CF3", "10")?;
-        fields.expect("CT5", "10")?;
         for name in [
             "CT3", "CT6", "CT7", "bgH", "bgS", "bgV", "stH", "stS", "stV", "Ct1",
         ] {
@@ -212,6 +213,7 @@ impl EdenHistoryMessage {
                 resource_name(fields.take("CE1")?)?,
                 resource_name(fields.take("CE2")?)?,
             ],
+            panel_fade: fields.number("CT5")?,
             transition_ticks: fields.number("Ct3")?,
         };
         fields.finish()?;
@@ -220,6 +222,7 @@ impl EdenHistoryMessage {
             || i32::try_from(message.message_id).is_err()
             || i32::try_from(message.transition_ticks).is_err()
             || message.bgm_volume > 100
+            || !matches!(message.panel_fade, 0 | 10)
             || !matches!(message.panel_mode, 0 | 1 | 3)
         {
             return Err(unsupported());

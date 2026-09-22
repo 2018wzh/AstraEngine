@@ -18,13 +18,20 @@ pub(crate) fn export(
     slot: u32,
     output: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    if std::fs::symlink_metadata(output).is_ok() {
+    if output.extension().and_then(|value| value.to_str()) != Some("sav") {
+        return Err("ASTRA_EMU_EDEN_SAVE_OUTPUT_NAME: output must end in .sav".into());
+    }
+    let thumbnail = output.with_extension("png");
+    if std::fs::symlink_metadata(output).is_ok() || std::fs::symlink_metadata(&thumbnail).is_ok() {
         return Err("ASTRA_EMU_EDEN_SAVE_OUTPUT_EXISTS: choose a new output file".into());
     }
     let save = astra_emu_musica::eden_save::export_slot(game_dir, profile, slot)?;
-    let bytes = save.encode()?;
+    let bytes = save.save.encode()?;
+    // Publish SAV last: native readers must never see a loadable slot without its preview.
+    // If publication fails, any new PNG remains explicit and no existing file is replaced.
+    super::private_output::write_new_private(&thumbnail, &save.thumbnail_png)?;
     super::private_output::write_new_private(output, &bytes)?;
-    println!("Exported one native eden message checkpoint into a new file. Original-game readback was not performed.");
+    println!("Exported one native eden message checkpoint and its captured thumbnail into new files. Original-game readback was not performed.");
     Ok(())
 }
 pub(crate) fn inspect(
@@ -80,6 +87,20 @@ fn read(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn export_preserves_an_existing_companion_thumbnail() {
+        let root = tempfile::tempdir().unwrap();
+        let output = root.path().join("eden0020.sav");
+        let thumbnail = output.with_extension("png");
+        std::fs::write(&thumbnail, b"existing native thumbnail").unwrap();
+        assert!(export(root.path(), Path::new("missing.profile"), 0, &output).is_err());
+        assert!(!output.exists());
+        assert_eq!(
+            std::fs::read(thumbnail).unwrap(),
+            b"existing native thumbnail"
+        );
+    }
+
     #[test]
     fn export_never_replaces_an_existing_target_even_if_the_source_is_invalid() {
         let root = tempfile::tempdir().unwrap();

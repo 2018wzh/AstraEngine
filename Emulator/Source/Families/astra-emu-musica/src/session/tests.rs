@@ -472,6 +472,7 @@ fn corrupt_or_foreign_slot_is_never_overwritten() {
     std::fs::write(&slot, b"original commercial save").unwrap();
     let store = crate::storage::Storage::new(root.path()).unwrap();
     let state = crate::storage::Snapshot {
+        logical_extent: [1280, 720],
         card: crate::storage::SaveCard::capture(1280, 720, 1280, 720, &vec![255; 1280 * 720 * 4])
             .unwrap(),
         game: astra_core::Hash256::from_sha256(b"game"),

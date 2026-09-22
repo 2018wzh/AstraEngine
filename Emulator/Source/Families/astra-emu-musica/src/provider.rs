@@ -104,6 +104,8 @@ pub fn musica_descriptor() -> FamilyDescriptor {
     });
     configuration.push(render_extent("render_width", "GPU render width", 1280));
     configuration.push(render_extent("render_height", "GPU render height", 720));
+    configuration.push(render_extent("logical_width", "Game logical width", 1280));
+    configuration.push(render_extent("logical_height", "Game logical height", 720));
     configuration.push(ConfigField {
         id: "script_encoding".into(),
         label: "Script encoding".into(),
@@ -265,6 +267,8 @@ impl MusicaProvider {
         };
         let raster_width = render_extent("render_width")?;
         let raster_height = render_extent("render_height")?;
+        let logical_width = render_extent("logical_width")?;
+        let logical_height = render_extent("logical_height")?;
         let encoding = match config
             .iter()
             .find(|e| e.id == "script_encoding")
@@ -298,6 +302,12 @@ impl MusicaProvider {
         let primary_encoding = encoding;
         let imported =
             eden::read_import(root, &get("eden_import_file")?, &config, primary_encoding)?;
+        if imported.is_some() && [logical_width, logical_height] != [1024, 640] {
+            return Err(error(
+                "ASTRA_EMU_EDEN_SAVE_CANVAS",
+                "eden native saves require a 1024 by 640 logical canvas",
+            ));
+        }
         if imported.is_some() && title_launch {
             return Err(error(
                 "ASTRA_EMU_EDEN_SAVE_LAUNCH",
@@ -370,8 +380,8 @@ impl MusicaProvider {
             })?;
         let mut scene = Scene::new_scaled(
             archive.clone(),
-            1280,
-            720,
+            logical_width,
+            logical_height,
             raster_width,
             raster_height,
             texture_overrides,
@@ -414,8 +424,8 @@ impl MusicaProvider {
         let info = FrameInfo {
             width: raster_width,
             height: raster_height,
-            logical_width: 1280,
-            logical_height: 720,
+            logical_width,
+            logical_height,
             stride: raster_width
                 .checked_mul(4)
                 .ok_or_else(|| error("ASTRA_EMU_MUSICA_FRAME_SIZE", "frame stride overflows"))?,

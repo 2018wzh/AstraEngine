@@ -95,7 +95,7 @@ fn write_message(message: &EdenHistoryMessage) -> Vec<EdenSaveField> {
         field("CT2", &message.background),
         field("CT3", message.background_position[0]),
         field("CT4", message.background_position[1]),
-        field("CT5", 10),
+        field("CT5", message.panel_fade),
         field("CT6", 0),
         field("CT7", 0),
         field("Frm", ""),

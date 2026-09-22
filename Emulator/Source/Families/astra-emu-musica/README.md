@@ -20,11 +20,11 @@ Musica 提供独立 `FamilyProvider`、`FamilySession` 和可选 `abi_stable` �
 
 PAZ 的边界/重叠校验、分卷读取、Blowfish/RC4、XOR、解压和源文件变化校验保留。SDK 的 `ArchiveManifest` 是核心本地索引，不是 Host VFS 或产品 package。私有配置有界读取与明文缓存也由 SDK 共用；配置相对路径以游戏目录为基准，公共读取错误使用 `ASTRA_EMU_PROFILE_*`。导入/读取不运行 managed helper、BinaryFormatter 或 executable patch。
 
-核心自有 slot 位于游戏目录 `.astra-musica/saves/slot-000.asav`。容器 `AMUSSV04` 包含长度、SHA-256 与 postcard snapshot，保存 VM、当前文本、等待进度以及 sound resource/播放位置/volume/pan/repeat。它绑定同一 archive/profile identity；加载重建脚本、场景和声音后提交。临时文件 flush 后原子替换；损坏、异版本或外部格式文件拒绝覆盖。此格式不宣称兼容原版存档。加载恢复声音的当前参数、位置与尚未完成的音量渐变。渐变保存分贝起止值、总采样数、已推进采样数和结束停止意图；按剩余采样继续，暂停不推进渐变。新音量命令替换旧渐变。旧 AMUSSV03 及更早内部格式明确拒绝，不覆盖旧 slot。
+核心自有 slot 位于游戏目录 `.astra-musica/saves/slot-000.asav`。容器 `AMUSSV05` 包含长度、SHA-256 与 postcard snapshot，保存 VM、当前文本、等待进度以及 sound resource/播放位置/volume/pan/repeat。它绑定同一 archive/profile identity；加载重建脚本、场景和声音后提交。临时文件 flush 后原子替换；损坏、异版本或外部格式文件拒绝覆盖。此格式不宣称兼容原版存档。加载恢复声音的当前参数、位置与尚未完成的音量渐变。渐变保存分贝起止值、总采样数、已推进采样数和结束停止意图；按剩余采样继续，暂停不推进渐变。新音量命令替换旧渐变。旧 AMUSSV04 及更早内部格式明确拒绝，不覆盖旧 slot。
 
 ## eden 原版存档与检查点
 
-`eden_save::EdenSave` 提供有界读取与容器编码，已补充严格检查点投影和 VM 恢复候选接口，Family 已接入严格子集的设备恢复和当前消息导出；原版读回仍待验收。`EdenEdition` 显式区分日文 CD-ROM 签名和本地 Steam English 签名：前者为 `;\n!`、`0xAA` 与 `eden 1.00`，后者为四个零字节与 `eden_en 1.00`。签名后依次为 NUL、有界注释、NUL、四字节 route 和单个 zlib 流。不会搜索压缩魔数来猜测偏移。
+`eden_save::EdenSave` 提供有界读取与容器编码，已补充严格检查点投影和 VM 恢复候选接口，Family 已接入严格子集的设备恢复和当前消息导出；已完成一个静态消息片段的原版读回与继续，范围见下文。`EdenEdition` 显式区分日文 CD-ROM 签名和本地 Steam English 签名：前者为 `;\n!`、`0xAA` 与 `eden 1.00`，后者为四个零字节与 `eden_en 1.00`。签名后依次为 NUL、有界注释、NUL、四字节 route 和单个 zlib 流。不会搜索压缩魔数来猜测偏移。
 
 `EdenSaveEncoding` 由调用方显式选择 Shift-JIS、GBK 或 Windows-1252。解码须无替换字符，重新编码须还原原字节；写入不可表达字符直接失败。变量及 backlog 保留原字段顺序，包括多语言 `L1_0` 等字段，不补默认字段或丢弃未知字段。重复字段、结构注入、截尾、压缩校验失败、追加压缩流和大小超限均拒绝；容器和解压体各限 16 MiB。类型不实现 Debug，避免误打出正文。
 
@@ -74,4 +74,6 @@ cargo build --manifest-path Emulator/Cargo.toml -p astra-emu-musica --features d
 
 VM 的可序列化状态集中在 runtime/model.rs，演出命令在 runtime/effects.rs，音频命令在 runtime/audio_commands.rs，选择处理在 runtime/choices.rs。调度与存读档保留在 runtime.rs，共享演出序号仍由 VM 分配。运行错误通过 typed diagnostic_code() 返回稳定标识；未实现命令只向 Family/Manager 返回指令序号，不透传脚本文本。
 
-`export-eden-save` 从核心自有槽读取权威 VM 与音频快照，重建已知原版字段；只允许导入后仍可准确表示的普通消息检查点。选择、未知变量、动态演出、活动音频渐变等状态拒绝导出。输出必须为不存在的新文件，不覆盖原版槽。内部 VM 格式升级为 v25，保留具名历史状态而非未知原版字段；旧槽在外层 AMUSSV04 检查时拒绝，读取失败不覆盖文件。当前导出仅生成 SAV，原版缩略图和原版加载后的媒体语义仍须实际核对。
+`export-eden-save` 从核心自有槽读取权威 VM 与音频快照，重建已知原版字段；只允许导入后仍可准确表示的普通消息检查点。选择、未知变量、动态演出、活动音频渐变等状态拒绝导出。输出必须为不存在的新文件，不覆盖原版槽。内部 VM 格式升级为 v26，保留具名历史状态而非未知原版字段；旧槽在外层 AMUSSV05 检查时拒绝，读取失败不覆盖文件。导出生成 SAV 与同名 128×80 PNG；缩略图来自该核心槽实际保存的 GPU 画面。两个目标都必须不存在，先发布 PNG、再发布 SAV；中途失败保留已产生的独立文件并报错，不覆盖既有文件。已在独立原版副本完成一个静态消息片段的导入、继续、保存、导出、读取继续；原版复存的剧情、变量、历史及媒体资源字段对齐。未验收可听音频与其他历史类型，不能据此声明全部存档兼容。
+
+原版历史 `CT5` 保存面板切换参数，支持已经核对的 0 和 10；其他值明确拒绝。逻辑画布与 GPU 光栅尺寸分别配置，eden 原版导入要求 1024×640；核心槽保存逻辑画布身份，不同画布加载在修改活动状态前拒绝。

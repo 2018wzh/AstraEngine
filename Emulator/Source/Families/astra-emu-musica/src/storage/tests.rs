@@ -4,6 +4,7 @@ use astra_media_core::Extent2D;
 
 fn snapshot(game: &[u8], message: &str) -> Snapshot {
     Snapshot {
+        logical_extent: [1280, 720],
         card: SaveCard::capture(1280, 720, 1280, 720, &vec![255; 1280 * 720 * 4]).unwrap(),
         game: Hash256::from_sha256(game),
         vm: vec![],
@@ -84,6 +85,7 @@ fn arbitrary_size_save_cards_round_trip_through_storage() {
         let mut card = SaveCard::capture(1280, 720, width, height, &rgba).unwrap();
         card.comment = format!("scale-{width}x{height}");
         let snapshot = Snapshot {
+            logical_extent: [1280, 720],
             card,
             game,
             vm: vec![slot as u8],
@@ -187,7 +189,7 @@ fn malformed_save_cards_and_previous_formats_are_not_replaced() {
     bad.card = original.card.clone();
     bad.card.comment = "invalid\ncomment".into();
     assert!(storage.write(20, &bad).is_err());
-    for magic in [b"AMINSV02", b"AMUSSV03"] {
+    for magic in [b"AMINSV02", b"AMUSSV03", b"AMUSSV04"] {
         let mut old = bytes.clone();
         old[..8].copy_from_slice(magic);
         std::fs::write(&path, &old).unwrap();

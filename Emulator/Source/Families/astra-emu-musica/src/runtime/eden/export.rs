@@ -66,9 +66,11 @@ impl MusicaVm {
         };
         let last = history.last().ok_or_else(invalid)?;
         let command = checked_command(last, &self.script)?;
-        if history.len() != self.state.backlog.len()
-            || capture(&self.state, command).map_err(|_| invalid())? != *last
-        {
+        let mut current = capture(&self.state, command).map_err(|_| invalid())?;
+        // CT5 is the recorded panel transition setting, not a live timer.
+        // The current message owns this typed value; new messages record zero.
+        current.panel_fade = last.panel_fade;
+        if history.len() != self.state.backlog.len() || current != *last {
             return Err(invalid());
         }
         let save = EdenSave::from_history(*edition, *encoding, history)?;
@@ -183,6 +185,7 @@ fn capture(
         bgm,
         bgm_volume,
         sound_effects: [String::new(), String::new()],
+        panel_fade: 0,
         transition_ticks: state.transition.duration_ticks,
     })
 }

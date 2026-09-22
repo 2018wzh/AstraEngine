@@ -29,6 +29,7 @@ fn native_gpu_eden_import_continues_saves_and_exports_authoritative_message() {
             bgm: String::new(),
             bgm_volume: 100,
             sound_effects: Default::default(),
+            panel_fade: 0,
             transition_ticks: 30,
         }],
     )
@@ -38,6 +39,14 @@ fn native_gpu_eden_import_continues_saves_and_exports_authoritative_message() {
     std::fs::write(root.path().join("native.sav"), &native).unwrap();
     let mut req = request(root.path(), Sink::default());
     req.configuration.extend([
+        ConfigEntry {
+            id: "logical_width".into(),
+            value: ConfigValue::Integer(1024),
+        },
+        ConfigEntry {
+            id: "logical_height".into(),
+            value: ConfigValue::Integer(640),
+        },
         ConfigEntry {
             id: "script_encoding".into(),
             value: ConfigValue::Enum("gbk".into()),
@@ -64,6 +73,20 @@ fn native_gpu_eden_import_continues_saves_and_exports_authoritative_message() {
     session.advance(16_666_667, &[key(KeyCode::Enter)]).unwrap();
     assert_eq!(session.message.as_ref().unwrap().0, "continued");
     session.advance(0, &[key(KeyCode::F5)]).unwrap();
+    let before = session.vm.encode_native_save().unwrap();
+    let mut incompatible = session.storage.read(10).unwrap();
+    incompatible.logical_extent = [1280, 720];
+    session.storage.write(11, &incompatible).unwrap();
+    let result = session.load(11).unwrap_err();
+    assert_eq!(result.code(), "ASTRA_EMU_MUSICA_SAVE_CANVAS");
+    assert_eq!(session.vm.encode_native_save().unwrap(), before);
+    assert_eq!(session.message.as_ref().unwrap().0, "continued");
+    assert!(crate::eden_save::export_slot(
+        root.path(),
+        std::path::Path::new(crate::MUSICA_PROFILE_FILE),
+        11,
+    )
+    .is_err());
     Box::new(session).close().unwrap();
     let exported = crate::eden_save::export_slot(
         root.path(),
@@ -71,7 +94,9 @@ fn native_gpu_eden_import_continues_saves_and_exports_authoritative_message() {
         10,
     )
     .unwrap();
-    let checkpoint = exported.checkpoint().unwrap();
+    let thumbnail = image::load_from_memory(&exported.thumbnail_png).unwrap();
+    assert_eq!((thumbnail.width(), thumbnail.height()), (128, 80));
+    let checkpoint = exported.save.checkpoint().unwrap();
     assert_eq!(checkpoint.message_id, 8);
     assert_eq!(checkpoint.history.len(), 2);
     assert_eq!(

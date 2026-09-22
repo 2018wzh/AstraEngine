@@ -243,6 +243,30 @@ fn native_restore_failure_keeps_active_state_and_rejects_unmodeled_fields() {
 }
 
 #[test]
+fn native_resave_zero_panel_fade_is_typed_and_other_values_are_rejected() {
+    let mut save = checkpoint_fixture();
+    save.backlog[0]
+        .iter_mut()
+        .find(|field| field.name == "CT5")
+        .unwrap()
+        .value = "0".into();
+    assert_eq!(save.checkpoint().unwrap().history[0].panel_fade, 0);
+    let mut vm = vm();
+    vm.restore_eden_save(&save, |_| panic!("current script"), 1)
+        .unwrap();
+    assert_eq!(
+        vm.export_eden_save().unwrap().checkpoint().unwrap().history[0].panel_fade,
+        0
+    );
+    save.backlog[0]
+        .iter_mut()
+        .find(|field| field.name == "CT5")
+        .unwrap()
+        .value = "1".into();
+    assert!(save.checkpoint().is_err());
+}
+
+#[test]
 fn missing_history_script_does_not_discard_history_or_replace_active_vm() {
     let mut vm = vm();
     let original = vm.encode_native_save().unwrap();

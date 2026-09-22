@@ -13,7 +13,7 @@ mod progress;
 mod quick;
 pub(crate) use card::SaveCard;
 
-const MAGIC: &[u8; 8] = b"AMUSSV04";
+const MAGIC: &[u8; 8] = b"AMUSSV05";
 const MAX_SAVE: usize = 16 * 1024 * 1024;
 pub(crate) const SAVE_PAGE_WIDTH: u32 = 10;
 pub(crate) const SAVE_PAGE_COUNT: u32 = 10;
@@ -21,6 +21,7 @@ pub(crate) const SAVE_MAX_SLOTS: u32 = SAVE_PAGE_WIDTH * SAVE_PAGE_COUNT;
 pub(crate) const MANUAL_SAVE_FIRST_SLOT: u32 = 20;
 #[derive(Serialize, Deserialize)]
 pub(crate) struct Snapshot {
+    pub logical_extent: [u32; 2],
     pub card: SaveCard,
     pub game: Hash256,
     pub vm: Vec<u8>,

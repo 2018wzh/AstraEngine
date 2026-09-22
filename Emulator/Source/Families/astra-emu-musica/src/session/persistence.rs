@@ -64,6 +64,7 @@ impl MusicaSession {
         self.storage.write(
             slot,
             &Snapshot {
+                logical_extent: [self.info.logical_width, self.info.logical_height],
                 card,
                 game: self.game,
                 vm,
@@ -77,6 +78,12 @@ impl MusicaSession {
     }
     pub(super) fn load(&mut self, slot: u32) -> FamilyResult<()> {
         let mut saved = self.storage.read(slot)?;
+        if saved.logical_extent != [self.info.logical_width, self.info.logical_height] {
+            return Err(error(
+                "ASTRA_EMU_MUSICA_SAVE_CANVAS",
+                "save logical canvas differs from this session",
+            ));
+        }
         if saved.game != self.game {
             return Err(error(
                 "ASTRA_EMU_MUSICA_SAVE_GAME",

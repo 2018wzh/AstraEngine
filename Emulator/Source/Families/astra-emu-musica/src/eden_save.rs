@@ -5,7 +5,7 @@ mod checkpoint;
 mod position;
 mod slot;
 mod state;
-pub use slot::export_slot;
+pub use slot::{export_slot, EdenSlotExport};
 mod write_checkpoint;
 pub use checkpoint::{EdenCheckpoint, EdenHistoryMessage};
 pub use position::EdenMessagePosition;
