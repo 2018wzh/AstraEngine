@@ -1,9 +1,10 @@
 mod dispatch;
 mod native_text;
+pub(crate) use native_text::layout::append as append_native_static_text;
 mod state;
 use astra_emu_sdk::CoreError;
 pub use dispatch::execute_cmvs390_frame;
-pub use native_text::{CmvsNativeTextAction, CmvsNativeTextSurface};
+pub use native_text::{CmvsNativeTextAction, CmvsNativeTextGlyph, CmvsNativeTextSurface};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 pub use state::CmvsPs2aVmState;

@@ -2,7 +2,7 @@
 
 SDK 提供移植核心共同使用的模块，当前替代 Musica 内部的文字资源管理、纹理缓存、归档公共类型和音频解码。CMVS 与 Musica 共用错误、归档、缓存和音频模块；CMVS 的完整 Family session 仍待接通。Family API 独立存在，成熟外部核心无需依赖 SDK。
 
-默认启用 `text`、`image`、`archive` 和 `cache` feature，`audio` 单独选择。仅需要格式错误类型的消费者使用 `default-features = false`；CMVS 选择 `archive/cache/image/audio`，不引入 SDK 文字模块。`CoreError` 保留稳定 code 与说明，不能直接把未经审查的 message 写入日志；核心仍负责产生不含私有数据的错误。
+默认启用 `text`、`image`、`archive` 和 `cache` feature，`audio` 单独选择。仅需要格式错误类型的消费者使用 `default-features = false`；CMVS 选择 `archive/cache/image/audio/text`，原生文字规则留在核心，字形排版与资源生命周期复用 SDK。`CoreError` 保留稳定 code 与说明，不能直接把未经审查的 message 写入日志；核心仍负责产生不含私有数据的错误。
 
 `decode_audio` 复用 Symphonia 和 Kira，将完整单/双声道音频解码为浮点帧。同步调用借用 `&[u8]`，调用方保留归档或容器的字节所有者，返回的 PCM 独立持有采样；不要求将共享缓冲或容器子范围复制为 `Vec`。调用方指定最大帧数并持有取消标志；探测前和包之间检查取消，采样率变化、非有限采样、解码失败或超预算均明确失败。Musica 的旧解码模块已删除，读取资产时保留 `astra-byte-source::OwnedByteBuffer`；CMVS 用同一函数处理普通音频和经核心校验的 MGV 内嵌 Ogg。旧的按值 `Vec` 参数直接改为借用切片，不保留并行解码入口。此模块不创建音频设备或 worker，也不代替流式长媒体播放。
 

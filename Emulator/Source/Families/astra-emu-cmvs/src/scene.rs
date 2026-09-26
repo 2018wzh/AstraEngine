@@ -6,6 +6,7 @@ use astra_platform_common::WgpuOffscreenRenderer;
 use std::{collections::BTreeMap, num::NonZeroUsize};
 #[cfg(test)]
 mod tests;
+mod text;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum CmvsTextureSlot {
@@ -19,6 +20,7 @@ pub struct CmvsScene {
     textures: TextureCache,
     bindings: BTreeMap<CmvsTextureSlot, String>,
     sequence: u64,
+    text: text::NativeTextRenderer,
 }
 
 impl CmvsScene {
@@ -33,11 +35,39 @@ impl CmvsScene {
                 .map_err(|_| error("ASTRA_EMU_CMVS_TEXTURE_BUDGET"))?,
             bindings: BTreeMap::new(),
             sequence: 0,
+            text: text::NativeTextRenderer::default(),
         })
     }
 
     pub(crate) fn clear(&mut self, width: u32, height: u32) -> Result<TextureFrame, CoreError> {
         self.draw(width, height, Vec::new())
+    }
+
+    pub(crate) fn bind_text_font(&mut self, font: &str) -> Result<(), CoreError> {
+        self.text.bind_font(font)
+    }
+
+    pub(crate) fn has_text_renderer(&self) -> bool {
+        self.text.is_initialized()
+    }
+
+    pub(crate) fn append_text(
+        &mut self,
+        vm: &mut CmvsPs2aVmState,
+        slot: u8,
+        source: &str,
+    ) -> Result<(), CoreError> {
+        self.text.append(vm, slot, source)
+    }
+
+    pub(crate) fn render_text(
+        &mut self,
+        vm: &CmvsPs2aVmState,
+        width: u32,
+        height: u32,
+    ) -> Result<TextureFrame, CoreError> {
+        let commands = self.text.frame(vm)?;
+        self.draw(width, height, commands)
     }
 
     pub fn bind(
@@ -125,6 +155,7 @@ impl CmvsScene {
                 blend: BlendMode::Alpha,
             });
         }
+        commands.extend(self.text.frame(vm)?);
         self.draw(width, height, commands).map(Some)
     }
 

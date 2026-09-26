@@ -94,6 +94,8 @@ fn metrics_and_colors_preserve_native_signed_sentinels_and_cursor_rules() {
 fn text_and_font_values_are_copied_before_script_or_global_changes() {
     let mut state = fixture();
     command(&mut state, 256, &[5, 10, 0]).unwrap();
+    command(&mut state, 259, &[5, 0, 0, 512, 30]).unwrap();
+    command(&mut state, 261, &[5, 30, 0, 0]).unwrap();
     let action = command(&mut state, 267, &[5, 20]).unwrap();
     state.process_string_slots.insert(2, b"Other Font".to_vec());
     command(&mut state, 262, &[5, 0x80000002]).unwrap();
@@ -142,4 +144,16 @@ fn snapshot_rejects_disconnected_font_owners_and_invalid_color_words() {
     state.slot_objects.insert(762 << 8 | 2, owner);
     state.native_text.get_mut(&2).unwrap().colors[0] = u32::MAX;
     assert!(validate_cmvs390_vm_state(&state).is_err());
+}
+
+#[test]
+fn native_surface_translation_and_gradient_mode_are_independent_of_cursor() {
+    let mut state = fixture();
+    command(&mut state, 256, &[7, 10, 0]).unwrap();
+    command(&mut state, 259, &[7, 44, 60, 512, 30]).unwrap();
+    command(&mut state, 258, &[7, (-10i32) as u32, 25]).unwrap();
+    command(&mut state, 275, &[7, 3]).unwrap();
+    assert_eq!(state.native_text[&7].position, [-10, 25]);
+    assert_eq!(state.native_text[&7].cursor, [44, 60]);
+    assert_eq!(state.native_text[&7].color_mode, 3);
 }

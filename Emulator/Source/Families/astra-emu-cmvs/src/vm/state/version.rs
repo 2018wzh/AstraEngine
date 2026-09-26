@@ -5,12 +5,12 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 pub(super) struct VmVersion;
 impl Serialize for VmVersion {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_u32(5)
+        serializer.serialize_u32(6)
     }
 }
 impl<'de> Deserialize<'de> for VmVersion {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        if u32::deserialize(deserializer)? == 5 {
+        if u32::deserialize(deserializer)? == 6 {
             Ok(Self)
         } else {
             Err(serde::de::Error::custom(

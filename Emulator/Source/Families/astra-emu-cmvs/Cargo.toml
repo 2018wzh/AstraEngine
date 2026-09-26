@@ -11,7 +11,9 @@ crate-type = ["rlib", "cdylib"]
 abi_stable.workspace = true
 astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api", features = ["diagnostic-bridge"] }
 astra-byte-source = { path = "../../../../Engine/Source/Runtime/astra-byte-source" }
-astra-emu-sdk = { path = "../../SDK/astra-emu-sdk", default-features = false, features = ["archive", "cache", "image", "audio"] }
+astra-emu-sdk = { path = "../../SDK/astra-emu-sdk", default-features = false, features = ["archive", "cache", "image", "audio", "text"] }
+astra-text = { path = "../../../../Engine/Source/Runtime/astra-text" }
+fontdb.workspace = true
 kira.workspace = true
 astra-media-core = { path = "../../../../Engine/Source/Runtime/astra-media-core" }
 astra-platform = { path = "../../../../Engine/Source/Platform/astra-platform" }

@@ -90,10 +90,23 @@ impl CmvsSession {
     }
     fn action(&mut self, action: CmvsPs2aVmAction) -> FamilyResult<()> {
         match action {
-            CmvsPs2aVmAction::NativeText(_) => Err(error(
-                "ASTRA_EMU_CMVS_TEXT_UNBOUND",
-                "native text projection is not connected",
-            )),
+            CmvsPs2aVmAction::NativeText(action) => {
+                match action {
+                    CmvsNativeTextAction::Create { slot }
+                    | CmvsNativeTextAction::SetFont { slot } => {
+                        self.scene
+                            .bind_text_font(&self.vm.native_text[&slot].font)
+                            .map_err(core)?;
+                    }
+                    CmvsNativeTextAction::DrawStatic { slot, source } => {
+                        self.scene
+                            .append_text(&mut self.vm, slot, &source)
+                            .map_err(core)?;
+                    }
+                    CmvsNativeTextAction::Destroy { .. } | CmvsNativeTextAction::Clear { .. } => {}
+                }
+                Ok(())
+            }
             CmvsPs2aVmAction::CallScript { frame, name } => self.load(frame, name),
             CmvsPs2aVmAction::ReloadRootScript { name } => self.load(0, name),
             CmvsPs2aVmAction::EnsurePathDirectories { buffer_offset } => self
@@ -178,6 +191,11 @@ impl CmvsSession {
                     {
                         self.frame = frame;
                     }
+                } else if self.scene.has_text_renderer() {
+                    self.frame = self
+                        .scene
+                        .render_text(&self.vm, self.frame.width, self.frame.height)
+                        .map_err(core)?;
                 }
                 return Ok(());
             }

@@ -1167,7 +1167,7 @@ pub struct CmvsPs2aCommandContract {
 /// dispatch and handler bodies.
 pub fn cmvs390_command_contract(command_id: u16) -> Option<CmvsPs2aCommandContract> {
     let (stack_pop_bytes, effect_kind, stack_words) = match command_id {
-        256 | 257 | 259 | 260 | 261 | 262 | 263 | 264 | 267 | 268 => {
+        256 | 257 | 258 | 259 | 260 | 261 | 262 | 263 | 264 | 267 | 268 | 275 => {
             native_text::lookup(command_id)
         }
         0 | 11 | 12 | 16 | 18 | 19 | 20 | 17 | 23 | 21 | 22 | 24 | 26 | 29 | 30 | 31 | 32 | 33

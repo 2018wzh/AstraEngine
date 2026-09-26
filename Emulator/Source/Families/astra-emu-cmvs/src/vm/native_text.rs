@@ -1,5 +1,17 @@
 use super::*;
 use crate::CmvsNativeTextOperation;
+pub(crate) mod layout;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct CmvsNativeTextGlyph {
+    pub text: String,
+    pub position: [i32; 2],
+    pub font: String,
+    pub size: u32,
+    pub colors: [u32; 2],
+    pub style: u32,
+    pub color_mode: u32,
+}
 
 /// Native text-object parameters. Font names and source text stay inside the
 /// Family. CPU/GPU font handles never enter a snapshot.
@@ -16,6 +28,8 @@ pub struct CmvsNativeTextSurface {
     pub kinsoku: bool,
     pub style: u32,
     pub color_mode: u32,
+    pub position: [i32; 2],
+    pub glyphs: Vec<CmvsNativeTextGlyph>,
 }
 
 impl CmvsNativeTextSurface {
@@ -32,6 +46,8 @@ impl CmvsNativeTextSurface {
             kinsoku: true,
             style: 2,
             color_mode: 0,
+            position: [0; 2],
+            glyphs: Vec::new(),
         }
     }
 }
@@ -100,8 +116,25 @@ pub(super) fn validate(state: &CmvsPs2aVmState) -> Result<(), CoreError> {
             || surface.size > i32::MAX as u32
             || surface.character_spacing > i32::MAX as u32
             || surface.line_spacing > i32::MAX as u32
+            || surface.glyphs.len() > 65_535
         {
             return Err(fail());
+        }
+        for glyph in &surface.glyphs {
+            let (text, _, invalid_text) = encoding_rs::SHIFT_JIS.encode(&glyph.text);
+            let (font, _, invalid_font) = encoding_rs::SHIFT_JIS.encode(&glyph.font);
+            if glyph.text.chars().count() != 1
+                || text.len() > 2
+                || text.contains(&0)
+                || invalid_text
+                || invalid_font
+                || font.len() >= 64
+                || font.contains(&0)
+                || !(1..=4096).contains(&glyph.size)
+                || glyph.colors.iter().any(|color| color & 0xff00_0000 != 0)
+            {
+                return Err(fail());
+            }
         }
     }
     Ok(())
@@ -114,11 +147,11 @@ pub(super) fn execute(
 ) -> Result<Option<CmvsPs2aVmAction>, CoreError> {
     use CmvsNativeTextOperation::*;
     let expected = match operation {
-        Create | Colors | Cursor => 3,
+        Create | Colors | Cursor | Position => 3,
         Rect => 5,
         Metrics => 4,
         Destroy | Clear => 1,
-        Font | Kinsoku | DrawStatic => 2,
+        Font | Kinsoku | DrawStatic | ColorMode => 2,
     };
     if values.len() != expected {
         return Err(invalid(
@@ -190,6 +223,7 @@ pub(super) fn execute(
                 }
                 Clear => {
                     surface.cursor = [surface.rect[0], surface.rect[1]];
+                    surface.glyphs.clear();
                     Some(CmvsNativeTextAction::Clear { slot })
                 }
                 Metrics => {
@@ -226,10 +260,18 @@ pub(super) fn execute(
                     surface.cursor = [values[1].1 as i32, values[2].1 as i32];
                     None
                 }
-                DrawStatic => Some(CmvsNativeTextAction::DrawStatic {
-                    slot,
-                    source: string.unwrap(),
-                }),
+                Position => {
+                    surface.position = [values[1].1 as i32, values[2].1 as i32];
+                    None
+                }
+                ColorMode => {
+                    surface.color_mode = values[1].1;
+                    None
+                }
+                DrawStatic => {
+                    let source = string.unwrap();
+                    Some(CmvsNativeTextAction::DrawStatic { slot, source })
+                }
                 Create | Destroy => unreachable!(),
             }
         }
