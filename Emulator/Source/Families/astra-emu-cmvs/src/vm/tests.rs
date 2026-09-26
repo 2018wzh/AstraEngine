@@ -1684,41 +1684,44 @@ fn command_47_clears_all_top_level_texture_containers_and_children() {
 }
 
 #[test]
-fn command_143_emits_a_window_caption_request_with_prefix_segments() {
+fn command_143_requests_a_file_icon_without_misclassifying_it_as_title() {
     let mut state = CmvsPs2aVmState::new(0);
-    push(&mut state, 40);
+    state.process_string_slots.insert(2, b"game.ico".to_vec());
+    push(&mut state, 0x8000_0002);
     let action = run_command_with_action(&mut state, 143);
     assert_eq!(
         action,
-        Some(CmvsPs2aVmAction::SetWindowCaption {
+        Some(CmvsPs2aVmAction::SetWindowIcon {
             segments: vec![
                 CmvsStringSegment::InterpreterPrefixField {
                     field_offset: 10764
                 },
-                CmvsStringSegment::PrivateString(CmvsPs2aPrivateStringReference {
-                    relative_offset: 40,
-                }),
-            ],
+                CmvsStringSegment::OwnedString("game.ico".into()),
+            ]
         })
     );
     assert_eq!(state.stack_cursor_bytes, 0);
 }
 
 #[test]
-fn command_352_emits_a_raw_caption_request_without_prefix() {
+fn command_352_owns_its_title_and_preserves_empty_native_titles() {
     let mut state = CmvsPs2aVmState::new(0);
-    push(&mut state, 55);
-    let action = run_command_with_action(&mut state, 352);
-    assert_eq!(
-        action,
-        Some(CmvsPs2aVmAction::SetWindowCaption {
-            segments: vec![CmvsStringSegment::PrivateString(
-                CmvsPs2aPrivateStringReference {
-                    relative_offset: 55,
-                }
-            )],
-        })
-    );
+    for value in [b"title".to_vec(), Vec::new()] {
+        state.process_string_slots.insert(2, value.clone());
+        push(&mut state, 0x8000_0002);
+        let action = run_command_with_action(&mut state, 352);
+        state.process_string_slots.insert(2, b"changed".to_vec());
+        let segments = vec![CmvsStringSegment::OwnedString(
+            String::from_utf8(value).unwrap(),
+        )];
+        assert_eq!(
+            action,
+            Some(CmvsPs2aVmAction::SetWindowCaption {
+                segments: segments.clone()
+            })
+        );
+        assert_eq!(state.interpreter_string_buffers.get(&288), Some(&segments));
+    }
 }
 
 #[test]

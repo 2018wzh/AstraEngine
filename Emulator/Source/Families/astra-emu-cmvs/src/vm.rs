@@ -461,8 +461,10 @@ pub enum CmvsPs2aVmAction {
     EnsurePathDirectories {
         buffer_offset: u16,
     },
-    /// The recovered case-143 path asks the host to set the main window
-    /// caption from the ordered, payload-free segment sequence.
+    /// An owned caption to display through the Family window command.
+    SetWindowIcon {
+        segments: Vec<CmvsStringSegment>,
+    },
     SetWindowCaption {
         segments: Vec<CmvsStringSegment>,
     },

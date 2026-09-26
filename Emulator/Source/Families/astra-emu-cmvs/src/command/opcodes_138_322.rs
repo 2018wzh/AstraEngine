@@ -33,13 +33,15 @@ pub(super) fn lookup(command_id: u16) -> Option<CommandFields> {
             &OPAQUE_WORD as &[CmvsPs2aCommandStackWord],
         ),
         // Handler `sub_47C2D0` resolves the top stack word, builds the
-        // prefix_10764 + string caption in a local buffer, and passes it to
-        // the window-caption setter for the interpreter's main window.
+        // prefix_10764 + relative icon filename in a local buffer. 496C80
+        // calls LoadImageA(IMAGE_ICON, LR_LOADFROMFILE), then WM_SETICON
+        // with ICON_SMALL only when loading succeeds. Missing icons do not
+        // fault dispatch.
         // Returns 0x4004.
         143 => (
             4,
-            CmvsPs2aCommandEffectKind::RequestWindowCaption {
-                prefix_field_offset: Some(10764),
+            CmvsPs2aCommandEffectKind::RequestWindowIcon {
+                prefix_field_offset: 10764,
             },
             &TAGGED_STRING_WORD as &[CmvsPs2aCommandStackWord],
         ),

@@ -85,3 +85,8 @@ CMVS 普通挂载现在只读取 CPZ header/index，校验索引身份、角色�
 
 
 296 后的有界真实 GPU 启动已完成：12 个 CPZ 索引约 0.16 秒，DX12 discrete 设备约 0.87 秒，session open 约 0.89 秒；首次 advance 越过 296，停在 352 的窗口标题 action 未接入，约 0.97 秒关闭。实际读取原版 system.dat 的独立私有副本，容器 2504 字节、version 1，解码 flags 32512 字节、CG 2048/BGM 1024 words、64 个空标题槽、两组列表 count 均为零。原文件未改写，自有进程已退出。仍无完成首 tick、267 文字帧、连续输入、PCM 或声音结果。
+
+
+352 现在在 CMVS 核心解析完整 tagged-string 域并立即拥有标题副本，保留 component+288 和空标题清空语义；Family 通过 v8 `SetTitle` 提交到真实 Host，遵守公共 UTF-8 4096 字节/控制字符边界。Host 窗口线程实际显示仍待连同后续 startup 动作验证。
+
+143 的旧 caption 分类已更正为 `SetWindowIcon`：原版按游戏根拼接图标路径，`LoadImageA(IMAGE_ICON, LR_LOADFROMFILE)` 成功后设置 `WM_SETICON/ICON_SMALL`，失败不阻止脚本。实际目标图标已用 Windows 原生 loader 验证可加载，但本批 Family 图标呈现尚未接入，返回独立 `WINDOW_ICON_UNBOUND`，不伪称已显示。153 的 startup 条件是全局 word2190 大于零；当前真实 system.dat 对应值为零。自定义 cursor 的后续非零分支仍未接 Host。

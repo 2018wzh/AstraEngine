@@ -433,9 +433,7 @@ pub(super) fn lookup(command_id: u16) -> Option<CommandFields> {
         // no prefix field participates. Returns 0x4004.
         352 => (
             4,
-            CmvsPs2aCommandEffectKind::RequestWindowCaption {
-                prefix_field_offset: None,
-            },
+            CmvsPs2aCommandEffectKind::RequestWindowCaption,
             &TAGGED_STRING_WORD as &[CmvsPs2aCommandStackWord],
         ),
         // Handler `sub_48A710` assembles the window caption from the prefix

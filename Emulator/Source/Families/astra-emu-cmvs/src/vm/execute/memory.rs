@@ -158,17 +158,31 @@ pub(super) fn execute(
             }
         }
         (
-            CmvsPs2aCommandEffectKind::RequestWindowCaption {
+            CmvsPs2aCommandEffectKind::RequestWindowIcon {
                 prefix_field_offset,
             },
             [(CmvsPs2aCommandStackWordKind::TaggedStringReference, value)],
         ) => {
-            let reference = tag_zero_reference(*value)?;
-            let mut segments = Vec::with_capacity(2);
-            if let Some(field_offset) = prefix_field_offset {
-                segments.push(CmvsStringSegment::InterpreterPrefixField { field_offset });
-            }
-            segments.push(CmvsStringSegment::PrivateString(reference));
+            let text = resolve_string_value(state, *value)?;
+            Ok(Some(CmvsPs2aVmAction::SetWindowIcon {
+                segments: vec![
+                    CmvsStringSegment::InterpreterPrefixField {
+                        field_offset: prefix_field_offset,
+                    },
+                    CmvsStringSegment::OwnedString(text),
+                ],
+            }))
+        }
+        (
+            CmvsPs2aCommandEffectKind::RequestWindowCaption,
+            [(CmvsPs2aCommandStackWordKind::TaggedStringReference, value)],
+        ) => {
+            let text = resolve_string_value(state, *value)?;
+            let segments = vec![CmvsStringSegment::OwnedString(text)];
+            // 41B1C0 owns a copy at component+288 before SetWindowTextA.
+            state
+                .interpreter_string_buffers
+                .insert(288, segments.clone());
             Ok(Some(CmvsPs2aVmAction::SetWindowCaption { segments }))
         }
         (

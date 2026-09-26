@@ -579,12 +579,11 @@ pub enum CmvsPs2aCommandEffectKind {
     MoveSlotObject {
         table_byte_offset: u16,
     },
-    /// Builds the recovered prefix+string caption and hands it to the host as
-    /// a window-caption request. The VM never materializes the text itself.
-    /// `prefix_field_offset` is `None` for the raw-caption path proven by
-    /// case 352.
-    RequestWindowCaption {
-        prefix_field_offset: Option<u16>,
+    /// Sets an owned native window caption (case 352).
+    RequestWindowCaption,
+    /// Loads a file icon for WM_SETICON/ICON_SMALL (case 143).
+    RequestWindowIcon {
+        prefix_field_offset: u16,
     },
     /// Copies the resolved stack string into one bounded interpreter buffer,
     /// raising the recovered error-flag mask when the resolved text exceeds

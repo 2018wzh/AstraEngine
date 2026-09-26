@@ -17,6 +17,7 @@ pub(crate) struct CmvsSession {
     suspended: bool,
     input: input::InputState,
     failure: Option<FamilyError>,
+    pending_window: Option<FamilyWindowCommand>,
     _lease: Lease,
 }
 impl CmvsSession {
@@ -47,6 +48,7 @@ impl CmvsSession {
             suspended: false,
             input: input::InputState::default(),
             failure: None,
+            pending_window: None,
             _lease: lease,
         })
     }
@@ -92,6 +94,22 @@ impl CmvsSession {
     }
     fn action(&mut self, action: CmvsPs2aVmAction) -> FamilyResult<()> {
         match action {
+            CmvsPs2aVmAction::SetWindowIcon { .. } => Err(error(
+                "ASTRA_EMU_CMVS_WINDOW_ICON_UNBOUND",
+                "native small-window icon support is not connected",
+            )),
+            CmvsPs2aVmAction::SetWindowCaption { segments } => {
+                let [CmvsStringSegment::OwnedString(title)] = segments.as_slice() else {
+                    return Err(error(
+                        "ASTRA_EMU_CMVS_WINDOW_CAPTION",
+                        "window caption prefix is not bound",
+                    ));
+                };
+                let command = FamilyWindowCommand::SetTitle(title.clone().into());
+                command.validate()?;
+                self.pending_window = Some(command);
+                Ok(())
+            }
             CmvsPs2aVmAction::ScanNativeSaveSlots { count } => self
                 .archive
                 .refresh_native_save_catalog(&mut self.vm, count)
@@ -290,7 +308,10 @@ impl CmvsSession {
             self.phase -= 1_000_000_000;
             self.tick()?;
         }
-        Ok(AdvanceResponse::running())
+        Ok(AdvanceResponse {
+            window_command: self.pending_window.take().into(),
+            ..AdvanceResponse::running()
+        })
     }
 }
 impl FamilySession for CmvsSession {

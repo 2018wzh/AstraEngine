@@ -59,7 +59,8 @@ pub(super) fn execute_command(
         | CmvsPs2aCommandEffectKind::MarkInterpreterRecordUnused { .. }
         | CmvsPs2aCommandEffectKind::InterpreterFlagRoundTrip { .. }
         | CmvsPs2aCommandEffectKind::StorePrefixedInterpreterString { .. }
-        | CmvsPs2aCommandEffectKind::RequestWindowCaption { .. }
+        | CmvsPs2aCommandEffectKind::RequestWindowCaption
+        | CmvsPs2aCommandEffectKind::RequestWindowIcon { .. }
         | CmvsPs2aCommandEffectKind::StoreComponentWord { .. }
         | CmvsPs2aCommandEffectKind::StoreBoundedInterpreterString { .. }
         | CmvsPs2aCommandEffectKind::BuildPrefixedWindowCaption { .. }
