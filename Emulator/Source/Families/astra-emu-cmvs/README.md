@@ -82,3 +82,6 @@ CMVS 普通挂载现在只读取 CPZ header/index，校验索引身份、角色�
 296 `LoadSystemState` 接入只读 `system.dat` 原生容器：完整校验长度、版本、身份、校验和、cipher/LZSS 及字符串边界后，才应用 flags、CG、BGM 和 64 个标题槽。BGM 写入原生 float-word 全局区，标题写入现有 string slots，不保留第二份存档旁路副本。两组原生列表保留 CP932 字节、原顺序和原版 ASCII/Shift-JIS 去重；非零 count 先清空再按各自 enable gate 加入，零 count 保留当前列表。缺文件保留当前 globals，不创建文件；损坏文件和已有错误状态明确失败，不改写文件或部分更新 VM。私有 VM v8 保存真实 owner 和列表，拒绝旧快照。
 
 本批只实现加载，不包含 297 写回、自动保存、Windows 菜单或原生 slot body 恢复。合成容器回归覆盖字符串、BGM owner、私有快照恢复、缺文件及失败原子性；真实游戏重试另行记录，不能据此声明首 tick 或文字已经通过。
+
+
+296 后的有界真实 GPU 启动已完成：12 个 CPZ 索引约 0.16 秒，DX12 discrete 设备约 0.87 秒，session open 约 0.89 秒；首次 advance 越过 296，停在 352 的窗口标题 action 未接入，约 0.97 秒关闭。实际读取原版 system.dat 的独立私有副本，容器 2504 字节、version 1，解码 flags 32512 字节、CG 2048/BGM 1024 words、64 个空标题槽、两组列表 count 均为零。原文件未改写，自有进程已退出。仍无完成首 tick、267 文字帧、连续输入、PCM 或声音结果。

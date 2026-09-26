@@ -18,7 +18,7 @@ CMVS 原生 352 需要实际设置窗口标题。Family API v8 添加 `SetTitle`
 
 随后补入两项局部修复：Editor 对合法扩展命令的 warning 分类保持一致，使第二次缓动/关键帧编辑与撤销可用；CMVS command 691 恢复原生只读存档目录语义。前者不改变 schema，后者只调整 CMVS 私有 VM 状态。修复后 VN Editor 7 项、CMVS 200 项普通测试通过，CMVS 1 项按原条件跳过；两 crate 的 all-target Clippy 通过。Editor 再次完整检查通过，18 项通过、3 项跳过。共享包与存档格式仍以本页 Timeline 小节为准，旧槽不得覆盖。
 
-CMVS 独立私有副本实际启动已在约 0.19 秒完成索引、1.54 秒打开 DX12 session，越过 691/692 后，首次 advance 在 command 296 返回 `STORAGE_UNBOUND`，1.68 秒正常关闭。296 原生 system.dat 只读候选加载已接入完整字符串和 live globals，缺文件保留当前状态，损坏不部分应用或写回；真实重试尚待进行。尚未完成首 tick、正文、PCM 或可玩输入。Windows Sandbox 仍受 `0x80370106` 阻断，未进行本基线 Player 真实交互和保存恢复；Editor GUI 与 Android 真机保持暂停。原生 policy IO 当前仅接 embedding session，Packaged Player 尚无资源授权 adapter，Web 明确拒绝。Linux 回传的局部结果不替代本次最终基线的 Linux 检查，远端 CI 与实际声音也未计通过。
+CMVS 独立私有副本实际启动已在约 0.16 秒完成索引、0.89 秒打开 DX12 session，越过 691/692/296 后，首次 advance 在 command 352 返回 `ACTION_UNBOUND`，0.97 秒正常关闭。296 已实际加载原版 system.dat 私有副本：完整 flags、CG/BGM 与 64 个标题槽恢复；列表 count 为零，按原版保留当前列表。尚未完成首 tick、正文、PCM 或可玩输入。Windows Sandbox 仍受 `0x80370106` 阻断，未进行本基线 Player 真实交互和保存恢复；Editor GUI 与 Android 真机保持暂停。原生 policy IO 当前仅接 embedding session，Packaged Player 尚无资源授权 adapter，Web 明确拒绝。Linux 回传的局部结果不替代本次最终基线的 Linux 检查，远端 CI 与实际声音也未计通过。
 
 ## 2026-09-26 Linux 完整视频流
 
