@@ -183,3 +183,14 @@ NativeVN 使用编译期组合的 Yakui。Cook、bundle 和 Player 不再接收�
 Package reader 从明确选中的 packaged game target 与 package profile 建立静态产品上下文，不通过动态 gameplay descriptor 选择实现。它继续校验容器版本、section 唯一性、内容 hash、target/profile eligibility、VFS namespace 与 provider capability/fingerprint。NativeVN package 的必要语义和 release 检查由 NativeVN 的静态契约决定，不依赖包内字符串声明哪些检查应该运行。
 
 旧动态 gameplay host、FFI descriptor 和验证选择对象在最后一个真实消费者迁移后删除。普通 Engine session 不因此依赖 package；平台 renderer、audio output、mixer、decode 和 VFS 的真实显式选择不被移除。验证覆盖无 gameplay provider 配置的 Cook/package/Player 会话、缺失和冲突机制绑定、旧 schema 拒绝、包损坏及产品存读档。
+
+
+### Luau 显式 IO 延续
+
+Native `VnSession` 通过 `bind_policy_io` 授予具名逻辑资源及读取限额，再由 `evaluate_policy` 执行可信策略。当前 typed 操作为 `PolicyReadText`，返回 UTF-8 文本或 `PolicyIoFailure`；包或脚本不能自行授予权限。脚本用 `astra.host.read_text(key, uri)` 获得 `(text, status)`，在后续调用中读取已提交结果，用 `astra.snapshot` 保存显式阶段。`cancel` 取消请求，`release` 释放已结束记录；key 复用不会复用请求序号。每会话最多保留 64 个请求，每次读取最多 1 MiB；不开放原生文件路径或隐式 IO。
+
+每个 pending 请求对应 Runtime `AwaitToken`。Session 按请求序号调度一个可取消 async worker，完成消息只能在成功的固定 tick 中通过原 scope 的 completion handle 进入状态。Host 必须提供取消安全的 Future，不能执行阻塞调用或遗留 detached worker。关闭、显式取消和成功恢复均取消并 join worker；损坏恢复候选在取消旧工作之前拒绝。Web 暂不提供原生 worker，返回 `ASTRA_POLICY_HOST_IO_UNSUPPORTED`，不静默执行同步 IO。
+
+`astra.vn.session_policy.v1` 保存策略值、请求及 AwaitToken 对应关系，不保存 VM、coroutine、执行栈、宿主 grant 或句柄。恢复保留完成结果，将 pending 明确转为 interrupted 并清除相应 await，不自动重发外部请求。缺失的新 session-policy component、版本错误、无效序号、超限结果或 await 不一致均拒绝；旧槽不迁移。读取已保存结果不需要再次授予权限；发起新请求仍需当前宿主授权。
+
+实现沿用现有 `mlua` VM 与 Runtime `TaskScope`。`mlua` 的 [async 支持](https://docs.rs/crate/mlua/0.10.5/source/README.md) 依赖 coroutine；本接口采用显式延续，避免将 coroutine 误当作可恢复状态。取消遵循 [CancellationToken](https://docs.rs/tokio-util/latest/tokio_util/sync/struct.CancellationToken.html) 的 Future drop 约定。平台 IO adapter 由 embedding host 显式提供；这一批没有自动给 Packaged Player 新增磁盘或网络权限。
