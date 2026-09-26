@@ -22,7 +22,7 @@ CMVS 已接入原生 352 标题与 143 图标。旧探针未应用 `SCRIPT_INIT_
 
 随后补入两项局部修复：Editor 对合法扩展命令的 warning 分类保持一致，使第二次缓动/关键帧编辑与撤销可用；CMVS command 691 恢复原生只读存档目录语义。前者不改变 schema，后者只调整 CMVS 私有 VM 状态。修复后 VN Editor 7 项、CMVS 200 项普通测试通过，CMVS 1 项按原条件跳过；两 crate 的 all-target Clippy 通过。Editor 再次完整检查通过，18 项通过、3 项跳过。共享包与存档格式仍以本页 Timeline 小节为准，旧槽不得覆盖。
 
-CMVS 先前有界 probe 实际运行了原版 CPZ 脚本和 DX12 GPU，但 Family 跳过 `SCRIPT_INIT_PATH`，误选 CPZ 内部同名 start.ps3；不能称为正确原生冷启动已跨过 691/692/296/352/143。原生应先执行配置目录内的 loose bootstrap，原版与副本均完整存在。现在统一 config slot0→boot→后续 call 的原生搜索域，删除 profile 全归档入口扫描；各动作独立回归仍有效，正确入口的首 tick、正文、窗口标题/图标、输入和 PCM 尚待重新验证。Windows Sandbox 仍受 `0x80370106` 阻断，未进行本基线 Player 真实交互和保存恢复；Editor GUI 与 Android 真机保持暂停。原生 policy IO 当前仅接 embedding session，Packaged Player 尚无资源授权 adapter，Web 明确拒绝。Linux 回传的局部结果不替代本次最终基线的 Linux 检查，远端 CI 与实际声音也未计通过。
+CMVS 先前有界 probe 实际运行了原版 CPZ 脚本和 DX12 GPU，但 Family 跳过 `SCRIPT_INIT_PATH`，误选 CPZ 内部同名 start.ps3；不能称为正确原生冷启动已跨过 691/692/296/352/143。原生应先执行配置目录内的 loose bootstrap，原版与副本均完整存在。现在统一 config slot0→boot→后续 call 的原生搜索域，删除 profile 全归档入口扫描；各动作独立回归仍有效。正确入口已单独执行有界真实 GPU probe：索引约 0.20 秒、DX12 discrete 约 0.97 秒、open 约 0.98 秒，首次 advance 在 command 354 返回 ACTION_UNBOUND，约 1.14 秒正常关闭且自有进程退出。仍无完成首 tick、267 正文、图像帧、Host 窗口请求交付、输入、PCM 或实际声音结果。Windows Sandbox 仍受 `0x80370106` 阻断，未进行本基线 Player 真实交互和保存恢复；Editor GUI 与 Android 真机保持暂停。原生 policy IO 当前仅接 embedding session，Packaged Player 尚无资源授权 adapter，Web 明确拒绝。Linux 回传的局部结果不替代本次最终基线的 Linux 检查，远端 CI 与实际声音也未计通过。
 
 ## 2026-09-26 Linux 完整视频流
 
