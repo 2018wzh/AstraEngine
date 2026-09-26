@@ -10,8 +10,8 @@ use std::collections::BTreeMap;
 const MAX_SCRIPT_BYTES: usize = 64 * 1024 * 1024;
 
 impl CmvsArchive {
-    /// Resolve a VM script-call operand and load it through the same archive.
-    pub fn load_called_script(
+    /// Resolve both native boot and VM script-call operands through D08.
+    pub fn load_native_script(
         &self,
         name: &str,
         frame: u16,

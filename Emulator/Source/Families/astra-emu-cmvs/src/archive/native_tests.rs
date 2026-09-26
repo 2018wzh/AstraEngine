@@ -10,6 +10,96 @@ fn fixture() -> (tempfile::TempDir, CmvsArchive, CmvsPs2aVmState) {
 }
 
 #[test]
+fn native_boot_config_and_script_calls_share_slot_zero_without_archive_scan() {
+    let (root, mut archive, mut vm) = fixture();
+    archive
+        .entries
+        .values_mut()
+        .next()
+        .unwrap()
+        .descriptor
+        .relative_path = "start.ps3".into();
+    std::fs::create_dir(root.path().join("boot")).unwrap();
+    std::fs::write(root.path().join("boot/start.ps3"), b"loose boot").unwrap();
+    std::fs::write(
+        root.path().join("cmvs.cfg"),
+        "[CMVS_SYSTEM_MAIN]\nSCRIPT_INIT_PATH=boot\\\n",
+    )
+    .unwrap();
+    archive.initialize_native_script_search(&mut vm).unwrap();
+    let uri = archive
+        .resolve_native_resource(&vm, CmvsResourceSearchBank::Script, "start.ps3")
+        .unwrap();
+    assert_eq!(
+        archive.read_range(&uri, 0, 10).unwrap().bytes.as_slice(),
+        b"loose boot"
+    );
+    let before = vm.clone();
+    assert!(archive.load_native_script("start.ps3", 0, &mut vm).is_err());
+    assert_eq!(vm, before); // bad selected loose script cannot fall back to CPZ
+    vm.resource_search_paths
+        .get_mut(&CmvsResourceSearchBank::Script)
+        .unwrap()
+        .insert(1, "archive.cpz".into());
+    assert_eq!(
+        archive
+            .resolve_native_resource(&vm, CmvsResourceSearchBank::Script, "start.ps3")
+            .unwrap(),
+        uri
+    );
+    // Command 16 replaces the same slot; later calls now resolve to CPZ.
+    vm.resource_search_paths
+        .get_mut(&CmvsResourceSearchBank::Script)
+        .unwrap()
+        .insert(0, "archive.cpz".into());
+    let packed = archive
+        .resolve_native_resource(&vm, CmvsResourceSearchBank::Script, "start.ps3")
+        .unwrap();
+    assert_eq!(
+        archive.read_range(&packed, 0, 7).unwrap().bytes.as_slice(),
+        b"decoded"
+    );
+    vm.resource_search_paths.clear();
+    std::fs::write(
+        root.path().join("cmvs.cfg"),
+        "[CMVS_SYSTEM_MAIN]\nSCRIPT_INIT_PATH=absent/\n",
+    )
+    .unwrap();
+    archive.initialize_native_script_search(&mut vm).unwrap();
+    assert_eq!(
+        archive
+            .resolve_native_resource(&vm, CmvsResourceSearchBank::Script, "start.ps3")
+            .unwrap_err()
+            .code(),
+        "ASTRA_EMU_CMVS_RESOURCE_NOT_FOUND"
+    );
+}
+
+#[test]
+fn missing_native_config_uses_game_root_and_invalid_config_is_atomic() {
+    let (root, archive, mut vm) = fixture();
+    std::fs::write(root.path().join("start.ps3"), b"root").unwrap();
+    archive.initialize_native_script_search(&mut vm).unwrap();
+    let uri = archive
+        .resolve_native_resource(&vm, CmvsResourceSearchBank::Script, "start.ps3")
+        .unwrap();
+    assert_eq!(
+        archive.read_range(&uri, 0, 4).unwrap().bytes.as_slice(),
+        b"root"
+    );
+    let before = vm.clone();
+    for value in ["../outside/".to_owned(), "a".repeat(256)] {
+        std::fs::write(
+            root.path().join("cmvs.cfg"),
+            format!("[CMVS_SYSTEM_MAIN]\nSCRIPT_INIT_PATH={value}\n"),
+        )
+        .unwrap();
+        assert!(archive.initialize_native_script_search(&mut vm).is_err());
+        assert_eq!(vm, before);
+    }
+}
+
+#[test]
 fn source_domains_and_slot_priority_control_real_file_reads() {
     let (root, archive, mut vm) = fixture();
     std::fs::create_dir(root.path().join("override")).unwrap();

@@ -1,6 +1,6 @@
 # CMVS
 
-当前 Family 插件导出 v7 descriptor 和 typed 配置，复用现有 CPZ5、PS2A VM 与硬件 GPU Scene。153 项普通回归及 1 项显式硬件 GPU 回归通过；格式与 VM 的局部结果不代表真实游戏流程已完成。
+当前 Family 插件导出 v9 descriptor 和 typed 配置，复用现有 CPZ5、PS2A VM 与硬件 GPU Scene。153 项普通回归及 1 项显式硬件 GPU 回归通过；格式与 VM 的局部结果不代表真实游戏流程已完成。
 
 脚本和纹理名称在执行命令时从当前脚本池或原生全局字符串槽解析并复制。全局表统一为 128 个独立 Shift-JIS 值，表达式拼接和 case 148 区间赋值均立即复制；后续槽位修改、frame 切换或根脚本替换不会改变已经复制的值。旧嵌套引用表和八层引用解析已删除，不猜测脚本名。
 
@@ -10,11 +10,11 @@ VM 和 CMVS 3.90 指令契约已迁入，状态、单步调度和 opcode 表拆�
 
 `execute_cmvs390_frame` 直接修改当前 VM，不再逐指令克隆状态或承诺错误回滚。开始执行前设置失败标志，只有成功返回才清除，因此错误或 panic 后的部分状态不能继续 dispatch，`validate_cmvs390_vm_state` 也拒绝该状态。调用方应结束失败会话，或恢复另一个经过校验的成功快照；不得只重置 `dispatch_stopped` 后重试。尚未开始执行时的等待、停止检查仍可在正常调度恢复后继续。状态结构新增失败标志，旧序列化状态不做迁移；CMVS 尚无已发布的 Family 存档格式。
 
-`CmvsArchive` 已改为核心自有文件访问，复用 SDK 的归档数据类型、读取边界与可选明文缓存。挂载、文件访问和来源校验分模块。`mount_cmvs` 从游戏目录有界读取 `cmvs.profile.json`，typed `CmvsProfile` 使用 `astra.emu.cmvs.profile.v2`。`archives` 是有序 `CmvsArchiveFile { role, path }` 列表，同名脚本查找按列表顺序决定优先级；不再由 role 名称的字母排序决定。`loose_files` 仍按唯一 role 映射相对文件路径。重复归档 role、重复来源、未知 schema、错误参数和未支持的 CPZ 版本明确失败，所有路径必须留在游戏目录。旧 v1 对象式归档配置直接拒绝，应按预期顺序重新编写列表，不自动推断优先级。当前挂载只接受 CPZ5，默认不创建磁盘缓存，不运行旧私有 patch 服务。
+`CmvsArchive` 已改为核心自有文件访问，复用 SDK 的归档数据类型、读取边界与可选明文缓存。挂载、文件访问和来源校验分模块。`mount_cmvs` 从游戏目录有界读取 `cmvs.profile.json`，typed `CmvsProfile` 使用 `astra.emu.cmvs.profile.v2`。`archives` 是有序 `CmvsArchiveFile { role, path }` 列表，用于挂载资源；脚本选择由原生 Script 搜索域决定，不把 profile 列表当运行时搜索表。`loose_files` 仍按唯一 role 映射相对文件路径。重复归档 role、重复来源、未知 schema、错误参数和未支持的 CPZ 版本明确失败，所有路径必须留在游戏目录。旧 v1 对象式归档配置直接拒绝，应按预期顺序重新编写列表，不自动推断优先级。当前挂载只接受 CPZ5，默认不创建磁盘缓存，不运行旧私有 patch 服务。
 
 `CmvsArchive::load_script` 直接解析核心归档返回的共享字节，不再经流复制整份输入。输入上限仍为 64 MiB，读取与解码成功后才通过 `install_script_frame` 更新入口 PC、脚本身份、名称索引、字符串长度表与初始数据段。frame 限 0–3，非法 frame 或路径在修改 VM 前拒绝。`install_script_data` 在重载时替换稀疏字表，全零或空数据段会删除旧字，其他 frame 不受影响。加载日志只记录 frame 和解码字节数，不记录资源名或正文。帧安装及关联脚本路径的 8 项增量回归通过。
 
-入口脚本经 `resolve_script_uri` 按配置的归档顺序选择；后续 `load_called_script` 只查找原生 Script 搜索域，纹理只查找 Texture 域。case 16/17/18/19/20/23/24/26 分属八个独立表，配置指令立即复制路径，不再按槽数合并，也不生成伪音频动作。原生脚本与交替音频读取槽 0–3，纹理读取槽 0–9；配置函数允许但读取器不使用的槽不会进入搜索。未恢复用途的表保留独立的原生字段身份，读请求明确拒绝。
+入口先读取原生 `cmvs.cfg` 的 `CMVS_SYSTEM_MAIN.SCRIPT_INIT_PATH` 建立 Script slot 0；boot 与后续调用统一走 `load_native_script`，只查找原生 Script 搜索域，纹理只查找 Texture 域。旧 profile 全归档入口扫描已删除，没有兼容 fallback。缺省空路径按原版指向游戏根；已配置但缺失或损坏的源不能由同名归档替换。case 16/17/18/19/20/23/24/26 分属八个独立表，配置指令立即复制路径，不再按槽数合并，也不生成伪音频动作。原生脚本与交替音频读取槽 0–3，纹理读取槽 0–9；配置函数允许但读取器不使用的槽不会进入搜索。未恢复用途的表保留独立的原生字段身份，读请求明确拒绝。
 
 查找按该域的槽号顺序进行。末尾带分隔符的路径及空路径指向游戏目录内的文件，其余路径必须对应私有配置中已挂载的归档。缺文件可以继续下一槽，读取错误、越界路径及存在但未配置的归档明确失败；不会转而扫描其他域或全部归档。归档内同名文件保持原生索引顺序，资源 URI 带归档 role，允许不同归档包含相同相对名称。读取日志和错误不回显路径。新增有界原生文件读取供脚本、PB 图像及已有音频解码入口共用，不写入商业源。Family 保持 60 Hz VM 调度与真实纹理提交。
 
@@ -76,7 +76,7 @@ CMVS 普通挂载现在只读取 CPZ header/index，校验索引身份、角色�
 
 692 已更正为 `SetNativeSaveEnabled`，对应原生 `4959A0` 的保存许可和菜单开关，不再产生错误的 GPU presentation action。命令同步写入 1596 与 15064；750 读取 1596，原生自动保存 gate 要求两者均非零。初始化保留原版 1596=1、15064=0，因而最初 750 可为真而保存 gate 仍关闭。许可直接保存在现有私有 VM 字段中，不在 slot catalog 复制派生布尔状态；快照恢复后使用同一 gate。
 
-此实现只恢复许可与查询语义，Windows 菜单交互及实际自动保存仍未接入，不创建空文件或将未实现保存动作当作成功。实际启动已跨过 691/692：索引约 0.19 秒，DX12 session 约 1.54 秒打开，首次 advance 在 296 返回 `STORAGE_UNBOUND`，约 1.68 秒关闭；仍未完成首 tick、正文、PCM 或输入。
+此实现只恢复许可与查询语义，Windows 菜单交互及实际自动保存仍未接入，不创建空文件或将未实现保存动作当作成功。先前错误 CPZ 入口的实际脚本运行已跨过 691/692：索引约 0.19 秒，DX12 session 约 1.54 秒打开，首次 advance 在 296 返回 `STORAGE_UNBOUND`，约 1.68 秒关闭；仍未完成首 tick、正文、PCM 或输入。
 
 
 296 `LoadSystemState` 接入只读 `system.dat` 原生容器：完整校验长度、版本、身份、校验和、cipher/LZSS 及字符串边界后，才应用 flags、CG、BGM 和 64 个标题槽。BGM 写入原生 float-word 全局区，标题写入现有 string slots，不保留第二份存档旁路副本。两组原生列表保留 CP932 字节、原顺序和原版 ASCII/Shift-JIS 去重；非零 count 先清空再按各自 enable gate 加入，零 count 保留当前列表。缺文件保留当前 globals，不创建文件；损坏文件和已有错误状态明确失败，不改写文件或部分更新 VM。私有 VM v8 保存真实 owner 和列表，拒绝旧快照。
@@ -84,7 +84,7 @@ CMVS 普通挂载现在只读取 CPZ header/index，校验索引身份、角色�
 本批只实现加载，不包含 297 写回、自动保存、Windows 菜单或原生 slot body 恢复。合成容器回归覆盖字符串、BGM owner、私有快照恢复、缺文件及失败原子性；真实游戏重试另行记录，不能据此声明首 tick 或文字已经通过。
 
 
-296 后的有界真实 GPU 启动已完成：12 个 CPZ 索引约 0.16 秒，DX12 discrete 设备约 0.87 秒，session open 约 0.89 秒；首次 advance 越过 296，停在 352 的窗口标题 action 未接入，约 0.97 秒关闭。实际读取原版 system.dat 的独立私有副本，容器 2504 字节、version 1，解码 flags 32512 字节、CG 2048/BGM 1024 words、64 个空标题槽、两组列表 count 均为零。原文件未改写，自有进程已退出。仍无完成首 tick、267 文字帧、连续输入、PCM 或声音结果。
+先前错误 CPZ 入口的有界 GPU 调试结果：12 个 CPZ 索引约 0.16 秒，DX12 discrete 设备约 0.87 秒，session open 约 0.89 秒；首次 advance 越过 296，停在 352 的窗口标题 action 未接入，约 0.97 秒关闭。实际读取原版 system.dat 的独立私有副本，容器 2504 字节、version 1，解码 flags 32512 字节、CG 2048/BGM 1024 words、64 个空标题槽、两组列表 count 均为零。原文件未改写，自有进程已退出。仍无完成首 tick、267 文字帧、连续输入、PCM 或声音结果。
 
 
 352 现在在 CMVS 核心解析完整 tagged-string 域并立即拥有标题副本，保留 component+288 和空标题清空语义；Family 通过 v8 `SetTitle` 提交到真实 Host，遵守公共 UTF-8 4096 字节/控制字符边界。Host 窗口线程实际显示仍待连同后续 startup 动作验证。
@@ -95,4 +95,7 @@ CMVS 普通挂载现在只读取 CPZ header/index，校验索引身份、角色�
 143 的只读图标加载已接公共 v9 `SetIcon`：CMVS 仅启用现有 image 的 ICO feature，按照 [LoadImage 文档](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-loadimagea) 的零尺寸规则选择首图，以有界单 entry 视图交给 image 解码 BMP/PNG，再提交 straight-alpha RGBA8。目录、offset/length、图像尺寸和分配预算均受限，不使用 decoder 默认的最大图选择。缺文件或明确无效图标返回原生 best-effort 结果；越界路径、资源预算或不支持的 decoder 能力明确失败，有效图标不能当缺失忽略。窗口属性队列按类型保留最新值，标题和图标分别交给 Host，避免同一次 advance 相互覆盖。原版图标 256×256 的 Windows loader 只读检查成功；Family/Host 的实际窗口标题和图标显示仍待验证。
 
 
-窗口命令批之后的单次真实 GPU probe：索引约 0.25 秒、DX12 discrete 创建约 1.02 秒、session open 约 1.03 秒。352/143 已执行并将有效标题/图标排队；首次 advance 在 129 的原生脚本搜索返回 `RESOURCE_NOT_FOUND`，约 1.17 秒正常关闭。未完成首 tick，窗口请求尚未返回 Host，因此未验证 Manager 实际显示；267、帧、输入、PCM 和声音也未通过。私有副本此前缺少的原版有效图标已补齐，不能把该副本缺项解释为原生图标加载失败。
+窗口命令批之后、仍使用错误 CPZ 入口的单次 GPU probe：索引约 0.25 秒、DX12 discrete 创建约 1.02 秒、session open 约 1.03 秒。352/143 已执行并将有效标题/图标排队；首次 advance 在 129 的原生脚本搜索返回 `RESOURCE_NOT_FOUND`，约 1.17 秒正常关闭。未完成首 tick，窗口请求尚未返回 Host，因此未验证 Manager 实际显示；267、帧、输入、PCM 和声音也未通过。私有副本此前缺少的原版有效图标已补齐，不能把该副本缺项解释为原生图标加载失败。
+
+
+入口纠正：此前 Family 跳过原生 SCRIPT_INIT_PATH，误选已挂载 CPZ 中同名 start.ps3；游戏原版实际先加载配置目录内的 loose bootstrap，再由脚本设置后续搜索槽。原版与私有副本的 bootstrap 均存在且内容相同，未修改商业脚本。此前 GPU、原生 system.dat 与各命令的局部检查仍有效，但不能称为正确原生冷启动已经跨过这些动作。当前修复统一 config slot0→boot→call 的搜索路径，正确入口的首次 tick/文字/输入/PCM 尚待重新验证。回归覆盖同名 loose/CPZ、后续槽覆盖、缺目录、坏选定资源以及失败不替换活动 VM。

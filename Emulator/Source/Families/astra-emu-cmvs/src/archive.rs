@@ -3,7 +3,6 @@ mod manifest;
 mod mount;
 pub(crate) mod native;
 mod save_catalog;
-mod scripts;
 mod settings;
 mod source;
 mod storage;

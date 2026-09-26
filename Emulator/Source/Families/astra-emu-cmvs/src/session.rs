@@ -29,11 +29,13 @@ impl CmvsSession {
         lease: Lease,
     ) -> FamilyResult<Self> {
         let mut vm = CmvsPs2aVmState::new(0);
-        let script = archive
-            .resolve_script_uri(entry)
-            .and_then(|uri| archive.load_script(&uri, 0, &mut vm))
-            .map_err(core)?;
         let default_font = archive.native_default_font().map_err(core)?;
+        archive
+            .initialize_native_script_search(&mut vm)
+            .map_err(core)?;
+        let script = archive
+            .load_native_script(entry, 0, &mut vm)
+            .map_err(core)?;
         let mut scene = CmvsScene::new().map_err(core)?;
         scene.set_default_font(default_font);
         let frame = scene.clear(window.width, window.height).map_err(core)?;
@@ -74,7 +76,7 @@ impl CmvsSession {
     fn load(&mut self, frame: u16, name: String) -> FamilyResult<()> {
         let script = self
             .archive
-            .load_called_script(&name, frame, &mut self.vm)
+            .load_native_script(&name, frame, &mut self.vm)
             .map_err(core)?;
         let resident = self
             .scripts

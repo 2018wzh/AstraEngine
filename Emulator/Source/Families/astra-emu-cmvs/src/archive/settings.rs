@@ -14,6 +14,31 @@ fn failure() -> CoreError {
 }
 
 impl CmvsArchive {
+    /// 41D7F0 configures D08 slot zero before loading start.ps3. Script
+    /// commands may subsequently replace that slot or add later search slots.
+    pub(crate) fn initialize_native_script_search(
+        &self,
+        vm: &mut crate::CmvsPs2aVmState,
+    ) -> Result<(), CoreError> {
+        let root = self.game_root.as_deref().ok_or_else(failure)?;
+        let path = string(
+            &read_ini(root, "cmvs.cfg")?,
+            "CMVS_SYSTEM_MAIN",
+            "SCRIPT_INIT_PATH",
+        )
+        .unwrap_or_default();
+        let (bytes, _, malformed) = encoding_rs::SHIFT_JIS.encode(&path);
+        if malformed || bytes.len() >= 256 {
+            return Err(failure());
+        }
+        native::validate_search_path(&path)?;
+        vm.resource_search_paths
+            .entry(crate::CmvsResourceSearchBank::Script)
+            .or_default()
+            .insert(0, path);
+        Ok(())
+    }
+
     pub(crate) fn native_default_font(&self) -> Result<String, CoreError> {
         let root = self.game_root.as_deref().ok_or_else(failure)?;
         resolve_font(root, &registry::SystemRegistry)
