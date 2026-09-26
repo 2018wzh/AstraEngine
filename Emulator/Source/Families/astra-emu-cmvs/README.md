@@ -93,3 +93,6 @@ CMVS 普通挂载现在只读取 CPZ header/index，校验索引身份、角色�
 
 
 143 的只读图标加载已接公共 v9 `SetIcon`：CMVS 仅启用现有 image 的 ICO feature，按照 [LoadImage 文档](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-loadimagea) 的零尺寸规则选择首图，以有界单 entry 视图交给 image 解码 BMP/PNG，再提交 straight-alpha RGBA8。目录、offset/length、图像尺寸和分配预算均受限，不使用 decoder 默认的最大图选择。缺文件或明确无效图标返回原生 best-effort 结果；越界路径、资源预算或不支持的 decoder 能力明确失败，有效图标不能当缺失忽略。窗口属性队列按类型保留最新值，标题和图标分别交给 Host，避免同一次 advance 相互覆盖。原版图标 256×256 的 Windows loader 只读检查成功；Family/Host 的实际窗口标题和图标显示仍待验证。
+
+
+窗口命令批之后的单次真实 GPU probe：索引约 0.25 秒、DX12 discrete 创建约 1.02 秒、session open 约 1.03 秒。352/143 已执行并将有效标题/图标排队；首次 advance 在 129 的原生脚本搜索返回 `RESOURCE_NOT_FOUND`，约 1.17 秒正常关闭。未完成首 tick，窗口请求尚未返回 Host，因此未验证 Manager 实际显示；267、帧、输入、PCM 和声音也未通过。私有副本此前缺少的原版有效图标已补齐，不能把该副本缺项解释为原生图标加载失败。
