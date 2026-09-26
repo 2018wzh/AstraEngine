@@ -173,3 +173,11 @@ NativeVN 使用编译期组合的 Yakui。Cook、bundle 和 Player 不再接收�
 ## 独立 Engine 会话构造
 
 `EngineSession::new(RuntimeConfig)` 创建无包、普通执行模式的会话；嵌入者无需选择 provider、完整性模式或 worker 数。确实需要包绑定或调度配置的产品先配置 `RuntimeWorld`，再通过 `EngineSession::from_world` 交出所有权。NativeVN 的会话身份使用自身字符串，跨 ABI 的 `GameRuntimeSessionId` 不再进入静态 VN session 或 Player 存档类型。字符串编码和值保持不变，作品、包、schema 和内容完整性校验不变；旧 v7/v8 保存格式仍拒绝。
+
+## 静态 gameplay 打包边界
+
+本轮 NativeVN 随 Player 编译，目标声明不再选择 gameplay runtime 或 UI provider。`astra.target_manifest.v3` 删除 `runtime_provider`/`ui_provider`；`astra.provider_policy.v3` 只保存真实呈现、VFS、音频和解码等机制的显式绑定，不保存 `ProductRuntimeDescriptor`，不要求 `game_runtime_provider` slot。旧 target/policy 版本须重新生成；不提供别名或 reader 回退。
+
+Package reader 从明确选中的 packaged game target 与 package profile 建立静态产品上下文，不通过动态 gameplay descriptor 选择实现。它继续校验容器版本、section 唯一性、内容 hash、target/profile eligibility、VFS namespace 与 provider capability/fingerprint。NativeVN package 的必要语义和 release 检查由 NativeVN 的静态契约决定，不依赖包内字符串声明哪些检查应该运行。
+
+旧动态 gameplay host、FFI descriptor 和验证选择对象在最后一个真实消费者迁移后删除。普通 Engine session 不因此依赖 package；平台 renderer、audio output、mixer、decode 和 VFS 的真实显式选择不被移除。验证覆盖无 gameplay provider 配置的 Cook/package/Player 会话、缺失和冲突机制绑定、旧 schema 拒绝、包损坏及产品存读档。
