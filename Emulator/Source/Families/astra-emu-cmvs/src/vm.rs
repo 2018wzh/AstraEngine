@@ -468,16 +468,6 @@ pub enum CmvsPs2aVmAction {
     SetWindowCaption {
         segments: Vec<CmvsStringSegment>,
     },
-    /// The recovered case-354 path asks the host to resolve the reference,
-    /// apply the bounded buffer write, or raise the error-flag mask when the
-    /// resolved text exceeds the bound.
-    StoreBoundedString {
-        buffer_offset: u16,
-        max_text_bytes: u16,
-        error_flag_field_offset: u16,
-        error_flag_mask: u32,
-        reference: CmvsPs2aPrivateStringReference,
-    },
     /// The recovered case-177 notification path is only emitted when the
     /// version-pinned gate field is non-zero in the retained state.
     NotifyChannelVisibility {

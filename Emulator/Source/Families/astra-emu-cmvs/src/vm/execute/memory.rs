@@ -207,17 +207,21 @@ pub(super) fn execute(
             },
             [(CmvsPs2aCommandStackWordKind::TaggedStringReference, value)],
         ) => {
-            // The length bound depends on the resolved text, which only the
-            // host can read; the host applies either the buffer write or the
-            // error-flag mask exactly as `sub_48A670` does.
-            let reference = tag_zero_reference(*value)?;
-            Ok(Some(CmvsPs2aVmAction::StoreBoundedString {
-                buffer_offset,
-                max_text_bytes,
-                error_flag_field_offset,
-                error_flag_mask,
-                reference,
-            }))
+            // 48A670 measures native CP932 bytes, not Unicode characters.
+            // 4712F0 reads this same buffer for the native save title/tag 256.
+            let bytes = resolve_tagged_string_bytes(state, *value)?;
+            if bytes.len() >= usize::from(max_text_bytes) {
+                *state
+                    .interpreter_words
+                    .entry(u32::from(error_flag_field_offset))
+                    .or_default() |= error_flag_mask;
+            } else {
+                let text = resolve_string_value(state, *value)?;
+                state
+                    .interpreter_string_buffers
+                    .insert(buffer_offset, vec![CmvsStringSegment::OwnedString(text)]);
+            }
+            Ok(None)
         }
         (
             CmvsPs2aCommandEffectKind::BuildPrefixedWindowCaption {

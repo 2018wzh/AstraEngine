@@ -17,6 +17,42 @@ fn command(state: &mut CmvsPs2aVmState, id: u16) -> Result<Option<CmvsPs2aVmActi
         },
     )
 }
+
+#[test]
+fn native_save_title_uses_cp932_byte_bounds_and_preserves_errors_and_old_title() {
+    let mut state = CmvsPs2aVmState::new(0);
+    state.interpreter_words.insert(10532, 0x20);
+    for text in [
+        String::new(),
+        "a".repeat(127),
+        format!("{}a", "あ".repeat(63)),
+    ] {
+        let (bytes, _, invalid) = encoding_rs::SHIFT_JIS.encode(&text);
+        assert!(!invalid);
+        bind(&mut state, 0, &bytes);
+        push_word(&mut state, 42).unwrap();
+        assert_eq!(command(&mut state, 354).unwrap(), None);
+        assert_eq!(
+            state.interpreter_string_buffers[&10324],
+            vec![CmvsStringSegment::OwnedString(text)]
+        );
+        assert_eq!(state.interpreter_words[&10532], 0x20);
+    }
+    let previous = state.interpreter_string_buffers[&10324].clone();
+    for text in ["a".repeat(128), "あ".repeat(64)] {
+        let (bytes, _, invalid) = encoding_rs::SHIFT_JIS.encode(&text);
+        assert!(!invalid);
+        state.process_string_slots.insert(2, bytes.into_owned());
+        push_word(&mut state, 0x8000_0002).unwrap();
+        assert_eq!(command(&mut state, 354).unwrap(), None);
+        assert_eq!(state.interpreter_string_buffers[&10324], previous);
+        assert_eq!(state.interpreter_words[&10532], 0x28);
+    }
+    let restored: CmvsPs2aVmState =
+        postcard::from_bytes(&postcard::to_allocvec(&state).unwrap()).unwrap();
+    assert_eq!(restored.interpreter_string_buffers[&10324], previous);
+    assert_eq!(restored.interpreter_words[&10532], 0x28);
+}
 #[test]
 fn global_assignment_copies_bytes_before_slot_and_script_replacement() {
     let mut state = CmvsPs2aVmState::new(0);
