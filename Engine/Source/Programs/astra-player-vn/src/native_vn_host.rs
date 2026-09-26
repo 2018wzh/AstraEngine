@@ -33,7 +33,6 @@ use astra_player_core::{
     PlayerTimelineTaskAction,
 };
 use astra_plugin::{RuntimeHostError, RuntimeHostLimits};
-use astra_plugin_abi::GameRuntimeSessionId;
 use astra_ui_core::{
     UiBackend, UiBlueprintBundle, UiBlueprintFrameModel, UiBlueprintModalFrameModel, UiButtonState,
     UiFrameRequest, UiInputDisposition, UiInputDispositionKind, UiInputEvent, UiInputEventKind,
@@ -144,7 +143,7 @@ pub struct NativeVnHostCommandSource {
     media_scope: astra_runtime::TaskScope,
     video_scopes: BTreeMap<String, astra_runtime::TaskScope>,
     host: NativeVnRuntimeHost,
-    session_id: GameRuntimeSessionId,
+    session_id: String,
     runtime_state: Option<VnRuntimeState>,
     runtime_backlog_count: usize,
     font_families: Vec<String>,
@@ -420,7 +419,7 @@ pub struct NativeVnProductObservationEvidence {
 struct NativeVnPlayerSavePayload {
     schema: String,
     slot: String,
-    session_id: GameRuntimeSessionId,
+    session_id: String,
     runtime: astra_runtime::SaveBlob,
     stage_director: ProductStageDirector,
     director_transition_snapshot: Option<SavedDirectorTransitionSnapshot>,
@@ -926,7 +925,7 @@ impl NativeVnHostCommandSource {
     }
 
     pub fn session_id(&self) -> &str {
-        &self.session_id.0
+        &self.session_id
     }
 
     pub fn provider_id(&self) -> &'static str {
@@ -1769,7 +1768,7 @@ impl NativeVnHostCommandSource {
         // backend emits an ordered release/resync transaction so the retained
         // Scene2D resources remain synchronized with this restored state.
         self.ui_backend
-            .context_restored(&format!("vn.ui.{}", self.session_id.0), self.ui_generation)
+            .context_restored(&format!("vn.ui.{}", self.session_id), self.ui_generation)
             .map_err(NativeVnHostError::Ui)?;
         self.presentation_failed = false;
         let mut batch = self.render_with_stage_refresh(&[], 0, true)?;
@@ -3418,7 +3417,7 @@ impl NativeVnHostCommandSource {
         };
         let request = UiFrameRequest {
             schema: "astra.ui_frame_request.v1".to_string(),
-            session_id: format!("vn.ui.{}", self.session_id.0),
+            session_id: format!("vn.ui.{}", self.session_id),
             generation: self.ui_generation,
             viewport: self.ui_viewport.clone(),
             fixed_time_ns: self.fixed_step.saturating_mul(16_666_667),

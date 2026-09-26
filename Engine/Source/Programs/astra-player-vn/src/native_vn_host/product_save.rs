@@ -224,7 +224,7 @@ mod tests {
         let scope = source.media_scope.child();
         let payload = &envelope.payload;
         let legacy_sections = RuntimeSaveSections {
-            session_id: payload.session_id.clone(),
+            session_id: astra_plugin_abi::GameRuntimeSessionId(payload.session_id.clone()),
             sections: vec![RuntimeSectionPayload {
                 section_id: "runtime.world".into(),
                 schema: "astra.runtime.save_blob.v5".into(),
@@ -254,7 +254,7 @@ mod tests {
         for variant in 0..3 {
             let mut invalid = decode_save_envelope(&bytes).unwrap();
             match variant {
-                0 => invalid.payload.session_id = GameRuntimeSessionId("foreign".into()),
+                0 => invalid.payload.session_id = "foreign".into(),
                 1 => {
                     let index = invalid.payload.runtime.0.len() - 1;
                     invalid.payload.runtime.0[index] ^= 1;
@@ -395,8 +395,30 @@ mod tests {
             .unwrap();
         assert_eq!(
             serde_json::to_value(media.snapshot()).unwrap(),
-            serde_json::to_value(expected).unwrap()
+            serde_json::to_value(&expected).unwrap()
         );
+        // A newly opened product session must accept the saved identity, then
+        // persist its restored media state through the normal save transaction.
+        let mut cold = self::source();
+        let mut cold_media = NativeVnProductMediaHost::default();
+        cold.restore_product_session(&bytes, &mut cold_media, &mut executor)
+            .await
+            .unwrap();
+        cold.cache_gameplay_surface(320, 180, vec![0x40; 320 * 180 * 4])
+            .unwrap();
+        cold.prepare_save_metadata("slot.01", "2000-01-01T00:00:01Z".into(), 1)
+            .unwrap();
+        let resaved = saved(&mut cold, &cold_media);
+        source
+            .restore_product_session(&resaved, &mut media, &mut executor)
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(media.snapshot()).unwrap(),
+            serde_json::to_value(&expected).unwrap()
+        );
+        cold.release_resources().unwrap();
+        cold.shutdown().unwrap();
         source.release_resources().unwrap();
         source.shutdown().unwrap();
     }

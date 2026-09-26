@@ -1,4 +1,4 @@
-use crate::{PackageHandle, RuntimeConfig, RuntimeError, RuntimeWorld, TickIntegrityMode};
+use crate::{RuntimeConfig, RuntimeError, RuntimeWorld, TickIntegrityMode};
 
 /// Owns the engine world and its task lifetime independently of any game semantics.
 ///
@@ -9,18 +9,12 @@ pub struct EngineSession {
 }
 
 impl EngineSession {
-    pub fn new(
-        config: RuntimeConfig,
-        integrity: TickIntegrityMode,
-        package: Option<PackageHandle>,
-        worker_count: usize,
-    ) -> Result<Self, RuntimeError> {
-        let mut world = RuntimeWorld::create_with_integrity(config, integrity)?;
-        if let Some(package) = package {
-            world = world.with_package(package)?;
-        }
-        world.set_machine_worker_count(worker_count)?;
-        Ok(Self { world })
+    /// Create a standalone session with normal shipping execution.
+    /// Package binding and scheduler tuning belong to embedding hosts that need them.
+    pub fn new(config: RuntimeConfig) -> Result<Self, RuntimeError> {
+        Ok(Self {
+            world: RuntimeWorld::create_with_integrity(config, TickIntegrityMode::Shipping)?,
+        })
     }
 
     /// Transfer an already configured embedding world into its session owner.

@@ -5,7 +5,7 @@ pub(super) struct NativeVnRuntimeHost {
     runtime: Option<astra_vn::VnSession>,
     binding: astra_package::PackageRuntimeSelection,
     limits: RuntimeHostLimits,
-    session: Option<GameRuntimeSessionId>,
+    session: Option<String>,
     seed: u64,
     last_step: u64,
     next_mode: astra_runtime::TickMode,
@@ -44,8 +44,8 @@ impl NativeVnRuntimeHost {
         Ok(())
     }
 
-    fn validate_session(&self, session: &GameRuntimeSessionId) -> Result<(), RuntimeHostError> {
-        if self.destroyed || self.runtime.is_none() || self.session.as_ref() != Some(session) {
+    fn validate_session(&self, session: &str) -> Result<(), RuntimeHostError> {
+        if self.destroyed || self.runtime.is_none() || self.session.as_deref() != Some(session) {
             return Err(RuntimeHostError::new(
                 "ASTRA_RUNTIME_HOST_SESSION",
                 "NativeVN session is not open",
@@ -69,7 +69,7 @@ impl NativeVnRuntimeHost {
         compiled: Arc<CompiledStory>,
         config: VnRunConfig,
         options: astra_vn::VnSessionConfig,
-    ) -> Result<GameRuntimeSessionId, RuntimeHostError> {
+    ) -> Result<String, RuntimeHostError> {
         self.validate_request(&options.target_id, &config.profile)?;
         if self.session.is_some() {
             return Err(RuntimeHostError::new(
@@ -80,7 +80,7 @@ impl NativeVnRuntimeHost {
         let seed = options.seed;
         let runtime = astra_vn::VnSession::new(compiled, config, options)
             .map_err(|error| RuntimeHostError::new("ASTRA_RUNTIME_HOST_OPEN", error.to_string()))?;
-        let session_id = runtime.id().clone();
+        let session_id = runtime.id().to_string();
         self.runtime = Some(runtime);
         self.session = Some(session_id.clone());
         self.seed = seed;

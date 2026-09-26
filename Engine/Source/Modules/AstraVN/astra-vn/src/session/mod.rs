@@ -1,6 +1,4 @@
 use astra_core::SchemaVersion;
-use astra_plugin_abi::{GameRuntimeSessionId, NATIVE_VN_RUNTIME_ID};
-#[cfg(test)]
 use astra_runtime::RuntimeWorld;
 use astra_runtime::{
     ActorId, BlackboardValue, ComponentId, ComponentRecord, EngineSession, EventPayload,

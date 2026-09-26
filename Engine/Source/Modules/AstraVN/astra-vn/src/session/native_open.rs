@@ -23,26 +23,29 @@ impl VnSession {
             seed = options.seed,
             "AstraVN runtime session open started"
         );
-        let session_id = GameRuntimeSessionId(format!(
-            "{}:{}:{}",
-            NATIVE_VN_RUNTIME_ID, options.target_id, options.seed
-        ));
+        let session_id = format!("native_vn:{}:{}", options.target_id, options.seed);
         let initial_runtime = CoreVnRuntime::new_shared_indexed(
             Arc::clone(&compiled),
             Arc::clone(&runtime_index),
             config,
         )?;
-        let mut engine = EngineSession::new(
+        // Product package identity and execution settings stay at the VN boundary.
+        let mut world = RuntimeWorld::create_with_integrity(
             RuntimeConfig {
                 seed: options.seed,
                 required_slots: Vec::new(),
             },
             options.integrity_mode,
-            options.package,
-            options.worker_count,
         )
         .map_err(|error| CoreVnError::message(error.to_string()))?;
-        let world = engine.world_mut();
+        if let Some(package) = options.package {
+            world = world
+                .with_package(package)
+                .map_err(|error| CoreVnError::message(error.to_string()))?;
+        }
+        world
+            .set_machine_worker_count(options.worker_count)
+            .map_err(|error| CoreVnError::message(error.to_string()))?;
         let owner = world
             .create_actor("astra.vn.runtime", vec!["gameplay_runtime".to_string()])
             .map_err(|error| CoreVnError::message(error.to_string()))?;
@@ -51,7 +54,7 @@ impl VnSession {
             .map_err(|err| CoreVnError::message(err.to_string()))?;
         Ok(Self {
             id: session_id,
-            engine,
+            engine: EngineSession::from_world(world),
             owner,
             compiled,
             runtime_index,

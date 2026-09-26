@@ -18,7 +18,7 @@ fn fixture() -> VnSession {
         .unwrap();
     let owner = world.create_actor("vn", vec![]).unwrap();
     VnSession {
-        id: GameRuntimeSessionId("restore.test".into()),
+        id: "restore.test".into(),
         engine: EngineSession::from_world(world),
         owner,
         compiled,

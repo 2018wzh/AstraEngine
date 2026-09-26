@@ -2,7 +2,7 @@ use super::*;
 
 /// An owned NativeVN session. Dropping it cancels its world-scoped tasks.
 pub struct VnSession {
-    pub(super) id: GameRuntimeSessionId,
+    pub(super) id: String,
     pub(super) engine: EngineSession,
     pub(super) owner: ActorId,
     pub(super) compiled: Arc<CoreCompiledStory>,
@@ -13,7 +13,7 @@ pub struct VnSession {
 }
 
 impl VnSession {
-    pub fn id(&self) -> &GameRuntimeSessionId {
+    pub fn id(&self) -> &str {
         &self.id
     }
 

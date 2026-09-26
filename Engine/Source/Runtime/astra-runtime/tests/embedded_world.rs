@@ -1,5 +1,5 @@
 use astra_runtime::{
-    PackageHandle, RuntimeConfig, RuntimeWorld, SaveRequest, TickInput, TickRequest,
+    EngineSession, PackageHandle, RuntimeConfig, RuntimeWorld, SaveRequest, TickInput, TickRequest,
 };
 use serde::{Deserialize, Serialize};
 
@@ -163,4 +163,63 @@ fn rejected_host_validation_does_not_commit_staged_mutations() {
             vec![],
         ))
         .unwrap();
+}
+
+#[test]
+fn standalone_session_needs_only_runtime_config_and_cancels_on_close() {
+    let mut session = EngineSession::new(RuntimeConfig {
+        seed: 37,
+        required_slots: vec![],
+    })
+    .unwrap();
+    assert!(session.world().package_handle().is_none());
+    let owner = session.world_mut().create_actor("sprite", vec![]).unwrap();
+    let component = session
+        .world_mut()
+        .attach_component(owner, "test.position", &Position { x: 5.0, y: 8.0 })
+        .unwrap();
+    session
+        .tick(TickRequest::live(
+            TickInput {
+                fixed_step: 1,
+                delta_ns: 16_666_667,
+                seed: 37,
+            },
+            vec![],
+        ))
+        .unwrap();
+    let saved = session.world().save(SaveRequest::default()).unwrap();
+    let mut restored = EngineSession::new(RuntimeConfig {
+        seed: 37,
+        required_slots: vec![],
+    })
+    .unwrap();
+    restored.world_mut().load(saved).unwrap();
+    assert_eq!(
+        restored
+            .world()
+            .read_component::<Position>(component)
+            .unwrap(),
+        Position { x: 5.0, y: 8.0 }
+    );
+    restored
+        .tick(TickRequest::restore_continuation(
+            TickInput {
+                fixed_step: 2,
+                delta_ns: 16_666_667,
+                seed: 37,
+            },
+            vec![],
+        ))
+        .unwrap();
+    assert!(!restored
+        .world()
+        .save(SaveRequest::default())
+        .unwrap()
+        .0
+        .is_empty());
+    let scope = session.world().task_scope();
+    session.close();
+    assert!(scope.is_cancelled());
+    restored.close();
 }

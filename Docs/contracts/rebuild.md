@@ -169,3 +169,7 @@ Windows 新建窗口在首次显示前按所在显示器的 work area 放置，�
 ## 静态游戏 UI 包格式
 
 NativeVN 使用编译期组合的 Yakui。Cook、bundle 和 Player 不再接收动态 UI component artifact、signer allowlist 或组件子进程配置；旧 `ui_component`、`component_slot` 源码需改为标准 widget。UI blueprint 为 `astra.ui_blueprint_bundle.v2`，compiled project 为 v4，package root 为 v3。旧包重新 Cook；读取时拒绝旧 root，不保留 reader fallback。作品 hash、section 完整性和存档损坏校验保持有效。
+
+## 独立 Engine 会话构造
+
+`EngineSession::new(RuntimeConfig)` 创建无包、普通执行模式的会话；嵌入者无需选择 provider、完整性模式或 worker 数。确实需要包绑定或调度配置的产品先配置 `RuntimeWorld`，再通过 `EngineSession::from_world` 交出所有权。NativeVN 的会话身份使用自身字符串，跨 ABI 的 `GameRuntimeSessionId` 不再进入静态 VN session 或 Player 存档类型。字符串编码和值保持不变，作品、包、schema 和内容完整性校验不变；旧 v7/v8 保存格式仍拒绝。
