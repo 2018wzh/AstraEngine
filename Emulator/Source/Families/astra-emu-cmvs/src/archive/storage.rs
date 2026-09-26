@@ -16,6 +16,12 @@ impl CmvsArchive {
         vm: &CmvsPs2aVmState,
         buffer_offset: u16,
     ) -> Result<(), CoreError> {
+        // `sub_426AA0` stores the selected native save-root mode here.
+        // Documents/AppData roots need their own native binding; never map
+        // restored or newly selected modes back to the game directory.
+        if vm.interpreter_words.get(&10756).copied().unwrap_or(0) != 0 {
+            return Err(storage_error());
+        }
         let segments = vm
             .interpreter_string_buffers
             .get(&buffer_offset)
@@ -104,5 +110,17 @@ mod tests {
         vm.interpreter_string_buffers.get_mut(&5404).unwrap()[0] =
             CmvsStringSegment::InterpreterPrefixField { field_offset: 1 };
         assert!(archive.ensure_path_directories(&vm, 5404).is_err());
+    }
+
+    #[test]
+    fn unsupported_save_root_modes_do_not_create_game_directories() {
+        let (root, mut archive) = super::super::cache_tests::fixture();
+        archive.bind_game_root(root.path().to_path_buf()).unwrap();
+        for mode in [1, 2, 3, u32::MAX] {
+            let mut vm = request("save/");
+            vm.interpreter_words.insert(10756, mode);
+            assert!(archive.ensure_path_directories(&vm, 5404).is_err());
+            assert!(!root.path().join("save").exists());
+        }
     }
 }
