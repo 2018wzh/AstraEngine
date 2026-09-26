@@ -310,6 +310,8 @@ pub enum CmvsStringSegment {
     PrivateString(CmvsPs2aPrivateStringReference),
     /// A fixed run of ASCII spaces proven by the case-353 caption gap.
     LiteralSpaces { count: u8 },
+    /// An immediately copied core-private value, independent of script pools.
+    OwnedString(String),
 }
 
 /// A host storage request emitted by a recovered command. The nucleus keeps

@@ -92,6 +92,10 @@ impl CmvsSession {
         match action {
             CmvsPs2aVmAction::CallScript { frame, name } => self.load(frame, name),
             CmvsPs2aVmAction::ReloadRootScript { name } => self.load(0, name),
+            CmvsPs2aVmAction::EnsurePathDirectories { buffer_offset } => self
+                .archive
+                .ensure_path_directories(&self.vm, buffer_offset)
+                .map_err(core),
             CmvsPs2aVmAction::LoadTextureParentResource {
                 parent_slot,
                 resource,
@@ -179,7 +183,13 @@ impl CmvsSession {
             let instruction =
                 frame_ps2a_instruction(script, self.vm.program_counter).map_err(core)?;
             if let Some(action) = execute_cmvs390_frame(&mut self.vm, &instruction).map_err(core)? {
-                self.action(action)?;
+                self.action(action).map_err(|mut failure| {
+                    if let CmvsPs2aInstructionFrame::Command { command_id, .. } = instruction {
+                        failure.message =
+                            format!("CMVS command {command_id}: {}", failure.message).into();
+                    }
+                    failure
+                })?;
             }
         }
         Err(error(

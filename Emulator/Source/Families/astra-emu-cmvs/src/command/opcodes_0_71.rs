@@ -54,8 +54,8 @@ pub(super) fn lookup(command_id: u16) -> Option<CommandFields> {
         // tagged-string resolver, copies the interpreter prefix field at
         // byte offset 10764 into the string buffer at byte offset 3356,
         // appends the resolved string, and returns 0x4004. Both segments
-        // are retained payload-free; the buffer's consumers are not yet
-        // recovered.
+        // retain the copied game-relative value and a symbolic root; absolute
+        // paths stay outside the VM snapshot.
         21 => (
             4,
             CmvsPs2aCommandEffectKind::StorePrefixedInterpreterString {

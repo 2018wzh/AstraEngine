@@ -138,14 +138,15 @@ pub(super) fn execute(
             },
             [(CmvsPs2aCommandStackWordKind::TaggedStringReference, value)],
         ) => {
-            let reference = tag_zero_reference(*value)?;
+            let value = resolve_string_value(state, *value)?;
+            crate::archive::native::validate_search_path(&value)?;
             state.interpreter_string_buffers.insert(
                 buffer_offset,
                 vec![
                     CmvsStringSegment::InterpreterPrefixField {
                         field_offset: prefix_field_offset,
                     },
-                    CmvsStringSegment::PrivateString(reference),
+                    CmvsStringSegment::OwnedString(value),
                 ],
             );
             if ensure_directories {

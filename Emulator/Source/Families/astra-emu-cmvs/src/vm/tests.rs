@@ -1324,8 +1324,11 @@ fn copies_native_string_values_from_command_148() {
 }
 
 #[test]
-fn stores_command_21_prefixed_string_segments_without_payload() {
+fn stores_command_21_owned_path_with_symbolic_root() {
     let mut state = CmvsPs2aVmState::new(0);
+    state
+        .frame_string_values
+        .insert(0, BTreeMap::from([(72, b"data/".to_vec())]));
     execute_cmvs390_frame(
         &mut state,
         &CmvsPs2aInstructionFrame::Control(CmvsPs2aControlInstruction::PushImmediate {
@@ -1350,9 +1353,7 @@ fn stores_command_21_prefixed_string_segments_without_payload() {
             CmvsStringSegment::InterpreterPrefixField {
                 field_offset: 10764
             },
-            CmvsStringSegment::PrivateString(CmvsPs2aPrivateStringReference {
-                relative_offset: 72,
-            }),
+            CmvsStringSegment::OwnedString("data/".into()),
         ])
     );
     assert_eq!(state.stack_cursor_bytes, 0);
@@ -1361,6 +1362,9 @@ fn stores_command_21_prefixed_string_segments_without_payload() {
 #[test]
 fn command_22_emits_a_directory_request_for_its_path_buffer() {
     let mut state = CmvsPs2aVmState::new(0);
+    state
+        .frame_string_values
+        .insert(0, BTreeMap::from([(88, b"save/".to_vec())]));
     push(&mut state, 88);
     let action = run_command_with_action(&mut state, 22);
     assert_eq!(
@@ -1373,23 +1377,21 @@ fn command_22_emits_a_directory_request_for_its_path_buffer() {
         state.interpreter_string_buffers.get(&5404),
         Some(&vec![
             CmvsStringSegment::InterpreterPrefixField { field_offset: 7452 },
-            CmvsStringSegment::PrivateString(CmvsPs2aPrivateStringReference {
-                relative_offset: 88,
-            }),
+            CmvsStringSegment::OwnedString("save/".into()),
         ])
     );
     assert_eq!(state.stack_cursor_bytes, 0);
 }
 
 #[test]
-fn blocks_command_21_tagged_string_outside_tag_zero() {
+fn blocks_command_21_unrecovered_string_domain() {
     let mut state = CmvsPs2aVmState::new(0);
     execute_cmvs390_frame(
         &mut state,
         &CmvsPs2aInstructionFrame::Control(CmvsPs2aControlInstruction::PushImmediate {
             span: SPAN,
             stack_bytes: 4,
-            value: 0x8000_0010,
+            value: 0xc000_0010,
         }),
     )
     .unwrap();

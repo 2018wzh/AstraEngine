@@ -103,7 +103,7 @@ fn restore_retains_slot_values_without_serializing_script_pool() {
 
 #[test]
 fn legacy_and_unknown_snapshot_versions_are_rejected_at_the_prefix() {
-    for bytes in [vec![0], vec![1], vec![2], vec![4]] {
+    for bytes in [vec![0], vec![1], vec![2], vec![3], vec![5]] {
         assert!(postcard::from_bytes::<CmvsPs2aVmState>(&bytes).is_err());
     }
     let mut state = CmvsPs2aVmState::new(0);
@@ -112,6 +112,43 @@ fn legacy_and_unknown_snapshot_versions_are_rejected_at_the_prefix() {
     state.process_string_slots.clear();
     state.process_string_slots.insert(0, vec![0x81]);
     assert!(validate_cmvs390_vm_state(&state).is_err());
+}
+
+#[test]
+fn configured_path_is_owned_across_script_and_global_replacement() {
+    let mut state = CmvsPs2aVmState::new(0);
+    bind(&mut state, 0, b"save\\");
+    state.process_string_slots.insert(1, b"save\\".to_vec());
+    push_word(&mut state, 0x8000_0001).unwrap();
+    command(&mut state, 22).unwrap();
+    bind(&mut state, 0, b"different\\");
+    state.process_string_slots.insert(1, b"other\\".to_vec());
+    state.current_frame = 2;
+    let restored: CmvsPs2aVmState =
+        postcard::from_bytes(&postcard::to_allocvec(&state).unwrap()).unwrap();
+    assert_eq!(
+        restored.interpreter_string_buffers[&5404],
+        vec![
+            CmvsStringSegment::InterpreterPrefixField { field_offset: 7452 },
+            CmvsStringSegment::OwnedString("save\\".into()),
+        ]
+    );
+}
+
+#[test]
+fn unsafe_path_does_not_replace_the_previous_owned_buffer() {
+    let mut state = CmvsPs2aVmState::new(0);
+    bind(&mut state, 0, b"save/");
+    push_word(&mut state, 42).unwrap();
+    command(&mut state, 22).unwrap();
+    let previous = state.interpreter_string_buffers[&5404].clone();
+    bind(&mut state, 0, b"../outside/");
+    push_word(&mut state, 42).unwrap();
+    assert_eq!(
+        command(&mut state, 22).unwrap_err().code(),
+        "ASTRA_EMU_CMVS_RESOURCE_PATH"
+    );
+    assert_eq!(state.interpreter_string_buffers[&5404], previous);
 }
 #[test]
 fn missing_or_external_pool_never_falls_back_to_a_different_frame() {
