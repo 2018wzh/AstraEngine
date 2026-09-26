@@ -90,6 +90,10 @@ impl CmvsSession {
     }
     fn action(&mut self, action: CmvsPs2aVmAction) -> FamilyResult<()> {
         match action {
+            CmvsPs2aVmAction::NativeText(_) => Err(error(
+                "ASTRA_EMU_CMVS_TEXT_UNBOUND",
+                "native text projection is not connected",
+            )),
             CmvsPs2aVmAction::CallScript { frame, name } => self.load(frame, name),
             CmvsPs2aVmAction::ReloadRootScript { name } => self.load(0, name),
             CmvsPs2aVmAction::EnsurePathDirectories { buffer_offset } => self

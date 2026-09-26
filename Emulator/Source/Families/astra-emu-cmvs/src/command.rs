@@ -6,7 +6,9 @@
 //! block on `None`; command ids are not an extension point for guessed
 //! behavior.
 
+mod native_text;
 mod words;
+pub use native_text::CmvsNativeTextOperation;
 use words::*;
 mod opcodes_0_71;
 mod opcodes_138_322;
@@ -28,6 +30,9 @@ use serde::{Deserialize, Serialize};
 /// The command result shape consumed by the CMVS 3.90 interpreter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum CmvsPs2aCommandEffectKind {
+    NativeText {
+        operation: CmvsNativeTextOperation,
+    },
     /// The dispatch table returns a negative result, ending the current
     /// interpreter dispatch cycle. It is not evidence that the entire game
     /// session has reached a terminal state.
@@ -1162,6 +1167,9 @@ pub struct CmvsPs2aCommandContract {
 /// dispatch and handler bodies.
 pub fn cmvs390_command_contract(command_id: u16) -> Option<CmvsPs2aCommandContract> {
     let (stack_pop_bytes, effect_kind, stack_words) = match command_id {
+        256 | 257 | 259 | 260 | 261 | 262 | 263 | 264 | 267 | 268 => {
+            native_text::lookup(command_id)
+        }
         0 | 11 | 12 | 16 | 18 | 19 | 20 | 17 | 23 | 21 | 22 | 24 | 26 | 29 | 30 | 31 | 32 | 33
         | 34 | 35 | 39 | 40 | 46 | 47 | 48 | 51 | 56 | 64 | 68 | 69 | 70 | 71 => {
             opcodes_0_71::lookup(command_id)

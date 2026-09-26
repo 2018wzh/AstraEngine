@@ -49,6 +49,9 @@ pub(super) fn execute_command(
     }
     drop_stack_bytes(state, u16::from(stack_pop_bytes))?;
     match effect_kind {
+        CmvsPs2aCommandEffectKind::NativeText { operation } => {
+            super::native_text::execute(state, operation, &values)
+        }
         CmvsPs2aCommandEffectKind::StoreComponentConstant { .. }
         | CmvsPs2aCommandEffectKind::StoreInterpreterConstant { .. }
         | CmvsPs2aCommandEffectKind::ClearInterpreterTableWord { .. }

@@ -1,7 +1,9 @@
 mod dispatch;
+mod native_text;
 mod state;
 use astra_emu_sdk::CoreError;
 pub use dispatch::execute_cmvs390_frame;
+pub use native_text::{CmvsNativeTextAction, CmvsNativeTextSurface};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 pub use state::CmvsPs2aVmState;
@@ -70,6 +72,7 @@ const MAX_FILTER_CHAIN_RECORDS_PER_BANK: usize = 4096;
 /// execution. The wire payload is untrusted even when its outer envelope and
 /// hash are valid.
 pub fn validate_cmvs390_vm_state(state: &CmvsPs2aVmState) -> Result<(), CoreError> {
+    native_text::validate(state)?;
     for (bank, paths) in &state.resource_search_paths {
         for (slot, path) in paths {
             if *slot >= bank.slot_count() {
@@ -300,7 +303,7 @@ pub struct CmvsScriptFrameIdentity {
 /// The recovered maximum nested-script frame index accepted by `sub_478080`.
 pub const CMVS_MAX_SCRIPT_CALL_INDEX: u32 = 3;
 
-/// One payload-free segment of a recovered interpreter string buffer.
+/// One core-private segment of a recovered interpreter string buffer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum CmvsStringSegment {
     /// An interpreter-owned prefix field copied before any script string.
@@ -328,6 +331,7 @@ pub enum CmvsPs2aStorageRequest {
 /// callers must not serialize actions into diagnostics or public reports.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum CmvsPs2aVmAction {
+    NativeText(CmvsNativeTextAction),
     /// Cases 160/164: alternate two audio channels, optionally crossfading.
     PlayCrossfadeAudio {
         primary: CmvsPs2aPrivateStringReference,
@@ -336,31 +340,54 @@ pub enum CmvsPs2aVmAction {
         playback_flag: bool,
     },
     /// Case 162: fade out the active channel and clear its resource names.
-    FadeOutAudio { fade_ms: u32 },
+    FadeOutAudio {
+        fade_ms: u32,
+    },
     /// Case 161: stop both channels and reset the channel selector.
     StopAudio,
     /// Case 778: one bounded table slot object is released.
-    DestroyBoundedSlotObject { table_dword_index: u32, slot: u32 },
+    DestroyBoundedSlotObject {
+        table_dword_index: u32,
+        slot: u32,
+    },
     /// Case 349: the effect playback objects for one channel/effect pair
     /// were rebuilt; the media graph itself stays unrecovered.
-    CreateEffectChannel { channel: u32, effect: u32 },
+    CreateEffectChannel {
+        channel: u32,
+        effect: u32,
+    },
     /// Case 347: one effect channel's enable flag was forwarded to the
     /// effect engine.
-    SetEffectChannelEnabled { channel: u32, enabled: bool },
+    SetEffectChannelEnabled {
+        channel: u32,
+        enabled: bool,
+    },
     /// Case 322: one opaque word was forwarded to an occupied effect channel.
-    ForwardEffectChannelWord { channel: u32 },
+    ForwardEffectChannelWord {
+        channel: u32,
+    },
     /// Case 376: one opaque block word was forwarded to an occupied channel.
-    ForwardEffectChannelBlock { channel: u32 },
+    ForwardEffectChannelBlock {
+        channel: u32,
+    },
     /// Case 324: two opaque words were forwarded to an occupied channel.
-    ForwardEffectChannelPair { channel: u32 },
+    ForwardEffectChannelPair {
+        channel: u32,
+    },
     /// Case 325: four opaque words were forwarded to an occupied channel.
-    ForwardEffectChannelQuad { channel: u32 },
+    ForwardEffectChannelQuad {
+        channel: u32,
+    },
     /// Case 350: the effect position was queried into two result words.
     QueryEffectPosition,
     /// Cases 384-391: one child of an occupied channel ran its action.
-    EffectChildCommand { channel: u32 },
+    EffectChildCommand {
+        channel: u32,
+    },
     /// Case 400: one effect quad configuration was applied.
-    ConfigureEffectQuad { channel: u32 },
+    ConfigureEffectQuad {
+        channel: u32,
+    },
     /// Case 286: one effect playback record's text surface received a value
     /// and two script string references; the host resolves them for length
     /// validation and never stores the text in the snapshot.
@@ -373,17 +400,28 @@ pub enum CmvsPs2aVmAction {
     /// stored.
     QueryEffectPointerHit,
     /// Case 402: quad `quad` on the occupied channel was shown.
-    SelectEffectQuad { channel: u32, quad: u32 },
+    SelectEffectQuad {
+        channel: u32,
+        quad: u32,
+    },
     /// Case 403: quad `quad` on the occupied channel was hidden.
-    DeselectEffectQuad { channel: u32, quad: u32 },
+    DeselectEffectQuad {
+        channel: u32,
+        quad: u32,
+    },
     /// Case 404: the effect state was queried into three result words.
     QueryEffectState,
     /// Case 405: the quad existence query stored its canonical result.
     QueryEffectQuadActive,
     /// Case 378: a child of an occupied channel received a boolean.
-    SetEffectChildEnabled { channel: u32, enabled: bool },
+    SetEffectChildEnabled {
+        channel: u32,
+        enabled: bool,
+    },
     /// Case 368: one named sound start was requested through a channel.
-    SelectEffectChild { channel: u32 },
+    SelectEffectChild {
+        channel: u32,
+    },
     PlayChannelSound {
         channel: u32,
         name: crate::CmvsPs2aPrivateStringReference,
@@ -401,7 +439,10 @@ pub enum CmvsPs2aVmAction {
     },
     /// The recovered case-48 path binds a private PB resource directly to a
     /// top-level texture container.
-    LoadTextureParentResource { parent_slot: u8, resource: String },
+    LoadTextureParentResource {
+        parent_slot: u8,
+        resource: String,
+    },
     /// Case 71 completes the recovered four-stage surface configuration.
     /// The host may present the selected parent or child only after this
     /// boundary; preceding setters remain state-only mutations.
@@ -412,10 +453,14 @@ pub enum CmvsPs2aVmAction {
     /// The recovered case-22 path asks the host to create the directories
     /// along the assembled path buffer. The host owns the storage policy;
     /// the VM never touches the filesystem itself.
-    EnsurePathDirectories { buffer_offset: u16 },
+    EnsurePathDirectories {
+        buffer_offset: u16,
+    },
     /// The recovered case-143 path asks the host to set the main window
     /// caption from the ordered, payload-free segment sequence.
-    SetWindowCaption { segments: Vec<CmvsStringSegment> },
+    SetWindowCaption {
+        segments: Vec<CmvsStringSegment>,
+    },
     /// The recovered case-354 path asks the host to resolve the reference,
     /// apply the bounded buffer write, or raise the error-flag mask when the
     /// resolved text exceeds the bound.
@@ -428,10 +473,15 @@ pub enum CmvsPs2aVmAction {
     },
     /// The recovered case-177 notification path is only emitted when the
     /// version-pinned gate field is non-zero in the retained state.
-    NotifyChannelVisibility { target_index: u8, enabled: bool },
+    NotifyChannelVisibility {
+        target_index: u8,
+        enabled: bool,
+    },
     /// The recovered case-691 path asks the host to apply the window layout
     /// derived from the stored presentation size field.
-    ApplyPresentationLayout { size_field_offset: u16 },
+    ApplyPresentationLayout {
+        size_field_offset: u16,
+    },
     /// The recovered case-692 path asks the host to toggle the presentation
     /// mode using the two named interpreter fields.
     TogglePresentationMode {
@@ -441,7 +491,9 @@ pub enum CmvsPs2aVmAction {
     },
     /// The recovered case-153 path asks the host to select the system cursor
     /// with the given index.
-    SelectSystemCursor { index: u32 },
+    SelectSystemCursor {
+        index: u32,
+    },
     /// The recovered case-296 path asks the host to load the system state
     /// archive; dispatch waits for the provider resolution.
     StorageRequest(CmvsPs2aStorageRequest),
@@ -450,13 +502,20 @@ pub enum CmvsPs2aVmAction {
     FilterGraphInputWait,
     /// The recovered case-535 selection poll waits for a directional,
     /// confirm, cancel, or primary-pointer edge owned by the host.
-    FilterChainSelectionWait { bank: u8 },
+    FilterChainSelectionWait {
+        bank: u8,
+    },
     /// The recovered case-129 path asks the host to load the named script
     /// into the given frame and continue dispatch there.
-    CallScript { frame: u16, name: String },
+    CallScript {
+        frame: u16,
+        name: String,
+    },
     /// The recovered case-128 path asks the host to load the named script as
     /// the new root frame-0 script and continue dispatch at its entry PC.
-    ReloadRootScript { name: String },
+    ReloadRootScript {
+        name: String,
+    },
 }
 
 mod effect;

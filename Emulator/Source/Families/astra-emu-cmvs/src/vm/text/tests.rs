@@ -103,7 +103,7 @@ fn restore_retains_slot_values_without_serializing_script_pool() {
 
 #[test]
 fn legacy_and_unknown_snapshot_versions_are_rejected_at_the_prefix() {
-    for bytes in [vec![0], vec![1], vec![2], vec![3], vec![5]] {
+    for bytes in [vec![0], vec![1], vec![2], vec![3], vec![4], vec![6]] {
         assert!(postcard::from_bytes::<CmvsPs2aVmState>(&bytes).is_err());
     }
     let mut state = CmvsPs2aVmState::new(0);

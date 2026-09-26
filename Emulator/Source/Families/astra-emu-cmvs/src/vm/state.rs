@@ -43,7 +43,7 @@ pub struct CmvsPs2aVmState {
     /// Opaque component fields keyed by packed parent-component and field
     /// offsets from the recovered CMVS 3.90 object graph.
     pub component_words: BTreeMap<u32, u32>,
-    /// Ordered, payload-free segments of interpreter-owned string buffers
+    /// Ordered core-private segments of interpreter-owned string buffers
     /// written by recovered command handlers. Keys are the original buffer
     /// byte offsets; interpreter prefix contents stay unnamed fields.
     pub interpreter_string_buffers: BTreeMap<u16, Vec<CmvsStringSegment>>,
@@ -62,6 +62,10 @@ pub struct CmvsPs2aVmState {
     /// Recovered effect playback table entries, keyed by effect index 0..=11.
     /// Cases 276/277/278 write the record fields at dwords 41/44/45.
     pub effect_playback: BTreeMap<u8, CmvsEffectPlaybackRecord>,
+    /// Core-private text objects in native table 750; fonts in table 762
+    /// outlive destruction of their corresponding text object.
+    pub native_text: BTreeMap<u8, CmvsNativeTextSurface>,
+    pub native_text_fonts: BTreeMap<u8, String>,
     /// Recovered effect channel child elements, keyed by `(channel, child)`.
     /// Cases 378/379/380/382/383 address one element through `sub_466AE0`.
     pub effect_elements: BTreeMap<(u8, u32), CmvsEffectElement>,
@@ -234,6 +238,8 @@ impl CmvsPs2aVmState {
             slot_objects: BTreeMap::new(),
             effect_channels: BTreeMap::new(),
             effect_playback: BTreeMap::new(),
+            native_text: BTreeMap::new(),
+            native_text_fonts: BTreeMap::new(),
             effect_elements: BTreeMap::new(),
             screen_pending: false,
             screen_words: BTreeMap::new(),
