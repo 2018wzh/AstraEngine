@@ -15,10 +15,13 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        workspace: [engine, emu]
+        workspace: [engine, emu, editor]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: ${{ matrix.workspace == 'emu' && 'recursive' || 'false' }}
+          lfs: true
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -27,7 +30,7 @@ jobs:
           python-version: '3.x'
       - name: Linux native dependencies
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libwayland-dev libxkbcommon-dev libx11-dev libxcursor-dev libxi-dev libxrandr-dev libvulkan-dev clang cmake
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev libfontconfig1-dev libx11-dev libxcursor-dev libxi-dev libxrandr-dev libvulkan-dev clang cmake
       - name: Check product workspace
         run: cargo xtask check --workspace ${{ matrix.workspace }}
 
@@ -37,6 +40,8 @@ jobs:
       VCPKG_DEFAULT_TRIPLET: x64-windows
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy

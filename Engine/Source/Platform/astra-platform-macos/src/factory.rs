@@ -144,6 +144,7 @@ mod macos {
                     event_loop,
                     app: MacosRunnerApp {
                         pending: pending.clone(),
+                        wake: start_wake.clone(),
                         host: None,
                     },
                 },
@@ -211,12 +212,13 @@ mod macos {
     }
 
     struct MacosRunnerApp {
+        wake: EventLoopProxy<()>,
         pending: Arc<std::sync::Mutex<Option<BackendSetup>>>,
         host: Option<MacosHostApp>,
     }
 
     impl MacosRunnerApp {
-        fn initialize(&mut self, event_loop: &ActiveEventLoop) -> Result<(), PlatformError> {
+        fn initialize(&mut self) -> Result<(), PlatformError> {
             let Some(setup) = self
                 .pending
                 .lock()
@@ -225,7 +227,7 @@ mod macos {
             else {
                 return Ok(());
             };
-            let proxy = event_loop.create_proxy();
+            let proxy = self.wake.clone();
             let gamepad_proxy = proxy.clone();
             setup.command_wake.bind(move || {
                 if proxy.send_event(()).is_err() {
@@ -267,7 +269,7 @@ mod macos {
 
     impl ApplicationHandler for MacosRunnerApp {
         fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-            if self.initialize(event_loop).is_err() {
+            if self.initialize().is_err() {
                 event_loop.exit();
             }
             if let Some(host) = self.host.as_mut() {
@@ -288,7 +290,7 @@ mod macos {
         }
 
         fn user_event(&mut self, event_loop: &ActiveEventLoop, _: ()) {
-            if self.initialize(event_loop).is_err() {
+            if self.initialize().is_err() {
                 event_loop.exit();
                 return;
             }
@@ -299,7 +301,7 @@ mod macos {
         }
 
         fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-            if self.initialize(event_loop).is_err() {
+            if self.initialize().is_err() {
                 event_loop.exit();
             }
             if let Some(host) = self.host.as_mut() {
@@ -876,6 +878,9 @@ mod macos {
                     HostCommand::ReadSave { slot, reply } => {
                         let _ = reply.send(self.save_store.read(&slot));
                     }
+                    HostCommand::ListSaves { reply } => {
+                        let _ = reply.send(self.save_store.list());
+                    }
                     HostCommand::DeleteSave { slot, reply } => {
                         let _ = reply.send(self.save_store.delete(&slot));
                     }
@@ -920,6 +925,16 @@ mod macos {
                     HostCommand::ClosePackage { source, reply } => {
                         let result = self.package_sources.remove(source).map(|_| ());
                         let _ = reply.send(result);
+                    }
+                    #[cfg(not(feature = "platform-test-driver"))]
+                    command @ (HostCommand::InjectSurfaceDeviceLoss { .. }
+                    | HostCommand::InjectAudioDeviceLoss { .. }) => {
+                        let operation = command.operation();
+                        let _ = command.reply_error(PlatformError::new(
+                            PlatformErrorCode::InvalidState,
+                            operation,
+                            "device fault injection requires platform-test-driver",
+                        ));
                     }
                     HostCommand::Shutdown { reply } => {
                         let result = self
@@ -1728,7 +1743,7 @@ mod macos {
                             .ok_or_else(|| {
                                 host_error("decode.submit", "decoded audio exceeds the byte limit")
                             })?,
-                        0,
+                        0.0,
                     );
                     let destination =
                         NonNull::new(audio_samples[start..].as_mut_ptr().cast()).unwrap();

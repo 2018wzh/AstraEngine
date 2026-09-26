@@ -388,7 +388,6 @@ pub enum HostCommand {
         frame: SceneFrame,
         reply: oneshot::Sender<Result<(), PlatformError>>,
     },
-    #[cfg(feature = "platform-test-driver")]
     InjectSurfaceDeviceLoss {
         surface: SurfaceHandle,
         reply: oneshot::Sender<Result<(), PlatformError>>,
@@ -417,7 +416,6 @@ pub enum HostCommand {
         output: AudioOutputHandle,
         reply: oneshot::Sender<Result<(), PlatformError>>,
     },
-    #[cfg(feature = "platform-test-driver")]
     InjectAudioDeviceLoss {
         output: AudioOutputHandle,
         reply: oneshot::Sender<Result<(), PlatformError>>,
@@ -494,7 +492,6 @@ impl HostCommand {
             Self::CaptureSurface { .. } => "surface.capture",
             Self::PresentRgba { .. } => "surface.present_rgba",
             Self::PresentScene { .. } => "surface.present_scene",
-            #[cfg(feature = "platform-test-driver")]
             Self::InjectSurfaceDeviceLoss { .. } => "surface.test.inject_device_loss",
             Self::DestroySurface { .. } => "surface.destroy",
             Self::DestroyWindow { .. } => "window.destroy",
@@ -502,7 +499,6 @@ impl HostCommand {
             Self::PauseAudio { .. } => "audio.pause",
             Self::ResumeAudio { .. } => "audio.resume",
             Self::AbortAudio { .. } => "audio.abort",
-            #[cfg(feature = "platform-test-driver")]
             Self::InjectAudioDeviceLoss { .. } => "audio.test.inject_device_loss",
             Self::CloseAudio { .. } => "audio.close",
             Self::OpenDecode { .. } => "decode.open",
@@ -538,7 +534,6 @@ impl HostCommand {
             | Self::AbortSave { reply, .. }
             | Self::ClosePackage { reply, .. }
             | Self::Shutdown { reply } => reply.send(result),
-            #[cfg(feature = "platform-test-driver")]
             Self::InjectAudioDeviceLoss { reply, .. }
             | Self::InjectSurfaceDeviceLoss { reply, .. } => reply.send(result),
             other => {
@@ -566,7 +561,6 @@ impl HostCommand {
             Self::CaptureSurface { reply, .. } => send_error!(reply),
             Self::PresentRgba { reply, .. } => send_error!(reply),
             Self::PresentScene { reply, .. } => send_error!(reply),
-            #[cfg(feature = "platform-test-driver")]
             Self::InjectSurfaceDeviceLoss { reply, .. } => send_error!(reply),
             Self::DestroySurface { reply, .. } => send_error!(reply),
             Self::DestroyWindow { reply, .. } => send_error!(reply),
@@ -574,7 +568,6 @@ impl HostCommand {
             Self::PauseAudio { reply, .. } => send_error!(reply),
             Self::ResumeAudio { reply, .. } => send_error!(reply),
             Self::AbortAudio { reply, .. } => send_error!(reply),
-            #[cfg(feature = "platform-test-driver")]
             Self::InjectAudioDeviceLoss { reply, .. } => send_error!(reply),
             Self::CloseAudio { reply, .. } => send_error!(reply),
             Self::OpenDecode { reply, .. } => send_error!(reply),

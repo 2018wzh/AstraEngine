@@ -181,3 +181,35 @@ fn command_wake_registration_rejects_rebinding() {
     assert_eq!(error.code, PlatformErrorCode::InvalidState);
     assert_eq!(error.operation, "host.command_wake.bind");
 }
+
+#[tokio::test]
+async fn fault_commands_can_be_rejected_without_enabling_client_test_api() {
+    let (surface_reply, surface_result) = tokio::sync::oneshot::channel();
+    let (audio_reply, audio_result) = tokio::sync::oneshot::channel();
+    let commands = [
+        HostCommand::InjectSurfaceDeviceLoss {
+            surface: astra_platform::SurfaceHandle::from_parts(1, 1).unwrap(),
+            reply: surface_reply,
+        },
+        HostCommand::InjectAudioDeviceLoss {
+            output: astra_platform::AudioOutputHandle::from_parts(1, 1).unwrap(),
+            reply: audio_reply,
+        },
+    ];
+    for command in commands {
+        let operation = command.operation();
+        command
+            .reply_error(astra_platform::PlatformError::new(
+                PlatformErrorCode::InvalidState,
+                operation,
+                "device fault injection requires platform-test-driver",
+            ))
+            .unwrap();
+    }
+    for result in [surface_result, audio_result] {
+        assert_eq!(
+            result.await.unwrap().unwrap_err().code,
+            PlatformErrorCode::InvalidState
+        );
+    }
+}

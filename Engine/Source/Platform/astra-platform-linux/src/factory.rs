@@ -1542,16 +1542,14 @@ mod linux {
                         host_error("decode.submit", "GStreamer sample is not CPU-readable")
                     })?;
                     if request.kind == DecodeKind::Audio {
-                        let chunks = map.as_slice().chunks_exact(std::mem::size_of::<f32>());
-                        if !chunks.remainder().is_empty() {
+                        let (samples, remainder) = map.as_slice().as_chunks::<4>();
+                        if !remainder.is_empty() {
                             return Err(host_error(
                                 "decode.submit",
                                 "GStreamer produced a partial f32 audio sample",
                             ));
                         }
-                        audio_samples.extend(chunks.map(|sample| {
-                            f32::from_le_bytes([sample[0], sample[1], sample[2], sample[3]])
-                        }));
+                        audio_samples.extend(samples.iter().copied().map(f32::from_le_bytes));
                     } else {
                         bytes.extend_from_slice(map.as_slice());
                         break;

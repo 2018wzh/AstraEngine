@@ -6,11 +6,12 @@
 cargo xtask docs
 cargo xtask check --workspace engine
 cargo xtask check --workspace emu
+cargo xtask check --workspace editor
 cargo xtask test --workspace engine -p astra-core
 cargo test --manifest-path Emulator/Cargo.toml -p astra-emu-family-api
 ```
 
-`check` 执行链接检查、格式、clippy、产品构建和完整测试；`fmt` 只处理所选 workspace 的成员，不格式化第三方路径依赖。`test -p` 是普通定向测试，不启动或预构建 Headless。完整产品测试先构建所选产品的程序，供真正的 CLI/宿主测试使用。
+CI 对三桌面的 Engine、EMU、Editor 分别执行 `check`，EMU job 检出时递归初始化固定提交的子模块；各 job 拉取 Git LFS 资产。`check` 执行链接检查、格式、clippy、产品构建和完整测试；`fmt` 只处理所选 workspace 的成员，不格式化第三方路径依赖。`test -p` 是普通定向测试，不启动或预构建 Headless。完整产品测试先构建所选产品的程序，供真正的 CLI/宿主测试使用。
 
 全量开发测试会产生较大的调试符号和增量缓存。CI 设置以下环境变量以控制空间，本地空间有限时也可使用；它们不改变 Release 配置。需要调试器符号时移除这些变量并重建。
 
@@ -120,3 +121,5 @@ python Tools/TsuiNoSora/classic_route_inputs.py \
 CLI 的 run/serve 必须持有 HeadlessThreadOwner，并通过 factory.with_thread_owner 绑定会话线程。owner 的作用域包住产品/会话：正常关闭先执行产品 shutdown，失败返回或取消时再取消并 join 剩余 Host。只有资源所属线程完成析构后，CLI 才能退出；不能以 process::exit 或超时强杀代替此收尾。
 
 Player 的物理输入入口使用 NativeVnHostCommandSource::prepare_ui_input，先按批内顺序执行命令，再把 Captured 结果交给 cache_gameplay_surface，最后处理 UI save request。新增宿主不要恢复仅按右键判定截图的逻辑。NativeVN 输入工具的 --save-restore 覆盖写槽与读取；--cold-restore 用另一进程读取已存在的一份测试存档，不能与写槽或影片输入选项合并。
+
+`xtask` 在产品 build 步骤排除正在运行的自身可执行文件，避免 Windows 文件锁阻止覆盖；自身仍参加格式、Clippy 和测试。平台内部故障注入命令的类型在各 feature 组合下保持一致，客户端注入入口仍由 `platform-test-driver` 控制，未开启的宿主明确拒绝注入请求。

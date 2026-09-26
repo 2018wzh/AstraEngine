@@ -360,6 +360,16 @@ mod browser {
                 HostCommand::ClosePackage { source, reply } => {
                     let _ = reply.send(packages.remove(source).map(|_| ()));
                 }
+                #[cfg(not(feature = "platform-test-driver"))]
+                command @ (HostCommand::InjectSurfaceDeviceLoss { .. }
+                | HostCommand::InjectAudioDeviceLoss { .. }) => {
+                    let operation = command.operation();
+                    let _ = command.reply_error(PlatformError::new(
+                        PlatformErrorCode::InvalidState,
+                        operation,
+                        "device fault injection requires platform-test-driver",
+                    ));
+                }
                 HostCommand::Shutdown { reply } => {
                     let result = surfaces
                         .ensure_empty()

@@ -1,5 +1,15 @@
 # 全产品重构实施状态
 
+## 2026-09-26 CI 与干净检出修复
+
+已接入 NativeVN 的 WAV/MP4 显式绑定、Editor 完整作者预览回归，以及 CMVS 原生字符串值拷贝。CI 增加三桌面 Editor 检查、Git LFS 和 EMU 递归子模块检出。`xtask` 可直接选择 Editor；产品构建不再覆盖正在运行的 `xtask.exe`，自身仍接受格式、Clippy 和测试。
+
+本轮修复 macOS event-loop proxy 来源、浮点音频填充值、存档列表命令和测试 feature 统一后的命令匹配，并修正 Linux 音频切片的新 Clippy 报错。故障注入命令类型不随 feature 变化，客户端入口仍受测试 feature 控制，关闭该 feature 的宿主明确拒绝请求。
+
+Windows 上根、Emulator、Editor 三个活动 workspace 的完整 `xtask check` 均通过，包含文档、格式、all-target Clippy、产品构建与普通测试；根构建包含 Headless。Editor 17 项测试通过，3 项外部 Agent/GPU 产品用例按原条件未执行。独立干净检出及独立 target 上，`xtask` 自身完整检查和 platform 关闭默认 feature 的 7 项 session 测试通过。Emulator 默认 GPU fixture 通过不代表商业流程或实际声音验收。
+
+干净检出发现 Artemis `13e55ffa`、RFVP `b2f385da`、Siglus `c6c4f99c` 的固定提交尚不能从配置的远端取得；本地子模块检查不替代远端可复现性。Linux/macOS 本机检查、更新后的远端 CI、FFmpeg 可选 job、真实 Player 视听与长流程仍未关闭。
+
 ## 2026-09-23 集成与 Classic 复测
 
 Editor 的过期项目操作拒绝、CMVS 输入锁存及调用脚本名称的 source frame 修复已整合；Editor 17 项测试、CMVS 158 项普通测试及各自 all-target Clippy、fmt 通过。默认 ignored 的外部产品和 GPU 用例未执行，CMVS 文字、PCM 与商业短流程仍待完成。`60dc3e58b` 阶段根 workspace 完整测试通过（830 通过、19 按原条件未执行），前置 Headless 构建、全 workspace all-target Clippy 和 fmt 通过。后续 `800bd36d3` 的 CMVS 自动推进查询修复另行通过 158 项普通测试、all-target Clippy 与 fmt，GPU 用例未执行。

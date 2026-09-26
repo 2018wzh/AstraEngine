@@ -26,7 +26,7 @@ fn main() -> Result<()> {
             "--workspace" => {
                 selection = options
                     .next()
-                    .context("--workspace needs engine, emu or all")?
+                    .context("--workspace needs engine, emu, editor or all")?
             }
             "--package" | "-p" => packages.push(
                 options
@@ -44,6 +44,7 @@ fn main() -> Result<()> {
     let workspaces: Vec<_> = match selection {
         "engine" => vec![root.to_path_buf()],
         "emu" => vec![root.join("Emulator")],
+        "editor" => vec![root.join("Editor")],
         "all" => {
             let mut paths = vec![root.to_path_buf(), root.join("Emulator")];
             if root.join("Editor/Cargo.toml").is_file() {
@@ -51,7 +52,7 @@ fn main() -> Result<()> {
             }
             paths
         }
-        _ => bail!("workspace must be engine, emu or all"),
+        _ => bail!("workspace must be engine, emu, editor or all"),
     };
     if !packages.is_empty() && selection == "all" {
         bail!("--package requires an explicit --workspace");
@@ -90,7 +91,16 @@ fn main() -> Result<()> {
         }
         if task == "build" || task == "check" || (task == "test" && packages.is_empty()) {
             // Complete product tests exercise installed binaries; ordinary focused tests need none.
-            cargo(&workspace, "build", &selected, &[])?;
+            // The running xtask binary is already built. Windows locks it, so
+            // rebuilding it in place would fail; lint and test still cover it.
+            let products: Vec<_> = selected
+                .iter()
+                .filter(|name| name.as_str() != "xtask")
+                .cloned()
+                .collect();
+            if !products.is_empty() {
+                cargo(&workspace, "build", &products, &[])?;
+            }
         }
         if matches!(task.as_str(), "test" | "check") {
             cargo(&workspace, "test", &selected, &[])?;
@@ -162,6 +172,6 @@ fn run(root: &Path, program: &str, args: &[String]) -> Result<()> {
 }
 
 fn help() -> Result<()> {
-    println!("cargo xtask <docs|fmt|lint|build|test|check|check-fast> [--workspace engine|emu|all] [-p crate]\nDefault: all active product workspaces. Focused tests never bootstrap a Headless server.");
+    println!("cargo xtask <docs|fmt|lint|build|test|check|check-fast> [--workspace engine|emu|editor|all] [-p crate]\nDefault: all active product workspaces. Focused tests never bootstrap a Headless server.");
     Ok(())
 }
