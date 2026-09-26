@@ -4,7 +4,7 @@
 
 CMVS 原生 352 需要实际设置窗口标题。Family API v8 添加 `SetTitle`、长度与控制字符校验，空标题保留原生清空语义；v9 随后加入有界 RGBA8 small-icon 命令，保留原生 143 与标题 352 的不同语义。公共类型与契约先提交，Manager 现已接入：标题保持到显式替换，空串清空；NullAudio 标记不被覆盖；small icon 复用 winit 的 Win32/X11 能力，其他后端明确拒绝。关闭或失败恢复 Manager 标题与默认图标。API vtable、Manager 状态与现有五个 Family 的 all-target Clippy 已通过；集成标题/图标消费者后 Emulator workspace 测试 604 项通过、34 项按原条件跳过，fmt 与文档检查通过；独立外部核心六项流程通过，包含标题/图标在 Headless 上明确拒绝并取消关闭；真实窗口标题/图标视觉尚未验收。
 
-CMVS 已接入原生 352 标题与 143 图标。旧探针未应用 `SCRIPT_INIT_PATH`，错误地从归档内同名脚本启动；其 129 `RESOURCE_NOT_FOUND` 及此前各 opcode 进度只能说明该错误入口的局部执行，不能作为正确原生冷启动结果。正确入口修复与重试尚未完成；Host 标题/图标、首 tick、正文及帧仍未实际验收。
+CMVS 已接入原生 352 标题与 143 图标。旧探针未应用 `SCRIPT_INIT_PATH`，错误地从归档内同名脚本启动；其 129 `RESOURCE_NOT_FOUND` 及此前各 opcode 进度只能说明该错误入口的局部执行，不能作为正确原生冷启动结果。正确入口已修复并重试，随后接入 354 原生有界存档标题 buffer，增量 209 项通过、1 项 GPU fixture 跳过。正确 bootstrap 已加载后续脚本，但首 advance 停在 353 标题 prefix 未绑定；没有向 Host 交付窗口请求，也没有完成首 tick、正文或帧。Host 标题/图标视觉仍未实际验收。
 
 当前集成树只有 FVP、Artemis、Siglus、Musica、CMVS 五个 Family 适配 crate；KrKr 来源存在于另一工作线，尚未接入此活动 workspace，不能将五核检查称为六核完成。
 
