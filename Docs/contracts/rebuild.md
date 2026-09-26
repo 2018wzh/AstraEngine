@@ -194,3 +194,14 @@ Native `VnSession` 通过 `bind_policy_io` 授予具名逻辑资源及读取限�
 `astra.vn.session_policy.v1` 保存策略值、请求及 AwaitToken 对应关系，不保存 VM、coroutine、执行栈、宿主 grant 或句柄。恢复保留完成结果，将 pending 明确转为 interrupted 并清除相应 await，不自动重发外部请求。缺失的新 session-policy component、版本错误、无效序号、超限结果或 await 不一致均拒绝；旧槽不迁移。读取已保存结果不需要再次授予权限；发起新请求仍需当前宿主授权。
 
 实现沿用现有 `mlua` VM 与 Runtime `TaskScope`。`mlua` 的 [async 支持](https://docs.rs/crate/mlua/0.10.5/source/README.md) 依赖 coroutine；本接口采用显式延续，避免将 coroutine 误当作可恢复状态。取消遵循 [CancellationToken](https://docs.rs/tokio-util/latest/tokio_util/sync/struct.CancellationToken.html) 的 Future drop 约定。平台 IO adapter 由 embedding host 显式提供；这一批没有自动给 Packaged Player 新增磁盘或网络权限。
+
+
+### Timeline 段插值与源码事务
+
+本批将已有四种 `VnPresentationEasing` 收归 script：`linear`、`ease_in`、`ease_out`、`ease_in_out`。`.astra` 的 `timeline easing:` 是整条轨道的段规则；省略为 linear，每两个关键帧之间独立按该规则计算归一化进度。沿用现有二次缓动公式，不把名称解释为 CSS cubic-bezier，也不增加通用曲线系统。首尾值精确钳定；取消沿用目标任务规则；保存保留轨道规则和已过时间，恢复不重启曲线。
+
+Timeline 是同一源 AST 的临时投影。共享 `astra-vn-editor` 提供投影和版本绑定的编辑 batch；桌面与外部工具使用同一事务，不保存第二份时间线。修改仅替换属性 span，插入可选 easing 时插在命令关键字后，保留注释、source ID 与其余文本；一次提交对应一次撤销。Story、Scene、角色和 UI 继续使用现有 AST/IR，不新增未被运行层消费的 Sequence 模型。
+
+compiled project 升至 v5、package root 升至 v4；包含轨道的 Runtime/Player 存档同时换版本。旧格式在解码前明确拒绝，作品重新 Cook，不做迁移或兼容别名。局部检查覆盖曲线端点/中点、编译诊断、暂停恢复、取消、文本与 Timeline 往返及版本冲突；桌面实际操作保持暂停。
+
+模式参考：[rust-analyzer 的无损语法树与类型 AST 分层](https://rust-analyzer.github.io/book/contributing/architecture.html)；缓动使用已有实现，概念上的段进度映射参考 [CSS Easing](https://www.w3.org/TR/css-easing-1/)，不宣称 CSS 数值兼容。
