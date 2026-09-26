@@ -8,7 +8,11 @@ mod luau;
 #[cfg(feature = "luau-runtime")]
 mod luau_actions;
 #[cfg(feature = "luau-runtime")]
+mod luau_budget;
+#[cfg(feature = "luau-runtime")]
 mod luau_io;
+#[cfg(feature = "luau-runtime")]
+mod luau_value;
 mod policy_bundle;
 mod state;
 pub use host_io::*;

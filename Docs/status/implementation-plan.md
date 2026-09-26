@@ -23,7 +23,7 @@ CMVS 已接入原生 352 标题与 143 图标。旧探针未应用 `SCRIPT_INIT_
 
 已在现有 policy VM 中保留并调用注册 handler，新增包绑定、typed 完成/等待结果与显式 continuation。调用复用 Extension 参数；每个 action 实例隔离 IO key，并将 entry 的文本列表与宿主授权取交集。Await 仅接受本实例 pending 请求，丢弃本次变量写入、保留显式状态；Complete 返回一次性变量事务，不能遗留 pending 工作。模块顶层只有注册权限，boolean 返回与未知命令效果不能冒充动作成功。
 
-policy crate 28 项测试与 all-target Clippy 通过，覆盖重复 source 实例、Await 前写入、Interrupted、非法等待与越权。随后统一 action 参数与 snapshot 的精确整数边界为 ±(2^53−1)，补充 2^40 经 Await/Ready/Interrupted 与保存编码后的读回，以及越界拒绝；不再在 continuation 读回时收窄成 i32。当前只完成可供 Cook 与 session 共用的执行基础；Cook entry 配置、包内绑定、VN continuation 保存、Player 无输入自动等待和资源预载尚未接通，不能据此称为 Packaged Player IO 已完成。没有执行桌面 GUI 或真实声音验收。
+policy crate 30 项测试与 all-target Clippy 通过，覆盖重复 source 实例、Await 前写入、Interrupted、非法等待与越权。随后统一 action 参数与 snapshot 的精确整数边界为 ±(2^53−1)，补充 2^40 经 Await/Ready/Interrupted 与保存编码后的读回，以及越界拒绝；不再在 continuation 读回时收窄成 i32。Rust 持有的 snapshot/trace/command/query 和注册 descriptor 在复制前共用现有 memory/output 预算；替换 snapshot 释放旧值额度，捕获预算错误也不能提交部分事务。小预算回归覆盖重复共享字符串、同 key 覆盖与失败时 gameplay/IO 不提交。当前只完成可供 Cook 与 session 共用的执行基础；Cook entry 配置、包内绑定、VN continuation 保存、Player 无输入自动等待和资源预载尚未接通，不能据此称为 Packaged Player IO 已完成。没有执行桌面 GUI 或真实声音验收。
 
 ## 2026-09-26 最终集成检查
 

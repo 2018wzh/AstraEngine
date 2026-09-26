@@ -13,7 +13,21 @@ struct RegisteredAction {
 }
 
 /// Execute a registration-only entry. The same VM owns both registration and handler.
-fn register(lua: &Lua, source: &str) -> mlua::Result<BTreeMap<String, RegisteredAction>> {
+fn register(
+    lua: &Lua,
+    source: &str,
+    budget: PolicyExecutionBudget,
+    shared: Option<super::luau_budget::SharedBudget>,
+) -> mlua::Result<BTreeMap<String, RegisteredAction>> {
+    let host_budget = match shared {
+        Some(shared) => shared,
+        None => super::luau_budget::HostBudget::new(
+            &VnPolicyState::default(),
+            &PolicyQueryContext::default(),
+            budget,
+        )?,
+    };
+    let registration_budget = host_budget.clone();
     let registered = Rc::new(RefCell::new(BTreeMap::new()));
     let registrations = registered.clone();
     let command = lua.create_table()?;
@@ -21,6 +35,11 @@ fn register(lua: &Lua, source: &str) -> mlua::Result<BTreeMap<String, Registered
         "register",
         lua.create_function(
             move |lua, (name, manifest, handler): (String, Table, Function)| {
+                let bytes = registration_budget
+                    .borrow()
+                    .lua_value_bytes(&mlua::Value::Table(manifest.clone()), 0)?
+                    .saturating_add(256 + name.len());
+                registration_budget.borrow_mut().replace(0, bytes)?;
                 let fields: BTreeMap<String, ExtensionFieldContract> =
                     lua.from_value(mlua::Value::Table(manifest.get("fields")?))?;
                 let descriptor = ExtensionCommandDescriptor {
@@ -53,6 +72,7 @@ fn register(lua: &Lua, source: &str) -> mlua::Result<BTreeMap<String, Registered
     astra.set("command", command)?;
     lua.globals().set("astra", astra)?;
     lua.load(source).exec()?;
+    host_budget.borrow().check()?;
     let mut actions = registered.borrow_mut();
     Ok(std::mem::take(&mut *actions))
 }
@@ -70,8 +90,8 @@ impl LuauPolicy {
         }
         let lua = astra_policy::create_sandboxed_lua(budget)
             .map_err(|e| VnError::diagnostic(e.code(), e.to_string()))?;
-        let actions =
-            register(&lua, source).map_err(|_| action_error("action registration failed"))?;
+        let actions = register(&lua, source, budget, None)
+            .map_err(|_| action_error("action registration failed"))?;
         if actions.is_empty() {
             return Err(action_error("entry registers no actions"));
         }
@@ -100,9 +120,14 @@ impl LuauPolicy {
             state: host.state,
             capabilities: &capabilities,
         };
-        let outcome =
-            self.evaluate_with(&mut staged, queries, budget, host, |lua, astra, io| {
-                let mut registered = register(lua, &binding.source)?;
+        let outcome = self.evaluate_with(
+            &mut staged,
+            queries,
+            budget,
+            host,
+            |lua, astra, io, host_budget| {
+                let mut registered =
+                    register(lua, &binding.source, budget, Some(host_budget.clone()))?;
                 let action = registered
                     .remove(&binding.descriptor.command)
                     .ok_or_else(|| mlua::Error::runtime("ASTRA_VN_POLICY_ACTION_MISSING"))?;
@@ -194,7 +219,8 @@ impl LuauPolicy {
                     }
                 }
                 Ok(outcome)
-            })?;
+            },
+        )?;
         continuation.state = staged.snapshots.clone();
         continuation.waiting_key = match &outcome {
             PolicyActionOutcome::Complete => None,
