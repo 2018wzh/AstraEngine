@@ -3356,6 +3356,12 @@ fn build_standalone_bundle_into(
     } else {
         PackageReader::open(&package_bytes)?
     };
+    if platform == PlatformId::Web && !astra_vn_package::load_policy_actions(&reader)?.is_empty() {
+        return Err(
+            "ASTRA_WEB_POLICY_ACTION_UNSUPPORTED: Web bundles cannot execute native policy actions"
+                .into(),
+        );
+    }
     let package_manifest: PackageManifest =
         reader.container().decode_postcard("package.manifest")?;
     if !reader.has_section("platform.profiles") {

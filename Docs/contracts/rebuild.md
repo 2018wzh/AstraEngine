@@ -213,7 +213,7 @@ Packaged Player 的 ReadText adapter 只读取显式授权且满足当前 VFS bi
 本批检查须覆盖真实 `.astra` → Cook → package → Player-VN 等待与恢复后再保存、同 source 重复执行、Await 前写入只在 Complete 提交一次、非法等待 key、阻塞 host 关闭和迟到结果。局部 VM 测试不能替代产品调用链；桌面 GUI 与真实设备验收单独报告。
 
 
-包内动作保存在 `vn.policy_actions` section（`astra.vn.policy_actions.v1`，上限 4 MiB、64 个 command）；其源码 hash、注册 entry 和 descriptor 必须一致。文本 allowlist 使用作者层 `asset:/` ID，经 Cook 已有 `asset.catalog` 唯一映射到 `package:/`，缺失或重复映射、非 text 类型、错误 profile、UTF-8 或完整性失败均阻断。每篇文本最多 1 MiB、合计最多 64 篇，预载字节从现有 asset cache 预算扣除；未授权资产不预载。catalog/VFS 元数据各最多 16 MiB。Web 不支持 native worker，含此 section 的动作包在打开时拒绝；普通无动作包不受影响。
+包内动作保存在 `vn.policy_actions` section（`astra.vn.policy_actions.v1`，上限 4 MiB、64 个 command）；其源码 hash、注册 entry 和 descriptor 必须一致。文本 allowlist 使用作者层 `asset:/` ID，经 Cook 已有 `asset.catalog` 唯一映射到 `package:/`，缺失或重复映射、非 text 类型、错误 profile、UTF-8 或完整性失败均阻断。每篇文本最多 1 MiB、合计最多 64 篇，预载字节从现有 asset cache 预算扣除；未授权资产不预载。catalog/VFS 元数据各最多 16 MiB。Web 不支持 native worker：跨平台 Cook 可保留动作，但选择 Web 打包时拒绝非空动作绑定，浏览器打开动作包也会拒绝；普通无动作包不受影响。
 
 项目配置与同一 `.astra` 的调用示例：
 

@@ -491,6 +491,86 @@ fn web_bundle_requires_wasm_bindgen_pair_and_embeds_canonical_host_scripts() {
     let config: serde_json::Value =
         serde_json::from_slice(&fs::read(bundle.join("AstraPlayer.config.json")).unwrap()).unwrap();
     assert!(config.get("ui_components").is_none());
+    // A mixed-platform Cook remains valid; only the selected Web bundle rejects actions.
+    let old_config = fs::read(bundle.join("AstraPlayer.config.json")).unwrap();
+    fs::create_dir_all(case_dir.join("Policies")).unwrap();
+    fs::write(
+        case_dir.join("Policies/action.luau"),
+        r#"
+astra.command.register("native_action", {schema="demo.action.v1",fields={}}, function(args)
+    return astra.action.complete()
+end)
+"#,
+    )
+    .unwrap();
+    let mut project_config: serde_yaml::Value =
+        serde_yaml::from_str(&fs::read_to_string(&project).unwrap()).unwrap();
+    project_config["nativevn"]["policy_actions"] =
+        serde_yaml::from_str("[{entry: Policies/action.luau}]").unwrap();
+    fs::write(&project, serde_yaml::to_string(&project_config).unwrap()).unwrap();
+    run_astra(
+        root,
+        [
+            "cook",
+            project.to_str().unwrap(),
+            "--profile",
+            "minimal",
+            "--target",
+            "nativevn-minimal-test-game",
+            "--out",
+            cooked.to_str().unwrap(),
+        ],
+    );
+    run_astra(
+        root,
+        [
+            "package",
+            "build",
+            cooked.to_str().unwrap(),
+            "--target",
+            "nativevn-minimal-test-game",
+            "--out",
+            package.to_str().unwrap(),
+        ],
+    );
+    let rejected_bundle = case_dir.join("policy-bundle");
+    for (destination, diagnostic) in [
+        (&rejected_bundle, "ASTRA_WEB_POLICY_ACTION_UNSUPPORTED"),
+        (&bundle, "ASTRA_BUNDLE_OUTPUT_EXISTS"),
+    ] {
+        let rejected = Command::new(env!("CARGO_BIN_EXE_astra"))
+            .args([
+                "package",
+                "bundle",
+                package.to_str().unwrap(),
+                "--target",
+                "nativevn-minimal-test-game",
+                "--profile",
+                "minimal",
+                "--platform",
+                "web",
+                "--out",
+                destination.to_str().unwrap(),
+                "--web-player-wasm",
+                wasm.to_str().unwrap(),
+                "--web-player-glue",
+                glue.to_str().unwrap(),
+            ])
+            .current_dir(root)
+            .output()
+            .unwrap();
+        assert!(!rejected.status.success());
+        assert!(
+            String::from_utf8_lossy(&rejected.stderr).contains(diagnostic),
+            "{}",
+            String::from_utf8_lossy(&rejected.stderr)
+        );
+    }
+    assert!(!rejected_bundle.exists());
+    assert_eq!(
+        fs::read(bundle.join("AstraPlayer.config.json")).unwrap(),
+        old_config
+    );
     fs::remove_dir_all(case_dir).unwrap();
 }
 
