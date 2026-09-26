@@ -103,3 +103,7 @@ CMVS 普通挂载现在只读取 CPZ header/index，校验索引身份、角色�
 354 现直接更新核心存档标题缓冲 10324，删除未被消费的 Host 动作。原生 CP932 字节长度小于 128 时复制到已有 interpreter_string_buffers；达到上限则保留旧标题，并对 10532 错误字段 OR 8，不清除其他位。原版保存函数从同一缓冲生成日期标题与 tag 256；当前仅完成缓冲和 VM 保存恢复语义，原生保存写回仍未实现。回归覆盖 127/128 字节、多字节字符、空标题、旧值和错误位保留及序列化恢复。
 
 354 修复后，209 项 unit 通过，1 项 GPU fixture 忽略，Clippy all-target、fmt 与文档检查通过。正确入口再次执行单次有界 GPU probe：索引约 0.20 秒、DX12 discrete 约 1.03 秒、session open 约 1.05 秒；首次 advance 已跨过 354，随后在 353 返回 `ASTRA_EMU_CMVS_WINDOW_CAPTION`，原因是窗口标题前缀尚未绑定，约 1.21 秒正常关闭且无残留进程。仍无完成首 tick、Host 窗口请求交付、267 正文、图像帧、输入或音频结果；本批到此冻结。
+
+353 现从352写入的288缓冲读取标题前缀，将实际参数复制到12816后缀缓冲，经现有 Family SetTitle 提交组合标题；354的存档标题缓冲保持独立。`initial.cfg` 的 `CMVS_INIT_CFG.FONT_SHIFT_JIS` 缺省为1：非零使用原生 CP932 全角空格，零使用两个 ASCII 空格，选择存入已有 process_global_words 并随 VM 恢复。原生拼接使用128字节栈数组且没有越界检查；本实现对组合 CP932 字节数达到128明确拒绝，并保留旧后缀，不模拟内存破坏。旧固定空格片段已删除，私有 VM snapshot 升至9并拒绝旧版本，Family API不变。213项 unit 通过、1项 GPU fixture忽略，覆盖分隔符、空后缀、多字节边界与恢复。
+
+353批正确入口有界 GPU probe 仍在首 advance 返回 `VM_STRING_TAG`。追加 Command 诊断后的同配置复测：索引约0.21秒、DX12 discrete约1.51秒、open约1.53秒、close约1.74秒；错误未经过 Command 上下文，具体非 Command 指令、offset以及是否已经到达353仍未定位。现已统一为全部 VM 指令和 action 错误追加 kind/offset（Command另含id），补充五类指令诊断回归；该最终诊断未再进行 GPU 复测。本批冻结，仍无完成首 tick、Host标题交付、图像/文字帧、输入或音频通过，原存档未写入。

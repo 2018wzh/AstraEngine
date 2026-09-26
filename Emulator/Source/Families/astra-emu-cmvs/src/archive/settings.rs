@@ -14,6 +14,18 @@ fn failure() -> CoreError {
 }
 
 impl CmvsArchive {
+    pub(crate) fn initialize_native_caption(
+        &self,
+        vm: &mut crate::CmvsPs2aVmState,
+    ) -> Result<(), CoreError> {
+        let root = self.game_root.as_deref().ok_or_else(failure)?;
+        vm.process_global_words.insert(
+            crate::vm::NATIVE_FONT_SHIFT_JIS,
+            u32::from(font_shift_jis(root)?),
+        );
+        Ok(())
+    }
+
     /// 41D7F0 configures D08 slot zero before loading start.ps3. Script
     /// commands may subsequently replace that slot or add later search slots.
     pub(crate) fn initialize_native_script_search(
@@ -43,6 +55,15 @@ impl CmvsArchive {
         let root = self.game_root.as_deref().ok_or_else(failure)?;
         resolve_font(root, &registry::SystemRegistry)
     }
+}
+
+fn font_shift_jis(root: &Path) -> Result<bool, CoreError> {
+    Ok(integer(
+        &read_ini(root, "initial.cfg")?,
+        "CMVS_INIT_CFG",
+        "FONT_SHIFT_JIS",
+        1,
+    )? != 0)
 }
 
 trait Registry {

@@ -76,6 +76,68 @@ fn global_assignment_copies_bytes_before_slot_and_script_replacement() {
     );
     assert_eq!(state.current_frame, 0);
 }
+
+#[test]
+fn caption_composes_native_owned_prefix_gap_and_suffix_after_restore() {
+    let mut state = CmvsPs2aVmState::new(0);
+    state.process_string_slots.insert(1, b"Title".to_vec());
+    push_word(&mut state, 0x8000_0001).unwrap();
+    command(&mut state, 352).unwrap();
+    for (charset, gap) in [(1, "\u{3000}"), (0, "  ")] {
+        state
+            .process_global_words
+            .insert(NATIVE_FONT_SHIFT_JIS, charset);
+        for suffix in ["chapter", ""] {
+            state
+                .process_string_slots
+                .insert(2, suffix.as_bytes().to_vec());
+            push_word(&mut state, 0x8000_0002).unwrap();
+            assert_eq!(
+                command(&mut state, 353).unwrap(),
+                Some(CmvsPs2aVmAction::SetWindowCaption {
+                    segments: vec![CmvsStringSegment::OwnedString(format!(
+                        "Title{gap}{suffix}"
+                    ))]
+                })
+            );
+            assert_eq!(
+                state.interpreter_string_buffers[&12816],
+                vec![CmvsStringSegment::OwnedString(suffix.into())]
+            );
+            state = postcard::from_bytes(&postcard::to_allocvec(&state).unwrap()).unwrap();
+            assert_eq!(state.process_global_words[&NATIVE_FONT_SHIFT_JIS], charset);
+        }
+    }
+    assert_eq!(
+        state.interpreter_string_buffers[&288],
+        vec![CmvsStringSegment::OwnedString("Title".into())]
+    );
+}
+
+#[test]
+fn caption_rejects_native_byte_overflow_without_replacing_suffix() {
+    for suffix in ["a".repeat(125), format!("{}a", "あ".repeat(62))] {
+        let mut state = CmvsPs2aVmState::new(0);
+        state
+            .interpreter_string_buffers
+            .insert(288, vec![CmvsStringSegment::OwnedString(String::new())]);
+        let (bytes, _, invalid) = encoding_rs::SHIFT_JIS.encode(&suffix);
+        assert!(!invalid);
+        bind(&mut state, 0, &bytes);
+        push_word(&mut state, 42).unwrap();
+        assert!(command(&mut state, 353).unwrap().is_some());
+        let previous = state.interpreter_string_buffers[&12816].clone();
+        let mut too_long = bytes.into_owned();
+        too_long.push(b'x');
+        bind(&mut state, 0, &too_long);
+        push_word(&mut state, 42).unwrap();
+        assert_eq!(
+            command(&mut state, 353).unwrap_err().code(),
+            "ASTRA_EMU_CMVS_WINDOW_CAPTION"
+        );
+        assert_eq!(state.interpreter_string_buffers[&12816], previous);
+    }
+}
 #[test]
 fn call_copies_name_before_switching_to_destination_frame() {
     let mut state = CmvsPs2aVmState::new(0);

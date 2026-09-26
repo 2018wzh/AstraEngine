@@ -437,8 +437,8 @@ pub(super) fn lookup(command_id: u16) -> Option<CommandFields> {
             &TAGGED_STRING_WORD as &[CmvsPs2aCommandStackWord],
         ),
         // Handler `sub_48A710` assembles the window caption from the prefix
-        // field at byte offset 288, a conditional two-space gap and the
-        // resolved top stack word, stores the reference at byte offset
+        // field at byte offset 288, a charset-dependent gap and the
+        // resolved top stack word, copies the suffix at byte offset
         // 12816 and sets the main window text. Returns 0x4004.
         353 => (
             4,

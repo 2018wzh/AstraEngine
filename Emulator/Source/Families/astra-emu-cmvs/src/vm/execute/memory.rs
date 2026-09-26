@@ -230,23 +230,51 @@ pub(super) fn execute(
             },
             [(CmvsPs2aCommandStackWordKind::TaggedStringReference, value)],
         ) => {
-            let reference = tag_zero_reference(*value)?;
-            // `sub_48A710` stores the resolved reference into the caption
-            // buffer, then sets the window text from the assembled caption.
-            state.interpreter_string_buffers.insert(
-                buffer_offset,
-                vec![CmvsStringSegment::PrivateString(reference)],
-            );
-            // The original selects the gap between an unrecovered exe
-            // literal and two spaces through `sub_419DB0`; the recovered
-            // model retains the proven two-space literal.
-            let segments = vec![
-                CmvsStringSegment::InterpreterPrefixField {
-                    field_offset: prefix_field_offset,
-                },
-                CmvsStringSegment::LiteralSpaces { count: 2 },
-                CmvsStringSegment::PrivateString(reference),
-            ];
+            let suffix = resolve_string_value(state, *value)?;
+            let suffix_bytes = resolve_tagged_string_bytes(state, *value)?.len();
+            let Some(prefix) = state.interpreter_string_buffers.get(&prefix_field_offset) else {
+                return Err(invalid(
+                    "ASTRA_EMU_CMVS_WINDOW_CAPTION",
+                    "native caption prefix is not bound",
+                ));
+            };
+            let [CmvsStringSegment::OwnedString(prefix)] = prefix.as_slice() else {
+                return Err(invalid(
+                    "ASTRA_EMU_CMVS_WINDOW_CAPTION",
+                    "native caption prefix is not owned",
+                ));
+            };
+            let (prefix_bytes, _, malformed) = encoding_rs::SHIFT_JIS.encode(prefix);
+            // 48A710 uses a 128-byte stack array with unbounded native copies.
+            // Refuse that overflow before changing the owned suffix buffer.
+            if malformed
+                || prefix_bytes
+                    .len()
+                    .saturating_add(suffix_bytes)
+                    .saturating_add(2)
+                    >= 128
+            {
+                return Err(invalid(
+                    "ASTRA_EMU_CMVS_WINDOW_CAPTION",
+                    "native caption exceeds its byte capacity",
+                ));
+            }
+            let gap = match state.process_global_words.get(&NATIVE_FONT_SHIFT_JIS) {
+                Some(0) => "  ",
+                Some(_) => "\u{3000}",
+                None => {
+                    return Err(invalid(
+                        "ASTRA_EMU_CMVS_WINDOW_CAPTION",
+                        "native caption character set is not bound",
+                    ))
+                }
+            };
+            let segments = vec![CmvsStringSegment::OwnedString(format!(
+                "{prefix}{gap}{suffix}"
+            ))];
+            state
+                .interpreter_string_buffers
+                .insert(buffer_offset, vec![CmvsStringSegment::OwnedString(suffix)]);
             Ok(Some(CmvsPs2aVmAction::SetWindowCaption { segments }))
         }
         (CmvsPs2aCommandEffectKind::NoOpCommand, []) => Ok(None),

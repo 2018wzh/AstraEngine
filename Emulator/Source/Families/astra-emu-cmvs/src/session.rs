@@ -3,6 +3,7 @@ use crate::*;
 use astra_emu_family_api::*;
 use astra_media_core::TextureFrame;
 use std::{collections::BTreeMap, sync::Arc};
+mod diagnostics;
 mod input;
 mod window;
 const MAX_INSTRUCTIONS: u32 = 1_048_576;
@@ -30,6 +31,7 @@ impl CmvsSession {
     ) -> FamilyResult<Self> {
         let mut vm = CmvsPs2aVmState::new(0);
         let default_font = archive.native_default_font().map_err(core)?;
+        archive.initialize_native_caption(&mut vm).map_err(core)?;
         archive
             .initialize_native_script_search(&mut vm)
             .map_err(core)?;
@@ -249,14 +251,11 @@ impl CmvsSession {
             })?;
             let instruction =
                 frame_ps2a_instruction(script, self.vm.program_counter).map_err(core)?;
-            if let Some(action) = execute_cmvs390_frame(&mut self.vm, &instruction).map_err(core)? {
-                self.action(action).map_err(|mut failure| {
-                    if let CmvsPs2aInstructionFrame::Command { command_id, .. } = instruction {
-                        failure.message =
-                            format!("CMVS command {command_id}: {}", failure.message).into();
-                    }
-                    failure
-                })?;
+            if let Some(action) = execute_cmvs390_frame(&mut self.vm, &instruction)
+                .map_err(|failure| diagnostics::instruction(&instruction, core(failure)))?
+            {
+                self.action(action)
+                    .map_err(|failure| diagnostics::instruction(&instruction, failure))?;
             }
         }
         Err(error(

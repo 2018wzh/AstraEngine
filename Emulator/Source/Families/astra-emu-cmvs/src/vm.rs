@@ -12,6 +12,8 @@ use serde::{Deserialize, Serialize};
 pub use state::CmvsPs2aVmState;
 use std::collections::{BTreeMap, BTreeSet};
 
+pub(crate) const NATIVE_FONT_SHIFT_JIS: u32 = 0x4e_a3a4;
+
 use crate::{
     cmvs390_command_contract, CmvsPs2aCommandEffectKind, CmvsPs2aCommandStackWordKind,
     CmvsPs2aControlInstruction, CmvsPs2aInstructionFrame, CmvsPs2aPrivateStringReference,
@@ -316,8 +318,6 @@ pub enum CmvsStringSegment {
     InterpreterPrefixField { field_offset: u16 },
     /// A resolved tag-zero private reference into the active script pool.
     PrivateString(CmvsPs2aPrivateStringReference),
-    /// A fixed run of ASCII spaces proven by the case-353 caption gap.
-    LiteralSpaces { count: u8 },
     /// An immediately copied core-private value, independent of script pools.
     OwnedString(String),
 }

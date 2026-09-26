@@ -1,5 +1,19 @@
 use super::*;
 
+#[test]
+fn caption_charset_reads_native_initial_config_default_and_boolean() {
+    let root = tempfile::tempdir().unwrap();
+    assert!(font_shift_jis(root.path()).unwrap());
+    for (value, expected) in [(0, false), (1, true), (-1, true), (2, true)] {
+        std::fs::write(
+            root.path().join("initial.cfg"),
+            format!("[CMVS_INIT_CFG]\nFONT_SHIFT_JIS={value}\n"),
+        )
+        .unwrap();
+        assert_eq!(font_shift_jis(root.path()).unwrap(), expected);
+    }
+}
+
 #[derive(Default)]
 struct Values {
     mode: Option<u32>,
