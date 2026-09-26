@@ -19,6 +19,11 @@ CMVS 已接入原生 352 标题与 143 图标。旧探针未应用 `SCRIPT_INIT_
 ## 2026-09-26 外部 Family 作者入口
 
 新增单用途外部核心开发回归：公开 fixture 在临时独立 Cargo 项目中编译，只依赖 Family API、abi_stable 和 tracing，使用现有 ProviderModule。现有 Manager 加载该动态库，验证启动配置、物理按键、借用 CPU 帧、PCM 有界队列及取消/等待 worker；不要求 SDK 或 VN。两次冷启动及逐像素检查通过，越界配置和缺失输入按预期失败；独立消费者的 fmt、all-target Clippy 与构建通过，临时项目完成后清理。开发手册同步删除已移除的 NativeVN descriptor 调用。此项只覆盖外部适配入口，不能替代六核真实游戏、GPU 或实际声音验收。
+## 2026-09-26 Luau 剧情动作注册基础
+
+已在现有 policy VM 中保留并调用注册 handler，新增包绑定、typed 完成/等待结果与显式 continuation。调用复用 Extension 参数；每个 action 实例隔离 IO key，并将 entry 的文本列表与宿主授权取交集。Await 仅接受本实例 pending 请求，丢弃本次变量写入、保留显式状态；Complete 返回一次性变量事务，不能遗留 pending 工作。模块顶层只有注册权限，boolean 返回与未知命令效果不能冒充动作成功。
+
+policy crate 26 项测试与 all-target Clippy 通过，覆盖重复 source 实例、Await 前写入、Interrupted、非法等待与越权。当前只完成可供 Cook 与 session 共用的执行基础；Cook entry 配置、包内绑定、VN continuation 保存、Player 无输入自动等待和资源预载尚未接通，不能据此称为 Packaged Player IO 已完成。没有执行桌面 GUI 或真实声音验收。
 
 ## 2026-09-26 最终集成检查
 

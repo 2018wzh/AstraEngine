@@ -64,6 +64,19 @@ impl LuauPolicy {
         budget: PolicyExecutionBudget,
         host: crate::PolicyIoContext<'_>,
     ) -> Result<bool, VnError> {
+        self.evaluate_with(state, queries, budget, host, |lua, _, _| {
+            lua.load(source).eval::<bool>()
+        })
+    }
+
+    pub(crate) fn evaluate_with<T>(
+        &mut self,
+        state: &mut VnPolicyState,
+        queries: &PolicyQueryContext,
+        budget: PolicyExecutionBudget,
+        host: crate::PolicyIoContext<'_>,
+        invoke: impl FnOnce(&Lua, &mlua::Table, &Rc<RefCell<crate::PolicyIoState>>) -> mlua::Result<T>,
+    ) -> Result<T, VnError> {
         host.state.validate()?;
         let host_state = Rc::new(RefCell::new(host.state.clone()));
         let lua = create_sandboxed_lua(budget)
@@ -426,8 +439,8 @@ impl LuauPolicy {
             host.capabilities.clone(),
         )
         .map_err(sandbox_error)?;
-        globals.set("astra", astra).map_err(sandbox_error)?;
-        let result = lua.load(source).eval::<bool>().map_err(sandbox_error)?;
+        globals.set("astra", astra.clone()).map_err(sandbox_error)?;
+        let result = invoke(&lua, &astra, &host_state).map_err(sandbox_error)?;
         let output_count = command_trace.borrow().len()
             + query_trace.borrow().len()
             + trace_events.borrow().len()

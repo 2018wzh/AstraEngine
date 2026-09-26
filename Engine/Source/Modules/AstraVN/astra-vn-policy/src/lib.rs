@@ -1,8 +1,12 @@
 //! AstraVN Luau policy sandbox, policy state and policy bundle contracts.
 
+mod actions;
+pub use actions::*;
 mod host_io;
 #[cfg(feature = "luau-runtime")]
 mod luau;
+#[cfg(feature = "luau-runtime")]
+mod luau_actions;
 #[cfg(feature = "luau-runtime")]
 mod luau_io;
 mod policy_bundle;

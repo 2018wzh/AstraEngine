@@ -19,6 +19,17 @@ pub struct PolicyIoCapabilities {
     max_bytes: usize,
 }
 impl PolicyIoCapabilities {
+    pub(crate) fn restrict(&self, resources: &[VfsUri]) -> Self {
+        Self {
+            resources: resources
+                .iter()
+                .filter(|r| self.resources.contains(*r))
+                .cloned()
+                .collect(),
+            max_bytes: self.max_bytes,
+        }
+    }
+
     pub fn read_text(
         resources: impl IntoIterator<Item = VfsUri>,
         max_bytes: usize,
