@@ -1,9 +1,13 @@
 use astra_core::DiagnosticSeverity;
 use astra_media_core::{MediaError, SceneCommand};
 use astra_text::{
-    CosmicTextLayoutProvider, TextLayoutRequest, TextRenderLayoutUpdate, TextRenderResourceOwner,
+    CosmicTextLayoutProvider, TextLayoutRequest, TextLayoutResult, TextRenderLayoutUpdate,
+    TextRenderResourceOwner,
 };
 use std::collections::BTreeSet;
+
+#[cfg(test)]
+mod tests;
 
 /// Circular glyph outline; uses the same shaped glyph resources as the foreground.
 #[derive(Clone, Copy)]
@@ -44,6 +48,25 @@ impl TextScene {
 
     pub fn frame(&mut self, regions: &[TextSceneLayout]) -> Result<Vec<SceneCommand>, MediaError> {
         self.frame_scaled(regions, 1.0)
+    }
+
+    /// Shape through the same provider and cache used by `frame`. Family-native
+    /// layout policies can read glyph advances without guessing from bitmaps or
+    /// owning a second font system. The result owns no renderer resources.
+    pub fn layout_shared(
+        &self,
+        request: &TextLayoutRequest,
+    ) -> Result<std::sync::Arc<TextLayoutResult>, MediaError> {
+        let layout = self.provider.layout_shared(request)?;
+        if layout.diagnostics.iter().any(|diagnostic| {
+            matches!(
+                diagnostic.severity,
+                DiagnosticSeverity::Error | DiagnosticSeverity::Blocking
+            )
+        }) {
+            return Err(MediaError::Diagnostics(layout.diagnostics.clone()));
+        }
+        Ok(layout)
     }
 
     /// Build a frame at a physical raster density while keeping the caller's
@@ -103,18 +126,7 @@ impl TextScene {
         }
         let layouts = regions
             .iter()
-            .map(|region| {
-                let layout = self.provider.layout_shared(&region.request)?;
-                if layout.diagnostics.iter().any(|diagnostic| {
-                    matches!(
-                        diagnostic.severity,
-                        DiagnosticSeverity::Error | DiagnosticSeverity::Blocking
-                    )
-                }) {
-                    return Err(MediaError::Diagnostics(layout.diagnostics.clone()));
-                }
-                Ok(layout)
-            })
+            .map(|region| self.layout_shared(&region.request))
             .collect::<Result<Vec<_>, MediaError>>()?;
         let updates = layers
             .iter()
