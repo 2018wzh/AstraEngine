@@ -44,6 +44,29 @@ impl CmvsArchive {
                 "CMVS mount has an invalid archive set",
             ));
         }
+        if !astra_core::is_safe_symbol(&mount_id) {
+            return Err(invalid(
+                "ASTRA_EMU_VFS_MANIFEST",
+                "archive mount identity is invalid",
+            ));
+        }
+        let mut roles = BTreeSet::new();
+        for role in configured_archives
+            .iter()
+            .map(|(role, _)| role.clone())
+            .chain(
+                configured_loose
+                    .iter()
+                    .map(|(role, _)| format!("loose-{role}")),
+            )
+        {
+            if !astra_core::is_safe_symbol(&role) || !roles.insert(role) {
+                return Err(invalid(
+                    "ASTRA_EMU_VFS_SOURCE",
+                    "archive source identity is invalid or duplicated",
+                ));
+            }
+        }
         let mut archives = Vec::with_capacity(configured_archives.len());
         let mut entries = BTreeMap::new();
         let mut entry_ids = BTreeSet::new();
@@ -61,6 +84,11 @@ impl CmvsArchive {
                 ));
             }
             let (header, index) = read_index(&path, metadata.len())?;
+            tracing::debug!(
+                event = "cmvs.archive.mount.begin",
+                archive_index = archives.len(),
+                source_bytes = metadata.len()
+            );
             if header.version != CmvsCpzVersion::Cpz5 {
                 return Err(invalid(
                     "ASTRA_EMU_CMVS_CPZ_VERSION",
@@ -68,7 +96,11 @@ impl CmvsArchive {
                 ));
             }
             let parsed = parse_cpz5_index(&header, &index, &scheme)?;
-            let source_hash = hash_file(&path)?;
+            tracing::debug!(
+                event = "cmvs.archive.index.ready",
+                archive_index = archives.len(),
+                entry_count = parsed.len()
+            );
             let archive_index = archives.len();
             for (ordinal, descriptor) in parsed.into_iter().enumerate() {
                 if descriptor.stored_size == 0 || descriptor.stored_size > MAX_ENTRY_BYTES {
@@ -115,14 +147,16 @@ impl CmvsArchive {
                     ));
                 }
             }
-            archives.push(ArchiveFile {
+            let mounted = ArchiveFile {
                 role,
                 path,
                 byte_size: metadata.len(),
                 source_stamp: source_stamp(&metadata)?,
-                source_hash,
+                source_hash: OnceLock::new(),
                 header,
-            });
+            };
+            verify_archive_stamp(&mounted)?;
+            archives.push(mounted);
         }
         let mut loose = BTreeMap::new();
         for (role, path) in configured_loose {
@@ -146,13 +180,15 @@ impl CmvsArchive {
             }
             let uri = format!("{prefix}loose/{role}");
             validate_archive_uri(&prefix, &uri)?;
-            if entries.contains_key(&uri) || loose.contains_key(&role) {
+            if entries.contains_key(&uri)
+                || loose.contains_key(&role)
+                || !entry_ids.insert(format!("loose-{role}"))
+            {
                 return Err(invalid(
                     "ASTRA_EMU_CMVS_LOOSE_DUPLICATE",
                     "CMVS loose resource role collides with a mounted URI",
                 ));
             }
-            let source_hash = hash_file(&path)?;
             let source_media_kind = loose_media_kind(&path)?;
             loose.insert(
                 role.clone(),
@@ -162,82 +198,21 @@ impl CmvsArchive {
                     media_kind: source_media_kind.into(),
                     byte_size: metadata.len(),
                     source_stamp: source_stamp(&metadata)?,
-                    source_hash,
+                    source_hash: OnceLock::new(),
                 },
             );
         }
-        let reader_hash = Hash256::from_sha256(
-            &archives
-                .iter()
-                .flat_map(|archive| archive.source_hash.as_bytes().iter().copied())
-                .chain(
-                    loose
-                        .values()
-                        .flat_map(|source| source.source_hash.as_bytes().iter().copied()),
-                )
-                .collect::<Vec<_>>(),
-        );
-        let manifest = ArchiveManifest {
-            schema: ARCHIVE_MANIFEST_SCHEMA.into(),
-            family_id: CMVS_FAMILY_ID.into(),
-            mount_id: mount_id.clone(),
-            prefix: prefix.clone(),
-            reader_id: CMVS_READER_ID.into(),
-            reader_hash,
-            decrypt_provider_id: CMVS_DECRYPT_PROVIDER_ID.into(),
-            private_profile_hash,
-            mount_profile_hash,
-            sources: archives
-                .iter()
-                .map(|archive| ArchiveSource {
-                    source_id: archive.role.clone(),
-                    archive_role: Some(archive.role.clone()),
-                    byte_size: archive.byte_size,
-                    part_count: 1,
-                    source_hash: archive.source_hash,
-                })
-                .chain(loose.values().map(|source| ArchiveSource {
-                    source_id: format!("loose-{}", source.role),
-                    archive_role: Some(format!("loose-{}", source.role)),
-                    byte_size: source.byte_size,
-                    part_count: 1,
-                    source_hash: source.source_hash,
-                }))
-                .collect(),
-            entries: entries
-                .values()
-                .map(|entry| ArchiveEntry {
-                    uri: entry.uri.clone(),
-                    entry_id: entry.entry_id.clone(),
-                    source_id: archives[entry.archive].role.clone(),
-                    source_offset: entry.descriptor.offset,
-                    stored_size: entry.descriptor.stored_size,
-                    decoded_size: entry.descriptor.stored_size,
-                    source_hash: archives[entry.archive].source_hash,
-                    content_hash: None,
-                    method: "cpz5-encrypted".into(),
-                    media_kind: media_kind(&entry.descriptor.relative_path).into(),
-                })
-                .chain(loose.values().map(|source| ArchiveEntry {
-                    uri: format!("{prefix}loose/{}", source.role),
-                    entry_id: format!("loose-{}", source.role),
-                    source_id: format!("loose-{}", source.role),
-                    source_offset: 0,
-                    stored_size: source.byte_size,
-                    decoded_size: source.byte_size,
-                    source_hash: source.source_hash,
-                    content_hash: None,
-                    method: "loose".into(),
-                    media_kind: source.media_kind.clone(),
-                }))
-                .collect(),
-        };
-        manifest.validate(MAX_ENTRIES)?;
+        if entries.len() + loose.len() > MAX_ENTRIES {
+            return Err(invalid(
+                "ASTRA_EMU_CMVS_ENTRY_LIMIT",
+                "mounted entry budget exceeded",
+            ));
+        }
         Ok(Self {
             game_root: None,
             mount_id,
             prefix,
-            manifest,
+            mount_profile_hash,
             archives,
             entries,
             loose,

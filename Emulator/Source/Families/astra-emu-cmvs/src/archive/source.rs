@@ -34,15 +34,39 @@ pub(super) fn read_index(
     Ok((header, index))
 }
 
-pub(super) fn verify_archive(archive: &ArchiveFile) -> Result<(), CoreError> {
-    verify_archive_stamp(archive)?;
-    if hash_file(&archive.path)? != archive.source_hash {
+pub(super) fn archive_hash(source: &ArchiveFile, recheck: bool) -> Result<Hash256, CoreError> {
+    verify_archive_stamp(source)?;
+    let hash = content_hash(&source.path, &source.source_hash, recheck)?;
+    verify_archive_stamp(source)?;
+    Ok(hash)
+}
+
+pub(super) fn loose_hash(source: &LooseSource, recheck: bool) -> Result<Hash256, CoreError> {
+    verify_loose_stamp(source)?;
+    let hash = content_hash(&source.path, &source.source_hash, recheck)?;
+    verify_loose_stamp(source)?;
+    Ok(hash)
+}
+
+fn content_hash(
+    path: &PathBuf,
+    stored: &OnceLock<Hash256>,
+    recheck: bool,
+) -> Result<Hash256, CoreError> {
+    if !recheck {
+        if let Some(hash) = stored.get() {
+            return Ok(*hash);
+        }
+    }
+    let hash = hash_file(path)?;
+    let expected = *stored.get_or_init(|| hash);
+    if hash != expected {
         return Err(invalid(
             "ASTRA_EMU_CMVS_SOURCE_CHANGED",
-            "CMVS source changed after mount",
+            "CMVS source content changed after identity was established",
         ));
     }
-    Ok(())
+    Ok(hash)
 }
 
 pub(super) fn verify_archive_stamp(archive: &ArchiveFile) -> Result<(), CoreError> {

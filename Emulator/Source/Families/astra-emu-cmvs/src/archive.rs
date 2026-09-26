@@ -1,4 +1,5 @@
 mod access;
+mod manifest;
 mod mount;
 pub(crate) mod native;
 mod scripts;
@@ -12,7 +13,7 @@ use std::{
     fs::File,
     io::{Cursor, Read, Seek, SeekFrom},
     path::PathBuf,
-    sync::Mutex,
+    sync::{Mutex, OnceLock},
     time::SystemTime,
 };
 
@@ -45,7 +46,7 @@ struct ArchiveFile {
     path: PathBuf,
     byte_size: u64,
     source_stamp: SourceStamp,
-    source_hash: Hash256,
+    source_hash: OnceLock<Hash256>,
     header: CmvsCpzHeader,
 }
 
@@ -56,7 +57,7 @@ struct LooseSource {
     media_kind: String,
     byte_size: u64,
     source_stamp: SourceStamp,
-    source_hash: Hash256,
+    source_hash: OnceLock<Hash256>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,7 +79,7 @@ pub struct CmvsArchive {
     game_root: Option<PathBuf>,
     mount_id: String,
     prefix: String,
-    manifest: ArchiveManifest,
+    mount_profile_hash: Hash256,
     archives: Vec<ArchiveFile>,
     entries: BTreeMap<String, MountedEntry>,
     loose: BTreeMap<String, LooseSource>,
@@ -221,21 +222,25 @@ impl CmvsArchive {
     fn decode_entry(&self, entry: &MountedEntry) -> Result<(OwnedByteBuffer, bool), CoreError> {
         let archive = &self.archives[entry.archive];
         verify_archive_stamp(archive)?;
-        let cache_identity = CacheIdentity {
-            family_id: CMVS_FAMILY_ID.into(),
-            source_hash: archive.source_hash,
-            entry_id: entry.entry_id.clone(),
-            private_profile_hash: self.private_profile_hash,
-            decrypt_provider_id: CMVS_DECRYPT_PROVIDER_ID.into(),
-            descriptor_schema_hash: Hash256::from_sha256(
-                crate::CMVS_DECRYPT_DESCRIPTOR_SCHEMA.as_bytes(),
-            ),
-            codec_identity: "cpz5-entry-v1".into(),
-        };
         let cache = self
             .cache
             .as_ref()
             .filter(|_| entry.descriptor.stored_size >= MIN_CACHEABLE_ENTRY_BYTES);
+        let cache_identity = cache
+            .map(|_| -> Result<_, CoreError> {
+                Ok(CacheIdentity {
+                    family_id: CMVS_FAMILY_ID.into(),
+                    source_hash: archive_hash(archive, false)?,
+                    entry_id: entry.entry_id.clone(),
+                    private_profile_hash: self.private_profile_hash,
+                    decrypt_provider_id: CMVS_DECRYPT_PROVIDER_ID.into(),
+                    descriptor_schema_hash: Hash256::from_sha256(
+                        crate::CMVS_DECRYPT_DESCRIPTOR_SCHEMA.as_bytes(),
+                    ),
+                    codec_identity: "cpz5-entry-v1".into(),
+                })
+            })
+            .transpose()?;
         if entry.descriptor.stored_size < MIN_CACHEABLE_ENTRY_BYTES {
             let ephemeral = self.ephemeral_entry.lock().map_err(|_| {
                 invalid(
@@ -250,7 +255,8 @@ impl CmvsArchive {
             }
         }
         if let Some(bytes) = cache
-            .map(|cache| cache.get(&cache_identity))
+            .zip(cache_identity.as_ref())
+            .map(|(cache, identity)| cache.get(identity))
             .transpose()
             .map_err(cache_error)?
             .flatten()
@@ -287,8 +293,8 @@ impl CmvsArchive {
         })?;
         verify_archive_stamp(archive)?;
         decrypt_cpz5_entry(&archive.header, &entry.descriptor, &mut bytes, &self.scheme)?;
-        if let Some(cache) = cache {
-            cache.put(&cache_identity, &bytes).map_err(cache_error)?;
+        if let Some((cache, identity)) = cache.zip(cache_identity.as_ref()) {
+            cache.put(identity, &bytes).map_err(cache_error)?;
         }
         let bytes = OwnedByteBuffer::from(bytes);
         if entry.descriptor.stored_size < MIN_CACHEABLE_ENTRY_BYTES {

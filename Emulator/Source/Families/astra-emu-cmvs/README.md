@@ -63,3 +63,7 @@ case 21/22 的路径值现在在命令执行时立即复制，保存为相对路
 INI 使用精确锁定的 `configparser 3.3.0`（MIT 许可选项），在核心先严格解码 CP932 或带 BOM 的 UTF-16LE。读取限制为 1 MiB，配置文件必须位于授权游戏根内；损坏、越界或过长字体名明确失败。只读授权脚本已确认实际创建命令使用空字体名；真实字体显示仍须经过原脚本的 Family/GPU 流程。266 实时文字 parser 及其他未恢复命令继续明确拒绝。
 
 本批 CPU 回归覆盖固定/比例度量、静态控制符与 ruby、禁则、原生描边和渐变、文字变换、资源上传/复用/释放及错误原子性。真实 Family 首 tick、文字画面和声音仍未验收；CPU 字形与 mesh 回归不代表 GPU 产品流程通过。
+
+CMVS 普通挂载现在只读取 CPZ header/index，校验索引身份、角色唯一性、相对路径、资源范围及源大小/修改时间。它不再为了未使用的 manifest 在首 tick 前遍历全部归档和 loose payload。只读私有启动的分段计时确认索引读取约 0.01 秒，而单个归档的全量 hash 耗时 7–34 秒，120 秒时限内尚未进入首 tick；这次失败不是字体显示验证。
+
+`CmvsArchive::manifest()` 改为返回 `Result<ArchiveManifest, CoreError>`，请求时才计算真实内容身份；持久 plaintext cache 仅在实际读取需要缓存的条目时计算其来源身份。默认播放没有持久 cache，脚本 URI 校验直接使用 mount prefix。首次 hash 建立内容基线，后续 `validate_sources()` 重新读取并比较；源大小或修改时间变化仍在每次资源读取前后拒绝。不能把延迟内容身份理解为挂载时已验证全部 payload，未知资源损坏仍在使用时明确失败。SDK manifest 类型及其他 Family 保持不变。

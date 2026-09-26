@@ -30,7 +30,7 @@ impl CmvsArchive {
         vm: &mut CmvsPs2aVmState,
     ) -> Result<CmvsScript, CoreError> {
         validate_frame(frame)?;
-        validate_archive_uri(&self.manifest().prefix, uri)?;
+        validate_archive_uri(self.prefix(), uri)?;
         let size = self.stat(uri)?.size;
         if size > MAX_SCRIPT_BYTES as u64 {
             return Err(script_bound());

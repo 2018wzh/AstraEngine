@@ -5,16 +5,16 @@ impl CmvsArchive {
         &self.mount_id
     }
 
-    pub fn manifest(&self) -> &ArchiveManifest {
-        &self.manifest
+    pub(crate) fn prefix(&self) -> &str {
+        &self.prefix
     }
 
     pub fn validate_sources(&self) -> Result<(), CoreError> {
         for archive in &self.archives {
-            verify_archive(archive)?;
+            archive_hash(archive, true)?;
         }
         for source in self.loose.values() {
-            verify_loose_stamp(source)?;
+            loose_hash(source, true)?;
         }
         Ok(())
     }
