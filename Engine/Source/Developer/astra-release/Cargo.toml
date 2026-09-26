@@ -16,7 +16,6 @@ astra-package = { path = "../../Runtime/astra-package" }
 astra-runtime = { path = "../../Runtime/astra-runtime" }
 astra-player-core = { path = "../../Runtime/astra-player-core" }
 astra-headless-protocol = { path = "../../Runtime/astra-headless-protocol" }
-astra-plugin = { path = "../../Runtime/astra-plugin", default-features = false }
 astra-platform = { path = "../../Platform/astra-platform" }
 astra-platform-android = { path = "../../Platform/astra-platform-android" }
 astra-plugin-abi = { path = "../../Runtime/astra-plugin-abi", default-features = false }

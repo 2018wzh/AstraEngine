@@ -10,7 +10,7 @@
 
 `astra-vn::VnSession` 是 NativeVN 的 typed 产品入口，持有剧情、变量和系统状态，并组合 `astra-runtime::EngineSession`。EngineSession 创建和持有 RuntimeWorld、任务作用域及逻辑步生命周期；VN 在修改剧情前校验步序、seed 和恢复模式。关闭会话取消其任务，不影响其他会话。保存仍使用原有 SaveBlob 容器，读取失败保留当前状态。
 
-旧 `astra-vn-runtime-provider` crate、NativeVnRuntimeProvider/Factory、FFI 转换和会话 map 已删除。Player、CLI、发布检查改用 `astra-vn`；`native_vn_descriptor()` 只提供现有包格式需要的元数据，不创建或选择动态 provider。其他公共 gameplay/UI ABI 消费者仍须继续迁移，不因本次删除视为全部完成。
+旧 `astra-vn-runtime-provider` crate、NativeVnRuntimeProvider/Factory、FFI 转换和会话 map 已删除。Player、CLI、发布检查改用 `astra-vn`；静态包契约随后移除了 `native_vn_descriptor()` 和剩余 gameplay/UI 动态 ABI 消费链；机制 provider 的显式绑定保留。
 
 ## EMU Family API
 

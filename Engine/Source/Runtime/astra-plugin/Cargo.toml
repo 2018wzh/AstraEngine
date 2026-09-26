@@ -11,7 +11,6 @@ dynamic-abi = ["dep:abi_stable", "dep:libloading", "astra-plugin-abi/ffi"]
 [dependencies]
 abi_stable = { workspace = true, optional = true }
 astra-core = { path = "../astra-core" }
-astra-media-core = { path = "../astra-media-core" }
 astra-plugin-abi = { path = "../astra-plugin-abi", default-features = false }
 astra-runtime = { path = "../astra-runtime" }
 astra-worker-budget = { path = "../astra-worker-budget" }
@@ -22,8 +21,4 @@ serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true
 thiserror.workspace = true
-tokio.workspace = true
 tracing.workspace = true
-
-[dev-dependencies]
-astra-byte-source = { path = "../astra-byte-source" }

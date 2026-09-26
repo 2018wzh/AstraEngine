@@ -10,7 +10,6 @@ use astra_player_vn::{
     NativeVnAudioOutput, NativeVnHostCommandSource, NativeVnRuntimeExecution,
     DEFAULT_NATIVE_VN_GPU_TEXTURE_CACHE_BYTES,
 };
-use astra_plugin_abi::ProviderPolicy;
 use astra_ui_core::{
     UiButtonState, UiInputEventKind, UiInsets, UiPoint, UiPointerButton, UiViewport, ValidateUi,
 };
@@ -813,30 +812,6 @@ state start #@id state.start
     assert!(error.contains("ASTRA_VN_PRESENTATION_PRESET_UNDECLARED"));
 }
 
-#[test]
-fn package_open_blocks_runtime_descriptor_drift_before_provider_creation() {
-    let bytes = product_package_with_request(STORY, |request| {
-        let mut policy: ProviderPolicy = serde_json::from_slice(&request.provider_policy).unwrap();
-        policy
-            .runtime_provider
-            .capabilities
-            .push("runtime.native_vn.drift".to_string());
-        request.provider_policy = serde_json::to_vec(&policy).unwrap();
-    });
-    let package = PackageReader::open(&bytes).unwrap();
-    let error = match NativeVnHostCommandSource::from_package(
-        &package,
-        VnRunConfig::classic("en"),
-        640,
-        360,
-        PlayerHostResourceId(1),
-    ) {
-        Ok(_) => panic!("linked provider descriptor drift must block package open"),
-        Err(error) => error.to_string(),
-    };
-    assert!(error.contains("ASTRA_RUNTIME_PROVIDER_LINKED_DESCRIPTOR_MISMATCH"));
-}
-
 #[cfg(all(target_os = "windows", feature = "platform-test-driver"))]
 #[tokio::test]
 async fn packaged_native_vn_scene_reaches_live_windows_wgpu_and_releases_resources() {
@@ -1174,7 +1149,7 @@ fn native_vn_source_builds_atomic_platform_save_transaction() {
 }
 
 #[test]
-fn native_vn_source_completes_wait_through_runtime_provider() {
+fn native_vn_source_completes_wait_through_product_context() {
     let story = r#"
 story main #@id story.main
 state start #@id state.start

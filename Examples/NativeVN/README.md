@@ -43,7 +43,7 @@ cargo run -p astra-cli -- cook Examples/NativeVN/project.yaml --profile advanced
 
 项目已迁到 platform host profile v3，明确区分 Kira mixer 与平台 output，并补齐音频缓存/块大小。目标覆盖 Windows、Linux、macOS 与 Android；列入配置不代表设备运行已验证。`advanced-vn` 的系统页绑定与 policy 已对齐，允许存读档、设置和历史页。
 
-当前 target schema 仍要求 `runtime_provider: native_vn` 和 `ui_provider: astra.ui.yakui` 两个元数据字段，因此此处保留；它们不恢复已删除的动态 VN provider。彻底移除须与共享 target/package schema 同步。
+target manifest v3 已移除 gameplay/UI provider 元数据字段；NativeVN 和 Yakui 由产品静态组合。修改后的项目必须重新 Cook，旧 target/policy schema 直接拒绝。
 
 ## 雨中的片刻
 

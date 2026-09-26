@@ -56,7 +56,7 @@ AstraVN UI 不得发送 `PresentRgba`。保留该通用命令的其他调用者�
 
 ## Step 6：直接迁移 `CompiledVnProject`
 
-新增 `compile_astra_project(...) -> CompiledVnProject` 并迁完所有 workspace caller。Package 写入 `vn.compiled_project` root 及独立 story/UI/binding/source-map/controller/theme/backend/component section。Target 直接迁到 `astra.target_manifest.v2`，带 UI 的 target 必须声明唯一 `ui_provider`。
+新增 `compile_astra_project(...) -> CompiledVnProject` 并迁完所有 workspace caller。Package 写入 `vn.compiled_project` root 及独立 story/UI/binding/source-map/controller/theme/backend/component section。Target 直接迁到 `astra.target_manifest.v3`，带 UI 的 target 必须声明唯一 `ui_provider`。
 
 所有 caller 和 fixtures 完成迁移后，删除公开 `compile_astra_sources`、`compile_astra_sources_with_options`、旧 `vn.compiled_story` reader、target v1 reader和兼容测试。旧 package 必须 recook，不做 runtime migration。
 

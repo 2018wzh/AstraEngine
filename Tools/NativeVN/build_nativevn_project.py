@@ -243,7 +243,7 @@ def build_ui() -> None:
 
 
 def build_project_descriptor() -> None:
-    write_text(PACK / "project.yaml", """schema: astra.target_manifest.v2
+    write_text(PACK / "project.yaml", """schema: astra.target_manifest.v3
 id: com.astra.nativevn.signal-glass-rain
 platform_profiles:
   windows-release:
@@ -309,8 +309,6 @@ targets:
     kind: game
     crate: astra-vn
     default_profile: advanced-vn
-    runtime_provider: native_vn
-    ui_provider: astra.ui.yakui
     platforms: [windows, linux, macos, android]
     packaged: true
 nativevn:

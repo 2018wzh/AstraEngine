@@ -2945,24 +2945,9 @@ fn production_package_request(
         .iter()
         .find(|target| target.id == target_id && target.kind == astra_target::TargetKind::Game)
         .ok_or_else(|| format!("package target {target_id} is not a game target"))?;
-    let runtime_provider = target
-        .runtime_provider
-        .as_deref()
-        .ok_or_else(|| format!("package target {target_id} has no runtime provider binding"))?;
-    if runtime_provider != "native_vn" {
-        return Err(format!(
-            "runtime provider {runtime_provider} is not implemented for product packaging"
-        )
-        .into());
-    }
     let provider_specs = [
         ("presentation", "astra.renderer.wgpu", "renderer2d.wgpu"),
         ("vfs_provider", "astra.vfs.package", "vfs.backend.package"),
-        (
-            "game_runtime_provider",
-            "astra.runtime.native_vn",
-            "runtime.native_vn",
-        ),
     ];
     let bindings = provider_specs
         .iter()
@@ -2988,7 +2973,7 @@ fn production_package_request(
         schema: astra_plugin_abi::PROVIDER_POLICY_SCHEMA.to_string(),
         profile: profile.clone(),
         renderer: "astra.renderer.wgpu".to_string(),
-        runtime_provider: astra_vn::native_vn_descriptor(),
+
         bindings: bindings.clone(),
     })?;
     let plugin_extension_registry =

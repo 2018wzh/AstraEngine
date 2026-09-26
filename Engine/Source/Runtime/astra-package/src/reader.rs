@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::PackageRuntimeSelection;
+use crate::PackageProductContext;
 use crate::{
     AstraContainerReader, ContainerError, ContainerKind, PackageManifest, SchemaRegistryManifest,
     CURRENT_CONTAINER_VERSION,
@@ -15,7 +15,7 @@ const REQUIRED_SECTIONS: &[(&str, &str)] = &[
     ("asset.vfs_manifest", "astra.asset_vfs_manifest.v1"),
     ("asset.catalog", "astra.asset_catalog.v1"),
     ("media.manifest", "astra.media_manifest.v1"),
-    ("provider.policy", "astra.provider_policy.v2"),
+    ("provider.policy", "astra.provider_policy.v3"),
     (
         "plugin.extension_registry",
         "astra.plugin_extension_registry.v2",
@@ -25,7 +25,7 @@ const REQUIRED_SECTIONS: &[(&str, &str)] = &[
         "astra.plugin_dependency_graph.v1",
     ),
     ("module.fingerprint", "astra.module_fingerprint.v1"),
-    ("target.manifest", "astra.target_manifest.v2"),
+    ("target.manifest", "astra.target_manifest.v3"),
     ("release.summary", "astra.release_summary.v1"),
     ("scenario.refs", "astra.scenario_refs.v2"),
     ("platform.eligibility", "astra.platform_eligibility.v1"),
@@ -34,7 +34,7 @@ const REQUIRED_SECTIONS: &[(&str, &str)] = &[
 #[derive(Debug, Clone)]
 pub struct PackageReader {
     container: AstraContainerReader,
-    runtime_provider: PackageRuntimeSelection,
+    product_context: PackageProductContext,
     package_hash: Hash256,
 }
 
@@ -151,7 +151,7 @@ impl PackageReader {
             container.read_bounded("plugin.extension_registry", 256 * 1024)?;
         let target_manifest_bytes = container.read_bounded("target.manifest", 256 * 1024)?;
         let vfs_manifest_bytes = container.read_bounded("asset.vfs_manifest", 16 * 1024 * 1024)?;
-        let runtime_provider = crate::authority::validate_provider_authority(
+        let product_context = crate::authority::validate_provider_authority(
             &manifest.package_id,
             &manifest.profile,
             &policy_bytes,
@@ -207,7 +207,7 @@ impl PackageReader {
         }
         let reader = Self {
             container,
-            runtime_provider,
+            product_context,
             package_hash,
         };
         let cook_summary: crate::CookSummaryManifest =
@@ -247,8 +247,8 @@ impl PackageReader {
         &self.container
     }
 
-    pub fn runtime_selection(&self) -> &PackageRuntimeSelection {
-        &self.runtime_provider
+    pub fn product_context(&self) -> &PackageProductContext {
+        &self.product_context
     }
 
     pub fn package_hash(&self) -> Hash256 {

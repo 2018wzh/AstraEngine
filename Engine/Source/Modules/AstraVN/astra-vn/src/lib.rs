@@ -8,8 +8,8 @@ pub use astra_vn_script::{
 };
 pub use astra_vn_system::{SystemStoryManifest, VnSystemUiProfileManifest};
 
-mod descriptor;
-pub use descriptor::native_vn_descriptor;
+mod limits;
+pub use limits::{VnHostError, VnHostLimits};
 mod session;
 pub use session::{
     NativeVnStateView, NativeVnStepCommand, NativeVnStepInput, NativeVnStepOutput, VnSession,

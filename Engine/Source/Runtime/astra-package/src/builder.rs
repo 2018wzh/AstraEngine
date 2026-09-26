@@ -1,7 +1,7 @@
 use astra_plugin_abi::{
-    LoadPhase, PluginExtensionRegistrySnapshot, ProductRuntimeDescriptor, ProviderBinding,
-    ProviderBindingContext, ProviderExtensionRecord, ProviderPolicy,
-    PLUGIN_EXTENSION_REGISTRY_SCHEMA, PROVIDER_POLICY_SCHEMA,
+    LoadPhase, PluginExtensionRegistrySnapshot, ProviderBinding, ProviderBindingContext,
+    ProviderExtensionRecord, ProviderPolicy, PLUGIN_EXTENSION_REGISTRY_SCHEMA,
+    PROVIDER_POLICY_SCHEMA,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -77,13 +77,11 @@ impl PackageBuildRequest {
                 "modules": []
             })),
             target_manifest: json_bytes(serde_json::json!({
-                "schema": "astra.target_manifest.v2",
+                "schema": "astra.target_manifest.v3",
                 "targets": [{
                     "id": "native-smoke-game",
                     "kind": "game",
                     "crate": "astra-runtime",
-                    "runtime_provider": "native_vn",
-                    "ui_provider": "astra.ui.yakui",
                     "default_profile": "desktop-release",
                     "platforms": ["windows", "linux", "macos", "ios", "android", "web"],
                     "packaged": true
@@ -121,11 +119,6 @@ fn default_fixture_provider_metadata(package_id: &str, profile: &str) -> (Vec<u8
             "presentation.headless",
         ),
         ("vfs_provider", "astra.vfs.package", "vfs.backend.package"),
-        (
-            "game_runtime_provider",
-            "astra.runtime.native_vn",
-            "runtime.native_vn",
-        ),
     ];
     let bindings = provider_specs
         .iter()
@@ -165,39 +158,6 @@ fn default_fixture_provider_metadata(package_id: &str, profile: &str) -> (Vec<u8
         schema: PROVIDER_POLICY_SCHEMA.to_string(),
         profile: profile.to_string(),
         renderer: "astra.fixture.headless_presentation".to_string(),
-        runtime_provider: ProductRuntimeDescriptor {
-            runtime_id: "native_vn".to_string(),
-            product_kind: "visual_novel".to_string(),
-            provider_id: "astra.runtime.native_vn".to_string(),
-            presentation_lane: astra_plugin_abi::RuntimePresentationLane::Scene2D,
-            supported_targets: vec!["game".to_string()],
-            capabilities: vec!["runtime.native_vn".to_string()],
-            package_sections: [
-                "vn.story",
-                "vn.profile_manifest",
-                "vn.policy_bundle_manifest",
-                "vn.extension_manifest",
-                "vn.standard_command_manifest",
-                "vn.presentation_provider_manifest",
-                "vn.commercial_baseline_manifest",
-                "vn.system_story_manifest",
-                "vn.system_ui_profile_manifest",
-                "vn.advanced_presentation_manifest",
-            ]
-            .into_iter()
-            .map(str::to_string)
-            .collect(),
-            release_checks: [
-                "runtime_provider.native_vn",
-                "vn.commercial_baseline",
-                "vn.system_ui_profile",
-                "vn.advanced_presentation",
-                "player.full_playable",
-            ]
-            .into_iter()
-            .map(str::to_string)
-            .collect(),
-        },
         bindings: bindings.clone(),
     };
     let registry = PluginExtensionRegistrySnapshot {
@@ -383,7 +343,7 @@ impl PackageBuilder {
             ),
             SectionPayload::raw(
                 "target.manifest",
-                "astra.target_manifest.v2",
+                "astra.target_manifest.v3",
                 request.target_manifest,
             ),
             SectionPayload::raw(

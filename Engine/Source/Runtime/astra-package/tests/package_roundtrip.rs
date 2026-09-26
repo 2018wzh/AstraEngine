@@ -323,39 +323,25 @@ fn package_builder_rejects_legacy_or_tampered_provider_authority() {
 }
 
 #[test]
-fn package_native_runtime_selection_preserves_authority_and_rejects_unsupported_descriptors() {
+fn package_native_product_context_preserves_authority_and_rejects_unsupported_descriptors() {
     let request = PackageBuildRequest::fixture("com.example.native", "classic", vec![]);
     let target: serde_json::Value = serde_json::from_slice(&request.target_manifest).unwrap();
     let blob = PackageBuilder::build(request.clone()).unwrap();
     let package = PackageReader::open(blob.as_bytes()).unwrap();
+    assert_eq!(package.product_context().profile(), "classic");
     assert_eq!(
-        package.runtime_selection().kind(),
-        astra_package::PackageRuntimeKind::NativeVn
-    );
-    assert_eq!(package.runtime_selection().profile(), "classic");
-    assert_eq!(
-        package.runtime_selection().target(),
+        package.product_context().target(),
         target["targets"][0]["id"].as_str().unwrap()
     );
-    for (field, value) in [
-        ("product_kind", "unknown"),
-        ("presentation_lane", "layer2_d"),
-    ] {
+    for schema in ["astra.provider_policy.v2", "astra.provider_policy.v3"] {
         let mut policy: serde_json::Value =
             serde_json::from_slice(&request.provider_policy).unwrap();
-        policy["runtime_provider"][field] = value.into();
-        // Use serde's enum spelling instead of guessing the presentation lane wire name.
-        if field == "presentation_lane" {
-            policy["runtime_provider"][field] =
-                serde_json::to_value(astra_plugin_abi::RuntimePresentationLane::Layer2D).unwrap();
-        }
+        policy["schema"] = schema.into();
+        policy["runtime_provider"] = serde_json::json!({"runtime_id": "native_vn"});
         let changed = serde_json::to_vec(&policy).unwrap();
         let mut invalid = request.clone();
         invalid.provider_policy = changed.clone();
-        assert!(PackageBuilder::build(invalid)
-            .unwrap_err()
-            .to_string()
-            .contains("ASTRA_PACKAGE_RUNTIME_UNSUPPORTED"));
+        assert!(PackageBuilder::build(invalid).is_err());
         let mut builder = AstraContainerBuilder::new(ContainerKind::Package);
         for entry in package.container().entries() {
             let payload = if entry.id == "provider.policy" {
@@ -373,9 +359,6 @@ fn package_native_runtime_selection_preserves_authority_and_rejects_unsupported_
             ));
         }
         let invalid = builder.write().unwrap();
-        assert!(PackageReader::open(invalid.as_bytes())
-            .unwrap_err()
-            .to_string()
-            .contains("ASTRA_PACKAGE_RUNTIME_UNSUPPORTED"));
+        assert!(PackageReader::open(invalid.as_bytes()).is_err());
     }
 }

@@ -143,7 +143,7 @@ def _is_forbidden_tsuinosora_package_section_key(key: str, path: list[str]) -> b
 
 def _render_nativevn_project(section_specs: list[dict], scenario_refs: list[str]) -> str:
     lines = [
-        "schema: astra.target_manifest.v2",
+        "schema: astra.target_manifest.v3",
         "id: com.example.tsuinosora.stage3",
         "platform_profiles:",
         "  windows-internal-release:",
@@ -164,17 +164,13 @@ def _render_nativevn_project(section_specs: list[dict], scenario_refs: list[str]
         "  - id: tsuinosora-internal-game",
         "    kind: game",
         "    crate: astra-vn",
-        "    runtime_provider: native_vn",
         "    default_profile: modern",
-        "    ui_provider: astra.ui.yakui",
         "    platforms: [windows, linux, macos, android]",
         "    packaged: true",
         "  - id: tsuinosora-patch-game",
         "    kind: game",
         "    crate: astra-vn",
-        "    runtime_provider: native_vn",
         "    default_profile: modern",
-        "    ui_provider: astra.ui.yakui",
         "    platforms: [windows, linux, macos, android]",
         "    packaged: true",
         "nativevn:",

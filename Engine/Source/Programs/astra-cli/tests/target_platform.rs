@@ -512,8 +512,6 @@ targets:
     kind: game
     crate: astra-vn
     default_profile: desktop-release
-    runtime_provider: native_vn
-    ui_provider: astra.ui.yakui
     platforms: [windows, linux]
     packaged: true
   - id: sample-editor
@@ -587,11 +585,10 @@ targets:
             && binding["provider_id"] == "astra.vfs.package"
             && binding["context"]["required_capability"] == "vfs.backend.package"
     }));
-    assert!(bindings.iter().any(|binding| {
-        binding["slot"] == "game_runtime_provider"
-            && binding["provider_id"] == "astra.runtime.native_vn"
-            && binding["context"]["required_capability"] == "runtime.native_vn"
-    }));
+    assert!(policy.get("runtime_provider").is_none());
+    assert!(!bindings
+        .iter()
+        .any(|binding| binding["slot"] == "game_runtime_provider"));
 
     let registry: serde_json::Value = serde_json::from_slice(
         &package
@@ -828,8 +825,6 @@ targets:
     kind: game
     crate: astra-vn
     default_profile: minimal
-    runtime_provider: native_vn
-    ui_provider: astra.ui.yakui
     platforms: [windows, web]
     packaged: true
 nativevn:

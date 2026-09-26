@@ -32,7 +32,6 @@ use astra_player_core::{
     PlayerHostCommandError, PlayerHostResourceId, PlayerSaveTransactionPlan, PlayerTimelineTask,
     PlayerTimelineTaskAction,
 };
-use astra_plugin::{RuntimeHostError, RuntimeHostLimits};
 use astra_ui_core::{
     UiBackend, UiBlueprintBundle, UiBlueprintFrameModel, UiBlueprintModalFrameModel, UiButtonState,
     UiFrameRequest, UiInputDisposition, UiInputDispositionKind, UiInputEvent, UiInputEventKind,
@@ -46,6 +45,7 @@ use astra_ui_yakui::{
     AstraYakuiBackend, BlueprintYakuiRenderer,
 };
 use astra_vn::{NativeVnStepCommand, NativeVnStepInput, NativeVnStepOutput};
+use astra_vn::{VnHostError, VnHostLimits};
 #[cfg(test)]
 use astra_vn_core::SystemActionEffect;
 use astra_vn_core::{
@@ -464,7 +464,7 @@ struct ProductPresentationBinding {
 }
 
 struct ProductPackageBinding {
-    runtime_provider: astra_package::PackageRuntimeSelection,
+    product_context: astra_package::PackageProductContext,
     package_hash: Hash256,
     presentation: ProductPresentationBinding,
     system_ui_policy: SystemUiProfilePolicy,
@@ -543,22 +543,12 @@ impl NativeVnHostCommandSource {
         } = options;
         runtime_execution.validate()?;
         validate_product_provider_bindings(package)?;
-        // Until the serialized policy is replaced, reject declarations the linked
-        // runtime cannot fulfill before creating any product resources.
-        let policy: astra_plugin_abi::ProviderPolicy =
-            serde_json::from_value(read_package_json(package, "provider.policy")?)
-                .map_err(|error| NativeVnHostError::Package(error.to_string()))?;
-        if policy.runtime_provider != astra_vn::native_vn_descriptor() {
-            return Err(NativeVnHostError::Package(
-                "ASTRA_RUNTIME_PROVIDER_LINKED_DESCRIPTOR_MISMATCH: package declarations do not match the compiled NativeVN runtime".into(),
-            ));
-        }
-        let runtime_provider = package.runtime_selection().clone();
-        if config.profile != runtime_provider.profile() {
+        let product_context = package.product_context().clone();
+        if config.profile != product_context.profile() {
             return Err(NativeVnHostError::Package(format!(
                 "ASTRA_PLAYER_RUNTIME_PROFILE_MISMATCH: requested profile {} does not match package provider profile {}",
                 config.profile,
-                runtime_provider.profile()
+                product_context.profile()
             )));
         }
         let compiled = decode_compiled_project(package)
@@ -624,7 +614,7 @@ impl NativeVnHostCommandSource {
             package,
             "media.font_manifest",
             FontBindingContext {
-                target: runtime_provider.target().to_string(),
+                target: product_context.target().to_string(),
                 profile: config.profile.clone(),
                 default_locale: config.locale.clone(),
             },
@@ -648,7 +638,7 @@ impl NativeVnHostCommandSource {
             height,
             surface,
             ProductPackageBinding {
-                runtime_provider,
+                product_context,
                 package_hash: package.package_hash(),
                 presentation: ProductPresentationBinding {
                     asset_store,
@@ -696,11 +686,11 @@ impl NativeVnHostCommandSource {
             .collect();
         let stage_director = ProductStageDirector::new(
             binding.presentation.manifest.clone(),
-            binding.runtime_provider.profile(),
+            binding.product_context.profile(),
             astra_vn_package::StageViewport { width, height },
         )
         .map_err(stage_director_error)?;
-        let runtime_provider = &binding.runtime_provider;
+        let product_context = &binding.product_context;
         let ui_profile = config.profile.clone();
         if compiled.themes.is_empty() {
             return Err(NativeVnHostError::Package(
@@ -747,18 +737,18 @@ impl NativeVnHostCommandSource {
                     .into(),
             ));
         }
-        let limits = RuntimeHostLimits::new();
-        let mut host = NativeVnRuntimeHost::new(runtime_provider, limits)?;
+        let limits = VnHostLimits::new();
+        let mut host = NativeVnRuntimeHost::new(product_context, limits)?;
         let story = Arc::new(compiled.story);
         let open = match host.open(
             Arc::clone(&story),
             config,
             astra_vn::VnSessionConfig {
-                target_id: runtime_provider.target().into(),
+                target_id: product_context.target().into(),
                 seed: 0,
                 package: Some(astra_runtime::PackageHandle {
                     package_id: binding.package_hash.to_string(),
-                    target: runtime_provider.target().into(),
+                    target: product_context.target().into(),
                     ..Default::default()
                 }),
                 integrity_mode: runtime_execution.integrity_mode,
@@ -926,10 +916,6 @@ impl NativeVnHostCommandSource {
 
     pub fn session_id(&self) -> &str {
         &self.session_id
-    }
-
-    pub fn provider_id(&self) -> &'static str {
-        astra_plugin_abi::NATIVE_VN_PROVIDER_ID
     }
 
     pub fn take_timeline_tasks(&mut self) -> Vec<PlayerTimelineTask> {
@@ -4730,14 +4716,9 @@ fn validate_product_provider_bindings(
                 .to_string(),
         ));
     }
-    for (slot, provider_id, capability) in [
-        (
-            "game_runtime_provider",
-            "astra.runtime.native_vn",
-            "runtime.native_vn",
-        ),
-        ("presentation", "astra.renderer.wgpu", "renderer2d.wgpu"),
-    ] {
+    {
+        let (slot, provider_id, capability) =
+            ("presentation", "astra.renderer.wgpu", "renderer2d.wgpu");
         let policy_bound = policy
             .get("bindings")
             .and_then(serde_json::Value::as_array)
@@ -7255,7 +7236,7 @@ pub enum NativeVnHostError {
     #[error("Player host command sequence overflowed")]
     SequenceOverflow,
     #[error(transparent)]
-    RuntimeHost(#[from] RuntimeHostError),
+    RuntimeHost(#[from] VnHostError),
     #[error(transparent)]
     Media(#[from] MediaError),
     #[error(transparent)]

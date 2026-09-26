@@ -11,7 +11,6 @@ use astra_plugin_abi::{
     ProviderExtensionRecord, ProviderPolicy, PLUGIN_EXTENSION_REGISTRY_SCHEMA,
     PROVIDER_POLICY_SCHEMA,
 };
-use astra_vn::native_vn_descriptor;
 use astra_vn_core::{compile_astra_project, AstraSource, CompileAstraProjectOptions, VnRunConfig};
 use astra_vn_package::{package_sections_for_project, PLAYER_LOCALE_CONFIG_SCHEMA};
 
@@ -230,11 +229,6 @@ fn bind_product_provider_authority(request: &mut PackageBuildRequest) {
     let specs = [
         ("presentation", "astra.renderer.wgpu", "renderer2d.wgpu"),
         ("vfs_provider", "astra.vfs.package", "vfs.backend.package"),
-        (
-            "game_runtime_provider",
-            "astra.runtime.native_vn",
-            "runtime.native_vn",
-        ),
     ];
     let bindings = specs
         .iter()
@@ -260,7 +254,7 @@ fn bind_product_provider_authority(request: &mut PackageBuildRequest) {
         schema: PROVIDER_POLICY_SCHEMA.to_string(),
         profile: request.profile.clone(),
         renderer: "astra.renderer.wgpu".to_string(),
-        runtime_provider: native_vn_descriptor(),
+
         bindings: bindings.clone(),
     })
     .unwrap();
@@ -285,13 +279,11 @@ fn bind_product_provider_authority(request: &mut PackageBuildRequest) {
     })
     .unwrap();
     request.target_manifest = serde_json::to_vec(&serde_json::json!({
-        "schema": "astra.target_manifest.v2",
+        "schema": "astra.target_manifest.v3",
         "targets": [{
             "id": "nativevn-game",
             "kind": "game",
             "crate": "astra-vn",
-            "runtime_provider": "native_vn",
-            "ui_provider": "astra.ui.yakui",
             "default_profile": "classic",
             "platforms": ["windows", "web"],
             "packaged": true

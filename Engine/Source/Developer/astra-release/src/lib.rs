@@ -17,9 +17,9 @@ use astra_player_core::{
     PlayerAutomationReport, PlayerAutomationStatus, PlayerPlatform, PlayerPresentationReport,
     PLAYER_PRESENTATION_REPORT_SCHEMA,
 };
-use astra_plugin::RuntimeHostLimits;
 use astra_plugin_abi::{PluginExtensionRegistrySnapshot, ProviderPolicy};
 use astra_target::{validate_manifest, TargetKind, TargetManifest, TargetValidationStatus};
+use astra_vn::VnHostLimits;
 use astra_vn_package::{
     decode_compiled_project, load_player_locale_config, load_presentation_provider_manifest,
     VnAdvancedPresentationManifest, VnCommercialBaselineManifest, VnExtensionManifest,
@@ -377,7 +377,7 @@ impl ReleaseValidator {
                 }
                 checks.push(plugin_extension_registry_check(&package));
                 checks.push(plugin_dependency_graph_check(&package));
-                checks.extend(runtime_provider_checks(
+                checks.extend(product_context_checks(
                     &package,
                     request.target.as_deref(),
                     &request.profile,
@@ -507,7 +507,7 @@ fn engine_test_profile_isolation_check(
             manifest
                 .targets
                 .iter()
-                .any(|target| target.runtime_provider.as_deref() == Some("native_vn"))
+                .any(|target| target.kind == TargetKind::Game && target.packaged)
         });
     let is_nativevn_engine_test_profile =
         profile == "minimal" && (has_nativevn_profile_manifest || has_nativevn_target);
@@ -1515,18 +1515,18 @@ fn plugin_dependency_graph_check(package: &PackageReader) -> ReleaseCheckRecord 
     }
 }
 
-fn runtime_provider_checks(
+fn product_context_checks(
     package: &PackageReader,
     selected_target: Option<&str>,
     profile: &str,
 ) -> Vec<ReleaseCheckRecord> {
     vec![
-        runtime_provider_binding_check(package, selected_target, profile),
-        runtime_provider_native_vn_check(package),
+        product_context_binding_check(package, selected_target, profile),
+        product_context_native_vn_check(package),
     ]
 }
 
-fn runtime_provider_binding_check(
+fn product_context_binding_check(
     package: &PackageReader,
     selected_target: Option<&str>,
     profile: &str,
@@ -1536,7 +1536,7 @@ fn runtime_provider_binding_check(
             Ok(value) => value,
             Err((code, message)) => {
                 return runtime_blocked(
-                    "runtime_provider.binding",
+                    "package.binding",
                     code,
                     message,
                     vec![evidence("section", "provider.policy")],
@@ -1550,7 +1550,7 @@ fn runtime_provider_binding_check(
         Ok(value) => value,
         Err((code, message)) => {
             return runtime_blocked(
-                "runtime_provider.binding",
+                "package.binding",
                 code,
                 message,
                 vec![evidence("section", "plugin.extension_registry")],
@@ -1566,7 +1566,7 @@ fn runtime_provider_binding_check(
         Some(manifest) => manifest,
         None => {
             return runtime_blocked(
-                "runtime_provider.binding",
+                "package.binding",
                 "ASTRA_RUNTIME_PROVIDER_TARGET_MANIFEST",
                 "runtime provider binding requires a valid target manifest",
                 vec![evidence("section", "target.manifest")],
@@ -1575,24 +1575,12 @@ fn runtime_provider_binding_check(
     };
     let Some(target) = select_game_target(&target_manifest, selected_target) else {
         return runtime_blocked(
-            "runtime_provider.binding",
+            "package.binding",
             "ASTRA_RUNTIME_PROVIDER_TARGET_MISSING",
             "runtime provider binding requires one selected game target",
             vec![evidence("selected_target", selected_target.unwrap_or(""))],
         );
     };
-    let runtime_provider = target.runtime_provider.as_deref().unwrap_or_default();
-    if runtime_provider != "native_vn" {
-        return runtime_blocked(
-            "runtime_provider.binding",
-            "ASTRA_RUNTIME_PROVIDER_BINDING_MISSING",
-            "selected game target must bind native_vn runtime provider",
-            vec![
-                evidence("target", &target.id),
-                evidence("runtime_provider", runtime_provider),
-            ],
-        );
-    }
     let manifest = match package
         .container()
         .decode_postcard::<PackageManifest>("package.manifest")
@@ -1600,7 +1588,7 @@ fn runtime_provider_binding_check(
         Ok(manifest) => manifest,
         Err(error) => {
             return runtime_blocked(
-                "runtime_provider.binding",
+                "package.binding",
                 "ASTRA_PACKAGE_MANIFEST_INVALID",
                 error.to_string(),
                 vec![evidence("section", "package.manifest")],
@@ -1611,69 +1599,23 @@ fn runtime_provider_binding_check(
         registry.validate_for_package(&provider_policy, &manifest.package_id, &target.id, profile)
     {
         return runtime_blocked(
-            "runtime_provider.binding",
+            "package.binding",
             diagnostic.code,
             diagnostic.message,
             vec![evidence("target", &target.id), evidence("profile", profile)],
         );
     }
-    let has_runtime_binding = registry.bindings.iter().any(|binding| {
-        binding.slot == "game_runtime_provider"
-            && binding.provider_id == "astra.runtime.native_vn"
-            && binding.context.required_capability == "runtime.native_vn"
-    });
-    if !has_runtime_binding {
-        return runtime_blocked(
-            "runtime_provider.binding",
-            "ASTRA_RUNTIME_PROVIDER_BINDING_MISSING",
-            "provider policy and registry must bind NativeVN runtime capability",
-            vec![evidence("provider_id", "astra.runtime.native_vn")],
-        );
-    }
-
     ReleaseCheckRecord {
-        id: "runtime_provider.binding".to_string(),
+        id: "package.binding".to_string(),
         domain: ReleaseDomain::Runtime,
         status: CheckStatus::Pass,
-        summary: "target manifest, provider policy and plugin registry bind NativeVN runtime"
-            .to_string(),
+        summary: "target manifest and explicit mechanism bindings match the package".to_string(),
         diagnostic: None,
-        evidence: vec![
-            evidence("target", &target.id),
-            evidence("runtime_provider", "native_vn"),
-            evidence("provider_id", "astra.runtime.native_vn"),
-        ],
+        evidence: vec![evidence("target", &target.id)],
     }
 }
 
-fn runtime_provider_native_vn_check(package: &PackageReader) -> ReleaseCheckRecord {
-    let provider_policy =
-        match read_typed_json_section::<ProviderPolicy>(package, "provider.policy") {
-            Ok(value) => value,
-            Err((code, message)) => {
-                return runtime_blocked(
-                    "runtime_provider.native_vn",
-                    code,
-                    message,
-                    vec![evidence("section", "provider.policy")],
-                )
-            }
-        };
-    let descriptor = &provider_policy.runtime_provider;
-    let runtime_id = descriptor.runtime_id.as_str();
-    let provider_id = descriptor.provider_id.as_str();
-    if runtime_id != "native_vn" || provider_id != "astra.runtime.native_vn" {
-        return runtime_blocked(
-            "runtime_provider.native_vn",
-            "ASTRA_RUNTIME_PROVIDER_DESCRIPTOR",
-            "NativeVN runtime provider descriptor id does not match target binding",
-            vec![
-                evidence("runtime_id", runtime_id),
-                evidence("provider_id", provider_id),
-            ],
-        );
-    }
-    let package_sections = &descriptor.package_sections;
+fn product_context_native_vn_check(package: &PackageReader) -> ReleaseCheckRecord {
     let required_sections = [
         "vn.compiled_project",
         "vn.story",
@@ -1687,49 +1629,28 @@ fn runtime_provider_native_vn_check(package: &PackageReader) -> ReleaseCheckReco
         "vn.system_ui_profile_manifest",
     ];
     for section in required_sections {
-        if !package_sections.iter().any(|value| value == section) {
+        if package
+            .container()
+            .read_bounded(section, 64 * 1024 * 1024)
+            .is_err()
+        {
             return runtime_blocked(
-                "runtime_provider.native_vn",
+                "vn.runtime",
                 "ASTRA_RUNTIME_PROVIDER_SECTION_DECLARATION",
-                format!("NativeVN runtime provider descriptor must declare {section}"),
+                format!("NativeVN package must contain {section}"),
                 vec![evidence("section", section)],
             );
         }
     }
-    let release_checks = &descriptor.release_checks;
-    if !release_checks
-        .iter()
-        .any(|value| value == "runtime_provider.native_vn")
-    {
-        return runtime_blocked(
-            "runtime_provider.native_vn",
-            "ASTRA_RUNTIME_PROVIDER_RELEASE_CHECK",
-            "NativeVN runtime provider descriptor must declare runtime_provider.native_vn",
-            vec![evidence("provider_id", "astra.runtime.native_vn")],
-        );
-    }
-
     let behavioral_evidence = match native_vn_behavioral_evidence(package) {
         Ok(evidence) => evidence,
-        Err((code, message)) => {
-            return runtime_blocked(
-                "runtime_provider.native_vn",
-                code,
-                message,
-                vec![evidence("provider_id", provider_id)],
-            )
-        }
+        Err((code, message)) => return runtime_blocked("vn.runtime", code, message, vec![]),
     };
-    let mut release_evidence = vec![
-        evidence("runtime_id", runtime_id),
-        evidence("provider_id", provider_id),
-        evidence("package_section_count", package_sections.len()),
-        evidence("release_check_count", release_checks.len()),
-    ];
+    let mut release_evidence = vec![evidence("package_section_count", required_sections.len())];
     release_evidence.extend(behavioral_evidence);
 
     ReleaseCheckRecord {
-        id: "runtime_provider.native_vn".to_string(),
+        id: "vn.runtime".to_string(),
         domain: ReleaseDomain::Runtime,
         status: CheckStatus::Pass,
         summary: "NativeVN owned session completed package-bound save/restore and resume checks"
@@ -1743,22 +1664,12 @@ fn native_vn_behavioral_evidence(
     package: &PackageReader,
 ) -> Result<Vec<ReleaseEvidence>, (&'static str, String)> {
     use astra_vn::{NativeVnStepCommand, NativeVnStepInput, VnSession, VnSessionConfig};
-    let policy = read_typed_json_section::<ProviderPolicy>(package, "provider.policy")?;
-    if policy.runtime_provider != astra_vn::native_vn_descriptor() {
-        return Err((
-            "ASTRA_RUNTIME_PROVIDER_LINKED_DESCRIPTOR_MISMATCH",
-            "package declarations do not match the compiled NativeVN runtime".into(),
-        ));
-    }
     let compiled = decode_compiled_project(package)
         .map_err(|error| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_PACKAGE", error.to_string()))?;
     let locale = load_player_locale_config(package)
         .map_err(|error| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_LOCALE", error.to_string()))?
         .default_locale;
-    let selection = package.runtime_selection();
-    match selection.kind() {
-        astra_package::PackageRuntimeKind::NativeVn => {}
-    }
+    let selection = package.product_context();
     let mut session = VnSession::new(
         std::sync::Arc::new(compiled.story),
         astra_vn_core::VnRunConfig {
@@ -1794,7 +1705,7 @@ fn native_vn_behavioral_evidence(
             NativeVnStepCommand::LaunchDefault,
         ))
         .map_err(|error| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_STEP", error.to_string()))?;
-    let limits = RuntimeHostLimits::new();
+    let limits = VnHostLimits::new();
     limits
         .validate_output_count(
             output

@@ -36,7 +36,6 @@ extern "C" fn register() -> FfiPluginRegistration {
             phase: "runtime".into(),
             packaged: true,
         }]),
-        runtime_providers: RVec::new(),
         callbacks: 0,
     }
 }

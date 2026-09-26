@@ -48,14 +48,14 @@ fn vfs_provider_registry_allows_multiple_providers_on_single_slot() {
 }
 
 #[test]
-fn runtime_provider_registry_keeps_explicit_single_binding_conflicts() {
+fn renderer_registry_keeps_explicit_single_binding_conflicts() {
     let mut registrar = PluginRegistrar::default();
-    let slot = EngineModuleSlot("game_runtime_provider".to_string());
+    let slot = EngineModuleSlot("presentation".to_string());
     registrar
         .register_provider(RegisteredProvider {
             slot: slot.clone(),
-            provider_id: "astra.runtime.native_vn".to_string(),
-            capability: "runtime.native_vn".to_string(),
+            provider_id: "astra.renderer.wgpu".to_string(),
+            capability: "renderer2d.wgpu".to_string(),
             phase: LoadPhase::Runtime,
             packaged: true,
             engine_version: "0.1.0".to_string(),
@@ -65,11 +65,7 @@ fn runtime_provider_registry_keeps_explicit_single_binding_conflicts() {
         })
         .unwrap();
     registrar
-        .bind_provider(
-            &slot,
-            "astra.runtime.native_vn",
-            context("runtime.native_vn"),
-        )
+        .bind_provider(&slot, "astra.renderer.wgpu", context("renderer2d.wgpu"))
         .unwrap();
     registrar
         .register_provider(RegisteredProvider {
@@ -95,5 +91,5 @@ fn runtime_provider_registry_keeps_explicit_single_binding_conflicts() {
 
     let snapshot = registrar.extension_registry_snapshot().unwrap();
     assert_eq!(snapshot.conflicts.len(), 1);
-    assert_eq!(snapshot.conflicts[0].slot, "game_runtime_provider");
+    assert_eq!(snapshot.conflicts[0].slot, "presentation");
 }

@@ -88,7 +88,7 @@ Plugin Manager 保存 project enable/disable 状态，读取 Stage 1/2 的 depen
 
 Stage 1 实现 registry backend 和 explicit provider binding。Stage 2 将 `plugin.extension_registry` 与 `plugin.dependency_graph` 写入 package 并执行 release gate。Stage 4 的 Plugin Manager 只提供 Editor UI、enablement 编辑和 diagnostic jump，不再拥有第二套 provider selection 或 dependency graph 实现。
 
-当前 package contract 使用 `astra.plugin_extension_registry.v2` / `astra.provider_policy.v2`。`ProviderBindingContext` 固化 package、target、profile、required capability、engine、rustc、feature 与 ABI fingerprint，`ProviderBinding` 额外记录 canonical SHA-256。Package builder、reader、Release Gate、scenario runner 和 VFS prefix gate 调用同一个 `astra-plugin-abi` validator；policy 与 registry 不能分别解释、按数组第一项选择或在缺 binding 时回退。`presentation` 必须与 policy renderer 相同，`game_runtime_provider` 必须与 runtime descriptor 的 provider/capability/output schema 相同，`vfs_provider` 必须与 mount backend capability 精确匹配。
+当前 package contract 使用 `astra.plugin_extension_registry.v2` / `astra.provider_policy.v3`。`ProviderBindingContext` 固化 package、target、profile、required capability、engine、rustc、feature 与 ABI fingerprint，`ProviderBinding` 额外记录 canonical SHA-256。Package builder、reader、Release Gate、scenario runner 和 VFS prefix gate 调用同一个 `astra-plugin-abi` validator；policy 与 registry 不能分别解释、按数组第一项选择或在缺 binding 时回退。`presentation` 必须与 policy renderer 相同，`vfs_provider` 必须与 mount backend capability 精确匹配。
 
 ## StateMachine Action Provider
 
@@ -157,22 +157,11 @@ pub trait VfsProvider: StableProvider {
     fn close_mount(&self, handle: VfsMountHandle) -> ProviderResult<VfsCloseReport>;
 }
 
-pub trait ProductRuntimeProvider: StableProvider {
-    fn descriptor(&self) -> ProductRuntimeDescriptor;
-    fn prepare(&self, request: RuntimePrepareRequest) -> ProviderResult<RuntimePrepareReport>;
-    fn open(&self, request: RuntimeOpenRequest) -> ProviderResult<GameRuntimeSessionId>;
-    fn step(&self, session: GameRuntimeSessionId, input: RuntimeStepInput) -> ProviderResult<RuntimeStepOutput>;
-    fn save(&self, session: GameRuntimeSessionId, request: RuntimeSaveRequest) -> ProviderResult<RuntimeSaveSections>;
-    fn restore(&self, session: GameRuntimeSessionId, request: RuntimeRestoreRequest) -> ProviderResult<RuntimeRestoreReport>;
-    fn shutdown(&self, session: GameRuntimeSessionId) -> ProviderResult<RuntimeShutdownReport>;
-}
 ```
 
-Provider 族还包括 `TextLayoutProvider`、`AudioOutputProvider`、`LuauPolicyBundleProvider`、`EditorPanelProvider`、`AiProvider`、`MCPToolProvider`、`VfsProvider` 和 `ProductRuntimeProvider`。所有 trait 只传 ABI-safe value、stable id、section ref、`VfsUri` 和 capability report。Stage 3 的 AstraVN 功能 crate 负责公开 VN command、presentation command、Luau policy bundle、Graph/Timeline metadata extension id 和 `NativeVnRuntimeProvider` 绑定；`astra-vn` 只作为 Rust dylib facade 和兼容 re-export，稳定插件边界仍由 `astra-plugin-abi` 承担。
 
-`ProductRuntimeProvider` 的 trait 是 host/in-process 接口。跨 ABI 使用 `astra-plugin-abi` 的 `FfiRuntimeProviderRegistration` 及 typed request/result callback；不再通过 JSON、postcard 或统一 `RVec<u8>` payload 调用 provider。NativeVN FFI adapter 已实现显式 instance create/destroy 和真实 session open/step/save/restore/shutdown；活动 session 会阻断 instance destroy。
 
-VFS backend provider 全部注册到同一个 `vfs_provider` slot。该 slot 允许多个 provider 共存，manifest 的 prefix registry 负责选择 `provider_id`；release gate 只在同一 prefix 缺少明确 provider、provider 未打包、capability mismatch 或依赖 unresolved 时阻断。`game_runtime_provider` 不采用这个多 provider 规则，仍要求目标显式绑定一个玩法 runtime provider。
+VFS backend provider 全部注册到同一个 `vfs_provider` slot。该 slot 允许多个 provider 共存，manifest 的 prefix registry 负责选择 `provider_id`；release gate 只在同一 prefix 缺少明确 provider、provider 未打包、capability mismatch 或依赖 unresolved 时阻断。Gameplay 由产品静态组合，不使用 provider slot。
 
 `AiProvider` 是 Editor 和 MCP host 的后端适配。OpenAI、Ollama、ComfyUI 和 ONNX Runtime 第一方 provider 以普通插件注册，默认禁用，由项目 manifest 或 release profile 显式绑定。Runtime 不直接接收 `AiProvider` trait object，只通过 `McpAiSession` 获取 typed Intent、tool result、generated artifact chunk 和 committed output。
 
@@ -186,9 +175,7 @@ AstraEMU 使用独立 Family ABI 与 Host loader，不注册 Engine extension re
 
 ## Game Runtime Provider
 
-`ProductRuntimeProvider` 是 packaged `Game` target 的玩法 runtime selector。NativeVN 和后续 AstraRPG 通过这个 slot 显式绑定；AstraVN 不作为所有玩法的基类。Provider ABI v3 的 step output 是 typed live DTO 与 control transaction；save/package/report 使用独立 persisted DTO。动态 action bytes invoke、通用 payload 与 effect envelope 已删除。
 
-`NativeVnRuntimeProvider` 包装现有 AstraVN Core、VN package sections 和 VN release checks。`AstraRpgRuntimeProvider` 只保留同级接入边界，当前不声明已有实现。
 
 ## Permissions
 

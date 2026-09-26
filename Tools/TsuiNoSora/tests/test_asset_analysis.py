@@ -6056,7 +6056,7 @@ class AssetAnalysisTests(unittest.TestCase):
             )
             self.assertTrue((work / "nativevn" / "Automation" / "route.coverage.001.jsonl").exists())
             self.assertIn("default_profile: modern", project)
-            self.assertIn("ui_provider: astra.ui.yakui", project)
+            self.assertNotIn("ui_provider:", project)
             self.assertIn("platform_profiles:", project)
             self.assertIn("windows-internal-release:", project)
             self.assertNotIn("web-release-chrome:", project)

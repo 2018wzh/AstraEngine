@@ -1,6 +1,6 @@
 mod authority;
-mod runtime_selection;
-pub use runtime_selection::{PackageRuntimeKind, PackageRuntimeSelection};
+mod product_context;
+pub use product_context::PackageProductContext;
 pub mod builder;
 pub mod container;
 pub mod reader;

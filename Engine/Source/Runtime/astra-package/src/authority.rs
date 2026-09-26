@@ -12,10 +12,10 @@ pub(crate) fn validate_provider_authority(
     registry_bytes: &[u8],
     target_manifest_bytes: &[u8],
     vfs_manifest_bytes: &[u8],
-) -> Result<crate::PackageRuntimeSelection, ContainerError> {
+) -> Result<crate::PackageProductContext, ContainerError> {
     let policy: ProviderPolicy = serde_json::from_slice(policy_bytes).map_err(|error| {
         ContainerError::message(format!(
-            "ASTRA_PROVIDER_POLICY_INVALID: provider policy v2 decode failed: {error}"
+            "ASTRA_PROVIDER_POLICY_INVALID: provider policy v3 decode failed: {error}"
         ))
     })?;
     let registry: PluginExtensionRegistrySnapshot = serde_json::from_slice(registry_bytes)
@@ -58,23 +58,6 @@ pub(crate) fn validate_provider_authority(
     if target_descriptor.kind != TargetKind::Game || !target_descriptor.packaged {
         return Err(ContainerError::message(
             "ASTRA_PLUGIN_BINDING_TARGET_INELIGIBLE: binding target is not a packaged game target",
-        ));
-    }
-    if target_descriptor.runtime_provider.as_deref()
-        != Some(policy.runtime_provider.runtime_id.as_str())
-    {
-        return Err(ContainerError::message(
-            "ASTRA_RUNTIME_PROVIDER_TARGET_MISMATCH: target and provider policy select different runtimes",
-        ));
-    }
-    if !policy
-        .runtime_provider
-        .supported_targets
-        .iter()
-        .any(|supported| supported == &target || supported == "game")
-    {
-        return Err(ContainerError::message(
-            "ASTRA_RUNTIME_PROVIDER_TARGET_UNSUPPORTED: runtime provider does not declare the selected target",
         ));
     }
     let vfs: VfsManifest = serde_json::from_slice(vfs_manifest_bytes).map_err(|error| {
@@ -154,19 +137,5 @@ pub(crate) fn validate_provider_authority(
             ContainerError::message(format!("{}: {}", diagnostic.code, diagnostic.message))
         })?;
     }
-    let selection = registry
-        .resolve_embedded_runtime_provider(&policy, package_id, profile)
-        .map_err(|diagnostic| ContainerError::message(diagnostic.to_string()))?;
-    let descriptor = selection.descriptor();
-    if descriptor.runtime_id != astra_plugin_abi::NATIVE_VN_RUNTIME_ID
-        || descriptor.provider_id != astra_plugin_abi::NATIVE_VN_PROVIDER_ID
-        || descriptor.product_kind != "visual_novel"
-        || descriptor.presentation_lane != astra_plugin_abi::RuntimePresentationLane::Scene2D
-    {
-        return Err(ContainerError::message("ASTRA_PACKAGE_RUNTIME_UNSUPPORTED: package does not select the compiled NativeVN runtime"));
-    }
-    Ok(crate::PackageRuntimeSelection::native_vn(
-        target,
-        profile.into(),
-    ))
+    Ok(crate::PackageProductContext::new(target, profile.into()))
 }

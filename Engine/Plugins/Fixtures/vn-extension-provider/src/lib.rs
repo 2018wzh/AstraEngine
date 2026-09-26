@@ -63,7 +63,6 @@ extern "C" fn register() -> FfiPluginRegistration {
                 "astra.vn.release_check",
             ),
         ]),
-        runtime_providers: RVec::new(),
         callbacks: 0,
     }
 }

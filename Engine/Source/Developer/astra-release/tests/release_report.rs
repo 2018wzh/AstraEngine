@@ -75,13 +75,11 @@ fn release_gate_blocks_headless_launch_profile_in_cooked_platform_profiles() {
 #[test]
 fn shipping_release_target_cannot_declare_headless_platform() {
     let target = serde_json::json!({
-        "schema": "astra.target_manifest.v2",
+        "schema": "astra.target_manifest.v3",
         "targets": [{
             "id": "nativevn-game",
             "kind": "game",
             "crate": "astra-vn",
-            "runtime_provider": "native_vn",
-            "ui_provider": "astra.ui.yakui",
             "default_profile": "desktop-release",
             "platforms": ["headless", "windows"],
             "packaged": true
@@ -210,12 +208,14 @@ fn release_report_covers_pass_warning_and_blocked_checks() {
     assert!(report.checks.iter().any(|check| {
         check.id == "plugin.dependency_graph" && check.status == CheckStatus::Pass
     }));
-    assert!(report.checks.iter().any(|check| {
-        check.id == "runtime_provider.binding" && check.status == CheckStatus::Pass
-    }));
-    assert!(report.checks.iter().any(|check| {
-        check.id == "runtime_provider.native_vn" && check.status == CheckStatus::Blocked
-    }));
+    assert!(report
+        .checks
+        .iter()
+        .any(|check| { check.id == "package.binding" && check.status == CheckStatus::Pass }));
+    assert!(report
+        .checks
+        .iter()
+        .any(|check| { check.id == "vn.runtime" && check.status == CheckStatus::Blocked }));
 
     let blocked = ReleaseValidator
         .validate_package(PackageValidateRequest {
@@ -653,7 +653,7 @@ fn release_gate_blocks_plugin_registry_conflict_and_invalid_binding() {
 }
 
 #[test]
-fn runtime_provider_gate_blocks_missing_nativevn_binding() {
+fn package_gate_blocks_missing_mechanism_bindings() {
     let mut request = PackageBuildRequest::fixture(
         "com.example.nativevn",
         "desktop-release",
@@ -1246,14 +1246,12 @@ fn release_gate_blocks_package_target_manifests_with_editor_descriptors() {
         )],
     );
     request.target_manifest = serde_json::json!({
-        "schema": "astra.target_manifest.v2",
+        "schema": "astra.target_manifest.v3",
         "targets": [
             {
                 "id": "native-smoke-game",
                 "kind": "game",
                 "crate": "astra-runtime",
-                "runtime_provider": "native_vn",
-                "ui_provider": "astra.ui.yakui",
                 "default_profile": "desktop-release",
                 "platforms": ["windows"],
                 "packaged": true
@@ -1299,13 +1297,11 @@ fn release_gate_requires_nativevn_sections_for_classic_profile() {
     let blob = package_with_target_manifest(
         "classic",
         serde_json::json!({
-            "schema": "astra.target_manifest.v2",
+            "schema": "astra.target_manifest.v3",
             "targets": [{
                 "id": "nativevn-game",
                 "kind": "game",
                 "crate": "astra-vn",
-                "runtime_provider": "native_vn",
-                "ui_provider": "astra.ui.yakui",
                 "default_profile": "classic",
                 "platforms": ["windows", "web"],
                 "packaged": true
@@ -1332,41 +1328,12 @@ fn release_gate_requires_nativevn_sections_for_classic_profile() {
 }
 
 #[test]
-fn release_gate_blocks_compiled_runtime_capability_drift() {
-    let compiled = compile_astra_project(
-        [AstraSource::story(
-            "main.astra",
-            nativevn_story_with_system_pages(),
-        )],
-        Default::default(),
-    )
-    .unwrap();
-    let mut sections =
-        package_sections_for_project(&compiled, &["classic".to_string()], "test-game").unwrap();
-    append_valid_locale_sections(&mut sections);
-    let mut request = PackageBuildRequest::fixture("com.example.nativevn", "classic", sections);
-    let mut policy: astra_plugin_abi::ProviderPolicy =
-        serde_json::from_slice(&request.provider_policy).unwrap();
-    policy.runtime_provider = astra_vn::native_vn_descriptor();
-    policy
-        .runtime_provider
-        .capabilities
-        .push("runtime.native_vn.drift".into());
+fn package_rejects_legacy_gameplay_policy() {
+    let mut request = PackageBuildRequest::fixture("com.example.nativevn", "classic", vec![]);
+    let mut policy: serde_json::Value = serde_json::from_slice(&request.provider_policy).unwrap();
+    policy["runtime_provider"] = serde_json::json!({"runtime_id": "native_vn"});
     request.provider_policy = serde_json::to_vec(&policy).unwrap();
-    let blob = PackageBuilder::build(request).unwrap();
-    let report = ReleaseValidator
-        .validate_package(package_request(blob.into_bytes()))
-        .unwrap();
-    let check = report
-        .checks
-        .iter()
-        .find(|check| check.id == "runtime_provider.native_vn")
-        .unwrap();
-    assert_eq!(check.status, CheckStatus::Blocked);
-    assert_eq!(
-        check.diagnostic.as_ref().unwrap().code,
-        "ASTRA_RUNTIME_PROVIDER_LINKED_DESCRIPTOR_MISMATCH"
-    );
+    assert!(PackageBuilder::build(request).is_err());
 }
 
 #[test]
@@ -1385,13 +1352,11 @@ fn release_gate_accepts_nativevn_sections_for_classic_profile() {
     let blob = package_with_target_manifest(
         "classic",
         serde_json::json!({
-            "schema": "astra.target_manifest.v2",
+            "schema": "astra.target_manifest.v3",
             "targets": [{
                 "id": "nativevn-game",
                 "kind": "game",
                 "crate": "astra-vn",
-                "runtime_provider": "native_vn",
-                "ui_provider": "astra.ui.yakui",
                 "default_profile": "classic",
                 "platforms": ["windows", "web"],
                 "packaged": true
@@ -1444,7 +1409,7 @@ fn release_gate_accepts_nativevn_sections_for_classic_profile() {
         .iter()
         .any(|check| check.id == "vn.commercial_baseline" && check.status == CheckStatus::Pass));
     assert!(report.checks.iter().any(|check| {
-        check.id == "runtime_provider.native_vn"
+        check.id == "vn.runtime"
             && check.status == CheckStatus::Pass
             && check
                 .evidence
@@ -2046,7 +2011,7 @@ fn bind_request_to_target(
     request: &mut PackageBuildRequest,
     target_id: &str,
     profile: &str,
-    use_native_vn: bool,
+    _use_native_vn: bool,
 ) {
     let mut policy: astra_plugin_abi::ProviderPolicy =
         serde_json::from_slice(&request.provider_policy).unwrap();
@@ -2069,9 +2034,6 @@ fn bind_request_to_target(
         .collect::<Vec<_>>();
     policy.profile = profile.to_string();
     policy.bindings = bindings.clone();
-    if use_native_vn {
-        policy.runtime_provider = astra_vn::native_vn_descriptor();
-    }
     registry.bindings = bindings;
     request.provider_policy = serde_json::to_vec(&policy).unwrap();
     request.plugin_extension_registry = serde_json::to_vec(&registry).unwrap();
@@ -2079,13 +2041,11 @@ fn bind_request_to_target(
 
 fn nativevn_target_manifest() -> serde_json::Value {
     serde_json::json!({
-        "schema": "astra.target_manifest.v2",
+        "schema": "astra.target_manifest.v3",
         "targets": [{
             "id": "nativevn-game",
             "kind": "game",
             "crate": "astra-vn",
-            "runtime_provider": "native_vn",
-            "ui_provider": "astra.ui.yakui",
             "default_profile": "classic",
             "platforms": ["windows", "web"],
             "packaged": true

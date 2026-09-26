@@ -19,8 +19,6 @@ targets:
     kind: game
     crate: astra-vn
     default_profile: desktop-release
-    runtime_provider: native_vn
-    ui_provider: astra.ui.yakui
     platforms: [windows]
     packaged: true
 "#,

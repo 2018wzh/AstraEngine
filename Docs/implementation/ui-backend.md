@@ -45,7 +45,7 @@ Luau Controller 使用生成的 `.d.luau` 和锁定的官方 `luau-analyze` 全�
 
 ## Package 与 target
 
-`astra.target_manifest.v2` 对带 UI 的 Game/Program target 要求唯一 `ui_provider`。Package 直接使用以下 section：
+`astra.target_manifest.v3` 不含 `ui_provider`，NativeVN 静态链接 Yakui。Package 直接使用以下 section：
 
 ```text
 vn.compiled_project

@@ -5,7 +5,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-pub const TARGET_MANIFEST_SCHEMA: &str = "astra.target_manifest.v2";
+pub const TARGET_MANIFEST_SCHEMA: &str = "astra.target_manifest.v3";
 pub const TARGET_VALIDATION_SCHEMA: &str = "astra.target_validation_report.v1";
 
 #[derive(Debug, Error)]
@@ -27,15 +27,12 @@ pub enum TargetKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct TargetDescriptor {
     pub id: String,
     pub kind: TargetKind,
     #[serde(default, rename = "crate", skip_serializing_if = "Option::is_none")]
     pub crate_name: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub runtime_provider: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ui_provider: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub binary: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -53,8 +50,6 @@ impl TargetDescriptor {
             id: format!("{}-game", normalize_id(&project_id)),
             kind: TargetKind::Game,
             crate_name: Some("astra-runtime".to_string()),
-            runtime_provider: Some("native_vn".to_string()),
-            ui_provider: Some("astra.ui.yakui".to_string()),
             binary: None,
             default_profile: Some("desktop-release".to_string()),
             platforms: vec![
@@ -152,13 +147,13 @@ pub fn validate_manifest(
     if manifest.schema != TARGET_MANIFEST_SCHEMA {
         diagnostics.push(Diagnostic::blocking(
             "ASTRA_TARGET_SCHEMA",
-            "target manifest schema must be astra.target_manifest.v2",
+            "target manifest schema must be astra.target_manifest.v3",
         ));
     }
     if manifest.legacy_runtime_field {
         diagnostics.push(Diagnostic::blocking(
             "ASTRA_TARGET_LEGACY_RUNTIME_FIELD",
-            "top-level runtime is removed; game targets must declare runtime_provider",
+            "top-level runtime is removed; gameplay is compiled into the product",
         ));
     }
     if manifest.targets.is_empty() {
@@ -275,26 +270,6 @@ fn validate_target(target: &TargetDescriptor, diagnostics: &mut Vec<Diagnostic>)
                     .with_field("target", &target.id),
                 );
             }
-            if target.runtime_provider.as_deref().is_none_or(str::is_empty) {
-                diagnostics.push(
-                    Diagnostic::blocking(
-                        "ASTRA_TARGET_RUNTIME_PROVIDER",
-                        "game target needs an explicit runtime_provider",
-                    )
-                    .with_field("target", &target.id),
-                );
-            }
-            if target.runtime_provider.as_deref() == Some("native_vn")
-                && target.ui_provider.as_deref() != Some("astra.ui.yakui")
-            {
-                diagnostics.push(
-                    Diagnostic::blocking(
-                        "ASTRA_TARGET_UI_PROVIDER",
-                        "native_vn game target requires the unique ui_provider astra.ui.yakui",
-                    )
-                    .with_field("target", &target.id),
-                );
-            }
             if target.platforms.is_empty() {
                 diagnostics.push(
                     Diagnostic::blocking("ASTRA_TARGET_PLATFORMS", "game target needs platforms")
@@ -364,8 +339,6 @@ targets:
   - id: nativevn-game
     kind: game
     crate: astra-vn
-    runtime_provider: native_vn
-    ui_provider: astra.ui.yakui
     default_profile: desktop-release
     platforms: [windows, linux, macos, ios, android, web]
     packaged: true
@@ -389,8 +362,6 @@ targets:
             id: "bad".to_string(),
             kind: TargetKind::Game,
             crate_name: None,
-            runtime_provider: None,
-            ui_provider: None,
             binary: None,
             default_profile: None,
             platforms: Vec::new(),
@@ -405,7 +376,22 @@ targets:
         assert!(report
             .diagnostics
             .iter()
-            .any(|diag| diag.code == "ASTRA_TARGET_RUNTIME_PROVIDER"));
+            .any(|diag| diag.code == "ASTRA_TARGET_GAME_PACKAGE"));
+    }
+
+    #[test]
+    fn rejects_removed_provider_fields() {
+        for field in ["runtime_provider", "ui_provider"] {
+            let yaml =
+                format!("targets:\n  - id: game\n    kind: game\n    {field}: old-provider\n");
+            assert!(TargetManifest::from_project_yaml(&yaml).is_err());
+        }
+        let mut manifest = TargetManifest::new(Vec::new());
+        manifest.schema = "astra.target_manifest.v2".into();
+        assert_eq!(
+            validate_manifest(&manifest, None).status,
+            TargetValidationStatus::Blocked
+        );
     }
 
     #[test]

@@ -82,9 +82,9 @@ Theme 只使用 backend-neutral token：font、color、metric、texture、nine-s
 
 ## Provider binding
 
-UI provider 由 target/profile/package 的显式 binding 唯一决定。descriptor、target、profile、capability、artifact fingerprint 和 package hash 必须一致。缺 binding、重复 binding、provider capability 不足或 fingerprint drift 均阻断，不得选择“第一个注册项”。
+NativeVN 产品静态链接 Yakui。包内的 typed UI blueprint、binding、controller 和内容 hash 决定界面；target 不再选择动态 UI provider。
 
-`astra.target_manifest.v2` 中有 UI 的 target 必须声明 `ui_provider`；无 UI 的 command-line/tool target 可以省略。Headless 使用 Migration 11 的 `HostLaunchProfile::Headless`，不能出现在 target platforms 或 cooked shipping profile。
+`astra.target_manifest.v3` 删除 `ui_provider` 字段；旧字段直接拒绝。Headless 使用 Migration 11 的 `HostLaunchProfile::Headless`，不能出现在 target platforms 或 cooked shipping profile。
 
 ## 性能与容量
 

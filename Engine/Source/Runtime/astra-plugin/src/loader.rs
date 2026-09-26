@@ -15,7 +15,6 @@ use crate::{
     AstraPluginModuleRef, EngineModuleSlot, FfiPluginShutdown, LoadPhase, PluginDescriptor,
     PluginError, PluginGate, PluginRegistrar, RegisteredProvider,
 };
-use astra_plugin_abi::GAME_RUNTIME_PROVIDER_SLOT;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct PluginLoadReport {
@@ -98,21 +97,6 @@ impl PluginLoader {
         for provider in registration.providers {
             let provider = RegisteredProvider {
                 slot: EngineModuleSlot(provider.slot.to_string()),
-                provider_id: provider.provider_id.to_string(),
-                capability: provider.capability.to_string(),
-                phase: LoadPhase::from_str(&provider.phase.to_string())
-                    .map_err(PluginError::Load)?,
-                packaged: provider.packaged,
-                engine_version: descriptor.engine_version.to_string(),
-                rustc_fingerprint: descriptor.rustc_fingerprint.clone(),
-                feature_fingerprint: descriptor.feature_fingerprint.clone(),
-                abi_fingerprint: descriptor.abi_fingerprint.clone(),
-            };
-            registered_providers.push(provider);
-        }
-        for provider in registration.runtime_providers {
-            let provider = RegisteredProvider {
-                slot: EngineModuleSlot(GAME_RUNTIME_PROVIDER_SLOT.to_string()),
                 provider_id: provider.provider_id.to_string(),
                 capability: provider.capability.to_string(),
                 phase: LoadPhase::from_str(&provider.phase.to_string())

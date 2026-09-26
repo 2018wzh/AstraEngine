@@ -253,7 +253,7 @@
 
 **迁移要求：** 删除或私有化无 binding 语义的 `select()`；公开选择 API 必须要求 binding context 并返回 selected provider 或 blocking conflict。新增两个 provider、显式选择第二个 provider、重新排序注册顺序和缺 binding 的负向测试，并让 release gate 使用同一选择实现。
 
-**2026-07-13 关闭证据：** 无 binding context 的 `ExtensionRegistry::select()` 已删除，provider 注册不再创建隐式默认 binding；`PluginRegistrar::bind_provider` 是唯一公开选择入口。`astra-plugin-abi` 现提供 `astra.plugin_extension_registry.v2`、`astra.provider_policy.v2`、带 canonical hash 的 `ProviderBinding` 和共享 validator，Package builder/reader、scenario runner、Release Gate 与 VFS provider gate 使用同一语义。注册 API 已 fallible，非法或重复 provider 不产生部分写入，loader 注册失败会回滚。两种注册顺序、缺失/重复 binding、hash、capability、fingerprint、package/target/profile drift 和未 packaged provider 的负向测试均已落地。P1-008 关闭。
+**2026-07-13 关闭证据：** 无 binding context 的 `ExtensionRegistry::select()` 已删除，provider 注册不再创建隐式默认 binding；`PluginRegistrar::bind_provider` 是唯一公开选择入口。`astra-plugin-abi` 现提供 `astra.plugin_extension_registry.v2`、`astra.provider_policy.v3`、带 canonical hash 的 `ProviderBinding` 和共享 validator，Package builder/reader、scenario runner、Release Gate 与 VFS provider gate 使用同一语义。注册 API 已 fallible，非法或重复 provider 不产生部分写入，loader 注册失败会回滚。两种注册顺序、缺失/重复 binding、hash、capability、fingerprint、package/target/profile drift 和未 packaged provider 的负向测试均已落地。P1-008 关闭。
 
 ### P1-009：VFS resolve 没有 target/profile eligibility，且 layer 冲突可能被静默覆盖
 

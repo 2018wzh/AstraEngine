@@ -1140,9 +1140,7 @@ name = "astra-plugin"
 version = "0.1.0"
 dependencies = [
  "abi_stable",
- "astra-byte-source",
  "astra-core",
- "astra-media-core",
  "astra-plugin-abi",
  "astra-runtime",
  "astra-worker-budget",
@@ -1153,7 +1151,6 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "thiserror 1.0.69",
- "tokio",
  "tracing",
 ]
 
@@ -1162,10 +1159,7 @@ name = "astra-plugin-abi"
 version = "0.1.0"
 dependencies = [
  "abi_stable",
- "astra-byte-source",
  "astra-core",
- "astra-media-core",
- "postcard",
  "schemars",
  "serde",
  "serde_json",
@@ -1230,7 +1224,6 @@ dependencies = [
  "astra-platform",
  "astra-platform-android",
  "astra-player-core",
- "astra-plugin",
  "astra-plugin-abi",
  "astra-runtime",
  "astra-target",

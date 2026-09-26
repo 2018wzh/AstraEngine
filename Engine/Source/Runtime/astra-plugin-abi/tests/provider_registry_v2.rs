@@ -1,7 +1,7 @@
 use astra_plugin_abi::{
-    LoadPhase, PluginExtensionRegistrySnapshot, ProductRuntimeDescriptor, ProviderBinding,
-    ProviderBindingContext, ProviderExtensionRecord, ProviderPolicy,
-    PLUGIN_EXTENSION_REGISTRY_SCHEMA, PROVIDER_POLICY_SCHEMA,
+    LoadPhase, PluginExtensionRegistrySnapshot, ProviderBinding, ProviderBindingContext,
+    ProviderExtensionRecord, ProviderPolicy, PLUGIN_EXTENSION_REGISTRY_SCHEMA,
+    PROVIDER_POLICY_SCHEMA,
 };
 
 fn context(required_capability: &str) -> ProviderBindingContext {
@@ -24,56 +24,27 @@ fn registry_and_policy() -> (PluginExtensionRegistrySnapshot, ProviderPolicy) {
         context("renderer2d.wgpu"),
     )
     .unwrap();
-    let runtime_binding = ProviderBinding::new(
-        "game_runtime_provider",
-        "astra.runtime.native_vn",
-        context("runtime.native_vn"),
-    )
-    .unwrap();
     let registry = PluginExtensionRegistrySnapshot {
         schema: PLUGIN_EXTENSION_REGISTRY_SCHEMA.into(),
-        providers: vec![
-            ProviderExtensionRecord {
-                slot: "presentation".into(),
-                provider_id: "astra.renderer.wgpu".into(),
-                capability: "renderer2d.wgpu".into(),
-                phase: LoadPhase::Runtime,
-                packaged: true,
-                engine_version: "0.1.0".into(),
-                rustc_fingerprint: "rustc-stable".into(),
-                feature_fingerprint: "runtime-typed-v3".into(),
-                abi_fingerprint: "astra-plugin-abi-v3".into(),
-            },
-            ProviderExtensionRecord {
-                slot: "game_runtime_provider".into(),
-                provider_id: "astra.runtime.native_vn".into(),
-                capability: "runtime.native_vn".into(),
-                phase: LoadPhase::Runtime,
-                packaged: true,
-                engine_version: "0.1.0".into(),
-                rustc_fingerprint: "rustc-stable".into(),
-                feature_fingerprint: "runtime-typed-v3".into(),
-                abi_fingerprint: "astra-plugin-abi-v3".into(),
-            },
-        ],
-        bindings: vec![binding.clone(), runtime_binding.clone()],
+        providers: vec![ProviderExtensionRecord {
+            slot: "presentation".into(),
+            provider_id: "astra.renderer.wgpu".into(),
+            capability: "renderer2d.wgpu".into(),
+            phase: LoadPhase::Runtime,
+            packaged: true,
+            engine_version: "0.1.0".into(),
+            rustc_fingerprint: "rustc-stable".into(),
+            feature_fingerprint: "runtime-typed-v3".into(),
+            abi_fingerprint: "astra-plugin-abi-v3".into(),
+        }],
+        bindings: vec![binding.clone()],
         conflicts: vec![],
     };
     let policy = ProviderPolicy {
         schema: PROVIDER_POLICY_SCHEMA.into(),
         profile: "desktop-release".into(),
         renderer: "astra.renderer.wgpu".into(),
-        runtime_provider: ProductRuntimeDescriptor {
-            runtime_id: "native_vn".into(),
-            product_kind: "visual_novel".into(),
-            provider_id: "astra.runtime.native_vn".into(),
-            presentation_lane: astra_plugin_abi::RuntimePresentationLane::Scene2D,
-            supported_targets: vec!["game".into()],
-            capabilities: vec!["runtime.native_vn".into()],
-            package_sections: vec![],
-            release_checks: vec![],
-        },
-        bindings: vec![binding, runtime_binding],
+        bindings: vec![binding],
     };
     (registry, policy)
 }
@@ -86,26 +57,6 @@ fn v2_registry_closes_policy_provider_and_package_identity() {
             .validate_embedded_package(&policy, "game.package", "desktop-release")
             .unwrap(),
         "game"
-    );
-    let selection = registry
-        .resolve_embedded_runtime_provider(&policy, "game.package", "desktop-release")
-        .unwrap();
-    assert_eq!(selection.provider_id(), "astra.runtime.native_vn");
-    assert_eq!(selection.target(), "game");
-    assert_eq!(selection.profile(), "desktop-release");
-    assert_eq!(selection.package_id(), "game.package");
-    selection
-        .validate_linked_descriptor(&policy.runtime_provider)
-        .unwrap();
-
-    let mut linked_drift = policy.runtime_provider.clone();
-    linked_drift.runtime_id = "native_vn.drift".into();
-    assert_eq!(
-        selection
-            .validate_linked_descriptor(&linked_drift)
-            .unwrap_err()
-            .code,
-        "ASTRA_RUNTIME_PROVIDER_LINKED_DESCRIPTOR_MISMATCH"
     );
 }
 
@@ -179,5 +130,27 @@ fn v2_registry_blocks_duplicate_slot_and_context_drift() {
             .unwrap_err()
             .code,
         "ASTRA_PLUGIN_BINDING_CONTEXT_MISMATCH"
+    );
+}
+
+#[test]
+fn registry_rejects_removed_gameplay_slot_and_old_policy_schema() {
+    let (registry, mut policy) = registry_and_policy();
+    policy.schema = "astra.provider_policy.v2".into();
+    assert_eq!(
+        registry
+            .validate_embedded_package(&policy, "game.package", "desktop-release")
+            .unwrap_err()
+            .code,
+        "ASTRA_PROVIDER_POLICY_VERSION_UNSUPPORTED"
+    );
+    let (mut registry, policy) = registry_and_policy();
+    registry.providers[0].slot = "game_runtime_provider".into();
+    assert_eq!(
+        registry
+            .validate_embedded_package(&policy, "game.package", "desktop-release")
+            .unwrap_err()
+            .code,
+        "ASTRA_PLUGIN_SLOT_REMOVED"
     );
 }

@@ -3,8 +3,8 @@ use astra_runtime::{LoadReport, SaveBlob};
 
 pub(super) struct NativeVnRuntimeHost {
     runtime: Option<astra_vn::VnSession>,
-    binding: astra_package::PackageRuntimeSelection,
-    limits: RuntimeHostLimits,
+    binding: astra_package::PackageProductContext,
+    limits: VnHostLimits,
     session: Option<String>,
     seed: u64,
     last_step: u64,
@@ -15,12 +15,9 @@ pub(super) struct NativeVnRuntimeHost {
 
 impl NativeVnRuntimeHost {
     pub(super) fn new(
-        binding: &astra_package::PackageRuntimeSelection,
-        limits: RuntimeHostLimits,
-    ) -> Result<Self, RuntimeHostError> {
-        match binding.kind() {
-            astra_package::PackageRuntimeKind::NativeVn => {}
-        }
+        binding: &astra_package::PackageProductContext,
+        limits: VnHostLimits,
+    ) -> Result<Self, VnHostError> {
         Ok(Self {
             runtime: None,
             binding: binding.clone(),
@@ -34,9 +31,9 @@ impl NativeVnRuntimeHost {
         })
     }
 
-    fn validate_request(&self, target: &str, profile: &str) -> Result<(), RuntimeHostError> {
+    fn validate_request(&self, target: &str, profile: &str) -> Result<(), VnHostError> {
         if self.destroyed || target != self.binding.target() || profile != self.binding.profile() {
-            return Err(RuntimeHostError::new(
+            return Err(VnHostError::new(
                 "ASTRA_RUNTIME_HOST_BINDING_CONTEXT",
                 "NativeVN request does not match the active package binding",
             ));
@@ -44,9 +41,9 @@ impl NativeVnRuntimeHost {
         Ok(())
     }
 
-    fn validate_session(&self, session: &str) -> Result<(), RuntimeHostError> {
+    fn validate_session(&self, session: &str) -> Result<(), VnHostError> {
         if self.destroyed || self.runtime.is_none() || self.session.as_deref() != Some(session) {
-            return Err(RuntimeHostError::new(
+            return Err(VnHostError::new(
                 "ASTRA_RUNTIME_HOST_SESSION",
                 "NativeVN session is not open",
             ));
@@ -54,9 +51,9 @@ impl NativeVnRuntimeHost {
         Ok(())
     }
 
-    fn require_healthy(&self) -> Result<(), RuntimeHostError> {
+    fn require_healthy(&self) -> Result<(), VnHostError> {
         if self.failed {
-            return Err(RuntimeHostError::new(
+            return Err(VnHostError::new(
                 "ASTRA_RUNTIME_HOST_SESSION_POISONED",
                 "NativeVN execution failed; restore or close the session",
             ));
@@ -69,17 +66,17 @@ impl NativeVnRuntimeHost {
         compiled: Arc<CompiledStory>,
         config: VnRunConfig,
         options: astra_vn::VnSessionConfig,
-    ) -> Result<String, RuntimeHostError> {
+    ) -> Result<String, VnHostError> {
         self.validate_request(&options.target_id, &config.profile)?;
         if self.session.is_some() {
-            return Err(RuntimeHostError::new(
+            return Err(VnHostError::new(
                 "ASTRA_RUNTIME_HOST_SESSION_DUPLICATE",
                 "NativeVN host already owns a session",
             ));
         }
         let seed = options.seed;
         let runtime = astra_vn::VnSession::new(compiled, config, options)
-            .map_err(|error| RuntimeHostError::new("ASTRA_RUNTIME_HOST_OPEN", error.to_string()))?;
+            .map_err(|error| VnHostError::new("ASTRA_RUNTIME_HOST_OPEN", error.to_string()))?;
         let session_id = runtime.id().to_string();
         self.runtime = Some(runtime);
         self.session = Some(session_id.clone());
@@ -93,9 +90,9 @@ impl NativeVnRuntimeHost {
     pub(super) fn step(
         &mut self,
         input: NativeVnStepInput,
-    ) -> Result<NativeVnStepOutput, RuntimeHostError> {
+    ) -> Result<NativeVnStepOutput, VnHostError> {
         self.validate_session(self.session.as_ref().ok_or_else(|| {
-            RuntimeHostError::new("ASTRA_RUNTIME_HOST_SESSION", "NativeVN session is not open")
+            VnHostError::new("ASTRA_RUNTIME_HOST_SESSION", "NativeVN session is not open")
         })?)?;
         self.require_healthy()?;
         if self.last_step.checked_add(1) != Some(input.timing.fixed_step)
@@ -105,7 +102,7 @@ impl NativeVnRuntimeHost {
             || input.mode != self.next_mode
         {
             self.failed = true;
-            return Err(RuntimeHostError::new(
+            return Err(VnHostError::new(
                 "ASTRA_RUNTIME_HOST_STEP_ORDER",
                 "NativeVN step violates session timing, seed or restore mode",
             ));
@@ -117,7 +114,7 @@ impl NativeVnRuntimeHost {
             .as_mut()
             .expect("validated native session")
             .step(input)
-            .map_err(|error| RuntimeHostError::new("ASTRA_RUNTIME_HOST_STEP", error.to_string()))
+            .map_err(|error| VnHostError::new("ASTRA_RUNTIME_HOST_STEP", error.to_string()))
             .and_then(|output| {
                 self.limits.validate_output_count(
                     output
@@ -136,9 +133,9 @@ impl NativeVnRuntimeHost {
         result
     }
 
-    pub(super) fn save(&mut self) -> Result<SaveBlob, RuntimeHostError> {
+    pub(super) fn save(&mut self) -> Result<SaveBlob, VnHostError> {
         self.validate_session(self.session.as_ref().ok_or_else(|| {
-            RuntimeHostError::new("ASTRA_RUNTIME_HOST_SESSION", "NativeVN session is not open")
+            VnHostError::new("ASTRA_RUNTIME_HOST_SESSION", "NativeVN session is not open")
         })?)?;
         self.require_healthy()?;
         self.failed = true;
@@ -147,7 +144,7 @@ impl NativeVnRuntimeHost {
             .as_ref()
             .expect("validated native session")
             .save()
-            .map_err(|error| RuntimeHostError::new("ASTRA_RUNTIME_HOST_SAVE", error.to_string()))
+            .map_err(|error| VnHostError::new("ASTRA_RUNTIME_HOST_SAVE", error.to_string()))
             .and_then(|report| {
                 self.limits.validate_output_count(1)?;
                 self.limits.validate_save_bytes(report.0.len())?;
@@ -157,9 +154,9 @@ impl NativeVnRuntimeHost {
         result
     }
 
-    pub(super) fn restore(&mut self, blob: SaveBlob) -> Result<LoadReport, RuntimeHostError> {
+    pub(super) fn restore(&mut self, blob: SaveBlob) -> Result<LoadReport, VnHostError> {
         self.validate_session(self.session.as_ref().ok_or_else(|| {
-            RuntimeHostError::new("ASTRA_RUNTIME_HOST_SESSION", "NativeVN session is not open")
+            VnHostError::new("ASTRA_RUNTIME_HOST_SESSION", "NativeVN session is not open")
         })?)?;
         self.limits.validate_save_bytes(blob.0.len())?;
         let was_failed = self.failed;
@@ -173,7 +170,7 @@ impl NativeVnRuntimeHost {
             Ok(report) => report,
             Err(error) => {
                 self.failed = was_failed;
-                return Err(RuntimeHostError::new(
+                return Err(VnHostError::new(
                     "ASTRA_RUNTIME_HOST_RESTORE",
                     error.to_string(),
                 ));
@@ -181,7 +178,7 @@ impl NativeVnRuntimeHost {
         };
         if report.seed != self.seed {
             self.failed = true;
-            return Err(RuntimeHostError::new(
+            return Err(VnHostError::new(
                 "ASTRA_RUNTIME_HOST_RESTORE_IDENTITY",
                 "NativeVN restored session or seed does not match",
             ));
@@ -192,22 +189,22 @@ impl NativeVnRuntimeHost {
         Ok(report)
     }
 
-    pub(super) fn validate_save(&self, blob: &SaveBlob) -> Result<(), RuntimeHostError> {
+    pub(super) fn validate_save(&self, blob: &SaveBlob) -> Result<(), VnHostError> {
         self.limits.validate_save_bytes(blob.0.len())?;
         self.runtime
             .as_ref()
             .ok_or_else(|| {
-                RuntimeHostError::new("ASTRA_RUNTIME_HOST_SESSION", "NativeVN session is not open")
+                VnHostError::new("ASTRA_RUNTIME_HOST_SESSION", "NativeVN session is not open")
             })?
             .validate_save(blob)
             .map_err(|error| {
-                RuntimeHostError::new("ASTRA_RUNTIME_HOST_SAVE_CANDIDATE", error.to_string())
+                VnHostError::new("ASTRA_RUNTIME_HOST_SAVE_CANDIDATE", error.to_string())
             })
     }
 
-    pub(super) fn shutdown(&mut self) -> Result<(), RuntimeHostError> {
+    pub(super) fn shutdown(&mut self) -> Result<(), VnHostError> {
         let session = self.session.clone().ok_or_else(|| {
-            RuntimeHostError::new("ASTRA_RUNTIME_HOST_SESSION", "NativeVN session is not open")
+            VnHostError::new("ASTRA_RUNTIME_HOST_SESSION", "NativeVN session is not open")
         })?;
         self.validate_session(&session)?;
         self.runtime
@@ -218,9 +215,9 @@ impl NativeVnRuntimeHost {
         Ok(())
     }
 
-    pub(super) fn destroy(&mut self) -> Result<(), RuntimeHostError> {
+    pub(super) fn destroy(&mut self) -> Result<(), VnHostError> {
         if self.session.is_some() {
-            return Err(RuntimeHostError::new(
+            return Err(VnHostError::new(
                 "ASTRA_RUNTIME_HOST_LIFECYCLE",
                 "close NativeVN before destroying the host",
             ));
@@ -229,7 +226,7 @@ impl NativeVnRuntimeHost {
         Ok(())
     }
 
-    pub(super) fn cleanup_after_failure(&mut self) -> Result<(), RuntimeHostError> {
+    pub(super) fn cleanup_after_failure(&mut self) -> Result<(), VnHostError> {
         if self.session.is_some() {
             self.shutdown()?;
         }
@@ -317,7 +314,7 @@ mod tests {
     fn typed_presentation_output_still_enforces_the_host_budget() {
         let mut source = source();
         let host = &mut source.host;
-        host.limits = RuntimeHostLimits::new().with_bounds(0, 8 * 1024 * 1024);
+        host.limits = VnHostLimits::new().with_bounds(0, 8 * 1024 * 1024);
         let error = host
             .step(step(host, 1, NativeVnStepCommand::LaunchDefault))
             .unwrap_err();
@@ -430,7 +427,7 @@ mod tests {
         assert!(host.restore(invalid).is_err());
         assert!(!host.failed);
         assert_eq!(save(host), saved);
-        host.limits = RuntimeHostLimits::new().with_bounds(256, 1);
+        host.limits = VnHostLimits::new().with_bounds(256, 1);
         assert!(host.save().is_err());
         assert!(host.failed);
         assert!(host

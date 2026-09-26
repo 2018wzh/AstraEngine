@@ -190,7 +190,6 @@ mod tests {
 
     #[test]
     fn v9_runtime_container_roundtrips_and_rejects_v8_corruption_and_foreign_identity() {
-        use astra_plugin_abi::{RuntimeSaveSections, RuntimeSectionCodec, RuntimeSectionPayload};
         let mut source = source();
         let bytes = source.save("slot.01").unwrap();
         let envelope = decode_save_envelope(&bytes).unwrap();
@@ -223,18 +222,19 @@ mod tests {
         let state = source.runtime_state.clone();
         let scope = source.media_scope.child();
         let payload = &envelope.payload;
-        let legacy_sections = RuntimeSaveSections {
-            session_id: astra_plugin_abi::GameRuntimeSessionId(payload.session_id.clone()),
-            sections: vec![RuntimeSectionPayload {
-                section_id: "runtime.world".into(),
-                schema: "astra.runtime.save_blob.v5".into(),
-                version: astra_core::SchemaVersion::new(5, 0, 0),
-                codec: RuntimeSectionCodec::Raw,
-                hash: Hash256::from_sha256(&payload.runtime.0),
-                bytes: payload.runtime.0.clone(),
-            }],
-            diagnostics: vec![],
-        };
+        // Tuple mirrors v7's old section wire layout without keeping its obsolete public ABI.
+        let legacy_sections = (
+            &payload.session_id,
+            vec![(
+                "runtime.world",
+                "astra.runtime.save_blob.v5",
+                astra_core::SchemaVersion::new(5, 0, 0),
+                1_u32, // Raw enum discriminant.
+                Hash256::from_sha256(&payload.runtime.0),
+                &payload.runtime.0,
+            )],
+            Vec::<String>::new(),
+        );
         // Preserve rejection of the actual v7 field layout as well.
         let legacy = postcard::to_allocvec(&(
             "astra.player.native_vn_save.v7",

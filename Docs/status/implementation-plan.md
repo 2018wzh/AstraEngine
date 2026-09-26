@@ -608,3 +608,9 @@ main surface 修复后真实 Cook/package 与 Vulkan 硬件离屏场景通过。
 ### 独立 Engine 构造与 VN 会话身份
 
 `EngineSession::new` 只接收 `RuntimeConfig`，package、integrity 和 worker 配置留在确实需要它们的产品入口。静态 VN session、Player-VN 和其存档不再使用动态插件 ABI 的会话 ID 类型；会话字符串及其编码不变，存档校验保持原有边界。最小 Engine 测试覆盖 typed 状态、tick、保存恢复再保存和关闭取消。VN session 13 项与 Player 产品保存 5 项回归通过，后者覆盖冷开恢复后再保存、媒体恢复、旧格式和损坏候选拒绝。受影响 crate 的 clippy、fmt 和文档检查通过；这些是软件流程回归，未执行真实平台视听验收。target descriptor 的 provider 字段仍待沿打包调用链移除。
+
+### 静态 gameplay 包与消费者
+
+Target manifest v3 删除 runtime/UI provider 字段，provider policy v3 仅保留 renderer、VFS、audio、decode 等机制 binding。Package reader 返回 target/profile 上下文；Player 与发布检查直接调用静态 VN session。已删除旧 gameplay descriptor、动态 host、FFI lifecycle 和仅服务旧链的测试；保存恢复仍校验 session、package、schema 与内容，旧包拒绝并要求重新 Cook。
+
+增量检查覆盖 package 23 项、plugin ABI/target 8 项、release 43 项、Player-VN library 与 source 89 项、plugin 13 项（含动态机制 fixture 加载和卸载）。实际 CLI 4 项通过，包含生成新包、Web bundle 和 Cook→package→Headless 输入流程；NativeVN 项目生成 2 项与终之空项目生成 1 项通过。Headless 在本树构建后执行，不代表原生窗口、GPU 画面和真实声音验收。静态 Yakui 及实际机制绑定保留；可信 Luau host IO、统一 Sequence 作者模型仍待后续批次。

@@ -2,9 +2,9 @@
 
 Astra 插件采用 Rust-facing `abi_stable` 风格 ABI。目标是给插件作者 Rust 体验，同时让二进制兼容性可检查、可拒绝、可审计。
 
-`astra-plugin-abi` 同时承载跨平台 provider DTO 与 native dynamic ABI adapter，但两者必须通过 feature 分层。`ffi`/`dynamic-abi` 只在支持动态库的 native host 启用，并携带 `abi_stable`、`libloading`、RootModule 和 FFI entrypoint；Web 等静态 in-process target 关闭这些 feature，只使用同一组 serde/schema provider request、output、binding 和 lifecycle contract。关闭 dynamic ABI 不得改变 provider binding、instance/session lifecycle、RuntimeWorld authority 或 replay 约束，也不得以直接持有产品 runtime 替代 `ProductRuntimeHost::in_process`。
+`astra-plugin-abi` 保留机制 provider 的 registry、binding、dependency DTO 和 `AstraPluginModule` 注册边界。`ffi`/`dynamic-abi` 仅用于原生动态插件加载。Gameplay 由产品 binary 静态组合；NativeVN 直接持有 `VnSession`，不再有动态 gameplay descriptor、host 或 FFI session lifecycle。Rust live presentation 类型暂留于此 crate，供现有静态消费者使用，不序列化为插件 payload。
 
-`astra-plugin-abi` 是插件二进制边界的真源，包含 `AstraPluginModule`、FFI registration、`LoadPhase`、extension registry DTO、dependency graph DTO 和 runtime provider DTO+FFI entrypoints。`astra-plugin` 是 host 侧 loader、registry 和 Runtime action adapter。`astra-engine` 和 `astra-vn` 都是受 Windows export budget 约束的 Rust compatibility dylib facade，不扩大插件 ABI；其允许制品、依赖闭包和审计命令以 [重构契约](rebuild.md) 为准。
+动态制品边界见 [重构契约](rebuild.md)。
 
 ```bash
 python Tools/check_dynamic_artifacts.py
@@ -57,74 +57,27 @@ pub trait Renderer2DProvider: StableProvider {
 }
 ```
 
-完整 provider trait 族见 [Provider And Plugin API Blueprint](../implementation/provider-plugin-api.md)。v1 必须覆盖 Renderer2D、TextLayout、AudioOutput、DecodeProvider、AssetImporter、CookProcessor、LuauPolicyBundle、EditorPanel、AiProvider、MCPToolProvider、GameRuntimeProvider、LegacyFamilyPlugin 和可选 EMUCoreBridge。AiProvider 只服务 Editor 和 MCP host，Runtime 通过 `McpAiSession` 消费固化后的 Intent 和 output。
+完整 provider trait 族见 [Provider And Plugin API Blueprint](../implementation/provider-plugin-api.md)。v1 必须覆盖 Renderer2D、TextLayout、AudioOutput、DecodeProvider、AssetImporter、CookProcessor、LuauPolicyBundle、EditorPanel、AiProvider、MCPToolProvider；EMU Family 使用独立 ABI。AiProvider 只服务 Editor 和 MCP host，Runtime 通过 `McpAiSession` 消费固化后的 Intent 和 output。
 
-## Game Runtime Provider ABI
+## 静态产品组合
 
-Provider ABI 版本固定为 `3`；旧 registration 在创建 instance 前直接拒绝。
-
-`ProductRuntimeProvider` 是 Rust 侧设计 trait；跨插件 ABI 不传 trait object。插件通过 `FfiRuntimeProviderRegistration` 注册 ABI-safe entrypoints，并继续把 provider 记录写入现有 `providers` slot snapshot，让 package/release gate 复用同一 registry：
-
-```rust
-pub struct FfiRuntimeProviderRegistration {
-    pub abi_version: u32,
-    pub provider_id: RString,
-    pub runtime_id: RString,
-    pub capability: RString,
-    pub phase: RString,
-    pub packaged: bool,
-    pub descriptor_schema: RString,
-    pub descriptor_json: RVec<u8>,
-    pub create_instance: FfiRuntimeCreateInstance,
-    pub destroy_instance: FfiRuntimeDestroyInstance,
-    pub prepare: FfiRuntimePrepare,
-    pub probe: FfiRuntimeProbe,
-    pub open_session: FfiRuntimeOpen,
-    pub step: FfiRuntimeStep,
-    pub save: FfiRuntimeSave,
-    pub restore: FfiRuntimeRestore,
-    pub shutdown: FfiRuntimeShutdown,
-    pub package_sections: FfiRuntimePackageSections,
-    pub release_checks: FfiRuntimeReleaseChecks,
-    pub editor_metadata: FfiRuntimeEditorMetadata,
-}
-```
-
-每个 entrypoint 使用对应的 typed request/result：create/destroy、prepare、probe、open、step、save、restore、shutdown、package sections、release checks 和 editor metadata；不使用 JSON、postcard 或统一 payload envelope。`game_runtime_provider` slot 仍要求显式绑定单一 provider，`vfs_provider` 的多 provider 规则不适用于 gameplay runtime。
-
-当前常量包括 `GAME_RUNTIME_PROVIDER_SLOT = "game_runtime_provider"`、`NATIVE_VN_RUNTIME_ID = "native_vn"` 和 `NATIVE_VN_PROVIDER_ID = "astra.runtime.native_vn"`。NativeVN FFI adapter 提供 instance create/destroy 与 session open/step/save/restore/shutdown；请求和返回只携带对应的 typed ABI-safe DTO。
-
-FFI 边界只传 stable id、section ref、diagnostic 和 bounded typed DTO；Luau VM handle、RuntimeWorld 指针、Editor widget、本地 root、provider secret、商业文本、音频、图像或 bytecode payload 都不得跨 ABI。
+`astra.target_manifest.v3` 不再要求 `runtime_provider` 或 `ui_provider`；`astra.provider_policy.v3` 只声明实际机制绑定。旧 schema、旧 descriptor 字段和 `game_runtime_provider` slot 均拒绝，项目需重新 Cook。`PackageProductContext` 只提供已验证的 target/profile；包完整性、VFS、renderer、audio 和 decode 的显式选择保持不变。发布检查直接验证 NativeVN section 与实际 session 保存恢复流程，不消费插件自声明的 release checks。
 
 ## Extension Registry
 
-插件可以注册 provider slot、asset type、importer、cook processor、Editor panel、menu command、graph node、timeline track、Inspector widget、release check、game runtime provider 和 legacy family provider。每条注册必须声明 `LoadPhase`、依赖、冲突策略、enablement scope、packaged eligibility 和 diagnostic source。Editor 的 Plugin Manager 只能改变 enablement 和 binding，不能绕过 descriptor gate。
+插件可以注册 provider slot、asset type、importer、cook processor、Editor panel、menu command、graph node、timeline track、Inspector widget、release check。每条注册必须声明 `LoadPhase`、依赖、冲突策略、enablement scope、packaged eligibility 和 diagnostic source。Editor 的 Plugin Manager 只能改变 enablement 和 binding，不能绕过 descriptor gate。
 
-Package 使用 `astra.plugin_extension_registry.v2` 和 `astra.provider_policy.v2`。两者共享 `ProviderBinding`，binding 同时固化 slot、provider id、required capability、package、target、profile、engine version、rustc/feature/ABI fingerprint 与 canonical `binding_hash`。Registry 中的 binding 集合必须与 policy 完全一致；缺失、重复、冲突、hash drift、capability/fingerprint mismatch、未 packaged provider 或 target/profile 不一致都会在 package builder、package reader、scenario runner 和 Release Gate 的同一 typed validator 中阻断。v1 section 不迁移，也不自动补默认 provider。
+Package 使用 `astra.plugin_extension_registry.v2` 和 `astra.provider_policy.v3`。两者共享 `ProviderBinding`，binding 同时固化 slot、provider id、required capability、package、target、profile、engine version、rustc/feature/ABI fingerprint 与 canonical `binding_hash`。Registry 中的 binding 集合必须与 policy 完全一致；缺失、重复、冲突、hash drift、capability/fingerprint mismatch、未 packaged provider 或 target/profile 不一致都会在 package builder、package reader、scenario runner 和 Release Gate 的同一 typed validator 中阻断。v1 section 不迁移，也不自动补默认 provider。
 
-`PackageReader` 在 open 时保留已验证的 `ValidatedRuntimeProviderSelection` 和真实 package SHA-256。Player 不能根据 provider 注册顺序、runtime 名称或硬编码 target 创建 provider；必须用 selection 的 provider id、target、profile、binding hash 和完整 `ProductRuntimeDescriptor` 匹配当前 binary/FFI registration。descriptor、request context 或 prepare/probe/open report identity 任一漂移都会在 provider 修改 session 前阻断；初始化失败必须执行 instance/session cleanup。
+`PackageReader` 保留已验证的 `PackageProductContext` 和包 SHA-256。产品从 target/profile 创建静态 session，作品身份与内容校验继续用于保存恢复。
 
 `PluginRegistrar::register_provider` 是 fallible API。非法 identity 与重复 `(slot, provider_id)` 不写入 registry；loader 先解析全部 registration，再提交注册，任一注册失败会撤销本次已提交的 provider。无 binding context 的选择 API 不存在，provider 注册顺序不能改变结果。
 
 Stage 1 host registry 负责 `LoadPhase`、provider binding、conflict report 和 `PluginDependency` dependency graph。Stage 2 package/release gate 写入并校验 `plugin.extension_registry` 和 `plugin.dependency_graph`。Stage 4 Editor Plugin Manager 只显示和修改这些后端产物。
 
-## StateMachine Action ABI
+## StateMachine Action
 
-Stage 1 action provider 使用 function pointer 和 postcard payload：
-
-```rust
-pub struct FfiActionRegistration {
-    pub abi_version: u32, // 必须为 2
-    pub provider_id: RString,
-    pub action_id: RString,
-    pub input_schema: RString,
-    pub output_schema: RString,
-    pub descriptor_json: RVec<u8>,
-    pub invoke: extern "C" fn(RVec<u8>) -> RVec<u8>,
-}
-```
-
-`descriptor_json` 是完整 `ActionDescriptor`，必须声明 execution class、read/write set 和 StableId reservation，并与 registration identity 完全一致。`invoke` 接收 `ActionCallRequest` bytes，返回 `ActionCallResult` bytes。result 只包含 `ActionTrace` 和可序列化 `ActionEffect` list；host adapter 在应用前逐项校验 effect 没有越过 write set。ABI 版本、identity、access 或 ID reservation 不满足契约时 fail closed。插件不得跨 ABI 接收或保存 RuntimeWorld、Actor 指针、trait object、native handle 或平台文件描述符。
+Action 是 host 内注册的 typed Rust action，通过 `DeterministicActionContext` 修改运行状态；不提供动态 bytes invoke 或 effect envelope。
 
 ## Load / Unload Report
 
