@@ -116,3 +116,100 @@ fn projection_and_edits_use_cook_scalar_and_easing_validation() {
     assert!(tracks(&duplicate).is_err());
     assert_eq!(workspace.document("main.astra").unwrap().text, source);
 }
+
+#[test]
+fn extension_source_allows_repeated_timeline_edits_without_authorizing_execution() {
+    let source="story main #@id main\nstate start #@id start\n  scene room #@id room\n    studio_fx intensity:2 #@id fx\n    timeline id:pan target:hero property:x keyframes:0=0,1000=1 budget_ms:1 #@id pan\n# retained note\n";
+    let mut workspace = AuthoringWorkspace::default();
+    workspace
+        .open(AstraSource::story("main.astra", source))
+        .unwrap();
+    workspace
+        .apply(
+            easing_edit(
+                &workspace,
+                "main.astra",
+                1,
+                "pan",
+                VnPresentationEasing::EaseIn,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let after_insert = workspace.document("main.astra").unwrap().text.clone();
+    let mut batch = easing_edit(
+        &workspace,
+        "main.astra",
+        2,
+        "pan",
+        VnPresentationEasing::EaseOut,
+    )
+    .unwrap();
+    let keys = edit(
+        &workspace,
+        "main.astra",
+        2,
+        "pan",
+        KeyframeEdit::Insert(Keyframe {
+            time_ms: 500,
+            value: "0.25".into(),
+        }),
+    )
+    .unwrap();
+    batch.documents[0]
+        .edits
+        .extend(keys.documents[0].edits.clone());
+    workspace.apply(batch).unwrap();
+    let doc = workspace.document("main.astra").unwrap();
+    assert!(doc.text.contains("studio_fx intensity:2 #@id fx"));
+    assert!(doc.text.ends_with("# retained note\n"));
+    assert_eq!(
+        tracks(doc).unwrap()[0].easing,
+        VnPresentationEasing::EaseOut
+    );
+    assert_eq!(tracks(doc).unwrap()[0].frames[1].time_ms, 500);
+    assert_eq!(
+        workspace.compile(Default::default()).unwrap_err().code(),
+        "ASTRA_VN_COMMAND_UNBOUND"
+    );
+    let compiled = workspace
+        .compile(
+            CompileAstraProjectOptions::default().bind_extension(ExtensionCommandDescriptor {
+                command: "studio_fx".into(),
+                provider_id: "studio.presentation".into(),
+                schema: "studio.fx.v1".into(),
+                fields: std::collections::BTreeMap::from([(
+                    "intensity".into(),
+                    ExtensionFieldContract {
+                        kind: ExtensionFieldKind::Integer,
+                        required: true,
+                    },
+                )]),
+            }),
+        )
+        .unwrap();
+    assert_eq!(compiled.story.source_map.get("pan").unwrap().line, 5);
+    workspace.undo().unwrap();
+    assert_eq!(workspace.document("main.astra").unwrap().text, after_insert);
+    workspace.undo().unwrap();
+    assert_eq!(workspace.document("main.astra").unwrap().text, source);
+    assert!(workspace.undo().is_err());
+    let mut invalid = AuthoringWorkspace::default();
+    invalid
+        .open(AstraSource::story(
+            "main.astra",
+            source.replace("property:x", "property:x property:y"),
+        ))
+        .unwrap();
+    assert!(easing_edit(
+        &invalid,
+        "main.astra",
+        1,
+        "pan",
+        VnPresentationEasing::EaseIn
+    )
+    .is_err());
+    assert!(invalid
+        .attribute_edit("main.astra", "pan", "keyframes", "0=0,1000=2")
+        .is_err());
+}

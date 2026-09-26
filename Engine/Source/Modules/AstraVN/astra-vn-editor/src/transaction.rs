@@ -2,7 +2,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{parse_astra_source, AuthoringWorkspace};
+use crate::{parse_astra_source, AuthoringWorkspace, ParsedAstraSource};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TextEdit {
@@ -126,17 +126,30 @@ impl AuthoringWorkspace {
         // Reject values the current grammar cannot represent (including multiline injection).
         let candidate = batch.documents[0].apply_to(&document.text)?;
         let updated = parse_astra_source(path, &candidate);
-        if !updated.diagnostics.is_empty()
-            || updated
-                .ast
-                .commands()
-                .find(|c| c.source_id() == Some(command_id))
-                .and_then(|c| c.attribute(attribute))
-                .map(|a| a.value())
-                != Some(value)
+        validate_edit_syntax(&updated)?;
+        if updated
+            .ast
+            .commands()
+            .find(|c| c.source_id() == Some(command_id))
+            .and_then(|c| c.attribute(attribute))
+            .map(|a| a.value())
+            != Some(value)
         {
             return Err(EditError::InvalidValue);
         }
         Ok(batch)
     }
+}
+
+/// Extension names remain editable before project binding. This does not authorize
+/// execution: Cook still rejects every command without an explicit descriptor.
+pub(crate) fn validate_edit_syntax(parsed: &ParsedAstraSource) -> Result<(), EditError> {
+    if parsed
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code != "ASTRA_VN_UNKNOWN_COMMAND")
+    {
+        return Err(EditError::InvalidValue);
+    }
+    Ok(())
 }

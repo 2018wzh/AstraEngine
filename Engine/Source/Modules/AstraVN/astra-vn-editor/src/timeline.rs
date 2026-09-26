@@ -21,13 +21,7 @@ pub struct TimelineTrack {
 /// A disposable projection of the canonical source, never a second timeline file.
 pub fn tracks(document: &DocumentSnapshot) -> anyhow::Result<Vec<TimelineTrack>> {
     let parsed = parse_astra_source(&document.path, &document.text);
-    anyhow::ensure!(
-        parsed
-            .diagnostics
-            .iter()
-            .all(|diagnostic| diagnostic.code == "ASTRA_VN_UNKNOWN_COMMAND"),
-        "Timeline source has syntax diagnostics"
-    );
+    crate::transaction::validate_edit_syntax(&parsed)?;
     let mut ids = std::collections::BTreeSet::new();
     anyhow::ensure!(
         parsed

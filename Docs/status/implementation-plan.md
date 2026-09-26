@@ -29,6 +29,8 @@ Artemis `13e55ffa`、RFVP `b2f385da`、Siglus `c6c4f99c` 已按用户授权分�
 
 ## Timeline 源码缓动接续
 
+源码事务与 Timeline 投影统一对 `ASTRA_VN_UNKNOWN_COMMAND` 的处理：允许保留待项目绑定的扩展名称，其他解析诊断仍阻断编辑。含扩展命令的源码可连续插入/替换缓动、修改关键帧并撤销；Cook 在缺少显式扩展绑定时仍拒绝执行。定向回归已覆盖这条此前遗漏的组合路径。
+
 `.astra` Timeline 已复用原有四种二次缓动，规则由唯一 script 类型进入 Cook、Stage 采样和保存恢复。`astra-vn-editor` 统一源码投影与关键帧/缓动事务；GPUI Timeline 可切换规则，MCP 读取同一投影，写入仍经原有版本/generation 批次。没有新增平行 Sequence 文件或曲线框架。package root v4、compiled project v5、Stage snapshot v11、Player save v10 拒绝旧格式；VN 业务 RuntimeState 没有轨道字段，维持 v4。作品需要重新 Cook，旧槽读取失败不覆盖原文件。
 
 定向检查覆盖段内与跨段插值、端点、取消、恢复后继续、旧格式拒绝、损坏存档、恢复后重存，以及注释/source ID/source map、版本冲突、关键帧拖动和单批撤销。Editor Timeline/MCP 4 项、Stage 20 项、typed stage IR 8 项和 Player 存档 5 项通过；受影响 Engine crate 与 Editor all-target Clippy、fmt 和文档检查通过。本树 CLI 的 Cook→package→Headless 最小 NativeVN 流程通过。实际 Editor 桌面操作仍暂停；此批不代表真实 Windows 长流程、GPU 画面或实际声音验收，片段 seek/热更新尚未实现。
