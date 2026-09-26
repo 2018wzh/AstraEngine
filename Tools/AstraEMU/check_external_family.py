@@ -68,12 +68,26 @@ tracing = "0.1"
             ("valid", True, {}), ("cold-reopen", True, {}),
             ("bad-config", False, {"configuration": [{"id": "intensity", "value": {"Integer": 999}}]}),
             ("missing-input", False, {"inputs": []}),
+            ("window-icon", False, {"configuration": [
+                {"id": "request_icon", "value": {"Bool": True}}
+            ]}),
+            ("window-title", False, {"configuration": [
+                {"id": "request_title", "value": {"Bool": True}}
+            ]}),
         ]
         for name, valid, changes in cases:
             config = base | changes | {"output": str(project / f"{name}.png")}
             source = project / f"{name}.json"
             source.write_text(json.dumps(config), encoding="utf-8")
-            result = subprocess.run([str(host), "--headless", str(source)], env=env, timeout=30)
+            result = subprocess.run(
+                [str(host), "--headless", str(source)], env=env, timeout=30,
+                capture_output=True, text=True, encoding="utf-8", errors="replace"
+            )
+            if name in {"window-title", "window-icon"}:
+                if "ASTRA_EMU_HEADLESS_WINDOW_COMMAND_UNAVAILABLE" not in result.stderr:
+                    raise RuntimeError(f"{name}: Host did not explicitly reject the request")
+                if "EXTERNAL_" in result.stderr:
+                    raise RuntimeError(f"{name}: Family cleanup failed")
             if (result.returncode == 0) != valid:
                 raise RuntimeError(f"{name}: unexpected Host exit status {result.returncode}")
             if valid:

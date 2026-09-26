@@ -118,7 +118,7 @@ cargo build --manifest-path Emulator/Cargo.toml -p astra-emu-manager
 python Tools/AstraEMU/check_external_family.py --host Emulator/target/debug/astra-emu-manager
 ```
 
-Windows 的 `--host` 参数添加 `.exe`。回归检查依赖图仅包含 Family API 这一 Astra crate、显式配置改变帧颜色、物理 Enter 按下/释放改变像素、PCM worker 至少一次写入成功，以及关闭取消并等待 worker。两次冷启动通过；越界配置和缺失输入必须失败。音频经过真实 Host 的有界 NullAudio 队列，但不会发声；2×2 CPU 帧只验证 ABI 交付，不代表 GPU、游戏或实际声音验收。真实核心的原生媒体、存读档和连续流程仍需单独运行。
+Windows 的 `--host` 参数添加 `.exe`。回归检查依赖图仅包含 Family API 这一 Astra crate、显式配置改变帧颜色、物理 Enter 按下/释放改变像素、PCM worker 至少一次写入成功，以及关闭取消并等待 worker。两次冷启动通过；越界配置和缺失输入必须失败。外部核心另请求标题和 RGBA8 图标，Headless 必须返回明确的窗口能力不可用错误，并完成 PCM worker 取消关闭。音频经过真实 Host 的有界 NullAudio 队列，但不会发声；2×2 CPU 帧只验证 ABI 交付，不代表 GPU、游戏或实际声音验收。真实核心的原生媒体、存读档和连续流程仍需单独运行。
 
 ## NativeVN 嵌入接口
 

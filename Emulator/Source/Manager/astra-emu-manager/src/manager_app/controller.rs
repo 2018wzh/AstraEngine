@@ -162,6 +162,18 @@ impl ManagerController for AstraEmuManagerController {
         self.active.as_ref().is_some_and(|active| active.fullscreen)
     }
 
+    fn take_game_icon(&mut self) -> Option<astra_emu_family_api::FamilyWindowIcon> {
+        self.active
+            .as_mut()
+            .and_then(|active| active.pending_icon.take())
+    }
+
+    fn game_title(&self) -> Option<&str> {
+        self.active
+            .as_ref()
+            .and_then(|active| active.title.as_deref())
+    }
+
     fn set_theme(&mut self, dark: bool) -> Result<(), String> {
         AstraEmuManagerController::set_theme(self, dark)
     }

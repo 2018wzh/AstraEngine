@@ -15,6 +15,8 @@ use std::{
 struct Provider;
 struct Session {
     pixels: [u8; 16],
+    title_requested: bool,
+    icon_requested: bool,
     pressed: bool,
     released: bool,
     sink: Arc<AudioSinkBox>,
@@ -52,13 +54,29 @@ impl FamilyProvider for Provider {
             version: "0.1.0".into(),
             capabilities: vec![FamilyCapability::CpuFrame, FamilyCapability::PcmAudio].into(),
             supported_formats: vec!["public-fixture".into()].into(),
-            configuration: vec![ConfigField {
-                id: "intensity".into(),
-                label: "Intensity".into(),
-                group: "".into(),
-                kind: ConfigKind::Integer { min: 1, max: 255 },
-                default: ConfigValue::Integer(32),
-            }]
+            configuration: vec![
+                ConfigField {
+                    id: "intensity".into(),
+                    label: "Intensity".into(),
+                    group: "".into(),
+                    kind: ConfigKind::Integer { min: 1, max: 255 },
+                    default: ConfigValue::Integer(32),
+                },
+                ConfigField {
+                    id: "request_title".into(),
+                    label: "Request window title".into(),
+                    group: "".into(),
+                    kind: ConfigKind::Bool,
+                    default: ConfigValue::Bool(false),
+                },
+                ConfigField {
+                    id: "request_icon".into(),
+                    label: "Request window icon".into(),
+                    group: "".into(),
+                    kind: ConfigKind::Bool,
+                    default: ConfigValue::Bool(false),
+                },
+            ]
             .into(),
         })
     }
@@ -78,6 +96,12 @@ impl FamilyProvider for Provider {
         request.validate_for_descriptor(&descriptor)?;
         let config = resolve_config(&descriptor.configuration, &request.configuration)?;
         let ConfigValue::Integer(intensity) = config[0].value else {
+            return Err(error("EXTERNAL_CONFIG"));
+        };
+        let ConfigValue::Bool(title_requested) = config[1].value else {
+            return Err(error("EXTERNAL_CONFIG"));
+        };
+        let ConfigValue::Bool(icon_requested) = config[2].value else {
             return Err(error("EXTERNAL_CONFIG"));
         };
         let sink = Arc::new(
@@ -121,6 +145,8 @@ impl FamilyProvider for Provider {
             },
             session: Box::new(Session {
                 pixels,
+                title_requested,
+                icon_requested,
                 pressed: false,
                 released: false,
                 sink,
@@ -152,7 +178,20 @@ impl FamilySession for Session {
                 _ => {}
             }
         }
-        Ok(AdvanceResponse::running())
+        Ok(AdvanceResponse {
+            window_command: if self.icon_requested {
+                ROption::RSome(FamilyWindowCommand::SetIcon(FamilyWindowIcon {
+                    width: 1,
+                    height: 1,
+                    rgba: vec![255; 4].into(),
+                }))
+            } else if self.title_requested {
+                ROption::RSome(FamilyWindowCommand::SetTitle("Public fixture".into()))
+            } else {
+                ROption::RNone
+            },
+            ..AdvanceResponse::running()
+        })
     }
     fn visit_frame(&self, visitor: &mut dyn FrameVisitor) -> FamilyResult<()> {
         visitor.accept(FrameView::from_slice(&self.pixels, frame_info())?)
@@ -167,13 +206,16 @@ impl FamilySession for Session {
             .map_err(|_| error("EXTERNAL_WORKER_PANIC"))?;
         cancellation?;
         joined?;
-        if !self.pressed || !self.released || self.writes.load(Ordering::Acquire) == 0 {
+        if !self.title_requested
+            && !self.icon_requested
+            && (!self.pressed || !self.released || self.writes.load(Ordering::Acquire) == 0)
+        {
             return Err(error("EXTERNAL_INCOMPLETE_FLOW"));
         }
         tracing::info!(
             event = "external.family.closed",
             pcm_chunks = self.writes.load(Ordering::Acquire),
-            input_complete = true
+            input_complete = self.pressed && self.released
         );
         Ok(())
     }

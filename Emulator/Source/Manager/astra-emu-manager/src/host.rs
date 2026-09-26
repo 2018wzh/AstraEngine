@@ -22,6 +22,8 @@ mod game_callbacks;
 mod library_callbacks;
 #[path = "host_settings_callbacks.rs"]
 mod settings_callbacks;
+#[path = "host_window_commands.rs"]
+mod window_commands;
 #[path = "host_events.rs"]
 mod window_events;
 
@@ -69,6 +71,12 @@ pub trait AstraUnderlayRenderer: 'static {
 pub trait ManagerController: 'static {
     fn game_fullscreen(&self) -> bool {
         false
+    }
+    fn take_game_icon(&mut self) -> Option<astra_emu_family_api::FamilyWindowIcon> {
+        None
+    }
+    fn game_title(&self) -> Option<&str> {
+        None
     }
     fn set_window_state(&mut self, state: astra_emu_family_api::WindowState) -> Result<(), String>;
     fn physical_event(&mut self, event: astra_emu_family_api::FamilyEvent) -> Result<(), String>;
@@ -293,6 +301,24 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                     }
                 }
                 window.set_game_active(controller.borrow().is_game_active());
+                let title = controller
+                    .borrow()
+                    .game_title()
+                    .map(slint::SharedString::from);
+                window.set_has_game_title(title.is_some());
+                let title = title.unwrap_or_default();
+                if window.get_game_title() != title {
+                    window.set_game_title(title);
+                    controller.borrow_mut().host_work_complete();
+                }
+                let icon = controller.borrow_mut().take_game_icon();
+                if icon.is_some() || !controller.borrow().is_game_active() {
+                    if let Err(error) = window_commands::set_icon(window.window(), icon) {
+                        terminate_game(&controller, &adapter, &window, error);
+                    } else {
+                        controller.borrow_mut().host_work_complete();
+                    }
+                }
                 let fullscreen = controller.borrow().game_fullscreen();
                 if window.window().is_fullscreen() != fullscreen {
                     window.window().set_fullscreen(fullscreen);
@@ -462,6 +488,7 @@ fn terminate_game<C: ManagerController>(
     error: String,
 ) {
     let cleanup = controller.borrow_mut().leave_game();
+    let icon_cleanup = window_commands::set_icon(window.window(), None);
     window.set_game_active(false);
     window.window().set_fullscreen(false);
     let message = match cleanup {
@@ -470,6 +497,10 @@ fn terminate_game<C: ManagerController>(
             error
         }
         Err(cleanup) => format!("{error}; {cleanup}"),
+    };
+    let message = match icon_cleanup {
+        Ok(()) => message,
+        Err(cleanup) => format!("{message}; {cleanup}"),
     };
     let diagnostic_code = message
         .split(':')

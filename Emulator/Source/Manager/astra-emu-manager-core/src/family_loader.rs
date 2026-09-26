@@ -288,11 +288,14 @@ impl FamilySession for LoadedFamilySession {
             events: events.to_vec().into(),
         };
         request.validate()?;
-        self.inner
+        let response = self
+            .inner
             .module
             .advance(request)
             .into_result()
-            .map_err(host_owned_error)
+            .map_err(host_owned_error)?;
+        response.validate()?;
+        Ok(response)
     }
 
     fn visit_frame(&self, visitor: &mut dyn FrameVisitor) -> FamilyResult<()> {

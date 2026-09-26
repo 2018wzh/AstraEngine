@@ -19,7 +19,10 @@ export { GameCard, MatchReview, PlaySession, ReleaseOption }
 
 export component ManagerWindow inherits Window {
     in property <bool> demo-mode: false;
-    title: demo-mode ? "AstraEMU Manager [DEMO]" : "AstraEMU Manager";
+    in property <string> game-title;
+    in property <bool> has-game-title: false;
+    title: (game-active && has-game-title ? game-title : (demo-mode ? "AstraEMU Manager [DEMO]" : "AstraEMU Manager"))
+        + (game-active && audio-device == "null" ? " [NullAudio]" : "");
     background: Theme.background;
     min-width: 360px;
     min-height: 640px;

@@ -8,6 +8,8 @@ pub(super) struct ActiveFamilySession {
     mailbox: FrameMailbox,
     pub(super) status: FamilyStatus,
     pub(super) fullscreen: bool,
+    pub(super) title: Option<String>,
+    pub(super) pending_icon: Option<astra_emu_family_api::FamilyWindowIcon>,
     pub(super) last_tick: Instant,
     pub(super) next_deadline: Instant,
 }
@@ -57,6 +59,8 @@ impl ActiveFamilySession {
             mailbox,
             status: FamilyStatus::Running,
             fullscreen: false,
+            title: None,
+            pending_icon: None,
             last_tick: Instant::now(),
             next_deadline: Instant::now() + Duration::from_nanos(FIXED_FRAME_NS),
         };
@@ -123,11 +127,20 @@ impl ActiveFamilySession {
                 return Err(error.to_string());
             }
         };
+        response.validate().map_err(|error| error.to_string())?;
         self.status = response.status;
-        if let ROption::RSome(astra_emu_family_api::FamilyWindowCommand::SetFullscreen(value)) =
-            response.window_command
-        {
-            self.fullscreen = value;
+        if let ROption::RSome(command) = response.window_command {
+            match command {
+                astra_emu_family_api::FamilyWindowCommand::SetFullscreen(value) => {
+                    self.fullscreen = value
+                }
+                astra_emu_family_api::FamilyWindowCommand::SetIcon(icon) => {
+                    self.pending_icon = Some(icon)
+                }
+                astra_emu_family_api::FamilyWindowCommand::SetTitle(title) => {
+                    self.title = Some(title.into_string())
+                }
+            }
         }
         self.capture_frame()?;
         self.last_tick = if response.reset_clock {
@@ -157,11 +170,20 @@ impl ActiveFamilySession {
                 return Err(error.to_string());
             }
         };
+        response.validate().map_err(|error| error.to_string())?;
         self.status = response.status;
-        if let ROption::RSome(astra_emu_family_api::FamilyWindowCommand::SetFullscreen(value)) =
-            response.window_command
-        {
-            self.fullscreen = value;
+        if let ROption::RSome(command) = response.window_command {
+            match command {
+                astra_emu_family_api::FamilyWindowCommand::SetFullscreen(value) => {
+                    self.fullscreen = value
+                }
+                astra_emu_family_api::FamilyWindowCommand::SetIcon(icon) => {
+                    self.pending_icon = Some(icon)
+                }
+                astra_emu_family_api::FamilyWindowCommand::SetTitle(title) => {
+                    self.title = Some(title.into_string())
+                }
+            }
         }
         self.capture_frame()?;
         if response.reset_clock {
@@ -225,38 +247,7 @@ mod tests {
     use super::*;
     use astra_emu_family_api::*;
 
-    struct WindowSession(std::collections::VecDeque<Option<bool>>);
-    impl FamilySession for WindowSession {
-        fn advance(&mut self, _: u64, _: &[FamilyEvent]) -> FamilyResult<AdvanceResponse> {
-            Ok(AdvanceResponse {
-                window_command: self
-                    .0
-                    .pop_front()
-                    .flatten()
-                    .map(FamilyWindowCommand::SetFullscreen)
-                    .into(),
-                ..AdvanceResponse::running()
-            })
-        }
-        fn visit_frame(&self, visitor: &mut dyn FrameVisitor) -> FamilyResult<()> {
-            visitor.accept(FrameView::from_slice(
-                &[0, 0, 0, 255],
-                FrameInfo {
-                    width: 1,
-                    height: 1,
-                    stride: 4,
-                    logical_width: 1,
-                    logical_height: 1,
-                    format: FrameFormat::Rgba8Srgb {
-                        alpha: FrameAlpha::Opaque,
-                    },
-                },
-            )?)
-        }
-        fn close(self: Box<Self>) -> FamilyResult<()> {
-            Ok(())
-        }
-    }
+    mod window;
 
     struct AudioSession {
         sink: AudioSinkBox,
@@ -345,6 +336,8 @@ mod tests {
             mailbox: FrameMailbox::new(),
             status: FamilyStatus::Running,
             fullscreen: false,
+            title: None,
+            pending_icon: None,
             last_tick: Instant::now(),
             next_deadline: Instant::now(),
         }
@@ -392,6 +385,8 @@ mod tests {
                 mailbox: FrameMailbox::new(),
                 status: FamilyStatus::Running,
                 fullscreen: false,
+                title: None,
+                pending_icon: None,
                 last_tick: Instant::now(),
                 next_deadline: Instant::now(),
             };
@@ -440,6 +435,8 @@ mod tests {
                 mailbox: FrameMailbox::new(),
                 status: FamilyStatus::Running,
                 fullscreen: false,
+                title: None,
+                pending_icon: None,
                 last_tick: anchor,
                 next_deadline: anchor + Duration::from_nanos(FIXED_FRAME_NS),
             };
@@ -501,6 +498,8 @@ mod tests {
             mailbox: FrameMailbox::new(),
             status: FamilyStatus::Running,
             fullscreen: false,
+            title: None,
+            pending_icon: None,
             last_tick: Instant::now(),
             next_deadline: Instant::now(),
         };
@@ -517,39 +516,12 @@ mod tests {
     }
 
     #[test]
-    fn window_request_persists_until_explicitly_replaced() {
-        let mut active = ActiveFamilySession {
-            family_id: "test".into(),
-            session: Some(Box::new(WindowSession(
-                [Some(true), None, Some(false)].into(),
-            ))),
-            audio: None,
-            text: None,
-            mailbox: FrameMailbox::new(),
-            status: FamilyStatus::Running,
-            fullscreen: false,
-            last_tick: Instant::now(),
-            next_deadline: Instant::now(),
-        };
-        active.advance(1, &[]).unwrap();
-        assert!(active.fullscreen);
-        active.advance(1, &[]).unwrap();
-        assert!(active.fullscreen);
-        active.advance(1, &[]).unwrap();
-        assert!(!active.fullscreen);
-        active.close().unwrap();
-    }
-
-    #[test]
     fn window_close_reports_advance_before_cleanup_error() {
         struct FailingSession;
 
         impl FamilySession for FailingSession {
             fn advance(&mut self, _: u64, _: &[FamilyEvent]) -> FamilyResult<AdvanceResponse> {
-                Err(FamilyError::new(
-                    "ASTRA_TEST_ADVANCE",
-                    "advance failed",
-                ))
+                Err(FamilyError::new("ASTRA_TEST_ADVANCE", "advance failed"))
             }
 
             fn visit_frame(&self, _: &mut dyn FrameVisitor) -> FamilyResult<()> {
@@ -576,6 +548,8 @@ mod tests {
             mailbox: FrameMailbox::new(),
             status: FamilyStatus::Running,
             fullscreen: false,
+            title: None,
+            pending_icon: None,
             last_tick: Instant::now(),
             next_deadline: Instant::now(),
         });

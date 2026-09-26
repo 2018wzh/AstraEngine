@@ -29,6 +29,8 @@ pub(super) fn install<C: ManagerController, R: AstraUnderlayRenderer>(
                 }
                 apply_model(&launch_adapter, &model);
                 window.set_game_active(true);
+                window.set_has_game_title(false);
+                window.set_game_title("".into());
                 fire_host_callback(&launch_runtime_schedule);
             }
             Err(error) => {
@@ -46,6 +48,12 @@ pub(super) fn install<C: ManagerController, R: AstraUnderlayRenderer>(
             return;
         };
         let result = leave_controller.borrow_mut().leave_game();
+        let icon_result = window_commands::set_icon(window.window(), None);
+        let result = match (result, icon_result) {
+            (Ok(model), Ok(())) => Ok(model),
+            (Err(error), Ok(())) | (Ok(_), Err(error)) => Err(error),
+            (Err(error), Err(cleanup)) => Err(format!("{error}; {cleanup}")),
+        };
         window.set_game_active(false);
         window.window().set_fullscreen(false);
         match result {
