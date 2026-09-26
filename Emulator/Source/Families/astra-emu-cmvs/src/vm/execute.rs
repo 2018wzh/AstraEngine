@@ -123,8 +123,22 @@ pub(super) fn execute_command(
         | CmvsPs2aCommandEffectKind::CreateEffectChannel { .. } => {
             effect_channels::execute(state, effect_kind, &values)
         }
+        CmvsPs2aCommandEffectKind::ScanNativeSaveSlots => {
+            let [(CmvsPs2aCommandStackWordKind::OpaqueU32, value)] = values.as_slice() else {
+                return Err(invalid(
+                    "ASTRA_EMU_CMVS_SAVE_CATALOG",
+                    "invalid native slot count operand",
+                ));
+            };
+            let signed = *value as i32;
+            let count = if signed < 0 {
+                10
+            } else {
+                signed.min(256) as u16
+            };
+            Ok(Some(CmvsPs2aVmAction::ScanNativeSaveSlots { count }))
+        }
         CmvsPs2aCommandEffectKind::StorePresentationFrameFields { .. }
-        | CmvsPs2aCommandEffectKind::StoreClampedPresentationSize { .. }
         | CmvsPs2aCommandEffectKind::CommitScreenParams { .. }
         | CmvsPs2aCommandEffectKind::WaitScreenCommit { .. }
         | CmvsPs2aCommandEffectKind::QueryScreenPending { .. }

@@ -637,14 +637,8 @@ pub enum CmvsPs2aCommandEffectKind {
         second_field_offset: u16,
         active_field_offset: u16,
     },
-    /// Clamps the signed stack word into the recovered presentation size
-    /// range and stores it; the host receives a layout request referencing
-    /// the stored field.
-    StoreClampedPresentationSize {
-        field_offset: u16,
-        negative_replacement: u32,
-        maximum: u32,
-    },
+    /// Scans the native save menu's bounded slot catalog (case 691).
+    ScanNativeSaveSlots,
     /// Loads the named script into a nested frame through the host and
     /// transfers dispatch there, mirroring `sub_478080`. The frame index
     /// bound is enforced before any state changes.

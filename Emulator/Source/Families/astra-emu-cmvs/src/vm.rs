@@ -1,5 +1,7 @@
 mod dispatch;
+mod native_save;
 mod native_text;
+pub use native_save::{CmvsNativeSaveCatalog, CmvsNativeSaveSlot};
 pub(crate) use native_text::layout::append as append_native_static_text;
 mod state;
 use astra_emu_sdk::CoreError;
@@ -74,6 +76,7 @@ const MAX_FILTER_CHAIN_RECORDS_PER_BANK: usize = 4096;
 /// hash are valid.
 pub fn validate_cmvs390_vm_state(state: &CmvsPs2aVmState) -> Result<(), CoreError> {
     native_text::validate(state)?;
+    native_save::validate(state)?;
     for (bank, paths) in &state.resource_search_paths {
         for (slot, path) in paths {
             if *slot >= bank.slot_count() {
@@ -478,10 +481,9 @@ pub enum CmvsPs2aVmAction {
         target_index: u8,
         enabled: bool,
     },
-    /// The recovered case-691 path asks the host to apply the window layout
-    /// derived from the stored presentation size field.
-    ApplyPresentationLayout {
-        size_field_offset: u16,
+    /// Read the native save-slot catalog without creating or modifying saves.
+    ScanNativeSaveSlots {
+        count: u16,
     },
     /// The recovered case-692 path asks the host to toggle the presentation
     /// mode using the two named interpreter fields.

@@ -27,29 +27,6 @@ pub(super) fn execute(
             Ok(None)
         }
         (
-            CmvsPs2aCommandEffectKind::StoreClampedPresentationSize {
-                field_offset,
-                negative_replacement,
-                maximum,
-            },
-            [(CmvsPs2aCommandStackWordKind::OpaqueU32, value)],
-        ) => {
-            let signed = i32::from_ne_bytes(value.to_ne_bytes());
-            let clamped = if signed < 0 {
-                negative_replacement
-            } else if u32::try_from(signed).unwrap_or(maximum) > maximum {
-                maximum
-            } else {
-                u32::try_from(signed).unwrap_or(maximum)
-            };
-            state
-                .interpreter_words
-                .insert(u32::from(field_offset), clamped);
-            Ok(Some(CmvsPs2aVmAction::ApplyPresentationLayout {
-                size_field_offset: field_offset,
-            }))
-        }
-        (
             CmvsPs2aCommandEffectKind::CommitScreenParams { error_mask: _ },
             [(CmvsPs2aCommandStackWordKind::BooleanU32, commit)],
         ) => {

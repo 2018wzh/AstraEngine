@@ -2451,23 +2451,16 @@ fn command_688_stores_the_frame_pair_and_active_flag() {
 }
 
 #[test]
-fn command_691_clamps_the_presentation_size_and_requests_layout() {
-    let mut state = CmvsPs2aVmState::new(0);
-    push(&mut state, u32::MAX); // -1 signed
-    let action = run_command_with_action(&mut state, 691);
-    assert_eq!(
-        action,
-        Some(CmvsPs2aVmAction::ApplyPresentationLayout {
-            size_field_offset: 10452
-        })
-    );
-    assert_eq!(state.interpreter_words.get(&10452), Some(&10));
-    push(&mut state, 400);
-    run_command(&mut state, 691);
-    assert_eq!(state.interpreter_words.get(&10452), Some(&256));
-    push(&mut state, 128);
-    run_command(&mut state, 691);
-    assert_eq!(state.interpreter_words.get(&10452), Some(&128));
+fn command_691_requests_native_slot_scan_without_partial_catalog_updates() {
+    for (input, count) in [(u32::MAX, 10), (400, 256), (128, 128), (0, 0)] {
+        let mut state = CmvsPs2aVmState::new(0);
+        push(&mut state, input);
+        assert_eq!(
+            run_command_with_action(&mut state, 691),
+            Some(CmvsPs2aVmAction::ScanNativeSaveSlots { count })
+        );
+        assert!(state.native_save_catalog.is_none());
+    }
 }
 
 #[test]

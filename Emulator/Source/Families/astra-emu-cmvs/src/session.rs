@@ -92,6 +92,11 @@ impl CmvsSession {
     }
     fn action(&mut self, action: CmvsPs2aVmAction) -> FamilyResult<()> {
         match action {
+            CmvsPs2aVmAction::ScanNativeSaveSlots { count } => self
+                .archive
+                .refresh_native_save_catalog(&mut self.vm, count)
+                .map_err(core),
+
             CmvsPs2aVmAction::NativeText(action) => {
                 match action {
                     CmvsNativeTextAction::Create { slot }

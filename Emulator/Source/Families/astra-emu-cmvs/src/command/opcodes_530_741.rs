@@ -340,16 +340,11 @@ pub(super) fn lookup(command_id: u16) -> Option<CommandFields> {
             },
             &SLOT_PAIR_WORDS as &[CmvsPs2aCommandStackWord],
         ),
-        // Handler `sub_485D40` clamps the signed top word (negative to ten,
-        // above 256 to 256), stores it at byte offset 10452, and feeds the
-        // recovered window-layout helpers. Returns 0x4004.
+        // Native save-menu slot count: negative becomes 10, above 256 is 256.
+        // Scans saveNNN.dat headers and selects the newest populated slot.
         691 => (
             4,
-            CmvsPs2aCommandEffectKind::StoreClampedPresentationSize {
-                field_offset: 10452,
-                negative_replacement: 10,
-                maximum: 256,
-            },
+            CmvsPs2aCommandEffectKind::ScanNativeSaveSlots,
             &OPAQUE_WORD as &[CmvsPs2aCommandStackWord],
         ),
         // Handler `sub_485DD0` passes `top != 0` with the interpreter

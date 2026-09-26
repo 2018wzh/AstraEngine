@@ -66,6 +66,7 @@ pub struct CmvsPs2aVmState {
     /// outlive destruction of their corresponding text object.
     pub native_text: BTreeMap<u8, CmvsNativeTextSurface>,
     pub native_text_fonts: BTreeMap<u8, String>,
+    pub native_save_catalog: Option<CmvsNativeSaveCatalog>,
     /// Recovered effect channel child elements, keyed by `(channel, child)`.
     /// Cases 378/379/380/382/383 address one element through `sub_466AE0`.
     pub effect_elements: BTreeMap<(u8, u32), CmvsEffectElement>,
@@ -240,6 +241,7 @@ impl CmvsPs2aVmState {
             effect_playback: BTreeMap::new(),
             native_text: BTreeMap::new(),
             native_text_fonts: BTreeMap::new(),
+            native_save_catalog: None,
             effect_elements: BTreeMap::new(),
             screen_pending: false,
             screen_words: BTreeMap::new(),
