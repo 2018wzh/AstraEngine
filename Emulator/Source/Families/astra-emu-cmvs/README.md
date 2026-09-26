@@ -67,3 +67,5 @@ INI 使用精确锁定的 `configparser 3.3.0`（MIT 许可选项），在核心
 CMVS 普通挂载现在只读取 CPZ header/index，校验索引身份、角色唯一性、相对路径、资源范围及源大小/修改时间。它不再为了未使用的 manifest 在首 tick 前遍历全部归档和 loose payload。只读私有启动的分段计时确认索引读取约 0.01 秒，而单个归档的全量 hash 耗时 7–34 秒，120 秒时限内尚未进入首 tick；这次失败不是字体显示验证。
 
 `CmvsArchive::manifest()` 改为返回 `Result<ArchiveManifest, CoreError>`，请求时才计算真实内容身份；持久 plaintext cache 仅在实际读取需要缓存的条目时计算其来源身份。默认播放没有持久 cache，脚本 URI 校验直接使用 mount prefix。首次 hash 建立内容基线，后续 `validate_sources()` 重新读取并比较；源大小或修改时间变化仍在每次资源读取前后拒绝。不能把延迟内容身份理解为挂载时已验证全部 payload，未知资源损坏仍在使用时明确失败。SDK manifest 类型及其他 Family 保持不变。
+
+懒内容身份改动后的同一私有游戏 Family 启动已实际运行：12 个 CPZ 的索引在启动后 0.14–0.30 秒完成，1.85 秒创建 DX12 独显设备，1.89 秒打开 session；首次 `advance` 在 1.90 秒因 command 691 返回 `ASTRA_EMU_CMVS_ACTION_UNBOUND`，2.02 秒关闭 session 并释放进程。挂载阻断已跨过，但首 tick 尚未完成，也没有执行到可确认的 267、捕获帧或文字显示；本次未提供音频 sink，不能作为声音测试。
