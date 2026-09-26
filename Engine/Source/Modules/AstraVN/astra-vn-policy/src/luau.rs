@@ -9,6 +9,9 @@ use crate::{
     PolicySnapshotValue, PolicyTraceEvent, VnError, VnPolicyState,
 };
 
+// Luau numbers are IEEE-754 doubles; reject the first ambiguous adjacent integer.
+pub(crate) const LUAU_MAX_EXACT_INTEGER: u64 = (1_u64 << 53) - 1;
+
 #[derive(Default)]
 pub struct LuauPolicy;
 
@@ -555,8 +558,7 @@ fn policy_snapshot_from_lua(
         mlua::Value::Number(value)
             if value.is_finite()
                 && value.fract() == 0.0
-                && value >= i64::MIN as f64
-                && value <= i64::MAX as f64 =>
+                && value.abs() <= LUAU_MAX_EXACT_INTEGER as f64 =>
         {
             Ok(PolicySnapshotValue::Integer(value as i64))
         }
@@ -593,9 +595,15 @@ fn policy_snapshot_to_lua(lua: &Lua, value: &PolicySnapshotValue) -> mlua::Resul
         PolicySnapshotValue::Nil => Ok(mlua::Value::Nil),
         PolicySnapshotValue::Bool(value) => Ok(mlua::Value::Boolean(*value)),
         PolicySnapshotValue::Integer(value) => {
-            let value = i32::try_from(*value)
-                .map_err(|_| snapshot_error("integer snapshot is outside Luau integer range"))?;
-            Ok(mlua::Value::Integer(value))
+            if value.unsigned_abs() > LUAU_MAX_EXACT_INTEGER {
+                return Err(snapshot_error(
+                    "integer snapshot is outside Luau exact integer range",
+                ));
+            }
+            Ok(match i32::try_from(*value) {
+                Ok(value) => mlua::Value::Integer(value),
+                Err(_) => mlua::Value::Number(*value as f64),
+            })
         }
         PolicySnapshotValue::String(value) => Ok(mlua::Value::String(lua.create_string(value)?)),
         PolicySnapshotValue::Object(values) => {

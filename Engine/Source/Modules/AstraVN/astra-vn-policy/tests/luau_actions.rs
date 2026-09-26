@@ -195,3 +195,86 @@ end)
     )
     .is_err());
 }
+
+#[test]
+fn action_integer_snapshot_roundtrips_after_ready_and_interrupted() {
+    let source = r#"
+astra.command.register("integer", {schema="demo.integer.v1", fields={value={kind="integer",required=true}}}, function(args)
+    local _, status = astra.host.read_text("note", "asset:/text/note")
+    if status == "pending" then
+        astra.snapshot.set("value", args.value)
+        return astra.action.await("note")
+    end
+    assert(astra.snapshot.get("value") == args.value)
+    return astra.action.complete()
+end)
+"#;
+    let binding = binding(source);
+    for value in [1_i64 << 40, (1_i64 << 53) - 1, -((1_i64 << 53) - 1)] {
+        for result in [
+            PolicyIoStatus::Ready("hello".into()),
+            PolicyIoStatus::Failed(PolicyIoFailure::Interrupted),
+        ] {
+            let mut continuation = continuation(&binding, 1);
+            continuation.command.fields =
+                BTreeMap::from([("value".into(), ExtensionValue::Integer(value))]);
+            let mut state = VnPolicyState::default();
+            let mut io = PolicyIoState::default();
+            assert!(matches!(
+                invoke(&binding, &mut continuation, &mut state, &mut io).unwrap(),
+                PolicyActionOutcome::Await { .. }
+            ));
+            let bytes = postcard::to_allocvec(&continuation).unwrap();
+            let mut continuation = postcard::from_bytes(&bytes).unwrap();
+            io.requests.get_mut("a1.note").unwrap().status = result;
+            assert_eq!(
+                invoke(&binding, &mut continuation, &mut state, &mut io).unwrap(),
+                PolicyActionOutcome::Complete
+            );
+        }
+    }
+    for value in [1_i64 << 53, -(1_i64 << 53), i64::MIN, i64::MAX] {
+        let mut continuation = continuation(&binding, 1);
+        continuation.command.fields =
+            BTreeMap::from([("value".into(), ExtensionValue::Integer(value))]);
+        assert!(invoke(
+            &binding,
+            &mut continuation,
+            &mut VnPolicyState::default(),
+            &mut PolicyIoState::default()
+        )
+        .is_err());
+    }
+}
+
+#[test]
+fn snapshot_rejects_ambiguous_numbers_and_out_of_range_saved_integers() {
+    let mut policy = LuauPolicy::new().unwrap();
+    for number in [
+        "9007199254740992",
+        "-9007199254740992",
+        "9007199254740993",
+        "9223372036854775807",
+    ] {
+        let mut state = VnPolicyState::default();
+        assert!(policy
+            .eval_bool(
+                &format!("astra.snapshot.set('value', {number}); return true"),
+                &mut state
+            )
+            .is_err());
+        assert!(state.snapshots.is_empty());
+    }
+    for integer in [1_i64 << 53, -(1_i64 << 53), i64::MIN, i64::MAX] {
+        let mut state = VnPolicyState::default();
+        state
+            .snapshots
+            .insert("value".into(), PolicySnapshotValue::Integer(integer));
+        assert!(policy
+            .eval_bool(
+                "local value = astra.snapshot.get('value'); return true",
+                &mut state
+            )
+            .is_err());
+    }
+}

@@ -152,7 +152,7 @@ impl LuauPolicy {
                         | ExtensionValue::Symbol(s)
                         | ExtensionValue::AssetUri(s) => mlua::Value::String(lua.create_string(s)?),
                         ExtensionValue::Integer(i) => {
-                            if i.unsigned_abs() > (1_u64 << 53) {
+                            if i.unsigned_abs() > super::luau::LUAU_MAX_EXACT_INTEGER {
                                 return Err(mlua::Error::runtime(
                                     "ASTRA_VN_POLICY_ACTION_INTEGER_RANGE",
                                 ));
