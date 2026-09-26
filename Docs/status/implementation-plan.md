@@ -1,5 +1,12 @@
 # 全产品重构实施状态
 
+## 2026-09-26 NativeVN 正文揭示与恢复演出
+
+硬件离屏检查发现样例的权威文字揭示状态尚未完成时，UI 已显示全文。根因是 classic/modern message body 没有绑定已有 `visible_graphemes`，现补作者属性；终之空转换模板的两个 monologue body 同步修复，未修改通用 renderer 或自定义 message 默认行为。模板复制与 NativeVN 内容相关的 8 项 Python 测试通过。
+
+同一合法 advanced-vn 源码重 Cook/package 后，以 DX12 discrete GPU 执行物理输入：同进程 72 条、12 个 checkpoint，冷进程 26 条、3 个 checkpoint，均正常关闭。实际查看关键帧确认部分正文到全文、分层位移与替换/取消、恢复后 120 个逻辑 tick 人物透明度继续；冷恢复使用新包本轮新建私有槽，读取后槽字节不变。fmt 与文档检查通过。本批没有桌面 GUI、可听声音、影片全流程或终之空 Modern 实玩验收，也未重复无关 Rust 全量测试。
+
+
 ## 2026-09-26 Packaged Luau 与 Web 消费链整合
 
 已按依赖合入 Luau 注册动作、精确整数、复制前预算、Packaged Player 授权文本等待与 Web bundle 拒绝边界，并接入 CMVS 353 原生标题与 VM 错误定位。当前源码基线 `ce25a26e2` 的 root workspace 测试 850 项通过、19 项按原条件跳过；root all-target Clippy、同树 Headless 构建及独立 `web-code-check` Clippy 通过。首轮默认并行编译因 Windows 提交内存不足失败，改用同一 target/profile 的 `-j 1` 后完整测试通过，未修改宿主配置或跳过测试。

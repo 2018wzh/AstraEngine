@@ -54,10 +54,13 @@ def build_sequence(*, save_restore: bool = False, media: bool = False,
         key("Enter")
         await_value("vn.system_page", None)
         await_value("vn.pending_wait_command", "experience.save.before")
-        add({"type": "checkpoint", "id": "experience.cold.restored"})
+        add({"type": "checkpoint", "id": "experience.cold.restored"}, 120)
+        add({"type": "checkpoint", "id": "experience.cold.continued"})
         add({"type": "shutdown"})
         return rows
     await_value("vn.pending_wait_command", "experience.read.first")
+    await_value("vn.text_reveal_complete", False)
+    add({"type": "checkpoint", "id": "experience.reading.revealing"})
     await_value("vn.text_reveal_complete", True)
     add({"type": "checkpoint", "id": "experience.reading"})
     key("Enter")
@@ -105,7 +108,8 @@ def build_sequence(*, save_restore: bool = False, media: bool = False,
         key("Enter")
         await_value("vn.system_page", None)
         await_value("vn.pending_wait_command", "experience.save.before")
-        add({"type": "checkpoint", "id": "experience.restored"})
+        add({"type": "checkpoint", "id": "experience.restored"}, 120)
+        add({"type": "checkpoint", "id": "experience.restored.continued"})
     if media:
         dialogue("experience.save.before")
         dialogue("experience.save.after")
@@ -136,7 +140,7 @@ def main():
     rows = build_sequence(save_restore=args.save_restore, media=args.media,
                           cold_restore=args.cold_restore)
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    # Existing sequences may be evidence from another build; do not overwrite them.
+    # Preserve input files from previous runs; callers choose a fresh private output.
     with args.output.open("x", encoding="utf-8") as stream:
         for row in rows:
             stream.write(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n")

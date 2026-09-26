@@ -25,7 +25,7 @@ ui_view ui.tsui.modern.monologue model:astra.vn.ui_model.message.v2 theme:tsui.t
   screen id:root
     panel id:advance fill:true
       on activate -> vn.advance
-    text id:body value:$model.text_key position_x:23 position_y:42 min_width:754 min_height:424 font_size:22 max_lines:20 text_align:center vertical_align:center text_color:theme:text.monologue
+    text id:body value:$model.text_key visible_graphemes:$model.visible_graphemes position_x:23 position_y:42 min_width:754 min_height:424 font_size:22 max_lines:20 text_align:center vertical_align:center text_color:theme:text.monologue
 
 ui_view ui.tsui.modern.choice model:astra.vn.ui_model.choice.v1 theme:tsui.theme.modern #@id ui.tsui.modern.choice
   screen id:root

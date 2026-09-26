@@ -3,6 +3,8 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
+import json
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -31,6 +33,32 @@ class TsuiNoSoraFontManifestTests(unittest.TestCase):
             / "Fonts"
             / "NotoSansJP-Variable.ttf"
         )
+
+    def test_copied_message_and_monologue_templates_bind_reveal_progress(self):
+        from tsuinosora_nativevn_font import _copy_tsuinosora_ui_template
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "nativevn"
+            (output / "Localization").mkdir(parents=True)
+            (output / "Localization/ja.json").write_text(
+                json.dumps({"schema": "astra.vn.localization_table.v1", "locale": "ja", "strings": {}}),
+                encoding="utf-8",
+            )
+            with mock.patch("tsuinosora_nativevn_font._copy_tsuinosora_ui_font"):
+                _copy_tsuinosora_ui_template(root, output)
+            for profile in ("classic", "modern"):
+                source = (output / f"UI/{profile}.astra").read_text(encoding="utf-8")
+                bodies = []
+                selected = False
+                for line in source.splitlines():
+                    if line.startswith("ui_view "):
+                        view = line.split()[1]
+                        selected = view.endswith((".message", ".monologue"))
+                    if selected and "text id:body value:$model.text_key" in line:
+                        bodies.append(line)
+                self.assertEqual(len(bodies), 2)
+                for body in bodies:
+                    self.assertIn("visible_graphemes:$model.visible_graphemes", body)
 
     def test_cmap_coverage_reports_only_real_glyphs(self):
         requested = {ord("A"), ord("◆"), ord("僕"), ord("汉"), 0x10FFFF}

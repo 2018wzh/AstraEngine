@@ -74,6 +74,13 @@ class ProjectRefreshTests(unittest.TestCase):
             missing = windows - surfaces.get(None, set()) - surfaces.get(profile, set())
             self.assertFalse(missing, f"{profile}: unbound dialogue windows {sorted(missing)}")
 
+    def test_message_views_bind_authoritative_reveal_progress(self):
+        source = (project.PACK / "UI/flagship.astra").read_text(encoding="utf-8")
+        bodies = [line for line in source.splitlines() if "text id:body value:$model.text_key" in line]
+        self.assertEqual(len(bodies), 2)
+        for body in bodies:
+            self.assertIn("visible_graphemes:$model.visible_graphemes", body)
+
     def test_refresh_preserves_authored_astra_and_controller_bytes(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
