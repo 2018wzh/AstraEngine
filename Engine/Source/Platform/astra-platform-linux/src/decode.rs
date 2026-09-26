@@ -153,18 +153,14 @@ fn decode_audio(bytes: &[u8], cancelled: &dyn Fn() -> bool) -> Result<DecodeOutp
         let map = buffer
             .map_readable()
             .map_err(|_| invalid("audio sample is not CPU-readable"))?;
-        let chunks = map.as_slice().chunks_exact(4);
-        if !chunks.remainder().is_empty()
-            || (samples.len() + chunks.len()) > pipeline::MAX_FRAME_BYTES / 4
-        {
+        let (chunks, remainder) = map.as_slice().as_chunks::<4>();
+        if !remainder.is_empty() || (samples.len() + chunks.len()) > pipeline::MAX_FRAME_BYTES / 4 {
             return Err(host_error(
                 "decode.submit",
                 "audio output is unaligned or exceeds the Linux decode budget",
             ));
         }
-        samples.extend(
-            chunks.map(|sample| f32::from_le_bytes([sample[0], sample[1], sample[2], sample[3]])),
-        );
+        samples.extend(chunks.iter().copied().map(f32::from_le_bytes));
     }
     if samples.is_empty() {
         return Err(host_error(

@@ -1,5 +1,13 @@
 # 全产品重构实施状态
 
+## 2026-09-26 最终集成检查
+
+静态 Engine/VN、源码 Timeline 缓动、原生 policy IO、CMVS 字体/按需内容身份以及 Linux WAV/完整视频流已汇入同一分支。Windows 上三个活动 workspace 的完整检查通过：根测试 829 项通过、19 项跳过；Emulator 586 项通过、34 项跳过；Editor 18 项通过、3 项跳过。文档、格式、all-target Clippy 和产品构建通过，根构建包含 Headless；NativeVN Python 26 项与 TsuiNoSora 分析回归 165 项通过。Linux decoder 拆分后保留原有固定长度 PCM 切片修复，未改变音频格式或 provider 选择。
+
+随后补入两项局部修复：Editor 对合法扩展命令的 warning 分类保持一致，使第二次缓动/关键帧编辑与撤销可用；CMVS command 691 恢复原生只读存档目录语义。前者不改变 schema，后者只调整 CMVS 私有 VM 状态。修复后 VN Editor 7 项、CMVS 200 项普通测试通过，CMVS 1 项按原条件跳过；两 crate 的 all-target Clippy 通过。Editor 再次完整检查通过，18 项通过、3 项跳过。共享包与存档格式仍以本页 Timeline 小节为准，旧槽不得覆盖。
+
+CMVS 独立私有副本实际启动已在约 0.27 秒完成索引、1.07 秒打开 DX12 session，越过 691 后，首次 advance 在 command 692 返回 `ACTION_UNBOUND`，1.17 秒正常关闭。尚未完成首 tick、正文、PCM 或可玩输入。Windows Sandbox 仍受 `0x80370106` 阻断，未进行本基线 Player 真实交互和保存恢复；Editor GUI 与 Android 真机保持暂停。原生 policy IO 当前仅接 embedding session，Packaged Player 尚无资源授权 adapter，Web 明确拒绝。Linux 回传的局部结果不替代本次最终基线的 Linux 检查，远端 CI 与实际声音也未计通过。
+
 ## 2026-09-26 Linux 完整视频流
 
 Linux 解码已从窗口事件线程移到 session-owned worker，视频接入既有 Start/Next，而非返回首帧后关闭。保留有界 GStreamer 管线，输出真实 PTS、可变帧时长、BGRA 帧和结束计数；取消、错误和关闭释放管线/输入，显式关闭等待 worker。此批依赖前一 WAV 修复，只改 Linux 媒体实现、必要依赖和测试，NativeVN WIP 保持原样。
