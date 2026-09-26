@@ -25,7 +25,7 @@ targets:
 
 每个 YAML schema 必须有 Rust 类型、schema version、migrator 和验证命令。
 
-当前 target 使用 `astra.target_manifest.v3`，删除 gameplay/UI provider 字段；NativeVN 使用 `vn.compiled_project` root v3、compiled project v4 与 blueprint v2。包保留 story、typed UI blueprint/binding/source map/controller/theme 和静态 Yakui backend manifest；动态组件 trust/artifact section 已删除。旧 target/policy schema 与旧 compiled root 直接拒绝，需重新 Cook。
+当前 target 使用 `astra.target_manifest.v3`，删除 gameplay/UI provider 字段；NativeVN 使用 `vn.compiled_project` root v4、compiled project v5 与 blueprint v2。包保留 story、typed UI blueprint/binding/source map/controller/theme 和静态 Yakui backend manifest；动态组件 trust/artifact section 已删除。旧 target/policy schema 与旧 compiled root 直接拒绝，需重新 Cook。
 
 `astra.asset.v1` 的 Rust 真源是 `AssetSidecar`。除 source/type/license/importer/cook/review 外，它包含默认空的 typed `dependencies: Vec<AssetId>`；font asset 还必须提供 `FontAssetMetadata` 的 family、face index、可选 subset 与有序不重叠 Unicode scalar coverage，缺 metadata、空 family、非法 range 或把 font metadata挂到非字体资产都会 blocking。self、duplicate、missing dependency 和 cycle 分别在 sidecar 或 batch graph 边界阻断。Cook 输出 `astra.cook_manifest.v2`，其中 `asset_cook` 使用 `astra.cook_batch_summary.v1`，只记录 content-bound graph hash、artifact/cache-hit/cooked count 和显式 concurrency limit。NativeVN Cook 从 typed font metadata自动生成 profile-bound `astra.font_manifest.v1`，从适用的 localization section 和 `nativevn.default_locale` 生成 `astra.player_locale_config.v1`；不允许项目手写同名 font manifest覆盖权威结果。Package 把同一摘要写入 required `cook.summary` section；`PackageReader` 要求摘要计数与 `astra.cooked_asset.v1` section 数量一致。旧 cook manifest、缺 summary、计数不闭合或 graph identity无法解析时必须重新 cook，不执行隐式迁移或 fallback。
 

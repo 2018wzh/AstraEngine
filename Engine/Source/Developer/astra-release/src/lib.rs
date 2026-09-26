@@ -2997,7 +2997,7 @@ fn vn_compiled_project_check(package: &PackageReader, profile: &str) -> ReleaseC
             };
         }
     };
-    if compiled.schema != "astra.vn.compiled_project.v4"
+    if compiled.schema != "astra.vn.compiled_project.v5"
         || compiled.story.stories.is_empty()
         || compiled.story.states.is_empty()
     {

@@ -56,8 +56,8 @@ pub fn package_sections_for_project(
         profiles: profiles.to_vec(),
     };
     let root = VnCompiledProjectRoot {
-        schema: "astra.vn.compiled_project_root.v3".to_string(),
-        compiled_project_schema: "astra.vn.compiled_project.v4".to_string(),
+        schema: "astra.vn.compiled_project_root.v4".to_string(),
+        compiled_project_schema: "astra.vn.compiled_project.v5".to_string(),
         project_hash: project.project_hash,
         story_hash: project.story.story_hash,
         ui_blueprint_hash: project.ui_blueprints.hash,
@@ -67,7 +67,7 @@ pub fn package_sections_for_project(
     let mut sections = vec![
         SectionPayload::postcard(
             "vn.compiled_project",
-            "astra.vn.compiled_project_root.v3",
+            "astra.vn.compiled_project_root.v4",
             &root,
         )?,
         SectionPayload::postcard("vn.story", "astra.vn.story", &project.story)?,
@@ -215,8 +215,8 @@ pub fn decode_compiled_project(
     package: &PackageReader,
 ) -> Result<CompiledVnProject, ContainerError> {
     let root: VnCompiledProjectRoot = package.container().decode_postcard("vn.compiled_project")?;
-    if root.schema != "astra.vn.compiled_project_root.v3"
-        || root.compiled_project_schema != "astra.vn.compiled_project.v4"
+    if root.schema != "astra.vn.compiled_project_root.v4"
+        || root.compiled_project_schema != "astra.vn.compiled_project.v5"
         || root.ui_provider != "astra.ui.yakui"
     {
         return Err(ContainerError::message(
@@ -273,7 +273,7 @@ pub fn decode_compiled_project(
         ));
     }
     Ok(CompiledVnProject {
-        schema: "astra.vn.compiled_project.v4".to_string(),
+        schema: "astra.vn.compiled_project.v5".to_string(),
         project_hash: root.project_hash,
         story,
         ui_blueprints,

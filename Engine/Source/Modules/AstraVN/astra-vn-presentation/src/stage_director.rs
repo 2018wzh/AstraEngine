@@ -14,7 +14,7 @@ use crate::{
     VnTextRevealState, VnTimelineJoinPolicy,
 };
 
-pub const PRODUCT_STAGE_STATE_SCHEMA: &str = "astra.vn.product_stage_state.v10";
+pub const PRODUCT_STAGE_STATE_SCHEMA: &str = "astra.vn.product_stage_state.v11";
 const MAX_FRAME_DELTA_NS: u64 = 1_000_000_000;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -1906,19 +1906,14 @@ fn sample_track(track: &crate::VnTimelineTrack, elapsed_ms: u32) -> Result<Fixed
             unreachable!("windows(2) always yields pairs")
         };
         if elapsed_ms <= right.time_ms {
-            let numerator = u64::from(elapsed_ms - left.time_ms) * 1_000_000;
-            let denominator = u64::from(right.time_ms - left.time_ms);
             return fixed_lerp(
                 left.value,
                 right.value,
-                FixedScalar {
-                    millionths: i64::try_from(numerator / denominator).map_err(|_| {
-                        stage_error(
-                            "ASTRA_VN_STAGE_TIMELINE_RANGE",
-                            "timeline interpolation range overflowed",
-                        )
-                    })?,
-                },
+                eased_progress(
+                    u64::from(elapsed_ms - left.time_ms),
+                    u64::from(right.time_ms - left.time_ms),
+                    track.easing,
+                )?,
             );
         }
     }

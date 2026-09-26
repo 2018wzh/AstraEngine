@@ -54,7 +54,7 @@ impl EditorMcp {
         }
         match self.bridge.read().await {
             Ok(document) if self.active() => {
-                serde_json::json!({"document":document,"generation":self.bridge.generation()})
+                serde_json::json!({"timeline": astra_vn_editor::timeline::tracks(&document).map_err(|error| error.to_string()), "document":document,"generation":self.bridge.generation()})
                     .to_string()
             }
             Ok(_) => serde_json::json!({"error":"Agent turn cancelled"}).to_string(),
@@ -109,4 +109,23 @@ pub async fn serve(bridge: EditorBridge) -> anyhow::Result<()> {
         .waiting()
         .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[tokio::test]
+    async fn read_exposes_the_same_source_timeline_as_desktop() {
+        let (bridge, mut requests) = EditorBridge::new();
+        let server = EditorMcp::new(bridge);
+        let reader = tokio::spawn(async move { server.read_document().await });
+        let crate::bridge::Request::Read { reply } = requests.recv().await.unwrap() else {
+            panic!("expected read")
+        };
+        reply.send(Ok(astra_vn_editor::DocumentSnapshot{path:"main.astra".into(),version:7,text:"timeline id:pan target:hero property:x keyframes:0=0,1000=1 easing:ease_out budget_ms:1 #@id pan\n".into()})).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&reader.await.unwrap()).unwrap();
+        assert_eq!(value["document"]["version"], 7);
+        assert_eq!(value["timeline"]["Ok"][0]["easing"], "ease_out");
+        assert_eq!(value["timeline"]["Ok"][0]["source_id"], "pan");
+    }
 }

@@ -189,12 +189,13 @@ mod tests {
     }
 
     #[test]
-    fn v9_runtime_container_roundtrips_and_rejects_v8_corruption_and_foreign_identity() {
+    fn v10_runtime_container_roundtrips_and_rejects_v9_corruption_and_foreign_identity() {
         let mut source = source();
         let bytes = source.save("slot.01").unwrap();
         let envelope = decode_save_envelope(&bytes).unwrap();
-        assert_eq!(envelope.schema, "astra.player.native_vn_save.v9");
+        assert_eq!(envelope.schema, "astra.player.native_vn_save.v10");
         for schema in [
+            "astra.player.native_vn_save.v9",
             "astra.player.native_vn_save.v7",
             "astra.player.native_vn_save.v8",
         ] {

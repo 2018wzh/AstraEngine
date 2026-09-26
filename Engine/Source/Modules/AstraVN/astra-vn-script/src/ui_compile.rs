@@ -221,7 +221,7 @@ pub(crate) fn compile_project_ui(
         &system_ui_profiles,
     )?;
     Ok(CompiledVnProject {
-        schema: "astra.vn.compiled_project.v4".to_string(),
+        schema: "astra.vn.compiled_project.v5".to_string(),
         project_hash,
         story,
         ui_blueprints,

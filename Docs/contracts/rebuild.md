@@ -202,6 +202,6 @@ Native `VnSession` 通过 `bind_policy_io` 授予具名逻辑资源及读取限�
 
 Timeline 是同一源 AST 的临时投影。共享 `astra-vn-editor` 提供投影和版本绑定的编辑 batch；桌面与外部工具使用同一事务，不保存第二份时间线。修改仅替换属性 span，插入可选 easing 时插在命令关键字后，保留注释、source ID 与其余文本；一次提交对应一次撤销。Story、Scene、角色和 UI 继续使用现有 AST/IR，不新增未被运行层消费的 Sequence 模型。
 
-compiled project 升至 v5、package root 升至 v4；包含轨道的 Runtime/Player 存档同时换版本。旧格式在解码前明确拒绝，作品重新 Cook，不做迁移或兼容别名。局部检查覆盖曲线端点/中点、编译诊断、暂停恢复、取消、文本与 Timeline 往返及版本冲突；桌面实际操作保持暂停。
+compiled project 升至 v5、package root 升至 v4；包含轨道的 Stage/Player 存档同时换版本；VN 业务 RuntimeState 不含轨道，保持 v4。旧格式在解码前明确拒绝，作品重新 Cook，不做迁移或兼容别名。局部检查覆盖曲线端点/中点、编译诊断、暂停恢复、取消、文本与 Timeline 往返及版本冲突；桌面实际操作保持暂停。
 
 模式参考：[rust-analyzer 的无损语法树与类型 AST 分层](https://rust-analyzer.github.io/book/contributing/architecture.html)；缓动使用已有实现，概念上的段进度映射参考 [CSS Easing](https://www.w3.org/TR/css-easing-1/)，不宣称 CSS 数值兼容。

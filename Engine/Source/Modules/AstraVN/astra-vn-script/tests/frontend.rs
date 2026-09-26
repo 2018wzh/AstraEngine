@@ -386,7 +386,7 @@ fn unknown_command_is_editable_but_requires_explicit_compile_binding() {
         }),
     )
     .unwrap();
-    assert_eq!(compiled.schema, "astra.vn.compiled_project.v4");
+    assert_eq!(compiled.schema, "astra.vn.compiled_project.v5");
 }
 
 #[test]
@@ -403,7 +403,7 @@ fn standard_audio_control_is_bound_without_an_extension_bypass() {
         Default::default(),
     )
     .unwrap();
-    assert_eq!(compiled.schema, "astra.vn.compiled_project.v4");
+    assert_eq!(compiled.schema, "astra.vn.compiled_project.v5");
 }
 
 #[test]

@@ -1,5 +1,5 @@
 use super::*;
-use astra_editor::timeline::{self, Keyframe, KeyframeEdit};
+use astra_vn_editor::timeline::{self, Keyframe, KeyframeEdit};
 
 #[derive(Clone)]
 struct KeyframeDrag {
@@ -132,7 +132,7 @@ impl Editor {
 
     fn drop_keyframe(&mut self, drag: &KeyframeDrag, window: &mut Window, cx: &mut Context<Self>) {
         let delta = f32::from(window.mouse_position().x) - drag.start_x.get();
-        let time_ms = timeline::drag_time(drag.frame.time_ms, delta, drag.duration);
+        let time_ms = astra_editor::timeline::drag_time(drag.frame.time_ms, delta, drag.duration);
         if time_ms == drag.frame.time_ms {
             return;
         }
@@ -187,7 +187,7 @@ impl Editor {
             .flex_col()
             .gap_3()
             .p_3()
-            .child("Timeline · drag keys to retime; select to edit · linear interpolation")
+            .child("Timeline · drag keys to retime; select to edit")
             .child(format!(
                 "0 ms ────────────────────────────────────── {duration} ms"
             ));
@@ -264,15 +264,69 @@ impl Editor {
                         ),
                 );
             }
+            let easing_path = document.path.clone();
+            let easing_id = track.source_id.clone();
+            let session = self.project.session_id();
+            let next_easing = match track.easing {
+                astra_vn_editor::VnPresentationEasing::Linear => {
+                    astra_vn_editor::VnPresentationEasing::EaseIn
+                }
+                astra_vn_editor::VnPresentationEasing::EaseIn => {
+                    astra_vn_editor::VnPresentationEasing::EaseOut
+                }
+                astra_vn_editor::VnPresentationEasing::EaseOut => {
+                    astra_vn_editor::VnPresentationEasing::EaseInOut
+                }
+                astra_vn_editor::VnPresentationEasing::EaseInOut => {
+                    astra_vn_editor::VnPresentationEasing::Linear
+                }
+            };
             panel = panel.child(
                 div()
                     .flex()
                     .flex_col()
                     .gap_1()
                     .child(format!(
-                        "{} · {} · {}",
-                        track.target, track.property, track.source_id
+                        "{} · {} · {} · {}",
+                        track.target,
+                        track.property,
+                        track.source_id,
+                        track.easing.as_str()
                     ))
+                    .child(
+                        Button::new(SharedString::from(format!("easing-{}", track.source_id)))
+                            .label(format!(
+                                "Easing: {} → {}",
+                                track.easing.as_str(),
+                                next_easing.as_str()
+                            ))
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                if this.project.session_id() != session
+                                    || this.project.active != easing_path
+                                {
+                                    return;
+                                }
+                                let result = timeline::easing_edit(
+                                    &this.project.documents,
+                                    &easing_path,
+                                    version,
+                                    &easing_id,
+                                    next_easing,
+                                )
+                                .and_then(|batch| Ok(this.project.documents.apply(batch)?));
+                                match result {
+                                    Ok(_) => {
+                                        this.cancel_agent();
+                                        this.panels.timeline_selection = None;
+                                        this.sync(window, cx);
+                                    }
+                                    Err(error) => {
+                                        this.status = error.to_string();
+                                        cx.notify();
+                                    }
+                                }
+                            })),
+                    )
                     .child(lane),
             );
         }

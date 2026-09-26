@@ -1,3 +1,6 @@
+mod timeline;
+pub use timeline::compile_timeline_command;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use astra_core::{is_safe_path_symbol as safe_symbol, Diagnostic};
@@ -7,8 +10,8 @@ use crate::{
     ExtensionFieldKind, ExtensionPresentationCommand, ExtensionValue, FixedScalar, MovieLoopMode,
     PresentationInterruptPolicy, StageBlendMode, StageClipPolicy, StageCommand, StageFitMode,
     StageLayerKind, StagePlacement, StageViewport, TimelineCommand, TimelineSpec, VnAudioBus,
-    VnAudioControlAction, VnAudioSync, VnError, VnMovieEndBehavior, VnTimelineJoinPolicy,
-    VnTimelineKeyframe, VnTimelineTrack,
+    VnAudioControlAction, VnAudioSync, VnError, VnMovieEndBehavior, VnPresentationEasing,
+    VnTimelineJoinPolicy, VnTimelineKeyframe, VnTimelineTrack,
 };
 
 pub(crate) fn compile_stage_command(line: &ParsedLine) -> Result<StageCommand, VnError> {
@@ -229,7 +232,7 @@ pub(crate) fn compile_stage_command(line: &ParsedLine) -> Result<StageCommand, V
                 duration_ms: parse_u32(line, "duration")?,
             })
         }
-        "timeline" => compile_timeline(line),
+        "timeline" => timeline::compile_timeline(line),
         "effect" => {
             validate_attrs(
                 line,
@@ -463,107 +466,6 @@ fn compile_audio(line: &ParsedLine, bus: VnAudioBus) -> Result<StageCommand, VnE
         fade_ms: optional_u32(line, "fade", 0)?,
         sync,
     }))
-}
-
-fn compile_timeline(line: &ParsedLine) -> Result<StageCommand, VnError> {
-    validate_attrs(
-        line,
-        &[
-            "id",
-            "action",
-            "reason",
-            "target",
-            "property",
-            "keyframes",
-            "join",
-            "fence",
-            "fallback",
-            "budget_ms",
-        ],
-        &["id"],
-    )?;
-    let id = symbol(line, "id")?;
-    match line.attr("action").unwrap_or("start") {
-        "cancel" => Ok(StageCommand::Timeline(TimelineCommand::Cancel {
-            id,
-            reason: line.attr("reason").unwrap_or("requested").to_string(),
-        })),
-        "start" => {
-            for name in ["target", "property", "keyframes", "budget_ms"] {
-                if line.attr(name).is_none() {
-                    return Err(missing_attr(line, name));
-                }
-            }
-            let join = match line.attr("join").unwrap_or("fire_and_forget") {
-                "fire_and_forget" => VnTimelineJoinPolicy::FireAndForget,
-                "wait" | "block" => VnTimelineJoinPolicy::Block,
-                "replace" | "replace_target" => VnTimelineJoinPolicy::ReplaceTarget,
-                value => {
-                    return Err(invalid_value(
-                        line,
-                        "join",
-                        value,
-                        "fire_and_forget,block,replace_target",
-                    ))
-                }
-            };
-            let fence = optional_symbol(line, "fence")?;
-            if join == VnTimelineJoinPolicy::Block && fence.is_none() {
-                return Err(missing_attr(line, "fence"));
-            }
-            Ok(StageCommand::Timeline(TimelineCommand::Start(
-                TimelineSpec {
-                    id,
-                    join,
-                    tracks: vec![VnTimelineTrack {
-                        target: symbol(line, "target")?,
-                        property: symbol(line, "property")?,
-                        keyframes: parse_keyframes(line, required(line, "keyframes")?)?,
-                    }],
-                    fence,
-                    fallback: optional_symbol(line, "fallback")?,
-                    budget_us: milliseconds_to_microseconds(line, parse_u32(line, "budget_ms")?)?,
-                },
-            )))
-        }
-        value => Err(invalid_value(line, "action", value, "start,cancel")),
-    }
-}
-
-fn parse_keyframes(line: &ParsedLine, value: &str) -> Result<Vec<VnTimelineKeyframe>, VnError> {
-    let mut result = Vec::new();
-    for pair in value.split(',') {
-        let (time, scalar) = pair
-            .split_once('=')
-            .ok_or_else(|| invalid_value(line, "keyframes", value, "time=value list"))?;
-        let time_ms = time
-            .parse::<u32>()
-            .map_err(|_| invalid_value(line, "keyframes", pair, "unsigned time=value"))?;
-        if result
-            .last()
-            .is_some_and(|last: &VnTimelineKeyframe| last.time_ms >= time_ms)
-        {
-            return Err(invalid_value(
-                line,
-                "keyframes",
-                pair,
-                "strictly increasing times",
-            ));
-        }
-        result.push(VnTimelineKeyframe {
-            time_ms,
-            value: parse_fixed(line, "keyframes", scalar)?,
-        });
-    }
-    if result.len() < 2 {
-        return Err(invalid_value(
-            line,
-            "keyframes",
-            value,
-            "at least two keyframes",
-        ));
-    }
-    Ok(result)
 }
 
 fn validate_attrs(

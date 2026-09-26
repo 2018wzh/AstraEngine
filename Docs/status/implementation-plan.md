@@ -14,6 +14,12 @@ Artemis `13e55ffa`、RFVP `b2f385da`、Siglus `c6c4f99c` 已按用户授权分�
 
 新格式 NativeVN 完整 Cook 和 package build 已通过。Windows Sandbox 两次创建均以 `0x80370106` 意外退出，列表仍为空；本轮尚未进入真实 Player 交互、保存或恢复，也未恢复 Editor GUI 操作。没有修改宿主系统配置。更新后的远端 CI、FFmpeg 可选 job、macOS 本机检查、真实 Player 视听与长流程仍未关闭。
 
+## Timeline 源码缓动接续
+
+`.astra` Timeline 已复用原有四种二次缓动，规则由唯一 script 类型进入 Cook、Stage 采样和保存恢复。`astra-vn-editor` 统一源码投影与关键帧/缓动事务；GPUI Timeline 可切换规则，MCP 读取同一投影，写入仍经原有版本/generation 批次。没有新增平行 Sequence 文件或曲线框架。package root v4、compiled project v5、Stage snapshot v11、Player save v10 拒绝旧格式；VN 业务 RuntimeState 没有轨道字段，维持 v4。作品需要重新 Cook，旧槽读取失败不覆盖原文件。
+
+定向检查覆盖段内与跨段插值、端点、取消、恢复后继续、旧格式拒绝、损坏存档、恢复后重存，以及注释/source ID/source map、版本冲突、关键帧拖动和单批撤销。Editor Timeline/MCP 4 项、Stage 20 项、typed stage IR 8 项和 Player 存档 5 项通过；受影响 Engine crate 与 Editor all-target Clippy、fmt 和文档检查通过。本树 CLI 的 Cook→package→Headless 最小 NativeVN 流程通过。实际 Editor 桌面操作仍暂停；此批不代表真实 Windows 长流程、GPU 画面或实际声音验收，片段 seek/热更新尚未实现。
+
 ## 2026-09-23 集成与 Classic 复测
 
 Editor 的过期项目操作拒绝、CMVS 输入锁存及调用脚本名称的 source frame 修复已整合；Editor 17 项测试、CMVS 158 项普通测试及各自 all-target Clippy、fmt 通过。默认 ignored 的外部产品和 GPU 用例未执行，CMVS 文字、PCM 与商业短流程仍待完成。`60dc3e58b` 阶段根 workspace 完整测试通过（830 通过、19 按原条件未执行），前置 Headless 构建、全 workspace all-target Clippy 和 fmt 通过。后续 `800bd36d3` 的 CMVS 自动推进查询修复另行通过 158 项普通测试、all-target Clippy 与 fmt，GPU 用例未执行。

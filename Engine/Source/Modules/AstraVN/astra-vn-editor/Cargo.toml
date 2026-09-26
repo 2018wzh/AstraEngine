@@ -5,6 +5,7 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+anyhow.workspace = true
 tracing.workspace = true
 astra-core = { path = "../../../Runtime/astra-core" }
 astra-vn-script = { path = "../astra-vn-script" }

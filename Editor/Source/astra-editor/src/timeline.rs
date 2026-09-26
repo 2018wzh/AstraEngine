@@ -1,136 +1,14 @@
-use astra_vn_editor::{parse_astra_source, AuthoringWorkspace, DocumentSnapshot, EditBatch};
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Keyframe {
-    pub time_ms: u32,
-    pub value: String,
-}
-
-#[derive(Clone, Debug)]
-pub struct TimelineTrack {
-    pub source_id: String,
-    pub target: String,
-    pub property: String,
-    pub frames: Vec<Keyframe>,
-}
-
-/// A disposable projection of the canonical source, never a second timeline file.
-pub fn tracks(document: &DocumentSnapshot) -> anyhow::Result<Vec<TimelineTrack>> {
-    let parsed = parse_astra_source(&document.path, &document.text);
-    let mut tracks = Vec::new();
-    for command in parsed
-        .ast
-        .commands()
-        .filter(|command| command.keyword() == "timeline")
-    {
-        let Some(encoded) = command
-            .attributes()
-            .find(|attribute| attribute.key() == "keyframes")
-        else {
-            continue;
-        };
-        let source_id = command
-            .source_id()
-            .ok_or_else(|| anyhow::anyhow!("Timeline needs a stable source ID"))?;
-        let frames = encoded
-            .value()
-            .split(',')
-            .map(|pair| {
-                let (time, value) = pair
-                    .split_once('=')
-                    .ok_or_else(|| anyhow::anyhow!("Invalid keyframe in {source_id}"))?;
-                Ok(Keyframe {
-                    time_ms: time.parse()?,
-                    value: value.into(),
-                })
-            })
-            .collect::<anyhow::Result<Vec<_>>>()?;
-        validate(&frames)?;
-        let attribute = |key| {
-            command
-                .attributes()
-                .find(|attribute| attribute.key() == key)
-                .map(|attribute| attribute.value().to_string())
-                .unwrap_or_default()
-        };
-        tracks.push(TimelineTrack {
-            source_id: source_id.into(),
-            target: attribute("target"),
-            property: attribute("property"),
-            frames,
-        });
-    }
-    Ok(tracks)
-}
-
-fn validate(frames: &[Keyframe]) -> anyhow::Result<()> {
-    anyhow::ensure!(frames.len() >= 2, "A timeline needs at least two keyframes");
-    anyhow::ensure!(
-        frames
-            .windows(2)
-            .all(|pair| pair[0].time_ms < pair[1].time_ms),
-        "Keyframe times must be unique and increasing"
-    );
-    anyhow::ensure!(
-        frames
-            .iter()
-            .all(|frame| !frame.value.is_empty() && !frame.value.contains([',', '=', '\n', '\r'])),
-        "A keyframe must contain one scalar value"
-    );
-    Ok(())
-}
+#[cfg(test)]
+use astra_vn_editor::{
+    timeline::{edit, tracks, Keyframe, KeyframeEdit},
+    AuthoringWorkspace,
+};
 
 /// Convert a drag on the 520-pixel time axis. Only release commits one undo batch.
 pub fn drag_time(original_ms: u32, delta_pixels: f32, duration_ms: u32) -> u32 {
     (original_ms as f64 + f64::from(delta_pixels) / 520. * f64::from(duration_ms))
         .round()
         .clamp(0., f64::from(u32::MAX)) as u32
-}
-
-pub enum KeyframeEdit {
-    Set { index: usize, frame: Keyframe },
-    Insert(Keyframe),
-    Remove { index: usize },
-}
-
-pub fn edit(
-    workspace: &AuthoringWorkspace,
-    path: &str,
-    version: u64,
-    source_id: &str,
-    edit: KeyframeEdit,
-) -> anyhow::Result<EditBatch> {
-    let document = workspace.document(path)?;
-    anyhow::ensure!(
-        document.version == version,
-        "Timeline changed; select the keyframe again"
-    );
-    let mut track = tracks(document)?
-        .into_iter()
-        .find(|track| track.source_id == source_id)
-        .ok_or_else(|| anyhow::anyhow!("Timeline source command no longer exists"))?;
-    match edit {
-        KeyframeEdit::Set { index, frame } => {
-            *track
-                .frames
-                .get_mut(index)
-                .ok_or_else(|| anyhow::anyhow!("Keyframe no longer exists"))? = frame;
-        }
-        KeyframeEdit::Insert(frame) => track.frames.push(frame),
-        KeyframeEdit::Remove { index } => {
-            anyhow::ensure!(index < track.frames.len(), "Keyframe no longer exists");
-            track.frames.remove(index);
-        }
-    }
-    track.frames.sort_by_key(|frame| frame.time_ms);
-    validate(&track.frames)?;
-    let value = track
-        .frames
-        .iter()
-        .map(|frame| format!("{}={}", frame.time_ms, frame.value))
-        .collect::<Vec<_>>()
-        .join(",");
-    Ok(workspace.attribute_edit(path, source_id, "keyframes", &value)?)
 }
 
 #[cfg(test)]

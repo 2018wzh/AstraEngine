@@ -2,6 +2,7 @@ use super::*;
 
 fn track(property: &str, end: i64) -> VnTimelineTrack {
     VnTimelineTrack {
+        easing: VnPresentationEasing::Linear,
         target: "hero".into(),
         property: property.into(),
         keyframes: vec![
@@ -136,6 +137,7 @@ fn clear_layer_cancels_only_removed_entity_tracks() {
     show_hero(&mut live);
     live.tick(300_000_000).unwrap();
     let camera = VnTimelineTrack {
+        easing: VnPresentationEasing::Linear,
         target: "camera".into(),
         property: "x".into(),
         keyframes: track("x", 2_000_000).keyframes,
@@ -214,6 +216,7 @@ fn invalid_timeline_endpoints_are_rejected_at_ingress() {
     for invalid in [
         track("opacity", 2_000_000),
         VnTimelineTrack {
+            easing: VnPresentationEasing::Linear,
             target: "camera".into(),
             property: "zoom".into(),
             keyframes: track("x", -1).keyframes,
@@ -230,4 +233,55 @@ fn invalid_timeline_endpoints_are_rejected_at_ingress() {
         assert!(!live.is_failed());
     }
     live.tick(300_000_000).unwrap();
+}
+
+#[test]
+fn compiled_timeline_easing_survives_restore_and_cancel() {
+    for (name, quarter, half) in [
+        ("linear", 250_000, 500_000),
+        ("ease_in", 62_500, 250_000),
+        ("ease_out", 437_500, 750_000),
+        ("ease_in_out", 125_000, 500_000),
+    ] {
+        let text=format!("timeline id:pan target:hero property:x easing:{name} keyframes:0=0,1000=1,2000=0 budget_ms:1 #@id pan");
+        let parsed = astra_vn_presentation::parse_astra_source("main.astra", &text);
+        let command = astra_vn_presentation::compile_timeline_command(
+            "main.astra",
+            parsed.ast.commands().next().unwrap(),
+        )
+        .unwrap();
+        let mut live = director();
+        configure(&mut live);
+        show_hero(&mut live);
+        live.tick(300_000_000).unwrap();
+        live.apply(&StageCommand::Timeline(command)).unwrap();
+        live.tick(250_000_000).unwrap();
+        assert_eq!(live.state().entities["hero"].x, fixed(quarter));
+        let mut restored = ProductStageDirector::restore(
+            VnPresentationProviderManifest::standard(),
+            "advanced-vn",
+            &live.snapshot().unwrap(),
+        )
+        .unwrap();
+        for (delta, expected) in [
+            (250_000_000, half),
+            (500_000_000, 1_000_000),
+            (250_000_000, 1_000_000 - quarter),
+        ] {
+            live.tick(delta).unwrap();
+            restored.tick(delta).unwrap();
+            assert_eq!(live.state().entities["hero"].x, fixed(expected));
+            assert_eq!(live.snapshot().unwrap(), restored.snapshot().unwrap());
+        }
+        live.apply(&StageCommand::Timeline(TimelineCommand::Cancel {
+            id: "pan".into(),
+            reason: "requested".into(),
+        }))
+        .unwrap();
+        let before = live.state().entities["hero"].x;
+        live.tick(750_000_000).unwrap();
+        assert_eq!(live.state().entities["hero"].x, before);
+        restored.tick(750_000_000).unwrap();
+        assert_eq!(restored.state().entities["hero"].x, FixedScalar::ZERO);
+    }
 }

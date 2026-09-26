@@ -20,6 +20,7 @@ pub use language_service::*;
 pub use registry::*;
 pub use source_map::*;
 pub use stage::*;
+pub use stage_compile::compile_timeline_command;
 pub use syntax::*;
 pub use types::*;
 

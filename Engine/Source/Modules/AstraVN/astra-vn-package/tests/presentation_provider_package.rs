@@ -8,7 +8,7 @@ use astra_vn_script::{compile_astra_project, AstraSource};
 fn compiled_story() -> astra_vn_script::CompiledVnProject {
     compile_astra_project([AstraSource::story(
         "story.astra",
-        "story main\nstate start\n  scene room\n    background asset:asset:/bg layer:bg preset:soft_fade duration:300 interrupt:replace_from_current\n",
+        "story main\nstate start\n  scene room\n    background asset:asset:/bg layer:bg preset:soft_fade duration:300 interrupt:replace_from_current\n    timeline id:camera target:camera.main property:zoom easing:ease_in_out keyframes:0=1,1000=1.2 budget_ms:1 #@id camera\n",
     )], Default::default())
     .unwrap()
 }
@@ -43,12 +43,12 @@ fn package_persists_profile_bound_presentation_policy() {
 }
 
 #[test]
-fn compiled_project_v4_requires_the_v3_root_without_reader_fallback() {
+fn compiled_project_v5_requires_the_v4_root_without_reader_fallback() {
     let project = compiled_story();
     let mut sections =
         package_sections_for_project(&project, &["classic".to_string()], "game").unwrap();
     let blob = PackageBuilder::build(PackageBuildRequest::fixture(
-        "compiled.project.v4",
+        "compiled.project.v5",
         "classic",
         sections.clone(),
     ))
@@ -58,11 +58,11 @@ fn compiled_project_v4_requires_the_v3_root_without_reader_fallback() {
         .container()
         .decode_postcard("vn.compiled_project")
         .unwrap();
-    assert_eq!(root.schema, "astra.vn.compiled_project_root.v3");
-    assert_eq!(root.compiled_project_schema, "astra.vn.compiled_project.v4");
+    assert_eq!(root.schema, "astra.vn.compiled_project_root.v4");
+    assert_eq!(root.compiled_project_schema, "astra.vn.compiled_project.v5");
     assert_eq!(
         decode_compiled_project(&package).unwrap().schema,
-        "astra.vn.compiled_project.v4"
+        "astra.vn.compiled_project.v5"
     );
 
     assert!(package
@@ -72,15 +72,15 @@ fn compiled_project_v4_requires_the_v3_root_without_reader_fallback() {
     assert_eq!(decode_compiled_project(&package).unwrap(), project);
 
     let legacy_root = VnCompiledProjectRoot {
-        schema: "astra.vn.compiled_project_root.v2".to_string(),
-        compiled_project_schema: "astra.vn.compiled_project.v3".to_string(),
+        schema: "astra.vn.compiled_project_root.v3".to_string(),
+        compiled_project_schema: "astra.vn.compiled_project.v4".to_string(),
         ..root
     };
     sections.retain(|section| section.id != "vn.compiled_project");
     sections.push(
         SectionPayload::postcard(
             "vn.compiled_project",
-            "astra.vn.compiled_project_root.v2",
+            "astra.vn.compiled_project_root.v3",
             &legacy_root,
         )
         .unwrap(),

@@ -157,10 +157,8 @@ fn nativevn_graph_timeline_preview_and_undo() {
 fn edit_nativevn(
     project: &mut Project,
 ) -> (astra_core::Hash256, Vec<astra_vn_editor::DocumentSnapshot>) {
-    use astra_editor::{
-        graph,
-        timeline::{self, KeyframeEdit},
-    };
+    use astra_editor::graph;
+    use astra_vn_editor::timeline::{self, KeyframeEdit};
     let original_hash = project.compile().unwrap().project_hash;
     let originals = project.documents.documents().cloned().collect::<Vec<_>>();
     let source = "Scripts/experience.astra";

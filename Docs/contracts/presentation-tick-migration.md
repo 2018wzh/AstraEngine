@@ -20,7 +20,7 @@ Region 队列保持原顺序并在活动过渡完成后激活；排队状态可�
 
 ## 数据格式迁移
 
-当前 Stage snapshot schema 为 `astra.vn.product_stage_state.v10`，coordinator 为 `astra.vn.presentation_coordinator.v6`；新增显式任务组合进度，字段布局已改变。Player envelope 与 payload 同步升级到 `astra.player.native_vn_save.v9` 和 `astra.player.native_vn_save_payload.v9`。各字节入口先读取 schema，拒绝旧版本后才解码变化字段，避免把旧布局误报为损坏。`PresentationRegionCommand` 改用 serde 外部标记枚举，使非空队列可由 postcard 双向编码；旧内部标记表示只能写入，读取会失败。若使用 JSON，payload 形式相应改为如 `{"character": {...}}`，不再是 `{"region": "character", "command": {...}}`。
+当前 Stage snapshot schema 为 `astra.vn.product_stage_state.v11`，coordinator 为 `astra.vn.presentation_coordinator.v6`；轨道新增段缓动规则，字段布局已改变。Player envelope 与 payload 同步升级到 `astra.player.native_vn_save.v10` 和 `astra.player.native_vn_save_payload.v10`。各字节入口先读取 schema，拒绝旧版本后才解码变化字段，避免把旧布局误报为损坏。`PresentationRegionCommand` 改用 serde 外部标记枚举，使非空队列可由 postcard 双向编码；旧内部标记表示只能写入，读取会失败。若使用 JSON，payload 形式相应改为如 `{"character": {...}}`，不再是 `{"region": "character", "command": {...}}`。
 
 旧内部 snapshot 明确拒绝并重建，不提供迁移器。恢复时校验 coordinator schema、队列边界、区域匹配、排队策略和文字 reveal rate，拒绝损坏队列而不是延迟到 tick panic。商业游戏原生存档不属于此格式，不能覆盖。
 

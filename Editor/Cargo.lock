@@ -538,6 +538,7 @@ dependencies = [
 name = "astra-vn-editor"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "astra-core",
  "astra-vn-script",
  "schemars 0.8.22",
@@ -549,6 +550,7 @@ dependencies = [
 name = "astra-vn-policy"
 version = "0.1.0"
 dependencies = [
+ "astra-asset",
  "astra-core",
  "astra-policy",
  "astra-ui-core",

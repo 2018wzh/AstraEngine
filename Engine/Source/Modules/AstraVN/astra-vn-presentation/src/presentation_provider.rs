@@ -4,7 +4,7 @@ use astra_core::Diagnostic;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::VnWaitKind;
+use crate::{VnPresentationEasing, VnWaitKind};
 
 pub const VN_PRESENTATION_PROVIDER_MANIFEST_SCHEMA: &str =
     "astra.vn.presentation_provider_manifest.v2";
@@ -551,15 +551,6 @@ pub struct VnPresentationPreset {
     pub filter: Option<String>,
     pub fallback_policy_id: Option<String>,
     pub budget_us: u32,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum VnPresentationEasing {
-    Linear,
-    EaseIn,
-    EaseOut,
-    EaseInOut,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

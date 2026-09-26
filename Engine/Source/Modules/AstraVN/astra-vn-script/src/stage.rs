@@ -148,6 +148,8 @@ pub struct VnTimelineKeyframe {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct VnTimelineTrack {
+    /// Applied independently to every adjacent keyframe segment.
+    pub easing: VnPresentationEasing,
     pub target: String,
     pub property: String,
     pub keyframes: Vec<VnTimelineKeyframe>,
@@ -408,4 +410,24 @@ pub struct ExtensionPresentationCommand {
     pub provider_id: String,
     pub schema: String,
     pub fields: BTreeMap<String, ExtensionValue>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum VnPresentationEasing {
+    Linear,
+    EaseIn,
+    EaseOut,
+    EaseInOut,
+}
+
+impl VnPresentationEasing {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Linear => "linear",
+            Self::EaseIn => "ease_in",
+            Self::EaseOut => "ease_out",
+            Self::EaseInOut => "ease_in_out",
+        }
+    }
 }

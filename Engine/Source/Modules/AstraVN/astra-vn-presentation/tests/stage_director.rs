@@ -1,8 +1,8 @@
 use astra_vn_presentation::{
     AspectRatio, FixedScalar, PresentationInterruptPolicy, ProductStageDirector, StageBlendMode,
     StageClipPolicy, StageCommand, StageFitMode, StageLayerKind, StagePlacement, StageViewport,
-    TimelineCommand, TimelineSpec, VnAudioBus, VnPresentationProviderManifest,
-    VnTimelineJoinPolicy, VnTimelineKeyframe, VnTimelineTrack,
+    TimelineCommand, TimelineSpec, VnAudioBus, VnPresentationEasing,
+    VnPresentationProviderManifest, VnTimelineJoinPolicy, VnTimelineKeyframe, VnTimelineTrack,
 };
 
 fn fixed(value: i64) -> FixedScalar {
@@ -323,6 +323,7 @@ fn stage_director_timeline_snapshot_restore_matches_uninterrupted_run() {
                 id: "hero.move".to_string(),
                 join: VnTimelineJoinPolicy::Block,
                 tracks: vec![VnTimelineTrack {
+                    easing: VnPresentationEasing::Linear,
                     target: "hero".to_string(),
                     property: "x".to_string(),
                     keyframes: vec![
@@ -378,6 +379,7 @@ fn stage_director_rejects_invalid_tick_and_timeline_without_mutation() {
                 id: "invalid".to_string(),
                 join: VnTimelineJoinPolicy::Block,
                 tracks: vec![VnTimelineTrack {
+                    easing: VnPresentationEasing::Linear,
                     target: "hero".to_string(),
                     property: "opacity".to_string(),
                     keyframes: vec![
@@ -475,7 +477,7 @@ fn product_movie_fence_waits_for_both_layers() {
 #[test]
 fn old_stage_header_is_rejected_before_changed_fields_are_decoded() {
     let manifest = VnPresentationProviderManifest::standard();
-    let old = postcard::to_allocvec(&(&manifest, "astra.vn.product_stage_state.v9")).unwrap();
+    let old = postcard::to_allocvec(&(&manifest, "astra.vn.product_stage_state.v10")).unwrap();
     let error = ProductStageDirector::restore(manifest, "advanced-vn", &old).unwrap_err();
     assert!(error
         .to_string()

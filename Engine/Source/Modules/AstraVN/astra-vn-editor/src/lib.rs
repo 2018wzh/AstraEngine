@@ -2,6 +2,7 @@
 
 mod document;
 mod editor_metadata;
+pub mod timeline;
 mod transaction;
 
 pub use astra_vn_script::*;
