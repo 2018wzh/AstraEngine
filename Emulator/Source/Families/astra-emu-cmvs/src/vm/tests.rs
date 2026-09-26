@@ -2342,9 +2342,8 @@ fn apply_system_save_overwrites_flag_and_word_regions() {
         flags,
         cg_words,
         bgm_words: vec![0_u32; 1024],
-        title_slot_count: 64,
-        list_a_count: 0,
-        list_b_count: 0,
+        title_slots: vec![Vec::new(); 64],
+        lists: [Vec::new(), Vec::new()],
     };
     apply_system_save(&mut state, save).unwrap();
     // Bits below the region survive.
@@ -2357,7 +2356,8 @@ fn apply_system_save_overwrites_flag_and_word_regions() {
     // The CG word table lands at process indexed words 2048..4096.
     assert_eq!(state.process_indexed_words.get(&2500), Some(&0));
     assert_eq!(state.process_indexed_words.get(&(2048 + 500)), Some(&1234));
-    assert!(state.system_save.is_some());
+    assert_eq!(state.process_float_words.get(&1024), Some(&0));
+    assert_eq!(state.process_string_slots.get(&64), Some(&Vec::new()));
 }
 
 #[test]

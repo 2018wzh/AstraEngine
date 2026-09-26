@@ -176,10 +176,12 @@ impl CmvsSession {
                 "ASTRA_EMU_CMVS_MEDIA_UNBOUND",
                 "native crossfade audio is not connected",
             )),
-            CmvsPs2aVmAction::StorageRequest(_) => Err(error(
-                "ASTRA_EMU_CMVS_STORAGE_UNBOUND",
-                "native storage request is not connected",
-            )),
+            CmvsPs2aVmAction::StorageRequest(CmvsPs2aStorageRequest::LoadSystemState {
+                path_buffer_offset,
+            }) => self
+                .archive
+                .load_native_system_state(&mut self.vm, path_buffer_offset)
+                .map_err(core),
             CmvsPs2aVmAction::PlayChannelSound { .. } => Err(error(
                 "ASTRA_EMU_CMVS_MEDIA_UNBOUND",
                 "native media channel is not connected",

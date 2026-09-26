@@ -77,6 +77,7 @@ const MAX_FILTER_CHAIN_RECORDS_PER_BANK: usize = 4096;
 pub fn validate_cmvs390_vm_state(state: &CmvsPs2aVmState) -> Result<(), CoreError> {
     native_text::validate(state)?;
     native_save::validate(state)?;
+    crate::system_save::validate_lists(&state.native_system_lists)?;
     for (bank, paths) in &state.resource_search_paths {
         for (slot, path) in paths {
             if *slot >= bank.slot_count() {
@@ -523,6 +524,7 @@ mod numeric;
 mod runtime;
 mod schedule;
 mod stack;
+mod system_state;
 mod text;
 
 pub use self::effect::CmvsEffectChannel;
@@ -537,7 +539,8 @@ use self::schedule::*;
 use self::stack::*;
 use self::text::*;
 
-pub use self::schedule::{apply_system_save, rebuild_frame_entry_queue};
+pub use self::schedule::rebuild_frame_entry_queue;
+pub use self::system_state::apply_system_save;
 
 fn invalid(code: &'static str, message: &'static str) -> CoreError {
     CoreError::invalid(code, message)

@@ -163,9 +163,9 @@ pub struct CmvsPs2aVmState {
     /// program counter; the recovered per-tick queue instead restores it so
     /// a handler that spans a wait keeps its continuation.
     pub wait_resume: Option<(u32, u16)>,
-    /// The applied system-save tables, retained as serializable player
-    /// progress state once the host resolves the system-state load.
-    pub system_save: Option<crate::CmvsSystemSave>,
+    /// Native linked-list payloads at interpreter offsets 10500/10504.
+    /// Tables and title slots live in their process-global owners instead.
+    pub native_system_lists: [Vec<Vec<u8>>; 2],
     /// The active script frame index; frame 0 is the entry script.
     pub current_frame: u16,
     /// Script identities loaded into call frames, keyed by frame index. The
@@ -267,7 +267,7 @@ impl CmvsPs2aVmState {
             filter_chain_selection_await: None,
             filter_chain_pending_control: None,
             wait_resume: None,
-            system_save: None,
+            native_system_lists: [Vec::new(), Vec::new()],
             current_frame: 0,
             script_frames: BTreeMap::new(),
             script_name_indices: BTreeMap::new(),
