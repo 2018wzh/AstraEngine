@@ -16,6 +16,7 @@ pub(super) struct NativeTextRenderer {
     scene: Option<TextScene>,
     pending: Vec<SceneCommand>,
     paint: paint::NativePaint,
+    pub(super) default_font: Option<String>,
 }
 
 impl NativeTextRenderer {
@@ -97,7 +98,14 @@ impl NativeTextRenderer {
             database.load_system_fonts();
             database
         });
-        let font = fonts::load(database, name)?;
+        let resolved = if name.is_empty() {
+            self.default_font
+                .as_deref()
+                .ok_or_else(|| error("ASTRA_EMU_CMVS_DEFAULT_FONT_UNBOUND"))?
+        } else {
+            name
+        };
+        let font = fonts::load(database, resolved)?;
         let mut fonts = self.fonts.clone();
         fonts.insert(name.to_owned(), font);
         let unique = fonts

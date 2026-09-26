@@ -14,6 +14,7 @@ astra-byte-source = { path = "../../../../Engine/Source/Runtime/astra-byte-sourc
 astra-emu-sdk = { path = "../../SDK/astra-emu-sdk", default-features = false, features = ["archive", "cache", "image", "audio", "text"] }
 astra-text = { path = "../../../../Engine/Source/Runtime/astra-text" }
 fontdb.workspace = true
+configparser = "=3.3.0"
 kira.workspace = true
 astra-media-core = { path = "../../../../Engine/Source/Runtime/astra-media-core" }
 astra-platform = { path = "../../../../Engine/Source/Platform/astra-platform" }
@@ -34,3 +35,6 @@ tracing.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = ["Win32_System_Registry"] }

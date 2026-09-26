@@ -31,7 +31,9 @@ impl CmvsSession {
             .resolve_script_uri(entry)
             .and_then(|uri| archive.load_script(&uri, 0, &mut vm))
             .map_err(core)?;
+        let default_font = archive.native_default_font().map_err(core)?;
         let mut scene = CmvsScene::new().map_err(core)?;
+        scene.set_default_font(default_font);
         let frame = scene.clear(window.width, window.height).map_err(core)?;
         tracing::info!(event = "astra.emu.cmvs.session.open");
         Ok(Self {
@@ -102,6 +104,11 @@ impl CmvsSession {
                         self.scene
                             .append_text(&mut self.vm, slot, &source)
                             .map_err(core)?;
+                        tracing::debug!(
+                            event = "cmvs.text.static",
+                            slot,
+                            glyph_count = self.vm.native_text[&slot].glyphs.len()
+                        );
                     }
                     CmvsNativeTextAction::Destroy { .. } | CmvsNativeTextAction::Clear { .. } => {}
                 }

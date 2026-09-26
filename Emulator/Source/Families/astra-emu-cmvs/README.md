@@ -58,6 +58,8 @@ case 21/22 的路径值现在在命令执行时立即复制，保存为相对路
 
 267 静态文字已接 Family 内的 SDK TextScene：原生 parser 处理控制符、换行、禁则及仅绘制 base 的静态 ruby，字符记录保留绘制时的字体、颜色和位置，后续命令不改写已生成文字。940 选择固定或比例前进量；默认遵守原生非零初值，比例模式从同一 Cosmic provider/cache 读取真实 glyph advance。所有字符由单个 TextScene 批量提交，GPU 复用 GlyphMask；原生 1/2 描边使用最大覆盖核，275 的纵向、横向和对角渐变使用 mesh 顶点颜色。258 单独设置整个文字对象的位置偏移。内部 VM 格式为 v6，旧快照拒绝；这仍不是原版 NativeSave 实现。
 
-显式字体名称从本机 font database 精确匹配，字体覆盖或 shaping 失败会停止会话。空字体名所指的原生默认配置尚未绑定，返回 DEFAULT_FONT_UNBOUND；不代换 Noto 或系统 generic 字体。只读授权脚本已确认实际创建命令使用空字体名，因此尚不能声明真实正文显示。266 实时文字 parser 及其他未恢复命令继续明确拒绝。
+字体名称从本机 font database 精确匹配，字体覆盖或 shaping 失败会停止会话，不代换 Noto 或系统 generic 字体。空字体名使用原生启动配置：读取 `initial.cfg` 的 `CMVS_INIT_CFG.CONFIG_PUT/REG`，模式 1 读取 Windows HKCU `Software/<REG>/param` 的 `MI_Font`，模式 3 先读取同一根的 `ConfigPut` 决定模式；未配置值时读取 `cmvs.cfg` 的 `MESSAGE_INFO.FONT`，空值保留原生默认“ＭＳ ゴシック”。模式 2 选择保存根内的配置，当前仅支持保存根 mode 0；Documents/AppData 根仍明确未绑定。Registry 读取限定在 CMVS Windows 模块，其他平台遇到 registry 模式明确失败。整个读取过程不创建 registry key，也不写回原配置。
+
+INI 使用精确锁定的 `configparser 3.3.0`（MIT 许可选项），在核心先严格解码 CP932 或带 BOM 的 UTF-16LE。读取限制为 1 MiB，配置文件必须位于授权游戏根内；损坏、越界或过长字体名明确失败。只读授权脚本已确认实际创建命令使用空字体名；真实字体显示仍须经过原脚本的 Family/GPU 流程。266 实时文字 parser 及其他未恢复命令继续明确拒绝。
 
 本批 CPU 回归覆盖固定/比例度量、静态控制符与 ruby、禁则、原生描边和渐变、文字变换、资源上传/复用/释放及错误原子性。真实 Family 首 tick、文字画面和声音仍未验收；CPU 字形与 mesh 回归不代表 GPU 产品流程通过。

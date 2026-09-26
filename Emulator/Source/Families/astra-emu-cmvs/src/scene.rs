@@ -28,7 +28,8 @@ impl CmvsScene {
         let renderer = pollster::block_on(WgpuOffscreenRenderer::new())
             .map_err(|_| error("ASTRA_EMU_CMVS_GPU_CREATE"))?;
         tracing::info!(event = "cmvs.gpu.created", backend = %renderer.identity().backend,
-            device_type = %renderer.identity().device_type);
+            device_type = %renderer.identity().device_type, vendor_id = renderer.identity().vendor_id,
+            device_id = renderer.identity().device_id);
         Ok(Self {
             renderer,
             textures: TextureCache::new(NonZeroUsize::new(512).unwrap(), 1024 * 1024 * 1024, 16384)
@@ -45,6 +46,10 @@ impl CmvsScene {
 
     pub(crate) fn bind_text_font(&mut self, font: &str) -> Result<(), CoreError> {
         self.text.bind_font(font)
+    }
+
+    pub(crate) fn set_default_font(&mut self, font: String) {
+        self.text.default_font = Some(font);
     }
 
     pub(crate) fn has_text_renderer(&self) -> bool {

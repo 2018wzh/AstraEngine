@@ -127,3 +127,23 @@ fn missing_and_unbound_default_fonts_do_not_substitute() {
         "ASTRA_EMU_CMVS_FONT_MISSING"
     );
 }
+
+#[test]
+fn empty_native_font_uses_bound_configuration_and_preserves_requested_identity() {
+    let (mut renderer, mut vm) = fixture();
+    renderer.default_font = Some("Noto Sans JP".into());
+    renderer.bind_font("").unwrap();
+    vm.native_text.get_mut(&3).unwrap().font.clear();
+    renderer.append(&mut vm, 3, "漢").unwrap();
+    assert!(vm.native_text[&3].glyphs[0].font.is_empty());
+    assert!(renderer.frame(&vm).is_ok());
+    let mut missing = NativeTextRenderer {
+        database: Some(fontdb::Database::new()),
+        default_font: Some("Unavailable configured font".into()),
+        ..Default::default()
+    };
+    assert_eq!(
+        missing.bind_font("").unwrap_err().code(),
+        "ASTRA_EMU_CMVS_FONT_MISSING"
+    );
+}

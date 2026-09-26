@@ -676,6 +676,7 @@ dependencies = [
  "astra-platform",
  "astra-platform-common",
  "astra-text",
+ "configparser",
  "encoding_rs",
  "flate2",
  "fontdb",
@@ -690,6 +691,7 @@ dependencies = [
  "sha2",
  "tempfile",
  "tracing",
+ "windows 0.62.2",
 ]
 
 [[package]]
@@ -2080,6 +2082,12 @@ checksum = "4ca0197aee26d1ae37445ee532fefce43251d24cc7c166799f4d46817f1d3973"
 dependencies = [
  "crossbeam-utils",
 ]
+
+[[package]]
+name = "configparser"
+version = "3.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "031ad3d167622974ed636505ae4556267ed4aa2aea0464122fa6bc9698a32825"
 
 [[package]]
 name = "console_error_panic_hook"
