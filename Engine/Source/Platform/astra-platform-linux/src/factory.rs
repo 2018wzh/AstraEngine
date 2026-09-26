@@ -77,7 +77,7 @@ mod linux {
         time::Duration,
     };
 
-    use crate::decode::DecodeResource;
+    use crate::decode::DecodeSession;
     use astra_platform::{
         host_channel_with_command_wake, AudioDeviceFormat, AudioOutputHandle, AudioOutputRequest,
         AudioWakeRegistration, CapturedFrame, DecodeSessionHandle, HostCommand, HostLaunchProfile,
@@ -314,7 +314,7 @@ mod linux {
         surfaces: ResourceTable<SurfaceResource, SurfaceHandle>,
         surface_windows: BTreeMap<SurfaceHandle, WindowId>,
         audio_outputs: ResourceTable<AudioResource, AudioOutputHandle>,
-        decode_sessions: ResourceTable<DecodeResource, DecodeSessionHandle>,
+        decode_sessions: ResourceTable<DecodeSession, DecodeSessionHandle>,
         save_store: AtomicSaveStore,
         package_cache: VerifiedPackageCache,
         package_source_policies: Vec<astra_platform::PackageSourcePolicy>,
@@ -644,23 +644,28 @@ mod linux {
                         let _ = reply.send(result);
                     }
                     HostCommand::OpenDecode { kind, reply } => {
-                        let result = DecodeResource::new(kind)
+                        let result = DecodeSession::new(kind)
                             .and_then(|resource| self.decode_sessions.insert(resource));
-                        let _ = reply.send(result);
+                        if let Err(Ok(handle)) = reply.send(result) {
+                            // Cancelled open must not retain a worker or a live handle.
+                            let _ = self.decode_sessions.remove(handle);
+                        }
                     }
                     HostCommand::Decode {
                         session,
                         request,
                         reply,
-                    } => {
+                    } => match self.decode_sessions.get(session) {
+                        Ok(resource) => resource.submit(request, reply),
+                        Err(error) => {
+                            let _ = reply.send(Err(error));
+                        }
+                    },
+                    HostCommand::CloseDecode { session, reply } => {
                         let result = self
                             .decode_sessions
-                            .get_mut(session)
-                            .and_then(|resource| resource.decode(request));
-                        let _ = reply.send(result);
-                    }
-                    HostCommand::CloseDecode { session, reply } => {
-                        let result = self.decode_sessions.remove(session).map(|_| ());
+                            .remove(session)
+                            .and_then(DecodeSession::close);
                         let _ = reply.send(result);
                     }
                     HostCommand::BeginSave { slot, reply } => {

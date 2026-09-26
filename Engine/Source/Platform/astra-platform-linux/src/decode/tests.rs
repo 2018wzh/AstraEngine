@@ -1,5 +1,6 @@
 use super::*;
 use astra_platform::DecodeStreamAction;
+use std::time::{Duration, Instant};
 
 fn request(bytes: Vec<u8>, sequence: u64) -> PlatformDecodeRequest {
     PlatformDecodeRequest {
@@ -94,3 +95,7 @@ fn malformed_media_fails_promptly_without_consuming_sequence() {
     assert!(start.elapsed() < Duration::from_secs(5));
     assert_eq!(decoder.next_sequence, 1);
 }
+
+mod local_media;
+mod video;
+mod worker;

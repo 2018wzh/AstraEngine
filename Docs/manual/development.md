@@ -138,4 +138,24 @@ cargo test -p astra-platform-linux --lib decode::tests -- --include-ignored
 cargo test -p astra-platform-linux --features platform-test-driver --test unavailable missing_display_rejects_real_host_start -- --ignored
 ```
 
-正式产品仍须在有显示与音频设备的 Linux 环境验证完整播放、系统页、存读档、退出及重新启动。WAV 局部通过不关闭完整视频流的实施缺口。
+正式产品仍须在有显示与音频设备的 Linux 环境验证完整播放、系统页、存读档、退出及重新启动。WAV 局部通过不代表视频已验收；完整视频测试见下节。
+
+## Linux 视频流与 GPU 验证
+
+视频测试使用 GStreamer 的 appsrc/appsink、videoconvert、VP8 encoder/decoder 与 WebM mux/demux 生成公开最小 fixture。安装所需插件后，显式执行流式、取消、截断和 GPU 用例；没有硬件 GPU 不运行 GPU 用例，不用软件 adapter 替代：
+
+```bash
+cargo test -p astra-platform-linux --lib decode:: -- --include-ignored --skip complete_local_movie_streams_through_worker_and_gpu --test-threads=1
+```
+
+实际本地视频测试须事先独立核对容器帧数、时长与 codec；环境变量只供这条 ignored 测试选取本地素材，不进入产品 API。每帧经过 session worker 和硬件 renderer，检查 PTS/时长、像素及结束计数。`ASTRA_LINUX_VIDEO_TEST_ARTIFACT_DIR` 可选，用于保存首/中/尾 GPU RGBA 回读，仅指向 ignored 私有目录。
+
+```bash
+ASTRA_LINUX_VIDEO_TEST_FILE='<authorized-video-file>' \
+ASTRA_LINUX_VIDEO_TEST_CODEC=mp4 \
+ASTRA_LINUX_VIDEO_TEST_FRAMES=288 \
+ASTRA_LINUX_VIDEO_TEST_DURATION_US=12000000 \
+cargo test -p astra-platform-linux --lib complete_local_movie_streams_through_worker_and_gpu -- --ignored
+```
+
+示例数字对应 12 秒、24 fps 的影片，其他素材必须填写独立核对后的真实值。H.264/MP4 另需所选 GStreamer 环境提供对应 decoder/demux 插件；不因缺插件改用其他 Astra provider。编码输入、单帧/音频输出和队列边界见 [重构契约](../contracts/rebuild.md)。本测试不验证原生窗口、设备声音或正式性能预算。

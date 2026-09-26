@@ -1,5 +1,12 @@
 # 全产品重构实施状态
 
+## 2026-09-26 Linux 完整视频流
+
+Linux 解码已从窗口事件线程移到 session-owned worker，视频接入既有 Start/Next，而非返回首帧后关闭。保留有界 GStreamer 管线，输出真实 PTS、可变帧时长、BGRA 帧和结束计数；取消、错误和关闭释放管线/输入，显式关闭等待 worker。此批依赖前一 WAV 修复，只改 Linux 媒体实现、必要依赖和测试，NativeVN WIP 保持原样。
+
+Linux 19 项测试显式执行并通过，包括可变 PTS WebM、截断视频拒绝、取消正在等待的 native pull、提前关闭/重新打开、WAV 和无显示启动。现有合法 H.264 影片的 12 秒、288 个 1920×1080 帧全部通过 worker 解码与硬件 GPU 渲染回读，逐帧像素一致，PTS、总时长及末尾字节计数匹配；已查看首/中/尾回读图。测试为 Debug 离屏流程，不代表实时性能、原生窗口、声音或整部游戏验收。最新公共集成 bundle 尚未接入，本批结果不能替代最终集成门禁。 CLI 首轮因当前 target 缺 astra-headless 失败，构建本树二进制后原失败用例通过；CLI 14 项回归通过，Headless/Player/CLI 构建通过。 Player 22 项通过、1 helper 忽略，三个直接相关 crate 的 all-target Clippy、文档、格式检查通过。
+
+
 ## 2026-09-26 Linux WAV 与硬件回归
 
 Linux decoder 原先在请求校验阶段拒绝 `wav`，与 NativeVN 现有 WAV master 绑定不符。现将 decoder 从 Host factory 拆为独立模块，保留同一显式 GStreamer provider，补充 WAV 接受与 bus 错误检查；缺插件或解码失败及时返回，不推进请求序号，启动失败也执行 pipeline 关闭。真实 GStreamer 用例覆盖 16/24-bit 完整 PCM、重复请求拒绝、重复创建/解码及损坏流。测试插件在本地私有目录加载，未写入仓库或改系统安装；不能据此声称发布环境已包含插件。
