@@ -32,15 +32,9 @@ impl MusicaSession {
                 }
                 if let Some((_, speaker)) = &self.message {
                     let replacement = (response.replacement.to_string(), speaker.clone());
-                    if self
-                        .scene
-                        .render(self.vm.state(), Some(&replacement), None)
-                        .is_ok()
-                    {
-                        self.message = Some(replacement);
-                    } else {
-                        tracing::warn!(event = "astra.emu.musica.translation.render_failed");
-                    }
+                    self.scene
+                        .render(self.vm.state(), Some(&replacement), None)?;
+                    self.message = Some(replacement);
                 }
                 Ok(false)
             }

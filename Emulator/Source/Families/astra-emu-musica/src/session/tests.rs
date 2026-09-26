@@ -16,6 +16,8 @@ static PROVIDER_SESSION: std::sync::Mutex<()> = std::sync::Mutex::new(());
 #[cfg(feature = "ffmpeg-vcpkg")]
 #[path = "tests/movie.rs"]
 mod movie;
+#[path = "tests/translation.rs"]
+mod translation;
 
 #[cfg(not(feature = "ffmpeg-vcpkg"))]
 #[test]
@@ -119,6 +121,11 @@ impl TextReplacementService for Translation {
                 "TEST_TRANSLATION_FAILED",
                 "fixture failure",
             )))
+            .into(),
+            3 => Ok(TextPollResult::Ready(TextReplacementResponse {
+                request_id: id,
+                replacement: "\u{10ffff}".into(),
+            }))
             .into(),
             _ => Ok(TextPollResult::Pending).into(),
         }

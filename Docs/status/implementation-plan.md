@@ -1,5 +1,9 @@
 # 全产品重构实施状态
 
+## 2026-09-26 Musica 翻译呈现失败
+
+翻译服务返回 Ready 后，Musica 原先吞掉场景呈现错误并继续会话，与 SDK 字形资源生命周期要求冲突。现将该错误传播到既有 advance/poison 边界，后续输入不能推进或写入存档；正常 close 仍取消并等待音频 worker。翻译服务拒绝或超时仍保留原文，不与字体/GPU 错误混为一类。定向测试通过真实字体排版得到 `ASTRA_TEXT_GLYPH_MISSING`，确认错误传播、后续保存输入拒绝及关闭回收；没有新增生产故障注入或 SDK 接口。
+
 ## 2026-09-26 外部 Family 作者入口
 
 新增单用途外部核心开发回归：公开 fixture 在临时独立 Cargo 项目中编译，只依赖 Family API、abi_stable 和 tracing，使用现有 ProviderModule。现有 Manager 加载该动态库，验证启动配置、物理按键、借用 CPU 帧、PCM 有界队列及取消/等待 worker；不要求 SDK 或 VN。两次冷启动及逐像素检查通过，越界配置和缺失输入按预期失败；独立消费者的 fmt、all-target Clippy 与构建通过，临时项目完成后清理。开发手册同步删除已移除的 NativeVN descriptor 调用。此项只覆盖外部适配入口，不能替代六核真实游戏、GPU 或实际声音验收。
