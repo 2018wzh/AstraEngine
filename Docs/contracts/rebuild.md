@@ -219,3 +219,5 @@ Linux 本地媒体边界限制单次编码输入 256 MiB、单个视频帧和 on
 实现只增加 Linux target 的 `gstreamer-video = 0.24.2`（MIT OR Apache-2.0）与锁定的 sys 依赖（MIT），不传递第三方类型到公共契约。平台发布检查必须验证所选 GStreamer 插件、完整视频帧/PTS/结束计数、取消及关闭，而非只验证 codec 名称或首帧；真实窗口、设备音频与新集成分支另行验收。
 
 Family 窗口 ABI v9 增加 `SetIcon(FamilyWindowIcon)`：owned RGBA8、每轴最多 256、长度与乘法溢出严格检查。Family 解码原生资源，Host 只在窗口线程应用 small icon，关闭后恢复应用图标；无窗口或后端不支持时显式拒绝。图标与标题各自保留待提交请求，不传路径、句柄或第三方 UI 类型。
+
+Web 输入观察采用 `astra.player_web_live_evidence.v2`，Player 输入 transcript 采用 v3：静态 session id、递增 fixed step、真实输入消费与 typed route/terminal/choice 是验收来源。删除动态 provider id 及每帧三种摘要字段；观察边界计算的 `trace_hash` 必须与对应消费记录一致。拒绝旧 schema、缺失或跨 session 身份及缺失 terminal 状态，不构造兼容 hash，不把编译检查当浏览器实玩。

@@ -246,7 +246,7 @@ impl WindowsSendInputHost {
             host_audio_meter(&request.host_conformance_report, &package_hash)?;
         let comparison = visual_comparison_evidence(&request.visual_comparison_report)?;
         let transcript = PlayerInputTranscript {
-            schema: "astra.player_input_transcript.v2".to_string(),
+            schema: "astra.player_input_transcript.v3".to_string(),
             target: bundle.target,
             profile: bundle.profile,
             platform: PlayerPlatform::Windows,
@@ -401,7 +401,7 @@ impl WebCdpInputHost {
         validate_web_same_run_audio(&live.final_evidence, &audio_meter, &platform_identity)?;
         let comparison = visual_comparison_evidence(&request.visual_comparison_report)?;
         let transcript = PlayerInputTranscript {
-            schema: "astra.player_input_transcript.v2".to_string(),
+            schema: "astra.player_input_transcript.v3".to_string(),
             target: bundle.target,
             profile: bundle.profile,
             platform: PlayerPlatform::Web,
@@ -748,9 +748,7 @@ struct ParsedPlayerHostTrace {
     kind: String,
     trace_hash: String,
     coverage_reached: Vec<String>,
-    runtime_state_hash: String,
-    runtime_event_hash: String,
-    runtime_presentation_hash: String,
+    session_id: String,
     current_state_id: Option<String>,
     pending_choice_ids: Vec<String>,
     terminal_route_ids: Vec<String>,
@@ -789,13 +787,8 @@ fn parse_player_host_traces(stderr: &str) -> Vec<ParsedPlayerHostTrace> {
             else {
                 continue;
             };
-            let Some(state_hash) = trace_token(line, "runtime_state_hash") else {
-                continue;
-            };
-            let Some(event_hash) = trace_token(line, "runtime_event_hash") else {
-                continue;
-            };
-            let Some(presentation_hash) = trace_token(line, "runtime_presentation_hash") else {
+            let Some(session_id) = trace_token(line, "session_id").filter(|id| !id.is_empty())
+            else {
                 continue;
             };
             runtime.insert(
@@ -803,9 +796,7 @@ fn parse_player_host_traces(stderr: &str) -> Vec<ParsedPlayerHostTrace> {
                 (
                     coverage,
                     fixed_step,
-                    state_hash.to_string(),
-                    event_hash.to_string(),
-                    presentation_hash.to_string(),
+                    session_id.to_string(),
                     trace_token(line, "current_state_id")
                         .filter(|value| *value != "-")
                         .map(str::to_string),
@@ -828,14 +819,15 @@ fn parse_player_host_traces(stderr: &str) -> Vec<ParsedPlayerHostTrace> {
             let (
                 coverage_reached,
                 fixed_step,
-                runtime_state_hash,
-                runtime_event_hash,
-                runtime_presentation_hash,
+                session_id,
                 current_state_id,
                 pending_choice_ids,
                 terminal_route_ids,
                 runtime_line,
             ) = runtime.remove(&player_sequence)?;
+            if trace_token(consumed_line, "session_id") != Some(session_id.as_str()) {
+                return None;
+            }
             Some(ParsedPlayerHostTrace {
                 player_sequence,
                 fixed_step,
@@ -845,9 +837,7 @@ fn parse_player_host_traces(stderr: &str) -> Vec<ParsedPlayerHostTrace> {
                 )
                 .to_string(),
                 coverage_reached,
-                runtime_state_hash,
-                runtime_event_hash,
-                runtime_presentation_hash,
+                session_id,
                 current_state_id,
                 pending_choice_ids,
                 terminal_route_ids,
@@ -1094,12 +1084,6 @@ mod windows_live {
         let mut consumption = Vec::new();
         let mut runtime_routes = Vec::new();
         for (event, trace) in input_events {
-            if !trace.runtime_state_hash.starts_with("hash128:")
-                || !trace.runtime_event_hash.starts_with("hash128:")
-                || !trace.runtime_presentation_hash.starts_with("hash128:")
-            {
-                continue;
-            }
             let route_id = trace
                 .current_state_id
                 .clone()
@@ -1123,9 +1107,7 @@ mod windows_live {
                 current_state_id: trace.current_state_id.clone(),
                 pending_choice_ids: trace.pending_choice_ids.clone(),
                 terminal_route_ids: trace.terminal_route_ids.clone(),
-                runtime_state_hash: trace.runtime_state_hash.clone(),
-                runtime_event_hash: trace.runtime_event_hash.clone(),
-                runtime_presentation_hash: trace.runtime_presentation_hash.clone(),
+                session_id: trace.session_id.clone(),
                 trace_hash: trace.trace_hash.clone(),
             });
         }
@@ -1197,10 +1179,9 @@ actions:
     #[test]
     fn route_coverage_is_parsed_from_runtime_evidence_not_expected_labels() {
         let stderr = concat!(
-            "event=astra.player.input.consumed player_sequence=17 kind=keyboard\n",
+            "event=astra.player.input.consumed player_sequence=17 kind=keyboard session_id=session.one\n",
             "event=astra.player.vn.step player_sequence=17 fixed_step=3 coverage=state.library,state.good ",
-            "runtime_state_hash=hash128:1111 runtime_event_hash=hash128:2222 ",
-            "runtime_presentation_hash=hash128:3333 current_state_id=state.library ",
+            "session_id=session.one current_state_id=state.library ",
             "pending_choice_ids=choice.left,choice.right terminal_route_ids=ending.good\n",
         );
 
@@ -1215,9 +1196,14 @@ actions:
             vec!["state.library", "state.good"]
         );
         assert_eq!(traces[0].current_state_id.as_deref(), Some("state.library"));
-        assert_eq!(traces[0].runtime_state_hash, "hash128:1111");
-        assert_eq!(traces[0].runtime_event_hash, "hash128:2222");
-        assert_eq!(traces[0].runtime_presentation_hash, "hash128:3333");
+        assert_eq!(traces[0].session_id, "session.one");
+        assert!(parse_player_host_traces(&stderr.replacen(
+            "session_id=session.one",
+            "session_id=other",
+            1
+        ))
+        .is_empty());
+        assert!(parse_player_host_traces(&stderr.replace("session_id=session.one", "")).is_empty());
         assert_eq!(
             traces[0].pending_choice_ids,
             vec!["choice.left", "choice.right"]

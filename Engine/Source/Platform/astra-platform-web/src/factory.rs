@@ -434,11 +434,13 @@ mod browser {
         }
     }
 
+    type AnimationFrameCallback = Rc<RefCell<Option<Closure<dyn FnMut(f64)>>>>;
+
     struct BrowserLifecycle {
         target: EventTarget,
         visibility: Closure<dyn FnMut(Event)>,
         gamepad_frame: i32,
-        _gamepad_callback: Rc<RefCell<Option<Closure<dyn FnMut(f64)>>>>,
+        _gamepad_callback: AnimationFrameCallback,
     }
 
     impl BrowserLifecycle {
@@ -472,8 +474,7 @@ mod browser {
             let mapper = astra_platform_common::GamepadMapper::new(0.2)?;
             let state = Rc::new(RefCell::new((gamepads, mapper)));
             let gamepad_emitter = emitter.clone();
-            let callback_slot: Rc<RefCell<Option<Closure<dyn FnMut(f64)>>>> =
-                Rc::new(RefCell::new(None));
+            let callback_slot: AnimationFrameCallback = Rc::new(RefCell::new(None));
             let callback_slot_for_callback = callback_slot.clone();
             let gamepad_window =
                 web_sys::window().ok_or_else(|| web_error("input.gamepad.bind"))?;
@@ -824,11 +825,9 @@ mod browser {
                 {
                     self.bind_aria_action(
                         &element,
-                        "click",
                         window,
                         node.id.clone(),
-                        "invoke",
-                        false,
+                        astra_ui_core::UiSemanticAction::Activate,
                         emitter.clone(),
                     )?;
                 }
@@ -838,11 +837,9 @@ mod browser {
                 {
                     self.bind_aria_action(
                         &element,
-                        "focus",
                         window,
                         node.id.clone(),
-                        "focus",
-                        false,
+                        astra_ui_core::UiSemanticAction::Focus,
                         emitter.clone(),
                     )?;
                 }
@@ -852,11 +849,9 @@ mod browser {
                 {
                     self.bind_aria_action(
                         &element,
-                        "change",
                         window,
                         node.id.clone(),
-                        "set_value",
-                        true,
+                        astra_ui_core::UiSemanticAction::SetValue,
                         emitter.clone(),
                     )?;
                 }
@@ -898,13 +893,17 @@ mod browser {
         fn bind_aria_action(
             &mut self,
             element: &Element,
-            event: &'static str,
             window: WindowHandle,
             semantic_id: String,
-            action: &'static str,
-            read_value: bool,
+            action: astra_ui_core::UiSemanticAction,
             emitter: astra_platform::PlatformEventEmitter,
         ) -> Result<(), PlatformError> {
+            let (event, action, read_value) = match action {
+                astra_ui_core::UiSemanticAction::Activate => ("click", "invoke", false),
+                astra_ui_core::UiSemanticAction::Focus => ("focus", "focus", false),
+                astra_ui_core::UiSemanticAction::SetValue => ("change", "set_value", true),
+                _ => return Err(web_error("accessibility.web.bind_action")),
+            };
             let target: EventTarget = element.clone().into();
             let focus_guard = self.aria_programmatic_focus.clone();
             let callback = Closure::wrap(Box::new(move |event: Event| {

@@ -13,14 +13,10 @@ fn web_live_evidence_roundtrips_stable_runtime_identity_without_payload() {
         profile: "classic".to_string(),
         package_hash: format!("sha256:{}", "1".repeat(64)),
         package_byte_size: None,
-        provider_id: Some("astra.runtime.native_vn".to_string()),
         session_id: Some("session.web.1".to_string()),
         player_sequence: Some(7),
         input_kind: Some("pointer".to_string()),
         fixed_step: Some(3),
-        runtime_state_hash: Some(format!("sha256:{}", "2".repeat(64))),
-        runtime_event_hash: Some(format!("sha256:{}", "3".repeat(64))),
-        runtime_presentation_hash: Some(format!("sha256:{}", "4".repeat(64))),
         coverage_reached: vec!["route.library".to_string()],
         current_state_id: Some("route.library".to_string()),
         terminal_route_ids: vec!["route.library".to_string()],
@@ -33,6 +29,8 @@ fn web_live_evidence_roundtrips_stable_runtime_identity_without_payload() {
     let text = String::from_utf8(encoded).unwrap();
     assert!(!text.contains("D:\\"));
     assert!(!text.contains("payload"));
+    assert!(!text.contains("provider_id"));
+    assert!(!text.contains("runtime_state_hash"));
 }
 
 #[test]

@@ -1,5 +1,9 @@
 # 全产品重构实施状态
 
+## 2026-09-26 Web 静态 session 消费链
+
+Web Player 删除对已移除动态 provider 与每帧三种 hash 的引用；浏览器输入观察和原生/CDP 报告统一读取真实 session、fixed step 与 typed route/terminal/choice。输入消费与 route 使用同一观察 trace hash，跨 session 拼接拒绝；Web 观察 schema 升级 v2、输入 transcript 升级 v3，旧 schema 直接拒绝。平台 Web 回调复用现有语义 action 枚举，移除多余字符串/布尔参数组合。四个受影响 crate 增量测试 62 项通过、1 项按原条件跳过，带 `web-code-check` 的 all-target Clippy、fmt/docs 和同树 Headless 构建通过。此前 Linux/macOS 报告 fixture 使用不同的消费与路由 trace hash，已按真实同一次观察绑定修正；不放宽校验。此次未进行浏览器实际流程，也不声明 Web policy IO 支持。
+
 ## 2026-09-26 Family 窗口标题契约
 
 CMVS 原生 352 需要实际设置窗口标题。Family API v8 添加 `SetTitle`、长度与控制字符校验，空标题保留原生清空语义；v9 随后加入有界 RGBA8 small-icon 命令，保留原生 143 与标题 352 的不同语义。公共类型与契约先提交，Manager 现已接入：标题保持到显式替换，空串清空；NullAudio 标记不被覆盖；small icon 复用 winit 的 Win32/X11 能力，其他后端明确拒绝。关闭或失败恢复 Manager 标题与默认图标。API vtable、Manager 状态与现有五个 Family 的 all-target Clippy 已通过；集成标题/图标消费者后 Emulator workspace 测试 604 项通过、34 项按原条件跳过，fmt 与文档检查通过；独立外部核心六项流程通过，包含标题/图标在 Headless 上明确拒绝并取消关闭；真实窗口标题/图标视觉尚未验收。

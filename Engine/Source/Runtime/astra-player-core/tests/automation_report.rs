@@ -174,7 +174,7 @@ fn script(platform: PlayerPlatform) -> PlayerAutomationScript {
 
 fn transcript(platform: PlayerPlatform, source: &str) -> PlayerInputTranscript {
     PlayerInputTranscript {
-        schema: "astra.player_input_transcript.v2".to_string(),
+        schema: "astra.player_input_transcript.v3".to_string(),
         target: "test-game".to_string(),
         profile: "classic".to_string(),
         platform,
@@ -228,6 +228,7 @@ fn transcript(platform: PlayerPlatform, source: &str) -> PlayerInputTranscript {
             status: PlayerAutomationStatus::Pass,
         }),
         runtime_routes: vec![PlayerRuntimeRouteEvidence {
+            session_id: "session.test".into(),
             input_sequence: 1,
             player_sequence: 1,
             fixed_step: 1,
@@ -235,10 +236,7 @@ fn transcript(platform: PlayerPlatform, source: &str) -> PlayerInputTranscript {
             current_state_id: Some("route.opening".to_string()),
             pending_choice_ids: Vec::new(),
             terminal_route_ids: vec!["route.opening".to_string()],
-            runtime_state_hash: "hash128:11111111111111111111111111111111".to_string(),
-            runtime_event_hash: "hash128:22222222222222222222222222222222".to_string(),
-            runtime_presentation_hash: "hash128:33333333333333333333333333333333".to_string(),
-            trace_hash: "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+            trace_hash: "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
                 .to_string(),
         }],
         route_coverage: vec!["route.opening".to_string()],
@@ -262,4 +260,44 @@ fn transcript_hash_failure_blocks_full_playable_instead_of_hashing_empty_bytes()
             })
     }));
     assert!(!report.full_playable_passed());
+}
+
+#[test]
+fn typed_routes_reject_mixed_sessions_and_unbound_trace_hashes() {
+    let script = script(PlayerPlatform::Windows);
+    for mixed_session in [false, true] {
+        let mut transcript = transcript(PlayerPlatform::Windows, "sendinput.mouse");
+        if mixed_session {
+            let mut consumed = transcript.input_consumption[0].clone();
+            consumed.input_sequence = 2;
+            consumed.player_sequence = 2;
+            transcript.input_consumption.push(consumed);
+            let mut route = transcript.runtime_routes[0].clone();
+            route.input_sequence = 2;
+            route.player_sequence = 2;
+            route.fixed_step = 2;
+            route.session_id = "another.session".into();
+            transcript.runtime_routes.push(route);
+        } else {
+            transcript.runtime_routes[0].trace_hash = format!("sha256:{}", "f".repeat(64));
+        }
+        let report = PlayerAutomationValidator.validate(&script, &transcript);
+        assert!(report
+            .checks
+            .iter()
+            .any(|check| check.id == "player.runtime_route_evidence"
+                && check.status == PlayerAutomationStatus::Blocked));
+    }
+}
+
+#[test]
+fn legacy_hash_transcript_schema_is_rejected() {
+    let script = script(PlayerPlatform::Windows);
+    let mut transcript = transcript(PlayerPlatform::Windows, "sendinput.mouse");
+    transcript.schema = "astra.player_input_transcript.v2".into();
+    let report = PlayerAutomationValidator.validate(&script, &transcript);
+    assert!(report.checks.iter().any(|check| check
+        .diagnostic
+        .as_ref()
+        .is_some_and(|d| d.code == "ASTRA_PLAYER_AUTOMATION_SCHEMA")));
 }

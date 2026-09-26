@@ -21,7 +21,7 @@ fn linux_uinput_transcript_produces_full_playable_report() {
         expected_route_id: Some("opening".into()),
     }];
     let transcript = PlayerInputTranscript {
-        schema: "astra.player_input_transcript.v2".into(),
+        schema: "astra.player_input_transcript.v3".into(),
         target: script.target.clone(),
         profile: script.profile.clone(),
         platform: PlayerPlatform::Linux,
@@ -67,6 +67,7 @@ fn linux_uinput_transcript_produces_full_playable_report() {
             status: PlayerAutomationStatus::Pass,
         }),
         runtime_routes: vec![PlayerRuntimeRouteEvidence {
+            session_id: "session.test".into(),
             input_sequence: 1,
             player_sequence: 1,
             fixed_step: 1,
@@ -74,10 +75,7 @@ fn linux_uinput_transcript_produces_full_playable_report() {
             current_state_id: Some("opening".into()),
             terminal_route_ids: vec!["opening".into()],
             pending_choice_ids: Vec::new(),
-            runtime_state_hash: "hash128:55555555555555555555555555555555".into(),
-            runtime_event_hash: "hash128:66666666666666666666666666666666".into(),
-            runtime_presentation_hash: "hash128:77777777777777777777777777777777".into(),
-            trace_hash: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            trace_hash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
                 .into(),
         }],
         route_coverage: vec!["opening".into()],

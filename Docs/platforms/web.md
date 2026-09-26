@@ -16,7 +16,7 @@ Web 目标是 wasm32 + WebGPU/WebGL fallback + WebCodecs。Web 平台必须遵�
 - DecodeProvider 优先 WebCodecs；不可用时使用受限软件 fallback。
 - Audio 使用 WebAudio provider。
 - Runtime deterministic tick 不依赖 requestAnimationFrame 时间抖动。
-- wasm Player 只通过浏览器 console 发出 `ASTRA_PLAYER_EVIDENCE ` 前缀的 `astra.player_web_live_evidence.v1`。该记录由 Rust 产品主链在 package 验证和 RuntimeWorld 实际消费输入后生成，字段限于 target/profile/package/provider/session identity、step/hash、route/choice id 与 audio meter；不得包含正文、payload、本地路径，也不得由 loader、CDP driver 或页面脚本伪造。
+- wasm Player 只通过浏览器 console 发出 `ASTRA_PLAYER_EVIDENCE ` 前缀的 `astra.player_web_live_evidence.v2`。该记录由 Rust 产品主链在 package 验证和 RuntimeWorld 实际消费输入后生成，字段限于 target/profile/package/session identity、fixed step、route/terminal/choice id 与 audio meter；不得包含正文、payload、本地路径，也不得由 loader、CDP driver 或页面脚本伪造。
 
 ## Testing
 
@@ -34,3 +34,5 @@ wasm-pack test --headless --chrome Engine/Source/Platform/astra-platform-web
 ## Capability
 
 Web release profile 固定要求 WebGPU、WebCodecs、WebAudio 与 OPFS，不声明 WebGL、IndexedDB 或媒体 fallback。capability v2 只有在 Chrome live conformance 中才能把 provider 写入 `available`/`selected`；当前 canvas/WebGPU present/readback、WebCodecs VP8 encode→decode、OPFS commit/reload/abort、File/fetch allowlist source、visibility/focus/resize/input mapping 与 AudioWorklet bounded queue 已落地。真实用户手势后的 AudioWorklet output meter、device/context loss recovery 和完整 Player route 仍是 blocker。字段以 [Platform Host Blueprint](../implementation/platform-host.md) 为准。
+
+Web v2 观察记录和 `astra.player_input_transcript.v3` 使用静态 session 与实际 typed route 状态，不再声明动态 provider 或每帧 state/event/presentation hash。CDP 校验同一 session、递增 step/输入序号、真实输入消费和 terminal/choice/coverage；`trace_hash` 只在消费后的观察边界计算，并与输入消费记录绑定。旧 schema 拒绝，不补空值或伪造旧摘要。

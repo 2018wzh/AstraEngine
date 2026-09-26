@@ -4,7 +4,7 @@ use astra_core::{Diagnostic, Hash256};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-pub const WEB_PLAYER_LIVE_EVIDENCE_SCHEMA: &str = "astra.player_web_live_evidence.v1";
+pub const WEB_PLAYER_LIVE_EVIDENCE_SCHEMA: &str = "astra.player_web_live_evidence.v2";
 
 mod platform_sink;
 pub use astra_media::{PlayerAudioContractError, PlayerDecodedAudio};
@@ -577,9 +577,7 @@ pub struct PlayerRuntimeRouteEvidence {
     pub pending_choice_ids: Vec<String>,
     #[serde(default)]
     pub terminal_route_ids: Vec<String>,
-    pub runtime_state_hash: String,
-    pub runtime_event_hash: String,
-    pub runtime_presentation_hash: String,
+    pub session_id: String,
     pub trace_hash: String,
 }
 
@@ -1038,7 +1036,7 @@ fn schema_check(
     transcript: &PlayerInputTranscript,
 ) -> PlayerAutomationCheck {
     if script.schema == "astra.player_automation_script.v1"
-        && transcript.schema == "astra.player_input_transcript.v2"
+        && transcript.schema == "astra.player_input_transcript.v3"
         && is_safe_relative_ref(&script.scenario_ref)
     {
         pass_check(
@@ -1232,21 +1230,34 @@ fn runtime_route_evidence_check(
     let consumed = transcript
         .input_consumption
         .iter()
-        .map(|item| (item.input_sequence, item.player_sequence))
+        .map(|item| {
+            (
+                item.input_sequence,
+                item.player_sequence,
+                item.trace_hash.as_str(),
+            )
+        })
         .collect::<BTreeSet<_>>();
     let mut actual_routes = BTreeSet::new();
     let mut terminal_routes = BTreeSet::new();
     let mut invalid = 0usize;
     let mut previous_step = 0_u64;
+    let session_id = transcript
+        .runtime_routes
+        .first()
+        .map(|route| route.session_id.as_str());
     for route in &transcript.runtime_routes {
-        let hashes_valid = route.runtime_state_hash.starts_with("hash128:")
-            && route.runtime_event_hash.starts_with("hash128:")
-            && route.runtime_presentation_hash.starts_with("hash128:")
-            && route.trace_hash.starts_with("sha256:");
-        let identity_valid = route.input_sequence > 0
+        let hashes_valid = route.trace_hash.starts_with("sha256:");
+        let identity_valid = !route.session_id.is_empty()
+            && Some(route.session_id.as_str()) == session_id
+            && route.input_sequence > 0
             && route.player_sequence > 0
             && route.fixed_step > previous_step
-            && consumed.contains(&(route.input_sequence, route.player_sequence));
+            && consumed.contains(&(
+                route.input_sequence,
+                route.player_sequence,
+                route.trace_hash.as_str(),
+            ));
         if !hashes_valid || !identity_valid {
             invalid += 1;
             continue;

@@ -1030,12 +1030,14 @@ fn log_consumed_vn_step(
     };
     tracing::trace!(
         event = "astra.player.input.consumed",
+        session_id = source.session_id(),
         player_sequence,
         kind,
         "Player host consumed platform input"
     );
     tracing::trace!(
         event = "astra.player.vn.step",
+        session_id = source.session_id(),
         player_sequence,
         fixed_step = evidence.fixed_step,
         coverage = %coverage,

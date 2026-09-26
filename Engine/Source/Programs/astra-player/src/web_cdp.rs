@@ -379,14 +379,10 @@ pub struct WebCdpRuntimeEvidence {
     pub target: String,
     pub profile: String,
     pub package_hash: String,
-    pub provider_id: Option<String>,
     pub session_id: Option<String>,
     pub player_sequence: Option<u64>,
     pub input_kind: Option<String>,
     pub fixed_step: Option<u64>,
-    pub runtime_state_hash: Option<String>,
-    pub runtime_event_hash: Option<String>,
-    pub runtime_presentation_hash: Option<String>,
     pub coverage_reached: Vec<String>,
     pub current_state_id: Option<String>,
     pub terminal_route_ids: Vec<String>,
@@ -430,6 +426,7 @@ pub(crate) fn run_web_live_input(
     let mut last_evidence = None;
     let mut previous_player_sequence = 0;
     let mut previous_fixed_step = 0;
+    let mut run_session_id: Option<String> = None;
 
     for (index, input) in inputs.iter().enumerate() {
         let (key, code, virtual_key) = match input {
@@ -476,6 +473,15 @@ pub(crate) fn run_web_live_input(
                 && evidence.player_sequence.unwrap_or_default() > previous_player_sequence
         })?;
         validate_evidence_identity(bundle, &evidence)?;
+        let session_id = evidence
+            .session_id
+            .as_ref()
+            .filter(|id| !id.is_empty())
+            .ok_or("ASTRA_PLAYER_WEB_SESSION_ID_MISSING")?;
+        if run_session_id.as_ref().is_some_and(|id| id != session_id) {
+            return Err("ASTRA_PLAYER_WEB_SESSION_ID_MISMATCH".into());
+        }
+        run_session_id.get_or_insert_with(|| session_id.clone());
         let player_sequence = evidence
             .player_sequence
             .ok_or("ASTRA_PLAYER_WEB_PLAYER_SEQUENCE_MISSING")?;
@@ -520,12 +526,7 @@ pub(crate) fn run_web_live_input(
             current_state_id: evidence.current_state_id.clone(),
             pending_choice_ids: evidence.pending_choice_ids.clone(),
             terminal_route_ids: evidence.terminal_route_ids.clone(),
-            runtime_state_hash: required_hash(&evidence.runtime_state_hash, "state")?,
-            runtime_event_hash: required_hash(&evidence.runtime_event_hash, "event")?,
-            runtime_presentation_hash: required_hash(
-                &evidence.runtime_presentation_hash,
-                "presentation",
-            )?,
+            session_id: session_id.clone(),
             trace_hash,
         });
         let after_png = browser.cdp.capture_screenshot(timeout)?;
@@ -585,14 +586,6 @@ fn validate_evidence_identity(
     Ok(())
 }
 
-fn required_hash(value: &Option<String>, domain: &str) -> Result<String, PlayerAutomationError> {
-    value
-        .as_ref()
-        .filter(|value| value.starts_with("hash128:"))
-        .cloned()
-        .ok_or_else(|| format!("ASTRA_PLAYER_WEB_RUNTIME_HASH_MISSING: {domain}").into())
-}
-
 fn png_dimensions(bytes: &[u8]) -> Result<(u32, u32), PlayerAutomationError> {
     if bytes.len() < 24 || &bytes[..8] != b"\x89PNG\r\n\x1a\n" || &bytes[12..16] != b"IHDR" {
         return Err("ASTRA_PLAYER_CDP_SCREENSHOT_PNG_INVALID".into());
@@ -643,14 +636,10 @@ impl WebCdpRuntimeEvidence {
             target: required("target")?,
             profile: required("profile")?,
             package_hash: required("package_hash")?,
-            provider_id: optional_string("provider_id"),
             session_id: optional_string("session_id"),
             player_sequence: value.get("player_sequence").and_then(Value::as_u64),
             input_kind: optional_string("input_kind"),
             fixed_step: value.get("fixed_step").and_then(Value::as_u64),
-            runtime_state_hash: optional_string("runtime_state_hash"),
-            runtime_event_hash: optional_string("runtime_event_hash"),
-            runtime_presentation_hash: optional_string("runtime_presentation_hash"),
             coverage_reached: string_array("coverage_reached")?,
             current_state_id: optional_string("current_state_id"),
             terminal_route_ids: string_array("terminal_route_ids")?,

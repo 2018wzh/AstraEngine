@@ -17,8 +17,6 @@ pub struct WebPlayerLiveEvidence {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub package_byte_size: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub player_sequence: Option<u64>,
@@ -26,12 +24,6 @@ pub struct WebPlayerLiveEvidence {
     pub input_kind: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fixed_step: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub runtime_state_hash: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub runtime_event_hash: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub runtime_presentation_hash: Option<String>,
     #[serde(default)]
     pub coverage_reached: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -228,14 +220,10 @@ mod browser {
             profile: evidence_identity.profile.clone(),
             package_hash: evidence_identity.package_hash.clone(),
             package_byte_size: Some(package_bytes.len() as u64),
-            provider_id: None,
             session_id: None,
             player_sequence: None,
             input_kind: None,
             fixed_step: None,
-            runtime_state_hash: None,
-            runtime_event_hash: None,
-            runtime_presentation_hash: None,
             coverage_reached: Vec::new(),
             current_state_id: None,
             terminal_route_ids: Vec::new(),
@@ -855,9 +843,8 @@ mod browser {
             player_sequence,
             input_kind = kind,
             fixed_step = evidence.fixed_step,
-            runtime_state_hash = %evidence.runtime_state_hash,
-            runtime_event_hash = %evidence.runtime_event_hash,
-            runtime_presentation_hash = %evidence.runtime_presentation_hash,
+            session_id = source.session_id(),
+            presentation_count = evidence.presentation_count,
             terminal_route_count = evidence.terminal_route_ids.len(),
             pending_choice_count = evidence.pending_choice_ids.len(),
             "Web Player consumed a platform input through RuntimeWorld"
@@ -869,14 +856,10 @@ mod browser {
             profile: identity.profile.clone(),
             package_hash: identity.package_hash.clone(),
             package_byte_size: None,
-            provider_id: Some(source.provider_id().to_string()),
             session_id: Some(source.session_id().to_string()),
             player_sequence: Some(player_sequence),
             input_kind: Some(kind.to_string()),
             fixed_step: Some(evidence.fixed_step),
-            runtime_state_hash: Some(evidence.runtime_state_hash.to_string()),
-            runtime_event_hash: Some(evidence.runtime_event_hash.to_string()),
-            runtime_presentation_hash: Some(evidence.runtime_presentation_hash.to_string()),
             coverage_reached: evidence.coverage_reached.iter().cloned().collect(),
             current_state_id: evidence.current_state_id.clone(),
             terminal_route_ids: evidence.terminal_route_ids.iter().cloned().collect(),
