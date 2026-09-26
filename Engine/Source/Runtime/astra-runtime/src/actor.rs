@@ -205,6 +205,22 @@ impl RuntimeComponentPayload {
         }
     }
 
+    /// Replace a snapshot component value while preserving its identity and advancing revision.
+    pub fn replaced<T>(&self, value: T) -> Result<Self, RuntimeError>
+    where
+        T: Serialize + Clone + fmt::Debug + Send + Sync + 'static,
+    {
+        let revision = self.revision.checked_add(1).ok_or_else(|| {
+            RuntimeError::diagnostic(astra_core::Diagnostic::blocking(
+                "ASTRA_RUNTIME_COMPONENT_REVISION_OVERFLOW",
+                "runtime component revision overflowed",
+            ))
+        })?;
+        let mut payload = Self::typed(self.schema.clone(), self.version, value);
+        payload.revision = revision;
+        Ok(payload)
+    }
+
     pub fn decode<T>(&self) -> Result<T, RuntimeError>
     where
         T: Serialize + DeserializeOwned + Clone + fmt::Debug + Send + Sync + 'static,

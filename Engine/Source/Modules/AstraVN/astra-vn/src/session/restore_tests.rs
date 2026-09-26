@@ -17,8 +17,17 @@ fn fixture() -> VnSession {
         .with_package(PackageHandle::default())
         .unwrap();
     let owner = world.create_actor("vn", vec![]).unwrap();
+    let policy_component = world
+        .attach_component(
+            owner,
+            super::policy_io::POLICY_STATE_SCHEMA,
+            &super::policy_io::SessionPolicyState::default(),
+        )
+        .unwrap();
     VnSession {
         id: "restore.test".into(),
+        policy_component,
+        policy_host: Default::default(),
         engine: EngineSession::from_world(world),
         owner,
         compiled,

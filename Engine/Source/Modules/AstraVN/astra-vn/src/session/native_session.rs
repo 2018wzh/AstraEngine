@@ -3,6 +3,8 @@ use super::*;
 /// An owned NativeVN session. Dropping it cancels its world-scoped tasks.
 pub struct VnSession {
     pub(super) id: String,
+    pub(super) policy_component: ComponentId,
+    pub(super) policy_host: super::policy_io::SessionPolicyHost,
     pub(super) engine: EngineSession,
     pub(super) owner: ActorId,
     pub(super) compiled: Arc<CoreCompiledStory>,
@@ -10,6 +12,12 @@ pub struct VnSession {
     pub(super) runtime: CoreVnRuntime,
     pub(super) failed: bool,
     pub(super) step_complexity: Option<VnStepComplexityMetrics>,
+}
+
+impl Drop for VnSession {
+    fn drop(&mut self) {
+        self.policy_host.stop();
+    }
 }
 
 impl VnSession {

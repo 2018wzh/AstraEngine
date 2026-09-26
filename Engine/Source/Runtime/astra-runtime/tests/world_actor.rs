@@ -109,3 +109,18 @@ fn world_actor_rejects_component_for_missing_actor() {
         .unwrap_err();
     assert!(error.to_string().contains("ASTRA_RUNTIME_ACTOR_MISSING"));
 }
+
+#[test]
+fn replacing_snapshot_payload_preserves_schema_and_advances_revision() {
+    let original = astra_runtime::RuntimeComponentPayload::typed(
+        "test.counter",
+        astra_core::SchemaVersion::new(2, 0, 0),
+        3_u64,
+    );
+    let replaced = original.replaced(5_u64).unwrap();
+    assert_eq!(replaced.schema(), original.schema());
+    assert_eq!(replaced.version(), original.version());
+    assert_eq!(replaced.revision(), original.revision() + 1);
+    assert_eq!(replaced.decode::<u64>().unwrap(), 5);
+    assert_eq!(original.decode::<u64>().unwrap(), 3);
+}

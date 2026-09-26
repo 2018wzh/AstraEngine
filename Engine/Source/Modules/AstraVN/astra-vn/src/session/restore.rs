@@ -6,6 +6,7 @@ pub(super) fn restore_session(
 ) -> Result<(u64, u64), CoreVnError> {
     let package = session.engine.world().package_handle().cloned();
     let owner = session.owner;
+    let policy_component = session.policy_component;
     let expected_seed = session.engine.seed();
     let compiled = Arc::clone(&session.compiled);
     let index = Arc::clone(&session.runtime_index);
@@ -16,6 +17,7 @@ pub(super) fn restore_session(
             blob,
             &astra_core::SchemaMigrationRegistry::default(),
             |snapshot| {
+                super::policy_io::prepare_policy(snapshot, owner, policy_component)?;
                 prepare_runtime(
                     snapshot,
                     package.as_ref(),
@@ -27,6 +29,7 @@ pub(super) fn restore_session(
             },
         )
         .map_err(|error| CoreVnError::message(error.to_string()))?;
+    session.policy_host.stop();
     session.runtime = runtime;
     session.step_complexity = None;
     Ok((step, seed))
@@ -43,6 +46,8 @@ pub(super) fn validate_session_save(
         .awaits
         .validate()
         .map_err(|error| CoreVnError::message(format!("{}: {}", error.code, error.message)))?;
+    super::policy_io::prepare_policy(&mut snapshot, session.owner, session.policy_component)
+        .map_err(|error| CoreVnError::message(error.to_string()))?;
     prepare_runtime(
         &mut snapshot,
         session.engine.world().package_handle(),

@@ -10,6 +10,7 @@ luau-runtime = ["astra-policy/luau-runtime", "dep:mlua"]
 portable-luau-runtime = ["astra-policy/portable-luau-runtime", "dep:luaur-rt"]
 
 [dependencies]
+astra-asset = { path = "../../../Runtime/astra-asset" }
 astra-core = { path = "../../../Runtime/astra-core" }
 astra-ui-core = { path = "../../../Runtime/astra-ui-core" }
 astra-policy = { path = "../../../Runtime/astra-policy", default-features = false }

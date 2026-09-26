@@ -1342,6 +1342,7 @@ dependencies = [
  "astra-vn-script",
  "astra-vn-system",
  "serde",
+ "tokio",
  "tracing",
 ]
 
@@ -1416,6 +1417,7 @@ dependencies = [
 name = "astra-vn-policy"
 version = "0.1.0"
 dependencies = [
+ "astra-asset",
  "astra-core",
  "astra-policy",
  "astra-ui-core",

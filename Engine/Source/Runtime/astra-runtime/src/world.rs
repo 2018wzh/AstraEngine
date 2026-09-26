@@ -613,19 +613,8 @@ impl RuntimeWorld {
         })?;
         let before_revision = component.payload.revision;
         let schema = component.payload.schema.clone();
-        let payload = RuntimeComponentPayload::typed(
-            component.payload.schema.clone(),
-            component.payload.version,
-            data.clone(),
-        );
-        let after_revision = before_revision.checked_add(1).ok_or_else(|| {
-            RuntimeError::diagnostic(Diagnostic::blocking(
-                "ASTRA_RUNTIME_COMPONENT_REVISION_OVERFLOW",
-                "runtime component revision overflowed",
-            ))
-        })?;
-        let mut payload = payload;
-        payload.revision = after_revision;
+        let payload = component.payload.replaced(data.clone())?;
+        let after_revision = payload.revision;
         component.payload = payload;
         self.mutations.push(RuntimeMutationRecord {
             step: self.step,

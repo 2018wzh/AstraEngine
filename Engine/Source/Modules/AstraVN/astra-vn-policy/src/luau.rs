@@ -42,6 +42,30 @@ impl LuauPolicy {
         queries: &PolicyQueryContext,
         budget: PolicyExecutionBudget,
     ) -> Result<bool, VnError> {
+        self.eval_bool_with_host(
+            source,
+            state,
+            queries,
+            budget,
+            crate::PolicyIoContext {
+                state: &mut crate::PolicyIoState::default(),
+                capabilities: &crate::PolicyIoCapabilities::default(),
+            },
+        )
+    }
+
+    /// Evaluate one explicit continuation. External work is dispatched by the session only
+    /// after successful evaluation; completed results are read from serializable state.
+    pub fn eval_bool_with_host(
+        &mut self,
+        source: &str,
+        state: &mut VnPolicyState,
+        queries: &PolicyQueryContext,
+        budget: PolicyExecutionBudget,
+        host: crate::PolicyIoContext<'_>,
+    ) -> Result<bool, VnError> {
+        host.state.validate()?;
+        let host_state = Rc::new(RefCell::new(host.state.clone()));
         let lua = create_sandboxed_lua(budget)
             .map_err(|error| VnError::diagnostic(error.code(), error.to_string()))?;
         let globals = lua.globals();
@@ -395,6 +419,13 @@ impl LuauPolicy {
             .map_err(sandbox_error)?;
 
         astra.set("snapshot", snapshot).map_err(sandbox_error)?;
+        super::luau_io::install(
+            &lua,
+            &astra,
+            Rc::clone(&host_state),
+            host.capabilities.clone(),
+        )
+        .map_err(sandbox_error)?;
         globals.set("astra", astra).map_err(sandbox_error)?;
         let result = lua.load(source).eval::<bool>().map_err(sandbox_error)?;
         let output_count = command_trace.borrow().len()
@@ -415,6 +446,7 @@ impl LuauPolicy {
         state.query_trace = query_trace.borrow().clone();
         state.trace_events = trace_events.borrow().clone();
         state.snapshots = snapshots.borrow().clone();
+        *host.state = host_state.borrow().clone();
         Ok(result)
     }
 }

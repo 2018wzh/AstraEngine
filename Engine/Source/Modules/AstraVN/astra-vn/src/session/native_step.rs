@@ -1,6 +1,6 @@
 use super::*;
 
-/// In-process NativeVN work; strings are interpreted only by legacy ABI adapters.
+/// In-process NativeVN work.
 #[derive(Debug, Clone, PartialEq)]
 pub enum NativeVnStepCommand {
     LaunchDefault,

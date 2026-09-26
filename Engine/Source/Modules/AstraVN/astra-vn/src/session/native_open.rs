@@ -49,11 +49,17 @@ impl VnSession {
         let owner = world
             .create_actor("astra.vn.runtime", vec!["gameplay_runtime".to_string()])
             .map_err(|error| CoreVnError::message(error.to_string()))?;
-        world
-            .attach_component(owner, "astra.vn.policy_state.v1", &VnPolicyState::default())
+        let policy_component = world
+            .attach_component(
+                owner,
+                super::policy_io::POLICY_STATE_SCHEMA,
+                &super::policy_io::SessionPolicyState::default(),
+            )
             .map_err(|err| CoreVnError::message(err.to_string()))?;
         Ok(Self {
             id: session_id,
+            policy_component,
+            policy_host: Default::default(),
             engine: EngineSession::from_world(world),
             owner,
             compiled,

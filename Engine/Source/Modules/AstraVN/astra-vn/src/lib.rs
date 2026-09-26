@@ -15,3 +15,8 @@ pub use session::{
     NativeVnStateView, NativeVnStepCommand, NativeVnStepInput, NativeVnStepOutput, VnSession,
     VnSessionConfig,
 };
+
+pub use astra_vn_policy::{
+    PolicyExecutionBudget, PolicyIoCapabilities, PolicyIoFailure, PolicyIoHost, PolicyIoState,
+    PolicyIoStatus, PolicyReadText, VnPolicyState,
+};

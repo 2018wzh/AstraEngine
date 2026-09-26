@@ -618,3 +618,9 @@ main surface 修复后真实 Cook/package 与 Vulkan 硬件离屏场景通过。
 Target manifest v3 删除 runtime/UI provider 字段，provider policy v3 仅保留 renderer、VFS、audio、decode 等机制 binding。Package reader 返回 target/profile 上下文；Player 与发布检查直接调用静态 VN session。已删除旧 gameplay descriptor、动态 host、FFI lifecycle 和仅服务旧链的测试；保存恢复仍校验 session、package、schema 与内容，旧包拒绝并要求重新 Cook。
 
 增量检查覆盖 package 23 项、plugin ABI/target 8 项、release 43 项、Player-VN library 与 source 89 项、plugin 13 项（含动态机制 fixture 加载和卸载）。实际 CLI 4 项通过，包含生成新包、Web bundle 和 Cook→package→Headless 输入流程；NativeVN 项目生成 2 项与终之空项目生成 1 项通过。Headless 在本树构建后执行，不代表原生窗口、GPU 画面和真实声音验收。静态 Yakui 及实际机制绑定保留；可信 Luau host IO、统一 Sequence 作者模型仍待后续批次。
+
+### Native Luau 宿主 IO 与恢复
+
+新增 `VnSession::bind_policy_io/evaluate_policy`，宿主显式授予逻辑资源及读取预算。`PolicyReadText` 由 session 所有的 async worker 执行，真实 Runtime AwaitToken 将结果限制在固定 tick 接受；取消与关闭回收 worker。策略只保存显式变量、snapshot 和请求状态。恢复保留完成结果、将 pending 标为 interrupted，不重发外部 IO；损坏候选在取消当前工作前拒绝。Snapshot component 替换保留 schema/version 并递增 revision。
+
+VN/policy 43 项测试、Player 保存恢复 5 项及 Runtime component 3 项通过，覆盖阻塞 Future 的关闭回收、能力拒绝、失败 eval 无派发、结果限额、迟到结果拒绝、损坏 await 关系、冷恢复与恢复后再保存。此处实现的是 native embedding host 接口及 VnSession 生命周期，Packaged Player 尚未新增资源授权或网络/磁盘 adapter，Web 原生 worker 明确不支持；不作为真实平台 IO、界面或声音流程已完成。

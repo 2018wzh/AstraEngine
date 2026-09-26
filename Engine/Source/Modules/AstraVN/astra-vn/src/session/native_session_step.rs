@@ -73,6 +73,17 @@ impl VnSession {
                 )),
             });
         }
+        let policy_completion = session.take_policy_completion();
+        if let Some(completion) = &policy_completion {
+            ingress.push(OrderedTickIngress {
+                sequence: 2,
+                payload: TickIngress::AwaitCompletion(completion.handle.complete(
+                    2,
+                    fixed_step,
+                    EventPayload::new("vn.policy.io.completed"),
+                )),
+            });
+        }
         let request = TickRequest {
             timing,
             mode,
@@ -87,6 +98,9 @@ impl VnSession {
                 diagnostic.code.clone(),
                 diagnostic.message.clone(),
             ));
+        }
+        if let Some(completion) = policy_completion {
+            session.commit_policy_completion(completion)?;
         }
         for event in pending_output.events() {
             session

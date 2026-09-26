@@ -8,6 +8,7 @@ version.workspace = true
 crate-type = ["rlib", "dylib"]
 
 [dependencies]
+tokio.workspace = true
 astra-vn-policy = { path = "../astra-vn-policy" }
 tracing.workspace = true
 serde.workspace = true
