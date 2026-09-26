@@ -198,6 +198,21 @@ Native `VnSession` 通过 `bind_policy_io` 授予具名逻辑资源及读取限�
 实现沿用现有 `mlua` VM 与 Runtime `TaskScope`。`mlua` 的 [async 支持](https://docs.rs/crate/mlua/0.10.5/source/README.md) 依赖 coroutine；本接口采用显式延续，避免将 coroutine 误当作可恢复状态。取消遵循 [CancellationToken](https://docs.rs/tokio-util/latest/tokio_util/sync/struct.CancellationToken.html) 的 Future drop 约定。平台 IO adapter 由 embedding host 显式提供；这一批没有自动给 Packaged Player 新增磁盘或网络权限。
 
 
+### 包内 Luau 注册动作（实施中）
+
+剧情动作复用 `ExtensionCommandDescriptor`、`ExtensionValue` 和现有 `.astra` 扩展命令语法，不新增 policy 关键字。项目显式列出包内 Luau entry 与允许读取的文本 URI；Cook 在受限 VM 中执行注册，校验 descriptor、参数、重复命令、entry 和源码 hash，再将绑定写入 package。运行时只调用与已编译命令完全匹配的 `PolicyActionBinding`；注册得到的 handler 保留在本次 VM，不能只记录注册日志。
+
+模块顶层只负责注册。handler 返回 `PolicyActionOutcome::Complete` 或 `Await { request_key }`，不能使用 boolean 隐式表示等待。每次剧情执行分配单调递增的 action instance，IO key 归该实例所有；同一 source ID 在循环中再次执行不能取得前一次结果。Await 只能引用当前实例实际存在的 pending 请求，未知、已结束或其他实例的 key 均拒绝。
+
+handler 从头调用，VM 与执行栈不保存。变量写入先暂存，只有 Complete 才一次提交给 VN 权威状态；Await 丢弃本次 gameplay 写入，仅保留显式 continuation state 与 IO 状态。不能将 command trace 当作已经执行的解锁或其他效果，未接入的 effect 必须报错。`PolicyActionContinuation` 保存 source ID、实例序号、typed 参数、等待 key 与显式 state；复用现有 VN wait 和 IO AwaitToken，不另建调度器。固定 tick 接收 IO completion，再调用 handler；普通物理输入不能跳过动作等待。
+
+保存组件将升级，旧版本明确拒绝。恢复验证 continuation、命令绑定、请求归属和 await 一致性后，才替换旧会话。pending 转为 Interrupted，不自动重新 dispatch；恢复后 handler 读取 Interrupted 并由显式分支完成或提出新的请求。损坏候选不取消旧会话，不覆盖旧槽。关闭取消并 join worker，迟到 completion 不得提交。
+
+Packaged Player 的 ReadText adapter 只读取显式授权且满足当前 VFS binding/target/profile 的包内 UTF-8 文本。启动阶段完成 package section/hash/长度验证与有界预载，计入已有资源预算；取消或失败不交付半初始化会话。运行阶段提供内存文本的可取消读取，不宣称实时磁盘 IO；包内授权不包含任意文件路径或网络。底层同步 package reader 不能放进 async poll 后声称可取消，启动取消须在真实读取边界处理并报告加载进度。
+
+本批检查须覆盖真实 `.astra` → Cook → package → Player-VN 等待与恢复后再保存、同 source 重复执行、Await 前写入只在 Complete 提交一次、非法等待 key、阻塞 host 关闭和迟到结果。局部 VM 测试不能替代产品调用链；桌面 GUI 与真实设备验收单独报告。
+
+
 ### Timeline 段插值与源码事务
 
 本批将已有四种 `VnPresentationEasing` 收归 script：`linear`、`ease_in`、`ease_out`、`ease_in_out`。`.astra` 的 `timeline easing:` 是整条轨道的段规则；省略为 linear，每两个关键帧之间独立按该规则计算归一化进度。沿用现有二次缓动公式，不把名称解释为 CSS cubic-bezier，也不增加通用曲线系统。首尾值精确钳定；取消沿用目标任务规则；保存保留轨道规则和已过时间，恢复不重启曲线。
