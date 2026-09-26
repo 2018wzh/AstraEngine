@@ -1,5 +1,11 @@
 # 全产品重构实施状态
 
+## 2026-09-26 Packaged Luau 与 Web 消费链整合
+
+已按依赖合入 Luau 注册动作、精确整数、复制前预算、Packaged Player 授权文本等待与 Web bundle 拒绝边界，并接入 CMVS 353 原生标题与 VM 错误定位。当前源码基线 `ce25a26e2` 的 root workspace 测试 850 项通过、19 项按原条件跳过；root all-target Clippy、同树 Headless 构建及独立 `web-code-check` Clippy 通过。首轮默认并行编译因 Windows 提交内存不足失败，改用同一 target/profile 的 `-j 1` 后完整测试通过，未修改宿主配置或跳过测试。
+
+Editor 直接消费者的 all-target Clippy 与完整普通测试通过，18 项通过、3 项按原条件跳过；CMVS 增量 all-target Clippy 与 213 项普通测试通过，1 项 GPU fixture 保持忽略。三个 workspace 的格式与 223 页文档检查通过。没有重复无关 Emulator 全量或 GPU 流程。CLI 测试覆盖真实 Cook/package、等待保存恢复与 Headless 物理输入；这不代表窗口视觉、可听音频或浏览器实际流程通过。既有无动作 NativeVN 包未因本次可选 section 重 Cook，旧 policy v1 槽仍拒绝且保护原文件。Editor GUI、Android 真机保持暂停，Sandbox 阻塞和 CMVS 首 advance 的 VM_STRING_TAG 尚未解除。
+
 ## 2026-09-26 Web 静态 session 消费链
 
 Web Player 删除对已移除动态 provider 与每帧三种 hash 的引用；浏览器输入观察和原生/CDP 报告统一读取真实 session、fixed step 与 typed route/terminal/choice。输入消费与 route 使用同一观察 trace hash，跨 session 拼接拒绝；Web 观察 schema 升级 v2、输入 transcript 升级 v3，旧 schema 直接拒绝。平台 Web 回调复用现有语义 action 枚举，移除多余字符串/布尔参数组合。四个受影响 crate 增量测试 62 项通过、1 项按原条件跳过，带 `web-code-check` 的 all-target Clippy、fmt/docs 和同树 Headless 构建通过。此前 Linux/macOS 报告 fixture 使用不同的消费与路由 trace hash，已按真实同一次观察绑定修正；不放宽校验。此次未进行浏览器实际流程，也不声明 Web policy IO 支持。
@@ -8,7 +14,7 @@ Web Player 删除对已移除动态 provider 与每帧三种 hash 的引用；�
 
 CMVS 原生 352 需要实际设置窗口标题。Family API v8 添加 `SetTitle`、长度与控制字符校验，空标题保留原生清空语义；v9 随后加入有界 RGBA8 small-icon 命令，保留原生 143 与标题 352 的不同语义。公共类型与契约先提交，Manager 现已接入：标题保持到显式替换，空串清空；NullAudio 标记不被覆盖；small icon 复用 winit 的 Win32/X11 能力，其他后端明确拒绝。关闭或失败恢复 Manager 标题与默认图标。API vtable、Manager 状态与现有五个 Family 的 all-target Clippy 已通过；集成标题/图标消费者后 Emulator workspace 测试 604 项通过、34 项按原条件跳过，fmt 与文档检查通过；独立外部核心六项流程通过，包含标题/图标在 Headless 上明确拒绝并取消关闭；真实窗口标题/图标视觉尚未验收。
 
-CMVS 已接入原生 352 标题与 143 图标。旧探针未应用 `SCRIPT_INIT_PATH`，错误地从归档内同名脚本启动；其 129 `RESOURCE_NOT_FOUND` 及此前各 opcode 进度只能说明该错误入口的局部执行，不能作为正确原生冷启动结果。正确入口已修复并重试，随后接入 354 原生有界存档标题 buffer，增量 209 项通过、1 项 GPU fixture 跳过。正确 bootstrap 已加载后续脚本，但首 advance 停在 353 标题 prefix 未绑定；没有向 Host 交付窗口请求，也没有完成首 tick、正文或帧。Host 标题/图标视觉仍未实际验收。
+CMVS 已接入原生 352 标题与 143 图标。旧探针未应用 `SCRIPT_INIT_PATH`，错误地从归档内同名脚本启动；其 129 `RESOURCE_NOT_FOUND` 及此前各 opcode 进度只能说明该错误入口的局部执行，不能作为正确原生冷启动结果。正确入口已修复并重试，随后接入 354 原生有界存档标题 buffer，增量 209 项通过、1 项 GPU fixture 跳过。随后已接入 353 的原生 prefix/suffix 拼接与容量校验；正确入口最新 probe 仍在首 advance 返回 VM_STRING_TAG，尚未确定具体非 Command 指令及是否到达 353。最终 kind/offset 诊断尚未重新运行 GPU probe；没有向 Host 交付窗口请求，也没有完成首 tick、正文或帧。Host 标题/图标视觉仍未实际验收。
 
 当前集成树只有 FVP、Artemis、Siglus、Musica、CMVS 五个 Family 适配 crate；KrKr 来源存在于另一工作线，尚未接入此活动 workspace，不能将五核检查称为六核完成。
 
@@ -27,7 +33,7 @@ policy crate 30 项测试与 all-target Clippy 通过，覆盖重复 source 实�
 
 新增回归覆盖同一 source 的重复实例、系统页暂停/恢复、阻塞 IO 关闭、损坏 continuation/越权资源拒绝、有界 section 取消和恢复后再保存。实际 CLI Cook→package→Player-VN pending 保存/恢复及无输入继续后的物理输入 Headless 流程通过；修复了首条异步动作尚未启动 UI 时恢复错误通知 Yakui context 的问题。存档 policy component 升至 v2，旧槽明确拒绝；包增加可选动作 section，普通无动作包不需配置 entry。Web native worker 仍明确不支持。10 个直接受影响 crate 的 all-target Clippy、fmt 与文档检查通过；policy 30 项、VN session 24 项、Player-VN 92 项、Player library 11 项、Cook 7 项、CLI 5 项及 script/core/package 增量测试通过。Player 列表预检和加载均在替换会话前拒绝旧 policy v1，沿现有 unavailable 状态保护原槽。
 
-额外启用 Web code-check 时发现冻结基线遗留断链：Web Player 仍引用已删除的 provider ID 和帧内摘要字段，编译失败；Web platform 另有 callback 类型复杂度与参数数量 Clippy 失败。对应文件由平台整合批处理，本批没有恢复旧 API。默认 native 检查通过不能替代该 feature 检查。本轮没有执行原生窗口、GPU 画面或真实声音验收；Android 真机和 Editor GUI 继续暂停。
+额外启用 Web code-check 时发现冻结基线遗留断链：Web Player 仍引用已删除的 provider ID 和帧内摘要字段，编译失败；Web platform 另有 callback 类型复杂度与参数数量 Clippy 失败。对应断链已由前述 Web 静态 session 消费链修复，没有恢复旧 API；整合后的 feature 检查单独执行，默认 native 检查不能代替它。本轮没有执行原生窗口、GPU 画面或真实声音验收；Android 真机和 Editor GUI 继续暂停。
 
 ## 2026-09-26 最终集成检查
 
@@ -35,7 +41,7 @@ policy crate 30 项测试与 all-target Clippy 通过，覆盖重复 source 实�
 
 随后补入两项局部修复：Editor 对合法扩展命令的 warning 分类保持一致，使第二次缓动/关键帧编辑与撤销可用；CMVS command 691 恢复原生只读存档目录语义。前者不改变 schema，后者只调整 CMVS 私有 VM 状态。修复后 VN Editor 7 项、CMVS 200 项普通测试通过，CMVS 1 项按原条件跳过；两 crate 的 all-target Clippy 通过。Editor 再次完整检查通过，18 项通过、3 项跳过。共享包与存档格式仍以本页 Timeline 小节为准，旧槽不得覆盖。
 
-CMVS 先前有界 probe 实际运行了原版 CPZ 脚本和 DX12 GPU，但 Family 跳过 `SCRIPT_INIT_PATH`，误选 CPZ 内部同名 start.ps3；不能称为正确原生冷启动已跨过 691/692/296/352/143。原生应先执行配置目录内的 loose bootstrap，原版与副本均完整存在。现在统一 config slot0→boot→后续 call 的原生搜索域，删除 profile 全归档入口扫描；各动作独立回归仍有效。正确入口已单独执行有界真实 GPU probe：索引约 0.20 秒、DX12 discrete 约 0.97 秒、open 约 0.98 秒，正确 bootstrap 已执行并加载后续脚本，首次 advance 在后续脚本 command 354 返回 ACTION_UNBOUND，约 1.14 秒正常关闭且自有进程退出。354 已改为核心持有原生存档标题缓冲，按 CP932 字节的 128 上限复制或保留旧值并 OR 错误位，删除伪 Host 动作；209 项 unit、Clippy all-target、fmt 与文档检查通过，1 项 GPU fixture 忽略；原生存档写回仍未实现。随后正确入口真实 GPU probe 已跨 354：索引约 0.20 秒、DX12 discrete 约 1.03 秒、open 约 1.05 秒，首 advance 在 353 返回 WINDOW_CAPTION（标题前缀未绑定），约 1.21 秒关闭且无残留进程，本批冻结。353现读取352拥有的288标题前缀，复制实际后缀至12816，按原生FONT_SHIFT_JIS配置选择全角空格或两个ASCII空格，并经现有SetTitle提交；原生128字节拼接容量超限明确拒绝，私有VM snapshot升至9、拒绝旧版本。213项unit通过，1项GPU fixture忽略，Clippy通过。正确入口有界GPU复测首advance仍报VM_STRING_TAG，未定位具体非Command指令/offset，是否实际到达353仍未知；已补全部VM指令kind/offset错误上下文及五类指令回归，最终诊断未再GPU复测，本批冻结。仍无完成首 tick、267 正文、图像帧、Host 窗口请求交付、输入、PCM 或实际声音结果。Windows Sandbox 仍受 `0x80370106` 阻断，未进行本基线 Player 真实交互和保存恢复；Editor GUI 与 Android 真机保持暂停。原生 policy IO 当前仅接 embedding session，Packaged Player 尚无资源授权 adapter，Web 明确拒绝。Linux 回传的局部结果不替代本次最终基线的 Linux 检查，远端 CI 与实际声音也未计通过。
+CMVS 先前有界 probe 实际运行了原版 CPZ 脚本和 DX12 GPU，但 Family 跳过 `SCRIPT_INIT_PATH`，误选 CPZ 内部同名 start.ps3；不能称为正确原生冷启动已跨过 691/692/296/352/143。原生应先执行配置目录内的 loose bootstrap，原版与副本均完整存在。现在统一 config slot0→boot→后续 call 的原生搜索域，删除 profile 全归档入口扫描；各动作独立回归仍有效。正确入口已单独执行有界真实 GPU probe：索引约 0.20 秒、DX12 discrete 约 0.97 秒、open 约 0.98 秒，正确 bootstrap 已执行并加载后续脚本，首次 advance 在后续脚本 command 354 返回 ACTION_UNBOUND，约 1.14 秒正常关闭且自有进程退出。354 已改为核心持有原生存档标题缓冲，按 CP932 字节的 128 上限复制或保留旧值并 OR 错误位，删除伪 Host 动作；209 项 unit、Clippy all-target、fmt 与文档检查通过，1 项 GPU fixture 忽略；原生存档写回仍未实现。随后正确入口真实 GPU probe 已跨 354：索引约 0.20 秒、DX12 discrete 约 1.03 秒、open 约 1.05 秒，首 advance 在 353 返回 WINDOW_CAPTION（标题前缀未绑定），约 1.21 秒关闭且无残留进程，本批冻结。353现读取352拥有的288标题前缀，复制实际后缀至12816，按原生FONT_SHIFT_JIS配置选择全角空格或两个ASCII空格，并经现有SetTitle提交；原生128字节拼接容量超限明确拒绝，私有VM snapshot升至9、拒绝旧版本。213项unit通过，1项GPU fixture忽略，Clippy通过。正确入口有界GPU复测首advance仍报VM_STRING_TAG，未定位具体非Command指令/offset，是否实际到达353仍未知；已补全部VM指令kind/offset错误上下文及五类指令回归，最终诊断未再GPU复测，本批冻结。仍无完成首 tick、267 正文、图像帧、Host 窗口请求交付、输入、PCM 或实际声音结果。Windows Sandbox 仍受 `0x80370106` 阻断，未进行本基线 Player 真实交互和保存恢复；Editor GUI 与 Android 真机保持暂停。Packaged Player 现已接入包内授权文本预载与 owned worker，运行期只读内存；Web runtime 和单独 Web bundle 均明确拒绝非空 policy action binding。Linux 回传的局部结果不替代本次最终基线的 Linux 检查，远端 CI 与实际声音也未计通过。
 
 ## 2026-09-26 Linux 完整视频流
 
