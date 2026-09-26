@@ -107,3 +107,7 @@ CMVS 普通挂载现在只读取 CPZ header/index，校验索引身份、角色�
 353 现从352写入的288缓冲读取标题前缀，将实际参数复制到12816后缀缓冲，经现有 Family SetTitle 提交组合标题；354的存档标题缓冲保持独立。`initial.cfg` 的 `CMVS_INIT_CFG.FONT_SHIFT_JIS` 缺省为1：非零使用原生 CP932 全角空格，零使用两个 ASCII 空格，选择存入已有 process_global_words 并随 VM 恢复。原生拼接使用128字节栈数组且没有越界检查；本实现对组合 CP932 字节数达到128明确拒绝，并保留旧后缀，不模拟内存破坏。旧固定空格片段已删除，私有 VM snapshot 升至9并拒绝旧版本，Family API不变。213项 unit 通过、1项 GPU fixture忽略，覆盖分隔符、空后缀、多字节边界与恢复。
 
 353批正确入口有界 GPU probe 仍在首 advance 返回 `VM_STRING_TAG`。追加 Command 诊断后的同配置复测：索引约0.21秒、DX12 discrete约1.51秒、open约1.53秒、close约1.74秒；错误未经过 Command 上下文，具体非 Command 指令、offset以及是否已经到达353仍未定位。现已统一为全部 VM 指令和 action 错误追加 kind/offset（Command另含id），补充五类指令诊断回归；该最终诊断未再进行 GPU 复测。本批冻结，仍无完成首 tick、Host标题交付、图像/文字帧、输入或音频通过，原存档未写入。
+
+正确入口后续定位：统一诊断将 VM_STRING_TAG 定位到 value expression offset 200324。对照原版46F180，0x201表达式中的0x170赋值必须按源记录的tag/value填充字符串缓冲，再按目标记录tag/value写入；原实现错误地用目标tag解释源payload。修复仅调整执行解析，不改变私有snapshot或字符串域；回归以相同payload分别读取池、local data和global来源，并检查失败保留目标及保存恢复。实际首tick/文字仍待修复后的GPU流程确认。
+
+本批 215 项 unit 通过，1 项 GPU fixture 忽略，all-target Clippy、fmt 与文档检查通过。正确入口实际 GPU 复测已跨过 offset 200324 的赋值：索引约 0.48 秒、DX12 discrete 约 2.40 秒、open 约 2.45 秒；首 advance 的下一阻断是 command 548 at offset 200462，返回 ACTION_UNBOUND，约 3.32 秒正常关闭且无残留进程。尚无完整首 tick、帧、267 正文、Host 请求交付、输入或音频结果。

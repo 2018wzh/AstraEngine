@@ -105,7 +105,7 @@ pub(super) fn run_value_expression(
                 append_value_entry_to_buffer(state, second_tag, second_value)?;
             }
             crate::CmvsPs2aValueExpressionToken::Operator { opcode: 0x170, .. } => {
-                let (_, value_word) = entries.pop().ok_or_else(|| {
+                let (source_tag, value_word) = entries.pop().ok_or_else(|| {
                     invalid(
                         "ASTRA_EMU_CMVS_VM_VALUE_EXPRESSION",
                         "CMVS value-expression assignment has no value operand",
@@ -117,10 +117,9 @@ pub(super) fn run_value_expression(
                         "CMVS value-expression assignment has no target operand",
                     )
                 })?;
-                // `sub_46D270(target_tag, value_word)` materializes the
-                // value into the assembly buffer; `sub_46E250` then stores
-                // the buffer through the target tag.
-                append_value_entry_to_buffer(state, target_tag, value_word)?;
+                // 46F180 materializes the top source record through its own
+                // tag, then passes the next record's target tag to 46E250.
+                append_value_entry_to_buffer(state, source_tag, value_word)?;
                 materialize_message_buffer(state, target_tag, target_payload)?;
             }
             _ => {

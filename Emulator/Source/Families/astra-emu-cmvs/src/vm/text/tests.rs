@@ -1,5 +1,115 @@
 use super::*;
 
+fn global_string_operand(index: u32) -> crate::CmvsPs2aValueExpressionToken {
+    let span = crate::CmvsPs2aSourceSpan {
+        offset: 0,
+        byte_length: 6,
+    };
+    crate::CmvsPs2aValueExpressionToken::NestedStackExpression {
+        span,
+        expression: Box::new(crate::CmvsPs2aStackExpression {
+            span,
+            nodes: vec![crate::CmvsPs2aStackExpressionNode::Value {
+                span,
+                opcode: 0x100,
+                payload: index,
+            }],
+        }),
+    }
+}
+
+fn assign_global_string(
+    state: &mut CmvsPs2aVmState,
+    source: crate::CmvsPs2aValueExpressionToken,
+) -> Result<(), CoreError> {
+    // 0x201 is the value-expression instruction; its 0x170 postfix assigns.
+    let span = crate::CmvsPs2aSourceSpan {
+        offset: 0,
+        byte_length: 2,
+    };
+    execute_cmvs390_frame(
+        state,
+        &CmvsPs2aInstructionFrame::ValueExpression(crate::CmvsPs2aValueExpression {
+            span,
+            tokens: vec![
+                global_string_operand(5),
+                source,
+                crate::CmvsPs2aValueExpressionToken::Operator {
+                    span,
+                    opcode: 0x170,
+                },
+            ],
+        }),
+    )
+    .map(|_| ())
+}
+
+#[test]
+fn value_assignment_resolves_source_tag_before_writing_global_target() {
+    let span = crate::CmvsPs2aSourceSpan {
+        offset: 0,
+        byte_length: 6,
+    };
+    for (source, expected) in [
+        (
+            crate::CmvsPs2aValueExpressionToken::Value {
+                span,
+                opcode: 0x120,
+                payload: 42,
+            },
+            b"pool".as_slice(),
+        ),
+        (
+            crate::CmvsPs2aValueExpressionToken::Value {
+                span,
+                opcode: 0x125,
+                payload: 42,
+            },
+            b"local".as_slice(),
+        ),
+        (global_string_operand(42), b"global".as_slice()),
+    ] {
+        let mut state = CmvsPs2aVmState::new(0);
+        bind(&mut state, 0, b"pool");
+        state.process_string_slots.insert(42, b"global".to_vec());
+        state.process_string_slots.insert(5, b"old".to_vec());
+        let mut data = vec![0; 42];
+        data.extend_from_slice(b"local\0");
+        state.install_script_data(0, &data).unwrap();
+        assign_global_string(&mut state, source).unwrap();
+        assert_eq!(state.process_string_slots[&5], expected);
+        assert_eq!(state.process_string_slots[&42], b"global");
+        let restored: CmvsPs2aVmState =
+            postcard::from_bytes(&postcard::to_allocvec(&state).unwrap()).unwrap();
+        assert_eq!(restored.process_string_slots[&5], expected);
+    }
+}
+
+#[test]
+fn value_assignment_invalid_source_does_not_replace_target() {
+    let span = crate::CmvsPs2aSourceSpan {
+        offset: 0,
+        byte_length: 6,
+    };
+    for (tag, payload) in [(0x120, 43), (0x125, 42)] {
+        let mut state = CmvsPs2aVmState::new(0);
+        bind(&mut state, 0, b"pool");
+        state.install_script_data(0, b"short\0").unwrap();
+        state.process_string_slots.insert(5, b"keep".to_vec());
+        assert!(assign_global_string(
+            &mut state,
+            crate::CmvsPs2aValueExpressionToken::Value {
+                span,
+                opcode: tag,
+                payload
+            }
+        )
+        .is_err());
+        assert_eq!(state.process_string_slots[&5], b"keep");
+        assert!(state.execution_failed);
+    }
+}
+
 fn bind(state: &mut CmvsPs2aVmState, frame: u16, bytes: &[u8]) {
     state
         .frame_string_values
