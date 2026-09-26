@@ -4,6 +4,7 @@ use astra_emu_family_api::*;
 use astra_media_core::TextureFrame;
 use std::{collections::BTreeMap, sync::Arc};
 mod input;
+mod window;
 const MAX_INSTRUCTIONS: u32 = 1_048_576;
 const MAX_SCRIPT_RESIDENT: u64 = 256 * 1024 * 1024;
 pub(crate) struct CmvsSession {
@@ -17,7 +18,7 @@ pub(crate) struct CmvsSession {
     suspended: bool,
     input: input::InputState,
     failure: Option<FamilyError>,
-    pending_window: Option<FamilyWindowCommand>,
+    pending_window: window::WindowCommands,
     _lease: Lease,
 }
 impl CmvsSession {
@@ -48,7 +49,7 @@ impl CmvsSession {
             suspended: false,
             input: input::InputState::default(),
             failure: None,
-            pending_window: None,
+            pending_window: window::WindowCommands::default(),
             _lease: lease,
         })
     }
@@ -94,10 +95,22 @@ impl CmvsSession {
     }
     fn action(&mut self, action: CmvsPs2aVmAction) -> FamilyResult<()> {
         match action {
-            CmvsPs2aVmAction::SetWindowIcon { .. } => Err(error(
-                "ASTRA_EMU_CMVS_WINDOW_ICON_UNBOUND",
-                "native small-window icon support is not connected",
-            )),
+            CmvsPs2aVmAction::SetWindowIcon { segments } => {
+                match self.archive.load_window_icon(&segments).map_err(core)? {
+                    Some(icon) => {
+                        let (width, height) = icon.dimensions();
+                        self.pending_window.submit(FamilyWindowCommand::SetIcon(
+                            FamilyWindowIcon {
+                                width,
+                                height,
+                                rgba: icon.into_raw().into(),
+                            },
+                        ))?;
+                    }
+                    None => tracing::debug!(event = "cmvs.window.icon_unavailable"),
+                }
+                Ok(())
+            }
             CmvsPs2aVmAction::SetWindowCaption { segments } => {
                 let [CmvsStringSegment::OwnedString(title)] = segments.as_slice() else {
                     return Err(error(
@@ -106,9 +119,7 @@ impl CmvsSession {
                     ));
                 };
                 let command = FamilyWindowCommand::SetTitle(title.clone().into());
-                command.validate()?;
-                self.pending_window = Some(command);
-                Ok(())
+                self.pending_window.submit(command)
             }
             CmvsPs2aVmAction::ScanNativeSaveSlots { count } => self
                 .archive

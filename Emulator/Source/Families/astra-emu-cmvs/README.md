@@ -90,3 +90,6 @@ CMVS 普通挂载现在只读取 CPZ header/index，校验索引身份、角色�
 352 现在在 CMVS 核心解析完整 tagged-string 域并立即拥有标题副本，保留 component+288 和空标题清空语义；Family 通过 v8 `SetTitle` 提交到真实 Host，遵守公共 UTF-8 4096 字节/控制字符边界。Host 窗口线程实际显示仍待连同后续 startup 动作验证。
 
 143 的旧 caption 分类已更正为 `SetWindowIcon`：原版按游戏根拼接图标路径，`LoadImageA(IMAGE_ICON, LR_LOADFROMFILE)` 成功后设置 `WM_SETICON/ICON_SMALL`，失败不阻止脚本。实际目标图标已用 Windows 原生 loader 验证可加载，但本批 Family 图标呈现尚未接入，返回独立 `WINDOW_ICON_UNBOUND`，不伪称已显示。153 的 startup 条件是全局 word2190 大于零；当前真实 system.dat 对应值为零。自定义 cursor 的后续非零分支仍未接 Host。
+
+
+143 的只读图标加载已接公共 v9 `SetIcon`：CMVS 仅启用现有 image 的 ICO feature，按照 [LoadImage 文档](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-loadimagea) 的零尺寸规则选择首图，以有界单 entry 视图交给 image 解码 BMP/PNG，再提交 straight-alpha RGBA8。目录、offset/length、图像尺寸和分配预算均受限，不使用 decoder 默认的最大图选择。缺文件或明确无效图标返回原生 best-effort 结果；越界路径、资源预算或不支持的 decoder 能力明确失败，有效图标不能当缺失忽略。窗口属性队列按类型保留最新值，标题和图标分别交给 Host，避免同一次 advance 相互覆盖。原版图标 256×256 的 Windows loader 只读检查成功；Family/Host 的实际窗口标题和图标显示仍待验证。

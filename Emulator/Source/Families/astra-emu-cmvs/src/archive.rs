@@ -8,6 +8,7 @@ mod settings;
 mod source;
 mod storage;
 mod system_state;
+mod window_icon;
 use source::*;
 
 use std::{

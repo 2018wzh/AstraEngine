@@ -22,7 +22,7 @@ astra-platform-common = { path = "../../../../Engine/Source/Platform/astra-platf
 pollster.workspace = true
 encoding_rs.workspace = true
 flate2.workspace = true
-image.workspace = true
+image = { workspace = true, features = ["ico"] }
 md-5 = "0.10"
 schemars.workspace = true
 serde.workspace = true
