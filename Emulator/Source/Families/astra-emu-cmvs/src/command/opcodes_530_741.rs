@@ -347,15 +347,11 @@ pub(super) fn lookup(command_id: u16) -> Option<CommandFields> {
             CmvsPs2aCommandEffectKind::ScanNativeSaveSlots,
             &OPAQUE_WORD as &[CmvsPs2aCommandStackWord],
         ),
-        // Handler `sub_485DD0` passes `top != 0` with the interpreter
-        // fields at byte offsets 1440 and 15064 to the recovered
-        // presentation-mode helper. Returns 0x4004.
+        // sub_4959A0 sets native save permission (1596), the saved flag
+        // (15064), and the save submenu's enabled state. No GPU operation.
         692 => (
             4,
-            CmvsPs2aCommandEffectKind::TogglePresentationMode {
-                first_field_offset: 1440,
-                second_field_offset: 15064,
-            },
+            CmvsPs2aCommandEffectKind::SetNativeSaveEnabled,
             &[CmvsPs2aCommandStackWord {
                 offset_from_top_bytes: 4,
                 kind: CmvsPs2aCommandStackWordKind::BooleanU32,

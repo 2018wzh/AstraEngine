@@ -227,7 +227,7 @@ impl CmvsPs2aVmState {
             stack_initialized: Vec::new(),
             stack_cursor_bytes: 0,
             call_frame_bases: vec![0],
-            interpreter_words: BTreeMap::from([(1452, 1), (1464, 0)]),
+            interpreter_words: BTreeMap::from([(1452, 1), (1464, 0), (1596, 1), (15064, 0)]),
             process_global_words: BTreeMap::new(),
             process_flag_bits: BTreeSet::new(),
             process_indexed_words: BTreeMap::new(),

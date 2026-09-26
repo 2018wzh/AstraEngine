@@ -2074,18 +2074,27 @@ fn command_548_without_an_owner_handle_pops_and_continues() {
 }
 
 #[test]
-fn command_692_emits_the_presentation_mode_toggle_request() {
+fn command_692_updates_native_save_permission_and_query() {
     let mut state = CmvsPs2aVmState::new(0);
-    push(&mut state, 1);
-    let action = run_command_with_action(&mut state, 692);
-    assert_eq!(
-        action,
-        Some(CmvsPs2aVmAction::TogglePresentationMode {
-            first_field_offset: 1440,
-            second_field_offset: 15064,
-            enabled: true,
-        })
-    );
+    assert!(!state.native_save_enabled());
+    run_command(&mut state, 750);
+    assert_eq!(state.interpreter_words.get(&81220), Some(&1));
+    for (value, expected) in [(0, 0), (1, 1), (u32::MAX, 1), (0, 0)] {
+        push(&mut state, value);
+        assert_eq!(run_command_with_action(&mut state, 692), None);
+        assert_eq!(state.interpreter_words.get(&1596), Some(&expected));
+        assert_eq!(state.interpreter_words.get(&15064), Some(&expected));
+        assert_eq!(state.native_save_enabled(), expected != 0);
+        run_command(&mut state, 750);
+        assert_eq!(state.interpreter_words.get(&81220), Some(&expected));
+        let encoded = postcard::to_allocvec(&state).unwrap();
+        assert_eq!(
+            postcard::from_bytes::<CmvsPs2aVmState>(&encoded).unwrap(),
+            state
+        );
+    }
+    state.interpreter_words.insert(15064, 1);
+    assert!(!state.native_save_enabled());
 }
 
 fn stack_expression(nodes: Vec<crate::CmvsPs2aStackExpressionNode>) -> CmvsPs2aInstructionFrame {

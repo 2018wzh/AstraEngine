@@ -283,17 +283,6 @@ pub(super) fn execute(
             state.scene_words.remove(&(base_word + 2));
             Ok(None)
         }
-        (
-            CmvsPs2aCommandEffectKind::TogglePresentationMode {
-                first_field_offset,
-                second_field_offset,
-            },
-            [(CmvsPs2aCommandStackWordKind::BooleanU32, enabled)],
-        ) => Ok(Some(CmvsPs2aVmAction::TogglePresentationMode {
-            first_field_offset,
-            second_field_offset,
-            enabled: *enabled != 0,
-        })),
         (CmvsPs2aCommandEffectKind::ResetPresentationBuffers, []) => {
             // `sub_45C5A0` clears presentation-manager counters only; the
             // headless presentation has no observable counterpart.

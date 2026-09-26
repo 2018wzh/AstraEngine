@@ -28,6 +28,15 @@ impl CmvsNativeSaveCatalog {
     }
 }
 
+impl CmvsPs2aVmState {
+    /// Native sub_4728B0 requires both the live permission and saved flag.
+    /// Menu/slot eligibility does not imply the native save codec is bound.
+    pub fn native_save_enabled(&self) -> bool {
+        self.interpreter_words.get(&1596).copied().unwrap_or(0) != 0
+            && self.interpreter_words.get(&15064).copied().unwrap_or(0) != 0
+    }
+}
+
 pub(super) fn validate(state: &CmvsPs2aVmState) -> Result<(), CoreError> {
     let Some(catalog) = &state.native_save_catalog else {
         return Ok(());

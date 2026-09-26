@@ -123,6 +123,18 @@ pub(super) fn execute_command(
         | CmvsPs2aCommandEffectKind::CreateEffectChannel { .. } => {
             effect_channels::execute(state, effect_kind, &values)
         }
+        CmvsPs2aCommandEffectKind::SetNativeSaveEnabled => {
+            let [(CmvsPs2aCommandStackWordKind::BooleanU32, enabled)] = values.as_slice() else {
+                return Err(invalid(
+                    "ASTRA_EMU_CMVS_SAVE_PERMISSION",
+                    "invalid native save permission operand",
+                ));
+            };
+            let enabled = u32::from(*enabled != 0);
+            state.interpreter_words.insert(1596, enabled);
+            state.interpreter_words.insert(15064, enabled);
+            Ok(None)
+        }
         CmvsPs2aCommandEffectKind::ScanNativeSaveSlots => {
             let [(CmvsPs2aCommandStackWordKind::OpaqueU32, value)] = values.as_slice() else {
                 return Err(invalid(
@@ -159,7 +171,6 @@ pub(super) fn execute_command(
         | CmvsPs2aCommandEffectKind::StoreScriptSlotPresentationState { .. }
         | CmvsPs2aCommandEffectKind::QuerySceneLayer { .. }
         | CmvsPs2aCommandEffectKind::ClearSceneLayer { .. }
-        | CmvsPs2aCommandEffectKind::TogglePresentationMode { .. }
         | CmvsPs2aCommandEffectKind::ResetPresentationBuffers
         | CmvsPs2aCommandEffectKind::SelectPresentationSlot { .. }
         | CmvsPs2aCommandEffectKind::SelectRenderViewport { .. } => {

@@ -485,13 +485,6 @@ pub enum CmvsPs2aVmAction {
     ScanNativeSaveSlots {
         count: u16,
     },
-    /// The recovered case-692 path asks the host to toggle the presentation
-    /// mode using the two named interpreter fields.
-    TogglePresentationMode {
-        first_field_offset: u16,
-        second_field_offset: u16,
-        enabled: bool,
-    },
     /// The recovered case-153 path asks the host to select the system cursor
     /// with the given index.
     SelectSystemCursor {

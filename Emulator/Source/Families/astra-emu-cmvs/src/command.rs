@@ -1061,12 +1061,8 @@ pub enum CmvsPs2aCommandEffectKind {
     StoreSystemSettingNonNegativeWord {
         setting_field_offset: u16,
     },
-    /// Hands the recovered presentation-mode toggle to the host, naming the
-    /// two interpreter fields the original layout helper consumes.
-    TogglePresentationMode {
-        first_field_offset: u16,
-        second_field_offset: u16,
-    },
+    /// Sets the native save permission and its save-menu state (case 692).
+    SetNativeSaveEnabled,
     /// Appends the resolved private string to the version-pinned string list
     /// proven by case 152 and writes the new list length to the named
     /// interpreter field. List node payloads stay in the script pool.
