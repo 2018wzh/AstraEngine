@@ -47,10 +47,9 @@ pub struct CmvsPs2aVmState {
     /// written by recovered command handlers. Keys are the original buffer
     /// byte offsets; interpreter prefix contents stay unnamed fields.
     pub interpreter_string_buffers: BTreeMap<u16, Vec<CmvsStringSegment>>,
-    /// Private resource references held by the recovered channel setup
-    /// path, keyed by recovered bank and channel index.
-    pub resource_channels:
-        BTreeMap<CmvsResourceChannelBank, BTreeMap<u8, CmvsPs2aPrivateStringReference>>,
+    /// Owned game-relative source paths, keyed by independent native bank
+    /// and slot. Directory paths retain their trailing separator.
+    pub resource_search_paths: BTreeMap<CmvsResourceSearchBank, BTreeMap<u8, String>>,
     /// Opaque object identities held in recovered interpreter slot tables.
     /// Keys pack the version-pinned table byte offset and slot index; values
     /// are deterministic identities assigned by the creation order.
@@ -231,7 +230,7 @@ impl CmvsPs2aVmState {
             process_string_slots: BTreeMap::new(),
             component_words: BTreeMap::new(),
             interpreter_string_buffers: BTreeMap::new(),
-            resource_channels: BTreeMap::new(),
+            resource_search_paths: BTreeMap::new(),
             slot_objects: BTreeMap::new(),
             effect_channels: BTreeMap::new(),
             effect_playback: BTreeMap::new(),

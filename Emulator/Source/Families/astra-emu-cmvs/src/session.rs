@@ -28,7 +28,8 @@ impl CmvsSession {
     ) -> FamilyResult<Self> {
         let mut vm = CmvsPs2aVmState::new(0);
         let script = archive
-            .load_called_script(entry, 0, &mut vm)
+            .resolve_script_uri(entry)
+            .and_then(|uri| archive.load_script(&uri, 0, &mut vm))
             .map_err(core)?;
         let mut scene = CmvsScene::new().map_err(core)?;
         let frame = scene.clear(window.width, window.height).map_err(core)?;
@@ -95,7 +96,10 @@ impl CmvsSession {
                 parent_slot,
                 resource,
             } => {
-                let uri = self.archive.resolve_script_uri(&resource).map_err(core)?;
+                let uri = self
+                    .archive
+                    .resolve_native_resource(&self.vm, CmvsResourceSearchBank::Texture, &resource)
+                    .map_err(core)?;
                 self.scene
                     .bind(CmvsTextureSlot::Parent(parent_slot), &uri, &self.archive)
                     .map_err(core)
@@ -105,7 +109,10 @@ impl CmvsSession {
                 child_id,
                 resource,
             } => {
-                let uri = self.archive.resolve_script_uri(&resource).map_err(core)?;
+                let uri = self
+                    .archive
+                    .resolve_native_resource(&self.vm, CmvsResourceSearchBank::Texture, &resource)
+                    .map_err(core)?;
                 self.scene
                     .bind(
                         CmvsTextureSlot::Child {
@@ -140,8 +147,7 @@ impl CmvsSession {
                 "ASTRA_EMU_CMVS_STORAGE_UNBOUND",
                 "native storage request is not connected",
             )),
-            CmvsPs2aVmAction::PlayChannelSound { .. }
-            | CmvsPs2aVmAction::StartResourceChannel { .. } => Err(error(
+            CmvsPs2aVmAction::PlayChannelSound { .. } => Err(error(
                 "ASTRA_EMU_CMVS_MEDIA_UNBOUND",
                 "native media channel is not connected",
             )),

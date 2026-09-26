@@ -91,6 +91,16 @@ impl CmvsArchive {
     }
 
     pub fn stat(&self, uri: &str) -> Result<ArchiveStat, CoreError> {
+        if let Some(path) = self.native_file(uri)? {
+            return Ok(ArchiveStat {
+                uri: uri.into(),
+                entry_id: None,
+                kind: ArchiveNodeKind::File,
+                size: native::native_size(&path)?,
+                archive_role: None,
+                method: Some("native-file".into()),
+            });
+        }
         if let Some(role) = self.loose_role_from_uri(uri) {
             let source = &self.loose[&role];
             return Ok(ArchiveStat {
@@ -149,6 +159,17 @@ impl CmvsArchive {
                 "ASTRA_EMU_VFS_READ_LIMIT",
                 "VFS read exceeds the bounded range limit",
             ));
+        }
+        if let Some(path) = self.native_file(uri)? {
+            let size = native::native_size(&path)?;
+            let bytes = native::read_native_range(&path, offset, length)?;
+            return Ok(ArchiveReadResult {
+                uri: uri.into(),
+                offset,
+                bytes: bytes.into(),
+                eof: offset + length == size,
+                cache_hit: false,
+            });
         }
         if let Some(role) = self.loose_role_from_uri(uri) {
             let source = &self.loose[&role];
@@ -212,12 +233,7 @@ impl CmvsArchive {
     }
 
     pub fn open_stream(&self, uri: &str) -> Result<Box<dyn ArchiveStream>, CoreError> {
-        if let Some(role) = self.loose_role_from_uri(uri) {
-            let source = &self.loose[&role];
-            let bytes = self.read_loose_range(source, 0, source.byte_size)?;
-            return Ok(Box::new(Cursor::new(bytes)));
-        }
-        let (decoded, _) = self.decode_entry(self.entry(uri)?)?;
+        let (decoded, _) = self.resource_bytes(uri)?;
         Ok(Box::new(Cursor::new(decoded)))
     }
 }

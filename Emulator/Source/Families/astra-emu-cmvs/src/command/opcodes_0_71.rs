@@ -32,25 +32,21 @@ pub(super) fn lookup(command_id: u16) -> Option<CommandFields> {
             },
             &OPAQUE_WORD as &[CmvsPs2aCommandStackWord],
         ),
-        // Handlers `sub_47BC30`, `sub_47BED0`, `sub_47B980` and `sub_47BDA0`
-        // all forward the stack-top channel and the resolved stack/8 string
-        // (prefixed through the recovered buffer helper) to `sub_48AE50`,
-        // which rejects channels above four and otherwise rebuilds the
-        // five-slot channel record. All return 0x4008.
-        16 | 18 | 19 | 20 => (
+        // Identical setup helpers receive different interpreter-owned tables.
+        16 | 17 | 18 | 19 | 20 | 23 | 24 | 26 => (
             8,
-            CmvsPs2aCommandEffectKind::StartResourceChannel {
-                bank: CmvsResourceChannelBank::FiveSlotSetup,
-            },
-            &RESOURCE_CHANNEL_WORDS as &[CmvsPs2aCommandStackWord],
-        ),
-        // Handlers `sub_47B720` and `sub_47B5F0` forward the same
-        // channel/string pair to `sub_4405F0`, whose bounds check rejects
-        // channels at or above ten. Both return 0x4008.
-        17 | 23 => (
-            8,
-            CmvsPs2aCommandEffectKind::StartResourceChannel {
-                bank: CmvsResourceChannelBank::TenSlotSetup,
+            CmvsPs2aCommandEffectKind::ConfigureResourceSearch {
+                bank: match command_id {
+                    16 => CmvsResourceSearchBank::Script,
+                    17 => CmvsResourceSearchBank::Texture,
+                    18 => CmvsResourceSearchBank::Native0d0c,
+                    19 => CmvsResourceSearchBank::CrossfadeAudio,
+                    20 => CmvsResourceSearchBank::Native0d14,
+                    23 => CmvsResourceSearchBank::Native0d00,
+                    24 => CmvsResourceSearchBank::Native0d04,
+                    26 => CmvsResourceSearchBank::Native0d18,
+                    _ => unreachable!(),
+                },
             },
             &RESOURCE_CHANNEL_WORDS as &[CmvsPs2aCommandStackWord],
         ),
@@ -81,24 +77,6 @@ pub(super) fn lookup(command_id: u16) -> Option<CommandFields> {
                 ensure_directories: true,
             },
             &TAGGED_STRING_WORD as &[CmvsPs2aCommandStackWord],
-        ),
-        // Handler `sub_47BAB0` forwards the same pair to `sub_4331B0`,
-        // whose bounds check rejects channels above six. Returns 0x4008.
-        24 => (
-            8,
-            CmvsPs2aCommandEffectKind::StartResourceChannel {
-                bank: CmvsResourceChannelBank::SevenSlotSetup,
-            },
-            &RESOURCE_CHANNEL_WORDS as &[CmvsPs2aCommandStackWord],
-        ),
-        // Handler `sub_47B850` forwards the same pair to `sub_441A70`,
-        // whose bounds check rejects channels above four. Returns 0x4008.
-        26 => (
-            8,
-            CmvsPs2aCommandEffectKind::StartResourceChannel {
-                bank: CmvsResourceChannelBank::FiveSlotAltSetup,
-            },
-            &RESOURCE_CHANNEL_WORDS as &[CmvsPs2aCommandStackWord],
         ),
         // Handler `sub_47C270` copies the top stack word into `this+400`
         // (dword index; byte offset 1600) and returns 0x4004. Byte offset

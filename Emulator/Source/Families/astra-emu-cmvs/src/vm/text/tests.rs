@@ -103,7 +103,7 @@ fn restore_retains_slot_values_without_serializing_script_pool() {
 
 #[test]
 fn legacy_and_unknown_snapshot_versions_are_rejected_at_the_prefix() {
-    for bytes in [vec![0], vec![1], vec![3]] {
+    for bytes in [vec![0], vec![1], vec![2], vec![4]] {
         assert!(postcard::from_bytes::<CmvsPs2aVmState>(&bytes).is_err());
     }
     let mut state = CmvsPs2aVmState::new(0);
@@ -153,4 +153,69 @@ fn data_string_domain_reads_mutable_segment_and_preserves_partial_tail() {
     assert_eq!(resolve_resource_name(&restored, 0x4000_0005).unwrap(), "x");
     state.install_script_data(0, b"unterminated").unwrap();
     assert!(resolve_resource_name(&state, 0x4000_0000).is_err());
+}
+
+#[test]
+fn native_search_configuration_is_owned_isolated_and_restorable() {
+    let mut state = CmvsPs2aVmState::new(0);
+    for (id, bank, path) in [
+        (16, CmvsResourceSearchBank::Script, "scripts.cpz"),
+        (17, CmvsResourceSearchBank::Texture, "image.cpz"),
+        (18, CmvsResourceSearchBank::Native0d0c, "voice.cpz"),
+        (19, CmvsResourceSearchBank::CrossfadeAudio, "audio.cpz"),
+        (20, CmvsResourceSearchBank::Native0d14, "other.cpz"),
+        (23, CmvsResourceSearchBank::Native0d00, "second.cpz"),
+        (24, CmvsResourceSearchBank::Native0d04, "third.cpz"),
+        (26, CmvsResourceSearchBank::Native0d18, "fourth.cpz"),
+    ] {
+        state
+            .process_string_slots
+            .insert(0, path.as_bytes().to_vec());
+        push_word(&mut state, 0x8000_0000).unwrap();
+        push_word(&mut state, 0).unwrap();
+        assert_eq!(command(&mut state, id).unwrap(), None);
+        assert_eq!(state.resource_search_paths[&bank][&0], path);
+    }
+    state.process_string_slots.clear();
+    state.current_frame = 1;
+    let bytes = postcard::to_allocvec(&state).unwrap();
+    let restored: CmvsPs2aVmState = postcard::from_bytes(&bytes).unwrap();
+    validate_cmvs390_vm_state(&restored).unwrap();
+    assert_eq!(restored.resource_search_paths, state.resource_search_paths);
+    assert_eq!(restored.resource_search_paths.len(), 8);
+}
+
+#[test]
+fn invalid_search_path_preserves_previous_binding_and_invalid_slot_is_native_noop() {
+    let mut state = CmvsPs2aVmState::new(0);
+    state.resource_search_paths.insert(
+        CmvsResourceSearchBank::Script,
+        BTreeMap::from([(0, "first.cpz".into())]),
+    );
+    state
+        .process_string_slots
+        .insert(0, b"../escape.cpz".to_vec());
+    push_word(&mut state, 0x8000_0000).unwrap();
+    push_word(&mut state, 0).unwrap();
+    assert_eq!(
+        command(&mut state, 16).unwrap_err().code(),
+        "ASTRA_EMU_CMVS_RESOURCE_PATH"
+    );
+    assert_eq!(
+        state.resource_search_paths[&CmvsResourceSearchBank::Script][&0],
+        "first.cpz"
+    );
+    let mut state = CmvsPs2aVmState::new(0);
+    push_word(&mut state, 0xc000_0000).unwrap();
+    push_word(&mut state, 5).unwrap();
+    assert_eq!(command(&mut state, 16).unwrap(), None);
+    assert!(state.resource_search_paths.is_empty());
+    state.resource_search_paths.insert(
+        CmvsResourceSearchBank::Script,
+        BTreeMap::from([(5, "a.cpz".into())]),
+    );
+    assert_eq!(
+        validate_cmvs390_vm_state(&state).unwrap_err().code(),
+        "ASTRA_EMU_CMVS_RESOURCE_SLOT"
+    );
 }

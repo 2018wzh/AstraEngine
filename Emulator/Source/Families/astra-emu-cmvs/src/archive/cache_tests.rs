@@ -1,18 +1,17 @@
 use super::*;
 
-#[test]
-fn cached_ranges_share_storage_and_survive_cache_release() {
+pub(super) fn fixture() -> (tempfile::TempDir, CmvsArchive) {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("archive.cpz");
     std::fs::write(&path, b"fixture source").unwrap();
     let metadata = std::fs::metadata(&path).unwrap();
     let hash = Hash256::from_sha256(b"fixture");
     let bytes = OwnedByteBuffer::from(b"decoded bytes".to_vec());
-    let pointer = bytes.as_ptr();
     let uri = "cmvs:/test.bin";
     // Prepopulate only the decoded-entry cache. This test exercises storage
     // ownership and source invalidation, not CPZ decryption or mounting.
     let archive = CmvsArchive {
+        game_root: None,
         mount_id: "test".into(),
         prefix: "cmvs:/".into(),
         manifest: ArchiveManifest {
@@ -53,6 +52,7 @@ fn cached_ranges_share_storage_and_survive_cache_release() {
         entries: BTreeMap::from([(
             uri.into(),
             MountedEntry {
+                ordinal: 0,
                 uri: uri.into(),
                 entry_id: "test-0".into(),
                 archive: 0,
@@ -84,6 +84,22 @@ fn cached_ranges_share_storage_and_survive_cache_release() {
         cache: None,
         ephemeral_entry: Mutex::new(Some(("test-0".into(), bytes))),
     };
+    (root, archive)
+}
+
+#[test]
+fn cached_ranges_share_storage_and_survive_cache_release() {
+    let (_root, archive) = fixture();
+    let path = archive.archives[0].path.clone();
+    let uri = "cmvs:/test.bin";
+    let pointer = archive
+        .ephemeral_entry
+        .lock()
+        .unwrap()
+        .as_ref()
+        .unwrap()
+        .1
+        .as_ptr();
     let first = archive.read_range(uri, 0, 7).unwrap();
     let second = archive.read_range(uri, 8, 5).unwrap();
     assert!(first.cache_hit && second.cache_hit);

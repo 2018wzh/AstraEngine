@@ -76,7 +76,7 @@ pub(super) fn execute_command(
         | CmvsPs2aCommandEffectKind::StoreProcessStringRange => {
             memory::execute(state, effect_kind, &values)
         }
-        CmvsPs2aCommandEffectKind::StartResourceChannel { .. }
+        CmvsPs2aCommandEffectKind::ConfigureResourceSearch { .. }
         | CmvsPs2aCommandEffectKind::PlayChannelSound { .. }
         | CmvsPs2aCommandEffectKind::RegisterResourceChannelSlot { .. }
         | CmvsPs2aCommandEffectKind::ClearResourceSlot { .. } => {

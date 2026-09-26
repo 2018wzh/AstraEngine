@@ -89,7 +89,7 @@ impl CmvsArchive {
                         "CMVS entry range exceeds its source archive",
                     ));
                 }
-                let uri = format!("{prefix}{}", descriptor.relative_path);
+                let uri = format!("{prefix}archive/{role}/{}", descriptor.relative_path);
                 validate_archive_uri(&prefix, &uri)?;
                 let entry_id = format!("{role}-{ordinal}");
                 if !entry_ids.insert(entry_id.clone()) || entries.contains_key(&uri) {
@@ -101,6 +101,7 @@ impl CmvsArchive {
                 entries.insert(
                     uri.clone(),
                     MountedEntry {
+                        ordinal,
                         uri,
                         entry_id,
                         archive: archive_index,
@@ -233,6 +234,7 @@ impl CmvsArchive {
         };
         manifest.validate(MAX_ENTRIES)?;
         Ok(Self {
+            game_root: None,
             mount_id,
             prefix,
             manifest,

@@ -17,7 +17,7 @@ impl CmvsArchive {
         frame: u16,
         vm: &mut CmvsPs2aVmState,
     ) -> Result<CmvsScript, CoreError> {
-        let uri = self.resolve_script_uri(name)?;
+        let uri = self.resolve_native_resource(vm, crate::CmvsResourceSearchBank::Script, name)?;
         self.load_script(&uri, frame, vm)
     }
 

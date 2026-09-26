@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn exposes_resource_channel_aliases_with_the_same_contract() {
+fn keeps_independent_native_resource_search_banks() {
     let words = vec![
         CmvsPs2aCommandStackWord {
             offset_from_top_bytes: 4,
@@ -12,15 +12,15 @@ fn exposes_resource_channel_aliases_with_the_same_contract() {
             kind: CmvsPs2aCommandStackWordKind::TaggedStringReference,
         },
     ];
-    let expected: [(u16, CmvsResourceChannelBank); 8] = [
-        (16, CmvsResourceChannelBank::FiveSlotSetup),
-        (17, CmvsResourceChannelBank::TenSlotSetup),
-        (18, CmvsResourceChannelBank::FiveSlotSetup),
-        (19, CmvsResourceChannelBank::FiveSlotSetup),
-        (20, CmvsResourceChannelBank::FiveSlotSetup),
-        (23, CmvsResourceChannelBank::TenSlotSetup),
-        (24, CmvsResourceChannelBank::SevenSlotSetup),
-        (26, CmvsResourceChannelBank::FiveSlotAltSetup),
+    let expected: [(u16, CmvsResourceSearchBank); 8] = [
+        (16, CmvsResourceSearchBank::Script),
+        (17, CmvsResourceSearchBank::Texture),
+        (18, CmvsResourceSearchBank::Native0d0c),
+        (19, CmvsResourceSearchBank::CrossfadeAudio),
+        (20, CmvsResourceSearchBank::Native0d14),
+        (23, CmvsResourceSearchBank::Native0d00),
+        (24, CmvsResourceSearchBank::Native0d04),
+        (26, CmvsResourceSearchBank::Native0d18),
     ];
     for (command_id, bank) in expected {
         assert_eq!(
@@ -28,7 +28,7 @@ fn exposes_resource_channel_aliases_with_the_same_contract() {
             Some(CmvsPs2aCommandContract {
                 command_id,
                 stack_pop_bytes: 8,
-                effect_kind: CmvsPs2aCommandEffectKind::StartResourceChannel { bank },
+                effect_kind: CmvsPs2aCommandEffectKind::ConfigureResourceSearch { bank },
                 stack_words: words.clone(),
             }),
             "command {command_id} must match its recovered channel bank"

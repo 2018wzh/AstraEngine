@@ -7,10 +7,10 @@ pub(super) fn execute(
 ) -> Result<Option<CmvsPs2aVmAction>, CoreError> {
     match (effect_kind, values) {
         (
-            CmvsPs2aCommandEffectKind::StartResourceChannel { bank },
+            CmvsPs2aCommandEffectKind::ConfigureResourceSearch { bank },
             [(CmvsPs2aCommandStackWordKind::OpaqueU32, channel), (CmvsPs2aCommandStackWordKind::TaggedStringReference, resource)],
         ) => {
-            // The recovered setup handlers return without creating a player
+            // The recovered setup handlers leave the table untouched
             // when the channel is outside each bank's fixed slot table.
             let Ok(channel) = u8::try_from(*channel) else {
                 return Ok(None);
@@ -18,17 +18,14 @@ pub(super) fn execute(
             if channel >= bank.slot_count() {
                 return Ok(None);
             }
-            let resource = tag_zero_reference(*resource)?;
+            let resource = resolve_string_value(state, *resource)?;
+            crate::archive::native::validate_search_path(&resource)?;
             state
-                .resource_channels
+                .resource_search_paths
                 .entry(bank)
                 .or_default()
                 .insert(channel, resource);
-            Ok(Some(CmvsPs2aVmAction::StartResourceChannel {
-                bank,
-                channel,
-                resource,
-            }))
+            Ok(None)
         }
         (
             CmvsPs2aCommandEffectKind::PlayChannelSound {

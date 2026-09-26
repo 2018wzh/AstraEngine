@@ -1,5 +1,6 @@
 mod access;
 mod mount;
+pub(crate) mod native;
 mod scripts;
 mod source;
 use source::*;
@@ -64,6 +65,7 @@ struct SourceStamp {
 
 #[derive(Clone)]
 struct MountedEntry {
+    ordinal: usize,
     uri: String,
     entry_id: String,
     archive: usize,
@@ -71,6 +73,7 @@ struct MountedEntry {
 }
 
 pub struct CmvsArchive {
+    game_root: Option<PathBuf>,
     mount_id: String,
     prefix: String,
     manifest: ArchiveManifest,
@@ -157,7 +160,7 @@ impl CmvsArchive {
     /// documented cross-entry dependency in the supported reference variants.
     pub fn decode_pb_image(&self, uri: &str) -> Result<PbDecodedImage, CoreError> {
         validate_archive_uri(&self.prefix, uri)?;
-        let (source, _) = self.decode_entry(self.entry(uri)?)?;
+        let (source, _) = self.resource_bytes(uri)?;
         if source.starts_with(crate::PB2_MAGIC) {
             return decode_pb2_image(&source);
         }
@@ -166,13 +169,13 @@ impl CmvsArchive {
 
     pub fn pb3_image_type(&self, uri: &str) -> Result<u16, CoreError> {
         validate_archive_uri(&self.prefix, uri)?;
-        let (source, _) = self.decode_entry(self.entry(uri)?)?;
+        let (source, _) = self.resource_bytes(uri)?;
         Ok(parse_pb3_metadata(&source)?.image_type)
     }
 
     pub fn pb_image_type(&self, uri: &str) -> Result<u16, CoreError> {
         validate_archive_uri(&self.prefix, uri)?;
-        let (source, _) = self.decode_entry(self.entry(uri)?)?;
+        let (source, _) = self.resource_bytes(uri)?;
         if source.starts_with(crate::PB2_MAGIC) {
             return Ok(parse_pb2_metadata(&source)?.image_type);
         }
@@ -191,7 +194,7 @@ impl CmvsArchive {
                 "CMVS PB3 base-image dependency is cyclic or exceeds its depth budget",
             ));
         }
-        let (source, _) = self.decode_entry(self.entry(uri)?)?;
+        let (source, _) = self.resource_bytes(uri)?;
         let metadata = parse_pb3_metadata(&source)?;
         chain.push(uri.into());
         match metadata.image_type {

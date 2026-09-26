@@ -49,7 +49,7 @@ pub fn mount_cmvs(game_root: &Path, profile_path: &Path) -> Result<CmvsArchive, 
             ));
         }
     }
-    CmvsArchive::mount_with_cache(
+    let mut archive = CmvsArchive::mount_with_cache(
         "cmvs.local".into(),
         "cmvs:/".into(),
         archives,
@@ -58,7 +58,9 @@ pub fn mount_cmvs(game_root: &Path, profile_path: &Path) -> Result<CmvsArchive, 
         hash,
         hash,
         None,
-    )
+    )?;
+    archive.bind_game_root(root)?;
+    Ok(archive)
 }
 
 fn resolve_sources(

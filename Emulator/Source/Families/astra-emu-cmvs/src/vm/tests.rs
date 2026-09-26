@@ -2503,48 +2503,6 @@ fn stores_component_constant_from_command_845() {
 }
 
 #[test]
-fn starts_the_recovered_resource_channel_from_command_19() {
-    let mut state = CmvsPs2aVmState::new(0);
-    for value in [17, 2] {
-        execute_cmvs390_frame(
-            &mut state,
-            &CmvsPs2aInstructionFrame::Control(CmvsPs2aControlInstruction::PushImmediate {
-                span: SPAN,
-                stack_bytes: 4,
-                value,
-            }),
-        )
-        .unwrap();
-    }
-    let action = execute_cmvs390_frame(
-        &mut state,
-        &CmvsPs2aInstructionFrame::Command {
-            span: SPAN,
-            command_id: 19,
-        },
-    )
-    .unwrap();
-    let reference = CmvsPs2aPrivateStringReference {
-        relative_offset: 17,
-    };
-    assert_eq!(
-        action,
-        Some(CmvsPs2aVmAction::StartResourceChannel {
-            bank: CmvsResourceChannelBank::FiveSlotSetup,
-            channel: 2,
-            resource: reference,
-        })
-    );
-    assert_eq!(
-        state
-            .resource_channels
-            .get(&CmvsResourceChannelBank::FiveSlotSetup)
-            .and_then(|bank| bank.get(&2)),
-        Some(&reference)
-    );
-}
-
-#[test]
 fn executes_a_name_index_call_and_exact_stack_return() {
     let mut state = CmvsPs2aVmState::new(10);
     for value in [u32::MAX, 2, 9] {

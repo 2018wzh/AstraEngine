@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::{
     cmvs390_command_contract, CmvsPs2aCommandEffectKind, CmvsPs2aCommandStackWordKind,
     CmvsPs2aControlInstruction, CmvsPs2aInstructionFrame, CmvsPs2aPrivateStringReference,
-    CmvsResourceChannelBank,
+    CmvsResourceSearchBank,
 };
 
 /// The decoded-script byte budget shared with the PS2A parser; segment
@@ -70,6 +70,17 @@ const MAX_FILTER_CHAIN_RECORDS_PER_BANK: usize = 4096;
 /// execution. The wire payload is untrusted even when its outer envelope and
 /// hash are valid.
 pub fn validate_cmvs390_vm_state(state: &CmvsPs2aVmState) -> Result<(), CoreError> {
+    for (bank, paths) in &state.resource_search_paths {
+        for (slot, path) in paths {
+            if *slot >= bank.slot_count() {
+                return Err(invalid(
+                    "ASTRA_EMU_CMVS_RESOURCE_SLOT",
+                    "resource search slot exceeds native table",
+                ));
+            }
+            crate::archive::native::validate_search_path(path)?;
+        }
+    }
     for (index, bytes) in &state.process_string_slots {
         if *index >= MAX_PROCESS_STRING_SLOTS {
             return Err(invalid(
@@ -378,13 +389,6 @@ pub enum CmvsPs2aVmAction {
     /// Case 778: one bounded table slot object is released; out-of-range
     /// selectors only raise the error mask.
 
-    /// A recovered resource-channel setup request. This is not yet bound to a
-    /// media provider; the host must reject an unbound channel contract.
-    StartResourceChannel {
-        bank: CmvsResourceChannelBank,
-        channel: u8,
-        resource: CmvsPs2aPrivateStringReference,
-    },
     /// The recovered case-56 path binds a private PB resource reference to
     /// one child texture. The host must resolve it through the active VFS and
     /// explicitly bound CMVS image decoder before presenting it.

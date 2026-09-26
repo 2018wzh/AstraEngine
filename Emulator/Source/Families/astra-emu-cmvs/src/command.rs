@@ -447,12 +447,10 @@ pub enum CmvsPs2aCommandEffectKind {
         field_offset: u16,
         value: u32,
     },
-    /// Begins the recovered CMVS resource-channel setup boundary for one of
-    /// the statically proven channel banks. The bank fingerprint is the
-    /// original setup-handler address; slot counts come from its bounds
-    /// check.
-    StartResourceChannel {
-        bank: CmvsResourceChannelBank,
+    /// Copies the source path into one independent native search table.
+    /// This configures resource lookup; it does not start audio playback.
+    ConfigureResourceSearch {
+        bank: CmvsResourceSearchBank,
     },
     /// Creates one opaque object in the bounded interpreter slot table,
     /// replacing any previous occupant. Out-of-range slots only update the
@@ -1094,32 +1092,31 @@ pub enum CmvsPs2aCommandEffectKind {
     },
 }
 
-/// One statically recovered resource-channel bank. Each bank is a fixed
-/// array of channel records owned by a version-pinned interpreter component;
-/// the discriminant order is part of the serialized contract.
+/// Independent native source tables. Unknown purposes retain their interpreter
+/// field identity instead of merging tables that share an allocation shape.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
 )]
-pub enum CmvsResourceChannelBank {
-    /// Handler `sub_48AE50`; five channel records of 2052 bytes.
-    FiveSlotSetup,
-    /// Handler `sub_4405F0`; ten channel records of 2052 bytes.
-    TenSlotSetup,
-    /// Handler `sub_4331B0`; seven channel records.
-    SevenSlotSetup,
-    /// Handler `sub_441A70`; five channel records.
-    FiveSlotAltSetup,
+pub enum CmvsResourceSearchBank {
+    /// Interpreter field 0xD08, configured by case 16.
+    Script,
+    /// Interpreter field 0xCFC, configured by case 17.
+    Texture,
+    /// Interpreter field 0xD10, configured by case 19.
+    CrossfadeAudio,
+    Native0d0c,
+    Native0d14,
+    Native0d00,
+    Native0d04,
+    Native0d18,
 }
 
-impl CmvsResourceChannelBank {
-    /// The recovered slot count of this bank, taken from the original
-    /// handler's bounds check.
+impl CmvsResourceSearchBank {
     pub fn slot_count(self) -> u8 {
         match self {
-            CmvsResourceChannelBank::FiveSlotSetup => 5,
-            CmvsResourceChannelBank::TenSlotSetup => 10,
-            CmvsResourceChannelBank::SevenSlotSetup => 7,
-            CmvsResourceChannelBank::FiveSlotAltSetup => 5,
+            Self::Texture | Self::Native0d00 => 10,
+            Self::Native0d04 => 7,
+            _ => 5,
         }
     }
 }

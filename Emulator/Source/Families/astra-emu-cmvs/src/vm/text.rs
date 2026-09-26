@@ -71,18 +71,26 @@ pub(super) fn resolve_resource_name(
     state: &CmvsPs2aVmState,
     value: u32,
 ) -> Result<String, CoreError> {
-    let bytes = resolve_tagged_string_bytes(state, value)?;
-    if bytes.is_empty() {
+    let text = resolve_string_value(state, value)?;
+    if text.is_empty() {
         return Err(invalid(
             "ASTRA_EMU_CMVS_VM_SCRIPT_NAME",
-            "script name is empty",
+            "resource name is empty",
         ));
     }
+    Ok(text)
+}
+
+pub(super) fn resolve_string_value(
+    state: &CmvsPs2aVmState,
+    value: u32,
+) -> Result<String, CoreError> {
+    let bytes = resolve_tagged_string_bytes(state, value)?;
     let (text, malformed) = encoding_rs::SHIFT_JIS.decode_without_bom_handling(&bytes);
     if malformed || bytes.contains(&0) {
         return Err(invalid(
             "ASTRA_EMU_CMVS_VM_STRING_ENCODING",
-            "resource name contains invalid Shift-JIS",
+            "native string contains invalid Shift-JIS",
         ));
     }
     Ok(text.into_owned())
