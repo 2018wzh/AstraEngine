@@ -109,22 +109,23 @@ impl LuauPolicy {
         host: PolicyIoContext<'_>,
     ) -> Result<PolicyActionOutcome, VnError> {
         binding.validate_command(&continuation.command)?;
-        continuation.request_key("validate")?;
+        continuation.validate()?;
         let mut staged = state.clone();
         staged.snapshots = continuation.state.clone();
         // Action effects are a fresh transaction, never a replay of prior traces.
         staged.mutation_trace.clear();
         staged.command_trace.clear();
         let capabilities = host.capabilities.restrict(&binding.read_text);
-        let host = PolicyIoContext {
-            state: host.state,
+        let mut staged_io = host.state.clone();
+        let scoped_host = PolicyIoContext {
+            state: &mut staged_io,
             capabilities: &capabilities,
         };
         let outcome = self.evaluate_with(
             &mut staged,
             queries,
             budget,
-            host,
+            scoped_host,
             |lua, astra, io, host_budget| {
                 let mut registered =
                     register(lua, &binding.source, budget, Some(host_budget.clone()))?;
@@ -221,11 +222,15 @@ impl LuauPolicy {
                 Ok(outcome)
             },
         )?;
-        continuation.state = staged.snapshots.clone();
-        continuation.waiting_key = match &outcome {
+        let mut next = continuation.clone();
+        next.state = staged.snapshots.clone();
+        next.waiting_key = match &outcome {
             PolicyActionOutcome::Complete => None,
             PolicyActionOutcome::Await { request_key } => Some(request_key.clone()),
         };
+        next.validate()?;
+        *continuation = next;
+        *host.state = staged_io;
         if outcome == PolicyActionOutcome::Complete {
             *state = staged;
         }

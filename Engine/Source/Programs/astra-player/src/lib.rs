@@ -21,7 +21,9 @@ pub use save_timestamp::current_save_timestamp;
 mod save_catalog;
 pub use save_catalog::hydrate_save_catalog;
 
+mod native_policy_loading;
 mod native_session;
+pub use native_policy_loading::*;
 mod native_session_clock;
 pub use native_session::*;
 

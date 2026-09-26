@@ -8,7 +8,7 @@ use mlua::Lua;
 use crate::{MutationTraceEntry, PolicyQueryContext, PolicySnapshotValue, VnError, VnPolicyState};
 
 // Luau numbers are IEEE-754 doubles; reject the first ambiguous adjacent integer.
-pub(crate) const LUAU_MAX_EXACT_INTEGER: u64 = (1_u64 << 53) - 1;
+pub(crate) use crate::actions::LUAU_MAX_EXACT_INTEGER;
 
 #[derive(Default)]
 pub struct LuauPolicy;

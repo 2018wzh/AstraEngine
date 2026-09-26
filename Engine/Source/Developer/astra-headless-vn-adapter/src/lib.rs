@@ -158,6 +158,12 @@ impl ProductAdapterFactory for NativeVnProductAdapterFactory {
                 request.height,
                 logical_surface,
                 astra_player_vn::NativeVnHostOpenOptions {
+                    policy_actions: astra_player_vn::PreparedPolicyActions::load(
+                        &package,
+                        asset_cache_bytes,
+                        &astra_runtime::TaskScope::new(),
+                    )
+                    .map_err(|error| binding("policy.preload", error))?,
                     max_asset_cache_bytes: asset_cache_bytes,
                     max_glyph_cache_bytes: glyph_cache_bytes,
                     runtime_execution: astra_player_vn::NativeVnRuntimeExecution::evidence_parallel(
@@ -802,6 +808,16 @@ impl NativeVnHeadlessSession {
             self.add_profile_duration(tick_started, |sample, duration| {
                 sample.runtime_tick_ns = sample.runtime_tick_ns.saturating_add(duration);
             })?;
+            if let Some(batch) = self
+                .source()?
+                .tick_policy()
+                .map_err(|error| ProductHostError::Output(error.to_string()))?
+            {
+                self.executor
+                    .execute_batch(batch)
+                    .await
+                    .map_err(|error| ProductHostError::Output(error.to_string()))?;
+            }
             for substep in 0..self.presentation_substeps {
                 let delta_ns = presentation_substep_duration_ns(
                     astra_headless_protocol::TICK_DURATION_NS,

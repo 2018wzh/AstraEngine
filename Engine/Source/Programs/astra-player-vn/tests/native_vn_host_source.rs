@@ -1358,3 +1358,6 @@ fn packaged_player_accepts_explicit_product_provider_bindings() {
     )
     .expect("product-bound package should open");
 }
+
+#[path = "support/policy_loading.rs"]
+mod policy_loading;

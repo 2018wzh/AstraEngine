@@ -92,6 +92,15 @@ impl NativeVnHostCommandSource {
         Ok(())
     }
 
+    /// Called by the existing 60 Hz logic pump, independently of rendering cadence.
+    pub fn tick_policy(&mut self) -> Result<Option<PlayerHostCommandBatch>, NativeVnHostError> {
+        self.ensure_presentation_active()?;
+        if !self.host.policy_pending()? {
+            return Ok(None);
+        }
+        self.step(NativeVnStepCommand::PollPolicy).map(Some)
+    }
+
     pub fn tick_presentation(
         &mut self,
         delta_ns: u64,

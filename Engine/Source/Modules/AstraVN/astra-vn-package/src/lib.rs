@@ -1,6 +1,8 @@
 //! AstraVN package section planning and release-evidence manifests.
 
 mod advanced_presentation;
+mod policy_actions;
+pub use policy_actions::*;
 mod commercial_baseline;
 mod localization;
 mod package;

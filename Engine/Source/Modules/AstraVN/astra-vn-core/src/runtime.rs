@@ -327,6 +327,7 @@ impl VnRuntime {
         &mut self,
         command: VnPlayerCommand,
         before: u64,
+        writes: &[(String, String, i64)],
     ) -> Result<PendingVnStepOutput, VnError> {
         tracing::trace!(
             event = "vn.runtime.command.start",
@@ -334,6 +335,11 @@ impl VnRuntime {
             "AstraVN player command started"
         );
         self.mutation_journal.clear();
+        for (scope, key, value) in writes {
+            validate_system_value("variable scope", scope, 256)?;
+            validate_system_value("variable key", key, 256)?;
+            self.mutate_variable(scope.clone(), key.clone(), |_| Some(*value))?;
+        }
         let mut presentation = Vec::new();
         let mut reached = BTreeSet::new();
         match command {
@@ -1350,6 +1356,18 @@ impl VnRuntime {
 pub struct PendingVnStepOutput(VnStepOutput);
 
 impl PendingVnStepOutput {
+    /// Remove the static policy action request after the session accepts ownership.
+    pub fn take_policy_action(&mut self) -> Option<crate::ExtensionPresentationCommand> {
+        let index = self.0.presentation.iter().position(|p| {
+            matches!(p,
+            PresentationCommand::Extension(e) if e.provider_id == crate::POLICY_ACTION_PROVIDER)
+        })?;
+        match self.0.presentation.remove(index) {
+            PresentationCommand::Extension(command) => Some(command),
+            _ => unreachable!(),
+        }
+    }
+
     pub fn events(&self) -> &[crate::VnEvent] {
         &self.0.events
     }
@@ -1443,6 +1461,14 @@ fn wait_state_from_presentation(
     command_id: &str,
     command: &PresentationCommand,
 ) -> Result<Option<VnWaitState>, VnError> {
+    if matches!(command, PresentationCommand::Extension(extension) if extension.provider_id == crate::POLICY_ACTION_PROVIDER)
+    {
+        return Ok(Some(VnWaitState::new(
+            VnWaitKind::Fence,
+            format!("policy.{command_id}"),
+            command_id.to_owned(),
+        )));
+    }
     let PresentationCommand::Stage(stage) = command else {
         return Ok(None);
     };

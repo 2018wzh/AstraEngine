@@ -23,7 +23,11 @@ CMVS 已接入原生 352 标题与 143 图标。旧探针未应用 `SCRIPT_INIT_
 
 已在现有 policy VM 中保留并调用注册 handler，新增包绑定、typed 完成/等待结果与显式 continuation。调用复用 Extension 参数；每个 action 实例隔离 IO key，并将 entry 的文本列表与宿主授权取交集。Await 仅接受本实例 pending 请求，丢弃本次变量写入、保留显式状态；Complete 返回一次性变量事务，不能遗留 pending 工作。模块顶层只有注册权限，boolean 返回与未知命令效果不能冒充动作成功。
 
-policy crate 30 项测试与 all-target Clippy 通过，覆盖重复 source 实例、Await 前写入、Interrupted、非法等待与越权。随后统一 action 参数与 snapshot 的精确整数边界为 ±(2^53−1)，补充 2^40 经 Await/Ready/Interrupted 与保存编码后的读回，以及越界拒绝；不再在 continuation 读回时收窄成 i32。Rust 持有的 snapshot/trace/command/query 和注册 descriptor 在复制前共用现有 memory/output 预算；替换 snapshot 释放旧值额度，捕获预算错误也不能提交部分事务。小预算回归覆盖重复共享字符串、同 key 覆盖与失败时 gameplay/IO 不提交。当前只完成可供 Cook 与 session 共用的执行基础；Cook entry 配置、包内绑定、VN continuation 保存、Player 无输入自动等待和资源预载尚未接通，不能据此称为 Packaged Player IO 已完成。没有执行桌面 GUI 或真实声音验收。
+policy crate 30 项测试与 all-target Clippy 通过，覆盖重复 source 实例、Await 前写入、Interrupted、非法等待与越权。随后统一 action 参数与 snapshot 的精确整数边界为 ±(2^53−1)，补充 2^40 经 Await/Ready/Interrupted 与保存编码后的读回，以及越界拒绝；不再在 continuation 读回时收窄成 i32。Rust 持有的 snapshot/trace/command/query 和注册 descriptor 在复制前共用现有 memory/output 预算；替换 snapshot 释放旧值额度，捕获预算错误也不能提交部分事务。小预算回归覆盖重复共享字符串、同 key 覆盖与失败时 gameplay/IO 不提交。现已接通项目 entry 配置、Cook 注册校验、包内 binding、VN continuation 保存及 Player/Headless 的 60 Hz 自动等待。授权文本复用 Cook 的 asset.catalog 唯一映射，校验 asset ID、text 类型、UTF-8、包完整性与预算；真实 Player 启动 worker 接收关闭事件后取消并 join，运行中只读取预载内存。
+
+新增回归覆盖同一 source 的重复实例、系统页暂停/恢复、阻塞 IO 关闭、损坏 continuation/越权资源拒绝、有界 section 取消和恢复后再保存。实际 CLI Cook→package→Player-VN pending 保存/恢复及无输入继续后的物理输入 Headless 流程通过；修复了首条异步动作尚未启动 UI 时恢复错误通知 Yakui context 的问题。存档 policy component 升至 v2，旧槽明确拒绝；包增加可选动作 section，普通无动作包不需配置 entry。Web native worker 仍明确不支持。10 个直接受影响 crate 的 all-target Clippy、fmt 与文档检查通过；policy 30 项、VN session 24 项、Player-VN 92 项、Player library 11 项、Cook 7 项、CLI 5 项及 script/core/package 增量测试通过。Player 列表预检和加载均在替换会话前拒绝旧 policy v1，沿现有 unavailable 状态保护原槽。
+
+额外启用 Web code-check 时发现冻结基线遗留断链：Web Player 仍引用已删除的 provider ID 和帧内摘要字段，编译失败；Web platform 另有 callback 类型复杂度与参数数量 Clippy 失败。对应文件由平台整合批处理，本批没有恢复旧 API。默认 native 检查通过不能替代该 feature 检查。本轮没有执行原生窗口、GPU 画面或真实声音验收；Android 真机和 Editor GUI 继续暂停。
 
 ## 2026-09-26 最终集成检查
 

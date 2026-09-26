@@ -10,6 +10,7 @@ pub(super) fn restore_session(
     let expected_seed = session.engine.seed();
     let compiled = Arc::clone(&session.compiled);
     let index = Arc::clone(&session.runtime_index);
+    let actions = session.policy_host.actions.clone();
     let (_, (runtime, step, seed)) = session
         .engine
         .world_mut()
@@ -18,14 +19,27 @@ pub(super) fn restore_session(
             &astra_core::SchemaMigrationRegistry::default(),
             |snapshot| {
                 super::policy_io::prepare_policy(snapshot, owner, policy_component)?;
-                prepare_runtime(
+                let policy: super::policy_io::SessionPolicyState = snapshot
+                    .actors
+                    .component(policy_component)
+                    .ok_or_else(|| RuntimeError::message("missing policy component"))?
+                    .payload
+                    .decode()?;
+                let result = prepare_runtime(
                     snapshot,
                     package.as_ref(),
                     owner,
                     expected_seed,
-                    compiled,
+                    Arc::clone(&compiled),
                     index,
-                )
+                )?;
+                super::policy_actions::validate_saved_action(
+                    &policy,
+                    result.0.state(),
+                    &compiled,
+                    &actions,
+                )?;
+                Ok(result)
             },
         )
         .map_err(|error| CoreVnError::message(error.to_string()))?;
@@ -48,13 +62,27 @@ pub(super) fn validate_session_save(
         .map_err(|error| CoreVnError::message(format!("{}: {}", error.code, error.message)))?;
     super::policy_io::prepare_policy(&mut snapshot, session.owner, session.policy_component)
         .map_err(|error| CoreVnError::message(error.to_string()))?;
-    prepare_runtime(
+    let policy: super::policy_io::SessionPolicyState = snapshot
+        .actors
+        .component(session.policy_component)
+        .ok_or_else(|| CoreVnError::message("missing policy component"))?
+        .payload
+        .decode()
+        .map_err(|error| CoreVnError::message(error.to_string()))?;
+    let result = prepare_runtime(
         &mut snapshot,
         session.engine.world().package_handle(),
         session.owner,
         session.engine.seed(),
         Arc::clone(&session.compiled),
         Arc::clone(&session.runtime_index),
+    )
+    .map_err(|error| CoreVnError::message(error.to_string()))?;
+    super::policy_actions::validate_saved_action(
+        &policy,
+        result.0.state(),
+        &session.compiled,
+        &session.policy_host.actions,
     )
     .map_err(|error| CoreVnError::message(error.to_string()))?;
     Ok(())

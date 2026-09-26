@@ -1,3 +1,4 @@
+mod nativevn_actions;
 mod windows_runtime;
 
 use std::{
@@ -2074,7 +2075,12 @@ fn cook_nativevn_sections(
         compile_options =
             compile_options.with_ui_controller_source(manifest.id.clone(), source.to_string());
     }
+    let policy_actions = nativevn_actions::load(project, project_dir, cancellation)?;
+    for binding in &policy_actions {
+        compile_options = compile_options.bind_extension(binding.descriptor.clone());
+    }
     let compiled = compile_astra_project(sources, compile_options)?;
+    nativevn_actions::validate_commands(&compiled, &policy_actions)?;
     let mut profiles = string_list(
         project
             .get("nativevn")
@@ -2087,7 +2093,10 @@ fn cook_nativevn_sections(
         profiles.push(profile.to_string());
     }
 
-    let sections = package_sections_for_project(&compiled, &profiles, target)?;
+    let mut sections = package_sections_for_project(&compiled, &profiles, target)?;
+    if !policy_actions.is_empty() {
+        sections.push(astra_vn_package::policy_action_section(&policy_actions)?);
+    }
     let section_dir = out.join("sections");
     fs::create_dir_all(&section_dir)?;
     let mut artifacts = Vec::new();
@@ -2116,6 +2125,7 @@ fn cook_nativevn_sections(
     let (asset_artifacts, asset_cook) =
         cook_nativevn_asset_sections(project, project_dir, out, profile, cancellation)?;
     artifacts.extend(asset_artifacts);
+    nativevn_actions::validate_resources(&policy_actions, &artifacts, out, cancellation)?;
     Ok((artifacts, asset_cook))
 }
 
@@ -2446,6 +2456,8 @@ fn asset_role_for_path(path: &str, asset_type: &str) -> String {
     let parts = normalized.split('/').collect::<Vec<_>>();
     if asset_type.starts_with("font.") || parts.contains(&"fonts") {
         "font".to_string()
+    } else if asset_type == "text" {
+        "text".to_string()
     } else if parts.contains(&"backgrounds") {
         "background".to_string()
     } else if parts.contains(&"characters") {

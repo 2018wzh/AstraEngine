@@ -7,18 +7,21 @@ mod worker;
 pub(super) use worker::Completion;
 use worker::PolicyIoWorker;
 
-pub(super) const POLICY_STATE_SCHEMA: &str = "astra.vn.session_policy.v1";
+pub(super) const POLICY_STATE_SCHEMA: &str = "astra.vn.session_policy.v2";
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub(super) struct SessionPolicyState {
     pub state: VnPolicyState,
     pub io: PolicyIoState,
     pub awaits: BTreeMap<u64, astra_runtime::AwaitTokenId>,
+    pub action_serial: u64,
+    pub action: Option<astra_vn_policy::PolicyActionContinuation>,
 }
 
 #[derive(Default)]
 pub(super) struct SessionPolicyHost {
     host: Option<Arc<dyn PolicyIoHost>>,
-    capabilities: PolicyIoCapabilities,
+    pub(super) capabilities: PolicyIoCapabilities,
+    pub(super) actions: BTreeMap<String, astra_vn_policy::PolicyActionBinding>,
     worker: Option<PolicyIoWorker>,
 }
 impl SessionPolicyHost {
@@ -95,19 +98,22 @@ impl VnSession {
         }
         Ok(())
     }
-    fn policy_state(&self) -> Result<SessionPolicyState, CoreVnError> {
+    pub(super) fn policy_state(&self) -> Result<SessionPolicyState, CoreVnError> {
         self.engine
             .world()
             .read_component(self.policy_component)
             .map_err(|error| CoreVnError::message(error.to_string()))
     }
-    fn write_policy(&mut self, policy: &SessionPolicyState) -> Result<(), CoreVnError> {
+    pub(super) fn write_policy(&mut self, policy: &SessionPolicyState) -> Result<(), CoreVnError> {
         self.engine
             .world_mut()
             .replace_component(self.policy_component, policy)
             .map_err(|error| CoreVnError::message(error.to_string()))
     }
-    fn dispatch_policy_io(&mut self, policy: &SessionPolicyState) -> Result<(), CoreVnError> {
+    pub(super) fn dispatch_policy_io(
+        &mut self,
+        policy: &SessionPolicyState,
+    ) -> Result<(), CoreVnError> {
         let state = &policy.io;
         if self.policy_host.worker.as_ref().is_some_and(|worker| {
             !state.requests.values().any(|record| {
@@ -144,7 +150,10 @@ impl VnSession {
         )?);
         Ok(())
     }
-    fn sync_policy_awaits(&mut self, policy: &mut SessionPolicyState) -> Result<(), CoreVnError> {
+    pub(super) fn sync_policy_awaits(
+        &mut self,
+        policy: &mut SessionPolicyState,
+    ) -> Result<(), CoreVnError> {
         let pending: std::collections::BTreeSet<_> = policy
             .io
             .requests
@@ -206,6 +215,15 @@ pub(super) fn prepare_policy(
     owner: ActorId,
     component_id: ComponentId,
 ) -> Result<(), RuntimeError> {
+    if snapshot
+        .actors
+        .component(component_id)
+        .is_some_and(|component| component.payload.schema() != POLICY_STATE_SCHEMA)
+    {
+        return Err(RuntimeError::message(
+            "ASTRA_POLICY_RESTORE_VERSION: unsupported session policy state schema",
+        ));
+    }
     if snapshot
         .actors
         .component_ids_for_actor_schema(owner, &POLICY_STATE_SCHEMA.to_string())

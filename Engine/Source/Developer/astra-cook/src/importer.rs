@@ -149,6 +149,16 @@ fn probe_metadata(path: &std::path::Path, bytes: &[u8]) -> Result<ImportMetadata
                 height: Some(image.height()),
             })
         }
+        "txt" => {
+            std::str::from_utf8(bytes).map_err(|_| CookError::message("ASTRA_IMPORT_TEXT_UTF8"))?;
+            Ok(ImportMetadata {
+                kind: "text".into(),
+                codec: "utf8".into(),
+                byte_len: bytes.len() as u64,
+                width: None,
+                height: None,
+            })
+        }
         "ttf" | "otf" => Ok(ImportMetadata {
             kind: "font".to_string(),
             codec: extension,

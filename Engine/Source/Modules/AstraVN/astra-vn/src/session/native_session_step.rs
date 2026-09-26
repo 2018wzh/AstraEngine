@@ -3,7 +3,8 @@ use super::*;
 impl VnSession {
     pub(super) fn apply_command_at_step(
         &mut self,
-        command: CoreVnPlayerCommand,
+        command: Option<CoreVnPlayerCommand>,
+        writes: &[(String, String, i64)],
         timing: TickInput,
         mode: astra_runtime::TickMode,
     ) -> Result<NativeVnStepOutput, CoreVnError> {
@@ -14,7 +15,17 @@ impl VnSession {
         let reading_mode = previous_state.system.reading_mode;
         let previous_backlog_count = previous_state.backlog.len();
         let previous_wait = pending_wait.clone();
-        let mut pending_output = session.runtime.apply_deferred(command.clone())?;
+        let prior_policy_wait = session.policy_action_wait_id()?;
+        let mut pending_output = match &command {
+            Some(command) => session
+                .runtime
+                .apply_deferred_with_writes(command.clone(), writes)?,
+            None => session.runtime.poll_deferred()?,
+        };
+        session.cancel_abandoned_policy_action(prior_policy_wait)?;
+        if let Some(action) = pending_output.take_policy_action() {
+            session.queue_policy_action(action)?;
+        }
         let next_state = session.runtime.state();
         if next_state.backlog.len() < previous_backlog_count {
             return Err(CoreVnError::diagnostic(
@@ -39,12 +50,14 @@ impl VnSession {
             pending_output.set_wait(wait);
         }
         let mut ingress = Vec::new();
-        if command_resolves_wait(
-            &command,
-            pending_wait.as_ref().map(|wait| wait.kind),
-            reading_mode,
-            &session.compiled,
-        ) {
+        if command.as_ref().is_some_and(|command| {
+            command_resolves_wait(
+                command,
+                pending_wait.as_ref().map(|wait| wait.kind),
+                reading_mode,
+                &session.compiled,
+            )
+        }) {
             let await_id = pending_wait
                 .as_ref()
                 .and_then(|wait| wait.await_id.as_deref())

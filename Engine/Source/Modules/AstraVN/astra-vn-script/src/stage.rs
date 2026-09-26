@@ -354,6 +354,9 @@ pub struct ExtensionFieldContract {
     pub required: bool,
 }
 
+/// Static owner for registered package Luau actions.
+pub const POLICY_ACTION_PROVIDER: &str = "astra.policy.actions";
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ExtensionCommandDescriptor {
     pub command: String,

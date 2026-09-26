@@ -189,6 +189,68 @@ mod tests {
     }
 
     #[test]
+    fn old_policy_component_is_rejected_before_catalog_or_live_session_changes() {
+        let mut source = source();
+        let bytes = source.save("slot.01").unwrap();
+        let mut envelope = decode_save_envelope(&bytes).unwrap();
+        let mut snapshot =
+            astra_runtime::read_runtime_save(&envelope.payload.runtime, &Default::default())
+                .unwrap();
+        let id = snapshot
+            .actors
+            .actor_snapshots()
+            .iter()
+            .flat_map(|actor| {
+                snapshot.actors.component_ids_for_actor_schema(
+                    actor.actor_id,
+                    &"astra.vn.session_policy.v2".into(),
+                )
+            })
+            .next()
+            .unwrap();
+        snapshot.actors.component_mut(id).unwrap().payload =
+            astra_runtime::RuntimeComponentPayload::typed(
+                "astra.vn.session_policy.v1",
+                Default::default(),
+                (),
+            );
+        envelope.payload.runtime =
+            astra_runtime::write_runtime_save(snapshot, astra_runtime::SaveRequest::default())
+                .unwrap();
+        let old = postcard::to_allocvec(&envelope).unwrap();
+        let before = old.clone();
+        let state = source.runtime_state.clone();
+        let scope = source.media_scope.clone();
+        assert!(source
+            .ingest_save_catalog_entry("slot.01", &old)
+            .unwrap_err()
+            .to_string()
+            .contains("ASTRA_POLICY_RESTORE_VERSION"));
+        assert!(!source.ui_save_slots["slot.01"].can_load);
+        assert!(source
+            .restore(&old)
+            .unwrap_err()
+            .to_string()
+            .contains("ASTRA_POLICY_RESTORE_VERSION"));
+        assert_eq!(source.runtime_state, state);
+        assert!(!scope.is_cancelled());
+        source.reject_save_catalog_entry("slot.01");
+        assert!(!source.ui_save_slots["slot.01"].can_load);
+        assert!(!source.ui_save_slots["slot.01"].can_write);
+        assert_eq!(
+            source.ui_save_slots["slot.01"].migration_status,
+            "unavailable"
+        );
+        assert!(source
+            .prepare_save_metadata("slot.01", "2000-01-01T00:00:01Z".into(), 1)
+            .is_err());
+        assert_eq!(old, before);
+        source.command(VnPlayerCommand::Advance).unwrap();
+        source.release_resources().unwrap();
+        source.shutdown().unwrap();
+    }
+
+    #[test]
     fn v10_runtime_container_roundtrips_and_rejects_v9_corruption_and_foreign_identity() {
         let mut source = source();
         let bytes = source.save("slot.01").unwrap();

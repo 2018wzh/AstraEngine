@@ -68,3 +68,29 @@ fn import_cook_classifies_fresh_stale_and_blocked_artifacts() {
         .iter()
         .any(|diag| diag.code == "ASTRA_ASSET_LICENSE_MISSING"));
 }
+
+#[test]
+fn text_import_rejects_invalid_utf8_and_preserves_valid_source() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("note.txt");
+    let request = ImportRequest {
+        asset_id: "asset:/text/note".parse().unwrap(),
+        source_path: path.clone(),
+        asset_type: "text".into(),
+        license: "CC0-1.0".into(),
+        font: None,
+        target_profiles: vec!["classic".into()],
+    };
+    let importer = DefaultMetadataImporter::new("astra.import.text");
+    std::fs::write(&path, "文本").unwrap();
+    let imported = importer.import(request.clone()).unwrap();
+    assert_eq!(imported.metadata.kind, "text");
+    assert_eq!(imported.metadata.codec, "utf8");
+    assert_eq!(imported.sidecar.cook.processor, "astra.cook.binary");
+    std::fs::write(&path, [0xff]).unwrap();
+    assert!(importer
+        .import(request)
+        .unwrap_err()
+        .to_string()
+        .contains("ASTRA_IMPORT_TEXT_UTF8"));
+}

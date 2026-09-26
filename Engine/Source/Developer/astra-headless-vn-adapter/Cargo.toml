@@ -8,6 +8,7 @@ publish = false
 
 [dependencies]
 astra-core = { path = "../../Runtime/astra-core" }
+astra-runtime = { path = "../../Runtime/astra-runtime" }
 astra-headless-protocol = { path = "../../Runtime/astra-headless-protocol" }
 astra-media = { path = "../../Runtime/astra-media" }
 astra-package = { path = "../../Runtime/astra-package" }

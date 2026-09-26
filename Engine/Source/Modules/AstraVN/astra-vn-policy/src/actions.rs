@@ -9,7 +9,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-pub const POLICY_ACTION_PROVIDER: &str = "astra.policy.actions";
+use crate::POLICY_ACTION_PROVIDER;
+pub(crate) const LUAU_MAX_EXACT_INTEGER: u64 = (1_u64 << 53) - 1;
 pub const POLICY_ACTION_SECTION: &str = "vn.policy_actions";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -82,6 +83,10 @@ impl PolicyActionBinding {
             if !matches {
                 return Err(action_error("action argument type mismatch"));
             }
+            if matches!(value, ExtensionValue::Integer(i) if i.unsigned_abs() > LUAU_MAX_EXACT_INTEGER)
+            {
+                return Err(action_error("action integer exceeds exact Luau range"));
+            }
         }
         if command
             .fields
@@ -110,6 +115,29 @@ pub struct PolicyActionContinuation {
 }
 
 impl PolicyActionContinuation {
+    pub fn validate(&self) -> Result<(), VnError> {
+        if self.source_id.is_empty() || self.source_id.len() > 1024 || self.state.len() > 256 {
+            return Err(action_error("invalid continuation identity or state"));
+        }
+        self.request_key("validate")?;
+        if let Some(key) = &self.waiting_key {
+            self.request_key(key)?;
+        }
+        for value in self.state.values() {
+            value
+                .validate_depth(crate::PolicyExecutionBudget::default().snapshot_depth)
+                .map_err(|_| action_error("continuation nesting exceeds budget"))?;
+        }
+        if postcard::to_allocvec(self)
+            .map_err(|_| action_error("invalid continuation state"))?
+            .len()
+            > crate::POLICY_IO_MAX_BYTES
+        {
+            return Err(action_error("continuation exceeds budget"));
+        }
+        Ok(())
+    }
+
     pub fn request_key(&self, local: &str) -> Result<String, VnError> {
         if self.instance == 0
             || local.is_empty()

@@ -158,8 +158,9 @@ fn run_nativevn_headless(
             (633, keyboard("KeyB")),
             (634, keyboard("F5")),
             (635, keyboard("F9")),
-            (636, PhysicalInput::Checkpoint { id: "final".into() }),
-            (637, PhysicalInput::Shutdown),
+            (636, keyboard("F5")),
+            (637, PhysicalInput::Checkpoint { id: "final".into() }),
+            (638, PhysicalInput::Shutdown),
         ]
     };
     let input_path = case_dir.join(format!("headless-{product_profile}.jsonl"));
@@ -709,6 +710,9 @@ fn nativevn_minimal_profile_cooks_packages_and_runs_headless() {
 
     fs::remove_dir_all(case_dir).unwrap();
 }
+
+#[path = "support/policy_actions.rs"]
+mod policy_actions;
 
 fn workspace_root() -> &'static Path {
     Path::new(env!("CARGO_MANIFEST_DIR"))

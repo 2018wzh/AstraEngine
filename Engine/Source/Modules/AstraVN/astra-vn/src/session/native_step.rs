@@ -4,6 +4,7 @@ use super::*;
 #[derive(Debug, Clone, PartialEq)]
 pub enum NativeVnStepCommand {
     LaunchDefault,
+    PollPolicy,
     Execute(CoreVnPlayerCommand),
 }
 
@@ -33,18 +34,30 @@ impl VnSession {
         self.engine
             .validate_step(input.timing, input.mode)
             .map_err(|error| CoreVnError::message(error.to_string()))?;
-        let command = match input.command {
-            NativeVnStepCommand::Execute(command) => command,
-            NativeVnStepCommand::LaunchDefault => {
-                self.runtime.default_launch_command().ok_or_else(|| {
+        let (command, writes) = match input.command {
+            NativeVnStepCommand::PollPolicy => self.poll_policy_action()?,
+            NativeVnStepCommand::Execute(command) => {
+                if matches!(command, CoreVnPlayerCommand::CompleteWait { .. })
+                    && self.policy_action_pending()?
+                {
+                    return Err(CoreVnError::diagnostic(
+                        "ASTRA_VN_POLICY_ACTION_EXTERNAL_COMPLETION",
+                        "input cannot complete a policy action",
+                    ));
+                }
+                (Some(command), Vec::new())
+            }
+            NativeVnStepCommand::LaunchDefault => (
+                Some(self.runtime.default_launch_command().ok_or_else(|| {
                     CoreVnError::diagnostic(
                         "ASTRA_NATIVE_VN_LAUNCH_MISSING",
                         "compiled story has no launchable state",
                     )
-                })?
-            }
+                })?),
+                Vec::new(),
+            ),
         };
-        let output = self.apply_command_at_step(command, input.timing, input.mode)?;
+        let output = self.apply_command_at_step(command, &writes, input.timing, input.mode)?;
         validate_audio_order(&output.presentations, &output.audio)?;
         failure_scope.0 = None;
         self.failed = false;

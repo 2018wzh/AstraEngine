@@ -76,7 +76,13 @@ async fn run_native_vn_player_session_inner(
     sink.bind_surface(logical_surface, surface)?;
     let mut executor = PlayerHostCommandExecutor::new(sink);
     let runtime_execution = astra_player_vn::NativeVnRuntimeExecution::shipping_parallel();
-    let mut vn = NativeVnHostCommandSource::from_package_with_execution(
+    let Some(mut prepared) =
+        crate::prepare_native_vn_open(&package, &mut session.events, runtime_execution).await?
+    else {
+        return Ok(());
+    };
+    let mut startup_events = std::mem::take(&mut prepared.events);
+    let mut vn = NativeVnHostCommandSource::from_package_with_options(
         &package,
         VnRunConfig {
             profile: config.profile,
@@ -85,7 +91,7 @@ async fn run_native_vn_player_session_inner(
         config.width,
         config.height,
         logical_surface,
-        runtime_execution,
+        prepared.options,
     )
     .map_err(|error| player_error_owned("player.runtime.open", error))?;
 
@@ -130,7 +136,7 @@ async fn run_native_vn_player_session_inner(
         loop {
             let event = tokio::select! {
                 biased;
-                event = session.events.recv() => event?,
+                event = async { if let Some(event) = startup_events.pop_front() { Ok(event) } else { session.events.recv().await } } => event?,
                 _ = tokio::time::sleep_until(tokio::time::Instant::from_std(timeline_tick.next_deadline())), if !timeline_clock.is_paused() => {
                     let due = timeline_tick.consume_due(std::time::Instant::now()).map_err(|code| {
                         player_error_owned(
@@ -139,6 +145,11 @@ async fn run_native_vn_player_session_inner(
                         )
                     })?.ok_or_else(|| player_error("player.runtime.scheduler", "scheduler woke before its deadline"))?;
                     for _ in 0..due.steps {
+                            let mut policy_stepped = false;
+                            if let Some(batch) = vn.tick_policy().map_err(|error| astra_platform::PlatformError::new(astra_platform::PlatformErrorCode::InvalidState, "player.runtime.policy_tick", error.to_string()))? {
+                                policy_stepped = true;
+                                executor.execute_batch(batch).await.map_err(|error| astra_platform::PlatformError::new(astra_platform::PlatformErrorCode::InvalidState, "player.host.execute", error.to_string()))?;
+                            }
                         if let Some(batch) = vn.tick_presentation(16_666_667)
                             .map_err(|error| player_error_owned("player.runtime.presentation_tick", error))?
                         {
@@ -146,7 +157,7 @@ async fn run_native_vn_player_session_inner(
                                 .await
                                 .map_err(|error| player_error_owned("player.host.execute", error))?;
                         }
-                        if media.is_active() {
+                        if media.is_active() || policy_stepped {
                             media.poll_and_process(
                                 &mut vn,
                                 &mut executor,

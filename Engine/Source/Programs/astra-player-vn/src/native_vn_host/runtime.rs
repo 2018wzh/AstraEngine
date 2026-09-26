@@ -87,6 +87,36 @@ impl NativeVnRuntimeHost {
         Ok(session_id)
     }
 
+    pub(super) fn bind_policy(
+        &mut self,
+        policy: crate::PreparedPolicyActions,
+    ) -> Result<(), VnHostError> {
+        let runtime = self
+            .runtime
+            .as_mut()
+            .ok_or_else(|| VnHostError::new("ASTRA_RUNTIME_HOST_SESSION", "session is not open"))?;
+        let capabilities = policy
+            .capabilities()
+            .map_err(|error| VnHostError::new("ASTRA_PLAYER_POLICY_GRANTS", error.to_string()))?;
+        runtime
+            .bind_policy_actions(policy.bindings.clone())
+            .map_err(|error| VnHostError::new("ASTRA_PLAYER_POLICY_BINDING", error.to_string()))?;
+        if !policy.bindings.is_empty() {
+            runtime
+                .bind_policy_io(Arc::new(policy), capabilities)
+                .map_err(|error| VnHostError::new("ASTRA_PLAYER_POLICY_HOST", error.to_string()))?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn policy_pending(&self) -> Result<bool, VnHostError> {
+        self.runtime
+            .as_ref()
+            .ok_or_else(|| VnHostError::new("ASTRA_RUNTIME_HOST_SESSION", "session is not open"))?
+            .policy_action_pending()
+            .map_err(|error| VnHostError::new("ASTRA_PLAYER_POLICY_STATE", error.to_string()))
+    }
+
     pub(super) fn step(
         &mut self,
         input: NativeVnStepInput,

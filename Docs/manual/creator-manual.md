@@ -14,6 +14,8 @@
 
 Cook 会读取每个 `AssetSidecar.dependencies` 构建依赖图，并把内容缓存写入项目内 ignored `.astra-cache/cook/`。正常的重复 Cook 应在 `astra.cook_manifest.v2.asset_cook` 中出现 cache hit；cache corruption、依赖缺失/cycle、source hash 或 processor version drift 会直接失败。输出先写 sibling staging directory，全部成功后替换目标目录；失败或按 Ctrl+C 取消时保留上一份完整 Cook 结果。不要手工复制 cache artifact 到 package，也不要把 `.astra-cache/` 提交到仓库。
 
+原生剧情可通过项目 `nativevn.policy_actions` 显式列出 Luau entry，并在 `.astra` 使用其注册的 typed 命令。文本授权填写 `asset:/` ID；Cook 使用已有 asset catalog 映射包内资源，不填写本机路径。handler 用显式 Complete/Await 结果表示完成与等待，存档只保留显式状态，恢复后的中断请求不会自动重发。配置与脚本示例见 [包内 Luau 注册动作](../contracts/rebuild.md#包内-luau-注册动作)。此入口目前仅支持原生 Player 的授权包内文本，Web worker、网络和任意磁盘读取未开放。
+
 脚本机制、Luau 策略和可视化规则见 [AstraVN Script Spec](../modules/astra-vn-script.md)。演出模型、标准命令和系统 UI 见 [AstraVN Presentation Model](../modules/astra-vn-presentation-model.md)、[AstraVN Standard Command Library](../modules/astra-vn-standard-commands.md) 和 [AstraVN System UI Profile](../modules/astra-vn-system-ui-profile.md)。样例见 [AstraVN Script Sample](../samples/astra-vn-script/README.md) 和 [AstraVN Advanced Presentation Sample](../samples/astra-vn-advanced/README.md)。
 
 页面开发使用 `.astra` View、Rust schema-bound ViewModel、Luau Controller 和 backend-neutral Theme。当前正式预览和矩阵由 NativeVN cooked package 与 Headless formal runner 驱动，必须走真实 Yakui/AstraText/Scene2D；静态图片或固定矩形不能作为产品 evidence。

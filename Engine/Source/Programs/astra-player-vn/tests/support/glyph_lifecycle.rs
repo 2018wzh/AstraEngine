@@ -125,6 +125,12 @@ astra.ui.controller.register("test.alternate", {
         180,
         PlayerHostResourceId(1),
         astra_player_vn::NativeVnHostOpenOptions {
+            policy_actions: astra_player_vn::PreparedPolicyActions::load(
+                &package,
+                16 * 1024 * 1024,
+                &astra_runtime::TaskScope::new(),
+            )
+            .unwrap(),
             max_asset_cache_bytes: 16 * 1024 * 1024,
             max_glyph_cache_bytes: 1,
             runtime_execution: NativeVnRuntimeExecution::shipping_serial(),

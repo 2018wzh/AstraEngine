@@ -198,20 +198,51 @@ Native `VnSession` 通过 `bind_policy_io` 授予具名逻辑资源及读取限�
 实现沿用现有 `mlua` VM 与 Runtime `TaskScope`。`mlua` 的 [async 支持](https://docs.rs/crate/mlua/0.10.5/source/README.md) 依赖 coroutine；本接口采用显式延续，避免将 coroutine 误当作可恢复状态。取消遵循 [CancellationToken](https://docs.rs/tokio-util/latest/tokio_util/sync/struct.CancellationToken.html) 的 Future drop 约定。平台 IO adapter 由 embedding host 显式提供；这一批没有自动给 Packaged Player 新增磁盘或网络权限。
 
 
-### 包内 Luau 注册动作（实施中）
+### 包内 Luau 注册动作
 
-剧情动作复用 `ExtensionCommandDescriptor`、`ExtensionValue` 和现有 `.astra` 扩展命令语法，不新增 policy 关键字。项目显式列出包内 Luau entry 与允许读取的文本 URI；Cook 在受限 VM 中执行注册，校验 descriptor、参数、重复命令、entry 和源码 hash，再将绑定写入 package。运行时只调用与已编译命令完全匹配的 `PolicyActionBinding`；注册得到的 handler 保留在本次 VM，不能只记录注册日志。
+剧情动作复用 `ExtensionCommandDescriptor`、`ExtensionValue` 和现有 `.astra` 扩展命令语法，不新增 policy 关键字。项目在 `nativevn.policy_actions` 中显式列出项目内 `.luau` entry 与 `read_text` asset ID；Cook 在受限 VM 中执行注册，校验 descriptor、参数、重复命令、entry 和源码 hash，再将绑定写入 package。运行时只调用与已编译命令完全匹配的 `PolicyActionBinding`；注册得到的 handler 保留在本次 VM，不能只记录注册日志。
 
 模块顶层只负责注册。handler 返回 `PolicyActionOutcome::Complete` 或 `Await { request_key }`，不能使用 boolean 隐式表示等待。每次剧情执行分配单调递增的 action instance，IO key 归该实例所有；同一 source ID 在循环中再次执行不能取得前一次结果。Await 只能引用当前实例实际存在的 pending 请求，未知、已结束或其他实例的 key 均拒绝。
 
 handler 从头调用，VM 与执行栈不保存。变量写入先暂存，只有 Complete 才一次提交给 VN 权威状态；Await 丢弃本次 gameplay 写入，仅保留显式 continuation state 与 IO 状态。不能将 command trace 当作已经执行的解锁或其他效果，未接入的 effect 必须报错。`PolicyActionContinuation` 保存 source ID、实例序号、typed 参数、等待 key 与显式 state；复用现有 VN wait 和 IO AwaitToken，不另建调度器。固定 tick 接收 IO completion，再调用 handler；普通物理输入不能跳过动作等待。
 
-保存组件将升级，旧版本明确拒绝。恢复验证 continuation、命令绑定、请求归属和 await 一致性后，才替换旧会话。pending 转为 Interrupted，不自动重新 dispatch；恢复后 handler 读取 Interrupted 并由显式分支完成或提出新的请求。损坏候选不取消旧会话，不覆盖旧槽。关闭取消并 join worker，迟到 completion 不得提交。
+保存组件使用 `astra.vn.session_policy.v2`，旧 v1 明确拒绝，不迁移或覆盖旧槽。恢复验证 continuation、命令绑定、请求归属和 await 一致性后，才替换旧会话。pending 转为 Interrupted，不自动重新 dispatch；恢复后 handler 读取 Interrupted 并由显式分支完成或提出新的请求。损坏候选不取消旧会话，不覆盖旧槽。关闭取消并 join worker，迟到 completion 不得提交。
 
-Packaged Player 的 ReadText adapter 只读取显式授权且满足当前 VFS binding/target/profile 的包内 UTF-8 文本。启动阶段完成 package section/hash/长度验证与有界预载，计入已有资源预算；取消或失败不交付半初始化会话。运行阶段提供内存文本的可取消读取，不宣称实时磁盘 IO；包内授权不包含任意文件路径或网络。底层同步 package reader 不能放进 async poll 后声称可取消，启动取消须在真实读取边界处理并报告加载进度。
+Packaged Player 的 ReadText adapter 只读取显式授权且满足当前 VFS binding/target/profile 的包内 UTF-8 文本。启动阶段完成 package section/hash/长度验证与有界预载，计入已有资源预算；取消或失败不交付半初始化会话。运行阶段提供内存文本的可取消读取，不宣称实时磁盘 IO；包内授权不包含任意文件路径或网络。底层同步 package reader 不能放进 async poll 后声称可取消，启动通过现有事件流处理关闭，取消启动作用域并 join 所有者线程；每个有界 section 读取前后检查取消，不能中断正在执行的同步磁盘调用。现有 tracing 记录已加载条目数与字节数，不新增事件协议。
 
 本批检查须覆盖真实 `.astra` → Cook → package → Player-VN 等待与恢复后再保存、同 source 重复执行、Await 前写入只在 Complete 提交一次、非法等待 key、阻塞 host 关闭和迟到结果。局部 VM 测试不能替代产品调用链；桌面 GUI 与真实设备验收单独报告。
 
+
+包内动作保存在 `vn.policy_actions` section（`astra.vn.policy_actions.v1`，上限 4 MiB、64 个 command）；其源码 hash、注册 entry 和 descriptor 必须一致。文本 allowlist 使用作者层 `asset:/` ID，经 Cook 已有 `asset.catalog` 唯一映射到 `package:/`，缺失或重复映射、非 text 类型、错误 profile、UTF-8 或完整性失败均阻断。每篇文本最多 1 MiB、合计最多 64 篇，预载字节从现有 asset cache 预算扣除；未授权资产不预载。catalog/VFS 元数据各最多 16 MiB。Web 不支持 native worker，含此 section 的动作包在打开时拒绝；普通无动作包不受影响。
+
+项目配置与同一 `.astra` 的调用示例：
+
+```yaml
+nativevn:
+  policy_actions:
+    - entry: Policies/note.luau
+      read_text: [asset:/text/note]
+```
+
+```astra
+load_note resource:asset:/text/note #@id note.load
+```
+
+```lua
+astra.command.register("load_note", {
+    schema = "demo.note.v1",
+    fields = { resource = { kind = "asset_uri", required = true } },
+}, function(args)
+    local text, status = astra.host.read_text("note", args.resource)
+    if status == "pending" then return astra.action.await("note") end
+    if status == "interrupted" then return astra.action.complete() end
+    assert(status == "ready")
+    astra.snapshot.set("note_length", #text)
+    return astra.action.complete()
+end)
+```
+
+Player 和 Headless 在既有 60 Hz 逻辑 pump 调用 `tick_policy`，结果按请求序号在 tick 边界接受；不依赖输入或呈现帧率。系统页保留剧情 fence 并暂停 handler，返回后继续；关闭和改走其他剧情时取消旧请求。只在剧情等待改变或确有显示输出时刷新画面。首条动作位于首句对话之前时，保存恢复不向尚未启动的 Yakui context 发送恢复通知。
 
 ### Timeline 段插值与源码事务
 

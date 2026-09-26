@@ -200,6 +200,7 @@ pub struct NativeVnHostCommandSource {
     ui_view_localization_keys: BTreeMap<String, BTreeSet<String>>,
     ui_bindings: astra_ui_core::UiBindingManifest,
     ui_backend: AstraYakuiBackend<BlueprintYakuiRenderer>,
+    ui_backend_started: bool,
     ui_themes: BTreeMap<String, Arc<UiThemeManifest>>,
     ui_profile: String,
     system_ui_policy: SystemUiProfilePolicy,
@@ -468,6 +469,7 @@ struct ProductPackageBinding {
     package_hash: Hash256,
     presentation: ProductPresentationBinding,
     system_ui_policy: SystemUiProfilePolicy,
+    policy_actions: crate::PreparedPolicyActions,
 }
 
 struct NativeVnHostCacheBudget {
@@ -480,6 +482,7 @@ pub struct NativeVnHostOpenOptions {
     pub max_asset_cache_bytes: u64,
     pub max_glyph_cache_bytes: u64,
     pub runtime_execution: NativeVnRuntimeExecution,
+    pub policy_actions: crate::PreparedPolicyActions,
 }
 
 struct NativeVnHostRuntimeOptions {
@@ -524,6 +527,11 @@ impl NativeVnHostCommandSource {
                 max_asset_cache_bytes: budget.asset_bytes,
                 max_glyph_cache_bytes: budget.glyph_bytes,
                 runtime_execution,
+                policy_actions: crate::PreparedPolicyActions::load(
+                    package,
+                    budget.asset_bytes,
+                    &astra_runtime::TaskScope::new(),
+                )?,
             },
         )
     }
@@ -540,8 +548,18 @@ impl NativeVnHostCommandSource {
             max_asset_cache_bytes,
             max_glyph_cache_bytes,
             runtime_execution,
+            policy_actions,
         } = options;
         runtime_execution.validate()?;
+        if policy_actions.package_hash != package.package_hash() {
+            return Err(NativeVnHostError::Package(
+                "ASTRA_PLAYER_POLICY_PACKAGE_IDENTITY".into(),
+            ));
+        }
+        let max_asset_cache_bytes = max_asset_cache_bytes
+            .checked_sub(policy_actions.byte_len)
+            .filter(|remaining| *remaining > 0)
+            .ok_or_else(|| NativeVnHostError::Asset("ASTRA_PLAYER_POLICY_CACHE_BUDGET".into()))?;
         validate_product_provider_bindings(package)?;
         let product_context = package.product_context().clone();
         if config.profile != product_context.profile() {
@@ -649,6 +667,7 @@ impl NativeVnHostCommandSource {
                     manifest: presentation_manifest,
                 },
                 system_ui_policy,
+                policy_actions,
             },
             NativeVnHostRuntimeOptions {
                 cache_budget: NativeVnHostCacheBudget {
@@ -758,6 +777,7 @@ impl NativeVnHostCommandSource {
             Ok(session_id) => session_id,
             Err(error) => return Err(cleanup_runtime_host(&mut host, error)),
         };
+        host.bind_policy(binding.policy_actions)?;
         tracing::info!(
             event = "player.vn.runtime.open",
             width,
@@ -855,6 +875,7 @@ impl NativeVnHostCommandSource {
             ui_view_localization_keys,
             ui_bindings: compiled.ui_bindings,
             ui_backend,
+            ui_backend_started: false,
             ui_themes: compiled
                 .themes
                 .into_iter()
@@ -1753,9 +1774,11 @@ impl NativeVnHostCommandSource {
         // The UI model has changed under the same session identity. The Yakui
         // backend emits an ordered release/resync transaction so the retained
         // Scene2D resources remain synchronized with this restored state.
-        self.ui_backend
-            .context_restored(&format!("vn.ui.{}", self.session_id), self.ui_generation)
-            .map_err(NativeVnHostError::Ui)?;
+        if self.ui_backend_started {
+            self.ui_backend
+                .context_restored(&format!("vn.ui.{}", self.session_id), self.ui_generation)
+                .map_err(NativeVnHostError::Ui)?;
+        }
         self.presentation_failed = false;
         let mut batch = self.render_with_stage_refresh(&[], 0, true)?;
         let [PlayerHostCommand::PresentScene { commands, .. }] = batch.commands.as_mut_slice()
@@ -3505,6 +3528,7 @@ impl NativeVnHostCommandSource {
         );
         self.ui_text_measurer.begin_frame()?;
         let mut output = self.ui_backend.render_frame(request)?;
+        self.ui_backend_started = true;
         let measured_text_layouts = self.ui_text_measurer.take_frame_layouts()?;
         let text_scene_started =
             performance_phase_started(self.ui_host_performance_sampling_enabled);
@@ -3822,6 +3846,8 @@ impl NativeVnHostCommandSource {
             .ok_or(NativeVnHostError::SequenceOverflow)?;
         let runtime_step_started =
             performance_phase_started(self.ui_host_performance_sampling_enabled);
+        let policy_poll = matches!(command, NativeVnStepCommand::PollPolicy);
+        let previous_wait = self.pending_wait().cloned();
         let output = self.host.step(NativeVnStepInput {
             timing: astra_runtime::TickInput {
                 fixed_step,
@@ -3977,6 +4003,9 @@ impl NativeVnHostCommandSource {
             sample.runtime_output_decode_ns = sample
                 .runtime_output_decode_ns
                 .saturating_add(runtime_output_decode_ns);
+        }
+        if policy_poll && presentation_count == 0 && previous_wait == self.pending_wait().cloned() {
+            return PlayerHostCommandBatch::new(Vec::new()).map_err(Into::into);
         }
         let render_started = performance_phase_started(self.ui_host_performance_sampling_enabled);
         let batch = self.render(&ordered_outputs, presentation_count)?;
@@ -7171,12 +7200,15 @@ fn validate_story_presentation(
                     }
                 }
             }
-            PresentationCommand::Extension(extension) => {
+            PresentationCommand::Extension(extension)
+                if extension.provider_id != astra_vn_policy::POLICY_ACTION_PROVIDER =>
+            {
                 return Err(NativeVnHostError::Asset(format!(
                     "ASTRA_PLAYER_EXTENSION_PROVIDER_UNWIRED: command {} requires provider {}",
                     extension.command, extension.provider_id
                 )))
             }
+            PresentationCommand::Extension(_) => {}
             _ => {}
         }
     }
