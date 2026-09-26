@@ -101,3 +101,5 @@ CMVS 普通挂载现在只读取 CPZ header/index，校验索引身份、角色�
 入口纠正：此前 Family 跳过原生 SCRIPT_INIT_PATH，误选已挂载 CPZ 中同名 start.ps3；游戏原版实际先加载配置目录内的 loose bootstrap，再由脚本设置后续搜索槽。原版与私有副本的 bootstrap 均存在且内容相同，未修改商业脚本。此前 GPU、原生 system.dat 与各命令的局部检查仍有效，但不能称为正确原生冷启动已经跨过这些动作。当前修复统一 config slot0→boot→call 的搜索路径，正确入口的单次有界 probe 已重新执行：12 个 CPZ 索引约 0.20 秒，DX12 discrete 设备约 0.97 秒，session open 约 0.98 秒；正确 bootstrap 已执行并加载后续脚本，首次 advance 在后续脚本 command 354 返回 ACTION_UNBOUND，约 1.14 秒正常关闭，自有进程已退出。未完成首 tick，未交付 Host 窗口请求，267 文字、图像帧、连续输入、PCM 与实际声音仍未验证。回归覆盖同名 loose/CPZ、后续槽覆盖、缺目录、坏选定资源以及失败不替换活动 VM。
 
 354 现直接更新核心存档标题缓冲 10324，删除未被消费的 Host 动作。原生 CP932 字节长度小于 128 时复制到已有 interpreter_string_buffers；达到上限则保留旧标题，并对 10532 错误字段 OR 8，不清除其他位。原版保存函数从同一缓冲生成日期标题与 tag 256；当前仅完成缓冲和 VM 保存恢复语义，原生保存写回仍未实现。回归覆盖 127/128 字节、多字节字符、空标题、旧值和错误位保留及序列化恢复。
+
+354 修复后，209 项 unit 通过，1 项 GPU fixture 忽略，Clippy all-target、fmt 与文档检查通过。正确入口再次执行单次有界 GPU probe：索引约 0.20 秒、DX12 discrete 约 1.03 秒、session open 约 1.05 秒；首次 advance 已跨过 354，随后在 353 返回 `ASTRA_EMU_CMVS_WINDOW_CAPTION`，原因是窗口标题前缀尚未绑定，约 1.21 秒正常关闭且无残留进程。仍无完成首 tick、Host 窗口请求交付、267 正文、图像帧、输入或音频结果；本批到此冻结。
