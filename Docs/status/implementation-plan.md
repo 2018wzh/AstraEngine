@@ -2,7 +2,7 @@
 
 ## 2026-09-26 Family 窗口标题契约
 
-CMVS 原生 352 需要实际设置窗口标题。Family API v8 添加 `SetTitle`、长度与控制字符校验，空标题保留原生清空语义；此批先提交公共类型与契约，Manager 消费者随后接入。当前集成树只有 FVP、Artemis、Siglus、Musica、CMVS 五个 Family 适配 crate；KrKr 来源存在于另一工作线，尚未接入此活动 workspace，不能将五核检查称为六核完成。
+CMVS 原生 352 需要实际设置窗口标题。Family API v8 添加 `SetTitle`、长度与控制字符校验，空标题保留原生清空语义；v9 随后加入有界 RGBA8 small-icon 命令，保留原生 143 与标题 352 的不同语义。公共类型与契约已先提交，Manager 消费者正在接入。当前集成树只有 FVP、Artemis、Siglus、Musica、CMVS 五个 Family 适配 crate；KrKr 来源存在于另一工作线，尚未接入此活动 workspace，不能将五核检查称为六核完成。
 
 ## 2026-09-26 Musica 翻译呈现失败
 

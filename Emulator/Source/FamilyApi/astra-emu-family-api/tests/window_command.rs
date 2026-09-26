@@ -20,3 +20,32 @@ fn titles_are_bounded_utf8_and_empty_explicitly_clears() {
         assert!(!error.message.contains("secret"));
     }
 }
+
+#[test]
+fn icon_dimensions_and_exact_rgba_length_are_checked_without_overflow() {
+    use astra_emu_family_api::FamilyWindowIcon;
+    FamilyWindowCommand::SetIcon(FamilyWindowIcon {
+        width: 16,
+        height: 16,
+        rgba: vec![255; 1024].into(),
+    })
+    .validate()
+    .unwrap();
+    for (width, height, length) in [
+        (0, 1, 0),
+        (1, 0, 0),
+        (257, 1, 1028),
+        (1, 1, 3),
+        (1, 1, 5),
+        (u32::MAX, u32::MAX, 0),
+    ] {
+        let error = FamilyWindowCommand::SetIcon(FamilyWindowIcon {
+            width,
+            height,
+            rgba: vec![0; length].into(),
+        })
+        .validate()
+        .unwrap_err();
+        assert_eq!(error.code(), "ASTRA_EMU_FAMILY_WINDOW_ICON");
+    }
+}

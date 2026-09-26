@@ -122,12 +122,47 @@ pub enum FamilyWindowCommand {
     SetFullscreen(bool),
     /// UTF-8 window caption. Empty clears it; native encodings are decoded by the family.
     SetTitle(RString),
+    /// Owned, tightly packed straight-alpha RGBA8 small window icon.
+    SetIcon(FamilyWindowIcon),
 }
 
 pub const MAX_WINDOW_TITLE_BYTES: usize = 4096;
+pub const MAX_WINDOW_ICON_DIMENSION: u32 = 256;
+
+#[repr(C)]
+#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
+pub struct FamilyWindowIcon {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: RVec<u8>,
+}
+
+impl FamilyWindowIcon {
+    pub fn validate(&self) -> FamilyResult<()> {
+        let expected = self
+            .width
+            .checked_mul(self.height)
+            .and_then(|n| n.checked_mul(4));
+        if self.width == 0
+            || self.height == 0
+            || self.width > MAX_WINDOW_ICON_DIMENSION
+            || self.height > MAX_WINDOW_ICON_DIMENSION
+            || expected.map(|n| n as usize) != Some(self.rgba.len())
+        {
+            return Err(FamilyError::invalid(
+                "ASTRA_EMU_FAMILY_WINDOW_ICON",
+                "window icon dimensions or RGBA8 byte length are invalid",
+            ));
+        }
+        Ok(())
+    }
+}
 
 impl FamilyWindowCommand {
     pub fn validate(&self) -> FamilyResult<()> {
+        if let Self::SetIcon(icon) = self {
+            return icon.validate();
+        }
         if let Self::SetTitle(title) = self {
             if title.len() > MAX_WINDOW_TITLE_BYTES || title.chars().any(char::is_control) {
                 return Err(FamilyError::invalid(

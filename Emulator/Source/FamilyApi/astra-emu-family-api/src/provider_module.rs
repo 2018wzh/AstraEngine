@@ -75,8 +75,10 @@ impl<P: FamilyProvider> FamilyModule for ProviderModule<P> {
         boundary(|| {
             request.validate()?;
             let mut state = self.state.lock().map_err(lock_error)?;
-            session(&mut state, request.session_id.as_str())?
-                .advance(request.elapsed_ns, &request.events)
+            let response = session(&mut state, request.session_id.as_str())?
+                .advance(request.elapsed_ns, &request.events)?;
+            response.validate()?;
+            Ok(response)
         })
     }
 

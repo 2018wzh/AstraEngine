@@ -1,4 +1,4 @@
-# Independent Family API v8
+# Independent Family API v9
 
 `astra-emu-family-api` 是 Family 插件唯一必需的契约依赖。不依赖 RuntimeWorld、package/save、VFS、renderer/audio backend 或 UI。静态核心和动态核心共用 typed DTO；动态入口使用 `abi_stable` 的 `FamilyModule`，提供 descriptor/probe/open/advance/frame/close。
 
@@ -26,9 +26,9 @@ Host 只提供 game_path、初始 WindowState 和输入。Family 自持 VM、文
 
 `AdvanceResponse.reset_clock` 默认 false。成功读档、重新开始或 Family 定义的暂停/恢复生命周期建立新的播放时间线时，核心提交一次 true；实时 Host 在本次 advance 和最终帧复制完成后重新计算计时起点与下一帧期限，避免把恢复、暂停或生命周期处理耗时计入新时间线。窗口暂停期间的墙钟累计由 Family 丢弃，恢复调用可以消费当前正常帧间隔，但不能补跑暂停累计。普通活动帧仍计入核心执行耗时，`elapsed_ns > 1s` 的 Musica 活动帧仍返回有界诊断，不静默截断。失败操作不提交重置；固定步长 Headless 不依赖墙钟，无需调整其步长。
 
-`AdvanceResponse.window_command` 为可选的 `FamilyWindowCommand::SetFullscreen(bool)`。每次 advance 最多提交一个窗口请求，无 native handle、回调或 UI 类型穿过 ABI。Manager 在窗口线程应用请求；设置保留到下一个请求或会话关闭，退出及错误关闭恢复普通窗口。无窗口的 Headless Host 遇到请求返回 `ASTRA_EMU_HEADLESS_WINDOW_COMMAND_UNAVAILABLE` 并走正常关闭流程，不静默忽略。核心在原生设置应用成功时提交请求，取消草稿不提交；需要恢复全屏的冷启动在首次 advance 提交。
+`AdvanceResponse.window_command` 为可选的 `FamilyWindowCommand::SetFullscreen(bool)` 或 `SetTitle(RString)`。每次 advance 最多提交一个窗口请求，无 native handle、回调或 UI 类型穿过 ABI。Manager 在窗口线程应用请求；设置保留到下一个请求或会话关闭，退出及错误关闭恢复普通窗口。无窗口的 Headless Host 遇到请求返回 `ASTRA_EMU_HEADLESS_WINDOW_COMMAND_UNAVAILABLE` 并走正常关闭流程，不静默忽略。核心在原生设置应用成功时提交请求，取消草稿不提交；需要恢复全屏的冷启动在首次 advance 提交。
 
-v8 增加 `FamilyWindowCommand::SetTitle(RString)`：标题为最多 4096 UTF-8 bytes 的文本，空串明确清空标题，NUL 和 Unicode 控制字符拒绝，不截断。旧核心字符串由 Family 严格按原生编码解码，Host 不猜测编码。`validate` 失败返回 `ASTRA_EMU_FAMILY_WINDOW_TITLE`，错误和日志不含标题正文。每次 advance 仍最多一个窗口请求，Host 在线程内应用后才继续下一次 advance；关闭/失败恢复 Manager 标题。NullAudio 测试标记不受游戏标题覆盖。无窗口 Host 与全屏请求一样明确拒绝，不能将标题命令当作成功的空操作。
+v8 增加 `FamilyWindowCommand::SetTitle(RString)`：标题为最多 4096 UTF-8 bytes 的文本，空串明确清空标题，NUL 和 Unicode 控制字符拒绝，不截断。旧核心字符串由 Family 严格按原生编码解码，Host 不猜测编码。`validate` 失败返回 `ASTRA_EMU_FAMILY_WINDOW_TITLE`，错误和日志不含标题正文。每次 advance 仍最多一个窗口请求，Manager 在窗口线程将最新请求同步到实际窗口标题；关闭/失败恢复 Manager 标题。NullAudio 测试标记不受游戏标题覆盖。无窗口 Host 与全屏请求一样明确拒绝，不能将标题命令当作成功的空操作。
 
 ## Manager 诊断
 
@@ -42,8 +42,11 @@ Manager 再验证边界和重复字段；非法记录输出 `family.diagnostics.
 
 ## 生命周期与迁移
 
-ABI fingerprint 为 `astra.emu.independent_family_abi.v8`，schema 为 `astra.emu.independent_family_api.v8`。v1/v2/v3/v4/v5/v6/v7 插件必须重新构建安装，不提供兼容 reader/adapter。
+ABI fingerprint 为 `astra.emu.independent_family_abi.v9`，schema 为 `astra.emu.independent_family_api.v9`。v1/v2/v3/v4/v5/v6/v7/v8 插件必须重新构建安装，不提供兼容 reader/adapter。
 
 动态库首次加载后一直驻留到进程退出，失败加载产生的 ABI 元数据也不会指向卸载的代码；更新插件必须重启 Manager。provider/module 对象按正常生命周期释放。会话 close 和 open 失败仍须取消 Host 请求、唤醒阻塞 PCM 写入并等待所有 worker 结束，错误不得跳过其他 worker 清理。驻留不允许保留已关闭会话的线程或 session callback；无 session 资源的进程级诊断 sink 除外。
 
 验证使用普通 Rust unit/integration test。配置合法/默认/边界/损坏值、可选翻译和必需音频、Manager 持久化覆盖及失败写入保护均需通过；真实游戏输入、音视频、原生存读档和退出仍须实际运行，局部测试不代表产品验收。
+
+
+v9 增加 `SetIcon(FamilyWindowIcon)`，只传 owned、紧密排列的 straight-alpha RGBA8 像素与宽高；每轴 1–256，字节数严格等于宽×高×4。尺寸、溢出或长度错误返回 `ASTRA_EMU_FAMILY_WINDOW_ICON`，不截断、不传文件路径或 native handle。此上限是 Host 边界，不宣称为旧引擎上限。Manager 复用窗口后端的 small-icon 能力，关闭或失败后恢复应用图标；无窗口或不支持该能力的后端显式拒绝。原生资源读取、解码与 best-effort 失败语义归 Family；未发请求不能称图标已显示。每次 advance 仍只提交一个命令，Family 必须保留不同类型的待提交请求，不能用图标覆盖未交付标题。

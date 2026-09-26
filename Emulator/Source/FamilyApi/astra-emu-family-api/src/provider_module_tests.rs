@@ -60,7 +60,7 @@ impl FamilySession for Session {
     fn advance(&mut self, _: u64, _: &[FamilyEvent]) -> FamilyResult<AdvanceResponse> {
         assert!(!self.panic_on_advance, "test panic");
         Ok(AdvanceResponse {
-            window_command: ROption::RSome(FamilyWindowCommand::SetFullscreen(true)),
+            window_command: ROption::RSome(FamilyWindowCommand::SetTitle("公開タイトル".into())),
             reset_clock: true,
             ..AdvanceResponse::running()
         })
@@ -151,7 +151,7 @@ fn typed_window_command_and_clock_reset_cross_the_family_vtable() {
     assert!(response.reset_clock);
     assert_eq!(
         response.window_command,
-        ROption::RSome(FamilyWindowCommand::SetFullscreen(true))
+        ROption::RSome(FamilyWindowCommand::SetTitle("公開タイトル".into()))
     );
     module.close(request()).into_result().unwrap();
     assert_eq!(closed.get(), 1);

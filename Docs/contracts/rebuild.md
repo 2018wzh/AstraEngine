@@ -217,3 +217,5 @@ Linux 视频使用现有 `Start/Next` 契约：Start 保留管线并返回已知
 Linux 本地媒体边界限制单次编码输入 256 MiB、单个视频帧和 one-shot 音频输出各 64 MiB；累计视频预算继续由产品 MediaHost 校验，不缓存完整解码影片。通过 `gstreamer-video` 按 plane stride 读取 BGRA，剔除行尾 padding。耗时解码不占用窗口事件线程；请求接收端取消或 session 关闭时 worker 停止拉帧，管线设为 Null 后删除临时输入。显式 CloseDecode 等待 worker，并传播关闭失败；取消的 OpenDecode 回复回收刚分配的句柄。宿主无须新增公共 ABI 或 save/package 字段，已有视频调用方使用原 Start/Next 即可。
 
 实现只增加 Linux target 的 `gstreamer-video = 0.24.2`（MIT OR Apache-2.0）与锁定的 sys 依赖（MIT），不传递第三方类型到公共契约。平台发布检查必须验证所选 GStreamer 插件、完整视频帧/PTS/结束计数、取消及关闭，而非只验证 codec 名称或首帧；真实窗口、设备音频与新集成分支另行验收。
+
+Family 窗口 ABI v9 增加 `SetIcon(FamilyWindowIcon)`：owned RGBA8、每轴最多 256、长度与乘法溢出严格检查。Family 解码原生资源，Host 只在窗口线程应用 small icon，关闭后恢复应用图标；无窗口或后端不支持时显式拒绝。图标与标题各自保留待提交请求，不传路径、句柄或第三方 UI 类型。
