@@ -1,5 +1,9 @@
 # 全产品重构实施状态
 
+## 2026-09-26 外部 Family 作者入口
+
+新增单用途外部核心开发回归：公开 fixture 在临时独立 Cargo 项目中编译，只依赖 Family API、abi_stable 和 tracing，使用现有 ProviderModule。现有 Manager 加载该动态库，验证启动配置、物理按键、借用 CPU 帧、PCM 有界队列及取消/等待 worker；不要求 SDK 或 VN。两次冷启动及逐像素检查通过，越界配置和缺失输入按预期失败；独立消费者的 fmt、all-target Clippy 与构建通过，临时项目完成后清理。开发手册同步删除已移除的 NativeVN descriptor 调用。此项只覆盖外部适配入口，不能替代六核真实游戏、GPU 或实际声音验收。
+
 ## 2026-09-26 最终集成检查
 
 静态 Engine/VN、源码 Timeline 缓动、原生 policy IO、CMVS 字体/按需内容身份以及 Linux WAV/完整视频流已汇入同一分支。Windows 上三个活动 workspace 的完整检查通过：根测试 829 项通过、19 项跳过；Emulator 586 项通过、34 项跳过；Editor 18 项通过、3 项跳过。文档、格式、all-target Clippy 和产品构建通过，根构建包含 Headless；NativeVN Python 26 项与 TsuiNoSora 分析回归 165 项通过。Linux decoder 拆分后保留原有固定长度 PCM 切片修复，未改变音频格式或 provider 选择。

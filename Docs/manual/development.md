@@ -105,9 +105,24 @@ python Tools/TsuiNoSora/classic_route_inputs.py \
 
 对白进入 pending wait 时，文字可能还在逐字显示。第一次推进输入会补全文字，后续输入才推进剧情。Headless 可通过只读观察项 `vn.text_reveal_complete` 等待当前文字显示完成，再发送物理按键；它来自真实演出状态，不修改剧情游标或显示进度。没有正在显示的文字时为 true。Classic 路线脚本已按此区分对白等待与普通输入等待，不能仅凭 `vn.pending_wait_command` 就假设一次 Enter 足以推进。
 
+## 外部 Family 最小接入
+
+[公开最小核心](../../Tools/AstraEMU/tests/fixtures/external_family.rs) 复用现有 `FamilyProvider`、`FamilySession` 和 `ProviderModule`，声明启动配置、借用 CPU 帧与固定格式 PCM。它没有 SDK、VN、EngineSession 或 Manager 依赖。实际核心可替换这三个实现中的 fixture 逻辑，继续拥有原生 VM、渲染和存档。
+
+示例选择 Family API 的 `diagnostic-bridge` feature，因为现有 `ProviderModule` 和 tracing/log 桥在该 feature 下提供；这不是 Family ABI 强制依赖。直接实现 `FamilyModule` 的核心可使用 `default-features = false`，自行将诊断送入 Host 安装的 `DiagnosticSink`。不能跳过诊断初始化后宣称日志已接通。
+
+先在当前独占树构建 Manager，再执行下列单用途开发回归。Python 需要 Pillow；脚本临时生成独立 Cargo 项目、lockfile 和 target，编译动态库并由已有 Manager 的 headless 入口加载。临时项目位于 ignored 目录，完成或失败后清理，不加入活动 workspace；没有继承主 workspace feature 集合或私有初始化步骤。
+
+```sh
+cargo build --manifest-path Emulator/Cargo.toml -p astra-emu-manager
+python Tools/AstraEMU/check_external_family.py --host Emulator/target/debug/astra-emu-manager
+```
+
+Windows 的 `--host` 参数添加 `.exe`。回归检查依赖图仅包含 Family API 这一 Astra crate、显式配置改变帧颜色、物理 Enter 按下/释放改变像素、PCM worker 至少一次写入成功，以及关闭取消并等待 worker。两次冷启动通过；越界配置和缺失输入必须失败。音频经过真实 Host 的有界 NullAudio 队列，但不会发声；2×2 CPU 帧只验证 ABI 交付，不代表 GPU、游戏或实际声音验收。真实核心的原生媒体、存读档和连续流程仍需单独运行。
+
 ## NativeVN 嵌入接口
 
-使用 `astra_vn::{VnSession, VnSessionConfig, NativeVnStepInput}` 创建和推进会话，保存/恢复传递 `astra_runtime::SaveBlob`，关闭消费 VnSession。原 `astra-vn-runtime-provider` 依赖须改为 `astra-vn`，不提供旧名称别名。包元数据使用 `astra_vn::native_vn_descriptor()`；无需注册 Factory 或传递 ABI request。EngineSession 的任务作用域由会话持有，调用方不得在退出后继续提交结果。
+使用 `astra_vn::{VnSession, VnSessionConfig, NativeVnStepInput}` 创建和推进会话，保存/恢复传递 `astra_runtime::SaveBlob`，关闭消费 VnSession。原 `astra-vn-runtime-provider` 依赖须改为 `astra-vn`，不提供旧名称别名。静态 NativeVN 包已删除 gameplay descriptor 和动态 Factory/ABI request 链；通过现有 Cook/package 入口生成包。EngineSession 的任务作用域由会话持有，调用方不得在退出后继续提交结果。
 
 本接口的增量回归包括 `cargo test -p astra-vn -p astra-runtime` 和 `cargo test -p astra-player-vn --lib`；包检查修改另运行 `cargo test -p astra-release --test release_report`。这些测试不代替 Windows/Android 实玩。
 
