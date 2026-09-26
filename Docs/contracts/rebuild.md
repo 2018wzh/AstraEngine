@@ -14,6 +14,8 @@
 
 ## EMU Family API
 
+Family API v8 增加有界 UTF-8 `SetTitle` 窗口请求，空串清空、控制字符及超过 4096 bytes 的标题失败；完整限制与迁移见 [Family API](../../Emulator/Source/FamilyApi/astra-emu-family-api/API_CONTRACT.md)。Family 负责严格解码原生编码，Host 在窗口线程应用；正文不得写日志，NullAudio 标记保留，关闭恢复 Manager 标题。v7 核心须重建，不提供兼容分支。
+
 Manager headless 使用现有 `astra-observability` 的有界日志，与本次输出图像放在一起：将输出文件扩展名替换为 `.diagnostics` 作为日志目录。日志不写入游戏目录或存档，不属于 package；测试结束后按临时产物规则清理。
 
 共享音频的流式解码只将解码器明确返回的流结束视为完成。`SymphoniaAudioStreamDecoder` 遇到意外 EOF 返回 `ASTRA_AUDIO_STREAM_TRUNCATED_INPUT`；已输出的有效 PCM 前缀不代表整段播放成功，调用方须终止失败的播放请求。正常完整流和解码预算规则不变。

@@ -114,16 +114,34 @@ pub enum FamilyStatus {
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
+#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
 pub enum FamilyWindowCommand {
     /// Request the host-owned game window's fullscreen mode. No native handle
     /// crosses the ABI. Hosts must execute this on their window thread or fail
     /// the session explicitly when window control is unavailable.
     SetFullscreen(bool),
+    /// UTF-8 window caption. Empty clears it; native encodings are decoded by the family.
+    SetTitle(RString),
+}
+
+pub const MAX_WINDOW_TITLE_BYTES: usize = 4096;
+
+impl FamilyWindowCommand {
+    pub fn validate(&self) -> FamilyResult<()> {
+        if let Self::SetTitle(title) = self {
+            if title.len() > MAX_WINDOW_TITLE_BYTES || title.chars().any(char::is_control) {
+                return Err(FamilyError::invalid(
+                    "ASTRA_EMU_FAMILY_WINDOW_TITLE",
+                    "window title exceeds its UTF-8 bound or contains control characters",
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
+#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
 pub struct AdvanceResponse {
     pub status: FamilyStatus,
     pub window_command: ROption<FamilyWindowCommand>,
@@ -135,6 +153,13 @@ pub struct AdvanceResponse {
 }
 
 impl AdvanceResponse {
+    pub fn validate(&self) -> FamilyResult<()> {
+        if let ROption::RSome(command) = &self.window_command {
+            command.validate()?;
+        }
+        Ok(())
+    }
+
     pub fn running() -> Self {
         Self {
             status: FamilyStatus::Running,

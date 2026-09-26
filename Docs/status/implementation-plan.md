@@ -1,5 +1,9 @@
 # 全产品重构实施状态
 
+## 2026-09-26 Family 窗口标题契约
+
+CMVS 原生 352 需要实际设置窗口标题。Family API v8 添加 `SetTitle`、长度与控制字符校验，空标题保留原生清空语义；此批先提交公共类型与契约，Manager 消费者随后接入。当前集成树只有 FVP、Artemis、Siglus、Musica、CMVS 五个 Family 适配 crate；KrKr 来源存在于另一工作线，尚未接入此活动 workspace，不能将五核检查称为六核完成。
+
 ## 2026-09-26 Musica 翻译呈现失败
 
 翻译服务返回 Ready 后，Musica 原先吞掉场景呈现错误并继续会话，与 SDK 字形资源生命周期要求冲突。现将该错误传播到既有 advance/poison 边界，后续输入不能推进或写入存档；正常 close 仍取消并等待音频 worker。翻译服务拒绝或超时仍保留原文，不与字体/GPU 错误混为一类。定向测试通过真实字体排版得到 `ASTRA_TEXT_GLYPH_MISSING`，确认错误传播、后续保存输入拒绝及关闭回收；没有新增生产故障注入或 SDK 接口。
