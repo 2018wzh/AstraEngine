@@ -8,7 +8,11 @@
 
 Windows 上根、Emulator、Editor 三个活动 workspace 的完整 `xtask check` 均通过，包含文档、格式、all-target Clippy、产品构建与普通测试；根构建包含 Headless。Editor 17 项测试通过，3 项外部 Agent/GPU 产品用例按原条件未执行。独立干净检出及独立 target 上，`xtask` 自身完整检查和 platform 关闭默认 feature 的 7 项 session 测试通过。Emulator 默认 GPU fixture 通过不代表商业流程或实际声音验收。
 
-干净检出发现 Artemis `13e55ffa`、RFVP `b2f385da`、Siglus `c6c4f99c` 的固定提交尚不能从配置的远端取得；本地子模块检查不替代远端可复现性。Linux/macOS 本机检查、更新后的远端 CI、FFmpeg 可选 job、真实 Player 视听与长流程仍未关闭。
+Artemis `13e55ffa`、RFVP `b2f385da`、Siglus `c6c4f99c` 已按用户授权分别推到原 fork 的新分支 `codex/ci-fixed-20260926`，未修改已有远端分支或推送主仓。独立干净检出已从远端取得三个固定提交。长路径检出触发 shaderc 的 MSVC 对象文件路径限制；同一 `24d2e1606` 在短路径新 clone 和独立 target 上完整通过 Emulator 检查，564 项通过、34 项按原条件跳过。DXC 的固定 release 曾遇到 TLS 下载失败，重试原地址后成功，未关闭证书校验或复制旧构建产物。
+
+`7ef635a7b` 已整合静态 gameplay 打包链及 SDK/CMVS 文字批。根 workspace 815 项测试通过、19 项跳过；Emulator 579 项通过、34 项跳过；Editor 17 项通过、3 项跳过。三个 workspace 的文档、格式、all-target Clippy 和产品构建均通过，NativeVN Python 回归 26 项通过。并行 Cook 曾锁住 `astra.exe`，随后串行重跑根测试通过。两个产品 lockfile 同步删除已移除的动态 ABI 依赖。
+
+新格式 NativeVN 完整 Cook 和 package build 已通过。Windows Sandbox 两次创建均以 `0x80370106` 意外退出，列表仍为空；本轮尚未进入真实 Player 交互、保存或恢复，也未恢复 Editor GUI 操作。没有修改宿主系统配置。更新后的远端 CI、FFmpeg 可选 job、macOS 本机检查、真实 Player 视听与长流程仍未关闭。
 
 ## 2026-09-23 集成与 Classic 复测
 

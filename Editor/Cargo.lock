@@ -461,10 +461,7 @@ dependencies = [
 name = "astra-plugin-abi"
 version = "0.1.0"
 dependencies = [
- "astra-byte-source",
  "astra-core",
- "astra-media-core",
- "postcard",
  "schemars 0.8.22",
  "serde",
  "serde_json",
