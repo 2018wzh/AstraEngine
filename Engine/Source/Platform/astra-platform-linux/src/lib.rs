@@ -1,3 +1,5 @@
+#[cfg(target_os = "linux")]
+mod decode;
 mod factory;
 #[cfg(all(target_os = "linux", feature = "platform-test-driver"))]
 mod test_driver;

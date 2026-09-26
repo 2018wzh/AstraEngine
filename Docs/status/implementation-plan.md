@@ -1,5 +1,11 @@
 # 全产品重构实施状态
 
+## 2026-09-26 Linux WAV 与硬件回归
+
+Linux decoder 原先在请求校验阶段拒绝 `wav`，与 NativeVN 现有 WAV master 绑定不符。现将 decoder 从 Host factory 拆为独立模块，保留同一显式 GStreamer provider，补充 WAV 接受与 bus 错误检查；缺插件或解码失败及时返回，不推进请求序号，启动失败也执行 pipeline 关闭。真实 GStreamer 用例覆盖 16/24-bit 完整 PCM、重复请求拒绝、重复创建/解码及损坏流。测试插件在本地私有目录加载，未写入仓库或改系统安装；不能据此声称发布环境已包含插件。
+
+同基线 Linux 原有 6 项回归与 8 项硬件 GPU 离屏用例通过，GPU 覆盖 aspect-fit、裁剪、图集增长/回收、混合和滤镜回读。默认 Linux Player 构建与 help 启动通过。当前环境没有显示会话或声卡，原生窗口、可听音频与商业游戏不计通过；Linux 视频仍只返回首帧，完整视频流及生命周期待实现。NativeVN 未提交素材保持原样，由本地 Editor 工作线接手。 本批最终 Linux 10 项（含显式 GStreamer 与无显示启动用例）、Player 22 项通过，1 项子进程 helper 按定义忽略；Linux/Player all-target Clippy、默认 Player 构建、文档与格式检查通过。独立 Emulator Manager 在 Linux 构建及 help 启动通过，未执行商业游戏或真实窗口。以上为受影响范围的验证，不代替新集成分支的全 workspace 门禁。
+
 ## 2026-09-26 CI 与干净检出修复
 
 已接入 NativeVN 的 WAV/MP4 显式绑定、Editor 完整作者预览回归，以及 CMVS 原生字符串值拷贝。CI 增加三桌面 Editor 检查、Git LFS 和 EMU 递归子模块检出。`xtask` 可直接选择 Editor；产品构建不再覆盖正在运行的 `xtask.exe`，自身仍接受格式、Clippy 和测试。

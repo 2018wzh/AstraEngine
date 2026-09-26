@@ -205,3 +205,9 @@ Timeline 是同一源 AST 的临时投影。共享 `astra-vn-editor` 提供投�
 compiled project 升至 v5、package root 升至 v4；包含轨道的 Stage/Player 存档同时换版本；VN 业务 RuntimeState 不含轨道，保持 v4。旧格式在解码前明确拒绝，作品重新 Cook，不做迁移或兼容别名。局部检查覆盖曲线端点/中点、编译诊断、暂停恢复、取消、文本与 Timeline 往返及版本冲突；桌面实际操作保持暂停。
 
 模式参考：[rust-analyzer 的无损语法树与类型 AST 分层](https://rust-analyzer.github.io/book/contributing/architecture.html)；缓动使用已有实现，概念上的段进度映射参考 [CSS Easing](https://www.w3.org/TR/css-easing-1/)，不宣称 CSS 数值兼容。
+
+### Linux WAV 解码
+
+Linux 显式 GStreamer provider 的 one-shot audio 接受 `wav`，保持原有 48 kHz、双声道 float PCM 输出；不切换到其他 decoder。运行环境须提供 playback/typefind、wavparse、audioconvert 与 audioresample 插件。缺插件或流错误返回 `ASTRA_LINUX_GSTREAMER_DECODE_FAILED`，不传播可能含私有临时路径的 GStreamer debug 字符串，不提交失败请求的 sequence。启动或解码失败后同样将 pipeline 置为 Null。此改动不更改 package/save schema，不需要数据迁移；发布验证必须实际解码目标位深素材，codec allowlist 或构建通过不能证明插件可用。
+
+此项只覆盖 one-shot audio；Linux 当前视频首帧返回不能作为完整流播放验收，仍需按公共视频流契约实现 start/next、时间戳与退出取消。

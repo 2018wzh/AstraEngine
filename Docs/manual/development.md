@@ -123,3 +123,19 @@ CLI 的 run/serve 必须持有 HeadlessThreadOwner，并通过 factory.with_thre
 Player 的物理输入入口使用 NativeVnHostCommandSource::prepare_ui_input，先按批内顺序执行命令，再把 Captured 结果交给 cache_gameplay_surface，最后处理 UI save request。新增宿主不要恢复仅按右键判定截图的逻辑。NativeVN 输入工具的 --save-restore 覆盖写槽与读取；--cold-restore 用另一进程读取已存在的一份测试存档，不能与写槽或影片输入选项合并。
 
 `xtask` 在产品 build 步骤排除正在运行的自身可执行文件，避免 Windows 文件锁阻止覆盖；自身仍参加格式、Clippy 和测试。平台内部故障注入命令的类型在各 feature 组合下保持一致，客户端注入入口仍由 `platform-test-driver` 控制，未开启的宿主明确拒绝注入请求。
+
+## Linux GStreamer 定向验证
+
+WAV 解码依赖 GStreamer 的 playback/typefind、wavparse、audioconvert 和 audioresample。开发机安装对应平台插件包，或用 `GST_PLUGIN_PATH` 指向本机私有插件目录；不将插件复制进源码，也不在失败后更换 decoder。以下用例实际解码公开构造的 16/24-bit PCM，并覆盖重复请求、重新创建和损坏流，默认 ignored，必须显式执行才计通过：
+
+```bash
+cargo test -p astra-platform-linux --lib decode::tests -- --include-ignored
+```
+
+无显示会话的 runner 可单独验证 Host 启动拒绝；这不是窗口播放成功：
+
+```bash
+cargo test -p astra-platform-linux --features platform-test-driver --test unavailable missing_display_rejects_real_host_start -- --ignored
+```
+
+正式产品仍须在有显示与音频设备的 Linux 环境验证完整播放、系统页、存读档、退出及重新启动。WAV 局部通过不关闭完整视频流的实施缺口。
