@@ -1,8 +1,9 @@
 use astra_ui_core::{UiThemeManifest, UiThemeValue};
 use astra_vn_script::{
-    compile_astra_project, format_astra_source, parse_astra_source, CompileAstraProjectOptions,
-    ExtensionCommandDescriptor, ExtensionFieldContract, ExtensionFieldKind, FormatOptions,
-    ScriptLanguageService, SemanticPass, SyntaxKind, SEMANTIC_PASS_ORDER,
+    compile_astra_project, format_astra_source, parse_astra_source, AstraSource,
+    CompileAstraProjectOptions, ExtensionCommandDescriptor, ExtensionFieldContract,
+    ExtensionFieldKind, FormatOptions, ScriptLanguageService, SemanticPass, SyntaxKind,
+    SEMANTIC_PASS_ORDER,
 };
 use std::collections::BTreeMap;
 
@@ -385,7 +386,7 @@ fn unknown_command_is_editable_but_requires_explicit_compile_binding() {
         }),
     )
     .unwrap();
-    assert_eq!(compiled.schema, "astra.vn.compiled_project.v3");
+    assert_eq!(compiled.schema, "astra.vn.compiled_project.v4");
 }
 
 #[test]
@@ -402,7 +403,7 @@ fn standard_audio_control_is_bound_without_an_extension_bypass() {
         Default::default(),
     )
     .unwrap();
-    assert_eq!(compiled.schema, "astra.vn.compiled_project.v3");
+    assert_eq!(compiled.schema, "astra.vn.compiled_project.v4");
 }
 
 #[test]
@@ -429,4 +430,18 @@ fn formatter_is_idempotent_and_preserves_semantics() {
     assert!(service
         .hover(formatted.find("text").unwrap() as u32 + 1)
         .is_some());
+}
+
+#[test]
+fn dynamic_ui_component_authoring_is_rejected() {
+    for ui in [
+        "ui_component obsolete.widget #@id obsolete.widget\n",
+        "ui_view ui.test model:astra.vn.ui_model.config.v1 theme:theme.classic #@id ui.test\n  component_slot id:root component:obsolete.widget\n",
+        "ui_view ui.test model:astra.vn.ui_model.config.v1 theme:theme.classic #@id ui.test\n  screen id:root component:obsolete.widget\n",
+    ] {
+        assert!(compile_astra_project(
+            [AstraSource::story("story.astra", SOURCE), AstraSource::ui("ui.astra", ui)],
+            CompileAstraProjectOptions::default().with_ui_theme(test_theme()),
+        ).is_err());
+    }
 }

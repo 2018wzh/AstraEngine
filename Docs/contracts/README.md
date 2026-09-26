@@ -13,7 +13,6 @@
 | Game Runtime Provider | [game-runtime-provider.md](game-runtime-provider.md) |
 | Media | [media.md](media.md) |
 | Runtime UI | [ui.md](ui.md) |
-| UI Component Plugin | [ui-component-plugin.md](ui-component-plugin.md) |
 | Performance | [performance.md](performance.md) |
 | Player 片段预览 | [player-preview.md](player-preview.md) |
 | Script / VN | [script-vn.md](script-vn.md) |

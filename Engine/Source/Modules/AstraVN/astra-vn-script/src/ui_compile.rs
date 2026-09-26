@@ -42,7 +42,6 @@ pub(crate) fn compile_project_ui(
     let mut source_map = BTreeMap::new();
     let mut controller_ids = BTreeSet::new();
     let mut theme_ids = BTreeSet::new();
-    let mut component_ids = BTreeSet::new();
     let mut themes = BTreeMap::new();
     for theme in ui_themes {
         theme.validate().map_err(ui_error)?;
@@ -115,18 +114,6 @@ pub(crate) fn compile_project_ui(
                 source_map.insert(line.stable_id(), line.source_ref());
                 index += 1;
             }
-            "ui_component" => {
-                let id = required_argument(line, 0, "component id")?;
-                if !component_ids.insert(id.to_string()) {
-                    return Err(diagnostic(
-                        line,
-                        "ASTRA_UI_COMPONENT_DUPLICATE",
-                        "UI component id is already declared",
-                    ));
-                }
-                source_map.insert(line.stable_id(), line.source_ref());
-                index += 1;
-            }
             "ui_policy" => {
                 let policy = parse_system_ui_policy(line)?;
                 if system_ui_profiles
@@ -165,7 +152,6 @@ pub(crate) fn compile_project_ui(
 
     for view in views.values() {
         theme_ids.insert(view.theme_id.clone());
-        collect_component_ids(&view.root, &mut component_ids);
     }
     if !views.is_empty() {
         for theme_id in &theme_ids {
@@ -207,7 +193,7 @@ pub(crate) fn compile_project_ui(
     }
 
     let mut ui_blueprints = UiBlueprintBundle {
-        schema: "astra.ui_blueprint_bundle.v1".to_string(),
+        schema: "astra.ui_blueprint_bundle.v2".to_string(),
         views,
         hash: Hash256::from_sha256(&[]),
     };
@@ -235,7 +221,7 @@ pub(crate) fn compile_project_ui(
         &system_ui_profiles,
     )?;
     Ok(CompiledVnProject {
-        schema: "astra.vn.compiled_project.v3".to_string(),
+        schema: "astra.vn.compiled_project.v4".to_string(),
         project_hash,
         story,
         ui_blueprints,
@@ -245,7 +231,6 @@ pub(crate) fn compile_project_ui(
         controller_sources,
         theme_ids,
         themes,
-        component_ids,
         system_ui_profiles,
     })
 }
@@ -672,10 +657,7 @@ fn item_path_allowed(schema: &str, collection: &str, path: &[String]) -> bool {
 
 fn parse_node(lines: &[ParsedLine], index: usize) -> Result<(UiNodeBlueprint, usize), VnError> {
     let line = &lines[index];
-    if matches!(
-        line.keyword.as_str(),
-        "on" | "ui_view" | "ui_bind" | "ui_component"
-    ) {
+    if matches!(line.keyword.as_str(), "on" | "ui_view" | "ui_bind") {
         return Err(diagnostic(
             line,
             "ASTRA_UI_WIDGET_EXPECTED",
@@ -687,7 +669,6 @@ fn parse_node(lines: &[ParsedLine], index: usize) -> Result<(UiNodeBlueprint, us
     let mut properties = BTreeMap::new();
     for (key, value) in &line.attrs {
         if key == "id"
-            || key == "component"
             || (line.keyword != "select"
                 && matches!(key.as_str(), "items" | "item_key" | "overscan"))
         {
@@ -726,7 +707,6 @@ fn parse_node(lines: &[ParsedLine], index: usize) -> Result<(UiNodeBlueprint, us
         events: Vec::new(),
         children: Vec::new(),
         repeat,
-        component_id: line.attr("component").map(str::to_string),
     };
     let mut next = index + 1;
     while next < lines.len() && lines[next].indent > line.indent {
@@ -898,7 +878,6 @@ fn validate_widget(line: &ParsedLine) -> Result<(), VnError> {
         "text",
         "text_input",
         "spacer",
-        "component_slot",
     ];
     if !WIDGETS.contains(&line.keyword.as_str()) {
         return Err(diagnostic(
@@ -997,7 +976,6 @@ fn validate_widget_properties(line: &ParsedLine) -> Result<(), VnError> {
             "columns",
         ],
         "canvas" => &["nodes", "edges"],
-        "component_slot" => &["component"],
         "screen" | "row" | "column" | "stack" | "panel" | "scroll" | "modal"
         | "semantic_region" | "spacer" => &[],
         _ => &[],
@@ -1131,9 +1109,6 @@ fn infer_capabilities(node: &UiNodeBlueprint, out: &mut BTreeSet<UiCapability>) 
             out.insert(UiCapability::TextInput);
             out.insert(UiCapability::Ime);
         }
-        "component_slot" => {
-            out.insert(UiCapability::ComponentSlots);
-        }
         _ => {}
     }
     if !node.events.is_empty() {
@@ -1143,15 +1118,6 @@ fn infer_capabilities(node: &UiNodeBlueprint, out: &mut BTreeSet<UiCapability>) 
     }
     for child in &node.children {
         infer_capabilities(child, out);
-    }
-}
-
-fn collect_component_ids(node: &UiNodeBlueprint, ids: &mut BTreeSet<String>) {
-    if let Some(id) = &node.component_id {
-        ids.insert(id.clone());
-    }
-    for child in &node.children {
-        collect_component_ids(child, ids);
     }
 }
 

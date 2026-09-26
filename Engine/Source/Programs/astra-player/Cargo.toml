@@ -47,8 +47,6 @@ libc.workspace = true
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true, features = ["Win32_System_IO", "Win32_Foundation"] }
 astra-platform-windows = { path = "../../Platform/astra-platform-windows" }
-astra-ui-component-host = { path = "../astra-ui-component-host" }
-astra-ui-plugin-abi = { path = "../../Runtime/astra-ui-plugin-abi" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 astra-platform-linux = { path = "../../Platform/astra-platform-linux" }

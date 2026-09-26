@@ -165,3 +165,7 @@ Yakui 的 `clip_rect_points` 必须以成对 `PushClip`/`PopClip` 进入共享 S
 NativeVN 宿主通过 prepare_ui_input 处理物理输入。只有剧情实际进入系统页或提出快捷保存时，才在该批首个呈现命令之前插入 CaptureSurface；宿主消费 Captured 结果后再处理保存请求。键盘、鼠标、导航与辅助功能入口使用同一状态转换判断，系统页内部切换不覆盖 gameplay thumbnail。直接 dispatch_ui_event 仍供不负责存档缩略图的预览/逻辑调用者使用。迁移宿主时须同时消费截图结果，不能仅替换方法名；回归检查截图在呈现前、序列递增、系统页内不重复捕获，并用真实保存页检查缩略图。
 
 Windows 新建窗口在首次显示前按所在显示器的 work area 放置，外框不得因系统级联位置挡住底部操作；可用区域不足时缩小物理客户区，剧情逻辑尺寸仍由共享 Canvas 管理。桌面和 native Player 的 `current_save_timestamp` 共用本地墙钟显示，时区不可得时明确附加 UTC 标识；Headless 保留确定性的 T+ 时间。既有槽的显示字符串不改写。
+
+## 静态游戏 UI 包格式
+
+NativeVN 使用编译期组合的 Yakui。Cook、bundle 和 Player 不再接收动态 UI component artifact、signer allowlist 或组件子进程配置；旧 `ui_component`、`component_slot` 源码需改为标准 widget。UI blueprint 为 `astra.ui_blueprint_bundle.v2`，compiled project 为 v4，package root 为 v3。旧包重新 Cook；读取时拒绝旧 root，不保留 reader fallback。作品 hash、section 完整性和存档损坏校验保持有效。

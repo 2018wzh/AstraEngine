@@ -600,3 +600,7 @@ main surface 修复后真实 Cook/package 与 Vulkan 硬件离屏场景通过。
 
 
 2026-09-22 接入 392ceec05 后修复 Headless 错误退出与保存缩略图入口：CLI run/serve 持有取消/join owner，最小硬件 GPU await-timeout 负例现在以预期 exit 2 退出，不再挂住；正常 69 输入/10 checkpoint 存读档 GPU 回归 exit 0。物理输入经 prepare_ui_input 按实际系统页转换在呈现前截图，三个宿主接收 Captured 结果；实际查看 slot.01，缩略图已显示保存前的剧情画面。126 项直接调用方测试通过、1 helper 忽略，线程析构 2 项局部测试与相关五 crate all-target Clippy 通过。随后使用另一进程读取同一存档，25 条物理输入、目录与恢复 checkpoint 均通过，已查看恢复画面；存档读取前后 hash 相同。列表 clip 丢失仍未修复，真实窗口/音频与多平台仍未验收。
+
+### 静态 Yakui 消费链
+
+已删除动态 UI ABI、组件 Host、fixture、JCO 专用工具及 Cook/bundle/Player/Web 消费链。标准 `.astra` widget、typed ViewModel、Luau Controller 与 Yakui 输入/布局/绘制保留。包格式改动要求重新 Cook。已通过 script/package/Yakui 增量测试、实际 CLI cook/package/Web bundle 回归及受影响 crate 的 clippy；最小 Engine 无 package/FSM 的状态与存读档测试通过。此项不代表真实平台 UI 流程已验收；可信 Luau host IO 与统一 Sequence 作者模型仍待完成。

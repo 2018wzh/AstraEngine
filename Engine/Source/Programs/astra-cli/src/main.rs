@@ -43,9 +43,7 @@ use astra_target::{
 use astra_test::ScenarioReport;
 use astra_vn_core::{VnRunConfig, VnWaitKind};
 use astra_vn_package::{
-    load_player_locale_config, load_ui_component_artifact,
-    package_sections_for_project_with_components, LoadedVnUiComponentArtifact, PlayerLocaleConfig,
-    VnUiComponentArtifactInput, VnUiComponentBundleManifest, VnUiComponentTarget,
+    load_player_locale_config, package_sections_for_project, PlayerLocaleConfig,
     PLAYER_LOCALE_CONFIG_SCHEMA,
 };
 use astra_vn_policy::LuauUiControllerHost;
@@ -53,7 +51,6 @@ use astra_vn_script::{
     compile_astra_project, format_astra_source, AstraSource, CompileAstraProjectOptions,
     FormatOptions,
 };
-use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use clap::{Parser, Subcommand, ValueEnum};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -65,8 +62,6 @@ const WEB_PLAYER_LOADER: &[u8] =
     include_bytes!("../../astra-player-web/web/astra-player-loader.js");
 const WEB_AUDIO_WORKLET: &[u8] =
     include_bytes!("../../astra-player-web/web/astra-audio-worklet.js");
-const WEB_UI_COMPONENT_HOST: &[u8] =
-    include_bytes!("../../astra-player-web/web/astra-ui-component-host.js");
 
 #[derive(Parser)]
 #[command(name = "astra")]
@@ -237,8 +232,6 @@ enum PackageCommand {
         macos_player: Option<PathBuf>,
         #[arg(long)]
         crash_reporter: Option<PathBuf>,
-        #[arg(long)]
-        ui_component_host: Option<PathBuf>,
         #[arg(long)]
         web_player_wasm: Option<PathBuf>,
         #[arg(long)]
@@ -512,7 +505,6 @@ fn main() -> Result<(), CliError> {
                 linux_player,
                 macos_player,
                 crash_reporter,
-                ui_component_host,
                 web_player_wasm,
                 web_player_glue,
                 android_arm64_library,
@@ -527,7 +519,6 @@ fn main() -> Result<(), CliError> {
                     linux_player,
                     macos_player,
                     crash_reporter,
-                    ui_component_host,
                     web_player_wasm,
                     web_player_glue,
                     android_arm64_library,
@@ -1374,7 +1365,6 @@ struct BundleArtifactInputs {
     linux_player: Option<PathBuf>,
     macos_player: Option<PathBuf>,
     crash_reporter: Option<PathBuf>,
-    ui_component_host: Option<PathBuf>,
     web_player_wasm: Option<PathBuf>,
     web_player_glue: Option<PathBuf>,
     android_arm64_library: Option<PathBuf>,
@@ -2097,13 +2087,7 @@ fn cook_nativevn_sections(
         profiles.push(profile.to_string());
     }
 
-    let component_artifacts = nativevn_ui_component_artifacts(project, project_dir)?;
-    let sections = package_sections_for_project_with_components(
-        &compiled,
-        &profiles,
-        target,
-        &component_artifacts,
-    )?;
+    let sections = package_sections_for_project(&compiled, &profiles, target)?;
     let section_dir = out.join("sections");
     fs::create_dir_all(&section_dir)?;
     let mut artifacts = Vec::new();
@@ -2722,94 +2706,6 @@ fn nativevn_controller_paths(
     paths.sort_by_key(|path| normalize_relative_path(path));
     paths.dedup_by(|left, right| normalize_relative_path(left) == normalize_relative_path(right));
     Ok(paths)
-}
-
-fn nativevn_ui_component_artifacts(
-    project: &serde_yaml::Value,
-    project_dir: &std::path::Path,
-) -> Result<Vec<VnUiComponentArtifactInput>, CliError> {
-    #[derive(serde::Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct ComponentTargetSource {
-        manifest: String,
-        artifact: String,
-    }
-
-    #[derive(serde::Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct ComponentSource {
-        id: String,
-        signer_public_key: String,
-        windows: ComponentTargetSource,
-        web: ComponentTargetSource,
-    }
-
-    let Some(value) = project
-        .get("nativevn")
-        .and_then(|nativevn| nativevn.get("ui_components"))
-    else {
-        return Ok(Vec::new());
-    };
-    let sources: Vec<ComponentSource> = serde_yaml::from_value(value.clone())?;
-    let mut ids = std::collections::BTreeSet::new();
-    let mut result = Vec::with_capacity(sources.len().saturating_mul(2));
-    for source in sources {
-        if !ids.insert(source.id.clone()) {
-            return Err("ASTRA_UI_COMPONENT_PROJECT_DUPLICATE: component id is duplicated".into());
-        }
-        if source.signer_public_key.len() != 64
-            || !source
-                .signer_public_key
-                .bytes()
-                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-        {
-            return Err("ASTRA_UI_COMPONENT_SIGNER_KEY: signer_public_key must be 64 lowercase hex characters".into());
-        }
-        let public_bytes = hex::decode(&source.signer_public_key).map_err(|_| {
-            "ASTRA_UI_COMPONENT_SIGNER_KEY: signer_public_key must be 64 lowercase hex characters"
-        })?;
-        let public_key: [u8; 32] = public_bytes.try_into().map_err(|_| {
-            "ASTRA_UI_COMPONENT_SIGNER_KEY: signer_public_key must encode exactly 32 bytes"
-        })?;
-        for (target, target_source) in [
-            (VnUiComponentTarget::Windows, source.windows),
-            (VnUiComponentTarget::Web, source.web),
-        ] {
-            let manifest_path = validate_project_relative_path(&target_source.manifest)?;
-            let artifact_path = validate_project_relative_path(&target_source.artifact)?;
-            let manifest_text = fs::read_to_string(project_dir.join(&manifest_path))?;
-            let manifest: astra_ui_plugin_abi::UiComponentManifest =
-                match manifest_path.extension().and_then(std::ffi::OsStr::to_str) {
-                    Some("json") => serde_json::from_str(&manifest_text)?,
-                    Some("yaml" | "yml") => serde_yaml::from_str(&manifest_text)?,
-                    _ => {
-                        return Err(
-                            "ASTRA_UI_COMPONENT_MANIFEST_FORMAT: manifest must use JSON or YAML"
-                                .into(),
-                        )
-                    }
-                };
-            if manifest.component_id != source.id {
-                return Err(
-                    "ASTRA_UI_COMPONENT_PROJECT_IDENTITY: source id differs from signed manifest"
-                        .into(),
-                );
-            }
-            let artifact = fs::read(project_dir.join(artifact_path))?;
-            if artifact.is_empty() || artifact.len() > 64 * 1024 * 1024 {
-                return Err(
-                    "ASTRA_UI_COMPONENT_ARTIFACT_SIZE: artifact must contain 1..=64 MiB".into(),
-                );
-            }
-            result.push(VnUiComponentArtifactInput {
-                target,
-                manifest,
-                artifact,
-                signer_public_key: public_key,
-            });
-        }
-    }
-    Ok(result)
 }
 
 fn collect_sources_with_extension(
@@ -3545,7 +3441,6 @@ fn build_standalone_bundle_into(
             &scenario_bytes,
         ));
     }
-    let ui_components = bundle_ui_components(&reader, out, platform, artifacts, &mut files)?;
 
     let entrypoint = match platform {
         PlatformId::Windows => {
@@ -3610,7 +3505,6 @@ fn build_standalone_bundle_into(
                 package_storage_hash: &package_storage_hash,
                 display_config: &display_config,
                 locale_config: &locale_config,
-                ui_components: ui_components.as_ref(),
                 source_unlock_profile: source_locked.then_some(source_profile_bundle_path),
             })?;
             fs::write(out.join("AstraPlayer.config.json"), &config)?;
@@ -3643,7 +3537,6 @@ fn build_standalone_bundle_into(
                 package_storage_hash: &package_storage_hash,
                 display_config: &display_config,
                 locale_config: &locale_config,
-                ui_components: ui_components.as_ref(),
                 source_unlock_profile: source_locked.then_some(source_profile_bundle_path),
             })?;
             fs::write(out.join("AstraPlayer.config.json"), &config)?;
@@ -3708,7 +3601,6 @@ fn build_standalone_bundle_into(
                 package_storage_hash: &package_storage_hash,
                 display_config: &display_config,
                 locale_config: &locale_config,
-                ui_components: ui_components.as_ref(),
                 source_unlock_profile: source_locked.then_some(source_profile_bundle_path),
             })?;
             fs::write(resources.join("AstraPlayer.config.json"), &config)?;
@@ -3766,7 +3658,6 @@ fn build_standalone_bundle_into(
                 package_storage_hash: &package_storage_hash,
                 display_config: &display_config,
                 locale_config: &locale_config,
-                ui_components: ui_components.as_ref(),
                 source_unlock_profile: source_locked.then_some(source_profile_bundle_path),
             })?;
             fs::write(out.join("AstraPlayer.config.json"), &config)?;
@@ -3788,16 +3679,6 @@ fn build_standalone_bundle_into(
                 "web_audio_worklet",
                 WEB_AUDIO_WORKLET,
             ));
-            fs::write(
-                out.join("astra-ui-component-host.js"),
-                WEB_UI_COMPONENT_HOST,
-            )?;
-            files.push(bundle_file(
-                "astra-ui-component-host.js",
-                "web_ui_component_host",
-                WEB_UI_COMPONENT_HOST,
-            ));
-
             for (source, destination, role, missing) in [
                 (
                     artifacts.web_player_wasm.as_deref(),
@@ -3856,7 +3737,6 @@ fn build_standalone_bundle_into(
                 package_storage_hash: &package_storage_hash,
                 display_config: &display_config,
                 locale_config: &locale_config,
-                ui_components: ui_components.as_ref(),
                 source_unlock_profile: source_locked.then_some(source_profile_bundle_path),
             })?;
             fs::write(out.join("AstraPlayer.config.json"), &config)?;
@@ -3981,231 +3861,6 @@ fn validate_web_player_glue(bytes: &[u8]) -> Result<(), CliError> {
     Ok(())
 }
 
-fn bundle_ui_components(
-    reader: &PackageReader,
-    out: &Path,
-    platform: PlatformId,
-    artifacts: &BundleArtifactInputs,
-    files: &mut Vec<StandaloneBundleFile>,
-) -> Result<Option<serde_json::Value>, CliError> {
-    let bundle: VnUiComponentBundleManifest = reader
-        .container()
-        .decode_postcard("vn.ui_component_manifest")?;
-    if bundle.schema != "astra.vn.ui_component_bundle.v1" {
-        return Err("ASTRA_UI_COMPONENT_BUNDLE_SCHEMA: package must be re-cooked".into());
-    }
-    if bundle.ids.is_empty() {
-        if !bundle.bindings.is_empty() {
-            return Err(
-                "ASTRA_UI_COMPONENT_BUNDLE_IDENTITY: empty declaration has bindings".into(),
-            );
-        }
-        return Ok(None);
-    }
-    if bundle.bindings.len() != bundle.ids.len() {
-        return Err("ASTRA_UI_COMPONENT_BUNDLE_IDENTITY: declaration/binding count differs".into());
-    }
-
-    let mut allowlist = BTreeMap::new();
-    for binding in &bundle.bindings {
-        if !bundle.ids.contains(&binding.component_id)
-            || allowlist
-                .insert(binding.signer_id.clone(), binding.signer_public_key)
-                .is_some_and(|key| key != binding.signer_public_key)
-        {
-            return Err(
-                "ASTRA_UI_COMPONENT_ALLOWLIST_CONFLICT: signer identity is ambiguous".into(),
-            );
-        }
-    }
-    let root = out.join("ui-components");
-    fs::create_dir_all(&root)?;
-    let allowlist_bytes = postcard::to_allocvec(&allowlist)?;
-    let allowlist_path = "ui-components/allowlist.postcard";
-    fs::write(out.join(allowlist_path), &allowlist_bytes)?;
-    files.push(bundle_file(
-        allowlist_path,
-        "ui_component_allowlist",
-        &allowlist_bytes,
-    ));
-
-    let target = match platform {
-        PlatformId::Windows => VnUiComponentTarget::Windows,
-        PlatformId::Web => VnUiComponentTarget::Web,
-        _ => return Err("ASTRA_UI_COMPONENT_PLATFORM: components require Windows or Web".into()),
-    };
-    let mut entries = Vec::new();
-    for component_id in &bundle.ids {
-        let loaded = load_ui_component_artifact(reader, component_id, target, &allowlist)?;
-        let component_root = format!("ui-components/{component_id}");
-        let manifest_path = format!("{component_root}/manifest.postcard");
-        let manifest_bytes = postcard::to_allocvec(&loaded.manifest)?;
-        fs::create_dir_all(out.join(&component_root))?;
-        fs::write(out.join(&manifest_path), &manifest_bytes)?;
-        files.push(bundle_file(
-            &manifest_path,
-            "ui_component_manifest",
-            &manifest_bytes,
-        ));
-        let entry = if platform == PlatformId::Windows {
-            let artifact_path = format!("{component_root}/component.dll");
-            fs::write(out.join(&artifact_path), &loaded.artifact)?;
-            files.push(bundle_file(
-                &artifact_path,
-                "ui_component_artifact",
-                &loaded.artifact,
-            ));
-            serde_json::json!({
-                "id": component_id,
-                "manifest": manifest_path,
-                "artifact": artifact_path,
-                "artifact_hash": loaded.manifest.artifact_hash.to_string(),
-                "signer_id": loaded.manifest.signer_id,
-            })
-        } else {
-            bundle_web_ui_component(
-                component_id,
-                &component_root,
-                &manifest_path,
-                &loaded,
-                out,
-                files,
-            )?
-        };
-        entries.push(entry);
-    }
-
-    let host = if platform == PlatformId::Windows {
-        let source = artifacts
-            .ui_component_host
-            .as_deref()
-            .ok_or("Windows bundle with UI components requires --ui-component-host")?;
-        let bytes = fs::read(source)?;
-        if bytes.is_empty() {
-            return Err("ASTRA_UI_COMPONENT_HOST_EMPTY: host executable is empty".into());
-        }
-        let path = "AstraUiComponentHost.exe";
-        fs::write(out.join(path), &bytes)?;
-        make_executable(&out.join(path))?;
-        files.push(bundle_file(path, "ui_component_host", &bytes));
-        Some(path)
-    } else {
-        None
-    };
-    Ok(Some(serde_json::json!({
-        "schema": "astra.player_ui_components.v1",
-        "host": host,
-        "allowlist": allowlist_path,
-        "deadline_ms": 100,
-        "components": entries,
-    })))
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct WebUiComponentArtifact {
-    schema: String,
-    bindings: String,
-    files: Vec<WebUiComponentArtifactFile>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct WebUiComponentArtifactFile {
-    path: String,
-    sha256: String,
-    byte_size: usize,
-    base64: String,
-}
-
-fn bundle_web_ui_component(
-    component_id: &str,
-    component_root: &str,
-    manifest_path: &str,
-    loaded: &LoadedVnUiComponentArtifact,
-    out: &Path,
-    files: &mut Vec<StandaloneBundleFile>,
-) -> Result<serde_json::Value, CliError> {
-    let artifact: WebUiComponentArtifact = serde_json::from_slice(&loaded.artifact)
-        .map_err(|error| format!("ASTRA_UI_COMPONENT_WEB_ARTIFACT_JSON: {error}"))?;
-    if artifact.schema != "astra.ui_component_web_artifact.v1"
-        || artifact.files.is_empty()
-        || artifact.files.len() > 64
-    {
-        return Err("ASTRA_UI_COMPONENT_WEB_ARTIFACT_SCHEMA: invalid Web artifact bundle".into());
-    }
-    let bindings = validate_component_relative_path(&artifact.bindings)?;
-    if !bindings.ends_with(".js") {
-        return Err("ASTRA_UI_COMPONENT_WEB_BINDINGS: bindings must be a JavaScript module".into());
-    }
-    let mut seen = std::collections::BTreeSet::new();
-    let mut core_artifacts = serde_json::Map::new();
-    let mut bindings_found = false;
-    for file in artifact.files {
-        let relative = validate_component_relative_path(&file.path)?;
-        if !seen.insert(relative.clone()) {
-            return Err("ASTRA_UI_COMPONENT_WEB_DUPLICATE: artifact path is duplicated".into());
-        }
-        let bytes = BASE64_STANDARD
-            .decode(file.base64.as_bytes())
-            .map_err(|_| "ASTRA_UI_COMPONENT_WEB_BASE64: artifact payload is invalid")?;
-        if bytes.len() != file.byte_size
-            || file.byte_size == 0
-            || file.byte_size > 64 * 1024 * 1024
-            || file.sha256 != Hash256::from_sha256(&bytes).to_string()
-        {
-            return Err("ASTRA_UI_COMPONENT_WEB_HASH: artifact size or hash differs".into());
-        }
-        if relative == bindings {
-            bindings_found = true;
-        }
-        if relative.ends_with(".wasm") {
-            core_artifacts.insert(
-                relative.clone(),
-                serde_json::json!({"sha256": file.sha256, "byte_size": file.byte_size}),
-            );
-        }
-        let bundle_path = format!("{component_root}/{relative}");
-        let destination = out.join(&bundle_path);
-        if let Some(parent) = destination.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        fs::write(&destination, &bytes)?;
-        files.push(bundle_file(
-            &bundle_path,
-            "ui_component_web_artifact",
-            &bytes,
-        ));
-    }
-    if !bindings_found || core_artifacts.is_empty() {
-        return Err("ASTRA_UI_COMPONENT_WEB_INCOMPLETE: bindings or core Wasm is missing".into());
-    }
-    Ok(serde_json::json!({
-        "id": component_id,
-        "manifest": manifest_path,
-        "artifact_hash": loaded.manifest.artifact_hash.to_string(),
-        "signer_id": loaded.manifest.signer_id,
-        "bindings": format!("{component_root}/{bindings}"),
-        "core_artifacts": core_artifacts,
-    }))
-}
-
-fn validate_component_relative_path(value: &str) -> Result<String, CliError> {
-    let path = Path::new(value);
-    if value.is_empty()
-        || value.contains('\\')
-        || path.is_absolute()
-        || path
-            .components()
-            .any(|component| !matches!(component, Component::Normal(_)))
-    {
-        return Err(
-            "ASTRA_UI_COMPONENT_WEB_PATH: artifact path must be contained and relative".into(),
-        );
-    }
-    Ok(value.to_string())
-}
-
 struct PlayerConfigInput<'a> {
     target: &'a str,
     profile: &'a str,
@@ -4213,7 +3868,6 @@ struct PlayerConfigInput<'a> {
     package_storage_hash: &'a str,
     display_config: &'a Option<PlayerDisplayConfig>,
     locale_config: &'a PlayerLocaleConfig,
-    ui_components: Option<&'a serde_json::Value>,
     source_unlock_profile: Option<&'a str>,
 }
 
@@ -4245,9 +3899,6 @@ fn player_config_bytes(input: PlayerConfigInput<'_>) -> Result<Vec<u8>, CliError
     });
     if let Some(display) = input.display_config {
         config["display"] = serde_json::to_value(display)?;
-    }
-    if let Some(components) = input.ui_components {
-        config["ui_components"] = components.clone();
     }
     if let Some(source_profile) = input.source_unlock_profile {
         config["source_unlock"] = serde_json::json!({

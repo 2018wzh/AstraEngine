@@ -1,6 +1,6 @@
 # Migration 12：AstraVN Yakui UI 与 Script-declared UI 迁移
 
-本页记录从旧固定 UI 命中路径迁到生产级 AstraVN UI 的实施顺序。架构真源见 [UI Contract](../contracts/ui.md)、[UI Component Plugin Contract](../contracts/ui-component-plugin.md)、[UI Backend 实施规格](../implementation/ui-backend.md) 与 ADR 0014–0017。
+本页记录从旧固定 UI 命中路径迁到生产级 AstraVN UI 的实施顺序。架构真源见 [UI Contract](../contracts/ui.md)、[UI Backend 实施规格](../implementation/ui-backend.md) 与 ADR 0014–0016。
 
 Migration 12 当前状态为 `IN_PROGRESS`。backend-neutral contract、Yakui adapter、Script UI、AstraText、Scene2D Mesh、产品 ViewModel、Classic/Modern profile、签名 component host 与 Headless E2 主路径已经落地；最终 workspace gate、Windows/Web E3、性能与无障碍正式 evidence 尚未闭合。在这些 evidence 通过前不得标记 `DONE`。
 
@@ -16,7 +16,7 @@ AstraEMU Manager/overlay 使用 Slint 1.17.1 的决策写入 Stage 5 设计，�
 2. 扩展 isolated build identity，记录实际 rustc/Cargo、lockfile、target/profile/feature、commit/dirty state。
 3. 在该工具链上选择最新兼容 Yakui core/widgets；验证 license、Windows、wasm32、依赖图、文本依赖和 API，再在同一提交精确锁定。
 4. 明确阻断 `yakui-wgpu`、`yakui-winit`、`yakui-app`、第二份 wgpu/winit 和第二套正式文本 authority。
-5. 锁定官方 `luau-analyze` 与 jco，并把 executable/package hash 写入 build identity。
+5. 锁定官方 `luau-analyze`，并把 executable/package hash 写入 build identity。
 
 **验证：** 新鲜 isolated Windows/wasm32 dependency build；identity mismatch、依赖重复、license 或 tool hash mismatch 必须失败。
 
@@ -48,7 +48,7 @@ AstraVN UI 不得发送 `PresentRgba`。保留该通用命令的其他调用者�
 
 ## Step 5：Script UI frontend
 
-为 `.astra` source 增加 `Story`/`Ui` role。UI grammar 包含 `ui_view`、`ui_bind`、`ui_component`、widget property、repeat 和 `on event -> action`。binding 只允许 literal、`$model/$item/$event/$state`、text key、asset ref 和 theme token。
+为 `.astra` source 增加 `Story`/`Ui` role。UI grammar 包含 `ui_view`、`ui_bind`、widget property、repeat 和 `on event -> action`。binding 只允许 literal、`$model/$item/$event/$state`、text key、asset ref 和 theme token。
 
 实现 `UiSymbols -> UiWidgets -> UiModels -> UiActions -> UiBindings -> UiCapabilities -> UiBundle`，并保持 token-level source map、formatter 和 language-service roundtrip。
 
@@ -87,14 +87,6 @@ UI action 只产生 request。save/load 使用既有 host transaction；unlock�
 按以下顺序接入同一主路径：Message/Choice；Title/Config/Modal；Save/Load；Backlog/Voice Replay；Gallery/Replay；Route Chart；Localization Preview；text-input fixture。正式产品页不得依赖 plugin fixture。
 
 **验证：** 每页 physical input -> semantic target -> action -> authority result -> Scene2D capture；Backlog/Gallery 必须证明虚拟化和 LRU。
-
-## Step 11：UI component ABI
-
-新增 `astra-ui-plugin-abi` 与 host adapter。实现 typed slot、bounded lifecycle DTO、session state、签名和 trust manifest。Windows 使用签名 dylib fixture；Web 从同一 Rust schema 生成 WIT，用锁定 jco 生成并验证 ES module/core wasm。
-
-固定上限为 depth 32、4096 nodes/view、1024 instances/view、4 MiB/DTO、1 MiB state、256 effects/call、64 MiB Web memory；release profile声明 time/fuel。
-
-**验证：** signer allowlist、fingerprint、mount/update/event/snapshot/restore/unmount、permission/user gesture、bounds、panic/trap/timeout、hash drift 和 session termination。不得生成替代组件或切换 provider。
 
 ## Step 12：开发工具与热更新
 

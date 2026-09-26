@@ -32,11 +32,5 @@
       "luaur-rt": "e2f75240c12ca15167dae8542d7d477d28a58491e33a752c4e160f424dc6e588",
       "luaur-vm": "945d6993538f99bc25a424b7a7a55b9db953d609f7fc869e6d80495326e46ae2"
     }
-  },
-  "jco": {
-    "package": "@bytecodealliance/jco",
-    "version": "1.25.2",
-    "integrity": "sha512-r9ch8vqtDkBxXtN5KzAEYpz+hjGCW+cQhc2b71U21DMuewE5HrTCI7X826gfL/1oU0ibsSpGodJV5YkwolH9Jg==",
-    "license": "(Apache-2.0 WITH LLVM-exception)"
   }
 }

@@ -2,7 +2,6 @@ use thiserror::Error;
 
 pub const MAX_TREE_DEPTH: usize = 32;
 pub const MAX_NODES_PER_VIEW: usize = 4096;
-pub const MAX_COMPONENT_INSTANCES_PER_VIEW: usize = 1024;
 pub const MAX_DTO_BYTES: usize = 4 * 1024 * 1024;
 pub const MAX_SESSION_STATE_BYTES: usize = 1024 * 1024;
 pub const MAX_EFFECTS_PER_CALL: usize = 256;

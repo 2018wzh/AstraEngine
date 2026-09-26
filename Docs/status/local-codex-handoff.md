@@ -136,7 +136,6 @@ cargo build --manifest-path Emulator/Cargo.toml -p astra-emu-musica --features d
 - [FVP 资料](../emu/fvp/README.md)、[FVP 薄适配](../emu/fvp/thin-fork.md)：与当前新契约交叉核对，旧架构章节不作为恢复旧设计的依据。
 - [NativeVN 样例](../../Examples/NativeVN/README.md)、[终之空资料](../samples/tsuinosora-modernization/README.md)：旧资料仅作现有实现与素材研究入口。
 
-全量 Engine 测试有一个故意让 UI component host 崩溃的隔离测试，可能产生 `Engine/Source/Programs/astra-ui-component-host/core.*`。确认它来自当前实例的测试二进制后再删除，不能清理别人的进程/文件。交接时本轮测试进程已结束，自己的 core 文件已清理。
 
 ## 8. 尚待澄清但不应阻止独立工作的事项
 

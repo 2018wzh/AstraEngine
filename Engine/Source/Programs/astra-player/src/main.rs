@@ -16,24 +16,6 @@ use std::{env, fs, path::PathBuf};
 
 type PlayerCliError = Box<dyn std::error::Error + Send + Sync>;
 
-#[cfg(target_os = "windows")]
-#[derive(serde::Deserialize)]
-struct UiComponentsConfig {
-    schema: String,
-    host: Option<String>,
-    allowlist: String,
-    deadline_ms: u64,
-    components: Vec<UiComponentConfig>,
-}
-
-#[cfg(target_os = "windows")]
-#[derive(serde::Deserialize)]
-struct UiComponentConfig {
-    id: String,
-    manifest: String,
-    artifact: String,
-}
-
 fn main() -> Result<(), PlayerCliError> {
     let mut log_filter = env::var("ASTRA_LOG").ok();
     let mut log_format = None;
@@ -287,12 +269,6 @@ fn run_bundled_game(test_null_audio: bool, preview_control: bool) -> Result<(), 
         #[serde(default)]
         source_unlock: Option<SourceUnlockConfig>,
         display: DisplayConfig,
-        #[cfg(target_os = "windows")]
-        #[serde(default)]
-        ui_components: Option<UiComponentsConfig>,
-        #[cfg(any(target_os = "linux", target_os = "macos"))]
-        #[serde(default)]
-        ui_components: Option<serde_json::Value>,
     }
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
@@ -337,12 +313,6 @@ fn run_bundled_game(test_null_audio: bool, preview_control: bool) -> Result<(), 
         || !matches!(config.display.scale_filter.as_str(), "linear" | "nearest")
     {
         return Err("invalid native Player display config".into());
-    }
-    #[cfg(target_os = "windows")]
-    let mut ui_component_processes = open_ui_component_processes(config.ui_components.as_ref())?;
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
-    if config.ui_components.is_some() {
-        return Err("native Player UI components are not implemented on this platform".into());
     }
     astra_platform::validate_safe_relative_path(&config.package)?;
     let expected_package_storage_hash = config
@@ -835,12 +805,6 @@ fn run_bundled_game(test_null_audio: bool, preview_control: bool) -> Result<(), 
         if let Err(error) = session.client.destroy_window(window).await {
             failures.push(error);
         }
-        #[cfg(target_os = "windows")]
-        for process in &mut ui_component_processes {
-            if let Err(error) = process.invoke(astra_ui_plugin_abi::UiComponentRequest::Shutdown) {
-                failures.push(player_platform_error("player.ui_component.shutdown", error));
-            }
-        }
         if failures.len() == 1 {
             return Err(failures.remove(0));
         }
@@ -878,76 +842,6 @@ fn run_bundled_game(test_null_audio: bool, preview_control: bool) -> Result<(), 
         .build()?
         .block_on(player)?;
     Ok(())
-}
-
-#[cfg(target_os = "windows")]
-fn open_ui_component_processes(
-    config: Option<&UiComponentsConfig>,
-) -> Result<Vec<astra_ui_component_host::UiComponentProcess>, PlayerCliError> {
-    use astra_ui_component_host::{UiComponentProcess, UiComponentProcessConfig};
-    use astra_ui_plugin_abi::UiComponentRequest;
-    use std::collections::BTreeSet;
-    use std::time::Duration;
-
-    let Some(config) = config else {
-        return Ok(Vec::new());
-    };
-    if config.schema != "astra.player_ui_components.v1"
-        || config.components.is_empty()
-        || !(1..=60_000).contains(&config.deadline_ms)
-    {
-        return Err("ASTRA_UI_COMPONENT_CONFIG: invalid component session config".into());
-    }
-    let host = config
-        .host
-        .as_deref()
-        .ok_or("ASTRA_UI_COMPONENT_HOST_MISSING: Windows config requires a host")?;
-    let host = resolve_bundled_component_path(host)?;
-    let allowlist = resolve_bundled_component_path(&config.allowlist)?;
-    let mut ids = BTreeSet::new();
-    let mut processes = Vec::with_capacity(config.components.len());
-    for component in &config.components {
-        if component.id.is_empty() || !ids.insert(component.id.clone()) {
-            return Err("ASTRA_UI_COMPONENT_CONFIG_ID: component IDs must be unique".into());
-        }
-        let mut process = UiComponentProcess::spawn(UiComponentProcessConfig {
-            host_binary: host.clone(),
-            manifest: resolve_bundled_component_path(&component.manifest)?,
-            artifact: resolve_bundled_component_path(&component.artifact)?,
-            allowlist: allowlist.clone(),
-            deadline: Duration::from_millis(config.deadline_ms),
-        })?;
-        let session_id = format!("vn.ui.component.{}", component.id);
-        process.invoke(UiComponentRequest::Open {
-            session_id,
-            component_id: component.id.clone(),
-            initial_state: Vec::new(),
-        })?;
-        processes.push(process);
-    }
-    Ok(processes)
-}
-
-#[cfg(target_os = "windows")]
-fn resolve_bundled_component_path(relative: &str) -> Result<PathBuf, PlayerCliError> {
-    use std::path::Component;
-    let path = std::path::Path::new(relative);
-    if path.is_absolute()
-        || path.components().any(|component| {
-            matches!(
-                component,
-                Component::ParentDir | Component::RootDir | Component::Prefix(_)
-            )
-        })
-    {
-        return Err("ASTRA_UI_COMPONENT_PATH: component path must be bundle-relative".into());
-    }
-    let root = std::env::current_dir()?.canonicalize()?;
-    let resolved = root.join(path).canonicalize()?;
-    if !resolved.starts_with(&root) || !resolved.is_file() {
-        return Err("ASTRA_UI_COMPONENT_PATH: component path escapes or is missing".into());
-    }
-    Ok(resolved)
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]

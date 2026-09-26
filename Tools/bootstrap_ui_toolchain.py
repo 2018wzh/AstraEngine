@@ -56,7 +56,7 @@ def run(command: list[str], *, cwd: pathlib.Path) -> str:
 def validate_lock(lock: dict[str, object]) -> None:
     if lock.get("schema") != "astra.ui_toolchain_lock.v1":
         raise RuntimeError("ASTRA_UI_TOOLCHAIN_LOCK_SCHEMA_INVALID")
-    for tool in ("node", "luau", "portable_luau_runtime", "jco"):
+    for tool in ("node", "luau", "portable_luau_runtime"):
         if not isinstance(lock.get(tool), dict):
             raise RuntimeError(f"ASTRA_UI_TOOLCHAIN_LOCK_MISSING: {tool}")
 
@@ -97,31 +97,6 @@ def provision_luau(root: pathlib.Path, lock: dict[str, object], target: str) -> 
             shutil.rmtree(install, ignore_errors=True)
             temporary.replace(install)
     return analyzer
-
-
-def provision_jco(root: pathlib.Path, lock: dict[str, object]) -> tuple[pathlib.Path, dict[str, object]]:
-    source = root / "Tools" / "ui-component-web"
-    package_lock = source / "package-lock.json"
-    if not package_lock.is_file():
-        raise RuntimeError("ASTRA_UI_TOOLCHAIN_NPM_LOCK_MISSING")
-    npm = shutil.which("npm")
-    if npm is None:
-        raise RuntimeError("ASTRA_UI_TOOLCHAIN_NPM_MISSING")
-    run([npm, "ci", "--ignore-scripts", "--no-audit", "--no-fund"], cwd=source)
-    package = source / "node_modules" / "@bytecodealliance" / "jco" / "package.json"
-    metadata = json.loads(package.read_text(encoding="utf-8"))
-    jco_lock = lock["jco"]
-    assert isinstance(jco_lock, dict)
-    if metadata.get("version") != jco_lock["version"] or metadata.get("license") != jco_lock["license"]:
-        raise RuntimeError("ASTRA_UI_TOOLCHAIN_JCO_IDENTITY_MISMATCH")
-    npm_lock = json.loads(package_lock.read_text(encoding="utf-8"))
-    dependency = npm_lock.get("packages", {}).get("node_modules/@bytecodealliance/jco", {})
-    if dependency.get("integrity") != jco_lock["integrity"]:
-        raise RuntimeError("ASTRA_UI_TOOLCHAIN_JCO_INTEGRITY_MISMATCH")
-    executable = source / "node_modules" / ".bin" / ("jco.cmd" if os.name == "nt" else "jco")
-    if not executable.is_file():
-        raise RuntimeError("ASTRA_UI_TOOLCHAIN_JCO_EXECUTABLE_MISSING")
-    return executable, {"package_lock_sha256": sha256(package_lock), "package_sha256": sha256(package)}
 
 
 def analyze_luau(root: pathlib.Path, analyzer: pathlib.Path) -> None:
@@ -272,7 +247,6 @@ def main() -> int:
         raise RuntimeError("ASTRA_UI_TOOLCHAIN_NODE_HASH_MISMATCH")
 
     analyzer = provision_luau(root, lock, target)
-    jco, jco_evidence = provision_jco(root, lock)
     if not args.skip_analysis:
         analyze_luau(root, analyzer)
     supply_chain = supply_chain_preflight(root, lock, target)
@@ -283,7 +257,6 @@ def main() -> int:
         "tools": {
             "node": {"version": actual_version, "executable_sha256": sha256(node_path)},
             "luau_analyze": {"version": lock["luau"]["version"], "executable_sha256": sha256(analyzer)},
-            "jco": {"version": lock["jco"]["version"], **jco_evidence},
         },
         "controller_analysis": "skipped" if args.skip_analysis else "passed",
         "supply_chain": supply_chain,

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     validate_id, validate_serialized_size, validate_string, UiCapability, UiValidationError,
-    UiValue, ValidateUi, MAX_COMPONENT_INSTANCES_PER_VIEW, MAX_NODES_PER_VIEW, MAX_TREE_DEPTH,
+    UiValue, ValidateUi, MAX_NODES_PER_VIEW, MAX_TREE_DEPTH,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -147,7 +147,6 @@ pub struct UiNodeBlueprint {
     pub events: Vec<UiEventBinding>,
     pub children: Vec<UiNodeBlueprint>,
     pub repeat: Option<UiRepeatBinding>,
-    pub component_id: Option<String>,
 }
 
 impl UiNodeBlueprint {
@@ -155,7 +154,6 @@ impl UiNodeBlueprint {
         &self,
         depth: usize,
         node_count: &mut usize,
-        component_count: &mut usize,
         identities: &mut BTreeSet<String>,
     ) -> Result<(), UiValidationError> {
         if depth > MAX_TREE_DEPTH {
@@ -214,18 +212,8 @@ impl UiNodeBlueprint {
                 validate_id("repeat.item_key", segment)?;
             }
         }
-        if let Some(component_id) = &self.component_id {
-            validate_id("node.component_id", component_id)?;
-            *component_count += 1;
-            if *component_count > MAX_COMPONENT_INSTANCES_PER_VIEW {
-                return Err(UiValidationError::invalid(
-                    "ASTRA_UI_COMPONENT_INSTANCE_LIMIT",
-                    format!("view exceeds {MAX_COMPONENT_INSTANCES_PER_VIEW} component instances"),
-                ));
-            }
-        }
         for child in &self.children {
-            child.validate_tree(depth + 1, node_count, component_count, identities)?;
+            child.validate_tree(depth + 1, node_count, identities)?;
         }
         Ok(())
     }
@@ -255,9 +243,8 @@ impl ValidateUi for UiViewBlueprint {
             ));
         }
         let mut nodes = 0;
-        let mut components = 0;
         self.root
-            .validate_tree(0, &mut nodes, &mut components, &mut BTreeSet::new())?;
+            .validate_tree(0, &mut nodes, &mut BTreeSet::new())?;
         validate_serialized_size(self)
     }
 }
@@ -280,10 +267,10 @@ impl UiBlueprintBundle {
 
 impl ValidateUi for UiBlueprintBundle {
     fn validate(&self) -> Result<(), UiValidationError> {
-        if self.schema != "astra.ui_blueprint_bundle.v1" {
+        if self.schema != "astra.ui_blueprint_bundle.v2" {
             return Err(UiValidationError::invalid(
                 "ASTRA_UI_BLUEPRINT_SCHEMA",
-                "blueprint bundle schema must be astra.ui_blueprint_bundle.v1",
+                "blueprint bundle schema must be astra.ui_blueprint_bundle.v2",
             ));
         }
         if self.views.is_empty() {

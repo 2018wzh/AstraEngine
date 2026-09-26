@@ -23,7 +23,6 @@ fn node(id: &str, widget: &str) -> UiNodeBlueprint {
         events: Vec::new(),
         children: Vec::new(),
         repeat: None,
-        component_id: None,
     }
 }
 
@@ -70,7 +69,7 @@ fn explicit_max_size_bounds_an_absolutely_positioned_window() {
         root,
     };
     let mut bundle = UiBlueprintBundle {
-        schema: "astra.ui_blueprint_bundle.v1".into(),
+        schema: "astra.ui_blueprint_bundle.v2".into(),
         views: BTreeMap::from([(view.id.clone(), view)]),
         hash: Hash256::from_sha256(&[]),
     };
@@ -194,7 +193,7 @@ fn modal_stack_is_rendered_as_bounded_dialog_semantics() {
         root: dialog_root,
     };
     let mut bundle = UiBlueprintBundle {
-        schema: "astra.ui_blueprint_bundle.v1".into(),
+        schema: "astra.ui_blueprint_bundle.v2".into(),
         views: BTreeMap::from([(base.id.clone(), base), (dialog.id.clone(), dialog)]),
         hash: Hash256::from_sha256(&[]),
     };
@@ -311,7 +310,7 @@ fn ten_thousand_items_instantiate_only_visible_rows() {
         root,
     };
     let mut bundle = UiBlueprintBundle {
-        schema: "astra.ui_blueprint_bundle.v1".into(),
+        schema: "astra.ui_blueprint_bundle.v2".into(),
         views: BTreeMap::from([(view.id.clone(), view)]),
         hash: Hash256::from_sha256(&[]),
     };
@@ -437,7 +436,7 @@ fn thousand_gallery_images_are_virtualized_and_bounded_by_lru() {
         root,
     };
     let mut bundle = UiBlueprintBundle {
-        schema: "astra.ui_blueprint_bundle.v1".into(),
+        schema: "astra.ui_blueprint_bundle.v2".into(),
         views: BTreeMap::from([(view.id.clone(), view)]),
         hash: Hash256::from_sha256(&[]),
     };
@@ -604,7 +603,7 @@ fn accessibility_range_action_uses_typed_change_binding_and_is_consumed() {
         root,
     };
     let mut bundle = UiBlueprintBundle {
-        schema: "astra.ui_blueprint_bundle.v1".into(),
+        schema: "astra.ui_blueprint_bundle.v2".into(),
         views: BTreeMap::from([(view.id.clone(), view)]),
         hash: Hash256::from_sha256(&[]),
     };
@@ -738,7 +737,7 @@ fn requested_focus_activates_a_button_without_prior_navigation() {
         root,
     };
     let mut bundle = UiBlueprintBundle {
-        schema: "astra.ui_blueprint_bundle.v1".into(),
+        schema: "astra.ui_blueprint_bundle.v2".into(),
         views: BTreeMap::from([(view.id.clone(), view)]),
         hash: Hash256::from_sha256(&[]),
     };
@@ -933,7 +932,7 @@ fn missing_focus_target_reports_bounded_focusable_semantic_ids() {
         root,
     };
     let mut bundle = UiBlueprintBundle {
-        schema: "astra.ui_blueprint_bundle.v1".into(),
+        schema: "astra.ui_blueprint_bundle.v2".into(),
         views: BTreeMap::from([(view.id.clone(), view)]),
         hash: Hash256::from_sha256(&[]),
     };

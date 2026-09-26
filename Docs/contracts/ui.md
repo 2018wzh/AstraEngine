@@ -78,7 +78,7 @@ Migration 12 formal matrix 是 `zh-Hans`、`ja`、`en` 的横排，以及 `zh-Ha
 
 Theme 只使用 backend-neutral token：font、color、metric、texture、nine-slice、focus、motion 和 accessibility override。缺 token 或 asset 是 blocking diagnostic，不允许 backend 自行补默认皮肤。
 
-内建 widget v1 至少包括 screen、row、column、stack、panel、image、nine-slice、text、rich-text、button、slider、toggle、select、scroll、virtual-list、virtual-grid、modal、canvas、semantic-region 和 text-input。作品专属动态组件遵循 [UI Component Plugin Contract](ui-component-plugin.md)。
+内建 widget v1 至少包括 screen、row、column、stack、panel、image、nine-slice、text、rich-text、button、slider、toggle、select、scroll、virtual-list、virtual-grid、modal、canvas、semantic-region 和 text-input。游戏 UI 使用静态 Yakui widget，不加载动态 UI component。
 
 ## Provider binding
 

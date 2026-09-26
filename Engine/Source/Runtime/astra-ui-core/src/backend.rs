@@ -26,7 +26,6 @@ pub enum UiCapability {
     Canvas,
     TextInput,
     VerticalText,
-    ComponentSlots,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

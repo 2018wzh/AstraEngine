@@ -11,7 +11,6 @@ members = [
     "Engine/Source/Runtime/astra-audio-kira",
     "Engine/Source/Runtime/astra-ui-core",
     "Engine/Source/Runtime/astra-ui-yakui",
-    "Engine/Source/Runtime/astra-ui-plugin-abi",
     "Engine/Source/Runtime/astra-policy",
     "Engine/Source/Modules/AstraVN/astra-vn-script",
     "Engine/Source/Modules/AstraVN/astra-vn-presentation",
@@ -58,12 +57,10 @@ members = [
     "Engine/Source/Programs/astra-player-web",
     "Engine/Source/Programs/astra-player-android",
     "Engine/Source/Programs/astra-crash-reporter",
-    "Engine/Source/Programs/astra-ui-component-host",
     "Engine/Tools/xtask",
     "Examples/TsuiNoSora/Tools/original-patcher",
     "Engine/Plugins/Fixtures/headless-presentation-provider",
     "Engine/Plugins/Fixtures/vn-extension-provider",
-    "Engine/Plugins/Fixtures/ui-component-provider",
 ]
 exclude = [
     "Editor",

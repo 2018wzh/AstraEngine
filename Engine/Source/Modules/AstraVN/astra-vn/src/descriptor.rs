@@ -22,7 +22,6 @@ fn native_vn_package_sections() -> Vec<String> {
         "vn.ui_controller_manifest",
         "vn.ui_theme_manifest",
         "vn.ui_backend_manifest",
-        "vn.ui_component_manifest",
         "vn.profile_manifest",
         "vn.policy_bundle_manifest",
         "vn.extension_manifest",

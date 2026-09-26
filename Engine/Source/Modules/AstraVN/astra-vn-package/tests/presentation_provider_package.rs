@@ -43,12 +43,12 @@ fn package_persists_profile_bound_presentation_policy() {
 }
 
 #[test]
-fn compiled_project_v3_requires_the_v2_root_without_reader_fallback() {
+fn compiled_project_v4_requires_the_v3_root_without_reader_fallback() {
     let project = compiled_story();
     let mut sections =
         package_sections_for_project(&project, &["classic".to_string()], "game").unwrap();
     let blob = PackageBuilder::build(PackageBuildRequest::fixture(
-        "compiled.project.v3",
+        "compiled.project.v4",
         "classic",
         sections.clone(),
     ))
@@ -58,23 +58,29 @@ fn compiled_project_v3_requires_the_v2_root_without_reader_fallback() {
         .container()
         .decode_postcard("vn.compiled_project")
         .unwrap();
-    assert_eq!(root.schema, "astra.vn.compiled_project_root.v2");
-    assert_eq!(root.compiled_project_schema, "astra.vn.compiled_project.v3");
+    assert_eq!(root.schema, "astra.vn.compiled_project_root.v3");
+    assert_eq!(root.compiled_project_schema, "astra.vn.compiled_project.v4");
     assert_eq!(
         decode_compiled_project(&package).unwrap().schema,
-        "astra.vn.compiled_project.v3"
+        "astra.vn.compiled_project.v4"
     );
 
+    assert!(package
+        .container()
+        .section_entry("vn.ui_component_manifest")
+        .is_none());
+    assert_eq!(decode_compiled_project(&package).unwrap(), project);
+
     let legacy_root = VnCompiledProjectRoot {
-        schema: "astra.vn.compiled_project_root.v1".to_string(),
-        compiled_project_schema: "astra.vn.compiled_project.v2".to_string(),
+        schema: "astra.vn.compiled_project_root.v2".to_string(),
+        compiled_project_schema: "astra.vn.compiled_project.v3".to_string(),
         ..root
     };
     sections.retain(|section| section.id != "vn.compiled_project");
     sections.push(
         SectionPayload::postcard(
             "vn.compiled_project",
-            "astra.vn.compiled_project_root.v1",
+            "astra.vn.compiled_project_root.v2",
             &legacy_root,
         )
         .unwrap(),

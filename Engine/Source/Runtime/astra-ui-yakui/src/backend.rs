@@ -73,7 +73,6 @@ impl<R: YakuiViewRenderer> AstraYakuiBackend<R> {
                 UiCapability::Canvas,
                 UiCapability::TextInput,
                 UiCapability::VerticalText,
-                UiCapability::ComponentSlots,
             ],
             artifact_fingerprint,
             packaged_eligible: true,

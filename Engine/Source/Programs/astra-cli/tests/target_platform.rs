@@ -484,9 +484,13 @@ fn web_bundle_requires_wasm_bindgen_pair_and_embeds_canonical_host_scripts() {
     assert!(roles.contains(&"web_player_glue"));
     assert!(roles.contains(&"web_player_loader"));
     assert!(roles.contains(&"web_audio_worklet"));
-    assert!(roles.contains(&"web_ui_component_host"));
+    assert!(!roles.contains(&"web_ui_component_host"));
     assert!(!bundle.join("AstraPlayer.route_model.json").exists());
     assert!(!bundle.join("astra-player.js").exists());
+    let config: serde_json::Value =
+        serde_json::from_slice(&fs::read(bundle.join("AstraPlayer.config.json")).unwrap()).unwrap();
+    assert!(config.get("ui_components").is_none());
+    fs::remove_dir_all(case_dir).unwrap();
 }
 
 #[test]

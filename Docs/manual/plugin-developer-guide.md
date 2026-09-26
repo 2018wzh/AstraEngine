@@ -26,7 +26,7 @@ manual.md
 
 插件可实现 Renderer2D、TextLayout、AudioOutput、DecodeProvider、AssetImporter、CookProcessor、LuauPolicyBundle、EditorPanel、AiProvider、MCPToolProvider、LegacyFamilyPlugin 或可选 EMUCoreBridge。descriptor、permission、load/unload、provider trait、extension registry 和 report 见 [Provider And Plugin API Blueprint](../implementation/provider-plugin-api.md)。
 
-作品专属 UI component 使用独立 `astra-ui-plugin-abi`，不能通过通用 widget callback 或 Yakui object 穿过 ABI。组件只能挂到 `.astra` 静态 typed slot；Windows dylib 由独立组件子进程加载并要求 Ed25519 signer allowlist，Web component 要求已校验 WIT/jco output。组件失败会终止 UI session，不会替换 provider 或生成替代组件。完整边界和 hard limit 见 [UI Component Plugin Contract](../contracts/ui-component-plugin.md)。
+游戏 UI 使用编译期组合的 Yakui；作品通过 `.astra` View、Binding 和 typed Luau Controller 定义界面。详见 [UI Contract](../contracts/ui.md)。
 
 AiProvider 只服务 Editor 和 MCP host。OpenAI、Ollama、ComfyUI、ONNX Runtime 这类 provider 必须声明 capability、secret handle、data egress、debug trace policy、runtime eligibility 和真实 smoke opt-in。Runtime 不能直接持有 provider，只能通过 `McpAiSession` 消费 typed Intent、generated artifact chunk 和 committed output。
 

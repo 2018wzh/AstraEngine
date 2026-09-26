@@ -8,7 +8,6 @@ version.workspace = true
 tracing.workspace = true
 astra-core = { path = "../../../Runtime/astra-core" }
 astra-ui-core = { path = "../../../Runtime/astra-ui-core" }
-astra-ui-plugin-abi = { path = "../../../Runtime/astra-ui-plugin-abi", default-features = false }
 astra-package = { path = "../../../Runtime/astra-package" }
 astra-vn-commands = { path = "../astra-vn-commands" }
 astra-vn-plugin = { path = "../astra-vn-plugin" }
@@ -20,4 +19,3 @@ postcard.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-ed25519-dalek.workspace = true

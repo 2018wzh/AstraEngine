@@ -54,7 +54,6 @@ pub struct CompiledVnProject {
     pub controller_sources: BTreeMap<String, String>,
     pub theme_ids: BTreeSet<String>,
     pub themes: BTreeMap<String, UiThemeManifest>,
-    pub component_ids: BTreeSet<String>,
     pub system_ui_profiles: BTreeMap<String, SystemUiProfilePolicy>,
 }
 

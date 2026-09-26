@@ -10,7 +10,6 @@ astra-ui-core
   ├─ astra-vn-ui
   ├─ astra-ui-yakui
   ├─ astra-vn-ui-yakui
-  ├─ astra-ui-plugin-abi
   └─ platform renderer / Headless test host
 
 astra-vn-core + astra-vn-system
