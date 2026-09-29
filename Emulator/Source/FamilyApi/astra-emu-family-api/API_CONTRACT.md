@@ -18,6 +18,18 @@ Descriptor 必须声明 CpuFrame，拒绝重复 capability/format。`PcmAudio` �
 
 `TextReplacement` 仅表示可选能力：不传 service 为本次关闭翻译，不阻止基础播放。服务使用 typed reset/submit/poll/cancel；poll 为 Pending、Ready、Cancelled 或 Failed。正文缓存不超过最近八段、6000 字符，日志不含正文。FVP 不声明此能力。
 
+### 音频播放进度（v10 实施契约）
+
+下一版在 `AudioSink` 增加一个可选查询 `playback_progress() -> FfiFamilyResult<AudioPlaybackProgress>`。`AudioPlaybackProgress` 只含 `accepted_source_frames: u64`、`played_source_frames: u64` 和 `AudioPlaybackClock`，后者为 `DeviceTimestamp` 或 `TestConsumption`。此处规定实现边界，当前 v9 二进制尚不提供该方法；vtable 实施时统一升级为 v10，旧插件重建，不保留 ABI 兼容层。
+
+一帧包含 configure 声明的全部声道，计数采用该源采样率，与设备声道数和采样率无关。accepted 只累计 Host 实际接纳的 PCM，包括重采样器尚未输出的输入；写入失败或取消的整块不能增加计数。played 是最近一次设备时间戳采样对应的源帧播放水位，必须满足 `played <= accepted`。两者之差覆盖重采样器输入留存及滤波延迟、Host 队列、当前块未消费部分和已经提交设备但尚未到播放时点的部分。设备欠载填充的静音不属于 Family PCM，不推进源帧计数。换算使用整数有理数，保留采样率转换余数，不能逐块截断后累加。
+
+`DeviceTimestamp` 使用实际设备回调提供的 callback/playback 时间。查询只能读取最近采样，不用查询时的墙钟外推，也不把回调提交位置当成播放位置；它受后端时间戳精度和回调周期限制，不承诺绝对 DAC 时刻。首个设备回调前 played 为零。支持性按实际后端确定，缺少有效时间戳的后端返回 `ASTRA_EMU_AUDIO_PROGRESS_UNSUPPORTED`。现有无需查询的 Family 继续基础播放；确实依赖进度的 Family 在 configure 后预检，不能用零或估算值替代不支持错误。
+
+`TestConsumption` 只供显式 NullAudio，按测试设备实际消费的有效帧推进，保留测试输出标记。它不代表可听声音。configure 每个 sink 只能成功一次；重开 session 创建新 sink 并从零计数，旧 sink 不能绑定新设备。未 configure、取消、关闭、设备失败和计数溢出分别返回明确错误；取消或丢弃数据不算已播放，旧 sink 的晚到查询不能读取新 session。查询允许与 worker 写入、设备消费和关闭并发，返回一致的两计数快照；设备回调不调用 Family，最终错误由 session owner 统一处理。
+
+增量测试覆盖首次回调、部分块、声道和采样率转换、重采样启动延迟与尾部留存、欠载静音、取消阻塞写入、重复 configure、旧 sink 晚查，以及 unsupported 与设备失败。真实设备播放仍须单独运行，不以这些单元测试宣称完成。
+
 Host 只提供 game_path、初始 WindowState 和输入。Family 自持 VM、文件、解码、混音、渲染和原生存档。probe 返回 `ROption<ProbeReport>`，None 是普通未匹配；game_id 为 opaque UTF-8。事件保留键盘、指针、滚轮、文本及窗口顺序。PointerMove 为 Host 逆映射后的逻辑舞台坐标，resize 为物理客户区像素；elapsed_ns 接受包括零在内的 u64，由核心决定 tick。
 
 `FrameView<'a>` 借用 CPU RGBA8 sRGB opaque 像素；`FrameConsumerRef<'_>` 只可在同步 frame 调用内使用。`FrameInfo.width/height` 是物理 raster 尺寸，`logical_width/logical_height` 是场景和输入使用的逻辑舞台尺寸。两者可以有不同宽高比；Family 用统一比例渲染到居中的 content viewport，viewport 外的 raster 像素必须是黑边，Host 负责在窗口中继续按相同比例显示并逆映射输入。Host 返回前复制 stride × height 字节，不跨 ABI 传 GPU/native handle。
