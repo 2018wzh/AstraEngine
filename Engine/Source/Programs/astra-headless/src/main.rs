@@ -639,7 +639,6 @@ async fn serve(build_identity: &Path, gpu: bool) -> Result<(), String> {
                         event: PhysicalInput::Shutdown,
                     },
                 )?;
-                session.last_tick = envelope.tick;
                 session.last_sequence = envelope.sequence;
                 let input_hash = format!("sha256:{:x}", session.input_digest.clone().finalize());
                 if session
@@ -775,11 +774,11 @@ async fn serve(build_identity: &Path, gpu: bool) -> Result<(), String> {
                     .input_count
                     .checked_add(1)
                     .ok_or_else(|| "ASTRA_HEADLESS_INPUT_COUNT_OVERFLOW".to_string())?;
-                session.last_tick = envelope.tick;
                 session.last_sequence = envelope.sequence;
                 let product = session.product.as_mut().ok_or_else(|| "ASTRA_HEADLESS_PRODUCT_SESSION_REQUIRED: lifecycle-only session rejects product input".to_string())?;
-                let (observations, _) =
+                let (observations, advanced_ticks) =
                     consume_input(product.as_mut(), envelope.tick, &input.event).await?;
+                session.last_tick = consumed_input_tick(envelope.tick, &input.event, advanced_ticks)?;
                 if let PhysicalInput::Checkpoint { id } = &input.event {
                     let (capture, result) = capture_checkpoint(
                         product.as_mut(),
@@ -1316,7 +1315,6 @@ async fn run_execution(
             .tick
             .checked_sub(await_tick_shift)
             .ok_or_else(|| "ASTRA_HEADLESS_AWAIT_TICK_SHIFT_INVALID".to_string())?;
-        final_tick = effective_tick;
         if matches!(message.event, PhysicalInput::Shutdown) {
             break;
         }
@@ -1346,6 +1344,7 @@ async fn run_execution(
                         physical_input_kind(&message.event)
                     )
                 })?;
+        final_tick = consumed_input_tick(effective_tick, &message.event, await_advanced_ticks)?;
         tracing::trace!(
             event = "astra.headless.input.completed",
             sequence = message.sequence,
@@ -1386,9 +1385,6 @@ async fn run_execution(
             await_tick_shift = await_tick_shift
                 .checked_add(unused_ticks)
                 .ok_or_else(|| "ASTRA_HEADLESS_AWAIT_TICK_SHIFT_OVERFLOW".to_string())?;
-            final_tick = final_tick
-                .checked_add(u64::from(await_advanced_ticks))
-                .ok_or_else(|| "ASTRA_HEADLESS_AWAIT_FINAL_TICK_OVERFLOW".to_string())?;
         }
         if let PhysicalInput::Checkpoint { id } = &message.event {
             let (capture, result) = capture_checkpoint(
@@ -1691,6 +1687,24 @@ fn observation_matches(
             .iter()
             .any(|observation| observation.key == *key),
     }
+}
+
+// Await first consumes its request tick, then reports only additional polling ticks.
+// Shutdown is immediate control input and never reaches this accounting path.
+fn consumed_input_tick(
+    tick: u64,
+    input: &PhysicalInput,
+    await_advanced_ticks: u32,
+) -> Result<u64, String> {
+    let additional_ticks = match input {
+        PhysicalInput::AdvanceTicks { count } => count
+            .checked_sub(1)
+            .ok_or_else(|| "ASTRA_HEADLESS_ADVANCE_TICKS_ZERO".to_string())?,
+        PhysicalInput::Await { .. } => await_advanced_ticks,
+        _ => 0,
+    };
+    tick.checked_add(u64::from(additional_ticks))
+        .ok_or_else(|| "ASTRA_HEADLESS_CONSUMED_TICK_OVERFLOW".to_string())
 }
 
 async fn consume_input(
@@ -2689,6 +2703,38 @@ async fn open_product(
         )
         .await
         .map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+mod input_clock_tests {
+    use super::{consumed_input_tick, PhysicalInput};
+    use astra_headless_protocol::ObservationPredicate;
+
+    #[test]
+    fn consumed_tick_accounts_for_polling_and_rejects_overflow() {
+        let await_input = PhysicalInput::Await {
+            observation: ObservationPredicate::Exists {
+                key: "vn.text_reveal_complete".into(),
+            },
+            timeout_ticks: 30,
+            continue_at_match: false,
+        };
+        assert_eq!(consumed_input_tick(10, &await_input, 0).unwrap(), 10);
+        assert_eq!(consumed_input_tick(10, &await_input, 7).unwrap(), 17);
+        assert_eq!(
+            consumed_input_tick(u64::MAX, &await_input, 1).unwrap_err(),
+            "ASTRA_HEADLESS_CONSUMED_TICK_OVERFLOW"
+        );
+        assert_eq!(
+            consumed_input_tick(u64::MAX, &PhysicalInput::AdvanceTicks { count: 2 }, 0)
+                .unwrap_err(),
+            "ASTRA_HEADLESS_CONSUMED_TICK_OVERFLOW"
+        );
+        assert_eq!(
+            consumed_input_tick(0, &PhysicalInput::AdvanceTicks { count: 0 }, 0).unwrap_err(),
+            "ASTRA_HEADLESS_ADVANCE_TICKS_ZERO"
+        );
+    }
 }
 
 #[cfg(test)]

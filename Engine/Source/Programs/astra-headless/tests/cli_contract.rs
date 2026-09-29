@@ -146,7 +146,10 @@ impl Fixture {
 
 #[test]
 fn file_and_stdio_execute_the_same_product_sequence() {
-    let fixture = Fixture::new();
+    assert_file_stdio_equivalence(&Fixture::new());
+}
+
+fn assert_file_stdio_equivalence(fixture: &Fixture) -> RunReport {
     let file_root = fixture.root().join("file-run");
     let output = command()
         .args([
@@ -236,6 +239,84 @@ fn file_and_stdio_execute_the_same_product_sequence() {
         )
         .unwrap()
     );
+    stdout_report
+}
+
+#[test]
+fn duration_counts_consumed_ticks_in_file_and_stdio() {
+    for (event, expected_tick) in [
+        (PhysicalInput::AdvanceTicks { count: 7 }, 16),
+        (
+            PhysicalInput::Await {
+                observation: ObservationPredicate::Exists {
+                    key: "vn.text_reveal_complete".into(),
+                },
+                timeout_ticks: 30,
+                continue_at_match: false,
+            },
+            10,
+        ),
+    ] {
+        let mut fixture = Fixture::new();
+        // The checkpoint consumed tick 2. Await at tick 10 must consume tick 10
+        // even when its predicate matches without additional polling.
+        fixture.messages.pop();
+        fixture
+            .messages
+            .push(input("cli-equivalence", 6, 10, event));
+        fixture
+            .messages
+            .push(input("cli-equivalence", 7, 1000, PhysicalInput::Shutdown));
+        write_jsonl(&fixture.input, &fixture.messages);
+        let mut checkpoint: CheckpointConfig =
+            serde_json::from_slice(&fs::read(&fixture.checkpoint).unwrap()).unwrap();
+        checkpoint.input_sequence_hash = hash_messages(&fixture.messages);
+        fs::write(
+            &fixture.checkpoint,
+            serde_json::to_vec_pretty(&checkpoint).unwrap(),
+        )
+        .unwrap();
+        let report = assert_file_stdio_equivalence(&fixture);
+        assert_eq!(report.duration_ns, expected_tick * 16_666_667);
+    }
+}
+
+#[test]
+fn duration_includes_await_polling_in_file_and_stdio() {
+    for continue_at_match in [false, true] {
+        let mut fixture = Fixture::new();
+        // Leave the initial line revealing instead of pressing Enter to finish it.
+        fixture.messages[2].event = PhysicalInput::AdvanceTicks { count: 1 };
+        fixture.messages.pop();
+        fixture.messages.push(input(
+            "cli-equivalence",
+            6,
+            3,
+            PhysicalInput::Await {
+                observation: ObservationPredicate::Equals {
+                    key: "vn.text_reveal_complete".into(),
+                    value_hash: astra_core::Hash256::from_sha256(b"true").to_string(),
+                },
+                timeout_ticks: 120,
+                continue_at_match,
+            },
+        ));
+        fixture
+            .messages
+            .push(input("cli-equivalence", 7, 1000, PhysicalInput::Shutdown));
+        write_jsonl(&fixture.input, &fixture.messages);
+        let mut checkpoint: CheckpointConfig =
+            serde_json::from_slice(&fs::read(&fixture.checkpoint).unwrap()).unwrap();
+        checkpoint.input_sequence_hash = hash_messages(&fixture.messages);
+        fs::write(
+            &fixture.checkpoint,
+            serde_json::to_vec_pretty(&checkpoint).unwrap(),
+        )
+        .unwrap();
+        let report = assert_file_stdio_equivalence(&fixture);
+        assert!(report.duration_ns > 3 * 16_666_667);
+        assert!(report.duration_ns <= 123 * 16_666_667);
+    }
 }
 
 #[test]

@@ -16,6 +16,8 @@ parser、schema、容器、调度和其他纯逻辑测试使用普通 Rust test 
 
 图像与音频比较帮助定位回归，开发 Agent 可检查实际截图和音频分析结果。没有运行设备或资源时明确记录未验证；Headless 通过不能替代真实平台输入、设备音频、GPU 性能或商业游戏长流程。
 
+JSONL 的 `Shutdown` 是立即关闭控制；它携带的 tick 不推进产品时间。运行时长只计算成功消费的最后一个 tick：`AdvanceTicks` 包含声明的多个 tick，`Await` 先消费请求 tick，再累加实际轮询推进量；条件立即满足时仍保留已消费的请求 tick。file 与 stdio 使用同一计算，时间溢出明确失败。
+
 ## 尚待简化的实现
 
 现有协议和 CLI 仍有旧 report、review、tolerance approval 和 preflight 类型及相应调用方。这些是待迁移的实现，不是本轮开发的新审批要求。后续按消费者一起删除，保留实际捕获、比较、损坏输入诊断和生命周期测试，不增加兼容双轨。

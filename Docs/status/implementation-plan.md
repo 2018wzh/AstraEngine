@@ -1,5 +1,11 @@
 # 全产品重构实施状态
 
+## 2026-09-29 Headless 关闭时长统计
+
+JSONL Shutdown 保持立即关闭，不再将未消费的请求 tick 算入时长。file 与 stdio 共用内部 tick 计算，覆盖 AdvanceTicks 的多个 tick，以及 Await 首次请求和额外轮询；条件立即满足时也保留实际消费的请求 tick，时间加法溢出明确失败。没有新增 schema、字段或产品时钟接口。
+
+同树最终宿主构建通过；Headless bin 23 项、CLI contract 6 项通过，3 项既有 GPU/性能 fixture 按原条件忽略。新用例实际执行 file/stdio，覆盖晚 Shutdown、7 tick 推进、请求 tick 不同的零额外 Await、两种 continue_at_match 的正轮询；all-target Clippy、fmt 和文档检查通过。最终 binary 用同一新包和中途关闭输入复测成功，首帧与关闭前画面逐字节相同，提交帧数不变；报告时长从 790 tick 修正为实际消费的 789 tick。此前五类 GPU 播放检查仍按各自实际运行结果记录，未为报告计算修改重复整套流程。
+
 ## 2026-09-29 NativeVN 完整影片与共享输入
 
 Headless 的 F5/F9 已删除私有存读档分支，统一通过物理输入、作者 UI request 和事务完成回调更新快捷槽。Enter 使用共享 Player 的 Advance 语义，只取消允许跳过且匹配当前 MovieEnd fence 的影片；系统页输入和后台继续播放的影片不进入跳过分支，取消后的迟到帧仍拒绝。NativeVN 两个 profile 补齐已有作者系统链的 quick_panel，右键打开后可用 Tab 聚焦返回按钮、Enter 回到原影片。
