@@ -1,12 +1,10 @@
 # 全产品重构实施状态
 
-## 2026-09-29 Family PCM 播放进度准备
+## 2026-09-29 Family PCM 播放进度
 
-已明确 v10 播放进度契约，尚未修改公共 ABI 或接入 KrKr。查询按源帧统计真实接纳和设备时间戳采样的播放水位，包含队列、重采样留存和设备待播放部分；无支持时返回错误。NullAudio 单独标记测试消费，不作为真实声音验证。
+Family 公共 API 已增加 v10 typed 播放进度查询，返回源帧 accepted/played 和 DeviceTimestamp/TestConsumption；默认实现明确 unsupported。现有无需查询的核心继续原有播放调用，旧插件需按 v10 重建。Family API 的 13 项测试与 all-target Clippy 通过；Host 映射与 KrKr 接入仍在实施，尚未完成其编译或真实设备验证。
 
-Host 保留 CPAL 0.17.1，其 WASAPI 时间戳不能满足这一定义。正式 CPAL 0.18.2 已改用设备时钟和提交帧水位；许可证 Apache-2.0、最低 Rust 1.85，本地 Rust 1.98 满足要求。定向升级在依赖解析阶段遇到 `alsa-sys` native links 冲突：现有核心链仍包含 CPAL 0.15。上游最早相关修复 `a7f56fff9d9ae325a3c9c8c44194bc10eb60d7ee` 已使用冲突的 ALSA 依赖，0.17 补丁版最高为 0.17.3，未找到兼容的官方维护分支。
-
-升级候选已撤回，现有 manifest、锁文件和音频路径保持原状。CPAL 的公开 WASAPI Device 可以给出 IMMDevice，但不能从它取得本条 CPAL stream 的 IAudioClock；不猜测私有布局或复用别的流时钟。公共 ABI、Host 计数映射和 KrKr 消费者暂不实施，避免在实际后端不支持时提交空实现。本批只做依赖与契约调查，没有执行构建、游戏或听音测试。
+CPAL 0.18.2 为正式版本，许可证 Apache-2.0、最低 Rust 1.85，本地 Rust 1.98 满足要求。Siglus hosted 特性隔离后，EMU 定向锁解析已通过：Kira 0.9.6 保留 mp3/ogg/flac/wav，仅 native-audio 默认特性启用原生 CPAL；MPEG rodio 只由 desktop-bins 引入。EMU 锁中不再包含旧 CPAL/rodio，Engine 主 workspace 依赖未变。Host 尚未重编，游戏与听音未测试；特性隔离与设备时间戳路径仍待增量检查。
 
 ## 2026-09-26 NativeVN 正文揭示与恢复演出
 

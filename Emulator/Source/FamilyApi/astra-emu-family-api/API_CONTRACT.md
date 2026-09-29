@@ -1,4 +1,4 @@
-# Independent Family API v9
+# Independent Family API v10
 
 `astra-emu-family-api` 是 Family 插件唯一必需的契约依赖。不依赖 RuntimeWorld、package/save、VFS、renderer/audio backend 或 UI。静态核心和动态核心共用 typed DTO；动态入口使用 `abi_stable` 的 `FamilyModule`，提供 descriptor/probe/open/advance/frame/close。
 
@@ -20,7 +20,7 @@ Descriptor 必须声明 CpuFrame，拒绝重复 capability/format。`PcmAudio` �
 
 ### 音频播放进度（v10 实施契约）
 
-下一版在 `AudioSink` 增加一个可选查询 `playback_progress() -> FfiFamilyResult<AudioPlaybackProgress>`。`AudioPlaybackProgress` 只含 `accepted_source_frames: u64`、`played_source_frames: u64` 和 `AudioPlaybackClock`，后者为 `DeviceTimestamp` 或 `TestConsumption`。此处规定实现边界，当前 v9 二进制尚不提供该方法；vtable 实施时统一升级为 v10，旧插件重建，不保留 ABI 兼容层。
+v10 在 `AudioSink` 增加一个可选查询 `playback_progress() -> FfiFamilyResult<AudioPlaybackProgress>`。`AudioPlaybackProgress` 只含 `accepted_source_frames: u64`、`played_source_frames: u64` 和 `AudioPlaybackClock`，后者为 `DeviceTimestamp` 或 `TestConsumption`。vtable 与指纹统一升级为 v10，旧插件重建，不保留 ABI 兼容层。原有 sink 的默认实现明确返回 unsupported，未使用查询的核心无需增加实现。
 
 一帧包含 configure 声明的全部声道，计数采用该源采样率，与设备声道数和采样率无关。accepted 只累计 Host 实际接纳的 PCM，包括重采样器尚未输出的输入；写入失败或取消的整块不能增加计数。played 是最近一次设备时间戳采样对应的源帧播放水位，必须满足 `played <= accepted`。两者之差覆盖重采样器输入留存及滤波延迟、Host 队列、当前块未消费部分和已经提交设备但尚未到播放时点的部分。设备欠载填充的静音不属于 Family PCM，不推进源帧计数。换算使用整数有理数，保留采样率转换余数，不能逐块截断后累加。
 
@@ -54,7 +54,7 @@ Manager 再验证边界和重复字段；非法记录输出 `family.diagnostics.
 
 ## 生命周期与迁移
 
-ABI fingerprint 为 `astra.emu.independent_family_abi.v9`，schema 为 `astra.emu.independent_family_api.v9`。v1/v2/v3/v4/v5/v6/v7/v8 插件必须重新构建安装，不提供兼容 reader/adapter。
+ABI fingerprint 为 `astra.emu.independent_family_abi.v10`，schema 为 `astra.emu.independent_family_api.v10`。v1/v2/v3/v4/v5/v6/v7/v8/v9 插件必须重新构建安装，不提供兼容 reader/adapter。
 
 动态库首次加载后一直驻留到进程退出，失败加载产生的 ABI 元数据也不会指向卸载的代码；更新插件必须重启 Manager。provider/module 对象按正常生命周期释放。会话 close 和 open 失败仍须取消 Host 请求、唤醒阻塞 PCM 写入并等待所有 worker 结束，错误不得跳过其他 worker 清理。驻留不允许保留已关闭会话的线程或 session callback；无 session 资源的进程级诊断 sink 除外。
 

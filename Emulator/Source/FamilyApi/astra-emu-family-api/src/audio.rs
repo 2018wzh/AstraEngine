@@ -93,6 +93,25 @@ pub enum AudioWriteStatus {
     Closed,
 }
 
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
+pub enum AudioPlaybackClock {
+    /// Most recent device callback timestamp; never extrapolated by a query.
+    DeviceTimestamp,
+    /// Explicit silent test output, counted when frames are consumed.
+    TestConsumption,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
+pub struct AudioPlaybackProgress {
+    /// Successfully accepted frames in the configured source PCM format.
+    pub accepted_source_frames: u64,
+    /// Source frames reached by the most recent playback observation.
+    pub played_source_frames: u64,
+    pub clock: AudioPlaybackClock,
+}
+
 /// Host audio is a bounded, cancellable queue. `configure` is called during
 /// family open and must complete before the family starts an audio worker.
 #[sabi_trait]
@@ -101,6 +120,60 @@ pub trait AudioSink: Send + Sync {
     fn write(&self, chunk: PcmChunk) -> FfiFamilyResult<AudioWriteStatus>;
     fn is_cancelled(&self) -> bool;
     fn cancel(&self) -> FfiFamilyResult<()>;
+    /// Optional playback observation. Hosts without an appropriate device
+    /// timestamp must explicitly reject this query; zero is not a fallback.
+    fn playback_progress(&self) -> FfiFamilyResult<AudioPlaybackProgress> {
+        Err(FamilyError::new(
+            "ASTRA_EMU_AUDIO_PROGRESS_UNSUPPORTED",
+            "this audio sink does not expose playback progress",
+        ))
+        .into()
+    }
 }
 
 pub type AudioSinkBox = AudioSink_TO<'static, RBox<()>>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use abi_stable::type_level::downcasting::TD_Opaque;
+
+    struct BasicSink;
+    impl AudioSink for BasicSink {
+        fn configure(&self, _: PcmFormatSpec) -> FfiFamilyResult<()> {
+            Ok(()).into()
+        }
+        fn write(&self, _: PcmChunk) -> FfiFamilyResult<AudioWriteStatus> {
+            Ok(AudioWriteStatus::Accepted).into()
+        }
+        fn is_cancelled(&self) -> bool {
+            false
+        }
+        fn cancel(&self) -> FfiFamilyResult<()> {
+            Ok(()).into()
+        }
+    }
+
+    #[test]
+    fn basic_sink_works_through_v10_vtable_but_progress_is_explicitly_unsupported() {
+        let sink = AudioSink_TO::from_value(BasicSink, TD_Opaque);
+        sink.configure(PcmFormatSpec {
+            sample_rate: 48_000,
+            channels: 2,
+            format: PcmFormat::I16,
+        })
+        .into_result()
+        .unwrap();
+        assert_eq!(
+            sink.write(PcmChunk::I16(vec![1, 2].into()))
+                .into_result()
+                .unwrap(),
+            AudioWriteStatus::Accepted
+        );
+        assert_eq!(
+            sink.playback_progress().into_result().unwrap_err().code(),
+            "ASTRA_EMU_AUDIO_PROGRESS_UNSUPPORTED"
+        );
+        assert!(!sink.is_cancelled());
+    }
+}

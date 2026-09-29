@@ -14,7 +14,7 @@
 
 ## EMU Family API
 
-KrKr 所需的 PCM 播放进度采用 [Family v10 实施契约](../../Emulator/Source/FamilyApi/astra-emu-family-api/API_CONTRACT.md#音频播放进度v10-实施契约)：单一 typed 查询返回 Host 已接纳与已播放的源帧水位，区分设备时间戳与显式测试消费。该接口待实现，当前二进制仍为 v9；不支持的后端明确拒绝进度查询，不阻止其他 Family 的基础播放。
+KrKr 所需的 PCM 播放进度采用 [Family v10 实施契约](../../Emulator/Source/FamilyApi/astra-emu-family-api/API_CONTRACT.md#音频播放进度v10-实施契约)：单一 typed 查询返回 Host 已接纳与已播放的源帧水位，区分设备时间戳与显式测试消费。公共接口与指纹升级为 v10，旧插件须重建；不支持的后端明确拒绝进度查询，不阻止其他 Family 的基础播放。
 
 Family API v8 增加有界 UTF-8 `SetTitle` 窗口请求，空串清空、控制字符及超过 4096 bytes 的标题失败；完整限制与迁移见 [Family API](../../Emulator/Source/FamilyApi/astra-emu-family-api/API_CONTRACT.md)。Family 负责严格解码原生编码，Host 在窗口线程应用；正文不得写日志，NullAudio 标记保留，关闭恢复 Manager 标题。v7 核心须重建，不提供兼容分支。
 
