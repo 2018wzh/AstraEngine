@@ -1,12 +1,20 @@
 # 全产品重构实施状态
 
+## 2026-09-29 Luau 动作闭包捕获 API
+
+Luau 模块使用 `local api = astra` 后，handler 原先仍持有注册阶段的 table，调用运行 API 会遇到 nil。现在保留该 table，在资源授权和动作实例 IO key 绑定完成后原位安装运行 API。注册回调在模块加载结束时关闭，捕获 `command` table 或 `register` 函数也不能在 handler 内继续注册；顶层仍不能执行 host IO 或修改游戏状态。没有新增公共类型或保存格式。
+
+Linux 独占检出先只加入回归测试，旧实现按预期在 `set_var` 处失败；完整修复后 8 项 policy action 测试和 4 项真实 VnSession 动作测试通过，覆盖等待、完成、恢复、中断、重复实例和关闭 join。两个受影响 crate 的 all-target Clippy 通过，本地格式和 223 页文档检查通过。本次为运行逻辑回归，没有新增 GPU、窗口或设备听音验收。
+
 ## 2026-09-29 Linux 集成检查
 
 ArchLXC 在 `0dcff6b5e7b89995fd0e384cbdcf2ec5e402ab81` 的独占检出完成根 workspace 默认构建、all-target Clippy 和完整测试：846 项通过、29 项按原条件忽略，Headless 已先行构建。223 页文档、7 项文档工具测试和根/Emulator 格式检查通过。NativeVN Python 首轮 27 项中有 1 项因缺少 Pillow 忽略，随后在独立环境补跑该项通过。
 
 Emulator workspace 构建和 all-target Clippy 通过，完整测试为 594 项通过、28 项失败、34 项忽略。首个失败是 Musica 创建硬件 renderer 失败，之后 27 项因共用测试锁 poisoned 连锁失败；没有将它们算成独立根因，也没有放宽测试。原首失败用例在新进程中单独运行通过，但不能关闭完整测试失败。Headless 的原生 GPU identity 用例显式执行通过，实际使用 Vulkan 硬件路径；这些局部检查不代表真实窗口、设备听音或游戏长流程验收。
 
-FFmpeg feature 检查另有环境阻塞：首次编译时系统 headers 缺少 `ffmpeg-next 8.1.0` 所需的三个 codec id，未进入测试。已准备既有 FFmpeg 8.1.3 的独立视频前缀，其 H.264/VP8/VP9 与 MOV/Matroska 范围不能替代还需 MP3 音频的完整媒体回归；修正环境后的结果尚未回收。根 workspace 默认检查通过不包含这项可选 feature。Musica 的反复 renderer 创建已独立复现 adapter 初始化失败，具体原因仍在排查，当前不标为已修复。
+FFmpeg feature 检查另有环境阻塞：首次编译时系统 FFmpeg 9.0.2 headers 缺少 `ffmpeg-next 8.1.0` 所需的三个 codec id，未进入测试。改用既有 FFmpeg 8.1.3 的独立视频前缀后，两处相关 crate 的 feature all-target Clippy 和纯 H.264 尺寸变化回归通过。该前缀缺少 AAC/MP3/PCM decoder，含 AAC 音轨的原影片流测试与 Headless 单帧预算测试仍失败；后者没有执行到预算断言。完整 feature suite 未通过，根 workspace 默认检查不包含这项可选 feature。
+
+Musica 失败已缩小到 Vulkan/NVIDIA 库反复装卸后的静态 TLS 分配失败。同进程第 27 次创建 renderer 或仅创建 Instance/adapter 都会失败，释放后的 FD 和线程数稳定；同一 Instance 内反复创建和释放 96 个 adapter/device 则通过。临时诊断已撤除，源码恢复原基线，没有修改驱动、宿主 TLS 配置或加入重试；Instance 的产品生命周期方案尚未实现。原远端批次已清理自有构建和诊断环境，保留干净检出及普通开发交接。
 
 ## 2026-09-29 Headless 关闭时长统计
 
