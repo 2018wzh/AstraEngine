@@ -8,6 +8,53 @@ impl NativeVnVideoRequest {
 }
 
 impl NativeVnHostCommandSource {
+    pub(super) fn skip_waiting_video(&mut self) -> Result<bool, NativeVnHostError> {
+        let Some(state) = self.runtime_state.as_ref() else {
+            return Ok(false);
+        };
+        if !state.system_stack.is_empty() || !state.system.skip_allowed {
+            return Ok(false);
+        }
+        let Some(wait) = state
+            .pending_wait
+            .as_ref()
+            .filter(|wait| wait.kind == VnWaitKind::MovieEnd)
+        else {
+            return Ok(false);
+        };
+        let Some(layer) = self
+            .stage_director
+            .state()
+            .movies
+            .values()
+            .find(|movie| {
+                movie.fence.as_deref() == Some(wait.fence.as_str())
+                    && self
+                        .video_scopes
+                        .get(&movie.layer)
+                        .is_some_and(|scope| !scope.is_cancelled())
+            })
+            .map(|movie| movie.layer.clone())
+        else {
+            return Ok(false);
+        };
+        let completed = self
+            .stage_director
+            .complete_video(&layer)
+            .map_err(stage_director_error)?;
+        self.pending_stage_completions.extend(completed);
+        if let Some(scope) = self.video_scopes.get(&layer) {
+            scope.cancel();
+        }
+        self.pending_video.retain(|request| !request.is_cancelled());
+        tracing::info!(
+            event = "astra.player.video.skipped",
+            layer,
+            "physical advance completed the current skippable movie wait"
+        );
+        Ok(true)
+    }
+
     pub(super) fn replace_video_scope(&mut self, layer: &str) -> astra_runtime::TaskScope {
         let scope = self.media_scope.child();
         if let Some(old) = self.video_scopes.insert(layer.into(), scope.clone()) {

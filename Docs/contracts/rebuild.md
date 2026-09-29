@@ -10,6 +10,8 @@
 
 `astra-vn::VnSession` 是 NativeVN 的 typed 产品入口，持有剧情、变量和系统状态，并组合 `astra-runtime::EngineSession`。EngineSession 创建和持有 RuntimeWorld、任务作用域及逻辑步生命周期；VN 在修改剧情前校验步序、seed 和恢复模式。关闭会话取消其任务，不影响其他会话。保存仍使用原有 SaveBlob 容器，读取失败保留当前状态。
 
+NativeVN 的原生宿主与 Headless 共用物理输入到 UI request/completion 的路径。快捷存档成功后由共享完成回调更新槽目录，Headless 不单独截获 F5/F9。Advance 只在未打开系统页、作品允许跳过且当前等待为 MovieEnd 时完成匹配的影片 fence；后台继续播放的影片不受影响。取消对应媒体任务后，媒体宿主关闭 decoder，旧请求返回的帧拒绝提交。删除 Headless 专用的 `skip_active_videos` 入口；调用方使用既有物理输入接口，不新增存档格式或兼容层。
+
 旧 `astra-vn-runtime-provider` crate、NativeVnRuntimeProvider/Factory、FFI 转换和会话 map 已删除。Player、CLI、发布检查改用 `astra-vn`；静态包契约随后移除了 `native_vn_descriptor()` 和剩余 gameplay/UI 动态 ABI 消费链；机制 provider 的显式绑定保留。
 
 ## EMU Family API

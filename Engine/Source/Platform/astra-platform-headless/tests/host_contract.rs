@@ -1049,6 +1049,70 @@ async fn ffmpeg_video_rejects_one_shot_decode() {
 
 #[cfg(feature = "ffmpeg-vcpkg")]
 #[tokio::test]
+async fn ffmpeg_video_start_enforces_frame_budget_independently_of_stream_budget() {
+    const FRAME_BYTES: usize = 960 * 540 * 4;
+    for frame_budget in [FRAME_BYTES - 1, FRAME_BYTES] {
+        let temp = tempfile::tempdir().unwrap();
+        let package = b"video frame budget identity";
+        fs::write(temp.path().join("fixture.astrapkg"), package).unwrap();
+        let mut profile = HeadlessHostProfile::reference(
+            "headless-video-frame-budget",
+            "fixture.astrapkg",
+            hash(b"build"),
+            hash(package),
+        );
+        profile.viewport_width = 16;
+        profile.viewport_height = 16;
+        profile.providers.video_decode = "ffmpeg-vcpkg".into();
+        profile.max_decode_output_bytes = 3 * 1024 * 1024 * 1024;
+        profile.limits.max_frame_bytes = frame_budget;
+        let factory = HeadlessPlatformFactory::new(temp.path().join("run"), temp.path());
+        let host = factory.start(profile.into()).await.unwrap();
+        let client = host.client.clone();
+        let session = client.open_decode(DecodeKind::Video).await.unwrap();
+        let started = client
+            .decode(
+                session,
+                PlatformDecodeRequest {
+                    sequence: 1,
+                    kind: DecodeKind::Video,
+                    codec: "mp4".into(),
+                    description: Vec::new(),
+                    sample_rate: None,
+                    channels: None,
+                    coded_width: None,
+                    coded_height: None,
+                    keyframe: true,
+                    stream_action: astra_platform::DecodeStreamAction::Start,
+                    bytes: include_bytes!("../../../../Fixtures/PublicDomainMedia/flower.mp4")
+                        .to_vec()
+                        .into(),
+                },
+            )
+            .await;
+        if frame_budget < FRAME_BYTES {
+            let error = started.unwrap_err();
+            assert_eq!(error.code, PlatformErrorCode::IntegrityMismatch);
+            // Reject the encoded dimensions at Start, before any decoded
+            // frame is requested. The same stream succeeds at the exact limit.
+            assert_eq!(
+                error.fields.get("diagnostic_codes").map(String::as_str),
+                Some("ASTRA_FFMPEG_STREAM_VIDEO_BUDGET"),
+                "{error:?}"
+            );
+        } else {
+            assert!(matches!(
+                started.unwrap(),
+                DecodeOutput::VideoStreamStart { .. }
+            ));
+        }
+        client.close_decode(session).await.unwrap();
+        client.shutdown().await.unwrap();
+    }
+}
+
+#[cfg(feature = "ffmpeg-vcpkg")]
+#[tokio::test]
 async fn ffmpeg_video_stream_returns_complete_ordered_frames_incrementally() {
     let temp = tempfile::tempdir().unwrap();
     let package = b"streaming video package identity";

@@ -42,3 +42,7 @@ state route_chart #@id state.system.route_chart
 state localization_preview #@id state.system.localization_preview
   scene localization_preview #@id scene.system.localization_preview
     system_page kind:localization_preview policy:astra.policy.standard #@id page.localization_preview
+
+state quick_panel #@id state.system.quick_panel
+  scene quick_panel #@id scene.system.quick_panel
+    system_page kind:quick_panel policy:astra.policy.standard #@id page.quick_panel

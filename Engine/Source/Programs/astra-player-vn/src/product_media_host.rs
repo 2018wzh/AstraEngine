@@ -16,7 +16,7 @@ use astra_player_core::{
 
 use crate::{
     NativeVnAudioOutput, NativeVnAudioPreloadRequest, NativeVnDecodedCacheBudget,
-    NativeVnHostCommandSource, NativeVnHostError, NativeVnProductAudioHost, NativeVnVideoRequest,
+    NativeVnHostCommandSource, NativeVnProductAudioHost, NativeVnVideoRequest,
     DEFAULT_NATIVE_VN_DECODED_CACHE_BYTES,
 };
 
@@ -215,33 +215,6 @@ impl NativeVnProductMediaHost {
 
     pub fn decoded_cache_bytes(&self) -> u64 {
         self.decoded_audio_cache_bytes
-    }
-
-    pub fn skip_active_videos(
-        &mut self,
-        source: &mut NativeVnHostCommandSource,
-    ) -> Result<bool, NativeVnHostError> {
-        if self.active_videos.is_empty() {
-            return Ok(false);
-        }
-        let mut skipped = false;
-        for video in &self.active_videos {
-            if video.request.is_cancelled() {
-                self.pending_video_closes.push(video.session);
-                continue;
-            }
-            source.complete_video_fence(&video.request)?;
-            skipped = true;
-            self.pending_video_closes.push(video.session);
-            tracing::info!(
-                event = "astra.player.video.skipped",
-                asset_id = %video.request.asset_id,
-                encoded_length = video.request.encoded_length,
-                "Player completed an active video fence from physical advance input"
-            );
-        }
-        self.active_videos.clear();
-        Ok(skipped)
     }
 
     pub fn last_audio_meter(&self) -> Option<crate::NativeVnAudioMeterSnapshot> {
@@ -1286,7 +1259,6 @@ fn media_error(operation: &'static str, error: impl std::fmt::Display) -> Platfo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_native_package as package_fixture;
 
     fn test_video(scope: astra_runtime::TaskScope) -> ActiveVideoStream {
         ActiveVideoStream {
@@ -1313,35 +1285,6 @@ mod tests {
             loop_index: 0,
             started_at_ms: 0,
         }
-    }
-
-    #[test]
-    fn cancelled_video_does_not_consume_advance_input() {
-        let bytes = package_fixture::product_package_with_request(
-            "story main #@id story.main\nstate start #@id state.start\n  scene room #@id scene.room\n    text key:line.one speaker:hero #@id line.one\n", |_| {},
-        );
-        let package = astra_package::PackageReader::open(&bytes).unwrap();
-        let mut source = NativeVnHostCommandSource::from_package(
-            &package,
-            astra_vn_core::VnRunConfig::classic("en"),
-            320,
-            180,
-            astra_player_core::PlayerHostResourceId(1),
-        )
-        .unwrap();
-        let mut host = NativeVnProductMediaHost::new(8);
-        let scope = astra_runtime::TaskScope::new();
-        scope.cancel();
-        host.active_videos.push(test_video(scope));
-        assert!(!host.skip_active_videos(&mut source).unwrap());
-        assert!(host.active_videos.is_empty());
-        assert_eq!(
-            host.pending_video_closes,
-            vec![astra_player_core::PlayerHostResourceId(41)]
-        );
-        assert!(source.take_stage_completions().is_empty());
-        source.release_resources().unwrap();
-        source.shutdown().unwrap();
     }
 
     #[test]

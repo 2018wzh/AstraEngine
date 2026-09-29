@@ -21,6 +21,7 @@ SYSTEM_STRINGS = {
     "system.title": {"zh-Hans": "玻璃雨中的信号", "en": "Signal in the Glass Rain"},
     "system.save": {"zh-Hans": "保存", "en": "Save"},
     "system.load": {"zh-Hans": "读取", "en": "Load"},
+    "system.quick_panel": {"zh-Hans": "快捷菜单", "en": "Quick Menu"},
     "system.config": {"zh-Hans": "设置", "en": "Settings"},
     "system.config.master_volume": {"zh-Hans": "主音量", "en": "Master Volume"},
     "system.config.text_speed": {"zh-Hans": "文字速度", "en": "Text Speed"},

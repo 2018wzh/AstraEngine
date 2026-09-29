@@ -1,5 +1,15 @@
 # 全产品重构实施状态
 
+## 2026-09-29 NativeVN 完整影片与共享输入
+
+Headless 的 F5/F9 已删除私有存读档分支，统一通过物理输入、作者 UI request 和事务完成回调更新快捷槽。Enter 使用共享 Player 的 Advance 语义，只取消允许跳过且匹配当前 MovieEnd fence 的影片；系统页输入和后台继续播放的影片不进入跳过分支，取消后的迟到帧仍拒绝。NativeVN 两个 profile 补齐已有作者系统链的 quick_panel，右键打开后可用 Tab 聚焦返回按钮、Enter 回到原影片。
+
+Headless 视频打开链分别传递累计输出与单帧预算。FFmpeg 在创建 scaler 和每次转换前检查尺寸及 BGRA 字节数，保留输出复制检查，并设置 decoder 的 max_pixels。真实编码流回归覆盖累计预算足够但单帧少一字节时拒绝、精确足够时成功，以及先产出 12 帧再在尺寸变化时拒绝。队列仍有界，不保存全片原始帧；这不表示拦截了 FFmpeg 内部的所有解码分配。
+
+受影响 Rust 定向回归 71 项通过，4 项既有 GPU fixture 按原条件忽略；NativeVN 工具 27 项通过，六个受影响 crate 的 FFmpeg feature all-target Clippy、fmt 和 223 页文档检查通过。重新构建宿主并 Cook 新包后，DX12 discrete GPU 串行执行完整影片、F5/F9 中途恢复、右键系统页返回、Enter 跳过和中途关闭，合计 296 条物理输入、51 个 checkpoint，全部正常退出。完整分支消费 12 秒、24 fps、288 帧视频并返回剧情；实际查看首中尾画面、菜单和恢复画面，保存与恢复帧相同，恢复后再推进 120 tick 画面继续变化。中途关闭前有实际推进与 checkpoint，decoder 正常释放，没有关闭挂起。
+
+这些检查使用真实 GPU 离屏渲染和测试 PCM，不代表真实窗口输入或设备听音通过。Sandbox 启动仍受阻，Editor GUI、Android 和终之空 Modern 实玩保持未验证；没有扩大为全 workspace 或正式性能验收。
+
 ## 2026-09-29 Family PCM 播放进度
 
 Family 公共 API 已升级 v10：单一 typed 查询返回源帧 accepted/played 和 DeviceTimestamp/TestConsumption，默认实现明确 unsupported。旧插件须重建；无需查询的核心保持原有播放调用。Manager Windows WASAPI 使用 CPAL 0.18.2 的实际 callback/playback 时间戳，覆盖当前块、队列、设备待播放区间与 Rubato 留存/延迟；查询不做墙钟外推。欠载静音不推进源帧，取消、关闭、写入或设备错误不能报告为已播放。NullAudio 保留显式测试标记；其他 native 后端只拒绝可选查询，不因缺少该时钟停止基础播放。

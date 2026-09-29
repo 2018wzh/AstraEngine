@@ -98,6 +98,35 @@ fn ffmpeg_stream_rejects_corrupt_input_and_invalid_budgets() {
 }
 
 #[test]
+fn ffmpeg_stream_rejects_encoded_dimension_changes_before_output_conversion() {
+    let mut decoder = FfmpegPlaybackDecoder::open(
+        "mp4",
+        include_bytes!("fixtures/dimensions-change.mp4"),
+        FfmpegStreamLimits::default(),
+    )
+    .unwrap();
+    let mut frames = 0;
+    loop {
+        match decoder.read_next() {
+            Ok(Some(FfmpegDecodedPacket::Video { packet, .. })) => {
+                assert_eq!((packet.width, packet.height), (32, 32));
+                frames += 1;
+            }
+            Err(error) => {
+                let astra_media::MediaError::Diagnostics(diagnostics) = error else {
+                    panic!("unexpected failure after {frames} frames: {error:?}");
+                };
+                assert_eq!(diagnostics.len(), 1);
+                assert_eq!(diagnostics[0].code, "ASTRA_FFMPEG_STREAM_VIDEO_FORMAT");
+                break;
+            }
+            other => panic!("dimension change was not rejected: {other:?}"),
+        }
+    }
+    assert_eq!(frames, 12);
+}
+
+#[test]
 fn ffmpeg_stream_drains_to_eos_with_single_packet_backpressure() {
     let limits = FfmpegStreamLimits {
         max_pending_packets: 1,

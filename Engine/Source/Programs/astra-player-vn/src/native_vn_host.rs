@@ -3742,6 +3742,9 @@ impl NativeVnHostCommandSource {
     ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
         self.ensure_presentation_active()?;
         if matches!(&command, VnPlayerCommand::Advance) {
+            if self.skip_waiting_video()? {
+                return self.present_current_scene(self.ui_draw.clone());
+            }
             match self.stage_director.request_text_advance() {
                 TextAdvanceDisposition::RevealCompleted => {
                     let ui = self.render_ui(Vec::new())?;

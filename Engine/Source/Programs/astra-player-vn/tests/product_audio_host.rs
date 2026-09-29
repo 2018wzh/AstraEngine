@@ -318,7 +318,15 @@ async fn product_media_host_presents_every_video_frame_and_restores_by_asset_ide
         .unwrap();
     assert_eq!(restored.snapshot().active_videos[0].next_frame, 2);
     assert!(restored.has_active_video());
-    assert!(restored.skip_active_videos(&mut source).unwrap());
+    source
+        .prepare_ui_input(astra_ui_core::UiInputEventKind::Keyboard {
+            physical_key: "Enter".into(),
+            logical_key: "Enter".into(),
+            state: astra_ui_core::UiButtonState::Pressed,
+            repeat: false,
+            modifiers: 0,
+        })
+        .unwrap();
     restored
         .poll_and_process(&mut source, &mut executor, 10_021)
         .await

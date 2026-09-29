@@ -24,6 +24,8 @@ cargo test --workspace --features ffmpeg-vcpkg
 
 Windows 的 `ffmpeg-vcpkg` job 要求设置 `VCPKG_ROOT`，并把 `VCPKG_DEFAULT_TRIPLET` 对应的 release/debug runtime 目录显式加入 `PATH`。目录或 runtime 缺失时命令直接阻断，不复制 DLL，也不退回无视频模式。
 
+Headless 视频的 `max_decode_output_bytes` 限制完整影片累计输出，`limits.max_frame_bytes` 限制单帧，两者分别生效。提高累计限额不会提高单帧限额；播放器继续逐帧拉取，不把完整影片缓存在内存中。FFmpeg 打开时绑定像素上限，创建 scaler 前检查 BGRA 帧大小，每次转换前再校验尺寸和预算；影片中途改变尺寸时明确失败。
+
 CI 的默认 Headless job 执行 docs、fmt、clippy、Headless driver build、workspace test、test convergence 与 shipping graph 检查。独立 Windows job 从显式 vcpkg root 安装 FFmpeg，并以 `ffmpeg-vcpkg` 同时运行 workspace clippy/test；配置存在不等于 job 已通过，状态页只能引用实际 CI run evidence。
 
 性能验收必须把同一份 build identity 继续传入 `PerformanceRunIdentity`，并补齐 package hash、host profile hash、product profile 和 session id。`astra.performance_report.v1` 为 `blocked` 时，应按 diagnostic 检查 run duration、sample count、threshold 或 identity drift；不要重写报告、删掉慢 sample或在采样后放宽 budget。正式校验使用 `ReleaseValidator::validate_package_with_product_evidence`，同时提交 capability、conformance、Player、budget 和 report。普通 debug test 只验证 recorder、host 与 validator 接线，正式阈值需要 release build 与声明的参考环境。
@@ -222,7 +224,9 @@ Classic Player 可用鼠标选择标题与存读档槽，右键打开游戏内�
 Player 升级后，旧格式或损坏的存档槽显示 `Unavailable save`，不能读取或覆盖；原文件保留，其他槽和新游戏仍可使用。Classic 存档列表同时显示保存时间，便于区分空槽和已用槽。Android 与桌面在启动时读取同一套存档目录信息。
 
 
-F5/F9 仅在作品声明快捷槽时可用，按住按键不会重复发起存读档。Classic 当前没有快捷槽，请使用系统页；空槽或不可用槽不会被快捷键读取或覆盖。
+F5/F9 仅在作品声明快捷槽时可用，按住按键不会重复发起存读档。未声明快捷槽的作品请使用系统页；空槽或不可用槽不会被快捷键读取或覆盖。
+
+NativeVN 样例的两个 profile 均声明快捷槽与右键快捷菜单。影片等待中可按 F5 保存，再按 F9 恢复；存档沿用已有媒体位置和等待状态，恢复时重新打开流。Enter 只跳过当前允许跳过的等待影片；系统页中的 Enter 激活当前控件，后台继续播放的影片不被跳过。关闭会话会取消媒体任务并关闭 decoder。
 
 读取时发现损坏、旧格式或不属于当前包的存档，会保留当前游戏，将该槽显示为不可用并禁止覆盖；可返回剧情或选择其他槽。设备故障及恢复提交后的失败仍会结束会话并显示错误。
 

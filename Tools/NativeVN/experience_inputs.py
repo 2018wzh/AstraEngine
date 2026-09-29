@@ -9,7 +9,11 @@ from pathlib import Path
 
 
 def build_sequence(*, save_restore: bool = False, media: bool = False,
-                   cold_restore: bool = False) -> list[dict]:
+                   cold_restore: bool = False, media_action: str = "full") -> list[dict]:
+    if media_action not in ("full", "restore", "system", "skip", "close"):
+        raise ValueError("unknown media action")
+    if media_action != "full" and not media:
+        raise ValueError("media actions require the media branch")
     if cold_restore and (save_restore or media):
         raise ValueError("cold restore is a separate process input sequence")
     rows = []
@@ -118,8 +122,36 @@ def build_sequence(*, save_restore: bool = False, media: bool = False,
         key("Enter")
         dialogue("experience.media.before")
         await_value("media.active_video", True)
-        add({"type": "checkpoint", "id": "experience.video.start"}, 360)
-        add({"type": "checkpoint", "id": "experience.video.middle"})
+        add({"type": "checkpoint", "id": "experience.video.start"},
+            360 if media_action == "full" else 180)
+        if media_action == "restore":
+            key("F5")
+            await_value("vn.occupied_save_slot_count", 1)
+            add({"type": "checkpoint", "id": "experience.video.saved"}, 120)
+            key("F9")
+            await_value("media.active_video", True)
+            add({"type": "checkpoint", "id": "experience.video.restored"}, 120)
+            add({"type": "checkpoint", "id": "experience.video.continued"})
+        elif media_action == "system":
+            for state in ("pressed", "released"):
+                add({"type": "pointer_button", "button": "secondary", "state": state})
+            await_value("vn.system_page", "quick_panel")
+            add({"type": "checkpoint", "id": "experience.video.system"}, 60)
+            # Right-click opens the page without keyboard focus; Tab selects Back.
+            key("Tab")
+            key("Enter")
+            await_value("vn.system_page", None)
+            await_value("media.active_video", True)
+            add({"type": "checkpoint", "id": "experience.video.returned"})
+        elif media_action == "skip":
+            key("Enter")
+        elif media_action == "close":
+            # Shutdown closes immediately; consume the elapsed ticks first.
+            add({"type": "checkpoint", "id": "experience.video.before_close"})
+            add({"type": "shutdown"})
+            return rows
+        else:
+            add({"type": "checkpoint", "id": "experience.video.middle"})
         await_value("vn.pending_wait_command", "experience.media.after", timeout=1200)
         await_value("media.active_video", False)
         add({"type": "checkpoint", "id": "experience.video.end"})
@@ -133,12 +165,16 @@ def main():
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--save-restore", action="store_true")
     parser.add_argument("--media", action="store_true")
+    parser.add_argument("--media-action", choices=("full", "restore", "system", "skip", "close"),
+                        default="full", help="physical interaction during the media branch")
     parser.add_argument("--cold-restore", action="store_true")
     args = parser.parse_args()
     if args.cold_restore and (args.save_restore or args.media):
         parser.error("--cold-restore cannot be combined with --save-restore or --media")
+    if args.media_action != "full" and not args.media:
+        parser.error("--media-action requires --media")
     rows = build_sequence(save_restore=args.save_restore, media=args.media,
-                          cold_restore=args.cold_restore)
+                          cold_restore=args.cold_restore, media_action=args.media_action)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     # Preserve input files from previous runs; callers choose a fresh private output.
     with args.output.open("x", encoding="utf-8") as stream:

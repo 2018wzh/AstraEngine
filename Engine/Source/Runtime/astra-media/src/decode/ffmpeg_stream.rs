@@ -129,7 +129,7 @@ impl FfmpegPlaybackDecoder {
             )
         })?;
         let audio = create_audio_decoder(&input, audio_output)?;
-        let video = create_video_decoder(&input)?;
+        let video = create_video_decoder(&input, &limits)?;
         if audio.is_none() && video.is_none() {
             return Err(decode_error(
                 "ASTRA_FFMPEG_STREAM_TRACKS",

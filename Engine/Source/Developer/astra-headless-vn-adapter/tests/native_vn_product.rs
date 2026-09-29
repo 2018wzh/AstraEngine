@@ -140,7 +140,7 @@ async fn real_native_vn_package_accepts_physical_input_and_produces_cpu_frame() 
         .await
         .unwrap();
     for (tick, key) in [(5, "KeyB"), (6, "Escape"), (7, "F5"), (8, "F9")] {
-        product
+        let observations = product
             .consume(
                 tick,
                 &PhysicalInput::Keyboard {
@@ -152,6 +152,16 @@ async fn real_native_vn_package_accepts_physical_input_and_produces_cpu_frame() 
             )
             .await
             .unwrap();
+        if matches!(key, "F5" | "F9") {
+            let occupied = astra_core::Hash256::from_sha256(b"1").to_string();
+            assert_eq!(
+                observations
+                    .iter()
+                    .find(|item| item.key == "vn.occupied_save_slot_count")
+                    .map(|item| item.value_hash.as_str()),
+                Some(occupied.as_str())
+            );
+        }
     }
     let frame = product.capture_frame().await.unwrap();
     assert_eq!((frame.width, frame.height), (320, 180));

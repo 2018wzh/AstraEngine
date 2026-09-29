@@ -20,6 +20,7 @@ pub(super) struct VideoDecoder {
 
 pub(super) fn create_video_decoder(
     input: &ffmpeg::format::context::Input,
+    limits: &FfmpegStreamLimits,
 ) -> Result<Option<VideoDecoder>, MediaError> {
     let Some(stream) = input.streams().best(ffmpeg::media::Type::Video) else {
         return Ok(None);
@@ -43,13 +44,46 @@ pub(super) fn create_video_decoder(
                 "FFmpeg video frame duration overflowed",
             )
         })?;
+    let parameters = stream.parameters();
+    // ffmpeg-next exposes no dimension getters on Parameters.
+    // SAFETY: the borrowed codec parameters remain owned by `input` and are
+    // read only here, before the input or parameters can be dropped.
+    let (declared_width, declared_height) = unsafe {
+        let parameters = &*parameters.as_ptr();
+        (parameters.width, parameters.height)
+    };
+    checked_frame_bytes(
+        u32::try_from(declared_width).unwrap_or(0),
+        u32::try_from(declared_height).unwrap_or(0),
+        limits,
+    )?;
     let context =
-        ffmpeg::codec::context::Context::from_parameters(stream.parameters()).map_err(|error| {
+        ffmpeg::codec::context::Context::from_parameters(parameters).map_err(|error| {
             ffmpeg_error("ASTRA_FFMPEG_STREAM_DECODER", "create video decoder", error)
         })?;
-    let decoder = context.decoder().video().map_err(|error| {
-        ffmpeg_error("ASTRA_FFMPEG_STREAM_DECODER", "open video decoder", error)
-    })?;
+    let decoder = context.decoder();
+    let codec = decoder
+        .codec()
+        .or_else(|| ffmpeg::decoder::find(decoder.id()))
+        .ok_or_else(|| {
+            decode_error(
+                "ASTRA_FFMPEG_STREAM_DECODER",
+                "FFmpeg video decoder is unavailable",
+            )
+        })?;
+    let mut options = ffmpeg::Dictionary::new();
+    options.set(
+        "max_pixels",
+        &(limits.max_video_frame_bytes / 4)
+            .min(i32::MAX as usize)
+            .to_string(),
+    );
+    let decoder = decoder
+        .open_as_with(codec, options)
+        .and_then(|opened| opened.video())
+        .map_err(|error| {
+            ffmpeg_error("ASTRA_FFMPEG_STREAM_DECODER", "open video decoder", error)
+        })?;
     let width = decoder.width();
     let height = decoder.height();
     if width == 0 || height == 0 {
@@ -58,6 +92,7 @@ pub(super) fn create_video_decoder(
             "FFmpeg video track has empty dimensions",
         ));
     }
+    checked_frame_bytes(width, height, limits)?;
     let scaler = ffmpeg::software::scaling::Context::get(
         decoder.format(),
         width,
@@ -99,6 +134,15 @@ pub(super) fn drain_video(
         let mut decoded = ffmpeg::frame::Video::empty();
         match video.decoder.receive_frame(&mut decoded) {
             Ok(()) => {
+                // Validate before swscale can allocate an output frame. A stream
+                // cannot silently change the dimensions bound at open time.
+                checked_frame_bytes(decoded.width(), decoded.height(), limits)?;
+                if decoded.width() != video.width || decoded.height() != video.height {
+                    return Err(decode_error(
+                        "ASTRA_FFMPEG_STREAM_VIDEO_FORMAT",
+                        "FFmpeg video dimensions changed during playback",
+                    ));
+                }
                 let pts_us = timestamp_us(decoded.timestamp(), video.time_base)?;
                 pts_us.checked_add(video.frame_duration_us).ok_or_else(|| {
                     decode_error(
@@ -164,6 +208,7 @@ pub(super) fn copy_bgra(
     height: u32,
     limits: &FfmpegStreamLimits,
 ) -> Result<Vec<u8>, MediaError> {
+    let frame_bytes = checked_frame_bytes(width, height, limits)?;
     let row_bytes = usize::try_from(width)
         .ok()
         .and_then(|width| width.checked_mul(4))
@@ -171,15 +216,6 @@ pub(super) fn copy_bgra(
             decode_error(
                 "ASTRA_FFMPEG_STREAM_VIDEO_BUDGET",
                 "FFmpeg video row size overflowed",
-            )
-        })?;
-    let frame_bytes = row_bytes
-        .checked_mul(height as usize)
-        .filter(|bytes| *bytes <= limits.max_video_frame_bytes)
-        .ok_or_else(|| {
-            decode_error(
-                "ASTRA_FFMPEG_STREAM_VIDEO_BUDGET",
-                "FFmpeg video frame exceeds its byte budget",
             )
         })?;
     if frame.stride(0) < row_bytes {
@@ -211,6 +247,24 @@ pub(super) fn copy_bgra(
         })?);
     }
     Ok(bgra)
+}
+
+fn checked_frame_bytes(
+    width: u32,
+    height: u32,
+    limits: &FfmpegStreamLimits,
+) -> Result<usize, MediaError> {
+    usize::try_from(width)
+        .ok()
+        .and_then(|width| width.checked_mul(height as usize))
+        .and_then(|pixels| pixels.checked_mul(4))
+        .filter(|bytes| *bytes > 0 && *bytes <= limits.max_video_frame_bytes)
+        .ok_or_else(|| {
+            decode_error(
+                "ASTRA_FFMPEG_STREAM_VIDEO_BUDGET",
+                "FFmpeg video frame exceeds its byte budget",
+            )
+        })
 }
 
 pub(super) fn timestamp_us(

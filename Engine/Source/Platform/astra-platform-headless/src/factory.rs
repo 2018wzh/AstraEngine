@@ -1188,6 +1188,7 @@ impl HostState {
                         &self.profile.providers.video_decode,
                         self.profile.max_video_frames,
                         self.profile.max_decode_output_bytes,
+                        self.profile.limits.max_frame_bytes,
                     )
                 });
                 let _ = reply.send(result);
@@ -1404,6 +1405,7 @@ fn decode_session(
     video_binding: &str,
     max_video_frames: u64,
     max_decode_output_bytes: u64,
+    max_frame_bytes: usize,
 ) -> Result<DecodeOutput, PlatformError> {
     if request.sequence == 0 || request.sequence <= state.last_sequence {
         return Err(invalid(
@@ -1457,6 +1459,7 @@ fn decode_session(
                     video_binding,
                     max_video_frames,
                     max_decode_output_bytes,
+                    max_frame_bytes,
                 )?;
                 let output = DecodeOutput::VideoStreamStart {
                     duration_us: Some(stream.duration_us),
@@ -1468,7 +1471,12 @@ fn decode_session(
             }
             #[cfg(not(feature = "ffmpeg-vcpkg"))]
             {
-                let _ = (video_binding, max_video_frames, max_decode_output_bytes);
+                let _ = (
+                    video_binding,
+                    max_video_frames,
+                    max_decode_output_bytes,
+                    max_frame_bytes,
+                );
                 Err(PlatformError::new(
                     PlatformErrorCode::ProviderUnavailable,
                     "decode.video.stream.start",
@@ -1571,6 +1579,7 @@ fn open_headless_video_stream(
     video_binding: &str,
     max_video_frames: u64,
     max_decode_output_bytes: u64,
+    max_frame_bytes: usize,
 ) -> Result<HeadlessVideoStream, PlatformError> {
     if video_binding != "ffmpeg-vcpkg" {
         return Err(PlatformError::new(
@@ -1595,7 +1604,7 @@ fn open_headless_video_stream(
     let limits = astra_media::FfmpegStreamLimits {
         max_encoded_bytes: encoded.len(),
         max_video_frames: max_video_frames_usize,
-        max_video_frame_bytes: max_decode_output_bytes_usize,
+        max_video_frame_bytes: max_frame_bytes.min(max_decode_output_bytes_usize),
         ..astra_media::FfmpegStreamLimits::default()
     };
     let decoder =

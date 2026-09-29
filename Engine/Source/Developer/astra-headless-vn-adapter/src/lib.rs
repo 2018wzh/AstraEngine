@@ -338,16 +338,6 @@ impl ProductSession for NativeVnHeadlessSession {
                 }
                 PhysicalInput::Keyboard {
                     physical_key,
-                    state: ButtonState::Pressed,
-                    ..
-                } if physical_key == "F5" => self.save("slot.quick").await?,
-                PhysicalInput::Keyboard {
-                    physical_key,
-                    state: ButtonState::Pressed,
-                    ..
-                } if physical_key == "F9" => self.load("slot.quick").await?,
-                PhysicalInput::Keyboard {
-                    physical_key,
                     logical_key,
                     state,
                     repeat,
@@ -592,32 +582,6 @@ impl NativeVnHeadlessSession {
     }
 
     async fn dispatch_ui(&mut self, event: UiInputEventKind) -> Result<(), ProductHostError> {
-        let activates = matches!(
-            &event,
-            UiInputEventKind::Keyboard {
-                logical_key,
-                state: UiButtonState::Pressed,
-                ..
-            } if matches!(logical_key.as_str(), "Enter" | " " | "Space")
-        ) || matches!(
-            &event,
-            UiInputEventKind::Navigation {
-                action: UiNavigationAction::Activate
-            }
-        );
-        if activates && self.media.has_active_video() {
-            let source = self
-                .source
-                .as_mut()
-                .ok_or_else(|| ProductHostError::Input("product session is shut down".into()))?;
-            if self
-                .media
-                .skip_active_videos(source)
-                .map_err(|error| ProductHostError::Input(error.to_string()))?
-            {
-                return Ok(());
-            }
-        }
         let profile_started = self.profile_started();
         let batch = self
             .source()?

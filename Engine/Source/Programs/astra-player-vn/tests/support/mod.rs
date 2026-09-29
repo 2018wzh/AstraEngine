@@ -15,9 +15,10 @@ use astra_vn_core::{compile_astra_project, AstraSource, CompileAstraProjectOptio
 use astra_vn_package::{package_sections_for_project, PLAYER_LOCALE_CONFIG_SCHEMA};
 
 const TEST_UI: &str = r#"
-ui_policy profile:classic save_slots:"slot.quick,slot.01" quick_slot:slot.quick allowed_pages:"title,save,load,config,backlog,gallery,replay,voice_replay,route_chart,localization_preview" reading_modes:"manual" audio_toggle:true save_completion:stay custom_actions:"" #@id ui.policy.test.classic
+ui_policy profile:classic save_slots:"slot.quick,slot.01" quick_slot:slot.quick allowed_pages:"quick_panel,title,save,load,config,backlog,gallery,replay,voice_replay,route_chart,localization_preview" reading_modes:"manual" audio_toggle:true save_completion:stay custom_actions:"" #@id ui.policy.test.classic
 ui_bind profile:classic surface:message view:ui.test.message controller:test.message policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.message
 ui_bind profile:classic surface:choice view:ui.test.choice controller:test.choice policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.choice
+ui_bind profile:classic system_page:quick_panel view:ui.test.system controller:test.system policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.quick_panel
 ui_bind profile:classic system_page:title view:ui.test.system controller:test.system policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.title
 ui_bind profile:classic system_page:save view:ui.test.system controller:test.system policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.save
 ui_bind profile:classic system_page:load view:ui.test.system controller:test.system policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.load
@@ -150,7 +151,9 @@ fn product_package_with_video(story: &str, video: Option<Vec<u8>>, audio: bool) 
             "strings":{
                 "line":"Production line.",
                 "line.after":"Line after timeline.",
-                "speaker.hero":"Hero"
+                "speaker.hero":"Hero",
+                "system.back":"Back",
+                "system.quick_panel":"Quick Panel"
             }
         }"#
         .to_vec(),

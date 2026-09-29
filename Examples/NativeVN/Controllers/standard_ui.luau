@@ -1,4 +1,6 @@
 local controllers = {
+    { "system.quick", "ui.system.quick_panel", "astra.vn.ui_model.quick_panel.v1" },
+    { "system.quick.modern", "ui.system.quick_panel", "astra.vn.ui_model.quick_panel.v1" },
     { "message.classic", "ui.message.classic", "astra.vn.ui_model.message.v2" },
     { "choice.classic", "ui.choice.classic", "astra.vn.ui_model.choice.v1" },
     { "system.standard", "ui.system.title", "astra.vn.ui_model.title.v1" },
