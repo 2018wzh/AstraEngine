@@ -1,5 +1,13 @@
 # 全产品重构实施状态
 
+## 2026-09-29 Linux 集成检查
+
+ArchLXC 在 `0dcff6b5e7b89995fd0e384cbdcf2ec5e402ab81` 的独占检出完成根 workspace 默认构建、all-target Clippy 和完整测试：846 项通过、29 项按原条件忽略，Headless 已先行构建。223 页文档、7 项文档工具测试和根/Emulator 格式检查通过。NativeVN Python 首轮 27 项中有 1 项因缺少 Pillow 忽略，随后在独立环境补跑该项通过。
+
+Emulator workspace 构建和 all-target Clippy 通过，完整测试为 594 项通过、28 项失败、34 项忽略。首个失败是 Musica 创建硬件 renderer 失败，之后 27 项因共用测试锁 poisoned 连锁失败；没有将它们算成独立根因，也没有放宽测试。原首失败用例在新进程中单独运行通过，但不能关闭完整测试失败。Headless 的原生 GPU identity 用例显式执行通过，实际使用 Vulkan 硬件路径；这些局部检查不代表真实窗口、设备听音或游戏长流程验收。
+
+FFmpeg feature 检查另有环境阻塞：首次编译时系统 headers 缺少 `ffmpeg-next 8.1.0` 所需的三个 codec id，未进入测试。已准备既有 FFmpeg 8.1.3 的独立视频前缀，其 H.264/VP8/VP9 与 MOV/Matroska 范围不能替代还需 MP3 音频的完整媒体回归；修正环境后的结果尚未回收。根 workspace 默认检查通过不包含这项可选 feature。Musica 的反复 renderer 创建已独立复现 adapter 初始化失败，具体原因仍在排查，当前不标为已修复。
+
 ## 2026-09-29 Headless 关闭时长统计
 
 JSONL Shutdown 保持立即关闭，不再将未消费的请求 tick 算入时长。file 与 stdio 共用内部 tick 计算，覆盖 AdvanceTicks 的多个 tick，以及 Await 首次请求和额外轮询；条件立即满足时也保留实际消费的请求 tick，时间加法溢出明确失败。没有新增 schema、字段或产品时钟接口。
