@@ -19,7 +19,7 @@ fn movie_control_skip_uses_movie_flag_independently_of_message_skip_preferences(
             .as_bytes(),
         );
         fixture::asset(root.path(), "mov", "sample.mp4", &bytes);
-        let mut provider = MusicaProvider::default();
+        let mut provider = fixture::provider();
         let mut opened = provider
             .open(request(root.path(), Sink::default()))
             .unwrap();
@@ -46,7 +46,7 @@ fn corrupt_movie_decode_fails_and_session_can_close() {
     let root = tempfile::tempdir().unwrap();
     fixture::game(root.path(), b".movie 1 broken.mp4 1280 720 t\r\n.end\r\n");
     fixture::asset(root.path(), "mov", "broken.mp4", b"not a movie");
-    let mut provider = MusicaProvider::default();
+    let mut provider = fixture::provider();
     let mut opened = provider
         .open(request(root.path(), Sink::default()))
         .unwrap();
@@ -74,7 +74,7 @@ fn movie_close_cancels_blocked_pcm_and_pending_decode_on_repeated_open() {
     .unwrap();
     fixture::asset(root.path(), "mov", "sample.mp4", &bytes);
     for _ in 0..3 {
-        let mut provider = MusicaProvider::default();
+        let mut provider = fixture::provider();
         let sink = Sink {
             block: true,
             ..Default::default()
@@ -103,7 +103,7 @@ fn native_gpu_movie_plays_pcm_pauses_restores_and_completes() {
     .unwrap();
     fixture::asset(root.path(), "mov", "sample.mp4", &bytes);
     let sink = Sink::default();
-    let mut provider = MusicaProvider::default();
+    let mut provider = fixture::provider();
     let mut opened = provider.open(request(root.path(), sink.clone())).unwrap();
     let mut capture = Capture(Vec::new());
     let mut last = Vec::new();

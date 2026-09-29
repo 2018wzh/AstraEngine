@@ -52,6 +52,7 @@ pub(crate) fn error(code: &str, message: &str) -> FamilyError {
 }
 
 pub(crate) struct Scene {
+    gpu_instance: wgpu::Instance,
     archive: Arc<MusicaMountedVfs>,
     renderer: WgpuOffscreenRenderer,
     sequence: u64,
@@ -72,12 +73,14 @@ pub(crate) struct Scene {
 impl Scene {
     #[allow(dead_code)]
     pub fn new(
+        gpu_instance: &wgpu::Instance,
         archive: Arc<MusicaMountedVfs>,
         width: u32,
         height: u32,
         encoding: crate::ScriptEncoding,
     ) -> FamilyResult<Self> {
         Self::new_scaled(
+            gpu_instance,
             archive,
             width,
             height,
@@ -88,7 +91,9 @@ impl Scene {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn new_scaled(
+        gpu_instance: &wgpu::Instance,
         archive: Arc<MusicaMountedVfs>,
         logical_width: u32,
         logical_height: u32,
@@ -120,11 +125,14 @@ impl Scene {
                 "raster frame exceeds the GPU readback budget",
             ));
         }
-        let renderer = pollster::block_on(WgpuOffscreenRenderer::new())
-            .map_err(|_| {
+        let renderer = pollster::block_on(WgpuOffscreenRenderer::new(gpu_instance))
+            .map_err(|cause| {
                 error(
                     "ASTRA_EMU_MUSICA_RENDERER",
-                    "hardware GPU renderer could not be created",
+                    &format!(
+                        "hardware GPU renderer could not be created ({:?} during {})",
+                        cause.code, cause.operation
+                    ),
                 )
             })?
             .with_default_compositing(astra_media_core::SceneCompositing2D::EncodedSrgb);
@@ -158,6 +166,7 @@ impl Scene {
             )
         })?;
         Ok(Self {
+            gpu_instance: gpu_instance.clone(),
             archive,
             renderer,
             text,
@@ -183,6 +192,9 @@ impl Scene {
     }
     pub(crate) fn texture_overrides(&self) -> MusicaTextureOverrides {
         self.texture_overrides.clone()
+    }
+    pub(crate) fn gpu_instance(&self) -> &wgpu::Instance {
+        &self.gpu_instance
     }
     pub fn set_text_encoding(&mut self, encoding: crate::ScriptEncoding) {
         self.text.set_encoding(encoding);

@@ -9,7 +9,10 @@ use astra_platform_common::WgpuOffscreenRenderer;
 #[tokio::test]
 #[ignore = "requires a native hardware GPU runner"]
 async fn large_scene_preserves_draw_order_and_rejects_duplicate_ids() {
-    let mut renderer = WgpuOffscreenRenderer::new().await.unwrap();
+    let mut renderer =
+        WgpuOffscreenRenderer::new(&astra_platform_common::native_wgpu_instance().unwrap())
+            .await
+            .unwrap();
     assert_ne!(renderer.identity().device_type, "cpu");
     let mut frame = SceneFrame {
         sequence: 1,
@@ -52,7 +55,10 @@ async fn large_scene_preserves_draw_order_and_rejects_duplicate_ids() {
 #[tokio::test]
 #[ignore = "requires a native hardware GPU runner"]
 async fn incremental_atlas_grows_for_wide_and_tall_textures() {
-    let mut renderer = WgpuOffscreenRenderer::new().await.unwrap();
+    let mut renderer =
+        WgpuOffscreenRenderer::new(&astra_platform_common::native_wgpu_instance().unwrap())
+            .await
+            .unwrap();
     assert_ne!(renderer.identity().device_type, "cpu");
     for (index, (width, height, color)) in [
         (2, 2, [255, 0, 0, 255]),
@@ -90,7 +96,10 @@ async fn incremental_atlas_grows_for_wide_and_tall_textures() {
 #[tokio::test]
 #[ignore = "requires a native hardware GPU runner"]
 async fn transient_texture_ids_reallocate_released_slots_across_frames() {
-    let mut renderer = WgpuOffscreenRenderer::new().await.unwrap();
+    let mut renderer =
+        WgpuOffscreenRenderer::new(&astra_platform_common::native_wgpu_instance().unwrap())
+            .await
+            .unwrap();
     for sequence in 1..=6 {
         let (width, height, color) = if sequence % 2 == 0 {
             (3, 1, [0, 255, 0, 255])
@@ -130,7 +139,10 @@ async fn transient_texture_ids_reallocate_released_slots_across_frames() {
 #[tokio::test]
 #[ignore = "requires a native hardware GPU runner"]
 async fn native_offscreen_gpu_renders_scene_filter_and_readback() {
-    let mut renderer = WgpuOffscreenRenderer::new().await.unwrap();
+    let mut renderer =
+        WgpuOffscreenRenderer::new(&astra_platform_common::native_wgpu_instance().unwrap())
+            .await
+            .unwrap();
     assert_eq!(renderer.identity().provider, "wgpu_offscreen");
     assert_eq!(
         renderer.identity().backend,
@@ -195,9 +207,12 @@ async fn integrated_gpu_timestamp_profile_has_zero_stable_atlas_upload() {
         require_timestamp_query: true,
         adapter_identity_hash: None,
     };
-    let mut renderer = WgpuOffscreenRenderer::new_with_policy(&policy)
-        .await
-        .unwrap();
+    let mut renderer = WgpuOffscreenRenderer::new_with_policy(
+        &astra_platform_common::native_wgpu_instance().unwrap(),
+        &policy,
+    )
+    .await
+    .unwrap();
     let mut frame = SceneFrame {
         sequence: 1,
         width: 64,

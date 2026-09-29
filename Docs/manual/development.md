@@ -133,7 +133,7 @@ Windows 的 `--host` 参数添加 `.exe`。回归检查依赖图仅包含 Family
 
 ### Headless 退出与缩略图调试
 
-CLI 的 run/serve 必须持有 HeadlessThreadOwner，并通过 factory.with_thread_owner 绑定会话线程。owner 的作用域包住产品/会话：正常关闭先执行产品 shutdown，失败返回或取消时再取消并 join 剩余 Host。只有资源所属线程完成析构后，CLI 才能退出；不能以 process::exit 或超时强杀代替此收尾。
+CLI 的 run/serve 必须持有 HeadlessThreadOwner，并通过 factory.with_thread_owner 绑定会话线程。owner 的作用域包住产品/会话：正常关闭先执行产品 shutdown，失败返回或取消时再取消并 join 剩余 Host。只有资源所属线程完成析构后，CLI 才能退出；不能以 process::exit 或超时强杀代替此收尾。 同一 owner 还跨会话保留原生 GPU Instance，供各 factory 使用；session 的 renderer、device、queue 和纹理仍各自创建和释放。直接调用 WgpuOffscreenRenderer 时也必须传入长期 graphics owner 持有的 Instance，不能在反复打开的 session 内重新创建整个 owner。
 
 Player 的物理输入入口使用 NativeVnHostCommandSource::prepare_ui_input，先按批内顺序执行命令，再把 Captured 结果交给 cache_gameplay_surface，最后处理 UI save request。新增宿主不要恢复仅按右键判定截图的逻辑。NativeVN 输入工具的 --save-restore 覆盖写槽与读取；--cold-restore 用另一进程读取已存在的一份测试存档，不能与写槽或影片输入选项合并。
 

@@ -347,7 +347,10 @@ pub async fn run(request: PerformanceE2Request<'_>) -> Result<(), String> {
     .map_err(|error| format!("ASTRA_PERFORMANCE_PACKAGE_VERIFY_FAILED: {error}"))?;
     let performance_scheduling = astra_platform_common::PerformanceSchedulingGuard::activate()?;
 
+    let gpu_instance =
+        astra_platform_common::native_wgpu_instance().map_err(|error| error.to_string())?;
     let mut renderer = WgpuOffscreenRenderer::new_for_performance(
+        &gpu_instance,
         gpu_policy,
         profile.max_gpu_resource_bytes,
         profile.viewport_width,
@@ -1352,9 +1355,12 @@ mod tests {
             require_timestamp_query: true,
             adapter_identity_hash: None,
         };
-        let mut renderer = WgpuOffscreenRenderer::new_with_policy(&policy)
-            .await
-            .unwrap();
+        let mut renderer = WgpuOffscreenRenderer::new_with_policy(
+            &astra_platform_common::native_wgpu_instance().unwrap(),
+            &policy,
+        )
+        .await
+        .unwrap();
         let (initialization, mut frame) = scene2d_workload();
         renderer.submit_frame_profiled(&initialization).unwrap();
         let mut allocations = Vec::with_capacity(240);
@@ -1377,9 +1383,12 @@ mod tests {
             require_timestamp_query: true,
             adapter_identity_hash: None,
         };
-        let mut renderer = WgpuOffscreenRenderer::new_with_policy(&policy)
-            .await
-            .unwrap();
+        let mut renderer = WgpuOffscreenRenderer::new_with_policy(
+            &astra_platform_common::native_wgpu_instance().unwrap(),
+            &policy,
+        )
+        .await
+        .unwrap();
         let (initialization, mut frame) = scene2d_workload();
         renderer.submit_frame_profiled(&initialization).unwrap();
         let temp = tempfile::tempdir().unwrap();

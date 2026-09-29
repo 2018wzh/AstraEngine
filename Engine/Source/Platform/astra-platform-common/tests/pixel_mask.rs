@@ -5,7 +5,10 @@ use astra_platform_common::WgpuOffscreenRenderer;
 #[tokio::test]
 #[ignore = "requires a native hardware GPU runner"]
 async fn pixel_mask_tiles_intersects_and_restores_without_geometry_growth() {
-    let mut renderer = WgpuOffscreenRenderer::new().await.unwrap();
+    let mut renderer =
+        WgpuOffscreenRenderer::new(&astra_platform_common::native_wgpu_instance().unwrap())
+            .await
+            .unwrap();
     assert!(matches!(
         renderer.identity().device_type.as_str(),
         "discrete_gpu" | "integrated_gpu"

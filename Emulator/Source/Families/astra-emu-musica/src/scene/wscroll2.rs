@@ -198,8 +198,14 @@ mod tests {
         vm.step(1).unwrap();
         vm.step(2).unwrap();
         vm.advance_wscroll2_clock(166_666_667).unwrap();
-        let mut scene =
-            Scene::new(archive.clone(), 1280, 720, crate::ScriptEncoding::ShiftJis).unwrap();
+        let mut scene = Scene::new(
+            crate::test_fixture::gpu_instance(),
+            archive.clone(),
+            1280,
+            720,
+            crate::ScriptEncoding::ShiftJis,
+        )
+        .unwrap();
         scene.render(vm.state(), None, None).unwrap();
         for x in 0..1280u32 {
             let near = color((x + 1280 - 8) % 1280);
@@ -222,8 +228,14 @@ mod tests {
         restored
             .restore_native_save(&vm.encode_native_save().unwrap(), 3)
             .unwrap();
-        let mut restored_scene =
-            Scene::new(archive, 1280, 720, crate::ScriptEncoding::ShiftJis).unwrap();
+        let mut restored_scene = Scene::new(
+            crate::test_fixture::gpu_instance(),
+            archive,
+            1280,
+            720,
+            crate::ScriptEncoding::ShiftJis,
+        )
+        .unwrap();
         restored_scene.render(restored.state(), None, None).unwrap();
         assert_eq!(restored_scene.pixels, expected);
         vm.step(3).unwrap();

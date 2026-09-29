@@ -8,6 +8,15 @@ use blowfish::{
 };
 use std::{collections::BTreeMap, io::Cursor, path::Path};
 const KEY: &[u8] = b"public-fixture-key";
+// The test binary is the graphics owner; sessions still own separate devices.
+pub(crate) fn gpu_instance() -> &'static wgpu::Instance {
+    static INSTANCE: std::sync::OnceLock<wgpu::Instance> = std::sync::OnceLock::new();
+    INSTANCE.get_or_init(|| astra_platform_common::native_wgpu_instance().unwrap())
+}
+
+pub(crate) fn provider() -> crate::MusicaProvider {
+    crate::MusicaProvider::with_gpu_instance(gpu_instance().clone())
+}
 fn encrypt(bytes: &[u8]) -> Vec<u8> {
     let cipher: Blowfish = Blowfish::new_from_slice(KEY).unwrap();
     let mut bytes = bytes.to_vec();

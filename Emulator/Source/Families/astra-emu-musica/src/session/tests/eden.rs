@@ -60,7 +60,7 @@ fn native_gpu_eden_import_continues_saves_and_exports_authoritative_message() {
             value: ConfigValue::String("native.sav".into()),
         },
     ]);
-    let (_, mut session) = MusicaProvider::default().open_session(req).unwrap();
+    let (_, mut session) = fixture::provider().open_session(req).unwrap();
     assert_eq!(session.message.as_ref().unwrap().0, "saved");
     let mut capture = Capture(Vec::new());
     session.visit_frame(&mut capture).unwrap();

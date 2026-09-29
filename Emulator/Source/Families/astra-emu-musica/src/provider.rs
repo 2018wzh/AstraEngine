@@ -40,6 +40,7 @@ impl Drop for SessionLease {
 #[derive(Default)]
 pub struct MusicaProvider {
     next: u64,
+    gpu_instance: Option<wgpu::Instance>,
 }
 pub fn create_musica_provider() -> Box<dyn FamilyProvider> {
     Box::new(MusicaProvider::default())
@@ -183,6 +184,14 @@ impl FamilyProvider for MusicaProvider {
     }
 }
 impl MusicaProvider {
+    #[cfg(test)]
+    pub(crate) fn with_gpu_instance(instance: wgpu::Instance) -> Self {
+        Self {
+            gpu_instance: Some(instance),
+            ..Self::default()
+        }
+    }
+
     pub(crate) fn open_session(
         &mut self,
         request: OpenRequest,
@@ -378,7 +387,23 @@ impl MusicaProvider {
                     "global progress cannot be applied",
                 )
             })?;
+        if self.gpu_instance.is_none() {
+            self.gpu_instance = Some(astra_platform_common::native_wgpu_instance().map_err(
+                |cause| {
+                    error(
+                        "ASTRA_EMU_MUSICA_RENDERER",
+                        &format!(
+                            "GPU instance creation failed ({:?} during {})",
+                            cause.code, cause.operation
+                        ),
+                    )
+                },
+            )?);
+        }
         let mut scene = Scene::new_scaled(
+            self.gpu_instance
+                .as_ref()
+                .expect("GPU instance initialized"),
             archive.clone(),
             logical_width,
             logical_height,

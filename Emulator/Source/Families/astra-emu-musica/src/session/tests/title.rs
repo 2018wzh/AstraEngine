@@ -135,7 +135,7 @@ fn native_gpu_title_without_texture_overrides_starts_loads_returns_and_exits() {
     let root = tempfile::tempdir().unwrap();
     game(root.path());
     omit_texture_overrides(root.path());
-    let mut provider = MusicaProvider::default();
+    let mut provider = fixture::provider();
     let (_, mut session) = provider.open_session(title_request(root.path())).unwrap();
     assert_eq!(session.vm.state().system_ui.page, MusicaSystemPage::Title);
     assert_eq!(&session.scene.pixels[..4], &[20, 30, 40, 255]);
@@ -214,7 +214,7 @@ fn native_gpu_lowercase_title_without_texture_overrides_starts_and_enters_story(
     let root = tempfile::tempdir().unwrap();
     game_with_lowercase_title(root.path());
     omit_texture_overrides(root.path());
-    let mut provider = MusicaProvider::default();
+    let mut provider = fixture::provider();
     let (_, mut session) = provider.open_session(title_request(root.path())).unwrap();
     assert_eq!(session.vm.state().system_ui.page, MusicaSystemPage::Title);
     assert_eq!(&session.scene.pixels[..4], &[20, 30, 40, 255]);
@@ -242,7 +242,7 @@ fn native_gpu_session_container_images_without_texture_overrides_render() {
         fixture::game(root.path(), source.as_bytes());
         fixture::asset(root.path(), "bg", name, &payload);
         omit_texture_overrides(root.path());
-        let mut provider = MusicaProvider::default();
+        let mut provider = fixture::provider();
         let mut opened = provider
             .open(request(root.path(), Sink::default()))
             .unwrap();
@@ -260,7 +260,7 @@ fn native_gpu_title_config_returns_and_missing_art_fails_explicitly() {
     let _lock = PROVIDER_SESSION.lock().unwrap();
     let root = tempfile::tempdir().unwrap();
     game(root.path());
-    let mut provider = MusicaProvider::default();
+    let mut provider = fixture::provider();
     let (_, mut session) = provider.open_session(title_request(root.path())).unwrap();
     session
         .advance(
@@ -292,7 +292,7 @@ fn native_gpu_config_preferences_survive_session_load_without_restoring_slot_set
     let _lock = PROVIDER_SESSION.lock().unwrap();
     let root = tempfile::tempdir().unwrap();
     fixture::game(root.path(), b".message 1   First\r\n.end\r\n");
-    let mut provider = MusicaProvider::default();
+    let mut provider = fixture::provider();
     let (_, mut session) = provider
         .open_session(request(root.path(), Sink::default()))
         .unwrap();

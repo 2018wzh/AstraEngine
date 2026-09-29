@@ -18,7 +18,7 @@ fn native_gpu_config_applies_cancels_persists_tests_audio_and_preserves_gameplay
     let _lock = PROVIDER_SESSION.lock().unwrap();
     let root = tempfile::tempdir().unwrap();
     title::game(root.path());
-    let mut provider = MusicaProvider::default();
+    let mut provider = fixture::provider();
     let sink = Sink::default();
     let mut req = title::title_request(root.path());
     req.host.audio_sink = ROption::RSome(AudioSink_TO::from_value(sink.clone(), TD_Opaque));
@@ -122,7 +122,7 @@ fn native_gpu_disabled_animation_keeps_scroll_waits_bounded_and_finishes_at_targ
             root.path(),
             format!(".stage * BG.png 0 0\r\n.{command}\r\n.endscroll false\r\n.end\r\n").as_bytes(),
         );
-        let mut provider = MusicaProvider::default();
+        let mut provider = fixture::provider();
         let (_, mut session) = provider
             .open_session(request(root.path(), Sink::default()))
             .unwrap();
@@ -157,7 +157,7 @@ fn native_gpu_config_requests_fullscreen_once_and_restores_on_cold_start() {
     let _lock = PROVIDER_SESSION.lock().unwrap();
     let root = tempfile::tempdir().unwrap();
     title::game(root.path());
-    let mut provider = MusicaProvider::default();
+    let mut provider = fixture::provider();
     let (_, mut session) = provider
         .open_session(title::title_request(root.path()))
         .unwrap();

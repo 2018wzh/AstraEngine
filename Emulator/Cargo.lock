@@ -830,6 +830,7 @@ dependencies = [
  "thiserror 1.0.69",
  "time",
  "tracing",
+ "wgpu 29.0.4",
 ]
 
 [[package]]

@@ -10,7 +10,10 @@ use astra_platform_common::WgpuOffscreenRenderer;
 #[tokio::test]
 #[ignore = "requires a native hardware GPU runner"]
 async fn native_gpu_preserves_aspect_fit_bars_for_arbitrary_rasters() {
-    let mut renderer = WgpuOffscreenRenderer::new().await.unwrap();
+    let mut renderer =
+        WgpuOffscreenRenderer::new(&astra_platform_common::native_wgpu_instance().unwrap())
+            .await
+            .unwrap();
     assert_eq!(renderer.identity().provider, "wgpu_offscreen");
     assert_ne!(renderer.identity().device_type, "cpu");
     assert!(matches!(
@@ -173,7 +176,10 @@ async fn native_gpu_preserves_aspect_fit_bars_for_arbitrary_rasters() {
 #[tokio::test]
 #[ignore = "requires a native hardware GPU runner"]
 async fn native_gpu_keeps_tiny_root_and_fractional_nested_clip_edges() {
-    let mut renderer = WgpuOffscreenRenderer::new().await.unwrap();
+    let mut renderer =
+        WgpuOffscreenRenderer::new(&astra_platform_common::native_wgpu_instance().unwrap())
+            .await
+            .unwrap();
     assert_ne!(renderer.identity().device_type, "cpu");
 
     let tiny = Canvas2D::new(Extent2D::new(1280, 720), Extent2D::new(1, 1)).unwrap();

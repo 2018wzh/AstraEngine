@@ -53,7 +53,7 @@ fn native_gpu_save_pages_navigate_save_and_restore_gameplay() {
     let _lock = PROVIDER_SESSION.lock().unwrap();
     let root = tempfile::tempdir().unwrap();
     game(root.path());
-    let mut provider = MusicaProvider::default();
+    let mut provider = fixture::provider();
     let (_, mut session) = provider
         .open_session(request(root.path(), Sink::default()))
         .unwrap();
@@ -123,7 +123,7 @@ fn native_gpu_save_page_rejects_corrupt_cards_without_overwriting() {
     std::fs::create_dir_all(&folder).unwrap();
     let slot = folder.join("slot-020.asav");
     std::fs::write(&slot, b"original corrupt slot").unwrap();
-    let (_, mut session) = MusicaProvider::default()
+    let (_, mut session) = fixture::provider()
         .open_session(request(root.path(), Sink::default()))
         .unwrap();
     session.advance(16_666_667, &[]).unwrap();
@@ -142,7 +142,7 @@ fn native_gpu_quick_save_rotates_skips_same_line_and_survives_restart() {
         .collect::<String>()
         + ".end\r\n";
     fixture::game(root.path(), script.as_bytes());
-    let mut provider = MusicaProvider::default();
+    let mut provider = fixture::provider();
     let (_, mut session) = provider
         .open_session(request(root.path(), Sink::default()))
         .unwrap();

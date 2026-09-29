@@ -7,6 +7,71 @@ use astra_platform_headless::HeadlessPlatformFactory;
 
 #[tokio::test]
 #[ignore = "requires a native hardware GPU runner"]
+async fn thread_owner_reuses_instance_across_32_independent_sessions() {
+    let temp = tempfile::tempdir().unwrap();
+    let owner = astra_platform_headless::HeadlessThreadOwner::default();
+    for iteration in 0..32 {
+        let hash = format!("sha256:{}", "0".repeat(64));
+        let mut profile = HeadlessHostProfile::reference(
+            format!("graphics-session-{iteration}"),
+            "com.example.graphics",
+            hash.clone(),
+            hash,
+        );
+        profile.providers.renderer = "wgpu_offscreen".into();
+        let session =
+            HeadlessPlatformFactory::new(temp.path().join(format!("run-{iteration}")), temp.path())
+                .with_thread_owner(&owner)
+                .with_gpu(true)
+                .start(profile.into())
+                .await
+                .unwrap();
+        let client = session.client;
+        let window = client
+            .create_window(WindowRequest {
+                title: "Graphics lifecycle".into(),
+                width: 4,
+                height: 4,
+                visible: false,
+            })
+            .await
+            .unwrap();
+        let surface = client
+            .create_surface(SurfaceRequest {
+                window,
+                width: 4,
+                height: 4,
+            })
+            .await
+            .unwrap();
+        let color = [iteration as u8, 100, 220, 255];
+        client
+            .present_scene(
+                surface,
+                SceneFrame {
+                    sequence: 1,
+                    width: 4,
+                    height: 4,
+                    clear_rgba: color,
+                    commands: vec![],
+                    semantics: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            &client.capture_surface(surface).await.unwrap().rgba8[..4],
+            &color
+        );
+        client.destroy_surface(surface).await.unwrap();
+        client.destroy_window(window).await.unwrap();
+        client.shutdown().await.unwrap();
+    }
+    drop(owner);
+}
+
+#[tokio::test]
+#[ignore = "requires a native hardware GPU runner"]
 async fn skipped_frames_preserve_release_and_reupload_boundaries() {
     let temp = tempfile::tempdir().unwrap();
     let hash = format!("sha256:{}", "0".repeat(64));

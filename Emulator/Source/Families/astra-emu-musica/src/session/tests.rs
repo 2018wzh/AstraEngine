@@ -1,7 +1,5 @@
 use crate::test_fixture as fixture;
-use crate::{
-    audio::Audio, mount_musica, scene::core_error, MusicaProvider, MusicaVm, MUSICA_PROFILE_FILE,
-};
+use crate::{audio::Audio, mount_musica, scene::core_error, MusicaVm, MUSICA_PROFILE_FILE};
 use abi_stable::{std_types::ROption, type_level::downcasting::TD_Opaque};
 use astra_emu_family_api::*;
 use std::{
@@ -13,6 +11,8 @@ use std::{
 };
 // The provider intentionally permits one live session per process.
 static PROVIDER_SESSION: std::sync::Mutex<()> = std::sync::Mutex::new(());
+#[path = "tests/gpu_lifecycle.rs"]
+mod gpu_lifecycle;
 #[cfg(feature = "ffmpeg-vcpkg")]
 #[path = "tests/movie.rs"]
 mod movie;
@@ -25,7 +25,7 @@ fn movie_without_ffmpeg_is_an_explicit_feature_error() {
     let _session = PROVIDER_SESSION.lock().unwrap();
     let root = tempfile::tempdir().unwrap();
     fixture::game(root.path(), b".movie 1 sample.mp4 1280 720 t\r\n.end\r\n");
-    let mut provider = MusicaProvider::default();
+    let mut provider = fixture::provider();
     let mut opened = provider
         .open(request(root.path(), Sink::default()))
         .unwrap();
@@ -183,7 +183,7 @@ fn native_gpu_choice_focus_save_restore_and_confirm_follow_the_selected_branch()
     let _session = PROVIDER_SESSION.lock().unwrap();
     let root = tempfile::tempdir().unwrap();
     fixture::game(root.path(), b".select First:left Second:right\r\n.label left\r\n.message 1   Wrong\r\n.end\r\n.label right\r\n.message 2   Selected\r\n.end\r\n");
-    let mut provider = MusicaProvider::default();
+    let mut provider = fixture::provider();
     let mut opened = provider
         .open(request(root.path(), Sink::default()))
         .unwrap();
@@ -226,7 +226,7 @@ fn native_gpu_choice_pointer_ignores_blank_clicks_and_selects_hovered_branch() {
     let _session = PROVIDER_SESSION.lock().unwrap();
     let root = tempfile::tempdir().unwrap();
     fixture::game(root.path(), b".select First:left Second:right\r\n.label left\r\n.message 1   Wrong\r\n.end\r\n.label right\r\n.end\r\n");
-    let mut provider = MusicaProvider::default();
+    let mut provider = fixture::provider();
     let mut opened = provider
         .open(request(root.path(), Sink::default()))
         .unwrap();
@@ -285,7 +285,7 @@ fn native_gpu_crossfade_clear_removes_the_previous_effect_frame() {
         root.path(),
         b".effect CrossFade BG.png:* 32 100\r\n.effect CrossFade\r\n.end\r\n",
     );
-    let mut provider = MusicaProvider::default();
+    let mut provider = fixture::provider();
     let mut opened = provider
         .open(request(root.path(), Sink::default()))
         .unwrap();
@@ -311,7 +311,7 @@ fn native_family_advances_real_archive_scene_audio_input_save_restore_and_close(
         root.path(),
         b".stage * BG.png 0 0\r\n.playBGM tone.ogg[50,-100]\r\n.message 1   Hello\r\n.end\r\n",
     );
-    let mut provider = MusicaProvider::default();
+    let mut provider = fixture::provider();
     assert!(provider
         .probe(ProbeRequest {
             game_path: root.path().to_str().unwrap().into()
@@ -511,7 +511,7 @@ fn native_gpu_control_keys_respect_release_focus_and_choice_boundaries() {
     let _session = PROVIDER_SESSION.lock().unwrap();
     let root = tempfile::tempdir().unwrap();
     fixture::game(root.path(), b".pragma enable_control\r\n.message 1   First\r\n.message 2   Second\r\n.select Confirm:done\r\n.label done\r\n.end\r\n");
-    let mut provider = MusicaProvider::default();
+    let mut provider = fixture::provider();
     let mut opened = provider
         .open(request(root.path(), Sink::default()))
         .unwrap();
@@ -598,7 +598,7 @@ fn native_gpu_screen_shake_advances_during_wait_and_restores_through_family_inpu
         root.path(),
         b".stage BG.png 0 0 * 0 0\r\n.shakescreen V 4 30\r\n.wait 1000\r\n.end\r\n",
     );
-    let mut provider = MusicaProvider::default();
+    let mut provider = fixture::provider();
     let mut opened = provider
         .open(request(root.path(), Sink::default()))
         .unwrap();
@@ -649,7 +649,7 @@ fn assert_scroll_restores_background_position(command: &str, middle_pixel: usize
         root.path(),
         format!(".stage * BG.png 0 0\r\n.{command}\r\n.endscroll false\r\n.end\r\n").as_bytes(),
     );
-    let mut provider = MusicaProvider::default();
+    let mut provider = fixture::provider();
     let mut opened = provider
         .open(request(root.path(), Sink::default()))
         .unwrap();

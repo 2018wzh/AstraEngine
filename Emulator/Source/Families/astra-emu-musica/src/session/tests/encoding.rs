@@ -20,7 +20,7 @@ fn native_gpu_gbk_script_guards_chain_choices_and_restore() {
         id: "script_encoding".into(),
         value: ConfigValue::Enum("gbk".into()),
     });
-    let (_, mut session) = MusicaProvider::default().open_session(req).unwrap();
+    let (_, mut session) = fixture::provider().open_session(req).unwrap();
     session.advance(16_666_667, &[]).unwrap();
     session.advance(16_666_667, &[]).unwrap();
     assert_eq!(
@@ -79,7 +79,7 @@ fn native_gpu_mixed_encoding_chain_keeps_primary_and_restores_another_encoding()
             id: "script_encoding".into(),
             value: ConfigValue::Enum("gbk".into()),
         });
-        MusicaProvider::default().open_session(req).unwrap().1
+        fixture::provider().open_session(req).unwrap().1
     };
     let mut session = open();
     session.advance(16_666_667, &[]).unwrap();

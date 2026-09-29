@@ -7,7 +7,7 @@ fn native_gpu_read_skip_stops_on_unread_and_restores_mode() {
         root.path(),
         b".label repeat\r\n.message 1  speaker First\r\n.goto repeat\r\n",
     );
-    let mut provider = MusicaProvider::default();
+    let mut provider = fixture::provider();
     let (_, mut session) = provider
         .open_session(request(root.path(), Sink::default()))
         .unwrap();
@@ -45,7 +45,7 @@ fn native_gpu_gallery_progress_survives_old_slot_and_cold_restart() {
     let _session = PROVIDER_SESSION.lock().unwrap();
     let root = tempfile::tempdir().unwrap();
     fixture::game(root.path(), b".message 1  speaker Before\r\n.setglobal REN_CLEAR = 1\r\n.message 2  speaker After\r\n.end\r\n");
-    let mut provider = MusicaProvider::default();
+    let mut provider = fixture::provider();
     let (_, mut session) = provider
         .open_session(request(root.path(), Sink::default()))
         .unwrap();

@@ -1,5 +1,17 @@
 # 全产品重构实施状态
 
+## 2026-09-30 GPU Instance 生命周期与媒体回归
+
+Vulkan/NVIDIA 在同进程反复装卸 loader 时出现静态 TLS 分配失败。现在由 MusicaProvider、HeadlessPlatformFactory 或显式 HeadlessThreadOwner 跨 session 持有原生 wgpu Instance，renderer 构造必须接收该 owner 的 Instance；原有 backend/DXC 配置不变，每次仍独立选择并校验 adapter、创建 device/queue 和会话资源。关闭释放会话资源，读档候选失败保留原会话；没有进程全局 Instance 缓存、device 复用、失败重试或 CPU fallback。此边界要求调用方保留 provider/graphics owner，不承诺无限销毁重建整个 host。Musica 初始化错误继续使用原诊断 code，并补充下层安全 code/operation；这项诊断改善与生命周期修复分别实现。
+
+Linux 硬件 Vulkan 检查通过：同一 Instance 连续创建、绘制和释放 96 个 renderer；同一生产默认 MusicaProvider 完成 32 次 open/close；同一 HeadlessThreadOwner 下 32 个独立 factory/session 正常关闭。测试按 wgpu 实际 registry 检查 adapter、device、queue、buffer、texture 等资源回落，没有用复用 device 代替会话释放。Musica 默认测试分批 200 项通过，原有 15 项 ignored GPU 用例显式执行后全部通过；其中两项在旧基线同样因归档缺少资产失败，本次补齐真实测试归档条目，保留原画面断言。恢复候选失败后原画面、VM 与后续读档/推进正常。
+
+其余增量检查包括 platform-common 41 项、SDK 10 项、Headless 普通测试 43 项，以及另行显式执行的 6 项 Headless 平台 GPU 用例和 1 项 CLI GPU 用例。Musica/SDK/CMVS、platform-common/headless/linux 和 Headless CLI 的 all-target Clippy 通过；CMVS 仅迁移构造调用点，未恢复功能验收。根 lockfile 与 Emulator lockfile 只补现有锁定 wgpu 的直接依赖，没有升级版本。本次没有重跑整个 root/Emulator workspace；Windows 条件依赖解析不能替代编译，Windows 编译、DX12 GPU、真实窗口/设备听音、游戏长流程和正式性能仍未复验。
+
+可选 FFmpeg 改用私有完整 8.1.2 前缀及其缺失依赖，实际加载的七个 FFmpeg 库均来自同一前缀；同树 Headless feature 构建、两个相关 crate 的 feature all-target Clippy 通过，完整目标 feature suite 为 53 项通过、0 项失败、6 项 GPU 用例按原条件忽略。检查覆盖目标素材所需音视频解码、重采样、完整有序帧、尺寸变化和预算，不表示全部编解码器或实际设备音频均已验收。此前 FFmpeg 9 headers 与仅视频 8.1.3 前缀的失败保留在下方历史记录。
+
+Linux GStreamer 首轮因缺少 vp8enc 未进入原解码 GPU 用例；在私有前缀补齐匹配版本插件后，该用例及相关解码组 10 项通过。额外的本地影片 worker→GPU 检查使用 10 fps 自有 WebM 通过，但 12 fps 素材仍触发结束时长与声明时长校验失败，作为独立 decoder 边界继续处理，未改生产时长语义或放宽断言。所有环境变量仅用于测试进程，未修改系统包或宿主配置。本批格式、差异和 223 页文档检查通过。
+
 ## 2026-09-29 Luau 动作闭包捕获 API
 
 Luau 模块使用 `local api = astra` 后，handler 原先仍持有注册阶段的 table，调用运行 API 会遇到 nil。现在保留该 table，在资源授权和动作实例 IO key 绑定完成后原位安装运行 API。注册回调在模块加载结束时关闭，捕获 `command` table 或 `register` 函数也不能在 handler 内继续注册；顶层仍不能执行 host IO 或修改游戏状态。没有新增公共类型或保存格式。
@@ -14,7 +26,7 @@ Emulator workspace 构建和 all-target Clippy 通过，完整测试为 594 项�
 
 FFmpeg feature 检查另有环境阻塞：首次编译时系统 FFmpeg 9.0.2 headers 缺少 `ffmpeg-next 8.1.0` 所需的三个 codec id，未进入测试。改用既有 FFmpeg 8.1.3 的独立视频前缀后，两处相关 crate 的 feature all-target Clippy 和纯 H.264 尺寸变化回归通过。该前缀缺少 AAC/MP3/PCM decoder，含 AAC 音轨的原影片流测试与 Headless 单帧预算测试仍失败；后者没有执行到预算断言。完整 feature suite 未通过，根 workspace 默认检查不包含这项可选 feature。
 
-Musica 失败已缩小到 Vulkan/NVIDIA 库反复装卸后的静态 TLS 分配失败。同进程第 27 次创建 renderer 或仅创建 Instance/adapter 都会失败，释放后的 FD 和线程数稳定；同一 Instance 内反复创建和释放 96 个 adapter/device 则通过。临时诊断已撤除，源码恢复原基线，没有修改驱动、宿主 TLS 配置或加入重试；Instance 的产品生命周期方案尚未实现。原远端批次已清理自有构建和诊断环境，保留干净检出及普通开发交接。
+Musica 失败已缩小到 Vulkan/NVIDIA 库反复装卸后的静态 TLS 分配失败。同进程第 27 次创建 renderer 或仅创建 Instance/adapter 都会失败，释放后的 FD 和线程数稳定；同一 Instance 内反复创建和释放 96 个 adapter/device 则通过。临时诊断已撤除，源码恢复原基线，没有修改驱动、宿主 TLS 配置或加入重试；当时尚未实现 Instance 的产品生命周期方案；后续修复与回归见上方 2026-09-30 记录。原远端批次已清理自有构建和诊断环境，保留干净检出及普通开发交接。
 
 ## 2026-09-29 Headless 关闭时长统计
 

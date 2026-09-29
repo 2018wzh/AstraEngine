@@ -7,7 +7,7 @@ fn manager_voice_preferences_keep_history_and_authored_voice_wait() {
     fixture::game(root.path(), b".message 1 aya-missing.ogg speaker First\r\n.message 2 aya-tone.ogg speaker Second\\v\r\n.end\r\n");
     fixture::asset(root.path(), "voice", "aya-tone.ogg", &fixture::wave());
     let sink = Sink::default();
-    let mut provider = MusicaProvider::default();
+    let mut provider = fixture::provider();
     let mut req = request(root.path(), sink.clone());
     req.configuration.push(ConfigEntry {
         id: "voice_aya".into(),
@@ -92,7 +92,7 @@ fn current_manager_preferences_override_saved_voice_playback() {
         b".message 1 aya-tone.ogg speaker First\r\n.end\r\n",
     );
     fixture::asset(root.path(), "voice", "aya-tone.ogg", &fixture::wave());
-    let mut provider = MusicaProvider::default();
+    let mut provider = fixture::provider();
     let mut initial = provider
         .open(request(root.path(), Sink::default()))
         .unwrap();
@@ -170,7 +170,7 @@ fn manager_bus_mute_is_applied_before_first_pcm_and_survives_restore() {
         id: "voice_muted".into(),
         value: ConfigValue::Bool(true),
     });
-    let mut provider = MusicaProvider::default();
+    let mut provider = fixture::provider();
     let mut opened = provider.open(req).unwrap();
     opened.session.advance(16_666_667, &[]).unwrap();
     opened.session.advance(0, &[key(KeyCode::F5)]).unwrap();

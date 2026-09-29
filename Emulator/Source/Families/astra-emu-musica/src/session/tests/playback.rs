@@ -8,7 +8,7 @@ fn native_gpu_auto_play_waits_restores_and_pauses_in_backlog() {
         root.path(),
         b".message 1  speaker First\r\n.message 2  speaker Second\r\n.end\r\n",
     );
-    let mut provider = MusicaProvider::default();
+    let mut provider = fixture::provider();
     let mut req = request(root.path(), Sink::default());
     req.configuration.push(ConfigEntry {
         id: "message_speed_auto_play".into(),
@@ -64,7 +64,7 @@ fn native_gpu_background_preference_gates_clocks_and_preserves_explicit_suspend(
             id: "progress_in_background".into(),
             value: ConfigValue::Bool(background),
         });
-        let (_, mut session) = MusicaProvider::default().open_session(req).unwrap();
+        let (_, mut session) = fixture::provider().open_session(req).unwrap();
         session.advance(16_666_667, &[]).unwrap();
         session
             .advance(
@@ -140,7 +140,7 @@ fn native_gpu_initial_unfocused_window_obeys_background_preference() {
             id: "progress_in_background".into(),
             value: ConfigValue::Bool(background),
         });
-        let (_, mut session) = MusicaProvider::default().open_session(req).unwrap();
+        let (_, mut session) = fixture::provider().open_session(req).unwrap();
         session.advance(100_000_000, &[]).unwrap();
         assert_eq!(session.vm.state().fixed_tick > 0, background);
         session
@@ -164,7 +164,7 @@ fn native_gpu_visibility_event_reaches_title_and_pauses_playback() {
                 value: ConfigValue::Enum("direct".into()),
             });
         }
-        let (_, mut session) = MusicaProvider::default().open_session(req).unwrap();
+        let (_, mut session) = fixture::provider().open_session(req).unwrap();
         session.advance(16_666_667, &[]).unwrap();
         let before = session.vm.state().fixed_tick;
         session
@@ -213,7 +213,7 @@ fn native_gpu_lifecycle_precedes_elapsed_guard_and_drops_paused_wall_time() {
             id: "launch_mode".into(),
             value: ConfigValue::Enum("direct".into()),
         });
-        let (_, mut session) = MusicaProvider::default().open_session(req).unwrap();
+        let (_, mut session) = fixture::provider().open_session(req).unwrap();
         session.advance(16_666_667, &[]).unwrap();
         let before = session.vm.state().fixed_tick;
 
@@ -250,7 +250,7 @@ fn native_gpu_background_focus_remains_active_but_keeps_elapsed_guard() {
         id: "progress_in_background".into(),
         value: ConfigValue::Bool(true),
     });
-    let (_, mut session) = MusicaProvider::default().open_session(req).unwrap();
+    let (_, mut session) = fixture::provider().open_session(req).unwrap();
     session.advance(16_666_667, &[]).unwrap();
     let before = session.vm.state().fixed_tick;
     let response = session
@@ -278,7 +278,7 @@ fn native_gpu_active_elapsed_remains_bounded() {
         id: "launch_mode".into(),
         value: ConfigValue::Enum("direct".into()),
     });
-    let (_, mut session) = MusicaProvider::default().open_session(request).unwrap();
+    let (_, mut session) = fixture::provider().open_session(request).unwrap();
     let error = session.advance(1_000_000_001, &[]).unwrap_err();
     assert_eq!(error.code.as_str(), "ASTRA_EMU_MUSICA_ELAPSED");
     Box::new(session).close().unwrap();
@@ -297,7 +297,7 @@ fn native_gpu_text_shadow_uses_current_manager_setting_after_load() {
         .write_to(&mut png, image::ImageFormat::Png)
         .unwrap();
     fixture::asset(root.path(), "bg", "BG.png", &png.into_inner());
-    let mut provider = MusicaProvider::default();
+    let mut provider = fixture::provider();
     let mut capture = Capture(Vec::new());
     let mut opened = provider
         .open(request(root.path(), Sink::default()))
@@ -339,7 +339,7 @@ fn native_gpu_manual_slots_restore_independent_story_positions() {
         root.path(),
         b".message 1   First\r\n.message 2   Second\r\n.end\r\n",
     );
-    let (_, mut session) = MusicaProvider::default()
+    let (_, mut session) = fixture::provider()
         .open_session(request(root.path(), Sink::default()))
         .unwrap();
     session.advance(16_666_667, &[]).unwrap();

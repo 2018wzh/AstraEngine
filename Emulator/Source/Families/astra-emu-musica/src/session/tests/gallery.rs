@@ -51,7 +51,7 @@ fn native_gpu_gallery_pages_music_and_script_return_share_session_lifecycle() {
         scripts.push((name, b".message 1   Gallery\r\n.end\r\n".as_slice()));
     }
     fixture::assets(root.path(), "scr", &scripts);
-    let mut provider = MusicaProvider::default();
+    let mut provider = fixture::provider();
     let mut req = title::title_request(root.path());
     let sink = Sink::default();
     req.host.audio_sink = ROption::RSome(AudioSink_TO::from_value(sink.clone(), TD_Opaque));

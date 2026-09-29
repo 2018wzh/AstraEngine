@@ -122,6 +122,7 @@ fn profile_texture_overrides_preserve_native_geometry_and_ani_origin() {
     let (archive, overrides) =
         mount_musica_with_texture_overrides(root.path(), &profile_path).unwrap();
     let mut scene = Scene::new_scaled(
+        crate::test_fixture::gpu_instance(),
         Arc::new(archive),
         16,
         16,
@@ -253,6 +254,7 @@ fn profile_texture_overrides_render_gpu_at_all_scales_with_crop_and_offset() {
         let mut vm = make_vm();
         vm.step(1).unwrap();
         let mut scene = Scene::new_scaled(
+            crate::test_fixture::gpu_instance(),
             archive.clone(),
             16,
             16,
@@ -340,6 +342,7 @@ fn profile_texture_overrides_render_gpu_at_all_scales_with_crop_and_offset() {
 
         drop(scene);
         let mut reopened = Scene::new_scaled(
+            crate::test_fixture::gpu_instance(),
             archive.clone(),
             16,
             16,
@@ -381,8 +384,14 @@ fn native_container_images_use_shared_gpu_cache_and_restore() {
         .unwrap();
         vm.step(1).unwrap();
         let saved = vm.encode_native_save().unwrap();
-        let mut scene =
-            Scene::new(archive.clone(), 16, 16, crate::ScriptEncoding::ShiftJis).unwrap();
+        let mut scene = Scene::new(
+            crate::test_fixture::gpu_instance(),
+            archive.clone(),
+            16,
+            16,
+            crate::ScriptEncoding::ShiftJis,
+        )
+        .unwrap();
         scene.render(vm.state(), None, None).unwrap();
         assert_eq!(
             &scene.pixels[(3 * 16 + 2) * 4..(3 * 16 + 3) * 4],
@@ -409,7 +418,14 @@ fn native_container_images_use_shared_gpu_cache_and_restore() {
         assert_eq!(scene.pixels, expected);
         assert_eq!(scene.textures.resident_bytes(), 4);
         vm.restore_native_save(&saved, 1).unwrap();
-        let mut restored = Scene::new(archive, 16, 16, crate::ScriptEncoding::ShiftJis).unwrap();
+        let mut restored = Scene::new(
+            crate::test_fixture::gpu_instance(),
+            archive,
+            16,
+            16,
+            crate::ScriptEncoding::ShiftJis,
+        )
+        .unwrap();
         restored.render(vm.state(), None, None).unwrap();
         assert_eq!(restored.pixels, expected);
     }

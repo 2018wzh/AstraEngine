@@ -20,7 +20,7 @@ fn native_gpu_includes_execute_on_open_chain_and_restore() {
             ("chinese.sc", &chinese),
         ],
     );
-    let (_, mut session) = MusicaProvider::default()
+    let (_, mut session) = fixture::provider()
         .open_session(request(root.path(), Sink::default()))
         .unwrap();
     session.advance(16_666_667, &[]).unwrap();
@@ -48,7 +48,7 @@ fn include_cycle_fails_before_creating_a_family_session() {
     let root = tempfile::tempdir().unwrap();
     fixture::game(root.path(), b".include test.sc\r\n");
     assert_eq!(
-        MusicaProvider::default()
+        fixture::provider()
             .open(request(root.path(), Sink::default()))
             .err()
             .unwrap()

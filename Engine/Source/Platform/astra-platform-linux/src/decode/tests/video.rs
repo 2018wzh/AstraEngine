@@ -150,8 +150,10 @@ fn every_decoded_frame_reaches_the_hardware_renderer() {
     use astra_platform::SceneFrame;
     // Renderer accepts media-core commands through astra-media's reexports.
     use astra_media::{BlendMode, RectI, SceneCommand};
-    let mut renderer =
-        pollster::block_on(astra_platform_common::WgpuOffscreenRenderer::new()).unwrap();
+    let mut renderer = pollster::block_on(astra_platform_common::WgpuOffscreenRenderer::new(
+        &astra_platform_common::native_wgpu_instance().unwrap(),
+    ))
+    .unwrap();
     assert_ne!(renderer.identity().device_type, "cpu");
     let mut decoder = DecodeResource::new(DecodeKind::Video).unwrap();
     decoder.decode(start(fixture())).unwrap();

@@ -19,7 +19,9 @@ use crate::{
     presentation::install_device_lost_callback,
 };
 
-/// Surface-free WGPU owner shared by the native platform hosts and Headless.
+/// Session-local surface-free renderer used by native platform hosts and Headless.
+/// The caller retains the backend instance across sessions; each renderer creates
+/// and releases its own device, queue and scene resources.
 pub struct WgpuOffscreenRenderer {
     _instance: wgpu::Instance,
     device: wgpu::Device,
@@ -210,15 +212,19 @@ impl WgpuOffscreenRenderer {
         self
     }
 
-    pub async fn new() -> Result<Self, PlatformError> {
-        Self::new_internal(None, None).await
+    pub async fn new(instance: &wgpu::Instance) -> Result<Self, PlatformError> {
+        Self::new_internal(instance, None, None).await
     }
 
-    pub async fn new_with_policy(policy: &GpuAdapterPolicy) -> Result<Self, PlatformError> {
-        Self::new_internal(Some(policy), None).await
+    pub async fn new_with_policy(
+        instance: &wgpu::Instance,
+        policy: &GpuAdapterPolicy,
+    ) -> Result<Self, PlatformError> {
+        Self::new_internal(instance, Some(policy), None).await
     }
 
     pub async fn new_for_performance(
+        instance: &wgpu::Instance,
         policy: &GpuAdapterPolicy,
         max_gpu_resource_bytes: u64,
         width: u32,
@@ -230,18 +236,19 @@ impl WgpuOffscreenRenderer {
                 "GPU resource budget is too small for the persistent performance atlas",
             ));
         }
-        let mut renderer = Self::new_internal(Some(policy), Some(PERFORMANCE_ATLAS_SIDE)).await?;
+        let mut renderer =
+            Self::new_internal(instance, Some(policy), Some(PERFORMANCE_ATLAS_SIDE)).await?;
         renderer.prewarm(width, height)?;
         Ok(renderer)
     }
 
     async fn new_internal(
+        instance: &wgpu::Instance,
         policy: Option<&GpuAdapterPolicy>,
         atlas_reservation: Option<u32>,
     ) -> Result<Self, PlatformError> {
-        let instance = native_wgpu_instance()?;
         let adapter = if let Some(policy) = policy {
-            select_adapter(&instance, policy).await?
+            select_adapter(instance, policy).await?
         } else {
             instance
                 .request_adapter(&wgpu::RequestAdapterOptions {
@@ -333,7 +340,7 @@ impl WgpuOffscreenRenderer {
         let device_lost = Arc::new(AtomicBool::new(false));
         install_device_lost_callback(&device, Arc::clone(&device_lost));
         Ok(Self {
-            _instance: instance,
+            _instance: instance.clone(),
             device,
             queue,
             scene_renderer,
@@ -1322,7 +1329,9 @@ fn float_param(
     }
 }
 
-/// Reuses the backend policy of the corresponding native platform host.
+/// Creates an instance with the corresponding native platform backend policy.
+/// Retain it in the graphics owner and lend it to each session renderer so native
+/// backend loaders remain loaded across session creation and destruction.
 pub fn native_wgpu_instance() -> Result<wgpu::Instance, PlatformError> {
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();

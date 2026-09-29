@@ -13,7 +13,7 @@ fn native_gpu_wscroll2_family_input_restores_and_suspends_the_animation() {
     .unwrap();
     fixture::asset(root.path(), "bg", "BG.png", png.get_ref());
     fixture::asset(root.path(), "st", "walk.txt", b"13\r\n16\r\n");
-    let mut provider = MusicaProvider::default();
+    let mut provider = fixture::provider();
     let mut opened = provider
         .open(request(root.path(), Sink::default()))
         .unwrap();

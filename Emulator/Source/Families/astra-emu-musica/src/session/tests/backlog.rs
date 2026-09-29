@@ -10,7 +10,7 @@ fn native_gpu_backlog_navigation_voice_save_restore_and_return() {
     );
     fixture::asset(root.path(), "voice", "tone.ogg", &fixture::wave());
     let sink = Sink::default();
-    let mut provider = MusicaProvider::default();
+    let mut provider = fixture::provider();
     let mut opened = provider.open(request(root.path(), sink.clone())).unwrap();
     opened.session.advance(16_666_667, &[]).unwrap();
     opened
@@ -79,7 +79,7 @@ fn backlog_replay_does_not_replace_pending_message_voice_duration() {
         "voice",
         &[("short.ogg", &short), ("long.ogg", &long)],
     );
-    let mut provider = MusicaProvider::default();
+    let mut provider = fixture::provider();
     let mut opened = provider
         .open(request(root.path(), Sink::default()))
         .unwrap();

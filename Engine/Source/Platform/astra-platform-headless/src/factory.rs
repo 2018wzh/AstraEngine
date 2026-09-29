@@ -55,6 +55,7 @@ pub struct HeadlessPlatformFactory {
     gpu_enabled: bool,
     performance_observer: Option<Arc<dyn HeadlessPerformanceObserver>>,
     thread_registry: Option<Arc<thread_owner::ThreadRegistry>>,
+    gpu_instance: Arc<Mutex<Option<wgpu::Instance>>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -110,6 +111,7 @@ impl HeadlessPlatformFactory {
             gpu_enabled: false,
             performance_observer: None,
             thread_registry: None,
+            gpu_instance: Arc::new(Mutex::new(None)),
         }
     }
     pub fn with_gpu(mut self, enabled: bool) -> Self {
@@ -118,6 +120,7 @@ impl HeadlessPlatformFactory {
     }
     pub fn with_thread_owner(mut self, owner: &HeadlessThreadOwner) -> Self {
         self.thread_registry = Some(owner.registry.clone());
+        self.gpu_instance = owner.gpu_instance.clone();
         self
     }
     pub fn with_performance_observer(
@@ -411,6 +414,7 @@ enum PackageState {
 }
 
 struct HostState {
+    gpu_instance: Arc<Mutex<Option<wgpu::Instance>>>,
     profile: HeadlessHostProfile,
     backend: astra_platform::PlatformBackendChannels,
     windows: ResourceTable<WindowState, WindowHandle>,
@@ -428,6 +432,17 @@ struct HostState {
 }
 
 impl HostState {
+    fn gpu_instance(&self) -> Result<wgpu::Instance, PlatformError> {
+        let mut instance = self
+            .gpu_instance
+            .lock()
+            .map_err(|_| invalid("headless.gpu_instance", "graphics owner lock is poisoned"))?;
+        if instance.is_none() {
+            *instance = Some(astra_platform_common::native_wgpu_instance()?);
+        }
+        Ok(instance.as_ref().expect("GPU instance initialized").clone())
+    }
+
     fn new(
         factory: HeadlessPlatformFactory,
         profile: HeadlessHostProfile,
@@ -441,6 +456,7 @@ impl HostState {
         )?));
         Ok(Self {
             profile,
+            gpu_instance: factory.gpu_instance,
             backend,
             windows: ResourceTable::new("window"),
             surfaces: ResourceTable::new("surface"),
@@ -711,10 +727,18 @@ impl HostState {
             }
             HostCommand::CreateSurface { request, reply } => {
                 let gpu_renderer = if self.profile.providers.renderer == "wgpu_offscreen" {
+                    let instance = match self.gpu_instance() {
+                        Ok(instance) => instance,
+                        Err(error) => {
+                            let _ = reply.send(Err(error));
+                            return;
+                        }
+                    };
                     let renderer = if self.performance_observer.is_some() {
                         match self.profile.gpu_adapter.as_ref() {
                             Some(policy) => {
                                 WgpuOffscreenRenderer::new_for_performance(
+                                    &instance,
                                     policy,
                                     self.profile.max_gpu_resource_bytes,
                                     request.width,
@@ -729,9 +753,9 @@ impl HostState {
                             )),
                         }
                     } else if let Some(policy) = &self.profile.gpu_adapter {
-                        WgpuOffscreenRenderer::new_with_policy(policy).await
+                        WgpuOffscreenRenderer::new_with_policy(&instance, policy).await
                     } else {
-                        WgpuOffscreenRenderer::new().await
+                        WgpuOffscreenRenderer::new(&instance).await
                     };
                     match renderer {
                         Ok(renderer) => Some(renderer),

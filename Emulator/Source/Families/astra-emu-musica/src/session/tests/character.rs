@@ -15,7 +15,7 @@ fn native_gpu_character_mirror_transition_wait_and_save_restore() {
     .write_to(&mut png, image::ImageFormat::Png)
     .unwrap();
     fixture::stand(root.path(), png.get_ref());
-    let mut provider = MusicaProvider::default();
+    let mut provider = fixture::provider();
     let mut opened = provider
         .open(request(root.path(), Sink::default()))
         .unwrap();

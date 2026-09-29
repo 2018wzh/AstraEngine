@@ -8,7 +8,10 @@ use astra_platform_common::WgpuOffscreenRenderer;
 #[tokio::test]
 #[ignore = "requires a native hardware GPU runner"]
 async fn screen_blends_premultiplied_colors_and_opacity_on_hardware() {
-    let mut renderer = WgpuOffscreenRenderer::new().await.unwrap();
+    let mut renderer =
+        WgpuOffscreenRenderer::new(&astra_platform_common::native_wgpu_instance().unwrap())
+            .await
+            .unwrap();
     assert!(matches!(
         renderer.identity().device_type.as_str(),
         "integrated_gpu" | "discrete_gpu"
@@ -66,10 +69,11 @@ async fn screen_texture_respects_color_space_and_preserves_transparent_pixels() 
         (SceneCompositing2D::LinearSrgb, 192),
         (SceneCompositing2D::EncodedSrgb, 160),
     ] {
-        let mut renderer = WgpuOffscreenRenderer::new()
-            .await
-            .unwrap()
-            .with_default_compositing(compositing);
+        let mut renderer =
+            WgpuOffscreenRenderer::new(&astra_platform_common::native_wgpu_instance().unwrap())
+                .await
+                .unwrap()
+                .with_default_compositing(compositing);
         assert!(matches!(
             renderer.identity().device_type.as_str(),
             "integrated_gpu" | "discrete_gpu"

@@ -15,7 +15,7 @@ fn native_gpu_message_inline_load_restores_mid_crossfade() {
     let red = png([255, 0, 0, 255]);
     let green = png([0, 255, 0, 255]);
     fixture::assets(root.path(), "st", &[("A.png", &red), ("B.png", &green)]);
-    let mut provider = MusicaProvider::default();
+    let mut provider = fixture::provider();
     let mut opened = provider
         .open(request(root.path(), Sink::default()))
         .unwrap();
@@ -57,7 +57,7 @@ fn native_gpu_message_voice_wait_queries_existing_decoded_audio() {
     let root = tempfile::tempdir().unwrap();
     fixture::game(root.path(), b".message 1 tone.ogg  Body\\v\r\n.end\r\n");
     fixture::asset(root.path(), "voice", "tone.ogg", &fixture::wave());
-    let mut provider = MusicaProvider::default();
+    let mut provider = fixture::provider();
     let mut opened = provider
         .open(request(root.path(), Sink::default()))
         .unwrap();

@@ -12,7 +12,7 @@ fn translation_glyph_failure_poisoning_differs_from_service_failure() {
         translation.clone(),
         TD_Opaque,
     ));
-    let mut provider = MusicaProvider::default();
+    let mut provider = fixture::provider();
     let (_, mut session) = provider.open_session(req).unwrap();
     session.advance(16_666_667, &[]).unwrap();
 

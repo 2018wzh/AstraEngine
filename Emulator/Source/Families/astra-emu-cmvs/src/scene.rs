@@ -25,7 +25,9 @@ pub struct CmvsScene {
 
 impl CmvsScene {
     pub fn new() -> Result<Self, CoreError> {
-        let renderer = pollster::block_on(WgpuOffscreenRenderer::new())
+        let instance = astra_platform_common::native_wgpu_instance()
+            .map_err(|_| error("ASTRA_EMU_CMVS_GPU_CREATE"))?;
+        let renderer = pollster::block_on(WgpuOffscreenRenderer::new(&instance))
             .map_err(|_| error("ASTRA_EMU_CMVS_GPU_CREATE"))?;
         tracing::info!(event = "cmvs.gpu.created", backend = %renderer.identity().backend,
             device_type = %renderer.identity().device_type, vendor_id = renderer.identity().vendor_id,

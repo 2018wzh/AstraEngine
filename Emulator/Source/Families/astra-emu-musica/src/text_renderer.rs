@@ -368,7 +368,10 @@ mod tests {
     #[ignore = "requires a hardware GPU"]
     fn gpu_text_updates_shared_glyphs_and_releases_removed_regions() {
         let mut text = MusicaTextRenderer::new(crate::ScriptEncoding::ShiftJis).unwrap();
-        let mut gpu = pollster::block_on(WgpuOffscreenRenderer::new()).unwrap();
+        let mut gpu = pollster::block_on(WgpuOffscreenRenderer::new(
+            crate::test_fixture::gpu_instance(),
+        ))
+        .unwrap();
         let mut sequence = 0;
         let mut draw = |message| {
             sequence += 1;
@@ -426,7 +429,10 @@ mod tests {
     #[ignore = "requires a hardware GPU"]
     fn gpu_shadow_toggle_reuses_glyphs_and_removes_outline_layers() {
         let mut text = MusicaTextRenderer::new(crate::ScriptEncoding::ShiftJis).unwrap();
-        let mut gpu = pollster::block_on(WgpuOffscreenRenderer::new()).unwrap();
+        let mut gpu = pollster::block_on(WgpuOffscreenRenderer::new(
+            crate::test_fixture::gpu_instance(),
+        ))
+        .unwrap();
         let mut sequence = 0;
         let mut draw = |text: &mut MusicaTextRenderer, shadow| {
             text.shadow = shadow;
@@ -502,7 +508,10 @@ mod tests {
             commands.append(&mut text_commands);
             commands.push(SceneCommand::PopTransform);
             commands.push(SceneCommand::PopTransform);
-            let mut gpu = pollster::block_on(WgpuOffscreenRenderer::new()).unwrap();
+            let mut gpu = pollster::block_on(WgpuOffscreenRenderer::new(
+                crate::test_fixture::gpu_instance(),
+            ))
+            .unwrap();
             let pixels = gpu
                 .render(&SceneFrame {
                     sequence: u64::from(raster.width),
@@ -602,7 +611,10 @@ mod tests {
         }
 
         let mut text = MusicaTextRenderer::new(crate::ScriptEncoding::ShiftJis).unwrap();
-        let mut gpu = pollster::block_on(WgpuOffscreenRenderer::new()).unwrap();
+        let mut gpu = pollster::block_on(WgpuOffscreenRenderer::new(
+            crate::test_fixture::gpu_instance(),
+        ))
+        .unwrap();
         let first_raster = Extent2D::new(1280, 720);
         let (first, first_commands) = render_text(&mut text, &mut gpu, 1, 1.0, first_raster);
         assert!(first_commands

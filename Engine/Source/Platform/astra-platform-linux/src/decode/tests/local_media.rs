@@ -22,8 +22,10 @@ fn complete_local_movie_streams_through_worker_and_gpu() {
     if let Some(dir) = artifact_dir.as_ref() {
         std::fs::create_dir_all(dir).unwrap();
     }
-    let mut renderer =
-        pollster::block_on(astra_platform_common::WgpuOffscreenRenderer::new()).unwrap();
+    let mut renderer = pollster::block_on(astra_platform_common::WgpuOffscreenRenderer::new(
+        &astra_platform_common::native_wgpu_instance().unwrap(),
+    ))
+    .unwrap();
     assert_ne!(renderer.identity().device_type, "cpu");
     let session = DecodeSession::new(DecodeKind::Video).unwrap();
     let mut request = video::start(bytes);

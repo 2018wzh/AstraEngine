@@ -26,7 +26,9 @@ impl ThreadRegistry {
     }
 }
 
-/// Owns dedicated Headless executor threads for one CLI run or JSONL server.
+/// Owns dedicated Headless executor threads and the native GPU instance for one
+/// CLI run or JSONL server. Factories attached to this owner retain separate
+/// session devices while sharing the configured backend loader.
 ///
 /// Drop cancels all remaining host loops and joins their threads, including
 /// executor and native resource destruction. Keep this owner outside the scope
@@ -34,6 +36,7 @@ impl ThreadRegistry {
 #[derive(Debug, Default)]
 pub struct HeadlessThreadOwner {
     pub(super) registry: Arc<ThreadRegistry>,
+    pub(super) gpu_instance: Arc<Mutex<Option<wgpu::Instance>>>,
 }
 
 impl Drop for HeadlessThreadOwner {

@@ -21,7 +21,14 @@ fn native_stage_gpu_restore_preserves_position_and_rejects_invalid_sequences() {
     };
     let mut vm = make_vm();
     vm.step(1).unwrap();
-    let mut scene = Scene::new(archive.clone(), 32, 32, crate::ScriptEncoding::ShiftJis).unwrap();
+    let mut scene = Scene::new(
+        crate::test_fixture::gpu_instance(),
+        archive.clone(),
+        32,
+        32,
+        crate::ScriptEncoding::ShiftJis,
+    )
+    .unwrap();
     scene.render(vm.state(), None, None).unwrap();
     let pixel = |x: usize, y: usize| &scene.pixels[(y * 32 + x) * 4..(y * 32 + x + 1) * 4];
     assert_eq!(pixel(0, 0), &[0, 0, 0, 255]);
@@ -32,7 +39,14 @@ fn native_stage_gpu_restore_preserves_position_and_rejects_invalid_sequences() {
     restored_vm
         .restore_native_save(&vm.encode_native_save().unwrap(), 1)
         .unwrap();
-    let mut restored_scene = Scene::new(archive, 32, 32, crate::ScriptEncoding::ShiftJis).unwrap();
+    let mut restored_scene = Scene::new(
+        crate::test_fixture::gpu_instance(),
+        archive,
+        32,
+        32,
+        crate::ScriptEncoding::ShiftJis,
+    )
+    .unwrap();
     restored_scene
         .render(restored_vm.state(), None, None)
         .unwrap();
@@ -68,6 +82,14 @@ fn dual_stage_screen_prefix_orders_layers_and_restores_without_partial_frames() 
         bytes.into_inner()
     };
     crate::test_fixture::stand(root.path(), &png(8, 8, [64, 128, 192, 255]));
+    crate::test_fixture::assets(
+        root.path(),
+        "bg",
+        &[
+            ("BG.png", &png(16, 16, [25, 100, 220, 255])),
+            ("Light_SC.PNG", &png(16, 16, [128, 0, 0, 128])),
+        ],
+    );
     let archive =
         Arc::new(mount_musica(root.path(), std::path::Path::new(MUSICA_PROFILE_FILE)).unwrap());
     let make_vm = || {
@@ -80,18 +102,14 @@ fn dual_stage_screen_prefix_orders_layers_and_restores_without_partial_frames() 
         .unwrap()
     };
     let make_scene = || {
-        let mut scene =
-            Scene::new(archive.clone(), 16, 16, crate::ScriptEncoding::ShiftJis).unwrap();
-        // Seed the shared decoded cache; the archive-backed background and stand
-        // still exercise native resource loading and geometry.
-        scene
-            .textures
-            .decode(
-                "musica:/bg/Light_SC.PNG".into(),
-                &png(16, 16, [128, 0, 0, 128]),
-            )
-            .unwrap();
-        scene
+        Scene::new(
+            crate::test_fixture::gpu_instance(),
+            archive.clone(),
+            16,
+            16,
+            crate::ScriptEncoding::ShiftJis,
+        )
+        .unwrap()
     };
     let mut vm = make_vm();
     vm.step(1).unwrap();
@@ -128,6 +146,21 @@ fn panel_modes_draw_at_native_positions_and_clear_after_restore() {
     let root = tempfile::tempdir().unwrap();
     let source = b".panel 1 * custom.png\r\n.panel 3\r\n.panel 0\r\n.end\r\n";
     crate::test_fixture::game(root.path(), source);
+    let png = |color| {
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        image::RgbaImage::from_pixel(16, 80, image::Rgba(color))
+            .write_to(&mut bytes, image::ImageFormat::Png)
+            .unwrap();
+        bytes.into_inner()
+    };
+    crate::test_fixture::assets(
+        root.path(),
+        "sys",
+        &[
+            ("custom.png", &png([255, 0, 0, 255])),
+            ("fullPanel.png", &png([0, 255, 0, 255])),
+        ],
+    );
     let archive =
         Arc::new(mount_musica(root.path(), std::path::Path::new(MUSICA_PROFILE_FILE)).unwrap());
     let make_vm = || {
@@ -139,20 +172,14 @@ fn panel_modes_draw_at_native_positions_and_clear_after_restore() {
         )
         .unwrap()
     };
-    let mut scene = Scene::new(archive, 16, 80, crate::ScriptEncoding::ShiftJis).unwrap();
-    for (uri, color) in [
-        ("musica:/sys/custom.png", [255, 0, 0, 255]),
-        ("musica:/sys/fullPanel.png", [0, 255, 0, 255]),
-    ] {
-        let mut png = std::io::Cursor::new(Vec::new());
-        image::RgbaImage::from_pixel(16, 80, image::Rgba(color))
-            .write_to(&mut png, image::ImageFormat::Png)
-            .unwrap();
-        scene
-            .textures
-            .decode(uri.into(), &png.into_inner())
-            .unwrap();
-    }
+    let mut scene = Scene::new(
+        crate::test_fixture::gpu_instance(),
+        archive,
+        16,
+        80,
+        crate::ScriptEncoding::ShiftJis,
+    )
+    .unwrap();
     let mut vm = make_vm();
     for tick in 1..=3 {
         vm.step(tick).unwrap();
@@ -202,7 +229,14 @@ fn screen_shake_gpu_preserves_composed_clipping_and_restores_mid_interval() {
         .unwrap()
     };
     let mut vm = make_vm();
-    let mut scene = Scene::new(archive, 16, 16, crate::ScriptEncoding::ShiftJis).unwrap();
+    let mut scene = Scene::new(
+        crate::test_fixture::gpu_instance(),
+        archive,
+        16,
+        16,
+        crate::ScriptEncoding::ShiftJis,
+    )
+    .unwrap();
     vm.step(1).unwrap();
     scene.render(vm.state(), None, None).unwrap();
     let original = scene.pixels.clone();
@@ -255,7 +289,14 @@ fn scrollxf_gpu_crops_translates_and_accepts_empty_extent() {
         .unwrap()
     };
     let mut vm = make_vm();
-    let mut scene = Scene::new(archive, 16, 16, crate::ScriptEncoding::ShiftJis).unwrap();
+    let mut scene = Scene::new(
+        crate::test_fixture::gpu_instance(),
+        archive,
+        16,
+        16,
+        crate::ScriptEncoding::ShiftJis,
+    )
+    .unwrap();
     vm.step(1).unwrap();
     scene.render(vm.state(), None, None).unwrap();
     let original = scene.pixels.clone();
@@ -340,6 +381,7 @@ fn native_gpu_scaled_ani_offset_scroll_clip_and_shake_preserve_logical_geometry(
         let mut vm = make_vm();
         vm.step(1).unwrap();
         let mut scene = Scene::new_scaled(
+            crate::test_fixture::gpu_instance(),
             archive.clone(),
             16,
             16,

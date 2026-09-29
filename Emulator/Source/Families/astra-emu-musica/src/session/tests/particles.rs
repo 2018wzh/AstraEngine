@@ -19,7 +19,7 @@ fn native_gpu_particle_family_save_restore_and_pause() {
     ]
     .map(|name| (name, png.get_ref().as_slice()));
     fixture::assets(root.path(), "sys", &entries);
-    let mut provider = MusicaProvider::default();
+    let mut provider = fixture::provider();
     let mut opened = provider
         .open(request(root.path(), Sink::default()))
         .unwrap();
