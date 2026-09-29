@@ -39,7 +39,7 @@ Decode 只能通过 `DecodeBindingContext { provider_id, target, profile, allow_
 
 `FfmpegPlaybackDecoder` 从受限临时输入执行真实 demux，输出带 generation、sequence、PTS、duration 和 resource id 的 typed PCM/BGRA packet。它支持设备目标格式 resample、seek、EOS flush、终段 trimming、取消和单 packet backpressure；`MediaPlaybackPipeline` 负责 live byte budget、audio-master 调度与视频资源释放，不在实时路径计算 packet hash。正式 performance evidence 仍绑定 product profile、package、build、session 与设备身份。
 
-Headless 与 Windows 共享 typed incremental stream contract。`DecodeStreamAction::Start` 建立有界 session，后续 `Next` 每次消费一个 owned frame，EOF 返回 typed end marker。Player 同时最多保留一帧；snapshot 只保存 asset identity、revision、cursor、loop index 和逻辑起始时间。restore 重新创建 decode session并按 cursor continuation；skip、loop replacement、失败与 shutdown 必须显式 `CloseDecode`。
+Headless、Windows、Android 与 Linux 共用 typed incremental stream contract。`DecodeStreamAction::Start` 建立有界 session，`VideoStreamStart.duration_estimate_us` 只提供可选探测时长；`Next` 每次交付一个 owned frame，成功 EOF 返回 `VideoStreamEnd`。真实帧区间与成功 EOS 共同确定视频完成终点，探测估计不能作为帧范围或文件完整性断言。Provider 仍须传播实际 demux/decode 错误、损坏帧和预算失败。Player 最多保留一帧，使用实际完成时长调度完成通知与循环；snapshot v4 保存资产身份、cursor、已展示帧尾、已知循环时长和逻辑起始时间。restore 重新打开同一资产并核对 cursor 对应帧尾及计数；skip、loop replacement、失败与 shutdown 显式 `CloseDecode`。该视频 session 不承载 PCM；作品 `movie_audio` 由独立 AudioHost 管理，不随视频 EOS 停止。
 
 Player 从 package 消费 encoded audio 时，必须先通过 `asset.catalog` 与 `asset.vfs_manifest` 得到唯一 package-backed entry，执行 bounded read 和 SHA-256 校验，再按文件签名识别 codec。不能用 asset id、文件名或 provider descriptor 猜测已解码成功。Windows Media Foundation 当前返回 `pcm_s16le:<sample_rate>:<channels>`；Player 必须检查格式字段、采样率、声道、sample budget、sample 截断和 frame alignment，再显式转换为 interleaved `f32`。未知格式、空/越界 stream shape 和不完整 frame 都是 blocking，不能转为空音频成功。
 

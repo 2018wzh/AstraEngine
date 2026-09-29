@@ -266,7 +266,9 @@ compiled project 升至 v5、package root 升至 v4；包含轨道的 Stage/Play
 
 Linux 显式 GStreamer provider 的 one-shot audio 接受 `wav`，保持原有 48 kHz、双声道 float PCM 输出；不切换到其他 decoder。运行环境须提供 playback/typefind、wavparse、audioconvert 与 audioresample 插件。缺插件或流错误返回 `ASTRA_LINUX_GSTREAMER_DECODE_FAILED`，不传播可能含私有临时路径的 GStreamer debug 字符串，不提交失败请求的 sequence。启动或解码失败后同样将 pipeline 置为 Null。此改动不更改 package/save schema，不需要数据迁移；发布验证必须实际解码目标位深素材，codec allowlist 或构建通过不能证明插件可用。
 
-Linux 视频使用现有 `Start/Next` 契约：Start 保留管线并返回已知时长，Next 返回连续编号的 BGRA 帧或唯一的末尾计数；视频 OneShot 明确拒绝，不能再把首帧当作播放结果。解码 session 持有单 worker 与容量为 1 的待处理请求队列，GStreamer appsink 最多保留 2 帧，不丢帧；另保留一个前视 sample 以真实 PTS 差计算可变帧率时长。最后一帧必须有有效 duration，并与容器声明的结束时间一致；独立纳秒转微秒的截断误差限 1 微秒。缺时长/PTS、非递增 PTS、截断或解码错误均失败，执行失败后须关闭 session，不能换 decoder 重试。
+Linux 视频使用 `Start/Next` 契约：Start 保留管线并返回可选 `duration_estimate_us`，Next 返回连续编号的 BGRA 帧或唯一的末尾计数；视频 OneShot 明确拒绝。探测时长可能随 demux 更新，不用于裁剪帧、判断完整性或确定循环周期。解码 session 持有单 worker 与容量为 1 的请求队列，appsink 最多保留 2 帧；一个前视 sample 以真实 PTS 差计算可变帧率时长。末帧使用解码器提供的有效 duration，在纳秒域计算帧尾后转换为微秒，保留原 PTS，不要求它与容器估计相等。缺时长/PTS、非递增 PTS、损坏帧、demux/decode 错误及超限均失败，失败 session 必须关闭。成功 EOS 确认已交付视频帧结束；容器未报错的静默截断不能仅凭时长估计检测，不宣称通用文件完整性保证。
+
+Player 复用 `VideoFrame` 和 `VideoStreamEnd`：成功 EOS 后，最后一帧的实际终点确定完成时长；完成通知与下一轮循环等待该时刻。后续轮的时间偏移使用已完成轮时长，并核对每轮实际终点一致；时间加法和乘法检查溢出。媒体 snapshot 使用 `astra.player.native_vn_media_snapshot.v4`，视频保存已展示 `frame_end_us` 与可选 `loop_duration_us`；首轮 EOS 前后者为 None。恢复重新打开已绑定资产并按 cursor 解码，核对实际帧尾与字节计数，不把可变探测时长当资产身份。旧 v3 直接拒绝，无迁移或字段别名。视频流只承载 BGRA 帧；`movie_audio` 由独立 AudioHost 的 PCM 时钟管理，视频结束与循环不关闭或截断该音频。
 
 Linux 本地媒体边界限制单次编码输入 256 MiB、单个视频帧和 one-shot 音频输出各 64 MiB；累计视频预算继续由产品 MediaHost 校验，不缓存完整解码影片。通过 `gstreamer-video` 按 plane stride 读取 BGRA，剔除行尾 padding。耗时解码不占用窗口事件线程；请求接收端取消或 session 关闭时 worker 停止拉帧，管线设为 Null 后删除临时输入。显式 CloseDecode 等待 worker，并传播关闭失败；取消的 OpenDecode 回复回收刚分配的句柄。宿主无须新增公共 ABI 或 save/package 字段，已有视频调用方使用原 Start/Next 即可。
 
