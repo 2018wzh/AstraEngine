@@ -5,7 +5,11 @@ use crate::{
     VnPolicyState, POLICY_ACTION_PROVIDER,
 };
 use mlua::{Function, Lua, LuaSerdeExt, Table};
-use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    collections::BTreeMap,
+    rc::Rc,
+};
 
 struct RegisteredAction {
     descriptor: ExtensionCommandDescriptor,
@@ -18,7 +22,7 @@ fn register(
     source: &str,
     budget: PolicyExecutionBudget,
     shared: Option<super::luau_budget::SharedBudget>,
-) -> mlua::Result<BTreeMap<String, RegisteredAction>> {
+) -> mlua::Result<(Table, BTreeMap<String, RegisteredAction>)> {
     let host_budget = match shared {
         Some(shared) => shared,
         None => super::luau_budget::HostBudget::new(
@@ -30,11 +34,18 @@ fn register(
     let registration_budget = host_budget.clone();
     let registered = Rc::new(RefCell::new(BTreeMap::new()));
     let registrations = registered.clone();
+    let registration_open = Rc::new(Cell::new(true));
+    let callback_open = registration_open.clone();
     let command = lua.create_table()?;
     command.set(
         "register",
         lua.create_function(
             move |lua, (name, manifest, handler): (String, Table, Function)| {
+                if !callback_open.get() {
+                    return Err(mlua::Error::runtime(
+                        "ASTRA_VN_POLICY_ACTION_REGISTRATION_CLOSED",
+                    ));
+                }
                 let bytes = registration_budget
                     .borrow()
                     .lua_value_bytes(&mlua::Value::Table(manifest.clone()), 0)?
@@ -70,11 +81,13 @@ fn register(
     )?;
     let astra = lua.create_table()?;
     astra.set("command", command)?;
-    lua.globals().set("astra", astra)?;
-    lua.load(source).exec()?;
+    lua.globals().set("astra", astra.clone())?;
+    let result = lua.load(source).exec();
+    registration_open.set(false);
+    result?;
     host_budget.borrow().check()?;
     let mut actions = registered.borrow_mut();
-    Ok(std::mem::take(&mut *actions))
+    Ok((astra, std::mem::take(&mut *actions)))
 }
 
 impl mlua::UserData for PolicyActionOutcome {}
@@ -90,7 +103,7 @@ impl LuauPolicy {
         }
         let lua = astra_policy::create_sandboxed_lua(budget)
             .map_err(|e| VnError::diagnostic(e.code(), e.to_string()))?;
-        let actions = register(&lua, source, budget, None)
+        let (_, actions) = register(&lua, source, budget, None)
             .map_err(|_| action_error("action registration failed"))?;
         if actions.is_empty() {
             return Err(action_error("entry registers no actions"));
@@ -127,7 +140,7 @@ impl LuauPolicy {
             budget,
             scoped_host,
             |lua, astra, io, host_budget| {
-                let mut registered =
+                let (registered_api, mut registered) =
                     register(lua, &binding.source, budget, Some(host_budget.clone()))?;
                 let action = registered
                     .remove(&binding.descriptor.command)
@@ -170,7 +183,14 @@ impl LuauPolicy {
                         })?,
                     )?;
                 }
-                lua.globals().set("astra", astra.clone())?;
+                // Preserve the table captured by module-local aliases and closures.
+                // Install only the runtime APIs after host scoping is complete.
+                registered_api.set("command", mlua::Value::Nil)?;
+                for entry in astra.pairs::<mlua::Value, mlua::Value>() {
+                    let (key, value) = entry?;
+                    registered_api.raw_set(key, value)?;
+                }
+                lua.globals().set("astra", registered_api)?;
                 let args = lua.create_table()?;
                 for (key, value) in &continuation.command.fields {
                     let value = match value {

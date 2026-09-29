@@ -208,6 +208,8 @@ Native `VnSession` 通过 `bind_policy_io` 授予具名逻辑资源及读取限�
 
 模块顶层只负责注册。handler 返回 `PolicyActionOutcome::Complete` 或 `Await { request_key }`，不能使用 boolean 隐式表示等待。每次剧情执行分配单调递增的 action instance，IO key 归该实例所有；同一 source ID 在循环中再次执行不能取得前一次结果。Await 只能引用当前实例实际存在的 pending 请求，未知、已结束或其他实例的 key 均拒绝。
 
+handler 可以通过模块局部变量捕获 `astra` table；注册结束后，该 table 原位获得当前动作的运行 API，资源授权和 IO key 仍受当前实例约束。顶层不能调用 host 或 mutation API。注册函数只在模块加载阶段开放；捕获 `astra.command` 或 `register` 函数也不能在 handler 内继续注册。每次调用重建 VM，不跨实例保留 API table 或闭包。
+
 handler 从头调用，VM 与执行栈不保存。变量写入先暂存，只有 Complete 才一次提交给 VN 权威状态；Await 丢弃本次 gameplay 写入，仅保留显式 continuation state 与 IO 状态。不能将 command trace 当作已经执行的解锁或其他效果，未接入的 effect 必须报错。`PolicyActionContinuation` 保存 source ID、实例序号、typed 参数、等待 key 与显式 state；复用现有 VN wait 和 IO AwaitToken，不另建调度器。固定 tick 接收 IO completion，再调用 handler；普通物理输入不能跳过动作等待。
 
 保存组件使用 `astra.vn.session_policy.v2`，旧 v1 明确拒绝，不迁移或覆盖旧槽。恢复验证 continuation、命令绑定、请求归属和 await 一致性后，才替换旧会话。pending 转为 Interrupted，不自动重新 dispatch；恢复后 handler 读取 Interrupted 并由显式分支完成或提出新的请求。损坏候选不取消旧会话，不覆盖旧槽。关闭取消并 join worker，迟到 completion 不得提交。

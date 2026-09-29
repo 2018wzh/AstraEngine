@@ -71,7 +71,19 @@ fn invoke(
 
 #[test]
 fn action_await_is_transactional_and_repeated_source_has_distinct_io() {
-    let binding = binding(SOURCE);
+    check_action_lifecycle(SOURCE);
+}
+
+#[test]
+fn captured_api_survives_await_completion_restore_and_new_instances() {
+    check_action_lifecycle(&format!(
+        "local api = astra\n{}",
+        SOURCE.replace("astra.", "api.")
+    ));
+}
+
+fn check_action_lifecycle(source: &str) {
+    let binding = binding(source);
     let mut first = continuation(&binding, 1);
     let mut state = VnPolicyState::default();
     let mut io = PolicyIoState::default();
@@ -104,6 +116,9 @@ fn action_await_is_transactional_and_repeated_source_has_distinct_io() {
     );
     assert_eq!(state.var("project", "count"), Some(1));
     io.interrupt_pending();
+    let mut second: PolicyActionContinuation =
+        postcard::from_bytes(&postcard::to_allocvec(&second).unwrap()).unwrap();
+    let mut io: PolicyIoState = postcard::from_bytes(&postcard::to_allocvec(&io).unwrap()).unwrap();
     assert_eq!(
         invoke(&binding, &mut second, &mut state, &mut io).unwrap(),
         PolicyActionOutcome::Complete
@@ -152,12 +167,49 @@ fn registration_has_no_gameplay_or_io_capabilities() {
             PolicyExecutionBudget::default()
         )
         .is_err());
+        let mut binding = binding(SOURCE);
+        binding.source = format!("{prefix}\n{SOURCE}");
+        binding.source_hash = Hash256::from_sha256(binding.source.as_bytes()).to_string();
+        assert!(invoke(
+            &binding,
+            &mut continuation(&binding, 1),
+            &mut VnPolicyState::default(),
+            &mut PolicyIoState::default()
+        )
+        .is_err());
     }
     assert!(LuauPolicy::action_descriptors(
         &format!("{SOURCE}\n{SOURCE}"),
         PolicyExecutionBudget::default()
     )
     .is_err());
+}
+
+#[test]
+fn captured_registration_table_and_function_are_closed_inside_handler() {
+    for (capture, call) in [
+        ("local command = astra.command", "command.register"),
+        ("local register = astra.command.register", "register"),
+    ] {
+        let source = format!(
+            "{capture}\n{}",
+            SOURCE.replace(
+                "local text, status",
+                &format!(
+                    "{call}('late', {{schema='demo.late.v1',fields={{}}}}, function() end)\n    local text, status"
+                )
+            )
+        );
+        let binding = binding(&source);
+        let mut continuation = continuation(&binding, 1);
+        let mut state = VnPolicyState::default();
+        let mut io = PolicyIoState::default();
+        let error = invoke(&binding, &mut continuation, &mut state, &mut io).unwrap_err();
+        assert!(error.to_string().contains("REGISTRATION_CLOSED"));
+        assert_eq!(state, VnPolicyState::default());
+        assert!(io.requests.is_empty());
+        assert!(continuation.state.is_empty());
+    }
 }
 
 #[test]

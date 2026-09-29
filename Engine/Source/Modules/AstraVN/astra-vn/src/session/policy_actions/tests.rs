@@ -7,12 +7,13 @@ use std::{
     time::Duration,
 };
 const POLICY: &str = r#"
-astra.command.register("note", {schema="demo.note.v1",fields={}}, function(args)
-    astra.mutate.set_var("project", "count", (astra.var.get("project","count") or 0) + 1)
-    local text,status = astra.host.read_text("note", "asset:/text/note")
-    if status == "pending" then return astra.action.await("note") end
+local api = astra
+api.command.register("note", {schema="demo.note.v1",fields={}}, function(args)
+    api.mutate.set_var("project", "count", (api.var.get("project","count") or 0) + 1)
+    local text,status = api.host.read_text("note", "asset:/text/note")
+    if status == "pending" then return api.action.await("note") end
     if status == "ready" then assert(text == "hello") else assert(status == "interrupted") end
-    return astra.action.complete()
+    return api.action.complete()
 end)
 "#;
 struct Host {
