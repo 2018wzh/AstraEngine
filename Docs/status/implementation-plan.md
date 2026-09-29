@@ -2,9 +2,13 @@
 
 ## 2026-09-29 Family PCM 播放进度
 
-Family 公共 API 已增加 v10 typed 播放进度查询，返回源帧 accepted/played 和 DeviceTimestamp/TestConsumption；默认实现明确 unsupported。现有无需查询的核心继续原有播放调用，旧插件需按 v10 重建。Family API 的 13 项测试与 all-target Clippy 通过；Host 映射与 KrKr 接入仍在实施，尚未完成其编译或真实设备验证。
+Family 公共 API 已升级 v10：单一 typed 查询返回源帧 accepted/played 和 DeviceTimestamp/TestConsumption，默认实现明确 unsupported。旧插件须重建；无需查询的核心保持原有播放调用。Manager Windows WASAPI 使用 CPAL 0.18.2 的实际 callback/playback 时间戳，覆盖当前块、队列、设备待播放区间与 Rubato 留存/延迟；查询不做墙钟外推。欠载静音不推进源帧，取消、关闭、写入或设备错误不能报告为已播放。NullAudio 保留显式测试标记；其他 native 后端只拒绝可选查询，不因缺少该时钟停止基础播放。
 
-CPAL 0.18.2 为正式版本，许可证 Apache-2.0、最低 Rust 1.85，本地 Rust 1.98 满足要求。Siglus hosted 特性隔离后，EMU 定向锁解析已通过：Kira 0.9.6 保留 mp3/ogg/flac/wav，仅 native-audio 默认特性启用原生 CPAL；MPEG rodio 只由 desktop-bins 引入。EMU 锁中不再包含旧 CPAL/rodio，Engine 主 workspace 依赖未变。Host 尚未重编，游戏与听音未测试；特性隔离与设备时间戳路径仍待增量检查。
+Siglus hosted 特性隔离后，EMU 定向锁解析通过。Kira 保持 0.9.6 与 mp3/ogg/flac/wav，仅默认 native-audio 特性启用原生 CpalBackend；MPEG rodio 只由 desktop-bins 引入。Family 关闭默认特性并选择 astra-hosted，缺 tap 明确失败。独立默认 native 检查还修复旧适配中 wait_now_ms 被错误整体 cfg 隐藏的问题，默认路径仍用真实单调时钟。Engine 主 workspace 依赖与 CMVS 实现未修改。
+
+CPAL 0.18.2 为正式版本，Apache-2.0、最低 Rust 1.85，本地 Rust 1.98 满足要求。Family API 13 项测试及 Clippy、Manager 音频 21 项测试、Siglus 1 项取消/join与缺 tap 测试通过；Siglus hosted all-target check、独立默认 native lib 和 siglus_engine bin check 通过。Manager/Siglus/SDK all-target Clippy（`-D warnings`）通过；交叉审查发现的 close 先于 health poll 吞掉进度错误已修复，清理后继续返回失败；上游原有警告未作范围外清理。
+
+Siglus 新 gitlink 为 `364aca85f2a76b05ca48c2230a1a79af567dd393`，保持固定上游 `e762f9f9c1c94cb490fb13f1367fd06f3e1367b4` 加单一适配提交。旧提交和分支保留；新提交尚未推送，因此远端干净检出和 CI 仍受阻。KrKr 消费者接入、实际 WASAPI 播放、真实听音及其他平台尚未验证，本批没有 GPU 或游戏测试。
 
 ## 2026-09-26 NativeVN 正文揭示与恢复演出
 

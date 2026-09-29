@@ -22,7 +22,7 @@ Descriptor 必须声明 CpuFrame，拒绝重复 capability/format。`PcmAudio` �
 
 v10 在 `AudioSink` 增加一个可选查询 `playback_progress() -> FfiFamilyResult<AudioPlaybackProgress>`。`AudioPlaybackProgress` 只含 `accepted_source_frames: u64`、`played_source_frames: u64` 和 `AudioPlaybackClock`，后者为 `DeviceTimestamp` 或 `TestConsumption`。vtable 与指纹统一升级为 v10，旧插件重建，不保留 ABI 兼容层。原有 sink 的默认实现明确返回 unsupported，未使用查询的核心无需增加实现。
 
-一帧包含 configure 声明的全部声道，计数采用该源采样率，与设备声道数和采样率无关。accepted 只累计 Host 实际接纳的 PCM，包括重采样器尚未输出的输入；写入失败或取消的整块不能增加计数。played 是最近一次设备时间戳采样对应的源帧播放水位，必须满足 `played <= accepted`。两者之差覆盖重采样器输入留存及滤波延迟、Host 队列、当前块未消费部分和已经提交设备但尚未到播放时点的部分。设备欠载填充的静音不属于 Family PCM，不推进源帧计数。换算使用整数有理数，保留采样率转换余数，不能逐块截断后累加。
+一帧包含 configure 声明的全部声道，计数采用该源采样率，与设备声道数和采样率无关。accepted 只累计 Host 实际接纳的 PCM，包括重采样器尚未输出的输入；写入失败或取消时，未被 Host 接纳的块或部分不能增加计数。played 是最近一次设备时间戳采样对应的源帧播放水位，必须满足 `played <= accepted`。两者之差覆盖重采样器输入留存及滤波延迟、Host 队列、当前块未消费部分和已经提交设备但尚未到播放时点的部分。设备欠载填充的静音不属于 Family PCM，不推进源帧计数。换算使用整数有理数，保留采样率转换余数，不能逐块截断后累加。
 
 `DeviceTimestamp` 使用实际设备回调提供的 callback/playback 时间。查询只能读取最近采样，不用查询时的墙钟外推，也不把回调提交位置当成播放位置；它受后端时间戳精度和回调周期限制，不承诺绝对 DAC 时刻。首个设备回调前 played 为零。支持性按实际后端确定，缺少有效时间戳的后端返回 `ASTRA_EMU_AUDIO_PROGRESS_UNSUPPORTED`。现有无需查询的 Family 继续基础播放；确实依赖进度的 Family 在 configure 后预检，不能用零或估算值替代不支持错误。
 

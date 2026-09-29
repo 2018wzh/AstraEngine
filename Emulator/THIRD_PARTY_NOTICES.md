@@ -48,3 +48,9 @@ FVP 使用仓库内的 `Emulator/Source/Families/na_wmv_player` 处理 ASF、WMV
 - Upstream: <https://github.com/microsoft/DirectXShaderCompiler>
 - Fixed version: `1.8.2502`.
 - 应用的 HLSL 编译路径使用固定版本 DXC；分发编译器时一并保留官方发行包中的许可证和第三方说明。
+
+## CPAL 0.18.2
+
+- Source: <https://github.com/RustAudio/cpal/releases/tag/v0.18.2>
+- License: Apache-2.0; minimum Rust version: 1.85.
+- Manager 使用 crates.io 的正式版本与锁文件 checksum。Windows WASAPI 播放进度读取该版本的设备 callback/playback 时间戳；其他后端仍可基础播放，但未提供相同精度的进度声明。发布包须包含完整 Apache-2.0 许可证。

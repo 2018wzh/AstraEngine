@@ -6,10 +6,13 @@ to an exact local adaptation commit in the
 [`2018wzh/siglus_rs`](https://github.com/2018wzh/siglus_rs) fork. That branch
 starts from upstream commit `e762f9f9c1c94cb490fb13f1367fd06f3e1367b4` (2026-09-13)
 plus a single adaptation commit
-(`c6c4f99ccac855966b726909756afe3200488374`). This local commit consolidates
+(`364aca85f2a76b05ca48c2230a1a79af567dd393`). This local commit consolidates
 the original hosted adaptation `2be01ae` and local cancellation/GPU changes
 `a9508e6`; both original commits remain available without rewriting their
-history. The new commit has not been pushed. The complete MPL-2.0 text stays
+history. The previous consolidated commit `c6c4f99ccac855966b726909756afe3200488374`
+and its branch remain unchanged. The current local branch is
+`codex/hosted-audio-isolation`; its commit has not been pushed, so a remote
+clean checkout and CI are not yet available for this gitlink. The complete MPL-2.0 text stays
 in `../../../ThirdParty/siglus_rs/LICENSE-MPL-2.0`; `THIRD_PARTY_NOTICES.md`
 records the attribution chain.
 
@@ -34,8 +37,17 @@ platform behavior still requires platform-specific validation.
   whose worker pulls mixed frames and pushes interleaved stereo f32 chunks at
   the configured sample rate) whenever a tap is installed. The callback
   blocks on the consumer's bounded queue, pacing the mixer to real time.
-  Without an installed tap, `AudioHub::new` takes the unchanged
-  `DefaultBackend` path.
+  Family disables default features and requires an installed tap; a missing
+  or failed tap returns an initialization error through `SiglusHost` instead
+  of silently selecting another backend. The default `native-audio` feature
+  explicitly constructs Kira's `CpalBackend` for the original desktop path.
+- The workspace Kira dependency disables automatic backend features and
+  explicitly retains `mp3`, `ogg`, `flac`, and `wav`. `native-audio` alone
+  enables `kira/cpal`; the hosted Family selects only `astra-hosted`.
+  `crates/na_mpeg2_decoder/Cargo.toml` makes rodio optional under the existing
+  `desktop-bins` feature, because only the desktop MPEG player uses it.
+  These changes leave Kira at 0.9.6 and avoid an unused native backend in the
+  hosted dependency graph; they do not replace codecs or mixing semantics.
 - `crates/na_wmv_player/Cargo.toml` bumps the package version from `0.2.0`
   to `0.2.1`: this repository already vendors an unrelated build of the same
   crate name at `Emulator/Source/Families/na_wmv_player`, and two distinct
@@ -47,7 +59,9 @@ platform behavior still requires platform-specific validation.
   their deadlines against a virtual monotonic clock that advances with each
   frame's elapsed value (`platform_time::hosted_clock`), and the family
   adapter enables it per session. Desktop paths keep the wall clock exactly
-  as upstream. Without this, real-time waits (movies, fades, `wait` ms)
+  as upstream. The default-feature check also fixed the existing adaptation
+  cfg boundary: `wait_now_ms` remains available without `astra-hosted`, while
+  only its virtual-clock branch is feature-gated. Without this, real-time waits (movies, fades, `wait` ms)
   would take their full real-world duration under a headless driver.
 - Blanket rustc/Clippy warning overrides from the previous adaptation were
   removed from all 18 affected manifests. Upstream warnings remain visible;

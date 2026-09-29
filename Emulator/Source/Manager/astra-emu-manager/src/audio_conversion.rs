@@ -25,6 +25,11 @@ pub(super) struct AudioConverter {
 }
 
 impl AudioConverter {
+    pub(super) fn output_delay(&self) -> usize {
+        self.resampler
+            .as_ref()
+            .map_or(0, |resampler| resampler.output_delay())
+    }
     pub(super) fn new(output: OutputFormat) -> Result<Self, String> {
         let source_channels = output.source.channels;
         let target_channels = output.device_channels;

@@ -7,6 +7,8 @@ use std::sync::{
 mod audio_conversion;
 #[path = "audio_device.rs"]
 mod audio_device;
+#[path = "audio_progress.rs"]
+mod audio_progress;
 pub(crate) use audio_device::AudioDeviceKind;
 use audio_device::AudioOutputDevice;
 
@@ -14,12 +16,13 @@ use abi_stable::type_level::downcasting::TD_Opaque;
 #[cfg(test)]
 use astra_emu_family_api::PcmFormat;
 use astra_emu_family_api::{
-    AudioSink, AudioSinkBox, AudioSink_TO, AudioWriteStatus, PcmChunk, PcmFormatSpec,
-    MAX_AUDIO_SAMPLES_PER_CHUNK,
+    AudioPlaybackClock, AudioPlaybackProgress, AudioSink, AudioSinkBox, AudioSink_TO,
+    AudioWriteStatus, PcmChunk, PcmFormatSpec, MAX_AUDIO_SAMPLES_PER_CHUNK,
 };
 #[cfg(test)]
 use audio_conversion::{convert_chunk, convert_samples};
 use audio_conversion::{pcm_chunk_samples, AudioConverter, OutputFormat};
+use audio_progress::{PlaybackCounters, PlaybackTracker};
 use crossbeam_channel::{bounded, select, Receiver, Sender};
 
 const AUDIO_QUEUE_CHUNKS: usize = 4;
@@ -38,6 +41,8 @@ struct AudioState {
     cancelled: AtomicBool,
     closed: AtomicBool,
     stream_failed: AtomicBool,
+    progress_failed: AtomicBool,
+    progress: Arc<PlaybackCounters>,
     configured: Mutex<Option<OutputFormat>>,
     producer: Mutex<Option<Sender<Vec<f32>>>>,
     cancel_waiters: Mutex<Vec<Sender<()>>>,
@@ -55,6 +60,9 @@ struct DeviceConsumer {
     receiver: Receiver<Vec<f32>>,
     current: Option<Vec<f32>>,
     cursor: usize,
+    channels: usize,
+    tracker: Option<PlaybackTracker>,
+    last_callback: Option<cpal::StreamInstant>,
 }
 
 impl HostAudioExecutor {
@@ -69,6 +77,8 @@ impl HostAudioExecutor {
                 cancelled: AtomicBool::new(false),
                 closed: AtomicBool::new(false),
                 stream_failed: AtomicBool::new(false),
+                progress_failed: AtomicBool::new(false),
+                progress: Arc::new(PlaybackCounters::default()),
                 configured: Mutex::new(None),
                 producer: Mutex::new(None),
                 cancel_waiters: Mutex::new(Vec::new()),
@@ -107,14 +117,13 @@ impl HostAudioExecutor {
         if let Some(stream) = stream {
             stream.close()?;
         }
-        if self.state.stream_failed.load(Ordering::Acquire) {
-            return Err("ASTRA_EMU_AUDIO_DEVICE_STREAM_FAILED".into());
-        }
-        Ok(())
+        self.check_health()
     }
 
     pub(crate) fn check_health(&self) -> Result<(), String> {
-        if self.state.stream_failed.load(Ordering::Acquire) {
+        if self.state.progress_failed.load(Ordering::Acquire) {
+            Err("ASTRA_EMU_AUDIO_PROGRESS_INVALID".into())
+        } else if self.state.stream_failed.load(Ordering::Acquire) {
             Err("ASTRA_EMU_AUDIO_DEVICE_STREAM_FAILED".into())
         } else {
             Ok(())
@@ -144,30 +153,8 @@ impl HostAudioSink {
         {
             return Err("ASTRA_EMU_AUDIO_CLOSED".into());
         }
-        if self
-            .state
-            .configured
-            .lock()
-            .map_err(|_| "ASTRA_EMU_AUDIO_CONFIG_LOCK".to_owned())?
-            .is_some()
-        {
-            return Err("ASTRA_EMU_AUDIO_ALREADY_CONFIGURED".into());
-        }
-
-        let (producer, receiver) = bounded(AUDIO_QUEUE_CHUNKS);
-        let consumer = DeviceConsumer {
-            receiver,
-            current: None,
-            cursor: 0,
-        };
-        let (output, stream) = AudioOutputDevice::open(
-            self.state.device_kind,
-            source,
-            consumer,
-            Arc::clone(&self.state),
-        )?;
-        let converter = AudioConverter::new(output)?;
-
+        // Hold the configuration guard through publication: one sink has one
+        // source format and one device timeline, even with competing callers.
         let mut configured = self
             .state
             .configured
@@ -176,8 +163,28 @@ impl HostAudioSink {
         if configured.is_some() {
             return Err("ASTRA_EMU_AUDIO_ALREADY_CONFIGURED".into());
         }
-        *configured = Some(output);
-        drop(configured);
+
+        let (producer, receiver) = bounded(AUDIO_QUEUE_CHUNKS);
+        let consumer = DeviceConsumer {
+            receiver,
+            current: None,
+            cursor: 0,
+            channels: 1,
+            tracker: None,
+            last_callback: None,
+        };
+        let (output, stream) = AudioOutputDevice::open(
+            self.state.device_kind,
+            source,
+            consumer,
+            Arc::clone(&self.state),
+        )?;
+        let converter = AudioConverter::new(output)?;
+        self.state
+            .progress
+            .resampler_delay
+            .store(converter.output_delay() as u64, Ordering::Release);
+
         *self
             .state
             .converter
@@ -188,11 +195,18 @@ impl HostAudioSink {
             .producer
             .lock()
             .map_err(|_| "ASTRA_EMU_AUDIO_PRODUCER_LOCK".to_owned())? = Some(producer);
-        *self
+        let mut active_stream = self
             .state
             .stream
             .lock()
-            .map_err(|_| "ASTRA_EMU_AUDIO_STREAM_LOCK".to_owned())? = Some(stream);
+            .map_err(|_| "ASTRA_EMU_AUDIO_STREAM_LOCK".to_owned())?;
+        if self.state.cancelled.load(Ordering::Acquire) || self.state.closed.load(Ordering::Acquire)
+        {
+            stream.close()?;
+            return Err("ASTRA_EMU_AUDIO_CLOSED".into());
+        }
+        *active_stream = Some(stream);
+        *configured = Some(output);
         tracing::info!(
             event = "astra.emu.audio.configured",
             device_kind = self.state.device_kind.as_str(),
@@ -220,14 +234,28 @@ impl HostAudioSink {
         chunk
             .validate(output.source)
             .map_err(|error| error.to_string())?;
-        let samples = self
+        let source_frames = (chunk.sample_count() / usize::from(output.source.channels)) as u64;
+        // Serialize conversion through queue publication, preserving the PCM
+        // order even if a Family uses multiple writers.
+        let mut converter = self
             .state
             .converter
             .lock()
-            .map_err(|_| "ASTRA_EMU_AUDIO_CONVERTER_LOCK".to_owned())?
+            .map_err(|_| "ASTRA_EMU_AUDIO_CONVERTER_LOCK".to_owned())?;
+        self.state.progress.check_accept(source_frames)?;
+        let samples = converter
             .as_mut()
             .ok_or_else(|| "ASTRA_EMU_AUDIO_NOT_CONFIGURED".to_owned())?
             .push(pcm_chunk_samples(chunk))?;
+        if samples.is_empty() {
+            // Rubato may retain this entire input block until its next window.
+            // Empty output is accepted source PCM, not a device queue entry.
+            if self.state.cancelled.load(Ordering::Acquire) {
+                return Ok(AudioWriteStatus::Cancelled);
+            }
+            self.state.progress.accept(source_frames);
+            return Ok(AudioWriteStatus::Accepted);
+        }
         let producer = self
             .state
             .producer
@@ -246,6 +274,9 @@ impl HostAudioSink {
             send(producer, samples) -> result => result.map(|_| AudioWriteStatus::Accepted).map_err(|_| "ASTRA_EMU_AUDIO_QUEUE_CLOSED".into()),
             recv(cancel_rx) -> _ => Ok(AudioWriteStatus::Cancelled),
         };
+        if matches!(result, Ok(AudioWriteStatus::Accepted)) {
+            self.state.progress.accept(source_frames);
+        }
         unregister_cancel_waiter(&self.state, &cancel_tx)?;
         result
     }
@@ -263,7 +294,13 @@ impl AudioSink for HostAudioSink {
 
     fn write(&self, chunk: PcmChunk) -> astra_emu_family_api::FfiFamilyResult<AudioWriteStatus> {
         self.write_inner(chunk)
-            .map_or_else(|error| Err(audio_error("ASTRA_EMU_AUDIO_WRITE", error)), Ok)
+            .map_err(|error| {
+                // A converter/queue failure may have retained or discarded PCM.
+                // End this timeline; no later query may claim it was played.
+                self.state.cancelled.store(true, Ordering::Release);
+                wake_cancel_waiters_best_effort(&self.state);
+                audio_error("ASTRA_EMU_AUDIO_WRITE", error)
+            })
             .into()
     }
 
@@ -279,6 +316,46 @@ impl AudioSink for HostAudioSink {
                 |_| Ok(()),
             )
             .into()
+    }
+
+    fn playback_progress(&self) -> astra_emu_family_api::FfiFamilyResult<AudioPlaybackProgress> {
+        self.progress_inner()
+            .map_err(|code| audio_error(code, "audio playback progress is unavailable".into()))
+            .into()
+    }
+}
+
+impl HostAudioSink {
+    fn progress_inner(&self) -> Result<AudioPlaybackProgress, &'static str> {
+        let state = &self.state;
+        if state.progress_failed.load(Ordering::Acquire) {
+            return Err("ASTRA_EMU_AUDIO_PROGRESS_INVALID");
+        }
+        if state.stream_failed.load(Ordering::Acquire) {
+            return Err("ASTRA_EMU_AUDIO_DEVICE_STREAM_FAILED");
+        }
+        if state.closed.load(Ordering::Acquire) {
+            return Err("ASTRA_EMU_AUDIO_CLOSED");
+        }
+        if state.cancelled.load(Ordering::Acquire) {
+            return Err("ASTRA_EMU_AUDIO_CANCELLED");
+        }
+        if state
+            .configured
+            .lock()
+            .map_err(|_| "ASTRA_EMU_AUDIO_CONFIG_LOCK")?
+            .is_none()
+        {
+            return Err("ASTRA_EMU_AUDIO_NOT_CONFIGURED");
+        }
+        let clock = match state.device_kind {
+            AudioDeviceKind::Null => AudioPlaybackClock::TestConsumption,
+            AudioDeviceKind::Native if cfg!(target_os = "windows") => {
+                AudioPlaybackClock::DeviceTimestamp
+            }
+            AudioDeviceKind::Native => return Err("ASTRA_EMU_AUDIO_PROGRESS_UNSUPPORTED"),
+        };
+        Ok(state.progress.snapshot(clock))
     }
 }
 fn audio_error(code: &str, message: String) -> astra_emu_family_api::FamilyError {
@@ -329,13 +406,52 @@ fn wake_cancel_waiters_best_effort(state: &AudioState) {
 }
 
 impl DeviceConsumer {
-    fn next(&mut self) -> f32 {
+    fn configure_tracking(&mut self, output: OutputFormat, state: &AudioState) {
+        self.channels = usize::from(output.device_channels);
+        if state.device_kind == AudioDeviceKind::Null || cfg!(target_os = "windows") {
+            self.tracker = Some(PlaybackTracker::new(
+                Arc::clone(&state.progress),
+                output.source.sample_rate,
+                output.device_rate,
+            ));
+        }
+    }
+
+    fn observe_device(&mut self, info: &cpal::OutputCallbackInfo) -> Result<(), &'static str> {
+        if let Some(tracker) = &mut self.tracker {
+            let timestamp = info.timestamp();
+            if self.last_callback.is_some_and(|previous| {
+                timestamp
+                    .callback
+                    .checked_duration_since(previous)
+                    .is_none()
+            }) {
+                return Err("ASTRA_EMU_AUDIO_PROGRESS_TIMESTAMP_REGRESSED");
+            }
+            self.last_callback = Some(timestamp.callback);
+            let delay = timestamp
+                .playback
+                .checked_duration_since(timestamp.callback)
+                .ok_or("ASTRA_EMU_AUDIO_PROGRESS_TIMESTAMP")?;
+            tracker.observe_device_delay(delay)?;
+        }
+        Ok(())
+    }
+
+    fn observe_null(&mut self) -> Result<(), &'static str> {
+        if let Some(tracker) = &mut self.tracker {
+            tracker.observe_test_consumption()?;
+        }
+        Ok(())
+    }
+
+    fn next(&mut self) -> Option<f32> {
         loop {
             if let Some(current) = self.current.as_ref() {
                 if self.cursor < current.len() {
                     let value = current[self.cursor];
                     self.cursor += 1;
-                    return value;
+                    return Some(value);
                 }
             }
             match self.receiver.try_recv() {
@@ -345,225 +461,42 @@ impl DeviceConsumer {
                 }
                 Err(_) => {
                     self.current = None;
-                    return 0.0;
+                    return None;
                 }
             }
         }
     }
 
-    fn fill_f32(&mut self, output: &mut [f32]) {
-        for sample in output {
-            *sample = self.next();
-        }
+    fn fill_f32(&mut self, output: &mut [f32]) -> Result<(), &'static str> {
+        self.fill(output, |sample| sample)
     }
 
-    fn fill_i16(&mut self, output: &mut [i16]) {
-        for sample in output {
-            *sample = (self.next().clamp(-1.0, 1.0) * 32_767.0).round() as i16;
+    fn fill<T: Copy>(
+        &mut self,
+        output: &mut [T],
+        convert: impl Fn(f32) -> T,
+    ) -> Result<(), &'static str> {
+        output.fill(convert(0.0));
+        if !output.len().is_multiple_of(self.channels) {
+            return Err("ASTRA_EMU_AUDIO_PROGRESS_ALIGNMENT");
         }
-    }
-
-    fn fill_u16(&mut self, output: &mut [u16]) {
-        for sample in output {
-            *sample = ((self.next().clamp(-1.0, 1.0) * 0.5 + 0.5) * 65_535.0).round() as u16;
+        for frame in output.chunks_exact_mut(self.channels) {
+            let first = self.next();
+            frame[0] = convert(first.unwrap_or(0.0));
+            if first.is_some() {
+                for sample in &mut frame[1..] {
+                    let value = self.next().ok_or("ASTRA_EMU_AUDIO_PROGRESS_ALIGNMENT")?;
+                    *sample = convert(value);
+                }
+            }
+            if let Some(tracker) = &mut self.tracker {
+                tracker.submitted_frame(first.is_some())?;
+            }
         }
+        Ok(())
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use abi_stable::std_types::RVec;
-
-    #[test]
-    fn null_device_consumes_pcm_without_opening_a_native_device_and_closes() {
-        let executor = HostAudioExecutor::new(AudioDeviceKind::Null, None);
-        let sink = executor.sink();
-        sink.configure(PcmFormatSpec {
-            sample_rate: 48_000,
-            channels: 2,
-            format: PcmFormat::I16,
-        })
-        .into_result()
-        .unwrap();
-        assert!(matches!(
-            *executor.state.stream.lock().unwrap(),
-            Some(AudioOutputDevice::Null(_))
-        ));
-        let configured = executor.state.configured.lock().unwrap().unwrap();
-        assert_eq!(configured.device_rate, 48_000);
-        assert_eq!(configured.device_channels, 2);
-        sink.write(PcmChunk::I16(RVec::from(vec![512; 960])))
-            .into_result()
-            .unwrap();
-        let producer = executor
-            .state
-            .producer
-            .lock()
-            .unwrap()
-            .as_ref()
-            .unwrap()
-            .clone();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-        while !producer.is_empty() {
-            assert!(
-                std::time::Instant::now() < deadline,
-                "null device did not consume queued PCM"
-            );
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        }
-        let writer = std::thread::spawn(move || loop {
-            let status = sink
-                .write(PcmChunk::I16(RVec::from(vec![512; 960])))
-                .into_result()
-                .unwrap();
-            if status != AudioWriteStatus::Accepted {
-                return status;
-            }
-        });
-        executor.close().unwrap();
-        assert_eq!(writer.join().unwrap(), AudioWriteStatus::Cancelled);
-        assert!(executor.state.stream.lock().unwrap().is_none());
-        assert!(executor.sink().is_cancelled());
-        executor.close().unwrap();
-    }
-
-    #[test]
-    fn unknown_audio_device_does_not_select_a_backend() {
-        assert_eq!(AudioDeviceKind::default(), AudioDeviceKind::Native);
-        assert!(AudioDeviceKind::parse("silent-fallback").is_err());
-    }
-
-    #[test]
-    fn conversion_maps_mono_and_preserves_i16_extremes() {
-        let values = convert_chunk(
-            PcmChunk::I16(RVec::from(vec![i16::MIN, i16::MAX])),
-            OutputFormat {
-                source: PcmFormatSpec {
-                    sample_rate: 48_000,
-                    channels: 1,
-                    format: PcmFormat::I16,
-                },
-                device_rate: 48_000,
-                device_channels: 2,
-                device_sample_format: cpal::SampleFormat::F32,
-            },
-        )
-        .unwrap();
-        assert_eq!(values.len(), 4);
-        assert_eq!(values[0], values[1]);
-        assert!(values[0] <= -0.99);
-        assert_eq!(values[2], values[3]);
-        assert_eq!(values[2], 1.0);
-    }
-
-    #[test]
-    fn conversion_resamples_with_bounded_output() {
-        let values = convert_samples(vec![0.0; 480], 48_000, 1, 24_000, 1).unwrap();
-        assert!(!values.is_empty());
-        assert!(values.len() <= MAX_AUDIO_OUTPUT_SAMPLES);
-    }
-
-    #[test]
-    fn persistent_resampler_is_invariant_to_irregular_input_chunks() {
-        let output = OutputFormat {
-            source: PcmFormatSpec {
-                sample_rate: 48_000,
-                channels: 1,
-                format: PcmFormat::F32,
-            },
-            device_rate: 24_000,
-            device_channels: 1,
-            device_sample_format: cpal::SampleFormat::F32,
-        };
-        let input = (0..10_000)
-            .map(|index| ((index as f32) * 0.013).sin())
-            .collect::<Vec<_>>();
-        let mut whole = AudioConverter::new(output).unwrap();
-        let expected = whole.push(input.clone()).unwrap();
-        let mut irregular = AudioConverter::new(output).unwrap();
-        let mut actual = Vec::new();
-        for chunk in input.chunks(137) {
-            actual.extend(irregular.push(chunk.to_vec()).unwrap());
-        }
-        assert_eq!(actual.len(), expected.len());
-        for (left, right) in actual.iter().zip(expected.iter()) {
-            assert!((left - right).abs() < 1.0e-6);
-        }
-    }
-
-    #[test]
-    fn persistent_converter_maps_stereo_to_mono() {
-        let output = OutputFormat {
-            source: PcmFormatSpec {
-                sample_rate: 48_000,
-                channels: 2,
-                format: PcmFormat::F32,
-            },
-            device_rate: 48_000,
-            device_channels: 1,
-            device_sample_format: cpal::SampleFormat::F32,
-        };
-        let mut converter = AudioConverter::new(output).unwrap();
-        assert_eq!(
-            converter.push(vec![1.0, -1.0, 0.4, 0.2]).unwrap(),
-            vec![0.0, 0.3]
-        );
-    }
-
-    #[test]
-    fn cancellation_wakes_all_registered_writers() {
-        let state = AudioState {
-            device_kind: AudioDeviceKind::Native,
-            wake: None,
-            cancelled: AtomicBool::new(false),
-            closed: AtomicBool::new(false),
-            stream_failed: AtomicBool::new(false),
-            configured: Mutex::new(None),
-            producer: Mutex::new(None),
-            cancel_waiters: Mutex::new(Vec::new()),
-            stream: Mutex::new(None),
-            converter: Mutex::new(None),
-        };
-        let (first_tx, first) = register_cancel_waiter(&state).unwrap().unwrap();
-        let (second_tx, second) = register_cancel_waiter(&state).unwrap().unwrap();
-        state.cancelled.store(true, Ordering::Release);
-        wake_cancel_waiters(&state).unwrap();
-        assert!(first.recv().is_ok());
-        assert!(second.recv().is_ok());
-        drop((first_tx, second_tx));
-    }
-
-    #[test]
-    fn stream_error_is_reported_by_health_check() {
-        let executor = HostAudioExecutor::new(AudioDeviceKind::Native, None);
-        executor.state.stream_failed.store(true, Ordering::Release);
-        assert_eq!(
-            executor.check_health().unwrap_err(),
-            "ASTRA_EMU_AUDIO_DEVICE_STREAM_FAILED"
-        );
-    }
-
-    #[test]
-    fn device_consumer_advances_blocks_inside_one_callback_buffer() {
-        let (sender, receiver) = bounded(AUDIO_QUEUE_CHUNKS);
-        sender.send(vec![0.25, 0.5]).unwrap();
-        sender.send(vec![0.75]).unwrap();
-        let mut consumer = DeviceConsumer {
-            receiver,
-            current: None,
-            cursor: 0,
-        };
-        let mut output = [0.0; 4];
-        consumer.fill_f32(&mut output);
-        assert_eq!(output, [0.25, 0.5, 0.75, 0.0]);
-    }
-
-    #[test]
-    fn close_cancels_unconfigured_sink_without_device_access() {
-        let executor = HostAudioExecutor::new(AudioDeviceKind::Native, None);
-        assert!(!executor.is_configured());
-        executor.close().unwrap();
-        assert!(executor.sink().is_cancelled());
-    }
-}
+#[path = "audio_executor_tests.rs"]
+mod tests;

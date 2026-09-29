@@ -45,7 +45,7 @@ impl AudioOutputDevice {
     pub(super) fn open(
         kind: AudioDeviceKind,
         source: PcmFormatSpec,
-        consumer: DeviceConsumer,
+        mut consumer: DeviceConsumer,
         state: Arc<AudioState>,
     ) -> Result<(OutputFormat, Self), String> {
         match kind {
@@ -57,6 +57,7 @@ impl AudioOutputDevice {
                     device_channels: source.channels,
                     device_sample_format: cpal::SampleFormat::F32,
                 };
+                consumer.configure_tracking(output, &state);
                 Ok((
                     output,
                     Self::Null(NullAudioDevice::open(output, consumer, state)?),
@@ -94,38 +95,76 @@ fn open_native(
         device_sample_format: supported.sample_format(),
     };
     let config = supported.into();
-    let on_error = move |_error: cpal::StreamError| {
-        state.stream_failed.store(true, Ordering::Release);
-        state.cancelled.store(true, Ordering::Release);
-        wake_cancel_waiters_best_effort(&state);
-        if let Some(wake) = &state.wake {
-            wake();
-        }
-    };
+    consumer.configure_tracking(output, &state);
+    // Use CPAL's maintained sample conversions, including the I24/I32 formats
+    // that can be selected by its current native default-format negotiation.
     let stream = match output.device_sample_format {
-        cpal::SampleFormat::F32 => device.build_output_stream(
-            &config,
-            move |samples: &mut [f32], _| consumer.fill_f32(samples),
-            on_error,
-            None,
-        ),
-        cpal::SampleFormat::I16 => device.build_output_stream(
-            &config,
-            move |samples: &mut [i16], _| consumer.fill_i16(samples),
-            on_error,
-            None,
-        ),
-        cpal::SampleFormat::U16 => device.build_output_stream(
-            &config,
-            move |samples: &mut [u16], _| consumer.fill_u16(samples),
-            on_error,
-            None,
-        ),
+        cpal::SampleFormat::I8 => build_stream::<i8>(&device, config, consumer, state),
+        cpal::SampleFormat::I16 => build_stream::<i16>(&device, config, consumer, state),
+        cpal::SampleFormat::I24 => build_stream::<cpal::I24>(&device, config, consumer, state),
+        cpal::SampleFormat::I32 => build_stream::<i32>(&device, config, consumer, state),
+        cpal::SampleFormat::I64 => build_stream::<i64>(&device, config, consumer, state),
+        cpal::SampleFormat::U8 => build_stream::<u8>(&device, config, consumer, state),
+        cpal::SampleFormat::U16 => build_stream::<u16>(&device, config, consumer, state),
+        cpal::SampleFormat::U32 => build_stream::<u32>(&device, config, consumer, state),
+        cpal::SampleFormat::U64 => build_stream::<u64>(&device, config, consumer, state),
+        cpal::SampleFormat::F32 => build_stream::<f32>(&device, config, consumer, state),
+        cpal::SampleFormat::F64 => build_stream::<f64>(&device, config, consumer, state),
         _ => return Err("ASTRA_EMU_AUDIO_DEVICE_SAMPLE_FORMAT".into()),
     }
     .map_err(|_| "ASTRA_EMU_AUDIO_STREAM_CREATE")?;
     stream.play().map_err(|_| "ASTRA_EMU_AUDIO_STREAM_START")?;
     Ok((output, AudioOutputDevice::Native(stream)))
+}
+
+fn build_stream<T: cpal::SizedSample + cpal::FromSample<f32>>(
+    device: &cpal::Device,
+    config: cpal::StreamConfig,
+    mut consumer: DeviceConsumer,
+    state: Arc<AudioState>,
+) -> Result<cpal::Stream, cpal::Error> {
+    let error_state = Arc::clone(&state);
+    device.build_output_stream(
+        config,
+        move |samples: &mut [T], info| {
+            render_callback(&state, samples, T::EQUILIBRIUM, |samples| {
+                consumer.observe_device(info)?;
+                consumer.fill(samples, |value| T::from_sample(value.clamp(-1.0, 1.0)))
+            });
+        },
+        move |_error| {
+            error_state.stream_failed.store(true, Ordering::Release);
+            error_state.cancelled.store(true, Ordering::Release);
+            wake_cancel_waiters_best_effort(&error_state);
+            if let Some(wake) = &error_state.wake {
+                wake();
+            }
+        },
+        None,
+    )
+}
+
+fn render_callback<T: Copy>(
+    state: &AudioState,
+    samples: &mut [T],
+    silence: T,
+    render: impl FnOnce(&mut [T]) -> Result<(), &'static str>,
+) {
+    if state.cancelled.load(Ordering::Acquire) {
+        samples.fill(silence);
+    } else if render(samples).is_err() {
+        samples.fill(silence);
+        fail_progress(state);
+    }
+}
+
+fn fail_progress(state: &AudioState) {
+    state.progress_failed.store(true, Ordering::Release);
+    state.cancelled.store(true, Ordering::Release);
+    wake_cancel_waiters_best_effort(state);
+    if let Some(wake) = &state.wake {
+        wake();
+    }
 }
 
 /// Explicit test output: drains the same bounded PCM queue on a sample clock.
@@ -198,7 +237,14 @@ fn consume_null(
         {
             break;
         }
-        consumer.fill_f32(&mut samples);
+        if consumer
+            .fill_f32(&mut samples)
+            .and_then(|_| consumer.observe_null())
+            .is_err()
+        {
+            fail_progress(&state);
+            break;
+        }
         rendered_frames += frames_per_block;
         nonzero_samples += samples.iter().filter(|sample| **sample != 0.0).count() as u64;
     }

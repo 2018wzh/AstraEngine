@@ -193,6 +193,12 @@ mod tests {
             entered_rx.recv_timeout(Duration::from_secs(3)).unwrap();
             drop(hub);
             hosted_tap::clear();
+            let missing_tap = AudioHub::new();
+            assert!(!missing_tap.is_enabled());
+            assert_eq!(
+                missing_tap.check_initialization().unwrap_err().to_string(),
+                "ASTRA_SIGLUS_HOSTED_AUDIO_TAP_REQUIRED"
+            );
             assert!(finished_rx.recv_timeout(Duration::from_secs(1)).unwrap());
         }
     }
