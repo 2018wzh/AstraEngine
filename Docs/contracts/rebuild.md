@@ -26,6 +26,8 @@ Manager headless 使用现有 `astra-observability` 的有界日志，与本次�
 
 GPU 回读缓冲可以在进程内保留共享所有权。`OwnedPixelBuffer::from(Arc<[u8]>)` 复用原像素分配，克隆只延长生命周期，`make_mut_for_update` 继续按写时复制隔离修改；转换本身不校验图像尺寸，仍由 `TextureFrame` 的现有校验入口负责。Musica 直接持有回读缓冲，CMVS 将同一缓冲转为纹理；Family 帧借用有效期和 Host 同步复制约束不变，保存与 ABI 格式不变。
 
+`WgpuOffscreenRenderer` 的 Rust 构造入口显式接收 graphics owner 持有的 `wgpu::Instance`，不再按 renderer 隐式创建 Instance。Musica 的持久 provider 持有 Instance，普通启动和恢复候选共用它；Headless factory 的克隆共享 Instance，使用 `HeadlessThreadOwner` 时由该 owner 跨 session 保留。原生 backend 和 Windows StaticDxc 配置保持不变，每个 renderer 仍独立选择并验证 adapter policy、创建 device/queue 和场景资源。关闭 session 释放自身 GPU 资源并取消、等待其 worker，不能缓存整个 renderer 或 device 冒充释放。Instance 随显式 owner 结束而释放，不用生产全局静态缓存，也不保证同一进程无限次销毁和重建整个 graphics owner。旧的无 Instance 构造调用直接迁移，不保留兼容入口；错误保留原诊断 code 和安全 operation，不增加软件 fallback 或失败重试。
+
 公共 `astra-media-core` 的 `Extent2D`/`Canvas2D` 负责逻辑舞台到 raster canvas 的比例校验、根变换和坐标映射，并复用 `RectI`、`Transform2D`、`TextureFrame`、`SceneCommand`。四个空间必须分开：逻辑舞台决定 VM、存档、时间和动画几何；资产保存物理像素并显式声明逻辑尺寸及格式原点；raster canvas 是 GPU 目标；窗口输出由 Host 做 letterbox 和 pointer 逆映射。`astra-emu-sdk` 只提供薄语义 `StageCanvas` 与 `TextureAsset`，不依赖 VN；AstraVN presentation 直接消费同一 `Canvas2D`，作为第二个真实调用方。
 
 Musica 固定逻辑舞台 `1280x720`，启动配置显式提供正整数 `render_width` 与 `render_height`，按设备和内存能力选择任意 raster 尺寸。配置无效或 raster 预算不足必须失败，不能静默降级。不同宽高比使用统一 scale 的居中 aspect-fit viewport，剩余像素清黑；viewport 外的指针不进入游戏。物理像素密度不能改变逻辑 quad、ANI 原点、动画 frame 几何、VM、存档或剧情时间；文字按实际 raster density 重新 shaping/rasterize glyph，再由根逆变换回逻辑位置。Family 帧的 `FrameInfo` 同时声明 physical `width/height` 与 logical `logical_width/logical_height`，Manager 和 Family 共用同一 viewport 计算完成输出与输入映射。无独立 SDK 的外部核心使用 logical=raster。
