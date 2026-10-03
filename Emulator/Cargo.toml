@@ -16,6 +16,7 @@ members = [
     "Source/Manager/astra-emu-manager",
 ]
 exclude = [
+    "Source/Families/astra-emu-krkr",
     "ThirdParty/art3m1s-core",
     "ThirdParty/rfvp",
     "ThirdParty/siglus_rs",
