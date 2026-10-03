@@ -131,7 +131,7 @@ impl Drain {
             // Cancel reads directly rather than waiting indefinitely for EOF.
             #[cfg(windows)]
             while !worker.is_finished() {
-                use std::os::windows::thread::JoinHandleExt;
+                use std::os::windows::io::AsRawHandle;
                 unsafe {
                     windows_sys::Win32::System::IO::CancelSynchronousIo(worker.as_raw_handle());
                 }
