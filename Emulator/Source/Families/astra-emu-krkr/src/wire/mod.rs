@@ -1,8 +1,7 @@
-//! One child process per session. stdin carries parent control, PCM replies
-//! and observed progress; stdout carries child replies and one in-flight PCM
-//! request; stderr is reserved for binary final frames. Native diagnostics
-//! may not write to either raw output stream; their bridge is a later native
-//! integration requirement, outside this transport contract.
+//! One child process per session with three dedicated loopback TCP lanes:
+//! control/replies/observed progress, synchronous PCM requests/replies, and
+//! binary final frames. Standard output and standard error remain diagnostic
+//! streams, so native/dependency logging cannot corrupt transport payloads.
 //!
 //! Control cancellation is served independently of PCM writes and frame
 //! copying. Audio is fixed I16/stereo/48 kHz, 480 source frames per request.
@@ -12,10 +11,12 @@
 mod bounded;
 mod codec;
 mod frame;
+mod lane;
 
 pub use bounded::{Items, Text};
 pub use codec::{read_packet, write_packet, Packet, PacketKind, Sequence};
 pub use frame::{read_frame, write_frame, FinalFrame, FrameInfo};
+pub use lane::{read_handshake, write_handshake, Lane};
 use serde::{Deserialize, Serialize};
 
 pub const VERSION: u16 = 1;

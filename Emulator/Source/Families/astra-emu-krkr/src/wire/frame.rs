@@ -8,8 +8,8 @@ use std::io::{self, Read, Write};
 const HEADER_BYTES: usize = 48;
 const MAGIC: &[u8; 4] = b"AKRF";
 
-/// Opaque RGBA8 sRGB. Raster and logical stage dimensions have identical
-/// aspect ratio; neither includes host letterbox or a GPU/native handle.
+/// Opaque RGBA8 sRGB. Raster and logical stage may have different aspect
+/// ratios under v10's centered content viewport rule. No GPU/native handle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FrameInfo {
     pub width: u32,
@@ -27,11 +27,6 @@ impl FrameInfo {
             || self.logical_height == 0
         {
             return Err("zero frame dimension");
-        }
-        if u64::from(self.width) * u64::from(self.logical_height)
-            != u64::from(self.height) * u64::from(self.logical_width)
-        {
-            return Err("frame and logical aspect ratio differ");
         }
         let row = self.width.checked_mul(4).ok_or("frame row overflow")?;
         if self.stride < row {
@@ -184,15 +179,17 @@ mod tests {
             FrameInfo { width: 0, ..valid },
             FrameInfo { stride: 1, ..valid },
             FrameInfo {
-                logical_width: 1281,
-                ..valid
-            },
-            FrameInfo {
                 stride: u32::MAX,
                 ..valid
             },
         ] {
             assert!(invalid_info.required_bytes().is_err());
         }
+        assert!(FrameInfo {
+            logical_width: 1281,
+            ..valid
+        }
+        .required_bytes()
+        .is_ok());
     }
 }
