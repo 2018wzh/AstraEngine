@@ -34,7 +34,7 @@ fn complete_local_movie_streams_through_worker_and_gpu() {
     session.submit(request, reply);
     assert!(
         matches!(result.blocking_recv().unwrap().unwrap(), DecodeOutput::VideoStreamStart {
-        duration_us: Some(duration), .. } if duration == expected_duration)
+        duration_estimate_us: Some(duration), .. } if duration > 0)
     );
     let mut total_bytes = 0;
     let mut next_pts = 0;

@@ -242,7 +242,7 @@ impl DecodeResource {
                     self.max_output_bytes,
                 )?;
                 let output = DecodeOutput::VideoStreamStart {
-                    duration_us: Some(stream.duration_us),
+                    duration_estimate_us: Some(stream.duration_us),
                     frame_count: None,
                     decoded_byte_count: None,
                 };

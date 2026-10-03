@@ -35,7 +35,7 @@ async fn invalid_stream_start_closes_decoder_and_retries_failed_cleanup() {
             reply
                 .send(match case {
                     0 => Ok(DecodeOutput::VideoStreamStart {
-                        duration_us: Some(0),
+                        duration_estimate_us: Some(0),
                         frame_count: Some(1),
                         decoded_byte_count: Some(4),
                     }),
@@ -113,7 +113,7 @@ async fn dropping_a_pending_stream_start_preserves_decoder_cleanup() {
         assert!(
             reply
                 .send(Ok(DecodeOutput::VideoStreamStart {
-                    duration_us: Some(1_000),
+                    duration_estimate_us: Some(1_000),
                     frame_count: Some(1),
                     decoded_byte_count: Some(4),
                 }))

@@ -81,7 +81,9 @@ impl AudioCacheKey {
 struct ActiveVideoStream {
     request: NativeVnVideoRequest,
     session: astra_player_core::PlayerHostResourceId,
-    duration_us: u64,
+    decoded_end_us: u64,
+    presented_end_us: u64,
+    loop_duration_us: Option<u64>,
     expected_frame_count: Option<u64>,
     expected_decoded_byte_count: Option<u64>,
     decoded_byte_count: u64,
@@ -113,7 +115,8 @@ pub struct NativeVnVideoStreamSnapshot {
     #[serde(default)]
     pub looping: bool,
     pub fence: Option<String>,
-    pub duration_us: u64,
+    pub frame_end_us: u64,
+    pub loop_duration_us: Option<u64>,
     pub decoded_byte_count: u64,
     pub next_frame: u64,
     #[serde(default)]
@@ -239,7 +242,7 @@ impl NativeVnProductMediaHost {
 
     pub fn snapshot(&self) -> NativeVnProductMediaSnapshot {
         NativeVnProductMediaSnapshot {
-            schema: "astra.player.native_vn_media_snapshot.v3".into(),
+            schema: "astra.player.native_vn_media_snapshot.v4".into(),
             playback_time_ms: self.clock.time_ms(),
             audio: self.audio.snapshot(),
             timeline: self.timeline.snapshot(),
@@ -254,7 +257,8 @@ impl NativeVnProductMediaHost {
                     alpha_millionths: video.request.alpha_millionths,
                     looping: video.request.looping,
                     fence: video.request.fence.clone(),
-                    duration_us: video.duration_us,
+                    frame_end_us: video.presented_end_us,
+                    loop_duration_us: video.loop_duration_us,
                     decoded_byte_count: video
                         .decoded_byte_count
                         .checked_sub(
@@ -276,7 +280,7 @@ impl NativeVnProductMediaHost {
     pub(crate) fn validate_snapshot_data(
         snapshot: &NativeVnProductMediaSnapshot,
     ) -> Result<(), PlatformError> {
-        if snapshot.schema != "astra.player.native_vn_media_snapshot.v3" {
+        if snapshot.schema != "astra.player.native_vn_media_snapshot.v4" {
             return Err(media_error(
                 "player.media.restore",
                 "ASTRA_PLAYER_MEDIA_SNAPSHOT_INVALID",
@@ -286,10 +290,15 @@ impl NativeVnProductMediaHost {
             .timeline
             .last_time_ms
             .is_some_and(|time| time > snapshot.playback_time_ms)
-            || snapshot
-                .active_videos
-                .iter()
-                .any(|video| video.started_at_ms > snapshot.playback_time_ms)
+            || snapshot.active_videos.iter().any(|video| {
+                video.started_at_ms > snapshot.playback_time_ms
+                    || (video.next_frame == 0) != (video.frame_end_us == 0)
+                    || video.loop_duration_us == Some(0)
+                    || (video.loop_index > 0 && video.loop_duration_us.is_none())
+                    || video
+                        .loop_duration_us
+                        .is_some_and(|duration| video.frame_end_us > duration)
+            })
         {
             return Err(media_error(
                 "player.media.restore",
@@ -610,6 +619,7 @@ impl NativeVnProductMediaHost {
 
     async fn fetch_video_frame(
         max_decode_output_bytes: u64,
+        max_video_frames: u64,
         source: &mut NativeVnHostCommandSource,
         executor: &mut PlayerHostCommandExecutor<PlatformCommandSink>,
         video: &mut ActiveVideoStream,
@@ -657,19 +667,25 @@ impl NativeVnProductMediaHost {
                         "ASTRA_PLAYER_VIDEO_FRAME_SEQUENCE_OVERFLOW",
                     )
                 })?;
+                let end_us = frame.pts_us.checked_add(frame.duration_us).ok_or_else(|| {
+                    media_error(
+                        "player.video.stream.frame",
+                        "ASTRA_PLAYER_VIDEO_FRAME_TIME_OVERFLOW",
+                    )
+                })?;
                 if frame.sequence != expected_sequence
+                    || frame.sequence > max_video_frames
                     || frame.bgra8.len() as u64 > max_decode_output_bytes
-                    || frame.pts_us >= video.duration_us
-                    || frame
-                        .pts_us
-                        .checked_add(frame.duration_us)
-                        .is_none_or(|end| end > video.duration_us)
+                    || video
+                        .loop_duration_us
+                        .is_some_and(|duration| end_us > duration)
                 {
                     return Err(media_error(
                         "player.video.stream.frame",
                         "ASTRA_PLAYER_VIDEO_FRAME_IDENTITY_MISMATCH",
                     ));
                 }
+                video.decoded_end_us = end_us;
                 video.decoded_byte_count = video
                     .decoded_byte_count
                     .checked_add(frame.bgra8.len() as u64)
@@ -691,7 +707,12 @@ impl NativeVnProductMediaHost {
                 frame_count,
                 decoded_byte_count,
             } => {
-                if video.next_frame != frame_count
+                if frame_count == 0
+                    || video.decoded_end_us == 0
+                    || video
+                        .loop_duration_us
+                        .is_some_and(|duration| duration != video.decoded_end_us)
+                    || video.next_frame != frame_count
                     || video.decoded_byte_count != decoded_byte_count
                     || video
                         .expected_frame_count
@@ -705,6 +726,7 @@ impl NativeVnProductMediaHost {
                         "ASTRA_PLAYER_VIDEO_STREAM_ENDED_EARLY",
                     ));
                 }
+                video.loop_duration_us = Some(video.decoded_end_us);
                 video.reached_end = true;
                 Ok(None)
             }
@@ -733,18 +755,13 @@ impl NativeVnProductMediaHost {
                 .await
                 .map_err(|error| media_error("player.video.restore.decode", error))?;
             drop(decode_lease);
-            if video.duration_us != snapshot.duration_us {
-                self.pending_video_closes.push(video.session);
-                return Err(media_error(
-                    "player.video.restore.identity",
-                    "ASTRA_PLAYER_VIDEO_STREAM_IDENTITY_MISMATCH",
-                ));
-            }
+            video.loop_duration_us = snapshot.loop_duration_us;
             let restored_frame = async {
                 let mut restored_frame = None;
                 for expected in 1..=snapshot.next_frame {
                     let frame = Self::fetch_video_frame(
                         self.max_decode_output_bytes,
+                        self.max_video_frames,
                         source,
                         executor,
                         &mut video,
@@ -763,9 +780,12 @@ impl NativeVnProductMediaHost {
                         ));
                     }
                     video.next_frame = expected;
+                    video.presented_end_us = video.decoded_end_us;
                     restored_frame = Some(frame);
                 }
-                if video.decoded_byte_count != snapshot.decoded_byte_count {
+                if video.decoded_byte_count != snapshot.decoded_byte_count
+                    || video.presented_end_us != snapshot.frame_end_us
+                {
                     return Err(media_error(
                         "player.video.restore.identity",
                         "ASTRA_PLAYER_VIDEO_STREAM_IDENTITY_MISMATCH",
@@ -1088,12 +1108,19 @@ impl NativeVnProductMediaHost {
                 continue;
             }
             let elapsed_us = now_ms
-                .saturating_sub(video.started_at_ms)
-                .saturating_mul(1_000);
+                .checked_sub(video.started_at_ms)
+                .and_then(|elapsed| elapsed.checked_mul(1_000))
+                .ok_or_else(|| {
+                    media_error(
+                        "player.video.stream.clock",
+                        "ASTRA_PLAYER_VIDEO_TIME_OVERFLOW",
+                    )
+                })?;
             loop {
                 if video.pending_frame.is_none() && !video.reached_end {
                     video.pending_frame = Self::fetch_video_frame(
                         self.max_decode_output_bytes,
+                        self.max_video_frames,
                         source,
                         executor,
                         video,
@@ -1101,16 +1128,15 @@ impl NativeVnProductMediaHost {
                     .await?;
                 }
                 if let Some(frame) = video.pending_frame.as_ref() {
-                    let loop_offset =
-                        video
-                            .loop_index
-                            .checked_mul(video.duration_us)
-                            .ok_or_else(|| {
-                                media_error(
-                                    "player.video.stream.clock",
-                                    "ASTRA_PLAYER_VIDEO_LOOP_TIME_OVERFLOW",
-                                )
-                            })?;
+                    let loop_offset = video
+                        .loop_index
+                        .checked_mul(video.loop_duration_us.unwrap_or(0))
+                        .ok_or_else(|| {
+                            media_error(
+                                "player.video.stream.clock",
+                                "ASTRA_PLAYER_VIDEO_LOOP_TIME_OVERFLOW",
+                            )
+                        })?;
                     let due_us = loop_offset.checked_add(frame.pts_us).ok_or_else(|| {
                         media_error(
                             "player.video.stream.clock",
@@ -1126,6 +1152,7 @@ impl NativeVnProductMediaHost {
                         .expect("pending frame was checked");
                     let texture = decoded_bgra_frame(frame.width, frame.height, frame.bgra8)?;
                     video.next_frame = frame.sequence;
+                    video.presented_end_us = video.decoded_end_us;
                     let present = source
                         .bind_decoded_video_frame(&video.request, texture, false)
                         .map_err(|error| media_error("player.video.stream.bind", error))?;
@@ -1141,7 +1168,10 @@ impl NativeVnProductMediaHost {
                 let loop_end_us = video
                     .loop_index
                     .checked_add(1)
-                    .and_then(|loop_index| loop_index.checked_mul(video.duration_us))
+                    .and_then(|loop_index| {
+                        loop_index
+                            .checked_mul(video.loop_duration_us.expect("EOS finalizes duration"))
+                    })
                     .ok_or_else(|| {
                         media_error(
                             "player.video.stream.clock",
@@ -1165,7 +1195,7 @@ impl NativeVnProductMediaHost {
                         loop_index,
                         video.started_at_ms,
                         (
-                            video.duration_us,
+                            video.loop_duration_us,
                             video.expected_frame_count,
                             video.expected_decoded_byte_count,
                         ),
@@ -1186,10 +1216,9 @@ impl NativeVnProductMediaHost {
                 .open_video_stream(source, executor, request, started_at_ms)
                 .await?;
             if (
-                replacement.duration_us,
                 replacement.expected_frame_count,
                 replacement.expected_decoded_byte_count,
-            ) != expected
+            ) != (expected.1, expected.2)
             {
                 self.pending_video_closes.push(old_session);
                 self.pending_video_closes.push(replacement.session);
@@ -1198,6 +1227,7 @@ impl NativeVnProductMediaHost {
                     "ASTRA_PLAYER_VIDEO_LOOP_STREAM_IDENTITY_MISMATCH",
                 ));
             }
+            replacement.loop_duration_us = expected.0;
             replacement.loop_index = loop_index;
             self.pending_video_closes.push(old_session);
             self.active_videos[index] = replacement;
@@ -1274,7 +1304,9 @@ mod tests {
                 fence: None,
             },
             session: astra_player_core::PlayerHostResourceId(41),
-            duration_us: 10,
+            decoded_end_us: 0,
+            presented_end_us: 0,
+            loop_duration_us: None,
             expected_frame_count: None,
             expected_decoded_byte_count: None,
             decoded_byte_count: 0,
@@ -1312,7 +1344,7 @@ mod tests {
         for variant in 0..3 {
             let mut invalid = media.snapshot();
             match variant {
-                0 => invalid.schema = "astra.player.native_vn_media_snapshot.v2".into(),
+                0 => invalid.schema = "astra.player.native_vn_media_snapshot.v3".into(),
                 1 => invalid.active_videos[0].started_at_ms = invalid.playback_time_ms + 1,
                 _ => invalid.timeline.last_time_ms = Some(invalid.playback_time_ms + 1),
             }

@@ -35,7 +35,7 @@ impl NativeVnProductMediaHost {
                 ));
             }
             let astra_platform::DecodeOutput::VideoStreamStart {
-                duration_us: Some(duration_us),
+                duration_estimate_us,
                 frame_count,
                 decoded_byte_count,
             } = decoded.output
@@ -45,7 +45,7 @@ impl NativeVnProductMediaHost {
                     "ASTRA_PLAYER_VIDEO_STREAM_DESCRIPTOR_REQUIRED",
                 ));
             };
-            if duration_us == 0
+            if duration_estimate_us == Some(0)
                 || frame_count.is_some_and(|count| count == 0 || count > self.max_video_frames)
                 || decoded_byte_count
                     .is_some_and(|bytes| bytes == 0 || bytes > self.max_decode_output_bytes)
@@ -58,7 +58,9 @@ impl NativeVnProductMediaHost {
             Ok(ActiveVideoStream {
                 request,
                 session: plan.session,
-                duration_us,
+                decoded_end_us: 0,
+                presented_end_us: 0,
+                loop_duration_us: None,
                 expected_frame_count: frame_count,
                 expected_decoded_byte_count: decoded_byte_count,
                 decoded_byte_count: 0,

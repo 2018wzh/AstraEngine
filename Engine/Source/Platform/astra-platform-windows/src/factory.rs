@@ -2032,7 +2032,7 @@ mod windows {
                                 end_emitted: false,
                             });
                             DecodeOutput::VideoStreamStart {
-                                duration_us: Some(duration_us),
+                                duration_estimate_us: Some(duration_us),
                                 frame_count: None,
                                 decoded_byte_count: None,
                             }

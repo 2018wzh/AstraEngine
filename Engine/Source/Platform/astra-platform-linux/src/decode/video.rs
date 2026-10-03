@@ -9,7 +9,6 @@ use gstreamer_video::prelude::*;
 pub(super) struct VideoStream {
     pipeline: Option<MediaPipeline>,
     pending: Option<gstreamer::Sample>,
-    duration_us: u64,
     frame_count: u64,
     decoded_bytes: u64,
     previous_pts: Option<u64>,
@@ -29,26 +28,24 @@ impl VideoStream {
         let pending = pipeline
             .pull(cancelled)?
             .ok_or_else(|| host_error("decode.stream.start", "video stream produced no frames"))?;
-        let duration_us = pipeline
+        let duration_estimate_us = pipeline
             .pipeline
             .query_duration::<ClockTime>()
             .map(|duration| duration.useconds())
-            .filter(|duration| *duration > 0)
-            .ok_or_else(|| host_error("decode.stream.start", "video duration is unavailable"))?;
+            .filter(|duration| *duration > 0);
         // Validate format, dimensions and timestamps before accepting Start.
-        inspect(&pending, duration_us)?;
+        inspect(&pending)?;
         Ok((
             Self {
                 pipeline: Some(pipeline),
                 pending: Some(pending),
-                duration_us,
                 frame_count: 0,
                 decoded_bytes: 0,
                 previous_pts: None,
                 ended: false,
             },
             DecodeOutput::VideoStreamStart {
-                duration_us: Some(duration_us),
+                duration_estimate_us,
                 frame_count: None,
                 decoded_byte_count: None,
             },
@@ -78,7 +75,7 @@ impl VideoStream {
                 decoded_byte_count: self.decoded_bytes,
             });
         };
-        let (info, pts_us) = inspect(&sample, self.duration_us)?;
+        let (info, pts_us) = inspect(&sample)?;
         if self.previous_pts.is_some_and(|previous| pts_us <= previous) {
             return Err(host_error(
                 "decode.stream.next",
@@ -92,29 +89,29 @@ impl VideoStream {
         // One lookahead sample derives variable frame durations from actual PTS.
         let following = pipeline.pull(cancelled)?;
         let end_us = if let Some(next) = following.as_ref() {
-            inspect(next, self.duration_us)?.1
+            inspect(next)?.1
         } else {
             let buffer = sample
                 .buffer()
                 .ok_or_else(|| invalid("video sample has no buffer"))?;
             let duration = buffer
                 .duration()
-                .map(|duration| duration.useconds())
-                .filter(|duration| *duration > 0)
+                .filter(|duration| *duration > ClockTime::ZERO)
                 .ok_or_else(|| {
                     host_error("decode.stream.next", "final video frame has no duration")
                 })?;
-            let end = pts_us
-                .checked_add(duration)
+            let end = buffer
+                .pts()
+                .and_then(|pts| pts.checked_add(duration))
                 .ok_or_else(|| invalid("video time overflowed"))?;
-            // Microsecond conversion may truncate both independent timestamps.
-            if end.abs_diff(self.duration_us) > 1 {
-                return Err(host_error(
-                    "decode.stream.next",
-                    "video ended before or after its declared duration",
-                ));
-            }
-            self.duration_us
+            // Container duration is an estimate. Preserve the actual decoded tail,
+            // calculating in nanoseconds before converting its absolute endpoint.
+            sample
+                .segment()
+                .and_then(|segment| segment.downcast_ref::<ClockTime>())
+                .and_then(|segment| segment.to_running_time(end))
+                .map(|end| end.useconds())
+                .ok_or_else(|| invalid("video end is outside its time segment"))?
         };
         let duration_us = end_us
             .checked_sub(pts_us)
@@ -172,10 +169,7 @@ impl VideoStream {
     }
 }
 
-fn inspect(
-    sample: &gstreamer::Sample,
-    duration_us: u64,
-) -> Result<(gstreamer_video::VideoInfo, u64), PlatformError> {
+fn inspect(sample: &gstreamer::Sample) -> Result<(gstreamer_video::VideoInfo, u64), PlatformError> {
     let caps = sample
         .caps()
         .ok_or_else(|| invalid("video sample has no caps"))?;
@@ -198,6 +192,9 @@ fn inspect(
     let buffer = sample
         .buffer()
         .ok_or_else(|| invalid("video sample has no buffer"))?;
+    if buffer.flags().contains(gstreamer::BufferFlags::CORRUPTED) {
+        return Err(host_error("decode.stream.next", "video frame is corrupted"));
+    }
     let pts = buffer
         .pts()
         .ok_or_else(|| invalid("video sample has no PTS"))?;
@@ -208,8 +205,7 @@ fn inspect(
     let pts_us = segment
         .to_running_time(pts)
         .map(|time| time.useconds())
-        .filter(|pts| *pts < duration_us)
-        .ok_or_else(|| invalid("video PTS is outside stream duration"))?;
+        .ok_or_else(|| invalid("video PTS is outside its time segment"))?;
     Ok((info, pts_us))
 }
 
@@ -220,5 +216,56 @@ impl VideoStream {
     }
     pub(super) fn test_input_path(&self) -> std::path::PathBuf {
         self.pipeline.as_ref().unwrap()._input.path().to_path_buf()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sample_validation_rejects_corruption_missing_pts_and_frame_budget() {
+        gstreamer::init().unwrap();
+        for (width, flags, pts, accepted) in [
+            (
+                1,
+                gstreamer::BufferFlags::DISCONT,
+                Some(ClockTime::ZERO),
+                true,
+            ),
+            (
+                1,
+                gstreamer::BufferFlags::CORRUPTED,
+                Some(ClockTime::ZERO),
+                false,
+            ),
+            (1, gstreamer::BufferFlags::empty(), None, false),
+            (
+                8192,
+                gstreamer::BufferFlags::empty(),
+                Some(ClockTime::ZERO),
+                false,
+            ),
+        ] {
+            let info = gstreamer_video::VideoInfo::builder(
+                gstreamer_video::VideoFormat::Bgra,
+                width,
+                width,
+            )
+            .build()
+            .unwrap();
+            let caps = info.to_caps().unwrap();
+            let mut buffer = gstreamer::Buffer::new();
+            let writable = buffer.get_mut().unwrap();
+            writable.set_pts(pts);
+            writable.set_flags(flags);
+            let segment = gstreamer::FormattedSegment::<ClockTime>::new();
+            let sample = gstreamer::Sample::builder()
+                .caps(&caps)
+                .buffer(&buffer)
+                .segment(&segment)
+                .build();
+            assert_eq!(inspect(&sample).is_ok(), accepted);
+        }
     }
 }

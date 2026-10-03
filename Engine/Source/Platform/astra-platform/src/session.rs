@@ -331,7 +331,8 @@ pub enum DecodeOutput {
         samples: Vec<f32>,
     },
     VideoStreamStart {
-        duration_us: Option<u64>,
+        /// Optional demux estimate, never a frame bound or completion clock.
+        duration_estimate_us: Option<u64>,
         frame_count: Option<u64>,
         decoded_byte_count: Option<u64>,
     },
@@ -343,6 +344,7 @@ pub enum DecodeOutput {
         height: u32,
         bgra8: astra_byte_source::OwnedByteBuffer,
     },
+    /// Successful EOS finalizes the end of the last delivered VideoFrame.
     VideoStreamEnd {
         frame_count: u64,
         decoded_byte_count: u64,

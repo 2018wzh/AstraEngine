@@ -1,5 +1,13 @@
 # 全产品重构实施状态
 
+## 2026-10-03 NativeVN 视频 EOS 与循环恢复
+
+视频流启动描述使用可选 `duration_estimate_us`，估计时长不再决定完成或循环边界。Linux 保留解码器的实际 PTS，用后一帧 PTS 计算帧区间，末帧使用解码器 duration；完整 EOS 和实际帧/字节计数决定结束。Player 按实际末帧终点完成和循环，循环重开校验完整时长一致，未知启动计数仍执行帧数和字节预算。媒体 snapshot 升级为 v4，保存已呈现帧终点与可选完整循环时长；直接拒绝 v3，恢复失败保留当前状态。视频流仅提供 BGRA，音频继续由独立 Host 与时钟持有，视频终点不会截断音频。
+
+接续核对同一完整补丁的 Linux 检查已完成：GStreamer decoder/worker/GPU 增量 16 项、Player 媒体单元 6 项、音频 Host 6 项、decoder cleanup 3 项、视频 timing 4 项，以及 Headless FFmpeg 视频契约 3 项全部通过。包括 10/12/24 fps、变化 PTS、末帧、完整 worker→硬件 GPU、预算、取消和关闭、循环重开及中途恢复；v3 拒绝由媒体单元回归覆盖。此前疑似挂起的 interrupted decoder open 用例最终通过，cleanup 整组用时 81.62 秒，timing 整组用时 111.22 秒，未发现无界循环，未为耗时修改生产代码。五个受影响 crate 的 all-target Clippy、根格式和文档检查通过。没有重复 GPU Instance 生命周期组或全 workspace 测试。
+
+Windows 与 Android 只迁移了启动描述字段，尚未完成本批原生编译和设备检查；Linux 硬件 GPU 离屏检查不能替代真实窗口、可听音频、长流程或正式性能验收。Windows 实玩继续等待 Sandbox，Android 真机与 Editor 桌面操作保持暂停。
+
 ## 2026-09-30 GPU Instance 生命周期与媒体回归
 
 Vulkan/NVIDIA 在同进程反复装卸 loader 时出现静态 TLS 分配失败。现在由 MusicaProvider、HeadlessPlatformFactory 或显式 HeadlessThreadOwner 跨 session 持有原生 wgpu Instance，renderer 构造必须接收该 owner 的 Instance；原有 backend/DXC 配置不变，每次仍独立选择并校验 adapter、创建 device/queue 和会话资源。关闭释放会话资源，读档候选失败保留原会话；没有进程全局 Instance 缓存、device 复用、失败重试或 CPU fallback。此边界要求调用方保留 provider/graphics owner，不承诺无限销毁重建整个 host。Musica 初始化错误继续使用原诊断 code，并补充下层安全 code/operation；这项诊断改善与生命周期修复分别实现。

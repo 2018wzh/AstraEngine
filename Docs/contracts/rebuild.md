@@ -270,7 +270,7 @@ Linux 视频使用 `Start/Next` 契约：Start 保留管线并返回可选 `dura
 
 Player 复用 `VideoFrame` 和 `VideoStreamEnd`：成功 EOS 后，最后一帧的实际终点确定完成时长；完成通知与下一轮循环等待该时刻。后续轮的时间偏移使用已完成轮时长，并核对每轮实际终点一致；时间加法和乘法检查溢出。媒体 snapshot 使用 `astra.player.native_vn_media_snapshot.v4`，视频保存已展示 `frame_end_us` 与可选 `loop_duration_us`；首轮 EOS 前后者为 None。恢复重新打开已绑定资产并按 cursor 解码，核对实际帧尾与字节计数，不把可变探测时长当资产身份。旧 v3 直接拒绝，无迁移或字段别名。视频流只承载 BGRA 帧；`movie_audio` 由独立 AudioHost 的 PCM 时钟管理，视频结束与循环不关闭或截断该音频。
 
-Linux 本地媒体边界限制单次编码输入 256 MiB、单个视频帧和 one-shot 音频输出各 64 MiB；累计视频预算继续由产品 MediaHost 校验，不缓存完整解码影片。通过 `gstreamer-video` 按 plane stride 读取 BGRA，剔除行尾 padding。耗时解码不占用窗口事件线程；请求接收端取消或 session 关闭时 worker 停止拉帧，管线设为 Null 后删除临时输入。显式 CloseDecode 等待 worker，并传播关闭失败；取消的 OpenDecode 回复回收刚分配的句柄。宿主无须新增公共 ABI 或 save/package 字段，已有视频调用方使用原 Start/Next 即可。
+Linux 本地媒体边界限制单次编码输入 256 MiB、单个视频帧和 one-shot 音频输出各 64 MiB；累计视频预算继续由产品 MediaHost 校验，不缓存完整解码影片。通过 `gstreamer-video` 按 plane stride 读取 BGRA，剔除行尾 padding。耗时解码不占用窗口事件线程；请求接收端取消或 session 关闭时 worker 停止拉帧，管线设为 Null 后删除临时输入。显式 CloseDecode 等待 worker，并传播关闭失败；取消的 OpenDecode 回复回收刚分配的句柄。解码资源继续使用既有 OpenDecode/CloseDecode 生命周期，不向公共边界暴露 GStreamer handle。
 
 实现只增加 Linux target 的 `gstreamer-video = 0.24.2`（MIT OR Apache-2.0）与锁定的 sys 依赖（MIT），不传递第三方类型到公共契约。平台发布检查必须验证所选 GStreamer 插件、完整视频帧/PTS/结束计数、取消及关闭，而非只验证 codec 名称或首帧；真实窗口、设备音频与新集成分支另行验收。
 

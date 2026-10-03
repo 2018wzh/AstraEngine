@@ -88,7 +88,7 @@ fn variable_pts_complete_stream_counts_and_end_are_preserved() {
     assert!(matches!(
         decoder.decode(start(fixture())).unwrap(),
         DecodeOutput::VideoStreamStart {
-            duration_us: Some(550_000),
+            duration_estimate_us: Some(550_000),
             ..
         }
     ));
@@ -216,4 +216,89 @@ fn truncated_video_never_reports_a_complete_stream() {
         }
     }
     panic!("truncated stream did not terminate");
+}
+
+fn check_fixed_rate_stream(fps: u64, expected_pts: &[u64], expected_end: u64) {
+    gstreamer::init().unwrap();
+    let file = tempfile::NamedTempFile::new().unwrap();
+    let pipeline = gstreamer::parse::launch(&format!(
+            "videotestsrc num-buffers={fps} pattern=ball ! video/x-raw,width=64,height=48,framerate={fps}/1 ! videoconvert ! vp8enc deadline=1 ! webmmux ! filesink name=output"
+        )).unwrap().downcast::<gstreamer::Pipeline>().unwrap();
+    pipeline
+        .by_name("output")
+        .unwrap()
+        .set_property("location", file.path().to_str().unwrap());
+    pipeline.set_state(gstreamer::State::Playing).unwrap();
+    let message = pipeline.bus().unwrap().timed_pop_filtered(
+        ClockTime::from_seconds(10),
+        &[gstreamer::MessageType::Eos, gstreamer::MessageType::Error],
+    );
+    pipeline.set_state(gstreamer::State::Null).unwrap();
+    assert_eq!(
+        message.expect("encoder timed out").type_(),
+        gstreamer::MessageType::Eos
+    );
+    let mut decoder = DecodeResource::new(DecodeKind::Video).unwrap();
+    let output = decoder
+        .decode(start(std::fs::read(file.path()).unwrap()))
+        .unwrap();
+    assert!(matches!(
+        output,
+        DecodeOutput::VideoStreamStart {
+            duration_estimate_us: Some(_),
+            ..
+        }
+    ));
+    let mut frame_end = 0;
+    for (index, pts_ms) in expected_pts.iter().copied().enumerate() {
+        let DecodeOutput::VideoFrame {
+            sequence,
+            pts_us,
+            duration_us,
+            ..
+        } = decoder.decode(next(index as u64 + 2)).unwrap()
+        else {
+            panic!("expected every encoded frame");
+        };
+        assert_eq!(sequence, index as u64 + 1);
+        assert_eq!(pts_us, pts_ms * 1_000);
+        assert!(duration_us > 0);
+        frame_end = pts_us.checked_add(duration_us).unwrap();
+    }
+    assert_eq!(frame_end, expected_end);
+    assert!(matches!(decoder.decode(next(fps + 2)).unwrap(),
+            DecodeOutput::VideoStreamEnd { frame_count, .. } if frame_count == fps));
+}
+
+#[test]
+#[ignore = "requires GStreamer VP8/WebM encoding and decoding plugins"]
+fn integer_frame_period_preserves_pts_through_eos() {
+    check_fixed_rate_stream(
+        10,
+        &[0, 100, 200, 300, 400, 500, 600, 700, 800, 900],
+        1_000_000,
+    );
+}
+
+#[test]
+#[ignore = "requires GStreamer VP8/WebM encoding and decoding plugins"]
+fn twelve_fps_preserves_quantized_pts_and_actual_tail() {
+    check_fixed_rate_stream(
+        12,
+        &[0, 83, 167, 250, 333, 417, 500, 583, 667, 750, 833, 917],
+        1_000_333,
+    );
+}
+
+#[test]
+#[ignore = "requires GStreamer VP8/WebM encoding and decoding plugins"]
+fn twenty_four_fps_preserves_quantized_pts_and_actual_tail() {
+    check_fixed_rate_stream(
+        24,
+        &[
+            0, 42, 83, 125, 167, 208, 250, 292, 333, 375, 417, 458, 500, 542, 583, 625, 667, 708,
+            750, 792, 833, 875, 917, 958,
+        ],
+        999_666,
+    );
 }

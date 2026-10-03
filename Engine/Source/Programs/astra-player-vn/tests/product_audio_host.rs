@@ -189,7 +189,7 @@ async fn product_media_host_presents_every_video_frame_and_restores_by_asset_ide
             );
             reply
                 .send(Ok(DecodeOutput::VideoStreamStart {
-                    duration_us: Some(40_000),
+                    duration_estimate_us: Some(40_000),
                     frame_count: Some(2),
                     decoded_byte_count: Some(8),
                 }))

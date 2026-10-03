@@ -1151,14 +1151,14 @@ async fn ffmpeg_video_stream_returns_complete_ordered_frames_incrementally() {
         .await
         .unwrap();
     let DecodeOutput::VideoStreamStart {
-        duration_us,
+        duration_estimate_us,
         frame_count,
         decoded_byte_count,
     } = started
     else {
         panic!("stream start returned an unexpected output");
     };
-    let duration_us = duration_us.unwrap();
+    let duration_us = duration_estimate_us.unwrap();
     assert!(duration_us > 0);
     assert_eq!(frame_count, None);
     assert_eq!(decoded_byte_count, None);
