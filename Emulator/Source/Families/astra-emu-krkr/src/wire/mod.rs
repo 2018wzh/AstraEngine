@@ -401,19 +401,17 @@ impl ChildPacket {
                     width,
                     height,
                     rgba,
-                } => {
-                    if *width == 0
-                        || *height == 0
-                        || *width > 256
-                        || *height > 256
-                        || width
-                            .checked_mul(*height)
-                            .and_then(|v| v.checked_mul(4))
-                            .map(|v| v as usize)
-                            != Some(rgba.as_slice().len())
-                    {
-                        return Err("invalid window icon");
-                    }
+                } if *width == 0
+                    || *height == 0
+                    || *width > 256
+                    || *height > 256
+                    || width
+                        .checked_mul(*height)
+                        .and_then(|v| v.checked_mul(4))
+                        .map(|v| v as usize)
+                        != Some(rgba.as_slice().len()) =>
+                {
+                    return Err("invalid window icon");
                 }
                 _ => {}
             },

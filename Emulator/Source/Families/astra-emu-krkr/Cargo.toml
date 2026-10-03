@@ -9,6 +9,23 @@ publish = false
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 postcard = { version = "1", features = ["alloc"] }
+crossbeam-channel = "0.5"
+astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api" }
+
+[features]
+transport-test-child = []
+
+[dev-dependencies]
+abi_stable = "0.11"
+
+[[bin]]
+name = "astra-emu-krkr-child"
+path = "src/bin/child.rs"
+
+[[bin]]
+name = "krkr-transport-test-child"
+path = "src/bin/transport_test_child.rs"
+required-features = ["transport-test-child"]
 
 [workspace]
 

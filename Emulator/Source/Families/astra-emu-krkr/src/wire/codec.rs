@@ -69,8 +69,14 @@ pub fn write_packet<T: Packet>(
 ) -> io::Result<()> {
     identity.validate().map_err(invalid)?;
     packet.validate().map_err(invalid)?;
-    // Serializing into a fixed bound avoids building an oversized Vec first.
-    let mut body = vec![0; MAX_PACKET_BYTES];
+    // Postcard's measurement flavor needs no payload allocation. Allocate
+    // only a validated size, instead of clearing 512 KiB for every PCM ack.
+    let size = postcard::serialize_with_flavor(packet, postcard::ser_flavors::Size::default())
+        .map_err(|_| invalid("invalid packet size"))?;
+    if size == 0 || size > MAX_PACKET_BYTES {
+        return Err(invalid("packet length"));
+    }
+    let mut body = vec![0; size];
     let encoded = postcard::to_slice(packet, &mut body)
         .map_err(|_| invalid("invalid or oversized packet"))?;
     let mut header = [0; HEADER_BYTES];
