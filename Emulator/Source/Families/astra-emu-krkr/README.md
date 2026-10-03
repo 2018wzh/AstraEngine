@@ -6,6 +6,11 @@ VM/renderer/input path, and returns its complete physical RGBA8 frame with
 the authored logical stage dimensions. The SDK owns the copied texture and
 validates the centered viewport; the adapter does not render the frame again.
 
+Pass the original native game directory as `game_path`; it is not an Astra
+package or an individual XP3 archive. Probe checks for a native XP3 header and
+does not establish that the game's scripts or plugins can run. The Family
+uses the original storage, VM and save handling inside its child process.
+
 The Host must initialize diagnostics and provide a fresh I16 stereo 48 kHz
 audio sink with actual playback progress. PCM acknowledgements follow the
 Host write; progress is never estimated from wall time. Control, PCM and frame
@@ -38,3 +43,13 @@ or running them. MSVC/UCRT runtime prerequisites are separate from the native
 target's app-local dependency DLLs. The transport test child is never packaged.
 The module is not yet registered in the Manager catalog; registration follows
 native integration. Other platforms return native-unavailable explicitly.
+
+The current Windows package is a development build. Its native owner and
+production Rust module/child compile and link, but the Sandbox Guest cannot
+currently execute commands. Native boot, rendered frames, input, close/reopen,
+BPG decoding and real audio remain unverified on that package.
+
+Horizontal wheel input returns `ASTRA_EMU_KRKR_HORIZONTAL_WHEEL_UNSUPPORTED`.
+Embedded native modal dialogs fail through the private native ABI and surface
+as `ASTRA_EMU_KRKR_BOOT` or `ASTRA_EMU_KRKR_ADVANCE`; they do not return a
+separate modal-dialog error code.
