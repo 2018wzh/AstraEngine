@@ -869,16 +869,25 @@ fn effect_quad_visibility_drives_the_case_405_gate() {
         state.interpreter_words.get(&81220).copied()
     };
 
-    // A never-shown quad reads as hidden: case 405 stores 1.
-    assert_eq!(quad_active(&mut state), Some(1));
-    // Case 402 shows quad 0, so case 405 stores 0.
+    // The source branch's recovered 405 reads the live flag, not its inverse.
+    assert_eq!(quad_active(&mut state), Some(0));
     push(&mut state, &[0, 7]);
     run(&mut state, 402);
-    assert_eq!(quad_active(&mut state), Some(0));
-    // Case 403 hides it again, so case 405 stores 1.
+    assert_eq!(quad_active(&mut state), Some(1));
     push(&mut state, &[0, 7]);
     run(&mut state, 403);
-    assert_eq!(quad_active(&mut state), Some(1));
+    assert_eq!(quad_active(&mut state), Some(0));
+    // Binding an animation frame activates the same quad. Rebinding the same
+    // frame after an explicit hide must reactivate it as well.
+    for _ in 0..2 {
+        push(&mut state, &[3, 0, 7]);
+        run(&mut state, 406);
+        assert_eq!(quad_active(&mut state), Some(1));
+        push(&mut state, &[0, 7]);
+        run(&mut state, 403);
+        assert_eq!(quad_active(&mut state), Some(0));
+    }
+    assert_eq!(state.stack_cursor_bytes, 0);
 }
 
 #[test]
@@ -2592,4 +2601,24 @@ fn native_crossfade_stop_preserves_duration_and_consumes_only_its_argument() {
     .unwrap();
     assert_eq!(action, Some(CmvsPs2aVmAction::StopAudio));
     assert_eq!(state.stack_cursor_bytes, 4);
+}
+
+#[test]
+fn source_rebuild_gate_preserves_suspended_stack_until_reenabled() {
+    let mut state = CmvsPs2aVmState::new(64);
+    state.interpreter_words.insert(3317, 1);
+    state.interpreter_words.insert(2679 * 4, 1);
+    // Queue slot three is an always-active coroutine entry.
+    let entry = 13272 + 28 * 3;
+    state.interpreter_words.insert(entry + 8, 96);
+    state.interpreter_words.insert(entry + 4, 0);
+    execute_cmvs390_frame(&mut state, &push_immediate(123)).unwrap();
+    let before = state.clone();
+    let cursor = state.stack_cursor_bytes;
+    rebuild_frame_entry_queue(&mut state).unwrap();
+    assert_eq!(state, before);
+    state.interpreter_words.insert(2679 * 4, 0);
+    rebuild_frame_entry_queue(&mut state).unwrap();
+    assert_eq!(state.stack_cursor_bytes, cursor + 12);
+    assert_eq!(state.program_counter, 96);
 }

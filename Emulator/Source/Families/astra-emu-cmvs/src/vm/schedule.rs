@@ -43,7 +43,19 @@ pub fn truncate_stack_to(state: &mut CmvsPs2aVmState, baseline: u32) {
     }
 }
 
+// Source CMVS branch: sub_46DF10 gates the entire rebuild on this dword.
+const FRAME_ENTRY_REBUILD_GATE_FIELD: u32 = 2679 * 4;
+
 pub fn rebuild_frame_entry_queue(state: &mut CmvsPs2aVmState) -> Result<(), CoreError> {
+    if state
+        .interpreter_words
+        .get(&FRAME_ENTRY_REBUILD_GATE_FIELD)
+        .copied()
+        .unwrap_or(0)
+        != 0
+    {
+        return Ok(());
+    }
     let scheduler_enabled = state
         .interpreter_words
         .get(&FRAME_ENTRY_SCHEDULER_ENABLED_WORD)

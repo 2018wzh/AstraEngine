@@ -88,6 +88,14 @@ pub(super) fn execute(
             }
             // `sub_466D50`: the quad record's visibility flag becomes 1 and
             // the bound element is shown.
+            if tracing::enabled!(tracing::Level::DEBUG) {
+                tracing::debug!(
+                    event = "astra.emu.cmvs.vm.quad_show",
+                    pc = state.program_counter,
+                    channel = *channel,
+                    quad = *quad
+                );
+            }
             state
                 .effect_channels
                 .entry(*channel as u8)
@@ -139,13 +147,15 @@ pub(super) fn execute(
             // `sub_47F330` stores the selected animation frame at word
             // `38*quad + 38` and, when the frame actually changes, copies the
             // frame's geometry sub-record onto the bound element through
-            // `sub_446B30`. The element surface is not modelled yet, so only
-            // the frame word is persisted.
+            // `sub_446B30`. Binding geometry makes the record live, so the
+            // activation also raises the quad's dword-40 visibility flag
+            // that case 405 polls (`sub_47F470`); case 403 clears it again.
             let frame = *value as u16;
             let channel_object = state.effect_channels.entry(*channel as u8).or_default();
             if channel_object.quad_frame(*quad) != frame {
                 channel_object.set_quad_frame(*quad, frame);
             }
+            channel_object.set_quad_visible(*quad, true);
             Ok(None)
         }
         (
@@ -192,18 +202,18 @@ pub(super) fn execute(
                 raise_error_flag(state, 10532, 0x0002_0000)?;
                 return Ok(None);
             }
-            // `sub_47F470` reads the quad record's byte at offset
-            // `76*quad + 40` and stores `(byte == 0)`: 1 while the quad is
-            // hidden, 0 once case 402 shows it. The script gates the
-            // quad-update path on this flag, so it must follow the
-            // recovered visibility transitions rather than a constant.
-            let hidden = state
+            // `sub_47F470` reads the quad record's dword at byte offset
+            // `76*quad + 40` and stores `(dword != 0)`: 1 while the record
+            // is live. The message engine gates the page-advance path on
+            // this flag, so it must follow the recovered visibility
+            // transitions rather than a constant.
+            let live = state
                 .effect_channels
                 .get(&(*channel as u8))
-                .is_none_or(|object| !object.quad_visible(*quad));
+                .is_some_and(|object| object.quad_visible(*quad));
             state
                 .interpreter_words
-                .insert(result_field_offset, u32::from(hidden));
+                .insert(result_field_offset, u32::from(live));
             Ok(None)
         }
         (
