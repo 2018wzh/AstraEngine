@@ -1,9 +1,9 @@
-//! Private KrKr session transport. This crate is not a registered Family.
-//!
-//! Native boot, GPU capture and input are supplied by the KrKr owner. No
-//! transport test child is allowed to advertise a functioning native core.
+//! KrKr Family v10 adapter and its owned native child transport.
+//! Each session uses a fresh child and the real native owner DLL. This crate
+//! remains outside the Manager registry until native integration is complete.
 
 pub mod child;
+pub mod family;
 pub mod parent;
 mod sockets;
 pub mod wire;

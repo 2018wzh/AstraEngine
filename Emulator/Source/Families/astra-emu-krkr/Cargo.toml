@@ -6,24 +6,30 @@ rust-version = "1.92"
 license = "MIT OR Apache-2.0"
 publish = false
 
+[lib]
+crate-type = ["rlib", "cdylib"]
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 postcard = { version = "1", features = ["alloc"] }
 crossbeam-channel = "0.5"
-astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api" }
+astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api", features = ["diagnostic-bridge"] }
+astra-emu-sdk = { path = "../../SDK/astra-emu-sdk", default-features = false, features = ["archive"] }
+astra-media-core = { path = "../../../../Engine/Source/Runtime/astra-media-core" }
+abi_stable = "0.11"
 libloading = "0.8"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_IO"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_IO", "Win32_System_LibraryLoader"] }
 
 [features]
 transport-test-child = []
 
 [dev-dependencies]
-abi_stable = "0.11"
+tempfile = "3"
 
 [[bin]]
 name = "astra-emu-krkr-child"
