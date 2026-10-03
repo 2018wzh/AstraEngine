@@ -41,6 +41,7 @@ impl Drop for Lease {
 #[derive(Default)]
 pub struct CmvsProvider {
     next: u64,
+    gpu_instance: Option<wgpu::Instance>,
 }
 pub fn cmvs_descriptor() -> FamilyDescriptor {
     let field = |id: &str, label: &str, default: &str| ConfigField {
@@ -133,7 +134,24 @@ impl FamilyProvider for CmvsProvider {
             .next
             .checked_add(1)
             .ok_or_else(|| error("ASTRA_EMU_CMVS_SESSION_ID", "session ID exhausted"))?;
-        let session = CmvsSession::new(archive, entry, request.initial_window, lease)?;
+        if self.gpu_instance.is_none() {
+            self.gpu_instance =
+                Some(astra_platform_common::native_wgpu_instance().map_err(|_| {
+                    error(
+                        "ASTRA_EMU_CMVS_GPU_CREATE",
+                        "native GPU instance creation failed",
+                    )
+                })?);
+        }
+        let session = CmvsSession::new(
+            archive,
+            entry,
+            request.initial_window,
+            lease,
+            self.gpu_instance
+                .as_ref()
+                .expect("GPU instance initialized"),
+        )?;
         Ok(FamilyOpen {
             response: OpenResponse {
                 session_id: format!("cmvs-{id}").into(),

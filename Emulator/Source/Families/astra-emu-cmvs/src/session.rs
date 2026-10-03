@@ -28,6 +28,7 @@ impl CmvsSession {
         entry: &str,
         window: WindowState,
         lease: Lease,
+        gpu_instance: &wgpu::Instance,
     ) -> FamilyResult<Self> {
         let mut vm = CmvsPs2aVmState::new(0);
         let default_font = archive.native_default_font().map_err(core)?;
@@ -38,8 +39,11 @@ impl CmvsSession {
         let script = archive
             .load_native_script(entry, 0, &mut vm)
             .map_err(core)?;
-        let mut scene = CmvsScene::new().map_err(core)?;
+        let mut scene = CmvsScene::new(gpu_instance).map_err(core)?;
         scene.set_default_font(default_font);
+        scene
+            .resize_raster(window.width, window.height)
+            .map_err(core)?;
         let frame = scene.clear(window.width, window.height).map_err(core)?;
         tracing::info!(event = "astra.emu.cmvs.session.open");
         Ok(Self {
@@ -58,11 +62,15 @@ impl CmvsSession {
         })
     }
     pub(crate) fn frame_info(&self) -> FamilyResult<FrameInfo> {
+        let logical = self
+            .scene
+            .logical_extent()
+            .ok_or_else(|| error("ASTRA_EMU_CMVS_CANVAS", "native stage is not initialized"))?;
         let info = FrameInfo {
             width: self.frame.width,
             height: self.frame.height,
-            logical_width: self.frame.width,
-            logical_height: self.frame.height,
+            logical_width: logical.width,
+            logical_height: logical.height,
             stride: self
                 .frame
                 .width
@@ -239,9 +247,12 @@ impl CmvsSession {
                         self.frame = frame;
                     }
                 } else if self.scene.has_text_renderer() {
+                    let logical = self.scene.logical_extent().ok_or_else(|| {
+                        error("ASTRA_EMU_CMVS_CANVAS", "native stage is not initialized")
+                    })?;
                     self.frame = self
                         .scene
-                        .render_text(&self.vm, self.frame.width, self.frame.height)
+                        .render_text(&self.vm, logical.width, logical.height)
                         .map_err(core)?;
                 }
                 return Ok(());
@@ -276,11 +287,14 @@ impl CmvsSession {
                     return Ok(AdvanceResponse {
                         status: FamilyStatus::Finished,
                         ..AdvanceResponse::running()
-                    })
+                    });
                 }
                 FamilyEvent::WindowSuspended { suspended } => {
                     changed |= self.suspended != *suspended;
                     self.suspended = *suspended;
+                }
+                FamilyEvent::WindowResized { width, height } => {
+                    self.scene.resize_raster(*width, *height).map_err(core)?;
                 }
                 FamilyEvent::PointerMove { x, y } => {
                     self.vm.pointer_x = *x as i32;
@@ -290,7 +304,7 @@ impl CmvsSession {
                     return Err(error(
                         "ASTRA_EMU_CMVS_INPUT_UNBOUND",
                         "native input handling is not connected",
-                    ))
+                    ));
                 }
                 _ => {}
             }

@@ -20,6 +20,7 @@ astra-media-core = { path = "../../../../Engine/Source/Runtime/astra-media-core"
 astra-platform = { path = "../../../../Engine/Source/Platform/astra-platform" }
 astra-platform-common = { path = "../../../../Engine/Source/Platform/astra-platform-common" }
 pollster.workspace = true
+wgpu.workspace = true
 encoding_rs.workspace = true
 flate2.workspace = true
 image = { workspace = true, features = ["ico"] }

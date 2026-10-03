@@ -679,6 +679,7 @@ dependencies = [
  "sha2",
  "tempfile",
  "tracing",
+ "wgpu 29.0.4",
  "windows 0.62.2",
 ]
 

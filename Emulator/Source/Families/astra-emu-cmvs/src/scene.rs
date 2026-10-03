@@ -1,6 +1,6 @@
 use crate::{CmvsArchive, CmvsPs2aVmState};
-use astra_emu_sdk::{CoreError, TextureCache};
-use astra_media_core::{BlendMode, RectI, SceneCommand, TextureFrame};
+use astra_emu_sdk::{CoreError, StageCanvas, TextureCache};
+use astra_media_core::{BlendMode, Extent2D, RectI, SceneCommand, TextureFrame};
 use astra_platform::SceneFrame;
 use astra_platform_common::WgpuOffscreenRenderer;
 use std::{collections::BTreeMap, num::NonZeroUsize};
@@ -20,14 +20,16 @@ pub struct CmvsScene {
     textures: TextureCache,
     bindings: BTreeMap<CmvsTextureSlot, String>,
     sequence: u64,
+    raster: Option<Extent2D>,
+    canvas: Option<StageCanvas>,
     text: text::NativeTextRenderer,
+    // Keep the loader alive until every session GPU resource has dropped.
+    _gpu_instance: wgpu::Instance,
 }
 
 impl CmvsScene {
-    pub fn new() -> Result<Self, CoreError> {
-        let instance = astra_platform_common::native_wgpu_instance()
-            .map_err(|_| error("ASTRA_EMU_CMVS_GPU_CREATE"))?;
-        let renderer = pollster::block_on(WgpuOffscreenRenderer::new(&instance))
+    pub fn new(instance: &wgpu::Instance) -> Result<Self, CoreError> {
+        let renderer = pollster::block_on(WgpuOffscreenRenderer::new(instance))
             .map_err(|_| error("ASTRA_EMU_CMVS_GPU_CREATE"))?;
         tracing::info!(event = "cmvs.gpu.created", backend = %renderer.identity().backend,
             device_type = %renderer.identity().device_type, vendor_id = renderer.identity().vendor_id,
@@ -38,8 +40,28 @@ impl CmvsScene {
                 .map_err(|_| error("ASTRA_EMU_CMVS_TEXTURE_BUDGET"))?,
             bindings: BTreeMap::new(),
             sequence: 0,
+            raster: None,
+            canvas: None,
             text: text::NativeTextRenderer::default(),
+            _gpu_instance: instance.clone(),
         })
+    }
+
+    /// Change only the render target. VM geometry stays in native stage units.
+    pub(crate) fn resize_raster(&mut self, width: u32, height: u32) -> Result<(), CoreError> {
+        let raster = Extent2D::new(width, height);
+        raster
+            .validate()
+            .map_err(|_| error("ASTRA_EMU_CMVS_CANVAS"))?;
+        self.renderer
+            .validate_output_extent(width, height)
+            .map_err(|_| error("ASTRA_EMU_CMVS_CANVAS"))?;
+        self.raster = Some(raster);
+        Ok(())
+    }
+
+    pub(crate) fn logical_extent(&self) -> Option<Extent2D> {
+        self.canvas.map(StageCanvas::logical)
     }
 
     pub(crate) fn clear(&mut self, width: u32, height: u32) -> Result<TextureFrame, CoreError> {
@@ -176,14 +198,27 @@ impl CmvsScene {
             .sequence
             .checked_add(1)
             .ok_or_else(|| error("ASTRA_EMU_CMVS_FRAME_SEQUENCE"))?;
+        let logical = Extent2D::new(width, height);
+        let canvas = StageCanvas::new(logical, self.raster.unwrap_or(logical))?;
+        let mut mapped = Vec::with_capacity(commands.len() + 4);
+        mapped.push(SceneCommand::PushClip {
+            rect: canvas.viewport_rect()?,
+        });
+        mapped.push(SceneCommand::PushTransform {
+            transform: canvas.logical_to_raster_transform(),
+        });
+        mapped.extend(commands);
+        mapped.push(SceneCommand::PopTransform);
+        mapped.push(SceneCommand::PopClip);
+        let raster = canvas.raster();
         let output = self
             .renderer
             .render(&SceneFrame {
                 sequence,
-                width,
-                height,
+                width: raster.width,
+                height: raster.height,
                 clear_rgba: [0, 0, 0, 255],
-                commands,
+                commands: mapped,
                 semantics: None,
             })
             .map_err(|cause| {
@@ -191,9 +226,10 @@ impl CmvsScene {
                 error("ASTRA_EMU_CMVS_GPU_RENDER")
             })?;
         self.sequence = sequence;
+        self.canvas = Some(canvas);
         Ok(TextureFrame {
-            width,
-            height,
+            width: raster.width,
+            height: raster.height,
             rgba8: output.rgba8.into(),
         })
     }
