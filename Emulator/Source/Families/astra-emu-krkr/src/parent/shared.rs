@@ -27,15 +27,24 @@ pub(super) fn failure_error(failure: Failure) -> io::Error {
         } else {
             io::ErrorKind::Other
         },
-        format!("KrKr {failure:?}"),
+        failure,
     )
 }
 
 fn query(sink: &AudioSinkBox) -> io::Result<Progress> {
-    let p = sink
-        .playback_progress()
-        .into_result()
-        .map_err(|_| failure_error(Failure::Audio))?;
+    let p = sink.playback_progress().into_result().map_err(|error| {
+        if error.code() == "ASTRA_EMU_AUDIO_PROGRESS_UNSUPPORTED" {
+            io::Error::new(
+                io::ErrorKind::Unsupported,
+                astra_emu_family_api::FamilyError::invalid(
+                    "ASTRA_EMU_AUDIO_PROGRESS_UNSUPPORTED",
+                    "host audio sink does not report actual playback progress",
+                ),
+            )
+        } else {
+            failure_error(Failure::Audio)
+        }
+    })?;
     let p = Progress {
         accepted_source_frames: p.accepted_source_frames,
         played_source_frames: p.played_source_frames,

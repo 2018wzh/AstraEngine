@@ -22,8 +22,33 @@ use std::{
 fn error(code: &str, message: &str) -> FamilyError {
     FamilyError::invalid(code, message)
 }
-fn transport_error(operation: &str) -> FamilyError {
-    error(operation, "KrKr native session operation failed")
+fn transport_error(operation: &str, source: std::io::Error) -> FamilyError {
+    if let Some(host) = source
+        .get_ref()
+        .and_then(|inner| inner.downcast_ref::<FamilyError>())
+    {
+        if host.code() == "ASTRA_EMU_AUDIO_PROGRESS_UNSUPPORTED" {
+            return error(
+                "ASTRA_EMU_AUDIO_PROGRESS_UNSUPPORTED",
+                "host audio sink does not report actual playback progress",
+            );
+        }
+    }
+    let code = match source
+        .get_ref()
+        .and_then(|inner| inner.downcast_ref::<crate::wire::Failure>())
+    {
+        Some(crate::wire::Failure::NativeUnavailable) => "ASTRA_EMU_KRKR_NATIVE_UNAVAILABLE",
+        Some(crate::wire::Failure::Boot) => "ASTRA_EMU_KRKR_BOOT",
+        Some(crate::wire::Failure::Advance) => "ASTRA_EMU_KRKR_ADVANCE",
+        Some(crate::wire::Failure::Frame) => "ASTRA_EMU_KRKR_FRAME",
+        Some(crate::wire::Failure::Input) => "ASTRA_EMU_KRKR_INPUT",
+        Some(crate::wire::Failure::Audio) => "ASTRA_EMU_KRKR_AUDIO",
+        Some(crate::wire::Failure::Protocol) => "ASTRA_EMU_KRKR_PROTOCOL",
+        Some(crate::wire::Failure::Shutdown) => "ASTRA_EMU_KRKR_SHUTDOWN",
+        None => operation,
+    };
+    error(code, "KrKr native session operation failed")
 }
 static ACTIVE: AtomicBool = AtomicBool::new(false);
 static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
@@ -242,6 +267,30 @@ pub fn astra_krkr_family_root_module() -> AstraFamilyModuleRef {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn family_preserves_native_unavailable_and_host_progress_failure_codes() {
+        let native = std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            crate::wire::Failure::NativeUnavailable,
+        );
+        assert_eq!(
+            transport_error("ASTRA_EMU_KRKR_BOOT", native).code(),
+            "ASTRA_EMU_KRKR_NATIVE_UNAVAILABLE"
+        );
+        let host = std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            error(
+                "ASTRA_EMU_AUDIO_PROGRESS_UNSUPPORTED",
+                "private host details",
+            ),
+        );
+        let result = transport_error("ASTRA_EMU_KRKR_BOOT", host);
+        assert_eq!(result.code(), "ASTRA_EMU_AUDIO_PROGRESS_UNSUPPORTED");
+        assert_eq!(
+            result.message,
+            "host audio sink does not report actual playback progress"
+        );
+    }
     #[test]
     fn probe_requires_native_xp3_magic() {
         let dir = tempfile::tempdir().unwrap();

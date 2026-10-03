@@ -272,6 +272,13 @@ pub enum Failure {
     Shutdown,
 }
 
+impl std::fmt::Display for Failure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "KrKr {self:?}")
+    }
+}
+impl std::error::Error for Failure {}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum WriteStatus {
     Accepted,

@@ -81,7 +81,14 @@ impl AudioSink for TestSink {
     }
     fn playback_progress(&self) -> FfiFamilyResult<AudioPlaybackProgress> {
         let state = self.state.0.lock().unwrap();
-        if self.unsupported_progress || state.cancelled {
+        if self.unsupported_progress {
+            return Err(FamilyError::new(
+                "ASTRA_EMU_AUDIO_PROGRESS_UNSUPPORTED",
+                "progress unavailable",
+            ))
+            .into();
+        }
+        if state.cancelled {
             return Err(FamilyError::new("TEST_PROGRESS", "progress unavailable")).into();
         }
         Ok(AudioPlaybackProgress {
@@ -277,7 +284,19 @@ fn cancellation_unblocks_host_write_child_pcm_wait_and_joins_all_workers() {
 #[test]
 fn unsupported_progress_rejects_before_child_spawn_and_cancels_sink() {
     let (audio, state) = sink(false, true);
-    assert!(SessionTransport::launch(fixture(""), Arc::clone(&audio), diagnostics(), 106).is_err());
+    let error = SessionTransport::launch(fixture(""), Arc::clone(&audio), diagnostics(), 106)
+        .err()
+        .expect("unsupported progress must reject open");
+    assert_eq!(error.kind(), io::ErrorKind::Unsupported);
+    assert_eq!(
+        error
+            .get_ref()
+            .unwrap()
+            .downcast_ref::<FamilyError>()
+            .unwrap()
+            .code(),
+        "ASTRA_EMU_AUDIO_PROGRESS_UNSUPPORTED"
+    );
     assert_eq!(Arc::strong_count(&audio), 1);
     let state = state.0.lock().unwrap();
     assert_eq!(state.configured, 1);

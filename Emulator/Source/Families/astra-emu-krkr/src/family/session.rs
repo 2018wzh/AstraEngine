@@ -19,7 +19,7 @@ pub(super) fn open(
     lease: Lease,
 ) -> FamilyResult<FamilyOpen> {
     let mut transport = SessionTransport::launch(Command::new(executable), sink, diagnostics, id)
-        .map_err(|_| transport_error("ASTRA_EMU_KRKR_BOOT"))?;
+        .map_err(|source| transport_error("ASTRA_EMU_KRKR_BOOT", source))?;
     let boot = wire::Command::Boot {
         game_path: wire::Text::new(game)
             .map_err(|_| error("ASTRA_EMU_KRKR_GAME_PATH", "game path exceeds native bound"))?,
@@ -34,10 +34,10 @@ pub(super) fn open(
     let opened = (|| {
         let expected = transport
             .boot(boot)
-            .map_err(|_| transport_error("ASTRA_EMU_KRKR_BOOT"))?;
+            .map_err(|source| transport_error("ASTRA_EMU_KRKR_BOOT", source))?;
         let source = transport
             .capture()
-            .map_err(|_| transport_error("ASTRA_EMU_KRKR_FRAME"))?;
+            .map_err(|source| transport_error("ASTRA_EMU_KRKR_FRAME", source))?;
         if source.info != expected {
             return Err(error(
                 "ASTRA_EMU_KRKR_FRAME",
@@ -106,8 +106,11 @@ impl KrkrSession {
     fn finish(&self) {
         let transport = self.transport.borrow_mut().take();
         if let Some(transport) = transport {
-            if transport.close().is_err() && self.first.borrow().is_none() {
-                *self.first.borrow_mut() = Some(transport_error("ASTRA_EMU_KRKR_SHUTDOWN"));
+            if let Err(source) = transport.close() {
+                if self.first.borrow().is_none() {
+                    *self.first.borrow_mut() =
+                        Some(transport_error("ASTRA_EMU_KRKR_SHUTDOWN", source));
+                }
             }
         }
         self.lease.borrow_mut().take();
@@ -132,7 +135,7 @@ impl FamilySession for KrkrSession {
             .advance(elapsed_ns, events);
         let reply = match reply {
             Ok(reply) => reply,
-            Err(_) => return self.fail(transport_error("ASTRA_EMU_KRKR_ADVANCE")),
+            Err(source) => return self.fail(transport_error("ASTRA_EMU_KRKR_ADVANCE", source)),
         };
         let response = match input::response(reply) {
             Ok(response) => response,
@@ -147,7 +150,7 @@ impl FamilySession for KrkrSession {
             let source = self.transport.borrow_mut().as_mut().unwrap().capture();
             let source = match source {
                 Ok(source) => source,
-                Err(_) => return self.fail(transport_error("ASTRA_EMU_KRKR_FRAME")),
+                Err(source) => return self.fail(transport_error("ASTRA_EMU_KRKR_FRAME", source)),
             };
             let frame = match Frame::from_native(source) {
                 Ok(frame) => frame,
