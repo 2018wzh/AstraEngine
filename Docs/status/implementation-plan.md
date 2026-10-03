@@ -4,7 +4,7 @@
 
 选定迁移批已按顺序集成。CMVS Scene 复用现有 SDK `StageCanvas` 区分核心逻辑舞台与物理 raster；窗口 resize 只更新渲染目标，Family 帧报告两种尺寸。`CmvsProvider` 跨 session 持有原生 `wgpu::Instance`，Scene 持有同一 Instance 的所有权，关闭与恢复候选释放各自 renderer/device/纹理资源。VM、格式、归档、指令及原生存档语义继续由核心负责，没有引入 Engine/VN session。来源已有的 quad activation/live 查询与 scheduler rebuild gate 同步迁入，未改变争议音频指令语义。
 
-来源独占 Linux 检出完成 `check --tests`、216 项 CPU 回归、2 项 SDK StageCanvas 回归及 all-target Clippy；Tesla P4 原生 Vulkan 两项 GPU 回归通过，包含同一 Instance 下 32 次 renderer 重建、resize/drop、失败候选回收及 GPU registries 回落。集成后的 Emulator 文件与已检查来源逐文件相同，EOS 变更不涉及 CMVS 的解码消费者，因此复用该批检查，没有重复 GPU 或全 workspace 构建。受影响 CMVS 格式与 223 页文档检查通过；Windows Emulator 全量格式调用遇到命令长度限制后，改为定向 CMVS 格式检查通过。
+来源独占 Linux 检出完成 `check --tests`、216 项 CPU 回归、2 项 SDK StageCanvas 回归及 all-target Clippy；Tesla P4 原生 Vulkan 两项 GPU 回归通过，包含同一 Instance 下 32 次 renderer 重建、resize/drop、失败候选回收及 GPU registries 回落。集成后的 Emulator 文件与已检查来源逐文件相同，EOS 变更不涉及 CMVS 的解码消费者，因此复用该批检查，没有重复 GPU 或全 workspace 构建。Windows Emulator 单次全量格式调用遇到命令长度限制（206）；随后从 `cargo metadata --no-deps --locked --offline` 的实际 workspace members 选出 13 个活动 package，通过独立的 `cargo fmt --package ... -- --check` 串行覆盖，其中 CMVS 复用本轮已通过的定向检查。逐 package 检查全部通过，不包含排除的上游 fixed cores；原单次全量命令仍记为失败。根格式此前通过，223 页文档检查通过。
 
 这项结果只完成选定 SDK 迁移。session 的音频动作仍返回 `ASTRA_EMU_CMVS_MEDIA_UNBOUND`，open 的 `audio_format` 仍为 `RNone`；没有通过可听 PCM、完整 session 媒体/恢复、真实商业游戏或第六核心流程。Windows 实玩、Android 真机和 Editor 桌面操作继续按原暂停范围处理。
 
