@@ -3,6 +3,7 @@
 mod audio;
 #[cfg(feature = "transport-test-child")]
 mod fixture;
+mod native;
 use crate::{
     sockets::{self, Sockets, POLL},
     wire::{
@@ -15,6 +16,7 @@ use audio::AudioState;
 use crossbeam_channel::{bounded, Receiver, Sender};
 #[cfg(feature = "transport-test-child")]
 pub use fixture::transport_fixture;
+pub use native::DllOwner;
 use std::{
     io,
     net::Shutdown,
@@ -37,24 +39,6 @@ pub trait NativeOwner {
     /// Cancel/join audio producer first, then tear down VM/GL and join all
     /// native workers, completing every cleanup step even after an error.
     fn shutdown(&mut self) -> Result<(), Failure>;
-}
-
-/// Explicit unavailable shell, never emits NativeReady. No VM, native GPU
-/// capture or functioning input is implemented by this transport crate.
-pub struct UnavailableOwner;
-impl NativeOwner for UnavailableOwner {
-    fn boot(&mut self, _: &str, _: WindowState, _: AudioCallbacks) -> Result<FrameInfo, Failure> {
-        Err(Failure::NativeUnavailable)
-    }
-    fn advance(&mut self, _: u64, _: &[wire::Event]) -> Result<Reply, Failure> {
-        Err(Failure::NativeUnavailable)
-    }
-    fn capture(&mut self) -> Result<(FrameInfo, Vec<u8>), Failure> {
-        Err(Failure::NativeUnavailable)
-    }
-    fn shutdown(&mut self) -> Result<(), Failure> {
-        Ok(())
-    }
 }
 
 enum Output {

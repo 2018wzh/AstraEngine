@@ -74,6 +74,13 @@ fn main() {
         println!("KrKr transport fixture stdout diagnostics, never a frame");
         eprintln!("KrKr transport fixture stderr diagnostics, never protocol");
     }
+    if mode == "stdio-flood" {
+        let line = "x".repeat(8192);
+        for _ in 0..256 {
+            println!("{line}");
+            eprintln!("{line}");
+        }
+    }
     let result = child::connection_arguments().and_then(|(session, port)| {
         if matches!(
             mode.as_str(),

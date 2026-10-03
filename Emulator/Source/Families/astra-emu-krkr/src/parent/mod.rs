@@ -1,6 +1,7 @@
 //! Parent ownership for one KrKr native child. This module does not register
 //! a Family or supply a native runtime. The fixed executable is selected by
 //! the eventual Family adapter; Command is private integration/test plumbing.
+mod diagnostics;
 mod shared;
 mod workers;
 
@@ -15,7 +16,7 @@ use crate::{
         Sequence,
     },
 };
-use astra_emu_family_api::AudioSinkBox;
+use astra_emu_family_api::{AudioSinkBox, DiagnosticSinkBox};
 use std::{
     io,
     process::{Child, Command, Stdio},
@@ -33,6 +34,7 @@ pub struct SessionTransport {
     shared: Arc<Shared>,
     channels: Option<Channels>,
     workers: Vec<JoinHandle<io::Result<()>>>,
+    diagnostics: Option<diagnostics::Drain>,
     sequence: Sequence,
     pid: u32,
     booted: bool,
@@ -50,7 +52,12 @@ impl Cancellation {
 }
 
 impl SessionTransport {
-    pub fn launch(mut command: Command, sink: Arc<AudioSinkBox>, session: u64) -> io::Result<Self> {
+    pub fn launch(
+        mut command: Command,
+        sink: Arc<AudioSinkBox>,
+        diagnostics: Arc<DiagnosticSinkBox>,
+        session: u64,
+    ) -> io::Result<Self> {
         let sequence = Sequence::new(session)?;
         let rendezvous = Rendezvous::bind()?;
         let port = rendezvous.port()?;
@@ -61,8 +68,8 @@ impl SessionTransport {
             .arg("--transport-port")
             .arg(port.to_string())
             .stdin(Stdio::null())
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit());
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
@@ -82,10 +89,23 @@ impl SessionTransport {
             shared,
             channels: None,
             workers: Vec::new(),
+            diagnostics: None,
             sequence,
             pid,
             booted: false,
         };
+        match diagnostics::Drain::start(
+            owner.child.as_mut().unwrap(),
+            diagnostics,
+            Arc::clone(&owner.shared),
+        ) {
+            Ok(drain) => owner.diagnostics = Some(drain),
+            Err(first) => {
+                owner.shared.fail(Failure::Protocol);
+                let _ = owner.cleanup();
+                return Err(first);
+            }
+        }
         let shared = Arc::clone(&owner.shared);
         let sockets = match rendezvous.accept(owner.child.as_mut().unwrap(), session, || {
             shared.sink.is_cancelled() || shared.cancel_requested.load(Ordering::Acquire)
@@ -119,13 +139,14 @@ impl SessionTransport {
     pub fn open(
         command: Command,
         sink: Arc<AudioSinkBox>,
+        diagnostics: Arc<DiagnosticSinkBox>,
         session: u64,
         boot: WireCommand,
     ) -> io::Result<(Self, FrameInfo)> {
         if !matches!(&boot, WireCommand::Boot { .. }) {
             return Err(failure_error(Failure::Protocol));
         }
-        let mut owner = Self::launch(command, sink, session)?;
+        let mut owner = Self::launch(command, sink, diagnostics, session)?;
         match owner.boot(boot) {
             Ok(frame) => Ok((owner, frame)),
             Err(first) => {
@@ -342,6 +363,11 @@ impl SessionTransport {
                 // expected; genuine earlier errors were recorded by workers.
                 Ok(Err(_)) => {}
                 Err(_) => self.shared.fail(Failure::Shutdown),
+            }
+        }
+        if let Some(mut diagnostics) = self.diagnostics.take() {
+            if diagnostics.finish().is_err() {
+                self.shared.fail(Failure::Shutdown);
             }
         }
         self.check_failure()
