@@ -1,5 +1,13 @@
 # 全产品重构实施状态
 
+## 2026-10-03 CMVS SDK 画布与 GPU 所有权迁移
+
+选定迁移批已按顺序集成。CMVS Scene 复用现有 SDK `StageCanvas` 区分核心逻辑舞台与物理 raster；窗口 resize 只更新渲染目标，Family 帧报告两种尺寸。`CmvsProvider` 跨 session 持有原生 `wgpu::Instance`，Scene 持有同一 Instance 的所有权，关闭与恢复候选释放各自 renderer/device/纹理资源。VM、格式、归档、指令及原生存档语义继续由核心负责，没有引入 Engine/VN session。来源已有的 quad activation/live 查询与 scheduler rebuild gate 同步迁入，未改变争议音频指令语义。
+
+来源独占 Linux 检出完成 `check --tests`、216 项 CPU 回归、2 项 SDK StageCanvas 回归及 all-target Clippy；Tesla P4 原生 Vulkan 两项 GPU 回归通过，包含同一 Instance 下 32 次 renderer 重建、resize/drop、失败候选回收及 GPU registries 回落。集成后的 Emulator 文件与已检查来源逐文件相同，EOS 变更不涉及 CMVS 的解码消费者，因此复用该批检查，没有重复 GPU 或全 workspace 构建。受影响 CMVS 格式与 223 页文档检查通过；Windows Emulator 全量格式调用遇到命令长度限制后，改为定向 CMVS 格式检查通过。
+
+这项结果只完成选定 SDK 迁移。session 的音频动作仍返回 `ASTRA_EMU_CMVS_MEDIA_UNBOUND`，open 的 `audio_format` 仍为 `RNone`；没有通过可听 PCM、完整 session 媒体/恢复、真实商业游戏或第六核心流程。Windows 实玩、Android 真机和 Editor 桌面操作继续按原暂停范围处理。
+
 ## 2026-10-03 NativeVN 视频 EOS 与循环恢复
 
 视频流启动描述使用可选 `duration_estimate_us`，估计时长不再决定完成或循环边界。Linux 保留解码器的实际 PTS，用后一帧 PTS 计算帧区间，末帧使用解码器 duration；完整 EOS 和实际帧/字节计数决定结束。Player 按实际末帧终点完成和循环，循环重开校验完整时长一致，未知启动计数仍执行帧数和字节预算。媒体 snapshot 升级为 v4，保存已呈现帧终点与可选完整循环时长；直接拒绝 v3，恢复失败保留当前状态。视频流仅提供 BGRA，音频继续由独立 Host 与时钟持有，视频终点不会截断音频。

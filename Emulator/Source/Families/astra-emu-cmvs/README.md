@@ -1,6 +1,10 @@
 # CMVS
 
-当前 Family 插件导出 v9 descriptor 和 typed 配置，复用现有 CPZ5、PS2A VM 与硬件 GPU Scene。153 项普通回归及 1 项显式硬件 GPU 回归通过；格式与 VM 的局部结果不代表真实游戏流程已完成。
+当前 Family 插件使用公共 v10 descriptor 和 typed 配置，复用现有 CPZ5、PS2A VM 与硬件 GPU Scene。VM、格式、归档和原生存档语义由核心持有，不创建 Engine/VN session。
+
+Scene 已接入 SDK `StageCanvas`：逻辑舞台与 raster 分开，窗口 resize 只调整渲染目标，Family 帧报告逻辑与物理尺寸。Provider 跨 session 持有原生 `wgpu::Instance`，Scene 保持同一 Instance 存活，并释放每个 session 自身的 renderer/device/纹理资源。来源的 quad activation/live 查询与 scheduler rebuild gate 已迁入。Linux 定向检查包含 216 项 CPU、2 项 SDK StageCanvas 与 2 项 Tesla P4 Vulkan GPU 回归，以及 all-target Clippy；GPU 组覆盖 32 次 renderer 重建、resize/drop 和失败候选回收。
+
+session 音频动作仍返回 `ASTRA_EMU_CMVS_MEDIA_UNBOUND`，open 的 `audio_format` 为 `RNone`。该迁移不代表可听 PCM、完整 session 媒体与恢复、真实游戏流程或第六核心已经完成。完整状态见[实施计划](../../../../../../Docs/status/implementation-plan.md)。
 
 脚本和纹理名称在执行命令时从当前脚本池或原生全局字符串槽解析并复制。全局表统一为 128 个独立 Shift-JIS 值，表达式拼接和 case 148 区间赋值均立即复制；后续槽位修改、frame 切换或根脚本替换不会改变已经复制的值。旧嵌套引用表和八层引用解析已删除，不猜测脚本名。
 
