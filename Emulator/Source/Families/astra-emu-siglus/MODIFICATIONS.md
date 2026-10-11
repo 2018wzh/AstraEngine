@@ -91,12 +91,18 @@ The local hosted core changes are limited to its existing boundaries:
 the worker, including failed startup and unwinding. Worker panics produce a
 stable diagnostic. Offscreen creation rejects CPU and unknown adapters;
 the native wgpu pipeline and desktop device backend remain unchanged.
-The adapter regression repeats blocked-write shutdown three times through
-the real Kira mixer. A separate hardware-only test checks native GPU readback.
+The adapter regression repeats native mixer replacement and blocked-write
+shutdown three times through the real Kira mixer. Replacement leaves the
+Host sink open and the new mixer continues producing PCM; session close
+cancels and joins the blocking forwarder. A separate hardware-only test
+checks native GPU readback.
 
 `astra-emu-siglus/src/` is the separate family adapter. It owns no engine
 state beyond the session: one `SiglusHost` per session on the family session
-thread, one offscreen renderer, and one kira tap worker. `open` resolves the
+thread, one offscreen renderer, the native kira tap workers, and one PCM
+forwarder with a bounded two-chunk queue. Each mixer producer has a separate
+cancellation channel; queued chunks from a dropped mixer are discarded.
+`open` resolves the
 game's `#SCREEN_SIZE` with the same discovery the engine host uses, enables
 the hosted virtual clock, boots the engine, and pumps settle frames until the
 first composition so the ABI's fixed `FrameInfo` is final. Each `advance`

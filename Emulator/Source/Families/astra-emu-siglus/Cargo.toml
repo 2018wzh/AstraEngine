@@ -13,6 +13,7 @@ abi_stable.workspace = true
 astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api", features = ["diagnostic-bridge"] }
 siglus_scene_vm = { path = "../../../ThirdParty/siglus_rs/crates/siglus_scene_vm", default-features = false, features = ["astra-hosted"] }
 tracing.workspace = true
+crossbeam-channel.workspace = true
 anyhow = "1"
 pollster = "0.3"
 

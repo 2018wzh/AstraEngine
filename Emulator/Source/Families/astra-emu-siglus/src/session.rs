@@ -54,11 +54,7 @@ pub(crate) fn boot(
     let (width, height) = resolve_screen_size(&game_path)?;
 
     let audio = PcmBridge::new(sink)?;
-    hosted_tap::install(
-        audio.tap_callback(),
-        audio.cancel_callback(),
-        audio::OUTPUT_FORMAT.sample_rate,
-    );
+    hosted_tap::install(audio.tap_factory(), audio::OUTPUT_FORMAT.sample_rate);
     siglus_scene_vm::platform_time::hosted_clock::enable();
 
     let boot_result = boot_engine(&game_path, width, height, audio);
