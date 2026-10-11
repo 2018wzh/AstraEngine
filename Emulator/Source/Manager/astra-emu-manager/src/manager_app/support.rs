@@ -154,38 +154,6 @@ pub(super) fn parse_game_roots() -> Vec<PathBuf> {
     roots
 }
 
-pub(super) fn enumerate_directories(root: &Path) -> Result<Vec<PathBuf>, String> {
-    let root = fs::canonicalize(root).map_err(|_| "ASTRA_EMU_GAME_DIRECTORY_INVALID".to_owned())?;
-    if !root.is_dir() {
-        return Err("ASTRA_EMU_GAME_DIRECTORY_NOT_DIRECTORY".into());
-    }
-    let mut result = Vec::new();
-    let mut queue = vec![(root, 0_usize)];
-    while let Some((directory, depth)) = queue.pop() {
-        if result.len() >= MAX_SCAN_DIRECTORIES {
-            return Err("ASTRA_EMU_GAME_DIRECTORY_BOUNDS".into());
-        }
-        result.push(directory.clone());
-        if depth >= MAX_SCAN_DEPTH {
-            continue;
-        }
-        for entry in fs::read_dir(&directory)
-            .map_err(|_| "ASTRA_EMU_GAME_DIRECTORY_ENUMERATION".to_owned())?
-        {
-            let entry = entry.map_err(|_| "ASTRA_EMU_GAME_DIRECTORY_ENUMERATION".to_owned())?;
-            let file_type = entry
-                .file_type()
-                .map_err(|_| "ASTRA_EMU_GAME_DIRECTORY_ENUMERATION".to_owned())?;
-            if file_type.is_dir() && !file_type.is_symlink() {
-                queue.push((entry.path(), depth + 1));
-            }
-        }
-    }
-    result.sort();
-    result.dedup();
-    Ok(result)
-}
-
 pub(super) fn human_duration(ms: i64) -> String {
     let seconds = (ms.max(0) / 1000) as u64;
     let hours = seconds / 3600;

@@ -52,6 +52,8 @@ impl AstraEmuManagerController {
         );
         paths.sort();
         paths.dedup();
+        self.candidates.clear();
+        self.probe_choices.clear();
         self.diagnostic.clear();
         let mut missing = 0;
         for path in &paths {
@@ -65,7 +67,9 @@ impl AstraEmuManagerController {
             self.scan_paths(&paths)?;
         }
         if missing > 0 {
-            self.diagnostic = format!("有 {missing} 个游戏目录当前不可用。资料库信息已保留，恢复目录后点击“扫描游戏”。");
+            self.diagnostic = format!(
+                "有 {missing} 个游戏目录当前不可用。资料库信息已保留，恢复目录后点击“扫描游戏”。"
+            );
         }
         if self.selected_case_id.is_none() {
             self.selected_case_id = self

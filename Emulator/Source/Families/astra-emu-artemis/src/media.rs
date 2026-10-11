@@ -10,7 +10,7 @@ use crate::error;
 use art3m1s_core::host_events::{HostEvents, EVENT_KIND_LOG, EVENT_KIND_MEDIA, EVENT_KIND_UI};
 use art3m1s_core::host_files::HostResources;
 use art3m1s_core::media::MediaSource;
-use astra_emu_family_api::FamilyResult;
+use astra_emu_family_api::{FamilyResult, FamilyWindowCommand};
 use serde::Deserialize;
 
 use crate::audio::{Channel, MixerCommand, SourcePair};
@@ -84,6 +84,7 @@ struct VolumePayload {
 pub(crate) fn drain(
     events: &HostEvents,
     resources: &HostResources,
+    caption: &mut Option<FamilyWindowCommand>,
 ) -> FamilyResult<Vec<MixerCommand>> {
     if events.dropped_events() != 0 {
         return Err(invalid());
@@ -146,10 +147,7 @@ pub(crate) fn drain(
                 }
                 EVENT_KIND_MEDIA => commands.extend(parse_media(payload, resources)?),
                 EVENT_KIND_UI => {
-                    return Err(error::invalid(
-                        "ASTRA_EMU_ARTEMIS_UI_UNSUPPORTED",
-                        "native UI request is not connected",
-                    ))
+                    *caption = Some(parse_ui(payload)?);
                 }
                 _ => return Err(invalid()),
             }
@@ -159,6 +157,27 @@ pub(crate) fn drain(
         }
     }
     Ok(commands)
+}
+fn parse_ui(bytes: &[u8]) -> FamilyResult<FamilyWindowCommand> {
+    let envelope: CommandEnvelope = serde_json::from_slice(bytes).map_err(|_| invalid())?;
+    if envelope.kind == "caption" {
+        #[derive(Deserialize)]
+        struct Caption {
+            data: String,
+        }
+        let caption: Caption = parse(envelope.payload)?;
+        let command = FamilyWindowCommand::SetTitle(caption.data.into());
+        command.validate()?;
+        Ok(command)
+    } else {
+        Err(error::invalid(
+            "ASTRA_EMU_ARTEMIS_UI_UNSUPPORTED",
+            format!(
+                "native UI request is not connected: {}",
+                envelope.kind.chars().take(128).collect::<String>()
+            ),
+        ))
+    }
 }
 fn invalid() -> astra_emu_family_api::FamilyError {
     error::invalid(
@@ -278,7 +297,7 @@ mod tests {
         let events = HostEvents::new();
         events.set_enabled(true);
         events.push_media("video_play", "{}");
-        assert!(drain(&events, &HostResources::new()).is_err());
+        assert!(drain(&events, &HostResources::new(), &mut None).is_err());
         events.set_enabled(false);
     }
     #[test]
@@ -296,5 +315,20 @@ mod tests {
         assert_eq!(compat_gain(Some(1)), 0.001);
         assert_eq!(compat_gain(Some(1000)), 1.0);
         assert_eq!(compat_pan(Some(-1)), -0.001);
+    }
+    #[test]
+    fn native_caption_uses_the_host_window_title_contract() {
+        let command = parse_ui(br#"{"kind":"caption","payload":{"data":"Native game"}}"#).unwrap();
+        assert!(
+            matches!(command, FamilyWindowCommand::SetTitle(title) if title.as_str() == "Native game")
+        );
+        assert!(parse_ui(br#"{"kind":"caption","payload":{"data":"bad\ncaption"}}"#).is_err());
+        assert!(parse_ui(br#"{"kind":"caption","payload":{"data":42}}"#).is_err());
+    }
+    #[test]
+    fn unsupported_native_ui_still_fails_with_the_request_kind() {
+        let error = parse_ui(br#"{"kind":"dialog_show","payload":{}}"#).unwrap_err();
+        assert_eq!(error.code(), "ASTRA_EMU_ARTEMIS_UI_UNSUPPORTED");
+        assert!(error.to_string().contains("dialog_show"));
     }
 }

@@ -127,6 +127,7 @@ impl ActiveFamilySession {
                 return Err(error.to_string());
             }
         };
+        let core_finished = tracing::enabled!(tracing::Level::DEBUG).then(Instant::now);
         response.validate().map_err(|error| error.to_string())?;
         self.status = response.status;
         if let ROption::RSome(command) = response.window_command {
@@ -142,7 +143,16 @@ impl ActiveFamilySession {
                 }
             }
         }
+        let copy_started = core_finished.map(|_| Instant::now());
         self.capture_frame()?;
+        if let (Some(core_finished), Some(copy_started)) = (core_finished, copy_started) {
+            tracing::debug!(
+                event = "astra.emu.host.frame_timing",
+                family_id = %self.family_id,
+                core_advance_us = core_finished.duration_since(started).as_micros() as u64,
+                frame_copy_us = copy_started.elapsed().as_micros() as u64
+            );
+        }
         self.last_tick = if response.reset_clock {
             tracing::debug!(event = "astra.emu.host.clock_reset", family_id = %self.family_id);
             Instant::now()

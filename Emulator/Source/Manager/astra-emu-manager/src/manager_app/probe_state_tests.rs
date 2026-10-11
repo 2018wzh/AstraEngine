@@ -78,7 +78,9 @@ fn imported_game_selection_loads_its_input_mapping() {
     let root = tempfile::tempdir().unwrap();
     let path = game(root.path());
     let mut app = controller(root.path());
-    app.registry.register_provider(provider("test-a", 9_000)).unwrap();
+    app.registry
+        .register_provider(provider("test-a", 9_000))
+        .unwrap();
     app.input_mapping.deadzone = GamepadDeadzone::High;
     let model = app.add_game_directory(&path).unwrap();
     assert_eq!(model.selected_case_id, Some(path_id(&path)));
@@ -90,7 +92,9 @@ fn unsupported_import_reports_the_selected_directory_with_existing_games() {
     let root = tempfile::tempdir().unwrap();
     let path = game(root.path());
     let mut app = controller(root.path());
-    app.registry.register_provider(provider("test-a", 9_000)).unwrap();
+    app.registry
+        .register_provider(provider("test-a", 9_000))
+        .unwrap();
     app.add_game_directory(&path).unwrap();
     let unsupported = root.path().join("unsupported");
     std::fs::create_dir(&unsupported).unwrap();
@@ -100,14 +104,126 @@ fn unsupported_import_reports_the_selected_directory_with_existing_games() {
 }
 
 #[test]
+fn scanning_stops_inside_a_recognized_game() {
+    let root = tempfile::tempdir().unwrap();
+    let path = game(root.path());
+    let assets = path.join("data").join("pack");
+    std::fs::create_dir_all(&assets).unwrap();
+    std::fs::write(assets.join("match"), b"archive marker").unwrap();
+    let mut app = controller(root.path());
+    app.registry
+        .register_provider(provider("test-a", 9_000))
+        .unwrap();
+    let imported = app.scan_paths(&[root.path().into(), assets]).unwrap();
+    assert_eq!(imported, vec![path_id(&path)]);
+    assert_eq!(app.library.list_games().unwrap().len(), 1);
+}
+
+#[test]
+fn importing_a_parent_keeps_the_existing_game_id_and_settings() {
+    let root = tempfile::tempdir().unwrap();
+    let path = game(root.path());
+    let alias = PathBuf::from(format!("{}{}", path.display(), std::path::MAIN_SEPARATOR));
+    let id = path_id(&alias);
+    let mut app = controller(root.path());
+    app.registry
+        .register_provider(provider("test-a", 9_000))
+        .unwrap();
+    app.library
+        .add_game(&GameRecord {
+            game_id: id.clone(),
+            title: "game".into(),
+            user_title: Some("My game".into()),
+            location: alias.to_str().unwrap().into(),
+            family_id: Some("fixture".into()),
+            content_fingerprint: None,
+            added_at_unix_ms: 1,
+        })
+        .unwrap();
+    app.library
+        .set_game_settings(
+            &id,
+            &astra_emu_manager_core::GameSettings {
+                input_mapping: Some(default_vn_preset()),
+            },
+        )
+        .unwrap();
+    let imported = app.scan_paths(&[root.path().into()]).unwrap();
+    assert_eq!(imported, vec![id.clone()]);
+    assert_eq!(app.library.list_games().unwrap().len(), 1);
+    assert_eq!(
+        app.library
+            .game(&id)
+            .unwrap()
+            .unwrap()
+            .user_title
+            .as_deref(),
+        Some("My game")
+    );
+    assert!(app
+        .library
+        .game_settings(&id)
+        .unwrap()
+        .unwrap()
+        .input_mapping
+        .is_some());
+}
+
+#[test]
+fn scanning_existing_path_aliases_keeps_both_records_without_a_location_conflict() {
+    let root = tempfile::tempdir().unwrap();
+    let path = game(root.path());
+    let alias = root.path().join(".").join("game");
+    let mut app = controller(root.path());
+    app.registry
+        .register_provider(provider("test-a", 9_000))
+        .unwrap();
+    for (id, location) in [("original", &alias), ("canonical", &path)] {
+        app.library
+            .add_game(&GameRecord {
+                game_id: id.into(),
+                title: "game".into(),
+                user_title: Some(id.into()),
+                location: location.to_str().unwrap().into(),
+                family_id: Some("fixture".into()),
+                content_fingerprint: None,
+                added_at_unix_ms: 1,
+            })
+            .unwrap();
+    }
+    app.rescan().unwrap();
+    assert_eq!(app.library.list_games().unwrap().len(), 2);
+    assert_eq!(
+        app.library.game("original").unwrap().unwrap().location,
+        alias.to_str().unwrap()
+    );
+    assert_eq!(
+        app.library.game("canonical").unwrap().unwrap().location,
+        path.to_str().unwrap()
+    );
+    assert!(app.candidates.contains_key("canonical"));
+    assert!(app.candidates.contains_key("original"));
+    std::fs::remove_file(path.join("match")).unwrap();
+    app.rescan().unwrap();
+    assert!(app.candidates.is_empty());
+    for id in ["original", "canonical"] {
+        assert_eq!(app.library.game(id).unwrap().unwrap().family_id, None);
+    }
+}
+
+#[test]
 fn unavailable_game_does_not_block_library_startup_or_lose_metadata() {
     let root = tempfile::tempdir().unwrap();
     let path = game(root.path());
     let id = path_id(&path);
     let mut app = controller(root.path());
-    app.registry.register_provider(provider("test-a", 9_000)).unwrap();
+    app.registry
+        .register_provider(provider("test-a", 9_000))
+        .unwrap();
     scan_once(&mut app, &path);
-    app.library.set_game_user_title(&id, Some("Saved title")).unwrap();
+    app.library
+        .set_game_user_title(&id, Some("Saved title"))
+        .unwrap();
     std::fs::remove_dir_all(&path).unwrap();
     let model = app.rescan().unwrap();
     assert_eq!(model.games.len(), 1);
@@ -268,10 +384,7 @@ fn rescan_replaces_stale_provider_choice_with_current_candidate() {
     scan_once(&mut app, &game_path);
 
     assert!(!app.probe_choices.contains_key(&id));
-    assert_eq!(
-        app.candidates.get(&id).unwrap().report.plugin_id,
-        "test-b"
-    );
+    assert_eq!(app.candidates.get(&id).unwrap().report.plugin_id, "test-b");
     assert!(!app.family_options.contains_key("family.plugin_id"));
     assert_eq!(
         app.family_config_changed("family.plugin_id", "test-a")

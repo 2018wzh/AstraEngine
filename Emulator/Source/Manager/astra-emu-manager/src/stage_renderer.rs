@@ -2,14 +2,15 @@ use std::{
     env,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
+    time::Instant,
 };
 
 use astra_emu_family_api::{FamilyResult, FrameAlpha, FrameFormat, FrameView, FrameVisitor};
-use astra_media_core::{Canvas2D, Extent2D, Viewport2D};
 use astra_emu_manager::{
     effects::{FilterConfiguration, FilterEngine},
     AstraUnderlayRenderer, StageTextureUpdate, WgpuFrameContext,
 };
+use astra_media_core::{Canvas2D, Extent2D, Viewport2D};
 use wgpu::{Extent3d, TextureUsages};
 
 const DEFAULT_STAGE_WIDTH: u32 = 800;
@@ -245,6 +246,7 @@ impl AstraUnderlayRenderer for ManagerStageRenderer {
         if frame.generation <= self.uploaded_generation && !self.filter_dirty {
             return Ok(());
         }
+        let started = tracing::enabled!(tracing::Level::DEBUG).then(Instant::now);
         let row_bytes = frame
             .width
             .checked_mul(BYTES_PER_PIXEL)
@@ -279,7 +281,8 @@ impl AstraUnderlayRenderer for ManagerStageRenderer {
             self.output_height = output_height;
             self.texture_dirty = true;
         }
-        if self.logical_width != frame.logical_width || self.logical_height != frame.logical_height {
+        if self.logical_width != frame.logical_width || self.logical_height != frame.logical_height
+        {
             self.logical_width = frame.logical_width;
             self.logical_height = frame.logical_height;
             self.texture_dirty = true;
@@ -328,6 +331,15 @@ impl AstraUnderlayRenderer for ManagerStageRenderer {
             self.uploaded_generation = frame.generation;
         }
         self.filter_dirty = false;
+        if let Some(started) = started {
+            tracing::debug!(
+                event = "astra.emu.host.render_submission_timing",
+                generation = frame.generation,
+                raster_width = frame.width,
+                raster_height = frame.height,
+                cpu_submission_us = started.elapsed().as_micros() as u64
+            );
+        }
         Ok(())
     }
 
