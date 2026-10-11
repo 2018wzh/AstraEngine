@@ -6,7 +6,7 @@ SDK 提供移植核心共同使用的模块，当前替代 Musica 内部的文�
 
 `decode_audio` 复用 Symphonia 和 Kira，将完整单/双声道音频解码为浮点帧。同步调用借用 `&[u8]`，调用方保留归档或容器的字节所有者，返回的 PCM 独立持有采样；不要求将共享缓冲或容器子范围复制为 `Vec`。调用方指定最大帧数并持有取消标志；探测前和包之间检查取消，采样率变化、非有限采样、解码失败或超预算均明确失败。Musica 的旧解码模块已删除，读取资产时保留 `astra-byte-source::OwnedByteBuffer`；CMVS 用同一函数处理普通音频和经核心校验的 MGV 内嵌 Ogg。旧的按值 `Vec` 参数直接改为借用切片，不保留并行解码入口。此模块不创建音频设备或 worker，也不代替流式长媒体播放。
 
-`archive` 复用 `astra-byte-source` 提供本地归档节点、读取结果和索引校验，不提供 Host VFS、registry 或挂载工厂。`ArchiveManifest` 使用 `astra.emu.archive_manifest.v1`，是核心内部索引，不是产品 package。Musica 原来的 `Paz*` 公共读取类型已改为相同的 `Archive*` 类型，不保留别名。
+`archive` 复用 `astra-byte-source` 提供本地归档节点、读取结果和索引校验，不提供 Host VFS、registry 或挂载工厂。`ArchiveManifest` 使用 `astra.emu.archive_manifest.v2`，是核心内部索引，不是产品 package。来源与条目的 `source_revision` 表示核心提供的索引/文件版本身份，并不声称是完整资源内容校验和；条目必须与其来源版本一致。核心可使用已读取的归档索引、分卷长度和修改时间生成该身份，不要求启动时扫描全部资产。`CacheIdentity` 使用相同字段及 v2 身份命名空间；旧字段和旧 manifest schema 直接移除，不保留兼容接口。Musica 原来的 `Paz*` 公共读取类型已改为相同的 `Archive*` 类型，不保留别名。
 
 `read_game_profile` 有界读取私有 JSON；相对配置路径以游戏目录为基准，绝对路径仍须位于游戏目录内。`resolve_game_file` 校验相对路径和 canonical 目录归属。错误码使用公共 `ASTRA_EMU_PROFILE_*`，解析失败不回显原文、不写文件。`cache` 复用原 Musica 的有界明文缓存、来源身份校验、淘汰和系统权限实现；是否创建磁盘缓存由核心明确选择。
 

@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::CoreError;
 
 pub const ARCHIVE_MAX_READ_BYTES: u64 = 64 * 1024 * 1024;
-pub const ARCHIVE_MANIFEST_SCHEMA: &str = "astra.emu.archive_manifest.v1";
+pub const ARCHIVE_MANIFEST_SCHEMA: &str = "astra.emu.archive_manifest.v2";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -55,7 +55,8 @@ pub struct ArchiveSource {
     pub archive_role: Option<String>,
     pub byte_size: u64,
     pub part_count: u32,
-    pub source_hash: Hash256,
+    /// Family-defined index/file generation identity, not a full content checksum.
+    pub source_revision: Hash256,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -66,7 +67,8 @@ pub struct ArchiveEntry {
     pub source_offset: u64,
     pub stored_size: u64,
     pub decoded_size: u64,
-    pub source_hash: Hash256,
+    /// Family-defined index/file generation identity, not a full content checksum.
+    pub source_revision: Hash256,
     pub content_hash: Option<Hash256>,
     pub method: String,
     pub media_kind: String,
@@ -153,6 +155,7 @@ impl ArchiveManifest {
                 || entry.stored_size == 0
                 || entry.decoded_size == 0
                 || end > source.byte_size
+                || entry.source_revision != source.source_revision
             {
                 return Err(error(
                     "ASTRA_EMU_VFS_ENTRY",

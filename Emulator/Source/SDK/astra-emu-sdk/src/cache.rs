@@ -19,7 +19,8 @@ const CACHE_HEADER_BYTES: usize = 8 + 8 + 32;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CacheIdentity {
     pub family_id: String,
-    pub source_hash: Hash256,
+    /// Generation of the source index and file; it need not scan source payloads.
+    pub source_revision: Hash256,
     pub entry_id: String,
     pub private_profile_hash: Hash256,
     pub decrypt_provider_id: String,
@@ -30,9 +31,9 @@ pub struct CacheIdentity {
 impl CacheIdentity {
     pub fn file_name(&self) -> String {
         let material = format!(
-            "{}\0{}\0{}\0{}\0{}\0{}\0{}",
+            "astra.emu.cache_identity.v2\0{}\0{}\0{}\0{}\0{}\0{}\0{}",
             self.family_id,
-            self.source_hash,
+            self.source_revision,
             self.entry_id,
             self.private_profile_hash,
             self.decrypt_provider_id,
@@ -338,7 +339,7 @@ mod tests {
     fn identity(entry: &str) -> CacheIdentity {
         CacheIdentity {
             family_id: "fixture".into(),
-            source_hash: Hash256::from_sha256(b"source"),
+            source_revision: Hash256::from_sha256(b"source"),
             entry_id: entry.into(),
             private_profile_hash: Hash256::from_sha256(b"private"),
             decrypt_provider_id: "fixture.decrypt.v1".into(),
