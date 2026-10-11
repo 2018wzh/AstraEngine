@@ -6,12 +6,12 @@ to an exact local adaptation commit in the
 [`2018wzh/siglus_rs`](https://github.com/2018wzh/siglus_rs) fork. That branch
 starts from upstream commit `e762f9f9c1c94cb490fb13f1367fd06f3e1367b4` (2026-09-13)
 plus a single adaptation commit
-(`473cb7a282b0b5b4e60d5568019e40ed4774a58e`). This local commit consolidates
+(`626530430a422dd83f58ac47f85f382b1c7b1d4a`). This local commit consolidates
 the original hosted adaptation `2be01ae` and local cancellation/GPU changes
 `a9508e6`; both original commits remain available without rewriting their
 history. The previous consolidated commit `c6c4f99ccac855966b726909756afe3200488374`
 and its branch remain unchanged. The current local branch is
-`codex/hosted-mixer-scopes`; its commit has not been pushed, so a remote
+`codex/hosted-lifecycle`; its commit has not been pushed, so a remote
 clean checkout and CI are not yet available for this gitlink. The complete MPL-2.0 text stays
 in `../../../ThirdParty/siglus_rs/LICENSE-MPL-2.0`; `THIRD_PARTY_NOTICES.md`
 records the attribution chain.
@@ -142,3 +142,12 @@ machine in `siglus_scene_vm`, not adapter changes.
 ## Manager diagnostics
 
 The Family adapter installs the shared optional Family API v7 diagnostic bridge before descriptor/probe/open. Existing core tracing and log events reach the Manager sink without adding a core logger or changing native rendering/platform behavior. The bridge forwards bounded text and Debug values without content redaction; Manager-side field and size limits remain in force.
+
+## Native lifecycle notifications
+
+The embedded EndGame proc sets `pending_exit`, matching the existing desktop
+shell. Successful native load completion and return to menu set a consumed
+`SiglusHost::take_timeline_reset` notification. The Family reports `reset_clock`
+after advancing so the Manager restarts timing after frame readback. VM, native
+save format and native renderer behavior remain unchanged. The earlier
+`473cb7a` adaptation is retained on its original local branch.
