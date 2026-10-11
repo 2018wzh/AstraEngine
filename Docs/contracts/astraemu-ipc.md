@@ -4,7 +4,7 @@ AstraEMU 采用独立 Host 与 in-process family plugin。旧 `LegacyRuntimeProv
 
 ## 描述与生命周期
 
-Family descriptor 声明稳定 family/plugin identity、独立 ABI identity、格式与 capability。静态与动态插件使用相同接口；动态库在所有 session、回调和借用释放之后才能卸载。未知 ABI、缺少必要能力和不合法 descriptor 必须在打开游戏之前失败。
+Family descriptor 声明稳定 family/plugin identity、独立 ABI identity、格式与 capability。静态与动态插件使用相同接口；动态库驻留至进程退出，关闭 session 仍须释放其回调、借用和 worker。未知 ABI、缺少必要能力和不合法 descriptor 必须在打开游戏之前失败。
 
 Host 调用 probe 后显式选择 Family；多项命中不依赖注册顺序。打开时传游戏位置，之后通过 elapsed advance、物理 input 和 window event 推进。Family 自行解释原生脚本并管理原生文件和存档，不接收 Host save root。整个进程只允许一个活动 session。焦点和前后台事件交给 Family 决定行为。
 
@@ -30,6 +30,11 @@ Host 将复制后的最终帧上传到 Slint 共享 wgpu device，执行 HLSL �
 
 ## 测试与迁移
 
-新 ABI 替换旧接口与 loader，旧 Manager 数据明确重建，游戏原生存档保持由 Family 管理。ABI 需要覆盖无效 descriptor、frame bounds、PCM format、取消与关闭、插件卸载顺序及 translation capability。产品测试覆盖资料库、原生输入、音视频、系统页、存读档、退出冷启动和授权游戏任一结局；本轮不创建新的 evidence/report 留存体系。
+新 ABI 替换旧接口与 loader，旧 Manager 数据明确重建，游戏原生存档保持由 Family 管理。ABI 需要覆盖无效 descriptor、frame bounds、PCM format、取消与关闭、进程驻留库与 session 释放顺序及 translation capability。产品测试覆盖资料库、原生输入、音视频、系统页、存读档、退出冷启动和授权游戏任一结局；本轮不创建新的 evidence/report 留存体系。
 
 Rust 类型是具体字段和 ABI layout 的真源：[Family API](../../Emulator/Source/FamilyApi/astra-emu-family-api/src/lib.rs)。状态见 [实施状态](../status/implementation-plan.md)。
+
+## 客户端核心发现
+
+桌面 Manager 从程序相邻的 `cores/` 和系统用户数据目录的 `cores/` 一次收集动态 Family 库。相同物理文件只加载一次；不同文件声明相同 plugin ID 时全部拒绝，不通过目录优先级替换。核心库驻留至进程退出，安装或更新后重启客户端。
+

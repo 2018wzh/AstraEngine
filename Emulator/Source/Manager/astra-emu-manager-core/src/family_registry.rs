@@ -123,7 +123,26 @@ impl FamilyProviderRegistry {
         &mut self,
         directory: impl AsRef<Path>,
     ) -> Result<FamilyDirectoryLoadReport, FamilyLoadError> {
-        let paths = discover_family_libraries(directory.as_ref())?;
+        self.load_directories(&[directory.as_ref().to_owned()])
+    }
+
+    /// Reject duplicate plugin IDs across bundled and user-installed cores.
+    pub fn load_directories(
+        &mut self,
+        directories: &[PathBuf],
+    ) -> Result<FamilyDirectoryLoadReport, FamilyLoadError> {
+        let mut paths = Vec::new();
+        let mut identities = BTreeSet::new();
+        for directory in directories {
+            for path in discover_family_libraries(directory)? {
+                let identity = fs::canonicalize(&path).map_err(|_| FamilyLoadError::InvalidPath)?;
+                if identities.insert(identity) {
+                    paths.push(path);
+                }
+            }
+        }
+        paths.sort();
+        paths.dedup();
         let mut candidates = BTreeMap::<String, (PathBuf, LoadedFamilyPlugin)>::new();
         let mut duplicate_ids = BTreeSet::new();
         let mut report = FamilyDirectoryLoadReport::default();
