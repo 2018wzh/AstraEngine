@@ -10,11 +10,11 @@ Siglus 启动场景重置析构旧混音器时，错误取消了整个 Host 音�
 
 更新后的实际 Sandbox 窗口完成 Rewrite+ 标题、Start、开场 WMV 完整播放至结束、正文输入、原生空槽保存、原生读档，以及 Manager 结束会话后重开并从标题读回同一槽。读档直接恢复 CG 与文字，Enter 可继续。音频仍为 NullAudio，未计可听音频或完整路线通过。普通 elapsed 已保留亚毫秒余量并移除静默截断；三个 CPU 回归通过，一个硬件 GPU 回归未运行，all-target Clippy 与 Release 构建通过。实际读档及返回原生标题均收到 Host `clock_reset`。
 
-原生 Exit 黑屏的剩余根因已从运行中客户端定位：`paused=true` 时流程栈仍有待处理项，嵌入入口的泵却直接返回。该入口没有桌面 debugger 的 pause/step 恢复操作，已移除复制来的停顿锁，同时保留原生退出通知及 `GameEndWipe`/`TimeWait` 轮询。增量 all-target Clippy 与 Release 构建通过。新版实际窗口完成标题 Exit 返回 Manager，重新启动并从标题读回槽 001，CG 与文字直接恢复，Enter 推进；正文 Quit 确认后也正常返回 Manager，不再停在黑屏。正文 Quit 鼠标点击仍需 Enter 才打开确认框，这个输入问题尚未解决。诊断器附加期间结束的客户端不计正常退出通过。
+原生 Exit 黑屏的剩余根因已从运行中客户端定位：`paused=true` 时流程栈仍有待处理项，嵌入入口的泵却直接返回。该入口没有桌面 debugger 的 pause/step 恢复操作，已移除复制来的停顿锁，同时保留原生退出通知及 `GameEndWipe`/`TimeWait` 轮询。增量 all-target Clippy 与 Release 构建通过。新版实际窗口完成标题 Exit 返回 Manager，重新启动并从标题读回槽 001，CG 与文字直接恢复，Enter 推进；正文 Quit 确认后也正常返回 Manager，不再停在黑屏。正文鼠标菜单的后续调试定位到另一处调度遗漏：子脚本入栈并解除原正文等待后，泵直接返回，未执行已可运行的子脚本。现在复用已有等待作用域，并在入栈后立即继续泵；增量 Clippy 与 Release 构建通过。新版实际窗口完成鼠标 Quit 直接弹框、No 返回正文并用 Enter 推进、Title 确认返回标题、Exit 返回 Manager，以及同一 Manager 重开、标题读档和鼠标 Quit→Yes 退出，菜单操作不再需要额外 Enter。诊断器附加期间结束的客户端不计正常退出通过。
 
 Siglus 开场演出的 30 秒开发采样中，Host advance 为 23.75 Hz，core advance 的 p50/p95 为 9.432/17.198 ms，帧复制为 12.139/23.243 ms。采样时独立 KrKr 依赖正在构建，场景持续变化，且 Sandbox 显示报告 32 Hz；该结果不计原生速率或正式可玩性能通过。
 
-首次窗口尺寸适配已移到 Slint 创建原生窗口之后，并使用 Slint 的最大化属性；此前事件循环启动前的 winit 访问没有生效。Manager all-target Clippy 与 Release 构建通过，新进程实际首次启动已自动适配完整窗口，无需手动最大化。KrKr 已从固定原生适配提交创建独立检出，复用准备好的私有依赖工具并开始原生依赖构建；Rust Family 桥接及 child 的 Release all-target Clippy、构建已通过；原生依赖仍在构建，尚未完成 OFF/ON 编译或真实游戏流程。
+首次窗口尺寸适配已移到 Slint 创建原生窗口之后，并使用 Slint 的最大化属性；此前事件循环启动前的 winit 访问没有生效。Manager all-target Clippy 与 Release 构建通过，新进程实际首次启动已自动适配完整窗口，无需手动最大化。KrKr 已从固定原生适配提交创建独立检出，复用准备好的私有依赖工具并开始原生依赖构建；Rust Family 桥接及 child 的 Release all-target Clippy、构建已通过；FFmpeg 3.3.9 汇编探测已通过显式寻址模式修正，未关闭汇编或更换版本；该依赖的 Release 与 Debug 已编译安装，其余原生依赖继续构建。当前独立检出的 OFF/ON 编译及真实游戏流程尚未完成。
 
 ## 2026-10-11 AstraEMU 客户端交付优先
 
