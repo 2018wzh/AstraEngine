@@ -16,7 +16,7 @@ FVP 保留原生字体语义，要求系统提供 `MS Gothic`；脚本请求其�
 
 当前 Windows 开发包已检查 FVP 游戏导入、标题与正文、输入、原生存档写入以及会话关闭重开。该游戏读档后会先恢复到保存菜单，点击游戏菜单的 `EXIT` 可返回所保存的剧情并继续推进；直接返回剧情的行为仍待修正。Sandbox 本次没有可用音频设备，使用 NullAudio，未完成可听音频、结局或性能验收。
 
-其他核心的真实样本仍在检查。CMVS 样本启动后在命令 548 处报告 `ASTRA_EMU_CMVS_ACTION_UNBOUND`，当前部分实现无法继续该游戏。Siglus 的 Release 包未重现此前 Debug shader 栈溢出；不透明帧与混音器独立取消修复后，实际窗口完成 Rewrite+ 标题、开场 WMV 播放至结束、正文输入、原生存读档，以及 Manager 结束会话后重开并从标题读档。读档直接恢复 CG 与文字并可继续剧情，但原生 Quit 确认后停在黑屏，退出通知与原生流程轮询修复已编译，但实测仍未解决黑屏，不能声明完整路线可玩。Artemis 已通过原生启动媒体、标题、剧情、输入、普通存档及退出重开；标题读档能恢复 CG 并继续推进，但保存处文字需首次 Enter 重显，完整恢复尚未通过。未实现的 UI 或媒体请求仍明确失败。开发包的编译结果不能作为可玩或性能结论；实际游戏与性能检查使用 Release 包。调试统计中的 `core_advance_us` 是 Family advance 耗时，`frame_capture_us` 包含 Family 帧访问、可能的 GPU 回读及 Host 复制，`cpu_submission_us` 是 Host 提交 CPU 耗时，不表示 GPU 完成时间。
+其他核心的真实样本仍在检查。CMVS 样本启动后在命令 548 处报告 `ASTRA_EMU_CMVS_ACTION_UNBOUND`，当前部分实现无法继续该游戏。Siglus 的 Release 包未重现此前 Debug shader 栈溢出；不透明帧与混音器独立取消修复后，实际窗口完成 Rewrite+ 标题、开场 WMV 播放至结束、正文输入、原生存读档，以及 Manager 结束会话后重开并从标题读档。读档直接恢复 CG 与文字并可继续剧情，原生标题 Exit 已正常返回 Manager，随后重开、标题读档、正文推进及 Quit 确认后退出也已完成。正文 Quit 鼠标点击仍需 Enter 才出现确认框，菜单鼠标流程尚未完成，不能声明完整路线可玩。Artemis 已通过原生启动媒体、标题、剧情、输入、普通存档及退出重开；标题读档能恢复 CG 并继续推进，但保存处文字需首次 Enter 重显，完整恢复尚未通过。未实现的 UI 或媒体请求仍明确失败。开发包的编译结果不能作为可玩或性能结论；实际游戏与性能检查使用 Release 包。调试统计中的 `core_advance_us` 是 Family advance 耗时，`frame_capture_us` 包含 Family 帧访问、可能的 GPU 回读及 Host 复制，`cpu_submission_us` 是 Host 提交 CPU 耗时，不表示 GPU 完成时间。
 
 本轮 Sandbox 的显示模式报告为 32 Hz，Slint 使用该频率进行窗口节流。实际窗口约 28–30 FPS 与这一限制相符，不能证明达到 60 Hz。核心推进、帧读取与 Host 提交开销分别测量，不通过更改宿主配置或强制重绘替代原生速率验收。
 

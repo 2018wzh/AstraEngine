@@ -10,7 +10,7 @@ Siglus 启动场景重置析构旧混音器时，错误取消了整个 Host 音�
 
 更新后的实际 Sandbox 窗口完成 Rewrite+ 标题、Start、开场 WMV 完整播放至结束、正文输入、原生空槽保存、原生读档，以及 Manager 结束会话后重开并从标题读回同一槽。读档直接恢复 CG 与文字，Enter 可继续。音频仍为 NullAudio，未计可听音频或完整路线通过。普通 elapsed 已保留亚毫秒余量并移除静默截断；三个 CPU 回归通过，一个硬件 GPU 回归未运行，all-target Clippy 与 Release 构建通过。实际读档及返回原生标题均收到 Host `clock_reset`。
 
-原生 Quit/Exit 仍出现黑屏，未返回 Manager。嵌入入口既遗漏桌面 shell 的 `pending_exit` 赋值，也只轮询 `VmWait`，未继续轮询原生 `ProcFlow` 的 `GameEndWipe`/`TimeWait`；已补上这两处，第二次 all-target Clippy 与 Release 构建通过，但实际标题 Exit 仍停在黑屏，额外 Enter 也未结束。正在附加运行中客户端读取原生流程与等待状态，尚未确定剩余根因。正文原生菜单鼠标点击还出现等待额外 Enter 处理的情况，尚未解决。诊断期间结束的客户端不计正常退出通过。
+原生 Exit 黑屏的剩余根因已从运行中客户端定位：`paused=true` 时流程栈仍有待处理项，嵌入入口的泵却直接返回。该入口没有桌面 debugger 的 pause/step 恢复操作，已移除复制来的停顿锁，同时保留原生退出通知及 `GameEndWipe`/`TimeWait` 轮询。增量 all-target Clippy 与 Release 构建通过。新版实际窗口完成标题 Exit 返回 Manager，重新启动并从标题读回槽 001，CG 与文字直接恢复，Enter 推进；正文 Quit 确认后也正常返回 Manager，不再停在黑屏。正文 Quit 鼠标点击仍需 Enter 才打开确认框，这个输入问题尚未解决。诊断器附加期间结束的客户端不计正常退出通过。
 
 Siglus 开场演出的 30 秒开发采样中，Host advance 为 23.75 Hz，core advance 的 p50/p95 为 9.432/17.198 ms，帧复制为 12.139/23.243 ms。采样时独立 KrKr 依赖正在构建，场景持续变化，且 Sandbox 显示报告 32 Hz；该结果不计原生速率或正式可玩性能通过。
 

@@ -6,12 +6,12 @@ to an exact local adaptation commit in the
 [`2018wzh/siglus_rs`](https://github.com/2018wzh/siglus_rs) fork. That branch
 starts from upstream commit `e762f9f9c1c94cb490fb13f1367fd06f3e1367b4` (2026-09-13)
 plus a single adaptation commit
-(`4e7706582c7e16292c688f7d57d9bcb4900913a8`). This local commit consolidates
+(`a3c22cdb5f0ca00cfee6ecbc013386cae9470645`). This local commit consolidates
 the original hosted adaptation `2be01ae` and local cancellation/GPU changes
 `a9508e6`; both original commits remain available without rewriting their
 history. The previous consolidated commit `c6c4f99ccac855966b726909756afe3200488374`
 and its branch remain unchanged. The current local branch is
-`codex/hosted-proc-poll`; its commit has not been pushed, so a remote
+`codex/hosted-flow-active`; its commit has not been pushed, so a remote
 clean checkout and CI are not yet available for this gitlink. The complete MPL-2.0 text stays
 in `../../../ThirdParty/siglus_rs/LICENSE-MPL-2.0`; `THIRD_PARTY_NOTICES.md`
 records the attribution chain.
@@ -161,3 +161,9 @@ flow procs on subsequent frames. They are owned by `ProcFlow` rather than
 input before EndGame or menu restart could run. The native proc implementation
 and wipe semantics are reused. The previous `6265304` commit remains on its
 original local branch.
+
+The embedded driver does not expose the desktop debugger pause/step controls.
+Its copied `paused` latch is removed: an exhausted script flow must not prevent
+subsequently queued native exit, menu, or button procs from running. Actual Exit
+diagnosis found pending flow entries with the latch set, so the pump returned
+without consuming them. The previous `4e77065` adaptation remains on its branch.
