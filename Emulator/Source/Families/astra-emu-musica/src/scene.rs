@@ -153,10 +153,10 @@ impl Scene {
             raster_width = raster_extent.width,
             raster_height = raster_extent.height
         );
-        let mut text = MusicaTextRenderer::new(encoding).map_err(|_| {
+        let mut text = MusicaTextRenderer::new(encoding).map_err(|cause| {
             error(
                 "ASTRA_EMU_MUSICA_FONT",
-                "font renderer could not be created",
+                &format!("font renderer could not be created: {cause}"),
             )
         })?;
         text.set_raster_scale(canvas.scale()).map_err(|_| {

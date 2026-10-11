@@ -71,6 +71,13 @@ def package(manager: Path, cores: list[Path], output: Path, runtime_files: list[
                 repo / "Emulator/Source/Families/na_wmv_player/THIRD_PARTY_NOTICES.md",
                 destination / "THIRD_PARTY_NOTICES.md",
             )
+        if any("musica" in core.stem for core in cores):
+            destination = licenses / "noto"
+            destination.mkdir()
+            shutil.copy2(
+                repo / "Examples/NativeVN/Assets/Fonts/OFL-NotoSansJP.txt",
+                destination / "OFL.txt",
+            )
         stage.rename(output)
 
 

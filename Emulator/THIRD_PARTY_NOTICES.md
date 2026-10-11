@@ -32,6 +32,10 @@
 `73d3b4413c95a3923cce695d98c3d9bf5b08ccf0`，当前另含上述本地修改。公开适配基线不能代替当前二进制对应的 covered source；发布时必须另行提供完整源码。文件级变化和覆盖范围见该 Family
 的 `MODIFICATIONS.md` 与 `THIRD_PARTY_NOTICES.md`。RFVP core 仅作为 private `rlib` 构建，动态边界由 `astra-emu-fvp` 持有。FVP 的四个原始系统字体槽由宿主通过 `fontdb` 从已安装字体按精确 family name 绑定，仓库不再携带替代字体文件。
 
+## Noto 字体
+
+Musica 编译期嵌入 Noto Sans JP 与 Noto Sans SC，使用 SIL Open Font License 1.1。字体通过仓库 Git LFS 提供，运行包在 `licenses/noto/OFL.txt` 保留相应许可；它们不替代 FVP 请求的原生系统字体。
+
 ## WMV decoder
 
 FVP 使用仓库内的 `Emulator/Source/Families/na_wmv_player` 处理 ASF、WMV 和 WMA。该 crate 的跟踪历史缺少明确的来源和许可证说明，源码注释也不足以确定其许可。当前将来源和许可证记为未知，不推断为 LGPL、GPL 或 MIT；已有信息见该 crate 的 `THIRD_PARTY_NOTICES.md`。

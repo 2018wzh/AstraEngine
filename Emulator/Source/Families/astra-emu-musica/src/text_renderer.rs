@@ -72,7 +72,7 @@ impl MusicaTextRenderer {
             fonts,
             TextLayoutConfig::production_defaults(),
         )
-        .map_err(|_| "ASTRA_EMU_MUSICA_TEXT_PROVIDER_CREATE".to_owned())?;
+        .map_err(text_error)?;
         Ok(Self {
             scene: TextScene::new(provider),
             encoding,
