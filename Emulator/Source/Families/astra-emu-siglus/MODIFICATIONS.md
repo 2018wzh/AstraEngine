@@ -6,12 +6,12 @@ to an exact local adaptation commit in the
 [`2018wzh/siglus_rs`](https://github.com/2018wzh/siglus_rs) fork. That branch
 starts from upstream commit `e762f9f9c1c94cb490fb13f1367fd06f3e1367b4` (2026-09-13)
 plus a single adaptation commit
-(`626530430a422dd83f58ac47f85f382b1c7b1d4a`). This local commit consolidates
+(`4e7706582c7e16292c688f7d57d9bcb4900913a8`). This local commit consolidates
 the original hosted adaptation `2be01ae` and local cancellation/GPU changes
 `a9508e6`; both original commits remain available without rewriting their
 history. The previous consolidated commit `c6c4f99ccac855966b726909756afe3200488374`
 and its branch remain unchanged. The current local branch is
-`codex/hosted-lifecycle`; its commit has not been pushed, so a remote
+`codex/hosted-proc-poll`; its commit has not been pushed, so a remote
 clean checkout and CI are not yet available for this gitlink. The complete MPL-2.0 text stays
 in `../../../ThirdParty/siglus_rs/LICENSE-MPL-2.0`; `THIRD_PARTY_NOTICES.md`
 records the attribution chain.
@@ -76,7 +76,7 @@ platform behavior still requires platform-specific validation.
 
 ## Family adapter
 
-The local product rebuild adds the independent Family API v7 dynamic root
+The local product rebuild uses the independent Family API v11 dynamic root
 module and explicit configuration schema. The module rejects a second active
 session. Adapter-only game-specific trace output has been removed; bounded
 frame events use `tracing`. Failed startup also disables the hosted clock.
@@ -125,9 +125,9 @@ Save data stays in the game directory (`<game>/savedata`), owned entirely by
 the engine; the host provides only the game path. Protected retail resources
 are decrypted through the user-provided `key.toml` in the game directory.
 
-## Known route blocker (upstream)
+## Earlier route blocker (upstream)
 
-The Rewrite+ prologue stalls a few lines into the first message block: the
+An earlier headless Rewrite+ prologue run stalled a few lines into the first message block: the
 `sys40_mp20` message proc gates its entire input handling behind a per-message
 voice-completion flag (`d[700]`) that never clears in this engine, so the
 proc spins on `disp()` and ignores every input shape (single-poll clicks,
@@ -137,11 +137,14 @@ so the voice event that should clear the flag never fires. Headless route
 completion therefore stops at that point; everything before it (boot, title
 flow, opening scene, movie, and the leading dialogue lines) runs and renders
 correctly. Fixing it requires upstream work on the msg-block/voice state
-machine in `siglus_scene_vm`, not adapter changes.
+machine in `siglus_scene_vm`, not adapter changes. The updated Release window
+has since completed the opening WMV, leading dialogue, native save/load and
+session reopen/load. Those shorter interactive flows do not establish full
+route completion or resolve the previously observed voice-state limitation.
 
 ## Manager diagnostics
 
-The Family adapter installs the shared optional Family API v7 diagnostic bridge before descriptor/probe/open. Existing core tracing and log events reach the Manager sink without adding a core logger or changing native rendering/platform behavior. The bridge forwards bounded text and Debug values without content redaction; Manager-side field and size limits remain in force.
+The Family adapter installs the shared optional Family API v11 diagnostic bridge before descriptor/probe/open. Existing core tracing and log events reach the Manager sink without adding a core logger or changing native rendering/platform behavior. The bridge forwards bounded text and Debug values without content redaction; Manager-side field and size limits remain in force.
 
 ## Native lifecycle notifications
 
@@ -151,3 +154,10 @@ shell. Successful native load completion and return to menu set a consumed
 after advancing so the Manager restarts timing after frame readback. VM, native
 save format and native renderer behavior remain unchanged. The earlier
 `473cb7a` adaptation is retained on its original local branch.
+
+The embedded step also polls the existing `GameEndWipe` and `TimeWait`
+flow procs on subsequent frames. They are owned by `ProcFlow` rather than
+`VmWait`; checking only VM waits left a completed fade waiting for another
+input before EndGame or menu restart could run. The native proc implementation
+and wipe semantics are reused. The previous `6265304` commit remains on its
+original local branch.
