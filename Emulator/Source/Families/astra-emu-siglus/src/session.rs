@@ -98,7 +98,7 @@ fn boot_engine(
             "the Siglus engine produced no composed frame during boot",
         ));
     }
-    pull_frame(&mut host, &frame)?;
+    pull_frame(&host, &frame)?;
     let frame_info = frame_info(&frame)?;
 
     Ok(SiglusOpen {
@@ -192,8 +192,8 @@ fn frame_info(frame: &FrameSnapshot) -> FamilyResult<FrameInfo> {
 
 /// Reads the composed frame back from the offscreen target. A size change
 /// resizes the snapshot; the stride stays width * 4.
-fn pull_frame(host: &mut SiglusHost, frame: &FrameSnapshot) -> FamilyResult<()> {
-    let (width, height, pixels) = {
+fn pull_frame(host: &SiglusHost, frame: &FrameSnapshot) -> FamilyResult<()> {
+    let (width, height, mut pixels) = {
         let renderer = host.renderer();
         renderer
             .read_frame_rgba()
@@ -204,6 +204,12 @@ fn pull_frame(host: &mut SiglusHost, frame: &FrameSnapshot) -> FamilyResult<()> 
             "ASTRA_EMU_SIGLUS_FRAME_EMPTY",
             "the engine reported an empty frame size",
         ));
+    }
+    // The native swapchain displays RGB over its black clear; its alpha
+    // channel is render-target bookkeeping, not presentation opacity. Keep
+    // the composed RGB unchanged and publish an opaque final Family frame.
+    for pixel in pixels.as_chunks_mut::<4>().0 {
+        pixel[3] = 255;
     }
     frame.width.set(width);
     frame.height.set(height);
@@ -257,21 +263,7 @@ impl FamilySession for SiglusSession {
     fn visit_frame(&self, visitor: &mut dyn FrameVisitor) -> FamilyResult<()> {
         self.ensure_live()?;
         if self.frame_dirty.get() {
-            let (width, height, pixels) = {
-                let renderer = self.host.renderer();
-                renderer
-                    .read_frame_rgba()
-                    .map_err(|error| error::engine("renderer.readback", error))?
-            };
-            if width == 0 || height == 0 {
-                return Err(error::invalid(
-                    "ASTRA_EMU_SIGLUS_FRAME_EMPTY",
-                    "the engine reported an empty frame size",
-                ));
-            }
-            self.frame.width.set(width);
-            self.frame.height.set(height);
-            *self.frame.pixels.borrow_mut() = pixels;
+            pull_frame(&self.host, &self.frame)?;
             let info = frame_info(&self.frame)?;
             self.frame_info.set(info);
             self.frame_dirty.set(false);

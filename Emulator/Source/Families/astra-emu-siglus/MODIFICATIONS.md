@@ -104,6 +104,11 @@ only composes into the offscreen target and `visit_frame` copies to the CPU
 on demand, so hosts that skip frame pulls (headless routes) do not pay a
 texture-to-buffer copy per advance.
 
+The final CPU frame preserves the native renderer's composed RGB and sets
+presentation alpha to 255. The native swapchain ignores render-target alpha;
+that channel is not scene opacity and can contain values below 255. It must
+not be exposed as transparent pixels under the Family's opaque-frame contract.
+
 Save data stays in the game directory (`<game>/savedata`), owned entirely by
 the engine; the host provides only the game path. Protected retail resources
 are decrypted through the user-provided `key.toml` in the game directory.
