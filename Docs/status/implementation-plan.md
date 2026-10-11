@@ -2,7 +2,7 @@
 
 ## 2026-10-12 AstraEMU 真实流程接续
 
-新版 Artemis 运行包通过原生启动媒体，显示标题、章节与剧情画面，鼠标和 Enter 可操作。原生普通存档在授权副本生成缩略图和数据；退出、重开并从标题读档成功，CG 恢复且可继续推进，但保存处文字需首次 Enter 重显，完整恢复尚未验收。实际 Host 使用 Vulkan / NVIDIA GeForce RTX 4070 Laptop GPU，音频仍为 NullAudio。
+新版 Artemis 运行包通过原生启动媒体，显示标题、章节与剧情画面，鼠标和 Enter 可操作。读档文字空白已定位到输入等待错误绑定在 `onLoad` 子流程；现在先在存档位置绑定等待，再执行原生加载处理器。Release 实际窗口从标题读取已有槽 001，直接恢复 CG 和保存处文字，Enter 可继续；新空槽 002 保存、原生 Exit 返回 Manager、重开后标题读取槽 002 也直接恢复 CG 与文字并可继续。两项原生加载等待回归、八项存档定向回归、受影响 Family all-target Clippy 与 Release 构建通过。实际 Host 使用 Vulkan / NVIDIA GeForce RTX 4070 Laptop GPU，音频仍为 NullAudio；完整路线、可听音频和正式性能未验收。
 
 Artemis 一段约 30 秒实际窗口流程中，Host 推进约 45.68 Hz；核心推进 p95 6.394 ms、帧读取 p95 7.284 ms、Host CPU 提交 p95 2.006 ms。Slint 窗口计数约 28–30 FPS；该计数不等于显示扫描或 GPU 完成时间。客体显示模式实际报告 1280×720、32 Hz，Slint 的现有窗口节流使用该显示频率；不修改宿主配置或通过强制重绘冒充原生速率。正式性能与可听音频仍未验收。
 
