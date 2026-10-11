@@ -18,6 +18,8 @@ FVP 保留原生字体语义，要求系统提供 `MS Gothic`；脚本请求其�
 
 其他核心的真实样本仍在检查。CMVS 样本启动后在命令 548 处报告 `ASTRA_EMU_CMVS_ACTION_UNBOUND`，当前部分实现无法继续该游戏。Siglus 的 Debug 包在 Naga 编译 shader 时发生栈溢出，尚待 Release 复测。Artemis 已接入原生窗口标题及 typed 鼠标请求，真实样本尚待重测；未实现的 UI 或媒体请求仍明确失败。开发包的编译结果不能作为可玩或性能结论；实际游戏与性能检查使用 Release 包。调试统计中的 `core_advance_us` 是 Family advance 耗时，`frame_capture_us` 包含 Family 帧访问、可能的 GPU 回读及 Host 复制，`cpu_submission_us` 是 Host 提交 CPU 耗时，不表示 GPU 完成时间。
 
+Musica 样本此前在首次挂载的全归档扫描中长时间停滞；现已改用索引和文件元数据生成归档版本标识，不再启动前扫描全部资产。归档和缓存的增量检查已通过，优化版实际启动、游戏流程及性能仍待复测。
+
 ## 构建运行包
 
 下面以 FVP 为例。先初始化主仓固定的 submodule；尚未推送的本地适配提交需要从开发来源恢复，不应换成旧版提交绕过构建失败。

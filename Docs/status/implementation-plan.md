@@ -2,13 +2,19 @@
 
 ## 2026-10-11 AstraEMU 客户端交付优先
 
-按用户最新要求，当前优先交付可直接启动的 AstraEMU 客户端。复用已整合的 Family API v10、音频进度与 GPU 生命周期实现。Manager 增加程序相邻 `cores/` 发现，与用户安装核心一起处理重复 plugin ID；无核心时提供运行包提示。游戏目录丢失不阻止资料库打开，保留资料库信息并阻止旧候选启动。Slint 列表的选择区域移到启动按钮后层，空资料库提供“添加游戏”入口。
+按用户最新要求，当前优先交付可直接启动的 AstraEMU 客户端。复用已整合的音频进度与 GPU 生命周期实现；当前窗口请求契约为 Family API v11，全部随包核心统一重建。Manager 增加程序相邻 `cores/` 发现，与用户安装核心一起处理重复 plugin ID；无核心时提供运行包提示。游戏目录丢失不阻止资料库打开，保留资料库信息并阻止旧候选启动。Slint 列表的选择区域移到启动按钮后层，空资料库提供“添加游戏”入口。
 
 `Tools/AstraEMU/package_client.py` 组装实际 Manager、Family 库、显式 runtime 依赖与许可文件；不启动、不发布、不加入商业素材。Windows 运行包准备包含固定 DXC 的 compiler/validator 与许可。使用与构建说明见 [客户端手册](../manual/astraemu-client.md)。
 
 本轮已从 ArchLXC 恢复未推送的 Siglus 固定提交，来源分支未修改。Manager 与动态 FVP 核心完成 Windows 构建，运行包已包含两者、DXC compiler/validator、VC runtime 及许可说明。资料库与核心发现 11 项定向回归通过，包括跨程序目录与用户目录的真实动态库重复 plugin ID 拒绝、失效目录保留以及导入后输入配置加载。Manager、manager-core、Slint UI 的 all-target Clippy 通过。
 
 Sandbox 已恢复启动。构建 target、运行依赖、客户端运行包与游戏副本位于数据盘，运行包通过只读 `wsb share` 映射；游戏独立副本排除原存档，按用户授权单独可写映射。现有只读映射重新 share 不会实际转为可写；重建本轮 Sandbox 后首次可写 share 已正常写入。实际客户端完成空资料库目录选择、FVP 核心加载、游戏导入、列表按钮启动、原生标题和正文显示、鼠标与键盘输入、空槽原生存档、会话关闭重开以及跨会话读取先前存档。客户端进程退出后重新启动，游戏记录、累计时长与两次会话记录保留，随包 FVP 核心再次发现。读档后先恢复到保存菜单；退出该菜单后剧情回到保存处，键盘可继续推进，直接返回剧情仍待修正。FVP 原生 GPU renderer 拒绝 CPU adapter，实际窗口完成上述绘制；未另测 GPU 离屏或正式性能。系统音频设备返回 `ASTRA_EMU_AUDIO_DEVICE_UNAVAILABLE`，本次流程明确使用 NullAudio；未计可听音频或完整结局验收。没有改用本机桌面或修改宿主配置；KrKr 仍不作为已验收核心加入运行包。
+
+本轮接入 Artemis 原生窗口标题和 typed 鼠标请求，Host 按实际 viewport 与 DPI 处理位置、可见性及空闲隐藏，关闭与覆盖层恢复应用光标。公共契约先提交，Artemis 与 Manager 消费者随后提交；相关增量测试与 all-target Clippy 已通过，真实样本仍待新版运行包重测。
+
+Musica 样本首次挂载曾在全归档 SHA-256 扫描中长时间停滞。SDK 归档契约升级为 v2，明确以来源版本标识构造缓存身份；Musica 改用已经读取的索引和文件元数据，不再启动前扫描全部资产。归档范围、解密与解码边界、来源变化检查及缓存容器完整性检查保留。CMVS 与 CLI 完整迁移共同契约，未扩展 CMVS VM 或媒体功能。Musica 7 项归档测试、SDK 定向测试和消费者 all-target Clippy 已通过；实际启动时间、完整游戏流程和性能尚未验收。
+
+五核心优化版客户端已开始串行构建。重建的 Sandbox 按授权首次可写映射六个独立样本副本与临时统计目录，尚未在该环境重测游戏存读档。另一独立 CMVS 实例启动重型构建后，本轮只停止自己的构建并保留缓存，等待重型槽释放；不操作其他实例成果。CMVS 命令 548、Siglus Debug shader 栈溢出及真实音频结果仍按客户端手册记录，不能据编译检查声明可玩。
 
 ## 2026-10-03 CMVS SDK 画布与 GPU 所有权迁移
 
