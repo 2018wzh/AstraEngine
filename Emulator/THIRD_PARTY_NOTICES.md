@@ -32,6 +32,15 @@
 `73d3b4413c95a3923cce695d98c3d9bf5b08ccf0`，当前另含上述本地修改。公开适配基线不能代替当前二进制对应的 covered source；发布时必须另行提供完整源码。文件级变化和覆盖范围见该 Family
 的 `MODIFICATIONS.md` 与 `THIRD_PARTY_NOTICES.md`。RFVP core 仅作为 private `rlib` 构建，动态边界由 `astra-emu-fvp` 持有。FVP 的四个原始系统字体槽由宿主通过 `fontdb` 从已安装字体按精确 family name 绑定，仓库不再携带替代字体文件。
 
+## KrKr native development bundle
+
+- Upstream: <https://github.com/fenghengzhi/kirikiroid2-web>
+- Fixed upstream revision: `7105b50822097d11b7b1f5894bf541509fd51350`。
+- Local adaptation revision: `8bf8896dfaed4d1d956e7b8944ed643df848a26c`；尚未推送。
+- 原生核心保留完整 fork；本地适配整理为该上游提交的单个子提交，来源分支与历史保持不变。当前尚未完成原生游戏流程，不将开发运行包记为已验收或已发布核心。
+- 运行包保留核心实际 `LICENSE`、Astra 适配的 BSD-3-Clause `LICENSE.astra`、`MODIFICATIONS.md`，以及固定安装依赖的 copyright 文件。根许可包含多个组件的实际条款，不用上游 README 的 MIT 概述替代。
+- 同目录 VC runtime 与 OpenMP runtime 来自构建工具链。FFmpeg 许可取决于实际配置；本批只作本地开发和 Sandbox 测试，未作整个依赖图的分发许可结论。
+
 ## Noto 字体
 
 Musica 编译期嵌入 Noto Sans JP 与 Noto Sans SC，使用 SIL Open Font License 1.1。字体通过仓库 Git LFS 提供，运行包在 `licenses/noto/OFL.txt` 保留相应许可；它们不替代 FVP 请求的原生系统字体。

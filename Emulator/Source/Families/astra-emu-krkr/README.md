@@ -10,6 +10,9 @@ Pass the original native game directory as `game_path`; it is not an Astra
 package or an individual XP3 archive. Probe checks for a native XP3 header and
 does not establish that the game's scripts or plugins can run. The Family
 uses the original storage, VM and save handling inside its child process.
+For a loose game it launches that directory's `startup.tjs`; for the
+conventional archive layout it launches `data.xp3` through the same native
+selector path. A directory lacking both entries fails explicitly.
 
 The Host must initialize diagnostics and provide a fresh I16 stereo 48 kHz
 audio sink with actual playback progress. PCM acknowledgements follow the
@@ -35,19 +38,29 @@ the Rust library and production child, assemble them into a new directory:
 python Tools/AstraEMU/package_krkr_runtime.py \
   --rust-artifacts "$RUST_ARTIFACTS" \
   --native-runtime "$NATIVE_RUNTIME" \
-  --output "$KRKR_RUNTIME"
+  --output "$KRKR_RUNTIME" \
+  --runtime-file "$MSVC_RUNTIME_DIR/msvcp140.dll" \
+  --runtime-file "$MSVC_RUNTIME_DIR/vcruntime140.dll" \
+  --runtime-file "$MSVC_RUNTIME_DIR/vcruntime140_1.dll" \
+  --runtime-file "$MSVC_OPENMP_DIR/vcomp140.dll"
 ```
 
 The script validates x64 PE headers and copies build outputs without loading
-or running them. MSVC/UCRT runtime prerequisites are separate from the native
-target's app-local dependency DLLs. The transport test child is never packaged.
-The module is not yet registered in the Manager catalog; registration follows
-native integration. Other platforms return native-unavailable explicitly.
+or running them. The three MSVC runtime DLLs and the OpenMP runtime used by
+OpenCV must accompany the production child and native owner; copies beside
+the Manager cannot satisfy the child loader. Windows supplies UCRT. The
+transport test child is never packaged. A Windows development bundle can
+discover the Family from `cores/`; native integration remains in progress.
+Other platforms return native-unavailable explicitly.
 
-The current Windows package is a development build. Its native owner and
-production Rust module/child compile and link, but the Sandbox Guest cannot
-currently execute commands. Native boot, rendered frames, input, close/reopen,
-BPG decoding and real audio remain unverified on that package.
+当前 Windows 开发包已完成固定依赖安装，以及核心 OFF/ON、Rust Family/child
+的 Release 编译和链接。已修复同目录 VC/OpenMP runtime 打包、Winsock 接入
+套接字的阻塞模式，以及最终回复发送前关闭接收方向造成的清理等待；九项
+Windows 传输回归与三项原生回调回归通过，all-target Clippy 和生产构建通过。
+嵌入启动补齐 Cocos 的第三次零 elapsed tick，并复用原生归档入口。Sandbox
+实际使用 NVIDIA OpenGL 4.6，已进入样本脚本，但启动阶段的原生模态提示框
+被当前嵌入接口明确拒绝。游戏最终帧、输入、退出重开、BPG 解码和可听音频
+尚未通过，不能计为可玩核心；没有跳过提示框或修改样本脚本。
 
 Horizontal wheel input returns `ASTRA_EMU_KRKR_HORIZONTAL_WHEEL_UNSUPPORTED`.
 Embedded native modal dialogs fail through the private native ABI and surface

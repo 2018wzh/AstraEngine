@@ -52,7 +52,7 @@ def resource_files(root: Path) -> list[Path]:
     return files
 
 
-def package(rust_artifacts: Path, native_runtime: Path, output: Path) -> int:
+def package(rust_artifacts: Path, native_runtime: Path, output: Path, runtime_files: list[Path]) -> int:
     rust_artifacts = rust_artifacts.resolve(strict=True)
     native_runtime = native_runtime.resolve(strict=True)
     output = output.absolute()
@@ -68,6 +68,7 @@ def package(rust_artifacts: Path, native_runtime: Path, output: Path) -> int:
     if not any(path.name == "astra_krkr_native.dll" for path in native):
         raise PackageError("native owner DLL is missing")
     sources.extend(native)
+    sources.extend(path.resolve(strict=True) for path in runtime_files)
     names = set()
     for path in sources:
         if not path.is_file() or path.is_symlink():
@@ -76,6 +77,8 @@ def package(rust_artifacts: Path, native_runtime: Path, output: Path) -> int:
             raise PackageError("runtime artifacts have a duplicate DLL name")
         names.add(path.name.casefold())
         check_pe(path, dll=path.suffix.casefold() == ".dll")
+    if not {"msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll", "vcomp140.dll"}.issubset(names):
+        raise PackageError("the production child and native owner require app-local MSVC runtime DLLs")
     resources = native_runtime / "Resources"
     resource_files(resources)
 
@@ -90,7 +93,7 @@ def package(rust_artifacts: Path, native_runtime: Path, output: Path) -> int:
         if output.exists() or output.is_symlink():
             raise PackageError("output directory appeared during packaging")
         stage.rename(output)
-    return len(native) - 1
+    return len(sources) - 3
 
 
 def main() -> int:
@@ -98,9 +101,10 @@ def main() -> int:
     parser.add_argument("--rust-artifacts", type=Path, required=True)
     parser.add_argument("--native-runtime", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--runtime-file", type=Path, action="append", default=[])
     args = parser.parse_args()
     try:
-        dependencies = package(args.rust_artifacts, args.native_runtime, args.output)
+        dependencies = package(args.rust_artifacts, args.native_runtime, args.output, args.runtime_file)
     except (OSError, PackageError):
         parser.exit(1, "KrKr runtime packaging failed: verify inputs and a new output directory.\n")
     print(f"KrKr runtime packaged with {dependencies} native dependency DLLs and Resources.")

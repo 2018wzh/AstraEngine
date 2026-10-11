@@ -244,19 +244,7 @@ impl ChildSockets {
         self.state.cancel();
         self.read_stop.store(true, Ordering::Release);
         self.frame_stop.store(true, Ordering::Release);
-        let _ = self.sockets.control.shutdown(Shutdown::Read);
         let _ = self.sockets.frame.shutdown(Shutdown::Both);
-        for worker in [
-            &mut self.reader,
-            &mut self.pcm_worker,
-            &mut self.frame_writer,
-        ] {
-            if let Some(worker) = worker.take() {
-                if worker.join().is_err() {
-                    self.state.fail(Failure::Shutdown);
-                }
-            }
-        }
         let reply = match self.state.first() {
             Some(failure) => Reply::Failed(failure),
             None => reply,
@@ -283,7 +271,26 @@ impl ChildSockets {
                     .map_err(|_| io::Error::other("child writer panicked"))??;
             }
         }
-        result
+        // Native cleanup has already completed. Send its final result before
+        // closing both control directions: Winsock SD_RECEIVE alone does not
+        // release a recv already blocked in the reader thread.
+        let _ = self.sockets.control.shutdown(Shutdown::Both);
+        for worker in [
+            &mut self.reader,
+            &mut self.pcm_worker,
+            &mut self.frame_writer,
+        ] {
+            if let Some(worker) = worker.take() {
+                if worker.join().is_err() {
+                    self.state.fail(Failure::Shutdown);
+                }
+            }
+        }
+        result?;
+        if self.state.first() == Some(Failure::Shutdown) {
+            return Err(io::Error::other("child transport cleanup failed"));
+        }
+        Ok(())
     }
 }
 impl Drop for ChildSockets {

@@ -107,6 +107,9 @@ impl Rendezvous {
                     if !peer.ip().is_loopback() {
                         return Err(io::Error::other("non-loopback KrKr peer"));
                     }
+                    // Winsock inherits the listener's nonblocking mode. The
+                    // framed protocol uses blocking reads on its worker lanes.
+                    stream.set_nonblocking(false)?;
                     stream.set_nodelay(true)?;
                     stream.set_read_timeout(Some(Duration::from_millis(500)))?;
                     let lane = wire::read_handshake(&mut stream, session)?;

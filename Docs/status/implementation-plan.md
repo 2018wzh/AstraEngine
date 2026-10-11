@@ -14,7 +14,9 @@ Siglus 启动场景重置析构旧混音器时，错误取消了整个 Host 音�
 
 Siglus 开场演出的 30 秒开发采样中，Host advance 为 23.75 Hz，core advance 的 p50/p95 为 9.432/17.198 ms，帧复制为 12.139/23.243 ms。采样时独立 KrKr 依赖正在构建，场景持续变化，且 Sandbox 显示报告 32 Hz；该结果不计原生速率或正式可玩性能通过。
 
-首次窗口尺寸适配已移到 Slint 创建原生窗口之后，并使用 Slint 的最大化属性；此前事件循环启动前的 winit 访问没有生效。Manager all-target Clippy 与 Release 构建通过，新进程实际首次启动已自动适配完整窗口，无需手动最大化。KrKr 已从固定原生适配提交创建独立检出，复用准备好的私有依赖工具并开始原生依赖构建；Rust Family 桥接及 child 的 Release all-target Clippy、构建已通过；FFmpeg 3.3.9 汇编探测已通过显式寻址模式修正，未关闭汇编或更换版本；该依赖的 Release 与 Debug 已编译安装，其余原生依赖继续构建。当前独立检出的 OFF/ON 编译及真实游戏流程尚未完成。
+首次窗口尺寸适配已移到 Slint 创建原生窗口之后，并使用 Slint 的最大化属性；此前事件循环启动前的 winit 访问没有生效。Manager all-target Clippy 与 Release 构建通过，新进程实际首次启动已自动适配完整窗口，无需手动最大化。KrKr 独立检出已完成全部 120 项固定依赖，以及原生核心 OFF/ON 的 Release 配置、编译与链接；ON 实际包含 NativeOwner、WaveMixer 和 HostedPcm。FFmpeg 3.3.9 的 NASM 探测通过显式寻址模式修正，未关闭汇编或更换版本。适配仍整理为固定上游加单个本地提交，来源历史保留，尚未将 KrKr 主仓 gitlink 作为完成核心接入。
+
+KrKr 真实接入依次修复了同目录 VC/OpenMP runtime 缺失、Winsock 已接入套接字继承非阻塞模式，以及最终回复发送前的单向 shutdown 未解除阻塞接收。九项 Windows 传输回归、三项原生回调回归、all-target Clippy、Family/child 生产构建与 native owner 增量构建通过。Cocos 启动补齐第三次零 elapsed tick，归档游戏复用原选择器启动 `data.xp3`，保留原 VM、storage、patch 和存档语义。实际 Sandbox 的原生 OpenGL 为 NVIDIA GeForce RTX 4070 Laptop GPU / OpenGL 4.6；已进入真实脚本，样本启动中的原生模态提示框被当前嵌入接口明确拒绝。没有跳过提示框或修改样本脚本；游戏最终帧、输入、存读档、退出重开、BPG 与可听音频仍未验收。诊断器附加未获取到该次启动状态，调试期间结束的进程不计正常清理通过。
 
 ## 2026-10-11 AstraEMU 客户端交付优先
 

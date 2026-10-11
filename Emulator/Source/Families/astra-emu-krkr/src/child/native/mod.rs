@@ -156,7 +156,10 @@ impl DllOwner {
                 LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS,
             )
         }
-        .map_err(|_| Failure::NativeUnavailable)?
+        .map_err(|error| {
+            eprintln!("KrKr native library load failed: {error}");
+            Failure::NativeUnavailable
+        })?
         .into();
         self._resident = Some(ManuallyDrop::new(library));
         let library = self._resident.as_ref().unwrap();
@@ -223,7 +226,7 @@ fn result(code: i32, error: &abi::Error, failure: Failure, operation: &str) -> R
         .iter()
         .position(|byte| *byte == 0)
         .ok_or(Failure::Protocol)?;
-    std::str::from_utf8(&error.message[..end]).map_err(|_| Failure::Protocol)?;
+    let message = std::str::from_utf8(&error.message[..end]).map_err(|_| Failure::Protocol)?;
     if code == abi::OK {
         if error.code != 0 || end != 0 {
             return Err(Failure::Protocol);
@@ -233,9 +236,9 @@ fn result(code: i32, error: &abi::Error, failure: Failure, operation: &str) -> R
     if !(1..=5).contains(&code) {
         return Err(Failure::Protocol);
     }
-    // Retain a stable code without copying arbitrary native exception paths
-    // into a control failure. Detailed core diagnostics use their own stream.
-    eprintln!("KrKr native {operation} failed (code {code})");
+    // Keep the control failure typed while forwarding the bounded native
+    // message through the child's existing diagnostic bridge.
+    eprintln!("KrKr native {operation} failed (code {code}): {message}");
     Err(failure)
 }
 
@@ -259,7 +262,15 @@ impl NativeOwner for DllOwner {
                 .as_deref()
                 .ok_or(Failure::NativeUnavailable)?,
         )?;
-        if window.width == 0 || window.height == 0 || audio.is_cancelled() {
+        if window.width == 0 || window.height == 0 {
+            eprintln!(
+                "KrKr native boot rejected window size {}x{}",
+                window.width, window.height
+            );
+            return Err(Failure::Boot);
+        }
+        if audio.is_cancelled() {
+            eprintln!("KrKr native boot rejected cancelled audio sink");
             return Err(Failure::Boot);
         }
         let mut context = Box::new(CallbackContext {
