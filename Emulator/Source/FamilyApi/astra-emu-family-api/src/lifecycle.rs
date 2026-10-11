@@ -124,6 +124,38 @@ pub enum FamilyWindowCommand {
     SetTitle(RString),
     /// Owned, tightly packed straight-alpha RGBA8 small window icon.
     SetIcon(FamilyWindowIcon),
+    /// Update the host-owned pointer in logical stage coordinates. Omitted
+    /// properties retain their current values; no native cursor handle is passed.
+    SetPointer(FamilyPointerRequest),
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, StableAbi)]
+pub struct FamilyPointerRequest {
+    pub logical_x: ROption<i32>,
+    pub logical_y: ROption<i32>,
+    pub visible: ROption<bool>,
+    /// Idle time in milliseconds; zero disables automatic hiding. Actual
+    /// pointer activity restores visibility unless explicitly hidden.
+    pub autohide_ms: ROption<u64>,
+}
+
+impl FamilyPointerRequest {
+    /// Coalesce pending updates without discarding unchanged properties.
+    pub fn merge(&mut self, next: Self) {
+        if next.logical_x.is_some() {
+            self.logical_x = next.logical_x;
+        }
+        if next.logical_y.is_some() {
+            self.logical_y = next.logical_y;
+        }
+        if next.visible.is_some() {
+            self.visible = next.visible;
+        }
+        if next.autohide_ms.is_some() {
+            self.autohide_ms = next.autohide_ms;
+        }
+    }
 }
 
 pub const MAX_WINDOW_TITLE_BYTES: usize = 4096;

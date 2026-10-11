@@ -1,4 +1,4 @@
-# Independent Family API v10
+# Independent Family API v11
 
 `astra-emu-family-api` 是 Family 插件唯一必需的契约依赖。不依赖 RuntimeWorld、package/save、VFS、renderer/audio backend 或 UI。静态核心和动态核心共用 typed DTO；动态入口使用 `abi_stable` 的 `FamilyModule`，提供 descriptor/probe/open/advance/frame/close。
 
@@ -38,7 +38,9 @@ Host 只提供 game_path、初始 WindowState 和输入。Family 自持 VM、文
 
 `AdvanceResponse.reset_clock` 默认 false。成功读档、重新开始或 Family 定义的暂停/恢复生命周期建立新的播放时间线时，核心提交一次 true；实时 Host 在本次 advance 和最终帧复制完成后重新计算计时起点与下一帧期限，避免把恢复、暂停或生命周期处理耗时计入新时间线。窗口暂停期间的墙钟累计由 Family 丢弃，恢复调用可以消费当前正常帧间隔，但不能补跑暂停累计。普通活动帧仍计入核心执行耗时，`elapsed_ns > 1s` 的 Musica 活动帧仍返回有界诊断，不静默截断。失败操作不提交重置；固定步长 Headless 不依赖墙钟，无需调整其步长。
 
-`AdvanceResponse.window_command` 为可选的 `FamilyWindowCommand::SetFullscreen(bool)` 或 `SetTitle(RString)`。每次 advance 最多提交一个窗口请求，无 native handle、回调或 UI 类型穿过 ABI。Manager 在窗口线程应用请求；设置保留到下一个请求或会话关闭，退出及错误关闭恢复普通窗口。无窗口的 Headless Host 遇到请求返回 `ASTRA_EMU_HEADLESS_WINDOW_COMMAND_UNAVAILABLE` 并走正常关闭流程，不静默忽略。核心在原生设置应用成功时提交请求，取消草稿不提交；需要恢复全屏的冷启动在首次 advance 提交。
+`AdvanceResponse.window_command` 为可选的 `FamilyWindowCommand`，包含 `SetFullscreen`、`SetTitle`、`SetIcon` 和 `SetPointer`。每次 advance 最多提交一个窗口请求，无 native handle、回调或 UI 类型穿过 ABI。Manager 在窗口线程应用请求；设置保留到下一个请求或会话关闭，退出及错误关闭恢复普通窗口和可见光标。无窗口的 Headless Host 遇到请求返回 `ASTRA_EMU_HEADLESS_WINDOW_COMMAND_UNAVAILABLE` 并走正常关闭流程，不静默忽略。核心在原生设置应用成功时提交请求，取消草稿不提交；需要恢复全屏的冷启动在首次 advance 提交。
+
+v11 增加 `SetPointer(FamilyPointerRequest)`。`logical_x`、`logical_y` 为可空的 i32 舞台坐标，`visible` 为可空 bool，`autohide_ms` 为可空 u64 毫秒数；空值保留当前属性，零时长关闭自动隐藏。Host 按实际游戏 content viewport 和 DPI 将舞台位置正向映射到窗口位置，只更改指定轴。自动隐藏使用 Host 的单次计时器；实际指针移动或按钮操作重置计时，显式隐藏仍保持隐藏。关闭、失败及 Manager 覆盖层恢复应用光标；回到游戏恢复游戏设置。后端不能移动系统光标或定时器时长无法表示时明确失败，不伪造成功。Family 合并尚未交付的同属性更新，但必须保留不同类型的请求，不能让 mouse 覆盖 caption。所有动态插件随 v11 重建，不保留 v10 兼容层。
 
 v8 增加 `FamilyWindowCommand::SetTitle(RString)`：标题为最多 4096 UTF-8 bytes 的文本，空串明确清空标题，NUL 和 Unicode 控制字符拒绝，不截断。旧核心字符串由 Family 严格按原生编码解码，Host 不猜测编码。`validate` 失败返回 `ASTRA_EMU_FAMILY_WINDOW_TITLE`，错误和日志不含标题正文。每次 advance 仍最多一个窗口请求，Manager 在窗口线程将最新请求同步到实际窗口标题；关闭/失败恢复 Manager 标题。NullAudio 测试标记不受游戏标题覆盖。无窗口 Host 与全屏请求一样明确拒绝，不能将标题命令当作成功的空操作。
 
@@ -54,7 +56,7 @@ Manager 再验证边界和重复字段；非法记录输出 `family.diagnostics.
 
 ## 生命周期与迁移
 
-ABI fingerprint 为 `astra.emu.independent_family_abi.v10`，schema 为 `astra.emu.independent_family_api.v10`。v1/v2/v3/v4/v5/v6/v7/v8/v9 插件必须重新构建安装，不提供兼容 reader/adapter。
+ABI fingerprint 为 `astra.emu.independent_family_abi.v11`，schema 为 `astra.emu.independent_family_api.v11`。v1 至 v10 插件必须重新构建安装，不提供兼容 reader/adapter。
 
 动态库首次加载后一直驻留到进程退出，失败加载产生的 ABI 元数据也不会指向卸载的代码；更新插件必须重启 Manager。provider/module 对象按正常生命周期释放。会话 close 和 open 失败仍须取消 Host 请求、唤醒阻塞 PCM 写入并等待所有 worker 结束，错误不得跳过其他 worker 清理。驻留不允许保留已关闭会话的线程或 session callback；无 session 资源的进程级诊断 sink 除外。
 

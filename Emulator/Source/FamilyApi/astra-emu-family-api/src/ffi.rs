@@ -248,6 +248,25 @@ mod tests {
             TextPollResult::Cancelled,
             TextPollResult::Cancelled
         ));
-        assert_eq!(FAMILY_API_SCHEMA, "astra.emu.independent_family_api.v10");
+        assert_eq!(FAMILY_API_SCHEMA, "astra.emu.independent_family_api.v11");
+    }
+
+    #[test]
+    fn pointer_updates_preserve_unmentioned_properties() {
+        let mut request = FamilyPointerRequest {
+            logical_x: ROption::RSome(10),
+            visible: ROption::RSome(false),
+            ..Default::default()
+        };
+        request.merge(FamilyPointerRequest {
+            logical_y: ROption::RSome(20),
+            autohide_ms: ROption::RSome(0),
+            ..Default::default()
+        });
+        assert_eq!(request.logical_x, ROption::RSome(10));
+        assert_eq!(request.logical_y, ROption::RSome(20));
+        assert_eq!(request.visible, ROption::RSome(false));
+        assert_eq!(request.autohide_ms, ROption::RSome(0));
+        FamilyWindowCommand::SetPointer(request).validate().unwrap();
     }
 }
