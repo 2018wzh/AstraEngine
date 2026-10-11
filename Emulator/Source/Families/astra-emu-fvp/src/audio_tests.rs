@@ -2,6 +2,91 @@ use super::*;
 use rfvp::host_api::EncodedAudioKind;
 
 #[test]
+fn commands_complete_and_close_joins_while_host_pcm_is_blocked() {
+    use abi_stable::type_level::downcasting::TD_Opaque;
+    use astra_emu_family_api::{AudioSink, AudioSink_TO, FfiFamilyResult};
+    use std::sync::{atomic::AtomicUsize, Condvar};
+
+    struct BlockedSink {
+        cancelled: Arc<(Mutex<bool>, Condvar)>,
+        writes: Arc<AtomicUsize>,
+        entered: Sender<()>,
+    }
+    impl AudioSink for BlockedSink {
+        fn configure(&self, _: PcmFormatSpec) -> FfiFamilyResult<()> {
+            Ok(()).into()
+        }
+        fn write(&self, _: PcmChunk) -> FfiFamilyResult<AudioWriteStatus> {
+            self.writes.fetch_add(1, Ordering::Relaxed);
+            let _ = self.entered.try_send(());
+            let (cancelled, wake) = &*self.cancelled;
+            let _guard = wake
+                .wait_while(cancelled.lock().unwrap(), |cancelled| !*cancelled)
+                .unwrap();
+            Ok(AudioWriteStatus::Cancelled).into()
+        }
+        fn is_cancelled(&self) -> bool {
+            *self.cancelled.0.lock().unwrap()
+        }
+        fn cancel(&self) -> FfiFamilyResult<()> {
+            *self.cancelled.0.lock().unwrap() = true;
+            self.cancelled.1.notify_all();
+            Ok(()).into()
+        }
+    }
+
+    let cancelled = Arc::new((Mutex::new(false), Condvar::new()));
+    let writes = Arc::new(AtomicUsize::new(0));
+    let (entered, writing) = bounded(1);
+    let sink = AudioSink_TO::from_value(
+        BlockedSink {
+            cancelled: Arc::clone(&cancelled),
+            writes: Arc::clone(&writes),
+            entered,
+        },
+        TD_Opaque,
+    );
+    let mut bridge = AudioBridge::new(sink).unwrap();
+    let id = AudioStreamId::bgm(0);
+    bridge
+        .submit(HostedAudioOperation::LoadEncoded {
+            id,
+            kind: EncodedAudioKind::Wav,
+            bytes: wav_pcm16(&[1_000, -1_000], 2, OUTPUT.sample_rate),
+        })
+        .unwrap();
+    bridge
+        .submit(HostedAudioOperation::Play {
+            id,
+            params: rfvp::host_api::AudioParams {
+                repeat: true,
+                ..Default::default()
+            },
+            fade_in_ms: 0,
+        })
+        .unwrap();
+    writing.recv_timeout(Duration::from_secs(2)).unwrap();
+    let (completed, result) = bounded(1);
+    let control = thread::spawn(move || {
+        let command = bridge.submit(HostedAudioOperation::SetMasterVolume(0.5));
+        let playing = bridge.video_audio_playing(id);
+        completed.send((command, playing)).unwrap();
+        bridge.close()
+    });
+    let response = result.recv_timeout(Duration::from_secs(2));
+    // Release the old implementation too, so a regression fails without
+    // leaving an audio thread behind in the test process.
+    *cancelled.0.lock().unwrap() = true;
+    cancelled.1.notify_all();
+    let closed = control.join().unwrap();
+    let (command, playing) = response.expect("control must complete before PCM is released");
+    command.unwrap();
+    assert!(playing.unwrap());
+    closed.unwrap();
+    assert_eq!(writes.load(Ordering::Relaxed), 1);
+}
+
+#[test]
 fn native_bgm_capacity_allows_overlap_without_discarding_fading_voices() {
     use rfvp::host_api::{AudioParams, AudioSlotKind, RfvpError};
     let mut mixer = SoftAudioMixer::new(SymphoniaBackend, mixer_config());

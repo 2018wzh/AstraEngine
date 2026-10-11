@@ -705,6 +705,7 @@ version = "0.1.0"
 dependencies = [
  "abi_stable",
  "astra-emu-family-api",
+ "crossbeam-channel",
  "fontdb",
  "pollster 0.4.0",
  "rfvp",

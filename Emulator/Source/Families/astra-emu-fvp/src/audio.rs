@@ -1,12 +1,15 @@
 #[path = "audio_decode.rs"]
 mod audio_decode;
 use audio_decode::SymphoniaBackend;
+#[path = "audio_worker.rs"]
+mod audio_worker;
+use audio_worker::run_worker;
+use crossbeam_channel::{bounded, Receiver, Sender, TrySendError};
 
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError},
         Arc, Mutex,
     },
     thread::{self, JoinHandle},
@@ -44,11 +47,11 @@ enum WorkerReply {
 
 struct Job {
     command: WorkerCommand,
-    completion: SyncSender<FamilyResult<WorkerReply>>,
+    completion: Sender<FamilyResult<WorkerReply>>,
 }
 
 pub(crate) struct AudioBridge {
-    tx: Option<SyncSender<Job>>,
+    tx: Option<Sender<Job>>,
     error: Arc<Mutex<Option<FamilyError>>>,
     playback_states: Arc<Mutex<BTreeMap<u32, bool>>>,
     used_stream_ids: BTreeSet<u32>,
@@ -62,7 +65,7 @@ impl AudioBridge {
         sink.configure(OUTPUT).into_result()?;
 
         let sink = Arc::new(sink);
-        let (tx, rx) = mpsc::sync_channel(QUEUE_CAPACITY);
+        let (tx, rx) = bounded(QUEUE_CAPACITY);
         let error = Arc::new(Mutex::new(None));
         let worker_error = Arc::clone(&error);
         let playback_states = Arc::new(Mutex::new(BTreeMap::new()));
@@ -171,7 +174,7 @@ impl AudioBridge {
         let tx = self.tx.as_ref().ok_or_else(|| {
             FamilyError::invalid("ASTRA_EMU_FVP_AUDIO_CLOSED", "audio worker is closed")
         })?;
-        let (completion, result) = mpsc::sync_channel(1);
+        let (completion, result) = bounded(1);
         match tx.try_send(Job {
             command,
             completion,
@@ -314,84 +317,6 @@ fn mixer_config() -> SoftAudioConfig {
         max_active_bgm: 4,
         ..SoftAudioConfig::default()
     }
-}
-
-fn run_worker(
-    rx: Receiver<Job>,
-    sink: Arc<AudioSinkBox>,
-    cancelled: Arc<AtomicBool>,
-    playback_states: Arc<Mutex<BTreeMap<u32, bool>>>,
-) -> FamilyResult<()> {
-    let mut mixer = SoftAudioMixer::new(SymphoniaBackend, mixer_config());
-    let mix_samples = mixer
-        .config()
-        .mix_frames
-        .checked_mul(usize::from(OUTPUT.channels))
-        .ok_or_else(|| {
-            FamilyError::invalid("ASTRA_EMU_FVP_AUDIO_BUFFER", "audio buffer size overflow")
-        })?;
-    let mut video_audio = BTreeMap::new();
-
-    loop {
-        if cancelled.load(Ordering::Acquire) || sink.is_cancelled() {
-            break;
-        }
-
-        let mut received = false;
-        loop {
-            match rx.try_recv() {
-                Ok(job) => {
-                    received = true;
-                    let result =
-                        apply_command(&mut mixer, &mut video_audio, &playback_states, job.command);
-                    let _ = job.completion.send(result.clone());
-                    result.map(|_| ())?;
-                    if cancelled.load(Ordering::Acquire) || sink.is_cancelled() {
-                        break;
-                    }
-                }
-                Err(TryRecvError::Empty) => break,
-                Err(TryRecvError::Disconnected) => {
-                    mixer.shutdown();
-                    return Ok(());
-                }
-            }
-        }
-        if cancelled.load(Ordering::Acquire) || sink.is_cancelled() {
-            break;
-        }
-
-        let mut samples = vec![0_i16; mix_samples];
-        let mixer_active = mixer
-            .mix_next(&mut samples)
-            .map_err(|cause| crate::error::rfvp_operation(cause, "audio mix"))?;
-        let video_active = mix_video_audio(&mut video_audio, &playback_states, &mut samples)?;
-        if mixer_active || video_active {
-            refresh_playback_states(&mixer, &video_audio, &playback_states);
-            write_pcm(&sink, samples)?;
-            continue;
-        }
-        refresh_playback_states(&mixer, &video_audio, &playback_states);
-
-        if !received {
-            match rx.recv_timeout(COMMAND_WAIT) {
-                Ok(job) => {
-                    let result =
-                        apply_command(&mut mixer, &mut video_audio, &playback_states, job.command);
-                    let _ = job.completion.send(result.clone());
-                    result.map(|_| ())?;
-                }
-                Err(mpsc::RecvTimeoutError::Timeout) => {}
-                Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    mixer.shutdown();
-                    return Ok(());
-                }
-            }
-        }
-    }
-
-    mixer.shutdown();
-    Ok(())
 }
 
 fn record_operation_state(

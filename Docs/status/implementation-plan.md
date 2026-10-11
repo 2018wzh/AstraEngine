@@ -4,15 +4,15 @@
 
 新版 Artemis 运行包通过原生启动媒体，显示标题、章节与剧情画面，鼠标和 Enter 可操作。读档文字空白已定位到输入等待错误绑定在 `onLoad` 子流程；现在先在存档位置绑定等待，再执行原生加载处理器。Release 实际窗口从标题读取已有槽 001，直接恢复 CG 和保存处文字，Enter 可继续；新空槽 002 保存、原生 Exit 返回 Manager、重开后标题读取槽 002 也直接恢复 CG 与文字并可继续。两项原生加载等待回归、八项存档定向回归、受影响 Family all-target Clippy 与 Release 构建通过。实际 Host 使用 Vulkan / NVIDIA GeForce RTX 4070 Laptop GPU，音频仍为 NullAudio；完整路线、可听音频和正式性能未验收。
 
-Artemis 一段约 30 秒实际窗口流程中，Host 推进约 45.68 Hz；核心推进 p95 6.394 ms、帧读取 p95 7.284 ms、Host CPU 提交 p95 2.006 ms。Slint 窗口计数约 28–30 FPS；该计数不等于显示扫描或 GPU 完成时间。客体显示模式实际报告 1280×720、32 Hz，Slint 的现有窗口节流使用该显示频率；不修改宿主配置或通过强制重绘冒充原生速率。正式性能与可听音频仍未验收。
+无重型构建时，在四个核心的实际窗口存档场景各采样约 30 秒。FVP / Artemis / Siglus / Musica 的 Host 推进分别为 60.52 / 58.63 / 57.82 / 59.34 Hz；核心推进、帧读取和 Host CPU 提交的独立统计见 [客户端手册](../manual/astraemu-client.md)。客体显示模式报告 1280×720、32 Hz，Slint 的窗口节流使用该显示频率；推进频率不等于显示帧率或 GPU 完成时间。正式呈现性能与可听音频仍未验收。
+
+FVP 实际运行调用栈定位到主线程等待音频控制命令回复，而混音线程阻塞在 Host PCM 写入。现将唯一 PCM 写入线程与混音控制分开，只允许一个混音块等待 Host 接收，等待期间继续处理控制命令；关闭、错误及 panic 路径取消并 join 写入线程。七项音频定向回归（包含 PCM 阻塞时的命令响应与关闭）、all-target Clippy 和 Release 构建通过。同一真实场景的 Host 推进从 46.85 提升到 60.52 Hz，核心推进 p95 从 24.088 降至 5.406 ms；实际读档、剧情鼠标推进、返回 Manager，以及同一客户端重开后读档与推进均已完成，音频仍为 NullAudio。
 
 Siglus 启动场景重置析构旧混音器时，错误取消了整个 Host 音频队列。实际调用栈定位到 `init_vm → restart_scene_name → reset_for_scene_restart → TapBackend::drop`。原生 hosted 接口已改为每个混音器创建独立取消作用域，Family 用有界两块 PCM 队列衔接单一 Host 写入 worker；旧混音器关闭不取消 Host，完整会话关闭仍取消并 join。真实 Kira 混音器替换及阻塞关闭回归重复三次通过，Siglus all-target Clippy 和 Release 构建通过。
 
 更新后的实际 Sandbox 窗口完成 Rewrite+ 标题、Start、开场 WMV 完整播放至结束、正文输入、原生空槽保存、原生读档，以及 Manager 结束会话后重开并从标题读回同一槽。读档直接恢复 CG 与文字，Enter 可继续。音频仍为 NullAudio，未计可听音频或完整路线通过。普通 elapsed 已保留亚毫秒余量并移除静默截断；三个 CPU 回归通过，一个硬件 GPU 回归未运行，all-target Clippy 与 Release 构建通过。实际读档及返回原生标题均收到 Host `clock_reset`。
 
 原生 Exit 黑屏的剩余根因已从运行中客户端定位：`paused=true` 时流程栈仍有待处理项，嵌入入口的泵却直接返回。该入口没有桌面 debugger 的 pause/step 恢复操作，已移除复制来的停顿锁，同时保留原生退出通知及 `GameEndWipe`/`TimeWait` 轮询。增量 all-target Clippy 与 Release 构建通过。新版实际窗口完成标题 Exit 返回 Manager，重新启动并从标题读回槽 001，CG 与文字直接恢复，Enter 推进；正文 Quit 确认后也正常返回 Manager，不再停在黑屏。正文鼠标菜单的后续调试定位到另一处调度遗漏：子脚本入栈并解除原正文等待后，泵直接返回，未执行已可运行的子脚本。现在复用已有等待作用域，并在入栈后立即继续泵；增量 Clippy 与 Release 构建通过。新版实际窗口完成鼠标 Quit 直接弹框、No 返回正文并用 Enter 推进、Title 确认返回标题、Exit 返回 Manager，以及同一 Manager 重开、标题读档和鼠标 Quit→Yes 退出，菜单操作不再需要额外 Enter。诊断器附加期间结束的客户端不计正常退出通过。
-
-Siglus 开场演出的 30 秒开发采样中，Host advance 为 23.75 Hz，core advance 的 p50/p95 为 9.432/17.198 ms，帧复制为 12.139/23.243 ms。采样时独立 KrKr 依赖正在构建，场景持续变化，且 Sandbox 显示报告 32 Hz；该结果不计原生速率或正式可玩性能通过。
 
 首次窗口尺寸适配已移到 Slint 创建原生窗口之后，并使用 Slint 的最大化属性；此前事件循环启动前的 winit 访问没有生效。Manager all-target Clippy 与 Release 构建通过，新进程实际首次启动已自动适配完整窗口，无需手动最大化。KrKr 独立检出已完成全部 120 项固定依赖，以及原生核心 OFF/ON 的 Release 配置、编译与链接；ON 实际包含 NativeOwner、WaveMixer 和 HostedPcm。FFmpeg 3.3.9 的 NASM 探测通过显式寻址模式修正，未关闭汇编或更换版本。适配仍整理为固定上游加单个本地提交，来源历史保留，尚未将 KrKr 主仓 gitlink 作为完成核心接入。
 
