@@ -2,6 +2,20 @@ use astra_emu_family_api::FamilyWindowIcon;
 use slint::winit_030::WinitWindowAccessor;
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
+/// Let the window manager fit the initial window when the preferred UI size
+/// exceeds the current display, including its native decorations.
+pub(super) fn fit_initial_window(window: &slint::Window) {
+    window.with_winit_window(|window| {
+        if let Some(monitor) = window.current_monitor() {
+            let available = monitor.size();
+            let requested = window.outer_size();
+            if requested.width > available.width || requested.height > available.height {
+                window.set_maximized(true);
+            }
+        }
+    });
+}
+
 /// The Manager has no custom application icon; None restores the window class default.
 pub(super) fn set_icon(
     window: &slint::Window,

@@ -453,6 +453,8 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
             let _ = slint::quit_event_loop();
         }
     }).map_err(|error| HostError::Renderer(error.to_string()))?;
+    adapter.window().show()?;
+    window_commands::fit_initial_window(adapter.window().window());
     let run_result = adapter.window().run();
     runtime_timer.stop();
     runtime_schedule.borrow_mut().take();

@@ -176,6 +176,16 @@ impl AstraUnderlayRenderer for ManagerStageRenderer {
         if self.input_texture.is_some() || self.output_texture.is_some() {
             return Err("ASTRA_EMU_HOST_RENDERER_DUPLICATE_SETUP".into());
         }
+        let adapter = context.device.adapter_info();
+        tracing::info!(
+            event = "astra.emu.host.gpu.created",
+            backend = ?adapter.backend,
+            device_type = ?adapter.device_type,
+            device = %adapter.name,
+            vendor_id = adapter.vendor,
+            device_id = adapter.device,
+            driver = %adapter.driver,
+        );
         self.device = Some(context.device.clone());
         self.filter_engine = FilterEngine::new(self.dxc_path.clone());
         self.filter_dirty = false;

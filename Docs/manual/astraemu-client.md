@@ -12,11 +12,11 @@ FVP 保留原生字体语义，要求系统提供 `MS Gothic`；脚本请求其�
 
 客户端从程序相邻的 `cores/` 和用户数据目录的 `cores/` 同时发现核心。核心文件损坏、ABI 不符和重复 plugin ID 都会显示诊断；重复核心不会按目录顺序覆盖。替换核心后需要重启客户端。
 
-运行包只包含实际构建的核心，不代表任意游戏已兼容。GPU 离屏测试、NullAudio、真实窗口操作和可听音频是不同检查；实际视听与完整游戏流程未验收时，不声明可通关。KrKr 原生运行包仍等待 Windows Sandbox 验收，当前不作为已验收核心提供。
+运行包只包含实际构建的核心，不代表任意游戏已兼容。GPU 离屏测试、NullAudio、真实窗口操作和可听音频是不同检查；实际视听与完整游戏流程未验收时，不声明可通关。KrKr 原生完整运行包与会话流程仍待完成，当前不作为已验收核心提供。
 
 当前 Windows 开发包已检查 FVP 游戏导入、标题与正文、输入、原生存档写入以及会话关闭重开。该游戏读档后会先恢复到保存菜单，点击游戏菜单的 `EXIT` 可返回所保存的剧情并继续推进；直接返回剧情的行为仍待修正。Sandbox 本次没有可用音频设备，使用 NullAudio，未完成可听音频、结局或性能验收。
 
-其他核心的真实样本仍在检查。CMVS 样本启动后在命令 548 处报告 `ASTRA_EMU_CMVS_ACTION_UNBOUND`，当前部分实现无法继续该游戏。Siglus 的 Release 包未重现此前 Debug shader 栈溢出，但原生帧的 alpha 与 Family 不透明输出契约不符，已修正适配，等待新版实测。Artemis 的窗口标题及 typed 鼠标请求已通过启动段，真实样本在尚未接入的 `video_play` 处停止；未实现的 UI 或媒体请求仍明确失败。开发包的编译结果不能作为可玩或性能结论；实际游戏与性能检查使用 Release 包。调试统计中的 `core_advance_us` 是 Family advance 耗时，`frame_capture_us` 包含 Family 帧访问、可能的 GPU 回读及 Host 复制，`cpu_submission_us` 是 Host 提交 CPU 耗时，不表示 GPU 完成时间。
+其他核心的真实样本仍在检查。CMVS 样本启动后在命令 548 处报告 `ASTRA_EMU_CMVS_ACTION_UNBOUND`，当前部分实现无法继续该游戏。Siglus 的 Release 包未重现此前 Debug shader 栈溢出，但原生帧的 alpha 与 Family 不透明输出契约不符，已修正适配，等待新版实测。Artemis 的窗口标题及 typed 鼠标请求已通过启动段；真实样本暴露未接入的 `video_play` 后，现已启用核心已有 FFmpeg/GPU 视频实现并补充线程取消、回收和视频音频通道，新版流程待重测。未实现的 UI 或媒体请求仍明确失败。开发包的编译结果不能作为可玩或性能结论；实际游戏与性能检查使用 Release 包。调试统计中的 `core_advance_us` 是 Family advance 耗时，`frame_capture_us` 包含 Family 帧访问、可能的 GPU 回读及 Host 复制，`cpu_submission_us` 是 Host 提交 CPU 耗时，不表示 GPU 完成时间。
 
 Musica 已移除启动前的全归档扫描，并修复 Git LFS 字体尚未检出时的打包问题。优化包在硬件 DX12 GPU 与 NullAudio 下完成《夏空のペルセウス》的原生标题、正文绘制、键盘推进、快速与普通存读档，以及关闭重开后从标题读取普通存档；没有完成结局或可听音频验收。两次 PresentMon 采集均未输出帧记录，尚无有效呈现性能数据，不能声明达到可玩帧率。
 

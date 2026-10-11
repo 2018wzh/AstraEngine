@@ -10,7 +10,7 @@
 
 Sandbox 已恢复启动。构建 target、运行依赖、客户端运行包与游戏副本位于数据盘，运行包通过只读 `wsb share` 映射；游戏独立副本排除原存档，按用户授权单独可写映射。现有只读映射重新 share 不会实际转为可写；重建本轮 Sandbox 后首次可写 share 已正常写入。实际客户端完成空资料库目录选择、FVP 核心加载、游戏导入、列表按钮启动、原生标题和正文显示、鼠标与键盘输入、空槽原生存档、会话关闭重开以及跨会话读取先前存档。客户端进程退出后重新启动，游戏记录、累计时长与两次会话记录保留，随包 FVP 核心再次发现。读档后先恢复到保存菜单；退出该菜单后剧情回到保存处，键盘可继续推进，直接返回剧情仍待修正。FVP 原生 GPU renderer 拒绝 CPU adapter，实际窗口完成上述绘制；未另测 GPU 离屏或正式性能。系统音频设备返回 `ASTRA_EMU_AUDIO_DEVICE_UNAVAILABLE`，本次流程明确使用 NullAudio；未计可听音频或完整结局验收。没有改用本机桌面或修改宿主配置；KrKr 仍不作为已验收核心加入运行包。
 
-本轮接入 Artemis 原生窗口标题和 typed 鼠标请求，Host 按实际 viewport 与 DPI 处理位置、可见性及空闲隐藏，关闭与覆盖层恢复应用光标。公共契约先提交，Artemis 与 Manager 消费者随后提交；相关增量测试与 all-target Clippy 已通过。Release 实测通过上述启动段，目前在未连接的原生 `video_play` 处停止，正在接入核心已有的 FFmpeg 视频与必要的 worker 生命周期边界。
+本轮接入 Artemis 原生窗口标题和 typed 鼠标请求，Host 按实际 viewport 与 DPI 处理位置、可见性及空闲隐藏，关闭与覆盖层恢复应用光标。公共契约先提交，Artemis 与 Manager 消费者随后提交；相关增量测试与 all-target Clippy 已通过。Release 实测通过上述启动段，在未连接的原生 `video_play` 处停止。现启用核心已有 FFmpeg/GPU 视频路径，补充实例持有的取消与 join、视频音频停止命令及临时 WAV 生命周期；原生 3 项生命周期回归、2 项 MPEG 解码回归和 all-target Clippy 通过，上游警告保留。Family 12 项回归、Manager 6 项帧与呈现回归以及受影响消费者 all-target Clippy 通过；1 项 GPU 用例未在本机执行。Manager 现按显示尺寸适配首次窗口，并记录实际 Host GPU 名称与类型。新版真实流程仍待复测。
 
 Musica 样本首次挂载曾在全归档 SHA-256 扫描中长时间停滞。SDK 归档契约升级为 v2，明确以来源版本标识构造缓存身份；Musica 改用已经读取的索引和文件元数据，不再启动前扫描全部资产。归档范围、解密与解码边界、来源变化检查及缓存容器完整性检查保留。CMVS 与 CLI 完整迁移共同契约，未扩展 CMVS VM 或媒体功能。Musica 7 项归档测试、SDK 定向测试和消费者 all-target Clippy 已通过；实际启动时间、完整游戏流程和性能尚未验收。
 
