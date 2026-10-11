@@ -6,9 +6,15 @@
 
 Artemis 一段约 30 秒实际窗口流程中，Host 推进约 45.68 Hz；核心推进 p95 6.394 ms、帧读取 p95 7.284 ms、Host CPU 提交 p95 2.006 ms。Slint 窗口计数约 28–30 FPS；该计数不等于显示扫描或 GPU 完成时间。客体显示模式实际报告 1280×720、32 Hz，Slint 的现有窗口节流使用该显示频率；不修改宿主配置或通过强制重绘冒充原生速率。正式性能与可听音频仍未验收。
 
-Siglus 的不透明首帧已通过实际加载，但启动场景重置析构旧混音器时，错误取消了整个 Host 音频队列。已附加运行中客户端，从实际调用栈定位到 `init_vm → restart_scene_name → reset_for_scene_restart → TapBackend::drop`。原生 hosted 接口改为每个混音器创建独立取消作用域，Family 用有界两块 PCM 队列衔接单一 Host 写入 worker；旧混音器关闭不取消 Host，完整会话关闭仍取消并 join。真实 Kira 混音器替换及阻塞关闭回归重复三次通过，Siglus all-target Clippy 和 Release 构建通过；新版窗口流程待复测。
+Siglus 启动场景重置析构旧混音器时，错误取消了整个 Host 音频队列。实际调用栈定位到 `init_vm → restart_scene_name → reset_for_scene_restart → TapBackend::drop`。原生 hosted 接口已改为每个混音器创建独立取消作用域，Family 用有界两块 PCM 队列衔接单一 Host 写入 worker；旧混音器关闭不取消 Host，完整会话关闭仍取消并 join。真实 Kira 混音器替换及阻塞关闭回归重复三次通过，Siglus all-target Clippy 和 Release 构建通过。
 
-首次窗口尺寸适配已移到 Slint 创建原生窗口之后，并使用 Slint 的最大化属性；此前事件循环启动前的 winit 访问没有生效。新的实际窗口复测仍待进行。KrKr 已从固定原生适配提交创建独立检出，复用准备好的私有依赖工具并开始原生依赖构建；尚未完成 OFF/ON 编译或真实游戏流程。
+更新后的实际 Sandbox 窗口完成 Rewrite+ 标题、Start、开场 WMV 完整播放至结束、正文输入、原生空槽保存、原生读档，以及 Manager 结束会话后重开并从标题读回同一槽。读档直接恢复 CG 与文字，Enter 可继续。音频仍为 NullAudio，未计可听音频或完整路线通过。普通 elapsed 已保留亚毫秒余量并移除静默截断；三个 CPU 回归通过，一个硬件 GPU 回归未运行，all-target Clippy 与 Release 构建通过。实际读档及返回原生标题均收到 Host `clock_reset`。
+
+原生 Quit/Exit 仍出现黑屏，未返回 Manager。嵌入入口既遗漏桌面 shell 的 `pending_exit` 赋值，也只轮询 `VmWait`，未继续轮询原生 `ProcFlow` 的 `GameEndWipe`/`TimeWait`；已补上这两处，第二次 all-target Clippy 与 Release 构建通过，但实际标题 Exit 仍停在黑屏，额外 Enter 也未结束。正在附加运行中客户端读取原生流程与等待状态，尚未确定剩余根因。正文原生菜单鼠标点击还出现等待额外 Enter 处理的情况，尚未解决。诊断期间结束的客户端不计正常退出通过。
+
+Siglus 开场演出的 30 秒开发采样中，Host advance 为 23.75 Hz，core advance 的 p50/p95 为 9.432/17.198 ms，帧复制为 12.139/23.243 ms。采样时独立 KrKr 依赖正在构建，场景持续变化，且 Sandbox 显示报告 32 Hz；该结果不计原生速率或正式可玩性能通过。
+
+首次窗口尺寸适配已移到 Slint 创建原生窗口之后，并使用 Slint 的最大化属性；此前事件循环启动前的 winit 访问没有生效。Manager all-target Clippy 与 Release 构建通过，新进程实际首次启动已自动适配完整窗口，无需手动最大化。KrKr 已从固定原生适配提交创建独立检出，复用准备好的私有依赖工具并开始原生依赖构建；Rust Family 桥接及 child 的 Release all-target Clippy、构建已通过；原生依赖仍在构建，尚未完成 OFF/ON 编译或真实游戏流程。
 
 ## 2026-10-11 AstraEMU 客户端交付优先
 
