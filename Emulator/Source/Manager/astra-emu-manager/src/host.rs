@@ -367,6 +367,7 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
     let event_window = adapter.window().as_weak();
     let event_pending = async_events_pending.clone();
     let renderer_callback = renderer.clone();
+    let initial_window_pending = std::cell::Cell::new(true);
     adapter.window().window().set_rendering_notifier(move |state, api| {
         let slint::GraphicsAPI::WGPU29 { device, queue, .. } = api else {
             record_fatal(&fatal_error_callback, "rendering notifier did not provide WGPU 29".into());
@@ -378,6 +379,16 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
             slint::RenderingState::RenderingSetup => {
                 renderer_callback.borrow_mut().setup(context)?;
                 if let Some(window) = event_window.upgrade() {
+                    if initial_window_pending.replace(false) {
+                        // Winit creates its native window when the event loop starts.
+                        // Defer fitting until the first render finishes applying size.
+                        let weak = window.as_weak();
+                        slint::Timer::single_shot(std::time::Duration::ZERO, move || {
+                            if let Some(window) = weak.upgrade() {
+                                window_commands::fit_initial_window(window.window());
+                            }
+                        });
+                    }
                     if window.get_theme_mode() == "system" {
                         let dark = window_events::system_theme(window.window())?;
                         event_controller.borrow_mut().set_system_theme(dark);
@@ -454,7 +465,6 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
         }
     }).map_err(|error| HostError::Renderer(error.to_string()))?;
     adapter.window().show()?;
-    window_commands::fit_initial_window(adapter.window().window());
     let run_result = adapter.window().run();
     runtime_timer.stop();
     runtime_schedule.borrow_mut().take();

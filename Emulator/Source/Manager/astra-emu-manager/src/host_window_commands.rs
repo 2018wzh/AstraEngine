@@ -5,15 +5,16 @@ use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 /// Let the window manager fit the initial window when the preferred UI size
 /// exceeds the current display, including its native decorations.
 pub(super) fn fit_initial_window(window: &slint::Window) {
-    window.with_winit_window(|window| {
-        if let Some(monitor) = window.current_monitor() {
+    let oversized = window.with_winit_window(|window| {
+        window.current_monitor().is_some_and(|monitor| {
             let available = monitor.size();
             let requested = window.outer_size();
-            if requested.width > available.width || requested.height > available.height {
-                window.set_maximized(true);
-            }
-        }
+            requested.width > available.width || requested.height > available.height
+        })
     });
+    if oversized == Some(true) {
+        window.set_maximized(true);
+    }
 }
 
 /// The Manager has no custom application icon; None restores the window class default.
