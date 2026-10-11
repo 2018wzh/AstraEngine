@@ -8,6 +8,9 @@
 [`2018wzh/rfvp`](https://github.com/2018wzh/rfvp/tree/codex/local-product-adaptation),
 branch `codex/local-product-adaptation`, revision
 `73d3b4413c95a3923cce695d98c3d9bf5b08ccf0`.
+The current parent gitlink is `b2f385da486342de6e23202cccad8141ac6423b6`,
+which adds local input-lifecycle changes. These changes remain unpublished;
+the published baseline alone is not the covered source of the current binary.
 The complete license text is `../../../ThirdParty/rfvp/LICENSE`. The file-level change
 inventory is `MODIFICATIONS.md`; both it and the covered source must remain in
 the source archive or the valid source offer for a binary distribution.

@@ -253,8 +253,13 @@ impl AstraEmuManagerController {
                 .plugin_errors
                 .iter()
                 .map(|(id, error)| {
-                    format!("核心文件 {id} 未加载：{error}。修复 data/cores 中的文件后重启 Manager。")
+                    format!("核心文件 {id} 未加载：{error}。修复运行包或用户数据目录的 cores 文件后重启 AstraEMU。")
                 })
+                .chain(
+                    (self.registry.descriptors().next().is_none()).then(|| {
+                        "没有可用核心。请使用含 cores 目录的完整 AstraEMU 运行包，然后重启客户端。".to_owned()
+                    }),
+                )
                 .chain(
                     std::iter::once(self.diagnostic.clone()).filter(|message| !message.is_empty()),
                 )

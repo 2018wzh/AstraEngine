@@ -74,6 +74,50 @@ fn scan_once(app: &mut AstraEmuManagerController, path: &Path) {
 }
 
 #[test]
+fn imported_game_selection_loads_its_input_mapping() {
+    let root = tempfile::tempdir().unwrap();
+    let path = game(root.path());
+    let mut app = controller(root.path());
+    app.registry.register_provider(provider("test-a", 9_000)).unwrap();
+    app.input_mapping.deadzone = GamepadDeadzone::High;
+    let model = app.add_game_directory(&path).unwrap();
+    assert_eq!(model.selected_case_id, Some(path_id(&path)));
+    assert_eq!(app.input_mapping.deadzone, default_vn_preset().deadzone);
+}
+
+#[test]
+fn unsupported_import_reports_the_selected_directory_with_existing_games() {
+    let root = tempfile::tempdir().unwrap();
+    let path = game(root.path());
+    let mut app = controller(root.path());
+    app.registry.register_provider(provider("test-a", 9_000)).unwrap();
+    app.add_game_directory(&path).unwrap();
+    let unsupported = root.path().join("unsupported");
+    std::fs::create_dir(&unsupported).unwrap();
+    let model = app.add_game_directory(&unsupported).unwrap();
+    assert_eq!(model.games.len(), 1);
+    assert!(model.global_diagnostic.contains("所选目录中未发现"));
+}
+
+#[test]
+fn unavailable_game_does_not_block_library_startup_or_lose_metadata() {
+    let root = tempfile::tempdir().unwrap();
+    let path = game(root.path());
+    let id = path_id(&path);
+    let mut app = controller(root.path());
+    app.registry.register_provider(provider("test-a", 9_000)).unwrap();
+    scan_once(&mut app, &path);
+    app.library.set_game_user_title(&id, Some("Saved title")).unwrap();
+    std::fs::remove_dir_all(&path).unwrap();
+    let model = app.rescan().unwrap();
+    assert_eq!(model.games.len(), 1);
+    assert_eq!(model.games[0].title, "Saved title");
+    assert!(!model.games[0].diagnostic.is_empty());
+    assert!(!app.candidates.contains_key(&id));
+    assert!(model.global_diagnostic.contains("1 个游戏目录当前不可用"));
+}
+
+#[test]
 fn selected_probe_is_cleared_on_no_match() {
     let root = tempfile::tempdir().unwrap();
     let game_path = game(root.path());

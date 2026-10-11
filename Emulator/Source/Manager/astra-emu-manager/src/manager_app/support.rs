@@ -22,6 +22,20 @@ pub(super) fn platform_data_dir() -> Result<PathBuf, String> {
         .ok_or_else(|| "ASTRA_EMU_DATA_DIRECTORY_UNAVAILABLE".into())
 }
 
+#[cfg(not(target_os = "android"))]
+pub(super) fn core_directories(user_cores: &Path) -> Result<Vec<PathBuf>, String> {
+    let executable = env::current_exe().map_err(|_| "ASTRA_EMU_EXECUTABLE_LOCATION")?;
+    let bundled = executable
+        .parent()
+        .ok_or("ASTRA_EMU_EXECUTABLE_LOCATION")?
+        .join("cores");
+    let mut directories = vec![user_cores.to_owned()];
+    if bundled.is_dir() {
+        directories.push(bundled);
+    }
+    Ok(directories)
+}
+
 pub(super) fn sha256_id(value: &str) -> String {
     use sha2::{Digest, Sha256};
     let digest = Sha256::digest(value.as_bytes());

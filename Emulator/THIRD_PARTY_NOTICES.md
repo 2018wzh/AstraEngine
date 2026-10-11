@@ -17,6 +17,7 @@
 - Hosted adaptation fork: <https://github.com/2018wzh/rfvp>
 - Hosted adaptation branch: `codex/local-product-adaptation`
 - Hosted adaptation revision: `73d3b4413c95a3923cce695d98c3d9bf5b08ccf0`
+- 当前 submodule 固定 revision：`b2f385da486342de6e23202cccad8141ac6423b6`，包含尚未发布的本地输入生命周期修改。
 - License: Mozilla Public License 2.0.
 - Derivative source: <https://github.com/2018wzh/rfvp/tree/codex/local-product-adaptation>
 - Astra wrapper source: `Emulator/Source/Families/astra-emu-fvp/`
@@ -24,12 +25,12 @@
 
 发布时提供与二进制对应的 MPL-2.0 covered source、修改说明和完整许可证，可随包分发源码或提供有效的 source offer。
 
-当前 vendored source 位于 `Emulator/ThirdParty/rfvp/`，以 RFVP 0.6.0 上游 revision
+当前完整 fork 以 Git submodule 固定在 `Emulator/ThirdParty/rfvp/`，以 RFVP 0.6.0 上游 revision
 `304e773387a9920c9db091ec1fd937c717aea949` 为基线，hosted 适配来自已发布的
 [`2018wzh/rfvp` fork](https://github.com/2018wzh/rfvp/tree/codex/local-product-adaptation)
 分支 `codex/local-product-adaptation`、revision
-`73d3b4413c95a3923cce695d98c3d9bf5b08ccf0`；文件级变化和覆盖范围见该 Family
-的 `MODIFICATIONS.md` 与 `THIRD_PARTY_NOTICES.md`。vendored RFVP core 仅作为 private `rlib` 构建，动态边界由 `astra-emu-fvp` 持有。FVP 的四个原始系统字体槽由宿主通过 `fontdb` 从已安装字体按精确 family name 绑定，仓库不再携带替代字体文件。
+`73d3b4413c95a3923cce695d98c3d9bf5b08ccf0`，当前另含上述本地修改。公开适配基线不能代替当前二进制对应的 covered source；发布时必须另行提供完整源码。文件级变化和覆盖范围见该 Family
+的 `MODIFICATIONS.md` 与 `THIRD_PARTY_NOTICES.md`。RFVP core 仅作为 private `rlib` 构建，动态边界由 `astra-emu-fvp` 持有。FVP 的四个原始系统字体槽由宿主通过 `fontdb` 从已安装字体按精确 family name 绑定，仓库不再携带替代字体文件。
 
 ## WMV decoder
 

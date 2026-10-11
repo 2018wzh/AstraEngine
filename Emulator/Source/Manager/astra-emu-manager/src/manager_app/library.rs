@@ -5,13 +5,14 @@ impl AstraEmuManagerController {
         if self.active.is_some() {
             return Err("ASTRA_EMU_FAMILY_SESSION_ALREADY_ACTIVE".into());
         }
-        self.scan_paths(&[path.to_owned()])?;
-        let games = self.library.list_games().map_err(|error| error.to_string())?;
-        if self.selected_case_id.is_none() {
-            self.selected_case_id = games.first().map(|game| game.game_id.clone());
+        let imported = self.scan_paths(&[path.to_owned()])?;
+        if let Some(game_id) = imported.first() {
+            self.family_options.clear();
+            self.load_game_input_mapping(game_id)?;
+            self.selected_case_id = Some(game_id.clone());
         }
-        self.diagnostic = if games.is_empty() {
-            "未发现受已发现 Family 核心支持的游戏。".into()
+        self.diagnostic = if imported.is_empty() {
+            "所选目录中未发现当前核心支持的游戏。请选择原生游戏目录，或检查运行包包含的核心。".into()
         } else {
             String::new()
         };
@@ -30,8 +31,8 @@ impl AstraEmuManagerController {
         game_roots: Vec<PathBuf>,
     ) -> Result<Self, String> {
         fs::create_dir_all(&data_dir).map_err(|_| "ASTRA_EMU_DATA_DIRECTORY_CREATE")?;
-        let _cores_dir = data_dir.join("cores");
-        fs::create_dir_all(&_cores_dir).map_err(|_| "ASTRA_EMU_CORES_DIRECTORY_CREATE")?;
+        let cores_dir = data_dir.join("cores");
+        fs::create_dir_all(&cores_dir).map_err(|_| "ASTRA_EMU_CORES_DIRECTORY_CREATE")?;
         let mut library =
             Library::open(data_dir.join("library.sqlite3")).map_err(|error| error.to_string())?;
         library
@@ -45,8 +46,10 @@ impl AstraEmuManagerController {
             .register_provider(astra_emu_fvp::FvpProvider::default())
             .map_err(|error| error.to_string())?;
         #[cfg(not(target_os = "android"))]
+        let core_directories = core_directories(&cores_dir)?;
+        #[cfg(not(target_os = "android"))]
         let core_report = registry
-            .load_directory(&_cores_dir)
+            .load_directories(&core_directories)
             .map_err(|error| error.to_string())?;
         #[cfg(not(target_os = "android"))]
         for failure in core_report.errors {
@@ -214,7 +217,7 @@ impl AstraEmuManagerController {
         self.probe_choices.get(game_id).map(Vec::as_slice)
     }
 
-    fn clear_probe_state(&mut self, game_id: &str) -> Result<(), String> {
+    pub(super) fn clear_probe_state(&mut self, game_id: &str) -> Result<(), String> {
         self.candidates.remove(game_id);
         self.probe_choices.remove(game_id);
         if self.selected_case_id.as_deref() == Some(game_id) {
@@ -268,7 +271,8 @@ impl AstraEmuManagerController {
         Ok(game_id)
     }
 
-    pub(super) fn scan_paths(&mut self, paths: &[PathBuf]) -> Result<(), String> {
+    pub(super) fn scan_paths(&mut self, paths: &[PathBuf]) -> Result<Vec<String>, String> {
+        let mut imported = BTreeSet::new();
         for root in paths {
             for path in enumerate_directories(root)? {
                 let selection = self.probe_directory(&path)?;
@@ -277,19 +281,20 @@ impl AstraEmuManagerController {
                     FamilyProbeSelection::Selected(candidate) => {
                         self.upsert_scanned_game(&path, Some(&candidate.report.family_id))?;
                         self.probe_choices.remove(&game_id);
+                        imported.insert(game_id.clone());
                         self.candidates.insert(game_id, *candidate);
                     }
                     FamilyProbeSelection::NoMatch => {
                         self.clear_probe_state(&game_id)?;
                     }
                     FamilyProbeSelection::RequiresUserChoice(candidates) => {
-                        self.remember_probe_choice(&path, candidates)?;
+                        imported.insert(self.remember_probe_choice(&path, candidates)?);
                         self.diagnostic =
                             "Multiple family providers matched a game; choose a provider in Family configuration.".into();
                     }
                 }
             }
         }
-        Ok(())
+        Ok(imported.into_iter().collect())
     }
 }

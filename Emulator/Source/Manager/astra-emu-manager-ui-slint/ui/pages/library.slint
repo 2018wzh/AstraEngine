@@ -63,6 +63,8 @@ component GameListRow inherits Rectangle {
     accessible-label: game.title;
     animate background { duration: 120ms; }
 
+    row-area := TouchArea { clicked => { root.activated(game.case-id); } }
+
     HorizontalLayout {
         padding-left: 12px;
         padding-right: 12px;
@@ -178,7 +180,6 @@ component GameListRow inherits Rectangle {
         }
     }
 
-    row-area := TouchArea { clicked => { root.activated(game.case-id); } }
 }
 
 // Bangumi collection progress section with M3 Segmented Buttons and rating
@@ -634,10 +635,10 @@ export component LibraryPage inherits Rectangle {
                                     clicked => { root.search-query = ""; root.search(""); }
                                 }
                                 M3Button {
-                                    text: "扫描本地游戏";
-                                    icon: Icons.rotate;
+                                    text: "添加游戏";
+                                    icon: Icons.gamepad;
                                     primary: true;
-                                    clicked => { root.rescan(); }
+                                    clicked => { root.add-game-directory(); }
                                 }
                             }
                         }

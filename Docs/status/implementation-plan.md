@@ -1,5 +1,15 @@
 # 全产品重构实施状态
 
+## 2026-10-11 AstraEMU 客户端交付优先
+
+按用户最新要求，当前优先交付可直接启动的 AstraEMU 客户端。复用已整合的 Family API v10、音频进度与 GPU 生命周期实现。Manager 增加程序相邻 `cores/` 发现，与用户安装核心一起处理重复 plugin ID；无核心时提供运行包提示。游戏目录丢失不阻止资料库打开，保留资料库信息并阻止旧候选启动。Slint 列表的选择区域移到启动按钮后层，空资料库提供“添加游戏”入口。
+
+`Tools/AstraEMU/package_client.py` 组装实际 Manager、Family 库、显式 runtime 依赖与许可文件；不启动、不发布、不加入商业素材。Windows 运行包准备包含固定 DXC 的 compiler/validator 与许可。使用与构建说明见 [客户端手册](../manual/astraemu-client.md)。
+
+本轮已从 ArchLXC 恢复未推送的 Siglus 固定提交，来源分支未修改。Manager 与动态 FVP 核心完成 Windows 构建，运行包已包含两者、DXC compiler/validator、VC runtime 及许可说明。资料库与核心发现 11 项定向回归通过，包括跨程序目录与用户目录的真实动态库重复 plugin ID 拒绝、失效目录保留以及导入后输入配置加载。Manager、manager-core、Slint UI 的 all-target Clippy 通过。
+
+Sandbox 已恢复启动。构建 target、运行依赖、客户端运行包与游戏副本位于数据盘，运行包通过只读 `wsb share` 映射；游戏独立副本排除原存档，按用户授权单独可写映射。现有只读映射重新 share 不会实际转为可写；重建本轮 Sandbox 后首次可写 share 已正常写入。实际客户端完成空资料库目录选择、FVP 核心加载、游戏导入、列表按钮启动、原生标题和正文显示、鼠标与键盘输入、空槽原生存档、会话关闭重开以及跨会话读取先前存档。客户端进程退出后重新启动，游戏记录、累计时长与两次会话记录保留，随包 FVP 核心再次发现。读档后先恢复到保存菜单；退出该菜单后剧情回到保存处，键盘可继续推进，直接返回剧情仍待修正。FVP 原生 GPU renderer 拒绝 CPU adapter，实际窗口完成上述绘制；未另测 GPU 离屏或正式性能。系统音频设备返回 `ASTRA_EMU_AUDIO_DEVICE_UNAVAILABLE`，本次流程明确使用 NullAudio；未计可听音频或完整结局验收。没有改用本机桌面或修改宿主配置；KrKr 仍不作为已验收核心加入运行包。
+
 ## 2026-10-03 CMVS SDK 画布与 GPU 所有权迁移
 
 选定迁移批已按顺序集成。CMVS Scene 复用现有 SDK `StageCanvas` 区分核心逻辑舞台与物理 raster；窗口 resize 只更新渲染目标，Family 帧报告两种尺寸。`CmvsProvider` 跨 session 持有原生 `wgpu::Instance`，Scene 持有同一 Instance 的所有权，关闭与恢复候选释放各自 renderer/device/纹理资源。VM、格式、归档、指令及原生存档语义继续由核心负责，没有引入 Engine/VN session。来源已有的 quad activation/live 查询与 scheduler rebuild gate 同步迁入，未改变争议音频指令语义。
