@@ -6,12 +6,12 @@ to an exact local adaptation commit in the
 [`2018wzh/siglus_rs`](https://github.com/2018wzh/siglus_rs) fork. That branch
 starts from upstream commit `e762f9f9c1c94cb490fb13f1367fd06f3e1367b4` (2026-09-13)
 plus a single adaptation commit
-(`364aca85f2a76b05ca48c2230a1a79af567dd393`). This local commit consolidates
+(`473cb7a282b0b5b4e60d5568019e40ed4774a58e`). This local commit consolidates
 the original hosted adaptation `2be01ae` and local cancellation/GPU changes
 `a9508e6`; both original commits remain available without rewriting their
 history. The previous consolidated commit `c6c4f99ccac855966b726909756afe3200488374`
 and its branch remain unchanged. The current local branch is
-`codex/hosted-audio-isolation`; its commit has not been pushed, so a remote
+`codex/hosted-mixer-scopes`; its commit has not been pushed, so a remote
 clean checkout and CI are not yet available for this gitlink. The complete MPL-2.0 text stays
 in `../../../ThirdParty/siglus_rs/LICENSE-MPL-2.0`; `THIRD_PARTY_NOTICES.md`
 records the attribution chain.
@@ -33,7 +33,7 @@ platform behavior still requires platform-specific validation.
   surface error branch.
 - `crates/siglus_scene_vm/src/audio/kira_hub.rs` adds a PCM tap audio
   backend gated behind `astra-hosted`: `hosted_tap::install` registers a
-  callback and `AudioHub::new` mixes through `TapBackend` (a kira `Backend`
+  callback factory and `AudioHub::new` mixes through `TapBackend` (a kira `Backend`
   whose worker pulls mixed frames and pushes interleaved stereo f32 chunks at
   the configured sample rate) whenever a tap is installed. The callback
   blocks on the consumer's bounded queue, pacing the mixer to real time.
@@ -41,6 +41,12 @@ platform behavior still requires platform-specific validation.
   or failed tap returns an initialization error through `SiglusHost` instead
   of silently selecting another backend. The default `native-audio` feature
   explicitly constructs Kira's `CpalBackend` for the original desktop path.
+- Each hosted mixer receives its own callback and cancellation scope from
+  the factory. Dropping an `AudioHub` during native scene restart only
+  interrupts that mixer's writes and joins its worker; it must not cancel
+  the session's shared Host sink. Session closure still cancels the Host
+  sink before joining workers. The previous `364aca8` adaptation is retained
+  on its own local branch.
 - The workspace Kira dependency disables automatic backend features and
   explicitly retains `mp3`, `ogg`, `flac`, and `wav`. `native-audio` alone
   enables `kira/cpal`; the hosted Family selects only `astra-hosted`.
