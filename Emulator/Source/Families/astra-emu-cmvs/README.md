@@ -1,6 +1,6 @@
 # CMVS
 
-当前 Family 插件使用公共 v10 descriptor 和 typed 配置，复用现有 CPZ5、PS2A VM 与硬件 GPU Scene。VM、格式、归档和原生存档语义由核心持有，不创建 Engine/VN session。
+当前 Family 插件使用公共 v11 descriptor 和 typed 配置，复用现有 CPZ5、PS2A VM 与硬件 GPU Scene。VM、格式、归档和原生存档语义由核心持有，不创建 Engine/VN session。
 
 Scene 已接入 SDK `StageCanvas`：逻辑舞台与 raster 分开，窗口 resize 只调整渲染目标，Family 帧报告逻辑与物理尺寸。Provider 跨 session 持有原生 `wgpu::Instance`，Scene 保持同一 Instance 存活，并释放每个 session 自身的 renderer/device/纹理资源。来源的 quad activation/live 查询与 scheduler rebuild gate 已迁入。Linux 定向检查包含 216 项 CPU、2 项 SDK StageCanvas 与 2 项 Tesla P4 Vulkan GPU 回归，以及 all-target Clippy；GPU 组覆盖 32 次 renderer 重建、resize/drop 和失败候选回收。
 

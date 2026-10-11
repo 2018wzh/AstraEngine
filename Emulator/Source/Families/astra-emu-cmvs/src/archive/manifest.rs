@@ -44,14 +44,14 @@ impl CmvsArchive {
                     archive_role: Some(archive.role.clone()),
                     byte_size: archive.byte_size,
                     part_count: 1,
-                    source_hash: archive_hashes[index],
+                    source_revision: archive_hashes[index],
                 })
                 .chain(loose.values().map(|source| ArchiveSource {
                     source_id: format!("loose-{}", source.role),
                     archive_role: Some(format!("loose-{}", source.role)),
                     byte_size: source.byte_size,
                     part_count: 1,
-                    source_hash: loose_hashes[&source.role],
+                    source_revision: loose_hashes[&source.role],
                 }))
                 .collect(),
             entries: entries
@@ -63,7 +63,7 @@ impl CmvsArchive {
                     source_offset: entry.descriptor.offset,
                     stored_size: entry.descriptor.stored_size,
                     decoded_size: entry.descriptor.stored_size,
-                    source_hash: archive_hashes[entry.archive],
+                    source_revision: archive_hashes[entry.archive],
                     content_hash: None,
                     method: "cpz5-encrypted".into(),
                     media_kind: media_kind(&entry.descriptor.relative_path).into(),
@@ -75,7 +75,7 @@ impl CmvsArchive {
                     source_offset: 0,
                     stored_size: source.byte_size,
                     decoded_size: source.byte_size,
-                    source_hash: loose_hashes[&source.role],
+                    source_revision: loose_hashes[&source.role],
                     content_hash: None,
                     method: "loose".into(),
                     media_kind: source.media_kind.clone(),

@@ -64,7 +64,7 @@
 
 - 旧文档把六个业务包误写成完整集合。八包 full verify 已补齐：14502 entries、43818 次 range read、6624958365 个 decoded bytes。
 - 启用 cache 的八包验证因平台私有缓存卷空间不足，在首个写入处阻断。no-cache full verify 已通过，但 cache identity 第二轮全命中仍需单独证据。
-- 首次八包挂载需要读取约 5.74 GiB source 并为 entry 建立完整性身份。旧实现先顺序哈希全包，再逐 entry 随机重读 encrypted range；现已改为一次有界顺序流同时计算 source 与 entry hash，并阻断重叠 range、短读和期间的 metadata drift。跨分卷、零长度和 overlap 回归已通过。相同本地样本的 mount 区间由约 466 秒降至两次单流运行的约 367 秒和 403 秒；各 role 的 `archive_hashed` 后均立即完成 mount。机械卷吞吐仍占主要成本，因此只记录约 14%–21% 的实测改善，不宣称秒级启动。
+- 启动时的全量 source/entry 哈希扫描已删除。挂载只读取必需归档索引，索引与分卷长度、修改时间生成 `source_revision`，用于缓存和存档身份；它不是完整内容校验和。仍检查格式、分卷、条目范围、重叠及挂载后的文件版本变化。真实样本启动及 Release 性能尚待复测。
 - `stage` 已覆盖无 stand 的普通图像路径，但 stand position 不能按名称猜成像素坐标；遇到 stand 时返回稳定 blocker。transition 配置已保存，动画插值和 fence 尚未接入。
 - 真实 Headless 已到第二条可见 message，但只检查了选定帧，没有完成整个 effect 周期的逐帧节奏比较。`select`、普通 voice、其他 panel/effect 和后续主要演出仍需逐项确认；assignment 的字符串值和除零行为也仍需脱敏 census。
 - AstraEMU runner 同时输出专用 `astra.emu.headless_run_report.v2` 和公共 `astra.headless_run_report.v2`；两者绑定同一 manifest hash、输入、checkpoint 和 diagnostic 状态。真实八包 v24 已通过 `prepare-review`，模型按 bundle 查看 6 个 required checkpoint、首尾/最大差异选择，并检查 3 个完整 WAV 的时长、电平、静音与 clipping；`validate-review` 随后通过。该 review 只适用于 373-tick slice，不能覆盖完整路线或自动失败。

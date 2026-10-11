@@ -119,8 +119,8 @@ fn playback_defers_content_identity_until_manifest_is_requested() {
     assert!(archive.archives[0].source_hash.get().is_none());
     let manifest = archive.manifest().unwrap();
     let expected = hash_file(&archive.archives[0].path).unwrap();
-    assert_eq!(manifest.sources[0].source_hash, expected);
-    assert_eq!(manifest.entries[0].source_hash, expected);
+    assert_eq!(manifest.sources[0].source_revision, expected);
+    assert_eq!(manifest.entries[0].source_revision, expected);
     assert_eq!(archive.archives[0].source_hash.get(), Some(&expected));
     assert_eq!(archive.manifest().unwrap(), manifest);
 }

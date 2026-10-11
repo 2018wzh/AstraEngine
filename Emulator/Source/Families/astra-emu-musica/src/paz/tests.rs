@@ -104,7 +104,7 @@ fn blowfish_encrypt(key: &[u8], plaintext: &[u8]) -> Vec<u8> {
     bytes
 }
 
-fn hash_fixture_entry(id: &str, offset: u64, size: u64) -> ArchiveEntryDescriptor {
+fn index_fixture_entry(id: &str, offset: u64, size: u64) -> ArchiveEntryDescriptor {
     ArchiveEntryDescriptor {
         archive_role: "bg".into(),
         entry_id: id.into(),
@@ -119,59 +119,32 @@ fn hash_fixture_entry(id: &str, offset: u64, size: u64) -> ArchiveEntryDescripto
 }
 
 #[test]
-fn archive_and_entry_hashes_share_one_ordered_stream() {
-    let temp = tempfile::tempdir().unwrap();
-    let bytes = (0u8..100).collect::<Vec<_>>();
-    let first = temp.path().join("archive.paz");
-    let second = temp.path().join("archive.pazA");
-    fs::write(&first, &bytes[..47]).unwrap();
-    fs::write(&second, &bytes[47..]).unwrap();
-    let parts = [&first, &second]
-        .into_iter()
-        .map(|path| {
-            let metadata = fs::metadata(path).unwrap();
-            ArchivePart {
-                path: path.clone(),
-                length: metadata.len(),
-                modified: metadata.modified().ok(),
-            }
-        })
-        .collect::<Vec<_>>();
-    let entries = vec![
-        hash_fixture_entry("first", 3, 17),
-        hash_fixture_entry("cross-part", 40, 20),
-        hash_fixture_entry("empty", 80, 0),
-    ];
-
-    let (source_hash, entry_hashes) =
-        hash_parts_and_entries(&parts, bytes.len() as u64, &entries).unwrap();
-
-    assert_eq!(source_hash, Hash256::from_sha256(&bytes));
-    assert_eq!(entry_hashes[0], Hash256::from_sha256(&bytes[3..20]));
-    assert_eq!(entry_hashes[1], Hash256::from_sha256(&bytes[40..60]));
-    assert_eq!(entry_hashes[2], Hash256::from_sha256(&[]));
+fn archive_revision_uses_index_and_metadata_without_opening_payloads() {
+    let mut parts = vec![ArchivePart {
+        path: PathBuf::from("unopened.paz"),
+        length: 1024,
+        modified: Some(UNIX_EPOCH + std::time::Duration::from_secs(1)),
+    }];
+    let first = archive_revision(&parts, 1, 0, b"index");
+    parts[0].path = PathBuf::from("relocated.paz");
+    assert_eq!(first, archive_revision(&parts, 1, 0, b"index"));
+    assert_ne!(first, archive_revision(&parts, 1, 0, b"different index"));
+    parts[0].length += 1;
+    assert_ne!(first, archive_revision(&parts, 1, 0, b"index"));
+    parts[0].length -= 1;
+    parts[0].modified = Some(UNIX_EPOCH + std::time::Duration::from_secs(2));
+    assert_ne!(first, archive_revision(&parts, 1, 0, b"index"));
 }
 
 #[test]
 fn overlapping_encrypted_entry_ranges_are_blocking() {
-    let temp = tempfile::tempdir().unwrap();
-    let path = temp.path().join("archive.paz");
-    fs::write(&path, [0u8; 32]).unwrap();
-    let metadata = fs::metadata(&path).unwrap();
-    let parts = vec![ArchivePart {
-        path,
-        length: metadata.len(),
-        modified: metadata.modified().ok(),
-    }];
     let entries = vec![
-        hash_fixture_entry("first", 0, 16),
-        hash_fixture_entry("second", 8, 16),
+        index_fixture_entry("first", 0, 16),
+        index_fixture_entry("second", 8, 16),
     ];
 
     assert_eq!(
-        hash_parts_and_entries(&parts, 32, &entries)
-            .unwrap_err()
-            .code(),
+        validate_entry_ranges(32, &entries).unwrap_err().code(),
         "ASTRA_EMU_MUSICA_ENTRY_OVERLAP"
     );
 }
@@ -215,7 +188,7 @@ fn v0_fixture_mounts_all_roles_and_reads_across_a_volume_boundary() {
             .iter()
             .find(|source| source.source_id == entry.source_id)
             .unwrap();
-        assert_eq!(entry.source_hash, source.source_hash);
+        assert_eq!(entry.source_revision, source.source_revision);
     }
     let root = vfs.read_dir("musica:/").unwrap();
     assert_eq!(root.len(), REQUIRED_ARCHIVE_ROLES.len());

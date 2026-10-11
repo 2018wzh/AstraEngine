@@ -232,7 +232,7 @@ impl CmvsArchive {
             .map(|_| -> Result<_, CoreError> {
                 Ok(CacheIdentity {
                     family_id: CMVS_FAMILY_ID.into(),
-                    source_hash: archive_hash(archive, false)?,
+                    source_revision: archive_hash(archive, false)?,
                     entry_id: entry.entry_id.clone(),
                     private_profile_hash: self.private_profile_hash,
                     decrypt_provider_id: CMVS_DECRYPT_PROVIDER_ID.into(),

@@ -4,7 +4,7 @@ use std::{
     io::{Cursor, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
     sync::Arc,
-    time::SystemTime,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use crate::archive::{
@@ -327,7 +327,7 @@ struct ArchiveFile {
     parts: Vec<ArchivePart>,
     version: u8,
     length: u64,
-    hash: Hash256,
+    revision: Hash256,
     xor_key: u8,
 }
 
@@ -343,7 +343,6 @@ struct MountedEntry {
     descriptor: ArchiveEntryDescriptor,
     uri: String,
     archive: usize,
-    encrypted_hash: Hash256,
 }
 
 pub struct MusicaMountedVfs {
@@ -394,7 +393,6 @@ impl MusicaMountedVfs {
         let mut archives = Vec::with_capacity(configs.len());
         let mut entries = BTreeMap::new();
         let mut entry_ids = BTreeSet::new();
-        let mut prepared = Vec::with_capacity(configs.len());
         for config in configs {
             tracing::info!(
                 event = "astra_emu_musica_archive_mount_started",
@@ -428,7 +426,7 @@ impl MusicaMountedVfs {
                 parts,
                 version: config.version,
                 length: total_length,
-                hash: Hash256::from_sha256(&[]),
+                revision: Hash256::from_sha256(&[]),
                 xor_key: 0,
             };
             let parsed = parse_archive_index(
@@ -441,19 +439,9 @@ impl MusicaMountedVfs {
                 archive_role = %config.role,
                 entry_count = parsed.len()
             );
-            prepared.push((config, source, parsed));
-        }
-        for (config, mut source, parsed) in prepared {
-            let (source_hash, encrypted_hashes) =
-                hash_parts_and_entries(&source.parts, source.length, &parsed)?;
-            source.hash = source_hash;
-            tracing::info!(
-                event = "astra_emu_musica_archive_hashed",
-                archive_role = %config.role,
-                archive_hash = %source.hash
-            );
+            validate_entry_ranges(source.length, &parsed)?;
             let archive_index = archives.len();
-            for (entry, encrypted_hash) in parsed.into_iter().zip(encrypted_hashes) {
+            for entry in parsed {
                 let uri = format!(
                     "{}{}/{}",
                     prefix,
@@ -473,7 +461,6 @@ impl MusicaMountedVfs {
                         descriptor: entry,
                         uri,
                         archive: archive_index,
-                        encrypted_hash,
                     },
                 );
             }
@@ -485,7 +472,7 @@ impl MusicaMountedVfs {
         }
         let reader_material = archives
             .iter()
-            .flat_map(|archive| archive.hash.as_bytes().iter().copied())
+            .flat_map(|archive| archive.revision.as_bytes().iter().copied())
             .collect::<Vec<_>>();
         let reader_hash = Hash256::from_sha256(&reader_material);
         let manifest_entries = entries
@@ -497,7 +484,7 @@ impl MusicaMountedVfs {
                 source_offset: entry.descriptor.offset,
                 stored_size: entry.descriptor.aligned_size,
                 decoded_size: entry.descriptor.unpacked_size,
-                source_hash: archives[entry.archive].hash,
+                source_revision: archives[entry.archive].revision,
                 content_hash: None,
                 method: entry_method(&entry.descriptor).into(),
                 media_kind: media_kind(&entry.descriptor.name).into(),
@@ -520,7 +507,7 @@ impl MusicaMountedVfs {
                     archive_role: Some(archive.role.clone()),
                     byte_size: archive.length,
                     part_count: archive.parts.len() as u32,
-                    source_hash: archive.hash,
+                    source_revision: archive.revision,
                 })
                 .collect(),
             entries: manifest_entries,
@@ -542,7 +529,7 @@ impl MusicaMountedVfs {
         verify_source_unchanged(archive)?;
         let identity = CacheIdentity {
             family_id: "musica".into(),
-            source_hash: archive.hash,
+            source_revision: archive.revision,
             entry_id: entry.descriptor.entry_id.clone(),
             private_profile_hash: self.decrypt_provider.private_profile_hash(),
             decrypt_provider_id: self.decrypt_provider.provider_id().into(),
@@ -575,12 +562,6 @@ impl MusicaMountedVfs {
             entry.descriptor.offset,
             entry.descriptor.aligned_size,
         )?;
-        if Hash256::from_sha256(&encrypted) != entry.encrypted_hash {
-            return Err(error(
-                "ASTRA_EMU_MUSICA_SOURCE_CHANGED",
-                "archive bytes changed after mount",
-            ));
-        }
         xor_byte(&mut encrypted, archive.xor_key);
         let mut decoded = decrypt_bytes(
             self.decrypt_provider.as_ref(),
@@ -647,19 +628,6 @@ impl MusicaMountedVfs {
     }
     pub fn manifest(&self) -> &ArchiveManifest {
         &self.manifest
-    }
-
-    pub fn validate_sources(&self) -> Result<(), PazError> {
-        for archive in &self.archives {
-            verify_source_unchanged(archive)?;
-            if hash_parts(&archive.parts)? != archive.hash {
-                return Err(error(
-                    "ASTRA_EMU_MUSICA_SOURCE_CHANGED",
-                    "archive content changed after mount",
-                ));
-            }
-        }
-        Ok(())
     }
 
     pub fn read_dir(&self, uri: &str) -> Result<Vec<ArchiveNode>, PazError> {
@@ -859,6 +827,7 @@ fn parse_archive_index(
         ));
     }
     let mut encrypted = read_source_range(source, index_offset, encrypted_size)?;
+    source.revision = archive_revision(&source.parts, source.version, source.xor_key, &encrypted);
     xor_byte(&mut encrypted, source.xor_key);
     let decoded = decrypt_bytes(
         decrypt_provider,
@@ -1076,14 +1045,37 @@ fn read_source_range(source: &ArchiveFile, offset: u64, length: u64) -> Result<V
     Ok(output)
 }
 
-fn hash_parts_and_entries(
-    parts: &[ArchivePart],
+// The index is already needed for mounting. File metadata supplies the payload
+// generation without reading every encrypted asset before the first game frame.
+fn archive_revision(parts: &[ArchivePart], version: u8, xor_key: u8, index: &[u8]) -> Hash256 {
+    let mut revision = Sha256::new();
+    revision.update(b"musica.paz.revision.v1\0");
+    revision.update([version, xor_key]);
+    revision.update((parts.len() as u64).to_le_bytes());
+    for part in parts {
+        revision.update(part.length.to_le_bytes());
+        match part.modified {
+            None => revision.update([0]),
+            Some(modified) => {
+                let (sign, elapsed) = match modified.duration_since(UNIX_EPOCH) {
+                    Ok(elapsed) => (1, elapsed),
+                    Err(before) => (2, before.duration()),
+                };
+                revision.update([sign]);
+                revision.update(elapsed.as_nanos().to_le_bytes());
+            }
+        }
+    }
+    revision.update(index);
+    Hash256::from_bytes(revision.finalize().into())
+}
+
+fn validate_entry_ranges(
     source_length: u64,
     entries: &[ArchiveEntryDescriptor],
-) -> Result<(Hash256, Vec<Hash256>), PazError> {
+) -> Result<(), PazError> {
     let mut ranges = Vec::with_capacity(entries.len());
-    let mut entry_hashes = vec![None; entries.len()];
-    for (index, entry) in entries.iter().enumerate() {
+    for entry in entries {
         let end = entry
             .offset
             .checked_add(entry.aligned_size)
@@ -1099,163 +1091,18 @@ fn hash_parts_and_entries(
                 "entry encrypted range exceeds the archive",
             ));
         }
-        if entry.aligned_size == 0 {
-            entry_hashes[index] = Some(Hash256::from_sha256(&[]));
-        } else {
-            ranges.push((entry.offset, end, index));
+        if entry.aligned_size != 0 {
+            ranges.push((entry.offset, end));
         }
     }
-    ranges.sort_unstable_by_key(|(start, end, index)| (*start, *end, *index));
-    for pair in ranges.windows(2) {
-        if pair[1].0 < pair[0].1 {
-            return Err(error(
-                "ASTRA_EMU_MUSICA_ENTRY_OVERLAP",
-                "PAZ encrypted entry ranges overlap",
-            ));
-        }
-    }
-
-    let mut source_hasher = Sha256::new();
-    let mut active_entry = None::<Sha256>;
-    let mut range_index = 0usize;
-    let mut logical_offset = 0u64;
-    // Windows reserves a relatively small main-thread stack. Archive hashing is a
-    // normal host operation, so its MiB-sized scratch area belongs on the heap.
-    let mut buffer = vec![0u8; 1024 * 1024];
-    for part in parts {
-        let file = File::open(&part.path).map_err(|_| {
-            error(
-                "ASTRA_EMU_MUSICA_ARCHIVE_OPEN",
-                "PAZ archive cannot be opened",
-            )
-        })?;
-        let read_bound = part.length.checked_add(1).ok_or_else(|| {
-            error(
-                "ASTRA_EMU_MUSICA_ARCHIVE_SIZE",
-                "archive part read bound overflowed",
-            )
-        })?;
-        let mut file = file.take(read_bound);
-        let mut part_bytes = 0u64;
-        loop {
-            let count = file.read(&mut buffer).map_err(|_| {
-                error(
-                    "ASTRA_EMU_MUSICA_ARCHIVE_READ",
-                    "PAZ archive hash read failed",
-                )
-            })?;
-            if count == 0 {
-                break;
-            }
-            part_bytes = part_bytes.checked_add(count as u64).ok_or_else(|| {
-                error(
-                    "ASTRA_EMU_MUSICA_ARCHIVE_SIZE",
-                    "archive part read size overflowed",
-                )
-            })?;
-            source_hasher.update(&buffer[..count]);
-            let chunk_end = logical_offset.checked_add(count as u64).ok_or_else(|| {
-                error(
-                    "ASTRA_EMU_MUSICA_ARCHIVE_SIZE",
-                    "archive logical offset overflowed",
-                )
-            })?;
-            while let Some(&(range_start, range_end, original_index)) = ranges.get(range_index) {
-                if range_start >= chunk_end {
-                    break;
-                }
-                if range_end <= logical_offset {
-                    return Err(error(
-                        "ASTRA_EMU_MUSICA_ENTRY_HASH",
-                        "entry encrypted range was not covered by the archive stream",
-                    ));
-                }
-                let overlap_start = range_start.max(logical_offset);
-                let overlap_end = range_end.min(chunk_end);
-                let start = usize::try_from(overlap_start - logical_offset).map_err(|_| {
-                    error(
-                        "ASTRA_EMU_MUSICA_ENTRY_HASH",
-                        "entry chunk start exceeds host bounds",
-                    )
-                })?;
-                let end = usize::try_from(overlap_end - logical_offset).map_err(|_| {
-                    error(
-                        "ASTRA_EMU_MUSICA_ENTRY_HASH",
-                        "entry chunk end exceeds host bounds",
-                    )
-                })?;
-                active_entry
-                    .get_or_insert_with(Sha256::new)
-                    .update(&buffer[start..end]);
-                if overlap_end != range_end {
-                    break;
-                }
-                let digest = active_entry.take().ok_or_else(|| {
-                    error("ASTRA_EMU_MUSICA_ENTRY_HASH", "entry hash state is missing")
-                })?;
-                entry_hashes[original_index] = Some(Hash256::from_bytes(digest.finalize().into()));
-                range_index += 1;
-            }
-            logical_offset = chunk_end;
-        }
-        if part_bytes != part.length {
-            return Err(error(
-                "ASTRA_EMU_MUSICA_SOURCE_CHANGED",
-                "archive part size changed while hashing",
-            ));
-        }
-    }
-    if logical_offset != source_length
-        || range_index != ranges.len()
-        || active_entry.is_some()
-        || entry_hashes.iter().any(Option::is_none)
-    {
+    ranges.sort_unstable();
+    if ranges.windows(2).any(|pair| pair[1].0 < pair[0].1) {
         return Err(error(
-            "ASTRA_EMU_MUSICA_ARCHIVE_SHORT_READ",
-            "archive stream did not cover every declared byte and entry",
+            "ASTRA_EMU_MUSICA_ENTRY_OVERLAP",
+            "PAZ encrypted entry ranges overlap",
         ));
     }
-    for part in parts {
-        let metadata = std::fs::metadata(&part.path).map_err(|_| {
-            error(
-                "ASTRA_EMU_MUSICA_SOURCE_CHANGED",
-                "archive part disappeared while hashing",
-            )
-        })?;
-        if metadata.len() != part.length || metadata.modified().ok() != part.modified {
-            return Err(error(
-                "ASTRA_EMU_MUSICA_SOURCE_CHANGED",
-                "archive part metadata changed while hashing",
-            ));
-        }
-    }
-    let entry_hashes = entry_hashes
-        .into_iter()
-        .map(|hash| {
-            hash.ok_or_else(|| {
-                error(
-                    "ASTRA_EMU_MUSICA_ENTRY_HASH",
-                    "entry hash was not finalized",
-                )
-            })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok((
-        Hash256::from_bytes(source_hasher.finalize().into()),
-        entry_hashes,
-    ))
-}
-
-fn hash_parts(parts: &[ArchivePart]) -> Result<Hash256, PazError> {
-    let source_length = parts.iter().try_fold(0u64, |total, part| {
-        total.checked_add(part.length).ok_or_else(|| {
-            error(
-                "ASTRA_EMU_MUSICA_ARCHIVE_SIZE",
-                "multipart PAZ size overflowed",
-            )
-        })
-    })?;
-    hash_parts_and_entries(parts, source_length, &[]).map(|(hash, _)| hash)
+    Ok(())
 }
 
 fn verify_source_unchanged(source: &ArchiveFile) -> Result<(), PazError> {

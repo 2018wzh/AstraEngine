@@ -9,7 +9,7 @@ fn native_stop_tokens_are_not_missing_archive_resources() {
     .unwrap();
     let hash = Hash256::from_sha256(b"census-test");
     let manifest = astra_emu_musica::ArchiveManifest {
-        schema: "astra.emu.archive_manifest.v1".into(),
+        schema: astra_emu_musica::ARCHIVE_MANIFEST_SCHEMA.into(),
         family_id: "musica".into(),
         mount_id: "test".into(),
         prefix: "musica:/".into(),

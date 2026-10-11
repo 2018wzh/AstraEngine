@@ -1,4 +1,4 @@
-//! KrKr Family v10 adapter and its owned native child transport.
+//! KrKr Family v11 adapter and its owned native child transport.
 //! Each session uses a fresh child and the real native owner DLL. This crate
 //! remains outside the Manager registry until native integration is complete.
 

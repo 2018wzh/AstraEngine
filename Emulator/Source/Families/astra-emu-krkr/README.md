@@ -1,6 +1,6 @@
 # KrKr Family
 
-The Family v10 module opens a native game directory and owns one fresh child
+The Family v11 module opens a native game directory and owns one fresh child
 process per session. The child loads the native owner DLL, runs the original
 VM/renderer/input path, and returns its complete physical RGBA8 frame with
 the authored logical stage dimensions. The SDK owns the copied texture and
