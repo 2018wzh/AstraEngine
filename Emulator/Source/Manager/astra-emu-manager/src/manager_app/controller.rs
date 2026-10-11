@@ -168,6 +168,12 @@ impl ManagerController for AstraEmuManagerController {
             .and_then(|active| active.pending_icon.take())
     }
 
+    fn take_game_pointer(&mut self) -> Option<astra_emu_family_api::FamilyPointerRequest> {
+        self.active
+            .as_mut()
+            .and_then(|active| active.pending_pointer.take())
+    }
+
     fn game_title(&self) -> Option<&str> {
         self.active
             .as_ref()

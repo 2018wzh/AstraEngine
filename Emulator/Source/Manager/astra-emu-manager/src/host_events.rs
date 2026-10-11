@@ -37,6 +37,7 @@ pub(super) fn current_window_state(window: &slint::Window) -> Result<WindowState
 pub(super) fn install<C: ManagerController>(
     adapter: &Rc<SlintManagerAdapter>,
     controller: Rc<RefCell<C>>,
+    pointer: Rc<RefCell<super::pointer::HostPointer>>,
 ) {
     let weak = adapter.window().as_weak();
     let weak_adapter = Rc::downgrade(adapter);
@@ -57,6 +58,7 @@ pub(super) fn install<C: ManagerController>(
                 && !window.get_translation_overlay_active()
                 && !window.get_diagnostics_overlay_active()
                 && !window.get_filters_overlay_active();
+            super::pointer::HostPointer::observe(&pointer, &window, event);
             let mut consumed = false;
             let result = match event {
                 WindowEvent::ThemeChanged(theme) => {

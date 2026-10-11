@@ -20,6 +20,8 @@ mod filters;
 mod game_callbacks;
 #[path = "host_library_callbacks.rs"]
 mod library_callbacks;
+#[path = "host_pointer.rs"]
+mod pointer;
 #[path = "host_settings_callbacks.rs"]
 mod settings_callbacks;
 #[path = "host_window_commands.rs"]
@@ -73,6 +75,9 @@ pub trait ManagerController: 'static {
         false
     }
     fn take_game_icon(&mut self) -> Option<astra_emu_family_api::FamilyWindowIcon> {
+        None
+    }
+    fn take_game_pointer(&mut self) -> Option<astra_emu_family_api::FamilyPointerRequest> {
         None
     }
     fn game_title(&self) -> Option<&str> {
@@ -267,7 +272,8 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
         }
     });
     controller.borrow_mut().set_host_wake(host_wake.clone());
-    window_events::install(&adapter, controller.clone());
+    let pointer = pointer::HostPointer::install(&adapter);
+    window_events::install(&adapter, controller.clone(), pointer.clone());
     gamepad
         .borrow_mut()
         .set_wake(host_wake)
@@ -279,12 +285,14 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
     let runtime_controller = controller.clone();
     let runtime_adapter = std::rc::Rc::downgrade(&adapter);
     let schedule_timer = runtime_timer.clone();
+    let runtime_pointer = pointer.clone();
     *runtime_schedule.borrow_mut() = Some(Box::new(move || {
         let timer = schedule_timer.clone();
         let slot = runtime_schedule_slot.clone();
         let weak = runtime_weak.clone();
         let controller = runtime_controller.clone();
         let adapter = runtime_adapter.clone();
+        let pointer = runtime_pointer.clone();
         let Some(deadline) = controller.borrow().runtime_deadline() else {
             timer.stop();
             return;
@@ -327,6 +335,14 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                         event = "astra.emu.host.window.fullscreen_requested",
                         fullscreen
                     );
+                }
+                let pointer_request = controller.borrow_mut().take_game_pointer();
+                if let Some(request) = pointer_request {
+                    if let Err(error) = pointer::HostPointer::apply(&pointer, &window, request) {
+                        terminate_game(&controller, &adapter, &window, error);
+                    } else {
+                        controller.borrow_mut().host_work_complete();
+                    }
                 }
                 window.window().request_redraw();
             }

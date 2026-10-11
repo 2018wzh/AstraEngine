@@ -47,6 +47,7 @@ fn window_request_persists_until_explicitly_replaced() {
         fullscreen: false,
         title: None,
         pending_icon: None,
+        pending_pointer: None,
         last_tick: Instant::now(),
         next_deadline: Instant::now(),
     };
@@ -84,6 +85,7 @@ fn title_commands_persist_clear_and_reject_invalid_updates() {
         fullscreen: false,
         title: None,
         pending_icon: None,
+        pending_pointer: None,
         last_tick: Instant::now(),
         next_deadline: Instant::now(),
     };

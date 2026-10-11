@@ -10,7 +10,7 @@ use crate::error;
 use art3m1s_core::host_events::{HostEvents, EVENT_KIND_LOG, EVENT_KIND_MEDIA, EVENT_KIND_UI};
 use art3m1s_core::host_files::HostResources;
 use art3m1s_core::media::MediaSource;
-use astra_emu_family_api::{FamilyResult, FamilyWindowCommand};
+use astra_emu_family_api::{FamilyPointerRequest, FamilyResult, FamilyWindowCommand};
 use serde::Deserialize;
 
 use crate::audio::{Channel, MixerCommand, SourcePair};
@@ -81,10 +81,38 @@ struct VolumePayload {
     value: f64,
 }
 
+/// Only these two native window properties are supported here. Separate slots
+/// retain both requests when one native tick changes caption and pointer.
+#[derive(Default)]
+pub(crate) struct WindowRequests {
+    caption: Option<FamilyWindowCommand>,
+    pointer: Option<FamilyPointerRequest>,
+}
+
+impl WindowRequests {
+    fn push(&mut self, command: FamilyWindowCommand) {
+        match command {
+            FamilyWindowCommand::SetPointer(request) => {
+                self.pointer
+                    .get_or_insert_with(Default::default)
+                    .merge(request);
+            }
+            FamilyWindowCommand::SetTitle(_) => self.caption = Some(command),
+            _ => unreachable!("parse_ui only produces caption and pointer commands"),
+        }
+    }
+
+    pub(crate) fn take(&mut self) -> Option<FamilyWindowCommand> {
+        self.caption
+            .take()
+            .or_else(|| self.pointer.take().map(FamilyWindowCommand::SetPointer))
+    }
+}
+
 pub(crate) fn drain(
     events: &HostEvents,
     resources: &HostResources,
-    caption: &mut Option<FamilyWindowCommand>,
+    window: &mut WindowRequests,
 ) -> FamilyResult<Vec<MixerCommand>> {
     if events.dropped_events() != 0 {
         return Err(invalid());
@@ -147,7 +175,7 @@ pub(crate) fn drain(
                 }
                 EVENT_KIND_MEDIA => commands.extend(parse_media(payload, resources)?),
                 EVENT_KIND_UI => {
-                    *caption = Some(parse_ui(payload)?);
+                    window.push(parse_ui(payload)?);
                 }
                 _ => return Err(invalid()),
             }
@@ -169,6 +197,21 @@ fn parse_ui(bytes: &[u8]) -> FamilyResult<FamilyWindowCommand> {
         let command = FamilyWindowCommand::SetTitle(caption.data.into());
         command.validate()?;
         Ok(command)
+    } else if envelope.kind == "mouse" {
+        #[derive(Deserialize)]
+        struct Mouse {
+            left: Option<i32>,
+            top: Option<i32>,
+            hide: Option<i32>,
+            autohide: Option<u64>,
+        }
+        let mouse: Mouse = parse(envelope.payload)?;
+        Ok(FamilyWindowCommand::SetPointer(FamilyPointerRequest {
+            logical_x: mouse.left.into(),
+            logical_y: mouse.top.into(),
+            visible: mouse.hide.map(|hide| hide == 0).into(),
+            autohide_ms: mouse.autohide.into(),
+        }))
     } else {
         Err(error::invalid(
             "ASTRA_EMU_ARTEMIS_UI_UNSUPPORTED",
@@ -297,7 +340,12 @@ mod tests {
         let events = HostEvents::new();
         events.set_enabled(true);
         events.push_media("video_play", "{}");
-        assert!(drain(&events, &HostResources::new(), &mut None).is_err());
+        assert!(drain(
+            &events,
+            &HostResources::new(),
+            &mut WindowRequests::default()
+        )
+        .is_err());
         events.set_enabled(false);
     }
     #[test]
@@ -330,5 +378,36 @@ mod tests {
         let error = parse_ui(br#"{"kind":"dialog_show","payload":{}}"#).unwrap_err();
         assert_eq!(error.code(), "ASTRA_EMU_ARTEMIS_UI_UNSUPPORTED");
         assert!(error.to_string().contains("dialog_show"));
+    }
+
+    #[test]
+    fn native_mouse_preserves_nulls_and_pending_caption() {
+        let mut pending = WindowRequests::default();
+        pending.push(parse_ui(br#"{"kind":"caption","payload":{"data":"Native game"}}"#).unwrap());
+        pending.push(
+            parse_ui(
+                br#"{"kind":"mouse","payload":{"left":12,"top":null,"hide":1,"autohide":1000}}"#,
+            )
+            .unwrap(),
+        );
+        pending.push(
+            parse_ui(
+                br#"{"kind":"mouse","payload":{"left":null,"top":34,"hide":null,"autohide":0}}"#,
+            )
+            .unwrap(),
+        );
+        assert!(matches!(
+            pending.take(),
+            Some(FamilyWindowCommand::SetTitle(_))
+        ));
+        let Some(FamilyWindowCommand::SetPointer(pointer)) = pending.take() else {
+            panic!("pending pointer must survive caption delivery");
+        };
+        assert_eq!(pointer.logical_x.into_option(), Some(12));
+        assert_eq!(pointer.logical_y.into_option(), Some(34));
+        assert_eq!(pointer.visible.into_option(), Some(false));
+        assert_eq!(pointer.autohide_ms.into_option(), Some(0));
+        assert!(pending.take().is_none());
+        assert!(parse_ui(br#"{"kind":"mouse","payload":{"hide":"bad"}}"#).is_err());
     }
 }

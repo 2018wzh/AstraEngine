@@ -104,6 +104,20 @@ export component ManagerWindow inherits Window {
     in-out property <float> stage-content-y: 0;
     in-out property <float> stage-content-width: 1024;
     in-out property <float> stage-content-height: 768;
+    in-out property <float> game-content-window-x;
+    in-out property <float> game-content-window-y;
+    in-out property <float> game-content-window-width;
+    in-out property <float> game-content-window-height;
+    in-out property <bool> game-cursor-visible: true;
+    callback pointer-state-changed();
+    changed game-active => { root.pointer-state-changed(); }
+    changed translation-overlay-active => { root.pointer-state-changed(); }
+    changed diagnostics-overlay-active => { root.pointer-state-changed(); }
+    changed filters-overlay-active => { root.pointer-state-changed(); }
+    changed game-content-window-x => { root.pointer-state-changed(); }
+    changed game-content-window-y => { root.pointer-state-changed(); }
+    changed game-content-window-width => { root.pointer-state-changed(); }
+    changed game-content-window-height => { root.pointer-state-changed(); }
     in-out property <bool> game-active: false;
 
     // ===== Overlay panels (game view) =====
@@ -227,6 +241,11 @@ export component ManagerWindow inherits Window {
         stage-content-y <=> root.stage-content-y;
         stage-content-width <=> root.stage-content-width;
         stage-content-height <=> root.stage-content-height;
+        pointer-content-x <=> root.game-content-window-x;
+        pointer-content-y <=> root.game-content-window-y;
+        pointer-content-width <=> root.game-content-window-width;
+        pointer-content-height <=> root.game-content-window-height;
+        cursor-visible: root.game-cursor-visible;
         game-input(control, pressed, value) => { root.game-input(control, pressed, value); }
         leave-game => { root.leave-game(); }
 

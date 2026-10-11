@@ -17,8 +17,7 @@ use art3m1s_core::host_events::HostEvents;
 use art3m1s_core::host_files::HostResources;
 use astra_emu_family_api::{
     AdvanceResponse, AudioSinkBox, FamilyError, FamilyEvent, FamilyResult, FamilySession,
-    FamilyStatus, FamilyWindowCommand, FrameAlpha, FrameFormat, FrameInfo, FrameView, FrameVisitor,
-    WindowState,
+    FamilyStatus, FrameAlpha, FrameFormat, FrameInfo, FrameView, FrameVisitor, WindowState,
 };
 
 use art3m1s_core::runtime::CoreRuntime;
@@ -49,7 +48,7 @@ pub(crate) struct ArtemisSession {
     frame_info: Cell<FrameInfo>,
     elapsed_remainder_ns: u64,
     fatal: Option<FamilyError>,
-    pending_caption: Option<FamilyWindowCommand>,
+    pending_window: media::WindowRequests,
 }
 
 pub(crate) fn boot(
@@ -144,13 +143,13 @@ fn boot_engine(
     let mut pixels = vec![0_u8; rt.pixel_buffer_size()];
 
     let mut settled = false;
-    let mut pending_caption = None;
+    let mut pending_window = media::WindowRequests::default();
     for _ in 0..FIRST_FRAME_SETTLE_FRAMES {
         let mut tick = TickContext {
             host_events,
             resources,
             audio: &audio,
-            caption: &mut pending_caption,
+            window: &mut pending_window,
         };
         match pump(
             &mut rt,
@@ -193,7 +192,7 @@ fn boot_engine(
             frame_info: Cell::new(frame_info),
             elapsed_remainder_ns: 0,
             fatal: None,
-            pending_caption,
+            pending_window,
         },
     })
 }
@@ -243,7 +242,7 @@ struct TickContext<'a> {
     host_events: &'a HostEvents,
     resources: &'a HostResources,
     audio: &'a AudioBridge,
-    caption: &'a mut Option<FamilyWindowCommand>,
+    window: &'a mut media::WindowRequests,
 }
 
 fn pump(
@@ -256,12 +255,12 @@ fn pump(
     for finished in tick.audio.drain_finished() {
         rt.notify_sound_finished(finished.id.as_deref());
     }
-    for command in media::drain(tick.host_events, tick.resources, tick.caption)? {
+    for command in media::drain(tick.host_events, tick.resources, tick.window)? {
         tick.audio.send(command)?;
     }
     events::apply(rt, input);
     let written = rt.advance_and_render_into(elapsed_ms, pixels);
-    for command in media::drain(tick.host_events, tick.resources, tick.caption)? {
+    for command in media::drain(tick.host_events, tick.resources, tick.window)? {
         tick.audio.send(command)?;
     }
     tick.audio.check_error()?;
@@ -322,7 +321,7 @@ impl FamilySession for ArtemisSession {
             host_events: &self.events,
             resources: &self.resources,
             audio: &self.audio,
-            caption: &mut self.pending_caption,
+            window: &mut self.pending_window,
         };
         if let Err(failure) = pump(&mut self.rt, &mut tick, &mut pixels, elapsed_ms, events) {
             self.fatal = Some(failure.clone());
@@ -336,7 +335,7 @@ impl FamilySession for ArtemisSession {
             });
         }
         Ok(AdvanceResponse {
-            window_command: self.pending_caption.take().into(),
+            window_command: self.pending_window.take().into(),
             ..AdvanceResponse::running()
         })
     }

@@ -16,7 +16,7 @@ FVP 保留原生字体语义，要求系统提供 `MS Gothic`；脚本请求其�
 
 当前 Windows 开发包已检查 FVP 游戏导入、标题与正文、输入、原生存档写入以及会话关闭重开。该游戏读档后会先恢复到保存菜单，点击游戏菜单的 `EXIT` 可返回所保存的剧情并继续推进；直接返回剧情的行为仍待修正。Sandbox 本次没有可用音频设备，使用 NullAudio，未完成可听音频、结局或性能验收。
 
-其他核心的真实样本仍在检查。CMVS 样本启动后在命令 548 处报告 `ASTRA_EMU_CMVS_ACTION_UNBOUND`，当前部分实现无法继续该游戏。Siglus 的 Debug 包在 Naga 编译 shader 时发生栈溢出，尚待 Release 复测。Artemis 已接入原生窗口标题请求，真实样本随后因 `mouse` 宿主请求尚未接入而停止；未实现的 UI 或媒体请求仍明确失败。开发包的编译结果不能作为可玩或性能结论；实际游戏与性能检查使用 Release 包。
+其他核心的真实样本仍在检查。CMVS 样本启动后在命令 548 处报告 `ASTRA_EMU_CMVS_ACTION_UNBOUND`，当前部分实现无法继续该游戏。Siglus 的 Debug 包在 Naga 编译 shader 时发生栈溢出，尚待 Release 复测。Artemis 已接入原生窗口标题及 typed 鼠标请求，真实样本尚待重测；未实现的 UI 或媒体请求仍明确失败。开发包的编译结果不能作为可玩或性能结论；实际游戏与性能检查使用 Release 包。调试统计中的 `core_advance_us` 是 Family advance 耗时，`frame_capture_us` 包含 Family 帧访问、可能的 GPU 回读及 Host 复制，`cpu_submission_us` 是 Host 提交 CPU 耗时，不表示 GPU 完成时间。
 
 ## 构建运行包
 

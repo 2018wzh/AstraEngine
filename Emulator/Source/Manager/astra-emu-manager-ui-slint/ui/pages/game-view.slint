@@ -24,7 +24,7 @@ export component GameViewPage inherits Rectangle {
     in-out property <bool> translation-overlay-active: false;
     in-out property <bool> diagnostics-overlay-active: false;
     in-out property <bool> filters-overlay-active: false;
-    property <bool> overlay-active: root.diagnostics-overlay-active || root.filters-overlay-active;
+    property <bool> overlay-active: root.translation-overlay-active || root.diagnostics-overlay-active || root.filters-overlay-active;
     in-out property <string> enhance-tab: "filters";
 
     // Keep host controls outside the game's original input and image area.
@@ -40,6 +40,12 @@ export component GameViewPage inherits Rectangle {
     property <length> content-stage-y: root.stage-raster-height > 0 ? root.stage-y + root.stage-content-y / root.stage-raster-height * root.stage-height : root.stage-y;
     property <length> content-stage-width: root.stage-raster-width > 0 ? root.stage-content-width / root.stage-raster-width * root.stage-width : 0px;
     property <length> content-stage-height: root.stage-raster-height > 0 ? root.stage-content-height / root.stage-raster-height * root.stage-height : 0px;
+    // Export the same viewport used by input, in window logical pixels.
+    in-out property <float> pointer-content-x: (root.absolute-position.x + root.content-stage-x) / 1px;
+    in-out property <float> pointer-content-y: (root.absolute-position.y + root.content-stage-y) / 1px;
+    in-out property <float> pointer-content-width: root.content-stage-width / 1px;
+    in-out property <float> pointer-content-height: root.content-stage-height / 1px;
+    in property <bool> cursor-visible: true;
 
     // Diagnostics panel state
     in-out property <length> diagnostics-x: 40px;
@@ -73,6 +79,7 @@ export component GameViewPage inherits Rectangle {
     game-focus := FocusScope {
 
         TouchArea {
+            mouse-cursor: !root.overlay-active && !root.cursor-visible && self.mouse-x >= root.content-stage-x && self.mouse-x < root.content-stage-x + root.content-stage-width && self.mouse-y >= root.content-stage-y && self.mouse-y < root.content-stage-y + root.content-stage-height ? none : default;
             moved => {
                 if root.overlay-active { return; }
                 if root.content-stage-width > 0px && root.content-stage-height > 0px && self.mouse-x >= root.content-stage-x && self.mouse-x < root.content-stage-x + root.content-stage-width && self.mouse-y >= root.content-stage-y && self.mouse-y < root.content-stage-y + root.content-stage-height {

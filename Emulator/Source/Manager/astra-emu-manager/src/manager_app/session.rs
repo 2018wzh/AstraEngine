@@ -10,6 +10,7 @@ pub(super) struct ActiveFamilySession {
     pub(super) fullscreen: bool,
     pub(super) title: Option<String>,
     pub(super) pending_icon: Option<astra_emu_family_api::FamilyWindowIcon>,
+    pub(super) pending_pointer: Option<astra_emu_family_api::FamilyPointerRequest>,
     pub(super) last_tick: Instant,
     pub(super) next_deadline: Instant,
 }
@@ -61,6 +62,7 @@ impl ActiveFamilySession {
             fullscreen: false,
             title: None,
             pending_icon: None,
+            pending_pointer: None,
             last_tick: Instant::now(),
             next_deadline: Instant::now() + Duration::from_nanos(FIXED_FRAME_NS),
         };
@@ -138,6 +140,11 @@ impl ActiveFamilySession {
                 astra_emu_family_api::FamilyWindowCommand::SetIcon(icon) => {
                     self.pending_icon = Some(icon)
                 }
+                astra_emu_family_api::FamilyWindowCommand::SetPointer(request) => {
+                    self.pending_pointer
+                        .get_or_insert_with(Default::default)
+                        .merge(request);
+                }
                 astra_emu_family_api::FamilyWindowCommand::SetTitle(title) => {
                     self.title = Some(title.into_string())
                 }
@@ -150,7 +157,7 @@ impl ActiveFamilySession {
                 event = "astra.emu.host.frame_timing",
                 family_id = %self.family_id,
                 core_advance_us = core_finished.duration_since(started).as_micros() as u64,
-                frame_copy_us = copy_started.elapsed().as_micros() as u64
+                frame_capture_us = copy_started.elapsed().as_micros() as u64
             );
         }
         self.last_tick = if response.reset_clock {
@@ -189,6 +196,11 @@ impl ActiveFamilySession {
                 }
                 astra_emu_family_api::FamilyWindowCommand::SetIcon(icon) => {
                     self.pending_icon = Some(icon)
+                }
+                astra_emu_family_api::FamilyWindowCommand::SetPointer(request) => {
+                    self.pending_pointer
+                        .get_or_insert_with(Default::default)
+                        .merge(request);
                 }
                 astra_emu_family_api::FamilyWindowCommand::SetTitle(title) => {
                     self.title = Some(title.into_string())
@@ -348,6 +360,7 @@ mod tests {
             fullscreen: false,
             title: None,
             pending_icon: None,
+            pending_pointer: None,
             last_tick: Instant::now(),
             next_deadline: Instant::now(),
         }
@@ -397,6 +410,7 @@ mod tests {
                 fullscreen: false,
                 title: None,
                 pending_icon: None,
+                pending_pointer: None,
                 last_tick: Instant::now(),
                 next_deadline: Instant::now(),
             };
@@ -447,6 +461,7 @@ mod tests {
                 fullscreen: false,
                 title: None,
                 pending_icon: None,
+                pending_pointer: None,
                 last_tick: anchor,
                 next_deadline: anchor + Duration::from_nanos(FIXED_FRAME_NS),
             };
@@ -510,6 +525,7 @@ mod tests {
             fullscreen: false,
             title: None,
             pending_icon: None,
+            pending_pointer: None,
             last_tick: Instant::now(),
             next_deadline: Instant::now(),
         };
@@ -560,6 +576,7 @@ mod tests {
             fullscreen: false,
             title: None,
             pending_icon: None,
+            pending_pointer: None,
             last_tick: Instant::now(),
             next_deadline: Instant::now(),
         });
