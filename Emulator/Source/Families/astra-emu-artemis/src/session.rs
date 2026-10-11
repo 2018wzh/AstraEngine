@@ -208,6 +208,7 @@ fn build_runtime(
         BackendSelection::NativeVulkan,
     )
     .map_err(error::engine)?;
+    rt.set_runtime_media_enabled(true);
     rt.set_resources(resources.clone());
     rt.load_project_bytes(ini, "WINDOWS")
         .map_err(error::engine)?;

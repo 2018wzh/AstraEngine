@@ -48,6 +48,7 @@ fn bus(channel: Channel) -> usize {
         Channel::Bgm => 0,
         Channel::Se => 1,
         Channel::Voice => 2,
+        Channel::Video => 3,
     }
 }
 fn fail() -> FamilyError {
@@ -98,7 +99,7 @@ pub(super) fn run(
             .add_sub_track(TrackBuilder::new())
             .map_err(|_| fail())
     };
-    let mut buses: [TrackHandle; 3] = [add_bus()?, add_bus()?, add_bus()?];
+    let mut buses: [TrackHandle; 4] = [add_bus()?, add_bus()?, add_bus()?, add_bus()?];
     let mut voices: Vec<Voice> = Vec::new();
     let mut suspended = false;
     loop {
@@ -175,12 +176,15 @@ pub(super) fn run(
                         id,
                         channel,
                         handle,
-                        notify: true,
+                        notify: channel != Channel::Video,
                         frames,
                     });
                 }
                 MixerCommand::Stop { id, fade_ms } => {
-                    for voice in voices.iter_mut().filter(|v| v.id == id) {
+                    for voice in voices
+                        .iter_mut()
+                        .filter(|v| v.channel != Channel::Video && v.id == id)
+                    {
                         voice.handle.stop(tween(fade_ms));
                         voice.notify = false;
                     }
@@ -191,13 +195,32 @@ pub(super) fn run(
                         voice.notify = false;
                     }
                 }
+                MixerCommand::StopVideo { id } => {
+                    for voice in voices
+                        .iter_mut()
+                        .filter(|v| v.channel == Channel::Video && v.id == id)
+                    {
+                        voice.handle.stop(tween(0));
+                    }
+                }
+                MixerCommand::StopVideoAll => {
+                    for voice in voices.iter_mut().filter(|v| v.channel == Channel::Video) {
+                        voice.handle.stop(tween(0));
+                    }
+                }
                 MixerCommand::Fade { id, gain, time_ms } => {
-                    for voice in voices.iter_mut().filter(|v| v.id == id) {
+                    for voice in voices
+                        .iter_mut()
+                        .filter(|v| v.channel != Channel::Video && v.id == id)
+                    {
                         voice.handle.set_volume(db(gain), tween(time_ms));
                     }
                 }
                 MixerCommand::Pan { id, pan, time_ms } => {
-                    for voice in voices.iter_mut().filter(|v| v.id == id) {
+                    for voice in voices
+                        .iter_mut()
+                        .filter(|v| v.channel != Channel::Video && v.id == id)
+                    {
                         voice
                             .handle
                             .set_panning(Panning((pan + 1.0) / 2.0), tween(time_ms));

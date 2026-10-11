@@ -2,9 +2,13 @@
 //!
 //! The core routes logs, media commands, and UI commands onto the enabled
 //! [`HostEvents`] queue. The session drains it after each tick: media
-//! commands drive audio; unsupported video and UI requests fail explicitly.
+//! commands drive audio; runtime video uses the core's FFmpeg/GPU path.
+//! Unsupported requests fail explicitly.
 
+use std::fs::File;
+use std::io::{Read, Seek, SeekFrom};
 use std::sync::Arc;
+use std::sync::Mutex;
 
 use crate::error;
 use art3m1s_core::host_events::{HostEvents, EVENT_KIND_LOG, EVENT_KIND_MEDIA, EVENT_KIND_UI};
@@ -79,6 +83,48 @@ struct VolumePayload {
     channel: String,
     #[serde(default)]
     value: f64,
+}
+
+#[derive(Deserialize)]
+struct VideoAudioPayload {
+    id: Option<String>,
+    path: String,
+    #[serde(default)]
+    r#loop: bool,
+}
+
+/// Adapt the native temporary WAV to its media-source contract. Keeping the
+/// open handle permits core cleanup while the mixer is still reading it.
+struct VideoAudioSource {
+    file: Mutex<File>,
+    length: u64,
+}
+
+impl VideoAudioSource {
+    fn open(path: &str) -> FamilyResult<Self> {
+        let source_error = |cause: std::io::Error| {
+            error::invalid("ASTRA_EMU_ARTEMIS_VIDEO_AUDIO_SOURCE", cause.to_string())
+        };
+        let file = File::open(path).map_err(source_error)?;
+        let length = file.metadata().map_err(source_error)?.len();
+        std::fs::remove_file(path).map_err(source_error)?;
+        Ok(Self {
+            file: Mutex::new(file),
+            length,
+        })
+    }
+}
+
+impl MediaSource for VideoAudioSource {
+    fn len(&self) -> Result<u64, String> {
+        Ok(self.length)
+    }
+    fn read_at(&self, offset: u64, output: &mut [u8]) -> Result<usize, String> {
+        let mut file = self.file.lock().map_err(|error| error.to_string())?;
+        file.seek(SeekFrom::Start(offset))
+            .map_err(|error| error.to_string())?;
+        file.read(output).map_err(|error| error.to_string())
+    }
 }
 
 /// Only these two native window properties are supported here. Separate slots
@@ -234,7 +280,26 @@ fn parse<T: serde::de::DeserializeOwned>(value: serde_json::Value) -> FamilyResu
 fn parse_media(bytes: &[u8], resources: &HostResources) -> FamilyResult<Vec<MixerCommand>> {
     let envelope: CommandEnvelope = serde_json::from_slice(bytes).map_err(|_| invalid())?;
     let command = match envelope.kind.as_str() {
-        "video_stop_all" => return Ok(Vec::new()),
+        "video_stop_all" => MixerCommand::StopVideoAll,
+        "video_audio_stop" => {
+            let p: StopPayload = parse(envelope.payload)?;
+            MixerCommand::StopVideo { id: p.id }
+        }
+        "video_audio_play" => {
+            let p: VideoAudioPayload = parse(envelope.payload)?;
+            MixerCommand::Play {
+                id: p.id,
+                channel: Channel::Video,
+                sources: SourcePair {
+                    base: Arc::new(VideoAudioSource::open(&p.path)?),
+                    loop_file: None,
+                },
+                loop_play: p.r#loop,
+                gain: 1.0,
+                pan: 0.0,
+                fade_ms: 0,
+            }
+        }
         "audio_set_volume" => {
             let p: VolumePayload = parse(envelope.payload)?;
             if !p.value.is_finite() || !(0.0..=1.0).contains(&p.value) {
@@ -333,81 +398,5 @@ fn compat_pan(raw: Option<i64>) -> f32 {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn rejects_video_without_fabricating_completion() {
-        let events = HostEvents::new();
-        events.set_enabled(true);
-        events.push_media("video_play", "{}");
-        assert!(drain(
-            &events,
-            &HostResources::new(),
-            &mut WindowRequests::default()
-        )
-        .is_err());
-        events.set_enabled(false);
-    }
-    #[test]
-    fn missing_audio_and_loop_resource_are_errors() {
-        for payload in [
-            r#"{"kind":"audio_bgm_play","payload":{"file":"missing.ogg"}}"#,
-            r#"{"kind":"audio_set_volume","payload":{"channel":"unknown","value":1}}"#,
-            r#"{"kind":"audio_bgm_pan","payload":{"pan":"bad"}}"#,
-        ] {
-            assert!(parse_media(payload.as_bytes(), &HostResources::new()).is_err());
-        }
-    }
-    #[test]
-    fn script_gain_and_pan_use_native_thousandths() {
-        assert_eq!(compat_gain(Some(1)), 0.001);
-        assert_eq!(compat_gain(Some(1000)), 1.0);
-        assert_eq!(compat_pan(Some(-1)), -0.001);
-    }
-    #[test]
-    fn native_caption_uses_the_host_window_title_contract() {
-        let command = parse_ui(br#"{"kind":"caption","payload":{"data":"Native game"}}"#).unwrap();
-        assert!(
-            matches!(command, FamilyWindowCommand::SetTitle(title) if title.as_str() == "Native game")
-        );
-        assert!(parse_ui(br#"{"kind":"caption","payload":{"data":"bad\ncaption"}}"#).is_err());
-        assert!(parse_ui(br#"{"kind":"caption","payload":{"data":42}}"#).is_err());
-    }
-    #[test]
-    fn unsupported_native_ui_still_fails_with_the_request_kind() {
-        let error = parse_ui(br#"{"kind":"dialog_show","payload":{}}"#).unwrap_err();
-        assert_eq!(error.code(), "ASTRA_EMU_ARTEMIS_UI_UNSUPPORTED");
-        assert!(error.to_string().contains("dialog_show"));
-    }
-
-    #[test]
-    fn native_mouse_preserves_nulls_and_pending_caption() {
-        let mut pending = WindowRequests::default();
-        pending.push(parse_ui(br#"{"kind":"caption","payload":{"data":"Native game"}}"#).unwrap());
-        pending.push(
-            parse_ui(
-                br#"{"kind":"mouse","payload":{"left":12,"top":null,"hide":1,"autohide":1000}}"#,
-            )
-            .unwrap(),
-        );
-        pending.push(
-            parse_ui(
-                br#"{"kind":"mouse","payload":{"left":null,"top":34,"hide":null,"autohide":0}}"#,
-            )
-            .unwrap(),
-        );
-        assert!(matches!(
-            pending.take(),
-            Some(FamilyWindowCommand::SetTitle(_))
-        ));
-        let Some(FamilyWindowCommand::SetPointer(pointer)) = pending.take() else {
-            panic!("pending pointer must survive caption delivery");
-        };
-        assert_eq!(pointer.logical_x.into_option(), Some(12));
-        assert_eq!(pointer.logical_y.into_option(), Some(34));
-        assert_eq!(pointer.visible.into_option(), Some(false));
-        assert_eq!(pointer.autohide_ms.into_option(), Some(0));
-        assert!(pending.take().is_none());
-        assert!(parse_ui(br#"{"kind":"mouse","payload":{"hide":"bad"}}"#).is_err());
-    }
-}
+#[path = "media/tests.rs"]
+mod tests;

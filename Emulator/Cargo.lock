@@ -514,6 +514,10 @@ dependencies = [
 [[package]]
 name = "art3m1s-media"
 version = "0.1.0"
+dependencies = [
+ "ffmpeg-next",
+ "libc",
+]
 
 [[package]]
 name = "art3m1s-render"

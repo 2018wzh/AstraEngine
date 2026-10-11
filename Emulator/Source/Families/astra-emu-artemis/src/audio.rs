@@ -1,14 +1,14 @@
 //! Software audio mixer for the Artemis family.
 //!
-//! The vendored Artemis core only emits media commands; real decoding and
-//! mixing are host-side. This module owns a mixer worker thread that decodes
+//! The native Artemis core emits audio commands; this Family owns audio
+//! decoding and mixing, while video decoding remains in the native core. This module owns a mixer worker thread that decodes
 //! sources with symphonia, applies the Artemis gain/pan/fade/loop semantics,
 //! and pushes interleaved stereo i16 chunks into the bounded host sink. A
 //! full queue blocks the worker, pacing audio to the real output device;
 //! cancellation comes from the sink or the session shutdown.
 //!
-//! Natural end of a non-looping source is reported back to the session so it
-//! can call `notify_sound_finished` on the runtime; the worker never touches
+//! Natural end of a non-looping BGM, SE or voice is reported back to the
+//! session so it can call `notify_sound_finished` on the runtime; the worker never touches
 //! the runtime itself.
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -43,6 +43,7 @@ pub(crate) enum Channel {
     Bgm,
     Se,
     Voice,
+    Video,
 }
 
 /// A resolved, readable audio source plus the optional A/B loop file.
@@ -81,6 +82,10 @@ pub(crate) enum MixerCommand {
     StopAll {
         fade_ms: u64,
     },
+    StopVideo {
+        id: Option<String>,
+    },
+    StopVideoAll,
     SetVolume {
         channel: Channel,
         value: f32,

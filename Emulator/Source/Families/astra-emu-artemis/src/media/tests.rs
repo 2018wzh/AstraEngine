@@ -1,0 +1,117 @@
+use super::*;
+#[test]
+fn rejects_video_without_fabricating_completion() {
+    let events = HostEvents::new();
+    events.set_enabled(true);
+    events.push_media("video_play", "{}");
+    assert!(drain(
+        &events,
+        &HostResources::new(),
+        &mut WindowRequests::default()
+    )
+    .is_err());
+    events.set_enabled(false);
+}
+#[test]
+fn missing_audio_and_loop_resource_are_errors() {
+    for payload in [
+        r#"{"kind":"audio_bgm_play","payload":{"file":"missing.ogg"}}"#,
+        r#"{"kind":"audio_set_volume","payload":{"channel":"unknown","value":1}}"#,
+        r#"{"kind":"audio_bgm_pan","payload":{"pan":"bad"}}"#,
+    ] {
+        assert!(parse_media(payload.as_bytes(), &HostResources::new()).is_err());
+    }
+}
+#[test]
+fn script_gain_and_pan_use_native_thousandths() {
+    assert_eq!(compat_gain(Some(1)), 0.001);
+    assert_eq!(compat_gain(Some(1000)), 1.0);
+    assert_eq!(compat_pan(Some(-1)), -0.001);
+}
+#[test]
+fn native_caption_uses_the_host_window_title_contract() {
+    let command = parse_ui(br#"{"kind":"caption","payload":{"data":"Native game"}}"#).unwrap();
+    assert!(
+        matches!(command, FamilyWindowCommand::SetTitle(title) if title.as_str() == "Native game")
+    );
+    assert!(parse_ui(br#"{"kind":"caption","payload":{"data":"bad\ncaption"}}"#).is_err());
+    assert!(parse_ui(br#"{"kind":"caption","payload":{"data":42}}"#).is_err());
+}
+#[test]
+fn unsupported_native_ui_still_fails_with_the_request_kind() {
+    let error = parse_ui(br#"{"kind":"dialog_show","payload":{}}"#).unwrap_err();
+    assert_eq!(error.code(), "ASTRA_EMU_ARTEMIS_UI_UNSUPPORTED");
+    assert!(error.to_string().contains("dialog_show"));
+}
+
+#[test]
+fn native_mouse_preserves_nulls_and_pending_caption() {
+    let mut pending = WindowRequests::default();
+    pending.push(parse_ui(br#"{"kind":"caption","payload":{"data":"Native game"}}"#).unwrap());
+    pending.push(
+        parse_ui(br#"{"kind":"mouse","payload":{"left":12,"top":null,"hide":1,"autohide":1000}}"#)
+            .unwrap(),
+    );
+    pending.push(
+        parse_ui(br#"{"kind":"mouse","payload":{"left":null,"top":34,"hide":null,"autohide":0}}"#)
+            .unwrap(),
+    );
+    assert!(matches!(
+        pending.take(),
+        Some(FamilyWindowCommand::SetTitle(_))
+    ));
+    let Some(FamilyWindowCommand::SetPointer(pointer)) = pending.take() else {
+        panic!("pending pointer must survive caption delivery");
+    };
+    assert_eq!(pointer.logical_x.into_option(), Some(12));
+    assert_eq!(pointer.logical_y.into_option(), Some(34));
+    assert_eq!(pointer.visible.into_option(), Some(false));
+    assert_eq!(pointer.autohide_ms.into_option(), Some(0));
+    assert!(pending.take().is_none());
+    assert!(parse_ui(br#"{"kind":"mouse","payload":{"hide":"bad"}}"#).is_err());
+}
+
+#[test]
+fn native_video_audio_keeps_an_open_source_after_temporary_cleanup() {
+    let temporary = tempfile::tempdir().unwrap();
+    let path = temporary.path().join("video.wav");
+    std::fs::write(&path, b"native audio").unwrap();
+    let payload = serde_json::json!({
+        "kind": "video_audio_play",
+        "payload": { "id": null, "path": path, "loop": true },
+    });
+    let commands = parse_media(
+        &serde_json::to_vec(&payload).unwrap(),
+        &HostResources::new(),
+    )
+    .unwrap();
+    let MixerCommand::Play {
+        id,
+        channel,
+        sources,
+        loop_play,
+        ..
+    } = &commands[0]
+    else {
+        panic!("native video audio must enter the mixer");
+    };
+    assert!(id.is_none());
+    assert_eq!(*channel, Channel::Video);
+    assert!(*loop_play);
+    assert!(!path.exists());
+    let mut bytes = [0; 5];
+    assert_eq!(sources.base.read_at(7, &mut bytes).unwrap(), 5);
+    assert_eq!(&bytes, b"audio");
+    let stop = parse_media(
+        br#"{"kind":"video_audio_stop","payload":{"id":null}}"#,
+        &HostResources::new(),
+    )
+    .unwrap();
+    assert!(matches!(&stop[0], MixerCommand::StopVideo { id: None }));
+    let all = parse_media(
+        br#"{"kind":"video_stop_all","payload":{}}"#,
+        &HostResources::new(),
+    )
+    .unwrap();
+    assert!(matches!(all[0], MixerCommand::StopVideoAll));
+}
