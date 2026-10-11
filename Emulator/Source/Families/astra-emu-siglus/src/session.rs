@@ -38,6 +38,7 @@ pub(crate) struct SiglusSession {
     frame_info: std::cell::Cell<FrameInfo>,
     fatal: Option<FamilyError>,
     frame_dirty: std::cell::Cell<bool>,
+    elapsed_remainder_ns: u64,
 }
 
 pub(crate) struct SiglusOpen {
@@ -96,6 +97,7 @@ fn boot_engine(
     }
     pull_frame(&host, &frame)?;
     let frame_info = frame_info(&frame)?;
+    host.take_timeline_reset();
 
     Ok(SiglusOpen {
         frame_info,
@@ -106,6 +108,7 @@ fn boot_engine(
             frame_info: std::cell::Cell::new(frame_info),
             fatal: None,
             frame_dirty: std::cell::Cell::new(true),
+            elapsed_remainder_ns: 0,
         },
     })
 }
@@ -222,10 +225,24 @@ impl SiglusSession {
     }
 }
 
+fn elapsed_millis(elapsed_ns: u64, remainder_ns: &mut u64) -> FamilyResult<u32> {
+    let total_ns = elapsed_ns.checked_add(*remainder_ns).ok_or_else(|| {
+        error::invalid("ASTRA_EMU_SIGLUS_ELAPSED_RANGE", "elapsed time overflows")
+    })?;
+    let millis = i32::try_from(total_ns / 1_000_000).map_err(|_| {
+        error::invalid(
+            "ASTRA_EMU_SIGLUS_ELAPSED_RANGE",
+            "elapsed time exceeds the native millisecond clock range",
+        )
+    })?;
+    *remainder_ns = total_ns % 1_000_000;
+    Ok(millis as u32)
+}
+
 impl FamilySession for SiglusSession {
     fn advance(
         &mut self,
-        _elapsed_ns: u64,
+        elapsed_ns: u64,
         events: &[astra_emu_family_api::FamilyEvent],
     ) -> FamilyResult<AdvanceResponse> {
         self.ensure_live()?;
@@ -233,11 +250,15 @@ impl FamilySession for SiglusSession {
         events::apply(&mut self.host, events);
         // The engine runs one VM frame per advance; the deterministic clock
         // consumes this elapsed value instead of the wall clock.
-        let elapsed_ms = ((_elapsed_ns + 500_000) / 1_000_000).clamp(1, 1_000) as u32;
+        let elapsed_ms = elapsed_millis(elapsed_ns, &mut self.elapsed_remainder_ns)?;
         let exit = self
             .host
             .step(elapsed_ms)
             .map_err(|error| error::engine("session.advance", error))?;
+        let reset_clock = self.host.take_timeline_reset();
+        if reset_clock {
+            self.elapsed_remainder_ns = 0;
+        }
         tracing::trace!(
             event = "astra.emu.siglus.frame.advanced",
             elapsed_ms,
@@ -247,13 +268,15 @@ impl FamilySession for SiglusSession {
         // happens on demand in `visit_frame`, so hosts that skip frame pulls
         // (headless routes) do not pay a texture-to-buffer copy per advance.
         self.frame_dirty.set(true);
-        if exit {
-            return Ok(AdvanceResponse {
-                status: FamilyStatus::Finished,
-                ..AdvanceResponse::running()
-            });
-        }
-        Ok(AdvanceResponse::running())
+        Ok(AdvanceResponse {
+            status: if exit {
+                FamilyStatus::Finished
+            } else {
+                FamilyStatus::Running
+            },
+            reset_clock,
+            ..AdvanceResponse::running()
+        })
     }
 
     fn visit_frame(&self, visitor: &mut dyn FrameVisitor) -> FamilyResult<()> {
@@ -283,7 +306,28 @@ impl FamilySession for SiglusSession {
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_screen_size;
+    use super::{elapsed_millis, resolve_screen_size};
+
+    #[test]
+    fn elapsed_clock_preserves_fractional_time_and_event_only_advances() {
+        let mut remainder = 0;
+        let mut total_ms = 0;
+        for _ in 0..60 {
+            total_ms += elapsed_millis(16_666_666, &mut remainder).unwrap();
+            assert_eq!(elapsed_millis(0, &mut remainder).unwrap(), 0);
+        }
+        total_ms += elapsed_millis(40, &mut remainder).unwrap();
+        assert_eq!(total_ms, 1_000);
+        assert_eq!(remainder, 0);
+        assert_eq!(
+            elapsed_millis(2_500_000_000, &mut remainder).unwrap(),
+            2_500
+        );
+        assert!(elapsed_millis((i32::MAX as u64 + 1) * 1_000_000, &mut remainder).is_err());
+        remainder = 1;
+        assert!(elapsed_millis(u64::MAX, &mut remainder).is_err());
+        assert_eq!(remainder, 1);
+    }
 
     #[test]
     #[ignore = "requires a hardware GPU adapter"]
