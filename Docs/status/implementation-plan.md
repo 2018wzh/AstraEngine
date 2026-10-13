@@ -1,5 +1,65 @@
 # 全产品重构实施状态
 
+## 2026-10-12 退役执行入口精简
+
+删除 `astra test run` 子命令、只返回迁移诊断的占位分支、旧 ScenarioReport 四类 DTO/formatter 及其纯文案测试。`report explain` 单次解析 ReleaseReport，拒绝未知 schema；旧兜底曾实际接受并格式化 `unknown.report.v1` 的 scenario-shaped 输入，现同一输入非零退出，回归保留。真实 package validation 生成的 blocked ReleaseReport 仍可正常解释。
+
+删除终之空固定 launch/advance/choose/replay 模板生成器、route-scenarios CLI、无消费者的输出和 NativeVN Writer/local-gate 的显式 routes 参数。资源预检 report 切到 `tsuinosora.stage3_gate_report.v2`；真实剧情、choice/terminal 与 Automation JSONL 继续来自 validated native_story_ir。保留有实际 SendInput/CDP 消费者的 Player 输入计划、scenario.refs v2 的 path/section/hash/size 校验及 VN 业务回看，不把这些有效接口当作旧 VM runner 一并删除。两份无法执行的 YAML 文档样例及全部引用已移除。
+
+真实 local-gate 在自建非商业输入上生成一条 typed 路线和一份 7-message JSONL（resume/focus/keyboard/await/await/checkpoint/shutdown），实际 `astra-headless validate-input` 通过；不含直接 launch/choose/replay 执行。这是生成与输入校验，不是商业路线、GPU或设备音频验收。所有本轮自建原始输入、生成工程和报告已清理。
+
+根 workspace fmt、all-target 严格 Clippy、完整 build/test 通过：858 项通过、21 项按原条件忽略、255 个 suite；CLI 定向 15 项通过。Python 其余工具 267 项通过，参考处理模块统一本地导入后 13 项行为回归通过；首轮 discovery 与随后遗漏局部导入的失败已修复，未用跳过掩盖。删除两项纯常量复制测试，保留像素/边界、失败不写出、资源与 source identity 行为。文档 190 页零链接/卫生错误，原有文档工具 7 项通过。上游 `binrw 0.15.1` 未来兼容警告保留，缺失核心对象仍按用户决定跳过。
+
+## 2026-10-12 审批链代码精简
+
+删除 12 个 Headless 审批/关联 DTO 与 enum、具名 review/tolerance approval、强制 preflight/link 和终之空 signoff 校验，连同 CLI 参数、命令、工具消费者、依赖及失效测试一并迁移。checkpoint 配置切到 v3，视觉 policy/node map/report 切到 v4，private RC gate/delivery 切到 v2；旧输入重新生成，无兼容 reader。自动比较、有限数值/范围、baseline 与 config/input/renderer hash、资源来源、真实平台报告和 shipping 隔离保留；退役测试格式只在拒绝集合出现，不可作为 shipping 数据读取。
+
+原审批模块混放的共享原子 JSON 写入移到现有 identity/IO 模块，保留原实现与哈希调用，未另建文件 sink 或存档格式。审批参数减少触发 CLI enum 大小差异；现只装箱最大的 Bundle 参数，删除全 PackageCommand 外层装箱，Build/Validate 不再额外分配，Bundle 不增加装箱次数或复制。
+
+根 workspace fmt、all-target 严格 Clippy、完整 build/test 通过：858 项通过、21 项按原条件忽略，共 255 个 suite。`binrw 0.15.1` 上游未来兼容警告保留。定向 Rust 首先证明旧实现拒绝无批准文件的自定义容差；另一回归捕获退役 checkpoint schema 被误放行，现当前/退役测试格式均拒绝且普通 metadata 保留。清理过程暴露并修复共享写入函数误删和未使用导入/函数，没有用 allow 或忽略测试掩盖失败。
+
+终之空 Python 工具 270 项通过后，唯一导入失败模块在正确根目录补跑 15 项通过；平台报告 4 项、文档工具 7 项通过，190 页链接/卫生无错误。首次 Python discovery 的工作目录导入错误保留，不算首次整套通过。
+
+实际 CLI 无审批图像比较：相同输入 SSIM 1.0/感知误差 0.0，通过；超限输入 SSIM 0.416610/感知误差 0.683319，blocked 并退出 1。真实 Headless stdio 用 v3 自定义容差完成 opened/关闭并产生匹配 config hash 的 passed 报告；容差越界退出 2。正式发布命令仍拒绝损坏容器和缺失平台报告，但不再要求 Headless/signoff。所有自建冒烟输入与输出已删除。上述是逻辑 Host、图像算法和拒绝边界验证，不是 GPU、听音、商业路线或发布验收；缺失核心对象继续按用户决定跳过。
+
+## 2026-10-12 文档与治理精简
+
+活动文档由 225 页收敛为 190 页。删除 35 页已被实际切换替代的 Qt、GameRuntimeProvider、运行时 AI/RPG、旧 Stage 路线、重复发布报告及 crate/UI/平台迁移计划，全部引用迁至现行架构、Rust 接口与操作入口；历史保留在 Git，不新增兼容页面或批准矩阵。
+
+发布报告只描述实际 `ReleaseReport`/`ReleaseCheckRecord`，不再复制虚构字段、AI/RPG domain 或未来 check IDs。NativeVN、可信 Luau、GPUI/ACP/MCP、独立 EMU 与媒体职责已对齐；移除已删除 crate、旧存档版本和多处相互冲突的完成表。Editor 保留已有缓动和真实预览记录，不再同时声称仅支持线性插值或仍在 Ready 前失败。
+
+现有正式 profile 的 `HeadlessFormalEvidence`、review/tolerance/link 和联合验收工具仍有代码消费者，本轮没有删除其实现或伪称相关检查已取消；普通逻辑测试、四平台产品范围与开发宪章不再由这些历史审批说明支配。没有修改运行 API、保存 schema、Release Validator 或测试门禁。
+
+190 页链接/卫生检查无错误，文档工具原有 7 项测试通过。实际 `astra package validate --help` 与现有选项一致；不存在文件在读取阶段明确失败，另用一次性损坏容器实际得到 `blocked` 发布报告，包含结构化 diagnostic 和 key/value evidence 数组。损坏输入已删除。这项检查只证明命令与报告说明，不是有效产品、GPU/音频、路线或发布验收；缺失核心对象按用户决定继续跳过。
+
+## 2026-10-12 固定核心检出恢复
+
+FVP 的 `hosted-gpu` 解析失败来自本地 RFVP 偏离父仓 gitlink：父仓固定 `b2f385da486342de6e23202cccad8141ac6423b6`，本地却为 `14b7f8a748b6c5eeed48afaed621274417ac530d`。本地无未提交改动；现从公开 fork 取回并检出原固定对象，保留旧分支，不修改父仓 pin、Family feature 或核心源码。
+
+Emulator 全目标检查随后仍被旧 Siglus 的 Kira/CPAL→ALSA 链与 Manager 的 CPAL 版本冲突阻断。Siglus 固定 `df036631f250bbd42213f07bcecb87357267b64f`，Artemis 固定 `6b59d145f5d64a5a543d0877459760b969e5f06d`；两者本地缺对象，公开 API 不可取，Siglus 精确 fetch 被远端拒绝。既有本地来源中未找到固定对象，ArchLXC 的原生 SSH 连接超时。Siglus 的可选 rodio 补丁和 Artemis 的 Generic 输入等待补丁原样保留，没有通过更换 pin、删依赖或关闭 GPU 掩盖失败；整仓验收仍待固定对象恢复。
+
+补查本地历史后，曾记录的交付 worktree 路径已不存在。现存 `astraengine-rebuild.bundle` 是主仓增量 bundle；在独占 bare 仓库中使用已有主仓前提对象展开后，仍不含上述两个核心提交。备用 Ubuntu 开发宿主的原生 SSH 连接也超时。没有采用历史中未经证明的“提交已永久消失”推断，没有把旧核心或父仓 bundle 作为等价替代；临时对象审计仓库已删除。后续需要可访问的精确 Git 对象来源，而不是继续重复当前依赖解析失败。
+
+按用户选择恢复开发宿主连接后，本机 VPN 的最小 socket rebind/restun 已恢复路由节点直连，ArchLXC 与备用 Ubuntu 的原生 SSH 均成功；没有修改认证、防火墙、来源分支或远程工作树。只读检查 ArchLXC 已记录的 Astra 仓库、保留的父仓/子模块对象库及既有核心 bundle 后，仍未找到 `df036631` / `6b59d145`。现有核心 bundle 的 HEAD 为旧版 `364aca85` / `13e55ffa`，取回并在独占 bare 审计仓展开后也不含目标对象。临时下载和审计仓已删除。网络阻塞已解除，剩余缺少精确对象来源，不能据此替换固定核心或宣称 Emulator 整仓通过。
+
+用户随后确认“当前无法获取，跳过”。本轮停止恢复这两个缺失对象，并跳过依赖它们的 Emulator 整仓验收；保留固定 gitlink、现有补丁及已取得的 FVP 组件验证结果。跳过不代表旧核心等价、依赖冲突已修复或整仓检查通过；仅在出现新的精确对象来源或用户重新要求恢复时继续。
+
+FVP 使用临时展开清单直接编译原 Family 源码、构建脚本和已固定 RFVP，不复制实现，不改构建身份。37 项普通库回归、4 项显式硬件 GPU 回归和严格 Clippy 通过。一次性真实嵌入程序在自建最小 HCB 上完成 probe，随后三次 open/推进/帧访问/close/重开，分别获得 `fvp-0/1/2`、`640×480` 帧和原生 RFVG 中的系统变量 42，关闭均取消宿主音频回调。样本不含音频，静音测试消费计数为 0；不是商业剧情、可听声音、完整结局或正式性能验收。临时清单、程序和 target 在验证后删除。
+
+## 2026-10-12 Engine 结构精简
+
+根 workspace 保留 52 个有实际编译或产物边界的成员，不再按固定数量预算合并 proc-macro、动态库和工具。`astra-product-host` 已并入 `astra-headless-protocol`；CLI、Headless、运行层、VN、平台宿主、CPU/GPU 绘制与相关测试按 Rust item/方法职责拆分。格式化后的 `Engine/` 中没有达到 600 行的 Rust 文件；公开 API 和序列化 schema 保持原路径，不新增兼容转发 crate。这个结果表示结构维护收尾，不表示产品长流程或四平台验收完成。
+
+模块迁移保留 trait impl、derive、平台 cfg、嵌入资源和测试路径。GPU command walk 使用原有栈上容器，分离资源/控制与绘制命令，保留命令顺序、资源变更日志、提交及采样边界。真实 Windows Host 运行发现旧文本式拆分把 Rust 可见性写进了 WGSL 字符串，现已修复；该窗口生命周期测试通过，另显式执行的 7 项硬件 GPU 绘制、图集、pixel mask 与 blend 用例通过。特定集成 GPU 性能用例未运行，不能据此声称性能达标。
+
+实际 `astra-headless validate-input` 接受三条含 Shutdown 的 JSONL 并生成规范输入摘要；`astra platform probe --platform ios` 仍明确返回未实现诊断。根 workspace 的 all-target 严格 Clippy、默认完整构建和完整测试通过：860 项通过、21 项按原条件忽略。首轮并行测试编译遭遇 LLVM OOM，随后单编译任务、单测试线程完成全套；没有删掉或忽略失败用例。`binrw 0.15.1` 的上游未来兼容警告保留。实施说明入口已移除旧 Stage、Qt、sandbox 和证据审批要求，日常检查沿用现有开发手册。
+
+Emulator workspace 的全目标检查在依赖解析阶段被现有 FVP/上游配置阻断：Family 要求 `rfvp/hosted-gpu`，本地 `rfvp 0.6.0` 不声明该 feature。没有更换上游核心、改写 gitlink 或关闭 GPU feature 来掩盖问题；这项整仓检查不能列为通过。
+
+Editor workspace 的 all-target 检查通过，其 lockfile 补入已合并 property 所需的 `astra-property-derive`。另用临时独立依赖图复用 Emulator 已锁定版本，编译真实 SDK、CMVS 和 Musica 实现，确认它们仍消费同一共享 API；临时源码与 target 已删除。这项消费者检查不替代被 FVP 配置阻断的 Emulator 整仓验收，也不代表游戏、声音或其他平台设备流程通过。
+
+Windows `platform-test-driver` 条件分支另外通过 all-target 严格 Clippy 和 12 项库回归，测试辅助类型直接从实现模块导入。非 Windows 交叉检查未通过：macOS 首次超时，继续后在 `blake3` 的 C 构建发现当前编译器不接受 Apple 目标参数；Android 缺 NDK clang/sysroot；Linux 离线缓存缺 `gstreamer-video 0.24.2`。这些失败未用关闭汇编、禁用后端或软件 adapter 替代，不计原生平台验收。
+
 ## 2026-10-12 AstraEMU 真实流程接续
 
 新版 Artemis 运行包通过原生启动媒体，显示标题、章节与剧情画面，鼠标和 Enter 可操作。读档文字空白已定位到输入等待错误绑定在 `onLoad` 子流程；现在先在存档位置绑定等待，再执行原生加载处理器。Release 实际窗口从标题读取已有槽 001，直接恢复 CG 和保存处文字，Enter 可继续；新空槽 002 保存、原生 Exit 返回 Manager、重开后标题读取槽 002 也直接恢复 CG 与文字并可继续。两项原生加载等待回归、八项存档定向回归、受影响 Family all-target Clippy 与 Release 构建通过。实际 Host 使用 Vulkan / NVIDIA GeForce RTX 4070 Laptop GPU，音频仍为 NullAudio；完整路线、可听音频和正式性能未验收。

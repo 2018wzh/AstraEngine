@@ -1,27 +1,18 @@
-# ADR 0015: UI backend provider 分工
+# ADR 0015: 产品 UI 分工
 
 ## Context
 
-AstraVN 需要可换肤、手柄友好、适合发布游戏的 UI；AstraEMU Manager 需要表单、日志、诊断和工具面板。两类产品共享输入、语义、纹理和绘制边界，但不适合强行使用同一个第三方 widget runtime。Editor 已由 ADR 0002 固定为 Qt/QML，也不应被运行时 UI 反向替换。
+游戏 UI、作者工作区和 EMU 资料库的交互与生命周期不同，不强制采用同一 widget runtime。当前决定以 [总体架构](../product/architecture.md) 和 [重构契约](../contracts/rebuild.md) 为准。
 
 ## Decision
 
-- AstraVN 发布 UI 使用 Yakui backend。
-- AstraEMU Manager 与诊断/翻译 overlay 使用 Slint 1.17.1；该实现留在 Stage 5，不属于 Migration 12 的 AstraVN 代码范围。
-- AstraEditor 继续使用 Qt/QML；PIE 只消费共享 runtime UI 的 frame、semantic snapshot 和 input disposition。
-- Astra 自有 `astra-ui-core` 持有 backend-neutral input、action、semantic、resource 和 render contract。Yakui、Slint、wgpu、winit 类型不得进入 package、save/replay、plugin ABI 或产品 public ViewModel。
-- provider 必须由 target/profile/package 的唯一显式 binding 选择。缺 binding、冲突或能力不匹配时阻断，不按注册顺序选取，也不回退到另一个 backend。
-
-AstraVN 只使用 Yakui core 和经过审核的 upstream widgets。平台输入、wgpu adapter、正式文本、语义树和资源生命周期由 Astra 持有；不引入 `yakui-wgpu`、`yakui-winit` 或 `yakui-app`。正式 VN 文本只走 Astra TextLayout。
+- NativeVN 游戏 UI 使用编译期组合的 Yakui；`.astra` 声明 View/Binding，Rust 提供 typed ViewModel，Luau Controller 保存显式数据。
+- Editor 使用 GPUI/gpui-component，共享 `AuthoringWorkspace`；独立 GPU Player 预览复用真实 VN session，不把 Runtime UI 当作 Editor shell。
+- EMU Manager 使用 Slint；Family 自持渲染并输出最终帧和 PCM，Manager 负责窗口输出及输入映射，不要求核心复用 Engine/VN UI 或同一 GPU device。
+- 删除内部动态 gameplay/UI ABI，不新增后端选择协议或序列化转发层。机制插件与 Family ABI 的真实消费者保持各自边界。
 
 ## Consequences
 
-- `SystemUiModel` 固定矩形命中模型在 Migration 12 完成时删除。
-- VN 的 UI 输出并入 renderer-ready Scene2D/Mesh2D 主路径，不恢复 bitmap/headless 产品 presenter。
-- Headless 复用 Migration 11 的完整 test host 和相同 UI contract，只提供 E2 证据。
-- AstraEMU 的 Slint host 持有窗口、winit 0.30 event loop、surface 和精确锁定的 wgpu 29.0.4 `Device`/`Queue`。Astra renderer 绘制游戏 underlay，Slint 绘制 Manager/overlay；二者共享同一设备，禁止 CPU 整帧回读和跨设备纹理复制。Slint 类型不能暴露给 family plugin、Manager Core 或 RuntimeWorld。
-- AstraEMU 采用 Slint Royalty-free 2.0 模式，在 About 和第三方 notices 保留规定归因；workspace 许可证不因此改为 GPL。
+NativeVN 继续保留真实文字 shaping、字体 fallback、Scene2D 绘制和资源生命周期，不能以固定矩形或首帧替代。Editor 的图和时间线修改同一源码；EMU Manager 不拥有原生 VM、媒体或存档权威。实现入口见 [UI Contract](../contracts/ui.md)、[Editor 手册](../../Editor/README.md) 和 [EMU 接口](../contracts/astraemu-ipc.md)。
 
-## Verification
-
-Migration 12 必须证明 Windows/Web 的显式 Yakui binding、物理输入消费、语义快照、Scene2D 输出、context restore 和无 backend 类型泄漏。AstraEMU Slint/WGPU host、响应布局、accessibility、overlay 输入隔离和平台证据由 Stage 5 单独关闭。
+Slint 许可归因保留在实际运行包的 notices/About，不因产品采用不同 UI 而改变仓库许可证。设备、桌面交互和性能状态只在 [实施状态](../status/implementation-plan.md) 维护，不再沿用旧 Stage 或强制 Headless 审批。

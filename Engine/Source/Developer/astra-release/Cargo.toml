@@ -15,7 +15,6 @@ astra-media = { path = "../../Runtime/astra-media" }
 astra-package = { path = "../../Runtime/astra-package" }
 astra-runtime = { path = "../../Runtime/astra-runtime" }
 astra-player-core = { path = "../../Runtime/astra-player-core" }
-astra-headless-protocol = { path = "../../Runtime/astra-headless-protocol" }
 astra-platform = { path = "../../Platform/astra-platform" }
 astra-platform-android = { path = "../../Platform/astra-platform-android" }
 astra-plugin-abi = { path = "../../Runtime/astra-plugin-abi", default-features = false }
@@ -25,7 +24,6 @@ astra-vn-core = { path = "../../Modules/AstraVN/astra-vn-core" }
 astra-vn-package = { path = "../../Modules/AstraVN/astra-vn-package" }
 astra-vn-policy = { path = "../../Modules/AstraVN/astra-vn-policy" }
 astra-vn-script = { path = "../../Modules/AstraVN/astra-vn-script" }
-astra-vn-system = { path = "../../Modules/AstraVN/astra-vn-system" }
 postcard.workspace = true
 schemars.workspace = true
 serde.workspace = true

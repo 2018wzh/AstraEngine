@@ -9,10 +9,11 @@
 | [system.astra](system.astra) | title/config/gallery/replay/chart system stories |
 | [standard_policy.luau](standard_policy.luau) | 官方标准策略包形态 |
 | [cinematic_policy.luau](cinematic_policy.luau) | 第三方复杂演出策略包形态 |
-| [full_playthrough.yaml](full_playthrough.yaml) | 商业级无头流程验收场景 |
 
 验证文档链接：
 
 ```bash
 python Tools/check_docs.py
 ```
+
+旧 YAML 执行样例已删除。保留的源码用于说明业务语义，不等于可执行产品包；实际验证使用真实 VN session、Rust tests 与物理输入流程，见[开发手册](../../manual/development.md)。

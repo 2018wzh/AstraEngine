@@ -110,7 +110,7 @@ CANONICAL_RECAPTURE_REFERENCES = {
     "ui014.save.a": ("TSUI1999-UI-014", "system-save"),
 }
 
-COLOR_TOLERANCE_APPROVALS = {
+COLOR_TOLERANCE_BINDINGS = {
     "TSUI1999-UI-006": {
         "reason_code": "capture_color_state_unproven",
         "profile_id": "capture_palette_v1",
@@ -391,7 +391,7 @@ def update_reference_manifest(
 def update_node_map(
     node_map: dict[str, object], recapture_manifest: dict[str, object]
 ) -> dict[str, object]:
-    if node_map.get("schema") != "tsuinosora.classic_visual_node_map.v3":
+    if node_map.get("schema") != "tsuinosora.classic_visual_node_map.v4":
         raise ReferenceError("TSUI_RECAPTURE_NODE_MAP_SCHEMA: unsupported node map")
     entries = node_map.get("entries")
     if not isinstance(entries, list):
@@ -458,9 +458,9 @@ def update_node_map(
                     "capture_sha256": "sha256:" + str(record["output_sha256"]),
                     "resource_sha256": locator["content_sha256"],
                 }
-            color_approval = COLOR_TOLERANCE_APPROVALS.get(reference_id)
-            if color_approval is not None:
-                entry["color_tolerance_approval"] = dict(color_approval)
+            color_binding = COLOR_TOLERANCE_BINDINGS.get(reference_id)
+            if color_binding is not None:
+                entry["color_tolerance_binding"] = dict(color_binding)
         updated_entries.append(entry)
     if len(seen) != 15 or not set(canonical).issubset(seen):
         raise ReferenceError(

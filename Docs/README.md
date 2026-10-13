@@ -11,5 +11,6 @@
 | [参考实现](references/README.md) | 上游实现与许可证资料 |
 | [终之空项目](samples/tsuinosora-modernization/README.md) | 本地转换与私有运行项目 |
 | [用户手册](manual/README.md) | 创作者与核心作者使用入口 |
+| [性能与上游适配审计](status/performance-upstream-audit-2026-10-12.md) | 全仓性能发现、AstraEMU 接口建议、最小 fork 边界与验证限制 |
 
 旧 ABI、Headless 和证据治理页面尚在逐子系统清理，不构成新实施要求。历史决策通过 Git 保存。

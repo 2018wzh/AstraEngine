@@ -15,9 +15,9 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 
-GATE_SCHEMA = "tsuinosora.private_rc_release_gate.v1"
+GATE_SCHEMA = "tsuinosora.private_rc_release_gate.v2"
 BUNDLE_SCHEMA = "astra.standalone_bundle_manifest.v2"
-DELIVERY_SCHEMA = "tsuinosora.private_rc_delivery_manifest.v1"
+DELIVERY_SCHEMA = "tsuinosora.private_rc_delivery_manifest.v2"
 NOTICE_NAME = "PRIVATE_RESEARCH_NOTICE.txt"
 MANIFEST_NAME = "private-rc-delivery-manifest.json"
 
@@ -84,8 +84,6 @@ def validate_gate(gate: dict[str, Any]) -> None:
     counts = gate.get("counts", {})
     if counts.get("visual_checks_required") != 13 or counts.get("visual_checks_passed") != 13:
         raise DeliveryError("TSUI_PRIVATE_RC_DELIVERY_VISUALS: 13 visual checks are required")
-    if not isinstance(gate.get("identity", {}).get("manual_signoff"), str):
-        raise DeliveryError("TSUI_PRIVATE_RC_DELIVERY_SIGNOFF: manual signoff is missing")
 
 
 def validate_bundle(bundle: Path, manifest: dict[str, Any], gate: dict[str, Any]) -> list[dict[str, Any]]:

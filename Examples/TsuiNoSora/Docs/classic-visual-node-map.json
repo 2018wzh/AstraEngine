@@ -1,5 +1,5 @@
 {
-  "schema": "tsuinosora.classic_visual_node_map.v3",
+  "schema": "tsuinosora.classic_visual_node_map.v4",
   "entries": [
     {
       "reference_id": "TSUI1999-UI-001",
@@ -158,7 +158,7 @@
           "sha256:0aeba17c8bedd738fc3211845575fbcd50d243414a2fdd42ce2582c3dacca616"
         ]
       },
-      "color_tolerance_approval": {
+      "color_tolerance_binding": {
         "reason_code": "capture_color_state_unproven",
         "profile_id": "capture_palette_v1",
         "evidence": "same_node_resource_closure_and_stable_gpu_capture"

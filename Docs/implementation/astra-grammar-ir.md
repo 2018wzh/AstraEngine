@@ -251,4 +251,4 @@ cargo test -p astra-vn-script --test compiler_runtime
 cargo test -p astra-vn-script --test compiler_diagnostics
 ```
 
-Frontend migration adds tests for lexer spans, CST/AST round-trip, semantic pass equivalence, command registry release blocking, source map spans, formatter stability, LSP diagnostics and expression interpreter equivalence before `S3-SCRIPT-01` or `S3-SCRIPT-02` can return to `DONE`.
+Frontend 测试覆盖 lexer span、lossless CST/AST、语义 pass、command registry、source map、formatter、语言服务诊断与表达式行为。实际产品输入、GPU/音频和长流程另行运行，不以编译器测试或旧 Stage 状态代表产品验收。

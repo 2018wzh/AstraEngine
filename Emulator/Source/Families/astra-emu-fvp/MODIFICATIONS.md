@@ -6,11 +6,13 @@
 [`2018wzh/rfvp` fork](https://github.com/2018wzh/rfvp/tree/codex/local-product-adaptation),
 branch `codex/local-product-adaptation`, at immutable revision
 `73d3b4413c95a3923cce695d98c3d9bf5b08ccf0`. The current parent gitlink adds the
-local input-lifecycle commit `b2f385da486342de6e23202cccad8141ac6423b6` on top of
-that baseline. The parent repository pins its exact gitlink; the input-lifecycle
-commit remains local until it is separately published. The covered source and the
-complete MPL-2.0 text are in `../../../ThirdParty/rfvp/crates/rfvp/` and
-`../../../ThirdParty/rfvp/LICENSE`.
+input-lifecycle commit
+[`b2f385da486342de6e23202cccad8141ac6423b6`](https://github.com/2018wzh/rfvp/commit/b2f385da486342de6e23202cccad8141ac6423b6)
+on top of that baseline. This exact commit is published and was fetched and
+checked out on 2026-10-12; the previous local branch was preserved. The parent
+gitlink and the Family's `hosted-gpu` dependency were not changed. The covered
+source and the complete MPL-2.0 text are in `../../../ThirdParty/rfvp/crates/rfvp/`
+and `../../../ThirdParty/rfvp/LICENSE`.
 
 The fork retains upstream history, workspace members, tools, licenses and platform
 crates.

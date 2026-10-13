@@ -94,7 +94,7 @@ class PrivateRcReleaseGateTests(unittest.TestCase):
                     "reference_validation": validation,
                 }
             )
-        self.write_json(self.node_map, {"schema": "tsuinosora.classic_visual_node_map.v3", "entries": entries})
+        self.write_json(self.node_map, {"schema": "tsuinosora.classic_visual_node_map.v4", "entries": entries})
         self.headless = self.root / "headless.json"
         checkpoints = [entry["checkpoint"] for entry in entries]
         renderer = {"provider": "wgpu_offscreen", "backend": "dx12", "device_type": "discrete_gpu"}
@@ -116,7 +116,7 @@ class PrivateRcReleaseGateTests(unittest.TestCase):
         self.write_json(
             self.comparison,
             {
-                "schema": "tsuinosora.classic_visual_comparison_report.v3",
+                "schema": "tsuinosora.classic_visual_comparison_report.v4",
                 "status": "passed",
                 "check_count": 15,
                 "passed_count": 15,
@@ -179,20 +179,6 @@ class PrivateRcReleaseGateTests(unittest.TestCase):
         )
         self.paths = self.root / "paths.json"
         self.write_json(self.paths, ["X:/private/source", "X:/private/workspace"])
-        self.signoff = self.root / "signoff.json"
-        self.write_json(
-            self.signoff,
-            {
-                "schema": "tsuinosora.private_rc_manual_signoff.v1",
-                "status": "approved",
-                "reviewer": "reviewer",
-                "build_identity": build_hash,
-                "package_identity": package_hash,
-                "headless_report_sha256": sha256_file(self.headless),
-                "comparison_report_sha256": sha256_file(self.comparison),
-                "y_route_report_sha256": sha256_file(self.y_route),
-            },
-        )
 
     def tearDown(self) -> None:
         self.temp.cleanup()
@@ -217,7 +203,6 @@ class PrivateRcReleaseGateTests(unittest.TestCase):
             source_profile=self.source,
             story_ir=self.story,
             private_path_probes=self.paths,
-            manual_signoff=self.signoff,
         )
 
     def test_complete_evidence_passes(self) -> None:
@@ -227,7 +212,7 @@ class PrivateRcReleaseGateTests(unittest.TestCase):
         self.assertEqual(report["scope"]["guaranteed_routes"], ["Y"])
         self.assertEqual(report["scope"]["present_unvalidated_route_count"], 36)
 
-    def test_missing_visuals_and_signoff_remain_blocking(self) -> None:
+    def test_missing_visuals_remain_blocking(self) -> None:
         comparison = json.loads(self.comparison.read_text(encoding="utf-8"))
         comparison["status"] = "blocked"
         comparison["check_count"] = 3
@@ -235,11 +220,10 @@ class PrivateRcReleaseGateTests(unittest.TestCase):
         comparison["results"] = comparison["results"][:3]
         self.write_json(self.comparison, comparison)
         args = self.args()
-        args.manual_signoff = None
         report = build_report(args)
         self.assertEqual(report["status"], "blocked")
         blocked = {check["id"] for check in report["checks"] if check["status"] == "blocking"}
-        self.assertEqual(blocked, {"visual_reference_y_13_of_13", "formal_human_signoff"})
+        self.assertEqual(blocked, {"visual_reference_y_13_of_13"})
 
     def test_missing_stable_reference_evidence_is_blocking(self) -> None:
         node_map = json.loads(self.node_map.read_text(encoding="utf-8"))
@@ -268,19 +252,6 @@ class PrivateRcReleaseGateTests(unittest.TestCase):
             {"code": "UNVALIDATED_ROUTE", "check_id": "checkpoint.15"},
         ]
         self.write_json(self.comparison, comparison)
-        self.write_json(
-            self.signoff,
-            {
-                "schema": "tsuinosora.private_rc_manual_signoff.v1",
-                "status": "approved",
-                "reviewer": "reviewer",
-                "build_identity": "sha256:" + "3" * 64,
-                "package_identity": sha256_file(self.package),
-                "headless_report_sha256": sha256_file(self.headless),
-                "comparison_report_sha256": sha256_file(self.comparison),
-                "y_route_report_sha256": sha256_file(self.y_route),
-            },
-        )
         report = build_report(self.args())
         self.assertEqual(report["status"], "passed")
         self.assertEqual(report["counts"]["visual_checks_required"], 13)

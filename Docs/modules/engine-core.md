@@ -1,41 +1,25 @@
-# EngineCore Module
+# Engine 核心与开发工具
 
-EngineCore 是所有产品线共享的引擎内核。它提供 RuntimeWorld、Actor/Component、StateMachine、PropertySystem、diagnostics、schema、migration、plugin loading 和 test harness。
+Engine 是可独立嵌入的 2D 核心，不要求创建会话时携带 package，不强制产品变更都经过 FSM action。公共 `EngineSession` 持有 RuntimeWorld、任务作用域和逻辑步生命周期；`VnSession` 持有 VN 业务状态。当前边界见 [重构契约](../contracts/rebuild.md)。
 
-## Crate 边界
+## 实际 crate 边界
 
 | Crate | 职责 |
 | --- | --- |
-| `astra-core` | stable id、diagnostics、schema、migration、hash、result 类型 |
-| `astra-runtime` | RuntimeWorld、Actor/Component、StateMachine、EventBus、Scheduler、AwaitToken |
-| `astra-plugin` | `abi_stable` 风格插件 ABI、descriptor、loader、registry |
-| `astra-target` | Editor/Game/Program Target manifest、validation report |
-| `astra-property` | derive 宏、PropertySystem metadata、Inspector/MCP/save glue |
-| `astra-test` | 历史 report DTO；旧 YAML runner 已由 Migration 11 删除 |
-| `astra-headless-test` | worktree-local `HeadlessTestContext` 与统一 test lifecycle |
-| `astra-headless` | Developer-only JSONL product runner、artifact/review/preflight evidence 工具 |
-| `astra-cli` | cook/package/release CLI；旧 `astra test run --headless` 只返回迁移 diagnostic |
+| `astra-core` | 稳定 ID、诊断、schema、hash 与 PropertySystem metadata |
+| `astra-runtime` | EngineSession/RuntimeWorld、Actor/Component、flat FSM、任务、事件、等待与显式保存恢复 |
+| `astra-plugin` / `astra-plugin-abi` | 机制插件的 descriptor、loader、注册与实际动态 ABI |
+| `astra-target` | Editor/Game/Program target manifest 与验证 |
+| `astra-headless-test` | 需要宿主时使用的独占测试上下文，不强制普通逻辑测试启动 Headless |
+| `astra-headless` | 物理 JSONL 输入、执行、checkpoint 自动比较与 PNG/WAV/run report |
+| `astra-cli` | Cook/package/target/platform/script/UI 与 ReleaseReport 解释 |
 
-Stage 1 代码位于 UE 风格 workspace：`Engine/Source/Runtime/`、`Engine/Source/Platform/`、`Engine/Source/Developer/`、`Engine/Source/Programs/` 和 `Engine/Plugins/Fixtures/`。
+AstraEMU Family/Host 不使用 Engine registry、RuntimeWorld 或产品 package。共享文字、绘制、媒体和字节源可独立消费，不因工具调用而新增 VN 或会话依赖。
 
-## 实现顺序
+## 运行与验证
 
-1. `astra-core` 定义 StableId、Diagnostic、SchemaVersion、Hash128。
-2. `astra-runtime` 实现固定 tick、事件队列、同步 guard、AwaitToken action。
-3. `astra-save` 或 runtime 内 section writer 实现自描述二进制 save。
-4. `astra-plugin` 实现 descriptor validation 和加载/卸载。
-5. `astra-headless-test` 为平台无关 tests 建立统一 Headless session；产品流程由 `astra-headless` 读取物理输入 JSONL 并生成真实 PNG/WAV 与 report。
+默认逻辑 60 Hz，呈现独立。任务明确完成、取消和失败；读档、重开或退出后旧异步结果失效。保存只在边界编码显式数据，读取失败保留原存档与当前状态；不建设通用输入回放、逐位确定性或每帧全量克隆/序列化。
 
-## 验收
+普通行为使用 Rust unit/integration tests；视听路径实际运行硬件 GPU/音频宿主。自动比较、接口存在或局部 fixture 不代表产品、路线、设备声音或性能验收。
 
-同一 package、seed、input、committed AI output 重跑两次，state/event/presentation hash 必须一致。Save 后 load 再 replay，hash mismatch 必须定位 frame、event、actor/component、script command 或 provider output。
-
-## 产品级交付面
-
-- `astra-core` 提供 StableId、SchemaId、SourceSpan、Diagnostic、Hash128/Hash256、schema registry 和 migration registry。
-- `astra-runtime` 提供 RuntimeWorld lifecycle、Actor/Component store、StateMachineStore、EventQueue、AwaitQueue、MutationLog、Save/Replay facade 和 RuntimeDebugSession。
-- `astra-plugin` 提供 descriptor gate、provider registry、EngineModuleSlot 和 load/unload report。
-- `astra-property` 提供 derive metadata、Inspector field model、serde/schema glue 和 `cargo expand` 可读输出。
-- `astra-test` 提供 YAML scenario runner、hash compare、report writer 和 replay mismatch explain。
-
-实现字段和 trait 见 [Runtime API Blueprint](../implementation/runtime-api.md)、[Provider And Plugin API Blueprint](../implementation/provider-plugin-api.md)。
+旧 `astra test run`、场景 hash 报告兜底与具名审批链已删除。`astra report explain` 只解释 `astra.release_report.v1`，拒绝其他 schema；实际命令见 [操作手册](../manual/operator-guide.md)，验证结果见 [实施状态](../status/implementation-plan.md)。

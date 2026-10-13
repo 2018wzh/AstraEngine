@@ -382,6 +382,7 @@ dependencies = [
 name = "astra-core"
 version = "0.1.0"
 dependencies = [
+ "astra-property-derive",
  "blake3",
  "hex",
  "miette",
@@ -478,6 +479,15 @@ dependencies = [
  "serde",
  "thiserror 1.0.69",
  "tracing",
+]
+
+[[package]]
+name = "astra-property-derive"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -604,17 +614,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "astra-vn-system"
-version = "0.1.0"
-dependencies = [
- "astra-core",
- "astra-vn-script",
- "schemars 0.8.22",
- "serde",
- "tracing",
-]
-
-[[package]]
 name = "astra-vn-ui"
 version = "0.1.0"
 dependencies = [
@@ -622,7 +621,6 @@ dependencies = [
  "astra-ui-core",
  "astra-vn-core",
  "astra-vn-script",
- "astra-vn-system",
  "schemars 0.8.22",
  "serde",
  "thiserror 1.0.69",

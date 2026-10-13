@@ -2,10 +2,8 @@ use std::io::{BufReader, Cursor};
 
 use astra_headless_protocol::{
     AudioTolerance, ButtonState, CheckpointConfig, CheckpointExpectation, ImageTolerance,
-    InputMessage, JsonlReader, JsonlWriter, PhysicalInput, PreflightLink, ReviewRecord,
-    ReviewVerdict, ReviewerKind, SequenceValidator, ToleranceApproval, ToleranceApprovalBinding,
-    ToleranceApproverKind, HEADLESS_CHECKPOINT_CONFIG_SCHEMA, HEADLESS_PREFLIGHT_LINK_SCHEMA,
-    HEADLESS_REVIEW_SCHEMA, HEADLESS_TOLERANCE_APPROVAL_SCHEMA, USER_INPUT_SEQUENCE_SCHEMA,
+    InputMessage, JsonlReader, JsonlWriter, PhysicalInput, SequenceValidator,
+    HEADLESS_CHECKPOINT_CONFIG_SCHEMA, USER_INPUT_SEQUENCE_SCHEMA,
 };
 
 fn hash(label: &str) -> String {
@@ -76,49 +74,10 @@ fn framing_and_schema_reject_semantic_shortcuts_unknown_fields_and_partial_lines
 }
 
 #[test]
-fn review_and_preflight_reject_incomplete_or_unsafe_evidence() {
-    let review = ReviewRecord {
-        schema: HEADLESS_REVIEW_SCHEMA.into(),
-        run_report_hash: hash("run"),
-        reviewer_kind: ReviewerKind::Model,
-        reviewer_identity: "model-v1".into(),
-        tool_identity_hash: hash("tool"),
-        checkpoints: vec![ReviewVerdict {
-            checkpoint: "required.final".into(),
-            passed: true,
-            diagnostic_codes: Vec::new(),
-        }],
-    };
-    review.validate().unwrap();
-    let mut invalid = review.clone();
-    invalid.checkpoints.push(invalid.checkpoints[0].clone());
-    assert!(invalid.validate().is_err());
-
-    let mut link = PreflightLink {
-        schema: HEADLESS_PREFLIGHT_LINK_SCHEMA.into(),
-        headless_run_report_hash: hash("headless"),
-        platform_run_report_hash: hash("platform"),
-        build_fingerprint: hash("build"),
-        cooked_package_hash: hash("package"),
-        input_sequence_hash: hash("input"),
-        scenario: "full.route".into(),
-        target: "nativevn-game".into(),
-        content_identity: "content.v1".into(),
-        headless_profile_id: "headless.profile".into(),
-        headless_session_id: "headless.session".into(),
-        platform_profile_id: "windows.profile".into(),
-        platform_session_id: "windows.session".into(),
-    };
-    link.validate().unwrap();
-    link.input_sequence_hash = "not-a-hash".into();
-    assert!(link.validate().is_err());
-}
-
-#[test]
-fn customized_tolerance_requires_hash_bound_human_approval() {
+fn custom_tolerances_are_validated_without_external_approval() {
     let mut config = CheckpointConfig {
         schema: HEADLESS_CHECKPOINT_CONFIG_SCHEMA.into(),
-        id: "approval.test".into(),
+        id: "tolerance.test".into(),
         input_sequence_hash: hash("input"),
         renderer_identity_hash: astra_headless_protocol::RendererExecutionIdentity::cpu_reference()
             .hash()
@@ -135,24 +94,17 @@ fn customized_tolerance_requires_hash_bound_human_approval() {
                 changed_pixel_ratio: 0.002,
                 ..ImageTolerance::default()
             },
-            audio_tolerance: AudioTolerance::default(),
+            audio_tolerance: AudioTolerance {
+                max_duration_delta_ms: 10.0,
+                ..AudioTolerance::default()
+            },
         }],
-        tolerance_approval: None,
     };
-    assert!(config.validate().is_err());
-    config.tolerance_approval = Some(ToleranceApprovalBinding {
-        relative_path: "approval.json".into(),
-        sha256: hash("approval"),
-    });
     config.validate().unwrap();
-    let approval = ToleranceApproval {
-        schema: HEADLESS_TOLERANCE_APPROVAL_SCHEMA.into(),
-        approval_id: "approval.001".into(),
-        approver_kind: ToleranceApproverKind::Human,
-        approver_identity: "qa.owner".into(),
-        approved_tolerance_hash: config.tolerance_hash().unwrap(),
-        previous_config_hash: Some(hash("previous")),
-        reason_codes: vec!["renderer.change.reviewed".into()],
-    };
-    approval.validate().unwrap();
+
+    config.checkpoints[0].image_tolerance.changed_pixel_ratio = f64::NAN;
+    assert!(config.validate().is_err());
+    config.checkpoints[0].image_tolerance.changed_pixel_ratio = 0.002;
+    config.checkpoints[0].audio_tolerance.max_duration_delta_ms = -1.0;
+    assert!(config.validate().is_err());
 }

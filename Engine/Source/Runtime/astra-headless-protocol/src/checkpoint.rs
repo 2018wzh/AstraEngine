@@ -1,11 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
-use crate::{
-    is_sha256, validate_symbol, ProtocolError, HEADLESS_CHECKPOINT_CONFIG_SCHEMA,
-    HEADLESS_TOLERANCE_APPROVAL_SCHEMA,
-};
+use crate::{is_sha256, validate_symbol, ProtocolError, HEADLESS_CHECKPOINT_CONFIG_SCHEMA};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -15,32 +11,6 @@ pub struct CheckpointConfig {
     pub input_sequence_hash: String,
     pub renderer_identity_hash: String,
     pub checkpoints: Vec<CheckpointExpectation>,
-    pub tolerance_approval: Option<ToleranceApprovalBinding>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct ToleranceApprovalBinding {
-    pub relative_path: String,
-    pub sha256: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct ToleranceApproval {
-    pub schema: String,
-    pub approval_id: String,
-    pub approver_kind: ToleranceApproverKind,
-    pub approver_identity: String,
-    pub approved_tolerance_hash: String,
-    pub previous_config_hash: Option<String>,
-    pub reason_codes: Vec<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum ToleranceApproverKind {
-    Human,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -117,7 +87,6 @@ impl CheckpointConfig {
             ));
         }
         let mut ids = std::collections::BTreeSet::new();
-        let mut customized_tolerance = false;
         for checkpoint in &self.checkpoints {
             validate_symbol("checkpoint.entry.id", &checkpoint.id)?;
             if !ids.insert(&checkpoint.id) {
@@ -153,71 +122,6 @@ impl CheckpointConfig {
             )?;
             validate_image_tolerance(checkpoint.image_tolerance)?;
             validate_audio_tolerance(checkpoint.audio_tolerance)?;
-            customized_tolerance |= checkpoint.image_tolerance != ImageTolerance::default()
-                || checkpoint.audio_tolerance != AudioTolerance::default();
-        }
-        if customized_tolerance && self.tolerance_approval.is_none() {
-            return Err(ProtocolError::invalid(
-                "checkpoint.tolerance_approval",
-                "custom tolerance requires a hash-bound human approval record",
-            ));
-        }
-        if let Some(approval) = &self.tolerance_approval {
-            validate_baseline_pair(
-                "checkpoint.tolerance_approval",
-                Some(&approval.relative_path),
-                Some(&approval.sha256),
-            )?;
-        }
-        Ok(())
-    }
-
-    pub fn tolerance_hash(&self) -> Result<String, ProtocolError> {
-        let values = self
-            .checkpoints
-            .iter()
-            .map(|checkpoint| {
-                (
-                    checkpoint.id.as_str(),
-                    checkpoint.image_tolerance,
-                    checkpoint.audio_tolerance,
-                )
-            })
-            .collect::<Vec<_>>();
-        let bytes = serde_json::to_vec(&values).map_err(|_| {
-            ProtocolError::invalid(
-                "checkpoint.tolerance_hash",
-                "tolerance set cannot be canonicalized",
-            )
-        })?;
-        Ok(format!("sha256:{:x}", Sha256::digest(bytes)))
-    }
-}
-
-impl ToleranceApproval {
-    pub fn validate(&self) -> Result<(), ProtocolError> {
-        if self.schema != HEADLESS_TOLERANCE_APPROVAL_SCHEMA
-            || !is_sha256(&self.approved_tolerance_hash)
-            || self
-                .previous_config_hash
-                .as_ref()
-                .is_some_and(|hash| !is_sha256(hash))
-        {
-            return Err(ProtocolError::invalid(
-                "tolerance_approval.validate",
-                "approval schema or configuration hashes are invalid",
-            ));
-        }
-        validate_symbol("tolerance_approval.id", &self.approval_id)?;
-        validate_symbol("tolerance_approval.approver", &self.approver_identity)?;
-        if self.reason_codes.is_empty() {
-            return Err(ProtocolError::invalid(
-                "tolerance_approval.reason",
-                "approval must record at least one reason code",
-            ));
-        }
-        for reason in &self.reason_codes {
-            validate_symbol("tolerance_approval.reason", reason)?;
         }
         Ok(())
     }

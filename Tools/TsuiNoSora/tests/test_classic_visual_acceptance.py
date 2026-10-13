@@ -64,7 +64,7 @@ class ClassicVisualAcceptanceTests(unittest.TestCase):
         story.commands[command_id][1]["text"] = "fixture-private-text"
         content_hash = "sha256:" + hashlib.sha256(b"fixture-private-text").hexdigest()
         node_map = {
-            "schema": "tsuinosora.classic_visual_node_map.v3",
+            "schema": "tsuinosora.classic_visual_node_map.v4",
             "entries": [{
                 "reference_id": "TSUI1999-UI-005",
                 "comparison_class": "same_node",
@@ -89,7 +89,7 @@ class ClassicVisualAcceptanceTests(unittest.TestCase):
             story.commands[command_id][1]["text"] = "reused-private-text"
         content_hash = "sha256:" + hashlib.sha256(b"reused-private-text").hexdigest()
         node_map = {
-            "schema": "tsuinosora.classic_visual_node_map.v3",
+            "schema": "tsuinosora.classic_visual_node_map.v4",
             "entries": [{
                 "reference_id": "TSUI1999-UI-005",
                 "comparison_class": "same_node",

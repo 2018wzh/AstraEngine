@@ -19,7 +19,7 @@ from headless_gpu_acceptance import (
 
 REPORT_SCHEMA = "tsuinosora.classic_visual_acceptance_report.v2"
 INPUT_SCHEMA = "astra.user_input_sequence.v1"
-NODE_MAP_SCHEMA = "tsuinosora.classic_visual_node_map.v3"
+NODE_MAP_SCHEMA = "tsuinosora.classic_visual_node_map.v4"
 
 
 class AcceptanceError(RuntimeError):

@@ -20,7 +20,7 @@ from tsuinosora_tools import (  # noqa: E402
     build_mount_policy,
     build_modern_profile_report,
     build_route_graph_report,
-    build_route_scenarios,
+    _route_mount_assets,
     build_script_source_map_report,
     build_stage3_gate_report,
     build_projectorrays_full_dump_report,
@@ -4363,22 +4363,11 @@ class AssetAnalysisTests(unittest.TestCase):
         self.assertNotIn(":", report["inputs"]["original_install_root"])
         self.assertNotIn("\\", encoded)
 
-    def test_route_scenario_generation_and_mount_policy_are_sanitized(self):
-        scenarios = build_route_scenarios(
-            target="tsuinosora-internal-game",
-            profile="classic",
-            platform="windows",
-            routes=[{"route_id": "classic.main", "choices": ["choice.start"], "terminal": "ending.good"}],
-        )
-        self.assertEqual(scenarios["schema"], "astra.scenario_refs.v1")
-        self.assertEqual(scenarios["scenarios"][0]["target"], "tsuinosora-internal-game")
-        self.assertEqual(scenarios["scenarios"][0]["assertions"][0]["coverage"]["routes"], ["ending.good"])
-
+    def test_mount_policy_and_asset_bindings_are_sanitized(self):
         policy = build_mount_policy(
             target="tsuinosora-patch-game",
             aliases={"original": "original_install_root", "remake": "remake_install_root"},
         )
-        self.assertEqual(policy["schema"], "tsuinosora.mount_policy.v1")
         self.assertEqual(policy["status"], "pass")
 
         blocked = build_mount_policy(
@@ -4388,75 +4377,27 @@ class AssetAnalysisTests(unittest.TestCase):
         self.assertEqual(blocked["status"], "blocked")
         self.assertEqual(blocked["diagnostics"][0]["code"], "TSUI_MOUNT_ALIAS_PATH_LEAK")
 
-        patch_scenarios = build_route_scenarios(
-            target="tsuinosora-patch-game",
-            profile="classic",
-            platform="windows",
-            routes=[
-                {
-                    "route_id": "classic.main",
-                    "choices": ["choice.start"],
-                    "terminal": "ending.good",
-                    "mount_assets": [
-                        {
-                            "alias": "original",
-                            "path": "native-assets/backgrounds/opening.png",
-                            "role": "background",
-                            "sha256": "sha256:" + "1" * 64,
-                        }
-                    ],
-                }
-            ],
-        )
-        patch_route = patch_scenarios["scenarios"][0]
-        self.assertEqual(patch_route["mount_assets"][0]["route_id"], "classic.main")
-        self.assertEqual(patch_route["mount_assets"][0]["role"], "background")
-
-        blocked_asset_role = build_route_scenarios(
-            target="tsuinosora-patch-game",
-            profile="classic",
-            platform="windows",
-            routes=[
-                {
-                    "route_id": "classic.main",
-                    "terminal": "ending.good",
-                    "mount_assets": [
-                        {
-                            "alias": "original",
-                            "path": "native-assets/backgrounds/opening.png",
-                            "role": "not_a_classification",
-                            "sha256": "sha256:" + "1" * 64,
-                        }
-                    ],
-                }
-            ],
-        )
-        self.assertEqual(blocked_asset_role["status"], "blocked")
-        self.assertEqual(
-            blocked_asset_role["diagnostics"][0]["code"],
-            "TSUI_ROUTE_MOUNT_ASSET_ROLE_INVALID",
-        )
-
-        web_scenarios = build_route_scenarios(
-            target="tsuinosora-patch-game",
-            profile="classic",
-            platform="web",
-            routes=[
-                {
-                    "route_id": "classic.main",
-                    "terminal": "ending.good",
-                    "mount_assets": [
-                        {
-                            "alias": "original",
-                            "path": "native-assets/backgrounds/opening.png",
-                            "role": "background",
-                            "sha256": "sha256:" + "1" * 64,
-                        }
-                    ],
-                }
-            ],
-        )
-        self.assertNotIn("mount_assets", web_scenarios["scenarios"][0])
+        route_id = "classic.main"
+        asset = {
+            "alias": "original",
+            "path": "native-assets/backgrounds/opening.png",
+            "role": "background",
+            "sha256": "sha256:" + "1" * 64,
+        }
+        for field, invalid, code in [
+            ("role", "not_a_classification", "TSUI_ROUTE_MOUNT_ASSET_ROLE_INVALID"),
+            ("path", "../source.png", "TSUI_ROUTE_MOUNT_ASSET_UNSAFE"),
+            ("route_id", "other.route", "TSUI_ROUTE_MOUNT_ASSET_UNSAFE"),
+        ]:
+            with self.subTest(field=field):
+                assets, diagnostics = _route_mount_assets(
+                    "tsuinosora-patch-game",
+                    "windows",
+                    {"mount_assets": [dict(asset, **{field: invalid})]},
+                    route_id,
+                )
+                self.assertEqual(assets, [])
+                self.assertEqual(diagnostics[0]["code"], code)
 
     def test_modern_profile_report_blocks_core_state_changes_and_missing_fallback(self):
         conversion = {
@@ -4512,7 +4453,6 @@ class AssetAnalysisTests(unittest.TestCase):
             )
             encoded = json.dumps(report, sort_keys=True)
 
-            self.assertEqual(report["schema"], "tsuinosora.stage3_gate_report.v1")
             self.assertEqual(report["status"], "blocked")
             self.assertIn("TSUI_SOURCE_ROOT_MISSING", {diag["code"] for diag in report["diagnostics"]})
             self.assertIn("TSUI_UNPACKED_ROOT_MISSING", {diag["code"] for diag in report["diagnostics"]})
@@ -4722,9 +4662,6 @@ class AssetAnalysisTests(unittest.TestCase):
             self.assertEqual(report["status"], "pass")
             self.assertEqual(report["reports"]["route_graph_report"], "reports/route_graph_report.json")
             self.assertTrue((work / "reports" / "route_graph_report.json").exists())
-            self.assertTrue(
-                (work / "reports" / "scenario_refs.tsuinosora-internal-game.classic.web.json").exists()
-            )
             self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
 
     def test_stage3_gate_derives_routes_from_extracted_script_source_map(self):
@@ -4985,7 +4922,6 @@ class AssetAnalysisTests(unittest.TestCase):
 
             self.assertEqual(report["status"], "pass")
             self.assertEqual(script_report["routes"][0]["source_map"], "maps/script_source_map.json")
-            self.assertEqual(report["scenario_refs"][0]["route_count"], 1)
             self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
 
     def test_stage3_gate_derives_cast_source_map_from_director_key_cas(self):
@@ -5148,9 +5084,6 @@ class AssetAnalysisTests(unittest.TestCase):
             self.assertEqual(report["targets"][0]["target"], "tsuinosora-internal-game")
             self.assertTrue((work / "reports" / "asset_analysis.json").exists())
             self.assertTrue((work / "reports" / "conversion_report.json").exists())
-            self.assertTrue(
-                (work / "reports" / "scenario_refs.tsuinosora-internal-game.classic.web.json").exists()
-            )
             self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
 
     def test_local_gate_writes_stage3_and_nativevn_reports_when_inputs_pass(self):
@@ -5826,71 +5759,6 @@ class AssetAnalysisTests(unittest.TestCase):
             self.assertFalse((work / "nativevn" / "project.yaml").exists())
             self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
 
-    def test_local_gate_blocks_explicit_routes_without_report_evidence(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            title = root / "Title.png"
-            game = root / "Game.png"
-            original = root / "original"
-            unpacked = root / "unpacked"
-            work = root / "work"
-            (original / "DATA").mkdir(parents=True)
-            unpacked.mkdir()
-            title.write_bytes(make_png(16, 9, fill=(10, 20, 30, 255)))
-            game.write_bytes(make_png(16, 9, fill=(30, 20, 10, 255)))
-            (original / "READY.dxr").write_bytes(b"synthetic director container")
-            (original / "DATA" / "SCENE.dxr").write_bytes(b"synthetic scene container")
-            (unpacked / "bg.png").write_bytes(make_png(8, 8, fill=(40, 80, 120, 255)))
-            write_cast_map(unpacked / "cast_map.json", "bg.png")
-            (unpacked / "route_graph.json").write_text(
-                json.dumps(
-                    {
-                        "schema": "tsuinosora.route_graph.v1",
-                        "routes": [
-                            {
-                                "route_id": "classic.main",
-                                "coverage": "covered",
-                                "terminal": "ending.good",
-                            }
-                        ],
-                    }
-                ),
-                encoding="utf-8",
-            )
-
-            write_native_story_ir_fixture(work)
-            report = run_local_gate(
-                original_root=original,
-                work_root=work,
-                title_png=title,
-                game_png=game,
-                unpacked_root=unpacked,
-                routes=[
-                    {
-                        "route_id": "classic.main",
-                        "coverage": "covered",
-                        "terminal": "ending.good",
-                    }
-                ],
-                modern_features=[
-                    {
-                        "feature_id": "remake_overlay.hero",
-                        "feature_kind": "portrait_overlay",
-                        "input_hash": "sha256:input",
-                        "output_hash": "sha256:output",
-                        "fallback_hash": "sha256:fallback",
-                        "independent_switch": True,
-                        "affects_core_state": False,
-                    }
-                ],
-            )
-
-            codes = {diagnostic["code"] for diagnostic in report["diagnostics"]}
-            self.assertEqual(report["status"], "blocked")
-            self.assertIn("TSUI_LOCAL_GATE_ROUTE_EVIDENCE_REQUIRED", codes)
-            self.assertEqual(report["reports"]["nativevn_package_input"], "")
-            self.assertFalse((work / "nativevn" / "project.yaml").exists())
-
     def test_local_gate_reports_routes_derived_from_stage3_reports(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -6240,157 +6108,6 @@ class AssetAnalysisTests(unittest.TestCase):
             self.assertIn("choice.route.good", story)
             self.assertIn("choice.route.confirm", story)
 
-    def test_nativevn_package_input_blocks_duplicate_choices_from_explicit_routes(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            title = root / "Title.png"
-            game = root / "Game.png"
-            original = root / "original"
-            unpacked = root / "unpacked"
-            work = root / "work"
-            original.mkdir()
-            unpacked.mkdir()
-            title.write_bytes(make_png(16, 9, fill=(10, 20, 30, 255)))
-            game.write_bytes(make_png(16, 9, fill=(30, 20, 10, 255)))
-            (original / "READY.dxr").write_bytes(
-                make_riff_container([("PNG ", make_png(8, 8, fill=(40, 80, 120, 255)))])
-            )
-            (unpacked / "bg.png").write_bytes(make_png(8, 8, fill=(40, 80, 120, 255)))
-            write_cast_map(unpacked / "cast_map.json", "bg.png")
-            valid_routes = [
-                {
-                    "route_id": "classic.main",
-                    "coverage": "covered",
-                    "terminal": "ending.good",
-                    "choices": ["choice.start"],
-                }
-            ]
-            duplicate_choice_routes = [
-                {
-                    "route_id": "classic.main",
-                    "coverage": "covered",
-                    "terminal": "ending.good",
-                    "choices": ["choice.start", "choice.start"],
-                }
-            ]
-
-            build_stage3_gate_report(
-                original_root=original,
-                work_root=work,
-                title_png=title,
-                game_png=game,
-                unpacked_root=unpacked,
-                routes=valid_routes,
-                modern_features=[
-                    {
-                        "feature_id": "remake_overlay.hero",
-                        "feature_kind": "portrait_overlay",
-                        "input_hash": "sha256:input",
-                        "output_hash": "sha256:output",
-                        "fallback_hash": "sha256:fallback",
-                        "independent_switch": True,
-                        "affects_core_state": False,
-                    }
-                ],
-            )
-
-            report = write_nativevn_package_input(work, duplicate_choice_routes)
-            encoded = json.dumps(report, sort_keys=True)
-
-            self.assertEqual(report["status"], "blocked")
-            self.assertEqual(report["project"], "")
-            self.assertEqual(report["story_source_count"], 0)
-            self.assertEqual(report["physical_input_sequence_count"], 0)
-            self.assertNotIn("project", {entry["role"] for entry in report["files"]})
-            self.assertNotIn("story", {entry["role"] for entry in report["files"]})
-            self.assertIn(
-                "TSUI_NATIVEVN_EXPLICIT_ROUTE_INPUT_RETIRED",
-                {diagnostic["code"] for diagnostic in report["diagnostics"]},
-            )
-            self.assertFalse(list((work / "nativevn" / "Scripts").glob("main.*.astra")))
-            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
-
-    def test_nativevn_package_input_blocks_invalid_explicit_route_metadata(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            title = root / "Title.png"
-            game = root / "Game.png"
-            original = root / "original"
-            unpacked = root / "unpacked"
-            work = root / "work"
-            original.mkdir()
-            unpacked.mkdir()
-            title.write_bytes(make_png(16, 9, fill=(10, 20, 30, 255)))
-            game.write_bytes(make_png(16, 9, fill=(30, 20, 10, 255)))
-            (original / "READY.dxr").write_bytes(
-                make_riff_container([("PNG ", make_png(8, 8, fill=(40, 80, 120, 255)))])
-            )
-            (unpacked / "bg.png").write_bytes(make_png(8, 8, fill=(40, 80, 120, 255)))
-            write_cast_map(unpacked / "cast_map.json", "bg.png")
-            valid_routes = [
-                {
-                    "route_id": "classic.main",
-                    "coverage": "covered",
-                    "terminal": "ending.good",
-                    "choices": ["choice.start"],
-                }
-            ]
-            invalid_routes = [
-                {
-                    "route_id": "classic.main",
-                    "coverage": "covered",
-                    "terminal": "ending.good",
-                    "choices": ["choice.start"],
-                },
-                {
-                    "route_id": "classic.main",
-                    "coverage": "covered",
-                    "terminal": "ending.bad",
-                    "choices": ["choice.start"],
-                },
-                {
-                    "route_id": "classic/main",
-                    "coverage": "missing",
-                    "terminal": "ending.good",
-                    "choices": ["choice.ok", "bad choice"],
-                },
-            ]
-
-            build_stage3_gate_report(
-                original_root=original,
-                work_root=work,
-                title_png=title,
-                game_png=game,
-                unpacked_root=unpacked,
-                routes=valid_routes,
-                modern_features=[
-                    {
-                        "feature_id": "remake_overlay.hero",
-                        "feature_kind": "portrait_overlay",
-                        "input_hash": "sha256:input",
-                        "output_hash": "sha256:output",
-                        "fallback_hash": "sha256:fallback",
-                        "independent_switch": True,
-                        "affects_core_state": False,
-                    }
-                ],
-            )
-
-            old_automation = work / "nativevn" / "Automation" / "old.jsonl"
-            old_automation.parent.mkdir(parents=True, exist_ok=True)
-            old_automation.write_text("old", encoding="utf-8")
-            report = write_nativevn_package_input(work, invalid_routes)
-            codes = {diagnostic["code"] for diagnostic in report["diagnostics"]}
-
-            self.assertEqual(report["status"], "blocked")
-            self.assertEqual(report["project"], "")
-            self.assertEqual(report["story_source_count"], 0)
-            self.assertEqual(report["physical_input_sequence_count"], 0)
-            self.assertIn("TSUI_NATIVEVN_EXPLICIT_ROUTE_INPUT_RETIRED", codes)
-            self.assertFalse((work / "nativevn" / "project.yaml").exists())
-            self.assertEqual(report["files"], [])
-            self.assertEqual(old_automation.read_text(encoding="utf-8"), "old")
-
     def test_nativevn_package_input_skips_story_conversion_when_preconditions_block(self):
         with tempfile.TemporaryDirectory() as tmp:
             work = Path(tmp) / "work"
@@ -6398,13 +6115,13 @@ class AssetAnalysisTests(unittest.TestCase):
             reports.mkdir(parents=True)
             write_native_story_ir_fixture(work)
             (reports / "conversion_report.json").write_text(
-                json.dumps({"status": "pass"}), encoding="utf-8"
+                json.dumps({"status": "blocked"}), encoding="utf-8"
             )
             (reports / "asset_analysis.json").write_text(
                 json.dumps({"status": "pass"}), encoding="utf-8"
             )
 
-            report = write_nativevn_package_input(work, [])
+            report = write_nativevn_package_input(work)
             story_report = json.loads(
                 (reports / "full_conversion_coverage_report.json").read_text(encoding="utf-8")
             )
@@ -6417,7 +6134,7 @@ class AssetAnalysisTests(unittest.TestCase):
             self.assertFalse((work / "nativevn" / "Localization").exists())
             self.assertFalse((work / "nativevn" / "Automation").exists())
             self.assertIn(
-                "TSUI_NATIVEVN_EXPLICIT_ROUTE_INPUT_RETIRED",
+                "TSUI_NATIVEVN_CONVERSION_BLOCKED",
                 {diagnostic["code"] for diagnostic in report["diagnostics"]},
             )
 

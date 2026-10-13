@@ -9,7 +9,7 @@
 - [原版截图合集](https://amaikahlua.hatenablog.com/entry/2020/12/09/183000)
 - [Windows 98 实机录像](https://www.youtube.com/watch?v=x3xBNw6o414)
 
-这些参考不能代替合法原版 source、同 checkpoint 自动差异、Windows E3 或 formal human signoff。
+这些参考不能代替合法原版 source、同 checkpoint 自动差异或真实平台输入、画面与设备听音；不以具名签署文件替代运行。
 
 ## 2. 裁剪与归一化
 
@@ -74,11 +74,11 @@ left=1220 top=674 right=2620 bottom=1724
 | Title、Title Load | `001/010` | 同一 Classic package 的物理输入 GPU checkpoint 与区域比较通过 |
 | 两种 Opening | `002/003` | 同一 Classic package 的物理输入 GPU checkpoint 与区域比较通过 |
 | 背景、普通对白 | `004/005/015` | `004/015` 通过；`005` 的黑色 stage 与相同 Director frame 的背景可见语义冲突，必须重新连续捕获两帧 |
-| 单/双人物越框 | `006/007` | frame-space/clip 几何均通过；`007` 按默认门禁通过，`006` 由具名 human approval 绑定固定色彩 profile 后通过，未豁免 anchor、visible bbox、越框或 z-order |
+| 单/双人物越框 | `006/007` | frame-space/clip 几何保持原阈值；`006` 仅使用匹配同节点资源与稳定帧的固定颜色 profile，不需要审批文件，也不豁免 anchor、visible bbox、越框或 z-order |
 | stage monologue、choice | `008/009` | `008` 通过；`009` 已修复双菱形并达到 1 px 几何误差，但原版 shade/transition 状态缺少连续帧证据，SSIM 门禁仍阻断 |
 | POPUP、Config、Load、Save | `011/012/013/014` | GPU checkpoint 与 modal geometry/underlay 比较通过 |
 | Exit、隐藏测试菜单 | 共享 `011` 的系统窗口视觉语法 | 物理输入 GPU checkpoint 通过；原始截图集中没有独立画面，行为由 Score/Lingo typed effect 证据约束 |
 
 2026-07-19 的 v43 结果只保留为历史证据，其中 UI015 的几何偏差为 0，但整幅画面的色阶不同，SSIM 为 0.723907、感知误差为 0.110397，不能按字体差异豁免。2026-07-20 的 private RC 已用新增连续帧关闭 `005/009` 的 source/presentation 缺口，并重新生成 13 项 Y 范围像素预检；模型已查看全部 reference、capture、mask、absolute diff 与 perceptual heatmap，自动失败没有被覆盖。
 
-本轮 RC 只保证 Y，因此视觉门禁固定为 UI001、UI002、UI003、UI005 至 UI014，共 13 项。UI004/UI015 属于未保证的 K movie，只保留研究状态。13 项像素预检均已通过；UI002 的原版与 capture 整体文字 bbox 完全一致，差异只落在 384 个字形 raster 像素，该项仍使用覆盖率上限 `0.08` 的紧边界文字 mask。`006` 仍是唯一可使用 `capture_palette_v1` 色彩容差的节点。模型已查看全部五联图，自动失败未被覆盖。30 张输入和 12 组 A/B 稳定复帧已闭合，权威 manifest 与 node map 已更新。Windows E3 显式延期；最终同身份重跑和 formal signoff 保持 `IN_PROGRESS`。
+Y 范围仍只有 UI001、UI002、UI003、UI005 至 UI014 共 13 项，UI004/UI015 保留未验收研究状态。当前 v4 node map/comparison policy 保存固定 mask、颜色 profile 和同节点/稳定帧绑定，不保存批准记录；来源、像素阈值或几何失败仍拒绝。历史像素预检和模型查看记录不代表当前最终身份、Windows 或设备声音已通过，实际进度见主仓实施状态。

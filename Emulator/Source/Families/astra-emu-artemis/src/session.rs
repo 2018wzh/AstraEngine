@@ -81,6 +81,7 @@ pub(crate) fn boot(
         ));
     };
 
+
     let save_dir = game_path.join("savedata");
     std::fs::create_dir_all(&save_dir).map_err(|_| {
         error::invalid(

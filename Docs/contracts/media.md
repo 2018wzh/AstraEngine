@@ -10,28 +10,12 @@ Migration 11 的 `CpuRendererProvider`、Kira mixer、Image/Symphonia decode 和
 
 ## DecodeProvider
 
-### RFVP PlatformHost stream binding
+### Engine/VN 增量流
 
-Windows RFVP movie playback uses the shared PlatformHost decode session rather
-than a fixed-tick full-file decode. The lifecycle is
-`OpenDecode -> Start -> Next* -> CloseDecode`. `Start` returns typed
-`VideoStreamStart`; each `Next` returns one typed `VideoFrame` or PCM chunk, and
-end-of-stream is reported as typed `VideoStreamEnd` or the stable
-`ASTRA_MEDIA_STREAM_EOS` diagnostic.
-The Windows provider requests Media Foundation hardware transforms. Its public
-boundary is still CPU BGRA/i16 PCM, so the final CPU-to-WGPU/device transfer is
-the only required output transfer and this contract does not claim external
-texture zero-copy. `VideoFrame` 只携带 sequence、PTS、duration、尺寸和 owned
-BGRA8 allocation；不携带 format string、postcard payload 或实时 content hash。
-WMF host 将同一 allocation 直接移交给 consumer。Hardware-transform selection is requested at the WMF source-reader
-boundary, but a device-specific transform-selection proof is still a separate
-release gate.
+共享 PlatformHost decode 提供 typed `OpenDecode -> Start -> Next* -> CloseDecode`，每次交付一个 owned frame 或明确 EOS。Windows provider 可请求 Media Foundation 硬件 transform；请求成功不等于已取得特定设备的性能或 transform 选择验收。
 
-Manager and native CLI use bounded prefetch workers and consume owned chunks at
-the runtime boundary. The worker, scene present, and UI loops do not decode a
-complete movie or append PCM by rebuilding historical samples. Web and other
-platforms remain explicit provider-gated until their native stream contract is
-implemented; no implicit software fallback is permitted.
+本节不适用于成熟 EMU 核心。FVP 保留 RFVP 原生 GPU/媒体路径，其他 Family 自持解码、混音与存档；Manager 只接收最终帧和有界 PCM，不另通过 PlatformHost 重写核心播放链。
+
 
 Decode 只能通过 `DecodeBindingContext { provider_id, target, profile, allow_reference_provider }` 选择一个显式 provider。Registry 阻断重复 id、无 binding、profile drift、unsupported codec/kind、feature-gated provider 和 reference provider 进入 shipping；注册顺序不参与选择。平台 provider 包括 Windows Media Foundation；Image/Symphonia 只能由 profile 显式绑定，不能作为失败后的 fallback。`SyntheticPlatformDecodeProvider` 明确为 non-packaged reference provider。DecodeProvider 输出经过 provider/kind/codec 与 typed shape 校验的 CPU buffer、PCM、video stream item 或 `MediaSurfaceToken`，public API 不暴露平台 native handle。
 
@@ -47,16 +31,12 @@ Player 的音频路径固定为 `OpenDecode -> Decode -> CloseDecode -> AudioSer
 
 持续音频由 session-local `AudioServiceSession` 管理。Kira 持有 voice、bus、fade、loop、seek、clock 与混音；平台只持有 `AudioOutputLane` endpoint。decoded audio 在播放前转换到设备格式并进入有界 cache，同格式 owned chunk 不重建。重复 voice、非法 gain/fade、容量、sequence、转换预算或 Kira 提交失败必须 poison 当前音频 session。`audio action:pause|resume|stop target:<stable-command-id>` 经过 ordered Runtime output 进入服务；missing target、重复 pause/resume 和未知 action 不得空成功。完成事件以设备已消费 sample 为准，在下一 fixed tick 回注 Runtime。
 
-`AudioOutputLane` 暴露只读原子 telemetry 和 wake registration，Kira worker按队列容量补充 chunk；refill 不进入 window/present command FIFO。稳定泵送后 underflow 增长必须终止受影响 session。open 后若设备格式漂移必须 blocking，退出时停止 mixer、关闭 endpoint 并等待 worker join。Web 仍须由真实 keyboard/pointer user activation 触发 `AudioContext.resume()`；设备热切换恢复与正式浏览器 E3 evidence 仍是独立门禁。
+`AudioOutputLane` 暴露只读原子 telemetry 和 wake registration，Kira worker 按队列容量补充 chunk；refill 不进入窗口呈现 FIFO。稳定泵送后的 underflow 增长、设备格式漂移与关闭失败必须明确终止受影响 session。现有 Web AudioContext 仍需要真实 user activation；Web 已延后，不因此新增本轮浏览器审批门禁。
 
-PlatformHost 通过 `AudioOutputLane::submit` 消费 Kira 填满的 owned chunk，并归还一个耗尽 allocation 供下一次 render 复用。native callback 使用 chunk+offset 批量消费，不能逐 sample push/pop，也不能分配或解码。AstraEMU Manager、CLI、Headless 与 Windowed E2 共用同一 Kira worker；Runtime tick、GPU present 与 Slint event loop 只提交 typed command 和读取 telemetry。
+Engine/VN PlatformHost 通过 `AudioOutputLane::submit` 消费 owned chunk，并归还耗尽 allocation 供后续 render 复用；native callback 使用 chunk/offset 批量消费，不逐 sample 分配或解码。CLI、Headless 和 native Player 使用该共享服务；Runtime tick 与 GPU present 只提交 typed 命令并读取 telemetry。
 
-Windows Manager 使用不创建窗口或 Winit event loop 的 media-service host 提供 audio/decode lane。Slint host 是进程内唯一窗口 event loop owner；media-service host 收到 window、surface、save 或 package command 时必须拒绝，不能转交完整 PlatformHost 或启动第二个 event loop。
+AstraEMU 的原生解码/混音属于 Family，Manager 音频输出只消费有界 PCM，按独立会话执行取消和 join。它不复用本页的统一 Runtime/PlatformHost 媒体服务，也不拥有 core audio graph。
 
-RFVP 的 SubmitI16/SubmitF32 不再把样本放进 audio command postcard。Family ABI v7
-直接移动 typed `I16`/`F32` packet，跨 ABI、Manager 和 worker 保留同一 ABI-owned
-allocation。相同格式的 PCM 不允许重建；worker 只在实际 mix/resample 边界读取 chunk，
-必要的采样格式转换单独记录。
 
 Native callback 的消费、设备错误和低水位边沿通过 `AudioWakeRegistration` 唤醒 drain/refill waiter；waiter 使用绝对 deadline，不能以 4/5 ms `sleep` 或 fixed-tick timeout 反复查询。队列满时 producer 必须背压或返回稳定 overflow，设备丢失、worker panic 和 shutdown drain/abort/join 必须成为可诊断的终态。
 
@@ -77,7 +57,7 @@ nodes:
 
 Node 必须声明 input/output target、精确参数集合、GPU/CPU capability、determinism、fallback 和 release gate rule。当前 deterministic CPU executor 只接受已实现的 bloom、fade 和 color matrix，要求显式 `allow_cpu_fallback`，并阻断 unknown node、no-op fallback、跨 target 伪执行、参数缺失/多余/越界和损坏 frame。跨 target graph 与 GPU node provider 未闭合前保持未完成。
 
-AstraEMU filter preset 复用同一 `FilterGraph`。final-frame preset 作用在合成后画面；per-layer preset 绑定 `PresentationCommand` 的 layer id 或 role。family 缺少 layer metadata 时，Manager 只启用 final-frame preset 并输出 diagnostic。
+AstraEMU 不使用本页的 per-layer `PresentationCommand` 或 VN filter provider 链；成熟核心优先复用自己的 GPU 效果，Manager 只处理最终输出。不能因列出 FilterGraph 目标而声称已新增 EMU 图层接口。
 
 ## Kira AudioService
 

@@ -541,7 +541,6 @@ dependencies = [
  "astra-package",
  "astra-platform",
  "astra-platform-android",
- "astra-platform-ios",
  "astra-platform-linux",
  "astra-platform-macos",
  "astra-platform-web",
@@ -551,7 +550,6 @@ dependencies = [
  "astra-plugin-abi",
  "astra-release",
  "astra-target",
- "astra-test",
  "astra-ui-core",
  "astra-vn",
  "astra-vn-core",
@@ -597,6 +595,7 @@ dependencies = [
 name = "astra-core"
 version = "0.1.0"
 dependencies = [
+ "astra-property-derive",
  "blake3",
  "hex",
  "miette",
@@ -650,7 +649,6 @@ dependencies = [
  "astra-platform-headless",
  "astra-player-vn",
  "astra-plugin",
- "astra-product-host",
  "clap",
  "hound",
  "image",
@@ -667,6 +665,10 @@ dependencies = [
 name = "astra-headless-protocol"
 version = "0.1.0"
 dependencies = [
+ "astra-byte-source",
+ "astra-core",
+ "astra-package",
+ "astra-platform",
  "schemars",
  "serde",
  "serde_json",
@@ -698,7 +700,6 @@ dependencies = [
  "astra-platform-headless",
  "astra-player-core",
  "astra-player-vn",
- "astra-product-host",
  "astra-runtime",
  "astra-ui-core",
  "astra-vn-core",
@@ -890,14 +891,6 @@ dependencies = [
  "tracing",
  "url",
  "wgpu",
-]
-
-[[package]]
-name = "astra-platform-ios"
-version = "0.1.0"
-dependencies = [
- "astra-platform",
- "tracing",
 ]
 
 [[package]]
@@ -1102,7 +1095,6 @@ dependencies = [
  "astra-vn-package",
  "astra-vn-policy",
  "astra-vn-presentation",
- "astra-vn-system",
  "astra-vn-ui",
  "astra-worker-budget",
  "image",
@@ -1184,30 +1176,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "astra-product-host"
-version = "0.1.0"
-dependencies = [
- "astra-byte-source",
- "astra-core",
- "astra-headless-protocol",
- "astra-package",
- "astra-platform",
- "astra-plugin-abi",
- "serde",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "astra-property"
-version = "0.1.0"
-dependencies = [
- "astra-core",
- "astra-property-derive",
- "schemars",
- "serde",
-]
-
-[[package]]
 name = "astra-property-derive"
 version = "0.1.0"
 dependencies = [
@@ -1222,7 +1190,6 @@ version = "0.1.0"
 dependencies = [
  "astra-asset",
  "astra-core",
- "astra-headless-protocol",
  "astra-media",
  "astra-package",
  "astra-platform",
@@ -1236,7 +1203,6 @@ dependencies = [
  "astra-vn-package",
  "astra-vn-policy",
  "astra-vn-script",
- "astra-vn-system",
  "postcard",
  "schemars",
  "serde",
@@ -1277,15 +1243,6 @@ dependencies = [
  "serde_yaml",
  "thiserror 1.0.69",
  "tracing",
-]
-
-[[package]]
-name = "astra-test"
-version = "0.1.0"
-dependencies = [
- "astra-core",
- "schemars",
- "serde",
 ]
 
 [[package]]
@@ -1344,20 +1301,8 @@ dependencies = [
  "astra-vn-policy",
  "astra-vn-presentation",
  "astra-vn-script",
- "astra-vn-system",
  "serde",
  "tokio",
- "tracing",
-]
-
-[[package]]
-name = "astra-vn-commands"
-version = "0.1.0"
-dependencies = [
- "astra-core",
- "astra-vn-script",
- "schemars",
- "serde",
  "tracing",
 ]
 
@@ -1392,29 +1337,18 @@ version = "0.1.0"
 dependencies = [
  "astra-core",
  "astra-package",
+ "astra-plugin",
+ "astra-runtime",
  "astra-ui-core",
- "astra-vn-commands",
- "astra-vn-plugin",
+ "astra-vn-core",
  "astra-vn-policy",
  "astra-vn-presentation",
  "astra-vn-script",
- "astra-vn-system",
  "postcard",
- "schemars",
- "serde",
- "serde_json",
- "tracing",
-]
-
-[[package]]
-name = "astra-vn-plugin"
-version = "0.1.0"
-dependencies = [
- "astra-core",
- "astra-plugin",
  "schemars",
  "semver",
  "serde",
+ "serde_json",
  "tracing",
 ]
 
@@ -1455,21 +1389,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "astra-vn-save"
-version = "0.1.0"
-dependencies = [
- "astra-core",
- "astra-package",
- "astra-runtime",
- "astra-vn-core",
- "astra-vn-policy",
- "postcard",
- "schemars",
- "serde",
- "tracing",
-]
-
-[[package]]
 name = "astra-vn-script"
 version = "0.1.0"
 dependencies = [
@@ -1494,17 +1413,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "astra-vn-system"
-version = "0.1.0"
-dependencies = [
- "astra-core",
- "astra-vn-script",
- "schemars",
- "serde",
- "tracing",
-]
-
-[[package]]
 name = "astra-vn-ui"
 version = "0.1.0"
 dependencies = [
@@ -1512,7 +1420,6 @@ dependencies = [
  "astra-ui-core",
  "astra-vn-core",
  "astra-vn-script",
- "astra-vn-system",
  "schemars",
  "serde",
  "thiserror 1.0.69",

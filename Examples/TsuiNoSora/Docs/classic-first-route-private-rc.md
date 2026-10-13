@@ -2,7 +2,7 @@
 
 ## 发布边界
 
-本切片只面向固定小群的 private research preview。交付 profile 固定为 Classic 和日文；加密 package 保留当前完整转换内容，但只对第一线路 `Y`、Title 与 Classic 系统页作可玩性承诺，其他路线属于未验收 research 内容。Modern 和 Director gameplay direct-read 不属于本次交付。2026 年 7 月 20 日 00:00 的目标时间已经过去；加密、Headless E2、Y 范围 13/13 视觉比较或人工签署任一项未通过，整包继续延期。
+本切片仅是固定小群的 private research preview：Classic/日文，仅保证第一线路 `Y`、Title 与 Classic 系统页，其他路线属于未验收研究内容。Modern 和 Director gameplay direct-read 不在该切片内。工具保留加密、同身份 GPU/路线结果、Y 范围 13/13 视觉比较与安全扫描，不再要求人工签署；这不等于本轮 Classic/Modern 37 路线或真实 Windows 产品已验收。
 
 Windows x64 bundle 仍是候选 artifact，但本轮不把 Windows E3 作为发布门禁。bundle 只做结构、身份和 source unlock 校验；真实窗口输入、音频、存档恢复与同 run identity 的 E3 保持 `IN_PROGRESS`，不能用 Headless E2 代替或写成已通过。
 
@@ -58,13 +58,13 @@ source-lock build 会强制保护全部 cooked asset、extra section、cook summ
 
 私有 reference 已收到 UI001、UI002、UI003、UI005 至 UI014 的全部画面。30 张输入均通过严格格式检查，12 组 A/B 契约全部逐字节稳定；UI002 没有动态复帧要求，其稳定性由 Score bitmap 的 resource hash 闭包证明。像素预检对 13 项均得到通过结果，模型也已查看全部五联图；UI010 至 UI014 的系统窗外框和语义矩形偏移均为 0 px，UI009 的菱形列偏移为 1 px。处理器已原子生成权威私有 manifest，并同步公开脱敏 recapture manifest、reference hash 与 node validation。UI004 与 UI015 不进入本轮 RC 的 13 项视觉门禁。
 
-当前硬件 renderer、43 个视觉 checkpoint、完整 Y 路线、37 路线内容存在、Windows candidate bundle、source profile binding、商业明文扫描和私有路径扫描均已通过预检。release gate 会同时验证 13 项像素结果与截图稳定性凭据；截图来源门禁已经闭合，下一步是在冻结后的最终 build identity 下重跑 Headless、Y 路线和比较，再由用户完成 formal human signoff。Windows E3 本轮显式延期，不属于 RC gate。提交级 Python、补丁器、文档、格式、Clippy 与 Headless build 已通过；`cargo test --workspace` 在执行测试前被 MSVC `LNK1189` 对象库数量上限阻断，不能写成全量测试通过。最终签署前，本切片保持 `IN_PROGRESS`，不得写成已发布、已授权或已解决版权问题。
+上述结果是历史预检，不代表当前 build 或完整产品已通过。当前 private RC gate 使用 v2，保留 package/source binding、实际硬件 checkpoint、Y 路线、13 项像素与稳定性、商业明文/私有路径检查；具名 signoff 已删除。最终当前身份重跑与实际 Windows 输入、听音、存读档等结果见主仓实施状态，不通过签署文件升级预检结果。
 
 ## 私密交付
 
-`build_private_rc_delivery.py` 是最终交付的唯一组装入口。它只接受状态为 `passed` 的 private RC release report；任何视觉项、source binding、安全扫描或人工签署仍为 blocking 时，工具在复制文件前退出。组装过程重新校验 bundle manifest 中每个文件的大小和 SHA-256，拒绝链接、重复路径、不安全相对路径和身份漂移，并通过同目录 staging 原子提交结果。
+`build_private_rc_delivery.py` 只接受 `tsuinosora.private_rc_release_gate.v2` 的 passed 报告；视觉项、source binding 或安全扫描失败时，在复制文件前拒绝。组装仍校验每个文件的大小/SHA-256、路径、链接、重复项与身份，使用同目录 staging 原子提交，不接收批准记录，也不执行发布。
 
-交付目录会增加 `PRIVATE_RESEARCH_NOTICE.txt` 和 `private-rc-delivery-manifest.json`。manifest 记录 build/package/evidence/signoff hash、生成时间、七天失效时间、文件清单和完整性 hash，不记录本机路径、原版文本或 key material。声明明确限定固定小群、禁止转发和公开索引，链接只能整体撤销。Windows E3 在本轮仍标记为 `deferred`，不会被 Headless E2 改写成已完成。
+交付增加 `PRIVATE_RESEARCH_NOTICE.txt` 与 v2 delivery manifest，记录实际 build/package/report hash、时间、七天期限和文件完整性，不含 signoff、私有路径、商业正文或 key material。固定小群、禁止转发/公开索引及整链撤销约束保留；该切片的延期平台状态不因自动比较改写为通过。
 
 ```sh
 python Tools/TsuiNoSora/build_private_rc_delivery.py \

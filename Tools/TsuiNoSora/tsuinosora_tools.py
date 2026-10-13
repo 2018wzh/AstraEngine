@@ -87,14 +87,8 @@ def main(argv: list[str] | None = None) -> int:
     modern_profile = sub.add_parser("modern-profile-report")
     modern_profile.add_argument("--conversion", required=True)
     modern_profile.add_argument("--features", required=True)
-    route_scenarios = sub.add_parser("route-scenarios")
-    route_scenarios.add_argument("--target", required=True)
-    route_scenarios.add_argument("--profile", required=True)
-    route_scenarios.add_argument("--platform", required=True)
-    route_scenarios.add_argument("--routes", required=True)
     nativevn_project = sub.add_parser("nativevn-project")
     nativevn_project.add_argument("--work-root", required=True)
-    nativevn_project.add_argument("--routes")
     mount_policy = sub.add_parser("mount-policy")
     mount_policy.add_argument("--target", required=True)
     mount_policy.add_argument("--alias", action="append", default=[])
@@ -114,7 +108,6 @@ def main(argv: list[str] | None = None) -> int:
     local_gate.add_argument("--game", default="Examples/TsuiNoSora/Docs/Game.png")
     local_gate.add_argument("--remake-root")
     local_gate.add_argument("--unpacked-root")
-    local_gate.add_argument("--routes")
     local_gate.add_argument("--features")
     demo_slice = sub.add_parser("demo-slice")
     demo_slice.add_argument("--config", required=True)
@@ -191,17 +184,9 @@ def main(argv: list[str] | None = None) -> int:
             _read_json(Path(args.conversion)),
             _read_json(Path(args.features)),
         )
-    elif args.command == "route-scenarios":
-        report = build_route_scenarios(
-            target=args.target,
-            profile=args.profile,
-            platform=args.platform,
-            routes=_read_json(Path(args.routes)),
-        )
     elif args.command == "nativevn-project":
         report = write_nativevn_package_input(
             work_root=Path(args.work_root),
-            routes=_read_json(Path(args.routes)) if args.routes else None,
         )
     elif args.command == "mount-policy":
         report = build_mount_policy(
@@ -227,7 +212,6 @@ def main(argv: list[str] | None = None) -> int:
             game_png=Path(args.game),
             remake_root=Path(args.remake_root) if args.remake_root else None,
             unpacked_root=Path(args.unpacked_root) if args.unpacked_root else None,
-            routes=_read_json(Path(args.routes)) if args.routes else [],
             modern_features=_read_json(Path(args.features)) if args.features else [],
         )
     elif args.command == "demo-slice":

@@ -1,5 +1,5 @@
 {
-  "schema": "tsuinosora.classic_visual_comparison_policy.v3",
+  "schema": "tsuinosora.classic_visual_comparison_policy.v4",
   "thresholds": {
     "max_geometry_delta_px": 2,
     "min_ssim": 0.94,
@@ -11,10 +11,6 @@
       "min_ssim": 0.75,
       "max_perceptual_error": 0.12
     }
-  },
-  "color_tolerance_approval": {
-    "relative_path": "classic-visual-color-tolerance-approval.json",
-    "sha256": "sha256:393c1c2c21a496ceb814b6de65c2084f9ba22ed19f2ca58a3cb1a7bbae3e93b5"
   },
   "capture_normalization": {
     "id": "windows_175pct_bilinear_then_lanczos_v1",

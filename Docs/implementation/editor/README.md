@@ -1,26 +1,22 @@
-# AstraEditor 实现设计
+# AstraEditor 实现入口
 
-当前 Editor 使用 GPUI 与 gpui-component，独立 Cargo workspace 位于 `Editor/`。人工创作是主流程，外部 ACP Agent 和 MCP 共用版本化文档事务。当前边界以 [rebuild contract](../../contracts/rebuild.md)、[模块设计](../../modules/editor.md) 和 [shell](shell.md) 为准。
+Editor 使用独立 GPUI workspace。当前边界见[重构契约](../../contracts/rebuild.md)，目标与未完成项见[Editor 模块](../../modules/editor.md)，结构与所有权见[Shell](shell.md)。
 
-UE Editor 是易用性目标。已接入项目打开、资源搜索、Outliner 与 Details 共享选择、属性批量编辑、布局恢复、保存和撤销。Graph 绘制真实剧情连接，Timeline 支持时间/数值修改与关键帧插删；两者直接修改同一源文档。节点拖动与拖线创建、关键帧拖动、曲线和二维场景操作仍需实现，不能据此宣称达到 UE 的创作体验。
+操作、Agent 配置、资源导入和 typed Player 预览统一维护在[Editor 手册](../../../Editor/README.md)，不再分别维护 Qt Graph、QML TextArea 或内置模型请求循环蓝图。
 
-## 阅读顺序
+## 共用源码与事务
 
-| 文档 | 内容 |
-| --- | --- |
-| [shell.md](shell.md) | 当前 GPUI 工作区、文档事务与进程预览 |
-| [graph.md](graph.md) | Graph/Timeline 设计意图；旧 Qt 实现建议不再适用 |
-| [script-editor.md](script-editor.md) | 源码编辑设计意图；实际输入组件见 shell |
-| [ai-copilot.md](ai-copilot.md) | 历史辅助创作设计；当前采用外部 ACP/MCP，不内置模型循环 |
-| [Editor 手册](../../../Editor/README.md) | 构建、启动、项目与 Agent 配置 |
+文本、Details、Graph/Timeline、ACP 和 MCP 使用同一个 `AuthoringWorkspace`。Graph 是 source ID 与实际路由的投影；Timeline 关键帧及 easing 编辑生成同源码的版本化 batch。撤销、过期版本和项目切换按同一所有权处理，不创建每个面板独立的剧情或演出数据。
+
+Player 在独立 GPU 窗口使用真实 VN 会话，Editor 负责构建、协议、停止和回收。UE 易用性是目标，不是完成声明；节点布局拖动、曲线、二维场景操作及桌面交互以手册和实施状态中的实际结果为准。
 
 ## 检查
 
 ```sh
 python Tools/check_docs.py
 cargo test -p astra-vn-editor
-cargo test --manifest-path Editor/Cargo.toml -p astra-editor --lib
-cargo clippy --manifest-path Editor/Cargo.toml --all-targets -- -D warnings
+cargo test --manifest-path Editor/Cargo.toml -p astra-editor
+cargo clippy --manifest-path Editor/Cargo.toml -p astra-editor --all-targets -- -D warnings
 ```
 
-项目解析和编译可通过 `astra-editor project.yaml --check-project` 检查；它不启动窗口，不能代替实际工作区与 Player 交互验收。
+项目解析和协议检查不能代替实际工作区、设备声音与 Player 画面验收。

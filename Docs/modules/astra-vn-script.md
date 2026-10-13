@@ -184,7 +184,7 @@ package_lock: auto
 
 命令必须由显式 registry 解析。`story`、`state` 和 `scene` 是结构节点，不是 runtime command。`text`、`choice`、`option`、`jump`、`call`、`return`、`mutate`、`system_page` 和 `wait` 属于 Core command。`background`、`show`、`hide`、`movie`、`voice`、`bgm`、`se`、`timeline`、`task`、`effect` 等 presentation command 必须来自 standard command provider。Extension command 必须来自 project manifest 或 plugin provider 的显式绑定。
 
-当前 public frontend 已包含 `CommandRegistry`、schema-bound extension 和 `compile_astra_sources_with_options`。Migration 12 会在同一 lossless frontend 上增加 `Story`/`Ui` source role 与 UI Typed AST，并把唯一产品入口直接迁到 `compile_astra_project(...) -> CompiledVnProject`；完成后删除 `compile_astra_sources`、`compile_astra_sources_with_options` 和旧 package reader，不保留兼容双轨。该迁移当前为 `SPEC_READY`，现有调用者尚未切换。
+当前产品入口为 `compile_astra_project(...) -> CompiledVnProject`，同一 lossless frontend 处理 Story/Ui source role、typed UI 与 command registry。旧 `compile_astra_sources` 兼容入口与单 story package reader 已删除，不按旧迁移计划恢复双轨。
 
 Unknown command 的策略是 fail fast：development profile 可以发 warning 或受控 diagnostic，release profile 必须 blocking，不能静默落入 presentation command。
 

@@ -1,9 +1,0 @@
-[package]
-name = "astra-platform-ios"
-edition.workspace = true
-license.workspace = true
-version.workspace = true
-
-[dependencies]
-tracing.workspace = true
-astra-platform = { path = "../astra-platform" }

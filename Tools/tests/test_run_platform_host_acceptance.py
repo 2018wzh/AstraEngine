@@ -1,8 +1,7 @@
+import copy
 import importlib.util
-import json
 import pathlib
 import sys
-import tempfile
 import unittest
 
 
@@ -14,142 +13,87 @@ sys.modules[SPEC.name] = MODULE
 SPEC.loader.exec_module(MODULE)
 
 
-def write_json(path: pathlib.Path, payload: dict) -> None:
-    path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
-
-
-class PlatformAcceptancePreflightTests(unittest.TestCase):
-    def fixture(self, root: pathlib.Path) -> dict[str, object]:
-        package = root / "game.astrapkg"
-        package.write_bytes(b"package")
-        player = root / "player.json"
-        write_json(player, {"schema": MODULE.PLAYER_SCHEMA, "status": "pass"})
-        run = root / "headless-run.json"
-        run_payload = {
-            "schema": MODULE.HEADLESS_RUN_SCHEMA,
-            "status": "passed",
-            "build_fingerprint": MODULE.sha256(package),
-            "package_hash": MODULE.sha256(package),
-            "input_sequence_hash": "sha256:" + "1" * 64,
-            "profile_id": "headless-profile",
-            "session_id": "headless-session",
-            "scenario": "full-route",
-            "target": "native-vn",
-            "content_identity": "public-content",
-            "manifest_hash": "sha256:" + "2" * 64,
-            "checkpoint_results": [{"id": "final", "passed": True}],
+class PlatformAcceptanceTests(unittest.TestCase):
+    def fixture(self):
+        package_hash = "sha256:" + "1" * 64
+        profile_hash = "sha256:" + "2" * 64
+        build_hash = "sha256:" + "3" * 64
+        capability = {
+            "schema": MODULE.CAPABILITY_SCHEMA,
+            "platform": "windows",
+            "profile_hash": profile_hash,
+            "build_fingerprint": build_hash,
         }
-        write_json(run, run_payload)
-        bundle = root / "review-bundle.json"
-        write_json(
-            bundle,
-            {
-                "schema": MODULE.HEADLESS_REVIEW_BUNDLE_SCHEMA,
-                "run_report_hash": MODULE.sha256(run),
-                "manifest_hash": run_payload["manifest_hash"],
-                "automatic_passed": True,
-                "selected_frames": [{"relative_path": "frames/final.png"}],
-                "selected_audio": [{"relative_path": "audio/full.wav"}],
-                "required_checkpoints": ["final"],
-            },
-        )
-        review = root / "review.json"
-        write_json(
-            review,
-            {
-                "schema": MODULE.HEADLESS_REVIEW_SCHEMA,
-                "run_report_hash": MODULE.sha256(run),
-                "reviewer_kind": "model",
-                "reviewer_identity": "codex-visual-audio-review",
-                "tool_identity_hash": "sha256:" + "3" * 64,
-                "checkpoints": [
-                    {"checkpoint": "final", "passed": True, "diagnostic_codes": []}
-                ],
-            },
-        )
+        for domain in ("renderer", "decode", "audio", "save"):
+            provider = f"native.{domain}"
+            capability[domain] = {
+                "selected": provider, "declared": [provider], "available": [provider],
+            }
         conformance = {
-            "profile_hash": "profile-v2",
-            "session_id": "platform-session",
+            "schema": MODULE.CONFORMANCE_SCHEMA,
+            "platform": "windows",
+            "status": "pass",
+            "package_hash": package_hash,
+            "profile_hash": profile_hash,
+            "build_fingerprint": build_hash,
+            "session_id": "native-session",
+            "checks": [
+                {"id": check_id, "status": "pass", "evidence": [{"key": "result", "value": "measured"}]}
+                for check_id in sorted(MODULE.REQUIRED["windows"])
+            ],
         }
-        identity = root / "platform-identity.json"
-        identity_payload = {
-            "schema": MODULE.PLATFORM_RUN_IDENTITY_SCHEMA,
-            "run_report_hash": MODULE.sha256(player),
-            "build_fingerprint": run_payload["build_fingerprint"],
-            "cooked_package_hash": run_payload["package_hash"],
-            "input_sequence_hash": run_payload["input_sequence_hash"],
-            "scenario": run_payload["scenario"],
-            "target": run_payload["target"],
-            "content_identity": run_payload["content_identity"],
-            "profile_id": conformance["profile_hash"],
-            "session_id": conformance["session_id"],
+        player = {
+            "schema": MODULE.PLAYER_SCHEMA,
+            "status": "pass",
+            "package_hash": package_hash,
+            "checks": [{
+                "id": "player.full_playable", "status": "pass",
+                "evidence": [
+                    {"key": key, "value": conformance[key]}
+                    for key in ("profile_hash", "build_fingerprint", "session_id")
+                ],
+            }],
         }
-        write_json(identity, identity_payload)
-        link = root / "preflight-link.json"
-        write_json(
-            link,
-            {
-                "schema": MODULE.PREFLIGHT_LINK_SCHEMA,
-                "headless_run_report_hash": MODULE.sha256(run),
-                "platform_run_report_hash": MODULE.sha256(identity),
-                "build_fingerprint": run_payload["build_fingerprint"],
-                "cooked_package_hash": run_payload["package_hash"],
-                "input_sequence_hash": run_payload["input_sequence_hash"],
-                "scenario": run_payload["scenario"],
-                "target": run_payload["target"],
-                "content_identity": run_payload["content_identity"],
-                "headless_profile_id": run_payload["profile_id"],
-                "headless_session_id": run_payload["session_id"],
-                "platform_profile_id": identity_payload["profile_id"],
-                "platform_session_id": identity_payload["session_id"],
-            },
-        )
-        return {
-            "package": package,
-            "player": player,
-            "run": run,
-            "bundle": bundle,
-            "review": review,
-            "conformance": conformance,
-            "identity": identity,
-            "link": link,
-        }
+        return capability, conformance, player, package_hash
 
-    def test_formal_review_and_platform_link_are_bound_to_the_same_run(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            fixture = self.fixture(pathlib.Path(temporary))
-            run = MODULE.validate_headless_review(
-                fixture["run"], fixture["bundle"], fixture["review"]
-            )
-            result = MODULE.validate_platform_preflight(
-                "windows", run, fixture["run"], fixture["identity"], fixture["link"],
-                fixture["player"], fixture["conformance"], MODULE.sha256(fixture["package"]),
-            )
-            self.assertEqual(result["status"], "pass")
+    def validate(self, fixture):
+        return MODULE.validate_platform("windows", *fixture)
 
-    def test_review_failure_and_identity_drift_block_before_host_launch(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            fixture = self.fixture(pathlib.Path(temporary))
-            review = MODULE.load(fixture["review"])
-            review["checkpoints"][0]["passed"] = False
-            write_json(fixture["review"], review)
-            with self.assertRaisesRegex(RuntimeError, "formal Headless review blocked"):
-                MODULE.validate_headless_review(
-                    fixture["run"], fixture["bundle"], fixture["review"]
-                )
+    def test_matching_native_reports_are_accepted(self):
+        self.assertEqual(self.validate(self.fixture())["status"], "pass")
 
-            fixture = self.fixture(pathlib.Path(temporary))
-            run = MODULE.validate_headless_review(
-                fixture["run"], fixture["bundle"], fixture["review"]
-            )
-            identity = MODULE.load(fixture["identity"])
-            identity["input_sequence_hash"] = "sha256:" + "9" * 64
-            write_json(fixture["identity"], identity)
-            with self.assertRaisesRegex(RuntimeError, "Headless preflight blocked"):
-                MODULE.validate_platform_preflight(
-                    "web", run, fixture["run"], fixture["identity"], fixture["link"],
-                    fixture["player"], fixture["conformance"], MODULE.sha256(fixture["package"]),
-                )
+    def test_player_identity_drift_is_blocked(self):
+        for key in ("profile_hash", "build_fingerprint", "session_id"):
+            with self.subTest(key=key):
+                fixture = self.fixture()
+                player = fixture[2]
+                item = next(item for item in player["checks"][0]["evidence"] if item["key"] == key)
+                item["value"] = "different-run"
+                report = self.validate(fixture)
+                self.assertEqual(report["status"], "blocked")
+                self.assertIn(f"player.{key}", report["diagnostics"])
+
+    def test_failed_or_missing_native_input_cannot_pass(self):
+        fixture = self.fixture()
+        for missing in (False, True):
+            with self.subTest(missing=missing):
+                changed = copy.deepcopy(fixture)
+                checks = changed[1]["checks"]
+                check = next(item for item in checks if item["id"] == "input.native_consumption")
+                if missing:
+                    checks.remove(check)
+                else:
+                    check["status"] = "blocked"
+                report = self.validate(changed)
+                self.assertEqual(report["status"], "blocked")
+                self.assertIn("conformance.input.native_consumption", report["diagnostics"])
+
+    def test_unavailable_selected_audio_provider_is_blocked(self):
+        fixture = self.fixture()
+        fixture[0]["audio"]["available"] = []
+        report = self.validate(fixture)
+        self.assertEqual(report["status"], "blocked")
+        self.assertIn("provider.audio", report["diagnostics"])
 
 
 if __name__ == "__main__":

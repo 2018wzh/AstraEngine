@@ -77,19 +77,15 @@
 - 从 `cast_source_map_report.v1` 的 route-bound member 到 `native-assets/` 的映射必须通过 source hash、converted hash、classification 和 route id 生成 `mount_assets`，不能靠文件名猜测。
 - Asset analysis 必须先记录脚本引用、container alias、尺寸、透明通道、visible bbox、edge padding、颜色分布、重复 hash、atlas crop/part、reference match 和分类冲突，再允许重排到 `native-assets/`。
 
-## Manual Signoff
+## 产品验证边界
 
-- formal release profile 的 `tsuinosora.manual_signoff.v1` 必须用 `check_id` 字段包含并通过 `manual.full_playthrough`、`manual.audio_listening`、`manual.visual_review` 和 `manual.alias_replacement`。
-- 任一 required check 缺失、未执行、失败或存在 blocker 都必须 blocking。
+人工 signoff section 和具名批准 gate 已退役。真实路线、视听、存读档、输入与 alias/replacement 行为仍须实际验证；结果记录在实施状态，不通过签署文件代替，也不因自动报告通过而写成产品完成。
 
 ## Standalone Bundle 约束
 
-- 只能记录相对路径、section hash、entrypoint、sanitized launch report 和 sanitized route report。
-- Windows/Web bundle 验收必须从已 cook/package 的 `.astrapkg` 构建，并重新通过 player route scenario。
-- Windows bundle 的 route evidence 必须由 bundle 内的 `AstraPlayer.exe` 读取 config/package/scenario refs 后输出 `astra.player_route_report.v1`，不能用外部 headless CLI 报告冒充。
-- TsuiNoSora standalone bundle 必须把脱敏 `tsuinosora.mount_policy` section 派生成 bundle 内相对路径 `AstraPlayer.mount_policy.json`。
-- Windows/Web player route report 必须校验 `player.mount_policy` 和 `player.mount_policy_hash`。
-- `tsuinosora-patch-game` 必须校验 `player.patch_direct_read`，证明 player host 读取了 bundle mount policy，scenario `mount_aliases` 与 policy 一致。
-- Windows player 的 patch direct-read 必须有本地读取证据：scenario 用 `mount_probes` 或 `mount_assets` 声明 alias、相对 path 和 `sha256`，再通过 `AstraPlayer.exe --route-scenario ... --mount-root alias=path` 读取。
-- Web player 遇到包含本地 `mount_probes` 或 `mount_assets` 的 patch scenario 必须 blocking。
-- `nativevn_package_input_report.v1` 必须为实际写出的 project、story、package section 和 scenario ref 记录 report-relative path、role、`sha256` 和 byte size。
+- Bundle 从真实 Cook/package 生成并校验相对路径、artifact/section hash 与 target/profile 身份。
+- package 的 `scenario.refs.v2` 继续绑定实际输入文件的 path、section、SHA-256 和 byte size，不因删除旧执行命令而去掉内容校验。
+- 终之空 NativeVN 工程和 `Automation/*.jsonl` 来自验证后的私有 typed story IR，不由固定 advance/choose/replay 模板推断路线。
+- Player 的实际平台输入适配与报告校验保留，不能通过旧 `--route-scenario` 自推进或直接业务命令冒充真实输入。
+- 本地 source/mount alias、边界、资源 hash 与 path/payload 泄露仍校验；未接通或未测的 patch direct-read 不通过文档命令声明为完成。
+- `nativevn_package_input_report.v1` 只登记实际写出的工程、源码、package section 和物理输入文件，并记录相对路径、role、hash 与 byte size。

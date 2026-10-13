@@ -692,11 +692,11 @@ redaction:
 
 `files` 在通过时必须至少覆盖 `project`、`story`、`package_section` 和 `scenario_ref`。只要 conversion report、Asset analysis 或 route coverage blocked，该 report 必须保持 blocked；如果 story/scenario refs 未写出，`project` 和 `story` 字段必须为空，`files` 不能登记不存在的 project/story。
 
-NativeVN package input 生成 `.astra` story 和 scenario refs 时，必须保留 `tsuinosora.route_graph_report.v1` 或 `tsuinosora.script_source_map_report.v1` 中的 sanitized `choices`。`.astra` option key 和 scenario `player_input choose.value` 必须使用同一个 choice id；只有 route 没有 choice 证据时才允许生成 fallback choice id。多 choice route 必须按 source-map 顺序生成连续 choice state，不能压缩成单个 synthetic choice。显式传入的 routes 也必须在写 story/scenario 前重新校验；不安全 `route_id`/terminal/choice、非 covered coverage、重复 choice 或冲突 route signature 都必须 blocking，且 `scenario_count` 为 0。`stage3-gate` 从 cast source map 和 native asset rearrange report 派生出的 route-bound `mount_assets` 必须写入 conversion report，并在没有显式 routes 入参时继续进入 NativeVN scenario refs，不能在 `local-gate` 里丢失。
+NativeVN story、choice、terminal 和物理输入只从经过完整 coverage 校验的私有 `native_story_ir` 生成。Writer 不接收显式 routes，不构造 fallback choice 或固定 launch/advance/choose/replay 模板；未知/重复/冲突字段、choice 或不完整路线在既有 IR/输入校验边界拒绝。资源映射仍保留 source/converted hash、classification 与安全相对路径，不能用目录名猜测。
 
 ## `tsuinosora.local_gate_report.v1`
 
-用于把 `stage3-gate` 与 NativeVN package input 写入串成一个本地执行入口。该 report 只记录 alias、相对 report path、target matrix、route count 和 diagnostic。`route_count` 必须来自实际写出的 `tsuinosora.nativevn_package_input_report.v1`，包括从 `stage3-gate` 派生出的 route，不能只复述 CLI 入参。`local-gate` 不接受显式 routes 作为商业 route coverage；如果调用方传入 routes 但没有 `tsuinosora.route_graph_report.v1` 或 `tsuinosora.script_source_map_report.v1` 派生证据，report 必须用 `TSUI_LOCAL_GATE_ROUTE_EVIDENCE_REQUIRED` 阻断，并且 `nativevn_package_input` 为空。
+`local-gate` 串联资源转换预检与 typed story 到 NativeVN 的真实生成。Report 只记录 alias、相对 report path、target、实际 route count 与 diagnostic；route count 来自实际生成结果。旧 `route-scenarios`、NativeVN/local-gate 的显式 routes 参数及假 scenario refs 输出已删除；资源分析阶段的 route metadata 不代表产品输入或可玩验证。
 
 ```yaml
 schema: tsuinosora.local_gate_report.v1
@@ -708,7 +708,7 @@ route_count: 1
 diagnostics: []
 ```
 
-如果 `stage3_gate_report` blocked，local gate 不写 NativeVN package input，并输出 `TSUI_LOCAL_GATE_STAGE3_BLOCKED`。如果调用方显式传入 routes，local gate 也不写 NativeVN package input；该场景必须先落成 route graph 或 script source-map report。
+预检 blocked 时不写 NativeVN 工程。输入来自验证后的私有 typed story IR，缺失或覆盖不完整继续拒绝；`stage3_gate_report.v2` 不再携带旧模板场景字段。
 
 ## `tsuinosora.modern_profile_report.v1`
 
@@ -741,51 +741,14 @@ diagnostics: []
 
 所有 feature 必须说明是否影响 Core state。modern feature 只能影响 presentation、audio、timeline、system UI 或 localization overlay；如果会改变 route、save/replay、backlog 或 read-state，就必须被 release gate 阻断。
 
-## `tsuinosora.manual_signoff.v1`
-
-用于记录人工完整通关、听音、画面和 replacement review。
-
-```yaml
-schema: tsuinosora.manual_signoff.v1
-profile: classic
-reviewer_alias: local_reviewer
-scenario_report_id: classic.full_route
-checks:
-  - check_id: manual.full_playthrough
-    result: not_started
-    evidence_note: no-commercial-content
-  - check_id: manual.audio_listening
-    result: not_started
-    evidence_note: no-commercial-content
-  - check_id: manual.visual_review
-    result: not_started
-    evidence_note: no-commercial-content
-  - check_id: manual.alias_replacement
-    result: not_started
-    evidence_note: no-commercial-content
-blockers: []
-```
-
-允许的 `result`：
-
-| Result | Meaning |
-| --- | --- |
-| `pass` | 已完成复核，没有阻断项 |
-| `pass_with_diagnostics` | 有差异记录，但不阻断目标 profile |
-| `blocked` | 有缺失、错误或授权边界问题 |
-| `not_started` | 还没有执行人工复核，不能作为验收完成证据 |
-
-formal release gate 会把 `manual.full_playthrough`、`manual.audio_listening`、`manual.visual_review` 和 `manual.alias_replacement` 当作 required check set，并且 required check 必须使用 `check_id` 字段；任一项缺失、`not_started`、`blocked` 或存在 blocker，`tsuinosora.manual_signoff` 都必须 blocking。report 只能写 check id、result、blocker count 和脱敏 note，不能写正文、截图、音频、影片或本地路径。
-
 ## Release Gate Join
 
-release gate 需要读取四类 report，并按 profile 合并判断：
+release gate 按实际消费者读取 source、conversion 与 Modern profile 报告，不再额外要求人工签署 section：
 
 | Gate input | Blocks when |
 | --- | --- |
 | source inventory | source hash 不匹配、coverage 缺口未解释、出现本地路径 |
 | conversion report | route 断裂、missing asset 未处理、command/source map 不完整 |
 | modern profile report | feature 改写 Core state、fallback 缺失、translation/overlay 不能独立关闭 |
-| manual signoff | 任一 required manual check 未通过或未执行 |
 
 所有进入 package 的 `tsuinosora.*` section 还会统一扫描 payload-like 字段。`text`、`script_text`、`source_text`、`content`、`payload`、`payload_bytes`、`bytecode`、`bytes`、`commercial_text`、`lingo_source`、`raw_payload` 和 `source_payload` 出现在 report 主体时必须 blocking；唯一允许的 `payload` 键是 `redaction.payload: omitted`。

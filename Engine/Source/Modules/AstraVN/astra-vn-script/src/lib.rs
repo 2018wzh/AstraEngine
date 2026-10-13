@@ -9,7 +9,9 @@ pub mod registry;
 pub mod source_map;
 mod stage;
 mod stage_compile;
+mod standard_commands;
 pub mod syntax;
+mod system_ui;
 mod types;
 mod ui_compile;
 
@@ -21,8 +23,9 @@ pub use registry::*;
 pub use source_map::*;
 pub use stage::*;
 pub use stage_compile::compile_timeline_command;
+pub use standard_commands::*;
 pub use syntax::*;
+pub use system_ui::*;
 pub use types::*;
-
 mod preview;
 pub use preview::*;

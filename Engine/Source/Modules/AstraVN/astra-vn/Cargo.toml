@@ -18,4 +18,3 @@ astra-plugin-abi = { path = "../../../Runtime/astra-plugin-abi", default-feature
 astra-vn-core = { path = "../astra-vn-core" }
 astra-vn-presentation = { path = "../astra-vn-presentation" }
 astra-vn-script = { path = "../astra-vn-script" }
-astra-vn-system = { path = "../astra-vn-system" }

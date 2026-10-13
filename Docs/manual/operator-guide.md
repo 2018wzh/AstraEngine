@@ -41,7 +41,7 @@ astra package validate target/game.astrapkg --profile desktop-release --target n
 astra-headless run --profile tests/headless/profile.json --package target/game.astrapkg --input tests/headless/full-playthrough.jsonl --artifact-root target/headless/full-playthrough --build-identity target/identity/astra-build-identity.json
 ```
 
-旧 `astra test run --headless` 已退役并返回 `ASTRA_TEST_HEADLESS_MIGRATED`；它不再读取 YAML、不转发，也不保留隐式 alias。
+`astra test run` 命令和旧场景报告解析已删除，不保留迁移诊断占位入口。`astra report explain` 只接受 `astra.release_report.v1` 的 YAML/JSON，拒绝未知或旧 scenario-shaped 报告；普通逻辑直接运行 Rust tests，需要视听/产品输入时使用独立 Headless 物理 JSONL。
 
 ## Headless Platform workflow
 
@@ -57,17 +57,6 @@ astra-headless run \
 
 astra-headless serve --stdio \
   --build-identity target/identity/astra-build-identity.json
-
-astra-headless prepare-review \
-  --run-report target/headless/full-playthrough/run-report.json \
-  --manifest target/headless/full-playthrough/artifact-manifest.json \
-  --artifact-root target/headless/full-playthrough \
-  --output target/headless/full-playthrough/review-bundle.json
-
-astra-headless validate-review \
-  --run-report target/headless/full-playthrough/run-report.json \
-  --bundle target/headless/full-playthrough/review-bundle.json \
-  --review target/headless/full-playthrough/review.json
 ```
 
 文件与 stdio 使用同一双向 JSONL 协议。普通功能运行可显式迁移 Headless profile v2；正式性能运行只接受 v3。`render_policy: checkpoints` 会校验所有 scene 并写入 submitted hash，仅首帧、具名 checkpoint 和末帧产生 RGBA；逐帧视觉验证显式使用 `all`。`max_submitted_frames` 与 `max_rasterized_frames` 任一超限都会阻断。stdout 只输出协议或 report，日志只写 stderr。
@@ -105,26 +94,15 @@ astra-headless performance-e2 \
 
 800×600 产品压力使用 `product-stress`，完整路线使用 `product-route`，并给 `run` 传对应的 `--performance-*` 参数。先用 `prepare-product-performance-input` 读取已经验收的 Title 导航前缀，再生成 1,200 + 72,000 个 presentation sample；生成器会保留物理输入与 `Await` 的真实 tick 语义。压力运行还必须传 `--performance-warmup-frames 1200`，并把生成器返回的 start sequence 原样传给 `run`。完整路线不伪造 72,000 个输入 sample，而是按实际 GPU submission 数生成固定预算。三次集显压力报告必须全部通过。独显 profile 和报告放在单独对照目录，不能参与 release decision。
 
-Trace 写入 ignored 目录后，Codex 通过外部 `perfetto-mcp==0.1.4` 的 `find_slices` 和 `execute_sql_query` 查看热点。不要把第三方 MCP 放进仓库，也不要修改 `astra-mcp`。设备名、本地路径和原始 trace 不进入文档、package 或 report。性能报告只证明所声明 adapter、workload 和 E2 identity；Windows E3 仍需另行验收。
+Trace 留在 ignored 工作区，可用外部 Perfetto 工具定位热点，不为查看 trace 新增模型服务 crate。可提交报告只保留已审核的身份、统计与诊断；性能结果仅覆盖实际 adapter/workload，不能替代真实 Player 和其他设备验收。
 
-产品、Player、样例或 full-playthrough 必须先通过自动比较，再运行 `prepare-review`。模型或具名人工只能按 bundle 查看 required checkpoint、首尾帧、最大差异帧、失败邻近帧和完整 WAV，不得自行省略条目。音频要检查波形、频谱、响度、静音、削波、声道和时长；涉及语音内容或音画同步时还要试听。完成的 `astra.headless_review.v2` 必须再通过 `validate-review`；模型不能覆盖自动失败或自行放宽容差。
+Headless 只保留物理输入、执行、checkpoint 自动比较和产物报告；具名审查、容差批准与 preflight link 命令已删除。`astra.headless_checkpoint_config.v3` 直接声明 image/audio tolerance，仍校验有限数值、范围、baseline path/hash 对、唯一 checkpoint 与输入/renderer 身份；报告继续绑定完整 config hash。旧 v2 配置需重新生成，不兼容读取，也不按审批结果放宽自动比较。
 
-checkpoint 未显式改写时使用固定的受控宽松默认容差。任何自定义容差都要在 config 中绑定 `astra.headless_tolerance_approval.v2` 的相对路径和 SHA-256；approval 只能是具名人工，必须匹配 tolerance-set hash。`astra-headless` 会把完整 checkpoint config hash 写入新 run report。修改 approval、config 或 baseline 后必须重跑，不能复用或编辑旧 report。
-
-真实平台验收只能在 `astra.headless_run_report.v2`、`astra.headless_review_bundle.v2` 和 `astra.headless_review.v2` 全部通过后启动。平台 automation 完成后输出 `astra.platform_run_identity.v1`，再运行 `astra-headless link-preflight --headless-run-report ... --platform-run-identity ... --output ...`。Headless 与真实平台 run 必须绑定同一 build、cooked package、input sequence、scenario、target 和 content identity；`astra.headless_preflight_link.v2` 只建立关联，Headless 结果不能替代真实窗口、浏览器、音频设备或原生输入证据。
-
-正式 Windows/Web 联合验收统一走 `Tools/run_platform_host_acceptance.py`。该入口在启动任何真实 host 命令前先校验 Headless run、review bundle、review、两份 platform run identity 和两份 preflight link；自动失败、review verdict 缺失、artifact hash 漂移或任一 identity 不一致都会在 host 启动前阻断。`--skip-host-runs` 只用于复核已经形成的同 run 证据，不能生成 E3：
+`Tools/run_platform_host_acceptance.py` 校验现有 Windows/Web capability、conformance 和 Player 报告，不接收 Headless 审批文件。它不是本轮四平台统一开发入口；`--skip-host-runs` 只复核已有报告，不产生新的设备通过结果：
 
 ```bash
 python Tools/run_platform_host_acceptance.py \
   --package target/product/game.astrapkg \
-  --headless-run-report target/headless/run-report.json \
-  --headless-review-bundle target/headless/review-bundle.json \
-  --headless-review target/headless/review.json \
-  --windows-platform-run-identity target/windows/platform-run-identity.json \
-  --windows-preflight-link target/windows/headless-preflight-link.json \
-  --web-platform-run-identity target/web/platform-run-identity.json \
-  --web-preflight-link target/web/headless-preflight-link.json \
   --windows-capability target/windows/capability.json \
   --windows-conformance target/windows/conformance.json \
   --windows-player target/windows/player.json \
@@ -178,7 +156,7 @@ Windows shipping Player 默认使用平台 writable `Saved/Logs` 与 `Saved/Cras
 
 ## 平台能力报告
 
-每个平台模块必须输出 renderer、decode、audio、filesystem、input、save persistence、network 和 AI permission capability。Release Gate 根据 profile 判断是否可发布。
+平台能力报告记录宿主声明与实际可用能力。Release Validator 按调用入口和 profile 校验发布输入；字段以 Rust 类型为准，不为延后的运行时 AI 预设能力声明。
 
 缺少对应 SDK 时，platform report 必须写 `sdk_status: missing`。普通 CI 可以保留 schema 和 CLI 证据，但不能把该平台 release 标成完成。
 
@@ -187,20 +165,15 @@ Windows shipping Player 默认使用平台 writable `Saved/Logs` 与 `Saved/Cras
 | Report | 用途 |
 | --- | --- |
 | `astra.release_report.v1` | 发布资格 |
-| `astra.scenario_report.v1` | 无头玩家流程 |
 | `astra.target_validation_report.v1` | Editor/Game/Program target |
 | `astra.platform_capability_report.v2` | declared/available/selected 平台 provider |
 | `astra.platform_host_conformance_report.v1` | build/profile/package/session 绑定的真实 host 生命周期证据 |
 | `astra.headless_artifact_manifest.v2` | Headless submitted/rasterized 双流、PNG/WAV、render policy 和 renderer identity |
 | `astra.headless_run_report.v2` | 平台无关 host、输入、双流产物与自动比较结果 |
-| `astra.headless_review.v2` | 具名模型或人工的视觉/音频审查结果；不能覆盖自动失败 |
-| `astra.headless_preflight_link.v2` | Headless E2 与真实平台 run 的 identity 关联 |
 | `astra.plugin_report.v1` | 插件加载、卸载和 provider |
 
-Stage 2 的 `astra package validate` 已输出 `astra.release_report.v1`，覆盖 package integrity、section bounds/hash、cook/project artifact、provider policy、media fallback policy、scenario refs、platform eligibility 和 platform report。`desktop-release`/`web-release` 缺 `compiled.project` 或 platform report 时阻断；headless/dev profile 的 platform report 可 warning。FFmpeg fallback 是 optional feature；profile 必须把缺失 FFmpeg 写成 warning 或 blocking。Release Gate check matrix 见 [Release Gate Checks Blueprint](../implementation/release-gate-checks.md)。
+`astra package validate` 输出 `astra.release_report.v1`，校验容器、Cook 产物、provider policy、媒体、scenario refs 和平台输入。正式 profile 与 dev/test profile 的缺失处理以 Rust 分支为准；检查入口见 [Release Gate 检查实现](../implementation/release-gate-checks.md)。报告存在不代表真实窗口、听音或完整路线已通过。
 
-ONNX Runtime local AI 发布时，operator 需要把 ModelBundle 当作 package 资产处理。模型、tokenizer、reduced runtime、Web runtime adapter 和 custom op sidecar 必须通过 cook/package 写入 Asset VFS section，并按 profile 绑定目标平台。Release Gate 校验 `ai.model_bundle`、`ai.model_bundle_vfs_mount`、`ai.onnx_runtime_pack`、`ai.onnx_execution_provider` 和 `ai.generated_artifact_save`；Windows、Linux、macOS/iOS、Android、Web 分别要求 `DirectML`、`OpenVINO`、`CoreML`、`QNN`、`WebNN` 主 EP 的真实目标运行证据。CPU fallback、release 阶段联网拉取 runtime、loose sidecar 或模型 payload 路径泄露都是 blocking diagnostic。
-正式 Migration 8 evidence 使用 `python Tools/run_platform_host_acceptance.py ...` 汇总。脚本拒绝 dirty worktree，重新执行 Windows/Chrome host 测试，并校验两端 capability、conformance 与 Player report 的 package/profile/build/session continuity；输出 manifest 只包含 commit、hash、provider、check count、状态和 diagnostic，不包含输入文件路径。
 
 ## Android 构建与验收
 
@@ -210,7 +183,7 @@ Android 构建入口是 `python Tools/build_android.py`。operator 必须先安�
 python Tools/build_android.py --package Build/Game.astrapkg --target nativevn-game --application-id com.example.game --output Build/Android --with-emulator-abi
 ```
 
-配置或 cross-build 通过只算 E1/E2。正式 E3 还必须在 API 28/36 emulator 与 arm64 Vulkan 真机上执行安装、启动、输入、TalkBack、MediaCodec、AAudio/focus、旋转/insets、SAF、save/recreate 和 zero-leak，并把同一 package/profile/build/session/input 的 host、Player、frame、audio、route 与人工 review 报告送入 release validator。OpenSL ES 只能用于显式 compatibility profile，实际报告为 OpenSL ES 时不得声称 AAudio。
+配置或 cross-build 通过只证明构建路径。Android 仍需在实际 emulator/arm64 Vulkan 设备验证安装、启动、输入、TalkBack、MediaCodec、AAudio/focus、旋转/insets、SAF、存读档、recreate 与资源回收。OpenSL ES 只用于显式 compatibility profile，不能据其结果声称 AAudio 已通过；实际验收状态统一记录，不另建立 E1/E2/E3 或具名审批门禁。
 
 
 ### Windows Player 静音测试

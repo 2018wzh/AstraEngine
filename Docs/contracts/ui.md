@@ -101,8 +101,8 @@ formal release profile 的 blocking budget：
 | Backlog data set | 10,000 entries |
 | Backlog instantiated rows | 64 + declared overscan |
 
-超限直接阻断。调整预算必须修改 release profile 并记录 ADR，不能降级成 warning。
+性能按实际 profile 预算校验；未测设备保持未验收。调整预算必须说明实际产品约束，不能靠改文档或降级诊断掩盖超限。
 
-## Release evidence
+## 验证边界
 
-至少输出：`ui.backend.binding`、`ui.backend.capabilities`、`ui.input.consumption`、`ui.semantic_snapshot`、`ui.render_frame`、`ui.resource_restore`、`ui.text_layout`、`ui.theme`、`ui.performance`、`ui.accessibility` 和 `ui.visual_matrix`。Windows/Web 必须绑定同一 build/profile/package/provider/session；Headless 只形成 E2 preflight，不替代 E3。
+验证真实输入消费、文字/语义、Scene2D 绘制、资源恢复、theme、性能和无障碍。接口、静态矩形或局部快照不等于产品通过；需要视听时使用真实 GPU/音频宿主，普通逻辑测试不强制 Headless。发布报告只记录已有检查和消费者，不另建立 Windows/Web E2/E3、具名模型审查或批准矩阵；本轮平台与实际状态见 [重构契约](rebuild.md) 和 [实施状态](../status/implementation-plan.md)。

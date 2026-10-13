@@ -90,4 +90,4 @@ unknown handler/command、不可证明的条件、resource/hash 断裂、重复 
 
 ## 6. 验收层级
 
-结构覆盖不是产品通过。完成迁移至少需要 resource/handler/command/route/terminal/choice/media/wait 全覆盖、Cook/package/VFS identity 闭合、物理输入 Headless E2、GPU 视觉比较、Windows Player E3，以及独立 formal human signoff。旧 package route report、静态截图或 Headless E2 都不能替代真实平台证据。
+结构覆盖不是产品通过。需验证 resource/handler/command/route/terminal/choice/media/wait 覆盖、Cook/package/VFS 身份与真实 GPU、Player 输入、视听、存读档和完整路线。Headless 自动比较可辅助定位，不能替代实际平台；不另生成 formal human signoff 或审批链。

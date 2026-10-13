@@ -4,20 +4,20 @@ use smallvec::SmallVec;
 
 /// Frame-local membership only; render order remains in the command stream.
 #[derive(Default)]
-pub(super) struct SceneIdSet<'a> {
+pub(crate) struct SceneIdSet<'a> {
     inline: SmallVec<[&'a str; 128]>,
     large: Option<HashSet<&'a str>>,
 }
 
 impl<'a> SceneIdSet<'a> {
-    pub(super) fn contains(&self, value: &str) -> bool {
+    pub(crate) fn contains(&self, value: &str) -> bool {
         match &self.large {
             Some(ids) => ids.contains(value),
             None => self.inline.contains(&value),
         }
     }
 
-    pub(super) fn insert(&mut self, value: &'a str) -> bool {
+    pub(crate) fn insert(&mut self, value: &'a str) -> bool {
         if let Some(ids) = &mut self.large {
             return ids.insert(value);
         }
@@ -35,11 +35,11 @@ impl<'a> SceneIdSet<'a> {
         true
     }
 
-    pub(super) fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.large.as_ref().map_or(self.inline.len(), HashSet::len)
     }
 
-    pub(super) fn spilled(&self) -> bool {
+    pub(crate) fn spilled(&self) -> bool {
         self.large.is_some()
     }
 }

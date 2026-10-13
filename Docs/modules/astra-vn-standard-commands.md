@@ -123,10 +123,9 @@ command_providers:
 
 ```bash
 cargo test -p astra-vn-script --test typed_stage_ir
-cargo test -p astra-vn-commands --test standard_command_manifest
+cargo test -p astra-vn-script --test standard_command_manifest
 cargo test -p astra-vn-presentation --test presentation_provider_manifest
 cargo test -p astra-vn-package --test presentation_provider_package
-astra test run scenarios/full_playthrough.yaml --package target/nativevn.astrapkg --headless --report target/reports/vn-command.yaml
 ```
 
 Expected report includes `vn.commercial_baseline`, `command.provider_binding`, `source_map.identity`, `timeline.join_cancel` and `system_stories.covered`.

@@ -1,20 +1,21 @@
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from PIL import Image
 
-from Tools.TsuiNoSora.process_original_ui_references import (
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from process_original_ui_references import (
     BORDER_CAPTURE_TRANSFORM,
     CANONICAL_RECAPTURE_REFERENCES,
     CLIENT_BORDER_RGBA,
     CLIENT_CAPTURE_CROP,
     CLIENT_CAPTURE_SIZE,
-    CROP_BOX,
     DESKTOP_SIZE,
     NATIVE_CAPTURE_SIZE,
     NATIVE_CAPTURE_TRANSFORM,
     OUTPUT_SIZE,
-    REFERENCE_INPUTS,
     RECAPTURE_INPUTS,
     STABLE_RECAPTURE_PAIRS,
     ReferenceError,
@@ -31,11 +32,6 @@ from Tools.TsuiNoSora.process_original_ui_references import (
 
 
 class OriginalUiReferenceProcessingTests(unittest.TestCase):
-    def test_crop_contract_is_exact_and_resizes_to_800_by_600(self):
-        self.assertEqual(CROP_BOX, (1220, 674, 2620, 1724))
-        self.assertEqual((CROP_BOX[2] - CROP_BOX[0], CROP_BOX[3] - CROP_BOX[1]), (1400, 1050))
-        self.assertEqual(OUTPUT_SIZE, (800, 600))
-
     def test_mismatched_desktop_capture_is_blocking(self):
         with tempfile.TemporaryDirectory() as temporary:
             source = Path(temporary) / "bad.png"
@@ -60,10 +56,6 @@ class OriginalUiReferenceProcessingTests(unittest.TestCase):
             root = Path(temporary)
             with self.assertRaisesRegex(ReferenceError, "TSUI_REFERENCE_INPUT_MISSING"):
                 process(root, root / "input", root / "output")
-
-    def test_stable_ids_cover_fourteen_desktop_captures_and_legacy_game(self):
-        ids = [reference_id for reference_id, _, _ in REFERENCE_INPUTS]
-        self.assertEqual(ids, [f"TSUI1999-UI-{index:03d}" for index in range(1, 15)])
 
     def test_public_manifest_drops_private_filenames(self):
         result = public_manifest(
@@ -166,8 +158,6 @@ class OriginalUiReferenceProcessingTests(unittest.TestCase):
             "ui014.",
         }
         pair_primary_by_capture = {}
-        from Tools.TsuiNoSora.process_original_ui_references import STABLE_RECAPTURE_PAIRS
-
         for primary, stable in STABLE_RECAPTURE_PAIRS:
             pair_primary_by_capture[stable] = primary
 
@@ -285,7 +275,7 @@ class OriginalUiReferenceProcessingTests(unittest.TestCase):
         }
         bitmap_identity["resource_hashes"] = ["sha256:" + "f" * 64]
         node_map = {
-            "schema": "tsuinosora.classic_visual_node_map.v3",
+            "schema": "tsuinosora.classic_visual_node_map.v4",
             "entries": node_entries,
         }
 
@@ -310,7 +300,7 @@ class OriginalUiReferenceProcessingTests(unittest.TestCase):
             "score_bitmap_resource_closure",
         )
         self.assertEqual(
-            node_by_id["TSUI1999-UI-006"]["color_tolerance_approval"]["profile_id"],
+            node_by_id["TSUI1999-UI-006"]["color_tolerance_binding"]["profile_id"],
             "capture_palette_v1",
         )
         self.assertEqual(

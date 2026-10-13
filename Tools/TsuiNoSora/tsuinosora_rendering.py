@@ -77,14 +77,6 @@ def _write_nativevn_section_inputs(reports_root: Path, section_root: Path) -> li
             [],
             ["modern"],
         ),
-        (
-            "tsuinosora.manual_signoff",
-            "tsuinosora.manual_signoff.v1",
-            "manual_signoff.json",
-            "manual_signoff.json",
-            [],
-            ["desktop-release", "web-release"],
-        ),
     ]
     specs = []
     for section_id, schema, source_name, output_name, targets, profiles in entries:

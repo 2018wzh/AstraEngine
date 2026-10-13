@@ -4,7 +4,7 @@
 
 工程装载读取现有 NativeVN project manifest 的 sources、ui_sources、ui_themes、ui_controllers 和 asset_roots。路径限制在工程内，重复文档、越界路径、损坏配置明确失败。浏览器切换文档保留各文档未保存内容，保存前检查磁盘冲突。
 
-左侧 Content Browser 和 Outliner、中间源文档/剧情结构/演出视图、右侧 Details 共用 source ID 选择。Details 批量应用各属性的 CST value span，版本变化后拒绝旧面板内容。调整后的面板宽度保存到 ignored `.astra-cache`；Reset layout 恢复默认工作区。
+左侧 Content Browser 和 Outliner、中间源文档/剧情结构/演出视图、右侧 Details 共用 source ID 选择。Details 批量应用各属性的 CST value span，版本变化后拒绝旧面板内容。工作区停靠和布局直接使用下述 DockArea；Reset layout 恢复默认工作区。
 
 Graph 从当前源文档的 state 和实际路由目标绘制连接，点击节点/路由定位同一份 Details。Timeline 从源 `keyframes` 属性派生时间刻度与帧选择，关键帧修改、插入、删除通过 `attribute_edit` 提交；它不保存另一份演出数据。关键帧拖动仅在原轨道释放时提交一次版本事务，取消不修改源码。Graph 连接端口创建经过目标校验的 jump，删除路由删除完整命令；源码编译继续负责可达性诊断。项目打开与预览配置使用 GPUI 系统文件选择器，项目切换处理保存、丢弃与取消，打开失败保留当前工程。
 
@@ -18,4 +18,4 @@ Agent 为辅助面板。每个 ACP 回合拥有一个有随机令牌的 loopback
 
 图片导入复用 astra-cook DefaultMetadataImporter，Editor 只承担项目相对目标校验、重名拒绝、后台任务取消和源文件/sidecar 写入。新增文件使用 no-clobber；sidecar 写入失败时删除本次创建的图片。不会把导入审计另存成一套报告。
 
-新版 NativeVN 已用于真实作者回归。完整包暴露的 Editor 问题已处理：预览临时数据改存项目卷，结束后立即释放，启动等待覆盖较大包加载，断管错误附带有界 stderr。Windows 当前仍在 Ready 前因 one-shot audio decode 被拒绝而退出；旧诊断混合多个拒绝原因，源码已查到样例 OGG 不受显式 WMF codec 列表支持。不能把该报错直接认定为 stream 生命周期冲突，Runtime 修复前不把完整作者预览流程写成通过。
+真实预览的验证记录与配置统一见 [Editor 手册](../../../Editor/README.md#产品预览)，当前缺口见 [实施状态](../../status/implementation-plan.md)。不在 shell 说明中重复历史失败或维护另一份完成表。

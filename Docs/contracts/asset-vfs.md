@@ -83,11 +83,14 @@ VFS 使用 UE 风格 mount graph，而不是一组分散 provider slot：
 
 | Backend | 用途 | 读写边界 |
 | --- | --- | --- |
-| `package` | 读取 `.astrapkg` 内 cooked asset、manifest、policy bundle、ModelBundle 和 report section | 只通过 section id、offset、size、hash 和 codec 读取 |
+| `package` | 读取 `.astrapkg` 内 cooked asset、manifest、policy bundle 和 report section | 只通过 section id、offset、size、hash 和 codec 读取 |
 | `local_authorized` | 本地合法数据根、开发期 import source、私有 acceptance root | host 进程持有 root capability；manifest/report 只写 prefix、URI、hash、size 和 diagnostic |
 | `legacy_pack` | FVP `.bin`、KrKr XP3、BGI PackFile、Artemis PFS、Siglus Scene.pck、SoftPAL PAC/DAT、Musica PAZ 等旧引擎资源包 | reader 输出 entry table hash、entry id、offset、size、hash、media kind 和 diagnostic |
 | `overlay` | patch、mod、翻译覆盖、调试替换和迁移期 NativeVN asset 覆盖 | 同一 `VfsUri` namespace 覆盖 lower layer；priority、allowlist、base hash 和 reason 必须显式声明 |
 | `memory` | Editor/Tools 的短生命周期 workspace object | 不进入 shipping package；只记录 stable object id、hash 和诊断 |
+
+旧格式 backend 用于资源工具和显式迁移输入；AstraEMU Family 不要求复用本 VFS，也不因列出格式名称而视为该核心已实现或验收。
+
 
 `resolve(uri, context)` 先校验整个 mount graph，再按 context 过滤 target/profile layer，并验证 prefix provider 和 capability 的显式 binding。解析按固定 `(priority, prefix, vfs_uri, layer_id)` 决定，不能依赖插件加载顺序。多个 layer 命中同一 `VfsUri` 时，高 priority 覆盖低 priority；同 priority 多候选、零个 eligible candidate、重复 prefix/layer/URI-layer、非法 overlay base 和未授权 provider/capability 都返回 blocking diagnostic。whiteout 只在自身 target/profile 与 layer 同时 eligible 时产生显式 `None`。
 
@@ -100,8 +103,6 @@ slot = "vfs_provider"
 ```
 
 provider 注册时声明 `provider_id`、可服务的 prefix pattern、backend capability、phase、packaged eligibility 和依赖。`asset.vfs_manifest.prefixes[*].provider_id` 必须绑定到已注册、可打包、capability 匹配的 `vfs_provider`。同一 slot 允许多个 provider 共存；只有同一 prefix 被多个 selected provider 竞争且 manifest 没有显式选择时才 blocking。
-
-`game_runtime_provider` 仍是单 provider 显式绑定，不复用 VFS 多 provider 规则。
 
 ## Overlayfs
 
@@ -124,7 +125,7 @@ VFS gate 至少检查：
 - package mount 的 section id、bounds、codec、schema 和 hash。
 - local authorized mount 不泄露 host root，且所有 report 只含 URI、hash、size 和 diagnostic。
 - overlay priority、whiteout allowlist、base hash、target/profile eligibility 和 reason。
-- legacy pack 声明必须有 provider/report；真实 reader 实现留在 Stage 5。
+- legacy pack backend 的声明与读取需有实际实现和边界校验，格式名称或 manifest 不能代替 reader。
 - manifest、catalog、package section 和 report 不得出现本地 root、payload-like 字段、商业文本、截图、音频、影片或 bytecode。
 
 缺 manifest、旧 `asset.registry`、URI 非法、prefix/provider 未注册、capability mismatch、hash mismatch、bounds invalid、overlay 未授权、root leak 或 payload leak 都必须 blocking。

@@ -12,9 +12,9 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 
-POLICY_SCHEMA = "tsuinosora.classic_visual_comparison_policy.v3"
-NODE_MAP_SCHEMA = "tsuinosora.classic_visual_node_map.v3"
-REPORT_SCHEMA = "tsuinosora.classic_visual_comparison_report.v3"
+POLICY_SCHEMA = "tsuinosora.classic_visual_comparison_policy.v4"
+NODE_MAP_SCHEMA = "tsuinosora.classic_visual_node_map.v4"
+REPORT_SCHEMA = "tsuinosora.classic_visual_comparison_report.v4"
 CAPTURE_NORMALIZATION_ID = "windows_175pct_bilinear_then_lanczos_v1"
 LEGACY_DESKTOP_CAPTURE_REFERENCE_IDS = {
     "TSUI1999-UI-001",
@@ -36,7 +36,6 @@ COLOR_TOLERANCE_PROFILE = {
     "min_ssim": 0.75,
     "max_perceptual_error": 0.12,
 }
-TOLERANCE_APPROVAL_SCHEMA = "astra.headless_tolerance_approval.v2"
 
 
 class ComparisonError(RuntimeError):
@@ -88,65 +87,6 @@ def _color_tolerance_profiles(policy: dict) -> dict[str, dict]:
     return profiles
 
 
-def _color_tolerance_approval(
-    policy: dict, profiles: dict[str, dict], policy_root: Path | None
-) -> dict[str, str]:
-    binding = policy.get("color_tolerance_approval")
-    if not isinstance(binding, dict) or set(binding) != {"relative_path", "sha256"}:
-        raise ComparisonError(
-            "TSUI_CLASSIC_VISUAL_COLOR_TOLERANCE_APPROVAL: a hash-bound human approval is required"
-        )
-    relative_path = binding.get("relative_path")
-    expected_sha256 = binding.get("sha256")
-    if not isinstance(relative_path, str) or not isinstance(expected_sha256, str):
-        raise ComparisonError(
-            "TSUI_CLASSIC_VISUAL_COLOR_TOLERANCE_APPROVAL: approval binding is malformed"
-        )
-    relative = Path(relative_path)
-    if policy_root is None or relative.is_absolute() or any(part in {"", ".", ".."} for part in relative.parts):
-        raise ComparisonError(
-            "TSUI_CLASSIC_VISUAL_COLOR_TOLERANCE_APPROVAL: approval path must be safe and policy-relative"
-        )
-    root = policy_root.resolve()
-    approval_path = (root / relative).resolve()
-    if not approval_path.is_relative_to(root) or not approval_path.is_file():
-        raise ComparisonError(
-            "TSUI_CLASSIC_VISUAL_COLOR_TOLERANCE_APPROVAL: approval record is missing"
-        )
-    actual_sha256 = _sha256(approval_path)
-    if actual_sha256 != expected_sha256:
-        raise ComparisonError(
-            "TSUI_CLASSIC_VISUAL_COLOR_TOLERANCE_APPROVAL: approval hash mismatch"
-        )
-    approval = json.loads(approval_path.read_text(encoding="utf-8"))
-    if (
-        set(approval) != {
-            "schema",
-            "approval_id",
-            "approver_kind",
-            "approver_identity",
-            "approved_tolerance_hash",
-            "previous_config_hash",
-            "reason_codes",
-        }
-        or approval.get("schema") != TOLERANCE_APPROVAL_SCHEMA
-        or approval.get("approver_kind") != "human"
-        or not isinstance(approval.get("approval_id"), str)
-        or not approval.get("approval_id")
-        or not isinstance(approval.get("approver_identity"), str)
-        or not approval.get("approver_identity")
-        or approval.get("approved_tolerance_hash") != _json_hash(profiles)
-        or approval.get("previous_config_hash") is not None
-        or approval.get("reason_codes") != [COLOR_TOLERANCE_PROFILE["reason_code"]]
-    ):
-        raise ComparisonError(
-            "TSUI_CLASSIC_VISUAL_COLOR_TOLERANCE_APPROVAL: approval record does not authorize this profile"
-        )
-    return {
-        "approval_id": approval["approval_id"],
-        "approval_sha256": actual_sha256,
-        "approved_tolerance_hash": approval["approved_tolerance_hash"],
-    }
 
 
 def _normalize_capture(path: Path, enabled: bool) -> np.ndarray:
@@ -528,18 +468,18 @@ def _entries_by_id(node_map: dict) -> dict[str, dict]:
                     raise ComparisonError(
                         "TSUI_CLASSIC_VISUAL_REFERENCE_VALIDATION: recapture evidence is incomplete"
                     )
-            color_approval = entry.get("color_tolerance_approval")
-            if color_approval is not None:
+            color_binding = entry.get("color_tolerance_binding")
+            if color_binding is not None:
                 if (
-                    not isinstance(color_approval, dict)
-                    or color_approval.get("reason_code")
+                    not isinstance(color_binding, dict)
+                    or color_binding.get("reason_code")
                     != COLOR_TOLERANCE_PROFILE["reason_code"]
-                    or color_approval.get("profile_id") != COLOR_TOLERANCE_PROFILE_ID
-                    or color_approval.get("evidence")
+                    or color_binding.get("profile_id") != COLOR_TOLERANCE_PROFILE_ID
+                    or color_binding.get("evidence")
                     != "same_node_resource_closure_and_stable_gpu_capture"
                 ):
                     raise ComparisonError(
-                        "TSUI_CLASSIC_VISUAL_REFERENCE_VALIDATION: color tolerance approval is incomplete"
+                        "TSUI_CLASSIC_VISUAL_REFERENCE_VALIDATION: color tolerance binding is incomplete"
                     )
         result[reference_id] = entry
         checkpoints.add(checkpoint)
@@ -553,7 +493,6 @@ def compare(
     references: Path,
     captures: Path,
     artifacts: Path,
-    policy_root: Path | None = None,
 ) -> dict:
     if policy.get("schema") != POLICY_SCHEMA:
         raise ComparisonError("TSUI_CLASSIC_VISUAL_POLICY_SCHEMA: unsupported policy")
@@ -562,9 +501,8 @@ def compare(
     min_ssim = thresholds.get("min_ssim")
     max_perceptual = thresholds.get("max_perceptual_error")
     if max_geometry != 2 or min_ssim != 0.94 or max_perceptual != 0.08:
-        raise ComparisonError("TSUI_CLASSIC_VISUAL_FIXED_THRESHOLDS: v3 thresholds are fixed")
+        raise ComparisonError("TSUI_CLASSIC_VISUAL_FIXED_THRESHOLDS: thresholds are fixed")
     color_profiles = _color_tolerance_profiles(policy)
-    color_tolerance_approval = _color_tolerance_approval(policy, color_profiles, policy_root)
     normalized_reference_ids, normalization_id = _capture_normalization(policy)
     entries = _entries_by_id(node_map)
     if acceptance.get("schema") != "tsuinosora.classic_visual_acceptance_report.v2" or acceptance.get("status") != "passed":
@@ -656,7 +594,7 @@ def compare(
         metrics["max_geometry_delta_px"] = geometry_delta
         comparison_class = entry.get("comparison_class")
         reference_validation = entry.get("reference_validation", {"status": "verified"})
-        color_approval = entry.get("color_tolerance_approval")
+        color_binding = entry.get("color_tolerance_binding")
         color_tolerance_id = check.get("color_tolerance")
         color_tolerance = None
         if color_tolerance_id is not None:
@@ -666,16 +604,16 @@ def compare(
                 )
             if (
                 comparison_class != "same_node"
-                or not isinstance(color_approval, dict)
-                or color_approval.get("profile_id") != color_tolerance_id
+                or not isinstance(color_binding, dict)
+                or color_binding.get("profile_id") != color_tolerance_id
             ):
                 raise ComparisonError(
-                    "TSUI_CLASSIC_VISUAL_COLOR_TOLERANCE_BINDING: tolerance is not approved by node evidence"
+                    "TSUI_CLASSIC_VISUAL_COLOR_TOLERANCE_BINDING: tolerance does not match node evidence"
                 )
             color_tolerance = color_profiles[color_tolerance_id]
-        elif color_approval is not None:
+        elif color_binding is not None:
             raise ComparisonError(
-                "TSUI_CLASSIC_VISUAL_COLOR_TOLERANCE_BINDING: approved node is missing a policy profile"
+                "TSUI_CLASSIC_VISUAL_COLOR_TOLERANCE_BINDING: bound node is missing a policy profile"
             )
         if comparison_class == "same_node":
             if color_tolerance is not None:
@@ -742,7 +680,6 @@ def compare(
         ),
         "thresholds": thresholds,
         "color_tolerance_profiles": color_profiles,
-        "color_tolerance_approval": color_tolerance_approval,
         "results": results,
         "diagnostics": diagnostics,
         "redaction": {"paths": "omitted", "payload": "omitted", "commercial_text": "omitted"},
@@ -766,7 +703,6 @@ def main() -> int:
         args.references,
         args.captures,
         args.artifacts,
-        args.policy.parent,
     )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

@@ -12,7 +12,7 @@ Demo 需要同时证明两件事。第一，classic profile 可以保留原游�
 
 | Profile | Purpose | Runtime shape | Acceptance focus |
 | --- | --- | --- | --- |
-| classic | 保留 1999 版内容和体验 | NativeVN 转换包，后续可由 VFS direct-read 替换来源 | 完整路线、媒体覆盖、输入节奏、save/load/replay、人工通关 signoff |
+| classic | 保留 1999 版内容和体验 | NativeVN 转换包，后续可由 VFS direct-read 替换来源 | 完整路线、媒体覆盖、输入节奏与可靠存读档的实际验证 |
 | modern | 在 classic 上叠加现代化能力 | profile package、filter preset、translation patch、portrait overlay | 标题、存读档、backlog、auto、skip、config、gallery、replay、route chart、voice replay、可回退增强 |
 
 classic profile 是验收基线。modern profile 只能增加可关闭的 overlay、system page、filter/audio preset 和本地化包，不能改写剧情状态、backlog、read-state、save/replay 或 route 选择结果。
@@ -37,5 +37,5 @@ classic profile 是验收基线。modern profile 只能增加可关闭的 overla
 | [Classic 忠实还原设计](../../../Examples/TsuiNoSora/Docs/classic-director-fidelity-design.md) | MENU/POPUP/SAVE/LOAD/GLOBALS、剧情 Score channel 与 Classic UI/行为的证据映射 |
 | [source-research.md](source-research.md) | 原版 Director/Shockwave 与 Remake PFS 资源形态、风险和不可提交内容 |
 | [implementation-plan.md](implementation-plan.md) | 从本地解包转换到 VFS direct-read 的分阶段实施路线 |
-| [conversion-manifest.md](conversion-manifest.md) | 脱敏 inventory、转换 report、modern profile report 和 manual signoff schema |
+| [conversion-manifest.md](conversion-manifest.md) | 脱敏 inventory、转换 report、Modern profile 与运行输入格式 |
 | [acceptance-matrix.md](acceptance-matrix.md) | classic/modern profile 的自动证据和人工验收标准 |

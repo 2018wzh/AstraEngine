@@ -1,14 +1,16 @@
 use std::sync::{Arc, Mutex};
 
-use astra_headless_protocol::{ButtonState, PhysicalInput, PointerButton};
+use astra_headless_protocol::{
+    ButtonState, PhysicalInput, PointerButton, ProductAdapterFactory, ProductOpenRequest,
+    ProductPackageSource, ProductPerformanceObserver, ProductPerformanceSample,
+};
 use astra_headless_vn_adapter::NativeVnProductAdapterFactory;
 use astra_platform::{HeadlessHostProfile, PlatformHostFactory};
 use astra_platform_headless::HeadlessPlatformFactory;
-use astra_product_host::{ProductAdapterFactory, ProductOpenRequest, ProductPerformanceObserver};
 
 #[derive(Default)]
 struct TestPerformanceObserver {
-    samples: Mutex<Vec<astra_product_host::ProductPerformanceSample>>,
+    samples: Mutex<Vec<ProductPerformanceSample>>,
 }
 
 impl ProductPerformanceObserver for TestPerformanceObserver {
@@ -16,10 +18,7 @@ impl ProductPerformanceObserver for TestPerformanceObserver {
         Ok(())
     }
 
-    fn record_sample(
-        &self,
-        sample: astra_product_host::ProductPerformanceSample,
-    ) -> Result<(), String> {
+    fn record_sample(&self, sample: ProductPerformanceSample) -> Result<(), String> {
         self.samples.lock().unwrap().push(sample);
         Ok(())
     }
@@ -50,7 +49,7 @@ async fn real_native_vn_package_accepts_physical_input_and_produces_cpu_frame() 
     let performance_observer = Arc::new(TestPerformanceObserver::default());
     let mut product = NativeVnProductAdapterFactory::default()
         .open(ProductOpenRequest {
-            package: astra_product_host::ProductPackageSource::InMemory(Arc::from(package)),
+            package: ProductPackageSource::InMemory(Arc::from(package)),
             profile: "classic".into(),
             target: "nativevn-game".into(),
             locale: Some("en".into()),
@@ -173,7 +172,7 @@ async fn real_native_vn_package_accepts_physical_input_and_produces_cpu_frame() 
         .iter()
         .copied()
         .fold(
-            astra_product_host::ProductPerformanceSample::default(),
+            astra_headless_protocol::ProductPerformanceSample::default(),
             |mut total, sample| {
                 total.runtime_tick_ns += sample.runtime_tick_ns;
                 total.vn_step_ns += sample.vn_step_ns;

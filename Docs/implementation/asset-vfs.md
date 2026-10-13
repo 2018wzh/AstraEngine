@@ -7,9 +7,9 @@
 | Crate | 职责 |
 | --- | --- |
 | `astra-asset` | `VfsUri`、prefix descriptor、provider descriptor、backend config、layer graph、entry table、whiteout、`asset.catalog` DTO、local root capability 和 bounded reader |
-| `astra-cook` | 把 import source、sidecar、native asset roots、ModelBundle source 和 project package section 转成 package VFS entry 输入 |
-| `astra-package` | 写入 `asset.vfs_manifest` 和 `asset.catalog`，并提供 package-backed section source；它不解释 VN、AI、EMU 或 legacy pack 语义 |
-| `astra-plugin` | 在保留 `slot: String` ABI 的前提下，让多个 provider 注册到单一 `vfs_provider` slot；`game_runtime_provider` 仍保持单 provider 绑定 |
+| `astra-cook` | 把 import source、sidecar、native asset roots 和 project package section 转成 package VFS entry 输入 |
+| `astra-package` | 写入 `asset.vfs_manifest` 和 `asset.catalog`，提供 package-backed section source；不解释产品或旧引擎语义 |
+| `astra-plugin` | 机制插件的 `vfs_provider` slot 和显式 prefix binding；gameplay 使用产品静态组合 |
 | `astra-release` | 校验 URI、prefix registry、provider binding、package bounds/hash、overlay/whiteout、catalog 引用和 redaction |
 
 ## Manifest Shape
@@ -27,7 +27,7 @@ VFS resolve 的输入是 `(target, profile, vfs_uri, expected_hash, media_kind)`
 
 1. overlay layer：同一 `VfsUri` namespace 下覆盖 lower layer，whiteout 必须有 allowlist、base hash 和 reason。
 2. package layer：读取 `.astrapkg` section 或 patch package section。
-3. legacy pack layer：由 family provider 解析 pack entry table，Stage 5 才落地 reader。
+3. legacy pack layer：由资源 backend 提供 entry table，不要求成熟 EMU 核心改用 VFS。
 4. local authorized layer：只服务开发期、私有 acceptance 或用户显式授权 case。
 5. memory/workspace layer：只用于 Editor/Tools 临时对象，不进入 shipping package。
 
@@ -45,14 +45,13 @@ manifest 中每个 prefix 都通过 `provider_id` 绑定一个 provider。releas
 
 ## Package Relationship
 
-`.astrapkg` 保留为控制面和证据面容器。它保存 target manifest、plugin registry、provider policy、compiled story、VN/AI/EMU package sections、release summary、`asset.vfs_manifest`、`asset.catalog` 和 cooked assets。旧引擎 pack 不替代 `.astrapkg`；它只作为 `legacy_pack` backend 被 AstraEMU 或迁移工具读取 payload。
+`.astrapkg` 保存 target manifest、机制插件 registry、provider policy、compiled story、VN package sections、release summary、`asset.vfs_manifest`、`asset.catalog` 和 cooked assets。资源迁移工具可将旧 pack 作为 `legacy_pack` source；AstraEMU Family 仍使用自己的原生文件与归档路径，不创建 product package。
 
 典型组合：
 
 - NativeVN release：`package:/native-assets/bg.png` 读取 cooked asset、policy bundle、scenario refs 和 player route model。
 - TsuiNoSora private slice：`local:/probe/manifest.json` 读取合法本地源，cook 后写入 `package:/native-assets/...`；patch direct-read 只在授权 profile 下通过 scenario `mount_probes` 或 `mount_assets` 证明。
-- FVP case：`.astrapkg` 保存 case profile、reader identity、release report 和 sanitized scenario；FVP `.bin` 通过 `fvp:/graph_bg/BG001_000`、`fvp:/voice/01000010` 这类 URI 进入 legacy VFS。
-- AI ModelBundle：模型权重、runtime dependency 和 custom op sidecar 是 package-backed VFS entries，不走 project-level `package_sections` 携带 payload。
+- AstraEMU 原生游戏：Family 自持目录、归档、解码和存档，不经过本 package/VFS 链路。
 
 ## Report Policy
 

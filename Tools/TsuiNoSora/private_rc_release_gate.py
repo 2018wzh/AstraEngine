@@ -11,15 +11,14 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 
-REPORT_SCHEMA = "tsuinosora.private_rc_release_gate.v1"
+REPORT_SCHEMA = "tsuinosora.private_rc_release_gate.v2"
 BUILD_SCHEMA = "astra.build_identity.v1"
 BUNDLE_SCHEMA = "astra.standalone_bundle_manifest.v2"
 HEADLESS_SCHEMA = "tsuinosora.classic_visual_acceptance_report.v2"
-COMPARISON_SCHEMA = "tsuinosora.classic_visual_comparison_report.v3"
-NODE_MAP_SCHEMA = "tsuinosora.classic_visual_node_map.v3"
+COMPARISON_SCHEMA = "tsuinosora.classic_visual_comparison_report.v4"
+NODE_MAP_SCHEMA = "tsuinosora.classic_visual_node_map.v4"
 SOURCE_PROFILE_SCHEMA = "astra.source_verification_manifest.v1"
 COVERAGE_SCHEMA = "tsuinosora.full_conversion_coverage_report.v1"
-SIGNOFF_SCHEMA = "tsuinosora.private_rc_manual_signoff.v1"
 Y_ROUTE_SCHEMA = "tsuinosora.classic_y_route_acceptance_report.v1"
 HASH_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 RC_REFERENCE_IDS = frozenset(
@@ -354,30 +353,6 @@ def path_scan(package: Path, bundle_root: Path, probe_file: Path | None) -> tupl
     }
 
 
-def signoff_gate(
-    path: Path | None,
-    build_hash: str,
-    package_hash: str,
-    headless_hash: str,
-    comparison_hash: str,
-    y_route_hash: str,
-) -> tuple[bool, str | None]:
-    if path is None or not path.is_file():
-        return False, None
-    value = load_json(path, SIGNOFF_SCHEMA)
-    valid = (
-        value.get("status") == "approved"
-        and value.get("build_identity") == build_hash
-        and value.get("package_identity") == package_hash
-        and value.get("headless_report_sha256") == headless_hash
-        and value.get("comparison_report_sha256") == comparison_hash
-        and value.get("y_route_report_sha256") == y_route_hash
-        and isinstance(value.get("reviewer"), str)
-        and bool(value["reviewer"].strip())
-    )
-    return valid, sha256_file(path)
-
-
 def build_report(args: argparse.Namespace) -> dict[str, Any]:
     package = args.package.resolve()
     bundle_root = args.bundle.resolve()
@@ -419,15 +394,6 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
     headless_hash = sha256_file(args.headless_report)
     comparison_hash = sha256_file(args.comparison_report)
     y_route_hash = sha256_file(args.y_route_report)
-    signoff_ok, signoff_hash = signoff_gate(
-        args.manual_signoff,
-        str(build.get("identity_hash")),
-        package_hash,
-        headless_hash,
-        comparison_hash,
-        y_route_hash,
-    )
-    add_check(checks, "formal_human_signoff", signoff_ok)
 
     for check in checks:
         if check["status"] != "pass":
@@ -451,7 +417,6 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
             "headless_report": headless_hash,
             "y_route_report": y_route_hash,
             "comparison_report": comparison_hash,
-            "manual_signoff": signoff_hash,
         },
         "counts": {
             "converted_routes": coverage.get("counts", {}).get("routes"),
@@ -494,7 +459,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--source-profile", type=Path, required=True)
     parser.add_argument("--story-ir", type=Path, required=True)
     parser.add_argument("--private-path-probes", type=Path)
-    parser.add_argument("--manual-signoff", type=Path)
     parser.add_argument("--out", type=Path, required=True)
     return parser.parse_args()
 

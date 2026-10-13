@@ -44,7 +44,7 @@ pub struct AstraPluginModule {
 }
 ```
 
-插件用 `abi_stable::export_root_module` 导出 `AstraPluginModuleRef`。`libloading` 负责打开动态库，loader 读取 `abi_stable` root module header 并校验 layout，再取 descriptor、register 和 shutdown 函数。SDK 可以用 Rust trait 包装 entry，但稳定边界仍以 descriptor YAML 和 ABI-safe value 为准。插件可以加载和卸载，不支持运行中重载。需要替换版本时，Runtime/Editor 必须完成 unload，再加载新 binary。
+插件用 `abi_stable::export_root_module` 导出 `AstraPluginModuleRef`。`libloading` 负责打开动态库，loader 读取 root module header 并校验 layout，再取 descriptor、register 和 shutdown。稳定边界以 descriptor 与 ABI-safe value 为准；现有机制插件 loader 的 load/unload 生命周期由实现负责，不把可热重载作为所有产品要求。AstraEMU 的库驻留规则见独立 Family 契约。
 
 ## Provider 注册
 
@@ -57,7 +57,7 @@ pub trait Renderer2DProvider: StableProvider {
 }
 ```
 
-完整 provider trait 族见 [Provider And Plugin API Blueprint](../implementation/provider-plugin-api.md)。v1 必须覆盖 Renderer2D、TextLayout、AudioOutput、DecodeProvider、AssetImporter、CookProcessor、LuauPolicyBundle、EditorPanel、AiProvider、MCPToolProvider；EMU Family 使用独立 ABI。AiProvider 只服务 Editor 和 MCP host，Runtime 通过 `McpAiSession` 消费固化后的 Intent 和 output。
+机制 provider 的已有接口见 [Provider And Plugin API](../implementation/provider-plugin-api.md)，注册项以 Rust ABI 和实际消费者为准，不强制补齐未来 trait 族。Editor 的 ACP/MCP 是独立编辑接口，不通过 `AiProvider` 或运行时模型 session。EMU Family 使用独立 ABI。
 
 ## 静态产品组合
 
@@ -65,7 +65,7 @@ pub trait Renderer2DProvider: StableProvider {
 
 ## Extension Registry
 
-插件可以注册 provider slot、asset type、importer、cook processor、Editor panel、menu command、graph node、timeline track、Inspector widget、release check。每条注册必须声明 `LoadPhase`、依赖、冲突策略、enablement scope、packaged eligibility 和 diagnostic source。Editor 的 Plugin Manager 只能改变 enablement 和 binding，不能绕过 descriptor gate。
+Extension registry 保存插件的注册项及其 load phase、依赖、冲突、enablement 与 packaged 状态；实际支持的注册类型以 Rust 定义为准。Editor Plugin Manager 尚不能作为已交付入口，未来界面也不得绕过 descriptor gate。
 
 Package 使用 `astra.plugin_extension_registry.v2` 和 `astra.provider_policy.v3`。两者共享 `ProviderBinding`，binding 同时固化 slot、provider id、required capability、package、target、profile、engine version、rustc/feature/ABI fingerprint 与 canonical `binding_hash`。Registry 中的 binding 集合必须与 policy 完全一致；缺失、重复、冲突、hash drift、capability/fingerprint mismatch、未 packaged provider 或 target/profile 不一致都会在 package builder、package reader、scenario runner 和 Release Gate 的同一 typed validator 中阻断。v1 section 不迁移，也不自动补默认 provider。
 
@@ -73,7 +73,7 @@ Package 使用 `astra.plugin_extension_registry.v2` 和 `astra.provider_policy.v
 
 `PluginRegistrar::register_provider` 是 fallible API。非法 identity 与重复 `(slot, provider_id)` 不写入 registry；loader 先解析全部 registration，再提交注册，任一注册失败会撤销本次已提交的 provider。无 binding context 的选择 API 不存在，provider 注册顺序不能改变结果。
 
-Stage 1 host registry 负责 `LoadPhase`、provider binding、conflict report 和 `PluginDependency` dependency graph。Stage 2 package/release gate 写入并校验 `plugin.extension_registry` 和 `plugin.dependency_graph`。Stage 4 Editor Plugin Manager 只显示和修改这些后端产物。
+宿主 registry 负责 load phase、显式 provider binding、冲突与依赖图；package builder/reader 和 Release Validator 校验相同的已固化产物，不另按历史 Stage 建立审批链。
 
 ## StateMachine Action
 

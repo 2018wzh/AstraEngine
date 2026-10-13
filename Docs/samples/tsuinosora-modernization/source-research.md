@@ -51,7 +51,7 @@ TsuiNoSora modern profile 只读取 Remake 立绘候选，建立 alias/replaceme
 
 - 文档、schema 说明、scenario 规格和验收矩阵。
 - 脱敏 inventory 和转换 report 的字段定义。
-- 不可逆 hash、计数、coverage 百分比、诊断码和人工 signoff 结果。
+- 不可逆 hash、计数、coverage 百分比、诊断码与实际运行结果。
 - 空的目录约定、忽略规则和生成命令说明。
 
 仓库内不能出现：

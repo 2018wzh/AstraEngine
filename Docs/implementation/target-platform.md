@@ -42,4 +42,4 @@ astra package validate target/nativevn.astrapkg \
 
 正式报告只记录 schema、稳定 id、hash、provider、状态、计数和 diagnostic，不记录本地绝对路径、用户名、商业 payload、secret 或 native handle。普通 CI 负责 schema、负向门禁、单元测试与 wasm 编译；Windows/Chrome `DONE` 需要同一最终 commit 的真实验收。
 
-真实产品平台验收在 Migration 11 完成后增加强制 Headless preflight：同一 build fingerprint、cooked package hash、input sequence hash、scenario、target 和 content identity 先通过 `astra.headless_run_report.v2` 与 `astra.headless_review.v2`，再由 `astra.headless_preflight_link.v2` 关联真实平台 run。缺 preflight 或 identity mismatch 时不得启动正式验收。
+实际平台验证直接运行本平台宿主与 Player，校验 package/profile/build/session 和真实输入、媒体、存读档、退出；不先收集 Headless 模型审查或具名批准文件。未测平台保持未验收，当前产品范围与状态见 [重构契约](../contracts/rebuild.md) 和 [实施状态](../status/implementation-plan.md)。

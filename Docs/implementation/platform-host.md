@@ -1,8 +1,8 @@
 # Platform Host Blueprint
 
-平台模块只适配原生能力，不拥有 Runtime 权威状态。Migration 8 当前产品化 Windows 与 Chrome Web；Linux 和 macOS 在 Stage 6 进入 `IN_PROGRESS`，iOS、Android 继续使用显式 `Unavailable` factory。
+平台模块只适配原生能力，不拥有 Runtime 权威状态。当前产品平台为 Windows/Linux/macOS/Android；Web/iOS 延后。接口存在、交叉编译和历史局部检查均不代表该平台产品已验收，实际状态统一见 [实施状态](../status/implementation-plan.md)。
 
-Target 绑定见 [Target And Platform Blueprint](target-platform.md)，native host 状态见 [Migration 8](../migrations/platform-host-migration.md)。平台无关测试后端见 [Migration 11](../migrations/headless-platform-test-backend-migration.md)，生产完备度缺口与收束条件见 [模块能力完备度审查](../migrations/module-completeness-audit-migration.md#p0-004headlessscenariorendereraudio-fixture-和-player-测试仍是分散双轨)。
+Target 绑定见 [Target And Platform Blueprint](target-platform.md)，运行边界见 [重构契约](../contracts/rebuild.md)，日常检查见 [开发手册](../manual/development.md)。本页只保留宿主接口和现有消费者事实，不另建立 Stage 顺序或测试审批矩阵。
 
 ## Contract
 
@@ -46,9 +46,10 @@ Headless 的 `HttpsRange` source 只接受 allowlist 中不含 credential/fragme
 | `astra-platform-common` | generational resource table、ordered completion、atomic save、hash-bound package range、shared `WgpuPresentationCore`、audio/gamepad mapper、verified cache 与共用 policy |
 | `astra-platform-windows` | winit event loop、hardware wgpu、WASAPI、WMF、Saved Games、Windows package source；test injection 仅在 `platform-test-driver` |
 | `astra-platform-web` | canvas/DOM、WebGPU、WebAudio、WebCodecs、OPFS、fetch/File source |
-| `astra-platform-headless` | `publish = false` 测试 host 已实现完整 service、物理输入编排和 PNG/WAV artifact；完整 workspace test 与正式 evidence 尚待闭合 |
+| `astra-platform-headless` | `publish = false` 测试 host，提供物理输入编排、PNG/WAV 与服务实现；需要视听时使用，不强制普通逻辑测试启动 |
 | `astra-player-web` | 独立 WASM Player，读取 config、package 和 cooked platform profile |
-| iOS、Android crate | Stage 6 `PLATFORM_NOT_IMPLEMENTED` factory |
+| `astra-platform-android` | Android 原生宿主；编译、设备与产品验收分别记录 |
+| `astra-platform` 的 iOS factory | 延后平台的显式 unavailable probe，不新增空壳 crate |
 
 ## Platform Profiles
 
@@ -70,4 +71,4 @@ Web required checks：`host.lifecycle`、`window.canvas`、`surface.webgpu_prese
 
 静态 WAV meter、接口存在性、hidden-window smoke、文件存在、route report、DOM synthetic click 和 `--dump-dom` 只能作诊断，不能通过 `player.full_playable`。
 
-Migration 11 完成后，真实产品平台验收还必须读取 `astra.headless_preflight_link.v2`。Headless 与真实平台 run 绑定同一 build、cooked package、input sequence、scenario、target 和 content identity，但使用各自的 profile/session id。Headless 只形成 E2 证据，不能替代真实平台 E3。
+平台与 Player 报告按各自实际身份和结果校验，不要求先生成 Headless 审批或跨 Host preflight link。需要视听测试时仍可使用 Headless，但它不能替代实际窗口、设备声音与产品流程验收，见 [发布契约](../contracts/release-gate.md)。

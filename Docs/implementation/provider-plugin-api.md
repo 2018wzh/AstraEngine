@@ -1,6 +1,6 @@
 # Provider And Plugin API Blueprint
 
-插件系统提供机制，不替项目做选择。项目 manifest 必须显式绑定 provider；加载顺序不能改变 runtime 行为。Stage 1 的 `astra-plugin-abi` 持有 ABI-safe structs、`LoadPhase`、extension registry DTO 和 dependency graph DTO；`astra-plugin` 只负责 host loader、registry 和 Runtime action adapter。
+插件系统只提供机制；项目显式绑定实际 provider，不靠加载顺序选择。`astra-plugin-abi` 持有 ABI-safe 注册、load phase、binding 和 dependency DTO，`astra-plugin` 持有 loader 与 registry。Gameplay 与 VN UI 使用静态组合。
 
 ## Descriptor
 
@@ -82,37 +82,15 @@ pub struct ExtensionRegistrationReport {
 }
 ```
 
-Extension point 覆盖 provider slot、game runtime provider、VFS provider、asset type、importer、cook processor、Editor panel、menu command、graph node、timeline track、Inspector widget、release check 和 legacy family provider。注册必须显式声明 id、phase、capability、permission、packaged eligibility、conflict policy 和 source span。冲突时不使用加载顺序裁决；项目 manifest 或 Plugin Manager 必须选定一个 provider。
+Extension registry 只维护实际 Rust ABI 的机制注册与依赖，不恢复 `game_runtime_provider`、旧 VN/UI ABI 或 LegacyFamilyPlugin。注册冲突、缺 capability/permission、未 packaged 或 binding mismatch 按实现明确失败。
 
-Plugin Manager 保存 project enable/disable 状态，读取 Stage 1/2 的 dependency graph，解释缺失依赖、版本冲突、权限不足和 packaged 裁剪原因。Release Gate 输出 `plugin.extension_registry` 和 `plugin.dependency_graph` evidence。
-
-Stage 1 实现 registry backend 和 explicit provider binding。Stage 2 将 `plugin.extension_registry` 与 `plugin.dependency_graph` 写入 package 并执行 release gate。Stage 4 的 Plugin Manager 只提供 Editor UI、enablement 编辑和 diagnostic jump，不再拥有第二套 provider selection 或 dependency graph 实现。
+package 与 Release Validator 消费同一 registry/policy；未来 Editor 界面也不能另写 provider selector 或 dependency graph。目前不把未交付的 Plugin Manager 当作已有功能。
 
 当前 package contract 使用 `astra.plugin_extension_registry.v2` / `astra.provider_policy.v3`。`ProviderBindingContext` 固化 package、target、profile、required capability、engine、rustc、feature 与 ABI fingerprint，`ProviderBinding` 额外记录 canonical SHA-256。Package builder、reader、Release Gate、scenario runner 和 VFS prefix gate 调用同一个 `astra-plugin-abi` validator；policy 与 registry 不能分别解释、按数组第一项选择或在缺 binding 时回退。`presentation` 必须与 policy renderer 相同，`vfs_provider` 必须与 mount backend capability 精确匹配。
 
-## StateMachine Action Provider
+## StateMachine Action
 
-Stage 1 的 gameplay action provider 走 host adapter，不把 trait object 穿过 ABI：
-
-```rust
-pub struct FfiPluginRegistration {
-    pub providers: RVec<FfiProviderRegistration>,
-    pub actions: RVec<FfiActionRegistration>,
-    pub callbacks: u32,
-}
-
-pub struct FfiActionRegistration {
-    pub provider_id: RString,
-    pub action_id: RString,
-    pub input_schema: RString,
-    pub output_schema: RString,
-    pub invoke: extern "C" fn(RVec<u8>) -> RVec<u8>,
-}
-```
-
-`invoke` 的 request/result 都是 postcard 编码的 serde DTO。插件返回 `ActionTrace` 和 `ActionEffect` list；host adapter 通过 `DeterministicActionContext` 应用 effect。插件不接收 `RuntimeWorld`、Actor 指针、Editor widget、GPU/audio native handle 或 platform file descriptor。
-
-卸载插件时，loader 除了清理 `PluginRegistrar` provider slot，还会调用 `RuntimeWorld::unregister_action_provider(provider_id)` 删除该 provider 注册的 action。
+Action 是宿主内的 typed Rust 机制，使用 `DeterministicActionContext`，不通过动态 bytes invoke 或 Postcard effect envelope 转发。会话不强制所有产品变更经 FSM action；Runtime 的通用 flat FSM 保持可选，见 [Runtime Contract](../contracts/runtime.md)。
 
 ## Provider Traits
 
@@ -163,19 +141,11 @@ pub trait VfsProvider: StableProvider {
 
 VFS backend provider 全部注册到同一个 `vfs_provider` slot。该 slot 允许多个 provider 共存，manifest 的 prefix registry 负责选择 `provider_id`；release gate 只在同一 prefix 缺少明确 provider、provider 未打包、capability mismatch 或依赖 unresolved 时阻断。Gameplay 由产品静态组合，不使用 provider slot。
 
-`AiProvider` 是 Editor 和 MCP host 的后端适配。OpenAI、Ollama、ComfyUI 和 ONNX Runtime 第一方 provider 以普通插件注册，默认禁用，由项目 manifest 或 release profile 显式绑定。Runtime 不直接接收 `AiProvider` trait object，只通过 `McpAiSession` 获取 typed Intent、tool result、generated artifact chunk 和 committed output。
-
-`astra-ai-onnx` provider 可以加载 package/VFS 中声明的 ORT custom op sidecar，但 sidecar 不是新的 Engine extension point。它只作为 ONNX Runtime 依赖被 provider 私有加载，必须由 ModelBundle manifest 声明平台、hash、license、加载策略和目标运行证据。sidecar 不能接收 `RuntimeWorld`、Actor 指针、Editor widget、GPU/audio native handle、provider trait object、platform file descriptor 或本地路径；需要 Engine 能力时必须另行实现普通插件/provider 并走 extension registry。
-
 旧 AstraEMU 翻译 slot 与 overlay 路径已被独立 Host 的异步正文替换服务取代，不再属于本插件接口。
 
 ## AstraEMU 独立接口
 
 AstraEMU 使用独立 Family ABI 与 Host loader，不注册 Engine extension registry。Family 负责原生 VM、媒体和存档，Host 消费最终帧与 PCM。契约见 [AstraEMU 接口](../contracts/astraemu-ipc.md)；本页的 product provider lifecycle 不适用于 Family。
-
-## Game Runtime Provider
-
-
 
 ## Permissions
 

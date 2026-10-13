@@ -18,7 +18,7 @@ from tsuinosora_rendering import _read_json, _report_has_path_leak
 from native_story_ir import _physical_input_rows
 from headless_route_matrix import _input_sequence_hash
 
-__all__ = ['rearrange_native_assets', 'build_conversion_report', '_conversion_route_record', 'build_route_scenarios', '_route_mount_assets', '_routes_with_native_mount_assets', 'build_mount_policy']
+__all__ = ['rearrange_native_assets', 'build_conversion_report', '_conversion_route_record', '_route_mount_assets', '_routes_with_native_mount_assets', 'build_mount_policy']
 
 
 def rearrange_native_assets(unpacked_root: Path | str, work_root: Path | str, asset_analysis: dict) -> dict:
@@ -267,49 +267,6 @@ def _conversion_route_record(route: dict) -> dict:
         record["mount_assets"] = mount_assets
     return record
 
-
-
-def build_route_scenarios(target: str, profile: str, platform: str, routes: list[dict]) -> dict:
-    scenarios = []
-    diagnostics = []
-    for route in routes:
-        route_id = route.get("route_id", "classic.main")
-        terminal = route.get("terminal", route_id)
-        actions = [{"launch": {}}]
-        for choice in route.get("choices", []):
-            actions.append({"player_input": {"kind": "advance"}})
-            actions.append({"player_input": {"kind": "choose", "value": choice}})
-        actions.append({"player_input": {"kind": "advance"}})
-        actions.append({"replay_from_start": {}})
-        scenario = {
-            "schema": "astra.scenario.v1",
-            "stage": "stage3-astra-vn",
-            "target": target,
-            "profile": profile,
-            "platform": platform,
-            "generated_route_id": route_id,
-            "seed": 42,
-            "actions": actions,
-            "assertions": [
-                {"coverage": {"routes": [terminal]}},
-                {"replay_hash_match": True},
-                {"no_blocking_diagnostics": True},
-            ],
-        }
-        mount_assets, asset_diagnostics = _route_mount_assets(target, platform, route, route_id)
-        diagnostics.extend(asset_diagnostics)
-        if mount_assets:
-            scenario["mount_assets"] = mount_assets
-        scenarios.append(scenario)
-    return {
-        "schema": "astra.scenario_refs.v1",
-        "status": "blocked" if diagnostics else "pass",
-        "target": target,
-        "profile": profile,
-        "platform": platform,
-        "scenarios": scenarios,
-        "diagnostics": _dedupe_diagnostics(diagnostics),
-    }
 
 
 def _route_mount_assets(target: str, platform: str, route: dict, route_id: str) -> tuple[list[dict], list[dict]]:

@@ -5,6 +5,7 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+astra-property-derive = { path = "../../Developer/astra-property-derive" }
 blake3.workspace = true
 hex.workspace = true
 miette.workspace = true

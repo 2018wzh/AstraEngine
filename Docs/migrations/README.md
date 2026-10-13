@@ -1,55 +1,18 @@
-# Migration Plans
+# 迁移资料
 
-2026-09-08：[AstraEMU 独立 Host 重构](astraemu-independent-host.md) 已获批准，当前 `IN_PROGRESS`。本页较早的 AstraEMU RuntimeWorld、Family ABI v9、Hook、Host VFS 和统一 package/save 记录由新方案取代；不能用于宣称独立 Host 已完成。
+当前目标、所有权与验收只由[总体架构](../product/architecture.md)、[重构契约](../contracts/rebuild.md)和[实施状态](../status/implementation-plan.md)维护。本目录不是额外的阶段执行顺序或完成度矩阵。
 
+已被实际切换取代的 GameRuntimeProvider、Qt Editor、延期 RPG/AI 及旧 crate 搬迁方案从活动文档删除，历史通过 Git 查询。仍保留的技术资料只解释其对应边界；接口、命令和状态与现行契约冲突时，不能按旧文档恢复已删除路径或兼容层。
 
-本目录只记录已实现代码向新设计对齐的迁移路线。设计页可以覆盖完整未来架构；迁移页不能把尚未存在的 AstraEMU/AstraRPG 代码写成可搬迁对象。
+## 实施入口
 
-当前落地状态：migration 1–5 已完成 Provider URI Asset VFS、provider selection、AstraVN module/crate split、RuntimeWorld `astra.vn.step` action 和真实 FFI lifecycle。Migration 6 的 lossless frontend 已完成；对应 Stage 3 script work item 仍等待 formal Windows/Web Player evidence。Migration 9 只关闭 shared policy、component effects 与 async runtime host，AstraRPG 产品代码仍留 Stage 7。Migration 11 已固化到主线，尚未闭合的正式平台 evidence 继续按状态页追踪。Migration 12 已进入实施验证：Yakui、UI Blueprint、AstraText、Scene2D、component ABI 和开发期 UI CLI 已落地，状态保持 `IN_PROGRESS`，等待全量隔离门禁与 Windows/Web E3。当前生产完备度修补按 [模块能力完备度审查](module-completeness-audit-migration.md) 收束。
+| 范围 | 入口 |
+| --- | --- |
+| workspace 与依赖 | [Workspace 组织](../implementation/workspace-blueprint.md) |
+| 公共运行层与可靠存档 | [Runtime](../contracts/runtime.md)、[任务作用域](../contracts/task-scope.md) |
+| NativeVN typed 会话 | [AstraVN](../modules/astra-vn.md) |
+| 文本、Graph/Timeline、ACP/MCP 与预览 | [Editor 手册](../../Editor/README.md) |
+| 独立 EMU Host | [Family 契约](../contracts/astraemu-ipc.md)、[客户端手册](../manual/astraemu-client.md) |
+| 日常定向检查与阶段全量验证 | [开发手册](../manual/development.md) |
 
-## 执行顺序
-
-| 顺序 | 文档 | 范围 |
-| --- | --- | --- |
-| 1 | [asset-vfs-migration.md](asset-vfs-migration.md) | 现有 `astra-asset`、`astra-cook`、`astra-package`、旧 asset registry writer、package section、TsuiNoSora mount/direct-read evidence 对齐到 Provider URI Asset VFS |
-| 2 | [plugin-runtime-boundary-migration.md](plugin-runtime-boundary-migration.md) | 现有 plugin registry、action provider、VN extension fixture 对齐到单一 `vfs_provider` slot 与 gameplay runtime provider selection |
-| 3 | [astra-vn-module-layout-migration.md](astra-vn-module-layout-migration.md) | 现有 `astra-vn` 从 Runtime 分区迁到 `Engine/Source/Modules/AstraVN/astra-vn` |
-| 4 | [astra-vn-crate-split-migration.md](astra-vn-crate-split-migration.md) | 现有单 crate `astra-vn` 拆成 AstraVN 多功能 crate，`astra-vn` 收缩为 facade |
-| 5 | [game-runtime-provider-migration.md](game-runtime-provider-migration.md) | 现有 AstraVN runtime facade、VN extension manifest、package sections、release checks 对齐到 `NativeVnRuntimeProvider` |
-| 6 | [vn-script-frontend-migration.md](vn-script-frontend-migration.md) | `DONE`：Lexer、recovery parser、Lossless CST、Typed AST、Semantic Passes、Command Registry、token-level source map、formatter 与 language-service adapter |
-| 7 | [editor-runtime-provider-migration.md](editor-runtime-provider-migration.md) | 现有 Editor 设计、手册和状态口径对齐到 runtime-provider-aware shell |
-| 8 | [platform-host-migration.md](platform-host-migration.md) | 已完成的 Windows 窗口渲染与音频/解码对齐到 realigned platform-host 统一 Token 抽象 |
-| 9 | [astra-rpg-design-alignment-migration.md](astra-rpg-design-alignment-migration.md) | shared 1–3 `DONE`；AstraRPG、AI Town、`rpg.trpg` 与 CP2020 adapter 留 Stage 7 |
-| 10 | [nativevn-flagship-demo-migration.md](nativevn-flagship-demo-migration.md) | 记录未来 15–20 分钟三终局、中英双语、中文全配音和正式原创资产的旗舰 Demo 产品迁移；本轮不实现 |
-| 11 | [headless-platform-test-backend-migration.md](headless-platform-test-backend-migration.md) | 将分散能力收束到测试专用完整 Headless Platform；typed contract 已固化，full host `IN_PROGRESS`，其余仍开放 |
-| 12 | [astra-ui-backend-split-migration.md](astra-ui-backend-split-migration.md) | AstraVN 迁到 Yakui、`.astra` script-declared UI、Scene2D/Mesh2D 和独立 component ABI；当前为 `IN_PROGRESS`，等待正式 E3 |
-
-## 范围边界
-
-迁移已有实现：
-
-- `astra-asset` 的 `AssetId`、sidecar、`VfsUri`、manifest/catalog DTO 和 path policy。
-- `astra-cook` 的 importer/cook artifact、NativeVN asset sidecar 和 cook audit。
-- `astra-package` 的 package/save container、section table、bounded reader、`asset.vfs_manifest`、`asset.catalog` 和 project-level `package_sections`。
-- `astra-vn` 的 module layout、facade、VN state/save、VN extension manifest、package sections、release checks 和 `NativeVnRuntimeProvider`。
-- `astra-vn-script` 当前的结构缩进 parser/compiler、`CompiledStory`、route graph、source map、debug symbols、command manifest 和 diagnostics，逐步对齐到 lossless frontend 标准。
-- `astra-platform` 与 `astra-platform-windows` 中已实现的 WMF 解码、WASAPI 声音输出、wgpu surface 绑定流程，对齐到 `PlatformHost::create_surface` 封装。
-- Stage 1 plugin registry、StateMachine action provider 和 `vn-extension-provider` fixture。
-- Editor workflow、module、creator manual 和 Stage 4 状态文档中的 runtime provider switching 口径。
-- TsuiNoSora 的脱敏 mount policy、`mount_probes`、route-bound `mount_assets`、NativeVN asset sidecar/cooked asset/package VFS manifest/catalog 和 player route evidence。
-
-后续新实现：
-
-- `AstraEmuRuntimeProvider`、AstraEMU Manager、family `LegacyRuntimeProvider` 代码、legacy pack VFS reader 和 EmulatorCore 状态机映射。
-- `AstraRpgRuntimeProvider` 和 RPG 专属 gameplay runtime。
-- `rpg.trpg` profile、ruleset、dice/check/ruling/transcript/seat authority。
-- Stage 4 AI/MCP provider 代码、ONNX provider 代码和 Editor UI。
-- AstraEMU/AstraRPG runtime provider 代码和专属 Editor surface；它们只在设计页和状态页保留 planned runtime 边界。
-
-## 验收命令
-
-```bash
-python Tools/check_docs.py
-```
-
-代码迁移完成后，再按对应阶段追加 Rust 测试、release gate 和 scenario 验收。文档迁移不能把未跑过的命令写成 `DONE` evidence；已完成项的证据以 `Docs/status/implementation-plan.md`、stage page、coverage matrix 和 stage test matrix 为准。
+迁移共用契约必须同步真实调用方；只有运行过的行为才能写为通过。缺少平台环境、固定核心对象或商业源时，保留明确缺口，不创建额外治理页反复登记相同状态。

@@ -71,7 +71,7 @@ class ClassicVisualComparisonTests(unittest.TestCase):
             Image.new("RGB", (800, 600), capture_color).save(captures / "classic.fixture.png")
             Image.new("RGB", (800, 600), capture_color).save(captures / "classic.fixture.__stable.png")
         node_map = {
-            "schema": "tsuinosora.classic_visual_node_map.v3",
+            "schema": "tsuinosora.classic_visual_node_map.v4",
             "entries": [{
                 "reference_id": "TSUI1999-UI-001",
                 "checkpoint": "classic.fixture",
@@ -92,7 +92,7 @@ class ClassicVisualComparisonTests(unittest.TestCase):
             }],
         }
         policy = {
-            "schema": "tsuinosora.classic_visual_comparison_policy.v3",
+            "schema": "tsuinosora.classic_visual_comparison_policy.v4",
             "thresholds": {"max_geometry_delta_px": 2, "min_ssim": 0.94, "max_perceptual_error": 0.08},
             "color_tolerance_profiles": {
                 "capture_palette_v1": {
@@ -100,10 +100,6 @@ class ClassicVisualComparisonTests(unittest.TestCase):
                     "min_ssim": 0.75,
                     "max_perceptual_error": 0.12,
                 }
-            },
-            "color_tolerance_approval": {
-                "relative_path": "color-tolerance-approval.json",
-                "sha256": "",
             },
             "capture_normalization": {
                 "id": "windows_175pct_bilinear_then_lanczos_v1",
@@ -121,18 +117,6 @@ class ClassicVisualComparisonTests(unittest.TestCase):
                 "geometry": [],
             }],
         }
-        approval = {
-            "schema": "astra.headless_tolerance_approval.v2",
-            "approval_id": "tsui.classic.capture_palette_v1",
-            "approver_kind": "human",
-            "approver_identity": "project_owner",
-            "approved_tolerance_hash": _json_hash(policy["color_tolerance_profiles"]),
-            "previous_config_hash": None,
-            "reason_codes": ["capture_color_state_unproven"],
-        }
-        approval_path = root / policy["color_tolerance_approval"]["relative_path"]
-        approval_path.write_text(json.dumps(approval), encoding="utf-8")
-        policy["color_tolerance_approval"]["sha256"] = file_hash(approval_path)
         checkpoint_identity = {"reference_id": "TSUI1999-UI-001", "typed_state": "fixture.state", "wait_command": "fixture.command"}
         acceptance = {
             "schema": "tsuinosora.classic_visual_acceptance_report.v2",
@@ -151,7 +135,7 @@ class ClassicVisualComparisonTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             policy, node_map, acceptance, references, captures = self.fixture(root)
-            report = compare(policy, node_map, acceptance, references, captures, root / "artifacts", root)
+            report = compare(policy, node_map, acceptance, references, captures, root / "artifacts")
             self.assertEqual(report["status"], "pass")
             artifact = root / "artifacts" / "classic.fixture"
             self.assertEqual(
@@ -163,7 +147,7 @@ class ClassicVisualComparisonTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             policy, node_map, acceptance, references, captures = self.fixture(root, capture=False)
-            report = compare(policy, node_map, acceptance, references, captures, root / "artifacts", root)
+            report = compare(policy, node_map, acceptance, references, captures, root / "artifacts")
         self.assertEqual(report["status"], "blocked")
         self.assertEqual(report["diagnostics"][0]["code"], "TSUI_CLASSIC_VISUAL_INPUT_MISSING")
 
@@ -172,7 +156,7 @@ class ClassicVisualComparisonTests(unittest.TestCase):
             root = Path(directory)
             policy, node_map, acceptance, references, captures = self.fixture(root)
             acceptance["runs"][0]["checkpoint_nodes"].pop("classic.fixture")
-            report = compare(policy, node_map, acceptance, references, captures, root / "artifacts", root)
+            report = compare(policy, node_map, acceptance, references, captures, root / "artifacts")
         self.assertEqual(report["status"], "blocked")
         self.assertEqual(report["check_count"], 0)
         self.assertEqual(
@@ -185,7 +169,7 @@ class ClassicVisualComparisonTests(unittest.TestCase):
             root = Path(directory)
             policy, node_map, acceptance, references, captures = self.fixture(root)
             node_map["entries"][0]["identity"]["reference_sha256"] = "sha256:" + "0" * 64
-            report = compare(policy, node_map, acceptance, references, captures, root / "artifacts", root)
+            report = compare(policy, node_map, acceptance, references, captures, root / "artifacts")
         self.assertEqual(report["diagnostics"][0]["code"], "TSUI_CLASSIC_VISUAL_REFERENCE_HASH")
 
     def test_duplicate_checkpoint_is_rejected(self):
@@ -196,7 +180,7 @@ class ClassicVisualComparisonTests(unittest.TestCase):
             duplicate["reference_id"] = "TSUI1999-UI-002"
             node_map["entries"].append(duplicate)
             with self.assertRaisesRegex(ComparisonError, "NODE_MAP_UNIQUE"):
-                compare(policy, node_map, acceptance, references, captures, root / "artifacts", root)
+                compare(policy, node_map, acceptance, references, captures, root / "artifacts")
 
     def test_same_node_requires_complete_identity_and_resource_closure(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -204,7 +188,7 @@ class ClassicVisualComparisonTests(unittest.TestCase):
             policy, node_map, acceptance, references, captures = self.fixture(root)
             node_map["entries"][0]["identity"]["resource_hashes"] = []
             with self.assertRaisesRegex(ComparisonError, "RESOURCE_CLOSURE"):
-                compare(policy, node_map, acceptance, references, captures, root / "artifacts", root)
+                compare(policy, node_map, acceptance, references, captures, root / "artifacts")
 
     def test_reference_retake_remains_blocking_even_when_pixels_match(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -215,7 +199,7 @@ class ClassicVisualComparisonTests(unittest.TestCase):
                 "reason_code": "source_presentation_contradiction",
                 "required_evidence": "two_consecutive_frames",
             }
-            report = compare(policy, node_map, acceptance, references, captures, root / "artifacts", root)
+            report = compare(policy, node_map, acceptance, references, captures, root / "artifacts")
         self.assertEqual(report["status"], "blocked")
         self.assertEqual(report["passed_count"], 0)
         self.assertEqual(
@@ -276,7 +260,7 @@ class ClassicVisualComparisonTests(unittest.TestCase):
                 "required_evidence": "one-frame",
             }
             with self.assertRaisesRegex(ComparisonError, "REFERENCE_VALIDATION"):
-                compare(policy, node_map, acceptance, references, captures, root / "artifacts", root)
+                compare(policy, node_map, acceptance, references, captures, root / "artifacts")
 
     def test_explicit_color_tolerance_accepts_a_bounded_palette_shift(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -284,13 +268,13 @@ class ClassicVisualComparisonTests(unittest.TestCase):
             policy, node_map, acceptance, references, captures = self.fixture(
                 root, capture_color=(60, 76, 92)
             )
-            node_map["entries"][0]["color_tolerance_approval"] = {
+            node_map["entries"][0]["color_tolerance_binding"] = {
                 "reason_code": "capture_color_state_unproven",
                 "profile_id": "capture_palette_v1",
                 "evidence": "same_node_resource_closure_and_stable_gpu_capture",
             }
             policy["checks"][0]["color_tolerance"] = "capture_palette_v1"
-            report = compare(policy, node_map, acceptance, references, captures, root / "artifacts", root)
+            report = compare(policy, node_map, acceptance, references, captures, root / "artifacts")
         self.assertEqual(report["status"], "pass")
         self.assertEqual(report["passed_with_color_tolerance_count"], 1)
         self.assertTrue(report["results"][0]["color_tolerance"]["applied"])
@@ -299,14 +283,14 @@ class ClassicVisualComparisonTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             policy, node_map, acceptance, references, captures = self.fixture(root)
-            node_map["entries"][0]["color_tolerance_approval"] = {
+            node_map["entries"][0]["color_tolerance_binding"] = {
                 "reason_code": "source_presentation_contradiction",
                 "profile_id": "capture_palette_v1",
                 "evidence": "same_node_resource_closure_and_stable_gpu_capture",
             }
             policy["checks"][0]["color_tolerance"] = "capture_palette_v1"
             with self.assertRaisesRegex(ComparisonError, "REFERENCE_VALIDATION"):
-                compare(policy, node_map, acceptance, references, captures, root / "artifacts", root)
+                compare(policy, node_map, acceptance, references, captures, root / "artifacts")
 
     def test_color_tolerance_profile_cannot_be_relaxed(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -316,23 +300,15 @@ class ClassicVisualComparisonTests(unittest.TestCase):
                 "max_perceptual_error"
             ] = 0.20
             with self.assertRaisesRegex(ComparisonError, "COLOR_TOLERANCE_POLICY"):
-                compare(policy, node_map, acceptance, references, captures, root / "artifacts", root)
+                compare(policy, node_map, acceptance, references, captures, root / "artifacts")
 
-    def test_color_tolerance_requires_node_approval(self):
+    def test_color_tolerance_requires_matching_node_binding(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             policy, node_map, acceptance, references, captures = self.fixture(root)
             policy["checks"][0]["color_tolerance"] = "capture_palette_v1"
             with self.assertRaisesRegex(ComparisonError, "COLOR_TOLERANCE_BINDING"):
-                compare(policy, node_map, acceptance, references, captures, root / "artifacts", root)
-
-    def test_color_tolerance_requires_hash_bound_human_approval(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            policy, node_map, acceptance, references, captures = self.fixture(root)
-            policy["color_tolerance_approval"]["sha256"] = "sha256:" + "0" * 64
-            with self.assertRaisesRegex(ComparisonError, "approval hash mismatch"):
-                compare(policy, node_map, acceptance, references, captures, root / "artifacts", root)
+                compare(policy, node_map, acceptance, references, captures, root / "artifacts")
 
     def test_excessive_mask_is_rejected(self):
         with self.assertRaisesRegex(ComparisonError, "MASK_EXCESSIVE"):
@@ -344,7 +320,7 @@ class ClassicVisualComparisonTests(unittest.TestCase):
             policy, node_map, acceptance, references, captures = self.fixture(root)
             policy["thresholds"]["min_ssim"] = 0.90
             with self.assertRaisesRegex(ComparisonError, "FIXED_THRESHOLDS"):
-                compare(policy, node_map, acceptance, references, captures, root / "artifacts", root)
+                compare(policy, node_map, acceptance, references, captures, root / "artifacts")
 
     def test_capture_normalization_cannot_be_changed_to_raise_similarity(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -352,7 +328,7 @@ class ClassicVisualComparisonTests(unittest.TestCase):
             policy, node_map, acceptance, references, captures = self.fixture(root)
             policy["capture_normalization"]["upscale"] = "bicubic"
             with self.assertRaisesRegex(ComparisonError, "CAPTURE_NORMALIZATION"):
-                compare(policy, node_map, acceptance, references, captures, root / "artifacts", root)
+                compare(policy, node_map, acceptance, references, captures, root / "artifacts")
 
     def test_native_client_recaptures_are_not_resampled(self):
         with tempfile.TemporaryDirectory() as directory:

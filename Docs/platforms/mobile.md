@@ -2,7 +2,7 @@
 
 iOS 和 Android 使用独立平台模块。移动壳负责原生生命周期、surface、触控、safe area、文件导入、权限、后台音频策略和平台媒体解码。
 
-对应 crate 是 `astra-platform-ios` 和 `astra-platform-android`。没有 SDK 时只输出缺失 SDK 的 capability report，不把移动平台标为完成。
+对应实现是 `astra-platform::probe_ios` 和 `astra-platform-android`。没有 SDK 时只输出缺失 SDK 的 capability report，不把移动平台标为完成。
 
 ## Current Status
 

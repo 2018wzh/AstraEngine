@@ -88,9 +88,9 @@ pub struct TimelineTaskState {
 
 这些类型通过 `serde` + `schemars` 生成 JSON Schema。YAML 和 `.astra` 只是作者源；Runtime 只消费 CompiledStory 中的 section。
 
-当前 Stage 3 slice 已把 contract 收敛为 `SceneCommand`：纹理和 glyph 先显式 upload，sprite 只引用 resource id 与 source rect，资源必须显式 release；command stream 同时表达 glyph run、transform、camera、clip、opacity/blend、video frame 与 `FilterGraph`。`DrawCommand` 只保留兼容 type alias。`VnHeadlessPresentationExecutor` 作为 CPU reference 执行同一 stream并生成定位 hash；Windows hardware glyph subset 已由 platform host 执行并生成 GPU visual golden，但 sprite、camera、filter、video 等完整 Windows stream、WebGPU 与 formal Player evidence 尚未闭合，因此 `S3-PRESENT-01` 保持 `IN_PROGRESS`。
+呈现使用 `SceneCommand`：纹理和 glyph 显式上传/释放，sprite 引用 resource id 与 source rect，command stream 表达 glyph、transform、camera、clip、opacity/blend、video 和 filter。已有 CPU reference executor 只用于对应测试，不能代替实际硬件 GPU 或商业流程验收。
 
-`ProductStageDirector` 是 typed `StageCommand` 的产品状态 owner。它用 fixed-point 保存 layer/entity/camera、tween、timeline、shake、movie/effect intent 和 frame identity；命令批次和 resize 在边界事务中提交，`tick` 原地推进，执行失败终止 session，不回滚整个帧；snapshot v8/coordinator v5 迁移见[演出帧推进迁移](../contracts/presentation-tick-migration.md)。执行仍受 package-bound profile budget 约束。NativeVN Player 已通过该 director 生成 background/sprite 的 retained `SceneCommand`，执行 safe-area clip、camera zoom/translation、opacity tween 和 texture lifecycle。当前平台 event loop 尚未把固定 frame tick送入 director，timeline completion 也尚未回到 Runtime await；movie/audio/effect、非 normal blend 和 camera rotation 仍会 blocking，不能由本地 director 单元测试外推为完整演出链。
+`ProductStageDirector` 持有 typed `StageCommand` 对应的 layer/entity/camera、tween、timeline、movie/effect intent 与 frame 状态。逻辑舞台、资产物理像素、raster canvas 与窗口输出保持独立；tick 原位推进，不克隆整帧状态。任务完成、取消和媒体恢复边界见 [演出帧推进迁移](../contracts/presentation-tick-migration.md)，具体 snapshot 版本以 Rust 类型为准。历史局部 slice 和旧 Stage 状态不再作为当前完成表。
 
 ## PresentationCommand
 

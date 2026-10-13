@@ -146,7 +146,6 @@ Editor 可以保存 layout metadata；Runtime 只信 compiler graph 和 VN Core 
 - localization preview 缺 text key、font fallback 或 layout coverage。
 
 ```bash
-astra test run scenarios/system_ui_profile.yaml --package target/nativevn.astrapkg --headless --report target/reports/system-ui.yaml
 cargo test -p astra-vn system_ui_profile
 ```
 

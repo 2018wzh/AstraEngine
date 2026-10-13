@@ -23,7 +23,6 @@ astra-player-core = { path = "../../Runtime/astra-player-core" }
 astra-player-vn = { path = "../astra-player-vn" }
 astra-platform = { path = "../../Platform/astra-platform" }
 astra-platform-android = { path = "../../Platform/astra-platform-android" }
-astra-platform-ios = { path = "../../Platform/astra-platform-ios" }
 astra-platform-linux = { path = "../../Platform/astra-platform-linux" }
 astra-platform-macos = { path = "../../Platform/astra-platform-macos" }
 astra-platform-web = { path = "../../Platform/astra-platform-web" }
@@ -32,7 +31,6 @@ astra-plugin-abi = { path = "../../Runtime/astra-plugin-abi" }
 astra-release = { path = "../../Developer/astra-release" }
 astra-target = { path = "../../Platform/astra-target" }
 astra-ui-core = { path = "../../Runtime/astra-ui-core" }
-astra-test = { path = "../../Developer/astra-test" }
 astra-vn = { path = "../../Modules/AstraVN/astra-vn" }
 astra-vn-core = { path = "../../Modules/AstraVN/astra-vn-core" }
 astra-vn-package = { path = "../../Modules/AstraVN/astra-vn-package" }

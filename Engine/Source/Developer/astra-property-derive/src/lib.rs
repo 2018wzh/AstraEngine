@@ -18,7 +18,7 @@ pub fn astra_property(input: TokenStream) -> TokenStream {
                     let field_name = ident.to_string();
                     let ty = field.ty;
                     quote! {
-                        ::astra_property::PropertyField::new(#field_name, stringify!(#ty))
+                        ::astra_core::PropertyField::new(#field_name, stringify!(#ty))
                     }
                 })
                 .collect::<Vec<_>>(),
@@ -38,9 +38,9 @@ pub fn astra_property(input: TokenStream) -> TokenStream {
         }
     };
     quote! {
-        impl #impl_generics ::astra_property::PropertyDescribe for #name #ty_generics #where_clause {
-            fn property_metadata() -> ::astra_property::TypeMetadata {
-                ::astra_property::TypeMetadata {
+        impl #impl_generics ::astra_core::PropertyDescribe for #name #ty_generics #where_clause {
+            fn property_metadata() -> ::astra_core::TypeMetadata {
+                ::astra_core::TypeMetadata {
                     type_name: stringify!(#name),
                     fields: vec![#(#fields),*],
                 }

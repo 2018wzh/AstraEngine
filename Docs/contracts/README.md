@@ -1,6 +1,6 @@
-# Contracts
+# 公共契约
 
-公共契约是实现入口。每个 contract 必须能映射到 Rust public API、数据格式、测试场景和 Release Gate。
+产品方向和跨模块边界以[总体架构](../product/architecture.md)、[重构契约](rebuild.md)为准。下列页面解释现有 Rust API、数据格式和真实消费者；不以未来 provider、阶段矩阵或报告清单反向要求实现。
 
 | Contract | 文件 |
 | --- | --- |
@@ -10,16 +10,12 @@
 | Plugin ABI | [plugin-abi.md](plugin-abi.md) |
 | Data / Save / Package | [data-formats.md](data-formats.md) |
 | Asset VFS | [asset-vfs.md](asset-vfs.md) |
-| Game Runtime Provider | [game-runtime-provider.md](game-runtime-provider.md) |
 | Media | [media.md](media.md) |
 | Runtime UI | [ui.md](ui.md) |
 | Performance | [performance.md](performance.md) |
 | Player 片段预览 | [player-preview.md](player-preview.md) |
 | Script / VN | [script-vn.md](script-vn.md) |
 | 演出帧推进迁移 | [presentation-tick-migration.md](presentation-tick-migration.md) |
-| AstraRPG / `rpg.trpg` | [rpg-trpg.md](rpg-trpg.md) |
-| AI / MCP | [ai-mcp.md](ai-mcp.md) |
 | AstraEMU 独立 Family ABI、最终帧与 PCM | [astraemu-ipc.md](astraemu-ipc.md) |
-| AstraEMU Family ABI v9 历史迁移（已取代） | [astraemu-family-abi-v9-migration.md](astraemu-family-abi-v9-migration.md) |
 | Release Gate | [release-gate.md](release-gate.md) |
 | TsuiNoSora Sidecar Schema | [tsuinosora-sidecar-schema.md](tsuinosora-sidecar-schema.md) |

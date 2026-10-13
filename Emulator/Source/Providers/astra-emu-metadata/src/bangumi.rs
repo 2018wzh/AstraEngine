@@ -183,14 +183,22 @@ fn convert_record(subject: Subject) -> MetadataRecord {
         .filter(|item| matches!(item.key.as_str(), "开发" | "发行" | "品牌" | "Developer"))
         .flat_map(|item| infobox_strings(&item.value))
         .collect();
+    let mut tags = subject
+        .tags
+        .into_iter()
+        .map(|tag| tag.name)
+        .collect::<Vec<_>>();
+    tags.extend(subject.meta_tags);
+    tags.sort();
+    tags.dedup();
     MetadataRecord {
         provider: MetadataProviderId::Bangumi,
         remote_id: subject.id.to_string(),
         title: subject.name,
         description: (!subject.summary.trim().is_empty()).then_some(subject.summary),
         alternate_titles,
+        tags,
         developers,
-        tags: subject.tags.into_iter().map(|tag| tag.name).collect(),
         release_date: subject.date,
         platforms: if subject.platform.is_empty() {
             Vec::new()

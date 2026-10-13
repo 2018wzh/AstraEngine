@@ -96,55 +96,16 @@ PlatformCommandSink 持有尚未交付的 decoder open future，限制为 64 个
 
 NativeVnProductAudioHost 持有唯一 pending open 和 pending close future。取消 ensure_open 后再次调用会继续同一 open；shutdown 则等待结果，直接关闭端点，不创建 Kira worker。关闭响应在恢复或退出 future 中断后继续由 Host 持有，下一次清理消费同一响应，不重复发送已完成的 close。明确失败的关闭仍可重试，端点在成功响应前保持所有权。这些 future 不进入存档，Host 必须在其平台客户端存活期间完成 shutdown。
 
-### NativeVN 直接 Rust 宿主
+## 当前 NativeVN 会话边界
 
-Player 的 NativeVN 主路径直接持有 NativeVnRuntimeProvider，移除 ProductRuntimeHost 的同步/异步桥、session mailbox、通用 worker 调度与外层 mutex。私有 NativeVnRuntimeHost 只负责已选择 package binding、单 session 生命周期、tick/seed/mode、输出数量和 save section 边界；实际玩法仍由同一 NativeVN RuntimeWorld 执行。step/save 执行失败后拒绝继续，经过完整验证的 restore 可重建会话；输入 section 验证失败不提交恢复。关闭与销毁不再伪造插件 instance lifecycle。
+Player、CLI 和发布检查直接使用 `astra-vn` 的 typed `VnSession`。公共场景、时钟、输入与任务由 `EngineSession` 持有；旧 NativeVnRuntimeProvider/Factory、通用 host/mailbox、FFI session map 和 gameplay/UI descriptor 已删除，不保留 ABI 适配或字符串命令兼容入口。
 
-现有 package/save 和 RuntimeStepInput 数据契约暂不改版；旧通用宿主仍供尚未迁移的非 Player 消费者使用，但 Player 不保留可切换的兼容分支。后续继续移除字符串 command、通用 product descriptor 和内部动态 ABI。这一步不把 NativeVN 全部 typed 重构标为完成。
+会话长期持有同一份 `VnRuntime` 状态，typed command 原位执行。常规显示投影只展开当前页面所需的 backlog、voice replay 或路线信息；不能为每帧显示复制完整权威状态。演出、音频与 timeline 输出由 Player 移动消费，不经过通用序列化 envelope。
 
-### NativeVN typed 命令入口
+保存/checkpoint 是显式事务边界，保存完整必要数据；package 校验与 typed 状态预检先于恢复提交。损坏输入保留当前状态与原文件；执行失败取消任务作用域，成功恢复后才重新可用。存档版本以当前 Rust reader 为准，不使用历史迁移页中的 v8/v9 或 provider descriptor 接受旧输入。
 
-NativeVnStepInput 将 tick/seed/mode 与 NativeVnStepCommand 分开表达。Player 直接传递已有 VnPlayerCommand；LaunchDefault 是独立变体，由权威 session 查找默认入口。删除 Player 的 runtime_step_fields 和 page/skip/reading/unlock 字符串映射，不再构造 RuntimeStepInput 的 action/argument/auxiliary/flag。NativeVnRuntimeProvider::step_native 是生产入口，旧 step 只在尚未迁移的 ABI 消费者边界解析字符串后调用同一实现。类型均为进程内数据，不新增序列化或存档字段；输出和 package descriptor 的后续迁移仍按总体计划执行。
+NativeVN 会话直接执行业务命令和管理等待，不要求通过专用单状态 FSM 或转发 action。通用 flat FSM 仍是 Engine 的可选能力；旧异步结果在恢复、重开或退出后失效，关闭必须取消并等待资源 worker 完成。
 
-### NativeVN typed 演出输出
+时间线保留已结束/已取消的 settled ID 供脚本清理。删除实体同时取消它的 tween/track，其他实体和摄像机轨道继续；取消不产生成功 fence，恢复校验拒绝引用已删除实体的活动任务。
 
-NativeVnStepOutput 直接拥有 PresentationCommand、VnAudioCommand 和 VnTimelineTask，Player 移动消费这些值，不再转换为 RuntimeLive 演出类型后解码回来。仅旧 ABI step 在返回边界进行转换。输出数量仍合计演出、音频和 timeline，超过宿主预算终止执行；音频与演出按原顺序匹配，缺失或多余音频明确失败。当前 VN view state 仍使用原来的按需历史投影，后续单独迁移，不为本次改动复制完整 backlog。save/package 格式不变。
-
-### NativeVN typed 状态视图
-
-NativeVnStateView 是进程内只读显示投影：直接复用 VN typed 字段，记录完整 backlog_count，但常规对话只复制最后一条 backlog。Backlog 页展开 backlog，VoiceReplay 页展开语音索引，RouteChart 或终局展开路线历史。call stack、variables、read_state 和 wait_sequence 不进入显示投影；权威状态与保存仍由 runtime 持有。Player 消费投影，不经过 RuntimeLiveVnState 往返转换；仅旧 ABI 输出边界适配。投影不提供 serde，不可用作存档恢复输入。
-
-### NativeVN 原生创建入口
-
-open_native 接收共享 Arc<CompiledStory>、VnRunConfig 与 NativeVnSessionConfig，配置直接声明 seed、worker_count、integrity_mode 和可选 PackageHandle。Player 与 runtime 共享已经校验、解码的剧情，不再生成中间 Postcard section/hash，也不重复 prepare/probe。package 仍在外层加载和 binding 校验；保存恢复身份检查不变。无 package 的嵌入式 NativeVN 可创建 session；旧 ABI open_compiled_story 只负责参数适配。非法 executor/worker_count 和重复 session 必须在发布会话前失败。
-
-### NativeVN session 直接所有权
-
-NativeVnSession::new 返回原生会话对象，Player 私有宿主直接拥有并调用 step/save/restore，关闭时消费并销毁会话，取消 RuntimeWorld 作用域。实时操作不经 provider session map 查找；旧 provider 将同一 session 实现保存在 map 中，仅服务旧 ABI 消费者。session API 验证传入的会话身份，非法身份不改变会话；已有 tick/失败、保存边界、恢复预检仍然有效。创建与 step/save 模块独立，不复制一套产品执行器。
-
-### 原生存档容器 v8
-
-NativeVnSession::save/restore 直接读写 Runtime SaveBlob，恢复返回 LoadReport（step/seed）。Player v8 保存明确 session_id 和自描述 Runtime 容器，删除 RuntimeSaveSections、section 元数据和重复外层 hash；Runtime 容器自身的 schema/codec/hash 校验、宿主大小限制与 package/typed state 预检保留；seed 在提交 World 和 VN state 前与创建配置匹配。v7 与更旧 Player 存档拒绝，不提供迁移或覆盖旧文件。旧 provider ABI 在边界包装同一个 SaveBlob；产品媒体、元数据和恢复后的作用域清理不变。
-
-### 原生 step 时间与关闭
-
-NativeVnStepInput 使用 Runtime TickInput/TickMode，与 NativeVnStepOutput 一起删除冗余 session id；直接持有的 NativeVnSession 决定执行对象，宿主继续校验 fixed step、seed 与恢复模式。旧 provider::step 在边界查找 session 并转换 ABI mode/输出身份，不再提供中间 step_native 转发入口。NativeVnSession::close 消费会话并返回 unit；仅旧 ABI 构造 RuntimeShutdownReport。存档 v8 格式不变。
-
-### 原生执行配置
-
-NativeVnRuntimeExecution 直接声明 Runtime TickIntegrityMode 与 usize worker_count，删除 RuntimeExecutorConfig、ABI mode 映射及 u8 转换。serial 使用一个 worker，parallel 使用独立 astra-worker-budget 已验证的进程预算，构造本身不再返回伪失败。package 打开入口先校验 1..=DEFAULT_LIMIT 的 worker 数，非法值明确失败，不截断或回退；session 创建沿用同一配置。此改动不改变存档格式或全局 worker 调度。
-
-### Package 原生 runtime 选择
-
-PackageReader::runtime_selection 返回只读 PackageRuntimeSelection（NativeVn、target、profile），不再公开插件 ValidatedRuntimeProviderSelection。builder/reader 继续完成现有 policy、registry、target 和 VFS 一致性验证，仅当前支持的 NativeVN/Scene2D 可生成原生选择；未知 runtime 或不匹配 provider 拒绝。现有序列化 policy 的 descriptor 暂留，后续整体改版移除；Player 打开包和发布检查仍在创建会话前校验其与编译入产品的描述完全一致，不将其存入运行宿主。发布行为检查直接创建 NativeVnSession，验证保存恢复字节一致和恢复后 typed step；不再建立通用 worker/mailbox、重复编解码剧情或伪造插件 lifecycle。此检查仍仅为局部 session conformance，不代表真实 Player 验收。
-
-### NativeVN 状态原位执行
-
-NativeVnSession 长期持有 VnRuntime，step 在同一份状态上执行，不复制 backlog/read-state/voice replay，也不临时重建 reducer。Core 的 apply_deferred 提交 revision 并返回待 Runtime 补齐 await 身份的输出；bind_pending_wait 只允许替换匹配的当前 wait，不公开可变状态。执行错误或 panic 时取消当前任务作用域，session 保持 failed，拒绝 step/save；成功 restore 才恢复可用，失败 restore 保留原状态与失败标记。存档仍在保存边界物化，容器格式不变。
-
-### NativeVN 移除转发 FSM
-
-NativeVN 由会话直接执行 typed command，Runtime tick 处理已有等待完成，随后会话以 Runtime 来源提交业务事件，并通过 RuntimeWorld::create_host_await 创建下一等待。新等待绑定当前 tick，事件进入有序队列供下一 tick 消费；保存保留队列和等待。删除专用单状态 FSM、转发 action、控制 Mutex 和字符串 PlayerInput 映射。Runtime 的通用 flat FSM 仍可选用。旧 NativeVN 存档中非空 StateMachineStore 返回 ASTRA_NATIVE_VN_RESTORE_LEGACY_MACHINE，预检失败不改变当前会话，不提供迁移。
-
-
-Stage v9 将已结束/已取消 timeline ID 统一保留为 settled ID，供脚本随后清理；删除实体时同时取消它的 tween 和 timeline track，其他实体/摄像机轨道继续运行。即时 hide、clear_layer 和渐隐完成均使用相同取消路径，取消不产生成功 fence；旧 v8 存档直接拒绝。存档与恢复校验禁止保留引用已删除实体的活动任务。
+当前 API、产品存读档和验证状态见 [AstraVN](../modules/astra-vn.md)、[Runtime](runtime.md) 与 [实施状态](../status/implementation-plan.md)。前述平台媒体取消/响应所有权仍适用于实际 Host，不因 typed 会话切换而删除。

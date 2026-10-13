@@ -23,7 +23,7 @@ from tsuinosora_director_core import extract_readable_assets
 from tsuinosora_route_graph import build_route_graph_report, analyze_assets
 from tsuinosora_script_source_map import build_script_source_map_report
 from tsuinosora_cast_source_map import build_cast_source_map_report
-from tsuinosora_native_conversion import build_conversion_report, build_route_scenarios, build_mount_policy, rearrange_native_assets
+from tsuinosora_native_conversion import build_conversion_report, build_mount_policy, rearrange_native_assets
 from tsuinosora_projectorrays_report import build_projectorrays_full_dump_report
 from tsuinosora_projectorrays_reader import import_projectorrays_reader
 from tsuinosora_diagnostics import _blocked_asset_analysis, _dedupe_diagnostics, _empty_inventory, _source_root_diagnostics, _write_json
@@ -332,24 +332,6 @@ def build_stage3_gate_report(
     for policy in mount_policies:
         _write_json(reports_root / f"mount_policy.{policy['target']}.json", policy)
 
-    scenario_ref_reports = []
-    for target_spec in target_specs:
-        target = target_spec["target"]
-        for profile in target_spec["profiles"]:
-            for platform in target_spec["platforms"]:
-                scenarios = build_route_scenarios(target, profile, platform, routes)
-                name = f"scenario_refs.{target}.{profile}.{platform}.json"
-                _write_json(reports_root / name, scenarios)
-                scenario_ref_reports.append(
-                    {
-                        "target": target,
-                        "profile": profile,
-                        "platform": platform,
-                        "report": f"reports/{name}",
-                        "route_count": len(routes),
-                    }
-                )
-
     report_diagnostics = _dedupe_diagnostics(
         diagnostics
         + asset_analysis.get("diagnostics", [])
@@ -360,7 +342,7 @@ def build_stage3_gate_report(
     )
 
     report = {
-        "schema": "tsuinosora.stage3_gate_report.v1",
+        "schema": "tsuinosora.stage3_gate_report.v2",
         "status": "pass",
         "input_aliases": {
             "original": "original_install_root",
@@ -383,7 +365,6 @@ def build_stage3_gate_report(
             "modern_profile_report": "reports/modern_profile_report.json" if requires_modern else "",
         },
         "targets": target_specs,
-        "scenario_refs": scenario_ref_reports,
         "diagnostics": report_diagnostics,
         "redaction": {
             "paths": "alias_or_report_relative_only",
@@ -442,22 +423,12 @@ def run_local_gate(
     game_png: Path | str,
     remake_root: Path | str | None = None,
     unpacked_root: Path | str | None = None,
-    routes: list[dict] | None = None,
     modern_features: list[dict] | None = None,
     targets: list[dict] | None = None,
     external_reader_report: dict | None = None,
 ) -> dict:
     work_root = Path(work_root)
     reports_root = work_root / "reports"
-    explicit_routes = list(routes or [])
-    route_evidence_diagnostics = []
-    if explicit_routes:
-        route_evidence_diagnostics.append(
-            {
-                "code": "TSUI_LOCAL_GATE_ROUTE_EVIDENCE_REQUIRED",
-                "message": "local gate requires route graph or script source-map report evidence; explicit routes cannot substitute commercial route coverage",
-            }
-        )
     stage3_report = build_stage3_gate_report(
         original_root=original_root,
         work_root=work_root,
@@ -470,10 +441,10 @@ def run_local_gate(
         targets=targets,
         external_reader_report=external_reader_report,
     )
-    diagnostics = route_evidence_diagnostics + list(stage3_report.get("diagnostics", []))
+    diagnostics = list(stage3_report.get("diagnostics", []))
     nativevn_report = None
     route_count = 0
-    if not route_evidence_diagnostics and stage3_report.get("status") == "pass":
+    if stage3_report.get("status") == "pass":
         nativevn_report = write_nativevn_package_input(work_root)
         diagnostics.extend(nativevn_report.get("diagnostics", []))
         route_count = int(nativevn_report.get("route_count", route_count))
@@ -505,8 +476,7 @@ def run_local_gate(
         },
     }
     if (
-        route_evidence_diagnostics
-        or stage3_report.get("status") != "pass"
+        stage3_report.get("status") != "pass"
         or (nativevn_report and nativevn_report.get("status") != "pass")
     ):
         report["status"] = "blocked"
@@ -564,7 +534,6 @@ def run_demo_slice_gate(config_path: Path | str) -> dict:
             game_png=Path(str(config.get("game_png", "Examples/TsuiNoSora/Docs/Game.png"))),
             remake_root=Path(str(config["remake_install_root"])) if config.get("remake_install_root") else None,
             unpacked_root=configured_unpacked_root,
-            routes=[],
             modern_features=list(config.get("modern_features", [])),
             targets=INTERNAL_DEMO_STAGE3_TARGETS,
             external_reader_report=projectorrays_report,

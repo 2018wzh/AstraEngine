@@ -1,6 +1,6 @@
-# Implementation Plan
+# 终之空转换与验证方法
 
-本页是 Stage 3 的执行蓝图。repo-side 的 ProjectorRays 读取、严格格式校验、资源转换、typed Director/Lingo story lowering、NativeVN project/package 生成、Classic/Modern Yakui UI、Headless 物理输入和视觉 checkpoint 已落地。当前私有 full coverage report 覆盖 578 个 source resource、724 个 handler、27,013 条 command、37 条自动化路线、1,328 个 choice、3,073 条 media command 与 17,161 个 wait command；2527/2527 个 ProjectorRays binary chunk 已转换。Classic 18 个和 Modern 11 个 GPU Headless checkpoint 已通过；15 项 Classic v3 原版参考比较有 13 项通过，`006` 绑定具名固定色彩 tolerance，`005/009` 等待连续两帧重新取证。人物 layer、Opening、monologue、choice、8 槽与原灰色系统页均由 Director 证据进入 typed 主路径。Windows E3、当前 package 的完整 37 路线汇总、两项 reference 重取证与 required manual signoff 仍是 blocker，Stage 3 保持 `IN_PROGRESS`。
+本页维护 ProjectorRays 读取、严格格式校验、资源转换、typed Director/Lingo lowering 与 NativeVN 工程生成的方法，不另维护 Stage 完成表。已生成路线与局部 GPU checkpoint 不代表完整产品验收；当前 Windows Classic/Modern 37 路线、媒体、存读档和其余平台的实际结果统一见 [实施状态](../../status/implementation-plan.md)。颜色比较使用显式固定 profile 与同节点资源/稳定帧绑定，不需要具名批准。
 
 2026 年 7 月 16 日起，`tsuinosora.native_story_ir.v1` 是唯一可生成私有 NativeVN 项目的剧情输入。它完整表达 score/frame、状态、分支、媒体、文本/选择、等待点和物理输入自动化，并由 `tsuinosora.full_conversion_coverage_report.v1` 逐项证明 source、handler、command、route、terminal、choice、media 和 wait coverage。Classic/Modern Yakui UI project template 已进入私有 package；Modern 为默认 profile，包含 Title、Quick Panel、Save、Load、Backlog、Auto、Skip 和 Config，两套 profile 都保持 800x600/4:3。Modern system page 使用同一 score-derived sky texture，并以 23 px 水平 inset、29 px 垂直 inset、gold rule 和 paper surface 延续原作画框语言；`position_x`/`position_y`/`position_right`/`position_bottom` 在 UI backend 中形成显式四边约束，不依赖隐式 stretch。私有 package 和 Headless UI/视觉 evidence 已重新生成，不复用旧 worktree 产物；Windows/Web 与全路线证据仍按本页后续 gate 闭合。
 
@@ -166,14 +166,14 @@ Asset analysis gate 通过后，转换器才能把解包资源重排到 `local_w
 
 ## Phase 6 NativeVN Conversion
 
-把 Phase 5 输出转成 AstraVN planned data。当前 `Tools/TsuiNoSora/tsuinosora_tools.py nativevn-project` 可以从已生成的脱敏 reports 和 covered routes 写出 `local_work_root/nativevn/project.yaml`、`Scripts/main.astra`、`PackageSections/*.json`、scenario refs、`native-assets/` asset sidecar 和 `tsuinosora.nativevn_package_input_report.v1`；该 report 会列出 project、story、package section、asset sidecar 和 scenario ref 的相对路径、role、`sha256` 和 byte size，不输出 story 正文或 payload。生成的 `project.yaml` 必须声明 `nativevn.asset_roots: [native-assets]`，`astra-cli cook` 会用 `astra-cook` 读取 sidecar 和 source hash，把每个 asset 写成 package section，并在 `asset.vfs_manifest.entries` 中登记 `package:/native-assets/...` URI、section id、hash 和 byte size，同时在 `asset.catalog.assets` 中登记 asset id、media kind 和 profile。生成的 `.astra` option key 和 scenario `player_input choose` 会保留 route graph/source map 中的 sanitized choice id；只有 route 没有 choice 证据时才生成 fallback choice。显式 routes 入参也会在写 story/scenario 前重新校验；不安全 `route_id`/terminal/choice、非 covered coverage、重复 choice 或冲突 route signature 会阻断，且不会写出 story 或 scenario refs。`local-gate` 会先跑 `stage3-gate`，如果没有显式 `unpacked_root`，会先执行 `extract-readable`，通过后只从 `tsuinosora.route_graph_report.v1` 或 `tsuinosora.script_source_map_report.v1` 派生 routes 并写 NativeVN package input；调用方显式传入 routes 只能触发 `TSUI_LOCAL_GATE_ROUTE_EVIDENCE_REQUIRED` blocking diagnostic，不能替代商业 route coverage。`demo-slice --config` 是私有 root 入口，只接受本地 root/config 作为运行参数，输出 `tsuinosora.demo_slice_report.v1` 和 `local-gate` 派生的 NativeVN project；config 中手填 routes 会触发 `TSUI_DEMO_SLICE_ROUTE_EVIDENCE_REQUIRED`。`local_gate_report.route_count` 来自实际 NativeVN package input，包括从 route graph 或 source-map report 派生的 routes；由 stage3 reports 派生的 choices 和 route-bound `mount_assets` 也会进入 conversion report、`.astra` 和 scenario refs，不再只保留 CLI 入参。`astra-cli` 的 project-level `package_sections` 会按 target/profile 把这些脱敏 section 写入 package，写入前会移除 package release gate 禁止的 payload-like 字段，只保留 `redaction.payload: omitted`。patch/windows scenario refs 已能在 route metadata 或 cast source map 派生证据提供 `mount_assets` 时输出 alias、相对 path、role、route id 和 `sha256`，其中 role 必须是 Asset analysis 允许分类且不能是 `unknown` 或 `script`，供 Windows player 从 `--mount-root` 读取本地合法数据根。生成的 demo story 包含 `vn.commercial_baseline` 所需的 dialogue、choice、route、voice replay、movie wait、bgm、se、explicit wait 和 system UI evidence。这个 slice 只证明 package 输入、section wiring、route choice 保真、asset cook/VFS manifest/catalog 和 hash-bound mount asset 读取；真实商业文本、素材 payload、VFS reader、modern profile 和完整商业全路线自动化仍是后续 gate。
+`nativevn-project --work-root` 只从私有 typed story IR、已通过的转换报告及实际资源闭包生成剧情、UI 工程、package sections、asset sidecar 和 `Automation/*.jsonl`。Writer 与 local-gate 不再接受显式 routes；旧 route-scenarios 模板已删除。既有 IR coverage、choice/terminal、资源身份、安全路径和 Rust 物理输入校验保留，报告只登记实际写出的文件。真实生成方法与限制以当前工具为准，不把 source-map 统计或 metadata route 声明当作输入执行。
 
 - `.astra` canonical story source。
 - `CompiledStory` debug symbol、source map 和 route table。
 - `VnCommandCursor` 初始位置、choice id、wait state expectation。
 - Asset registry、AudioGraph、Timeline/Fence 绑定。
 - classic profile 的 input map，保留左键推进和右键存档语义。
-- `tsuinosora.reference_evidence`、`tsuinosora.asset_analysis`、`tsuinosora.conversion_manifest`、`tsuinosora.mount_policy` 和 scenario refs 的 package section。当前 `astra-release` 已能在 TsuiNoSora target 下阻断缺 section、schema/status 错误、路径泄露、asset quarantine、route coverage 缺口、mount target/alias 错误；`modern` profile 还会要求 `tsuinosora.modern_profile_report`，formal release profile 还会要求 `tsuinosora.manual_signoff`。当前 `astra-cli` 已能 cook project-level `package_sections` 和 NativeVN asset sidecar，并按 `targets`/`profiles` 过滤，避免 internal/patch mount policy 混写。
+- reference、asset analysis、conversion、mount policy 和 scenario refs 的 package section。Release Validator 保留 section/schema/hash、路径和 payload、asset quarantine、route coverage、mount target/alias 校验，Modern 仍校验独立增强与回退；不再生成或要求人工 signoff。Cook 按 target/profile 过滤中间输入，避免 internal/patch mount policy 混写。
 
 转换器不能把 choice payload 先写进全局 Blackboard。choice、advance、await completion 等输入应在运行时作为 trigger event payload 交给 VN step action，再由 `VnRuntimeState` 和 command cursor 推进。
 
@@ -221,7 +221,7 @@ modern profile 在 classic profile 之上启用 AstraVN 商业基线系统：
 - text key 覆盖，不改变 command id 和 route graph。
 - 字体、排版、ruby/注音、行宽和断行策略。
 - 未覆盖文本 fallback 到原文。
-- 翻译覆盖率、冲突、长度溢出和人工校对 signoff。
+- 翻译覆盖率、冲突、长度溢出与实际文本校对。
 
 translation patch 关闭时，classic profile 的 route、hash 和 save/replay 行为必须回到未启用状态。
 
@@ -238,7 +238,7 @@ overlay 不能默认替换背景、CG、UI、影片或音频。任何替换失�
 
 ## Phase 12 VFS Direct-Read
 
-VFS direct-read 是补丁式发布形态。发布包只包含 AstraVN story metadata、patch、plugin、filter preset、translation package、mount policy 和脱敏 manifest；用户在启动时选择 `original_install_root`，可选选择 `remake_install_root`。Windows player route scenario 可以用 `mount_probes` 声明 alias、相对 path 和 hash，用 route-bound `mount_assets` 声明 alias、相对 path、Asset analysis role、route id 和 hash，再由 `AstraPlayer.exe --route-scenario ... --mount-root alias=path` 在本地读取并输出 `player.patch_mount_probe` 与 `player.patch_mount_asset` check；report 不记录本地 root。Windows patch route 没有本地读取证据时，`player.patch_direct_read` 必须 blocking。Web patch direct-read 仍是后续目标，不能用浏览器静态 bundle 结果冒充本地 VFS 验收；如果 Web scenario 声明本地 mount probe/asset，Web player 必须 blocking。
+VFS direct-read 保留为独立的本地资源访问目标，需真实 alias/资源绑定、边界与 hash 校验。旧 route runner 和 `--route-scenario` 自推进不再作为实现或验证入口；未接通的 patch direct-read 保持未验收，不通过生成 metadata 或虚构命令证明。商业 payload、本地 root 与私有路径仍不得进入可提交报告。
 
 VFS 插件负责：
 
@@ -264,7 +264,7 @@ Stage 3 自动化需要覆盖真实玩家行为，而不只是不带窗口的 da
 
 ## Phase 14 Acceptance Evidence
 
-Stage 3 `DONE` 需要自动证据通过，但正式 release profile 仍要求人工 signoff。
+自动验证与实际产品运行分别记录，不设置 Stage `DONE`、具名签署或批准文件条件。
 
 自动证据：
 
@@ -275,7 +275,6 @@ Stage 3 `DONE` 需要自动证据通过，但正式 release profile 仍要求人
 - `tsuinosora.modern_profile_report.v1`
 - `tsuinosora.nativevn_package_input_report.v1`
 - `tsuinosora.local_gate_report.v1`
-- `tsuinosora.manual_signoff.v1`，只在 formal release profile 中作为人工验收摘要进入 release gate。
 - `astra.player_route_report.v1`
 - scenario report、coverage summary、state/event/presentation/player hash、release report。
 
@@ -286,4 +285,4 @@ Stage 3 `DONE` 需要自动证据通过，但正式 release profile 仍要求人
 - 画面复核。
 - alias/replacement review。
 
-任一自动阻断项未清，Stage 3 不能标为 `DONE`。人工 signoff 缺失时，Stage 3 自动化可以完成，但正式 release profile 必须保持 blocked。
+自动阻断项必须解决；真实通关、画面、设备听音和输入行为另行验证。签署报告不再是完成或发布条件，局部工具报告仍不能替代完整产品流程。

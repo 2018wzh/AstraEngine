@@ -12,9 +12,8 @@
 | [classic-first-route-private-rc.md](classic-first-route-private-rc.md) | Classic 第一线路 private research preview 的截图、Score snapshot、source unlock 与延期门禁 |
 | `classic-first-route-recapture-manifest.json` | 新增 800×600/802×602 连续帧的脱敏 raw/normalized hash 与节点证据 |
 | `classic-source-profile.json` | 1999 日文原版的 source verification profile；只含安全相对路径、长度与 hash |
-| `classic-visual-node-map.json` | reference、Director 节点、typed state、wait occurrence 与 GPU checkpoint 的脱敏同节点映射 |
-| `classic-visual-comparison-policy.json` | v3 固定几何/图像门禁、mask 上限和逐项色彩 tolerance 绑定 |
-| `classic-visual-color-tolerance-approval.json` | 项目所有者明确批准的 `astra.headless_tolerance_approval.v2`；只授权固定 `capture_palette_v1`，不等同于 formal signoff |
+| `classic-visual-node-map.json` | v4 同节点、资源闭包、稳定帧与 `color_tolerance_binding`；不含批准记录 |
+| `classic-visual-comparison-policy.json` | v4 固定几何/图像阈值、mask 上限与逐项颜色 profile；无需外部审批文件 |
 | [original-game-debug-patcher.md](original-game-debug-patcher.md) | 1999 原版调试菜单、完整副本、自动日文转区和无边框窗口补丁器的契约与验收边界 |
 
 补充截图统一放在样例 ignored 私有工作区的 `original-ui-references/` 生成目录。该目录分别保存 `raw/`、`cropped/`、`normalized/`，汇总图固定命名为 `tsui1999-ui-reference-contact-sheet.png`，索引固定命名为 `manifest.json`。迭代 run 可以使用版本后缀，但公开文档和 manifest 不依赖具体 run 目录。文件名不得使用下载站标题、角色商业名称或本机路径。

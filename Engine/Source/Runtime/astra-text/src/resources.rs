@@ -391,7 +391,7 @@ impl TextRenderResourceOwner {
                 commands,
             });
         }
-        tracing::debug!(
+        tracing::trace!(
             target: "astra_text",
             event = "text.render_resources.frame_updated",
             layout_count = self.layouts.len(),

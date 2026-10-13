@@ -1,9 +1,9 @@
-# Product Spec
+# 产品方向
 
-本目录写 AstraEngine 系列的产品级蓝图。这里不替代模块 contract，而是确定目标、边界、阶段和验收口径。
+本轮范围、产品边界和验收要求只在现行入口维护，不另设 Stage 路线或未来产品门禁。
 
 | 文档 | 内容 |
 | --- | --- |
-| [vision.md](vision.md) | 产品定位、用户、成功状态和非目标 |
-| [architecture.md](architecture.md) | 多仓架构、运行链路和关键边界 |
-| [roadmap.md](roadmap.md) | stage gate + 版本路线 |
+| [总体架构](architecture.md) | 单仓产品分区、运行链路与职责边界 |
+| [重构契约](../contracts/rebuild.md) | 已确认的实现与迁移约束 |
+| [实施状态](../status/implementation-plan.md) | 实际进度、验证结果与未完成项 |

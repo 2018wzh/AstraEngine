@@ -62,20 +62,10 @@ Standard command 在编译期直接降为 `StageCommand`。viewport、layer、ca
 
 扩展命令使用 `ExtensionCommandDescriptor` 声明 provider id、schema、字段名、字段类型和 required 状态。运行产物保存 descriptor 绑定和 typed payload。Player 没有装载对应 provider 时必须在 package open 阶段阻断，不能把扩展命令当成普通 Stage command 或忽略。
 
-## Luau Capability Sandbox
+## Luau 与宿主 IO
 
-Luau 默认无文件、网络或系统调用。权威写入必须通过记录型 `astra.mutate` API，产生 trace、previous value、rollback scope、dirty scope 和 replay event，并可在 rollback/playback 中恢复。`astra.command`、`astra.query` 和 `astra.trace` 只记录可序列化 capability request、read-only query 和 diagnostic event。`astra.snapshot` 只允许 nil、bool、integer、string 和 object 这类可序列化值；function、thread、userdata、native handle 或超出边界的 number 必须阻断，不能进入 save/replay。能力通过 descriptor 声明：
+Luau 是可信游戏脚本，不把不可信 sandbox 作为产品目标。当前 bootstrap 仍使用受限 Lua 环境；实际 IO 通过 embedding host 的显式接口异步提交，不因可信脚本契约而假装任意内置文件/网络 API 已接通。保存只接受显式可序列化数据，不保存 function、thread、userdata 或 native handle。
 
-```yaml
-luau:
-  runtime: luau
-  capabilities:
-    - astra.vn.command_extension
-    - astra.vn.policy_bundle
-    - astra.emu.patch.decode
-  fs:
-    read_roots: [foreign-content]
-  network: false
-```
+变量写入、query、trace 与 snapshot 的现有实现及预算见 [Luau 实现](../implementation/luau-policy.md)。读档、重开或退出使旧异步结果失效，预览 seek 不重复外部副作用。
 
-AstraEMU 的用户脚本统一使用 Luau。Trusted Project Profile 可以开启 read-only VFS、patch overlay、decode transform、text/media hook、VM trace、diagnostic 和 typed intent；状态注入只能在 fixed tick 边界变成 typed Blackboard、input、tag 或 media intent。AstraEMU 只处理本地结构、索引、压缩、用户授权 key 输入和 payload transform。脚本请求未授权 key 提取、商业保护处理或访问控制规避时，Manager 隔离禁用该脚本，并按无补丁模式继续 case。旧引擎研究文档中的 Lua/TJS 名称只描述 legacy engine 原有机制。
+AstraEMU 使用各核心的原生脚本与 VM，不强制改为 Luau，也不经 Engine Blackboard 或 product provider 注入状态。Family 自持文件、媒体、渲染与存档，见 [EMU 契约](astraemu-ipc.md)。

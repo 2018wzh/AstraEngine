@@ -1,6 +1,6 @@
 # AstraVN Live Player Automation
 
-本页定义 Stage 3 live player automation 的设计边界。目标不是再跑一次 headless scenario，也不是让 route runner 代替玩家；Stage 3 的 Windows/Web 可玩验收必须证明真实 player host 收到平台输入、渲染发生变化、音频图有输出，并且 route 由同一次 player run 推进。
+本页解释已有 live-player automation 与报告边界，不另规定 Stage 顺序。真实可玩验证必须观察 Player event loop 的平台输入、画面变化、设备音频与同次运行的路线；Headless 局部场景或 route runner 不能替代。
 
 ## 证据链
 
@@ -33,15 +33,15 @@ Transcript identity 必须由完整 canonical JSON 计算；序列化失败或 a
 
 `VnPlayerCommand` 只允许留在产品内部语义层和明确的局部单元断言，不得作为 Headless、live-player gate 或产品自动化输入。旧 YAML Headless runner 已删除。
 
-## Headless Preflight
+## 可选 Headless 自动比较
 
 Migration 11 已实现平台无关 `astra.user_input_sequence.v1`。它只包含 focus/resume、keyboard、IME、pointer、wheel、touch、gamepad、固定时间推进、await、checkpoint 和 shutdown；`advance`、`choose`、`open_system`、直接 `VnPlayerCommand` 和 Runtime mutation 在 schema/adapter 边界阻断。file 与 stdio 现在执行同一物理输入序列并产生等价 manifest/report，损坏 JSONL 和断流会提交 blocked report 后非零退出。
 
-产品、Player、样例和 full-playthrough 在进入 Windows/Web live automation 前，必须先用相同 build、cooked package 和 input sequence 通过 Headless 自动比较与模型审查。`astra.headless_preflight_link.v2` 只负责绑定两次 run，不能把 Headless 的 PNG/WAV、route 或 input transcript冒充 Windows/Web host evidence。
+Headless 自动比较与真实平台操作各自独立执行，不再使用审批或 preflight link 把两者串成强制前置链。自动失败仍明确拒绝；PNG/WAV、frame/checkpoint 和 schema/hash 校验保留，不能冒充真实窗口或设备声音。
 
 ## Windows Driver
 
-Windows Stage 3 driver 必须启动真实 player 窗口，发现目标窗口并确认 focus。鼠标和键盘输入必须由 Win32 `SendInput` 发送到 player 窗口；输入后必须证明 winit event loop 收到对应 mouse/keyboard event，再由 runtime 推进 dialogue、choice、system page、config、save、load 和 backlog 路径。
+Windows driver 启动真实 Player 窗口，发现并聚焦目标。已有自动化使用 Win32 `SendInput`，并检查 event loop 接收结果及 dialogue、choice、system page、config、save/load 和 backlog 的实际变化。
 
 Windows required evidence：
 
@@ -56,7 +56,7 @@ Windows required evidence：
 
 ## Web Driver
 
-Web Stage 3 driver 可以继续用本地 HTTP server 承载 bundle，但必须打开真实 Chrome/Edge 页面并通过 Chrome DevTools Protocol 注入输入。鼠标、键盘和必要的触摸输入分别使用 `Input.dispatchMouseEvent`、`Input.dispatchKeyEvent` 和 `Input.dispatchTouchEvent`。禁止使用 DOM `element.click()`、直接调用 app JS API、直接写 route state 或 `--dump-dom` route runner。
+已保留的 Web driver 使用本地 HTTP bundle、真实浏览器页面与 CDP 输入；不能通过 DOM click、直接 app callback 或写 route state 冒充平台事件。Web 已延后，本节是现有工具事实，不是本轮新增产品验收要求。
 
 Web required evidence：
 
@@ -87,6 +87,6 @@ CDP transport由 `astra-player::WebCdpSession` 持有，连接只允许本机 `w
 
 `input.browser`、`input.gamepad`、`input.touch`、`input.ime` 这类 API 可用性只能说明 capability 存在，不能作为可玩证据。
 
-## Stage 6 扩展
+## 平台范围
 
-Stage 3 只要求 Windows 和 Web。Linux、macOS、iOS 和 Android 的同类平台输入自动化进入 Stage 6：桌面平台需要真实窗口、focus、原生输入、window/canvas frame evidence 和 host audio meter；移动平台需要设备或模拟器上的 touch/keyboard、safe area、resume、audio session 和 package source evidence。Stage 6 之前不得把这些平台的 capability smoke 写成 Stage 3 `DONE` 证据。
+本轮验证 Windows/Linux/macOS/Android 的实际输入、媒体、存读档与退出；桌面检查真实窗口和 focus，移动检查 touch、safe area、resume 与设备 audio session。尚未测的平台保持未验收，不把 capability smoke 写成完成；Web/iOS 延后，状态统一见 [实施状态](../status/implementation-plan.md)。

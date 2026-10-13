@@ -43,7 +43,7 @@ class PrivateRcDeliveryTests(unittest.TestCase):
     @staticmethod
     def gate_value(package_hash: str) -> dict:
         return {
-            "schema": "tsuinosora.private_rc_release_gate.v1",
+            "schema": "tsuinosora.private_rc_release_gate.v2",
             "status": "passed",
             "scope": {
                 "profile": "classic",
@@ -59,7 +59,6 @@ class PrivateRcDeliveryTests(unittest.TestCase):
                 "headless_report": "sha256:" + "2" * 64,
                 "y_route_report": "sha256:" + "3" * 64,
                 "comparison_report": "sha256:" + "4" * 64,
-                "manual_signoff": "sha256:" + "5" * 64,
             },
             "counts": {"visual_checks_required": 13, "visual_checks_passed": 13},
             "checks": [{"id": "all", "status": "pass"}],

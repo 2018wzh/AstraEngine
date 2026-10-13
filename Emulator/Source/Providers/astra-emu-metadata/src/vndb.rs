@@ -221,6 +221,12 @@ fn convert_record(value: vn::VisualNovel) -> MetadataRecord {
     }
     alternate_titles.sort();
     alternate_titles.dedup();
+    let developers = value
+        .developers
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|developer| developer.producer.name.or(developer.producer.original))
+        .collect();
     let mut tags = value
         .tags
         .unwrap_or_default()
@@ -229,12 +235,6 @@ fn convert_record(value: vn::VisualNovel) -> MetadataRecord {
         .collect::<Vec<_>>();
     tags.sort();
     tags.dedup();
-    let developers = value
-        .developers
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|developer| developer.producer.name.or(developer.producer.original))
-        .collect();
     let cover = value.image.map(|image| RemoteCover {
         url: image.thumbnail.or(image.url).unwrap_or_default(),
         width: image.thumbnail_dims.or(image.dims).map(|dims| dims[0]),
@@ -251,8 +251,8 @@ fn convert_record(value: vn::VisualNovel) -> MetadataRecord {
         title: value.title.unwrap_or_default(),
         description: value.description,
         alternate_titles,
-        developers,
         tags,
+        developers,
         release_date: value.released,
         platforms: value
             .platforms

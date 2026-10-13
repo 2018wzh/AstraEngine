@@ -28,19 +28,11 @@ __all__ = [
 ]
 
 
-def write_nativevn_package_input(work_root: Path | str, routes: list[dict] | None = None) -> dict:
+def write_nativevn_package_input(work_root: Path | str) -> dict:
     work_root = Path(work_root)
     reports_root = work_root / "reports"
     nativevn_root = work_root / "nativevn"
     diagnostics = []
-    if routes is not None:
-        diagnostics.append(
-            {
-                "code": "TSUI_NATIVEVN_EXPLICIT_ROUTE_INPUT_RETIRED",
-                "message": "NativeVN story and route coverage must come from the typed private story IR",
-            }
-        )
-
     conversion_report = _read_json(reports_root / "conversion_report.json")
     asset_analysis = _read_json(reports_root / "asset_analysis.json")
     if conversion_report.get("status") != "pass":

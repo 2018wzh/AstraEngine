@@ -1,127 +1,38 @@
-# Luau Policy
+# Luau 与宿主接口
 
-Luau 是 AstraEngine 的 policy runtime 方向。当前已实现主体在 AstraVN；Stage 7 需要先把可复用 sandbox、snapshot、trace、manifest、lock/vendor cache 和 diagnostic 抽成 `astra-policy`，再由 AstraVN、AstraRPG 和 AstraEMU host API 绑定各自 namespace。Legacy engine research can still mention Lua/TJS as historical input, but product policy docs use Luau terminology.
+Luau 是可信游戏脚本。当前产品边界见[重构契约](../contracts/rebuild.md)，不再要求所有状态修改经过 FSM action，也不把旧 sandbox、通用回放或未来 RPG/AI provider 作为主路径。
 
-## Runtime
+## 当前实现
 
-Use `mlua` with Luau support for host binding. Luau runs in a sandbox:
+`astra-policy` 提供值、预算和 VM 公共能力；`astra-vn-policy` 绑定 VN 查询、命令、动作和显式状态。当前 VM 初始化仍使用 `create_sandboxed_lua` 限制内置入口，这描述现有 bootstrap，不表示宿主文件/网络能力被产品契约禁止，也不构成不可信脚本安全边界。
 
-- no filesystem, network, process, clipboard or native call by default;
-- no direct access to renderer/audio/platform handles;
-- all host capability enters through `astra.*`;
-- all authoritative writes go through namespace-specific effect/mutation API.
+`PolicyExecutionBudget` 控制指令、内存、输出和状态深度。预算失败、非法值与宿主失败必须返回诊断，不能转为成功。保存 `PolicySnapshotValue`、`VnPolicyState` 和 continuation 数据，不保存 Function、Thread、UserData、闭包、协程栈或原生句柄。
 
-Generic `astra-policy` owns value serialization, capability denial, trace records and package lock/source-cache validation. Product crates own host tables:
+## 动作与异步 IO
 
-- AstraVN uses `astra.command`、`astra.mutate`、`astra.query` and `astra.snapshot`.
-- AstraRPG uses `astra.rpg.*` and `astra.rpg.trpg.*`.
-- AstraEMU trusted policy host remains Manager/provider scoped and must not expose legacy VM internals.
+包内注册源码通过 `astra.command.register` 声明动作及字段 schema。注册阶段结束后不能继续注册；动作 handler 使用同一 VM 的运行 API，并以 `PolicyActionContinuation` 显式保存进度。
 
-当前 AstraVN host 每次执行都接收 `PolicyQueryContext` 和 `PolicyExecutionBudget`。Query context 提供 text、asset、backlog、savepoint 与 layout 的确定性快照；缺 key 时返回 blocking diagnostic，不构造合成结果。Query trace 保存 API、参数和 result hash，Replay 使用记录结果。
+已实现的 Lua IO 接口是 `astra.host.read_text(key, resource)`、`cancel(key)` 和 `release(key)`：
 
-Execution budget 同时限制 Luau interrupt count、memory bytes、输出记录数量和 snapshot depth。无限循环、内存超限、输出洪泛或过深 snapshot 都会停止执行并返回 diagnostic。
+- `PolicyIoCapabilities` 由嵌入宿主授予具体 VFS 资源与字节上限，包或脚本不能自行增加权限。
+- `PolicyIoHost::read_text` 立即返回可取消 Future；请求、状态与失败原因由 `PolicyIoState` 持有。
+- Lua 读取 pending/ready/failed 状态，不阻塞 VM 等待外部工作；有 pending 请求时，先取消再 release。
+- 成功求值后才派发外部请求。关闭、读档或替换作用域使旧任务失效，迟到结果不能覆盖新会话。
 
-## AstraVN Host API
+宿主可以按可信脚本需求提供文件或网络实现，但现有上述入口不代表 Packaged Player 已具备通用磁盘/网络 adapter。资源授权、宿主实现和实际产品接入状态须分别记录，不能用 fixture host 冒充平台能力。预览 seek 不重复外部副作用。
 
-```luau
-astra.command.register(name: string, manifest: CommandManifest, handler: function)
-astra.command.filter(name: string, filter: function)
-astra.command.emit(name: string, params: table)
-astra.command.enqueue(name: string, params: table)
+## 查询与包数据
 
-astra.mutate.set_var(scope: string, key: string, value: any)
-astra.mutate.presentation(command: table)
-astra.mutate.audio(command: table)
-astra.mutate.timeline(task: table)
-astra.mutate.system_page(event: table)
+VN 查询和命令绑定使用真实 `PolicyQueryContext` 与包内源码/manifest。缺键、未知命令、损坏缓存或不匹配身份明确失败。现有包的 source cache 和内容校验继续由代码负责；不另建一套 speculative policy/runtime provider、审计 ledger 或审批报告。
 
-astra.var.get(scope: string, key: string): any
-astra.query.text(key: string, locale: string): table
-astra.query.asset(id: string): table
-astra.query.backlog(): table
-astra.query.savepoint(): table
-astra.query.layout(target: string): table
-astra.trace.event(kind: string, fields: table)
-astra.trace.performance_scope(name: string)
-```
+接口真源位于 `astra-vn-policy/src/{actions,host_io,luau_actions,luau_io}.rs`；调用与作用域由 typed `VnSession` 管理。公共 VM/值类型见 `astra-policy`，当前状态见[实施计划](../status/implementation-plan.md)。
 
-旧的 `astra.var.set` 已禁止作为权威写入入口，调用会返回 `ASTRA_VN_LUAU_AUTHORITY_API`。`astra.mutate.set_var` 只生成可序列化 mutation request/trace；host 必须在 Runtime action 事务中应用权威状态变化。直接修改 Luau table 仍只影响本次策略私有值。
+## 定向验证
 
-Every host function returns either a value or a structured diagnostic table:
-
-```luau
-{ ok = false, code = "ASTRA_LUAU_DENIED", message = "...", span = source_span }
-```
-
-## Typed Policy
-
-Policy packages must provide Luau types or generated `.d.luau` files. Editor and CI run typecheck before package.
-
-```luau
-export type CommandContext = {
-  locale: string,
-  step: number,
-  source_ref: string,
-}
-
-export type DialogueParams = {
-  key: string,
-  speaker: string,
-  voice: string?,
-}
-```
-
-## Policy Manifest
-
-```yaml
-schema: astra.policy_bundle.v1
-id: astra.policy.standard
-version: 0.1.0
-runtime: luau
-entry: policy/init.luau
-types: policy/types.d.luau
-commands:
-  astra.vn.dialogue:
-    params_schema: astra.vn.dialogue.params.v1
-    mutation_scope: [backlog, read_state, presentation, audio]
-    editor_node: Dialogue
-hooks:
-  - runtime_start
-  - before_command
-  - after_command
-dependencies:
-  pesde:
-    - name: jsdotlua/luau-regexp
-      version: 0.3.1
-lock: astra.policy.lock
-```
-
-## Dependencies
-
-Development can resolve pesde packages online. Package builds must write `astra.policy.lock` and vendor cache:
-
-```yaml
-schema: astra.policy_lock.v1
-packages:
-  - name: jsdotlua/luau-regexp
-    version: 0.3.1
-    source: pesde
-    hash: sha256:...
-    license: MIT
-```
-
-Release Gate uses only lock/vendor cache.
-
-## Snapshot
-
-Allowed runtime snapshot values are nil, boolean, integer, string and object/table values with string or integer keys. Function, thread, userdata, native handle, non-finite number and out-of-range number values block save/replay and package validation.
-
-## Tests
-
-```bash
+```sh
 cargo test -p astra-policy
-cargo test -p astra-vn-policy --test luau_sandbox
+cargo test -p astra-vn-policy --test luau_actions
 cargo test -p astra-vn-policy --test luau_mutation
 ```
 
-Expected: denied capability returns diagnostic；query reads injected backing state and records result hash；removed authority API and execution budget violations block；mutation trace records previous value and replay metadata；rollback/playback restores deterministic state；invalid snapshot/command/trace payloads block. `cargo test -p astra-policy` is planned until the shared crate exists.
+这些是普通逻辑与宿主边界回归，不要求启动 Headless；文件/网络、声音和画面能力仍需对应真实宿主验证。

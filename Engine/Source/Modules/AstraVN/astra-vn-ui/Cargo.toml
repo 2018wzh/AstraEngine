@@ -9,7 +9,6 @@ astra-core = { path = "../../../Runtime/astra-core" }
 astra-ui-core = { path = "../../../Runtime/astra-ui-core" }
 astra-vn-core = { path = "../astra-vn-core" }
 astra-vn-script = { path = "../astra-vn-script" }
-astra-vn-system = { path = "../astra-vn-system" }
 schemars.workspace = true
 serde.workspace = true
 thiserror.workspace = true
