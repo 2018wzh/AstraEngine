@@ -1,24 +1,22 @@
 # FVP Source Inventory
 
-本页是 RFVP upstream 研究索引。它描述的 snapshot section、PresentationCommand
-等旧接入名词仅用于定位历史代码；当前 v9 provider 的职责和阻断项见
-[rfvp-fork-audit.md](rfvp-fork-audit.md)。
+本页索引完整 RFVP submodule 的原生模块与样本 metadata。当前固定提交和差异分类见 [MODIFICATIONS](../../../Emulator/Source/Families/astra-emu-fvp/MODIFICATIONS.md)，实现状态见[性能审计](../../status/performance-upstream-audit-2026-10-12.md)。
 
 ## FVP 参考入口
 
-FVP 研究实现是本次设计输入的主要参考。AstraEMU 只吸收格式、状态机和验收经验，不复制该实现的产品结构。
+以下路径相对 `Emulator/ThirdParty/rfvp`。AstraEMU 直接复用原实现，不按此表再实现一套 VM、decoder 或 renderer。
 
-| 路径 | 可用事实 | AstraEMU 用法 |
+| 原生路径 | 职责 | 适配边界 |
 | --- | --- | --- |
-| `crates/rfvp/src/script/parser.rs` | `.hcb` header、`Nls`、syscall table、screen mode 映射 | 编写 `FvpScriptHeader`、probe 和 diagnostics |
-| `crates/rfvp/src/script/opcode.rs` | 0x00..0x27 opcode 名称 | 定义 bytecode decoder 和 trace vocabulary |
-| `crates/rfvp/src/script/context.rs` | stack VM、`Variant`、`ConstString` offset、`VmSyscall` dispatch | family plugin VM 执行模型 |
-| `crates/rfvp/src/vm_runner.rs` | frame tick、thread state、yield、save/load safe point | AstraEMU RuntimeWorld tick 边界和 ordered event 输出 |
-| `crates/rfvp/src/subsystem/resources/vfs.rs` | `.bin` pack parser、loose file override、VFS path 规范化 | archive reader 和 media resolver |
-| `crates/rfvp/src/subsystem/world.rs` | `GameData` 资源集合和 syscall registry | family-private 状态聚合，不进入 EngineCore |
-| `crates/rfvp/src/subsystem/components/syscalls/*.rs` | graph、text、sound、movie、thread 等 syscall 行为 | legacy API mapper 和兼容矩阵 |
-| `crates/rfvp/src/subsystem/resources/*` | prim、motion、text、graph buffer、save manager | snapshot section 和 PresentationCommand 来源 |
-| `crates/rfvp/src/portable/*` | portable VM、host bridge、no_std host API | 可借鉴 core/host 分离，不继承平台限制 |
+| `crates/rfvp/src/script/parser.rs` | HCB header、NLS、syscall、screen mode | 复用原解析与诊断 |
+| `crates/rfvp/src/script/opcode.rs` | opcode 定义 | 原 VM 执行，不新增 Host trace 协议 |
+| `crates/rfvp/src/script/context.rs` | 栈、Variant、ConstString、dispatch | 保持原操作语义 |
+| `crates/rfvp/src/vm_runner.rs` | 协程、yield、保存恢复安全点 | 功能修复与嵌入通知分别审查 |
+| `crates/rfvp/src/subsystem/resources/vfs.rs` | BIN、loose override、资源查找 | Family 提供文件访问，原核心解析 |
+| `crates/rfvp/src/subsystem/world.rs` | GameData 与 syscall registry | 会话自持，不进入 RuntimeWorld |
+| `crates/rfvp/src/subsystem/components/syscalls/` | graph、text、sound、movie、thread 命令 | 复用原实现 |
+| `crates/rfvp/src/rendering/gpu_prim.rs` | 原生 primitive GPU 绘制 | 原 renderer，不转为 Host 场景命令 |
+| `crates/rfvp/src/no_std_core.rs` / `host_api/` | 核心运行与嵌入端口 | 输入/时间、资源、字体、音频和生命周期 |
 
 ## 工具入口
 

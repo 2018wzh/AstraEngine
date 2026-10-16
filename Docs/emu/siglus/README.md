@@ -15,17 +15,17 @@
 | [script-execution.md](script-execution.md) | VM 栈、调用、命令分发、等待边界 |
 | [presentation-and-media.md](presentation-and-media.md) | G00、OMV、OVK、OWP、NWA、Ogg、MPEG/WMV 的运行时口径 |
 | [gameexe-config.md](gameexe-config.md) | `Gameexe.dat`/`Gameexe.chs` 解析和配置表契约 |
-| [runtime-family-plugin.md](runtime-family-plugin.md) | AstraEMU Siglus `LegacyRuntimeProvider` session 设计 |
+| [MODIFICATIONS](../../../Emulator/Source/Families/astra-emu-siglus/MODIFICATIONS.md) | 当前核心基线与必要嵌入差异 |
 | [game-observations.md](game-observations.md) | anemoi 体験版与 Rewrite_PLUS 的本地结构化观测 |
 | [tooling.md](tooling.md) | 现有 probe 工具和安全使用边界 |
-| [implementation-checklist.md](implementation-checklist.md) | 按功能域拆分的实现清单 |
+| [实施计划](../../status/implementation-plan.md) | 当前整改顺序与验收条件 |
 
 ## 接入原则
 
-Siglus 在 AstraEMU 中是 engine-native family plugin，不进入 AstraVN canonical story，也不把 Siglus 的对象模型上提为 EngineCore API。Manager 只接收 `PresentationCommand`、`AudioCommand`、`TextCaptureEvent`、`StateMachineTrace`、snapshot reference 和 diagnostics。
+Siglus Family 复用原 VM、renderer、Kira、实时时钟和保存实现。Manager 通过 [Family API](../../../Emulator/Source/FamilyApi/astra-emu-family-api/API_CONTRACT.md) 获取不可变 CPU lease、有界 PCM 和 typed 请求；Family 不进入 RuntimeWorld 或 AstraVN。
 
-Runtime 权威状态留在 Siglus provider session 内。Session 只传递结构化事件、本地结构化 trace 和可复现的本地资源引用；Manager 不解析 family 私有 VM 内存。
+当前绘制 generation 用于跳过无新输出的回读；变化帧的同步等待、分配和受阻关闭仍需收敛，详见[性能审计](../../status/performance-upstream-audit-2026-10-12.md)。
 
 ## 验收
 
-第一阶段只要求合法安装目录的只读启动和 trace：识别 `Scene.pck`、读取 `Gameexe.*` header、枚举媒体格式、构建本地结构化 report。后续再接脚本执行、presentation 和 save/load。
+当前已运行 GPU 标题/媒体、PCM、原生全局保存和冷重开。新基线菜单/槽位/代表流程、设备听音、GPU 警告归因与性能对照仍待验收。格式研究不替代实际产品运行。

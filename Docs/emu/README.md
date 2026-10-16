@@ -1,10 +1,10 @@
-# AstraEMU Legacy Engine Research
+# AstraEMU 核心资料
 
-本目录保存 AstraEMU legacy family 的实现级研究资料，包括 archive reader、脚本反编译、VM、媒体和原生存档。当前架构以 [ADR 0019](../adr/0019-astraemu-independent-host.md) 和 [AstraEMU Family Contract](../contracts/astraemu-ipc.md) 为准。旧页中的 RuntimeWorld、LegacyRuntimeProvider、Host VFS、snapshot bridge 与 release report 描述仅是历史接入记录，不作为独立 Host 的实施要求。
+本目录保存归档、脚本、VM、媒体和原生存档的研究事实。运行边界以 [Family API](../../Emulator/Source/FamilyApi/astra-emu-family-api/API_CONTRACT.md) 和[重构契约](../contracts/rebuild.md)为准；当前问题与验证见[性能审计](../status/performance-upstream-audit-2026-10-12.md)。
 
 ## Engine 目录
 
-本轮只接入 Windows 与 FVP。其他 family 的核心源码和格式研究保留，暂不参与活动依赖图；后续接入直接采用独立 Family ABI。
+当前整合 FVP、Siglus、Artemis、Musica 和 CMVS；KrKr 跳过本批适配，BGI/SoftPAL 保留研究资料。各核心实际完成范围见[实施计划](../status/implementation-plan.md)。
 
 | Engine | 合法样本来源 | 参考实现或工具 | 资料入口 |
 | --- | --- | --- | --- |
@@ -16,24 +16,11 @@
 | SoftPAL | 用户本地合法安装和 synthetic PAC/DAT fixture | SoftPAL 研究实现与本仓 extcall probe 工具 | [softpal/README.md](softpal/README.md) |
 | Musica | 用户本地合法安装和 synthetic PAZ fixture | Musica 研究实现与本仓 PAZ probe 工具 | [musica/README.md](musica/README.md) |
 
-## 统一文档切分
+## 文档职责
 
-每个 engine 至少包含：
+格式、源码索引、样本 metadata 和工具用法按核心保留。活动外部核心的精确基线与差异集中在各 Family 的 `MODIFICATIONS.md`，问题和下一步集中在 status，不再为每个核心维护第二份进度清单。
 
-```text
-README.md
-source-inventory.md
-archive-format.md
-script-format.md
-script-execution.md
-presentation-and-media.md
-runtime-family-plugin.md
-game-observations.md
-tooling.md
-implementation-checklist.md
-```
-
-特化文档只放 family 私有细节，例如 BGI 的 `script-bcs.md` / `script-bp.md`、Artemis 的 `script-tags-lua.md`、KrKr 的 `kag-tjs.md`、SoftPAL 的 `sv20-extcalls.md`。各 family 的 `runtime-family-plugin.md` 保留既有接入研究，当前接入状态统一见 [实施状态](../status/implementation-plan.md)。
+尚未接入核心的研究页不构成实现承诺；其中旧 RuntimeWorld、LegacyRuntimeProvider、snapshot bridge 或 release report 术语不能恢复为现行契约。
 
 ## Tooling
 

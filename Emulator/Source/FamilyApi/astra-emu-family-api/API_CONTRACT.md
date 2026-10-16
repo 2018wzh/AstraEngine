@@ -53,7 +53,7 @@ Host 只提供 game_path、初始 WindowState 和输入。Family 自持 VM、文
 
 `FrameInfo.width/height` 是物理 raster，`logical_width/logical_height` 是 VM/输入舞台；stride、尺寸、长度和像素语义明确验证。格式声明 RGBA/BGRA 顺序、sRGB/linear 编码，行声明 top-to-bottom/bottom-to-top；alpha 声明 opaque 或 ignored。ignored 表示 RGB 已按原生规则最终合成，alpha 字节不参与 Host 透明度，不需要 Family 扫描改写 alpha。Host 直接按原生 stride 上传，不为 `Queue::write_texture` 增加 256-byte 行填充；必要的翻转、颜色/alpha 呈现转换由 Host GPU 完成。普通 RGBA/sRGB/top-to-bottom/opaque 无滤镜输出直接呈现上传纹理。不跨 ABI 传 GPU/native handle，不改变上游混合空间。
 
-现行六个 Family 的最终合成 RGB 使用 Ignored alpha，避免在发布时重新扫描/改写不被消费的 alpha；公共 Opaque 仍严格验证。Host 的 GPU alpha 归一化不是零成本，净性能和硬件范围见[性能审计](../../../../Docs/status/performance-upstream-audit-2026-10-12.md#10-整改进度2026-10-13)，不能据此声称所有平台已验收。
+已迁移 Family 的最终合成 RGB 使用 Ignored alpha，避免发布时重新扫描/改写未被消费的 alpha；公共 Opaque 仍严格验证。Host GPU 归一化成本及实际验收范围见[性能审计](../../../../Docs/status/performance-upstream-audit-2026-10-12.md#已验证范围)。KrKr 本批跳过，不计整合验收。
 
 推进、取帧与呈现解耦。每个 Family 的 provider、VM、GPU 与生命周期入口从创建到关闭固定在同一 owner；UI 只提交有界 typed 命令并接收结果/最新帧，不能直接执行核心推进或等待自己负责完成的模态请求。输入保持顺序，帧消费者可以降频但不能丢逻辑步、篡改原生音频时钟或存档语义。epoch 切换/关闭后旧输入、完成结果和帧拒绝，设备重建仍可重新上传保留 lease 的完整基线。
 

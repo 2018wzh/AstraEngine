@@ -116,4 +116,4 @@ CMVS 普通挂载现在只读取 CPZ header/index，校验索引身份、角色�
 
 本批 215 项 unit 通过，1 项 GPU fixture 忽略，all-target Clippy、fmt 与文档检查通过。正确入口实际 GPU 复测已跨过 offset 200324 的赋值：索引约 0.48 秒、DX12 discrete 约 2.40 秒、open 约 2.45 秒；首 advance 的下一阻断是 command 548 at offset 200462，返回 ACTION_UNBOUND，约 3.32 秒正常关闭且无残留进程。尚无完整首 tick、帧、267 正文、Host 请求交付、输入或音频结果。
 
-最终合成 RGB 的 Family 帧声明 Ignored alpha，保留原字节/stride，发布时不重复逐像素 Opaque 认证；VM/Scene/媒体不变。Host 必要 GPU 归一化有成本，release 硬件对比和未验收范围见[性能审计](../../../../Docs/status/performance-upstream-audit-2026-10-12.md#10-整改进度2026-10-13)。这不补齐上述未接通的真实游戏能力。
+最终合成 RGB 的 Family 帧声明 Ignored alpha，保留原字节/stride，发布时不重复逐像素 Opaque 认证。Host GPU 归一化成本、当前运行边界见[性能审计](../../../../Docs/status/performance-upstream-audit-2026-10-12.md#已验证范围)，下一步统一见[实施计划](../../../../Docs/status/implementation-plan.md)；上述早期过程记录不替代当前验收。

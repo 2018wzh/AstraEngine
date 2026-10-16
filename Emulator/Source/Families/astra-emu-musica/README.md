@@ -70,7 +70,7 @@ cargo build --manifest-path Emulator/Cargo.toml -p astra-emu-musica --features d
 
 测试覆盖 archive、图像、parser/VM、native codec 和 profile 边界。创建真实 session 的测试现在需要硬件 GPU；独立文字 GPU 测试显式使用 `--ignored` 运行，覆盖共享字形、移除区域、清空后重建与重复帧。公开最小字节格式 fixture 贯通 encrypted PAZ、SC、PNG、完整 PCM decode、Kira stereo pan、消息物理输入、atomic save/load 相同帧、translation cancel/load 和 close/reopen；单独验证阻塞 audio sink 退出、decode budget 与非挂起 VM 循环边界。Fixture audio sink 不是真实音频设备，动态模块编译也不代表 Manager 内实际安装验收。
 
-现有未验证 stand positioning、movie、choice、系统页相关 opcode 仍明确失败，不能把这一可运行子集说成完整 Musica 兼容。ANI/SQZ decoder 有独立真实格式 fixture，尚未接入 session 动画播放。尚无授权完整游戏、真实设备音视频、原版 save compatibility、冷启动/完整结局、Android 静态注册或跨平台验收。
+当前整合状态和游戏验收以[实施计划](../../../../Docs/status/implementation-plan.md)为准。标题、剧情、选择、系统页、ANI/SQZ、影片及自有存档已有实现与局部回归；完整机制、真实设备音视频、结局、Android 和跨平台仍待验收，未支持命令继续明确失败。
 
 VM 的可序列化状态集中在 runtime/model.rs，演出命令在 runtime/effects.rs，音频命令在 runtime/audio_commands.rs，选择处理在 runtime/choices.rs。调度与存读档保留在 runtime.rs，共享演出序号仍由 VM 分配。运行错误通过 typed diagnostic_code() 返回稳定标识；未实现命令只向 Family/Manager 返回指令序号，不透传脚本文本。
 
@@ -78,4 +78,4 @@ VM 的可序列化状态集中在 runtime/model.rs，演出命令在 runtime/eff
 
 原版历史 `CT5` 保存面板切换参数，支持已经核对的 0 和 10；其他值明确拒绝。逻辑画布与 GPU 光栅尺寸分别配置，eden 原版导入要求 1024×640；核心槽保存逻辑画布身份，不同画布加载在修改活动状态前拒绝。
 
-最终合成 RGB 的 Family 帧声明 Ignored alpha，保留原字节与存档/VM 几何，发布时不重复 Opaque alpha 扫描。Host 必要 GPU 归一化仍执行；release 实测与四空间/eden 旧逻辑尺寸迁移的未完成边界见[性能审计](../../../../Docs/status/performance-upstream-audit-2026-10-12.md#10-整改进度2026-10-13)。这项元数据整改没有改动原来已验证的演出或存档机制。
+最终合成 RGB 的 Family 帧声明 Ignored alpha，保留原字节与存档/VM 几何，发布时不重复 Opaque alpha 扫描。Host 必要 GPU 归一化仍有成本；性能基线与 eden 旧逻辑尺寸整合缺口见[性能审计](../../../../Docs/status/performance-upstream-audit-2026-10-12.md#已验证范围)。元数据整改不代表演出、保存或几何迁移已完成。

@@ -1,57 +1,51 @@
 # AstraEngine 实施宪章
 
-## 当前方向
+## 权威入口
 
-本仓按 2026-09-12 用户确认的全产品重构实施。权威入口是 [总体架构](Docs/product/architecture.md)、[重构契约](Docs/contracts/rebuild.md) 和 [实施状态](Docs/status/implementation-plan.md)。旧页面中与这些决定冲突的 Stage、provider ABI、证据治理、强制 Headless、Qt 和 Luau sandbox 要求不再生效；随相应子系统替换删除旧页面和代码，不创建长期兼容双轨。
+- [总体架构](Docs/product/architecture.md)：产品分工与平台范围。
+- [重构契约](Docs/contracts/rebuild.md)、[Family API](Emulator/Source/FamilyApi/astra-emu-family-api/API_CONTRACT.md)：接口、所有权和生命周期。
+- [实施计划](Docs/status/implementation-plan.md)：当前状态、执行顺序与验收；[性能审计](Docs/status/performance-upstream-audit-2026-10-12.md)：问题、证据和上游修复。
 
-单仓按产品分区。2026-09-16 本地接续优先验证 FVP 与 AstraVN 终之空，再整合全部并行 EMU 成果，继续 Engine/VN、GPUI Editor/Agent 和四平台验收。共享契约先于实现更新。未实现目标不得写成已完成。
+宪章只保留长期约束，提交号、测试计数和阶段进度写入对应记录。现行决定取代旧 Stage、证据审批、强制 Headless、Qt、通用 provider/动态 UI ABI 和 Luau sandbox 要求；切换时迁移消费者并删除旧链，不留兼容双轨。
 
-## 产品和运行边界
+## 实施与数据
 
-- Engine 是可独立嵌入的 2D 核心。Actor/Component、flat FSM 和任务组合各司其职；不强制所有产品修改通过 FSM action，不要求创建 World 时携带 package。
-- 公共运行层使用 astra-runtime，公共会话命名为 EngineSession；场景、任务、时钟、输入和呈现不得使用 AstraVNRuntime 名称。VN 专属会话使用 VnSession，VnRuntime 只表示 VN 业务实现。按职责迁移代码，不保留旧名称的兼容别名。
-- 本地接续纳入 KrKr、Siglus、Artemis、CMVS、Musica 的已提交及未提交成果，在独占工作树逐项移植；不得覆盖来源工作树。旧 Minori family 统一重命名为 Musica。新增核心验证代表流程，FVP/Musica 各一结局与终之空 Classic/Modern 37 路线要求不变。
-- 所有适配核心采用最小原生移植原则：优先启用核心现有 GPU feature，复用其渲染、媒体和平台适配；改动限必要的嵌入入口、Family API 与生命周期边界。不得因统一 Host 而另写同一核心的执行或渲染路径。实际视听测试使用 GPU；Windows Sandbox 使用 GPU 虚拟化，软件 adapter 不算通过。
-- 外部核心采用完整上游 fork，以固定上游提交加一个最小适配提交作为整合目标，通过 Git submodule 固定精确提交；不在主仓复制源码。吸收 emu/krkr-hosted 的此项决策，不沿用其已废弃的 ABI。适配代码尽量留在 Family，核心自身缺陷优先整理上游 issue；不得借重构扩大核心功能。整理提交使用新的本地分支，不改写来源或已发布历史，差异与基线同步记录在 MODIFICATIONS.md。
-- 用户已确认 codex/minori-runtime-followup 的全部机制经过验证。接续以该分支完整实现为移植依据，按依赖批量接入，不再逐项重新逆向或验证原引擎语义；测试聚焦新 Family API、SDK/GPU 复用和生命周期的整合回归。不得遗漏机制，亦不得恢复旧 Host/provider 架构。
-- Musica 与 CMVS 是 astra-emu-sdk 的实际消费者：按共同需求提取模块，优先复用 AstraEngine 已有文字、绘制、媒体及字节源能力，删除被替代的重复实现。SDK 不依赖 VN、不强制创建 EngineSession，不要求成熟外部核心采用；统一使用 Musica 实现。
-- Rust 编译期组合和显式依赖注入是 NativeVN 主路径。内部通用 provider/动态 UI ABI 随消费者迁移删除，不新增序列化转发层。
-- Runtime 默认逻辑 60 Hz，呈现独立。只保证可靠存读档，不建设通用输入回放、跨平台逐位确定性或全程 hash 链。禁止每帧全量状态克隆和序列化；必要事务保留在编辑、存档和配置边界。
-- 任务有明确状态所有者、作用域、取消和完成结果。读档/退出后旧异步结果失效。新演出默认替换同属性旧任务，其他轨道继续。
-- `.astra` 是剧情、场景、演出和 UI 的创作权威，使用成熟 lexer/parser/CST/AST 库；图和时间线修改同一源码，布局仅为作者元数据。
-- Luau 是可信游戏脚本，可通过宿主使用文件和网络；耗时工作异步。保存显式数据，不保存闭包、协程栈或 native handle。预览 seek 不重复外部副作用。
-- Editor 使用 GPUI，独立 GPU 预览窗口，复用真实 VN session。游戏 UI 使用 Yakui，EMU Manager 使用 Slint。
-- Editor 使用 ACP 外部 Agent 和 MCP 编辑接口，提供自主/逐批确认模式。统一文档版本、批量编辑和撤销，不另写模型 API Agent 循环。
-- EMU 独立于 RuntimeWorld、VN、product package 和 Engine registry。Family 自持 VM、文件、渲染、解码、混音和存档，Host 接收 CPU 最终帧和有界 PCM。
-- 核心与插件的诊断日志必须接入 Manager 的 tracing/astra-observability 通道，覆盖初始化、运行、存读档及关闭。动态库由适配层安装共享日志桥，静态核心复用宿主订阅器；核心不另建文件 sink。保留稳定事件、级别、来源和有界字段；按用户决定，日志桥不做字段脱敏或白名单过滤，字符串、message 和 Debug/Display 正常转发，超限用 dropped_fields 计数。桥初始化失败阻止加载。
-- Family API v7 的窗口请求只传 typed SetFullscreen，不传 UI 类型或 native handle；`FrameInfo` 同时声明物理 raster 与逻辑 stage 尺寸，两者保持宽高比；Family 不内置 letterbox，Manager 在窗口线程统一做输出与输入逆映射，退出恢复普通窗口，无窗口 Host 明确拒绝。
-- 呈现严格区分四个空间：逻辑舞台决定 VM、存档、时间和动画几何；资产物理像素只决定上传密度，必须显式提供逻辑尺寸与 ANI 等原点；raster canvas 决定 GPU 目标尺寸；窗口输出由 Host 负责 letterbox 和 pointer 映射。Musica 固定逻辑舞台 `1280x720`，render scale 只允许 `1.0/1.5/2.0/3.0`，对应 `1280x720/1920x1080/2560x1440/3840x2160`；不能静默 fallback 或让资源密度改变 VM/save/time。
-- 公共 `astra-media-core` 提供 `Extent2D`/`Canvas2D`、`RectI`、`Transform2D`、`TextureFrame` 和 `SceneCommand`；`astra-emu-sdk` 的 `StageCanvas` 只做 Family 语义包装，`TextureAsset` 显式分开物理像素、逻辑尺寸和原点。SDK 不依赖 VN，AstraVN presentation 也直接使用同一 Canvas contract。
-- 成功读档或重新开始后，Family 通过 reset_clock 显式重置播放时间线。实时 Host 从 advance 与帧复制完成后重新计时；普通帧保留原有耗时计算，不扩大 elapsed 上限或静默截断。
-- Family API 使用 abi_stable；可选增强关闭不阻止基础播放。Manager 保存核心/游戏配置，启动时传入并由核心验证。库驻留至进程退出，更新重启 Manager；关闭会话仍须取消请求并等待 worker 结束。
-- FVP 保留成熟 RFVP，适配尽量小。按用户 2026-10-16 决定基于上游当前 HEAD（0.6.0 revision af557db750c7833274f22a6d82b0dc33cdea2f85）加一个必要适配提交，以 ThirdParty submodule 集成，差异写 MODIFICATIONS.md；共用上游 V1/RFVS、GlobalSaveDataV1/RFVG，不复制 hosted 存档结构，不添加旧存档识别、迁移或专门报错。
-- Musica 使用可选 SDK，共享底层能力不要求创建 Engine session。短期采用核心自有存档，长期才做原版兼容。成熟核心无需采用 SDK。
-- Musica GARbro scheme 保留纯 Rust 两阶段 NRBF reader：收集对象再解析引用，未知/断裂/重复/越界及不符合图约束的输入明确失败，不使用 BinaryFormatter 或启发式 fallback。
-- 保留真实文字 shaping、字体 fallback、媒体播放、资源生命周期和错误诊断；不能以矩形、首帧或 synthetic fixture 冒充完整产品。
-- 平台范围为 Windows/Linux/macOS/Android，Editor 仅三桌面；Web/iOS/RPG/TRPG/运行时 AI 本轮延后。Android 默认导入游戏到应用管理目录，静态编译核心。
+- 主线程亲自实施，不启动或委派子智能体。每个实例独占 worktree、branch、target 和服务；不得编辑、编译或清理其他实例工作树。来源分支和既有未提交成果保持原状。
+- 共享契约先于实现修改。优先成熟 crate，按实际消费者与平台职责拆分；合并纯转发层，lib.rs 保持薄 facade，接近 400–600 行时按职责拆模块。Rust 类型是 schema 真源；跨平台脚本用 Python，命令示例用 bash/sh。
+- 商业资源、正文、截图、存档、私有 profile/key 和转换产物只留 ignored 工作区。保留许可证和修改归属，原商业存档不得误覆盖；读取失败不回写原文件。
+- 保留容器版本、长度/边界、唯一 section、内容完整性和明确错误。postcard struct 不使用破坏二进制读取的 `skip_serializing_if`。不以 fallback、静默跳过或假数据掩盖缺失能力。
+- 日志复用 tracing/astra-observability，库不建独立文件 sink；私有路径、secret 和商业正文不进入可提交报告。
+- 常规实现、检查和本地提交已授权。真实游戏发现的上游功能缺陷可独立提交 issue/PR，附非商业最小复现；其他发布、外发和破坏性操作另按授权执行。提交用短祈使句，不改写来源或已发布历史。
 
-## 代码、数据与协作
+## Engine、VN 与 Editor
 
-- 用户于 2026-09-15 要求本次重构由主线程完成；不得启动或委派子智能体。已有子任务 worktree 不因此自动归当前实例所有。
+- Engine 是可独立嵌入的 2D 核心。Actor/Component、flat FSM、任务组合各司其职；World 不强制携带 package，业务修改不强制经 FSM action。
+- 公共运行层为 `astra-runtime` / `EngineSession`；VN 入口为 `VnSession`，`VnRuntime` 仅表示 VN 业务。按职责迁移，不保留旧名称别名或内部产品动态 ABI 转发。
+- 逻辑默认 60 Hz，呈现独立。保存显式状态；禁止每帧全量克隆/序列化，不建设通用 replay、跨平台逐位确定性或全程 hash 链。事务留在编辑、存档和配置边界。
+- 任务具有 owner、scope、取消和完成结果；读档/退出使旧异步结果失效。新演出替换同属性旧任务，其他轨道继续。关闭即使遇错也须完成取消和 worker 回收。
+- `.astra` 是剧情、场景、演出和 UI 的创作权威，复用成熟 lexer/parser/CST/AST；图和时间线回写同一源码，布局仅为作者元数据。
+- Luau 是可信游戏脚本，文件/网络通过宿主异步执行；存档不保存闭包、协程栈或 native handle。预览 seek 不重复外部副作用。
+- Editor 使用 GPUI，独立 GPU 预览复用真实 VN session；游戏 UI 使用 Yakui，EMU Manager 使用 Slint。Editor 使用 ACP 外部 Agent 与 MCP 版本化编辑、批量撤销、自主/逐批确认模式，不另写模型 API Agent 循环。
 
-- 每个实例独占 Git worktree、branch、target 和服务。开始前检查归属；禁止在其他实例 worktree 编辑/编译/测试。只清理自己创建且不再使用的产物。并行 agent 通过独立提交整合。
-- 成熟 crate 优先；按真实消费者、平台隔离和职责拆分。合并纯转发 crate，不为数量目标新增抽象。lib.rs 薄 facade；接近 400–600 行拆模块。
-- Rust 使用 idiomatic 命名与 typed API；Rust 类型为 schema 真源。跨平台脚本用 Python，命令示例用 bash/sh。
-- 日志使用 tracing/astra-observability，库不初始化全局 sink；稳定事件字段。secret、商业正文和未经审计的 payload 不写日志。私有路径不写可提交报告。
-- 保留容器版本、长度/边界、唯一 section、内容完整性和明确错误。postcard struct 不使用导致二进制不可读的 skip_serializing_if。读取失败不覆盖原存档。
-- 商业游戏源、截图、转换数据和私有包只在 ignored 工作区；保留许可证和上游修改说明。终之空公开仓库只含工具/模板/非商业测试，不能提交商业 payload。既有商业存档永不误覆盖。
-- Git 提交用短祈使句。常规实现与本地提交已由重构任务授权；发布、外发或 destructive 操作遵循用户授权范围。
+## EMU 最小原生适配
 
-## 测试和状态
+- EMU 独立于 RuntimeWorld、VN、product package 和 Engine registry。Family 自持原 VM、文件、渲染、解码、混音和存档；Host 接收不可变 CPU frame lease 和有界 PCM。保持 CPU lease 边界，不跨 ABI 传 GPU/native handle。
+- 外部核心用完整上游 fork，整合时基于上游 HEAD 加一个必要适配提交，由 `Emulator/ThirdParty` submodule 固定精确提交。`MODIFICATIONS.md` 记录基线与差异；不在主仓复制核心源码。
+- 核心改动严格限必要嵌入钩子：入口、依赖注入、原生输出与生命周期通知。优先启用原 GPU/媒体/platform feature，不复制 VM、renderer、decoder 或存档实现，不为统一 Host 更换上游图形库。
+- 引擎自身功能缺陷独立提交上游 issue/PR，等待合并后更新基线。适配引入的回归在适配内修正；不撤回必要修复后宣称验收，也不把功能修复长期混称为嵌入钩子。
+- FVP 共用上游 V1/RFVS、`GlobalSaveDataV1`/RFVG；不增加旧存档识别、迁移、兼容 reader 或专门旧版本报错。
+- Musica 接续以已确认的 `codex/minori-runtime-followup` 完整机制为依据，测试聚焦整合，不重复原语义逆向；统一使用 Musica 名称。Musica/CMVS 共同驱动可选 SDK，复用公共文字、绘制、媒体与字节源；SDK 不依赖 VN，不强制 EngineSession，成熟外部核心无需采用。
+- Musica 短期用核心自有存档。GARbro scheme 保留纯 Rust 两阶段 NRBF reader：先收集对象、再解析引用；未知、断裂、重复、越界或非法对象图明确失败，不用 BinaryFormatter 或启发式 fallback。
+- 分清逻辑舞台、资产物理像素、raster canvas 和窗口输出。复用公共 `Canvas2D` 等类型；资产显式提供逻辑尺寸和 ANI 原点，Host 负责 letterbox 与输入逆映射。Musica 逻辑舞台固定 `1280×720`，render scale 目标限 `1.0/1.5/2.0/3.0`；资源密度不改变 VM/save/time，不静默降级。
+- `abi_stable` Family API 的 typed 配置由 Manager 保存、核心验证；可选增强关闭不阻止基础播放。窗口/模态请求由 Host 执行，无窗口 Host 明确拒绝。库驻留至进程退出，更新需重启；session 关闭仍须取消请求并 join worker。
+- 成功读档/重开始显式返回 `reset_clock`；Host 从 advance 与取帧完成后重新计时。普通帧保留耗时，不扩大 elapsed 上限或静默截断。
+- 动态库由适配层安装共享日志桥，静态核心复用宿主订阅器；初始化失败阻止加载。核心日志保留事件、级别、来源和有界 typed 字段，字符串/message/Debug/Display 正常转发，不做桥字段脱敏或白名单；超限计入 `dropped_fields`。
 
-- 普通逻辑用 Rust unit/integration test，无需启动 Headless；需要视听时才创建 GPU/音频宿主。纯代码 doctest 可恢复。删除强制全测试 Headless 和具名 tolerance/evidence 审批要求。
-- 每次提交至少检查文档链接、fmt、受影响 crate 的 clippy 和相关测试；阶段末执行全部活动 workspace 的 build/clippy/test。平台缺依赖或资源须准确记录，不能以跳过冒充通过。
-- 开发 Agent 辅助操作真实产品、查看截图和音频分析。产品完成须来自实际运行，不以静态报告、窗口存在或局部 fixture 代替。
-- Windows 验证终之空 Classic/Modern 37 路线、FVP/Musica 各一结局；其余平台验证代表流程、输入/媒体/存读档/退出与性能。
-- VN 桌面目标 1440p120、移动 1080p60；EMU 按原生速率，分别测核心与 Host。固定场景记录实际硬件，未测保持未验收。
-- 文档中文主体，API/crate 名保留英文。现行文档写实际接口与状态，删除失效治理内容，历史留 Git。文档检查仅做链接和明确内容卫生，不强制 Stage 状态矩阵或报告 schema。
+## 验收与记录
+
+- 普通逻辑用 unit/integration test；视听路径使用实际硬件 GPU/音频宿主，允许 headless 或 GPU 虚拟化 Sandbox。软件 adapter、NullAudio、首帧和 synthetic fixture 各只证明其覆盖范围。
+- 保留真实 shaping、字体 fallback、完整媒体、资源生命周期和错误诊断。产品完成必须来自实际操作，不用静态报告、窗口存在或测试数量代替。
+- Windows 最终验收包括终之空 Classic/Modern 37 路线、FVP/Musica 各一结局；其他平台覆盖代表流程、输入/媒体/存读档/退出。VN 桌面目标 1440p120、移动 1080p60；EMU 按原生节奏分别测核心和 Host，先建同场景基线再定开销门槛。
+- 平台为 Windows/Linux/macOS/Android，Editor 仅三桌面；Web/iOS/RPG/TRPG/运行时 AI 延后。Android 默认将游戏导入应用管理目录，静态编译核心。
+- 代码提交检查文档链接、fmt、受影响 crate Clippy 和相关测试；阶段末检查活动 workspace build/clippy/test 并运行对应产品。缺依赖、忽略项和失败如实记录；文档改动运行文档检查，不冒报产品验证。
+- 文档以中文为主，保留 API/crate 名。只维护当前契约、结论和下一步；删除失效过程页，历史留 Git，不再叠加流水账、审批矩阵或报告 schema。

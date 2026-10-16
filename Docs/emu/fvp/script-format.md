@@ -1,8 +1,6 @@
 # FVP Script Format
 
-本页为脚本格式研究资料。正文、text capture、逐运行 hash 和本地路径不得进入
-当前 v9 的日志、report、package 或 Host DTO；文字显示由 RFVP core 自己完成，
-翻译只经同步 UTF-8 Hook。当前边界见 [thin-fork.md](thin-fork.md)。
+本页为 HCB 格式研究。当前 Family 直接复用 RFVP 解析和文字实现，边界见 [FVP](README.md)；样本正文和完整反编译脚本只留私有工作区。
 
 FVP 主脚本通常是 `.hcb`。rfvp 的 parser 没有 magic check，文件开头直接是 `sys_desc_offset`，code area 从 offset `0x00000004` 开始，到 `sys_desc_offset` 之前结束。
 
@@ -142,4 +140,4 @@ Last descriptors include `TimerSuspend`, `TitleMenu`, `V3DMotion`, `V3DMotionPau
 
 ## Format policy
 
-AstraEMU may expose a structured HCB metadata report, but the report must not include full `push_string` payloads. Store string length, source offset, encoding and hash prefix. Full text stays inside the FVP provider session and only enters `TextCaptureEvent` when the user has explicitly enabled local text capture for a legally owned copy.
+HCB metadata 报告可保留字符串长度、source offset、编码和 hash prefix；不包含完整 `push_string` payload。正文留在原核心会话，不另建 TextCaptureEvent 或逐运行 hash 协议。

@@ -16,37 +16,37 @@ NativeVN 的原生宿主与 Headless 共用物理输入到 UI request/completion
 
 ## EMU Family API
 
-KrKr 所需的 PCM 播放进度采用 [Family v10 实施契约](../../Emulator/Source/FamilyApi/astra-emu-family-api/API_CONTRACT.md#音频播放进度v10-实施契约)：单一 typed 查询返回 Host 已接纳与已播放的源帧水位，区分设备时间戳与显式测试消费。公共接口与指纹升级为 v10，旧插件须重建；不支持的后端明确拒绝进度查询，不阻止其他 Family 的基础播放。
+现行 [Family API v13](../../Emulator/Source/FamilyApi/astra-emu-family-api/API_CONTRACT.md) 使用 abi_stable、固定 owner 和不可变 CPU frame lease；epoch/generation 区分 Ready/Pending/Unchanged。PCM 查询区分已接纳/已播放源帧及 DeviceTimestamp/TestConsumption，不支持时明确拒绝查询。可选能力关闭不阻止基础播放。
 
-Family API v8 增加有界 UTF-8 `SetTitle` 窗口请求，空串清空、控制字符及超过 4096 bytes 的标题失败；完整限制与迁移见 [Family API](../../Emulator/Source/FamilyApi/astra-emu-family-api/API_CONTRACT.md)。Family 负责严格解码原生编码，Host 在窗口线程应用；正文不得写日志，NullAudio 标记保留，关闭恢复 Manager 标题。v7 核心须重建，不提供兼容分支。
+窗口采用 typed SetFullscreen/SetTitle/SetIcon/SetPointer，模态服务使用有界 typed 请求。Host 在窗口线程应用、关闭恢复普通窗口与 Manager 标题/图标；无窗口 Host 明确拒绝。尺寸、字段和响应限制以 API 契约为准，不传 UI 类型或 native handle。
 
 Manager headless 使用现有 `astra-observability` 的有界日志，与本次输出图像放在一起：将输出文件扩展名替换为 `.diagnostics` 作为日志目录。日志不写入游戏目录或存档，不属于 package；测试结束后按临时产物规则清理。
 
 共享音频的流式解码只将解码器明确返回的流结束视为完成。`SymphoniaAudioStreamDecoder` 遇到意外 EOF 返回 `ASTRA_AUDIO_STREAM_TRUNCATED_INPUT`；已输出的有效 PCM 前缀不代表整段播放成功，调用方须终止失败的播放请求。正常完整流和解码预算规则不变。
 
-GPU 回读缓冲可以在进程内保留共享所有权。`OwnedPixelBuffer::from(Arc<[u8]>)` 复用原像素分配，克隆只延长生命周期，`make_mut_for_update` 继续按写时复制隔离修改；转换本身不校验图像尺寸，仍由 `TextureFrame` 的现有校验入口负责。Musica 直接持有回读缓冲，CMVS 将同一缓冲转为纹理；Family 帧借用有效期和 Host 同步复制约束不变，保存与 ABI 格式不变。
+GPU 回读后的 CPU 存储可以在进程内保留共享所有权。`OwnedPixelBuffer::from(Arc<[u8]>)` 复用原像素分配，`make_mut_for_update` 保持写时复制；`TextureFrame` 校验尺寸和完整性。Family 以不可变 CPU lease 交付，Host 保留 owner 到上传完成，不要求同步复制，也不把 GPU 对象放进跨线程 lease。
 
 `WgpuOffscreenRenderer` 的 Rust 构造入口显式接收 graphics owner 持有的 `wgpu::Instance`，不再按 renderer 隐式创建 Instance。Musica 的持久 provider 持有 Instance，普通启动和恢复候选共用它；Headless factory 的克隆共享 Instance，使用 `HeadlessThreadOwner` 时由该 owner 跨 session 保留。原生 backend 和 Windows StaticDxc 配置保持不变，每个 renderer 仍独立选择并验证 adapter policy、创建 device/queue 和场景资源。关闭 session 释放自身 GPU 资源并取消、等待其 worker，不能缓存整个 renderer 或 device 冒充释放。Instance 随显式 owner 结束而释放，不用生产全局静态缓存，也不保证同一进程无限次销毁和重建整个 graphics owner。旧的无 Instance 构造调用直接迁移，不保留兼容入口；错误保留原诊断 code 和安全 operation，不增加软件 fallback 或失败重试。
 
 公共 `astra-media-core` 的 `Extent2D`/`Canvas2D` 负责逻辑舞台到 raster canvas 的比例校验、根变换和坐标映射，并复用 `RectI`、`Transform2D`、`TextureFrame`、`SceneCommand`。四个空间必须分开：逻辑舞台决定 VM、存档、时间和动画几何；资产保存物理像素并显式声明逻辑尺寸及格式原点；raster canvas 是 GPU 目标；窗口输出由 Host 做 letterbox 和 pointer 逆映射。`astra-emu-sdk` 只提供薄语义 `StageCanvas` 与 `TextureAsset`，不依赖 VN；AstraVN presentation 直接消费同一 `Canvas2D`，作为第二个真实调用方。
 
-Musica 固定逻辑舞台 `1280x720`，启动配置显式提供正整数 `render_width` 与 `render_height`，按设备和内存能力选择任意 raster 尺寸。配置无效或 raster 预算不足必须失败，不能静默降级。不同宽高比使用统一 scale 的居中 aspect-fit viewport，剩余像素清黑；viewport 外的指针不进入游戏。物理像素密度不能改变逻辑 quad、ANI 原点、动画 frame 几何、VM、存档或剧情时间；文字按实际 raster density 重新 shaping/rasterize glyph，再由根逆变换回逻辑位置。Family 帧的 `FrameInfo` 同时声明 physical `width/height` 与 logical `logical_width/logical_height`，Manager 和 Family 共用同一 viewport 计算完成输出与输入映射。无独立 SDK 的外部核心使用 logical=raster。
+Musica 的产品目标为固定 `1280×720` 逻辑舞台及 `1.0/1.5/2.0/3.0` render scale。当前实现仍暴露 `logical_width/logical_height` 与 `render_width/render_height`，支持更广的逻辑/raster 尺寸；包括 eden 旧 1024×640 的整合尚未收敛，不能将目标写成已实现。现行 Canvas 以统一 scale 和居中 aspect-fit viewport 输出，viewport 外指针不进入游戏；配置/预算无效明确失败。资产密度不能改变逻辑 quad、ANI 原点、动画几何、VM、保存或时间，文字按 raster density 排版后映回逻辑坐标。尺寸契约收敛须保留这些不变量及已有存档身份校验，不通过静默缩放修改游戏语义。
 
-本地接续同时整合 KrKr、Siglus、Artemis、CMVS 和 Musica 的已有成果，全部使用新 Family API；统一使用 Musica 名称。新增核心的完成标准为真实代表流程，包括启动、连续剧情、媒体、选择或系统页、存读档和退出重开。FVP 与 Musica 仍各验证一条结局。
+当前整合 FVP、Siglus、Artemis、CMVS 和 Musica，KrKr 按用户决定跳过本批适配，保留原成果。统一使用 Musica 名称。新增核心验证真实代表流程，包括启动、连续剧情、媒体、选择/系统页、存读档和退出重开；FVP/Musica 最终各验证一条结局。
 
 FamilyDescriptor 增加有界 typed 配置 schema（bool/integer/number/string/enum，分组和默认值）；OpenRequest 增加相同 schema 对应的 typed 配置值。字段 ID 唯一，未知键、重复键、类型/范围/枚举不匹配都在 open 前返回可定位错误。未提供值使用声明默认值。配置只在启动时生效，Manager 按核心/游戏持久化，核心继续验证。
 
-TextReplacement 表示可选能力，未传 service 表示本次禁用，不应阻止支持正文翻译的核心启动。PCM capability 仍要求对应 sink。CPU 帧借用和音频有界/可取消写入不变。ABI 变更递增 fingerprint，旧插件明确重装，不增加旧 reader。动态库加载后在进程中保留，session 关闭取消所有 worker/服务调用；切换游戏不卸载库。
+TextReplacement 是可选能力，未传 service 表示本次禁用；PCM capability 仍要求对应 sink。CPU lease 保持不可变，音频写入有界且可取消。ABI 变更递增 fingerprint，插件统一重建，不加兼容 reader。动态库驻留至进程退出，session 关闭取消并等待 worker/服务调用；切换游戏不卸载库。
 
 FVP 共用 RFVP VM、原生媒体和存档，仅补必要接口。Musica 使用 SDK，自有存档不覆盖原版；原版兼容不属于当前发布要求。SDK 不能依赖 VN 或强迫核心创建 RuntimeWorld。
 
-全部适配核心采用最小必要修改，优先启用已有 GPU feature 和原生平台适配。Family API 的 CPU 最终帧借用只约束跨 ABI 交付方式，不要求 CPU 渲染：核心使用自己的 GPU 管线，交付时回读最终帧。不得为接入统一 Manager 复制一套核心渲染器。Windows Sandbox 通过 GPU 虚拟化执行视听测试；软件 adapter 明确失败，不能替代 GPU 验收。
+成熟核心改动严格限必要嵌入钩子，复用原 GPU/媒体/平台实现；CPU lease 约束的是交付，不要求 CPU 渲染。产品硬件要求由显式嵌入配置或 Family 验证，不改变上游默认平台策略。实际视听使用硬件 GPU，Sandbox 可使用 GPU 虚拟化。
 
-所有核心诊断接入 Manager，不能只写在动态库内部的独立日志系统。Family API v7 在 descriptor/probe/open 前安装进程级 DiagnosticSink；适配层可选用 API crate 的 diagnostic-bridge feature，将 tracing 与 log 统一转发。Manager 仍是日志 sink、过滤和 flush 的唯一所有者。初始化冲突明确失败，不保留无日志的启动路径。桥不改变核心 GPU、平台和存档实现，也不要求依赖旧 SDK。
+核心诊断在 descriptor/probe/open 前接入 Manager。动态适配层安装共享日志桥，静态核心复用宿主订阅器；Manager 是日志 sink、级别过滤和 flush 的所有者。桥初始化冲突阻止加载。字符串、message、Debug/Display 正常有界转发，数值保留 typed 值，超限计入 dropped_fields；字段不经白名单或内容脱敏。当前最终输出缺口见审计 R08。
 
 
 
-Rust Family 可选用 API crate 的 ProviderModule 复用 ABI 会话管理，FVP、Musica 和 Siglus 共用此实现。它直接适配现有 FamilyProvider/FamilySession，不引入引擎或 SDK 依赖，也不改变 Family ABI。一个模块只持有一个会话；打开、推进、帧借用和完整关闭共用互斥边界，关闭返回前不能重新打开。panic 后拒绝继续工作，但允许取回会话执行关闭；模块释放时也须关闭遗留会话。公共边界错误使用 ASTRA_EMU_FAMILY_SESSION_ACTIVE、SESSION、LOCK 和 PANIC 后缀，核心自身诊断保持原有代码，不保留旧 Family 私有边界错误别名。
+Rust Family 可用 API crate 的 ProviderModule 管理 ABI 会话，不依赖 Engine/SDK。一个模块一个会话，由同一 owner 串行创建、推进、获取帧和完整关闭；关闭返回前不重开。panic 后拒绝继续工作，但允许取回会话清理；模块释放也关闭遗留会话。公共边界错误保留 SESSION_ACTIVE、SESSION、LOCK、PANIC 等诊断，核心错误保持原代码。
 
 ### 外部核心与 SDK 的重构边界
 
@@ -54,11 +54,11 @@ Musica 的原生 stage 以完整资源序列、参考坐标、背景与立绘参
 
 Musica 的高清纹理替换只在私有 `MusicaProfile` 中声明 `texture_overrides` 映射：键是已挂载的 `musica:/` 原资源 URI，值是游戏目录内安全的 PNG 相对路径。启动时先验证原资源、ANI 原点和受支持的帧数，首次使用再解码原资源并按映射读取替换像素；替换像素只改变物理纹理，不改变脚本坐标、裁剪、命中区域、存档或 VM 时间。静态 PNG 和单帧 ANI 可以使用 PNG 替换，多帧 ANI、SQZ 及其他格式明确拒绝，不能只替换动画首帧后继续运行。缺失、越界、路径不安全、帧数不匹配或不支持的格式都返回诊断，不静默回退到原图。原生与替换像素使用同一个 SDK `TextureCache`，以不同身份键区分，随同一缓存的有界淘汰释放；替换素材只存在于 ignored 私有工作区。Family 负责 Musica 归档 URI 和 ANI 规则，SDK 只提供通用纹理帧与逻辑/物理尺寸类型。
 
-吸收 `emu/krkr-hosted` 中外部核心 fork、最小适配提交和 submodule 的决策。来源提交 `dad452d2d` 将 RFVP、Siglus 改为 submodule，`bfc49f419` 引入 Artemis；这些提交用于确认来源，不整体移植旧 Family 接口。目标是保留完整上游历史，在固定上游基线上用一个适配提交承载必要差异，由主仓 gitlink 锁定精确提交。分支名只用于维护，不能替代提交固定。
+外部核心保留完整上游历史，整合目标为上游 HEAD 加一个必要适配提交，由 `Emulator/ThirdParty` submodule 固定精确 revision。分支名不能代替 gitlink，主仓不复制核心源码。
 
-Family descriptor、配置、日志桥和 ABI 转换放在主仓适配层。fork 只补嵌入入口、原生 GPU 输出、PCM 接口及必要生命周期能力，尽量保持上游平台入口可用。核心自身缺陷整理最小复现后交上游 issue，禁止附带商业素材、私有路径和存档；必要临时适配说明原因和删除条件。不以本次重构为由重写外部 VM、渲染器或媒体系统。
+descriptor、配置、日志桥、ABI 转换与产品策略放在 Family。核心只提供必要入口、原生输出和生命周期通知。游戏暴露的引擎功能缺陷独立提交上游 issue/PR，附自制最小复现；合并前标明依赖，不能长期混称为适配。适配自身回归由适配修正，不通过重写 VM/renderer/媒体或回退必要功能缩小 diff。
 
-整理后的 fork 保留许可证、归属和上游基线，Family 的 `MODIFICATIONS.md` 记录每项差异。新增改动在独占本地分支合成单个适配提交并验证，再更新 submodule；不重写来源工作树或已发布历史。本地提交不等于已发布，推送仍在本轮授权范围之外。
+整理使用独占新分支，保留许可证和 MODIFICATIONS 中的基线/差异，不改写来源或已发布历史。已授权发布上述上游功能修复；产品、完整适配分支和其他外发仍按各自授权执行。当前状态、审查结论及执行顺序只在 [status](../status/README.md) 维护。
 
 Musica 和 CMVS 一起驱动 `astra-emu-sdk` 模块化。先对照 AstraEngine 现有文字、绘制、解码、混音与字节源实现，再提取两个核心共同需要的能力；格式解析、VM 和原生存档语义继续由核心拥有。SDK 按需组合，不依赖 VN、World/package/registry 或强制 EngineSession；不建立纯转发 provider，不为成熟外部核心增加 SDK 依赖。替换调用方后删除重复实现。
 
@@ -93,7 +93,6 @@ Root workspace 管共享/Engine/VN/Player/工具；Editor 与 Emulator 使用独
 
 共享 SceneCommand 提供 `PushPixelMask { bits }` / `PopPixelMask`：64 位遮罩按屏幕像素平铺为 8×8，最高位对应 (0,0)，最低位对应 (7,7)，不随场景变换移动；嵌套遮罩取交集，栈下溢或帧末未闭合明确失败。它限制作用域内绘制命令的片元覆盖，不改变资源上传及最终帧 FilterGraph。GPU shader 执行遮罩，CPU 测试 renderer 明确返回 `ASTRA_MEDIA_PIXEL_MASK_GPU_REQUIRED`，不展开像素裁剪或切换后端。命令追加到现有序列化枚举末尾，不改变既有 tag；使用新命令的运行端须同步更新。Director type 26 只生成一次入场场景，保留既有图案表、时序和显式场景恢复，遮罩命令不含外部 IO。
 
-日志桥按用户决定取消内容脱敏和字段白名单，正常转发字符串、message、Debug/Display；数值保留 typed 值。`DiagnosticValue::Text` 最大 4096 bytes，事件最多 32 个唯一字段；超限、重复字段及非有限数值计入 `dropped_fields`。Debug 使用有界 formatter，避免先分配任意大小字符串。来源、级别和事件保持可定位，Manager 继续拥有 sink。Family API/ABI 当前为 v7，旧插件须同步重建安装，不保留旧脱敏模式。
 
 Musica 接续直接采用 `codex/minori-runtime-followup` 已验证的完整机制，按依赖批量移植剩余实现。验证重点是新 Family API、共享 SDK/GPU 和 session 生命周期的整合回归，不重复原引擎语义研究。旧 Host/provider 层仍按新架构替换。
 
@@ -134,7 +133,6 @@ Musica 路线解锁沿用来源分支的 TOHKA_CLEAR、AYAME_CLEAR、SUI_CLEAR�
 Musica 原生启动模式使用 `MusicaLaunchMode::Direct/Title`。Title 会话的 end 返回原生标题，Direct 仍结束会话；标题菜单和恢复必须保留会话选择的启动方式，不恢复旧 Host semantic menu ABI。未接入的页面明确报错，不能静默开始剧情。
 
 
-Family API v7 增加可选 SetFullscreen 窗口命令及 logical/raster FrameInfo，Manager 在 Slint 窗口线程执行输出 letterbox 与 pointer 逆映射，关闭会话恢复普通窗口。该命令不传 UI 类型或原生句柄；无窗口 Host 明确拒绝。Musica 原生设置通过同一通道应用与冷启动恢复全屏。
 
 核心文件缺失、加载失败、descriptor/capability 不匹配或重复 `plugin_id` 时，Manager 按 `data/cores/` 中的文件显示诊断并继续加载其他唯一核心；冲突 ID 的全部文件禁用。SQLite 不记录插件路径，更新核心需替换文件并重启 Manager。不能因单个核心失败关闭管理界面。
 
@@ -274,6 +272,5 @@ Linux 本地媒体边界限制单次编码输入 256 MiB、单个视频帧和 on
 
 实现只增加 Linux target 的 `gstreamer-video = 0.24.2`（MIT OR Apache-2.0）与锁定的 sys 依赖（MIT），不传递第三方类型到公共契约。平台发布检查必须验证所选 GStreamer 插件、完整视频帧/PTS/结束计数、取消及关闭，而非只验证 codec 名称或首帧；真实窗口、设备音频与新集成分支另行验收。
 
-Family 窗口 ABI v9 增加 `SetIcon(FamilyWindowIcon)`：owned RGBA8、每轴最多 256、长度与乘法溢出严格检查。Family 解码原生资源，Host 只在窗口线程应用 small icon，关闭后恢复应用图标；无窗口或后端不支持时显式拒绝。图标与标题各自保留待提交请求，不传路径、句柄或第三方 UI 类型。
 
 Web 输入观察采用 `astra.player_web_live_evidence.v2`，Player 输入 transcript 采用 v3：静态 session id、递增 fixed step、真实输入消费与 typed route/terminal/choice 是验收来源。删除动态 provider id 及每帧三种摘要字段；观察边界计算的 `trace_hash` 必须与对应消费记录一致。拒绝旧 schema、缺失或跨 session 身份及缺失 terminal 状态，不构造兼容 hash，不把编译检查当浏览器实玩。

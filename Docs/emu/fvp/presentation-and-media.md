@@ -1,98 +1,27 @@
-# FVP Presentation And Media
+# FVP 呈现与媒体
 
-本页保留为 v9 迁移前的研究映射，不能作为当前 Family ABI 或 release gate 的
-实现声明。当前 Host surface、Layer2D、Hook 和 writable-file 边界以
-[thin-fork.md](thin-fork.md) 与 [rfvp-fork-audit.md](rfvp-fork-audit.md) 为准；
-本页中的 `PresentationCommand`、`TextCaptureEvent` 和 Host overlay 术语不属于
-当前 v9 shipping path。
+Family 复用 RFVP 原生资源、执行和绘制；Manager 接收最终 CPU lease 与有界 PCM。接口见 [Family API](../../../Emulator/Source/FamilyApi/astra-emu-family-api/API_CONTRACT.md)，核心差异见 [MODIFICATIONS](../../../Emulator/Source/Families/astra-emu-fvp/MODIFICATIONS.md)。
 
-FVP presentation is syscall-driven. Scripts load resources through VFS, mutate legacy graph/text/prim state, and the renderer/audio/video systems consume that state. AstraEMU should turn those mutations into `PresentationCommand`, `AudioCommand`, `TextCaptureEvent` and media block references.
+## 图像与文字
 
-## Graphics
+`GraphLoad`、`GraphRGB`、`GaijiLoad` 修改原 graph/glyph 资源；`PrimSetSprt`、`PrimSetText`、`PrimSetTile` 及属性命令修改原 primitive 状态。HZC1/NVSG 解码留在原核心，格式及样本统计见[归档格式](archive-format.md)与[样本观察](game-observations.md)。
 
-Common graph syscalls:
+`TextBuff`、`TextPrint`、`TextFormat`、`TextFont`、`TextColor`、`TextSpeed` 等由原 text manager 处理，保持字体选择、已读状态、文字等待与绘制语义。系统字体由 Family 解析实际字体和 TTC face 后注入；当前 FVP 不声明文本替换能力。
 
-| Syscall | Core effect |
-| --- | --- |
-| `GraphLoad(id, path)` | Load/unload texture slot from VFS |
-| `GraphRGB(id, r, g, b)` | Apply tone adjustment to loaded texture |
-| `GaijiLoad(code, size, path)` | Register external glyph bitmap |
-| `PrimSetSprt(id, texture_id, x, y)` | Initialize sprite primitive |
-| `PrimSetText(id, text_id, x, y)` | Bind text slot to primitive |
-| `PrimSetTile(id, tile, x, y, w, h)` | Initialize tile primitive |
-| `PrimSetAlpha`, `PrimSetBlend`, `PrimSetXY`, `PrimSetWH`, `PrimSetUV`, `PrimSetZ` | Mutate primitive display state |
-| `Dissolve`, `DissolveWait` | Drive visual transition and VM wait |
+原 `GpuPrimRenderer` 与 `RenderTarget` 负责图像、文字、转场和 mask。Family `SceneTracker` 只观察绘制元数据用于变化检测，不保留纹理 payload 或另行 rasterize。只有实际 GPU cache 确认 generation 已上传，才能授权 CPU 像素回收。
 
-The sample graph packs use `hzc1` payloads. rfvp's `nvsg_pack` describes these as FAVORITE `HZC1 + NVSG` textures and supports `single24`, `single32`, `multi32`, `single8` and `single1`. AstraEMU should decode this inside the FVP core or a family media helper, then pass renderer-neutral surfaces to Manager.
+## 音频与影片
 
-## Text
+原音频命令通过 Family 有界 worker 进入原 SoftAudioMixer，混音结果交给 Host PCM sink。BGM 保持四个原生 slot，Movie 使用独立 stream ID；暂停/淡出仍占容量。控制处理与阻塞 PCM 写入分离，关闭取消 sink 并等待 worker。
 
-Text syscalls manage 32 text slots. Important behavior:
+影片使用原 RFVP Movie decoder、墙钟、合成与音轨路径；Family 的第二 WMV 播放器已删除。影片参数、结束、停止和 VM 等待由原实现决定，不在 Host 将游戏帧覆盖成独立视频帧，也不为接入改用另一平台 decoder。
 
-- `TextBuff(id, w, h)` creates or clears a text buffer and uploads it to graph slot `4064 + id`.
-- `TextPrint(id, content)` writes text, uploads the slot, calls legacy text capture, and may request `TEXT` wait.
-- `ConstString` print returns `True` only the first time that script offset is marked as read.
-- `TextTest(ConstString)` uses the same read bitmap behavior.
-- `TextFormat`, `TextFunction`, `TextSize`, `TextFont`, `TextColor`, `TextSpeed`, `TextSkip` and `TextSuspendChr` update layout and flow control.
+## 帧与保存边界
 
-`TextCaptureEvent` must contain enough local evidence for replay and backlog, but it should default to local structured text in case reports. When local text capture is enabled, the event still stays inside the user's machine and is not committed to public reports.
+变化帧提交原 GPU 并在完成后发布 CPU lease；静态帧返回 Unchanged。RFVP 回读复用 staging buffer，保留期限、取消和代次校验；CPU 输出分配成本仍纳入性能基线。
 
-## Audio
+保存缩略图在原 SaveCreate 边界读取已呈现的 render target，使用原 Triangle 缩放。V1 槽与全局 RFVG 继续由核心编码；图像恢复和协程/保存时点修复按原生缺陷单独审查，不将其自动归为嵌入钩子。
 
-The sample separates long music, voice and effects:
+输入沿原按键/指针入口进入 VM。Manager 负责窗口输出与逆映射，Family 不复制窗口 UI；原 no_std 输入提交缺口列为当前优先修复项。
 
-| VFS family | Sample pack | Entry count | Magic | Typical syscall |
-| --- | --- | ---: | --- | --- |
-| BGM | `bgm.bin` | 70 | `OggS` | `AudioLoad`, `AudioPlay`, `AudioVol` |
-| Voice | `voice.bin` | 14,498 | `OggS` | `SoundLoad`, `SoundPlay` or title-specific mapping |
-| SE | `se.bin` | 304 | `RIFF` | `SoundLoad`, `SoundPlay`, `SoundVol` |
-| Environment SE | `se_env.bin` | 79 | `RIFF` | `SoundLoad`, `SoundPlay` |
-| System SE | `se_sys.bin` | 13 | `RIFF` | menu/system sound syscalls |
-
-rfvp splits BGM-like channels and SE-like channels. BGM channels accept ids `0..3`; sound effects accept ids `0..255`. Fade and crossfade arguments are bounded to `0..300000` ms. Volume uses `0..100`.
-
-## Movie
-
-Windows RFVP movie playback binds to the shared PlatformHost Media Foundation
-stream service for `.wmv`, `.asf`, `.mpg`, `.mpeg`, `.mp4` and `.m4v`. `Start`
-returns a bounded cursor, `Next` produces one frame or PCM chunk, and
-`CloseDecode` is issued on completion, stop, restore, or error. The native CLI
-and Manager use separate bounded prefetch workers; a full ring is backpressured
-instead of blocking the Runtime tick, and a not-yet-ready hardware decode is
-retried on the next deadline/event. WMF hardware transforms are requested; the
-observable boundary remains owned CPU BGRA/i16 data followed by the normal
-WGPU/audio-device transfer. Non-Windows reference hosts keep the portable FVP
-decoder and do not claim a hardware provider.
-
-The sample stores movies as loose files:
-
-| File | Bytes | Magic |
-| --- | ---: | --- |
-| `movie/01.wmv` | 111,307,131 | ASF header |
-| `movie/02.wmv` | 130,225,633 | ASF header |
-
-rfvp's `Movie(path, flag)` treats `flag` by type:
-
-- `flag == Nil`: layer/effect movie, video only.
-- `flag != Nil`: modal movie, video + audio, script/scheduler halted while playing.
-
-Resolution tries the original path first for `.wmv`/`.asf` and other native video extensions, then a `.mp4` fallback. For AstraEMU, this fallback is a compatibility probe, not a requirement to transcode or ship converted assets.
-
-## Cursor and input
-
-The sample has loose `cursor1.ani` and `cursor2.ani`. rfvp finds loose `cursor*.ani` files in game roots and maps the numeric suffix to cursor slot. `CursorShow`, `CursorMove` and `CursorChange` mutate window cursor state; input syscalls read per-frame state such as down/up/repeat, cursor position and wheel.
-
-Manager owns the actual OS cursor. Core emits cursor commands and receives input events at tick boundaries.
-
-## Mapping to Astra Runtime outputs
-
-| Legacy state | AstraEMU output |
-| --- | --- |
-| Graph slot load/unload | `PresentationCommand::TextureLoad` / `TextureRelease` |
-| Prim tree mutation | `PresentationCommand::PrimitiveUpdate` |
-| Text slot upload | `PresentationCommand::TextSurfaceUpdate` and optional `TextCaptureEvent` |
-| Audio channel load/play/stop/vol | `AudioCommand` |
-| Movie start/stop/state | `PresentationCommand::VideoStart` / `VideoStop`, `AudioCommand` when modal |
-| Thread wait/sleep/text/dissolve | `StateMachineTrace` with yield reason |
-
-No output may carry native GPU/audio handles across provider boundaries. Large media moves through content-addressed media block references.
+实际验证、R01–R09 和下一步分别见[性能审计](../../status/performance-upstream-audit-2026-10-12.md)与[实施计划](../../status/implementation-plan.md)。

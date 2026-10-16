@@ -1,16 +1,16 @@
-# AstraEMU 独立 Host 重构
+# AstraEMU 独立 Host 边界
 
-本轮采用同仓独立 emulator host，先完成 Windows、FVP 和现有 Slint Manager。AstraVN、Editor 和 EngineCore 的运行模型不变。此方案取代 AstraEMU 对 RuntimeWorld、StateMachine、product package/save、旧 Family ABI、通用 Hook 与 Trusted Luau patch 的依赖；不保留兼容入口。其他 family 的核心源码保留，但不进入本轮活动依赖图。
+独立 Host 已用于 FVP、Siglus、Artemis、Musica 与 CMVS；KrKr 暂缓本批适配。EMU 与 RuntimeWorld、VN、product package 分离，当前状态见[实施计划](../status/implementation-plan.md)，接口以 [Family API](../../Emulator/Source/FamilyApi/astra-emu-family-api/API_CONTRACT.md) 为准。
 
 ## 运行边界
 
-设计参考固定为 [art3m1s](https://github.com/Alphaly2K/art3m1s/tree/3053170d7a5fe174a4c8dab29d7f5152af086219)、[art3m1s-core](https://github.com/Alphaly2K/art3m1s-core/tree/635f19511d31481663c7d6ae5aa5cb96dc9d82e6) 和 [RFVP](https://github.com/xmoezzz/rfvp/tree/469f848ac55755e4628e5b3758da58b563068aa3)。采用清晰的引擎/Host 职责边界与 elapsed 推进方式；保留 RFVP 原生游戏语义。ABI 仍需自行处理借用、回调、取消和动态库生命周期，不能照搬进程全局回调或把参考程序的接口直接当作多 Family 插件规范。
+Family 保留原引擎语义与 GPU/媒体实现；Host 持有窗口、配置、输入及最终输出。精确上游基线和必要差异由各 Family MODIFICATIONS 维护，性能和最小适配结论见[审计](../status/performance-upstream-audit-2026-10-12.md)。
 
 Family 自行解释脚本、读取原生文件、解码、混音、绘制和管理游戏原生存档。Host 只传入游戏位置，不提供 VFS、存档根目录或资源服务。一个进程同时只运行一个游戏 session。窗口焦点、前后台、尺寸和物理输入传给 Family，由 Family 决定游戏行为。
 
 独立 `astra-emu-family-api` 使用 Rust `abi_stable` DTO 与生命周期；第三方只需依赖 ABI，不强制使用 SDK。接口包含 descriptor、probe、open、advance(elapsed)、input/window event、close、CPU 最终帧、独立 PCM 输出和可选异步文本替换。静态与动态插件使用同一接口。旧 ABI binary 显式拒绝。
 
-Family 借出只读最终帧，Host 在调用期间同步复制，随后释放借用；不跨 ABI 传 GPU handle。音频在打开流时固定 sample rate、channel count 和 i16/f32 format。Family 音频 worker 向有界、可取消的 Host 队列阻塞写入；设备转换由 Host 负责，设备实时回调不调用 Family。关闭必须取消写入、停止 worker，再释放 session 和动态库。不可恢复错误关闭游戏并回到资料库，显示可定位的诊断。
+Family 交付不可变最终 CPU frame lease，Host 保留原 owner 到上传完成；epoch/generation 标识输出，Ready/Pending/Unchanged 区分完成状态。音频固定 sample rate、channels 和 i16/f32 format，由 Family worker 向有界、可取消 Host 队列写入；设备回调不调用 Family。关闭取消请求并 join worker，动态库仍驻留至进程退出。不可恢复错误结束游戏并显示诊断。
 
 ## Manager 与插件
 
@@ -36,17 +36,9 @@ Host 直接处理 Family 最终帧，交付缩放、锐化、Anime4K Restore_S �
 
 内置 Anime4K shader 从 MIT upstream revision `7684e9586f8dcc738af08a1cdceb024cc184f426` 独立移植，保留许可。使用固定 DXC 1.8.2502 和 hassle-rs 0.12 生成 SPIR-V，经 Naga 校验并转为 WGSL，再交给 wgpu 29；不走 unsafe passthrough。RGBA16F read/write storage texture 需要显式 device feature，最终输出 RGBA8 并与 Slint 共用 device。失败的新配置不生效，显示错误并保留之前有效配置。已完成的独立探测只证明编译与 GPU 多 pass 可行，不能替代产品集成和视觉测试。
 
-## 实施顺序
-
-1. 固定上述共享边界并更新实施规则；建立独占重构分支。
-2. 替换独立 ABI，重写 RFVP adapter，打通 frame/audio/input/native save 最小端到端路径。
-3. 简化 Manager core、插件加载、资料库与翻译服务；迁移 Slint host 并移除旧依赖路径。
-4. 接入 HLSL 效果链和内置 Anime4K；完成参数、错误与切换行为。
-5. 更新 workspace、文档与 schema，删除过时程序和中间文件；执行增量回归和提交前检查。
-6. 在授权 Windows Sandbox 中用《樱花萌放》完成任一角色结局，可使用 Ctrl 快进；检查系统页、音视频、原生存读档、退出和冷启动。将独立游戏副本以可写目录挂载给 guest，原始游戏目录保持不变。不测试 FVP 翻译。
 
 ## 交付边界
 
-主任务负责设计、代码修复、审阅和集成；委派给 Luna 的任务使用独立 worktree。各 worktree 独享 target，遇到构建锁等待。构建并发按整机可用内存控制，多个工作树不同时运行重型构建。按普通软件开发方式运行测试，不建立新的 evidence/report 留存体系；临时游戏内容、截图、日志和编译探测产物完成后清理。代码通过相关检查后提交到重构分支，不自动合并或发布。未通过的检查与未完成的真实游戏流程如实记录为未完成。
+主线程在独占 worktree/target 实施、审查和集成，不委派子智能体。后续顺序和验收条件统一见[实施计划](../status/implementation-plan.md)；临时探针和运行产物完成后清理。普通软件检查、真实游戏和设备验收分别记录，不建立额外审批或留证体系。
 
 Manager 的作品关联入口位于游戏库详情。Host 通过 `ManagerController::search_metadata(provider, query)` 调用现有 `MetadataProvider::search`，搜索结果经 `accept_match(candidate_id)` 显式选择后重新获取并保存；不提供手填 ID 的 UI 回调。网络许可、256 字符上限、单作品请求互斥和候选归属校验在 Host 执行。`refresh_metadata` 只更新已关联条目，旧设置页的手填 ID 与审核队列直接删除，不保留兼容入口。此接口只读外部元数据并修改本地关联，不发送游戏内容；发布条件仍沿用独立 Host 的许可与功能验收。

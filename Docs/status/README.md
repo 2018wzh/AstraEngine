@@ -1,9 +1,8 @@
 # 实施状态
 
-当前权威状态在 [实施计划](implementation-plan.md)。重构按 EMU/SDK、Engine/VN、Editor/Agent、终之空和跨平台验收推进。
+当前记录分为两页：
 
-历史 Stage、coverage 和 logging 矩阵随相应子系统删除，不作为重构完成证据。设计目标见 [总体架构](../product/architecture.md)，验证入口见 [开发手册](../manual/development.md)。
+- [实施状态与下一步计划](implementation-plan.md)：执行顺序、依赖、产品状态和验收条件。
+- [性能与最小上游适配审计](performance-upstream-audit-2026-10-12.md)：当前发现、代码基线、运行证据和上游 issue/PR。
 
-本地具备授权测试游戏的 Codex 接手时，先读 [本地交接](local-codex-handoff.md)，核对代码提交、验证边界与真实游戏任务。
-
-[全仓性能与 AstraEMU 最小上游适配审计（2026-10-12）](performance-upstream-audit-2026-10-12.md) 汇总两轮审计发现、源码证据、隔离实验、接口提案和后续验收条件；不是修复完成或性能通过记录。
+设计见[总体架构](../product/architecture.md)与[重构契约](../contracts/rebuild.md)，操作见[开发手册](../manual/development.md)。日期流水账、旧交接和已失效的核心迁移清单留在 Git；现行文件直接替换过期状态，不重复叠加过程记录。

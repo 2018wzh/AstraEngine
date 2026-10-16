@@ -13,16 +13,16 @@
 | [script-execution.md](script-execution.md) | `system.ini` boot、tag 执行、Lua 调用和等待点 |
 | [script-tags-lua.md](script-tags-lua.md) | `lua`、`calllua`、`tag`、`setTagFilter`、`enqueueTag` 的互操作 |
 | [presentation-and-media.md](presentation-and-media.md) | layer、transition、message、BGM/SE/voice/movie 映射 |
-| [runtime-family-plugin.md](runtime-family-plugin.md) | Artemis family plugin 的 `LegacyRuntimeProvider` session、step 输出和 sandbox |
+| [MODIFICATIONS](../../../Emulator/Source/Families/astra-emu-artemis/MODIFICATIONS.md) | 当前核心基线、嵌入差异与上游修复 |
 | [game-observations.md](game-observations.md) | 两个本地样本的本地结构化统计和启动链观察 |
 | [tooling.md](tooling.md) | 现有 probe、PFS 工具和下一步 fixture 边界 |
-| [implementation-checklist.md](implementation-checklist.md) | 实施清单、状态和验收口径 |
+| [实施计划](../../status/implementation-plan.md) | 当前整改顺序与验收条件 |
 
 ## 范围
 
-Artemis 在 AstraEMU 中是 engine-native family plugin。Plugin 通过 `LegacyRuntimeProvider` session 持有 PFS resolver、Artemis script VM、Lua sandbox、legacy tag executor、media state 和 save snapshot；Manager 创建 RuntimeWorld，并通过 legacy lifecycle action 接收本地结构化 trace、`PresentationCommand`、`AudioCommand`、`TextCaptureEvent` 和 `StateMachineTrace`。
+Artemis Family 直接复用 art3m1s-core 原 VM、Lua 5.1、GPU 和 FFmpeg 9；核心无 PCM mixer，Family 复用 SDK Symphonia/Kira。Manager 通过 [Family API](../../../Emulator/Source/FamilyApi/astra-emu-family-api/API_CONTRACT.md) 接收不可变 CPU lease、有界 PCM 和 typed 宿主请求，不依赖 RuntimeWorld。
 
-Artemis 不改变 EngineCore 的 Actor/Component + StateMachine 权威模型，也不把 Artemis 的 tag、Lua 环境、PFS patch 规则或平台视频限制变成公共 Runtime contract。
+当前问题与证据见[性能审计](../../status/performance-upstream-audit-2026-10-12.md)。onLoad 等待修复已提交 [PR #5](https://github.com/Alphaly2K/art3m1s-core/pull/5)，等待合并；本地功能修复尚未全部上游化。下列格式研究不作为当前实现完成声明。
 
 ## 样本基线
 
