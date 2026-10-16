@@ -299,6 +299,8 @@ pub struct AsfWmv2Decoder<R: Read + Seek> {
     video_info: VideoStreamInfo,
     assembler: FrameAssembler,
     decoder: Wmv2Decoder,
+    // Preserve the rest of a packet when one payload produces a frame.
+    payloads: std::vec::IntoIter<AsfPayload>,
 }
 
 /// ASF + WMA (v1/v2) decoding pipeline.
@@ -430,6 +432,7 @@ impl<R: Read + Seek> AsfWmv2Decoder<R> {
             video_info,
             assembler: FrameAssembler::default(),
             decoder,
+            payloads: Vec::new().into_iter(),
         })
     }
 
@@ -448,27 +451,29 @@ impl<R: Read + Seek> AsfWmv2Decoder<R> {
     /// Returns `Ok(None)` on end-of-stream.
     pub fn next_frame(&mut self) -> Result<Option<DecodedFrame>> {
         loop {
-            let payloads = match self.asf.read_packet(&mut self.reader) {
-                Ok(p) => p,
-                Err(DecoderError::EndOfStream) => return Ok(None),
-                Err(e) => return Err(e),
+            let payload = match self.payloads.next() {
+                Some(payload) => payload,
+                None => {
+                    self.payloads = match self.asf.read_packet(&mut self.reader) {
+                        Ok(payloads) => payloads.into_iter(),
+                        Err(DecoderError::EndOfStream) => return Ok(None),
+                        Err(error) => return Err(error),
+                    };
+                    continue;
+                }
             };
-
-            for payload in payloads {
-                if payload.stream_number != self.video_info.stream_number {
-                    continue;
-                }
-                let Some((pts_ms, is_key, data)) = self.assembler.push(payload) else {
-                    continue;
-                };
-
-                if let Some(frame) = self.decoder.decode_frame_owned(&data, is_key)? {
-                    return Ok(Some(DecodedFrame {
-                        pts_ms,
-                        is_key_frame: is_key,
-                        frame,
-                    }));
-                }
+            if payload.stream_number != self.video_info.stream_number {
+                continue;
+            }
+            let Some((pts_ms, is_key, data)) = self.assembler.push(payload) else {
+                continue;
+            };
+            if let Some(frame) = self.decoder.decode_frame_owned(&data, is_key)? {
+                return Ok(Some(DecodedFrame {
+                    pts_ms,
+                    is_key_frame: is_key,
+                    frame,
+                }));
             }
         }
     }

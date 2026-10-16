@@ -65,10 +65,8 @@ pub(super) fn terminal_state_marks_machine_completed_and_blocks_future_ticks() {
     let machines = world.debug_session().state_machines(actor);
     assert_eq!(machines[0].current_state, done);
     assert!(machines[0].completed);
-    let snapshot = world.snapshot().unwrap();
-    let trace: Vec<_> = snapshot
-        .machines
-        .trace()
+    let records = world.debug_session().action_trace();
+    let trace: Vec<_> = records
         .iter()
         .map(|trace| trace.action_id.as_str())
         .collect();

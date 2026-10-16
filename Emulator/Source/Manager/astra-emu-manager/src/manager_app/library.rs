@@ -45,38 +45,11 @@ impl AstraEmuManagerController {
             .settle_abandoned_sessions(unix_time_ms()?)
             .map_err(|error| error.to_string())?;
 
-        let mut registry = FamilyProviderRegistry::new();
-        let mut plugin_errors = BTreeMap::new();
+        #[cfg(not(target_os = "android"))]
+        let directories = core_directories(&cores_dir)?;
         #[cfg(target_os = "android")]
-        registry
-            .register_provider(astra_emu_fvp::FvpProvider::default())
-            .map_err(|error| error.to_string())?;
-        #[cfg(not(target_os = "android"))]
-        let core_directories = core_directories(&cores_dir)?;
-        #[cfg(not(target_os = "android"))]
-        let core_report = registry
-            .load_directories(&core_directories)
-            .map_err(|error| error.to_string())?;
-        #[cfg(not(target_os = "android"))]
-        for failure in core_report.errors {
-            let file_name = failure
-                .path
-                .file_name()
-                .and_then(|value| value.to_str())
-                .unwrap_or("<unknown-core>")
-                .to_owned();
-            let diagnostic = format!(
-                "{}: {}",
-                failure.error.diagnostic_code(),
-                failure.error.human_message()
-            );
-            tracing::error!(
-                event = "astra.emu.plugin.discovery_failed",
-                core = %file_name,
-                diagnostic = %diagnostic
-            );
-            plugin_errors.insert(file_name, diagnostic);
-        }
+        let directories = Vec::new();
+        let (registry, plugin_errors) = owner::FamilyOwner::start(directories, mailbox.clone())?;
 
         let input_mapping = library
             .load_input_mapping()

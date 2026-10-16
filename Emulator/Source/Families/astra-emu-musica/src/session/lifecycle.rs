@@ -23,10 +23,32 @@ impl FamilySession for MusicaSession {
         if result.is_err() {
             self.poisoned = true;
         }
+        if result.as_ref().is_ok_and(|response| response.reset_clock) {
+            self.force_frame = true;
+        }
         result
     }
-    fn visit_frame(&self, visitor: &mut dyn FrameVisitor) -> FamilyResult<()> {
-        visitor.accept(FrameView::from_slice(&self.scene.pixels, self.info)?)
+    fn acquire_frame(&mut self, after: Option<FrameIdentity>) -> FamilyResult<FramePoll> {
+        if self.poisoned {
+            return Err(error(
+                "ASTRA_EMU_MUSICA_POISONED",
+                "failed session must be closed",
+            ));
+        }
+        let pixels = &self.scene.pixels;
+        if self.force_frame
+            || self.published_frame.current().is_none_or(|frame| {
+                frame.info != self.info || frame.pixels().as_ptr() != pixels.as_ptr()
+            })
+        {
+            self.published_frame.publish(
+                Arc::clone(pixels),
+                |pixels| pixels.as_ref(),
+                self.info,
+            )?;
+            self.force_frame = false;
+        }
+        Ok(self.published_frame.poll(after))
     }
     fn close(mut self: Box<Self>) -> FamilyResult<()> {
         let text = self.cancel_text();

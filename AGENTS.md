@@ -29,7 +29,7 @@
 - 公共 `astra-media-core` 提供 `Extent2D`/`Canvas2D`、`RectI`、`Transform2D`、`TextureFrame` 和 `SceneCommand`；`astra-emu-sdk` 的 `StageCanvas` 只做 Family 语义包装，`TextureAsset` 显式分开物理像素、逻辑尺寸和原点。SDK 不依赖 VN，AstraVN presentation 也直接使用同一 Canvas contract。
 - 成功读档或重新开始后，Family 通过 reset_clock 显式重置播放时间线。实时 Host 从 advance 与帧复制完成后重新计时；普通帧保留原有耗时计算，不扩大 elapsed 上限或静默截断。
 - Family API 使用 abi_stable；可选增强关闭不阻止基础播放。Manager 保存核心/游戏配置，启动时传入并由核心验证。库驻留至进程退出，更新重启 Manager；关闭会话仍须取消请求并等待 worker 结束。
-- FVP 保留成熟 RFVP，适配尽量小。上游基线为 0.6.0 revision 304e773387a9920c9db091ec1fd937c717aea949，差异写 MODIFICATIONS.md；共用上游 GlobalSaveDataV1/RFVG，不复制 hosted 存档结构。
+- FVP 保留成熟 RFVP，适配尽量小。按用户 2026-10-16 决定基于上游当前 HEAD（0.6.0 revision af557db750c7833274f22a6d82b0dc33cdea2f85）加一个必要适配提交，以 ThirdParty submodule 集成，差异写 MODIFICATIONS.md；共用上游 V1/RFVS、GlobalSaveDataV1/RFVG，不复制 hosted 存档结构，不添加旧存档识别、迁移或专门报错。
 - Musica 使用可选 SDK，共享底层能力不要求创建 Engine session。短期采用核心自有存档，长期才做原版兼容。成熟核心无需采用 SDK。
 - Musica GARbro scheme 保留纯 Rust 两阶段 NRBF reader：收集对象再解析引用，未知/断裂/重复/越界及不符合图约束的输入明确失败，不使用 BinaryFormatter 或启发式 fallback。
 - 保留真实文字 shaping、字体 fallback、媒体播放、资源生命周期和错误诊断；不能以矩形、首帧或 synthetic fixture 冒充完整产品。

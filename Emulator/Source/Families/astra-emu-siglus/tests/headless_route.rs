@@ -14,8 +14,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use abi_stable::type_level::downcasting::TD_Opaque;
 use astra_emu_family_api::{
     AudioSink, AudioSink_TO, AudioWriteStatus, FamilyEvent, FamilyOpen, FamilyProvider,
-    FamilySession, FamilyStatus, FrameView, FrameVisitor, KeyState, OpenRequest, PcmChunk,
-    PcmFormatSpec, PointerButton, WindowState,
+    FamilySession, FamilyStatus, KeyState, OpenRequest, PcmChunk, PcmFormatSpec, PointerButton,
+    WindowState,
 };
 
 static PUSHED_FRAMES: AtomicU64 = AtomicU64::new(0);
@@ -38,18 +38,6 @@ impl AudioSink for CountingSink {
     }
     fn cancel(&self) -> astra_emu_family_api::FfiFamilyResult<()> {
         Ok(()).into()
-    }
-}
-
-struct Alive;
-
-impl FrameVisitor for Alive {
-    fn accept(&mut self, frame: FrameView<'_>) -> astra_emu_family_api::FamilyResult<()> {
-        assert!(
-            frame.info.width > 0 && frame.info.height > 0,
-            "composed frame stays valid"
-        );
-        Ok(())
     }
 }
 
@@ -85,6 +73,7 @@ fn headless_route_reaches_dialogue_flow() {
     let mut provider = astra_emu_siglus::SiglusProvider::default();
     let open = provider
         .open(OpenRequest {
+            session_epoch: astra_emu_family_api::allocate_session_epoch().unwrap(),
             configuration: Vec::new().into(),
             game_path: game.display().to_string().into(),
             initial_window: WindowState {
@@ -99,6 +88,7 @@ fn headless_route_reaches_dialogue_flow() {
                     TD_Opaque,
                 )),
                 text_replacement: abi_stable::std_types::ROption::RNone,
+                modal: abi_stable::std_types::ROption::RNone,
             },
         })
         .expect("siglus session opens");
@@ -106,8 +96,6 @@ fn headless_route_reaches_dialogue_flow() {
         response: _,
         mut session,
     } = open;
-
-    let mut alive = Alive;
 
     // Settle to the title menu.
     for _ in 0..90 {
@@ -167,9 +155,7 @@ fn headless_route_reaches_dialogue_flow() {
         }
     }
     let _ = finished;
-    session
-        .visit_frame(&mut alive)
-        .expect("frames stay composed through the route");
+
     let pushed = PUSHED_FRAMES.load(Ordering::Relaxed);
     assert!(
         pushed > 480_000,

@@ -14,13 +14,15 @@ cargo run --manifest-path Editor/Cargo.toml -p astra-editor -- story.astra
 
 `AuthoringWorkspace` 保存文档版本，版本从 1 开始。`EditBatch` 内每个文档必须提供当前版本和不重叠的 UTF-8 字节范围；全部校验通过后一起应用。撤销和重做仍增加版本，旧 Agent 结果不能因内容恢复而重新生效。一个 batch 对应一次撤销。
 
+撤销记录只保留 UTF-8 最小改动范围，不保存每次编辑的整篇文本；文本控件上报的全文替换也会归一为实际差异。默认最多保留 100 个 batch，undo/redo 合计历史预留预算为 64 MiB；`with_history_budget` 可由嵌入者配置更小预算。新 batch 超过预算时返回 `HistoryLimit`，不修改任何文档或既有历史；正常新增仅淘汰最旧 undo，undo/redo 移动不增加预留额度。预算覆盖两个方向的文本及历史元数据，当前文档与事务准备内存另计。
+
 `attribute_edit` 使用现有 CST 的 attribute span 修改源码，保留周围注释和 source ID。Outliner、剧情结构、演出视图和 Details 共用 source ID 选择；点击命令定位源码，Details 把一组属性修改作为单个 batch 提交。源码版本改变后旧 Details 提交会被拒绝。Graph 按实际 state、jump、option、branch 和 call 绘制连接，点击节点或路由后可在 Details 修改属性。Timeline 按实际时间绘制关键帧，可修改时间/数值、插入和删除；时间排序、重复时间和至少两个关键帧的约束在事务前检查，标量和缓动语义复用 Cook 编译器诊断。轨道支持 linear/ease_in/ease_out/ease_in_out，Timeline 按钮修改同一源码属性。共享 astra-vn-editor 提供投影和事务，MCP read_document 同时返回该投影；外部编辑仍使用现有 apply_batch。所有编辑仍写回同一 `.astra`，保留注释，并共用批量撤销。
 
 Open project 使用系统文件选择器，切换前处理未保存修改；打开失败保留原工程。Preview setup 可载入当前工程的产品预览配置。Graph 的连接端口可拖到目标 state 创建 jump，要求源 state 有 scene 且尚无控制流；目标必须唯一存在。Delete route 删除完整路由命令（branch 的两个出口一起删除），可能产生的不可达状态由编译诊断显示。Graph 目前仍采用固定网格，尚无节点布局拖动。Timeline 可在原轨道拖动关键帧，释放时提交一次事务，离开轨道释放即取消；一个手势对应一次撤销，过期版本和重复时间会拒绝。缓动类型使用上述已有引擎语义；时间缩放与自由曲线编辑仍未完成。
 
 工作区使用 gpui-component DockArea：Content & Outliner、Authoring、Details 可拖动停靠、组合标签页、调整分区和放大。布局保存在 ignored `.astra-cache/editor-layout.json`，重开项目恢复；Reset layout 恢复默认三栏。布局损坏、版本变化或缺失/重复作者面板时显示诊断并使用默认布局。三个必要面板不可关闭，避免丢失人工编辑入口；旧的仅宽度布局直接重建。停靠交互尚未进行桌面操作验收。Ctrl/Cmd+S 保存全部源文档，源编辑区的 Undo/Redo 快捷键进入共用 batch 历史。Agent 输入和未提交的属性字段保留自己的局部输入撤销。
 
-编辑后直接调用现有 `.astra` 编译器。诊断显示 source、行列和错误内容，并可跳转到输入位置。成功编译沿用 compiler source map，不生成另一套位置映射。
+输入诊断使用一个 Editor-owned compiler worker，150 ms 去抖且只保留最新 pending 请求；UI 交付不可变文档版本快照，不逐次复制全项目正文。完全相同的文档版本和编译选项复用上次结果，源码变化仍调用现有完整 `.astra` 语义编译器，保留跨文件检查。结果提交前再次比对项目会话和全部文档版本，迟到结果不会覆盖新项目/新编辑的诊断。关闭取消 pending 并等待 worker 结束。诊断显示 source、行列和错误内容，沿用 compiler source map，并可跳转到输入位置。
 
 ## 外部 Agent
 

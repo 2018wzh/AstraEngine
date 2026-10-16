@@ -35,7 +35,8 @@ use astra_emu_translation_openai_compatible::{
 };
 use metadata_runtime::{MetadataCommand, MetadataCommandKind, MetadataPayload, MetadataRuntime};
 use platform_secret::ManagerSecretStore;
-use stage_renderer::{FrameCollector, FrameMailbox, ManagerStageRenderer};
+use stage_renderer::{FrameMailbox, ManagerStageRenderer};
+use astra_emu_manager::modal_service::ModalBridge;
 
 const FIXED_FRAME_NS: u64 = 16_666_667;
 const MAX_SCAN_DIRECTORIES: usize = 4_096;
@@ -56,6 +57,8 @@ mod probe_state_tests;
 mod model;
 mod navigation;
 mod preferences;
+mod owner;
+mod owner_worker;
 mod runtime;
 mod session;
 mod support;
@@ -70,7 +73,7 @@ struct PendingMetadata {
 
 struct AstraEmuManagerController {
     library: Library,
-    registry: FamilyProviderRegistry,
+    registry: owner::FamilyOwner,
     candidates: BTreeMap<String, FamilyProbeCandidate>,
     probe_choices: BTreeMap<String, Vec<FamilyProbeCandidate>>,
     selected_case_id: Option<String>,
@@ -80,7 +83,7 @@ struct AstraEmuManagerController {
     data_dir: PathBuf,
     game_roots: Vec<PathBuf>,
     mailbox: FrameMailbox,
-    active: Option<ActiveFamilySession>,
+    active: Option<owner::ActiveSessionView>,
     audio_device: audio_executor::AudioDeviceKind,
     active_play_session: Option<String>,
     pending_events: Vec<FamilyEvent>,
@@ -122,6 +125,12 @@ impl Drop for AstraEmuManagerController {
     fn drop(&mut self) {
         if let Err(error) = self.close_active(PlaySessionEndReason::Shutdown) {
             tracing::error!(event = "astra.emu.manager.shutdown_failed", diagnostic_code = %error);
+        }
+        if let Err(error) = self.registry.shutdown() {
+            tracing::error!(event = "astra.emu.manager.owner_shutdown_failed", diagnostic_code = %error);
+        }
+        if let Err(error) = self.finish_play_session(PlaySessionEndReason::Shutdown) {
+            tracing::error!(event = "astra.emu.manager.play_shutdown_failed", diagnostic_code = %error);
         }
     }
 }

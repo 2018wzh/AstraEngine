@@ -201,9 +201,8 @@ pub(super) fn state_machine_runs_transition_actions_in_order() {
         snapshot.blackboard.get("route"),
         Some(&BlackboardValue::from("rooftop"))
     );
-    let trace: Vec<_> = snapshot
-        .machines
-        .trace()
+    let records = world.debug_session().action_trace();
+    let trace: Vec<_> = records
         .iter()
         .map(|trace| trace.action_id.as_str())
         .collect();

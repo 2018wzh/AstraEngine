@@ -1,4 +1,7 @@
 use astra_emu_family_api::{PcmChunk, PcmFormatSpec};
+use abi_stable::std_types::RVec;
+use std::ops::Deref;
+
 use rubato::{
     audioadapter::Adapter, audioadapter_buffers::direct::SequentialSliceOfVecs, Async, FixedAsync,
     PolynomialDegree, Resampler, SincInterpolationParameters, SincInterpolationType,
@@ -6,6 +9,21 @@ use rubato::{
 };
 
 use super::MAX_AUDIO_OUTPUT_SAMPLES;
+/// Keep foreign ABI allocations owned until non-realtime retirement.
+pub(super) enum OutputPcm {
+    Abi(RVec<f32>),
+    Converted(Vec<f32>),
+}
+
+impl Deref for OutputPcm {
+    type Target = [f32];
+    fn deref(&self) -> &[f32] {
+        match self {
+            Self::Abi(samples) => samples.as_slice(),
+            Self::Converted(samples) => samples,
+        }
+    }
+}
 
 #[derive(Clone, Copy)]
 pub(super) struct OutputFormat {
@@ -29,6 +47,15 @@ impl AudioConverter {
         self.resampler
             .as_ref()
             .map_or(0, |resampler| resampler.output_delay())
+    }
+    /// The sink validates the chunk once before calling this conversion path.
+    pub(super) fn push_chunk(&mut self, chunk: PcmChunk) -> Result<OutputPcm, String> {
+        if self.resampler.is_none() && self.source_channels == self.target_channels {
+            if let PcmChunk::F32(samples) = chunk {
+                return Ok(OutputPcm::Abi(samples));
+            }
+        }
+        self.push(pcm_chunk_samples(chunk)).map(OutputPcm::Converted)
     }
     pub(super) fn new(output: OutputFormat) -> Result<Self, String> {
         let source_channels = output.source.channels;
@@ -81,6 +108,9 @@ impl AudioConverter {
         .saturating_mul(u128::from(self.target_channels));
         if projected_samples > u128::from(MAX_AUDIO_OUTPUT_SAMPLES as u64) {
             return Err("ASTRA_EMU_AUDIO_CONVERSION_BUDGET".into());
+        }
+        if self.resampler.is_none() && self.source_channels == self.target_channels {
+            return Ok(samples);
         }
         append_channel_map(
             &mut self.pending,

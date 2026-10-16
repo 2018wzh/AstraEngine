@@ -14,6 +14,7 @@ pub(crate) struct CmvsSession {
     scripts: BTreeMap<u16, CmvsScript>,
     scene: CmvsScene,
     frame: TextureFrame,
+    published_frame: FramePublisher,
     selected: Option<CmvsTextureSlot>,
     phase: u64,
     suspended: bool,
@@ -27,6 +28,7 @@ impl CmvsSession {
         archive: Arc<CmvsArchive>,
         entry: &str,
         window: WindowState,
+        session_epoch: u64,
         lease: Lease,
         gpu_instance: &wgpu::Instance,
     ) -> FamilyResult<Self> {
@@ -52,6 +54,7 @@ impl CmvsSession {
             scripts: BTreeMap::from([(0, script)]),
             scene,
             frame,
+            published_frame: FramePublisher::new(session_epoch)?,
             selected: None,
             phase: 0,
             suspended: false,
@@ -77,8 +80,9 @@ impl CmvsSession {
                 .checked_mul(4)
                 .ok_or_else(|| error("ASTRA_EMU_CMVS_FRAME", "frame stride overflow"))?,
             format: FrameFormat::Rgba8Srgb {
-                alpha: FrameAlpha::Opaque,
+                alpha: FrameAlpha::Ignored,
             },
+            rows: FrameRowOrder::TopToBottom,
         };
         info.validate()?;
         Ok(info)
@@ -355,14 +359,21 @@ impl FamilySession for CmvsSession {
         }
         result
     }
-    fn visit_frame(&self, visitor: &mut dyn FrameVisitor) -> FamilyResult<()> {
+    fn acquire_frame(&mut self, after: Option<FrameIdentity>) -> FamilyResult<FramePoll> {
         if let Some(failure) = &self.failure {
             return Err(failure.clone());
         }
-        visitor.accept(FrameView::from_slice(
-            self.frame.rgba8.as_slice(),
-            self.frame_info()?,
-        )?)
+        let info = self.frame_info()?;
+        if self.published_frame.current().is_none_or(|frame| {
+            frame.info != info || frame.pixels().as_ptr() != self.frame.rgba8.as_ptr()
+        }) {
+            self.published_frame.publish(
+                self.frame.rgba8.clone(),
+                |bytes| bytes.as_slice(),
+                info,
+            )?;
+        }
+        Ok(self.published_frame.poll(after))
     }
     fn close(self: Box<Self>) -> FamilyResult<()> {
         tracing::info!(event = "astra.emu.cmvs.session.close");

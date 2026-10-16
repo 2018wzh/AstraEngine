@@ -10,7 +10,7 @@ use astra_runtime::{
 #[test]
 fn save_load_rejects_previous_runtime_world_layout_without_compatibility() {
     let world = RuntimeWorld::create(RuntimeConfig::default()).unwrap();
-    let version = SchemaVersion::new(1, 0, 0);
+    let version = SchemaVersion::new(5, 0, 0);
     let manifest = MigrationManifest {
         sections: vec![MigrationManifestEntry {
             schema: "runtime.world".to_string(),

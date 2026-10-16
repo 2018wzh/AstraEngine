@@ -8,20 +8,8 @@ impl FamilySession for WindowSession {
             ..AdvanceResponse::running()
         })
     }
-    fn visit_frame(&self, visitor: &mut dyn FrameVisitor) -> FamilyResult<()> {
-        visitor.accept(FrameView::from_slice(
-            &[0, 0, 0, 255],
-            FrameInfo {
-                width: 1,
-                height: 1,
-                stride: 4,
-                logical_width: 1,
-                logical_height: 1,
-                format: FrameFormat::Rgba8Srgb {
-                    alpha: FrameAlpha::Opaque,
-                },
-            },
-        )?)
+    fn acquire_frame(&mut self, _: Option<FrameIdentity>) -> FamilyResult<FramePoll> {
+        Ok(FramePoll::Pending(FrameIdentity { session_epoch: 1, generation: 0 }))
     }
     fn close(self: Box<Self>) -> FamilyResult<()> {
         Ok(())
@@ -30,27 +18,26 @@ impl FamilySession for WindowSession {
 
 #[test]
 fn window_request_persists_until_explicitly_replaced() {
-    let mut active = ActiveFamilySession {
-        family_id: "test".into(),
-        session: Some(Box::new(WindowSession(
-            [
-                Some(FamilyWindowCommand::SetFullscreen(true)),
-                None,
-                Some(FamilyWindowCommand::SetFullscreen(false)),
-            ]
-            .into(),
-        ))),
-        audio: None,
-        text: None,
-        mailbox: FrameMailbox::new(),
-        status: FamilyStatus::Running,
-        fullscreen: false,
-        title: None,
-        pending_icon: None,
-        pending_pointer: None,
-        last_tick: Instant::now(),
-        next_deadline: Instant::now(),
-    };
+    let mut active = ActiveFamilySession { session_epoch: 1, family_id: "test".into(),
+    session: Some(Box::new(WindowSession(
+        [
+            Some(FamilyWindowCommand::SetFullscreen(true)),
+            None,
+            Some(FamilyWindowCommand::SetFullscreen(false)),
+        ]
+        .into(),
+    ))),
+    audio: None,
+    text: None,
+    modal: None,
+    mailbox: FrameMailbox::new(),
+    status: FamilyStatus::Running,
+    fullscreen: false,
+    title: None,
+    pending_icon: None,
+    pending_pointer: None,
+    last_tick: Instant::now(),
+    next_deadline: Instant::now(), };
     active.advance(1, &[]).unwrap();
     assert!(active.fullscreen);
     active.advance(1, &[]).unwrap();
@@ -62,33 +49,32 @@ fn window_request_persists_until_explicitly_replaced() {
 
 #[test]
 fn title_commands_persist_clear_and_reject_invalid_updates() {
-    let mut active = ActiveFamilySession {
-        family_id: "test".into(),
-        session: Some(Box::new(WindowSession(
-            [
-                Some(FamilyWindowCommand::SetTitle("公開タイトル".into())),
-                None,
-                Some(FamilyWindowCommand::SetTitle("bad\nprivate".into())),
-                Some(FamilyWindowCommand::SetIcon(FamilyWindowIcon {
-                    width: 1,
-                    height: 1,
-                    rgba: vec![1, 2, 3, 255].into(),
-                })),
-                Some(FamilyWindowCommand::SetTitle("".into())),
-            ]
-            .into(),
-        ))),
-        audio: None,
-        text: None,
-        mailbox: FrameMailbox::new(),
-        status: FamilyStatus::Running,
-        fullscreen: false,
-        title: None,
-        pending_icon: None,
-        pending_pointer: None,
-        last_tick: Instant::now(),
-        next_deadline: Instant::now(),
-    };
+    let mut active = ActiveFamilySession { session_epoch: 1, family_id: "test".into(),
+    session: Some(Box::new(WindowSession(
+        [
+            Some(FamilyWindowCommand::SetTitle("公開タイトル".into())),
+            None,
+            Some(FamilyWindowCommand::SetTitle("bad\nprivate".into())),
+            Some(FamilyWindowCommand::SetIcon(FamilyWindowIcon {
+                width: 1,
+                height: 1,
+                rgba: vec![1, 2, 3, 255].into(),
+            })),
+            Some(FamilyWindowCommand::SetTitle("".into())),
+        ]
+        .into(),
+    ))),
+    audio: None,
+    text: None,
+    modal: None,
+    mailbox: FrameMailbox::new(),
+    status: FamilyStatus::Running,
+    fullscreen: false,
+    title: None,
+    pending_icon: None,
+    pending_pointer: None,
+    last_tick: Instant::now(),
+    next_deadline: Instant::now(), };
     assert_eq!(active.title, None);
     active.advance(1, &[]).unwrap();
     assert_eq!(active.title.as_deref(), Some("公開タイトル"));

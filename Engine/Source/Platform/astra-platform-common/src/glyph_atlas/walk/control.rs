@@ -212,8 +212,8 @@ impl<'a> WalkedScene<'a> {
                 self.opacity_stack.pop();
             }
             SceneCommand::FilterGraph { .. } => {
-                // Filter graphs are validated and executed by the offscreen
-                // owner after this scene pass. They carry no atlas mutation.
+                // Both presentation owners execute the shared filter pass
+                // after this scene pass. Filters carry no atlas mutation.
             }
             _ => return Ok(false),
         }

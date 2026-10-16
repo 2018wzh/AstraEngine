@@ -9,6 +9,9 @@ mod text_service;
 use clap::Parser;
 use std::process::ExitCode;
 
+// Native VM boot may hold large temporaries. Reserve once per session owner.
+const FAMILY_OWNER_STACK_BYTES: usize = 8 * 1024 * 1024;
+
 #[derive(Parser)]
 struct Arguments {
     /// Run a local family startup test using the clocked null audio device.

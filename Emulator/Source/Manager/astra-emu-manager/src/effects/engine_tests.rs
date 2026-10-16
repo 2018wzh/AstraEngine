@@ -6,7 +6,9 @@ mod tests {
     #[ignore = "requires the pinned local DXC DLL and a GPU adapter"]
     #[test]
     fn compiles_anime_chain_with_pinned_dxc_when_available() {
-        let dxc = PathBuf::from("../../../../.tmp/dxc/dxcompiler.dll");
+        let dxc = std::env::var_os("ASTRA_EMU_DXC_PATH")
+            .map(PathBuf::from)
+            .expect("ASTRA_EMU_DXC_PATH must point to the pinned DXC DLL");
         assert!(
             dxc.is_file(),
             "pinned DXC DLL is required for this GPU test"
@@ -97,7 +99,7 @@ mod tests {
                 &device,
                 &queue,
                 &input,
-                &output,
+                Some(&output),
                 &FilterConfiguration {
                     preset: FilterPreset::Anime4kRestoreUpscale,
                     scale: 2.0,
@@ -132,7 +134,7 @@ mod tests {
             Err(FilterError::AnimeScale)
         ));
         engine
-            .apply(&device, &queue, &input, &output, &anime_config)
+            .apply(&device, &queue, &input, Some(&output), &anime_config)
             .unwrap();
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         let retained_pixels = readback(&device, &queue, &output, 34, 38);
@@ -160,7 +162,13 @@ mod tests {
             view_formats: &[],
         });
         engine
-            .apply(&device, &queue, &input, &restore_output, &anime_config)
+            .apply(
+                &device,
+                &queue,
+                &input,
+                Some(&restore_output),
+                &anime_config,
+            )
             .unwrap();
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         engine
@@ -168,7 +176,7 @@ mod tests {
             .unwrap();
         assert_eq!(engine.active_output_dimensions(17, 19).unwrap(), (34, 38));
         engine
-            .apply(&device, &queue, &input, &output, &anime_config)
+            .apply(&device, &queue, &input, Some(&output), &anime_config)
             .unwrap();
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         let external_pixels = readback(&device, &queue, &output, 34, 38);
@@ -208,7 +216,7 @@ mod tests {
         engine.reload(&device, &scale_config).unwrap();
         assert_eq!(engine.active_output_dimensions(17, 19).unwrap(), (26, 29));
         engine
-            .apply(&device, &queue, &input, &scale_output, &scale_config)
+            .apply(&device, &queue, &input, Some(&scale_output), &scale_config)
             .unwrap();
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         let scale_pixels = readback(&device, &queue, &scale_output, 26, 29);

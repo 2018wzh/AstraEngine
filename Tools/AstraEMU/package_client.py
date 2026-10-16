@@ -64,13 +64,6 @@ def package(manager: Path, cores: list[Path], output: Path, runtime_files: list[
                 destination = licenses / "rfvp"
                 destination.mkdir(exist_ok=True)
                 shutil.copy2(source, destination / name)
-        if any("fvp" in core.stem for core in cores):
-            destination = licenses / "wmv-decoder"
-            destination.mkdir()
-            shutil.copy2(
-                repo / "Emulator/Source/Families/na_wmv_player/THIRD_PARTY_NOTICES.md",
-                destination / "THIRD_PARTY_NOTICES.md",
-            )
         if any("musica" in core.stem for core in cores):
             destination = licenses / "noto"
             destination.mkdir()

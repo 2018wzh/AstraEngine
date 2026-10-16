@@ -113,7 +113,9 @@ fn native_gpu_movie_plays_pcm_pauses_restores_and_completes() {
     loop {
         assert!(Instant::now() < deadline, "movie did not complete");
         let result = opened.session.advance(16_666_667, &[]).unwrap();
-        opened.session.visit_frame(&mut capture).unwrap();
+        capture
+            .read(opened.session.acquire_frame(None).unwrap())
+            .unwrap();
         if capture.0 != last {
             changes += 1;
             last.clone_from(&capture.0);
@@ -127,7 +129,9 @@ fn native_gpu_movie_plays_pcm_pauses_restores_and_completes() {
             for _ in 0..5 {
                 opened.session.advance(16_666_667, &[]).unwrap();
             }
-            opened.session.visit_frame(&mut capture).unwrap();
+            capture
+                .read(opened.session.acquire_frame(None).unwrap())
+                .unwrap();
             assert_eq!(capture.0, last);
             opened.session.advance(0, &[key(KeyCode::F9)]).unwrap();
             opened

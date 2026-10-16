@@ -1,7 +1,7 @@
 use rfvp::host_api::{
     AudioParams, AudioSampleFormat, AudioStreamDesc, AudioStreamId, ColorRgba, DrawSolidCommand,
-    DrawSpriteCommand, EncodedAudioKind, PixelBuffer, RfvpAudio, RfvpError, RfvpRenderer,
-    RfvpResult, TextureDesc, TextureId, TextureRect,
+    DrawSpriteCommand, EncodedAudioKind, RfvpAudio, RfvpError, RfvpRenderer, RfvpResult,
+    TextureDesc, TextureId, TextureRect,
 };
 
 pub(crate) struct NullRenderer;
@@ -10,7 +10,7 @@ impl RfvpRenderer for NullRenderer {
         &mut self,
         _id: TextureId,
         _desc: TextureDesc,
-        _pixels: Option<PixelBuffer<'_>>,
+        _pixels: Option<&[u8]>,
     ) -> RfvpResult<()> {
         Ok(())
     }
@@ -18,7 +18,7 @@ impl RfvpRenderer for NullRenderer {
         &mut self,
         _id: TextureId,
         _rect: TextureRect,
-        _pixels: PixelBuffer<'_>,
+        _pixels: &[u8],
     ) -> RfvpResult<()> {
         Ok(())
     }
@@ -152,17 +152,15 @@ impl rfvp::host_api::RfvpClock for SessionClock {
         self.micros
     }
 
-    fn local_calendar_time(&mut self) -> RfvpResult<rfvp::host_api::clock::CalendarTime> {
-        let now = time::OffsetDateTime::now_local().map_err(|_| RfvpError::Backend)?;
-        let value = rfvp::host_api::clock::CalendarTime {
-            year: now.year().try_into().map_err(|_| RfvpError::InvalidData)?,
+    fn wall_time(&mut self) -> Option<rfvp::host_api::clock::WallTime> {
+        let now = time::OffsetDateTime::now_local().ok()?;
+        Some(rfvp::host_api::clock::WallTime {
+            year: now.year().try_into().ok()?,
             month: now.month() as u8,
             day: now.day(),
             day_of_week: now.weekday().number_days_from_sunday(),
             hour: now.hour(),
             minute: now.minute(),
-        };
-        value.validate()?;
-        Ok(value)
+        })
     }
 }

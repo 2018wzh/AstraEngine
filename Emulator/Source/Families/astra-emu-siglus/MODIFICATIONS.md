@@ -1,187 +1,41 @@
-# siglus_rs Astra family fork record
+# Siglus 最小原生适配
 
-`../../../ThirdParty/siglus_rs/` is the git submodule of the full
-[`xmoezzz/siglus_rs`](https://github.com/xmoezzz/siglus_rs) repository pinned
-to an exact local adaptation commit in the
-[`2018wzh/siglus_rs`](https://github.com/2018wzh/siglus_rs) fork. That branch
-starts from upstream commit `e762f9f9c1c94cb490fb13f1367fd06f3e1367b4` (2026-09-13)
-plus a single adaptation commit
-(`df036631f250bbd42213f07bcecb87357267b64f`). This local commit consolidates
-the original hosted adaptation `2be01ae` and local cancellation/GPU changes
-`a9508e6`; both original commits remain available without rewriting their
-history. The previous consolidated commit `c6c4f99ccac855966b726909756afe3200488374`
-and its branch remain unchanged. The current local branch is
-`codex/hosted-button-flow`; its commit has not been pushed, so a remote
-clean checkout and CI are not yet available for this gitlink. The complete MPL-2.0 text stays
-in `../../../ThirdParty/siglus_rs/LICENSE-MPL-2.0`; `THIRD_PARTY_NOTICES.md`
-records the attribution chain.
+## 固定来源与提交结构
 
-## Local changes to the vendored tree
+- 上游：[xmoezzz/siglus_rs](https://github.com/xmoezzz/siglus_rs)，2026-10-16 核对 main HEAD 为 `5f358ef1360b0439e92aed2b749e8f25d8721954`，版本 1.0.0。
+- 完整 fork：[2018wzh/siglus_rs](https://github.com/2018wzh/siglus_rs)，本地分支 `codex/astra-upstream-head-20261016`。
+- 唯一适配提交：`8bf5024fb3975bb8dc375874380f4574ecedf4d8`；唯一父提交为上述上游 HEAD，范围内提交数实测为 1。尚未推送，不能声称远端干净克隆已经可取得它。
+- 主仓通过 `Emulator/ThirdParty/siglus_rs` submodule 固定精确提交，不复制源码。旧缺失对象、恢复起点和旧基线验证保存在[审计文档](../../../../Docs/status/performance-upstream-audit-2026-10-12.md)，原来源和发布历史未改写。
 
-Hosted execution is selected by the `astra-hosted` Cargo feature on
-`siglus_scene_vm`. Native renderer and audio paths remain in place; unchanged
-platform behavior still requires platform-specific validation.
+## 必要核心差异
 
-- `crates/siglus_scene_vm/src/render/mod.rs` adds an offscreen renderer:
-  `Renderer::new_offscreen(width, height)` creates the wgpu device without a
-  window surface and renders into an owned non-sRGB RGBA8 texture (the same
-  D3D9 byte-space blending semantics as the surface path). `render_frame`
-  dispatches to a shared `render_frame_to_view` path for both surface and
-  offscreen targets, `read_frame_rgba` copies the composed target back to CPU
-  RGBA bytes, and target resize recreates the owned texture. The `surface`
-  field becomes an `Option`; the desktop overlay shells only gain a missing
-  surface error branch.
-- `crates/siglus_scene_vm/src/audio/kira_hub.rs` adds a PCM tap audio
-  backend gated behind `astra-hosted`: `hosted_tap::install` registers a
-  callback factory and `AudioHub::new` mixes through `TapBackend` (a kira `Backend`
-  whose worker pulls mixed frames and pushes interleaved stereo f32 chunks at
-  the configured sample rate) whenever a tap is installed. The callback
-  blocks on the consumer's bounded queue, pacing the mixer to real time.
-  Family disables default features and requires an installed tap; a missing
-  or failed tap returns an initialization error through `SiglusHost` instead
-  of silently selecting another backend. The default `native-audio` feature
-  explicitly constructs Kira's `CpalBackend` for the original desktop path.
-- Each hosted mixer receives its own callback and cancellation scope from
-  the factory. Dropping an `AudioHub` during native scene restart only
-  interrupts that mixer's writes and joins its worker; it must not cancel
-  the session's shared Host sink. Session closure still cancels the Host
-  sink before joining workers. The previous `364aca8` adaptation is retained
-  on its own local branch.
-- The workspace Kira dependency disables automatic backend features and
-  explicitly retains `mp3`, `ogg`, `flac`, and `wav`. `native-audio` alone
-  enables `kira/cpal`; the hosted Family selects only `astra-hosted`.
-  `crates/na_mpeg2_decoder/Cargo.toml` makes rodio optional under the existing
-  `desktop-bins` feature, because only the desktop MPEG player uses it.
-  These changes leave Kira at 0.9.6 and avoid an unused native backend in the
-  hosted dependency graph; they do not replace codecs or mixing semantics.
-- `crates/na_wmv_player/Cargo.toml` bumps the package version from `0.2.0`
-  to `0.2.1`: this repository already vendors an unrelated build of the same
-  crate name at `Emulator/Source/Families/na_wmv_player`, and two distinct
-  path dependencies with identical name and version cannot share a lockfile.
-- `crates/siglus_scene_vm/src/runtime/mod.rs`, `src/host.rs`, and
-  `src/platform_time.rs` add a deterministic hosted clock behind
-  `astra-hosted`: `SiglusHostConfig::deterministic_frame_clock` makes `step`
-  drive the frame clock from its `dt_ms` argument, blocking waits measure
-  their deadlines against a virtual monotonic clock that advances with each
-  frame's elapsed value (`platform_time::hosted_clock`), and the family
-  adapter enables it per session. Desktop paths keep the wall clock exactly
-  as upstream. The default-feature check also fixed the existing adaptation
-  cfg boundary: `wait_now_ms` remains available without `astra-hosted`, while
-  only its virtual-clock branch is feature-gated. Without this, real-time waits (movies, fades, `wait` ms)
-  would take their full real-world duration under a headless driver.
-- Blanket rustc/Clippy warning overrides from the previous adaptation were
-  removed from all 18 affected manifests. Upstream warnings remain visible;
-  unrelated lint cleanup is not part of the embedding patch. Formatting-only
-  changes in 117 source files were also removed after comparing rustfmt output.
+- 使用显式 `astra-hosted` feature；Family 关闭 default features。原桌面默认仍使用 Kira/CPAL，未选择 hosted 时保留原 VM、过程流、输入、保存、解码和原生窗口渲染。
+- 为原 wgpu renderer 增加无窗口硬件 GPU 目标。仅把 surface 改为 optional、共用初始化和同一 `render_frame_to_view`，不另写 sprite、wipe、shader、Emote 或几何路径。离屏仅接受独显/集显/虚拟硬件 adapter，拒绝 CPU/未知类型。
+- 最终纹理与 GPU readback buffer 按尺寸持有，映射完成队列初始化一次后复用；实际拉帧才读回，不逐帧新建 readback buffer。RGBA 非 sRGB render target 保持原 D3D9 byte-space 合成语义；不增加全像素 alpha 认证。
+- 复用原 Kira mixer，由每 mixer 的有界 tap worker 交付 stereo F32。取消先打断阻塞写入再 join，替换 mixer 不取消整个 session。新增失败诊断经原 log 通道，不新建文件 sink；新增共享注册表使用 parking_lot。
+- Kira backend feature 调整只放在 `siglus_scene_vm` 消费者，不改变整个上游 workspace 的 Kira 默认配置。原解码 features 和桌面 CPAL 保留。
+- 原生成功 load-completed、返回菜单与场景 restart 仅增加一次性 timeline-reset 通知；不复制旧分支过程流修复或修改新上游 VM。
+- 保留上游原生实时时钟。删除旧适配的 hosted_clock/deterministic_frame_clock 及其消费者，不在真实游戏启用上游注明仅供 replay 的 virtual-clock。
+- 原生离屏提交成功后才增加 hosted frame generation；VM tick、读取与 resize 本身不冒充新绘制。Family 据此跳过没有新提交时的 GPU 回读和 CPU 发布，generation 保存在 renderer 中以跨目标 resize 连续，避免重建目标造成旧 frame identity 别名。未新增像素 hash、场景比较或另一绘制路径。
+- 原 WMV 解码 crate 版本标为 0.2.1，只解决同一 Host lockfile 中独立 path 包的同名同版本冲突；不更换 codec、算法或媒体行为。
 
-## Family adapter
+核心差异共 11 文件、+557/−67，包含清单、lockfile、窗口消费者迁移及新增离屏模块；不把全部称为性能改动。Parent Family 负责 ABI v13、事件翻译、PCM Host 队列、FrameLease/代次与生命周期，不向核心引入 Astra 类型或 SDK 依赖。
 
-The local product rebuild uses the independent Family API v11 dynamic root
-module and explicit configuration schema. The module rejects a second active
-session. Adapter-only game-specific trace output has been removed; bounded
-frame events use `tracing`. Failed startup also disables the hosted clock.
-Missing `SCREEN_SIZE` retains the engine's documented default, while unreadable,
-undecodable or malformed configuration now fails instead of replacing it with
-default dimensions. Engine errors expose only an audited operation name;
-arbitrary error chains may contain private paths or game text. The first
-frame readback now propagates errors instead of retrying every failure.
+## 新 HEAD 实际验证与边界
 
-The local hosted core changes are limited to its existing boundaries:
-`TapBackend` receives a cancellation callback and invokes it before joining
-the worker, including failed startup and unwinding. Worker panics produce a
-stable diagnostic. Offscreen creation rejects CPU and unknown adapters;
-the native wgpu pipeline and desktop device backend remain unchanged.
-The adapter regression repeats native mixer replacement and blocked-write
-shutdown three times through the real Kira mixer. Replacement leaves the
-Host sink open and the new mixer continues producing PCM; session close
-cancels and joins the blocking forwarder. A separate hardware-only test
-checks native GPU readback.
+- 上游原桌面 default-feature library check 和 `--no-default-features --features astra-hosted` library check 均通过。
+- Hosted Core Clippy 执行成功，保留上游原有 warning；新 tap-worker 的局部 Clippy 问题已修正，没有为全绿屏蔽警告或清理无关上游源码。
+- 使用实际 Family 源码的独立清单：普通 library 测试 3 通过，GPU 项原先忽略；另显式执行加强后的 GPU 像素/resize 回归 1 通过。首次只传短测试名又加 `--exact`，实际筛选出零项，未计通过；随后使用完整模块路径真实执行。
+- 实际独立程序使用原 renderer，在 NVIDIA GeForce RTX 4070 Laptop GPU / DiscreteGpu / Vulkan 上执行 `63×47 → 65×49 → 63×47`，全部像素分别精确匹配原色，FramePublisher generation 为 1/2/3；关闭 renderer/publisher 后最初 CPU lease 仍有效。覆盖非 256-byte 行宽的 readback padding 与目标重建，不是商业游戏或正式帧率验收。
+- 修改文件单独格式化；全 package fmt check 仍报告未修改的 upstream replay/example/movie/Horizon 等格式差异，未扩大适配提交处理它们。
+- 已通过实际 Manager headless 入口运行商业游戏并观察原生标题菜单、非零 PCM 和正常关闭；这不替代路线、原生菜单/槽位、设备听音和四平台验收。完整 Emulator 检查及最后的宿主优化复测见性能审计，不能套用旧基线结果。
 
-`astra-emu-siglus/src/` is the separate family adapter. It owns no engine
-state beyond the session: one `SiglusHost` per session on the family session
-thread, one offscreen renderer, the native kira tap workers, and one PCM
-forwarder with a bounded two-chunk queue. Each mixer producer has a separate
-cancellation channel; queued chunks from a dropped mixer are discarded.
-`open` resolves the
-game's `#SCREEN_SIZE` with the same discovery the engine host uses, enables
-the hosted virtual clock, boots the engine, and pumps settle frames until the
-first composition so the ABI's fixed `FrameInfo` is final. Each `advance`
-applies translated family events, pumps one engine frame through
-`SiglusHost::step` with the host's elapsed value, and reads the composed
-frame back into the session snapshot; a `true` step result (engine-requested
-exit or halted proc flow) maps to `FamilyStatus::Finished`. `close` cancels
-the host audio queue first, then drops the host so the tap worker joins, and
-clears the process-global tap registry. The frame readback is lazy: `advance`
-only composes into the offscreen target and `visit_frame` copies to the CPU
-on demand, so hosts that skip frame pulls (headless routes) do not pay a
-texture-to-buffer copy per advance.
+许可证和用户自备密钥边界见[第三方说明](THIRD_PARTY_NOTICES.md)。
 
-The final CPU frame preserves the native renderer's composed RGB and sets
-presentation alpha to 255. The native swapchain ignores render-target alpha;
-that channel is not scene opacity and can contain values below 255. It must
-not be exposed as transparent pixels under the Family's opaque-frame contract.
+## Family 与宿主生命周期补齐
 
-Save data stays in the game directory (`<game>/savedata`), owned entirely by
-the engine; the host provides only the game path. Protected retail resources
-are decrypted through the user-provided `key.toml` in the game directory.
+Family 改用当前上游已提供的 `new_with_renderer_sync`，避免无实际 await 的包装；同步改动本身未解决 Windows main 栈溢出。Manager 的 GUI/headless 固定 owner 统一一次性保留 8 MiB 栈，实际同一游戏随后正常进入标题菜单并关闭，没有更改原 VM 或为此增加核心提交。
 
-## Earlier route blocker (upstream)
+Family 在首个脚本帧前取得原 `persist_global_if_changed(None)` fingerprint，关闭时调用同一个原生 dirty writer，保留原全局/已读/配置编码与错误日志，不另写保存格式；只在启动/关闭边界计算，不逐帧 hash。取消音频后仍执行原生关闭持久化并 drop host，最后清除 tap。
 
-An earlier headless Rewrite+ prologue run stalled a few lines into the first message block: the
-`sys40_mp20` message proc gates its entire input handling behind a per-message
-voice-completion flag (`d[700]`) that never clears in this engine, so the
-proc spins on `disp()` and ignores every input shape (single-poll clicks,
-split-edge clicks, Enter, Ctrl skip, and the in-game A.Skip toggle). No koe
-error is logged and `KoeEngine::is_playing_any()` never reports playback,
-so the voice event that should clear the flag never fires. Headless route
-completion therefore stops at that point; everything before it (boot, title
-flow, opening scene, movie, and the leading dialogue lines) runs and renders
-correctly. Fixing it requires upstream work on the msg-block/voice state
-machine in `siglus_scene_vm`, not adapter changes. The updated Release window
-has since completed the opening WMV, leading dialogue, native save/load and
-session reopen/load. Those shorter interactive flows do not establish full
-route completion or resolve the previously observed voice-state limitation.
-
-## Manager diagnostics
-
-The Family adapter installs the shared optional Family API v11 diagnostic bridge before descriptor/probe/open. Existing core tracing and log events reach the Manager sink without adding a core logger or changing native rendering/platform behavior. The bridge forwards bounded text and Debug values without content redaction; Manager-side field and size limits remain in force.
-
-## Native lifecycle notifications
-
-The embedded EndGame proc sets `pending_exit`, matching the existing desktop
-shell. Successful native load completion and return to menu set a consumed
-`SiglusHost::take_timeline_reset` notification. The Family reports `reset_clock`
-after advancing so the Manager restarts timing after frame readback. VM, native
-save format and native renderer behavior remain unchanged. The earlier
-`473cb7a` adaptation is retained on its original local branch.
-
-The embedded step also polls the existing `GameEndWipe` and `TimeWait`
-flow procs on subsequent frames. They are owned by `ProcFlow` rather than
-`VmWait`; checking only VM waits left a completed fade waiting for another
-input before EndGame or menu restart could run. The native proc implementation
-and wipe semantics are reused. The previous `6265304` commit remains on its
-original local branch.
-
-The embedded driver does not expose the desktop debugger pause/step controls.
-Its copied `paused` latch is removed: an exhausted script flow must not prevent
-subsequently queued native exit, menu, or button procs from running. Actual Exit
-diagnosis found pending flow entries with the latch set, so the pump returned
-without consuming them. The previous `4e77065` adaptation remains on its branch.
-
-A script proc requested during native frame evaluation wakes the next script
-pump after redraw. Button actions already run in the native VM; adding their
-requested proc to the host flow must also schedule it without requiring another
-input. Existing script boundaries and native button execution are retained.
-The previous `a3c22cd` adaptation remains on its original local branch.
-
-Button ex-call scripts use the existing menu wait suspension and restoration
-scope, so an interrupted message key wait cannot block the newly entered menu.
-The block check follows the proc transition. Load, selection restore and return
-to title discard scopes belonging to the replaced flow; SAVE_SCENE retains its
-existing thumbnail cleanup. The previous `fefb5d5` adaptation remains unchanged.
-
-The pump continues immediately when a button ex-call pushes a SCRIPT proc
-after polling the interrupted parent. Returning at that point left an
-unblocked child idle until another input. Native script execution, waits,
-confirmation UI and button semantics are retained. The previous `d9a92e0`
-adaptation remains on its original local branch.
+短场景 private bytes 采样和原 D3D12 候选后端/DXGI Live Object 警告均如实记入审计；未证明 GPU 无泄露，不屏蔽警告或以局部像素测试代替长期产品对照。

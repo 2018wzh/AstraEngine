@@ -39,8 +39,9 @@ impl RuntimeWorld {
             delayed_events: DelayedEventQueue::default(),
             machines: StateMachineStore::default(),
             actions,
-            presentation: Vec::new(),
-            mutations: Vec::new(),
+            presentation: VecDeque::new(),
+            presentation_sequence: 0,
+            mutations: VecDeque::new(),
             diagnostics: Vec::new(),
             mounted_modules: BTreeMap::new(),
             step: 0,
@@ -285,14 +286,17 @@ impl RuntimeWorld {
         let payload = component.payload.replaced(data.clone())?;
         let after_revision = payload.revision;
         component.payload = payload;
-        self.mutations.push(RuntimeMutationRecord {
-            step: self.step,
-            component_id,
-            schema,
-            before_revision,
-            after_revision,
-            source: "runtime.api".to_string(),
-        });
+        crate::diagnostic_history::record(
+            &mut self.mutations,
+            RuntimeMutationRecord {
+                step: self.step,
+                component_id,
+                schema,
+                before_revision,
+                after_revision,
+                source: "runtime.api".to_string(),
+            },
+        );
         Ok(())
     }
 
@@ -400,18 +404,24 @@ impl RuntimeWorld {
 
     pub fn emit_presentation(&mut self, command: PresentationCommand) -> Result<(), RuntimeError> {
         self.ensure_active()?;
-        let sequence = self.presentation.len() as u64;
+        let sequence = self.presentation_sequence;
+        self.presentation_sequence = sequence
+            .checked_add(1)
+            .ok_or_else(|| RuntimeError::message("ASTRA_RUNTIME_PRESENTATION_SEQUENCE_OVERFLOW"))?;
         debug!(
             step = self.step,
             sequence,
             command_kind = presentation_kind(&command),
             "runtime.presentation.emit"
         );
-        self.presentation.push(PresentationRecord {
-            step: self.step,
-            sequence,
-            command,
-        });
+        crate::diagnostic_history::record(
+            &mut self.presentation,
+            PresentationRecord {
+                step: self.step,
+                sequence,
+                command,
+            },
+        );
         Ok(())
     }
 

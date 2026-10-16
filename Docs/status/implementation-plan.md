@@ -1,5 +1,21 @@
 # 全产品重构实施状态
 
+## 2026-10-16 最新上游最小适配整合
+
+本轮由主线程在独占工作树亲自实施，KrKr 按用户决定跳过，保留原成果与未验收记录，不纳入本批 fork/gitlink。FVP、Siglus、Artemis 分别直接基于当前上游 HEAD 加一个适配提交，主仓 `Emulator/ThirdParty` 以三项精确 `160000` gitlink 固定。最终再次核对三上游 live HEAD、父提交、单提交计数及核心工作树 clean 均通过；只作本地整合，未推送，不声称远端全新 clone 已可取得提交。
+
+FVP 直接使用上游 V1 保存，不保留旧 V2 扩展、识别、迁移或专门旧存档报错；删除重复 WMV 播放器和第二 mask，Astra 收集/变化跟踪留在 Family，原 VM/GPU/媒体/混音保留。V1 图像/几何修复只用既有字段，实际游戏发现的黑屏由原 GPU cache 正确授权像素回收修复。动态模块 25 项及另 3 项硬件 GPU 回归通过；真实 headless 已观察标题菜单、物理点击进入剧情和正文，正常关闭。原桌面默认 check/portable rlib 通过，未修改 native texture 测试缺少 Read 导入的全测试限制如实保留。
+
+新 HEAD 与所有实际证据见[性能审计](performance-upstream-audit-2026-10-12.md#已完成的单提交与新基线实证)。Siglus 复用原同步入口、实际绘制 generation 与原生 dirty writer；Manager GUI/headless 固定 owner 保留 8 MiB 栈，真实游戏/非零 PCM/原生全局保存及冷重开已运行。Headless 保留 CPU lease，仅在请求 PNG 时转换，FVP 最终像素与原路径完全一致。共享 FFmpeg 保留上游 9.0。Engine 完整 fmt/严格 Clippy/build/test 为 870 通过、22 忽略；Editor 为 18 通过、3 忽略。Emulator 最终 fmt/严格 Clippy/build 成功；Cargo 综合 test 命令含缓存锁等待并超时，隔离末尾 Musica 用例通过后，按原包 cwd 和原生环境直接执行全部 26 个当前测试程序，627 通过、0 失败、37 忽略，未改测试/忽略集合。Artemis 商业 headless 遇 typed 窗口请求正确拒绝，仅黑色首帧不算视觉验收；设备听音、结局/路线、四平台、原生性能对照和 GPU 泄露长期对照仍未验收。原商业目录与存档不回写。
+
+## 2026-10-13 性能整改与最小核心恢复（独占分支，未整合提交）
+
+主线程在独占 `codex/performance-main-20261013` 实施，未覆盖来源工作树。现行 Family ABI 为 v13：保留 CPU lease/epoch/generation、像素格式/行序/alpha 与固定 owner 调度，新增有界、可取消的 typed 模态服务；旧条目中的 v11/v12 构建/运行记录仅代表当时版本。当前结论、实际检查与未验收范围集中记录在 [性能与上游适配审计 §10](performance-upstream-audit-2026-10-12.md#10-整改进度2026-10-13)。
+
+Runtime 诊断有界、延迟队列/worker 复用，Editor 后台诊断/增量撤销，共享滤镜、SDK 纹理驻留、PCM owner 直通/非实时回收及无滤镜直接呈现均已实现并分别经过定向回归与真实 crate/GPU 冒烟。FVP 完成静态/影片帧跳过、同步原生 GPU 保存边界和可复用分离回读；保留 input/change 与 GPU 的原生计算，不另写 renderer，未声称变化帧已合成单遍。Artemis 完成显式 Result 帧边界，实际 Windows hardware Vulkan/native FFmpeg 视频与非零 PCM 交付验证通过；这些公开夹具/NullAudio 不是商业游戏或听音验收。
+
+KrKr 完整固定 Cocos/OpenGL 上游及原版 layerExImage 已恢复；Windows 原独立 executable 与正式 NativeOwner shared target 均完整编译/链接。Family 自持 adapter，原核心只增加可选嵌入/生命周期钩子，复用原 VM、最终游戏纹理、输入、OpenAL loopback/WaveMixer、FFmpeg 与存档。原模态通过真实交互验证；公开原 TJS/WAV 已验证硬件 GPU 动态全画布、静态跳过、逻辑输入和窗口请求，三次生产 child/完整运行包开启与关闭通过。PCM 使用 TestConsumption，不能作为设备听音、商业游戏、视频/BPG、存读档或 Manager 完整流程验收。Siglus/Artemis 原缺失对象的可取得恢复起点和实际差异分别记录，不能写成找回原对象。三个主 Windows workspace 此前 fmt/严格 Clippy/build/test 保留历史通过记录；本轮新 NativeOwner 与取消竞态修改的定向检查继续补齐。真实 GPUI 大文档增量编辑/确认/撤销/重做已观察，但 `--mcp` 持有 stdin 的关闭缺口仍待整改。正式 fork 整理提交、parent gitlink 与四平台/真实游戏验收尚未完成。
+
 ## 2026-10-12 退役执行入口精简
 
 删除 `astra test run` 子命令、只返回迁移诊断的占位分支、旧 ScenarioReport 四类 DTO/formatter 及其纯文案测试。`report explain` 单次解析 ReleaseReport，拒绝未知 schema；旧兜底曾实际接受并格式化 `unknown.report.v1` 的 scenario-shaped 输入，现同一输入非零退出，回归保留。真实 package validation 生成的 blocked ReleaseReport 仍可正常解释。

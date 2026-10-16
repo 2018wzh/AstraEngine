@@ -31,8 +31,10 @@ tokio.workspace = true
 directories.workspace = true
 image.workspace = true
 pollster.workspace = true
+parking_lot = "0.12.5"
 serde_json.workspace = true
 rubato.workspace = true
+rtrb.workspace = true
 sha2.workspace = true
 slint = { workspace = true, features = ["std", "compat-1-2", "accessibility", "backend-winit", "renderer-femtovg-wgpu", "unstable-wgpu-29", "unstable-winit-030"] }
 thiserror.workspace = true

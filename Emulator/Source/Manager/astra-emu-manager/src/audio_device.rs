@@ -8,7 +8,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use crossbeam_channel::{bounded, Receiver, Sender};
 
 use super::{
-    wake_cancel_waiters_best_effort, AudioState, DeviceConsumer, Ordering, OutputFormat,
+    cancel_writes, AudioState, DeviceConsumer, Ordering, OutputFormat,
     PcmFormatSpec,
 };
 
@@ -135,7 +135,7 @@ fn build_stream<T: cpal::SizedSample + cpal::FromSample<f32>>(
         move |_error| {
             error_state.stream_failed.store(true, Ordering::Release);
             error_state.cancelled.store(true, Ordering::Release);
-            wake_cancel_waiters_best_effort(&error_state);
+            cancel_writes(&error_state);
             if let Some(wake) = &error_state.wake {
                 wake();
             }
@@ -161,7 +161,7 @@ fn render_callback<T: Copy>(
 fn fail_progress(state: &AudioState) {
     state.progress_failed.store(true, Ordering::Release);
     state.cancelled.store(true, Ordering::Release);
-    wake_cancel_waiters_best_effort(state);
+    cancel_writes(state);
     if let Some(wake) = &state.wake {
         wake();
     }

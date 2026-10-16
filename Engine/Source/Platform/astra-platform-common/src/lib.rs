@@ -11,6 +11,7 @@ mod offscreen;
 mod performance_scheduling;
 mod presentation;
 mod resource;
+mod scene_filters;
 mod storage;
 #[cfg(not(target_arch = "wasm32"))]
 mod verified_cache;

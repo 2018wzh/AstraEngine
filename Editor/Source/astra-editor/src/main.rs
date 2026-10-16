@@ -2,11 +2,12 @@ use clap::Parser;
 use std::path::PathBuf;
 
 use astra_editor::preview::{Preview, PreviewConfig};
-use astra_editor::project::Project;
+use astra_editor::project::{Project, ProjectRevision};
 use astra_editor::{
     agent::{AgentEdits, EditMode},
     bridge::{EditorBridge, Request},
 };
+use astra_vn_editor::{BackgroundCompiler, CompilationResult};
 use gpui::{div, prelude::*, *};
 use gpui_component::{
     button::Button,
@@ -29,6 +30,16 @@ struct PermissionReview {
     generation: u64,
     request: Box<RequestPermissionRequest>,
     reply: tokio::sync::oneshot::Sender<RequestPermissionOutcome>,
+}
+
+struct DiagnosticJob {
+    revision: ProjectRevision,
+    receiver: std::sync::mpsc::Receiver<CompilationResult>,
+}
+
+struct EditorServices {
+    runtime: tokio::runtime::Handle,
+    compiler: BackgroundCompiler,
 }
 
 struct Editor {
@@ -58,6 +69,8 @@ struct Editor {
     agent_task: Option<tokio::task::JoinHandle<()>>,
     diagnostic_position: Option<gpui_component::input::Position>,
     diagnostic_source: Option<String>,
+    compiler: BackgroundCompiler,
+    diagnostic_job: Option<DiagnosticJob>,
     panels: panels::WorkspacePanels,
     _subscription: Subscription,
 }
@@ -80,11 +93,12 @@ impl Editor {
         preview_config: Option<PreviewConfig>,
         transport: (EditorBridge, tokio::sync::mpsc::Receiver<Request>),
         agent_command: Option<String>,
-        runtime: tokio::runtime::Handle,
+        services: EditorServices,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let (bridge, requests) = transport;
+        let EditorServices { runtime, compiler } = services;
         let text = project
             .documents
             .document(&project.active)
@@ -142,6 +156,8 @@ impl Editor {
             agent_task: None,
             diagnostic_position: None,
             diagnostic_source: None,
+            compiler,
+            diagnostic_job: None,
             _subscription: subscription,
         };
         editor.agent.begin(editor.mode).expect("new agent turn");
@@ -152,6 +168,9 @@ impl Editor {
             if this
                 .update_in(cx, |this, window, cx| {
                     this.follow_source_cursor(window, cx);
+                    if this.poll_diagnostics() {
+                        cx.notify();
+                    }
                     while let Ok(request) = this.requests.try_recv() {
                         match request {
                             Request::Permission {
@@ -260,13 +279,46 @@ impl Editor {
     fn diagnose(&mut self) {
         self.diagnostic_position = None;
         self.diagnostic_source = None;
-        self.status = match self.project.compile() {
-            Ok(project) => format!(
-                "Compiled · {} source locations",
-                project.story.source_map.len()
-            ),
+        self.diagnostic_job = match self.compiler.submit(
+            self.project.documents.compilation_snapshot(),
+            self.project.compilation_options(),
+        ) {
+            Ok(receiver) => {
+                self.status = "Checking source…".into();
+                Some(DiagnosticJob {
+                    revision: self.project.revision(),
+                    receiver,
+                })
+            }
+            Err(error) => {
+                self.status = error.to_string();
+                None
+            }
+        };
+    }
+
+    fn poll_diagnostics(&mut self) -> bool {
+        let Some(job) = &self.diagnostic_job else {
+            return false;
+        };
+        if job.revision != self.project.revision() {
+            self.diagnostic_job = None;
+            return false;
+        }
+        let result = match job.receiver.try_recv() {
+            Ok(result) => result,
+            Err(std::sync::mpsc::TryRecvError::Empty) => return false,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.diagnostic_job = None;
+                self.status = "ASTRA_EDITOR_COMPILER_CLOSED".into();
+                return true;
+            }
+        };
+        self.diagnostic_job = None;
+        self.status = match result.as_ref() {
+            Ok(locations) => format!("Compiled · {locations} source locations"),
             Err(astra_vn_editor::VnError::Diagnostic(error)) => {
-                if let Some(source) = error.source {
+                if let Some(source) = &error.source {
                     self.diagnostic_source = Some(source.source.clone());
                     self.diagnostic_position = Some(gpui_component::input::Position::new(
                         source.line.saturating_sub(1),
@@ -282,6 +334,7 @@ impl Editor {
             }
             Err(error) => error.to_string(),
         };
+        true
     }
 
     fn sync(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -344,6 +397,7 @@ fn main() -> anyhow::Result<()> {
         });
     }
     let runtime_handle = runtime.handle().clone();
+    let compiler = BackgroundCompiler::new(std::time::Duration::from_millis(150))?;
     Application::new().run(move |cx: &mut App| {
         gpui_component::init(cx);
         let bounds = Bounds::centered(None, size(px(1100.), px(760.)), cx);
@@ -360,7 +414,7 @@ fn main() -> anyhow::Result<()> {
                         preview_config,
                         (bridge, requests),
                         args.agent,
-                        runtime_handle,
+                        EditorServices { runtime: runtime_handle, compiler },
                         window,
                         cx,
                     )

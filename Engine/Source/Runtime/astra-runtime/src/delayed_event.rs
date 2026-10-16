@@ -18,10 +18,31 @@ pub struct ScheduledEvent {
     pub payload: EventPayload,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, JsonSchema)]
 pub struct DelayedEventQueue {
     queued: Vec<ScheduledEvent>,
     next_sequence: u64,
+}
+
+impl<'de> Deserialize<'de> for DelayedEventQueue {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct SavedQueue {
+            queued: Vec<ScheduledEvent>,
+            next_sequence: u64,
+        }
+        let mut saved = SavedQueue::deserialize(deserializer)?;
+        // Normalize once at the recovery boundary, never on an idle tick.
+        saved.queued.sort_unstable_by_key(event_order);
+        Ok(Self {
+            queued: saved.queued,
+            next_sequence: saved.next_sequence,
+        })
+    }
+}
+
+fn event_order(event: &ScheduledEvent) -> (u64, u64, DelayedEventId) {
+    (event.due_tick, event.sequence, event.id)
 }
 
 impl DelayedEventQueue {
@@ -29,7 +50,11 @@ impl DelayedEventQueue {
         event.sequence = self.next_sequence;
         self.next_sequence += 1;
         let id = event.id;
-        self.queued.push(event);
+        let key = event_order(&event);
+        let index = self
+            .queued
+            .partition_point(|pending| event_order(pending) <= key);
+        self.queued.insert(index, event);
         id
     }
 
@@ -43,25 +68,26 @@ impl DelayedEventQueue {
     }
 
     pub fn drain_due(&mut self, fixed_step: u64) -> Vec<RuntimeEvent> {
-        self.queued
-            .sort_by_key(|event| (event.due_tick, event.sequence, event.id));
-        let mut ready = Vec::new();
-        let mut pending = Vec::new();
-        for event in self.queued.drain(..) {
-            if event.due_tick <= fixed_step {
-                ready.push(RuntimeEvent {
-                    id: EventId(event.id.0),
-                    source: event.source,
-                    step: event.due_tick,
-                    sequence: event.sequence,
-                    payload: event.payload,
-                });
-            } else {
-                pending.push(event);
-            }
+        if self
+            .queued
+            .first()
+            .is_none_or(|event| event.due_tick > fixed_step)
+        {
+            return Vec::new();
         }
-        self.queued = pending;
-        ready
+        let due = self
+            .queued
+            .partition_point(|event| event.due_tick <= fixed_step);
+        self.queued
+            .drain(..due)
+            .map(|event| RuntimeEvent {
+                id: EventId(event.id.0),
+                source: event.source,
+                step: event.due_tick,
+                sequence: event.sequence,
+                payload: event.payload,
+            })
+            .collect()
     }
 
     pub fn queued(&self) -> &[ScheduledEvent] {

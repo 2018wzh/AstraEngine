@@ -71,7 +71,6 @@ fn run_mixer(
         .ok_or_else(|| {
             FamilyError::invalid("ASTRA_EMU_FVP_AUDIO_BUFFER", "audio buffer size overflow")
         })?;
-    let mut video_audio = BTreeMap::new();
     let result = (|| loop {
         if cancelled.load(Ordering::Acquire) || sink.is_cancelled() {
             return Ok(());
@@ -81,7 +80,7 @@ fn run_mixer(
             match rx.try_recv() {
                 Ok(job) => {
                     received = true;
-                    apply_job(&mut mixer, &mut video_audio, playback_states, job)?;
+                    apply_job(&mut mixer, playback_states, job)?;
                 }
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => return Ok(()),
@@ -94,9 +93,8 @@ fn run_mixer(
         let mixer_active = mixer
             .mix_next(&mut samples)
             .map_err(|cause| crate::error::rfvp_operation(cause, "audio mix"))?;
-        let video_active = mix_video_audio(&mut video_audio, playback_states, &mut samples)?;
-        refresh_playback_states(&mixer, &video_audio, playback_states);
-        if mixer_active || video_active {
+        refresh_playback_states(&mixer, playback_states);
+        if mixer_active {
             pcm_tx.send(samples).map_err(|_| output_closed())?;
             loop {
                 select! {
@@ -106,7 +104,7 @@ fn run_mixer(
                     }
                     recv(rx) -> command => {
                         let Ok(job) = command else { return Ok(()); };
-                        apply_job(&mut mixer, &mut video_audio, playback_states, job)?;
+                        apply_job(&mut mixer, playback_states, job)?;
                     }
                 }
                 if cancelled.load(Ordering::Acquire) || sink.is_cancelled() {
@@ -115,7 +113,7 @@ fn run_mixer(
             }
         } else if !received {
             match rx.recv_timeout(COMMAND_WAIT) {
-                Ok(job) => apply_job(&mut mixer, &mut video_audio, playback_states, job)?,
+                Ok(job) => apply_job(&mut mixer, playback_states, job)?,
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => return Ok(()),
             }
@@ -127,11 +125,10 @@ fn run_mixer(
 
 fn apply_job(
     mixer: &mut SoftAudioMixer<SymphoniaBackend>,
-    video_audio: &mut BTreeMap<u32, VideoAudioPlayback>,
     playback_states: &Mutex<BTreeMap<u32, bool>>,
     job: Job,
 ) -> FamilyResult<()> {
-    let result = apply_command(mixer, video_audio, playback_states, job.command);
+    let result = apply_command(mixer, playback_states, job.command);
     let _ = job.completion.send(result.clone());
     result.map(|_| ())
 }

@@ -14,6 +14,7 @@ astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api", features
 siglus_scene_vm = { path = "../../../ThirdParty/siglus_rs/crates/siglus_scene_vm", default-features = false, features = ["astra-hosted"] }
 tracing.workspace = true
 crossbeam-channel.workspace = true
+parking_lot = "0.12.5"
 anyhow = "1"
 pollster = "0.3"
 
@@ -23,9 +24,9 @@ tempfile.workspace = true
 
 [package.metadata.astra]
 upstream = "https://github.com/xmoezzz/siglus_rs"
-upstream_revision = "e762f9f9c1c94cb490fb13f1367fd06f3e1367b4"
+upstream_revision = "5f358ef1360b0439e92aed2b749e8f25d8721954"
 hosted_fork = "https://github.com/2018wzh/siglus_rs"
-hosted_fork_branch = "codex/hosted-button-flow"
-hosted_fork_revision = "df036631f250bbd42213f07bcecb87357267b64f"
+hosted_fork_branch = "codex/astra-upstream-head-20261016"
+hosted_fork_revision = "8bf5024fb3975bb8dc375874380f4574ecedf4d8"
 license_notice = "THIRD_PARTY_NOTICES.md"
 modifications = "MODIFICATIONS.md"

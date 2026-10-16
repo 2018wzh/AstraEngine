@@ -9,11 +9,13 @@ use std::{collections::BTreeMap, sync::Arc};
 struct RegisteredAction {
     provider_id: String,
     action: Arc<dyn RuntimeAction>,
+    descriptor: ActionDescriptor,
 }
 
 #[derive(Default, Clone)]
 pub struct ActionRegistry {
     actions: BTreeMap<String, RegisteredAction>,
+    epoch: Arc<()>,
 }
 
 impl ActionRegistry {
@@ -67,28 +69,42 @@ impl ActionRegistry {
             ));
         }
         self.actions.insert(
-            descriptor.id,
+            descriptor.id.clone(),
             RegisteredAction {
                 provider_id,
                 action: Arc::new(action),
+                descriptor,
             },
         );
+        self.epoch = Arc::new(());
         Ok(())
     }
 
     pub fn unregister_provider(&mut self, provider_id: &str) {
+        let previous_len = self.actions.len();
         self.actions
             .retain(|_, action| action.provider_id != provider_id);
+        if self.actions.len() != previous_len {
+            self.epoch = Arc::new(());
+        }
     }
 
     pub fn get(&self, id: &str) -> Option<Arc<dyn RuntimeAction>> {
         self.actions.get(id).map(|action| action.action.clone())
     }
 
-    pub(crate) fn descriptor(&self, id: &str) -> Option<ActionDescriptor> {
+    pub(crate) fn descriptor(&self, id: &str) -> Option<&ActionDescriptor> {
+        self.actions.get(id).map(|action| &action.descriptor)
+    }
+
+    pub(crate) fn invocation(&self, id: &str) -> Option<(&dyn RuntimeAction, &ActionDescriptor)> {
         self.actions
             .get(id)
-            .map(|action| action.action.descriptor())
+            .map(|action| (action.action.as_ref(), &action.descriptor))
+    }
+
+    pub(crate) fn epoch(&self) -> &Arc<()> {
+        &self.epoch
     }
 }
 

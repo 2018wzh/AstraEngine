@@ -4,7 +4,7 @@ use crate::{
 };
 use astra_byte_source::OwnedByteBuffer;
 use astra_emu_family_api::{FamilyError, FamilyResult};
-use astra_emu_sdk::{StageCanvas, TextureAsset, TextureCache};
+use astra_emu_sdk::{SceneTextureResidency, StageCanvas, TextureAsset, TextureCache};
 use astra_media_core::{BlendMode, Extent2D, RectI, SceneCommand, TextureFrame};
 use astra_platform::SceneFrame;
 use astra_platform_common::WgpuOffscreenRenderer;
@@ -58,6 +58,7 @@ pub(crate) struct Scene {
     sequence: u64,
     text: MusicaTextRenderer,
     textures: TextureCache,
+    texture_residency: SceneTextureResidency,
     texture_sources: lru::LruCache<String, texture::TextureSourceGeometry>,
     texture_overrides: MusicaTextureOverrides,
     wscroll2_sync: lru::LruCache<String, Vec<i32>>,
@@ -178,6 +179,7 @@ impl Scene {
                         "invalid texture cache budget",
                     )
                 })?,
+            texture_residency: SceneTextureResidency::default(),
             texture_sources: lru::LruCache::new(NonZeroUsize::new(32).unwrap()),
             texture_overrides,
             width: logical_width,
@@ -430,7 +432,7 @@ impl Scene {
             blend: BlendMode::Alpha,
         }])
     }
-    fn submit(&mut self, commands: Vec<SceneCommand>) -> FamilyResult<()> {
+    fn submit(&mut self, mut commands: Vec<SceneCommand>) -> FamilyResult<()> {
         let sequence = self
             .sequence
             .checked_add(1)
@@ -439,6 +441,9 @@ impl Scene {
             .canvas
             .viewport_rect()
             .map_err(|_| error("ASTRA_EMU_MUSICA_CANVAS", "stage viewport is invalid"))?;
+        self.texture_residency
+            .prepare(&mut commands)
+            .map_err(|cause| error("ASTRA_EMU_MUSICA_TEXTURE_RESIDENCY", &cause.to_string()))?;
         let mut mapped = Vec::with_capacity(commands.len() + 4);
         // The viewport is a raster-space boundary. Push it while the command
         // stack is still in identity space, then map logical commands into

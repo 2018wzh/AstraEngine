@@ -500,3 +500,69 @@ fn sample_logical(pixels: &[u8], raster_size: u32, scale: f32, x: u32, y: u32) -
     let offset = ((raster_y * raster_size + raster_x) * 4) as usize;
     pixels[offset..offset + 4].try_into().unwrap()
 }
+
+#[test]
+#[ignore = "requires a hardware GPU"]
+fn moving_shared_asset_reuses_gpu_pixels_and_reappears_after_release() {
+    let root = tempfile::tempdir().unwrap();
+    crate::test_fixture::game(root.path(), b".end\r\n");
+    let mut png = std::io::Cursor::new(Vec::new());
+    image::RgbaImage::from_pixel(512, 512, image::Rgba([255, 0, 0, 255]))
+        .write_to(&mut png, image::ImageFormat::Png)
+        .unwrap();
+    crate::test_fixture::assets(root.path(), "bg", &[("BG.png", png.get_ref())]);
+    let archive =
+        Arc::new(mount_musica(root.path(), std::path::Path::new(MUSICA_PROFILE_FILE)).unwrap());
+    let mut scene = Scene::new(
+        crate::test_fixture::gpu_instance(),
+        archive,
+        16,
+        16,
+        crate::ScriptEncoding::ShiftJis,
+    )
+    .unwrap();
+    for x in 0..8 {
+        let mut commands = Vec::new();
+        scene
+            .layer(&mut commands, "musica:/bg/BG.png", x, 0, 1.0)
+            .unwrap();
+        // Two logical draws share the same immutable native asset.
+        scene
+            .layer(&mut commands, "musica:/bg/BG.png", x + 1, 0, 1.0)
+            .unwrap();
+        scene.submit(commands).unwrap();
+        for column in 0..16 {
+            assert_eq!(
+                &scene.pixels[(column * 4) as usize..(column * 4 + 4) as usize],
+                if column < x {
+                    &[0, 0, 0, 255]
+                } else {
+                    &[255, 0, 0, 255]
+                }
+            );
+        }
+        if x > 0 {
+            // Counters include vertex uploads. Re-uploading this 1 MiB asset
+            // cannot fit below its decoded size, even after atlas packing.
+            assert!(scene.renderer.performance_counters().upload_bytes < 512 * 512 * 4);
+        }
+    }
+    scene.submit(Vec::new()).unwrap();
+    assert!(scene
+        .pixels
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .all(|pixel| *pixel == [0, 0, 0, 255]));
+    let mut commands = Vec::new();
+    scene
+        .layer(&mut commands, "musica:/bg/BG.png", 0, 0, 1.0)
+        .unwrap();
+    scene.submit(commands).unwrap();
+    assert!(scene
+        .pixels
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .all(|pixel| *pixel == [255, 0, 0, 255]));
+}

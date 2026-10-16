@@ -17,12 +17,16 @@ mod stage;
 pub use archive::*;
 #[cfg(feature = "cache")]
 pub use cache::*;
+#[cfg(feature = "image")]
+mod scene_textures;
 #[cfg(feature = "text")]
 mod text;
 #[cfg(feature = "image")]
 mod texture;
 
 pub use error::CoreError;
+#[cfg(feature = "image")]
+pub use scene_textures::SceneTextureResidency;
 pub use stage::{StageCanvas, TextureAsset};
 #[cfg(feature = "text")]
 pub use text::{TextOutline, TextScene, TextSceneLayout};

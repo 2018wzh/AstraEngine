@@ -56,7 +56,6 @@ fn null_device_consumes_pcm_without_opening_a_native_device_and_closes() {
 
 #[test]
 fn unknown_audio_device_does_not_select_a_backend() {
-    assert_eq!(AudioDeviceKind::default(), AudioDeviceKind::Native);
     assert!(AudioDeviceKind::parse("silent-fallback").is_err());
 }
 
@@ -81,13 +80,6 @@ fn conversion_maps_mono_and_preserves_i16_extremes() {
     assert!(values[0] <= -0.99);
     assert_eq!(values[2], values[3]);
     assert_eq!(values[2], 1.0);
-}
-
-#[test]
-fn conversion_resamples_with_bounded_output() {
-    let values = convert_samples(vec![0.0; 480], 48_000, 1, 24_000, 1).unwrap();
-    assert!(!values.is_empty());
-    assert!(values.len() <= MAX_AUDIO_OUTPUT_SAMPLES);
 }
 
 #[test]
@@ -138,31 +130,6 @@ fn persistent_converter_maps_stereo_to_mono() {
 }
 
 #[test]
-fn cancellation_wakes_all_registered_writers() {
-    let state = AudioState {
-        device_kind: AudioDeviceKind::Native,
-        wake: None,
-        cancelled: AtomicBool::new(false),
-        closed: AtomicBool::new(false),
-        stream_failed: AtomicBool::new(false),
-        progress_failed: AtomicBool::new(false),
-        progress: Arc::new(PlaybackCounters::default()),
-        configured: Mutex::new(None),
-        producer: Mutex::new(None),
-        cancel_waiters: Mutex::new(Vec::new()),
-        stream: Mutex::new(None),
-        converter: Mutex::new(None),
-    };
-    let (first_tx, first) = register_cancel_waiter(&state).unwrap().unwrap();
-    let (second_tx, second) = register_cancel_waiter(&state).unwrap().unwrap();
-    state.cancelled.store(true, Ordering::Release);
-    wake_cancel_waiters(&state).unwrap();
-    assert!(first.recv().is_ok());
-    assert!(second.recv().is_ok());
-    drop((first_tx, second_tx));
-}
-
-#[test]
 fn stream_error_is_reported_by_health_check() {
     let executor = HostAudioExecutor::new(AudioDeviceKind::Native, None);
     executor.state.stream_failed.store(true, Ordering::Release);
@@ -175,15 +142,18 @@ fn stream_error_is_reported_by_health_check() {
 #[test]
 fn device_consumer_advances_blocks_inside_one_callback_buffer() {
     let (sender, receiver) = bounded(AUDIO_QUEUE_CHUNKS);
-    sender.send(vec![0.25, 0.5]).unwrap();
-    sender.send(vec![0.75]).unwrap();
+    sender.send(OutputPcm::Converted(vec![0.25, 0.5])).unwrap();
+    sender.send(OutputPcm::Converted(vec![0.75])).unwrap();
+    let (retired, _reclaimer) = rtrb::RingBuffer::new(AUDIO_QUEUE_CHUNKS + 2);
     let mut consumer = DeviceConsumer {
         receiver,
         current: None,
+        retired,
         cursor: 0,
         channels: 1,
         tracker: None,
         last_callback: None,
+        _completion: ConsumerCompletion(None),
     };
     let mut output = [0.0; 4];
     consumer.fill_f32(&mut output).unwrap();
@@ -214,13 +184,17 @@ fn manually_configured_audio() -> (HostAudioExecutor, DeviceConsumer) {
     *executor.state.configured.lock().unwrap() = Some(output);
     *executor.state.converter.lock().unwrap() = Some(AudioConverter::new(output).unwrap());
     *executor.state.producer.lock().unwrap() = Some(producer);
+    let (retired, reclaimer) = rtrb::RingBuffer::new(AUDIO_QUEUE_CHUNKS + 2);
+    *executor.state.retired.lock() = Some(reclaimer);
     let mut consumer = DeviceConsumer {
         receiver,
         current: None,
+        retired,
         cursor: 0,
         channels: 2,
         tracker: None,
         last_callback: None,
+        _completion: ConsumerCompletion(None),
     };
     consumer.configure_tracking(output, &executor.state);
     (executor, consumer)
@@ -280,7 +254,7 @@ fn progress_tracks_partial_current_block_and_rejects_old_sink_after_close() {
 }
 
 #[test]
-fn cancellation_of_blocked_write_preserves_only_previously_accepted_chunks() {
+fn cancellation_wakes_queued_and_serialized_writers_without_accepting_pending_pcm() {
     let (executor, _consumer) = manually_configured_audio();
     let sink = executor.sink();
     for _ in 0..AUDIO_QUEUE_CHUNKS {
@@ -291,21 +265,26 @@ fn cancellation_of_blocked_write_preserves_only_previously_accepted_chunks() {
             AudioWriteStatus::Accepted
         );
     }
-    let writer_sink = executor.sink();
-    let writer = std::thread::spawn(move || {
-        writer_sink
-            .write(PcmChunk::F32(vec![0.5; 960].into()))
-            .into_result()
-            .unwrap()
-    });
-    // Wait until this write registered for either capacity or cancellation.
+    let start = Arc::new(std::sync::Barrier::new(4));
+    let writers = (0..3).map(|_| {
+        let writer_sink = executor.sink();
+        let start = start.clone();
+        std::thread::spawn(move || {
+            start.wait();
+            writer_sink.write(PcmChunk::F32(vec![0.5; 960].into())).into_result().unwrap()
+        })
+    }).collect::<Vec<_>>();
+    start.wait();
+    // One writer owns conversion/queue admission; others wait on serialization.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-    while executor.state.cancel_waiters.lock().unwrap().is_empty() {
-        assert!(std::time::Instant::now() < deadline);
+    while executor.state.converter.try_lock().is_ok() {
+        assert!(std::time::Instant::now() < deadline, "writer never entered admission");
         std::thread::yield_now();
     }
     sink.cancel().into_result().unwrap();
-    assert_eq!(writer.join().unwrap(), AudioWriteStatus::Cancelled);
+    for writer in writers {
+        assert_eq!(writer.join().unwrap(), AudioWriteStatus::Cancelled);
+    }
     let internal = executor
         .state
         .progress

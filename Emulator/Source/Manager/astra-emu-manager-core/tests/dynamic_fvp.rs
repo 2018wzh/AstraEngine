@@ -50,6 +50,7 @@ fn fixture(root: &Path) {
 
 fn request(game: &Path) -> OpenRequest {
     OpenRequest {
+        session_epoch: astra_emu_family_api::allocate_session_epoch().unwrap(),
         game_path: game.to_string_lossy().to_string().into(),
         configuration: vec![ConfigEntry {
             id: "script_encoding".into(),
@@ -65,6 +66,7 @@ fn request(game: &Path) -> OpenRequest {
         host: FamilyHostServices {
             audio_sink: ROption::RSome(AudioSink_TO::from_value(AcceptingSink, TD_Opaque)),
             text_replacement: ROption::RNone,
+            modal: ROption::RNone,
         },
     }
 }

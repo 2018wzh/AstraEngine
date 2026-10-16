@@ -21,37 +21,7 @@ pub struct DocumentEdits {
 
 impl DocumentEdits {
     pub(crate) fn apply_to(&self, source: &str) -> Result<String, EditError> {
-        if self.edits.is_empty() {
-            return Err(EditError::EmptyBatch);
-        }
-        let mut ordered = self.edits.iter().collect::<Vec<_>>();
-        ordered.sort_by_key(|edit| (edit.start, edit.end));
-        let mut previous: Option<&TextEdit> = None;
-        let mut size = source.len();
-        for edit in &ordered {
-            if edit.start > edit.end
-                || !source.is_char_boundary(edit.start)
-                || !source.is_char_boundary(edit.end)
-            {
-                return Err(EditError::InvalidRange);
-            }
-            if previous.is_some_and(|p| p.end > edit.start || p.start == edit.start) {
-                return Err(EditError::OverlappingEdits);
-            }
-            size = size
-                .checked_sub(edit.end - edit.start)
-                .and_then(|s| s.checked_add(edit.replacement.len()))
-                .ok_or(EditError::Limit)?;
-            if size > 16 * 1024 * 1024 {
-                return Err(EditError::Limit);
-            }
-            previous = Some(edit);
-        }
-        let mut output = source.to_string();
-        for edit in ordered.into_iter().rev() {
-            output.replace_range(edit.start..edit.end, &edit.replacement);
-        }
-        Ok(output)
+        crate::history::apply_text(source, &self.edits)
     }
 }
 
@@ -72,6 +42,7 @@ pub enum EditError {
     EmptyBatch,
     NoHistory,
     Limit,
+    HistoryLimit,
     MissingAttribute,
     InvalidValue,
 }

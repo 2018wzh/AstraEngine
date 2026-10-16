@@ -20,6 +20,8 @@ mod filters;
 mod game_callbacks;
 #[path = "host_library_callbacks.rs"]
 mod library_callbacks;
+#[path = "host_modals.rs"]
+mod modals;
 #[path = "host_pointer.rs"]
 mod pointer;
 #[path = "host_settings_callbacks.rs"]
@@ -83,6 +85,16 @@ pub trait ManagerController: 'static {
     fn game_title(&self) -> Option<&str> {
         None
     }
+    fn take_modal_update(&mut self) -> Option<crate::modal_service::ModalUiUpdate> {
+        None
+    }
+    fn respond_modal(
+        &mut self,
+        _id: crate::modal_service::ModalId,
+        _response: astra_emu_family_api::ModalResponse,
+    ) -> Result<(), String> {
+        Err("ASTRA_EMU_MANAGER_MODAL_SERVICE_UNAVAILABLE".into())
+    }
     fn set_window_state(&mut self, state: astra_emu_family_api::WindowState) -> Result<(), String>;
     fn physical_event(&mut self, event: astra_emu_family_api::FamilyEvent) -> Result<(), String>;
     fn is_game_active(&self) -> bool;
@@ -141,13 +153,10 @@ pub trait ManagerController: 'static {
     ) -> Result<ManagerViewModel, String>;
     fn poll_platform(&mut self) -> Result<Option<ManagerViewModel>, String>;
     fn set_host_wake(&mut self, _wake: HostWake);
-    /// Absolute deadline for the next fixed runtime tick.  The host schedules
-    /// a single wake at this deadline; rendering never advances the runtime.
+    /// Next UI input/metadata service deadline. Native core clocks are independent.
     fn runtime_deadline(&self) -> Option<Instant>;
+    /// Drain owner results and enqueue input; never execute a native core on UI.
     fn advance_runtime(&mut self) -> Result<Option<ManagerViewModel>, String>;
-    /// Re-anchor runtime time after a host operation that can block the UI
-    /// thread, such as a window transition or filter compilation.
-    fn host_work_complete(&mut self) {}
     /// Update the platform theme used by automatic appearance mode.
     fn set_system_theme(&mut self, dark: bool);
     fn set_theme(&mut self, _dark: bool) -> Result<(), String>;
@@ -317,20 +326,16 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                 let title = title.unwrap_or_default();
                 if window.get_game_title() != title {
                     window.set_game_title(title);
-                    controller.borrow_mut().host_work_complete();
                 }
                 let icon = controller.borrow_mut().take_game_icon();
                 if icon.is_some() || !controller.borrow().is_game_active() {
                     if let Err(error) = window_commands::set_icon(window.window(), icon) {
                         terminate_game(&controller, &adapter, &window, error);
-                    } else {
-                        controller.borrow_mut().host_work_complete();
                     }
                 }
                 let fullscreen = controller.borrow().game_fullscreen();
                 if window.window().is_fullscreen() != fullscreen {
                     window.window().set_fullscreen(fullscreen);
-                    controller.borrow_mut().host_work_complete();
                     tracing::debug!(
                         event = "astra.emu.host.window.fullscreen_requested",
                         fullscreen
@@ -340,8 +345,6 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                 if let Some(request) = pointer_request {
                     if let Err(error) = pointer::HostPointer::apply(&pointer, &window, request) {
                         terminate_game(&controller, &adapter, &window, error);
-                    } else {
-                        controller.borrow_mut().host_work_complete();
                     }
                 }
                 window.window().request_redraw();
@@ -361,6 +364,7 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
     );
     settings_callbacks::install(&adapter, &controller);
     library_callbacks::install(&adapter, &controller);
+    let modal_ui = modals::install(&adapter, &controller);
     let event_controller = controller.clone();
     let event_adapter = std::rc::Rc::downgrade(&adapter);
     let event_gamepad = gamepad.clone();
@@ -402,12 +406,13 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                         .ok_or_else(|| "Manager window disappeared during renderer setup".to_string())?;
                     apply_stage_texture_update(&window, update)?;
                 }
-                event_controller.borrow_mut().host_work_complete();
                 Ok(())
             }
             slint::RenderingState::BeforeRendering => {
                 if let Some(window) = event_window.upgrade() {
+                    modals::service(&window, &event_controller, &modal_ui);
                     let input_blocked = !window.get_game_active()
+                        || window.get_modal_active()
                         || window.get_translation_overlay_active()
                         || window.get_diagnostics_overlay_active()
                         || window.get_filters_overlay_active();

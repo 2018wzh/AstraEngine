@@ -85,3 +85,134 @@ fn overlapping_edits_and_unsafe_paths_fail() {
         Err(EditError::OverlappingEdits)
     );
 }
+
+#[test]
+fn adjacent_unicode_deletions_and_replacement_undo_as_one_batch() {
+    let mut workspace = AuthoringWorkspace::default();
+    let original = "é🙂漢字-tail";
+    workspace
+        .open(AstraSource::story("unicode.astra", original))
+        .unwrap();
+    workspace
+        .apply(EditBatch {
+            documents: vec![DocumentEdits {
+                path: "unicode.astra".into(),
+                version: 1,
+                edits: vec![
+                    TextEdit {
+                        start: 0,
+                        end: 2,
+                        replacement: String::new(),
+                    },
+                    TextEdit {
+                        start: 2,
+                        end: 6,
+                        replacement: String::new(),
+                    },
+                    TextEdit {
+                        start: 6,
+                        end: 9,
+                        replacement: "文".into(),
+                    },
+                ],
+            }],
+        })
+        .unwrap();
+    assert_eq!(
+        workspace.document("unicode.astra").unwrap().text,
+        "文字-tail"
+    );
+    workspace.undo().unwrap();
+    assert_eq!(workspace.document("unicode.astra").unwrap().text, original);
+    workspace.redo().unwrap();
+    assert_eq!(
+        workspace.document("unicode.astra").unwrap().text,
+        "文字-tail"
+    );
+}
+
+#[test]
+fn full_replacement_diff_never_splits_shared_utf8_prefix_or_suffix_bytes() {
+    for (before, after) in [("é🙂tail", "ê🙃tail"), ("prefix-é", "prefix-ĩ")] {
+        let mut workspace = AuthoringWorkspace::default();
+        workspace
+            .open(AstraSource::story("unicode.astra", before))
+            .unwrap();
+        workspace
+            .apply(EditBatch {
+                documents: vec![DocumentEdits {
+                    path: "unicode.astra".into(),
+                    version: 1,
+                    edits: vec![TextEdit {
+                        start: 0,
+                        end: before.len(),
+                        replacement: after.into(),
+                    }],
+                }],
+            })
+            .unwrap();
+        workspace.undo().unwrap();
+        assert_eq!(workspace.document("unicode.astra").unwrap().text, before);
+        workspace.redo().unwrap();
+        assert_eq!(workspace.document("unicode.astra").unwrap().text, after);
+    }
+}
+
+#[test]
+fn oversized_history_reservation_rejects_the_whole_batch_and_preserves_undo() {
+    let mut workspace = AuthoringWorkspace::with_history_budget(512).unwrap();
+    let original = "a".repeat(512);
+    workspace
+        .open(AstraSource::story("a.astra", &original))
+        .unwrap();
+    workspace
+        .open(AstraSource::story("b.astra", &original))
+        .unwrap();
+    workspace
+        .apply(EditBatch {
+            documents: vec![DocumentEdits {
+                path: "a.astra".into(),
+                version: 1,
+                edits: vec![TextEdit {
+                    start: 0,
+                    end: 1,
+                    replacement: "x".into(),
+                }],
+            }],
+        })
+        .unwrap();
+    let before = workspace.document("a.astra").unwrap().clone();
+    let reservation = workspace.history_reserved_bytes();
+    let error = workspace
+        .apply(EditBatch {
+            documents: vec![
+                DocumentEdits {
+                    path: "a.astra".into(),
+                    version: before.version,
+                    edits: vec![TextEdit {
+                        start: 1,
+                        end: 2,
+                        replacement: "y".into(),
+                    }],
+                },
+                DocumentEdits {
+                    path: "b.astra".into(),
+                    version: 1,
+                    edits: vec![TextEdit {
+                        start: 0,
+                        end: original.len(),
+                        replacement: "z".repeat(512),
+                    }],
+                },
+            ],
+        })
+        .unwrap_err();
+    assert_eq!(error, EditError::HistoryLimit);
+    assert_eq!(workspace.document("a.astra").unwrap(), &before);
+    assert_eq!(workspace.document("b.astra").unwrap().text, original);
+    assert_eq!(workspace.history_reserved_bytes(), reservation);
+    workspace.undo().unwrap();
+    assert_eq!(workspace.document("a.astra").unwrap().text, original);
+    workspace.redo().unwrap();
+    assert_eq!(workspace.document("a.astra").unwrap().text, before.text);
+}

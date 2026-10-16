@@ -183,7 +183,7 @@ impl RuntimeWorld {
         for command in output.presentation {
             self.emit_presentation(command)?;
         }
-        self.mutations.extend(output.mutations);
+        crate::diagnostic_history::extend(&mut self.mutations, output.mutations);
         if let Some(diagnostic) = self.diagnostics.iter().find(|diagnostic| {
             matches!(
                 diagnostic.severity,
@@ -278,8 +278,9 @@ impl RuntimeWorld {
         self.awaits = snapshot.awaits;
         self.delayed_events = snapshot.delayed_events;
         self.events = snapshot.events;
-        self.presentation = snapshot.presentation;
-        self.mutations = snapshot.mutations;
+        self.presentation.clear();
+        self.presentation_sequence = snapshot.presentation_sequence;
+        self.mutations.clear();
         self.mounted_modules = snapshot.mounted_modules;
         self.integrity_mode = snapshot.integrity_mode;
         self.step = snapshot.step;
@@ -297,12 +298,11 @@ impl RuntimeWorld {
             id_source: self.id_source.clone(),
             actors: self.actors.clone(),
             blackboard: self.blackboard.clone(),
-            machines: self.machines.clone(),
+            machines: self.machines.snapshot(),
             awaits: self.awaits.clone(),
             delayed_events: self.delayed_events.clone(),
-            events: self.events.clone(),
-            presentation: self.presentation.clone(),
-            mutations: self.mutations.clone(),
+            events: self.events.snapshot(),
+            presentation_sequence: self.presentation_sequence,
             mounted_modules: self.mounted_modules.clone(),
             integrity_mode: self.integrity_mode,
             step: self.step,
@@ -352,14 +352,18 @@ impl RuntimeDebugSession<'_> {
     }
 
     pub fn event_trace(&self) -> Vec<RuntimeEvent> {
-        self.world.events.trace().to_vec()
+        self.world.events.trace().iter().cloned().collect()
     }
 
     pub fn presentation_trace(&self) -> Vec<PresentationRecord> {
-        self.world.presentation.clone()
+        self.world.presentation.iter().cloned().collect()
     }
 
     pub fn mutation_trace(&self) -> Vec<RuntimeMutationRecord> {
-        self.world.mutations.clone()
+        self.world.mutations.iter().cloned().collect()
+    }
+
+    pub fn action_trace(&self) -> Vec<crate::ActionTrace> {
+        self.world.machines.trace().iter().cloned().collect()
     }
 }

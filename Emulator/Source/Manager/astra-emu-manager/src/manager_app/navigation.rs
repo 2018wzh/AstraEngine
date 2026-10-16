@@ -122,10 +122,6 @@ impl AstraEmuManagerController {
             .host_wake
             .clone()
             .ok_or("ASTRA_EMU_HOST_WAKE_REQUIRED")?;
-        let audio = candidate
-            .descriptor
-            .has_capability(astra_emu_manager_core::FamilyCapability::PcmAudio)
-            .then(|| audio_executor::HostAudioExecutor::new(self.audio_device, Some(wake)));
         let schema = self
             .registry
             .configuration(&candidate.descriptor.plugin_id)
@@ -134,38 +130,24 @@ impl AstraEmuManagerController {
             .library
             .family_configuration(&candidate.descriptor.plugin_id, case_id, &schema)
             .map_err(|error| error.to_string())?;
-        let active = ActiveFamilySession::open(
-            (&game, configuration),
-            &candidate,
-            &mut self.registry,
-            self.mailbox.clone(),
-            self.window_state.ok_or("ASTRA_EMU_WINDOW_STATE_REQUIRED")?,
+        let epoch = astra_emu_family_api::allocate_session_epoch().map_err(|error| error.to_string())?;
+        self.mailbox.activate(epoch).map_err(|error| error.to_string())?;
+        self.registry.open(owner::OpenSession {
+            epoch,
+            game,
+            candidate,
+            configuration,
+            window: self.window_state.ok_or("ASTRA_EMU_WINDOW_STATE_REQUIRED")?,
             text,
-            audio,
-        )?;
-        match self.library.start_play_session(case_id, unix_time_ms()?) {
-            Ok(session_id) => {
-                self.selected_case_id = Some(case_id.into());
-                self.pending_events.clear();
-                self.active = Some(active);
-                self.active_play_session = Some(session_id);
-                self.diagnostic.clear();
-                match self.model() {
-                    Ok(model) => Ok(model),
-                    Err(error) => match self.close_active(PlaySessionEndReason::Crash) {
-                        Ok(()) => Err(error),
-                        Err(cleanup) => Err(format!("{error}; {cleanup}")),
-                    },
-                }
-            }
-            Err(error) => {
-                let mut active = active;
-                match active.close() {
-                    Ok(()) => Err(error.to_string()),
-                    Err(cleanup) => Err(format!("{error}; {cleanup}")),
-                }
-            }
-        }
+            audio_device: self.audio_device,
+            wake,
+            modal: None,
+        })?;
+        self.selected_case_id = Some(case_id.into());
+        self.pending_events.clear();
+        self.active = Some(owner::ActiveSessionView::opening(epoch, case_id.into()));
+        self.diagnostic.clear();
+        self.model()
     }
 
     pub(super) fn leave_game(&mut self) -> Result<ManagerViewModel, String> {

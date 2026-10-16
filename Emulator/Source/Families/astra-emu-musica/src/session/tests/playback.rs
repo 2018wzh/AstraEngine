@@ -20,22 +20,32 @@ fn native_gpu_auto_play_waits_restores_and_pauses_in_backlog() {
     opened.session.advance(40_000_000, &[]).unwrap();
     opened.session.advance(0, &[key(KeyCode::F5)]).unwrap();
     let mut capture = Capture(Vec::new());
-    opened.session.visit_frame(&mut capture).unwrap();
+    capture
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     let first = capture.0.clone();
     opened.session.advance(70_000_000, &[]).unwrap();
-    opened.session.visit_frame(&mut capture).unwrap();
+    capture
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     let second = capture.0.clone();
     assert_ne!(first, second);
     opened.session.advance(0, &[key(KeyCode::F9)]).unwrap();
-    opened.session.visit_frame(&mut capture).unwrap();
+    capture
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     assert_eq!(capture.0, first);
     opened.session.advance(0, &[key(KeyCode::PageUp)]).unwrap();
     opened.session.advance(1_000_000_000, &[]).unwrap();
     opened.session.advance(0, &[key(KeyCode::Escape)]).unwrap();
-    opened.session.visit_frame(&mut capture).unwrap();
+    capture
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     assert_eq!(capture.0, first);
     opened.session.advance(70_000_000, &[]).unwrap();
-    opened.session.visit_frame(&mut capture).unwrap();
+    capture
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     assert_eq!(capture.0, second);
     opened.session.advance(0, &[key(KeyCode::A)]).unwrap();
     assert_eq!(
@@ -305,7 +315,9 @@ fn native_gpu_text_shadow_uses_current_manager_setting_after_load() {
     opened.session.advance(16_666_667, &[]).unwrap();
     opened.session.advance(16_666_667, &[]).unwrap();
     opened.session.advance(0, &[key(KeyCode::F5)]).unwrap();
-    opened.session.visit_frame(&mut capture).unwrap();
+    capture
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     let outlined = capture.0.clone();
     opened.session.close().unwrap();
     let mut req = request(root.path(), Sink::default());
@@ -316,14 +328,18 @@ fn native_gpu_text_shadow_uses_current_manager_setting_after_load() {
     let mut opened = provider.open(req).unwrap();
     opened.session.advance(16_666_667, &[]).unwrap();
     opened.session.advance(16_666_667, &[]).unwrap();
-    opened.session.visit_frame(&mut capture).unwrap();
+    capture
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     let plain = capture.0.clone();
     assert!(
         outlined != plain,
         "shadow must change the rendered dialogue"
     );
     opened.session.advance(0, &[key(KeyCode::F9)]).unwrap();
-    opened.session.visit_frame(&mut capture).unwrap();
+    capture
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     assert!(
         plain == capture.0,
         "load must retain the current shadow preference"
@@ -351,13 +367,13 @@ fn native_gpu_manual_slots_restore_independent_story_positions() {
     assert!(!session.advance(0, &[]).unwrap().reset_clock);
     assert_eq!(session.message.as_ref().unwrap().0, "First");
     let mut capture = Capture(Vec::new());
-    session.visit_frame(&mut capture).unwrap();
+    capture.read(session.acquire_frame(None).unwrap()).unwrap();
     let first = capture.0.clone();
     session.load(21).unwrap();
     assert!(session.advance(0, &[]).unwrap().reset_clock);
     assert!(!session.advance(0, &[]).unwrap().reset_clock);
     assert_eq!(session.message.as_ref().unwrap().0, "Second");
-    session.visit_frame(&mut capture).unwrap();
+    capture.read(session.acquire_frame(None).unwrap()).unwrap();
     assert!(
         capture.0 != first,
         "different slots must render their own restored message"

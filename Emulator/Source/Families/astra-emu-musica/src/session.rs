@@ -29,6 +29,8 @@ struct PendingText {
 pub(crate) struct MusicaSession {
     id: String,
     info: FrameInfo,
+    published_frame: FramePublisher,
+    force_frame: bool,
     archive: Arc<MusicaMountedVfs>,
     vm: MusicaVm,
     scene: Scene,
@@ -71,6 +73,7 @@ impl MusicaSession {
     pub fn new(
         id: String,
         info: FrameInfo,
+        published_frame: FramePublisher,
         archive: Arc<MusicaMountedVfs>,
         vm: MusicaVm,
         scene: Scene,
@@ -95,6 +98,8 @@ impl MusicaSession {
             load_from_title: false,
             id,
             info,
+            published_frame,
+            force_frame: false,
             archive,
             vm,
             scene,

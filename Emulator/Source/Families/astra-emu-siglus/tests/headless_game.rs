@@ -11,8 +11,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use abi_stable::type_level::downcasting::TD_Opaque;
 use astra_emu_family_api::{
     AudioSink, AudioSink_TO, AudioWriteStatus, FamilyEvent, FamilyOpen, FamilyProvider,
-    FamilySession, FamilyStatus, FrameView, FrameVisitor, KeyCode, KeyModifiers, KeyState,
-    OpenRequest, PcmChunk, PcmFormatSpec, PointerButton, WindowState,
+    FamilySession, FamilyStatus, FramePoll, KeyCode, KeyModifiers, KeyState, OpenRequest, PcmChunk,
+    PcmFormatSpec, PointerButton, WindowState,
 };
 
 static PUSHED_FRAMES: AtomicU64 = AtomicU64::new(0);
@@ -44,17 +44,26 @@ struct FrameDigest {
     lit_pixels: usize,
 }
 
-impl FrameVisitor for FrameDigest {
-    fn accept(&mut self, frame: FrameView<'_>) -> astra_emu_family_api::FamilyResult<()> {
-        self.len = frame.as_slice().len();
+impl FrameDigest {
+    fn read(&mut self, poll: FramePoll) -> astra_emu_family_api::FamilyResult<()> {
+        let FramePoll::Ready(frame) = poll else {
+            return Err(astra_emu_family_api::FamilyError::invalid(
+                "TEST_FRAME_PENDING",
+                "expected a completed native frame",
+            ));
+        };
+        self.len = frame.pixels().len();
         self.sum = frame
-            .as_slice()
+            .pixels()
+            .as_chunks::<4>()
+            .0
             .iter()
+            .flat_map(|pixel| pixel[..3].iter())
             .fold(0_u64, |acc, byte| acc.wrapping_add(u64::from(*byte)));
         // Count pixels a human could see: any color channel above a low
         // threshold. A fade-from-black boot keeps this at zero for a while.
         self.lit_pixels = frame
-            .as_slice()
+            .pixels()
             .as_chunks::<4>()
             .0
             .iter()
@@ -64,14 +73,14 @@ impl FrameVisitor for FrameDigest {
     }
 }
 
-fn digest(session: &dyn FamilySession) -> FrameDigest {
+fn digest(session: &mut dyn FamilySession) -> FrameDigest {
     let mut digest = FrameDigest {
         len: 0,
         sum: 0,
         lit_pixels: 0,
     };
-    session
-        .visit_frame(&mut digest)
+    digest
+        .read(session.acquire_frame(None).unwrap())
         .expect("frame visit succeeds");
     digest
 }
@@ -122,6 +131,7 @@ fn drive_events(index: u32) -> Vec<FamilyEvent> {
 
 fn open_request(game: &std::path::Path) -> OpenRequest {
     OpenRequest {
+        session_epoch: astra_emu_family_api::allocate_session_epoch().unwrap(),
         configuration: Vec::new().into(),
         game_path: game.display().to_string().into(),
         initial_window: WindowState {
@@ -136,6 +146,7 @@ fn open_request(game: &std::path::Path) -> OpenRequest {
                 TD_Opaque,
             )),
             text_replacement: abi_stable::std_types::ROption::RNone,
+            modal: abi_stable::std_types::ROption::RNone,
         },
     }
 }
@@ -160,7 +171,7 @@ fn headless_boot_inputs_frames_audio_and_close() {
     // Drive the title flow long enough for the boot fade and the first
     // scripted presentation to finish. The composition must produce visible
     // content and keep changing while inputs advance the flow.
-    let boot = digest(session.as_ref());
+    let boot = digest(session.as_mut());
     assert_eq!(
         boot.len,
         (response.frame.width * response.frame.height * 4) as usize,
@@ -174,7 +185,7 @@ fn headless_boot_inputs_frames_audio_and_close() {
         let result = session
             .advance(16_666_667, &events)
             .expect("advance succeeds");
-        let snapshot = digest(session.as_ref());
+        let snapshot = digest(session.as_mut());
         max_lit = max_lit.max(snapshot.lit_pixels);
         distinct_sums.insert(snapshot.sum);
         if result.status == FamilyStatus::Finished {

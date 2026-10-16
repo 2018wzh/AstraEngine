@@ -81,7 +81,22 @@ impl GpuRenderer {
         Ok(Self(HostedGpuRenderer::new(resources, (width, height))))
     }
 
-    pub(crate) fn capture(&mut self, core: &rfvp::hosted::RfvpCore) -> FamilyResult<Vec<u8>> {
+    pub(crate) fn native(&mut self) -> &mut HostedGpuRenderer {
+        &mut self.0
+    }
+
+    pub(crate) fn capture(
+        &mut self,
+        core: &mut rfvp::no_std_core::RfvpCore,
+    ) -> FamilyResult<Vec<u8>> {
         core.render_hosted_gpu(&mut self.0).map_err(error)
+    }
+
+    pub(crate) fn submit(&mut self, core: &mut rfvp::no_std_core::RfvpCore) -> FamilyResult<()> {
+        core.submit_hosted_gpu(&mut self.0).map_err(error)
+    }
+
+    pub(crate) fn poll_frame(&mut self) -> FamilyResult<Option<Vec<u8>>> {
+        self.0.poll_frame().map_err(error)
     }
 }

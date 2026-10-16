@@ -24,32 +24,44 @@ fn native_gpu_wscroll2_family_input_restores_and_suspends_the_animation() {
         opened.session.advance(40_000_000, &[]).unwrap().status,
         FamilyStatus::Waiting
     );
-    opened.session.visit_frame(&mut frame).unwrap();
+    frame
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     let saved = frame.0.clone();
     opened.session.advance(0, &[key(KeyCode::F5)]).unwrap();
     opened.session.advance(40_000_000, &[]).unwrap();
-    opened.session.visit_frame(&mut frame).unwrap();
+    frame
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     let later = frame.0.clone();
     assert_ne!(later, saved);
     opened.session.advance(0, &[key(KeyCode::F9)]).unwrap();
-    opened.session.visit_frame(&mut frame).unwrap();
+    frame
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     assert_eq!(frame.0, saved);
     opened.session.advance(40_000_000, &[]).unwrap();
-    opened.session.visit_frame(&mut frame).unwrap();
+    frame
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     assert_eq!(frame.0, later);
     opened
         .session
         .advance(0, &[FamilyEvent::WindowSuspended { suspended: true }])
         .unwrap();
     opened.session.advance(40_000_000, &[]).unwrap();
-    opened.session.visit_frame(&mut frame).unwrap();
+    frame
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     assert_eq!(frame.0, later);
     opened
         .session
         .advance(0, &[FamilyEvent::WindowSuspended { suspended: false }])
         .unwrap();
     opened.session.advance(40_000_000, &[]).unwrap();
-    opened.session.visit_frame(&mut frame).unwrap();
+    frame
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     assert_ne!(frame.0, later);
     opened.session.close().unwrap();
 }

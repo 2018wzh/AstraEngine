@@ -21,6 +21,14 @@ export component ManagerWindow inherits Window {
     in property <bool> demo-mode: false;
     in property <string> game-title;
     in property <bool> has-game-title: false;
+    in property <bool> modal-active: false;
+    in property <string> modal-caption;
+    in property <string> modal-message;
+    in property <[string]> modal-buttons;
+    in property <bool> modal-has-input: false;
+    in-out property <string> modal-text;
+    callback modal-submit(int, string);
+    callback modal-cancel();
     title: (game-active && has-game-title ? game-title : (demo-mode ? "AstraEMU Manager [DEMO]" : "AstraEMU Manager"))
         + (game-active && audio-device == "null" ? " [NullAudio]" : "");
     background: Theme.background;
@@ -246,7 +254,9 @@ export component ManagerWindow inherits Window {
         pointer-content-width <=> root.game-content-window-width;
         pointer-content-height <=> root.game-content-window-height;
         cursor-visible: root.game-cursor-visible;
-        game-input(control, pressed, value) => { root.game-input(control, pressed, value); }
+        game-input(control, pressed, value) => {
+            if !root.modal-active { root.game-input(control, pressed, value); }
+        }
         leave-game => { root.leave-game(); }
 
         translation-overlay-active <=> root.translation-overlay-active;
@@ -526,6 +536,61 @@ export component ManagerWindow inherits Window {
                         text: "知道了 (Acknowledge)";
                         primary: true;
                         clicked => { root.fatal-error-active = false; }
+                    }
+                }
+            }
+        }
+    }
+    if root.modal-active : Rectangle {
+        z: 110;
+        background: #0008;
+        TouchArea {}
+        Rectangle {
+            width: min(640px, parent.width - 32px);
+            height: min(560px, parent.height - 32px);
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            border-radius: 16px;
+            background: Theme.surface;
+            VerticalLayout {
+                padding: 24px;
+                spacing: 16px;
+                Text {
+                    text: root.modal-caption;
+                    color: Theme.on-surface;
+                    font-size: 20px;
+                    wrap: word-wrap;
+                }
+                ScrollView {
+                    vertical-stretch: 1;
+                    Text {
+                        text: root.modal-message;
+                        color: Theme.on-surface;
+                        wrap: word-wrap;
+                    }
+                }
+                if root.modal-has-input : LineEdit {
+                    text <=> root.modal-text;
+                }
+                ScrollView {
+                    height: min(180px, modal-actions.preferred-height);
+                    modal-actions := VerticalLayout {
+                        spacing: 8px;
+                        for label[index] in root.modal-buttons : M3Button {
+                            text: label;
+                            clicked => { root.modal-submit(index, root.modal-text); }
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    M3Button {
+                        text: "取消";
+                        clicked => { root.modal-cancel(); }
+                    }
+                    M3Button {
+                        text: "退出会话";
+                        clicked => { root.leave-game(); }
                     }
                 }
             }

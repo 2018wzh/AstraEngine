@@ -19,27 +19,14 @@ impl WgpuOffscreenRenderer {
                 "GPU device is lost",
             ));
         }
-        let mut saw_filter = false;
-        for command in &frame.commands {
-            match command {
-                SceneCommand::FilterGraph { graph } => {
-                    saw_filter = true;
-                    let validation = FilterValidator.validate(graph);
-                    if !validation.blocking_diagnostics().is_empty() {
-                        return Err(invalid(
-                            "offscreen.filter",
-                            "filter graph validation failed",
-                        ));
-                    }
-                }
-                _ if saw_filter => {
-                    return Err(invalid(
-                        "offscreen.filter",
-                        "draw commands after a filter graph are not supported",
-                    ));
-                }
-                _ => {}
-            }
+        let filter_stage = SceneFilters::validate(frame)?;
+        let profile_atlas_upload = profile_gpu && self.scene_renderer.requires_atlas_update(frame);
+        let query_count = 2 + u32::from(profile_atlas_upload) * 2 + filter_stage as u32 * 2;
+        if profile_gpu && query_count > MAX_GPU_TIMESTAMP_QUERIES {
+            return Err(invalid(
+                "offscreen.timestamp_query",
+                "frame exceeds the bounded GPU timestamp query count",
+            ));
         }
         let timer_slot = if profile_gpu {
             let timer = self.gpu_timer.as_ref().ok_or_else(|| {
@@ -58,7 +45,6 @@ impl WgpuOffscreenRenderer {
         } else {
             None
         };
-        let profile_atlas_upload = profile_gpu && self.scene_renderer.requires_atlas_update(frame);
         let scene_started = Instant::now();
         let prepared = if profile_gpu {
             let timer = self.gpu_timer.as_ref().ok_or_else(|| {
@@ -83,54 +69,23 @@ impl WgpuOffscreenRenderer {
                 .render(&self.device, &self.queue, frame)?
         };
         let scene_cpu_profile = prepared.cpu_profile;
-        let mut texture = self.scene_renderer.commit(prepared);
+        let texture = self.scene_renderer.commit(prepared);
         let scene_cpu_ns = elapsed_ns(scene_started, "offscreen.scene.cpu")?;
         let filter_started = Instant::now();
-        let mut filter_stage = 0usize;
-        let mut filter_context = FilterPassContext {
-            device: &self.device,
-            queue: &self.queue,
-            pipelines: &mut self.filter_pipelines,
-            outputs: &mut self.filter_outputs,
-            width: frame.width,
-            height: frame.height,
-        };
-        for command in &frame.commands {
-            let SceneCommand::FilterGraph { graph } = command else {
-                continue;
-            };
-            for node in &graph.nodes {
-                texture = apply_filter(
-                    &mut filter_context,
-                    filter_stage,
-                    &texture,
-                    &node.kind,
-                    &node.params,
-                    if let Some(timer_slot) = timer_slot {
-                        let begin =
-                            2 + u32::from(profile_atlas_upload) * 2 + filter_stage as u32 * 2;
-                        Some((
-                            &self
-                                .gpu_timer
-                                .as_ref()
-                                .ok_or_else(|| {
-                                    unavailable(
-                                        "offscreen.timestamp_query",
-                                        "GPU timer is unavailable",
-                                    )
-                                })?
-                                .slots[timer_slot]
-                                .query_set,
-                            begin,
-                            begin + 1,
-                        ))
-                    } else {
-                        None
-                    },
-                )?;
-                filter_stage += 1;
-            }
-        }
+        let timestamps = timer_slot.map(|slot| {
+            (
+                &self
+                    .gpu_timer
+                    .as_ref()
+                    .expect("profiled timer checked")
+                    .slots[slot]
+                    .query_set,
+                2 + u32::from(profile_atlas_upload) * 2,
+            )
+        });
+        let texture =
+            self.filters
+                .render(&self.device, &self.queue, frame, &texture, timestamps)?;
         self.pending_output = Some(PendingOutput {
             texture,
             width: frame.width,
@@ -138,13 +93,6 @@ impl WgpuOffscreenRenderer {
         });
         if profile_gpu {
             let filter_cpu_ns = elapsed_ns(filter_started, "offscreen.filter.cpu")?;
-            let query_count = 2 + u32::from(profile_atlas_upload) * 2 + filter_stage as u32 * 2;
-            if query_count > MAX_GPU_TIMESTAMP_QUERIES {
-                return Err(invalid(
-                    "offscreen.timestamp_query",
-                    "frame exceeds the bounded GPU timestamp query count",
-                ));
-            }
             let cpu_submit_ns = cpu_started.elapsed().as_nanos().try_into().map_err(|_| {
                 invalid(
                     "offscreen.timestamp_query",

@@ -1,18 +1,8 @@
 use super::*;
-use astra_emu_family_api::FrameInfo;
+use astra_emu_family_api::{FrameAlpha, FrameFormat, FrameInfo, FrameLease, FrameRowOrder};
 use astra_emu_manager::effects::FilterPreset;
 use std::{collections::BTreeMap, path::PathBuf};
 
-#[test]
-fn default_dxc_path_is_resolved_next_to_manager_executable() {
-    let executable = PathBuf::from("package").join("astra-emu-manager.exe");
-    let expected = PathBuf::from("package").join(format!(
-        "{}dxcompiler.{}",
-        std::env::consts::DLL_PREFIX,
-        std::env::consts::DLL_EXTENSION
-    ));
-    assert_eq!(super::dxc_path_for_executable(&executable), expected);
-}
 
 fn info(width: u32, height: u32, stride: u32, alpha: FrameAlpha) -> FrameInfo {
     FrameInfo {
@@ -22,65 +12,40 @@ fn info(width: u32, height: u32, stride: u32, alpha: FrameAlpha) -> FrameInfo {
         logical_height: height,
         stride,
         format: FrameFormat::Rgba8Srgb { alpha },
+        rows: FrameRowOrder::TopToBottom,
     }
 }
 
-#[test]
-fn frame_copy_strips_source_padding_and_aligns_upload_rows() {
-    let mailbox = FrameMailbox::new();
-    let source = [1_u8, 2, 3, 255, 5, 6, 7, 255, 99, 99, 99, 99];
-    mailbox
-        .publish(FrameView::from_slice(&source, info(2, 1, 12, FrameAlpha::Opaque)).unwrap())
-        .unwrap();
-    let frame = mailbox.snapshot().unwrap().unwrap();
-    assert_eq!(frame.stride, 256);
-    assert_eq!(&frame.pixels[..8], &[1, 2, 3, 255, 5, 6, 7, 255]);
-    assert!(frame.pixels[8..].iter().all(|value| *value == 0));
+fn lease(pixels: Vec<u8>, info: FrameInfo, epoch: u64, generation: u64) -> FrameLease {
+    FrameLease::from_vec(pixels, info, FrameIdentity { session_epoch: epoch, generation }).unwrap()
 }
 
 #[test]
-fn clear_removes_the_previous_session_frame() {
+fn old_frame_and_shutdown_cannot_replace_or_clear_a_new_session_baseline() {
     let mailbox = FrameMailbox::new();
-    mailbox
-        .publish(FrameView::from_slice(&[1, 2, 3, 255], info(1, 1, 4, FrameAlpha::Opaque)).unwrap())
-        .unwrap();
-    let generation = mailbox.snapshot().unwrap().unwrap().generation;
-    mailbox.clear().unwrap();
-    assert!(mailbox.snapshot().unwrap().is_none());
-    mailbox
-        .publish(FrameView::from_slice(&[5, 6, 7, 255], info(1, 1, 4, FrameAlpha::Opaque)).unwrap())
-        .unwrap();
-    assert!(mailbox.snapshot().unwrap().unwrap().generation > generation);
-}
-
-#[test]
-fn collector_publishes_only_the_last_synchronous_frame() {
-    let mailbox = FrameMailbox::new();
-    let mut collector = FrameCollector::new(mailbox.clone());
-    collector
-        .accept(FrameView::from_slice(&[3, 4, 5, 255], info(1, 1, 4, FrameAlpha::Opaque)).unwrap())
-        .unwrap();
-    collector
-        .accept(FrameView::from_slice(&[7, 8, 9, 255], info(1, 1, 4, FrameAlpha::Opaque)).unwrap())
-        .unwrap();
-    let frame = mailbox.snapshot().unwrap().unwrap();
-    assert_eq!(&frame.pixels[..4], &[7, 8, 9, 255]);
-    assert_eq!(frame.generation, 2);
-}
-
-#[test]
-fn invalid_opaque_alpha_preserves_previous_frame() {
-    let mailbox = FrameMailbox::new();
-    mailbox
-        .publish(FrameView::from_slice(&[1, 2, 3, 255], info(1, 1, 4, FrameAlpha::Opaque)).unwrap())
-        .unwrap();
-    let previous = mailbox.snapshot().unwrap().unwrap();
-    assert!(mailbox
-        .publish(FrameView::from_slice(&[1, 2, 3, 0], info(1, 1, 4, FrameAlpha::Opaque)).unwrap())
-        .is_err());
+    mailbox.activate(1).unwrap();
+    let old = lease(vec![1, 2, 3, 255], info(1, 1, 4, FrameAlpha::Opaque), 1, 7);
+    mailbox.publish(old.clone()).unwrap();
+    mailbox.clear(1).unwrap();
+    mailbox.activate(2).unwrap();
+    mailbox.publish(lease(vec![5, 6, 7, 255], info(1, 1, 4, FrameAlpha::Opaque), 2, 1)).unwrap();
+    assert!(mailbox.publish(old).is_err());
+    mailbox.clear(1).unwrap();
     let current = mailbox.snapshot().unwrap().unwrap();
-    assert_eq!(current.generation, previous.generation);
-    assert_eq!(current.pixels, previous.pixels);
+    assert_eq!(current.identity, FrameIdentity { session_epoch: 2, generation: 1 });
+    assert_eq!(current.pixels(), &[5, 6, 7, 255]);
+}
+
+#[test]
+fn replacement_and_close_preserve_an_already_acquired_cpu_lease() {
+    let mailbox = FrameMailbox::new();
+    mailbox.activate(3).unwrap();
+    mailbox.publish(lease(vec![3, 4, 5, 255], info(1, 1, 4, FrameAlpha::Opaque), 3, 1)).unwrap();
+    let held = mailbox.snapshot().unwrap().unwrap();
+    mailbox.publish(lease(vec![7, 8, 9, 255], info(1, 1, 4, FrameAlpha::Opaque), 3, 2)).unwrap();
+    mailbox.clear(3).unwrap();
+    assert!(mailbox.snapshot().unwrap().is_none());
+    assert_eq!(held.pixels(), &[3, 4, 5, 255]);
 }
 
 #[test]
@@ -109,7 +74,8 @@ fn filtered_output_keeps_content_viewport_in_output_space() {
 }
 
 fn read_pixels(device: &wgpu::Device, queue: &wgpu::Queue, texture: &wgpu::Texture) -> Vec<u8> {
-    let stride = align_row(texture.width() * 4).unwrap();
+    let stride = (texture.width() * 4).div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)
+        * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
     let buffer = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("stage-test-readback"),
         size: u64::from(stride) * u64::from(texture.height()),
@@ -168,6 +134,7 @@ fn filter_configuration_rolls_back_and_reuses_uploaded_input() {
     }))
     .expect("GPU device creation must succeed");
     let mailbox = FrameMailbox::new();
+    mailbox.activate(1).unwrap();
     let mut renderer = ManagerStageRenderer::with_dxc_path(mailbox.clone(), dxc_path);
     renderer
         .setup(WgpuFrameContext {
@@ -189,7 +156,7 @@ fn filter_configuration_rolls_back_and_reuses_uploaded_input() {
     assert_eq!((renderer.output_width, renderer.output_height), old_output);
 
     mailbox
-        .publish(FrameView::from_slice(&[1, 2, 3, 255], info(1, 1, 4, FrameAlpha::Opaque)).unwrap())
+        .publish(lease(vec![1, 2, 3, 255], info(1, 1, 4, FrameAlpha::Opaque), 1, 1))
         .unwrap();
     renderer
         .render(WgpuFrameContext {
@@ -197,7 +164,7 @@ fn filter_configuration_rolls_back_and_reuses_uploaded_input() {
             queue: &queue,
         })
         .unwrap();
-    let uploaded_generation = renderer.uploaded_generation;
+    let uploaded_identity = renderer.uploaded_identity;
     assert_eq!(
         read_pixels(&device, &queue, renderer.output_texture.as_ref().unwrap()),
         [1, 2, 3, 255].repeat(4)
@@ -227,11 +194,13 @@ fn filter_configuration_rolls_back_and_reuses_uploaded_input() {
             queue: &queue,
         })
         .unwrap();
-    assert_eq!(renderer.uploaded_generation, uploaded_generation);
+    assert_eq!(renderer.uploaded_identity, uploaded_identity);
     assert_eq!(
         read_pixels(&device, &queue, renderer.output_texture.as_ref().unwrap()),
         [200, 60, 10, 255]
     );
+    assert_eq!(renderer.output_texture.as_ref(), renderer.input_texture.as_ref());
+    assert!(renderer.filtered_texture.is_none());
     assert!(renderer.configure_filter(&config, Some(invalid)).is_err());
     renderer
         .render(WgpuFrameContext {
@@ -243,7 +212,7 @@ fn filter_configuration_rolls_back_and_reuses_uploaded_input() {
         read_pixels(&device, &queue, renderer.output_texture.as_ref().unwrap()),
         [200, 60, 10, 255]
     );
-    mailbox.clear().unwrap();
+    mailbox.clear(1).unwrap();
     renderer
         .render(WgpuFrameContext {
             device: &device,
@@ -255,4 +224,42 @@ fn filter_configuration_rolls_back_and_reuses_uploaded_input() {
         [0, 0, 0, 0]
     );
     assert!(renderer.input_texture.is_none());
+}
+
+#[test]
+#[ignore = "requires a native hardware GPU runner"]
+fn native_pixels_keep_row_padding_and_present_bgra_linear_ignored_alpha_after_recovery() {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+        power_preference: wgpu::PowerPreference::HighPerformance,
+        compatible_surface: None,
+        force_fallback_adapter: false,
+    })).unwrap();
+    assert_ne!(adapter.get_info().device_type, wgpu::DeviceType::Cpu);
+    let (device, queue) = pollster::block_on(adapter.request_device(&Default::default())).unwrap();
+    let mailbox = FrameMailbox::new();
+    mailbox.activate(7).unwrap();
+    let frame = lease(
+        vec![128, 0, 0, 0, 0, 128, 0, 1, 42, 42, 42, 42,
+             0, 0, 128, 7, 128, 128, 128, 17, 42, 42, 42, 42],
+        FrameInfo {
+            width: 2, height: 2, logical_width: 2, logical_height: 2, stride: 12,
+            format: FrameFormat::Bgra8Linear { alpha: FrameAlpha::Ignored },
+            rows: FrameRowOrder::BottomToTop,
+        }, 7, 1,
+    );
+    mailbox.publish(frame).unwrap();
+    let mut renderer = ManagerStageRenderer::with_dxc_path(mailbox.clone(), PathBuf::new());
+    let expected = [188u8, 0, 0, 255, 188, 188, 188, 255,
+                    0, 0, 188, 255, 0, 188, 0, 255];
+    for _ in 0..2 {
+        renderer.setup(WgpuFrameContext { device: &device, queue: &queue }).unwrap();
+        renderer.render(WgpuFrameContext { device: &device, queue: &queue }).unwrap();
+        let actual = read_pixels(&device, &queue, renderer.output_texture.as_ref().unwrap());
+        assert!(actual.iter().zip(expected).all(|(value, expected)| value.abs_diff(expected) <= 1));
+        renderer.teardown();
+    }
+    // Rebuilding the GPU does not discard the immutable complete CPU baseline.
+    assert_eq!(mailbox.snapshot().unwrap().unwrap().identity,
+        FrameIdentity { session_epoch: 7, generation: 1 });
 }

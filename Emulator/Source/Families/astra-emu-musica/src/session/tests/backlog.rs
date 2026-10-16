@@ -18,11 +18,15 @@ fn native_gpu_backlog_navigation_voice_save_restore_and_return() {
         .advance(16_666_667, &[key(KeyCode::Enter)])
         .unwrap();
     let mut capture = Capture(Vec::new());
-    opened.session.visit_frame(&mut capture).unwrap();
+    capture
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     let second = capture.0.clone();
     opened.session.advance(0, &[key(KeyCode::PageUp)]).unwrap();
     opened.session.advance(0, &[key(KeyCode::ArrowUp)]).unwrap();
-    opened.session.visit_frame(&mut capture).unwrap();
+    capture
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     let first_history = capture.0.clone();
     assert_ne!(first_history, second);
     opened.session.advance(0, &[key(KeyCode::F5)]).unwrap();
@@ -30,10 +34,14 @@ fn native_gpu_backlog_navigation_voice_save_restore_and_return() {
         .session
         .advance(0, &[key(KeyCode::ArrowDown)])
         .unwrap();
-    opened.session.visit_frame(&mut capture).unwrap();
+    capture
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     assert_ne!(capture.0, first_history);
     opened.session.advance(0, &[key(KeyCode::F9)]).unwrap();
-    opened.session.visit_frame(&mut capture).unwrap();
+    capture
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     assert_eq!(capture.0, first_history);
     sink.nonzero.store(false, Ordering::Release);
     opened.session.advance(0, &[key(KeyCode::Enter)]).unwrap();
@@ -47,7 +55,9 @@ fn native_gpu_backlog_navigation_voice_save_restore_and_return() {
         FamilyStatus::Waiting
     );
     opened.session.advance(0, &[key(KeyCode::Escape)]).unwrap();
-    opened.session.visit_frame(&mut capture).unwrap();
+    capture
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     assert_eq!(capture.0, second);
     assert_eq!(
         opened

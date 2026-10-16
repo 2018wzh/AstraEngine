@@ -39,7 +39,11 @@ impl RuntimeWorld {
 
 `ValidatedModuleBinding` 只能由显式 registry selection、packaged eligibility、capability、package、target、profile、engine version、rustc/feature/ABI fingerprint 校验生成。上述 identity 由已验证的 `PackageHandle` 固化；重复 slot、token/slot 不一致或任一 identity 不一致必须在修改 world 前失败。`tick` 的首步固定为 `1`，之后每次只能递增 `1`；`seed` 必须等于 session seed，`delta_ns` 必须处于 `1..=1_000_000_000`。`PlayerInput` 与 `AwaitCompletion` 只能通过 non-zero、strictly increasing 的 `OrderedTickIngress` 提交。provider live output 不作为 Runtime ingress。load 后第一步必须使用一次 `RestoreContinuation`，之后回到 `Live`。重复、回退、跳步、非法 delta、seed mismatch、mode mismatch、ingress 乱序、缺少 required module 或任一 ingress 校验失败都返回稳定 blocking diagnostic，输入预检错误保持原状态，执行期失败处理见下文。
 
-`runtime.world` 当前二进制 schema 为 `5.0.0`，外层产品 section 为 `astra.runtime.save_blob.v5`。v4 及更早布局和调用方请求的旧 minimum version 直接返回 `ASTRA_RUNTIME_SAVE_WORLD_VERSION_UNSUPPORTED`；不提供兼容 adapter 或迁移工具。
+`runtime.world` 当前二进制 schema 为 `6.0.0`。NativeVN 保存并验证同一个 typed `SaveBlob`；v5 及更早布局和调用方请求的旧 minimum version 直接返回 `ASTRA_RUNTIME_SAVE_WORLD_VERSION_UNSUPPORTED`，不提供兼容 adapter 或迁移工具。原生 EMU 游戏存档不受此内部格式变更影响。
+
+Runtime 的 event/action/presentation/mutation 诊断历史分别最多保留最近 1024 条，不进入恢复快照或存档。`RuntimeDebugSession` 提供只读历史查询；恢复只提交未消费事件、活动状态及递增序号，成功恢复后诊断历史从空开始。presentation 序号独立于历史容量保存，淘汰和读档都不能复用已发出的序号。
+
+DelayedEventQueue 在插入时按 `(due_tick, sequence, id)` 有序放置，在反序列化边界一次归一排序。无事件到期的 tick 只检查首项，不重新排序、分配或搬移 pending 队列；到期项按同一稳定顺序交付，取消不改变剩余事件的序号。
 
 字段级实现蓝图见 [Runtime API Blueprint](../implementation/runtime-api.md)、[Runtime Execution](../implementation/runtime-execution.md) 和 [StateMachine Action Provider](../implementation/state-machine-action-provider.md)。
 
@@ -83,13 +87,15 @@ Tokio task 完成后只提交 `AwaitResult`。Runtime 在固定 tick 边界按 `
 - Runtime action 在 host 内以 typed Rust action 注册。通用动态 action ABI 与 bytes invoke adapter 已删除；动态 gameplay provider 只通过 Provider ABI v3 返回 typed live/control output。
 - `ActionRegistry` 拒绝空 descriptor、重复 action id 和 provider 冲突，不按后注册覆盖前注册。
 - 状态机定义分双轨：引擎系统用 Rust code-first；项目 gameplay/VN 可以用 YAML/Graph 定义并 Cook 成 IR。
-- Save 保存 `StableIdGenerator`、Actor/typed Component、StateMachine、Blackboard、AwaitQueue、完整 EventQueue、DelayedEventQueue 和 MutationLog，不保存实时 effect trace、ECS entity、native handle 或 Future 内部状态。typed component 只在 save 时编码，restore 后首次 typed read 才懒解码。
+- Save 保存 `StableIdGenerator`、Actor/typed Component、StateMachine、Blackboard、AwaitQueue、未消费 EventQueue、DelayedEventQueue 和递增序号，不保存诊断历史、实时 effect trace、ECS entity、native handle 或 Future 内部状态。typed component 只在 save 时编码，restore 后首次 typed read 才懒解码。
 
 ### Action ABI v2 与并行执行
 
 每个 action 必须提交 `ActionDescriptor`，声明 `ActionExecutionClass`、确定性 read/write set 和 `stable_id_reservation`。空声明、动态访问、实际访问越权、pure action 写入、StableId 预留不足都会 fail closed。`RuntimeExecutorConfig` 只允许 `serial(1)` 或 `parallel(1..=8)`；Windows 与 Headless 产品入口显式选择 parallel，其他平台可选择 serial，序列化保存状态应一致。
 
 StateMachine scheduler 先按稳定 machine id 构建 conflict DAG wave。wave 内任务只读同一不可变 Actor/Blackboard/event snapshot，分别生成 `ActorStoreDelta`、`BlackboardDelta` 和有序 effect；提交固定按 `(machine_id, microstep, action_index)` 验证。无法证明无冲突的 action 不会静默重试或降级，而是在注册或执行边界返回 blocking diagnostic。
+
+ActionDescriptor 在注册时验证并固化；变更声明须注销后重新注册。machine 访问计划按定义及 registry 代次缓存，增加 machine、注册或注销 action 时失效。首次真正需要并行 wave 时创建 World 所有的有界 Rayon worker pool，后续 wave/tick 复用；单 worker 或单 machine 仍串行。pool 和计划不进入恢复快照，所有并行任务完成后才按稳定顺序提交，关闭 World 不保留未完成 action。
 
 每个 `StateMachineDefinition` 首次创建或反序列化后只编译一次 state→transition、terminal-state 与可证明的 event-kind dispatch index。tick event root 每 tick 只计算一次；每个 candidate 用稳定 consumed bitset 标记事件，不复制或 `Vec::remove` 事件队列。cycle fingerprint 组合缓存的 base Actor/Blackboard root、overlay delta metadata、event root 与 consumed ordinal，不重新序列化完整 ActorStore、component bytes 或剩余事件。event-kind dispatch 仍按原始 event sequence 选择 trigger，不能让 kind 排序改变消费顺序。
 
@@ -99,7 +105,7 @@ Runtime 外层 tick 原地执行；候选 action/machine 验证与整帧回滚�
 
 通用 Runtime replay recorder、transcript、checkpoint、Replay tick mode 和执行入口已删除，没有兼容 reader。原调用方使用正常 `save`/`load` 和后续物理输入继续运行；这不影响 VN backlog、语音重播和 CG/剧情回想。
 
-World 不再保存或增量刷新 HistoryChain，也不再提供 aggregate `state_hash`/`event_hash`/`presentation_hash` API。`LoadReport` 返回恢复的 step 和 seed，不返回结构摘要。测试直接比较 typed snapshot 或存档字节，内容完整性由容器 hash 校验；旧摘要不再作验收基线，runtime.world v5 存档布局不变。诊断记录存储的进一步精简单独推进。
+World 不保存 HistoryChain，也不提供 aggregate `state_hash`/`event_hash`/`presentation_hash` API。`LoadReport` 返回恢复的 step 和 seed，不返回结构摘要。测试直接比较权威 typed snapshot 或存档字节，内容完整性由容器 hash 校验；诊断历史仅用于有界在线观察。
 
 `AwaitCompletionPolicy` 表示完成来源：`HostResult` 接受 host 提交的完成结果，不能声明 timeout；`TickTimeout` 必须声明 timeout step，并拒绝外部 completion。
 
@@ -121,7 +127,7 @@ Unknown event、invalid payload、missing required module、missing action、act
 
 需要旧 packaged module binding 的产品宿主在首 tick 前调用 `with_package(PackageHandle)` 显式附加身份，且只能附加一次。`package_id()` 与 `package_handle()` 返回 Option，无包时不生成默认或伪造身份。无包 World 调用 packaged `mount_module` 返回 `ASTRA_RUNTIME_MODULE_PACKAGE_REQUIRED`；重复附加或首 tick 后附加返回 `ASTRA_RUNTIME_PACKAGE_LIFECYCLE`。普通 Actor/Component 操作不依赖这项绑定。
 
-`runtime.world` v5 snapshot 将 package 身份改为 Option，NativeVN 外层 section 同步升级为 `astra.runtime.save_blob.v5`。旧布局明确拒绝；内存 typed state 与正常存读档仍由同一 RuntimeWorld 持有。权限来自宿主对 World 的所有权，诊断不记录组件 payload。验收包含无包/无 FSM 的 typed 更新和恢复、身份生命周期失败路径，以及现有 VN provider/Player 存档调用方。
+`runtime.world` v6 snapshot 保留可选 package 身份。旧布局明确拒绝；内存 typed state 与正常存读档仍由同一 RuntimeWorld 持有。权限来自宿主对 World 的所有权，诊断不记录组件 payload。验收包含无包/无 FSM 的 typed 更新和恢复、身份生命周期失败路径，以及现有 VN session/Player 存档调用方。
 
 ## Tick 失败与恢复
 
@@ -129,15 +135,15 @@ RuntimeWorld tick 原地推进，不再为 Actor、Blackboard、Event、Await、
 
 step、seed、mode 等输入预检在修改前完成；预检错误不终止 World。执行阶段返回错误、blocking/error diagnostic 或发生 Rust unwind panic 时，`is_failed()` 变为 true，首次调用返回根因；后续 tick、可变 World API、save 和 snapshot 返回 `ASTRA_RUNTIME_SESSION_FAILED`。`create_actor`、事件写入、移除/取消和 snapshot 等原先不可失败的 API 现返回 Result，产品调用方必须传播错误。DebugSession 与只读查询可用于诊断，动作 provider 注销仍可用于清理。
 
-失败状态不进入正常存档。宿主可销毁 World，或明确读取已存在且通过格式验证的存档；读取失败保持当前失败状态，成功恢复后使用 RestoreContinuation 继续。宿主显式提供的 `restore_snapshot` 是同样的恢复边界。此调整不改变 runtime.world v5 二进制布局：删除的事务字段此前均未序列化。
+失败状态不进入正常存档。宿主可销毁 World，或明确读取已存在且通过格式验证的存档；读取失败保持当前失败状态，成功恢复后使用 RestoreContinuation 继续。宿主显式提供的 `restore_snapshot` 是同样的恢复边界；恢复快照不携带诊断历史。
 
-验证覆盖多 machine 部分提交、动作访问错误、microstep 超限、Await policy 错误、panic、失败后的写入/保存拒绝以及从此前存档恢复。通用 replay 与 HistoryChain 已移除；诊断记录存储仍需后续精简。
+验证覆盖多 machine 部分提交、动作访问错误、microstep 超限、Await policy 错误、panic、失败后的写入/保存拒绝以及从此前存档恢复。通用 replay 与 HistoryChain 已移除，诊断历史不再随长流程无界增长或进入存档。
 
 ## 宿主恢复验证
 
 `load_with_validation(save, registry, validate)` 先验证容器并解码候选 RuntimeSnapshot，再由持有 World 的宿主检查和提取 typed 产品状态。闭包只修改候选 snapshot；返回错误时不替换当前 World，也不解除失败状态。验证成功后提交并进入 RestoreContinuation，同时返回宿主提取的数据。普通 `load`/`load_with_registry` 复用这一路径，不要求无产品 World 安装 VN 校验器。
 
-NativeVN 在提交前检查外层 section 的 hash、v5 数字版本、package 身份、唯一 owner state component、component 版本、typed 解码与 VN state schema；验证失败保留 World、VN state 和待处理控制。成功时一起替换状态并清空旧控制。外层旧 v4 数字版本明确拒绝，需重新生成内部开发存档；嵌套 runtime.world v5 布局不变。验收包含合法 hash 下的无效 typed state、版本/包不符、失败 World 的拒绝恢复和正常恢复后续 tick。
+NativeVN 在提交前检查容器完整性、runtime.world v6、package 身份、唯一 owner state component、component 版本、typed 解码与 VN state schema；验证失败保留 World、VN state 和待处理控制。成功时一起替换状态并清空旧控制与诊断历史。旧内部存档明确拒绝，不改写原文件；验收覆盖合法 hash 下的无效 typed state、版本/包不符、失败 World 的拒绝恢复和正常恢复后续 tick。
 
 ## 异步完成句柄与作用域
 

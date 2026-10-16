@@ -14,6 +14,7 @@ pub struct WgpuPresentationCore {
     pub(super) sampler: wgpu::Sampler,
     pub(super) pipeline: wgpu::RenderPipeline,
     pub(super) glyph_renderer: WgpuGlyphAtlasRenderer,
+    pub(super) filters: crate::scene_filters::SceneFilters,
     pub(super) last_upload: Option<UploadFrame>,
     pub(super) last_frame: Option<RgbaFrame>,
     pub(super) last_scene_frame: Option<SceneFrame>,

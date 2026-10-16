@@ -1,6 +1,9 @@
 mod tasks;
 
-use std::{collections::BTreeMap, time::Instant};
+use std::{
+    collections::{BTreeMap, VecDeque},
+    time::Instant,
+};
 
 use astra_core::{
     Diagnostic, SchemaId, SchemaMigrationRegistry, SchemaVersion, StableId, StableIdGenerator,

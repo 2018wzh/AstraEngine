@@ -1,18 +1,5 @@
 use super::*;
 
-pub(super) fn float_param(
-    params: &BTreeMap<String, FilterParam>,
-    name: &str,
-) -> Result<String, PlatformError> {
-    match params.get(name) {
-        Some(FilterParam::Float(value)) if value.is_finite() => Ok(format!("{value:.9}")),
-        _ => Err(invalid(
-            "offscreen.filter",
-            "validated filter parameter is unavailable",
-        )),
-    }
-}
-
 /// Creates an instance with the corresponding native platform backend policy.
 /// Retain it in the graphics owner and lend it to each session renderer so native
 /// backend loaders remain loaded across session creation and destruction.

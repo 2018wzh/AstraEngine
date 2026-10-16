@@ -1,27 +1,25 @@
 # Third-party notices
 
-## siglus_rs (vendored at `ThirdParty/siglus_rs`)
+## siglus_rs (`Emulator/ThirdParty/siglus_rs`)
 
 Git submodule of [`xmoezzz/siglus_rs`](https://github.com/xmoezzz/siglus_rs)
 pinned by exact gitlink to a local adaptation of the
 [`2018wzh/siglus_rs`](https://github.com/2018wzh/siglus_rs) fork: upstream
-revision `e762f9f9c1c94cb490fb13f1367fd06f3e1367b4` (2026-09-13) plus a single
-adaptation commit, for an unofficial Rust reimplementation of the
-SiglusEngine. The covered source is
+revision `5f358ef1360b0439e92aed2b749e8f25d8721954` (1.0.0) plus the single
+local adaptation `ec20655b32e369c8a6f682a1ecadedddb66c33e6`, for an unofficial
+Rust reimplementation of SiglusEngine. The covered source is
 redistributed under the MPL-2.0; the complete license text is preserved at
-`ThirdParty/siglus_rs/LICENSE-MPL-2.0`. The file-level change inventory is
+`Emulator/ThirdParty/siglus_rs/LICENSE-MPL-2.0`. The file-level change inventory is
 `MODIFICATIONS.md`; both it and the covered source must remain in the source
 archive or the valid source offer for a binary distribution.
 
-The vendored tree keeps the upstream Cargo workspace (`crates/`, `platform/`,
-`site/`, `testdata/`) so upstream diffs stay reviewable. Only the crates
-reachable from `siglus_scene_vm` are built by this repository
-(`siglus_scene_vm`, `siglus_assets`, `shion-xfile`, `shion-render`,
-`shion-xscene`, `siglus_omv_decoder`, `na_mpeg2_decoder`, `na_wmv_player`,
-`theora-rs`); the decompiler, compiler, and viewer crates remain inert source.
+The complete upstream workspace and vendored components are retained, not
+copied into the parent repository. Only dependencies reachable from the
+selected Family features are built; the other upstream tools stay source.
 
-Registry dependencies of the vendored crates (kira, wgpu 0.20, winit 0.30,
-egui 0.28, eluna_rs, ab_glyph, encoding_rs, and the transitive closure) are
+Registry dependencies (Kira 0.9, wgpu 0.20, winit 0.31.0-beta.3,
+egui 0.28, ab_glyph, encoding_rs, and the transitive closure) and the
+upstream-vendored eluna_rs retain their own licenses. Registry packages are
 resolved from crates.io and carry their own licenses; the upstream
 `Cargo.lock` records the pinned set, and the host workspace lockfile records
 the set actually compiled into the family plugin.

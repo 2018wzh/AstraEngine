@@ -2,80 +2,91 @@ use super::*;
 
 impl AstraEmuManagerController {
     pub(super) fn close_active(&mut self, reason: PlaySessionEndReason) -> Result<(), String> {
-        self.pending_events.clear();
+        if let Some(active) = self.active.as_mut() {
+            if active.closing.is_none() {
+                self.registry.close(active.epoch, std::mem::take(&mut self.pending_events))?;
+                active.closing = Some(reason);
+            }
+        }
         self.physical_keys.clear();
         self.held_controls.clear();
-        self.key_modifiers = KeyModifiers {
-            shift: false,
-            control: false,
-            alt: false,
-            super_key: false,
-        };
-        let close_error = self
-            .active
-            .take()
-            .and_then(|mut active| active.close().err());
-        let play_error = self
-            .active_play_session
-            .take()
-            .map(|session_id| {
-                self.library
-                    .end_play_session(&session_id, unix_time_ms()?, reason)
-                    .map_err(|error| error.to_string())
-            })
-            .transpose()
-            .err();
-        match (close_error, play_error) {
-            (Some(first), Some(second)) => Err(format!("{first}; {second}")),
-            (Some(error), None) | (None, Some(error)) => Err(error),
-            (None, None) => Ok(()),
+        self.key_modifiers = KeyModifiers { shift: false, control: false, alt: false, super_key: false };
+        Ok(())
+    }
+
+    pub(super) fn flush_owner_events(&mut self) -> Result<(), String> {
+        if self.pending_events.is_empty() { return Ok(()); }
+        if let Some(active) = self.active.as_ref().filter(|active| active.closing.is_none()) {
+            self.registry.events(active.epoch, std::mem::take(&mut self.pending_events))?;
         }
+        Ok(())
+    }
+
+    fn poll_owner(&mut self) -> Result<bool, String> {
+        let Some(active) = self.active.as_mut() else { return Ok(false); };
+        let Some(update) = self.registry.take_update(active.epoch) else { return Ok(false); };
+        active.fullscreen = update.fullscreen;
+        if update.title_changed { active.title = update.title; }
+        if let Some(icon) = update.icon { active.pending_icon = Some(icon); }
+        if let Some(pointer) = update.pointer {
+            active.pending_pointer.get_or_insert_with(Default::default).merge(pointer);
+        }
+        if update.opened && !active.opened {
+            active.opened = true;
+            match self.library.start_play_session(&active.game_id, unix_time_ms()?) {
+                Ok(id) => self.active_play_session = Some(id),
+                Err(error) => {
+                    self.close_active(PlaySessionEndReason::Crash)?;
+                    return Err(error.to_string());
+                }
+            }
+        }
+        if update.closed {
+            let active = self.active.take().expect("active view checked above");
+            self.pending_events.clear();
+            self.mailbox.clear(active.epoch)?;
+            let play_error = self.finish_play_session(active.closing.unwrap_or(
+                if update.error.is_some() { PlaySessionEndReason::Crash } else { PlaySessionEndReason::Leave }
+            )).err();
+            match (update.error, play_error) {
+                (Some(first), Some(second)) => return Err(format!("{first}; {second}")),
+                (Some(error), None) | (None, Some(error)) => return Err(error),
+                (None, None) => {}
+            }
+        }
+        Ok(true)
+    }
+
+    pub(super) fn finish_play_session(&mut self, reason: PlaySessionEndReason) -> Result<(), String> {
+        if let Some(id) = self.active_play_session.take() {
+            self.library.end_play_session(&id, unix_time_ms()?, reason).map_err(|error| error.to_string())?;
+        }
+        Ok(())
     }
 
     pub(super) fn poll_platform(&mut self) -> Result<Option<ManagerViewModel>, String> {
-        if let Some(active) = self.active.as_ref() {
-            if let Some(audio) = active.audio.as_ref() {
-                audio.check_health()?;
-            }
-        }
+        let owner_changed = self.poll_owner()?;
         let connection_changed = self.poll_connection_test();
-        if self.poll_metadata()? || connection_changed {
-            Ok(Some(self.model()?))
-        } else {
-            Ok(None)
-        }
+        let metadata_changed = self.poll_metadata()?;
+        if owner_changed || metadata_changed || connection_changed { Ok(Some(self.model()?)) }
+        else { Ok(None) }
     }
 
     pub(super) fn set_host_wake(&mut self, wake: HostWake) {
+        if let Err(error) = self.registry.set_wake(wake.clone()) {
+            self.diagnostic = error;
+        }
         self.host_wake = Some(wake.clone());
         self.metadata.set_wake(wake);
     }
 
     pub(super) fn runtime_deadline(&self) -> Option<Instant> {
-        self.active.as_ref().map(|active| active.next_deadline)
+        // Presentation/input servicing only. Native deadlines are owned by FamilyOwner.
+        self.active.as_ref().map(|_| Instant::now() + Duration::from_nanos(FIXED_FRAME_NS))
     }
 
     pub(super) fn advance_runtime(&mut self) -> Result<Option<ManagerViewModel>, String> {
-        let Some(active) = self.active.as_mut() else {
-            return Ok(None);
-        };
-        let elapsed = active
-            .last_tick
-            .elapsed()
-            .as_nanos()
-            .min(u128::from(u64::MAX)) as u64;
-        let events = std::mem::take(&mut self.pending_events);
-        active.advance(elapsed.max(1), &events)?;
-        if active.status == FamilyStatus::Finished {
-            self.close_active(PlaySessionEndReason::Leave)?;
-            return Ok(Some(self.model()?));
-        }
-        Ok(None)
-    }
-
-    pub(super) fn host_work_complete(&mut self) {
-        if let Some(active) = self.active.as_mut() {
-            active.host_work_complete();
-        }
+        self.flush_owner_events()?;
+        if self.poll_owner()? { Ok(Some(self.model()?)) } else { Ok(None) }
     }
 }

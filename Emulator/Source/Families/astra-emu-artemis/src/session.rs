@@ -9,15 +9,15 @@
 //! Save data stays in the game directory (`<game>/savedata`), owned entirely
 //! by the engine; the host provides only the game path.
 
-use std::cell::{Cell, RefCell};
-use std::path::Path;
+use std::{path::Path, sync::Arc};
 
 use art3m1s_core::backend::BackendSelection;
 use art3m1s_core::host_events::HostEvents;
 use art3m1s_core::host_files::HostResources;
 use astra_emu_family_api::{
     AdvanceResponse, AudioSinkBox, FamilyError, FamilyEvent, FamilyResult, FamilySession,
-    FamilyStatus, FrameAlpha, FrameFormat, FrameInfo, FrameView, FrameVisitor, WindowState,
+    FamilyStatus, FrameAlpha, FrameFormat, FrameIdentity, FrameInfo, FramePoll, FramePublisher,
+    FrameRowOrder, WindowState,
 };
 
 use art3m1s_core::runtime::CoreRuntime;
@@ -44,8 +44,9 @@ pub(crate) struct ArtemisSession {
     events: HostEvents,
     _lease: provider::SessionLease,
     suspended: bool,
-    pixels: RefCell<Vec<u8>>,
-    frame_info: Cell<FrameInfo>,
+    pixels: [Option<Arc<Vec<u8>>>; 3],
+    published_frame: FramePublisher,
+    pending_frame: bool,
     elapsed_remainder_ns: u64,
     fatal: Option<FamilyError>,
     pending_window: media::WindowRequests,
@@ -57,6 +58,7 @@ pub(crate) fn boot(
     initial_window: WindowState,
     sink: AudioSinkBox,
     lease: provider::SessionLease,
+    session_epoch: u64,
 ) -> FamilyResult<ArtemisOpen> {
     // Mount with the first entry-name encoding that exposes the boot
     // configuration; a failed attempt is replaced by the next one.
@@ -81,7 +83,6 @@ pub(crate) fn boot(
         ));
     };
 
-
     let save_dir = game_path.join("savedata");
     std::fs::create_dir_all(&save_dir).map_err(|_| {
         error::invalid(
@@ -104,7 +105,16 @@ pub(crate) fn boot(
     host_events.set_enabled(true);
     host_events.set_window_state(if initial_window.focused { 1 } else { 0 });
 
-    let boot_result = boot_engine(&resources, &host_events, &ini, initial_window, sink, lease);
+    let published_frame = FramePublisher::new(session_epoch)?;
+    let boot_result = boot_engine(
+        &resources,
+        &host_events,
+        &ini,
+        initial_window,
+        sink,
+        lease,
+        published_frame,
+    );
     if boot_result.is_err() {
         // Unwind the process-global host state so a later session cannot
         // inherit a dead handle; the audio bridge cancels its worker.
@@ -120,6 +130,7 @@ fn boot_engine(
     initial_window: WindowState,
     sink: AudioSinkBox,
     lease: provider::SessionLease,
+    mut published_frame: FramePublisher,
 ) -> FamilyResult<ArtemisOpen> {
     let audio = AudioBridge::start(sink)?;
     let mut rt = match build_runtime(resources, ini, initial_window) {
@@ -141,7 +152,6 @@ fn boot_engine(
             return Err(frame_error);
         }
     };
-    let mut pixels = vec![0_u8; rt.pixel_buffer_size()];
 
     let mut settled = false;
     let mut pending_window = media::WindowRequests::default();
@@ -152,14 +162,8 @@ fn boot_engine(
             audio: &audio,
             window: &mut pending_window,
         };
-        match pump(
-            &mut rt,
-            &mut tick,
-            pixels.as_mut_slice(),
-            FRAME_INTERVAL_MS,
-            &[],
-        ) {
-            Ok(written) if written > 0 => {
+        match pump(&mut rt, &mut tick, FRAME_INTERVAL_MS, &[]) {
+            Ok(true) => {
                 settled = true;
                 break;
             }
@@ -179,6 +183,23 @@ fn boot_engine(
             "the Artemis engine produced no composed frame during boot",
         ));
     }
+    let mut pixels = vec![0_u8; rt.pixel_buffer_size()];
+    if let Err(capture_error) = rt
+        .try_capture_frame_into(&mut pixels)
+        .map_err(error::engine)
+    {
+        let _ = audio.close();
+        host_events.set_enabled(false);
+        return Err(capture_error);
+    }
+    let pixels = Arc::new(pixels);
+    if let Err(publication_error) =
+        published_frame.publish(Arc::clone(&pixels), |pixels| pixels.as_slice(), frame_info)
+    {
+        let _ = audio.close();
+        host_events.set_enabled(false);
+        return Err(publication_error);
+    }
 
     Ok(ArtemisOpen {
         frame_info,
@@ -189,8 +210,9 @@ fn boot_engine(
             _lease: lease,
             suspended: false,
             audio,
-            pixels: RefCell::new(pixels),
-            frame_info: Cell::new(frame_info),
+            pixels: [Some(pixels), None, None],
+            published_frame,
+            pending_frame: false,
             elapsed_remainder_ns: 0,
             fatal: None,
             pending_window,
@@ -203,12 +225,22 @@ fn build_runtime(
     ini: &[u8],
     initial_window: WindowState,
 ) -> FamilyResult<CoreRuntime> {
-    let mut rt = CoreRuntime::create(
-        initial_window.width.max(1),
-        initial_window.height.max(1),
-        BackendSelection::NativeVulkan,
-    )
-    .map_err(error::engine)?;
+    #[cfg(target_os = "macos")]
+    let backend = BackendSelection::NativeMetal;
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "android"))]
+    let backend = BackendSelection::NativeVulkan;
+    #[cfg(not(any(
+        target_os = "windows",
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "android"
+    )))]
+    return Err(error::invalid(
+        "ASTRA_EMU_ARTEMIS_PLATFORM",
+        "native GPU backend is unavailable on this platform",
+    ));
+    let mut rt = CoreRuntime::create(initial_window.width, initial_window.height, backend)
+        .map_err(error::engine)?;
     rt.set_runtime_media_enabled(true);
     rt.set_resources(resources.clone());
     rt.load_project_bytes(ini, "WINDOWS")
@@ -232,14 +264,13 @@ fn frame_info_of(width: u32, height: u32) -> FamilyResult<FrameInfo> {
             error::invalid("ASTRA_EMU_ARTEMIS_FRAME_SIZE", "frame stride overflows")
         })?,
         format: FrameFormat::Rgba8Srgb {
-            alpha: FrameAlpha::Opaque,
+            alpha: FrameAlpha::Ignored,
         },
+        rows: FrameRowOrder::TopToBottom,
     })
 }
 
-/// Applies finished-sound notifications and queued media commands, injects
-/// input, and runs one engine tick. Returns the number of rendered bytes.
-/// Per-tick session state the pump consumes and updates.
+/// Per-tick services used while advancing the original core and media queues.
 struct TickContext<'a> {
     host_events: &'a HostEvents,
     resources: &'a HostResources,
@@ -250,10 +281,9 @@ struct TickContext<'a> {
 fn pump(
     rt: &mut CoreRuntime,
     tick: &mut TickContext<'_>,
-    pixels: &mut [u8],
     elapsed_ms: u64,
     input: &[FamilyEvent],
-) -> FamilyResult<usize> {
+) -> FamilyResult<bool> {
     for finished in tick.audio.drain_finished() {
         rt.notify_sound_finished(finished.id.as_deref());
     }
@@ -261,12 +291,12 @@ fn pump(
         tick.audio.send(command)?;
     }
     events::apply(rt, input);
-    let written = rt.advance_and_render_into(elapsed_ms, pixels);
+    let changed = rt.try_advance_frame(elapsed_ms).map_err(error::engine)?;
     for command in media::drain(tick.host_events, tick.resources, tick.window)? {
         tick.audio.send(command)?;
     }
     tick.audio.check_error()?;
-    Ok(written)
+    Ok(changed)
 }
 
 impl ArtemisSession {
@@ -275,6 +305,31 @@ impl ArtemisSession {
             return Err(value.clone());
         }
         Ok(())
+    }
+
+    fn capture_pending(&mut self) -> FamilyResult<bool> {
+        let Some(index) = self.pixels.iter().position(|slot| {
+            slot.as_ref()
+                .is_none_or(|pixels| Arc::strong_count(pixels) == 1)
+        }) else {
+            return Ok(false);
+        };
+        let slot = self.pixels[index].get_or_insert_with(|| Arc::new(Vec::new()));
+        let pixels = Arc::get_mut(slot).ok_or_else(|| {
+            error::invalid(
+                "ASTRA_EMU_ARTEMIS_FRAME_OWNER",
+                "CPU frame buffer is still leased",
+            )
+        })?;
+        pixels.resize(self.rt.pixel_buffer_size(), 0);
+        self.rt
+            .try_capture_frame_into(pixels)
+            .map_err(error::engine)?;
+        let info = frame_info_of(self.rt.stage_width(), self.rt.stage_height())?;
+        self.published_frame
+            .publish(Arc::clone(slot), |pixels| pixels.as_slice(), info)?;
+        self.pending_frame = false;
+        Ok(true)
     }
 }
 
@@ -318,18 +373,19 @@ impl FamilySession for ArtemisSession {
             .ok_or_else(|| error::invalid("ASTRA_EMU_ARTEMIS_TIME", "elapsed time overflow"))?;
         let elapsed_ms = elapsed / 1_000_000;
         self.elapsed_remainder_ns = elapsed % 1_000_000;
-        let mut pixels = self.pixels.borrow_mut();
         let mut tick = TickContext {
             host_events: &self.events,
             resources: &self.resources,
             audio: &self.audio,
             window: &mut self.pending_window,
         };
-        if let Err(failure) = pump(&mut self.rt, &mut tick, &mut pixels, elapsed_ms, events) {
-            self.fatal = Some(failure.clone());
-            return Err(failure);
+        match pump(&mut self.rt, &mut tick, elapsed_ms, events) {
+            Ok(changed) => self.pending_frame |= changed,
+            Err(failure) => {
+                self.fatal = Some(failure.clone());
+                return Err(failure);
+            }
         }
-        drop(pixels);
         if self.rt.is_exit_requested() {
             return Ok(AdvanceResponse {
                 status: FamilyStatus::Finished,
@@ -342,11 +398,19 @@ impl FamilySession for ArtemisSession {
         })
     }
 
-    fn visit_frame(&self, visitor: &mut dyn FrameVisitor) -> FamilyResult<()> {
+    fn acquire_frame(&mut self, after: Option<FrameIdentity>) -> FamilyResult<FramePoll> {
         self.ensure_live()?;
-        let pixels = self.pixels.borrow();
-        let view = FrameView::from_slice(&pixels, self.frame_info.get())?;
-        visitor.accept(view)
+        if self.pending_frame {
+            match self.capture_pending() {
+                Ok(false) => return Ok(self.published_frame.pending()),
+                Ok(true) => {}
+                Err(failure) => {
+                    self.fatal = Some(failure.clone());
+                    return Err(failure);
+                }
+            }
+        }
+        Ok(self.published_frame.poll(after))
     }
 
     fn close(self: Box<Self>) -> FamilyResult<()> {

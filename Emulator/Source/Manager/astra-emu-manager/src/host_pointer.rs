@@ -159,6 +159,7 @@ impl HostPointer {
         let game_visible = state.visible && !state.idle_hidden;
         window.set_game_cursor_visible(game_visible);
         let controlling = active
+            && !window.get_modal_active()
             && !window.get_translation_overlay_active()
             && !window.get_diagnostics_overlay_active()
             && !window.get_filters_overlay_active()

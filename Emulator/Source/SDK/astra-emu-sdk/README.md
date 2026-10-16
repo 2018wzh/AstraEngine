@@ -1,6 +1,6 @@
 # AstraEMU SDK
 
-SDK 提供移植核心共同使用的模块，当前替代 Musica 内部的文字资源管理、纹理缓存、归档公共类型和音频解码。CMVS 与 Musica 共用错误、归档、缓存和音频模块；CMVS 的完整 Family session 仍待接通。Family API 独立存在，成熟外部核心无需依赖 SDK。
+SDK 提供移植核心共同使用的模块，当前替代 Musica 内部的文字资源管理、纹理缓存、归档公共类型和音频解码。CMVS 与 Musica 共用错误、归档、缓存、文字、纹理驻留和音频模块；CMVS 独立工作树的完整成果尚待整合。Family API 独立存在，成熟外部核心无需依赖 SDK。
 
 默认启用 `text`、`image`、`archive` 和 `cache` feature，`audio` 单独选择。仅需要格式错误类型的消费者使用 `default-features = false`；CMVS 选择 `archive/cache/image/audio/text`，原生文字规则留在核心，字形排版与资源生命周期复用 SDK。`CoreError` 保留稳定 code 与说明，不能直接把未经审查的 message 写入日志；核心仍负责产生不含私有数据的错误。
 
@@ -15,6 +15,10 @@ SDK 提供移植核心共同使用的模块，当前替代 Musica 内部的文�
 `TextScene::layout_shared` 返回同一 provider/cache 的只读 `TextLayoutResult`，供原生核心读取 `ShapedGlyph::advance`。它不上传字形，也不创建可见区域；`frame` 复用该入口并负责资源生命周期。字体缺失、覆盖不足和其他 Error/Blocking 诊断均原样返回，不以 bitmap 宽度或字号比例补出度量。现有调用不需要迁移；CMVS 比例文字布局接入此接口。
 
 `TextureCache` 复用 `astra-media-core::TextureFrame`、`image` 和 `lru`，同时限制条目数、尺寸和缓存持有的 RGBA 字节数。标准图片解码在转换 RGBA 前检查尺寸与分配预算；专用格式由核心解码后调用 `insert`。淘汰不会使外部持有的帧失效，预算不代表 GPU 或所有调用方的总内存。
+
+`SceneTextureResidency`（`image`）把每帧新建的 `Texture` 绘制命令改为既有公共 `UploadTexture/Sprite/ReleaseResource`；Musica 的所有场景/影片提交及 CMVS 的 texture/text/clear 提交使用同一模块。不可变像素 owner 的地址、长度和尺寸构成身份，保留原帧引用防止地址复用误命中，不逐帧比较或 hash 正文；相同资源的多个绘制共享上传，移动、透明度和裁剪不重传像素。不再出现在当前场景的资源在下一次提交释放，当前工作集仍受渲染器资源/字节预算限制，atlas 可保留有界容量。模块不拥有 GPU 或第二套 renderer，不改变逻辑尺寸、混合空间、ANI 原点、VM 或存档。
+
+一个 residency 实例对应一个 renderer，在提交前调用 `prepare`；输入为本帧尚未转换的命令，不能再次转换上次的输出。上传/释放位于绘制前；没有资源变化时不额外分配命令向量。和 `TextScene` 一样，渲染失败关闭该 renderer/cache 对应会话，不能丢掉资源命令继续；重建场景/设备时创建新的实例。
 
 `StageCanvas` 只包装公共 `Canvas2D` 的逻辑舞台到 raster 输出映射；`TextureAsset` 将物理 `TextureFrame` 与显式 logical extent、logical origin 分开。Family 可以用原资源的逻辑几何承载不同密度的替换像素，SDK 不定义具体归档、命名或替换策略，也不创建第二套纹理缓存。
 

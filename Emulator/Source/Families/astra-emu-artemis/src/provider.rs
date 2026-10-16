@@ -141,7 +141,14 @@ impl FamilyProvider for ArtemisProvider {
         self.next_session_id = id.checked_add(1).ok_or_else(|| {
             error::invalid("ASTRA_EMU_ARTEMIS_SESSION_ID", "session ID exhausted")
         })?;
-        let open = session::boot(&game_path, &archive, request.initial_window, sink, lease)?;
+        let open = session::boot(
+            &game_path,
+            &archive,
+            request.initial_window,
+            sink,
+            lease,
+            request.session_epoch,
+        )?;
         let frame_info = open.frame_info;
         tracing::info!(
             event = "astra.emu.artemis.session.open",

@@ -15,13 +15,7 @@ RFVP fork 直接 acquire Host writable lease
     -> Host 校验并上传
 ```
 
-当前父仓 pinned RFVP source 是已发布的
-[`2018wzh/rfvp` fork](https://github.com/2018wzh/rfvp/tree/codex/local-product-adaptation)，
-分支 `codex/local-product-adaptation`、revision
-`73d3b4413c95a3923cce695d98c3d9bf5b08ccf0`，基于 RFVP 0.6.0 上游 revision
-`304e773387a9920c9db091ec1fd937c717aea949`。本页下文保留的是旧 Family ABI v9
-清理审计；历史审计对象和阻断项见 [RFVP fork audit](rfvp-fork-audit.md)，不能把
-旧审计 head 当作当前 fork 身份。
+本页审计对象为历史 Family ABI v9，不再声明当前 parent 的 source identity。现行精确提交与必要原生边界见 [MODIFICATIONS.md](../../../Emulator/Source/Families/astra-emu-fvp/MODIFICATIONS.md)，本轮真实检查与未验收范围见[性能审计](../../status/performance-upstream-audit-2026-10-12.md)。下文的旧软件 surface、commit damage 和 Hook 链路均不得作为现行实现要求。
 
 ## 职责边界
 

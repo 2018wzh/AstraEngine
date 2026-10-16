@@ -10,6 +10,7 @@ struct Session {
     closed: Rc<Cell<usize>>,
     panic_on_advance: bool,
     fail_close: bool,
+    frame: FramePublisher,
 }
 
 fn frame_info() -> FrameInfo {
@@ -22,6 +23,7 @@ fn frame_info() -> FrameInfo {
         format: FrameFormat::Rgba8Srgb {
             alpha: FrameAlpha::Opaque,
         },
+        rows: FrameRowOrder::TopToBottom,
     }
 }
 
@@ -40,7 +42,9 @@ impl FamilyProvider for Provider {
     fn probe(&self, _: ProbeRequest) -> FamilyResult<Option<ProbeReport>> {
         Ok(None)
     }
-    fn open(&mut self, _: OpenRequest) -> FamilyResult<FamilyOpen> {
+    fn open(&mut self, request: OpenRequest) -> FamilyResult<FamilyOpen> {
+        let mut frame = FramePublisher::new(request.session_epoch)?;
+        frame.publish(vec![0, 0, 0, 255], Vec::as_slice, frame_info())?;
         Ok(FamilyOpen {
             response: OpenResponse {
                 session_id: "test-session".into(),
@@ -51,6 +55,7 @@ impl FamilyProvider for Provider {
                 closed: self.closed.clone(),
                 panic_on_advance: self.panic_on_advance,
                 fail_close: self.fail_close,
+                frame,
             }),
         })
     }
@@ -65,8 +70,8 @@ impl FamilySession for Session {
             ..AdvanceResponse::running()
         })
     }
-    fn visit_frame(&self, visitor: &mut dyn FrameVisitor) -> FamilyResult<()> {
-        visitor.accept(FrameView::from_slice(&[0, 0, 0, 255], frame_info())?)
+    fn acquire_frame(&mut self, after: Option<FrameIdentity>) -> FamilyResult<FramePoll> {
+        Ok(self.frame.poll(after))
     }
     fn close(self: Box<Self>) -> FamilyResult<()> {
         self.closed.set(self.closed.get() + 1);
@@ -80,6 +85,7 @@ impl FamilySession for Session {
 fn open_request() -> OpenRequest {
     OpenRequest {
         game_path: "test-game".into(),
+        session_epoch: allocate_session_epoch().unwrap(),
         configuration: Default::default(),
         initial_window: WindowState {
             width: 1,
@@ -90,6 +96,7 @@ fn open_request() -> OpenRequest {
         host: FamilyHostServices {
             audio_sink: ROption::RNone,
             text_replacement: ROption::RNone,
+            modal: ROption::RNone,
         },
     }
 }

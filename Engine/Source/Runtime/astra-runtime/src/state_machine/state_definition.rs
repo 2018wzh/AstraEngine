@@ -178,13 +178,72 @@ pub fn validate_state_machine(definition: &StateMachineDefinition) -> StateMachi
     StateMachineValidationReport { valid, diagnostics }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 pub struct StateMachineStore {
     pub(super) machines: Vec<StateMachineInstance>,
-    pub(super) trace: Vec<ActionTrace>,
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub(super) trace: VecDeque<ActionTrace>,
+    #[serde(skip)]
+    #[schemars(skip)]
+    worker_pool: Option<Arc<rayon::ThreadPool>>,
+    #[serde(skip)]
+    #[schemars(skip)]
+    access_plans: Vec<MachineAccessPlan>,
+    #[serde(skip)]
+    #[schemars(skip)]
+    action_epoch: Option<Arc<()>>,
+}
+
+impl PartialEq for StateMachineStore {
+    fn eq(&self, other: &Self) -> bool {
+        self.machines == other.machines && self.trace == other.trace
+    }
 }
 
 impl StateMachineStore {
+    fn ensure_worker_pool(&mut self, workers: usize) -> Result<(), Diagnostic> {
+        if !(1..=8).contains(&workers) {
+            return Err(Diagnostic::blocking(
+                "ASTRA_RUNTIME_WORKER_COUNT",
+                "machine worker count must be within 1..=8",
+            ));
+        }
+        if self
+            .worker_pool
+            .as_ref()
+            .is_some_and(|pool| pool.current_num_threads() == workers)
+        {
+            return Ok(());
+        }
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(workers)
+            .thread_name(|index| format!("astra-fsm-{index}"))
+            .build()
+            .map_err(|error| {
+                Diagnostic::blocking("ASTRA_RUNTIME_WORKER_POOL", error.to_string())
+            })?;
+        self.worker_pool = Some(Arc::new(pool));
+        Ok(())
+    }
+
+    fn refresh_access_plans(&mut self, actions: &ActionRegistry) {
+        if self.access_plans.len() == self.machines.len()
+            && self
+                .action_epoch
+                .as_ref()
+                .is_some_and(|epoch| Arc::ptr_eq(epoch, actions.epoch()))
+        {
+            return;
+        }
+        self.access_plans = self
+            .machines
+            .iter()
+            .map(|machine| machine_access_plan(machine, actions))
+            .collect();
+        self.action_epoch = Some(Arc::clone(actions.epoch()));
+    }
+
     pub fn add(&mut self, definition: StateMachineDefinition) -> Result<(), RuntimeError> {
         if self
             .machines
@@ -212,6 +271,8 @@ impl StateMachineStore {
         self.machines.push(StateMachineInstance::new(definition));
         self.machines
             .sort_by_key(|machine| machine.definition.id.to_string());
+        self.access_plans.clear();
+        self.action_epoch = None;
         Ok(())
     }
 
@@ -228,13 +289,22 @@ impl StateMachineStore {
         evidence_mode: bool,
     ) -> StateMachineTickOutput {
         let mut output = StateMachineTickOutput::default();
-        let waves = build_conflict_waves(&self.machines, actions);
+        self.refresh_access_plans(actions);
+        let waves = build_conflict_waves(&self.machines, &self.access_plans);
+        if worker_count > 1 && waves.iter().any(|wave| wave.len() > 1) {
+            if let Err(diagnostic) = self.ensure_worker_pool(worker_count) {
+                output.diagnostics.push(diagnostic);
+                return output;
+            }
+        }
         for wave in waves {
             let base_id_source = id_source.clone();
-            let mut candidates = if worker_count > 1 && wave.len() > 1 {
+            let candidates = if worker_count > 1 && wave.len() > 1 {
                 execute_parallel_wave(
                     &wave,
-                    worker_count,
+                    self.worker_pool
+                        .as_ref()
+                        .expect("parallel pool was prepared"),
                     &self.machines,
                     step,
                     events,
@@ -261,7 +331,6 @@ impl StateMachineStore {
                     })
                     .collect()
             };
-            candidates.sort_by_key(|candidate| candidate.machine_index);
             for candidate in candidates {
                 if let Some(diagnostic) = candidate.failed {
                     debug!(
@@ -277,7 +346,10 @@ impl StateMachineStore {
                 candidate.actor_delta.commit(actors);
                 candidate.blackboard_delta.commit(blackboard);
                 *id_source = candidate.id_source;
-                self.trace.extend(candidate.output.trace.iter().cloned());
+                crate::diagnostic_history::extend(
+                    &mut self.trace,
+                    candidate.output.trace.iter().cloned(),
+                );
                 output.append(candidate.output);
                 self.machines[candidate.machine_index] = candidate.machine;
                 debug!(
@@ -305,12 +377,19 @@ impl StateMachineStore {
             .collect()
     }
 
-    pub fn trace(&self) -> &[ActionTrace] {
+    pub fn trace(&self) -> &VecDeque<ActionTrace> {
         &self.trace
+    }
+
+    pub(crate) fn snapshot(&self) -> Self {
+        Self {
+            machines: self.machines.clone(),
+            ..Self::default()
+        }
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub(super) struct MachineAccessPlan {
     pub(super) serial: bool,
     pub(super) reads: BTreeSet<ActionResourceKey>,
@@ -330,20 +409,20 @@ pub(super) struct MachineCandidate {
 
 pub(super) fn build_conflict_waves(
     machines: &[StateMachineInstance],
-    actions: &ActionRegistry,
+    plans: &[MachineAccessPlan],
 ) -> Vec<Vec<usize>> {
     let mut waves = Vec::new();
     let mut current = Vec::new();
-    let mut current_plans = Vec::new();
+    let mut current_plans: Vec<&MachineAccessPlan> = Vec::new();
     for (machine_index, machine) in machines.iter().enumerate() {
         if machine.completed {
             continue;
         }
-        let plan = machine_access_plan(machine, actions);
+        let plan = &plans[machine_index];
         let conflicts = plan.serial
             || current_plans
                 .iter()
-                .any(|current_plan| access_conflicts(&plan, current_plan));
+                .any(|current_plan| access_conflicts(plan, current_plan));
         if conflicts && !current.is_empty() {
             waves.push(std::mem::take(&mut current));
             current_plans.clear();
@@ -381,8 +460,8 @@ pub(super) fn machine_access_plan(
             continue;
         };
         plan.serial |= descriptor.execution == ActionExecutionClass::Serial;
-        plan.reads.extend(descriptor.access.reads);
-        plan.writes.extend(descriptor.access.writes);
+        plan.reads.extend(descriptor.access.reads.iter().cloned());
+        plan.writes.extend(descriptor.access.writes.iter().cloned());
     }
     plan
 }

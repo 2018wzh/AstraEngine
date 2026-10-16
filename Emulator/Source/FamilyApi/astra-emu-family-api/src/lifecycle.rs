@@ -14,8 +14,9 @@ use super::{
         validate_game_path, validate_symbol, FamilyDescriptor, FamilyError, FamilyResult,
         FfiFamilyResult, ProbeReport, ProbeRequest,
     },
-    frame::{FrameConsumerRef, FrameInfo, FrameVisitor},
+    frame::{FrameIdentity, FrameInfo, FramePoll, FrameRequest},
     input::{validate_events, FamilyEvent, WindowState},
+    modal::ModalServiceBox,
     text::TextReplacementServiceBox,
 };
 
@@ -24,12 +25,14 @@ use super::{
 pub struct FamilyHostServices {
     pub audio_sink: ROption<AudioSinkBox>,
     pub text_replacement: ROption<TextReplacementServiceBox>,
+    pub modal: ROption<ModalServiceBox>,
 }
 
 #[repr(C)]
 #[derive(StableAbi)]
 pub struct OpenRequest {
     pub game_path: RString,
+    pub session_epoch: u64,
     pub configuration: RVec<crate::ConfigEntry>,
     pub initial_window: WindowState,
     pub host: FamilyHostServices,
@@ -38,6 +41,11 @@ pub struct OpenRequest {
 impl OpenRequest {
     pub fn validate(&self) -> FamilyResult<()> {
         validate_game_path(&self.game_path)?;
+        FrameIdentity {
+            session_epoch: self.session_epoch,
+            generation: 0,
+        }
+        .validate(false)?;
         self.initial_window.validate()
     }
 
@@ -265,8 +273,7 @@ pub trait FamilyModule {
     /// background threads alive. The library remains resident until process exit.
     fn open(&self, request: OpenRequest) -> FfiFamilyResult<OpenResponse>;
     fn advance(&self, request: AdvanceRequest) -> FfiFamilyResult<AdvanceResponse>;
-    fn frame(&self, request: SessionRequest, consumer: FrameConsumerRef<'_>)
-        -> FfiFamilyResult<()>;
+    fn frame(&self, request: FrameRequest<'_>) -> FfiFamilyResult<FramePoll>;
     /// Closes the named session and releases all family-owned resources.
     ///
     /// Before returning, including when returning `Err`, the implementation
@@ -312,7 +319,7 @@ pub trait FamilyProvider {
 pub trait FamilySession {
     fn advance(&mut self, elapsed_ns: u64, events: &[FamilyEvent])
         -> FamilyResult<AdvanceResponse>;
-    fn visit_frame(&self, visitor: &mut dyn FrameVisitor) -> FamilyResult<()>;
+    fn acquire_frame(&mut self, after: Option<FrameIdentity>) -> FamilyResult<FramePoll>;
     /// Stops the session and releases all family-owned resources.
     ///
     /// Before returning, including when returning `Err`, the implementation

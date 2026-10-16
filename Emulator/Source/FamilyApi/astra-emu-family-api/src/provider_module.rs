@@ -10,6 +10,7 @@ use std::{
 struct State<P> {
     provider: P,
     session: Option<(String, Box<dyn FamilySession>)>,
+    session_epoch: u64,
 }
 
 /// Optional ABI implementation for a Rust family provider. A single lock keeps
@@ -24,6 +25,7 @@ impl<P> ProviderModule<P> {
             state: Mutex::new(State {
                 provider,
                 session: None,
+                session_epoch: 0,
             }),
         }
     }
@@ -65,8 +67,10 @@ impl<P: FamilyProvider> FamilyModule for ProviderModule<P> {
                     "close the active family session before opening another",
                 ));
             }
+            let session_epoch = request.session_epoch;
             let opened = state.provider.open(request)?;
             state.session = Some((opened.response.session_id.to_string(), opened.session));
+            state.session_epoch = session_epoch;
             Ok(opened.response)
         })
     }
@@ -82,17 +86,15 @@ impl<P: FamilyProvider> FamilyModule for ProviderModule<P> {
         })
     }
 
-    fn frame(
-        &self,
-        request: SessionRequest,
-        mut consumer: FrameConsumerRef<'_>,
-    ) -> FfiFamilyResult<()> {
+    fn frame(&self, request: FrameRequest<'_>) -> FfiFamilyResult<FramePoll> {
         boundary(|| {
             request.validate()?;
             let mut state = self.state.lock().map_err(lock_error)?;
-            session(&mut state, request.session_id.as_str())?.visit_frame(&mut ConsumerVisitor {
-                consumer: &mut consumer,
-            })
+            let epoch = state.session_epoch;
+            let frame = session(&mut state, request.session_id.as_str())?
+                .acquire_frame(request.after.into_option())?;
+            frame.validate(epoch)?;
+            Ok(frame)
         })
     }
 
@@ -133,15 +135,6 @@ fn session<'a, P>(
             "ASTRA_EMU_FAMILY_SESSION",
             "the requested family session does not exist",
         )),
-    }
-}
-
-struct ConsumerVisitor<'a, 'b> {
-    consumer: &'a mut FrameConsumerRef<'b>,
-}
-impl FrameVisitor for ConsumerVisitor<'_, '_> {
-    fn accept(&mut self, frame: FrameView<'_>) -> FamilyResult<()> {
-        self.consumer.accept(frame).into_result()
     }
 }
 

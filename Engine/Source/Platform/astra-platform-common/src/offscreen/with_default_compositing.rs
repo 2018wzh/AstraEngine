@@ -146,8 +146,7 @@ impl WgpuOffscreenRenderer {
             identity,
             device_lost,
             pending_output: None,
-            filter_pipelines: BTreeMap::new(),
-            filter_outputs: Vec::new(),
+            filters: SceneFilters::default(),
             gpu_timer,
             readback_ring: ReadbackRing::default(),
             last_readback_bytes: 0,
@@ -178,9 +177,7 @@ impl WgpuOffscreenRenderer {
     }
 
     pub fn performance_counters(&self) -> WgpuFramePerformanceCounters {
-        let filter_bytes = self.filter_outputs.iter().fold(0u64, |total, output| {
-            total + u64::from(output.width) * u64::from(output.height) * 4
-        });
+        let filter_bytes = self.filters.resource_bytes();
         let readback_bytes = u64::from(self.readback_ring.padded_row_bytes)
             .saturating_mul(u64::from(self.readback_ring.height))
             .saturating_mul(self.readback_ring.slots.len() as u64);
@@ -197,13 +194,13 @@ impl WgpuOffscreenRenderer {
             atlas_bytes: self.scene_renderer.atlas_bytes(),
             upload_bytes: self.scene_renderer.last_upload_bytes(),
             readback_bytes: self.last_readback_bytes,
-            draw_calls: self.scene_renderer.last_draw_calls() + self.filter_outputs.len() as u64,
+            draw_calls: self.scene_renderer.last_draw_calls() + self.filters.draw_calls(),
             queue_submissions: self.last_queue_submissions
                 + self
                     .gpu_timer
                     .as_ref()
                     .map_or(0, |timer| timer.resolve_submissions_since_frame),
-            pipeline_count: 1 + self.filter_pipelines.len() as u64,
+            pipeline_count: 1 + self.filters.pipeline_count(),
             engine_allocation_bytes: self.scene_renderer.last_engine_allocation_bytes(),
             engine_allocation_count: self.scene_renderer.last_engine_allocation_count(),
             command_allocation_bytes: self.scene_renderer.last_command_allocation_bytes(),

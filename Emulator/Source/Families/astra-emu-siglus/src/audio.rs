@@ -1,12 +1,11 @@
 //! PCM bridge from the kira mixer thread to the host audio sink.
 //!
-//! The vendored engine mixes through `TapBackend` (see
-//! `siglus_scene_vm::audio::kira_hub::hosted_tap`); its worker converts the
-//! mixer output to stereo i16 here. A bounded bridge queue separates native
-//! mixer replacement from session cancellation of the blocking Host sink.
+//! The vendored engine mixes through `TapBackend`. Preserve its F32 samples;
+//! the bounded bridge separates native mixer replacement from cancellation
+//! of the whole session's blocking Host sink. No upstream audio change needed.
 
 use std::sync::{
-    atomic::{AtomicBool, AtomicU64, Ordering},
+    atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
 use std::thread::{self, JoinHandle};
@@ -16,19 +15,18 @@ use astra_emu_family_api::{
     AudioSinkBox, AudioWriteStatus, FamilyError, FamilyResult, PcmChunk, PcmFormat, PcmFormatSpec,
 };
 use crossbeam_channel::{bounded, Receiver, Sender};
+use parking_lot::Mutex as ParkingMutex;
 
 pub(crate) const OUTPUT_FORMAT: PcmFormatSpec = PcmFormatSpec {
     sample_rate: 48_000,
     channels: 2,
-    format: PcmFormat::I16,
+    format: PcmFormat::F32,
 };
 
 pub(crate) struct PcmBridge {
     sink: Arc<AudioSinkBox>,
     cancelled: Arc<AtomicBool>,
-    pushed_frames: Arc<AtomicU64>,
-    dropped_frames: Arc<AtomicU64>,
-    error: Arc<Mutex<Option<FamilyError>>>,
+    error: Arc<ParkingMutex<Option<FamilyError>>>,
     queue: Sender<QueuedPcm>,
     stopping: Receiver<()>,
     stop: Mutex<Option<Sender<()>>>,
@@ -36,7 +34,7 @@ pub(crate) struct PcmBridge {
 }
 
 struct QueuedPcm {
-    samples: RVec<i16>,
+    samples: RVec<f32>,
     mixer_stopping: Receiver<()>,
 }
 
@@ -48,9 +46,7 @@ impl PcmBridge {
         let bridge = Self {
             sink: Arc::new(sink),
             cancelled: Arc::new(AtomicBool::new(false)),
-            pushed_frames: Arc::new(AtomicU64::new(0)),
-            dropped_frames: Arc::new(AtomicU64::new(0)),
-            error: Arc::new(Mutex::new(None)),
+            error: Arc::new(ParkingMutex::new(None)),
             queue,
             stopping,
             stop: Mutex::new(Some(stop)),
@@ -59,8 +55,6 @@ impl PcmBridge {
         let tap = Tap {
             sink: Arc::clone(&bridge.sink),
             cancelled: Arc::clone(&bridge.cancelled),
-            pushed_frames: Arc::clone(&bridge.pushed_frames),
-            dropped_frames: Arc::clone(&bridge.dropped_frames),
             error: Arc::clone(&bridge.error),
         };
         let stopping = bridge.stopping.clone();
@@ -83,47 +77,31 @@ impl PcmBridge {
     pub(crate) fn tap_factory(&self) -> siglus_scene_vm::audio::kira_hub::hosted_tap::TapFactory {
         let queue = self.queue.clone();
         let stopping = self.stopping.clone();
-        let dropped_frames = Arc::clone(&self.dropped_frames);
         Arc::new(move || {
             let (cancel, cancelled) = bounded(0);
-            let cancel = Mutex::new(Some(cancel));
+            let cancel = ParkingMutex::new(Some(cancel));
             let queue = queue.clone();
             let stopping = stopping.clone();
-            let dropped_frames = Arc::clone(&dropped_frames);
             let callback = Arc::new(move |samples: &[f32]| {
                 let chunk = QueuedPcm {
-                    samples: samples
-                        .iter()
-                        .map(|sample| (sample.clamp(-1.0, 1.0) * 32_767.0) as i16)
-                        .collect(),
+                    samples: samples.to_vec().into(),
                     mixer_stopping: cancelled.clone(),
                 };
-                let accepted = crossbeam_channel::select_biased! {
+                let _ = crossbeam_channel::select_biased! {
                     recv(cancelled) -> _ => false,
                     recv(stopping) -> _ => false,
                     send(queue, chunk) -> result => result.is_ok(),
                 };
-                if !accepted {
-                    dropped_frames.fetch_add(samples.len() as u64 / 2, Ordering::Relaxed);
-                }
             });
             let cancel_callback = Arc::new(move || {
-                cancel
-                    .lock()
-                    .expect("mixer cancellation lock is poisoned")
-                    .take();
+                cancel.lock().take();
             });
             (callback, cancel_callback)
         })
     }
 
-    #[allow(dead_code)] // exposed for session-level diagnostics in later revisions
-    pub(crate) fn pushed_frames(&self) -> u64 {
-        self.pushed_frames.load(Ordering::Relaxed)
-    }
-
     pub(crate) fn check_error(&self) -> FamilyResult<()> {
-        if let Some(error) = self.error.lock().map_err(|_| lock_error())?.as_ref() {
+        if let Some(error) = self.error.lock().as_ref() {
             return Err(error.clone());
         }
         if self.cancelled.load(Ordering::Acquire) {
@@ -137,17 +115,45 @@ impl PcmBridge {
 
     pub(crate) fn close(&self) -> FamilyResult<()> {
         self.cancelled.store(true, Ordering::Release);
-        self.stop.lock().map_err(|_| lock_error())?.take();
-        self.sink.cancel().into_result()?;
-        if let Some(worker) = self.worker.lock().map_err(|_| lock_error())?.take() {
-            worker.join().map_err(|_| {
-                FamilyError::invalid("ASTRA_EMU_SIGLUS_AUDIO_WORKER", "PCM worker panicked")
-            })?;
+        let stop_error = match self.stop.lock() {
+            Ok(mut stop) => {
+                stop.take();
+                None
+            }
+            Err(poison) => {
+                poison.into_inner().take();
+                Some(lock_error())
+            }
+        };
+        let cancel_error = self.sink.cancel().into_result().err();
+        let (mut worker, worker_lock_error) = match self.worker.lock() {
+            Ok(worker) => (worker, None),
+            Err(poison) => (poison.into_inner(), Some(lock_error())),
+        };
+        let worker_error = worker
+            .take()
+            .and_then(|worker| worker.join().err())
+            .map(|_| FamilyError::invalid("ASTRA_EMU_SIGLUS_AUDIO_WORKER", "PCM worker panicked"));
+        let mut failure = None;
+        for error in [
+            stop_error,
+            cancel_error,
+            worker_lock_error,
+            worker_error,
+            self.error.lock().clone(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            failure = Some(match failure {
+                None => error,
+                Some(previous) => FamilyError::invalid(
+                    "ASTRA_EMU_SIGLUS_AUDIO_CLOSE",
+                    format!("{previous}; {error}"),
+                ),
+            });
         }
-        match self.error.lock().map_err(|_| lock_error())?.as_ref() {
-            Some(error) => Err(error.clone()),
-            None => Ok(()),
-        }
+        failure.map_or(Ok(()), Err)
     }
 }
 
@@ -169,32 +175,24 @@ impl Drop for PcmBridge {
 struct Tap {
     sink: Arc<AudioSinkBox>,
     cancelled: Arc<AtomicBool>,
-    pushed_frames: Arc<AtomicU64>,
-    dropped_frames: Arc<AtomicU64>,
-    error: Arc<Mutex<Option<FamilyError>>>,
+    error: Arc<ParkingMutex<Option<FamilyError>>>,
 }
 
 impl Tap {
-    fn push(&self, chunk: RVec<i16>) {
-        let frames = chunk.len() as u64 / 2;
+    fn push(&self, chunk: RVec<f32>) {
         if self.cancelled.load(Ordering::Acquire) {
-            self.dropped_frames.fetch_add(frames, Ordering::Relaxed);
             return;
         }
-        match self.sink.write(PcmChunk::I16(chunk)).into_result() {
-            Ok(AudioWriteStatus::Accepted) => {
-                self.pushed_frames.fetch_add(frames, Ordering::Relaxed);
-            }
+        match self.sink.write(PcmChunk::F32(chunk)).into_result() {
+            Ok(AudioWriteStatus::Accepted) => {}
             Ok(AudioWriteStatus::Cancelled) | Ok(AudioWriteStatus::Closed) => {
                 self.cancelled.store(true, Ordering::Release);
-                self.dropped_frames.fetch_add(frames, Ordering::Relaxed);
             }
             Err(error) => {
-                let mut slot = self.error.lock().unwrap();
+                let mut slot = self.error.lock();
                 if slot.is_none() {
                     *slot = Some(error);
                 }
-                self.dropped_frames.fetch_add(frames, Ordering::Relaxed);
             }
         }
     }
@@ -211,9 +209,6 @@ fn forward_pcm(tap: Tap, receiver: Receiver<QueuedPcm>, stopping: Receiver<()>) 
             Err(crossbeam_channel::TryRecvError::Empty)
         ) {
             tap.push(chunk.samples);
-        } else {
-            tap.dropped_frames
-                .fetch_add(chunk.samples.len() as u64 / 2, Ordering::Relaxed);
         }
     }
 }

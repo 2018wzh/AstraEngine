@@ -13,24 +13,18 @@
 ## rfvp derivative used by astra-emu-fvp
 
 - Upstream: <https://github.com/xmoezzz/rfvp>
-- Upstream version: `0.6.0`, revision `304e773387a9920c9db091ec1fd937c717aea949`
+- Upstream version: `0.6.0`, revision `af557db750c7833274f22a6d82b0dc33cdea2f85`
 - Hosted adaptation fork: <https://github.com/2018wzh/rfvp>
-- Hosted adaptation branch: `codex/local-product-adaptation`
-- Hosted adaptation revision: `73d3b4413c95a3923cce695d98c3d9bf5b08ccf0`
-- 当前 submodule 固定 revision：`b2f385da486342de6e23202cccad8141ac6423b6`，包含尚未发布的本地输入生命周期修改。
+- Hosted adaptation branch: `codex/astra-upstream-head-20261016`
+- 当前 submodule 固定 revision：`d1ff965d79ba2cdc956aad73ae100cc44bc7ce90`，直接基于上述上游 HEAD 的一个适配提交；尚未推送。
 - License: Mozilla Public License 2.0.
-- Derivative source: <https://github.com/2018wzh/rfvp/tree/codex/local-product-adaptation>
+- Derivative source: <https://github.com/2018wzh/rfvp>
 - Astra wrapper source: `Emulator/Source/Families/astra-emu-fvp/`
 - 独立 Host 重构在 Family 内保留 RFVP 游戏行为，调整最终帧、混合 PCM、输入和生命周期边界。具体修改随 Family 源码记录；旧 Host VFS、effect journal 和统一 snapshot 接口不再作为产品接口。
 
 发布时提供与二进制对应的 MPL-2.0 covered source、修改说明和完整许可证，可随包分发源码或提供有效的 source offer。
 
-当前完整 fork 以 Git submodule 固定在 `Emulator/ThirdParty/rfvp/`，以 RFVP 0.6.0 上游 revision
-`304e773387a9920c9db091ec1fd937c717aea949` 为基线，hosted 适配来自已发布的
-[`2018wzh/rfvp` fork](https://github.com/2018wzh/rfvp/tree/codex/local-product-adaptation)
-分支 `codex/local-product-adaptation`、revision
-`73d3b4413c95a3923cce695d98c3d9bf5b08ccf0`，当前另含上述本地修改。公开适配基线不能代替当前二进制对应的 covered source；发布时必须另行提供完整源码。文件级变化和覆盖范围见该 Family
-的 `MODIFICATIONS.md` 与 `THIRD_PARTY_NOTICES.md`。RFVP core 仅作为 private `rlib` 构建，动态边界由 `astra-emu-fvp` 持有。FVP 的四个原始系统字体槽由宿主通过 `fontdb` 从已安装字体按精确 family name 绑定，仓库不再携带替代字体文件。
+完整 fork 以 Git submodule 固定在 `Emulator/ThirdParty/rfvp/`；旧已发布基线不能代替当前二进制实际使用的 covered source。本地适配尚未发布，分发前必须提供匹配源码和修改记录。文件级变化与覆盖范围见该 Family 的 `MODIFICATIONS.md` 与 `THIRD_PARTY_NOTICES.md`。Family 以 rlib 链接核心，产品动态 ABI 边界由 `astra-emu-fvp` 持有；核心原有构建 targets 保留。原生四个系统字体槽由宿主通过 `fontdb` 按实际 family name 与 TTC index 绑定，不分发 Microsoft 字体，optional slot 沿用原生 fallback。
 
 ## KrKr native development bundle
 
@@ -47,7 +41,7 @@ Musica 编译期嵌入 Noto Sans JP 与 Noto Sans SC，使用 SIL Open Font Lice
 
 ## WMV decoder
 
-FVP 使用仓库内的 `Emulator/Source/Families/na_wmv_player` 处理 ASF、WMV 和 WMA。该 crate 的跟踪历史缺少明确的来源和许可证说明，源码注释也不足以确定其许可。当前将来源和许可证记为未知，不推断为 LGPL、GPL 或 MIT；已有信息见该 crate 的 `THIRD_PARTY_NOTICES.md`。
+FVP 使用完整 RFVP fork 中的原生 `crates/na_wmv_player` 及原 Movie 路径处理 ASF/WMV/WMA，不再直接依赖主仓 `Emulator/Source/Families/na_wmv_player`。原生 decoder 清单没有独立 license 字段，须保留完整 fork 许可与来源，并在分发前核实实际覆盖范围，不能从 FFmpeg 算法名称推断额外授权。主仓旧独立 decoder/工具的来源和许可不明问题仍保留在其 `THIRD_PARTY_NOTICES.md`，不能混称为当前 FVP 的直接依赖。打包复制当前 Family 的说明与完整 RFVP 许可，不再附加旧 decoder 的错误归因。
 
 ## Anime4K
 

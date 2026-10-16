@@ -147,6 +147,7 @@ impl FamilyProvider for CmvsProvider {
             archive,
             entry,
             request.initial_window,
+            request.session_epoch,
             lease,
             self.gpu_instance
                 .as_ref()
@@ -199,6 +200,7 @@ mod tests {
         let mut p = CmvsProvider::default();
         for _ in 0..2 {
             let result = p.open(OpenRequest {
+                session_epoch: astra_emu_family_api::allocate_session_epoch().unwrap(),
                 game_path: root.path().to_string_lossy().to_string().into(),
                 configuration: Vec::new().into(),
                 initial_window: WindowState {
@@ -210,6 +212,7 @@ mod tests {
                 host: FamilyHostServices {
                     audio_sink: ROption::RNone,
                     text_replacement: ROption::RNone,
+                    modal: ROption::RNone,
                 },
             });
             assert!(result.is_err());

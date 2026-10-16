@@ -131,6 +131,7 @@ fn text_capability_can_be_disabled_but_audio_still_requires_sink() {
     };
     let request = crate::OpenRequest {
         game_path: "game".into(),
+        session_epoch: crate::allocate_session_epoch().unwrap(),
         configuration: Default::default(),
         initial_window: crate::WindowState {
             width: 800,
@@ -141,6 +142,7 @@ fn text_capability_can_be_disabled_but_audio_still_requires_sink() {
         host: crate::FamilyHostServices {
             audio_sink: RNone,
             text_replacement: RNone,
+            modal: RNone,
         },
     };
     request.validate_for_descriptor(&descriptor).unwrap();

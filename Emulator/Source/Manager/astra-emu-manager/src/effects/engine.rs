@@ -75,6 +75,8 @@ pub enum FilterError {
     TextureUsage,
     #[error("ASTRA_EMU_FILTER_TEXTURE_DIMENSIONS")]
     TextureDimensions,
+    #[error("ASTRA_EMU_FILTER_OUTPUT_MISSING")]
+    OutputMissing,
     #[error("ASTRA_EMU_FILTER_WGPU_VALIDATION: {0}")]
     GpuValidation(String),
     #[error("ASTRA_EMU_FILTER_COMPILE: {0}")]
@@ -179,49 +181,27 @@ impl FilterEngine {
         self.active = Some(new_chain);
         Ok(())
     }
+    /// Return the texture to present. None aliases input without encoding,
+    /// submitting or requiring an unused destination texture.
     pub fn apply(
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         input: &wgpu::Texture,
-        output: &wgpu::Texture,
+        output: Option<&wgpu::Texture>,
         config: &FilterConfiguration,
-    ) -> Result<(), FilterError> {
+    ) -> Result<wgpu::Texture, FilterError> {
         config.validate()?;
         if matches!(config.preset, FilterPreset::None) {
-            if input.format() != wgpu::TextureFormat::Rgba8Unorm
-                || output.format() != wgpu::TextureFormat::Rgba8Unorm
-            {
-                return Err(FilterError::TextureFormat);
-            }
-            if input.width() != output.width() || input.height() != output.height() {
-                return Err(FilterError::TextureDimensions);
-            }
-            if !input.usage().contains(wgpu::TextureUsages::COPY_SRC)
-                || !output.usage().contains(wgpu::TextureUsages::COPY_DST)
-            {
-                return Err(FilterError::TextureUsage);
-            }
-            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("astra.emu.effect.none-encoder"),
-            });
-            encoder.copy_texture_to_texture(
-                input.as_image_copy(),
-                output.as_image_copy(),
-                wgpu::Extent3d {
-                    width: input.width(),
-                    height: input.height(),
-                    depth_or_array_layers: 1,
-                },
-            );
-            queue.submit([encoder.finish()]);
-            return Ok(());
+            return Ok(input.clone());
         }
+        let output = output.ok_or(FilterError::OutputMissing)?;
         let chain = self
             .active
             .as_ref()
             .ok_or(FilterError::Compile("filter is not loaded".into()))?;
-        chain.apply(device, queue, input, output, config)
+        chain.apply(device, queue, input, output, config)?;
+        Ok(output.clone())
     }
 }
 

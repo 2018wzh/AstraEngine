@@ -22,7 +22,9 @@ fn native_gpu_character_mirror_transition_wait_and_save_restore() {
     let mut capture = Capture(Vec::new());
     opened.session.advance(16_666_667, &[]).unwrap();
     opened.session.advance(16_666_667, &[]).unwrap();
-    opened.session.visit_frame(&mut capture).unwrap();
+    capture
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     let index = (704 * 1280 + 8) * 4;
     assert_eq!(&capture.0[index..index + 4], &[0, 255, 0, 255]);
     opened.session.advance(16_666_667, &[]).unwrap();
@@ -30,22 +32,32 @@ fn native_gpu_character_mirror_transition_wait_and_save_restore() {
         opened.session.advance(40_000_000, &[]).unwrap().status,
         FamilyStatus::Waiting
     );
-    opened.session.visit_frame(&mut capture).unwrap();
+    capture
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     let saved = capture.0.clone();
     assert!(saved[index + 1] > 0 && saved[index + 1] < 255);
     opened.session.advance(0, &[key(KeyCode::F5)]).unwrap();
     opened.session.advance(40_000_000, &[]).unwrap();
-    opened.session.visit_frame(&mut capture).unwrap();
+    capture
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     let later = capture.0.clone();
     assert!(later[index + 1] < saved[index + 1]);
     opened.session.advance(0, &[key(KeyCode::F9)]).unwrap();
-    opened.session.visit_frame(&mut capture).unwrap();
+    capture
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     assert_eq!(capture.0, saved);
     opened.session.advance(40_000_000, &[]).unwrap();
-    opened.session.visit_frame(&mut capture).unwrap();
+    capture
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     assert_eq!(capture.0, later);
     opened.session.advance(40_000_000, &[]).unwrap();
-    opened.session.visit_frame(&mut capture).unwrap();
+    capture
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     assert_eq!(&capture.0[index..index + 4], &[0, 0, 0, 255]);
     opened.session.close().unwrap();
 }

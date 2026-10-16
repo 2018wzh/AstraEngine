@@ -25,20 +25,28 @@ fn native_gpu_message_inline_load_restores_mid_crossfade() {
     }
     opened.session.advance(30_000_000, &[]).unwrap();
     opened.session.advance(40_000_000, &[]).unwrap();
-    opened.session.visit_frame(&mut capture).unwrap();
+    capture
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     let saved = capture.0.clone();
     let index = (704 * 1280 + 8) * 4;
     assert!(saved[index] > 0 && saved[index + 1] > 0);
     opened.session.advance(0, &[key(KeyCode::F5)]).unwrap();
     opened.session.advance(40_000_000, &[]).unwrap();
-    opened.session.visit_frame(&mut capture).unwrap();
+    capture
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     let later = capture.0.clone();
     assert_ne!(later, saved);
     opened.session.advance(0, &[key(KeyCode::F9)]).unwrap();
-    opened.session.visit_frame(&mut capture).unwrap();
+    capture
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     assert_eq!(capture.0, saved);
     opened.session.advance(40_000_000, &[]).unwrap();
-    opened.session.visit_frame(&mut capture).unwrap();
+    capture
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     assert_eq!(capture.0, later);
     assert_eq!(
         opened

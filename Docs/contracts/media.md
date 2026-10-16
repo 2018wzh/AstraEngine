@@ -57,6 +57,8 @@ nodes:
 
 Node 必须声明 input/output target、精确参数集合、GPU/CPU capability、determinism、fallback 和 release gate rule。当前 deterministic CPU executor 只接受已实现的 bloom、fade 和 color matrix，要求显式 `allow_cpu_fallback`，并阻断 unknown node、no-op fallback、跨 target 伪执行、参数缺失/多余/越界和损坏 frame。跨 target graph 与 GPU node provider 未闭合前保持未完成。
 
+窗口与离屏的 SceneFrame 尾部滤镜由 `astra-platform-common::SceneFilters` 统一执行，支持 bloom、fade、color matrix 的现有 GPU 表达式；FilterGraph 后不能继续绘制。pipeline 仅按 kind 与目标像素格式缓存，数值参数通过每个 pass 独立的 16-byte uniform 更新。输入纹理身份、尺寸或格式变化时重建对应 binding/output；无滤镜直接保留 scene 纹理，设备恢复重新执行保留帧的滤镜。该路径只处理最终合成，不代表已实现独立图层 target 路由。
+
 AstraEMU 不使用本页的 per-layer `PresentationCommand` 或 VN filter provider 链；成熟核心优先复用自己的 GPU 效果，Manager 只处理最终输出。不能因列出 FilterGraph 目标而声称已新增 EMU 图层接口。
 
 ## Kira AudioService

@@ -1,23 +1,26 @@
-use std::{path::Path, sync::Arc};
+use std::path::Path;
 
 use astra_emu_family_api::{
     AdvanceResponse, FamilyCapability, FamilyDescriptor, FamilyError, FamilyEvent, FamilyOpen,
-    FamilyProvider, FamilyResult, FamilySession, FamilyStatus, FrameAlpha, FrameFormat, FrameInfo,
-    FrameView, FrameVisitor, OpenRequest, OpenResponse, ProbeReport, ProbeRequest,
+    FamilyProvider, FamilyResult, FamilySession, FamilyStatus, FrameAlpha, FrameFormat,
+    FrameIdentity, FrameInfo, FramePoll, FramePublisher, FrameRowOrder, OpenRequest, OpenResponse,
+    ProbeReport, ProbeRequest,
 };
 use rfvp::{
-    host_api::{AudioStreamId, RfvpFileSystem, RfvpHost},
-    hosted::{HostedBootConfig, HostedConfig, HostedLimits, HostedSession, HostedStepInput},
+    host_api::{RfvpFileSystem, RfvpHost},
     script::parser::Nls,
 };
 
 use crate::{
     audio::AudioBridge,
+    embedding::{
+        HostedAudioOperation, HostedBootConfig, HostedConfig, HostedLimits, HostedSession,
+        HostedStepInput,
+    },
     error, events,
     filesystem::NativeFileSystem,
     font_bindings,
     renderer::{NullAudio, NullRenderer, SessionClock},
-    video::VideoPlayback,
 };
 
 pub fn fvp_descriptor() -> FamilyDescriptor {
@@ -137,6 +140,7 @@ impl FvpProvider {
             }
         };
         let mut fs = NativeFileSystem::new(&request.game_path).map_err(error::rfvp)?;
+        rfvp::utils::file::set_base_path(&request.game_path);
         let font_bindings = font_bindings::load_system_font_bindings()?;
         let hcb_paths = hcb_paths(&mut fs).map_err(error::rfvp)?;
         if hcb_paths.len() > 1 {
@@ -183,6 +187,7 @@ impl FvpProvider {
                         max_hcb_bytes: 64 * 1024 * 1024,
                         max_manifest_entries: 4096,
                         nls,
+                        ..HostedBootConfig::default()
                     },
                 )
                 .map_err(|error| error::rfvp_operation(error, hosted.core().last_operation()))?;
@@ -197,15 +202,12 @@ impl FvpProvider {
                 error::invalid("ASTRA_EMU_FVP_FRAME_SIZE", "frame stride overflows")
             })?,
             format: FrameFormat::Rgba8Srgb {
-                alpha: FrameAlpha::Opaque,
+                alpha: FrameAlpha::Ignored,
             },
+            rows: FrameRowOrder::TopToBottom,
         };
-        let frame_len = frame_info.required_bytes().ok_or_else(|| {
-            error::invalid("ASTRA_EMU_FVP_FRAME_SIZE", "frame dimensions overflow")
-        })?;
-        let frame = vec![0_u8; frame_len];
+        let frame = FramePublisher::new(request.session_epoch)?;
         let gpu = crate::gpu::GpuRenderer::new(frame_info.width, frame_info.height)?;
-        hosted.use_direct_surface();
         let audio = AudioBridge::new(sink)?;
         let id = self.next_session_id;
         self.next_session_id = self
@@ -223,12 +225,11 @@ impl FvpProvider {
                 frame_info.logical_width,
                 frame_info.logical_height,
             ),
-            video: None,
-            video_audio_id: None,
             frame,
             frame_info,
             gpu,
             fatal: None,
+            game_dirty: true,
         };
         session.render_frame()?;
         tracing::info!(
@@ -292,7 +293,16 @@ impl RfvpHost for SessionHost<'_> {
     fn clock(&mut self) -> &mut Self::Clock {
         self.clock
     }
-    fn log(&mut self, _level: rfvp::host_api::RfvpLogLevel, _message: &str) {}
+    fn log(&mut self, level: rfvp::host_api::RfvpLogLevel, message: &str) {
+        use rfvp::host_api::RfvpLogLevel;
+        match level {
+            RfvpLogLevel::Error => tracing::error!(event = "astra.emu.fvp.core", message),
+            RfvpLogLevel::Warn => tracing::warn!(event = "astra.emu.fvp.core", message),
+            RfvpLogLevel::Info => tracing::info!(event = "astra.emu.fvp.core", message),
+            RfvpLogLevel::Debug => tracing::debug!(event = "astra.emu.fvp.core", message),
+            RfvpLogLevel::Trace => tracing::trace!(event = "astra.emu.fvp.core", message),
+        }
+    }
 }
 
 pub(crate) struct FvpSession {
@@ -301,12 +311,11 @@ pub(crate) struct FvpSession {
     audio: AudioBridge,
     clock: SessionClock,
     input_state: events::InputState,
-    video: Option<VideoPlayback>,
-    video_audio_id: Option<AudioStreamId>,
-    frame: Vec<u8>,
+    frame: FramePublisher,
     frame_info: FrameInfo,
     gpu: crate::gpu::GpuRenderer,
     fatal: Option<astra_emu_family_api::FamilyError>,
+    game_dirty: bool,
 }
 
 impl FvpSession {
@@ -318,134 +327,34 @@ impl FvpSession {
         self.fatal.clone().map_or(Ok(()), Err)
     }
     fn render_frame(&mut self) -> FamilyResult<()> {
-        let rendered = self.gpu.capture(self.hosted.core())?;
-        if rendered.len()
-            != self.frame_info.required_bytes().ok_or_else(|| {
-                error::invalid("ASTRA_EMU_FVP_FRAME_SIZE", "frame dimensions overflow")
-            })?
-        {
+        if matches!(self.frame.poll(None), FramePoll::Pending(_)) {
+            let rendered = self.gpu.capture(self.hosted.core_mut())?;
+            self.publish_game_frame(rendered)?;
+            self.game_dirty = false;
+            return Ok(());
+        }
+        if self.game_dirty && !self.gpu.native().frame_pending() {
+            self.gpu.submit(self.hosted.core_mut())?;
+            self.game_dirty = false;
+        }
+        Ok(())
+    }
+
+    fn publish_game_frame(&mut self, rendered: Vec<u8>) -> FamilyResult<()> {
+        if self.frame_info.required_bytes() != Some(rendered.len()) {
             return self.fail(error::invalid(
                 "ASTRA_EMU_FVP_FRAME_BYTES",
                 "RFVP returned an invalid frame allocation",
             ));
         }
-        self.frame = rendered;
-        if let Some(video) = self.video.as_ref() {
-            if video.frame().len() != self.frame.len() {
-                return self.fail(error::invalid(
-                    "ASTRA_EMU_FVP_VIDEO_FRAME_BYTES",
-                    "decoded WMV frame does not match the game viewport",
-                ));
-            }
-            self.frame.copy_from_slice(video.frame());
-        }
+        self.frame
+            .publish(rendered, Vec::as_slice, self.frame_info)?;
         Ok(())
     }
 
-    fn start_video(&mut self, command: rfvp::hosted::HostedVideoOperation) -> FamilyResult<()> {
-        if self.video.is_some() {
-            return Err(error::invalid(
-                "ASTRA_EMU_FVP_VIDEO_CONCURRENT",
-                "RFVP requested a second video while one is active",
-            ));
-        }
-        let rfvp::hosted::HostedVideoOperation::Play {
-            resource_uri,
-            byte_len,
-            modal_with_audio,
-            stage_width,
-            stage_height,
-        } = command
-        else {
-            return Err(error::invalid(
-                "ASTRA_EMU_FVP_VIDEO_OPERATION",
-                "RFVP sent a non-play operation to the movie starter",
-            ));
-        };
-        if stage_width != self.frame_info.width || stage_height != self.frame_info.height {
-            return Err(error::invalid(
-                "ASTRA_EMU_FVP_VIDEO_VIEWPORT",
-                "WMV stage dimensions do not match the configured game viewport",
-            ));
-        }
-        let resource_name = resource_uri
-            .strip_prefix("rfvp://")
-            .unwrap_or(&resource_uri);
-        let byte_len = usize::try_from(byte_len).map_err(|_| {
-            error::invalid(
-                "ASTRA_EMU_FVP_VIDEO_BYTES",
-                "WMV resource length overflows usize",
-            )
-        })?;
-        let mut host = SessionHost {
-            fs: &mut self.fs,
-            renderer: NullRenderer,
-            audio: NullAudio,
-            clock: &mut self.clock,
-        };
-        let bytes = self
-            .hosted
-            .read_resource(&mut host, resource_name, byte_len)
-            .map_err(|error| error::rfvp_operation(error, "video resource read"))?;
-        if bytes.len() != byte_len {
-            return Err(error::invalid(
-                "ASTRA_EMU_FVP_VIDEO_BYTES",
-                "WMV resource length changed during playback setup",
-            ));
-        }
-
-        let bytes: Arc<[u8]> = bytes.into();
-        let playback = VideoPlayback::open(
-            Arc::clone(&bytes),
-            stage_width,
-            stage_height,
-            modal_with_audio,
-        )?;
-
-        let video_audio_id = if modal_with_audio {
-            let id = self.audio.allocate_video_stream_id()?;
-            match self.audio.start_video_audio(id, Arc::clone(&bytes)) {
-                Ok(true) => Some(id),
-                Ok(false) => {
-                    self.audio.release_stream_id(id);
-                    None
-                }
-                Err(error) => {
-                    self.audio.release_stream_id(id);
-                    return Err(error);
-                }
-            }
-        } else {
-            None
-        };
-        self.video_audio_id = video_audio_id;
-        self.video = Some(playback);
-        Ok(())
-    }
-
-    fn finish_video(&mut self, complete_core: bool) -> FamilyResult<()> {
-        let audio_id = self.video_audio_id.take();
-        let audio_result = audio_id.map(|id| {
-            let stop = self.audio.stop_video_audio(id);
-            self.audio.release_stream_id(id);
-            stop
-        });
-        let core_result = if complete_core {
-            self.hosted
-                .complete_video()
-                .map_err(|cause| error::rfvp_operation(cause, "video completion"))
-        } else {
-            Ok(())
-        };
-        self.video = None;
-        if let Some(Err(error)) = audio_result {
-            return Err(error);
-        }
-        core_result
-    }
-    fn send_audio(&mut self, operation: rfvp::hosted::HostedAudioOperation) -> FamilyResult<()> {
+    fn send_audio(&mut self, operation: HostedAudioOperation) -> FamilyResult<()> {
         let operation = match operation {
-            rfvp::hosted::HostedAudioOperation::LoadResource {
+            HostedAudioOperation::LoadResource {
                 id,
                 kind,
                 resource_uri,
@@ -469,7 +378,7 @@ impl FvpSession {
                     .hosted
                     .read_resource(&mut host, resource_name, isize::MAX as usize)
                     .map_err(|error| error::rfvp_operation(error, "audio resource read"))?;
-                rfvp::hosted::HostedAudioOperation::LoadEncoded { id, kind, bytes }
+                HostedAudioOperation::LoadEncoded { id, kind, bytes }
             }
             other => other,
         };
@@ -494,6 +403,7 @@ impl FamilySession for FvpSession {
         let input = events::convert(events, &mut self.input_state)?;
         self.clock.advance_ns(elapsed_ns);
         self.sync_audio_playback_state()?;
+        let was_pending = self.gpu.native().frame_pending();
         let delta = {
             let mut host = SessionHost {
                 fs: &mut self.fs,
@@ -502,103 +412,62 @@ impl FamilySession for FvpSession {
                 clock: &mut self.clock,
             };
             self.hosted
-                .step(&mut host, HostedStepInput { events: input })
+                .step_with_gpu(
+                    &mut host,
+                    HostedStepInput { events: input },
+                    self.gpu.native(),
+                )
                 .map_err(|error| {
                     error::rfvp_operation(error, self.hosted.core().last_operation())
                 })?
         };
+        let reset_clock = self.hosted.take_timeline_reset();
+        if reset_clock {
+            self.gpu.native().cancel_pending();
+            self.game_dirty = true;
+        }
+        self.game_dirty |=
+            delta.visual_changed || (was_pending && !self.gpu.native().frame_pending());
         for operation in delta.audio {
             if let Err(value) = self.send_audio(operation) {
                 return self.fail(value);
             }
         }
-        let mut started_video = false;
-        for operation in delta.video {
-            match operation {
-                rfvp::hosted::HostedVideoOperation::Play { .. } => {
-                    if let Err(value) = self.start_video(operation) {
-                        return self.fail(value);
-                    }
-                    started_video = true;
-                }
-                rfvp::hosted::HostedVideoOperation::Stop => {
-                    if self.video.is_none() && self.video_audio_id.is_none() {
-                        return self.fail(error::invalid(
-                            "ASTRA_EMU_FVP_VIDEO_STOP",
-                            "RFVP requested a movie stop without an active movie",
-                        ));
-                    }
-                    if let Err(value) = self.finish_video(false) {
-                        return self.fail(value);
-                    }
-                }
-            }
-        }
-        let video_eof = if let Some(video) = self.video.as_mut() {
-            // The elapsed time belongs to the hosted tick that emitted the
-            // operation. A newly opened movie starts at its first frame and
-            // consumes time beginning with the following family tick.
-            match video.advance(if started_video { 0 } else { elapsed_ns }) {
-                Ok(eof) => eof,
-                Err(value) => return self.fail(value),
-            }
-        } else {
-            false
-        };
         if let Err(value) = self.render_frame() {
             return self.fail(value);
         }
-        let video_complete = if video_eof {
-            match self.video_audio_id {
-                Some(id) => match self.audio.video_audio_playing(id) {
-                    Ok(playing) => !playing,
-                    Err(value) => return self.fail(value),
-                },
-                None => true,
-            }
-        } else {
-            false
-        };
-        if video_complete {
-            if let Err(value) = self.finish_video(true) {
-                return self.fail(value);
-            }
-        }
         let status = if self.hosted.is_terminal() {
             FamilyStatus::Finished
-        } else if self
-            .video
-            .as_ref()
-            .is_some_and(VideoPlayback::modal_with_audio)
-        {
+        } else if self.hosted.core().is_waiting_for_movie() {
             FamilyStatus::Waiting
         } else {
             FamilyStatus::Running
         };
         Ok(AdvanceResponse {
             status,
+            reset_clock,
             ..AdvanceResponse::running()
         })
     }
-    fn visit_frame(&self, visitor: &mut dyn FrameVisitor) -> FamilyResult<()> {
-        let view = FrameView::from_slice(&self.frame, self.frame_info)?;
-        visitor.accept(view)
+    fn acquire_frame(&mut self, after: Option<FrameIdentity>) -> FamilyResult<FramePoll> {
+        self.ensure_live()?;
+        if self.gpu.native().frame_pending() {
+            if let Some(rendered) = self.gpu.poll_frame()? {
+                self.publish_game_frame(rendered)?;
+            } else {
+                return Ok(self.frame.pending());
+            }
+        }
+        Ok(self.frame.poll(after))
     }
     fn close(mut self: Box<Self>) -> FamilyResult<()> {
         tracing::info!(event = "astra.emu.fvp.session.closing");
         let save_result = self
             .hosted
-            .core()
-            .save_global_data(&mut self.fs)
-            .map_err(|error| error::rfvp_operation(error, "global save write"));
-        let video_result = if self.video.is_some() || self.video_audio_id.is_some() {
-            self.finish_video(true)
-        } else {
-            Ok(())
-        };
+            .shutdown()
+            .map_err(|error| error::rfvp_operation(error, "native shutdown"));
         let audio_result = self.audio.close();
         save_result?;
-        video_result?;
         audio_result
     }
 }

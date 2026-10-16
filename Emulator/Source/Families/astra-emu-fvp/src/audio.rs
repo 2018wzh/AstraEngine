@@ -5,25 +5,24 @@ use audio_decode::SymphoniaBackend;
 mod audio_worker;
 use audio_worker::run_worker;
 use crossbeam_channel::{bounded, Receiver, Sender, TrySendError};
+use parking_lot::Mutex;
 
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeMap,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
+        Arc,
     },
     thread::{self, JoinHandle},
     time::Duration,
 };
 
+use crate::embedding::HostedAudioOperation;
 use abi_stable::std_types::RVec;
 use astra_emu_family_api::{
     AudioSinkBox, AudioWriteStatus, FamilyError, FamilyResult, PcmChunk, PcmFormat, PcmFormatSpec,
 };
 use rfvp::host_api::{AudioStreamId, SoftAudioConfig, SoftAudioMixer};
-use rfvp::hosted::HostedAudioOperation;
-
-use crate::video::VideoAudioPlayback;
 
 const OUTPUT: PcmFormatSpec = PcmFormatSpec {
     sample_rate: 48_000,
@@ -33,28 +32,15 @@ const OUTPUT: PcmFormatSpec = PcmFormatSpec {
 const QUEUE_CAPACITY: usize = 64;
 const COMMAND_WAIT: Duration = Duration::from_millis(20);
 
-enum WorkerCommand {
-    Hosted(HostedAudioOperation),
-    StartVideo { id: AudioStreamId, bytes: Arc<[u8]> },
-    StopVideo { id: AudioStreamId },
-}
-
-#[derive(Clone, Copy)]
-enum WorkerReply {
-    Applied,
-    VideoStarted(bool),
-}
-
 struct Job {
-    command: WorkerCommand,
-    completion: Sender<FamilyResult<WorkerReply>>,
+    command: HostedAudioOperation,
+    completion: Sender<FamilyResult<()>>,
 }
 
 pub(crate) struct AudioBridge {
     tx: Option<Sender<Job>>,
     error: Arc<Mutex<Option<FamilyError>>>,
     playback_states: Arc<Mutex<BTreeMap<u32, bool>>>,
-    used_stream_ids: BTreeSet<u32>,
     cancelled: Arc<AtomicBool>,
     sink: Option<Arc<AudioSinkBox>>,
     worker: Option<JoinHandle<()>>,
@@ -84,9 +70,7 @@ impl AudioBridge {
                 );
                 if let Err(value) = result {
                     if !worker_cancelled.load(Ordering::Acquire) && !worker_sink.is_cancelled() {
-                        *worker_error
-                            .lock()
-                            .expect("audio worker error mutex poisoned") = Some(value);
+                        *worker_error.lock() = Some(value);
                     }
                 }
                 let _ = worker_sink.cancel();
@@ -99,7 +83,6 @@ impl AudioBridge {
             tx: Some(tx),
             error,
             playback_states,
-            used_stream_ids: BTreeSet::new(),
             cancelled,
             sink: Some(sink),
             worker: Some(worker),
@@ -107,63 +90,10 @@ impl AudioBridge {
     }
 
     pub(crate) fn submit(&mut self, operation: HostedAudioOperation) -> FamilyResult<()> {
-        // RFVP emits Tick as a host pacing hint. The worker has its own clock:
-        // audio advances when the bounded sink accepts mixed PCM, never when
-        // the gameplay thread calls advance.
-        if matches!(operation, HostedAudioOperation::Tick { .. }) {
-            return Ok(());
-        }
-
-        let stream_mutation = stream_mutation(&operation);
-        let result = self.dispatch(WorkerCommand::Hosted(operation));
-        if matches!(result, Ok(WorkerReply::Applied)) {
-            self.record_stream_id(stream_mutation);
-        }
-        result.map(|_| ())
+        self.dispatch(operation)
     }
 
-    pub(crate) fn start_video_audio(
-        &mut self,
-        id: AudioStreamId,
-        bytes: Arc<[u8]>,
-    ) -> FamilyResult<bool> {
-        match self.dispatch(WorkerCommand::StartVideo { id, bytes })? {
-            WorkerReply::VideoStarted(present) => Ok(present),
-            WorkerReply::Applied => Err(FamilyError::invalid(
-                "ASTRA_EMU_FVP_VIDEO_AUDIO_WORKER",
-                "audio worker returned an invalid video start response",
-            )),
-        }
-    }
-
-    pub(crate) fn stop_video_audio(&mut self, id: AudioStreamId) -> FamilyResult<()> {
-        match self.dispatch(WorkerCommand::StopVideo { id })? {
-            WorkerReply::Applied => Ok(()),
-            WorkerReply::VideoStarted(_) => Err(FamilyError::invalid(
-                "ASTRA_EMU_FVP_VIDEO_AUDIO_WORKER",
-                "audio worker returned an invalid video stop response",
-            )),
-        }
-    }
-
-    pub(crate) fn video_audio_playing(&self, id: AudioStreamId) -> FamilyResult<bool> {
-        self.check_error()?;
-        if self.cancelled.load(Ordering::Acquire) {
-            return Err(FamilyError::invalid(
-                "ASTRA_EMU_FVP_AUDIO_CANCELLED",
-                "audio worker is cancelled",
-            ));
-        }
-        Ok(self
-            .playback_states
-            .lock()
-            .expect("audio playback state mutex poisoned")
-            .get(&id.0)
-            .copied()
-            .unwrap_or(false))
-    }
-
-    fn dispatch(&self, command: WorkerCommand) -> FamilyResult<WorkerReply> {
+    fn dispatch(&self, command: HostedAudioOperation) -> FamilyResult<()> {
         self.check_error()?;
         if self.cancelled.load(Ordering::Acquire) {
             return Err(FamilyError::invalid(
@@ -197,45 +127,8 @@ impl AudioBridge {
         }
     }
 
-    pub(crate) fn allocate_video_stream_id(&mut self) -> FamilyResult<AudioStreamId> {
-        for slot in (0..rfvp::host_api::SE_LOGICAL_SLOT_COUNT).rev() {
-            let id = AudioStreamId::se(slot);
-            if self.used_stream_ids.insert(id.0) {
-                return Ok(id);
-            }
-        }
-        Err(FamilyError::invalid(
-            "ASTRA_EMU_FVP_VIDEO_AUDIO_CAPACITY",
-            "no free audio stream is available for WMV playback",
-        ))
-    }
-
-    pub(crate) fn release_stream_id(&mut self, id: AudioStreamId) {
-        self.used_stream_ids.remove(&id.0);
-        self.playback_states
-            .lock()
-            .expect("audio playback state mutex poisoned")
-            .remove(&id.0);
-    }
-
-    fn record_stream_id(&mut self, mutation: Option<StreamMutation>) {
-        match mutation {
-            Some(StreamMutation::Add(id)) => {
-                self.used_stream_ids.insert(id.0);
-            }
-            Some(StreamMutation::Remove(id)) => {
-                self.used_stream_ids.remove(&id.0);
-            }
-            None => {}
-        }
-    }
-
     fn check_error(&self) -> FamilyResult<()> {
-        self.error
-            .lock()
-            .expect("audio worker error mutex poisoned")
-            .clone()
-            .map_or(Ok(()), Err)
+        self.error.lock().clone().map_or(Ok(()), Err)
     }
 
     pub(crate) fn playback_states(
@@ -251,7 +144,6 @@ impl AudioBridge {
         let states = self
             .playback_states
             .lock()
-            .expect("audio playback state mutex poisoned")
             .iter()
             .map(|(id, playing)| (rfvp::host_api::AudioStreamId(*id), *playing))
             .collect();
@@ -288,21 +180,6 @@ impl AudioBridge {
     }
 }
 
-enum StreamMutation {
-    Add(AudioStreamId),
-    Remove(AudioStreamId),
-}
-
-fn stream_mutation(operation: &HostedAudioOperation) -> Option<StreamMutation> {
-    match operation {
-        HostedAudioOperation::DestroyStream(id) => Some(StreamMutation::Remove(*id)),
-        HostedAudioOperation::LoadResource { id, .. }
-        | HostedAudioOperation::LoadEncoded { id, .. }
-        | HostedAudioOperation::CreateStream { id, .. } => Some(StreamMutation::Add(*id)),
-        _ => None,
-    }
-}
-
 impl Drop for AudioBridge {
     fn drop(&mut self) {
         let _ = self.close();
@@ -327,91 +204,26 @@ fn record_operation_state(
     let Some(id) = operation_stream_id(operation) else {
         return;
     };
-    states
-        .lock()
-        .expect("audio playback state mutex poisoned")
-        .insert(id.0, mixer.is_playing(id));
+    states.lock().insert(id.0, mixer.is_playing(id));
 }
 
 fn apply_command(
     mixer: &mut SoftAudioMixer<SymphoniaBackend>,
-    video_audio: &mut BTreeMap<u32, VideoAudioPlayback>,
     playback_states: &Mutex<BTreeMap<u32, bool>>,
-    command: WorkerCommand,
-) -> FamilyResult<WorkerReply> {
-    match command {
-        WorkerCommand::Hosted(operation) => {
-            apply_operation(mixer, &operation)?;
-            record_operation_state(mixer, playback_states, &operation);
-            Ok(WorkerReply::Applied)
-        }
-        WorkerCommand::StartVideo { id, bytes } => {
-            if video_audio.contains_key(&id.0) {
-                return Err(FamilyError::invalid(
-                    "ASTRA_EMU_FVP_VIDEO_AUDIO_CONCURRENT",
-                    "video audio stream is already active",
-                ));
-            }
-            let Some(stream) = VideoAudioPlayback::open(bytes)? else {
-                playback_states
-                    .lock()
-                    .expect("audio playback state mutex poisoned")
-                    .insert(id.0, false);
-                return Ok(WorkerReply::VideoStarted(false));
-            };
-            playback_states
-                .lock()
-                .expect("audio playback state mutex poisoned")
-                .insert(id.0, true);
-            video_audio.insert(id.0, stream);
-            Ok(WorkerReply::VideoStarted(true))
-        }
-        WorkerCommand::StopVideo { id } => {
-            video_audio.remove(&id.0);
-            playback_states
-                .lock()
-                .expect("audio playback state mutex poisoned")
-                .remove(&id.0);
-            Ok(WorkerReply::Applied)
-        }
-    }
-}
-
-fn mix_video_audio(
-    video_audio: &mut BTreeMap<u32, VideoAudioPlayback>,
-    playback_states: &Mutex<BTreeMap<u32, bool>>,
-    output: &mut [i16],
-) -> FamilyResult<bool> {
-    let mut active = false;
-    let mut finished = Vec::new();
-    for (id, stream) in video_audio.iter_mut() {
-        active |= stream.mix_into(OUTPUT.sample_rate, output)?;
-        if stream.is_finished() {
-            finished.push(*id);
-        }
-    }
-    if !finished.is_empty() {
-        let mut states = playback_states
-            .lock()
-            .expect("audio playback state mutex poisoned");
-        for id in finished {
-            video_audio.remove(&id);
-            states.insert(id, false);
-        }
-    }
-    Ok(active)
+    operation: HostedAudioOperation,
+) -> FamilyResult<()> {
+    apply_operation(mixer, &operation)?;
+    record_operation_state(mixer, playback_states, &operation);
+    Ok(())
 }
 
 fn refresh_playback_states(
     mixer: &SoftAudioMixer<SymphoniaBackend>,
-    video_audio: &BTreeMap<u32, VideoAudioPlayback>,
     states: &Mutex<BTreeMap<u32, bool>>,
 ) {
-    let mut states = states.lock().expect("audio playback state mutex poisoned");
+    let mut states = states.lock();
     for (id, playing) in states.iter_mut() {
-        if !video_audio.contains_key(id) {
-            *playing = mixer.is_playing(rfvp::host_api::AudioStreamId(*id));
-        }
+        *playing = mixer.is_playing(rfvp::host_api::AudioStreamId(*id));
     }
 }
 
@@ -428,7 +240,7 @@ fn operation_stream_id(operation: &HostedAudioOperation) -> Option<rfvp::host_ap
         | HostedAudioOperation::SetParams { id, .. }
         | HostedAudioOperation::DestroyStream(id) => Some(*id),
         HostedAudioOperation::LoadResource { id, .. } => Some(*id),
-        HostedAudioOperation::SetMasterVolume(_) | HostedAudioOperation::Tick { .. } => None,
+        HostedAudioOperation::SetMasterVolume(_) => None,
     }
 }
 
@@ -473,13 +285,13 @@ fn apply_operation(
             mixer.destroy_stream(*id);
             return Ok(());
         }
-        HostedAudioOperation::Tick { .. } => return Ok(()),
     };
     result.map_err(|cause| {
         let error = crate::error::rfvp_operation(cause, name);
         let slot_kind = match operation_stream_id(operation).and_then(AudioStreamId::slot_kind) {
             Some(rfvp::host_api::AudioSlotKind::Bgm) => "bgm",
             Some(rfvp::host_api::AudioSlotKind::Se) => "se",
+            Some(rfvp::host_api::AudioSlotKind::Movie) => "movie",
             None => "none",
         };
         tracing::error!(

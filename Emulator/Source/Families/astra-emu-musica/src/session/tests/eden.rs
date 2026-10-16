@@ -63,7 +63,7 @@ fn native_gpu_eden_import_continues_saves_and_exports_authoritative_message() {
     let (_, mut session) = fixture::provider().open_session(req).unwrap();
     assert_eq!(session.message.as_ref().unwrap().0, "saved");
     let mut capture = Capture(Vec::new());
-    session.visit_frame(&mut capture).unwrap();
+    capture.read(session.acquire_frame(None).unwrap()).unwrap();
     assert!(capture
         .0
         .as_chunks::<4>()

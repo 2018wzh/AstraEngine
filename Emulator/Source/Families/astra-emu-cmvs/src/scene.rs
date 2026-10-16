@@ -1,5 +1,5 @@
 use crate::{CmvsArchive, CmvsPs2aVmState};
-use astra_emu_sdk::{CoreError, StageCanvas, TextureCache};
+use astra_emu_sdk::{CoreError, SceneTextureResidency, StageCanvas, TextureCache};
 use astra_media_core::{BlendMode, Extent2D, RectI, SceneCommand, TextureFrame};
 use astra_platform::SceneFrame;
 use astra_platform_common::WgpuOffscreenRenderer;
@@ -18,6 +18,7 @@ pub enum CmvsTextureSlot {
 pub struct CmvsScene {
     renderer: WgpuOffscreenRenderer,
     textures: TextureCache,
+    texture_residency: SceneTextureResidency,
     bindings: BTreeMap<CmvsTextureSlot, String>,
     sequence: u64,
     raster: Option<Extent2D>,
@@ -38,6 +39,7 @@ impl CmvsScene {
             renderer,
             textures: TextureCache::new(NonZeroUsize::new(512).unwrap(), 1024 * 1024 * 1024, 16384)
                 .map_err(|_| error("ASTRA_EMU_CMVS_TEXTURE_BUDGET"))?,
+            texture_residency: SceneTextureResidency::default(),
             bindings: BTreeMap::new(),
             sequence: 0,
             raster: None,
@@ -192,7 +194,7 @@ impl CmvsScene {
         &mut self,
         width: u32,
         height: u32,
-        commands: Vec<SceneCommand>,
+        mut commands: Vec<SceneCommand>,
     ) -> Result<TextureFrame, CoreError> {
         let sequence = self
             .sequence
@@ -200,6 +202,11 @@ impl CmvsScene {
             .ok_or_else(|| error("ASTRA_EMU_CMVS_FRAME_SEQUENCE"))?;
         let logical = Extent2D::new(width, height);
         let canvas = StageCanvas::new(logical, self.raster.unwrap_or(logical))?;
+        self.texture_residency
+            .prepare(&mut commands)
+            .map_err(|cause| {
+                CoreError::invalid("ASTRA_EMU_CMVS_TEXTURE_RESIDENCY", cause.to_string())
+            })?;
         let mut mapped = Vec::with_capacity(commands.len() + 4);
         mapped.push(SceneCommand::PushClip {
             rect: canvas.viewport_rect()?,

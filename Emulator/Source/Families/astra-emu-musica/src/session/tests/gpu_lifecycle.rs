@@ -16,9 +16,9 @@ fn native_gpu_one_provider_reopens_32_sessions_and_releases_each_device() {
             .unwrap();
         let instance = session.scene.gpu_instance().clone();
         session.advance(16_666_667, &[]).unwrap();
-        let mut frame = Capture(Vec::new());
-        session.visit_frame(&mut frame).unwrap();
-        assert!(!frame.0.is_empty());
+        let FramePoll::Ready(frame) = session.acquire_frame(None).unwrap() else {
+            panic!("first native frame is not ready");
+        };
         assert_eq!(
             instance
                 .generate_report()
@@ -30,6 +30,8 @@ fn native_gpu_one_provider_reopens_32_sessions_and_releases_each_device() {
         );
         Box::new(session).close().unwrap();
         assert_session_resources_released(&instance);
+        // A real published CPU lease must not keep the session GPU alive.
+        assert_eq!(&frame.pixels()[..4], &[25, 100, 220, 255]);
         // Only the provider may retain this Instance between open calls.
         drop(instance);
     }

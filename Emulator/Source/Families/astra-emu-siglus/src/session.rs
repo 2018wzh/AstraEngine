@@ -11,7 +11,8 @@ use std::path::Path;
 
 use astra_emu_family_api::{
     AdvanceResponse, AudioSinkBox, FamilyError, FamilyResult, FamilySession, FamilyStatus,
-    FrameAlpha, FrameFormat, FrameInfo, FrameView, FrameVisitor, WindowState,
+    FrameAlpha, FrameFormat, FrameIdentity, FrameInfo, FramePoll, FramePublisher, FrameRowOrder,
+    WindowState,
 };
 use siglus_scene_vm::audio::kira_hub::hosted_tap;
 use siglus_scene_vm::host::{SiglusHost, SiglusHostConfig};
@@ -22,23 +23,15 @@ use crate::{audio, audio::PcmBridge, error, events};
 
 const FRAME_INTERVAL_MS: u32 = 16;
 
-/// Interior-mutable frame snapshot so an immutable `visit_frame` can refresh
-/// the CPU copy on demand. Only the family session thread touches these.
-#[derive(Default)]
-struct FrameSnapshot {
-    pixels: std::cell::RefCell<Vec<u8>>,
-    width: std::cell::Cell<u32>,
-    height: std::cell::Cell<u32>,
-}
-
 pub(crate) struct SiglusSession {
     host: SiglusHost,
     audio: PcmBridge,
-    frame: FrameSnapshot,
-    frame_info: std::cell::Cell<FrameInfo>,
+    frame: FramePublisher,
     fatal: Option<FamilyError>,
-    frame_dirty: std::cell::Cell<bool>,
+    frame_dirty: bool,
     elapsed_remainder_ns: u64,
+    global_fingerprint: u64,
+    render_generation: u64,
 }
 
 pub(crate) struct SiglusOpen {
@@ -50,20 +43,20 @@ pub(crate) fn boot(
     game_path: &Path,
     _initial_window: WindowState,
     sink: AudioSinkBox,
+    session_epoch: u64,
 ) -> FamilyResult<SiglusOpen> {
     let game_path = game_path.to_owned();
     let (width, height) = resolve_screen_size(&game_path)?;
+    let frame = FramePublisher::new(session_epoch)?;
 
     let audio = PcmBridge::new(sink)?;
     hosted_tap::install(audio.tap_factory(), audio::OUTPUT_FORMAT.sample_rate);
-    siglus_scene_vm::platform_time::hosted_clock::enable();
 
-    let boot_result = boot_engine(&game_path, width, height, audio);
+    let boot_result = boot_engine(&game_path, width, height, audio, frame);
     if boot_result.is_err() {
         // Unwind the tap registry so a later session cannot inherit a dead
         // callback; the engine may still own the mixer worker until dropped.
         hosted_tap::clear();
-        siglus_scene_vm::platform_time::hosted_clock::disable();
     }
     boot_result
 }
@@ -73,19 +66,19 @@ fn boot_engine(
     width: u32,
     height: u32,
     audio: PcmBridge,
+    mut frame: FramePublisher,
 ) -> FamilyResult<SiglusOpen> {
     let renderer = pollster::block_on(Renderer::new_offscreen(width, height))
         .map_err(|error| error::engine("renderer.open", error))?;
     let mut config = SiglusHostConfig::new(game_path.to_owned());
     config.width = Some(width);
     config.height = Some(height);
-    config.deterministic_frame_clock = true;
-    let mut host = pollster::block_on(SiglusHost::new_with_renderer(config, renderer))
+    let mut host = SiglusHost::new_with_renderer_sync(config, renderer)
         .map_err(|error| error::engine("session.open", error))?;
+    let global_fingerprint = host.persist_global_if_changed(None);
 
     // Compose the first frame before publishing its dimensions. Readback
     // failures must propagate rather than masquerading as an unsettled frame.
-    let frame = FrameSnapshot::default();
     if host
         .step(FRAME_INTERVAL_MS)
         .map_err(|error| error::engine("session.first_frame", error))?
@@ -95,9 +88,9 @@ fn boot_engine(
             "the Siglus engine produced no composed frame during boot",
         ));
     }
-    pull_frame(&host, &frame)?;
-    let frame_info = frame_info(&frame)?;
+    let frame_info = pull_frame(&host, &mut frame)?;
     host.take_timeline_reset();
+    let render_generation = host.renderer().hosted_frame_generation();
 
     Ok(SiglusOpen {
         frame_info,
@@ -105,10 +98,11 @@ fn boot_engine(
             host,
             audio,
             frame,
-            frame_info: std::cell::Cell::new(frame_info),
             fatal: None,
-            frame_dirty: std::cell::Cell::new(true),
+            frame_dirty: false,
             elapsed_remainder_ns: 0,
+            global_fingerprint,
+            render_generation,
         },
     })
 }
@@ -168,52 +162,39 @@ fn resolve_screen_size(game_path: &Path) -> FamilyResult<(u32, u32)> {
     Ok((dimension(0)?, dimension(1)?))
 }
 
-fn frame_info(frame: &FrameSnapshot) -> FamilyResult<FrameInfo> {
-    if frame.width.get() == 0 || frame.height.get() == 0 {
+fn frame_info(width: u32, height: u32) -> FamilyResult<FrameInfo> {
+    if width == 0 || height == 0 {
         return Err(error::invalid(
             "ASTRA_EMU_SIGLUS_FRAME_EMPTY",
             "the engine produced an empty frame",
         ));
     }
     Ok(FrameInfo {
-        width: frame.width.get(),
-        height: frame.height.get(),
-        logical_width: frame.width.get(),
-        logical_height: frame.height.get(),
-        stride: frame.width.get().checked_mul(4).ok_or_else(|| {
+        width,
+        height,
+        logical_width: width,
+        logical_height: height,
+        stride: width.checked_mul(4).ok_or_else(|| {
             error::invalid("ASTRA_EMU_SIGLUS_FRAME_SIZE", "frame stride overflows")
         })?,
+        // Native swapchain ignores render-target alpha; preserve native RGB.
         format: FrameFormat::Rgba8Srgb {
-            alpha: FrameAlpha::Opaque,
+            alpha: FrameAlpha::Ignored,
         },
+        rows: FrameRowOrder::TopToBottom,
     })
 }
 
 /// Reads the composed frame back from the offscreen target. A size change
 /// resizes the snapshot; the stride stays width * 4.
-fn pull_frame(host: &SiglusHost, frame: &FrameSnapshot) -> FamilyResult<()> {
-    let (width, height, mut pixels) = {
-        let renderer = host.renderer();
-        renderer
-            .read_frame_rgba()
-            .map_err(|error| error::engine("renderer.readback", error))?
-    };
-    if width == 0 || height == 0 {
-        return Err(error::invalid(
-            "ASTRA_EMU_SIGLUS_FRAME_EMPTY",
-            "the engine reported an empty frame size",
-        ));
-    }
-    // The native swapchain displays RGB over its black clear; its alpha
-    // channel is render-target bookkeeping, not presentation opacity. Keep
-    // the composed RGB unchanged and publish an opaque final Family frame.
-    for pixel in pixels.as_chunks_mut::<4>().0 {
-        pixel[3] = 255;
-    }
-    frame.width.set(width);
-    frame.height.set(height);
-    *frame.pixels.borrow_mut() = pixels;
-    Ok(())
+fn pull_frame(host: &SiglusHost, frame: &mut FramePublisher) -> FamilyResult<FrameInfo> {
+    let (width, height, pixels) = host
+        .renderer()
+        .read_frame_rgba()
+        .map_err(|error| error::engine("renderer.readback", error))?;
+    let info = frame_info(width, height)?;
+    frame.publish(pixels, Vec::as_slice, info)?;
+    Ok(info)
 }
 
 impl SiglusSession {
@@ -248,8 +229,8 @@ impl FamilySession for SiglusSession {
         self.ensure_live()?;
         self.audio.check_error()?;
         events::apply(&mut self.host, events);
-        // The engine runs one VM frame per advance; the deterministic clock
-        // consumes this elapsed value instead of the wall clock.
+        // Preserve the upstream player's real-time clock; do not enable its
+        // replay-only virtual-clock feature in a hosted game session.
         let elapsed_ms = elapsed_millis(elapsed_ns, &mut self.elapsed_remainder_ns)?;
         let exit = self
             .host
@@ -265,9 +246,10 @@ impl FamilySession for SiglusSession {
             finished = exit
         );
         // The composed frame stays in the offscreen target; the CPU readback
-        // happens on demand in `visit_frame`, so hosts that skip frame pulls
+        // happens on demand in `acquire_frame`, so hosts that skip frame pulls
         // (headless routes) do not pay a texture-to-buffer copy per advance.
-        self.frame_dirty.set(true);
+        self.frame_dirty |=
+            self.host.renderer().hosted_frame_generation() != self.render_generation;
         Ok(AdvanceResponse {
             status: if exit {
                 FamilyStatus::Finished
@@ -279,27 +261,24 @@ impl FamilySession for SiglusSession {
         })
     }
 
-    fn visit_frame(&self, visitor: &mut dyn FrameVisitor) -> FamilyResult<()> {
+    fn acquire_frame(&mut self, after: Option<FrameIdentity>) -> FamilyResult<FramePoll> {
         self.ensure_live()?;
-        if self.frame_dirty.get() {
-            pull_frame(&self.host, &self.frame)?;
-            let info = frame_info(&self.frame)?;
-            self.frame_info.set(info);
-            self.frame_dirty.set(false);
+        if self.frame_dirty {
+            pull_frame(&self.host, &mut self.frame)?;
+            self.render_generation = self.host.renderer().hosted_frame_generation();
+            self.frame_dirty = false;
         }
-        let info = self.frame_info.get();
-        let pixels = self.frame.pixels.borrow();
-        let view = FrameView::from_slice(&pixels, info)?;
-        visitor.accept(view)
+        Ok(self.frame.poll(after))
     }
 
-    fn close(self: Box<Self>) -> FamilyResult<()> {
+    fn close(mut self: Box<Self>) -> FamilyResult<()> {
         // Cancel the host queue first so the kira worker cannot stay blocked
         // in `write`; dropping the host then joins that worker.
         let audio_result = self.audio.close();
+        self.host
+            .persist_global_if_changed(Some(self.global_fingerprint));
         drop(self.host);
         hosted_tap::clear();
-        siglus_scene_vm::platform_time::hosted_clock::disable();
         audio_result
     }
 }
@@ -331,11 +310,48 @@ mod tests {
 
     #[test]
     #[ignore = "requires a hardware GPU adapter"]
-    fn native_gpu_offscreen_readback() {
-        let renderer = pollster::block_on(super::Renderer::new_offscreen(64, 48)).unwrap();
-        let (width, height, pixels) = renderer.read_frame_rgba().unwrap();
-        assert_eq!((width, height), (64, 48));
-        assert_eq!(pixels.len(), 64 * 48 * 4);
+    fn native_gpu_readback_preserves_pixels_across_padded_resize() {
+        use siglus_scene_vm::{
+            assets::RgbaImage,
+            image_manager::ImageManager,
+            layer::{RenderSprite, Sprite},
+        };
+        let mut renderer = pollster::block_on(super::Renderer::new_offscreen(63, 47)).unwrap();
+        let mut images = ImageManager::new(std::path::PathBuf::new());
+        let mut previous_generation = renderer.hosted_frame_generation();
+        for (width, height, color) in [
+            (63, 47, [23, 101, 211, 255]),
+            (65, 49, [199, 37, 61, 255]),
+            (63, 47, [23, 101, 211, 255]),
+        ] {
+            renderer.resize(width, height);
+            let image = images.insert_image(RgbaImage {
+                width,
+                height,
+                center_x: 0,
+                center_y: 0,
+                rgba: color.repeat((width * height) as usize),
+            });
+            let sprite = RenderSprite::new(
+                None,
+                None,
+                Sprite {
+                    image_id: Some(image),
+                    visible: true,
+                    ..Sprite::default()
+                },
+            );
+            renderer.render_sprites(&images, &[sprite]).unwrap();
+            let (actual_width, actual_height, pixels) = renderer.read_frame_rgba().unwrap();
+            let generation = renderer.hosted_frame_generation();
+            assert!(
+                generation > previous_generation,
+                "resize must not alias an older CPU frame"
+            );
+            previous_generation = generation;
+            assert_eq!((actual_width, actual_height), (width, height));
+            assert_eq!(pixels, color.repeat((width * height) as usize));
+        }
     }
 
     #[test]

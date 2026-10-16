@@ -209,8 +209,7 @@ mod tests {
         )
         .unwrap();
         controller
-            .registry
-            .register_provider(ConfigProvider)
+            .registry.register_provider(move || ConfigProvider)
             .unwrap();
         controller
             .library

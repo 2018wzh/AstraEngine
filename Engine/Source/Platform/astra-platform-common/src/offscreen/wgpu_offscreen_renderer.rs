@@ -11,8 +11,7 @@ pub struct WgpuOffscreenRenderer {
     pub(super) identity: RendererExecutionIdentity,
     pub(super) device_lost: Arc<AtomicBool>,
     pub(super) pending_output: Option<PendingOutput>,
-    pub(super) filter_pipelines: BTreeMap<String, CachedFilterPipeline>,
-    pub(super) filter_outputs: Vec<CachedFilterOutput>,
+    pub(super) filters: SceneFilters,
     pub(super) gpu_timer: Option<GpuTimer>,
     pub(super) readback_ring: ReadbackRing,
     pub(super) last_readback_bytes: u64,
@@ -21,28 +20,6 @@ pub struct WgpuOffscreenRenderer {
 
 pub(super) struct PendingOutput {
     pub(super) texture: wgpu::Texture,
-    pub(super) width: u32,
-    pub(super) height: u32,
-}
-
-pub(super) struct CachedFilterPipeline {
-    pub(super) bind_layout: wgpu::BindGroupLayout,
-    pub(super) pipeline: wgpu::RenderPipeline,
-}
-
-pub(super) struct CachedFilterOutput {
-    pub(super) width: u32,
-    pub(super) height: u32,
-    pub(super) texture: wgpu::Texture,
-    pub(super) binding_signature: Option<String>,
-    pub(super) bind_group: Option<wgpu::BindGroup>,
-}
-
-pub(super) struct FilterPassContext<'a> {
-    pub(super) device: &'a wgpu::Device,
-    pub(super) queue: &'a wgpu::Queue,
-    pub(super) pipelines: &'a mut BTreeMap<String, CachedFilterPipeline>,
-    pub(super) outputs: &'a mut Vec<CachedFilterOutput>,
     pub(super) width: u32,
     pub(super) height: u32,
 }

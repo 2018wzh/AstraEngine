@@ -62,6 +62,7 @@ impl WgpuPresentationCore {
             sampler,
             pipeline,
             glyph_renderer,
+            filters: crate::scene_filters::SceneFilters::default(),
             last_upload: None,
             last_frame: None,
             last_scene_frame: None,
@@ -266,6 +267,7 @@ impl WgpuPresentationCore {
                 "scene frame sequence is zero, duplicated, or out of order, or dimensions are zero",
             ));
         }
+        crate::scene_filters::SceneFilters::validate(&frame)?;
         if frame.width != self.config.width || frame.height != self.config.height {
             self.config.width = frame.width;
             self.config.height = frame.height;
@@ -277,12 +279,15 @@ impl WgpuPresentationCore {
         let prepared = self
             .glyph_renderer
             .render(&self.device, &self.queue, &frame)?;
+        let texture =
+            self.filters
+                .render(&self.device, &self.queue, &frame, &prepared.texture, None)?;
         let render_ns = render_started.elapsed().as_nanos();
         let surface_started = std::time::Instant::now();
-        self.present_texture(&prepared.texture, "surface.present_scene")?;
+        self.present_texture(&texture, "surface.present_scene")?;
         let surface_ns = surface_started.elapsed().as_nanos();
         let commit_started = std::time::Instant::now();
-        let texture = self.glyph_renderer.commit(prepared);
+        self.glyph_renderer.commit(prepared);
         let commit_ns = commit_started.elapsed().as_nanos();
         self.last_upload = Some(UploadFrame {
             texture,
@@ -388,6 +393,7 @@ impl WgpuPresentationCore {
         #[cfg(feature = "platform-test-driver")]
         if self.test_device_loss.swap(false, Ordering::AcqRel) {
             self.glyph_renderer.recover(&self.device, &self.queue);
+            self.filters = crate::scene_filters::SceneFilters::default();
             self.last_upload = if let Some(frame) = self.last_frame.as_ref() {
                 Some(UploadFrame {
                     texture: upload_frame(&self.device, &self.queue, frame),
@@ -396,11 +402,15 @@ impl WgpuPresentationCore {
                 })
             } else if let Some(frame) = self.last_scene_frame.as_ref() {
                 Some(UploadFrame {
-                    texture: self.glyph_renderer.render_retained(
-                        &self.device,
-                        &self.queue,
-                        frame,
-                    )?,
+                    texture: {
+                        let scene = self.glyph_renderer.render_retained(
+                            &self.device,
+                            &self.queue,
+                            frame,
+                        )?;
+                        self.filters
+                            .render(&self.device, &self.queue, frame, &scene, None)?
+                    },
                     width: frame.width,
                     height: frame.height,
                 })
@@ -437,6 +447,7 @@ impl WgpuPresentationCore {
             surface.configure(&device, &self.config);
         }
         self.glyph_renderer.recover(&device, &queue);
+        let mut filters = crate::scene_filters::SceneFilters::default();
         let last_upload = if let Some(frame) = self.last_frame.as_ref() {
             Some(UploadFrame {
                 texture: upload_frame(&device, &queue, frame),
@@ -445,9 +456,12 @@ impl WgpuPresentationCore {
             })
         } else if let Some(frame) = self.last_scene_frame.as_ref() {
             Some(UploadFrame {
-                texture: self
-                    .glyph_renderer
-                    .render_retained(&device, &queue, frame)?,
+                texture: {
+                    let scene = self
+                        .glyph_renderer
+                        .render_retained(&device, &queue, frame)?;
+                    filters.render(&device, &queue, frame, &scene, None)?
+                },
                 width: frame.width,
                 height: frame.height,
             })
@@ -459,6 +473,7 @@ impl WgpuPresentationCore {
         self.layout = layout;
         self.sampler = sampler;
         self.pipeline = pipeline;
+        self.filters = filters;
         self.last_upload = last_upload;
         self.device_lost = device_lost;
         tracing::info!(

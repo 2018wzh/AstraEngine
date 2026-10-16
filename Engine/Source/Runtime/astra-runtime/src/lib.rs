@@ -3,6 +3,7 @@ pub mod actor;
 pub mod await_token;
 pub mod blackboard;
 pub mod delayed_event;
+mod diagnostic_history;
 pub mod event;
 pub mod mutation;
 pub mod presentation;

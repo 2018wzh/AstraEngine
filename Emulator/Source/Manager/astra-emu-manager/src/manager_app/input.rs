@@ -34,7 +34,7 @@ impl AstraEmuManagerController {
     }
 
     pub(super) fn handle_physical_event(&mut self, event: FamilyEvent) -> Result<(), String> {
-        if self.active.is_none() {
+        if self.active.as_ref().is_none_or(|active| active.closing.is_some()) {
             return Ok(());
         }
         if matches!(
@@ -66,26 +66,12 @@ impl AstraEmuManagerController {
                 | FamilyEvent::WindowVisibility { .. }
                 | FamilyEvent::WindowSuspended { .. }
         );
-        if lifecycle {
-            let mut events = std::mem::take(&mut self.pending_events);
-            events.push(event);
-            return self
-                .active
-                .as_mut()
-                .expect("active session checked above")
-                .advance_host_events(&events);
-        }
         let closing = matches!(event, FamilyEvent::WindowCloseRequested);
         self.pending_events.push(event);
         if closing {
-            let events = std::mem::take(&mut self.pending_events);
-            let result = self
-                .active
-                .as_mut()
-                .expect("active session checked above")
-                .advance(0, &events);
-            let cleanup = self.close_active(PlaySessionEndReason::Shutdown);
-            combine_primary_cleanup(result, cleanup)?;
+            self.close_active(PlaySessionEndReason::Shutdown)?;
+        } else if lifecycle {
+            self.flush_owner_events()?;
         }
         Ok(())
     }
@@ -112,7 +98,7 @@ impl AstraEmuManagerController {
         pressed: bool,
         value: f32,
     ) -> Result<(), String> {
-        if self.active.is_none() {
+        if self.active.as_ref().is_none_or(|active| active.closing.is_some()) {
             return Err("ASTRA_EMU_FAMILY_SESSION_NOT_ACTIVE".into());
         }
         if self.pending_events.len() >= astra_emu_family_api::MAX_EVENTS_PER_ADVANCE {
@@ -331,17 +317,6 @@ impl AstraEmuManagerController {
             .map_err(|error| error.to_string())?;
         self.load_game_input_mapping(&game.game_id)?;
         self.model()
-    }
-}
-
-fn combine_primary_cleanup(
-    primary: Result<(), String>,
-    cleanup: Result<(), String>,
-) -> Result<(), String> {
-    match (primary, cleanup) {
-        (Err(primary), Err(cleanup)) => Err(format!("{primary}; {cleanup}")),
-        (Err(primary), Ok(())) | (Ok(()), Err(primary)) => Err(primary),
-        (Ok(()), Ok(())) => Ok(()),
     }
 }
 

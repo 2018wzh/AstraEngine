@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 
 use astra_core::StableId;
 use schemars::JsonSchema;
@@ -49,7 +49,9 @@ pub struct RuntimeEvent {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct EventQueue {
     queued: Vec<RuntimeEvent>,
-    trace: Vec<RuntimeEvent>,
+    #[serde(skip)]
+    #[schemars(skip)]
+    trace: VecDeque<RuntimeEvent>,
     next_sequence: u64,
 }
 
@@ -73,15 +75,23 @@ impl EventQueue {
             }
         }
         self.queued = pending;
-        self.trace.extend(ready.clone());
+        crate::diagnostic_history::extend(&mut self.trace, ready.iter().cloned());
         ready
     }
 
-    pub fn trace(&self) -> &[RuntimeEvent] {
+    pub fn trace(&self) -> &VecDeque<RuntimeEvent> {
         &self.trace
     }
 
     pub fn pending(&self) -> &[RuntimeEvent] {
         &self.queued
+    }
+
+    pub(crate) fn snapshot(&self) -> Self {
+        Self {
+            queued: self.queued.clone(),
+            next_sequence: self.next_sequence,
+            trace: VecDeque::new(),
+        }
     }
 }

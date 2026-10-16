@@ -5,7 +5,8 @@ use rfvp::host_api::EncodedAudioKind;
 fn commands_complete_and_close_joins_while_host_pcm_is_blocked() {
     use abi_stable::type_level::downcasting::TD_Opaque;
     use astra_emu_family_api::{AudioSink, AudioSink_TO, FfiFamilyResult};
-    use std::sync::{atomic::AtomicUsize, Condvar};
+    use parking_lot::Condvar;
+    use std::sync::atomic::AtomicUsize;
 
     struct BlockedSink {
         cancelled: Arc<(Mutex<bool>, Condvar)>,
@@ -20,16 +21,15 @@ fn commands_complete_and_close_joins_while_host_pcm_is_blocked() {
             self.writes.fetch_add(1, Ordering::Relaxed);
             let _ = self.entered.try_send(());
             let (cancelled, wake) = &*self.cancelled;
-            let _guard = wake
-                .wait_while(cancelled.lock().unwrap(), |cancelled| !*cancelled)
-                .unwrap();
+            let mut guard = cancelled.lock();
+            wake.wait_while(&mut guard, |cancelled| !*cancelled);
             Ok(AudioWriteStatus::Cancelled).into()
         }
         fn is_cancelled(&self) -> bool {
-            *self.cancelled.0.lock().unwrap()
+            *self.cancelled.0.lock()
         }
         fn cancel(&self) -> FfiFamilyResult<()> {
-            *self.cancelled.0.lock().unwrap() = true;
+            *self.cancelled.0.lock() = true;
             self.cancelled.1.notify_all();
             Ok(()).into()
         }
@@ -69,14 +69,18 @@ fn commands_complete_and_close_joins_while_host_pcm_is_blocked() {
     let (completed, result) = bounded(1);
     let control = thread::spawn(move || {
         let command = bridge.submit(HostedAudioOperation::SetMasterVolume(0.5));
-        let playing = bridge.video_audio_playing(id);
+        let playing = bridge.playback_states().map(|states| {
+            states
+                .iter()
+                .any(|(stream, playing)| *stream == id && *playing)
+        });
         completed.send((command, playing)).unwrap();
         bridge.close()
     });
     let response = result.recv_timeout(Duration::from_secs(2));
     // Release the old implementation too, so a regression fails without
     // leaving an audio thread behind in the test process.
-    *cancelled.0.lock().unwrap() = true;
+    *cancelled.0.lock() = true;
     cancelled.1.notify_all();
     let closed = control.join().unwrap();
     let (command, playing) = response.expect("control must complete before PCM is released");

@@ -137,6 +137,7 @@ impl TextReplacementService for Translation {
 }
 fn request(root: &std::path::Path, sink: Sink) -> OpenRequest {
     OpenRequest {
+        session_epoch: astra_emu_family_api::allocate_session_epoch().unwrap(),
         game_path: root.to_str().unwrap().into(),
         configuration: Default::default(),
         initial_window: WindowState {
@@ -148,6 +149,7 @@ fn request(root: &std::path::Path, sink: Sink) -> OpenRequest {
         host: FamilyHostServices {
             audio_sink: ROption::RSome(AudioSink_TO::from_value(sink, TD_Opaque)),
             text_replacement: ROption::RNone,
+            modal: ROption::RNone,
         },
     }
 }
@@ -164,9 +166,15 @@ fn key(code: KeyCode) -> FamilyEvent {
     }
 }
 struct Capture(Vec<u8>);
-impl FrameVisitor for Capture {
-    fn accept(&mut self, frame: FrameView<'_>) -> FamilyResult<()> {
-        self.0 = frame.as_slice().to_vec();
+impl Capture {
+    fn read(&mut self, poll: FramePoll) -> FamilyResult<()> {
+        let FramePoll::Ready(frame) = poll else {
+            return Err(FamilyError::invalid(
+                "TEST_FRAME_PENDING",
+                "test expected a completed frame",
+            ));
+        };
+        self.0 = frame.pixels().to_vec();
         Ok(())
     }
 }
@@ -192,14 +200,18 @@ fn native_gpu_choice_focus_save_restore_and_confirm_follow_the_selected_branch()
         FamilyStatus::Waiting
     );
     let mut frame = Capture(Vec::new());
-    opened.session.visit_frame(&mut frame).unwrap();
+    frame
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     let first = frame.0.clone();
     assert!(first.as_chunks::<4>().0.iter().any(|p| p[0] != 0));
     opened
         .session
         .advance(0, &[key(KeyCode::ArrowDown)])
         .unwrap();
-    opened.session.visit_frame(&mut frame).unwrap();
+    frame
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     let second = frame.0.clone();
     assert_ne!(first, second);
     opened.session.advance(0, &[key(KeyCode::F5)]).unwrap();
@@ -207,16 +219,22 @@ fn native_gpu_choice_focus_save_restore_and_confirm_follow_the_selected_branch()
         .session
         .advance(0, &[key(KeyCode::ArrowDown)])
         .unwrap();
-    opened.session.visit_frame(&mut frame).unwrap();
+    frame
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     assert_eq!(frame.0, first);
     opened.session.advance(0, &[key(KeyCode::F9)]).unwrap();
-    opened.session.visit_frame(&mut frame).unwrap();
+    frame
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     assert_eq!(frame.0, second);
     opened
         .session
         .advance(16_666_667, &[key(KeyCode::Enter)])
         .unwrap();
-    opened.session.visit_frame(&mut frame).unwrap();
+    frame
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     assert_ne!(frame.0, second);
     opened.session.close().unwrap();
 }
@@ -236,7 +254,9 @@ fn native_gpu_choice_pointer_ignores_blank_clicks_and_selects_hovered_branch() {
     };
     opened.session.advance(16_666_667, &[]).unwrap();
     let mut frame = Capture(Vec::new());
-    opened.session.visit_frame(&mut frame).unwrap();
+    frame
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     let first = frame.0.clone();
     // No known pointer position must not confirm the keyboard focus.
     assert_eq!(
@@ -256,14 +276,18 @@ fn native_gpu_choice_pointer_ignores_blank_clicks_and_selects_hovered_branch() {
                 .status,
             FamilyStatus::Waiting
         );
-        opened.session.visit_frame(&mut frame).unwrap();
+        frame
+            .read(opened.session.acquire_frame(None).unwrap())
+            .unwrap();
         assert_eq!(frame.0, first);
     }
     opened
         .session
         .advance(0, &[FamilyEvent::PointerMove { x: 250.0, y: 310.0 }])
         .unwrap();
-    opened.session.visit_frame(&mut frame).unwrap();
+    frame
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     assert_ne!(frame.0, first);
     // Only the second branch ends immediately; the first waits for dialogue input.
     assert_eq!(
@@ -291,10 +315,14 @@ fn native_gpu_crossfade_clear_removes_the_previous_effect_frame() {
         .unwrap();
     let mut frame = Capture(Vec::new());
     opened.session.advance(16_666_667, &[]).unwrap();
-    opened.session.visit_frame(&mut frame).unwrap();
+    frame
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     assert_eq!(&frame.0[..4], &[25, 100, 220, 255]);
     opened.session.advance(16_666_667, &[]).unwrap();
-    opened.session.visit_frame(&mut frame).unwrap();
+    frame
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     assert!(frame
         .0
         .as_chunks::<4>()
@@ -330,7 +358,9 @@ fn native_family_advances_real_archive_scene_audio_input_save_restore_and_close(
     );
     opened.session.advance(16_666_667, &[]).unwrap();
     let mut frame = Capture(vec![]);
-    opened.session.visit_frame(&mut frame).unwrap();
+    frame
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     assert_eq!(&frame.0[..4], &[25, 100, 220, 255]);
     opened.session.advance(16_666_667, &[]).unwrap();
     until(|| sink.nonzero.load(Ordering::Acquire));
@@ -340,7 +370,9 @@ fn native_family_advances_real_archive_scene_audio_input_save_restore_and_close(
         opened.session.advance(16_666_667, &[]).unwrap().status,
         FamilyStatus::Waiting
     );
-    opened.session.visit_frame(&mut frame).unwrap();
+    frame
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     let dialogue = frame.0.clone();
     assert!(dialogue
         .as_chunks::<4>()
@@ -365,7 +397,9 @@ fn native_family_advances_real_archive_scene_audio_input_save_restore_and_close(
             .status,
         FamilyStatus::Waiting
     );
-    opened.session.visit_frame(&mut frame).unwrap();
+    frame
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     assert_eq!(frame.0, dialogue);
     opened.session.close().unwrap();
     assert!(sink.cancelled.load(Ordering::Acquire));
@@ -517,7 +551,9 @@ fn native_gpu_control_keys_respect_release_focus_and_choice_boundaries() {
         .unwrap();
     opened.session.advance(16_666_667, &[]).unwrap();
     let mut capture = Capture(Vec::new());
-    opened.session.visit_frame(&mut capture).unwrap();
+    capture
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     let first = capture.0.clone();
     opened
         .session
@@ -528,7 +564,9 @@ fn native_gpu_control_keys_respect_release_focus_and_choice_boundaries() {
         *state = KeyState::Released;
     }
     opened.session.advance(16_666_667, &[release_left]).unwrap();
-    opened.session.visit_frame(&mut capture).unwrap();
+    capture
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     let second = capture.0.clone();
     assert_ne!(first, second);
     opened
@@ -538,7 +576,9 @@ fn native_gpu_control_keys_respect_release_focus_and_choice_boundaries() {
             &[FamilyEvent::WindowFocused { focused: false }],
         )
         .unwrap();
-    opened.session.visit_frame(&mut capture).unwrap();
+    capture
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     assert_eq!(capture.0, second);
     opened
         .session
@@ -557,7 +597,9 @@ fn native_gpu_control_keys_respect_release_focus_and_choice_boundaries() {
             &[FamilyEvent::WindowSuspended { suspended: false }],
         )
         .unwrap();
-    opened.session.visit_frame(&mut capture).unwrap();
+    capture
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     assert_eq!(capture.0, second);
 
     opened
@@ -570,14 +612,18 @@ fn native_gpu_control_keys_respect_release_focus_and_choice_boundaries() {
             ],
         )
         .unwrap();
-    opened.session.visit_frame(&mut capture).unwrap();
+    capture
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     let choice = capture.0.clone();
     assert_ne!(choice, second);
     assert_eq!(
         opened.session.advance(100_000_000, &[]).unwrap().status,
         FamilyStatus::Waiting
     );
-    opened.session.visit_frame(&mut capture).unwrap();
+    capture
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     assert_eq!(capture.0, choice);
     assert_eq!(
         opened
@@ -604,40 +650,54 @@ fn native_gpu_screen_shake_advances_during_wait_and_restores_through_family_inpu
         .unwrap();
     let mut frame = Capture(Vec::new());
     opened.session.advance(16_666_667, &[]).unwrap();
-    opened.session.visit_frame(&mut frame).unwrap();
+    frame
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     let original = frame.0.clone();
     opened.session.advance(16_666_667, &[]).unwrap();
     assert_eq!(
         opened.session.advance(30_000_000, &[]).unwrap().status,
         FamilyStatus::Waiting
     );
-    opened.session.visit_frame(&mut frame).unwrap();
+    frame
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     let negative = frame.0.clone();
     assert_ne!(negative, original);
     opened.session.advance(0, &[key(KeyCode::F5)]).unwrap();
     opened.session.advance(30_000_000, &[]).unwrap();
-    opened.session.visit_frame(&mut frame).unwrap();
+    frame
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     let positive = frame.0.clone();
     assert_ne!(positive, negative);
     opened.session.advance(0, &[key(KeyCode::F9)]).unwrap();
-    opened.session.visit_frame(&mut frame).unwrap();
+    frame
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     assert_eq!(frame.0, negative);
     opened.session.advance(30_000_000, &[]).unwrap();
-    opened.session.visit_frame(&mut frame).unwrap();
+    frame
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     assert_eq!(frame.0, positive);
     opened
         .session
         .advance(0, &[FamilyEvent::WindowSuspended { suspended: true }])
         .unwrap();
     opened.session.advance(30_000_000, &[]).unwrap();
-    opened.session.visit_frame(&mut frame).unwrap();
+    frame
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     assert_eq!(frame.0, positive);
     opened
         .session
         .advance(0, &[FamilyEvent::WindowSuspended { suspended: false }])
         .unwrap();
     opened.session.advance(30_000_000, &[]).unwrap();
-    opened.session.visit_frame(&mut frame).unwrap();
+    frame
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     assert_eq!(frame.0, negative);
     opened.session.close().unwrap();
 }
@@ -655,14 +715,18 @@ fn assert_scroll_restores_background_position(command: &str, middle_pixel: usize
         .unwrap();
     let mut frame = Capture(Vec::new());
     opened.session.advance(16_666_667, &[]).unwrap();
-    opened.session.visit_frame(&mut frame).unwrap();
+    frame
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     let original = frame.0.clone();
     opened.session.advance(16_666_667, &[]).unwrap();
     assert_eq!(
         opened.session.advance(40_000_000, &[]).unwrap().status,
         FamilyStatus::Waiting
     );
-    opened.session.visit_frame(&mut frame).unwrap();
+    frame
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     let middle = frame.0.clone();
     assert_ne!(middle, original);
     assert_eq!(&middle[..4], &[0, 0, 0, 255]);
@@ -675,17 +739,23 @@ fn assert_scroll_restores_background_position(command: &str, middle_pixel: usize
         opened.session.advance(40_000_000, &[]).unwrap().status,
         FamilyStatus::Finished
     );
-    opened.session.visit_frame(&mut frame).unwrap();
+    frame
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     let finished = frame.0.clone();
     assert_ne!(finished, middle);
     opened.session.advance(0, &[key(KeyCode::F9)]).unwrap();
-    opened.session.visit_frame(&mut frame).unwrap();
+    frame
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     assert_eq!(frame.0, middle);
     assert_eq!(
         opened.session.advance(40_000_000, &[]).unwrap().status,
         FamilyStatus::Finished
     );
-    opened.session.visit_frame(&mut frame).unwrap();
+    frame
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     assert_eq!(frame.0, finished);
     opened.session.close().unwrap();
 }

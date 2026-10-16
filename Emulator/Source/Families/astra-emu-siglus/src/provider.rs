@@ -101,7 +101,12 @@ impl FamilyProvider for SiglusProvider {
             }
         };
         let game_path = Path::new(request.game_path.as_str()).to_owned();
-        let open = session::boot(&game_path, request.initial_window, sink)?;
+        let open = session::boot(
+            &game_path,
+            request.initial_window,
+            sink,
+            request.session_epoch,
+        )?;
         let id = self.next_session_id;
         self.next_session_id = id
             .checked_add(1)

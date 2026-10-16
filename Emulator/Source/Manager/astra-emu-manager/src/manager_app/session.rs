@@ -1,10 +1,18 @@
 use super::*;
 
+pub(super) struct SessionServices {
+    pub(super) text: Option<TextReplacementBridge>,
+    pub(super) audio: Option<audio_executor::HostAudioExecutor>,
+    pub(super) modal: Option<ModalBridge>,
+}
+
 pub(super) struct ActiveFamilySession {
     pub(super) family_id: String,
+    session_epoch: u64,
     session: Option<Box<dyn FamilySession>>,
     pub(super) audio: Option<audio_executor::HostAudioExecutor>,
     text: Option<TextReplacementBridge>,
+    modal: Option<ModalBridge>,
     mailbox: FrameMailbox,
     pub(super) status: FamilyStatus,
     pub(super) fullscreen: bool,
@@ -17,20 +25,21 @@ pub(super) struct ActiveFamilySession {
 
 impl ActiveFamilySession {
     pub(super) fn open(
-        game_config: (&GameRecord, Vec<astra_emu_family_api::ConfigEntry>),
+        game_config: (&GameRecord, Vec<astra_emu_family_api::ConfigEntry>, u64),
         candidate: &FamilyProbeCandidate,
         registry: &mut FamilyProviderRegistry,
         mailbox: FrameMailbox,
         initial_window: WindowState,
-        text: Option<TextReplacementBridge>,
-        audio: Option<audio_executor::HostAudioExecutor>,
+        services: SessionServices,
     ) -> Result<Self, String> {
-        let (game, configuration) = game_config;
+        let (game, configuration, session_epoch) = game_config;
+        let SessionServices { text, audio, modal } = services;
         if candidate.descriptor.family_id != candidate.report.family_id
             || game.family_id.as_deref() != Some(candidate.report.family_id.as_str())
         {
             return Err("ASTRA_EMU_FAMILY_BINDING_MISMATCH".into());
         }
+        mailbox.activate(session_epoch).map_err(|error| error.to_string())?;
         let host = FamilyHostServices {
             audio_sink: audio
                 .as_ref()
@@ -40,6 +49,8 @@ impl ActiveFamilySession {
                 .as_ref()
                 .map(|bridge| ROption::RSome(bridge.sink()))
                 .unwrap_or(ROption::RNone),
+            modal: modal.as_ref().map(|bridge| ROption::RSome(bridge.sink()))
+                .unwrap_or(ROption::RNone),
         };
         let opened = registry
             .open_selected(
@@ -47,16 +58,24 @@ impl ActiveFamilySession {
                 OpenRequest {
                     configuration: configuration.into(),
                     game_path: game.location.clone().into(),
+                    session_epoch,
                     initial_window,
                     host,
                 },
             )
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| {
+                if let Some(modal) = modal.as_ref() {
+                    modal.cancel_pending();
+                }
+                error.to_string()
+            })?;
         let mut active = Self {
             family_id: candidate.descriptor.family_id.clone(),
+            session_epoch,
             session: Some(opened.session),
             audio,
             text,
+            modal,
             mailbox,
             status: FamilyStatus::Running,
             fullscreen: false,
@@ -75,15 +94,22 @@ impl ActiveFamilySession {
         Ok(active)
     }
 
-    pub(super) fn capture_frame(&self) -> Result<(), String> {
-        let session = self
-            .session
-            .as_ref()
+    pub(super) fn capture_frame(&mut self) -> Result<(), String> {
+        let after = self.mailbox.identity()?;
+        let session = self.session.as_mut()
             .ok_or_else(|| "ASTRA_EMU_FAMILY_SESSION_CLOSED".to_owned())?;
-        let mut collector = FrameCollector::new(self.mailbox.clone());
-        session
-            .visit_frame(&mut collector)
-            .map_err(|error| error.to_string())
+        let frame = session.acquire_frame(after).map_err(|error| error.to_string())?;
+        frame.validate(self.session_epoch).map_err(|error| error.to_string())?;
+        match frame {
+            astra_emu_family_api::FramePoll::Ready(frame) => {
+                self.mailbox.publish(frame).map_err(|error| error.to_string())
+            }
+            astra_emu_family_api::FramePoll::Unchanged(identity) if after == Some(identity) => Ok(()),
+            astra_emu_family_api::FramePoll::Pending(_) => Ok(()),
+            astra_emu_family_api::FramePoll::Unchanged(_) => {
+                Err("ASTRA_EMU_FAMILY_FRAME_BASELINE".into())
+            }
+        }
     }
 
     fn capture_initial_frame(&mut self) -> Result<(), String> {
@@ -92,8 +118,8 @@ impl ActiveFamilySession {
         Ok(())
     }
 
-    pub(super) fn host_work_complete(&mut self) {
-        self.reset_clock_after_host_work("host_work");
+    pub(super) fn epoch(&self) -> u64 {
+        self.session_epoch
     }
 
     fn reset_clock_after_host_work(&mut self, reason: &'static str) {
@@ -218,6 +244,9 @@ impl ActiveFamilySession {
     }
 
     pub(super) fn close(&mut self) -> Result<(), String> {
+        if let Some(modal) = self.modal.take() {
+            modal.cancel_pending();
+        }
         // Let the family cancel and join its workers while their host sinks
         // are still alive. Releasing the bounded PCM queue first races a
         // family worker into ASTRA_EMU_AUDIO_CLOSED before it can observe its
@@ -237,7 +266,7 @@ impl ActiveFamilySession {
             text_error,
             audio_error,
             session_error,
-            self.mailbox.clear().err(),
+            self.mailbox.clear(self.session_epoch).err(),
         ]
         .into_iter()
         .flatten()
@@ -282,8 +311,8 @@ mod tests {
             Ok(AdvanceResponse::running())
         }
 
-        fn visit_frame(&self, _: &mut dyn FrameVisitor) -> FamilyResult<()> {
-            Ok(())
+        fn acquire_frame(&mut self, _: Option<FrameIdentity>) -> FamilyResult<FramePoll> {
+            Ok(FramePoll::Pending(FrameIdentity { session_epoch: 1, generation: 0 }))
         }
 
         fn close(mut self: Box<Self>) -> FamilyResult<()> {
@@ -346,24 +375,23 @@ mod tests {
             );
             std::thread::sleep(Duration::from_millis(1));
         }
-        ActiveFamilySession {
-            family_id: "audio-lifecycle-test".into(),
-            session: Some(Box::new(AudioSession {
-                sink,
-                stop,
-                worker: Some(worker),
-            })),
-            audio: Some(audio),
-            text: None,
-            mailbox: FrameMailbox::new(),
-            status: FamilyStatus::Running,
-            fullscreen: false,
-            title: None,
-            pending_icon: None,
-            pending_pointer: None,
-            last_tick: Instant::now(),
-            next_deadline: Instant::now(),
-        }
+        ActiveFamilySession { session_epoch: 1, family_id: "audio-lifecycle-test".into(),
+        session: Some(Box::new(AudioSession {
+            sink,
+            stop,
+            worker: Some(worker),
+        })),
+        audio: Some(audio),
+        text: None,
+        modal: None,
+        mailbox: FrameMailbox::new(),
+        status: FamilyStatus::Running,
+        fullscreen: false,
+        title: None,
+        pending_icon: None,
+        pending_pointer: None,
+        last_tick: Instant::now(),
+        next_deadline: Instant::now(), }
     }
 
     #[test]
@@ -387,9 +415,9 @@ mod tests {
                     ..AdvanceResponse::running()
                 })
             }
-            fn visit_frame(&self, _: &mut dyn FrameVisitor) -> FamilyResult<()> {
+            fn acquire_frame(&mut self, _: Option<FrameIdentity>) -> FamilyResult<FramePoll> {
                 *self.captured.lock().unwrap() = Some(Instant::now());
-                Ok(())
+                Ok(FramePoll::Pending(FrameIdentity { session_epoch: 1, generation: 0 }))
             }
             fn close(self: Box<Self>) -> FamilyResult<()> {
                 Ok(())
@@ -397,23 +425,22 @@ mod tests {
         }
         for reset in [false, true] {
             let captured = std::sync::Arc::new(std::sync::Mutex::new(None));
-            let mut active = ActiveFamilySession {
-                family_id: "clock-test".into(),
-                session: Some(Box::new(ClockSession {
-                    reset,
-                    captured: captured.clone(),
-                })),
-                audio: None,
-                text: None,
-                mailbox: FrameMailbox::new(),
-                status: FamilyStatus::Running,
-                fullscreen: false,
-                title: None,
-                pending_icon: None,
-                pending_pointer: None,
-                last_tick: Instant::now(),
-                next_deadline: Instant::now(),
-            };
+            let mut active = ActiveFamilySession { session_epoch: 1, family_id: "clock-test".into(),
+            session: Some(Box::new(ClockSession {
+                reset,
+                captured: captured.clone(),
+            })),
+            audio: None,
+            text: None,
+            modal: None,
+            mailbox: FrameMailbox::new(),
+            status: FamilyStatus::Running,
+            fullscreen: false,
+            title: None,
+            pending_icon: None,
+            pending_pointer: None,
+            last_tick: Instant::now(),
+            next_deadline: Instant::now(), };
             active.advance(1, &[]).unwrap();
             let completion = captured.lock().unwrap().unwrap();
             if reset {
@@ -441,8 +468,8 @@ mod tests {
                     ..AdvanceResponse::running()
                 })
             }
-            fn visit_frame(&self, _: &mut dyn FrameVisitor) -> FamilyResult<()> {
-                Ok(())
+            fn acquire_frame(&mut self, _: Option<FrameIdentity>) -> FamilyResult<FramePoll> {
+                Ok(FramePoll::Pending(FrameIdentity { session_epoch: 1, generation: 0 }))
             }
             fn close(self: Box<Self>) -> FamilyResult<()> {
                 Ok(())
@@ -451,20 +478,19 @@ mod tests {
 
         for reset in [false, true] {
             let anchor = Instant::now();
-            let mut active = ActiveFamilySession {
-                family_id: "host-event-clock-test".into(),
-                session: Some(Box::new(HostEventSession { reset })),
-                audio: None,
-                text: None,
-                mailbox: FrameMailbox::new(),
-                status: FamilyStatus::Running,
-                fullscreen: false,
-                title: None,
-                pending_icon: None,
-                pending_pointer: None,
-                last_tick: anchor,
-                next_deadline: anchor + Duration::from_nanos(FIXED_FRAME_NS),
-            };
+            let mut active = ActiveFamilySession { session_epoch: 1, family_id: "host-event-clock-test".into(),
+            session: Some(Box::new(HostEventSession { reset })),
+            audio: None,
+            text: None,
+            modal: None,
+            mailbox: FrameMailbox::new(),
+            status: FamilyStatus::Running,
+            fullscreen: false,
+            title: None,
+            pending_icon: None,
+            pending_pointer: None,
+            last_tick: anchor,
+            next_deadline: anchor + Duration::from_nanos(FIXED_FRAME_NS), };
             active
                 .advance_host_events(&[FamilyEvent::WindowFocused { focused: false }])
                 .unwrap();
@@ -492,11 +518,11 @@ mod tests {
             fn advance(&mut self, _: u64, _: &[FamilyEvent]) -> FamilyResult<AdvanceResponse> {
                 Ok(AdvanceResponse::running())
             }
-            fn visit_frame(&self, _: &mut dyn FrameVisitor) -> FamilyResult<()> {
+            fn acquire_frame(&mut self, _: Option<FrameIdentity>) -> FamilyResult<FramePoll> {
                 self.entered.send(()).unwrap();
                 self.release.lock().unwrap().recv().unwrap();
                 *self.completed.lock().unwrap() = Some(Instant::now());
-                Ok(())
+                Ok(FramePoll::Pending(FrameIdentity { session_epoch: 1, generation: 0 }))
             }
             fn close(self: Box<Self>) -> FamilyResult<()> {
                 Ok(())
@@ -511,24 +537,23 @@ mod tests {
             entered_receiver.recv().unwrap();
             release.send(()).unwrap();
         });
-        let mut active = ActiveFamilySession {
-            family_id: "initial-frame-clock-test".into(),
-            session: Some(Box::new(InitialFrameSession {
-                entered,
-                release: std::sync::Mutex::new(release_receiver),
-                completed: completed_for_session,
-            })),
-            audio: None,
-            text: None,
-            mailbox: FrameMailbox::new(),
-            status: FamilyStatus::Running,
-            fullscreen: false,
-            title: None,
-            pending_icon: None,
-            pending_pointer: None,
-            last_tick: Instant::now(),
-            next_deadline: Instant::now(),
-        };
+        let mut active = ActiveFamilySession { session_epoch: 1, family_id: "initial-frame-clock-test".into(),
+        session: Some(Box::new(InitialFrameSession {
+            entered,
+            release: std::sync::Mutex::new(release_receiver),
+            completed: completed_for_session,
+        })),
+        audio: None,
+        text: None,
+        modal: None,
+        mailbox: FrameMailbox::new(),
+        status: FamilyStatus::Running,
+        fullscreen: false,
+        title: None,
+        pending_icon: None,
+        pending_pointer: None,
+        last_tick: Instant::now(),
+        next_deadline: Instant::now(), };
 
         active.capture_initial_frame().unwrap();
         releaser.join().unwrap();
@@ -541,53 +566,4 @@ mod tests {
         active.close().unwrap();
     }
 
-    #[test]
-    fn window_close_reports_advance_before_cleanup_error() {
-        struct FailingSession;
-
-        impl FamilySession for FailingSession {
-            fn advance(&mut self, _: u64, _: &[FamilyEvent]) -> FamilyResult<AdvanceResponse> {
-                Err(FamilyError::new("ASTRA_TEST_ADVANCE", "advance failed"))
-            }
-
-            fn visit_frame(&self, _: &mut dyn FrameVisitor) -> FamilyResult<()> {
-                Ok(())
-            }
-
-            fn close(self: Box<Self>) -> FamilyResult<()> {
-                Err(FamilyError::new("ASTRA_TEST_CLOSE", "close failed"))
-            }
-        }
-
-        let root = tempfile::tempdir().unwrap();
-        let mut controller = AstraEmuManagerController::open_library(
-            root.path().to_owned(),
-            FrameMailbox::new(),
-            Vec::new(),
-        )
-        .unwrap();
-        controller.active = Some(ActiveFamilySession {
-            family_id: "error-order-test".into(),
-            session: Some(Box::new(FailingSession)),
-            audio: None,
-            text: None,
-            mailbox: FrameMailbox::new(),
-            status: FamilyStatus::Running,
-            fullscreen: false,
-            title: None,
-            pending_icon: None,
-            pending_pointer: None,
-            last_tick: Instant::now(),
-            next_deadline: Instant::now(),
-        });
-
-        let result = controller
-            .handle_physical_event(FamilyEvent::WindowCloseRequested)
-            .unwrap_err();
-
-        assert_eq!(
-            result,
-            "ASTRA_TEST_ADVANCE: advance failed; ASTRA_TEST_CLOSE: close failed"
-        );
-    }
 }

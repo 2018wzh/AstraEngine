@@ -13,15 +13,14 @@ use std::{
 use abi_stable::{
     abi_stability::abi_checking::{check_layout_compatibility_with_globals, CheckingGlobals},
     library::{lib_header_from_raw_library, RawLibrary},
-    sabi_trait::TD_Opaque,
     std_types::RString,
     StableAbi,
 };
 use astra_emu_family_api::{
     AdvanceRequest, AdvanceResponse, AstraFamilyModuleRef, FamilyDescriptor as AbiDescriptor,
     FamilyError, FamilyModuleBox, FamilyOpen, FamilyProvider, FamilyResult, FamilySession,
-    FrameConsumer, FrameConsumerRef, FrameView, FrameVisitor, OpenRequest, OpenResponse,
-    ProbeReport, ProbeRequest, SessionRequest,
+    FrameIdentity, FramePoll, FrameRequest, OpenRequest, OpenResponse, ProbeReport, ProbeRequest,
+    SessionRequest,
 };
 use thiserror::Error;
 
@@ -231,6 +230,7 @@ impl FamilyProvider for LoadedFamilyPlugin {
 
     fn open(&mut self, request: OpenRequest) -> FamilyResult<FamilyOpen> {
         request.validate_for_descriptor(&self.inner.descriptor)?;
+        let session_epoch = request.session_epoch;
         let response = self
             .inner
             .module
@@ -264,6 +264,7 @@ impl FamilyProvider for LoadedFamilyPlugin {
             session: Box::new(LoadedFamilySession {
                 inner: Rc::clone(&self.inner),
                 session_id,
+                session_epoch,
                 closed: false,
             }),
         })
@@ -273,6 +274,7 @@ impl FamilyProvider for LoadedFamilyPlugin {
 struct LoadedFamilySession {
     inner: Rc<LoadedModuleInner>,
     session_id: RString,
+    session_epoch: u64,
     closed: bool,
 }
 
@@ -298,32 +300,36 @@ impl FamilySession for LoadedFamilySession {
         Ok(response)
     }
 
-    fn visit_frame(&self, visitor: &mut dyn FrameVisitor) -> FamilyResult<()> {
-        let mut bridge = FrameForwarder {
-            visitor,
-            frame_count: 0,
-            callback_error: None,
-        };
-        // `FrameConsumerRef` is tied to this stack borrow and can only be used
-        // for the synchronous `frame` call. No foreign frame bytes or callback
-        // object survive the call. Library residency does not extend the borrow.
-        let consumer: FrameConsumerRef<'_> = FrameConsumerRef::from_ptr(&mut bridge, TD_Opaque);
-        let result = self
+    fn acquire_frame(&mut self, after: Option<FrameIdentity>) -> FamilyResult<FramePoll> {
+        let frame = self
             .inner
             .module
-            .frame(
-                SessionRequest {
-                    session_id: self.session_id.clone(),
-                },
-                consumer,
-            )
+            .frame(FrameRequest {
+                session_id: self.session_id.as_str().into(),
+                after: after.into(),
+            })
             .into_result()
-            .map_err(host_owned_error);
-        if let Some(error) = bridge.callback_error.take() {
-            return Err(host_owned_error(error));
+            .map_err(host_owned_error)?;
+        frame.validate(self.session_epoch)?;
+        if let FramePoll::Unchanged(identity) = &frame {
+            if after != Some(*identity) {
+                return Err(FamilyError::invalid(
+                    "ASTRA_EMU_FAMILY_FRAME_BASELINE",
+                    "unchanged frame does not match the requested complete baseline",
+                ));
+            }
         }
-        result?;
-        Ok(())
+        if after.is_some_and(|previous| {
+            previous.session_epoch == self.session_epoch
+                && frame.identity().generation < previous.generation
+        }) {
+            return Err(FamilyError::invalid(
+                "ASTRA_EMU_FAMILY_FRAME_GENERATION",
+                "frame generation moved backwards",
+            ));
+        }
+        // Keep the foreign ABI owner through upload; never into_vec/into_arc.
+        Ok(frame)
     }
 
     fn close(mut self: Box<Self>) -> FamilyResult<()> {
@@ -361,56 +367,6 @@ impl Drop for LoadedFamilySession {
         } else {
             tracing::warn!(event = "astra.emu.family.session_dropped_without_close");
         }
-    }
-}
-
-struct FrameForwarder<'a> {
-    visitor: &'a mut dyn FrameVisitor,
-    frame_count: usize,
-    callback_error: Option<FamilyError>,
-}
-
-impl FrameConsumer for FrameForwarder<'_> {
-    fn accept(&mut self, frame: FrameView<'_>) -> astra_emu_family_api::FfiFamilyResult<()> {
-        if self.frame_count != 0 {
-            return self.error(FamilyError::invalid(
-                "ASTRA_EMU_FAMILY_FRAME_COUNT",
-                "family emitted more than one frame",
-            ));
-        }
-        let required = match frame.info.required_bytes() {
-            Some(required) => required,
-            None => {
-                return self.error(FamilyError::invalid(
-                    "ASTRA_EMU_FAMILY_FRAME_SIZE",
-                    "frame size does not fit host usize",
-                ))
-            }
-        };
-        if let Err(error) = frame.info.validate() {
-            return self.error(error);
-        }
-        let pixels = frame.as_slice();
-        if pixels.len() < required {
-            return self.error(FamilyError::invalid(
-                "ASTRA_EMU_FAMILY_FRAME_BYTES",
-                "frame pixels are shorter than stride times height",
-            ));
-        }
-        self.frame_count = 1;
-        match self.visitor.accept(frame) {
-            Ok(()) => astra_emu_family_api::FfiFamilyResult::ROk(()),
-            Err(error) => self.error(error),
-        }
-    }
-}
-
-impl FrameForwarder<'_> {
-    fn error(&mut self, error: FamilyError) -> astra_emu_family_api::FfiFamilyResult<()> {
-        if self.callback_error.is_none() {
-            self.callback_error = Some(error.clone());
-        }
-        astra_emu_family_api::FfiFamilyResult::RErr(error)
     }
 }
 
@@ -482,9 +438,6 @@ fn host_owned_open_response(response: OpenResponse) -> OpenResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use astra_emu_family_api::{FamilyResult, FrameAlpha, FrameFormat, FrameInfo};
-
-    struct CountingVisitor(usize);
 
     #[test]
     #[ignore = "requires an explicitly built Family plugin binary"]
@@ -510,42 +463,5 @@ mod tests {
                 .is_none());
             drop(plugin);
         }
-    }
-
-    impl FrameVisitor for CountingVisitor {
-        fn accept(&mut self, _frame: FrameView<'_>) -> FamilyResult<()> {
-            self.0 += 1;
-            Ok(())
-        }
-    }
-
-    #[test]
-    fn frame_forwarder_latches_errors_when_plugin_ignores_callback_failure() {
-        let info = FrameInfo {
-            width: 1,
-            height: 1,
-            logical_width: 1,
-            logical_height: 1,
-            stride: 4,
-            format: FrameFormat::Rgba8Srgb {
-                alpha: FrameAlpha::Opaque,
-            },
-        };
-        let mut visitor = CountingVisitor(0);
-        let mut bridge = FrameForwarder {
-            visitor: &mut visitor,
-            frame_count: 0,
-            callback_error: None,
-        };
-        let first = FrameView::from_slice(&[0, 0, 0, 255], info).unwrap();
-        assert!(bridge.accept(first).into_result().is_ok());
-        let second = FrameView::from_slice(&[0, 0, 0, 255], info).unwrap();
-        assert!(bridge.accept(second).into_result().is_err());
-        assert_eq!(
-            bridge.callback_error.as_ref().map(FamilyError::code),
-            Some("ASTRA_EMU_FAMILY_FRAME_COUNT")
-        );
-        drop(bridge);
-        assert_eq!(visitor.0, 1);
     }
 }

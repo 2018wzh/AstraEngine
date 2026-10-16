@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use astra_vn_editor::{AstraSource, AuthoringWorkspace, DocumentEdits, EditBatch, TextEdit};
 
@@ -18,7 +19,7 @@ pub struct Project {
     pub profiles: Vec<String>,
     disk_text: BTreeMap<String, String>,
     pub content: Vec<String>,
-    options: astra_vn_editor::CompileAstraProjectOptions,
+    options: Arc<astra_vn_editor::CompileAstraProjectOptions>,
 }
 
 impl Project {
@@ -67,7 +68,7 @@ impl Project {
                 content: files.content,
                 asset_roots: files.asset_roots,
                 profiles: files.profiles,
-                options: files.options,
+                options: Arc::new(files.options),
             });
         }
         let active = path
@@ -131,7 +132,11 @@ impl Project {
     }
 
     pub fn compile(&self) -> Result<astra_vn_editor::CompiledVnProject, astra_vn_editor::VnError> {
-        self.documents.compile(self.options.clone())
+        self.documents.compile((*self.options).clone())
+    }
+
+    pub fn compilation_options(&self) -> Arc<astra_vn_editor::CompileAstraProjectOptions> {
+        Arc::clone(&self.options)
     }
 
     pub fn any_dirty(&self) -> bool {

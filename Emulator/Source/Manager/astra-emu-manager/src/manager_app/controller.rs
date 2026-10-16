@@ -1,6 +1,18 @@
 use super::*;
 
 impl ManagerController for AstraEmuManagerController {
+    fn take_modal_update(&mut self) -> Option<astra_emu_manager::modal_service::ModalUiUpdate> {
+        self.registry.take_modal_update()
+    }
+
+    fn respond_modal(
+        &mut self,
+        id: astra_emu_manager::modal_service::ModalId,
+        response: astra_emu_family_api::ModalResponse,
+    ) -> Result<(), String> {
+        self.registry.respond_modal(id, response)
+    }
+
     fn set_system_theme(&mut self, dark: bool) {
         if self.appearance.theme_mode == "system" {
             self.appearance.theme_dark = dark;
@@ -20,7 +32,7 @@ impl ManagerController for AstraEmuManagerController {
         self.handle_physical_event(event)
     }
     fn is_game_active(&self) -> bool {
-        self.active.is_some()
+        self.active.as_ref().is_some_and(|active| active.closing.is_none())
     }
     fn model(&self) -> Result<ManagerViewModel, String> {
         AstraEmuManagerController::model(self)
@@ -154,29 +166,28 @@ impl ManagerController for AstraEmuManagerController {
         AstraEmuManagerController::advance_runtime(self)
     }
 
-    fn host_work_complete(&mut self) {
-        AstraEmuManagerController::host_work_complete(self);
-    }
-
     fn game_fullscreen(&self) -> bool {
-        self.active.as_ref().is_some_and(|active| active.fullscreen)
+        self.active.as_ref().is_some_and(|active| active.closing.is_none() && active.fullscreen)
     }
 
     fn take_game_icon(&mut self) -> Option<astra_emu_family_api::FamilyWindowIcon> {
         self.active
             .as_mut()
+            .filter(|active| active.closing.is_none())
             .and_then(|active| active.pending_icon.take())
     }
 
     fn take_game_pointer(&mut self) -> Option<astra_emu_family_api::FamilyPointerRequest> {
         self.active
             .as_mut()
+            .filter(|active| active.closing.is_none())
             .and_then(|active| active.pending_pointer.take())
     }
 
     fn game_title(&self) -> Option<&str> {
         self.active
             .as_ref()
+            .filter(|active| active.closing.is_none())
             .and_then(|active| active.title.as_deref())
     }
 

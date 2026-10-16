@@ -27,7 +27,9 @@ fn native_gpu_particle_family_save_restore_and_pause() {
     opened.session.advance(16_666_667, &[]).unwrap();
     opened.session.advance(16_666_667, &[]).unwrap();
     opened.session.advance(64_000_000, &[]).unwrap();
-    opened.session.visit_frame(&mut capture).unwrap();
+    capture
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     let saved = capture.0.clone();
     assert!(saved
         .as_chunks::<4>()
@@ -36,21 +38,29 @@ fn native_gpu_particle_family_save_restore_and_pause() {
         .any(|pixel| pixel[..3] != [0, 0, 0]));
     opened.session.advance(0, &[key(KeyCode::F5)]).unwrap();
     opened.session.advance(64_000_000, &[]).unwrap();
-    opened.session.visit_frame(&mut capture).unwrap();
+    capture
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     let later = capture.0.clone();
     assert_ne!(saved, later);
     opened.session.advance(0, &[key(KeyCode::F9)]).unwrap();
-    opened.session.visit_frame(&mut capture).unwrap();
+    capture
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     assert_eq!(saved, capture.0);
     opened.session.advance(64_000_000, &[]).unwrap();
-    opened.session.visit_frame(&mut capture).unwrap();
+    capture
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     assert_eq!(later, capture.0);
     opened
         .session
         .advance(0, &[FamilyEvent::WindowSuspended { suspended: true }])
         .unwrap();
     opened.session.advance(64_000_000, &[]).unwrap();
-    opened.session.visit_frame(&mut capture).unwrap();
+    capture
+        .read(opened.session.acquire_frame(None).unwrap())
+        .unwrap();
     assert_eq!(later, capture.0);
     opened.session.close().unwrap();
 }

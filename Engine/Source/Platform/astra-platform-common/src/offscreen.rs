@@ -1,5 +1,4 @@
 use std::{
-    collections::BTreeMap,
     sync::{
         atomic::{AtomicBool, AtomicU8, Ordering},
         mpsc, Arc,
@@ -8,7 +7,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use astra_media_core::{FilterParam, FilterValidator, SceneCommand};
+use astra_media_core::SceneCommand;
 
 use astra_platform::{
     CapturedFrame, GpuAdapterPolicy, GpuBackendPolicy, GpuDeviceTypePolicy, PlatformError,
@@ -18,6 +17,7 @@ use astra_platform::{
 use crate::{
     glyph_atlas::{GlyphProfileQueries, WgpuGlyphAtlasRenderer},
     presentation::install_device_lost_callback,
+    scene_filters::SceneFilters,
 };
 
 #[cfg(test)]
@@ -68,9 +68,6 @@ mod adapter_identity_tests {
 }
 
 mod wgpu_offscreen_renderer;
-use wgpu_offscreen_renderer::CachedFilterOutput;
-use wgpu_offscreen_renderer::CachedFilterPipeline;
-use wgpu_offscreen_renderer::FilterPassContext;
 use wgpu_offscreen_renderer::GpuTimer;
 use wgpu_offscreen_renderer::GpuTimerSlot;
 use wgpu_offscreen_renderer::PendingOutput;
@@ -97,14 +94,12 @@ use submit_frame_internal::device_descriptor;
 use submit_frame_internal::renderer_execution_identity;
 use submit_frame_internal::select_adapter;
 mod apply_filter;
-use apply_filter::apply_filter;
 use apply_filter::elapsed_ns;
 use apply_filter::mark_gpu_timestamp_recorded;
 use apply_filter::resolve_gpu_timestamps;
 mod float_param;
 use float_param::backend_name;
 use float_param::device_type_name;
-use float_param::float_param;
 use float_param::hash;
 use float_param::invalid;
 use float_param::native_backend_mask;

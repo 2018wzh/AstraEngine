@@ -455,8 +455,9 @@ impl MusicaProvider {
                 .checked_mul(4)
                 .ok_or_else(|| error("ASTRA_EMU_MUSICA_FRAME_SIZE", "frame stride overflows"))?,
             format: FrameFormat::Rgba8Srgb {
-                alpha: FrameAlpha::Opaque,
+                alpha: FrameAlpha::Ignored,
             },
+            rows: FrameRowOrder::TopToBottom,
         };
         let response = OpenResponse {
             session_id: id.clone().into(),
@@ -467,6 +468,7 @@ impl MusicaProvider {
         let mut session = MusicaSession::new(
             id,
             info,
+            FramePublisher::new(request.session_epoch)?,
             archive,
             vm,
             scene,

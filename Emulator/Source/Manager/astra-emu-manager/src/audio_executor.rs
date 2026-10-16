@@ -20,10 +20,10 @@ use astra_emu_family_api::{
     AudioWriteStatus, PcmChunk, PcmFormatSpec, MAX_AUDIO_SAMPLES_PER_CHUNK,
 };
 #[cfg(test)]
-use audio_conversion::{convert_chunk, convert_samples};
-use audio_conversion::{pcm_chunk_samples, AudioConverter, OutputFormat};
+use audio_conversion::convert_chunk;
+use audio_conversion::{AudioConverter, OutputFormat, OutputPcm};
 use audio_progress::{PlaybackCounters, PlaybackTracker};
-use crossbeam_channel::{bounded, select, Receiver, Sender};
+use crossbeam_channel::{bounded, Receiver, Sender};
 
 const AUDIO_QUEUE_CHUNKS: usize = 4;
 const MAX_AUDIO_OUTPUT_SAMPLES: usize = MAX_AUDIO_SAMPLES_PER_CHUNK;
@@ -44,25 +44,31 @@ struct AudioState {
     progress_failed: AtomicBool,
     progress: Arc<PlaybackCounters>,
     configured: Mutex<Option<OutputFormat>>,
-    producer: Mutex<Option<Sender<Vec<f32>>>>,
-    cancel_waiters: Mutex<Vec<Sender<()>>>,
+    producer: Mutex<Option<Sender<OutputPcm>>>,
+    cancel_sender: parking_lot::Mutex<Option<Sender<()>>>,
+    cancel_receiver: Receiver<()>,
+    retired: parking_lot::Mutex<Option<rtrb::Consumer<OutputPcm>>>,
+    receiver_guard: parking_lot::Mutex<Option<Receiver<OutputPcm>>>,
+    consumer_done: parking_lot::Mutex<Option<Receiver<()>>>,
     stream: Mutex<Option<AudioOutputDevice>>,
     converter: Mutex<Option<AudioConverter>>,
 }
 
-type CancelWaiter = (Sender<()>, Receiver<()>);
 
 struct HostAudioSink {
     state: Arc<AudioState>,
 }
 
 struct DeviceConsumer {
-    receiver: Receiver<Vec<f32>>,
-    current: Option<Vec<f32>>,
+    receiver: Receiver<OutputPcm>,
+    current: Option<OutputPcm>,
+    retired: rtrb::Producer<OutputPcm>,
     cursor: usize,
     channels: usize,
     tracker: Option<PlaybackTracker>,
     last_callback: Option<cpal::StreamInstant>,
+    // Last field: notify close only after queue and retirement producers drop.
+    _completion: ConsumerCompletion,
 }
 
 impl HostAudioExecutor {
@@ -70,6 +76,7 @@ impl HostAudioExecutor {
         device_kind: AudioDeviceKind,
         wake: Option<astra_emu_manager::HostWake>,
     ) -> Self {
+        let (cancel_sender, cancel_receiver) = bounded(0);
         Self {
             state: Arc::new(AudioState {
                 device_kind,
@@ -81,7 +88,11 @@ impl HostAudioExecutor {
                 progress: Arc::new(PlaybackCounters::default()),
                 configured: Mutex::new(None),
                 producer: Mutex::new(None),
-                cancel_waiters: Mutex::new(Vec::new()),
+                cancel_sender: parking_lot::Mutex::new(Some(cancel_sender)),
+                cancel_receiver,
+                retired: parking_lot::Mutex::new(None),
+                receiver_guard: parking_lot::Mutex::new(None),
+                consumer_done: parking_lot::Mutex::new(None),
                 stream: Mutex::new(None),
                 converter: Mutex::new(None),
             }),
@@ -97,27 +108,40 @@ impl HostAudioExecutor {
         )
     }
 
-    /// Stop the device before releasing the family session. The cancellation
-    /// signal disconnects blocked writes; no fixed tick or callback is needed.
+    /// Cancel blocked writes, stop the device and reclaim its CPU owners off callback.
     pub(crate) fn close(&self) -> Result<(), String> {
         self.state.cancelled.store(true, Ordering::Release);
         self.state.closed.store(true, Ordering::Release);
-        wake_cancel_waiters(&self.state)?;
-        self.state
-            .producer
-            .lock()
-            .map_err(|_| "ASTRA_EMU_AUDIO_PRODUCER_LOCK".to_owned())?
-            .take();
-        let stream = self
-            .state
-            .stream
-            .lock()
-            .map_err(|_| "ASTRA_EMU_AUDIO_STREAM_LOCK".to_owned())?
-            .take();
-        if let Some(stream) = stream {
-            stream.close()?;
+        cancel_writes(&self.state);
+        // A poisoned ownership lock is still an error, but cannot skip teardown.
+        let producer_error = match self.state.producer.lock() {
+            Ok(mut producer) => { producer.take(); None }
+            Err(poison) => {
+                poison.into_inner().take();
+                Some("ASTRA_EMU_AUDIO_PRODUCER_LOCK".to_owned())
+            }
+        };
+        let (stream, stream_lock_error) = match self.state.stream.lock() {
+            Ok(mut stream) => (stream.take(), None),
+            Err(poison) => (poison.into_inner().take(), Some("ASTRA_EMU_AUDIO_STREAM_LOCK".to_owned())),
+        };
+        let stream_error = stream.and_then(|stream| stream.close().err());
+        let done_error = self.state.consumer_done.lock().take()
+            .and_then(|done| done.recv().err())
+            .map(|_| "ASTRA_EMU_AUDIO_CONSUMER_SHUTDOWN".to_owned());
+        // Serialize with the last admitted producer before freeing queued owners.
+        let (mut converter, converter_error) = match self.state.converter.lock() {
+            Ok(converter) => (converter, None),
+            Err(poison) => (poison.into_inner(), Some("ASTRA_EMU_AUDIO_CONVERTER_LOCK".to_owned())),
+        };
+        converter.take();
+        reclaim_retired(&self.state);
+        if let Some(receiver) = self.state.receiver_guard.lock().take() {
+            while receiver.try_recv().is_ok() {}
         }
-        self.check_health()
+        [producer_error, stream_lock_error, stream_error, done_error, converter_error, self.check_health().err()]
+            .into_iter().flatten().reduce(|first, next| format!("{first}; {next}"))
+            .map_or(Ok(()), Err)
     }
 
     pub(crate) fn check_health(&self) -> Result<(), String> {
@@ -165,13 +189,22 @@ impl HostAudioSink {
         }
 
         let (producer, receiver) = bounded(AUDIO_QUEUE_CHUNKS);
+        // At most queue + current + one serial blocked producer can retire
+        // between producer reclamations. The callback never frees a PCM owner.
+        let (retired, reclaimer) = rtrb::RingBuffer::new(AUDIO_QUEUE_CHUNKS + 2);
+        let (completion, done) = bounded(1);
+        *self.state.retired.lock() = Some(reclaimer);
+        *self.state.receiver_guard.lock() = Some(receiver.clone());
+        *self.state.consumer_done.lock() = Some(done);
         let consumer = DeviceConsumer {
             receiver,
             current: None,
+            retired,
             cursor: 0,
             channels: 1,
             tracker: None,
             last_callback: None,
+            _completion: ConsumerCompletion(Some(completion)),
         };
         let (output, stream) = AudioOutputDevice::open(
             self.state.device_kind,
@@ -242,11 +275,15 @@ impl HostAudioSink {
             .converter
             .lock()
             .map_err(|_| "ASTRA_EMU_AUDIO_CONVERTER_LOCK".to_owned())?;
+        if self.state.cancelled.load(Ordering::Acquire) {
+            return Ok(AudioWriteStatus::Cancelled);
+        }
+        reclaim_retired(&self.state);
         self.state.progress.check_accept(source_frames)?;
         let samples = converter
             .as_mut()
             .ok_or_else(|| "ASTRA_EMU_AUDIO_NOT_CONFIGURED".to_owned())?
-            .push(pcm_chunk_samples(chunk))?;
+            .push_chunk(chunk)?;
         if samples.is_empty() {
             // Rubato may retain this entire input block until its next window.
             // Empty output is accepted source PCM, not a device queue entry.
@@ -264,20 +301,16 @@ impl HostAudioSink {
             .as_ref()
             .cloned()
             .ok_or_else(|| "ASTRA_EMU_AUDIO_NOT_CONFIGURED".to_owned())?;
-        // `select!` waits on either queue capacity or cancellation. It never
-        // polls the queue with a timer, so Family workers stop promptly when
-        // the Manager closes the session.
-        let Some((cancel_tx, cancel_rx)) = register_cancel_waiter(&self.state)? else {
-            return Ok(AudioWriteStatus::Cancelled);
-        };
-        let result = select! {
+        // Disconnecting the session's one-shot signal wakes every blocked writer.
+        // No per-chunk waiter channel/allocation; mixer-local cancellation stays
+        // in its Family scope and never disconnects this session signal.
+        let result = crossbeam_channel::select_biased! {
+            recv(self.state.cancel_receiver) -> _ => Ok(AudioWriteStatus::Cancelled),
             send(producer, samples) -> result => result.map(|_| AudioWriteStatus::Accepted).map_err(|_| "ASTRA_EMU_AUDIO_QUEUE_CLOSED".into()),
-            recv(cancel_rx) -> _ => Ok(AudioWriteStatus::Cancelled),
         };
         if matches!(result, Ok(AudioWriteStatus::Accepted)) {
             self.state.progress.accept(source_frames);
         }
-        unregister_cancel_waiter(&self.state, &cancel_tx)?;
         result
     }
 }
@@ -298,7 +331,7 @@ impl AudioSink for HostAudioSink {
                 // A converter/queue failure may have retained or discarded PCM.
                 // End this timeline; no later query may claim it was played.
                 self.state.cancelled.store(true, Ordering::Release);
-                wake_cancel_waiters_best_effort(&self.state);
+                cancel_writes(&self.state);
                 audio_error("ASTRA_EMU_AUDIO_WRITE", error)
             })
             .into()
@@ -310,12 +343,8 @@ impl AudioSink for HostAudioSink {
 
     fn cancel(&self) -> astra_emu_family_api::FfiFamilyResult<()> {
         self.state.cancelled.store(true, Ordering::Release);
-        wake_cancel_waiters(&self.state)
-            .map_or_else(
-                |error| Err(audio_error("ASTRA_EMU_AUDIO_CANCEL", error)),
-                |_| Ok(()),
-            )
-            .into()
+        cancel_writes(&self.state);
+        Ok(()).into()
     }
 
     fn playback_progress(&self) -> astra_emu_family_api::FfiFamilyResult<AudioPlaybackProgress> {
@@ -362,46 +391,33 @@ fn audio_error(code: &str, message: String) -> astra_emu_family_api::FamilyError
     astra_emu_family_api::FamilyError::new(code, message)
 }
 
-fn register_cancel_waiter(state: &AudioState) -> Result<Option<CancelWaiter>, String> {
-    let (sender, receiver) = bounded(1);
-    let mut waiters = state
-        .cancel_waiters
-        .lock()
-        .map_err(|_| "ASTRA_EMU_AUDIO_CANCEL_LOCK".to_owned())?;
-    if state.cancelled.load(Ordering::Acquire) || state.closed.load(Ordering::Acquire) {
-        return Ok(None);
+fn cancel_writes(state: &AudioState) {
+    state.cancel_sender.lock().take();
+}
+
+fn reclaim_retired(state: &AudioState) {
+    let mut retired = state.retired.lock();
+    if let Some(retired) = retired.as_mut() {
+        while retired.pop().is_ok() {}
     }
-    waiters.push(sender.clone());
-    Ok(Some((sender, receiver)))
 }
 
-fn unregister_cancel_waiter(state: &AudioState, sender: &Sender<()>) -> Result<(), String> {
-    let mut waiters = state
-        .cancel_waiters
-        .lock()
-        .map_err(|_| "ASTRA_EMU_AUDIO_CANCEL_LOCK".to_owned())?;
-    waiters.retain(|waiter| !waiter.same_channel(sender));
-    Ok(())
-}
-
-fn wake_cancel_waiters(state: &AudioState) -> Result<(), String> {
-    let waiters = state
-        .cancel_waiters
-        .lock()
-        .map_err(|_| "ASTRA_EMU_AUDIO_CANCEL_LOCK".to_owned())?;
-    for waiter in waiters.iter() {
-        let _ = waiter.try_send(());
+struct ConsumerCompletion(Option<Sender<()>>);
+impl Drop for ConsumerCompletion {
+    fn drop(&mut self) {
+        if let Some(done) = self.0.take() {
+            let _ = done.try_send(());
+        }
     }
-    Ok(())
 }
 
-fn wake_cancel_waiters_best_effort(state: &AudioState) {
-    if let Err(error) = wake_cancel_waiters(state) {
-        tracing::error!(
-            event = "astra.emu.audio.cancel_waiters_failed",
-            diagnostic_code = "ASTRA_EMU_AUDIO_CANCEL_LOCK",
-            error_kind = %error,
-        );
+impl Drop for DeviceConsumer {
+    fn drop(&mut self) {
+        if let Some(current) = self.current.take() {
+            self.retired.push(current).unwrap_or_else(|_| {
+                panic!("audio retirement capacity invariant violated")
+            });
+        }
     }
 }
 
@@ -454,13 +470,17 @@ impl DeviceConsumer {
                     return Some(value);
                 }
             }
+            if let Some(completed) = self.current.take() {
+                self.retired.push(completed).unwrap_or_else(|_| {
+                    panic!("audio retirement capacity invariant violated")
+                });
+            }
             match self.receiver.try_recv() {
                 Ok(block) => {
                     self.current = Some(block);
                     self.cursor = 0;
                 }
                 Err(_) => {
-                    self.current = None;
                     return None;
                 }
             }

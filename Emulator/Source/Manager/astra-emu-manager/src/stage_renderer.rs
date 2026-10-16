@@ -5,9 +5,9 @@ use std::{
     time::Instant,
 };
 
-use astra_emu_family_api::{FamilyResult, FrameAlpha, FrameFormat, FrameView, FrameVisitor};
+use astra_emu_family_api::FrameIdentity;
 use astra_emu_manager::{
-    effects::{FilterConfiguration, FilterEngine},
+    effects::{FilterConfiguration, FilterEngine, FilterPreset},
     AstraUnderlayRenderer, StageTextureUpdate, WgpuFrameContext,
 };
 use astra_media_core::{Canvas2D, Extent2D, Viewport2D};
@@ -15,25 +15,28 @@ use wgpu::{Extent3d, TextureUsages};
 
 const DEFAULT_STAGE_WIDTH: u32 = 800;
 const DEFAULT_STAGE_HEIGHT: u32 = 600;
-const BYTES_PER_PIXEL: u32 = 4;
-const COPY_ROW_ALIGNMENT: u32 = 256;
 
 #[path = "stage_frame.rs"]
 mod frame;
-pub(crate) use frame::{FrameCollector, FrameMailbox};
+#[path = "stage_pixels.rs"]
+mod pixels;
+pub(crate) use frame::FrameMailbox;
 
 pub(crate) struct ManagerStageRenderer {
     mailbox: FrameMailbox,
     device: Option<wgpu::Device>,
     input_texture: Option<wgpu::Texture>,
     output_texture: Option<wgpu::Texture>,
+    filtered_texture: Option<wgpu::Texture>,
+    presented_input: Option<wgpu::Texture>,
+    pixel_presentation: pixels::PixelPresentation,
     input_width: u32,
     input_height: u32,
     logical_width: u32,
     logical_height: u32,
     output_width: u32,
     output_height: u32,
-    uploaded_generation: u64,
+    uploaded_identity: Option<FrameIdentity>,
     texture_dirty: bool,
     dxc_path: PathBuf,
     filter_engine: FilterEngine,
@@ -56,13 +59,16 @@ impl ManagerStageRenderer {
             device: None,
             input_texture: None,
             output_texture: None,
+            filtered_texture: None,
+            presented_input: None,
+            pixel_presentation: pixels::PixelPresentation::default(),
             input_width: DEFAULT_STAGE_WIDTH,
             input_height: DEFAULT_STAGE_HEIGHT,
             logical_width: DEFAULT_STAGE_WIDTH,
             logical_height: DEFAULT_STAGE_HEIGHT,
             output_width: DEFAULT_STAGE_WIDTH,
             output_height: DEFAULT_STAGE_HEIGHT,
-            uploaded_generation: 0,
+            uploaded_identity: None,
             texture_dirty: false,
             filter_engine: FilterEngine::new(dxc_path.clone()),
             dxc_path,
@@ -95,29 +101,23 @@ impl ManagerStageRenderer {
         let (output_width, output_height) = candidate
             .active_output_dimensions(self.input_width, self.input_height)
             .map_err(|error| error.to_string())?;
-        let output_needs_replacement = self.output_texture.as_ref().is_none_or(|texture| {
-            texture.width() != output_width || texture.height() != output_height
-        });
-        let replacement = if output_needs_replacement {
-            Some(create_stage_texture(
-                device,
-                output_width,
-                output_height,
-                "output",
-            )?)
-        } else {
+        let replacement = if config.preset == FilterPreset::None {
             None
+        } else if self.filtered_texture.as_ref().is_some_and(|texture| {
+            texture.width() == output_width && texture.height() == output_height
+        }) {
+            self.filtered_texture.clone()
+        } else {
+            Some(create_stage_texture(device, output_width, output_height,
+                "output", wgpu::TextureFormat::Rgba8Unorm)?)
         };
 
         self.filter_engine = candidate;
         self.filter_configuration = config.clone();
         self.filter_source = source.map(str::to_owned);
-        if let Some(output) = replacement {
-            self.output_texture = Some(output);
-            self.output_width = output_width;
-            self.output_height = output_height;
-            self.texture_dirty = true;
-        }
+        self.filtered_texture = replacement;
+        self.output_width = output_width;
+        self.output_height = output_height;
         self.filter_dirty = true;
         Ok(())
     }
@@ -129,18 +129,25 @@ impl ManagerStageRenderer {
         input_height: u32,
         output_width: u32,
         output_height: u32,
+        input_format: wgpu::TextureFormat,
     ) -> Result<(), String> {
         validate_dimensions(device, input_width, input_height)?;
         validate_dimensions(device, output_width, output_height)?;
-        let input = create_stage_texture(device, input_width, input_height, "input")?;
-        let output = create_stage_texture(device, output_width, output_height, "output")?;
+        let input = create_stage_texture(device, input_width, input_height, "input", input_format)?;
+        let filtered = if self.filter_configuration.preset == FilterPreset::None {
+            None
+        } else {
+            Some(create_stage_texture(device, output_width, output_height, "output", wgpu::TextureFormat::Rgba8Unorm)?)
+        };
+        self.output_texture = filtered.as_ref().cloned().or_else(|| Some(input.clone()));
+        self.filtered_texture = filtered;
         self.input_texture = Some(input);
-        self.output_texture = Some(output);
         self.input_width = input_width;
         self.input_height = input_height;
         self.output_width = output_width;
         self.output_height = output_height;
-        self.uploaded_generation = 0;
+        self.uploaded_identity = None;
+        self.presented_input = None;
         self.texture_dirty = true;
         Ok(())
     }
@@ -195,6 +202,7 @@ impl AstraUnderlayRenderer for ManagerStageRenderer {
             DEFAULT_STAGE_HEIGHT,
             DEFAULT_STAGE_WIDTH,
             DEFAULT_STAGE_HEIGHT,
+            wgpu::TextureFormat::Rgba8Unorm,
         )
     }
 
@@ -227,16 +235,14 @@ impl AstraUnderlayRenderer for ManagerStageRenderer {
 
     fn render(&mut self, context: WgpuFrameContext<'_>) -> Result<(), String> {
         let Some(frame) = self.mailbox.snapshot()? else {
-            if self.uploaded_generation != 0 {
+            if self.uploaded_identity.is_some() {
                 if let Some(output) = &self.output_texture {
                     let view = output.create_view(&Default::default());
                     let mut encoder = context.device.create_command_encoder(&Default::default());
                     {
                         let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                                view: &view,
-                                depth_slice: None,
-                                resolve_target: None,
+                                view: &view, depth_slice: None, resolve_target: None,
                                 ops: wgpu::Operations {
                                     load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
                                     store: wgpu::StoreOp::Store,
@@ -248,105 +254,78 @@ impl AstraUnderlayRenderer for ManagerStageRenderer {
                     context.queue.submit([encoder.finish()]);
                 }
                 self.input_texture = None;
-                self.uploaded_generation = 0;
+                self.presented_input = None;
+                self.pixel_presentation = pixels::PixelPresentation::default();
+                self.uploaded_identity = None;
                 self.filter_dirty = false;
             }
             return Ok(());
         };
-        if frame.generation <= self.uploaded_generation && !self.filter_dirty {
+        if Some(frame.identity) == self.uploaded_identity && !self.filter_dirty {
             return Ok(());
         }
         let started = tracing::enabled!(tracing::Level::DEBUG).then(Instant::now);
-        let row_bytes = frame
-            .width
-            .checked_mul(BYTES_PER_PIXEL)
-            .ok_or_else(|| "ASTRA_EMU_HOST_FRAME_SIZE".to_owned())?;
-        if frame.width == 0 || frame.height == 0 || frame.stride < row_bytes {
-            return Err("ASTRA_EMU_HOST_FRAME_DIMENSIONS".into());
-        }
-        validate_dimensions(context.device, frame.width, frame.height)?;
-        let (output_width, output_height) = self
-            .filter_engine
-            .active_output_dimensions(frame.width, frame.height)
+        let info = frame.info;
+        validate_dimensions(context.device, info.width, info.height)?;
+        let (output_width, output_height) = self.filter_engine
+            .active_output_dimensions(info.width, info.height)
             .map_err(|error| error.to_string())?;
-        let input_needs_replacement = self.input_width != frame.width
-            || self.input_height != frame.height
-            || self.input_texture.is_none();
+        let input_format = pixels::input_format(info.format);
+        let input_needs_replacement = self.input_width != info.width
+            || self.input_height != info.height
+            || self.input_texture.as_ref().is_none_or(|texture| texture.format() != input_format);
         if input_needs_replacement {
             self.recreate_textures(
-                context.device,
-                frame.width,
-                frame.height,
-                output_width,
-                output_height,
+                context.device, info.width, info.height, output_width, output_height, input_format,
             )?;
-        } else if self.output_width != output_width
-            || self.output_height != output_height
-            || self.output_texture.is_none()
-        {
-            let output =
-                create_stage_texture(context.device, output_width, output_height, "output")?;
-            self.output_texture = Some(output);
+        } else if self.filter_configuration.preset != FilterPreset::None
+            && self.filtered_texture.as_ref().is_none_or(|texture| {
+                texture.width() != output_width || texture.height() != output_height
+            }) {
+            self.filtered_texture = Some(create_stage_texture(
+                context.device, output_width, output_height, "output", wgpu::TextureFormat::Rgba8Unorm,
+            )?);
             self.output_width = output_width;
             self.output_height = output_height;
+        }
+        if self.logical_width != info.logical_width || self.logical_height != info.logical_height {
+            self.logical_width = info.logical_width;
+            self.logical_height = info.logical_height;
             self.texture_dirty = true;
         }
-        if self.logical_width != frame.logical_width || self.logical_height != frame.logical_height
-        {
-            self.logical_width = frame.logical_width;
-            self.logical_height = frame.logical_height;
-            self.texture_dirty = true;
-        }
-        let input = self
-            .input_texture
-            .as_ref()
+        let input = self.input_texture.as_ref()
             .ok_or_else(|| "ASTRA_EMU_HOST_RENDERER_NOT_SETUP".to_owned())?;
-        let output = self
-            .output_texture
-            .as_ref()
-            .ok_or_else(|| "ASTRA_EMU_HOST_RENDERER_NOT_SETUP".to_owned())?;
-        let expected_len = usize::try_from(frame.stride)
-            .ok()
-            .and_then(|stride| stride.checked_mul(usize::try_from(frame.height).ok()?))
-            .ok_or_else(|| "ASTRA_EMU_HOST_FRAME_SIZE".to_owned())?;
-        if frame.pixels.len() != expected_len {
-            return Err("ASTRA_EMU_HOST_FRAME_BYTES".into());
-        }
-        if frame.generation > self.uploaded_generation {
+        if Some(frame.identity) != self.uploaded_identity {
+            let required = info.required_bytes().ok_or_else(|| "ASTRA_EMU_HOST_FRAME_SIZE".to_owned())?;
             context.queue.write_texture(
-                input.as_image_copy(),
-                &frame.pixels,
+                input.as_image_copy(), &frame.pixels()[..required],
                 wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(frame.stride),
-                    rows_per_image: Some(frame.height),
+                    offset: 0, bytes_per_row: Some(info.stride), rows_per_image: Some(info.height),
                 },
-                Extent3d {
-                    width: frame.width,
-                    height: frame.height,
-                    depth_or_array_layers: 1,
-                },
+                Extent3d { width: info.width, height: info.height, depth_or_array_layers: 1 },
             );
+            self.presented_input = Some(self.pixel_presentation.apply(
+                context.device, context.queue, input, info,
+            ));
         }
-        self.filter_engine
-            .apply(
-                context.device,
-                context.queue,
-                input,
-                output,
-                &self.filter_configuration,
-            )
-            .map_err(|error| error.to_string())?;
-        if frame.generation > self.uploaded_generation {
-            self.uploaded_generation = frame.generation;
+        let presented_input = self.presented_input.as_ref()
+            .ok_or_else(|| "ASTRA_EMU_HOST_FRAME_BASELINE".to_owned())?;
+        let output = self.filter_engine.apply(
+            context.device, context.queue, presented_input, self.filtered_texture.as_ref(),
+            &self.filter_configuration,
+        ).map_err(|error| error.to_string())?;
+        if self.output_texture.as_ref() != Some(&output) {
+            self.output_texture = Some(output);
+            self.texture_dirty = true;
         }
+        self.uploaded_identity = Some(frame.identity);
         self.filter_dirty = false;
         if let Some(started) = started {
             tracing::debug!(
                 event = "astra.emu.host.render_submission_timing",
-                generation = frame.generation,
-                raster_width = frame.width,
-                raster_height = frame.height,
+                session_epoch = frame.identity.session_epoch,
+                generation = frame.identity.generation,
+                raster_width = info.width, raster_height = info.height,
                 cpu_submission_us = started.elapsed().as_micros() as u64
             );
         }
@@ -354,19 +333,15 @@ impl AstraUnderlayRenderer for ManagerStageRenderer {
     }
 
     fn teardown(&mut self) {
-        if let Err(error) = self.mailbox.clear() {
-            tracing::error!(
-                event = "astra.emu.stage_renderer.mailbox_clear_failed",
-                diagnostic_code = "ASTRA_EMU_HOST_FRAME_LOCK",
-                error_kind = %error,
-            );
-        }
         self.input_texture = None;
         self.output_texture = None;
+        self.filtered_texture = None;
+        self.presented_input = None;
+        self.pixel_presentation = pixels::PixelPresentation::default();
         self.device = None;
         self.logical_width = DEFAULT_STAGE_WIDTH;
         self.logical_height = DEFAULT_STAGE_HEIGHT;
-        self.uploaded_generation = 0;
+        self.uploaded_identity = None;
         self.texture_dirty = false;
         self.filter_engine = FilterEngine::new(self.dxc_path.clone());
         self.filter_configuration = FilterConfiguration::default();
@@ -458,6 +433,7 @@ fn create_stage_texture(
     width: u32,
     height: u32,
     role: &str,
+    format: wgpu::TextureFormat,
 ) -> Result<wgpu::Texture, String> {
     validate_dimensions(device, width, height)?;
     let error_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
@@ -475,12 +451,10 @@ fn create_stage_texture(
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8Unorm,
-        usage: TextureUsages::TEXTURE_BINDING
-            | TextureUsages::COPY_DST
-            | TextureUsages::COPY_SRC
-            | TextureUsages::STORAGE_BINDING
-            | TextureUsages::RENDER_ATTACHMENT,
+        format,
+        usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST | TextureUsages::COPY_SRC
+            | TextureUsages::RENDER_ATTACHMENT
+            | if role == "input" { TextureUsages::empty() } else { TextureUsages::STORAGE_BINDING },
         view_formats: &[],
     });
     if let Some(error) = pollster::block_on(error_scope.pop()) {
@@ -489,17 +463,6 @@ fn create_stage_texture(
     Ok(texture)
 }
 
-fn align_row(row_bytes: u32) -> FamilyResult<u32> {
-    row_bytes
-        .checked_add(COPY_ROW_ALIGNMENT - 1)
-        .map(|value| value / COPY_ROW_ALIGNMENT * COPY_ROW_ALIGNMENT)
-        .ok_or_else(|| {
-            astra_emu_family_api::FamilyError::invalid(
-                "ASTRA_EMU_HOST_FRAME_STRIDE",
-                "frame upload stride overflows",
-            )
-        })
-}
 
 #[cfg(test)]
 #[path = "stage_renderer_tests.rs"]

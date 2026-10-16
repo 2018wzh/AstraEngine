@@ -3,12 +3,23 @@ use std::{
     fs,
     io::{Read, Seek, SeekFrom, Write},
     path::{Component, Path, PathBuf},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
 };
 
-pub(crate) struct NativeFileSystem {
+mod storage;
+
+struct FileSystemRoot {
     root: PathBuf,
     root_canonical: PathBuf,
-    temp_counter: u64,
+    temp_counter: AtomicU64,
+}
+
+#[derive(Clone)]
+pub(crate) struct NativeFileSystem {
+    shared: Arc<FileSystemRoot>,
 }
 
 impl NativeFileSystem {
@@ -19,9 +30,11 @@ impl NativeFileSystem {
         }
         let root_canonical = fs::canonicalize(&root).map_err(|_| RfvpError::Io)?;
         Ok(Self {
-            root,
-            root_canonical,
-            temp_counter: 0,
+            shared: Arc::new(FileSystemRoot {
+                root,
+                root_canonical,
+                temp_counter: AtomicU64::new(0),
+            }),
         })
     }
     fn relative(path: &str) -> RfvpResult<PathBuf> {
@@ -48,7 +61,7 @@ impl NativeFileSystem {
         Ok(clean)
     }
     fn resolve_existing(&self, path: &str) -> RfvpResult<PathBuf> {
-        let joined = self.root.join(Self::relative(path)?);
+        let joined = self.shared.root.join(Self::relative(path)?);
         let canonical = fs::canonicalize(joined).map_err(|error| {
             if error.kind() == std::io::ErrorKind::NotFound {
                 RfvpError::NotFound
@@ -56,14 +69,14 @@ impl NativeFileSystem {
                 RfvpError::Io
             }
         })?;
-        if !canonical.starts_with(&self.root_canonical) {
+        if !canonical.starts_with(&self.shared.root_canonical) {
             return Err(RfvpError::InvalidArgument);
         }
         Ok(canonical)
     }
     fn resolve_existing_lexical(&self, path: &str) -> RfvpResult<PathBuf> {
         let relative = Self::relative(path)?;
-        let joined = self.root.join(relative);
+        let joined = self.shared.root.join(relative);
         let canonical = fs::canonicalize(&joined).map_err(|error| {
             if error.kind() == std::io::ErrorKind::NotFound {
                 RfvpError::NotFound
@@ -71,25 +84,25 @@ impl NativeFileSystem {
                 RfvpError::Io
             }
         })?;
-        if !canonical.starts_with(&self.root_canonical) {
+        if !canonical.starts_with(&self.shared.root_canonical) {
             return Err(RfvpError::InvalidArgument);
         }
         let parent = joined.parent().ok_or(RfvpError::InvalidArgument)?;
         let canonical_parent = fs::canonicalize(parent).map_err(|_| RfvpError::Io)?;
-        if !canonical_parent.starts_with(&self.root_canonical) {
+        if !canonical_parent.starts_with(&self.shared.root_canonical) {
             return Err(RfvpError::InvalidArgument);
         }
         Ok(joined)
     }
     fn resolve_for_write(&self, path: &str) -> RfvpResult<PathBuf> {
         let relative = Self::relative(path)?;
-        let joined = self.root.join(&relative);
+        let joined = self.shared.root.join(&relative);
         let parent = joined.parent().ok_or(RfvpError::InvalidArgument)?;
         // Save slots may be nested and are created on first use. Walk one
         // component at a time so an existing symlink is checked before any
         // missing child is created; `create_dir_all` could otherwise create
         // directories through a symlink outside the writable root.
-        let mut current = self.root.clone();
+        let mut current = self.shared.root.clone();
         if let Some(relative_parent) = relative.parent() {
             for component in relative_parent.components() {
                 let Component::Normal(part) = component else {
@@ -109,13 +122,13 @@ impl NativeFileSystem {
                     Err(_) => return Err(RfvpError::Io),
                 }
                 let canonical = fs::canonicalize(&current).map_err(|_| RfvpError::Io)?;
-                if !canonical.starts_with(&self.root_canonical) {
+                if !canonical.starts_with(&self.shared.root_canonical) {
                     return Err(RfvpError::InvalidArgument);
                 }
             }
         }
         let canonical_parent = fs::canonicalize(parent).map_err(|_| RfvpError::Io)?;
-        if !canonical_parent.starts_with(&self.root_canonical) {
+        if !canonical_parent.starts_with(&self.shared.root_canonical) {
             return Err(RfvpError::InvalidArgument);
         }
 
@@ -127,7 +140,7 @@ impl NativeFileSystem {
             Ok(_) => {
                 let canonical_target =
                     fs::canonicalize(&joined).map_err(|_| RfvpError::InvalidArgument)?;
-                if !canonical_target.starts_with(&self.root_canonical) {
+                if !canonical_target.starts_with(&self.shared.root_canonical) {
                     return Err(RfvpError::InvalidArgument);
                 }
             }
@@ -137,15 +150,20 @@ impl NativeFileSystem {
         Ok(joined)
     }
 
-    fn next_temp_path(&mut self, target: &Path) -> RfvpResult<PathBuf> {
+    fn next_temp_path(&self, target: &Path) -> RfvpResult<PathBuf> {
         let file_name = target
             .file_name()
             .ok_or(RfvpError::InvalidArgument)?
             .to_os_string();
         let pid = std::process::id();
         for _ in 0..64 {
-            let counter = self.temp_counter;
-            self.temp_counter = self.temp_counter.checked_add(1).ok_or(RfvpError::Io)?;
+            let counter = self
+                .shared
+                .temp_counter
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+                    value.checked_add(1)
+                })
+                .map_err(|_| RfvpError::Io)?;
             let mut temp_name = file_name.clone();
             temp_name.push(format!(".astra-tmp-{pid}-{counter}"));
             let path = target.with_file_name(temp_name);
@@ -207,6 +225,45 @@ impl NativeFileSystem {
         }
         Ok(())
     }
+    fn open_file(&self, path: &str) -> RfvpResult<NativeFile> {
+        let resolved = self.resolve_existing(path)?;
+        let file = fs::File::open(&resolved).map_err(|_| RfvpError::Io)?;
+        let length = file.metadata().map_err(|_| RfvpError::Io)?.len();
+        Ok(NativeFile { file, length })
+    }
+
+    fn write_atomic(&self, path: &str, bytes: &[u8]) -> RfvpResult<()> {
+        let target = self.resolve_for_write(path)?;
+        let tmp = self.next_temp_path(&target)?;
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)
+            .map_err(|_| RfvpError::Io)?;
+        let result = (|| {
+            file.write_all(bytes).map_err(|_| RfvpError::Io)?;
+            file.sync_all().map_err(|_| RfvpError::Io)?;
+            drop(file);
+            atomic_replace(&tmp, &target).map_err(|_| RfvpError::Io)
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&tmp);
+        }
+        result
+    }
+
+    fn list_entries(
+        &self,
+        root: &str,
+        visitor: &mut dyn FnMut(&str, RfvpFileInfo) -> RfvpResult<()>,
+    ) -> RfvpResult<()> {
+        let relative = Self::relative(root)?;
+        match self.resolve_existing(root) {
+            Ok(_) => self.enumerate_directory(root, None, visitor),
+            Err(RfvpError::NotFound) if relative == Path::new("save") => Ok(()),
+            Err(error) => Err(error),
+        }
+    }
 }
 
 pub(crate) struct NativeFile {
@@ -228,32 +285,13 @@ impl RfvpFile for NativeFile {
 impl RfvpFileSystem for NativeFileSystem {
     type File = NativeFile;
     fn open(&mut self, path: &str) -> RfvpResult<Self::File> {
-        let resolved = self.resolve_existing(path)?;
-        let file = fs::File::open(&resolved).map_err(|_| RfvpError::Io)?;
-        let length = file.metadata().map_err(|_| RfvpError::Io)?.len();
-        Ok(NativeFile { file, length })
+        self.open_file(path)
     }
     fn metadata(&mut self, path: &str) -> RfvpResult<RfvpFileInfo> {
         Self::info(&self.resolve_existing(path)?)
     }
     fn write_all(&mut self, path: &str, bytes: &[u8]) -> RfvpResult<()> {
-        let target = self.resolve_for_write(path)?;
-        let tmp = self.next_temp_path(&target)?;
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&tmp)
-            .map_err(|_| RfvpError::Io)?;
-        let result = (|| {
-            file.write_all(bytes).map_err(|_| RfvpError::Io)?;
-            file.sync_all().map_err(|_| RfvpError::Io)?;
-            drop(file);
-            atomic_replace(&tmp, &target).map_err(|_| RfvpError::Io)
-        })();
-        if result.is_err() {
-            let _ = fs::remove_file(&tmp);
-        }
-        result
+        self.write_atomic(path, bytes)
     }
     fn remove(&mut self, path: &str) -> RfvpResult<()> {
         // Use the validated lexical path so removing an in-root symlink
@@ -288,15 +326,7 @@ impl RfvpFileSystem for NativeFileSystem {
         root: &str,
         visitor: &mut dyn FnMut(&str, RfvpFileInfo) -> RfvpResult<()>,
     ) -> RfvpResult<()> {
-        let relative = Self::relative(root)?;
-        match self.resolve_existing(root) {
-            Ok(_) => self.enumerate_directory(root, None, visitor),
-            // A fresh game has no save directory yet. Treat that save root as
-            // an empty collection so SaveData(RefreshAll) is harmless before
-            // the first save is written; other missing roots remain errors.
-            Err(RfvpError::NotFound) if relative == Path::new("save") => Ok(()),
-            Err(error) => Err(error),
-        }
+        self.list_entries(root, visitor)
     }
     fn enumerate_by_extension(
         &mut self,
@@ -305,6 +335,12 @@ impl RfvpFileSystem for NativeFileSystem {
         visitor: &mut dyn FnMut(&str, RfvpFileInfo) -> RfvpResult<()>,
     ) -> RfvpResult<()> {
         self.enumerate_directory(root, Some(extension.trim_start_matches('.')), visitor)
+    }
+    fn storage(&mut self) -> Option<Arc<dyn rfvp::host_api::fs::RfvpStorage>> {
+        Some(self.shared_storage(64 * 1024 * 1024))
+    }
+    fn game_files(&mut self) -> Option<Arc<dyn rfvp::host_api::fs::RfvpStorage>> {
+        Some(self.shared_storage(usize::MAX))
     }
 }
 

@@ -1,6 +1,6 @@
 # RFVP fork v9 职责审计
 
-> 历史记录：本页描述旧 Family ABI v9 分支，不代表当前独立 Host 的实现。2026-09-11 已升级到 RFVP 0.6.0，删除 hosted snapshot/restore 与 canonical state hash API，并接入上游全局持久化。当前父仓 source identity 是 RFVP 0.6.0 上游 revision `304e773387a9920c9db091ec1fd937c717aea949` 加上已发布的 `2018wzh/rfvp` fork 分支 `codex/local-product-adaptation` revision `73d3b4413c95a3923cce695d98c3d9bf5b08ccf0`；当前差异以 `Emulator/Source/Families/astra-emu-fvp/MODIFICATIONS.md` 为准。下表中的旧 head 仅用于历史审计。
+> 历史记录：本页只描述旧 Family ABI v9 分支，不代表当前独立 Host 或现行 source identity。当前完整 fork、上游 HEAD 单适配提交与差异分类见 [MODIFICATIONS.md](../../../Emulator/Source/Families/astra-emu-fvp/MODIFICATIONS.md)，本轮真实检查与未验收范围见[性能审计](../../status/performance-upstream-audit-2026-10-12.md)。下表旧 head 仅用于历史审计，不能据此恢复旧 hosted 协议。
 
 ## 审计结论
 

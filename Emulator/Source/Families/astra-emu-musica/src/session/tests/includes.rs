@@ -27,13 +27,13 @@ fn native_gpu_includes_execute_on_open_chain_and_restore() {
     assert_eq!(session.message.as_ref().unwrap().0, "Included");
     session.advance(0, &[key(KeyCode::F5)]).unwrap();
     let mut capture = Capture(Vec::new());
-    session.visit_frame(&mut capture).unwrap();
+    capture.read(session.acquire_frame(None).unwrap()).unwrap();
     let first_frame = capture.0.clone();
     session.advance(16_666_667, &[key(KeyCode::Enter)]).unwrap();
     session.advance(16_666_667, &[]).unwrap();
     assert_eq!(session.message.as_ref().unwrap().0, "中文剧情");
     session.advance(0, &[key(KeyCode::F9)]).unwrap();
-    session.visit_frame(&mut capture).unwrap();
+    capture.read(session.acquire_frame(None).unwrap()).unwrap();
     assert!(
         capture.0 == first_frame,
         "restore must reload the expanded script and its font binding"

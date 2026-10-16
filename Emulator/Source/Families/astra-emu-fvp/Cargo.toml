@@ -20,9 +20,9 @@ fontdb.workspace = true
 tracing.workspace = true
 crossbeam-channel.workspace = true
 pollster.workspace = true
+parking_lot = "0.12"
 time = { workspace = true, features = ["local-offset"] }
 symphonia = { version = "0.5", default-features = false, features = ["ogg", "vorbis", "wav", "pcm", "mp3", "flac"] }
-wmv-decoder = { path = "../na_wmv_player", default-features = false, features = ["audio"] }
 
 [build-dependencies]
 astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api", features = ["diagnostic-bridge"] }
@@ -34,10 +34,13 @@ windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Storage
 
 [dev-dependencies]
 tempfile.workspace = true
+image-native = { package = "image", version = "0.24.9", default-features = false }
 
 [package.metadata.astra]
 upstream = "https://github.com/xmoezzz/rfvp"
-upstream_revision = "304e773387a9920c9db091ec1fd937c717aea949"
+upstream_revision = "af557db750c7833274f22a6d82b0dc33cdea2f85"
 hosted_fork = "https://github.com/2018wzh/rfvp"
-hosted_fork_revision = "b2f385da486342de6e23202cccad8141ac6423b6"
+hosted_fork_branch = "codex/astra-upstream-head-20261016"
+hosted_fork_revision = "d1ff965d79ba2cdc956aad73ae100cc44bc7ce90"
 license_notice = "THIRD_PARTY_NOTICES.md"
+modifications = "MODIFICATIONS.md"

@@ -28,7 +28,7 @@ fn native_gpu_gbk_script_guards_chain_choices_and_restore() {
         Some(("中文剧情".into(), Some("姓名".into())))
     );
     let mut capture = Capture(Vec::new());
-    session.visit_frame(&mut capture).unwrap();
+    capture.read(session.acquire_frame(None).unwrap()).unwrap();
     let dialogue = capture.0.clone();
     assert!(dialogue
         .as_chunks::<4>()
@@ -40,7 +40,7 @@ fn native_gpu_gbk_script_guards_chain_choices_and_restore() {
     let (labels, _) = session.vm.choice_display().unwrap().unwrap();
     assert_eq!(labels, ["继续"]);
     session.advance(0, &[key(KeyCode::F9)]).unwrap();
-    session.visit_frame(&mut capture).unwrap();
+    capture.read(session.acquire_frame(None).unwrap()).unwrap();
     assert!(
         capture.0 == dialogue,
         "GBK dialogue must survive native restore"
@@ -89,7 +89,7 @@ fn native_gpu_mixed_encoding_chain_keeps_primary_and_restores_another_encoding()
     assert_eq!(session.message.as_ref().unwrap().0, "中文剧情");
     session.advance(0, &[key(KeyCode::F5)]).unwrap();
     let mut capture = Capture(Vec::new());
-    session.visit_frame(&mut capture).unwrap();
+    capture.read(session.acquire_frame(None).unwrap()).unwrap();
     let chinese = capture.0.clone();
     session.advance(16_666_667, &[key(KeyCode::Enter)]).unwrap();
     session.advance(16_666_667, &[]).unwrap();
@@ -99,7 +99,7 @@ fn native_gpu_mixed_encoding_chain_keeps_primary_and_restores_another_encoding()
         crate::ScriptEncoding::ShiftJis
     );
     session.advance(0, &[key(KeyCode::F9)]).unwrap();
-    session.visit_frame(&mut capture).unwrap();
+    capture.read(session.acquire_frame(None).unwrap()).unwrap();
     assert!(
         capture.0 == chinese,
         "restore must rebuild the saved Chinese font binding"
@@ -107,7 +107,7 @@ fn native_gpu_mixed_encoding_chain_keeps_primary_and_restores_another_encoding()
     Box::new(session).close().unwrap();
     let mut session = open();
     session.advance(0, &[key(KeyCode::F9)]).unwrap();
-    session.visit_frame(&mut capture).unwrap();
+    capture.read(session.acquire_frame(None).unwrap()).unwrap();
     assert!(
         capture.0 == chinese,
         "cold reopen must load a different detected encoding"

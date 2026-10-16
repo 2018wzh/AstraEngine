@@ -184,17 +184,60 @@ async fn native_offscreen_gpu_renders_scene_filter_and_readback() {
     let capture = renderer.render(&frame).unwrap();
     assert_eq!((capture.width, capture.height), (4, 4));
     assert_eq!(capture.rgba8.len(), 64);
-    assert!(capture
-        .rgba8
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .any(|pixel| pixel[3] != 0));
+    assert!(capture.rgba8.as_chunks::<4>().0.iter().all(|pixel| {
+        pixel
+            .iter()
+            .zip([146u8, 71, 34, 255])
+            .all(|(actual, expected)| actual.abs_diff(expected) <= 1)
+    }));
     assert_eq!(renderer.performance_counters().readback_bytes, 64);
     for sequence in 2..=4 {
         frame.sequence = sequence;
         renderer.submit_frame(&frame).unwrap();
         assert_eq!(renderer.capture_checkpoint().unwrap().rgba8, capture.rgba8);
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires a native hardware GPU runner"]
+async fn animated_filter_reuses_pipeline_and_rebinds_resized_input() {
+    let mut renderer =
+        WgpuOffscreenRenderer::new(&astra_platform_common::native_wgpu_instance().unwrap())
+            .await
+            .unwrap();
+    for sequence in 1..=64 {
+        let amount = sequence as f32 / 64.0;
+        let side = if sequence % 2 == 0 { 8 } else { 4 };
+        let frame = SceneFrame {
+            sequence,
+            width: side,
+            height: side,
+            clear_rgba: [255; 4],
+            commands: vec![SceneCommand::FilterGraph {
+                graph: FilterGraph {
+                    schema: "astra.filter_graph.v1".into(),
+                    nodes: vec![FilterNode {
+                        id: "fade".into(),
+                        kind: "astra.filter.fade".into(),
+                        input: FilterTarget::Final,
+                        output: FilterTarget::Final,
+                        params: BTreeMap::from([("amount".into(), FilterParam::Float(amount))]),
+                        deterministic: true,
+                        allow_cpu_fallback: false,
+                    }],
+                },
+            }],
+            semantics: None,
+        };
+        let capture = renderer.render(&frame).unwrap();
+        let expected = ((1.055 * amount.powf(1.0 / 2.4) - 0.055) * 255.0).round() as u8;
+        assert!(capture.rgba8.as_chunks::<4>().0.iter().all(|pixel| {
+            pixel[..3]
+                .iter()
+                .all(|channel| channel.abs_diff(expected) <= 1)
+                && pixel[3] == 255
+        }));
+        assert_eq!(renderer.performance_counters().pipeline_count, 2);
     }
 }
 

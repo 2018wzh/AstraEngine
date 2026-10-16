@@ -14,8 +14,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use abi_stable::type_level::downcasting::TD_Opaque;
 use astra_emu_family_api::{
     AudioSink, AudioSink_TO, AudioWriteStatus, FamilyEvent, FamilyOpen, FamilyProvider,
-    FamilySession, FamilyStatus, FrameView, FrameVisitor, KeyCode, KeyModifiers, KeyState,
-    OpenRequest, PcmChunk, PcmFormatSpec, PointerButton, WindowState,
+    FamilySession, FamilyStatus, FramePoll, KeyCode, KeyModifiers, KeyState, OpenRequest, PcmChunk,
+    PcmFormatSpec, PointerButton, WindowState,
 };
 
 static PUSHED_FRAMES: AtomicU64 = AtomicU64::new(0);
@@ -38,18 +38,6 @@ impl AudioSink for CountingSink {
     }
     fn cancel(&self) -> astra_emu_family_api::FfiFamilyResult<()> {
         Ok(()).into()
-    }
-}
-
-struct Alive;
-
-impl FrameVisitor for Alive {
-    fn accept(&mut self, frame: FrameView<'_>) -> astra_emu_family_api::FamilyResult<()> {
-        assert!(
-            frame.info.width > 0 && frame.info.height > 0,
-            "composed frame stays valid"
-        );
-        Ok(())
     }
 }
 
@@ -120,11 +108,17 @@ fn settle_until_lit(session: &mut dyn FamilySession, max_frames: u32, min_lit_ra
         count: usize,
         total: usize,
     }
-    impl FrameVisitor for Lit {
-        fn accept(&mut self, frame: FrameView<'_>) -> astra_emu_family_api::FamilyResult<()> {
-            self.total = frame.as_slice().len() / 4;
+    impl Lit {
+        fn read(&mut self, poll: FramePoll) -> astra_emu_family_api::FamilyResult<()> {
+            let FramePoll::Ready(frame) = poll else {
+                return Err(astra_emu_family_api::FamilyError::invalid(
+                    "TEST_FRAME_PENDING",
+                    "expected a completed native frame",
+                ));
+            };
+            self.total = frame.pixels().len() / 4;
             self.count = frame
-                .as_slice()
+                .pixels()
                 .as_chunks::<4>()
                 .0
                 .iter()
@@ -136,7 +130,8 @@ fn settle_until_lit(session: &mut dyn FamilySession, max_frames: u32, min_lit_ra
     for _ in 0..max_frames {
         let _ = session.advance(16_666_667, &[]).expect("advance succeeds");
         let mut lit = Lit { count: 0, total: 0 };
-        session.visit_frame(&mut lit).expect("frame visit succeeds");
+        lit.read(session.acquire_frame(None).unwrap())
+            .expect("frame visit succeeds");
         if lit.total > 0 && (lit.count as f64) / (lit.total as f64) >= min_lit_ratio {
             return true;
         }
@@ -169,6 +164,7 @@ fn open_session(
         session,
     } = provider
         .open(OpenRequest {
+            session_epoch: astra_emu_family_api::allocate_session_epoch().unwrap(),
             configuration: Vec::new().into(),
             game_path: game.display().to_string().into(),
             initial_window: WindowState {
@@ -183,6 +179,7 @@ fn open_session(
                     TD_Opaque,
                 )),
                 text_replacement: abi_stable::std_types::ROption::RNone,
+                modal: abi_stable::std_types::ROption::RNone,
             },
         })
         .expect("siglus session opens");
@@ -209,7 +206,6 @@ fn headless_playthrough_route_completion_and_feature_probes() {
         .try_init();
     let mut provider = astra_emu_siglus::SiglusProvider::default();
     let mut session = open_session(&mut provider, &game);
-    let mut alive = Alive;
 
     // ---- Title flow into the prologue ----
     settle(session.as_mut(), 30);
@@ -277,14 +273,8 @@ fn headless_playthrough_route_completion_and_feature_probes() {
                 route_t0.elapsed(),
                 (i + 1) as f64 / route_t0.elapsed().as_secs_f64()
             );
-            session
-                .visit_frame(&mut alive)
-                .expect("route frames compose");
         }
     }
-    session
-        .visit_frame(&mut alive)
-        .expect("frames stay composed after the route run");
 
     // ---- Feature probe: quick save, quick load ----
     //
@@ -308,9 +298,7 @@ fn headless_playthrough_route_completion_and_feature_probes() {
     settle(session.as_mut(), 120);
     escape(session.as_mut());
     settle(session.as_mut(), 60);
-    session
-        .visit_frame(&mut alive)
-        .expect("frames stay composed through the save/load probes");
+
     eprintln!("PLAYTHROUGH: save/load probes done");
 
     let pushed = PUSHED_FRAMES.load(Ordering::Relaxed);

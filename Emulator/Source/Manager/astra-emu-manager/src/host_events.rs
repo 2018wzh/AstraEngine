@@ -55,6 +55,7 @@ pub(super) fn install<C: ManagerController>(
                 return EventResult::Propagate;
             };
             let input_active = window.get_game_active()
+                && !window.get_modal_active()
                 && !window.get_translation_overlay_active()
                 && !window.get_diagnostics_overlay_active()
                 && !window.get_filters_overlay_active();

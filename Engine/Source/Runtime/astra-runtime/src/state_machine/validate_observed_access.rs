@@ -1,4 +1,5 @@
 use super::*;
+use rayon::prelude::*;
 
 pub(super) fn validate_observed_access(
     action_id: &str,
@@ -36,7 +37,7 @@ pub(super) fn validate_observed_access(
 #[allow(clippy::too_many_arguments)]
 pub(super) fn execute_parallel_wave(
     wave: &[usize],
-    worker_count: usize,
+    pool: &rayon::ThreadPool,
     machines: &[StateMachineInstance],
     step: u64,
     events: &[RuntimeEvent],
@@ -46,38 +47,20 @@ pub(super) fn execute_parallel_wave(
     id_source: &StableIdGenerator,
     evidence_mode: bool,
 ) -> Vec<MachineCandidate> {
-    let workers = worker_count.max(1).min(wave.len());
-    let chunk_size = wave.len().div_ceil(workers);
-    std::thread::scope(|scope| {
-        let handles = wave
-            .chunks(chunk_size)
-            .map(|chunk| {
-                scope.spawn(move || {
-                    chunk
-                        .iter()
-                        .map(|machine_index| {
-                            execute_machine_caught(
-                                *machine_index,
-                                &machines[*machine_index],
-                                step,
-                                events,
-                                actors,
-                                blackboard,
-                                actions,
-                                id_source,
-                                evidence_mode,
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                })
-            })
-            .collect::<Vec<_>>();
-        handles
-            .into_iter()
-            .flat_map(|handle| {
-                handle
-                    .join()
-                    .expect("execute_machine_caught contains provider action panics")
+    pool.install(|| {
+        wave.par_iter()
+            .map(|machine_index| {
+                execute_machine_caught(
+                    *machine_index,
+                    &machines[*machine_index],
+                    step,
+                    events,
+                    actors,
+                    blackboard,
+                    actions,
+                    id_source,
+                    evidence_mode,
+                )
             })
             .collect()
     })
@@ -306,14 +289,13 @@ pub(super) fn execute_machine(
         );
         let mut transition_failed = None;
         for invocation in &transition.actions {
-            let Some(action) = actions.get(&invocation.action_id) else {
+            let Some((action, descriptor)) = actions.invocation(&invocation.action_id) else {
                 transition_failed = Some(Diagnostic::blocking(
                     "ASTRA_RUNTIME_ACTION_MISSING",
                     format!("missing action {}", invocation.action_id),
                 ));
                 break;
             };
-            let descriptor = action.descriptor();
             let mut stable_ids_used = 0_u32;
             let mut next_id = || {
                 stable_ids_used = stable_ids_used.saturating_add(1);

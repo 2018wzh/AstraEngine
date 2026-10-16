@@ -6,7 +6,7 @@ Musica 提供独立 `FamilyProvider`、`FamilySession` 和可选 `abi_stable` �
 
 ## 启动和输入
 
-`create_musica_provider()` 返回静态 provider；`dynamic-plugin-export` feature 导出独立 FamilyModule。descriptor 使用 Family API v7，接受 `profile_file`（默认 `musica.profile.json`）和 `entry_script`（默认 `test.sc`）两个 typed 启动配置。前者限游戏目录内安全相对路径；后者是 scr archive 内单个 `.sc` 文件名。`test.sc` 延续此前明确优先选择的观察入口，可按游戏修改。不会在入口失败后猜测另一个脚本。
+`create_musica_provider()` 返回静态 provider；`dynamic-plugin-export` feature 导出独立 FamilyModule。descriptor 使用当前 Family API v13，提供 `profile_file`（默认 `musica.profile.json`）、`entry_script`（默认 `test.sc`）等 typed 启动配置，完整字段以 Rust descriptor/schema 为准。前者限游戏目录内安全相对路径；后者是 scr archive 内单个 `.sc` 文件名。`test.sc` 延续此前明确优先选择的观察入口，可按游戏修改。不会在入口失败后猜测另一个脚本。
 
 已接入的渲染路径保留既有 1280×720 坐标与 Noto Sans JP 字体绑定。Host resize 只改变窗口，不改游戏内部布局。Session 按 60 Hz 逻辑处理有界 elapsed interval，显示纹理、消息、面板和已验证的 CrossFade2；字形结果与纹理有界缓存。Enter、Space 和鼠标主键推进消息；F5 保存，F9 读取。关闭和销毁都会取消文字请求、取消 PCM 写入并等待 audio worker 结束；同进程不能同时打开两个 Musica session。
 
@@ -77,3 +77,5 @@ VM 的可序列化状态集中在 runtime/model.rs，演出命令在 runtime/eff
 `export-eden-save` 从核心自有槽读取权威 VM 与音频快照，重建已知原版字段；只允许导入后仍可准确表示的普通消息检查点。选择、未知变量、动态演出、活动音频渐变等状态拒绝导出。输出必须为不存在的新文件，不覆盖原版槽。内部 VM 格式升级为 v26，保留具名历史状态而非未知原版字段；旧槽在外层 AMUSSV05 检查时拒绝，读取失败不覆盖文件。导出生成 SAV 与同名 128×80 PNG；缩略图来自该核心槽实际保存的 GPU 画面。两个目标都必须不存在，先发布 PNG、再发布 SAV；中途失败保留已产生的独立文件并报错，不覆盖既有文件。已在独立原版副本完成一个静态消息片段的导入、继续、保存、导出、读取继续；原版复存的剧情、变量、历史及媒体资源字段对齐。未验收可听音频与其他历史类型，不能据此声明全部存档兼容。
 
 原版历史 `CT5` 保存面板切换参数，支持已经核对的 0 和 10；其他值明确拒绝。逻辑画布与 GPU 光栅尺寸分别配置，eden 原版导入要求 1024×640；核心槽保存逻辑画布身份，不同画布加载在修改活动状态前拒绝。
+
+最终合成 RGB 的 Family 帧声明 Ignored alpha，保留原字节与存档/VM 几何，发布时不重复 Opaque alpha 扫描。Host 必要 GPU 归一化仍执行；release 实测与四空间/eden 旧逻辑尺寸迁移的未完成边界见[性能审计](../../../../Docs/status/performance-upstream-audit-2026-10-12.md#10-整改进度2026-10-13)。这项元数据整改没有改动原来已验证的演出或存档机制。

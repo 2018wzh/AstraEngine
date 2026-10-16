@@ -10,6 +10,7 @@ astra-package = { path = "../astra-package" }
 blake3.workspace = true
 indexmap.workspace = true
 postcard.workspace = true
+rayon.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -21,3 +22,4 @@ tokio-util.workspace = true
 [dev-dependencies]
 futures-util.workspace = true
 tokio.workspace = true
+parking_lot = "0.12"

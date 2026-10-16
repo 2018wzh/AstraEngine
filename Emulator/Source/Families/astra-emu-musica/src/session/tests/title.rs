@@ -248,7 +248,9 @@ fn native_gpu_session_container_images_without_texture_overrides_render() {
             .unwrap();
         opened.session.advance(16_666_667, &[]).unwrap();
         let mut frame = Capture(Vec::new());
-        opened.session.visit_frame(&mut frame).unwrap();
+        frame
+            .read(opened.session.acquire_frame(None).unwrap())
+            .unwrap();
         let pixel = (3 * 1280 + 2) * 4;
         assert_eq!(&frame.0[pixel..pixel + 4], &[224, 96, 32, 255]);
         opened.session.close().unwrap();

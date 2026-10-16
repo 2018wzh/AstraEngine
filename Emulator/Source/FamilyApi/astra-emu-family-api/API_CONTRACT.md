@@ -1,6 +1,8 @@
-# Independent Family API v11
+# Independent Family API v13
 
 `astra-emu-family-api` 是 Family 插件唯一必需的契约依赖。不依赖 RuntimeWorld、package/save、VFS、renderer/audio backend 或 UI。静态核心和动态核心共用 typed DTO；动态入口使用 `abi_stable` 的 `FamilyModule`，提供 descriptor/probe/open/advance/frame/close。
+
+v13 在 v12 CPU lease/固定 owner 契约上增加 session-scoped typed 模态服务，消费者同批迁移；Manager 宿主服务与 Slint 原按钮/输入/取消已实际验证，KrKr native dialog/NativeOwner 接入和真实游戏验收仍未完成。统一重建插件，不保留旧同步帧 visitor、旧 vtable 或模态默认答案。
 
 ## 启动配置
 
@@ -18,6 +20,15 @@ Descriptor 必须声明 CpuFrame，拒绝重复 capability/format。`PcmAudio` �
 
 `TextReplacement` 仅表示可选能力：不传 service 为本次关闭翻译，不阻止基础播放。服务使用 typed reset/submit/poll/cancel；poll 为 Pending、Ready、Cancelled 或 Failed。正文缓存不超过最近八段、6000 字符，日志不含正文。FVP 不声明此能力。
 
+### 模态宿主服务（v13 实施契约）
+
+`FamilyHostServices.modal` 为可选 `ModalServiceBox`，每次 open 创建独立服务。未提供服务不妨碍无模态请求的基础播放；核心真正请求时必须明确返回 unavailable，不能自动确认、伪造输入或用既有默认按钮代替。服务只传 UTF-8 `ModalRequest`/`ModalResponse`，不传 UI 类型、native handle 或原生 callback。
+
+请求保留 caption/message 和原按钮顺序/标签；`initial_text=None` 是消息框，Some（含空串）是输入框。caption/message/输入各最多 65,536 UTF-8 bytes，最多 16 个按钮、每个最多 256 bytes，拒绝 NUL，不截断。响应为 Cancelled 或 Submitted，button index 必须属于原请求，输入值的有无与请求一致。窗口关闭和 session 取消都不能当作按钮 0/空输入确认，错误不含正文。
+
+`request` 只能在 core worker 等待，窗口线程继续呈现、接收真实用户响应或取消；Host 同一 session 最多保留一个待答请求，满时明确失败。关闭先 one-shot `cancel` 唤醒等待，再 join worker；旧 service 及迟到 UI response 不能跨 epoch/绑定新 session。读档/重开失效请求必须走同样取消边界。无窗口 Host 显式拒绝请求，不新增常驻轮询、每帧序列化或 UI/provider shim。
+
+
 ### 音频播放进度（v10 实施契约）
 
 v10 在 `AudioSink` 增加一个可选查询 `playback_progress() -> FfiFamilyResult<AudioPlaybackProgress>`。`AudioPlaybackProgress` 只含 `accepted_source_frames: u64`、`played_source_frames: u64` 和 `AudioPlaybackClock`，后者为 `DeviceTimestamp` 或 `TestConsumption`。vtable 与指纹统一升级为 v10，旧插件重建，不保留 ABI 兼容层。原有 sink 的默认实现明确返回 unsupported，未使用查询的核心无需增加实现。
@@ -30,9 +41,25 @@ v10 在 `AudioSink` 增加一个可选查询 `playback_progress() -> FfiFamilyRe
 
 增量测试覆盖首次回调、部分块、声道和采样率转换、重采样启动延迟与尾部留存、欠载静音、取消阻塞写入、重复 configure、旧 sink 晚查，以及 unsupported 与设备失败。真实设备播放仍须单独运行，不以这些单元测试宣称完成。
 
+Manager 同采样率/声道的 F32 chunk 保留原 ABI `RVec` owner 到设备消费，不转换成宿主 Vec，不做 planar/interleaved 重排；不同格式、声道或采样率仍使用实际转换。设备回调只向最终输出缓冲写样本，完成块移入 lock-free retirement ring；producer 在下次写入前回收，关闭在 callback context 销毁确认后回收剩余块。ring 容量为 queue + current + 一个串行阻塞 producer（当前为 4+2），不在回调释放 PCM 分配。关闭持有 ready receiver，避免驱动线程成为队列最后 owner；异常关闭仍继续清理并汇总错误。
+
+`AudioSink::cancel` 是整个 session 的 one-shot 取消，断开一个通知域唤醒全部排队/串行化 writer，不为每块创建等待通道。Siglus 保留两个块的桥接队列和每个原生 mixer 的独立取消域，旧 mixer 析构不能调用 session cancel；已经进入 Host write 的块按 Host FIFO 接纳/取消，未接纳或取消块不增加 accepted，丢弃不冒充 played。借用的原生 F32 tap 跨 worker 必须复制一次以取得独立 lifetime，保留 F32、不做 I16 量化；无需修改上游 mixer 或音频 API。
+
 Host 只提供 game_path、初始 WindowState 和输入。Family 自持 VM、文件、解码、混音、渲染和原生存档。probe 返回 `ROption<ProbeReport>`，None 是普通未匹配；game_id 为 opaque UTF-8。事件保留键盘、指针、滚轮、文本及窗口顺序。PointerMove 为 Host 逆映射后的逻辑舞台坐标，resize 为物理客户区像素；elapsed_ns 接受包括零在内的 u64，由核心决定 tick。
 
-`FrameView<'a>` 借用 CPU RGBA8 sRGB opaque 像素；`FrameConsumerRef<'_>` 只可在同步 frame 调用内使用。`FrameInfo.width/height` 是物理 raster 尺寸，`logical_width/logical_height` 是场景和输入使用的逻辑舞台尺寸。两者可以有不同宽高比；Family 用统一比例渲染到居中的 content viewport，viewport 外的 raster 像素必须是黑边，Host 负责在窗口中继续按相同比例显示并逆映射输入。Host 返回前复制 stride × height 字节，不跨 ABI 传 GPU/native handle。
+`OpenRequest` 携带 Host 分配的非零 `session_epoch`。CPU 帧改由 `FramePoll::Ready(FrameLease) / Unchanged(FrameIdentity) / Pending(FrameIdentity)` 交付；`FrameIdentity` 包含 epoch 与 generation。首个完成帧 generation 非零，之后只在新完成输出、resize 或恢复失效时递增，不按 Host 拉取次数递增，不逐帧 hash 推断变化。读档/重新开始可重置原生时钟，但同一 session 内不能倒退帧 generation。`Pending` 明确表示仍有输出待完成，不能冒充无变化。
+
+`FrameLease` 持有 `abi_stable` 共享、不可变 CPU 像素 owner，Host 保留到 GPU 上传完成；clone 只增加 owner 引用，不复制像素。Family 包装已有 Vec、Arc 或共享字节 owner，不强迫上游改成 Astra 容器。owner 不能包含 VM、GPU、窗口或需要会话线程析构的原生资源；close 停止生产并 join worker，但已交付的 CPU lease 仍可安全读取/释放。生产缓冲只能在没有消费者引用时复用，缓冲耗尽须背压或返回 Pending，不能覆盖消费者正在读取的内存或无限扩容。
+
+`FrameInfo.width/height` 是物理 raster，`logical_width/logical_height` 是 VM/输入舞台；stride、尺寸、长度和像素语义明确验证。格式声明 RGBA/BGRA 顺序、sRGB/linear 编码，行声明 top-to-bottom/bottom-to-top；alpha 声明 opaque 或 ignored。ignored 表示 RGB 已按原生规则最终合成，alpha 字节不参与 Host 透明度，不需要 Family 扫描改写 alpha。Host 直接按原生 stride 上传，不为 `Queue::write_texture` 增加 256-byte 行填充；必要的翻转、颜色/alpha 呈现转换由 Host GPU 完成。普通 RGBA/sRGB/top-to-bottom/opaque 无滤镜输出直接呈现上传纹理。不跨 ABI 传 GPU/native handle，不改变上游混合空间。
+
+现行六个 Family 的最终合成 RGB 使用 Ignored alpha，避免在发布时重新扫描/改写不被消费的 alpha；公共 Opaque 仍严格验证。Host 的 GPU alpha 归一化不是零成本，净性能和硬件范围见[性能审计](../../../../Docs/status/performance-upstream-audit-2026-10-12.md#10-整改进度2026-10-13)，不能据此声称所有平台已验收。
+
+推进、取帧与呈现解耦。每个 Family 的 provider、VM、GPU 与生命周期入口从创建到关闭固定在同一 owner；UI 只提交有界 typed 命令并接收结果/最新帧，不能直接执行核心推进或等待自己负责完成的模态请求。输入保持顺序，帧消费者可以降频但不能丢逻辑步、篡改原生音频时钟或存档语义。epoch 切换/关闭后旧输入、完成结果和帧拒绝，设备重建仍可重新上传保留 lease 的完整基线。
+
+Manager 在固定 `astra-family-owner` 线程构造并加载 registry；`Rc` provider/session 不跨线程，也不要求 `Send`。UI 缓存描述符/schema，只提交容量 8 的 typed 命令；普通输入、窗口生命周期、关闭按 epoch 排序。开档与正常关闭异步，native 入口阻塞不阻塞 UI；关闭完成前禁止新开档，窗口退出状态不被旧 owner 属性恢复。逻辑 60 Hz 期限、PCM health、advance 与 acquire_frame 都在 owner，UI 的服务计时器仅排队输入/应用元数据，不重新锚定播放时钟。窗口结果有界合并，标题只在改变时复制；最新 CPU lease 直接进入 mailbox。最终应用退出 join owner。Manager 模态服务遵循 v13 的真实响应与取消边界；具体核心接入和产品验收见审计，KrKr 本批按用户决定跳过，无窗口 Host 明确拒绝请求。
+
+Manager 的原生会话 owner 一次性保留 8 MiB 线程栈，供未经重写的核心初始化临时值使用，不逐帧分配。Headless 同样在独立固定 owner 上完成加载、open、advance、取帧和 close，不能回到 Windows 窗口主线程的小默认栈；不在线程之间搬移已创建的 VM/GPU。这是宿主资源预算，不新增或改变 Family ABI。
 
 ## 窗口请求
 
@@ -56,7 +83,7 @@ Manager 再验证边界和重复字段；非法记录输出 `family.diagnostics.
 
 ## 生命周期与迁移
 
-ABI fingerprint 为 `astra.emu.independent_family_abi.v11`，schema 为 `astra.emu.independent_family_api.v11`。v1 至 v10 插件必须重新构建安装，不提供兼容 reader/adapter。
+ABI fingerprint 为 `astra.emu.independent_family_abi.v13`，schema 为 `astra.emu.independent_family_api.v13`。v1 至 v12 插件必须重新构建安装，不提供兼容 reader/adapter。
 
 动态库首次加载后一直驻留到进程退出，失败加载产生的 ABI 元数据也不会指向卸载的代码；更新插件必须重启 Manager。provider/module 对象按正常生命周期释放。会话 close 和 open 失败仍须取消 Host 请求、唤醒阻塞 PCM 写入并等待所有 worker 结束，错误不得跳过其他 worker 清理。驻留不允许保留已关闭会话的线程或 session callback；无 session 资源的进程级诊断 sink 除外。
 
