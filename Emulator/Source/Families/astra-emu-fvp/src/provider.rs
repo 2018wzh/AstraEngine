@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::Arc;
 
 use astra_emu_family_api::{
     AdvanceResponse, FamilyCapability, FamilyDescriptor, FamilyError, FamilyEvent, FamilyOpen,
@@ -230,6 +231,8 @@ impl FvpProvider {
             gpu,
             fatal: None,
             game_dirty: true,
+            pixels: Default::default(),
+            readback_slot: None,
         };
         session.render_frame()?;
         tracing::info!(
@@ -316,10 +319,14 @@ pub(crate) struct FvpSession {
     gpu: crate::gpu::GpuRenderer,
     fatal: Option<astra_emu_family_api::FamilyError>,
     game_dirty: bool,
+    pixels: [Option<Arc<Vec<u8>>>; 3],
+    readback_slot: Option<usize>,
 }
 
 impl FvpSession {
     fn fail<T>(&mut self, value: FamilyError) -> FamilyResult<T> {
+        self.gpu.native().cancel_pending();
+        self.readback_slot = None;
         self.fatal = Some(value.clone());
         Err(value)
     }
@@ -329,26 +336,41 @@ impl FvpSession {
     fn render_frame(&mut self) -> FamilyResult<()> {
         if matches!(self.frame.poll(None), FramePoll::Pending(_)) {
             let rendered = self.gpu.capture(self.hosted.core_mut())?;
-            self.publish_game_frame(rendered)?;
+            self.pixels[0] = Some(Arc::new(rendered));
+            self.publish_game_frame(0)?;
             self.game_dirty = false;
             return Ok(());
         }
         if self.game_dirty && !self.gpu.native().frame_pending() {
+            let Some(index) = self.pixels.iter().position(|slot| {
+                slot.as_ref()
+                    .is_none_or(|pixels| Arc::strong_count(pixels) == 1)
+            }) else {
+                return Ok(());
+            };
+            self.pixels[index].get_or_insert_with(|| Arc::new(Vec::new()));
+            self.readback_slot = Some(index);
             self.gpu.submit(self.hosted.core_mut())?;
             self.game_dirty = false;
         }
         Ok(())
     }
 
-    fn publish_game_frame(&mut self, rendered: Vec<u8>) -> FamilyResult<()> {
+    fn publish_game_frame(&mut self, index: usize) -> FamilyResult<()> {
+        let rendered = self.pixels[index]
+            .as_ref()
+            .expect("reserved CPU slot exists");
         if self.frame_info.required_bytes() != Some(rendered.len()) {
             return self.fail(error::invalid(
                 "ASTRA_EMU_FVP_FRAME_BYTES",
                 "RFVP returned an invalid frame allocation",
             ));
         }
-        self.frame
-            .publish(rendered, Vec::as_slice, self.frame_info)?;
+        self.frame.publish(
+            Arc::clone(rendered),
+            |pixels| pixels.as_slice(),
+            self.frame_info,
+        )?;
         Ok(())
     }
 
@@ -424,7 +446,11 @@ impl FamilySession for FvpSession {
         let reset_clock = self.hosted.take_timeline_reset();
         if reset_clock {
             self.gpu.native().cancel_pending();
+            self.readback_slot = None;
             self.game_dirty = true;
+        }
+        if was_pending && !self.gpu.native().frame_pending() {
+            self.readback_slot = None;
         }
         self.game_dirty |=
             delta.visual_changed || (was_pending && !self.gpu.native().frame_pending());
@@ -451,17 +477,40 @@ impl FamilySession for FvpSession {
     }
     fn acquire_frame(&mut self, after: Option<FrameIdentity>) -> FamilyResult<FramePoll> {
         self.ensure_live()?;
-        if self.gpu.native().frame_pending() {
-            if let Some(rendered) = self.gpu.poll_frame()? {
-                self.publish_game_frame(rendered)?;
-            } else {
-                return Ok(self.frame.pending());
+        if self.game_dirty && !self.gpu.native().frame_pending() {
+            if let Err(failure) = self.render_frame() {
+                return self.fail(failure);
             }
+        }
+        if self.gpu.native().frame_pending() {
+            let index = self
+                .readback_slot
+                .expect("map submission reserves a CPU slot");
+            let pixels = Arc::get_mut(
+                self.pixels[index]
+                    .as_mut()
+                    .expect("reserved CPU slot exists"),
+            )
+            .expect("reserved CPU slot has no lease");
+            match self.gpu.poll_frame_into(pixels) {
+                Ok(true) => {
+                    self.readback_slot = None;
+                    if let Err(failure) = self.publish_game_frame(index) {
+                        return self.fail(failure);
+                    }
+                }
+                Ok(false) => return Ok(self.frame.pending()),
+                Err(failure) => return self.fail(failure),
+            }
+        } else if self.game_dirty {
+            return Ok(self.frame.pending());
         }
         Ok(self.frame.poll(after))
     }
     fn close(mut self: Box<Self>) -> FamilyResult<()> {
         tracing::info!(event = "astra.emu.fvp.session.closing");
+        self.gpu.native().cancel_pending();
+        self.readback_slot = None;
         let save_result = self
             .hosted
             .shutdown()

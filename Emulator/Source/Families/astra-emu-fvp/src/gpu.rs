@@ -96,7 +96,7 @@ impl GpuRenderer {
         core.submit_hosted_gpu(&mut self.0).map_err(error)
     }
 
-    pub(crate) fn poll_frame(&mut self) -> FamilyResult<Option<Vec<u8>>> {
-        self.0.poll_frame().map_err(error)
+    pub(crate) fn poll_frame_into(&mut self, pixels: &mut Vec<u8>) -> FamilyResult<bool> {
+        self.0.poll_frame_into(pixels).map_err(error)
     }
 }

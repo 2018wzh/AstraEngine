@@ -15,8 +15,8 @@
 - Upstream: <https://github.com/xmoezzz/rfvp>
 - Upstream version: `0.6.0`, revision `af557db750c7833274f22a6d82b0dc33cdea2f85`
 - Hosted adaptation fork: <https://github.com/2018wzh/rfvp>
-- Hosted adaptation branch: `codex/astra-upstream-head-20261016`
-- 当前 submodule 固定 revision：`d1ff965d79ba2cdc956aad73ae100cc44bc7ce90`，直接基于上述上游 HEAD 的一个适配提交；尚未推送。
+- Hosted adaptation branch: `codex/astra-minimal-native-20261017`
+- 当前 submodule 固定 revision：`dcd39c23ca59b38a9a96b6f301aeb05121aa3e18`，直接基于上述上游 HEAD 的一个适配提交；尚未推送。
 - License: Mozilla Public License 2.0.
 - Derivative source: <https://github.com/2018wzh/rfvp>
 - Astra wrapper source: `Emulator/Source/Families/astra-emu-fvp/`

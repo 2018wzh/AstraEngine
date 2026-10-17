@@ -14,8 +14,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use abi_stable::type_level::downcasting::TD_Opaque;
 use astra_emu_family_api::{
     AudioSink, AudioSink_TO, AudioWriteStatus, FamilyEvent, FamilyOpen, FamilyProvider,
-    FamilySession, FamilyStatus, FramePoll, KeyCode, KeyModifiers, KeyState, OpenRequest, PcmChunk,
-    PcmFormatSpec, PointerButton, WindowState,
+    FamilySession, FamilyStatus, FrameLease, FramePoll, KeyCode, KeyModifiers, KeyState,
+    OpenRequest, PcmChunk, PcmFormatSpec, PointerButton, WindowState,
 };
 
 static PUSHED_FRAMES: AtomicU64 = AtomicU64::new(0);
@@ -109,13 +109,7 @@ fn settle_until_lit(session: &mut dyn FamilySession, max_frames: u32, min_lit_ra
         total: usize,
     }
     impl Lit {
-        fn read(&mut self, poll: FramePoll) -> astra_emu_family_api::FamilyResult<()> {
-            let FramePoll::Ready(frame) = poll else {
-                return Err(astra_emu_family_api::FamilyError::invalid(
-                    "TEST_FRAME_PENDING",
-                    "expected a completed native frame",
-                ));
-            };
+        fn read(&mut self, frame: &FrameLease) {
             self.total = frame.pixels().len() / 4;
             self.count = frame
                 .pixels()
@@ -124,14 +118,37 @@ fn settle_until_lit(session: &mut dyn FamilySession, max_frames: u32, min_lit_ra
                 .iter()
                 .filter(|pixel| pixel[..3].iter().any(|channel| *channel > 24))
                 .count();
-            Ok(())
         }
     }
+    let mut previous: Option<FrameLease> = None;
     for _ in 0..max_frames {
         let _ = session.advance(16_666_667, &[]).expect("advance succeeds");
         let mut lit = Lit { count: 0, total: 0 };
-        lit.read(session.acquire_frame(None).unwrap())
-            .expect("frame visit succeeds");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let after = previous.as_ref().map(|frame| frame.identity);
+            match session
+                .acquire_frame(after)
+                .expect("native frame poll succeeds")
+            {
+                FramePoll::Ready(frame) => {
+                    previous = Some(frame);
+                    break;
+                }
+                FramePoll::Unchanged(identity) => {
+                    assert_eq!(after, Some(identity));
+                    break;
+                }
+                FramePoll::Pending(_) => {
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "native frame readback timed out"
+                    );
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
+            }
+        }
+        lit.read(previous.as_ref().expect("completed native frame"));
         if lit.total > 0 && (lit.count as f64) / (lit.total as f64) >= min_lit_ratio {
             return true;
         }

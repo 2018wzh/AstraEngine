@@ -11,8 +11,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use abi_stable::type_level::downcasting::TD_Opaque;
 use astra_emu_family_api::{
     AudioSink, AudioSink_TO, AudioWriteStatus, FamilyEvent, FamilyOpen, FamilyProvider,
-    FamilySession, FamilyStatus, FramePoll, KeyCode, KeyModifiers, KeyState, OpenRequest, PcmChunk,
-    PcmFormatSpec, PointerButton, WindowState,
+    FamilySession, FamilyStatus, FrameLease, FramePoll, KeyCode, KeyModifiers, KeyState,
+    OpenRequest, PcmChunk, PcmFormatSpec, PointerButton, WindowState,
 };
 
 static PUSHED_FRAMES: AtomicU64 = AtomicU64::new(0);
@@ -45,13 +45,7 @@ struct FrameDigest {
 }
 
 impl FrameDigest {
-    fn read(&mut self, poll: FramePoll) -> astra_emu_family_api::FamilyResult<()> {
-        let FramePoll::Ready(frame) = poll else {
-            return Err(astra_emu_family_api::FamilyError::invalid(
-                "TEST_FRAME_PENDING",
-                "expected a completed native frame",
-            ));
-        };
+    fn read(&mut self, frame: &FrameLease) {
         self.len = frame.pixels().len();
         self.sum = frame
             .pixels()
@@ -69,19 +63,40 @@ impl FrameDigest {
             .iter()
             .filter(|pixel| pixel[..3].iter().any(|channel| *channel > 24))
             .count();
-        Ok(())
     }
 }
 
-fn digest(session: &mut dyn FamilySession) -> FrameDigest {
+fn digest(session: &mut dyn FamilySession, previous: &mut Option<FrameLease>) -> FrameDigest {
     let mut digest = FrameDigest {
         len: 0,
         sum: 0,
         lit_pixels: 0,
     };
-    digest
-        .read(session.acquire_frame(None).unwrap())
-        .expect("frame visit succeeds");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let after = previous.as_ref().map(|frame| frame.identity);
+        match session
+            .acquire_frame(after)
+            .expect("native frame poll succeeds")
+        {
+            FramePoll::Ready(frame) => {
+                *previous = Some(frame);
+                break;
+            }
+            FramePoll::Unchanged(identity) => {
+                assert_eq!(after, Some(identity));
+                break;
+            }
+            FramePoll::Pending(_) => {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "native frame readback timed out"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        }
+    }
+    digest.read(previous.as_ref().expect("completed native frame"));
     digest
 }
 
@@ -171,7 +186,8 @@ fn headless_boot_inputs_frames_audio_and_close() {
     // Drive the title flow long enough for the boot fade and the first
     // scripted presentation to finish. The composition must produce visible
     // content and keep changing while inputs advance the flow.
-    let boot = digest(session.as_mut());
+    let mut previous = None;
+    let boot = digest(session.as_mut(), &mut previous);
     assert_eq!(
         boot.len,
         (response.frame.width * response.frame.height * 4) as usize,
@@ -185,7 +201,7 @@ fn headless_boot_inputs_frames_audio_and_close() {
         let result = session
             .advance(16_666_667, &events)
             .expect("advance succeeds");
-        let snapshot = digest(session.as_mut());
+        let snapshot = digest(session.as_mut(), &mut previous);
         max_lit = max_lit.max(snapshot.lit_pixels);
         distinct_sums.insert(snapshot.sum);
         if result.status == FamilyStatus::Finished {

@@ -202,7 +202,7 @@ pub(crate) fn find_base_archive(root: &Path, selected: &str) -> FamilyResult<Pat
 static ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 pub(crate) struct SessionLease;
 impl SessionLease {
-    fn acquire() -> FamilyResult<Self> {
+    pub(crate) fn acquire() -> FamilyResult<Self> {
         ACTIVE
             .compare_exchange(
                 false,

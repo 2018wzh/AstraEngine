@@ -200,6 +200,7 @@ fn boot_engine(
         host_events.set_enabled(false);
         return Err(publication_error);
     }
+    rt.take_timeline_reset();
 
     Ok(ArtemisOpen {
         frame_info,
@@ -228,7 +229,7 @@ fn build_runtime(
     #[cfg(target_os = "macos")]
     let backend = BackendSelection::NativeMetal;
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "android"))]
-    let backend = BackendSelection::NativeVulkan;
+    let backend = BackendSelection::NativeVulkanHardware;
     #[cfg(not(any(
         target_os = "windows",
         target_os = "linux",
@@ -386,13 +387,19 @@ impl FamilySession for ArtemisSession {
                 return Err(failure);
             }
         }
+        let reset_clock = self.rt.take_timeline_reset();
+        if reset_clock {
+            self.elapsed_remainder_ns = 0;
+        }
         if self.rt.is_exit_requested() {
             return Ok(AdvanceResponse {
                 status: FamilyStatus::Finished,
+                reset_clock,
                 ..AdvanceResponse::running()
             });
         }
         Ok(AdvanceResponse {
+            reset_clock,
             window_command: self.pending_window.take().into(),
             ..AdvanceResponse::running()
         })
@@ -423,3 +430,7 @@ impl FamilySession for ArtemisSession {
         audio_result
     }
 }
+
+#[cfg(test)]
+#[path = "session_clock_tests.rs"]
+mod clock_tests;

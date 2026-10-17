@@ -188,3 +188,54 @@ fn native_mask_dissolve_preserves_previous_frame_and_thresholds() {
         .iter()
         .all(|p| *p == [0, 0, 0, 255]));
 }
+
+#[test]
+#[ignore = "requires a hardware GPU"]
+fn read_into_preserves_padded_rows_and_reuses_pixels_after_cancel() {
+    use rfvp::{script::parser::Nls, subsystem::resources::vfs::Vfs};
+    let mut vfs = Vfs::new(Nls::ShiftJIS).unwrap();
+    let mut motion = MotionManager::new();
+    let mut initial = motion.capture_snapshot_v1();
+    let prim = &mut initial.prim_manager.prims[0];
+    prim.typ = 4;
+    prim.draw_flag = true;
+    prim.alpha = 255;
+    prim.texture_id = 0;
+    motion.apply_snapshot_v1(&initial, &vfs).unwrap();
+    let source = white_nvsg();
+    vfs.add_loose_file("white.nvsg", source.clone());
+    motion.load_graph(0, "white.nvsg", source).unwrap();
+    let mut pixels = Vec::new();
+    for (width, height) in [(63, 47), (65, 49), (63, 47)] {
+        let mut renderer = GpuRenderer::new(width, height).unwrap();
+        for _ in 0..4 {
+            renderer.native().submit(&motion).unwrap();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while !renderer.poll_frame_into(&mut pixels).unwrap() {
+                assert!(std::time::Instant::now() < deadline);
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            let pointer = pixels.as_ptr();
+            let capacity = pixels.capacity();
+            assert_eq!(pixels.len(), (width * height * 4) as usize);
+            for (i, pixel) in pixels.as_chunks::<4>().0.iter().enumerate() {
+                let expected = if i % (width as usize) < 4 && i / (width as usize) < 2 {
+                    [255; 4]
+                } else {
+                    [0, 0, 0, 255]
+                };
+                assert_eq!(*pixel, expected);
+            }
+            renderer.native().submit(&motion).unwrap();
+            renderer.native().cancel_pending();
+            renderer.native().submit(&motion).unwrap();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while !renderer.poll_frame_into(&mut pixels).unwrap() {
+                assert!(std::time::Instant::now() < deadline);
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            assert_eq!(pixels.as_ptr(), pointer);
+            assert_eq!(pixels.capacity(), capacity);
+        }
+    }
+}

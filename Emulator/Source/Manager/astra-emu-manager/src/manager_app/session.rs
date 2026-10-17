@@ -21,6 +21,8 @@ pub(super) struct ActiveFamilySession {
     pub(super) pending_pointer: Option<astra_emu_family_api::FamilyPointerRequest>,
     pub(super) last_tick: Instant,
     pub(super) next_deadline: Instant,
+    pub(super) frame_poll_deadline: Option<Instant>,
+    pub(super) clock_reset_pending: bool,
 }
 
 impl ActiveFamilySession {
@@ -39,7 +41,9 @@ impl ActiveFamilySession {
         {
             return Err("ASTRA_EMU_FAMILY_BINDING_MISMATCH".into());
         }
-        mailbox.activate(session_epoch).map_err(|error| error.to_string())?;
+        mailbox
+            .activate(session_epoch)
+            .map_err(|error| error.to_string())?;
         let host = FamilyHostServices {
             audio_sink: audio
                 .as_ref()
@@ -49,7 +53,9 @@ impl ActiveFamilySession {
                 .as_ref()
                 .map(|bridge| ROption::RSome(bridge.sink()))
                 .unwrap_or(ROption::RNone),
-            modal: modal.as_ref().map(|bridge| ROption::RSome(bridge.sink()))
+            modal: modal
+                .as_ref()
+                .map(|bridge| ROption::RSome(bridge.sink()))
                 .unwrap_or(ROption::RNone),
         };
         let opened = registry
@@ -84,6 +90,8 @@ impl ActiveFamilySession {
             pending_pointer: None,
             last_tick: Instant::now(),
             next_deadline: Instant::now() + Duration::from_nanos(FIXED_FRAME_NS),
+            frame_poll_deadline: None,
+            clock_reset_pending: false,
         };
         if let Err(error) = active.capture_initial_frame() {
             return match active.close() {
@@ -96,16 +104,29 @@ impl ActiveFamilySession {
 
     pub(super) fn capture_frame(&mut self) -> Result<(), String> {
         let after = self.mailbox.identity()?;
-        let session = self.session.as_mut()
+        let session = self
+            .session
+            .as_mut()
             .ok_or_else(|| "ASTRA_EMU_FAMILY_SESSION_CLOSED".to_owned())?;
-        let frame = session.acquire_frame(after).map_err(|error| error.to_string())?;
-        frame.validate(self.session_epoch).map_err(|error| error.to_string())?;
+        let frame = session
+            .acquire_frame(after)
+            .map_err(|error| error.to_string())?;
+        frame
+            .validate(self.session_epoch)
+            .map_err(|error| error.to_string())?;
+        self.frame_poll_deadline = None;
         match frame {
-            astra_emu_family_api::FramePoll::Ready(frame) => {
-                self.mailbox.publish(frame).map_err(|error| error.to_string())
+            astra_emu_family_api::FramePoll::Ready(frame) => self
+                .mailbox
+                .publish(frame)
+                .map_err(|error| error.to_string()),
+            astra_emu_family_api::FramePoll::Unchanged(identity) if after == Some(identity) => {
+                Ok(())
             }
-            astra_emu_family_api::FramePoll::Unchanged(identity) if after == Some(identity) => Ok(()),
-            astra_emu_family_api::FramePoll::Pending(_) => Ok(()),
+            astra_emu_family_api::FramePoll::Pending(_) => {
+                self.frame_poll_deadline = Some(Instant::now() + Duration::from_millis(1));
+                Ok(())
+            }
             astra_emu_family_api::FramePoll::Unchanged(_) => {
                 Err("ASTRA_EMU_FAMILY_FRAME_BASELINE".into())
             }
@@ -113,9 +134,31 @@ impl ActiveFamilySession {
     }
 
     fn capture_initial_frame(&mut self) -> Result<(), String> {
+        self.clock_reset_pending = true;
         self.capture_frame()?;
-        self.reset_clock_after_host_work("initial_frame");
+        self.settle_clock("initial_frame");
         Ok(())
+    }
+
+    pub(super) fn wake_deadline(&self) -> Instant {
+        match self.frame_poll_deadline {
+            Some(poll) if self.clock_reset_pending => poll,
+            Some(poll) => poll.min(self.next_deadline),
+            None => self.next_deadline,
+        }
+    }
+
+    pub(super) fn poll_pending_frame(&mut self) -> Result<bool, String> {
+        self.capture_frame()?;
+        self.settle_clock("family_frame");
+        Ok(self.frame_poll_deadline.is_none())
+    }
+
+    fn settle_clock(&mut self, reason: &'static str) {
+        if self.clock_reset_pending && self.frame_poll_deadline.is_none() {
+            self.clock_reset_pending = false;
+            self.reset_clock_after_host_work(reason);
+        }
     }
 
     pub(super) fn epoch(&self) -> u64 {
@@ -177,6 +220,7 @@ impl ActiveFamilySession {
             }
         }
         let copy_started = core_finished.map(|_| Instant::now());
+        self.clock_reset_pending |= response.reset_clock;
         self.capture_frame()?;
         if let (Some(core_finished), Some(copy_started)) = (core_finished, copy_started) {
             tracing::debug!(
@@ -186,13 +230,9 @@ impl ActiveFamilySession {
                 frame_capture_us = copy_started.elapsed().as_micros() as u64
             );
         }
-        self.last_tick = if response.reset_clock {
-            tracing::debug!(event = "astra.emu.host.clock_reset", family_id = %self.family_id);
-            Instant::now()
-        } else {
-            started
-        };
-        self.next_deadline = self.last_tick + Duration::from_nanos(FIXED_FRAME_NS);
+        self.last_tick = started;
+        self.next_deadline = started + Duration::from_nanos(FIXED_FRAME_NS);
+        self.settle_clock("family_frame");
         Ok(())
     }
 
@@ -233,13 +273,10 @@ impl ActiveFamilySession {
                 }
             }
         }
+        self.clock_reset_pending |= response.reset_clock;
         self.capture_frame()?;
-        if response.reset_clock {
-            tracing::debug!(event = "astra.emu.host.clock_reset", family_id = %self.family_id);
-            self.reset_clock_after_host_work("family_event");
-        } else {
-            self.next_deadline = self.last_tick + Duration::from_nanos(FIXED_FRAME_NS);
-        }
+        self.next_deadline = self.last_tick + Duration::from_nanos(FIXED_FRAME_NS);
+        self.settle_clock("family_event");
         Ok(())
     }
 
@@ -298,6 +335,7 @@ mod tests {
     use super::*;
     use astra_emu_family_api::*;
 
+    mod clock;
     mod window;
 
     struct AudioSession {
@@ -312,7 +350,10 @@ mod tests {
         }
 
         fn acquire_frame(&mut self, _: Option<FrameIdentity>) -> FamilyResult<FramePoll> {
-            Ok(FramePoll::Pending(FrameIdentity { session_epoch: 1, generation: 0 }))
+            Ok(FramePoll::Pending(FrameIdentity {
+                session_epoch: 1,
+                generation: 0,
+            }))
         }
 
         fn close(mut self: Box<Self>) -> FamilyResult<()> {
@@ -361,7 +402,7 @@ mod tests {
                     AudioWriteStatus::Cancelled | AudioWriteStatus::Closed
                         if worker_stop.load(Ordering::Acquire) =>
                     {
-                        return Ok(())
+                        return Ok(());
                     }
                     status => return Err(format!("unexpected audio status: {status:?}")),
                 }
@@ -375,62 +416,15 @@ mod tests {
             );
             std::thread::sleep(Duration::from_millis(1));
         }
-        ActiveFamilySession { session_epoch: 1, family_id: "audio-lifecycle-test".into(),
-        session: Some(Box::new(AudioSession {
-            sink,
-            stop,
-            worker: Some(worker),
-        })),
-        audio: Some(audio),
-        text: None,
-        modal: None,
-        mailbox: FrameMailbox::new(),
-        status: FamilyStatus::Running,
-        fullscreen: false,
-        title: None,
-        pending_icon: None,
-        pending_pointer: None,
-        last_tick: Instant::now(),
-        next_deadline: Instant::now(), }
-    }
-
-    #[test]
-    fn close_joins_family_pcm_worker_before_releasing_null_audio_and_reopens() {
-        for _ in 0..2 {
-            let mut active = active_with_audio();
-            active.close().unwrap();
-        }
-    }
-
-    #[test]
-    fn restored_clock_starts_after_frame_capture_only_when_requested() {
-        struct ClockSession {
-            reset: bool,
-            captured: std::sync::Arc<std::sync::Mutex<Option<Instant>>>,
-        }
-        impl FamilySession for ClockSession {
-            fn advance(&mut self, _: u64, _: &[FamilyEvent]) -> FamilyResult<AdvanceResponse> {
-                Ok(AdvanceResponse {
-                    reset_clock: self.reset,
-                    ..AdvanceResponse::running()
-                })
-            }
-            fn acquire_frame(&mut self, _: Option<FrameIdentity>) -> FamilyResult<FramePoll> {
-                *self.captured.lock().unwrap() = Some(Instant::now());
-                Ok(FramePoll::Pending(FrameIdentity { session_epoch: 1, generation: 0 }))
-            }
-            fn close(self: Box<Self>) -> FamilyResult<()> {
-                Ok(())
-            }
-        }
-        for reset in [false, true] {
-            let captured = std::sync::Arc::new(std::sync::Mutex::new(None));
-            let mut active = ActiveFamilySession { session_epoch: 1, family_id: "clock-test".into(),
-            session: Some(Box::new(ClockSession {
-                reset,
-                captured: captured.clone(),
+        ActiveFamilySession {
+            session_epoch: 1,
+            family_id: "audio-lifecycle-test".into(),
+            session: Some(Box::new(AudioSession {
+                sink,
+                stop,
+                worker: Some(worker),
             })),
-            audio: None,
+            audio: Some(audio),
             text: None,
             modal: None,
             mailbox: FrameMailbox::new(),
@@ -440,130 +434,17 @@ mod tests {
             pending_icon: None,
             pending_pointer: None,
             last_tick: Instant::now(),
-            next_deadline: Instant::now(), };
-            active.advance(1, &[]).unwrap();
-            let completion = captured.lock().unwrap().unwrap();
-            if reset {
-                assert!(active.last_tick >= completion);
-            } else {
-                assert!(active.last_tick <= completion);
-            }
-            assert_eq!(
-                active.next_deadline,
-                active.last_tick + Duration::from_nanos(FIXED_FRAME_NS)
-            );
-            active.close().unwrap();
+            next_deadline: Instant::now(),
+            frame_poll_deadline: None,
+            clock_reset_pending: false,
         }
     }
 
     #[test]
-    fn host_event_clock_follows_family_reset_decision() {
-        struct HostEventSession {
-            reset: bool,
-        }
-        impl FamilySession for HostEventSession {
-            fn advance(&mut self, _: u64, _: &[FamilyEvent]) -> FamilyResult<AdvanceResponse> {
-                Ok(AdvanceResponse {
-                    reset_clock: self.reset,
-                    ..AdvanceResponse::running()
-                })
-            }
-            fn acquire_frame(&mut self, _: Option<FrameIdentity>) -> FamilyResult<FramePoll> {
-                Ok(FramePoll::Pending(FrameIdentity { session_epoch: 1, generation: 0 }))
-            }
-            fn close(self: Box<Self>) -> FamilyResult<()> {
-                Ok(())
-            }
-        }
-
-        for reset in [false, true] {
-            let anchor = Instant::now();
-            let mut active = ActiveFamilySession { session_epoch: 1, family_id: "host-event-clock-test".into(),
-            session: Some(Box::new(HostEventSession { reset })),
-            audio: None,
-            text: None,
-            modal: None,
-            mailbox: FrameMailbox::new(),
-            status: FamilyStatus::Running,
-            fullscreen: false,
-            title: None,
-            pending_icon: None,
-            pending_pointer: None,
-            last_tick: anchor,
-            next_deadline: anchor + Duration::from_nanos(FIXED_FRAME_NS), };
-            active
-                .advance_host_events(&[FamilyEvent::WindowFocused { focused: false }])
-                .unwrap();
-            if reset {
-                assert!(active.last_tick >= anchor);
-            } else {
-                assert_eq!(active.last_tick, anchor);
-            }
-            assert_eq!(
-                active.next_deadline,
-                active.last_tick + Duration::from_nanos(FIXED_FRAME_NS)
-            );
+    fn close_joins_family_pcm_worker_before_releasing_null_audio_and_reopens() {
+        for _ in 0..2 {
+            let mut active = active_with_audio();
             active.close().unwrap();
         }
     }
-
-    #[test]
-    fn initial_clock_starts_after_initial_frame_capture() {
-        struct InitialFrameSession {
-            entered: std::sync::mpsc::SyncSender<()>,
-            release: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
-            completed: std::sync::Arc<std::sync::Mutex<Option<Instant>>>,
-        }
-        impl FamilySession for InitialFrameSession {
-            fn advance(&mut self, _: u64, _: &[FamilyEvent]) -> FamilyResult<AdvanceResponse> {
-                Ok(AdvanceResponse::running())
-            }
-            fn acquire_frame(&mut self, _: Option<FrameIdentity>) -> FamilyResult<FramePoll> {
-                self.entered.send(()).unwrap();
-                self.release.lock().unwrap().recv().unwrap();
-                *self.completed.lock().unwrap() = Some(Instant::now());
-                Ok(FramePoll::Pending(FrameIdentity { session_epoch: 1, generation: 0 }))
-            }
-            fn close(self: Box<Self>) -> FamilyResult<()> {
-                Ok(())
-            }
-        }
-
-        let (entered, entered_receiver) = std::sync::mpsc::sync_channel(0);
-        let (release, release_receiver) = std::sync::mpsc::sync_channel(0);
-        let completed = std::sync::Arc::new(std::sync::Mutex::new(None));
-        let completed_for_session = completed.clone();
-        let releaser = std::thread::spawn(move || {
-            entered_receiver.recv().unwrap();
-            release.send(()).unwrap();
-        });
-        let mut active = ActiveFamilySession { session_epoch: 1, family_id: "initial-frame-clock-test".into(),
-        session: Some(Box::new(InitialFrameSession {
-            entered,
-            release: std::sync::Mutex::new(release_receiver),
-            completed: completed_for_session,
-        })),
-        audio: None,
-        text: None,
-        modal: None,
-        mailbox: FrameMailbox::new(),
-        status: FamilyStatus::Running,
-        fullscreen: false,
-        title: None,
-        pending_icon: None,
-        pending_pointer: None,
-        last_tick: Instant::now(),
-        next_deadline: Instant::now(), };
-
-        active.capture_initial_frame().unwrap();
-        releaser.join().unwrap();
-        let completed = completed.lock().unwrap().unwrap();
-        assert!(active.last_tick >= completed);
-        assert_eq!(
-            active.next_deadline,
-            active.last_tick + Duration::from_nanos(FIXED_FRAME_NS)
-        );
-        active.close().unwrap();
-    }
-
 }

@@ -254,7 +254,10 @@ where
 
     fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
         let metadata = event.metadata();
-        let mut visitor = FieldVisitor::default();
+        let mut visitor = FieldVisitor {
+            native_family: metadata.target() == "astra_emu::family",
+            ..FieldVisitor::default()
+        };
         event.record(&mut visitor);
         let event_name = visitor
             .fields
@@ -374,13 +377,18 @@ impl StableJsonLayer {
 #[derive(Default)]
 struct FieldVisitor {
     fields: BTreeMap<String, Value>,
+    native_family: bool,
 }
 
 impl FieldVisitor {
     fn insert(&mut self, field: &tracing::field::Field, value: Value) {
         self.fields.insert(
             field.name().to_string(),
-            sanitize_field(field.name(), value),
+            if self.native_family {
+                value
+            } else {
+                sanitize_field(field.name(), value)
+            },
         );
     }
 }

@@ -1,3 +1,5 @@
+#[path = "readback_tests.rs"]
+mod readback_tests;
 #[path = "texture_lifecycle_tests.rs"]
 mod texture_lifecycle_tests;
 
@@ -233,8 +235,9 @@ fn scripted_movie_reuses_frame_then_restores_native_game_after_eof() {
             "native movie did not present"
         );
     };
-    let mut latest = first.clone();
-    let mut next = None;
+    let first_pixels = first.pixels().to_vec();
+    let mut latest = first;
+    let mut saw_another_movie_frame = false;
     let restored = loop {
         std::thread::sleep(std::time::Duration::from_millis(10));
         session.advance(10_000_000, &[]).unwrap();
@@ -242,8 +245,8 @@ fn scripted_movie_reuses_frame_then_restores_native_game_after_eof() {
             if frame.pixels() == game.pixels() {
                 break frame;
             }
-            if frame.pixels() != first.pixels() {
-                next = Some(frame.clone());
+            if frame.pixels() != first_pixels {
+                saw_another_movie_frame = true;
             }
             latest = frame;
         }
@@ -252,10 +255,12 @@ fn scripted_movie_reuses_frame_then_restores_native_game_after_eof() {
             "native movie did not reach EOF"
         );
     };
-    let next = next.expect("native decoder must present another movie frame");
+    assert!(
+        saw_another_movie_frame,
+        "native decoder must present another movie frame"
+    );
     Box::new(session).close().unwrap();
-    assert!(first.pixels() != game.pixels());
-    assert!(next.pixels() != game.pixels());
+    assert!(first_pixels != game.pixels());
     assert_eq!(restored.pixels(), game.pixels());
 }
 
@@ -292,12 +297,15 @@ fn saved_thumbnail_matches_native_gpu_at_prepare_not_later_write() {
     call(&mut hcb, 0, &[]);
     call(&mut hcb, 4, &[Some(3), None]);
     call(&mut hcb, 0, &[]);
+    let saved_return_pc = hcb.len();
     call(
         &mut hcb,
         1,
         &[Some(1), Some(0), Some(128), Some(0), Some(255)],
     );
     call(&mut hcb, 5, &[Some(20)]);
+    call(&mut hcb, 0, &[]);
+    call(&mut hcb, 6, &[Some(20)]);
     let wait = hcb.len() as u32;
     call(&mut hcb, 0, &[]);
     hcb.push(Opcode::Jmp as u8);
@@ -308,7 +316,7 @@ fn saved_thumbnail_matches_native_gpu_at_prepare_not_later_write() {
     hcb.extend_from_slice(&0_u16.to_le_bytes());
     hcb.extend_from_slice(&0_u16.to_le_bytes());
     hcb.extend_from_slice(&[0, 0, 1, 0]);
-    hcb.extend_from_slice(&6_u16.to_le_bytes());
+    hcb.extend_from_slice(&7_u16.to_le_bytes());
     for (args, name) in [
         (0, "ThreadNext"),
         (5, "ColorSet"),
@@ -316,6 +324,7 @@ fn saved_thumbnail_matches_native_gpu_at_prepare_not_later_write() {
         (2, "PrimGroupIn"),
         (2, "SaveCreate"),
         (1, "SaveWrite"),
+        (1, "Load"),
     ] {
         hcb.extend_from_slice(&[args, (name.len() + 1) as u8]);
         hcb.extend_from_slice(name.as_bytes());
@@ -333,6 +342,10 @@ fn saved_thumbnail_matches_native_gpu_at_prepare_not_later_write() {
     let menu = await_frame(&mut session, Some(prepared.identity));
     assert!(menu.pixels()[0] == 0 && menu.pixels()[1] > 0 && menu.pixels()[2] == 0);
     let bytes = std::fs::read(root.path().join("save/rfvp_s020.bin")).unwrap();
+    let snapshot = rfvp::subsystem::save_state::try_decode_state_chunk_v1(&bytes)
+        .unwrap()
+        .unwrap();
+    assert_eq!(snapshot.vm.contexts[0].cursor, saved_return_pc);
     let native = SaveManager::new();
     let thumb = SaveItem::read_thumb_texture_from_mem(
         &bytes,
@@ -345,5 +358,20 @@ fn saved_thumbnail_matches_native_gpu_at_prepare_not_later_write() {
         .0
         .iter()
         .all(|pixel| pixel[..3] == *prepared_rgb));
+    session.advance(16_666_667, &[]).unwrap(); // Load requests restoration.
+    let loaded = session.advance(16_666_667, &[]).unwrap();
+    assert!(loaded.reset_clock);
+    let restored = await_frame(&mut session, Some(menu.identity));
+    assert_eq!(restored.pixels(), prepared.pixels());
+    drop(menu);
+    assert!(session
+        .hosted
+        .core()
+        .debug_threads()
+        .contains(&format!("pc {saved_return_pc:#x} ")));
+    let resumed = session.advance(16_666_667, &[]).unwrap();
+    assert!(!resumed.reset_clock);
+    let continued = await_frame(&mut session, Some(restored.identity));
+    assert!(continued.pixels()[0] == 0 && continued.pixels()[1] > 0);
     Box::new(session).close().unwrap();
 }
