@@ -16,17 +16,21 @@ NativeVN 的原生宿主与 Headless 共用物理输入到 UI request/completion
 
 ## EMU Family API
 
-目标为原生核心 Embedded＋统一 C ABI＋CPU/GPU FrameSurface＋Manager 统一呈现。当前 [Family API v13](../../Emulator/Source/FamilyApi/astra-emu-family-api/API_CONTRACT.md) 是待迁移实现，不是新 ABI 的兼容基线。以下目标优先于尚未迁移段落中的 ProviderModule、advance、必需 CPU/PCM 等旧实现名称；迁移时删除旧链，不增加兼容 vtable、别名或并行运行协议。
+目标为原生核心 Embedded＋统一 C ABI＋CPU/GPU FrameSurface＋Manager 统一呈现。新协议由 [`astra-emu-abi`](../../Emulator/Source/FamilyApi/astra-emu-abi/src/lib.rs) 的 Rust 类型定义，C 头由 cbindgen 0.29.2 生成。旧 [Family API v13](../../Emulator/Source/FamilyApi/astra-emu-family-api/API_CONTRACT.md) 仅描述尚未迁移的消费者，不是新 ABI 的兼容基线；新 Manager 不加载旧 vtable，也不为 CMVS 增加兼容运行链。
 
 ### 原生所有权与 ABI
 
-同进程、单活动游戏，Dynamic/Static 共用 C 兼容结构、明确长度、不透明句柄和稳定错误码。动态库通过统一查询符号返回版本化函数表；静态核心以唯一工厂入口注册相同协议。接口分为核心描述/配置/格式探测、会话控制、Surface 扩展、Hook 服务和可选平台服务，不用无类型 JSON call 代替 typed 协议。具体符号与布局由实现契约统一冻结，不提前宣称尚未实现的 ABI 已稳定。
+同进程、单活动游戏，Dynamic/Static 共用 C 兼容结构、明确长度、不透明句柄和稳定错误码。动态入口 `astra_emu_query` 与静态注册的 `Query` 返回相同 `CoreApi`；查询只协商版本，不启动线程或安装日志。函数表含 initialize、describe、probe、open、input、control、state、frame、cancel、close 和 extension，不含 advance。普通调用串行，cancel 可并发唤醒阻塞服务；close 无论成功失败都消费句柄，返回前结束全部 worker 和回调。失败 open 不交付会话且完成清理。此为本轮实现版本，尚未完成七核心产品验收，不宣称已发布稳定 ABI。
 
 核心自持 VM、原生调度、资源、渲染、游戏 UI、输入语义、音视频和存档。Manager 管理会话而非游戏 Tick 策略；不要求公共 advance，不强制固定 16 ms 推进、统一 SceneCommand/Mixer/VFS、Host PCM 或 no_std Runtime。上游 host_step 等入口可在嵌入运行层内部复用，不能把执行逻辑搬进另一套 Family 包装。音频优先使用核心原生输出，SDK 后端仅在平台确有需要时按需链接。
 
 应用级平台壳拥有 OS 事件循环与窗口，DLL 不再创建第二套 GUI 应用循环。Manager 是最终 Present 的唯一正式路径，上游独立应用只作为正常入口和行为对照。窗口与模态使用有界 typed 请求，Host 在窗口线程执行并反馈实际结果；无窗口 Host 明确拒绝，不伪造用户回答。默认允许自由缩放窗口，原生窗口行为作为按游戏启用的兼容策略。
 
 库驻留至进程退出，更新需要重启，切换游戏不能靠卸载库清理全局状态。关闭先停止生产并取消原生服务，再结束帧消费、回收 worker 和会话资源；宿主回调对象销毁后不得再发生回调。启动失败和关闭错误也完成所有可达清理。Rust panic/C++ 异常不得跨普通 C ABI 传播。读档、重开失效运行上下文与迟到结果；核心恢复自身时钟，不把 Hook/模态/暂停等待补成巨大 Tick。
+
+`HostServices.cancellation` 在 open 开始前就由 Host 持有；取消按会话代次查询，初始化和原生 worker 在阶段边界检查。Host 的请求登记、取消与成功 open 句柄发布使用同一同步边界；取消获胜时关闭刚返回的句柄，不发布运行会话。调用 close 前禁止新的 raw cancel 并等在途 cancel 返回，不能在已消费句柄上继续调用。
+
+当前 typed 窗口服务覆盖标题、全屏、图标、指针、窗口大小/位置/可见性/最小化，以及保留 caption、按钮 ID 和可选文字输入的模态。结果区分实际生效字段；异步窗口请求值不能冒充实际值。输入模态使用调用方有界输出缓冲，取消不伪造按钮或空输入。文件/文件夹选择器尚无可取消的 Host 原生 owner，桌面壁纸修改未接入，相关核心请求明确失败；这些能力不计为已完成。
 
 ### 渲染配置与 FrameSurface
 
@@ -36,7 +40,7 @@ NativeVN 的原生宿主与 Headless 共用物理输入到 UI request/completion
 
 每帧必须是包含文字、系统页及核心 UI 的完整游戏图像。Surface 描述输出类型、实际尺寸、像素格式、颜色编码、Alpha、行方向和后端信息；帧身份包含会话代次、输出配置代次、generation 和必要时间信息。租约明确所有权、可读期限、归还和允许复用的时点。显示滤镜作用于完整游戏帧，Manager UI 在之后合成；首版不定义分层场景或文字合成协议。
 
-CPU Surface 提供只读像素与 stride，复用不可变 lease、有界帧池、异步完成和 Ready/Pending/Unchanged 区分。能安全借用就借用，只有必须取得独立生命周期才复制，不为统一格式逐帧扫描。Host 按真实上传 API 的源数据生命周期释放 lease，不机械等同于调用返回或最终显示完成。生产者不得覆写已交付内存，池满时采用明确背压或显示帧丢弃规则。
+CPU Surface 提供只读像素与 stride，复用不可变 lease、有界帧池、异步完成和 Ready/Pending/Unchanged 区分。`CpuFrame` 仅接管 owner，不复制或扫描像素；无效帧也归还租约。release 可在任意线程执行，且不依赖已关闭的会话、GPU、窗口或 Host 回调；Host 按真实上传 API 的源数据生命周期释放 lease，不机械等同于调用返回或最终显示完成。生产者不得覆写已交付内存，池满时采用明确背压或显示帧丢弃规则。
 
 GPU Surface 保留核心自己的 Device 和 renderer，通过版本化图形扩展协商后端、设备兼容性、格式、共享句柄、导入与同步，不跨 ABI 传 wgpu::Texture 等 Rust 对象，也不把同一显卡当作同一 Device。核心完成写入后 Host 才能采样；Host 提交消费完成依赖后核心才能复用目标。先固定扩展发现机制和帧身份，具体后端协议随真实实现验收，不预先冻结虚构的跨后端 GPU 结构。
 

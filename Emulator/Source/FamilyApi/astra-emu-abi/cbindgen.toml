@@ -1,0 +1,11 @@
+language = "C"
+include_guard = "ASTRA_EMU_ABI_H"
+autogen_warning = "/* Generated from astra-emu-abi Rust types by cbindgen 0.29.2. Do not edit. */"
+cpp_compat = true
+usize_is_size_t = true
+style = "both"
+sys_includes = ["stdint.h", "stddef.h"]
+
+[export]
+include = ["CoreApi", "Query", "CpuLease", "FrameSurface", "OpenRequest", "OpenResult", "SessionState", "Descriptor", "ProbeResult", "InputEvent", "ConfigField", "ConfigEntry", "Diagnostics", "HostServices"]
+prefix = "AstraEmu"

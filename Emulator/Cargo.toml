@@ -5,6 +5,7 @@ members = [
     "Source/Families/astra-emu-cmvs",
     "Source/Families/astra-emu-artemis",
     "Source/FamilyApi/astra-emu-family-api",
+    "Source/FamilyApi/astra-emu-abi",
     "Source/Families/astra-emu-fvp",
     "Source/Families/astra-emu-siglus",
     "Source/Families/astra-emu-musica",
@@ -178,3 +179,4 @@ oboe = "0.6.1"
 astra-byte-source = { path = "../Engine/Source/Runtime/astra-byte-source" }
 astra-core = { path = "../Engine/Source/Runtime/astra-core" }
 astra-emu-family-api = { path = "Source/FamilyApi/astra-emu-family-api" }
+astra-emu-abi = { path = "Source/FamilyApi/astra-emu-abi" }

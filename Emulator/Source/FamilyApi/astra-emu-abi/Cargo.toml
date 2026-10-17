@@ -1,0 +1,21 @@
+[package]
+name = "astra-emu-abi"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+rust-version = "1.92"
+
+[lib]
+doctest = false
+
+[features]
+default = []
+diagnostic-bridge = ["dep:tracing", "dep:tracing-subscriber", "dep:tracing-log"]
+
+[dependencies]
+tracing = { version = "0.1", optional = true }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["registry", "std"], optional = true }
+tracing-log = { version = "0.2", optional = true }
+
+[dev-dependencies]
+parking_lot = "0.12"

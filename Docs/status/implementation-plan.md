@@ -4,7 +4,7 @@
 
 ## 当前结论
 
-- 已确认新目标：原生 Embedded、统一 C ABI、CPU/GPU FrameSurface、Manager 统一 Present。当前只更新架构与实施契约，尚未实现新 ABI、GPU 交接或新核心整合。
+- 已实现 `astra-emu-abi` C 函数表、typed 配置校验、会话/输出/帧代次、独立 CPU lease 和可选诊断桥，并运行真实 C→Rust DLL 边界 smoke。RFVP、Manager 与其他核心的产品调用链仍在迁移；GPU 交接及七核心验收尚未完成。
 - 本次 Windows 交付覆盖 RFVP/FVP、Siglus、Artemis、Musica、Sena、Ethornell 和 KrKr；全部重新适配，最大化复用原生能力，最小化修改。CMVS 正在独立开发，本批不处理、不触碰其工作树。
 - RFVP 先完成 CPU 完整路径，再独立实现并验收首个 GPU 交付后端；只有 Musica 实现并验证文字 Hook。资源替换 Hook 暂不做，其他核心不新增文字 Hook。
 - Slint Manager 重做精炼 Material 3 界面，同窗口切换管理与游戏；迁移全部既有滤镜，提供内置 Luau 翻译扩展和本地扩展管理。
@@ -33,9 +33,9 @@
 
 ### 1. 共享契约与隔离任务
 
-主线程冻结 C ABI、会话/回调所有权、FrameSurface 身份和配置边界，再拆分独立实施任务。用户已授权委派，优先 openai-codex/gpt-6.1-sol，不可用时允许其他可核实的 Codex 模型；记录实际模型，不把请求值当作运行证据。每个实施实例独占 worktree、branch、target 和服务，共享契约由唯一整合者修改。
+主线程维护共享 `astra-emu-abi` 与整合工作树 `codex/emu-native-implementation-20261018`，从 `9b34d2d32` 接续。独立 Codex 任务分别负责 RFVP、Manager UI、Manager 运行层、Musica、Siglus、Artemis、Sena、Ethornell 和 KrKr，独占工作树、分支和构建产物；共享边界另由 Codex 只读检查。CMVS 不修改、不编译、不验收。
 
-本批契约工作位于 `codex/emu-embedded-contract-20261018`。尚未启动子代理；启动实施须使用已经生效的新项目约束，而非仍加载禁止委派和旧 ABI 限制的会话。CMVS 的既有实现与独立开发环境不纳入任务，不能为方便整仓迁移擅自改写它。
+委派工具没有模型选择参数。上述实施代理的受信任 runtime context 均报告 `openai-codex/gpt-6-astra`，按已授权的 Codex fallback 执行，未宣称使用 `gpt-6.1-sol`。一次只读 scout 报告非 Codex 模型，未修改代码，停止使用该路由。
 
 ### 2. RFVP CPU 完整路径与 Manager
 
@@ -75,6 +75,6 @@ fork/master 承载独立原生改进，astra 相对该基线仅一个必要适�
 - 主机硬件 GPU/音频为本批 Windows 正式验收环境；headless 先覆盖自动化可达流程，再运行实际窗口、输入、滤镜、原生菜单和设备音频。软件 adapter、NullAudio、首帧和公开夹具不能替代商业流程及结局。
 - 性能记录包含实际 R/O、帧交付方式、回读/上传字节、CPU/GPU 时间、帧池等待和显示延迟；按相同硬件、驱动、Release、游戏版本及语义场景分别记录冷启动与预热。短时平稳不作为长期无泄露结论。
 
-本轮契约文档检查：`python Tools/check_docs.py` 检查 181 份文档，链接/卫生错误为 0；`python -m unittest Tools.tests.test_check_docs` 的 7 项测试通过。Family API 页面另外执行同一检查器，错误为 0。未修改产品代码，未运行新架构、游戏结局或硬件视听验收。
+本轮已执行 `astra-emu-abi --features diagnostic-bridge` 的 6 项测试及 all-targets Clippy（`-D warnings`）。真实 C 程序通过生成的头文件调用 Rust DLL，验证 typed 配置、原分配 CPU 像素、跨线程 release、旧会话代次拒绝后的释放、文字输入模态回调与 open 前取消查询；该 smoke 不代表游戏或 GPU 验收。Slint 页面改动已整合，实窗交互、完整产品构建和各核心结局尚未验收。
 
 操作入口：[开发手册](../manual/development.md)、[AstraEMU 客户端](../manual/astraemu-client.md)、[Editor](../../Editor/README.md)、[NativeVN 样例](../../Examples/NativeVN/README.md)、[终之空资料](../samples/tsuinosora-modernization/README.md)。

@@ -645,17 +645,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "astra-emu-abi"
+version = "0.1.0"
+dependencies = [
+ "parking_lot",
+ "tracing",
+ "tracing-log",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "astra-emu-artemis"
 version = "0.1.0"
 dependencies = [
- "abi_stable",
  "art3m1s-core",
- "astra-emu-family-api",
+ "astra-emu-abi",
  "astra-emu-sdk",
  "encoding_rs",
- "env_logger",
- "image 0.25.10",
  "kira 0.12.2",
+ "parking_lot",
  "serde",
  "serde_json",
  "tempfile",
@@ -2313,6 +2321,8 @@ dependencies = [
  "block2 0.6.2",
  "coreaudio-rs",
  "dasp_sample",
+ "futures-channel",
+ "futures-util",
  "jni",
  "js-sys",
  "libc",
@@ -2328,6 +2338,8 @@ dependencies = [
  "objc2-core-audio-types",
  "objc2-core-foundation",
  "objc2-foundation 0.3.2",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
  "web-sys",
  "windows 0.62.2",
  "windows-core 0.62.2",
@@ -5103,6 +5115,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40962061330cfa2fb59d040be05955247a91573a87353bfbe8a4c4be2c62e90a"
 dependencies = [
  "atomic-arena",
+ "cpal",
  "glam 0.33.7",
  "mint",
  "pastey 0.2.3",
