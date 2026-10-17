@@ -52,6 +52,8 @@ class HostModal final {
         AstraKrkrModalResponse response{0, 0, text.get(), input ? 65536u : 0u, 0};
         const WaitTime wait{self};
         const auto status = self.callback_(self.context_, &request, &response);
+        // NativeOwner retains the first typed host failure for this operation;
+        // an error-reporting modal must not replace the preceding window error.
         if(status == 5) throw NativeCancelled();
         if(status != 0) throw std::runtime_error("ASTRA_KRKR_HOST_MODAL_FAILED");
         if(response.kind == 0)

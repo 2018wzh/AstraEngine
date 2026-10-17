@@ -23,6 +23,10 @@ or second application event loop. Audio uses the original OpenAL playback device
 - `native/include/astra_emu.h` is the generated shared header at AstraEngine
   `15a39a626b1316cb6137a75e17e14a2ff2d1ba88` (ABI v2). Regenerate/copy it with the shared
   crate whenever that ABI revision changes; do not edit the header independently.
+- The Astra-specific C++ adapter lives in this main-repository `native/`
+  directory. The fork supplies retained build/platform seams and general
+  lifecycle/path-cache fixes; it does not contain a separate Astra adapter
+  commit. This provenance is unchanged by the commercial acceptance work.
 
 ## Ownership and reopen
 
@@ -60,6 +64,13 @@ are unchanged. Never run acceptance against the sole commercial save copy.
 Only compiled original plugins are registered; arbitrary legacy TPM/DLL loading
 is not introduced. Unsupported platform requests fail instead of inventing a
 modal answer. No text-hook capability is advertised.
+
+Host request failures retain their original typed status, code and message for
+the current native operation. If TJS catches a window failure and then requests
+an error-reporting modal, a second Host refusal cannot replace the first error.
+An error handled by the script is cleared before the next native operation.
+Modal caption/message diagnostics retain the script's original error context;
+the Host still refuses unavailable window/modal operations without answering them.
 
 ## Build prerequisites
 

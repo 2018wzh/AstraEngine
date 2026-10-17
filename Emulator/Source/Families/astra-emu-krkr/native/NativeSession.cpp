@@ -213,8 +213,8 @@ void NativeSession::copy_frame(const AstraKrkrFrameInfo &expected, std::uint8_t 
     const auto source = static_cast<const std::uint8_t *>(texture_->GetPixelData());
     if(!source || texture_->GetPitch() != actual.stride)
         throw std::runtime_error("ASTRA_KRKR_NATIVE_FRAME_READBACK");
-    // Do not copy uninitialized or off-canvas native padding into IPC. Preserve
-    // the original stride, writing visible bytes once and only clearing padding.
+    // Do not copy uninitialized or off-canvas native padding into a CPU lease.
+    // Preserve the original stride, writing visible bytes once and clearing padding.
     const auto row_bytes = static_cast<std::size_t>(actual.width) * 4;
     for(unsigned int row = 0; row < actual.height; ++row) {
         const auto offset = static_cast<std::size_t>(row) * actual.stride;

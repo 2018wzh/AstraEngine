@@ -12,10 +12,13 @@
 #include <chrono>
 #include <thread>
 #include <string_view>
+#include <cstring>
 
 namespace {
 std::atomic<uint64_t> cancelled{0};
 std::atomic<bool> loop_entered{false};
+bool reject_requests = false;
+unsigned rejected_modals = 0;
 uint32_t is_cancelled(void *, uint64_t epoch) { return cancelled.load() == epoch; }
 void emit(void *, const AstraEmuLogRecord *record) {
     std::fprintf(stderr, "%.*s: %.*s\n", static_cast<int>(record->target.len), record->target.data,
@@ -25,7 +28,18 @@ void emit(void *, const AstraEmuLogRecord *record) {
         .find("KRKR_CANCEL_LOOP_ENTERED") != std::string_view::npos)
         loop_entered.store(true);
 }
-AstraEmuStatus window(void *, const AstraEmuWindowRequest *r, AstraEmuWindowResult *, AstraEmuError *) {
+AstraEmuStatus window(void *, const AstraEmuWindowRequest *r, AstraEmuWindowResult *, AstraEmuError *error) {
+    if(reject_requests) {
+        if(r->kind == AstraEmuWINDOW_MODAL) ++rejected_modals;
+        const char *code = r->kind == AstraEmuWINDOW_TITLE ? "TEST_TITLE_REJECTED" : "TEST_MODAL_REJECTED";
+        const char *message = r->kind == AstraEmuWINDOW_TITLE ? "original title failure" : "secondary modal failure";
+        *error = {};
+        error->code_len = static_cast<uint32_t>(std::strlen(code));
+        error->message_len = static_cast<uint32_t>(std::strlen(message));
+        std::memcpy(error->code, code, error->code_len);
+        std::memcpy(error->message, message, error->message_len);
+        return AstraEmuUNSUPPORTED;
+    }
     // Never dismiss a commercial game's modal automatically. Interactive game
     // acceptance uses Manager's actual typed modal service instead of this test.
     if(r->kind == AstraEmuWINDOW_TITLE) {
@@ -98,6 +112,25 @@ int wmain(int argc, wchar_t **argv) {
         AstraEmuDiagnostics diagnostic{{sizeof(diagnostic), AstraEmuABI_VERSION}, nullptr, emit, nullptr};
         check(api->initialize(&diagnostic, &e), e);
         const auto game = std::filesystem::path(argv[2]).u8string();
+        if(argc == 4) {
+            AstraEmuOpenRequest request{};
+            request.header = {sizeof(request), AstraEmuABI_VERSION};
+            request.game_path = {reinterpret_cast<const uint8_t *>(game.data()), game.size()};
+            request.session_epoch = 5;
+            request.window = {1280, 720, 1.0, 1, 0};
+            request.host.header = {sizeof(request.host), AstraEmuABI_VERSION};
+            request.host.cancellation = {nullptr, is_cancelled};
+            request.host.window = {nullptr, window, invalidate};
+            reject_requests = true;
+            AstraEmuOpenResult failed{};
+            const auto status = api->open(&request, &failed, &e);
+            reject_requests = false;
+            if(status != AstraEmuUNSUPPORTED || failed.session || rejected_modals != 1 ||
+               std::string_view(reinterpret_cast<const char *>(e.code), e.code_len) != "TEST_TITLE_REJECTED" ||
+               std::string_view(reinterpret_cast<const char *>(e.message), e.message_len) != "original title failure")
+                throw std::runtime_error("secondary error modal replaced original title failure");
+            std::puts("first typed host failure survives secondary error modal");
+        }
         AstraEmuFrameSurface retained{};
         uint64_t retained_hash = 0;
         for(uint64_t epoch = 1; epoch <= 2; ++epoch) {

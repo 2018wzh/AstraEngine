@@ -17,6 +17,7 @@
 #include <mutex>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -30,7 +31,9 @@ struct Failure : std::runtime_error {
     bool has_detail = false;
     Failure(AstraEmuStatus s, const char *message) : std::runtime_error(message), status(s) {}
     Failure(AstraEmuStatus s, const AstraEmuError &error)
-        : std::runtime_error("KRKR_NATIVE_FAILURE"), status(s), detail(error), has_detail(true) {}
+        : std::runtime_error(std::string(reinterpret_cast<const char *>(error.message),
+              std::min<size_t>(error.message_len, sizeof(error.message)))),
+          status(s), detail(error), has_detail(true) {}
 };
 void require(bool condition, const char *code, AstraEmuStatus status = AstraEmuINVALID_ARGUMENT) {
     if(!condition) throw Failure(status, code);
@@ -103,6 +106,8 @@ struct Session {
     bool opened = false, ended = false;
     AstraEmuStatus failure = AstraEmuOK;
     AstraEmuError failure_error{};
+    AstraEmuStatus host_failure = AstraEmuOK;
+    AstraEmuError host_failure_error{};
     std::vector<Input> input;
     std::array<bool, 96> held_keys{};
     std::unique_ptr<Frames, FramesRelease> frames{new Frames};
@@ -121,6 +126,24 @@ struct Session {
         wake.notify_all();
     }
     static uint32_t is_cancelled(void *p) { return static_cast<Session *>(p)->stopping(); }
+    void remember_host_failure(AstraEmuStatus status, const AstraEmuError &detail) {
+        std::lock_guard<std::mutex> lock(mutex);
+        if(host_failure == AstraEmuOK) {
+            host_failure = status;
+            host_failure_error = detail;
+        }
+    }
+    void begin_native_operation() {
+        std::lock_guard<std::mutex> lock(mutex);
+        host_failure = AstraEmuOK;
+        host_failure_error = {};
+    }
+    void check_host_result(AstraEmuStatus status, AstraEmuError detail, const char *fallback) {
+        if(status == AstraEmuOK) return;
+        if(!detail.code_len && !detail.message_len) error(&detail, fallback);
+        remember_host_failure(status, detail);
+        throw Failure(status, detail);
+    }
     static int32_t modal(void *p, const AstraKrkrModalRequest *r, AstraKrkrModalResponse *out) {
         auto &s = *static_cast<Session *>(p);
         try {
@@ -137,19 +160,28 @@ struct Session {
             request.text = {r->message.data, static_cast<size_t>(r->message.bytes)};
             request.initial_text = {r->initial_text.data, static_cast<size_t>(r->initial_text.bytes)};
             request.buttons = buttons.data(); request.button_count = r->button_count;
+            spdlog::info("KRKR_HOST_MODAL request_id={} caption={} message={}", request.request_id,
+                std::string_view(reinterpret_cast<const char *>(r->caption.data), r->caption.bytes),
+                std::string_view(reinterpret_cast<const char *>(r->message.data), r->message.bytes));
             AstraEmuWindowResult result{};
             result.input = {out->text, static_cast<size_t>(out->text_capacity), 0};
             AstraEmuError e{};
             s.phase.store(AstraEmuSESSION_WAITING);
             const auto status = s.host.window.request(s.host.window.context, &request, &result, &e);
             s.phase.store(AstraEmuSESSION_RUNNING);
-            require(status == AstraEmuOK && !s.stopping(), "KRKR_MODAL_FAILED", status == AstraEmuOK ? AstraEmuCANCELLED : status);
+            s.check_host_result(status, e, "KRKR_MODAL_FAILED");
+            require(!s.stopping(), "KRKR_CANCELLED", AstraEmuCANCELLED);
             require((result.valid_fields & AstraEmuWINDOW_RESULT_MODAL) && result.selected_button < r->button_count &&
                 result.input.data == out->text && result.input.capacity == out->text_capacity && result.input.len <= out->text_capacity,
                 "KRKR_MODAL_RESPONSE");
             out->kind = 1; out->button_index = result.selected_button; out->text_bytes = result.input.len;
             return 0;
-        } catch(const Failure &e) { return e.status; }
+        } catch(const Failure &e) {
+            AstraEmuError detail{};
+            if(e.has_detail) detail = e.detail; else error(&detail, e.what());
+            s.remember_host_failure(e.status, detail);
+            return e.status;
+        }
         catch(...) { return AstraEmuCORE_ERROR; }
     }
     void publish(astra::krkr::NativeSession &native) {
@@ -186,7 +218,7 @@ struct Session {
         r.kind = kind; r.flags = flags; r.text = text;
         AstraEmuWindowResult result{}; AstraEmuError e{};
         const auto status = host.window.request(host.window.context, &r, &result, &e);
-        require(status == AstraEmuOK, "KRKR_WINDOW_REQUEST_FAILED", status);
+        check_host_result(status, e, "KRKR_WINDOW_REQUEST_FAILED");
         return result;
     }
     static bool fullscreen(void *p, bool enabled) {
@@ -209,6 +241,7 @@ struct Session {
         std::unique_ptr<astra::krkr::NativeSession> native;
         AstraEmuError e{};
         auto status = boundary(&e, [&] {
+            begin_native_operation();
             require(!stopping(), "KRKR_CANCELLED", AstraEmuCANCELLED);
             native = std::make_unique<astra::krkr::NativeSession>(options);
             native->boot(options);
@@ -245,6 +278,9 @@ struct Session {
                 const auto active_elapsed = elapsed - static_cast<int64_t>(waiting - previous_wait);
                 previous = now;
                 previous_wait = waiting;
+                // A script may handle a failed request. Only retain its first
+                // cause for the current native operation, not subsequent ticks.
+                begin_native_operation();
                 const auto result = native->advance(static_cast<uint64_t>(std::max<int64_t>(0, active_elapsed)), events.data(), static_cast<uint32_t>(events.size()));
                 pending.clear();
                 if(result.reset_clock) previous = Clock::now();
@@ -256,6 +292,13 @@ struct Session {
                 if(result.frame_changed) publish(*native);
             }
         });
+        if(status != AstraEmuOK && status != AstraEmuCANCELLED) {
+            std::lock_guard<std::mutex> lock(mutex);
+            if(host_failure != AstraEmuOK) {
+                status = host_failure;
+                e = host_failure_error;
+            }
+        }
         if(native) {
             AstraEmuError cleanup_error{};
             const auto cleanup_status = boundary(&cleanup_error, [&] { native->shutdown(); });
