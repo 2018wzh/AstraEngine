@@ -1,6 +1,6 @@
 # AstraEMU 独立 Host 边界
 
-独立 Host 已用于 FVP、Siglus、Artemis、Musica 与 CMVS；KrKr 暂缓本批适配。EMU 与 RuntimeWorld、VN、product package 分离，当前状态见[实施计划](../status/implementation-plan.md)，接口以 [Family API](../../Emulator/Source/FamilyApi/astra-emu-family-api/API_CONTRACT.md) 为准。
+本文说明尚未迁移的 Family v13 独立 Host 实现，不规定新的开发流程。新的 Embedded C ABI 设计见[重构契约](../contracts/rebuild.md#emu-family-api)，本批核心范围和进度见[实施计划](../status/implementation-plan.md)；[Family API](../../Emulator/Source/FamilyApi/astra-emu-family-api/API_CONTRACT.md) 记录旧实现接口。
 
 ## 运行边界
 
@@ -39,6 +39,6 @@ Host 直接处理 Family 最终帧，交付缩放、锐化、Anime4K Restore_S �
 
 ## 交付边界
 
-主线程在独占 worktree/target 实施、审查和集成，不委派子智能体。后续顺序和验收条件统一见[实施计划](../status/implementation-plan.md)；临时探针和运行产物完成后清理。普通软件检查、真实游戏和设备验收分别记录，不建立额外审批或留证体系。
+日常协作和验证见[开发手册](../manual/development.md)，当前交付范围见[实施计划](../status/implementation-plan.md)。
 
 Manager 的作品关联入口位于游戏库详情。Host 通过 `ManagerController::search_metadata(provider, query)` 调用现有 `MetadataProvider::search`，搜索结果经 `accept_match(candidate_id)` 显式选择后重新获取并保存；不提供手填 ID 的 UI 回调。网络许可、256 字符上限、单作品请求互斥和候选归属校验在 Host 执行。`refresh_metadata` 只更新已关联条目，旧设置页的手填 ID 与审核队列直接删除，不保留兼容入口。此接口只读外部元数据并修改本地关联，不发送游戏内容；发布条件仍沿用独立 Host 的许可与功能验收。

@@ -68,6 +68,8 @@ FooterHash
 
 Section payload 默认使用 `postcard` + serde。大型媒体 payload 可以使用 `Raw` 或 `Zstd` section codec；section table 必须记录 codec、hash、stored hash、offset、length、decoded length 和 migration policy。
 
+容器读取校验版本、长度/边界、section 唯一性和内容完整性，损坏输入返回明确错误且保留原文件。postcard 的 struct 字段按位置编码，使用 `skip_serializing_if` 省略字段会破坏读取布局；可选值应通过显式字段或版本化 schema 表达。
+
 容器 ABI 在 [Package And Save](../implementation/package-save.md) 中锁定：little-endian、8 byte alignment、header magic、section table、schema id、codec、hash、optional encryption descriptor、migration policy 和 footer hash。Encryption descriptor 只描述 provider 能力，不提供 DRM 或访问控制绕过方案。
 
 ## Save

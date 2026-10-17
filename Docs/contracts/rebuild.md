@@ -96,7 +96,7 @@ Musica 的高清纹理替换只在私有 `MusicaProfile` 中声明 `texture_over
 
 ABI 导出、描述/配置、原生会话包装、Surface 输出、Hook 接线、日志与必要平台桥放在核心的薄嵌入层；Manager 不维护第二套游戏执行实现。帧池、协议包装和通用同步辅助可复用 SDK，但不强迫成熟核心依赖其运行层。上游功能缺陷另行提交非商业最小复现，适配回归在适配内修复。
 
-实施使用独占工作树与产物，共享契约由主线程整合。推送与验收后主线整合的本次授权、模型选择和具体状态统一记录在 [实施计划](../status/implementation-plan.md)，不自动发布二进制 Release。
+协作、构建与日常检查见[开发手册](../manual/development.md)。本次推送、验收后主线整合及模型选择的授权记录在[实施计划](../status/implementation-plan.md)；二进制 Release 不属于当前授权。
 
 Musica 与 CMVS 的既有共同需求是 `astra-emu-sdk` 模块化依据；本次 CMVS 保持原状，不把它作为本批 SDK 迁移或验收的前置条件。先复用 AstraEngine 现有文字、绘制、解码、混音与字节源，格式解析、VM 和原生存档语义继续由核心拥有。SDK 按需组合，不依赖 VN、World/package/registry 或强制 EngineSession，不增加纯转发 provider。
 

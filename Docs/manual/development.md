@@ -1,5 +1,18 @@
 # 开发与测试
 
+## 日常开发
+
+按当前任务定位代码、实施修改、验证结果即可。常规编辑、构建、测试和本地提交已有授权；独立任务可以委派，由发起者整合。远端推送、发布和主线整合沿用当前任务的授权，涉及未授权的破坏性操作再确认。
+
+文档按需查阅，与代码一起更新，不是开工审批。任务明确时直接推进；文档滞后就修正相关段落，不要求先整理全部文档、冻结全部设计或重启会话。尚未确定且会改变产品范围的取舍单独确认，其他工作继续。
+
+协作方式按实际冲突选择：串行修改可使用当前工作树，并行改动重叠时使用独立 worktree/分支；构建产物、服务端口也按需要隔离。保留用户和其他任务的修改，合并重叠改动时明确整合者，不把每项任务新建工作树作为固定流程。
+
+实现优先复用现有代码和成熟依赖，按职责拆分。公共接口变化同步相关消费者，兼容策略遵循该接口的实际要求；不为局部修改扩大全仓重构。跨平台工具优先 Python，文档示例使用 bash/sh。数据格式见[数据契约](../contracts/data-formats.md)，日志复用 [astra-observability](../contracts/logging-observability.md)，生命周期和原生核心适配见[重构契约](../contracts/rebuild.md)。
+
+## Workspace 与常用命令
+
+
 在仓库根目录运行 `cargo xtask`。Engine/VN/Player/共享库由根 workspace 管理，EMU 使用 `Emulator/Cargo.toml` 和独立 lockfile/target；Editor 使用 `Editor/Cargo.toml` 和独立 lockfile/target，入口见 [Editor 手册](../../Editor/README.md)。共享库通过路径依赖复用，不复制源文件或产物。
 
 ```bash
@@ -23,13 +36,23 @@ export CARGO_INCREMENTAL=0
 cargo xtask check --workspace engine
 ```
 
-只限制并发、保留已有 Debug 配置时，可以直接执行 `cargo build --workspace -j 1`，再执行 `cargo test --workspace -j 1 -- --test-threads=1`。完整检查与定向检查不要同时使用同一 worktree 的 target；先等待前一项结束。
+只限制并发、保留已有 Debug 配置时，可以执行 `cargo build --workspace -j 1`，再执行 `cargo test --workspace -j 1 -- --test-threads=1`。同一 target 的构建按需串行或另设 CARGO_TARGET_DIR，避免锁等待和产物覆盖；不清理其他正在使用的构建目录。
 
-并行开发每个实例使用独占 worktree 和 target；不要设置指向其他 worktree 的 CARGO_TARGET_DIR。构建/测试失败必须修复或准确记录根因。
+## 按改动选择验证
 
-文档检查仅检查链接、控制字符与私有绝对路径，允许 TODO 和未完成状态，不要求报告 schema 或指定 Stage 文字。普通 Rust 测试验证数据和行为，GPU/音频/设备测试按实际需要运行。开发 Agent 辅助真实产品验收，不生成具名审批体系。
+局部 Rust 改动运行相关测试、格式检查和受影响 crate 的 Clippy，并实际运行改变的路径；跨模块改动扩大到对应消费者。完整 workspace 检查用于跨 workspace 变更、CI 或准备交付，不要求每次提交或每个阶段都重跑全部产品。单纯文档修改运行 `python Tools/check_docs.py`。
 
-Windows 完成长流程，Linux/macOS/Android 完成代表流程和平台特性；没有 GPU、音频设备或商业源时不得声称相关真实流程通过。
+GPU、音频、窗口和设备测试按改动需要运行。开发时可使用 Headless、软件 adapter、NullAudio 或 fixture 定位问题；结果标明覆盖范围。设备或素材缺失时继续不依赖它们的工作，将相关验收留待可用环境执行。各产品的硬件、平台和结局要求见[实施计划](../status/implementation-plan.md)，局部测试通过不等于整项产品验收完成。
+
+## 数据与提交
+
+商业资源、正文、截图、存档、私有 profile/key 和转换产物放在 ignored 工作区；测试使用副本或新槽，避免覆盖用户原数据。读取失败保留原文件，清理仅针对本任务产生且不再使用的临时产物。
+
+提交保留许可证与修改归属，检查是否混入无关修改、secret、私有路径或商业正文。缺失能力、错误及未运行的检查如实说明。上游问题与适配改动分别记录，性能测量见[性能审计](../status/performance-upstream-audit-2026-10-12.md)。
+
+文档以中文为主，维护有用的接口说明、当前状态和操作方法；旧过程留在 Git。文档检查只查链接、控制字符和私有绝对路径，不要求报告 schema、审批文件或固定状态表。
+
+## 平台与打包
 
 Android Player 的构建入口是 `Tools/build_android.py`。AGP 9.3.0 配合 Gradle 9.5.0，构建脚本固定使用 JDK 17；设置 `JAVA_HOME` 时，校验与 Gradle 都使用该目录的 Java，而不是 PATH 中另一版本。SDK、NDK、Gradle 缓存只对当前构建进程设置，独占工作树的输出不能指向其他实例。
 
