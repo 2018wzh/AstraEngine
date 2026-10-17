@@ -1,0 +1,2 @@
+// The host cancellation callback must interrupt this original VM loop.
+while(true) {}

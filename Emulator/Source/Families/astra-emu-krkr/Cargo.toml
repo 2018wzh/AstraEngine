@@ -5,40 +5,12 @@ edition = "2021"
 rust-version = "1.92"
 license = "MIT OR Apache-2.0"
 publish = false
+build = "build.rs"
 
 [lib]
-crate-type = ["rlib", "cdylib"]
+crate-type = ["rlib"]
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
-postcard = { version = "1", features = ["alloc"] }
-crossbeam-channel = "0.5"
-astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api", features = ["diagnostic-bridge"] }
-astra-emu-sdk = { path = "../../SDK/astra-emu-sdk", default-features = false, features = ["archive"] }
-astra-media-core = { path = "../../../../Engine/Source/Runtime/astra-media-core" }
-abi_stable = "0.11"
-libloading = "0.8"
-
-[target.'cfg(unix)'.dependencies]
-libc = "0.2"
-
-[target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_IO", "Win32_System_LibraryLoader"] }
-
-[features]
-transport-test-child = []
-
-[dev-dependencies]
-tempfile = "3"
-
-[[bin]]
-name = "astra-emu-krkr-child"
-path = "src/bin/child.rs"
-
-[[bin]]
-name = "krkr-transport-test-child"
-path = "src/bin/transport_test_child.rs"
-required-features = ["transport-test-child"]
+astra-emu-abi = { git = "https://github.com/2018wzh/AstraEngine.git", rev = "15a39a626b1316cb6137a75e17e14a2ff2d1ba88" }
 
 [workspace]
-

@@ -1,0 +1,37 @@
+// Public, self-contained original-VM canvas used by native_lifecycle.cpp.
+var win = new Window();
+win.setInnerSize(320, 240);
+win.caption = "Astra KrKr native lifecycle";
+var base = new Layer(win, null);
+base.setImageSize(320, 240);
+base.setSizeToImageSize();
+base.visible = true;
+base.face = dfOpaque;
+base.type = ltOpaque;
+base.fillRect(0, 0, 320, 240, 0xff204060);
+base.fillRect(16, 16, 64, 48, 0xffe02040);
+base.font.height = 24;
+base.drawText(16, 88, "Native TJS", 0xffffffff);
+win.add(base);
+var image = new Layer(win, base);
+image.loadImages("tile.png");
+image.setSizeToImageSize();
+image.left = 128;
+image.top = 16;
+image.type = ltAlpha;
+image.visible = true;
+var sound = new WaveSoundBuffer(win);
+sound.open("tone.wav");
+sound.looping = true;
+sound.play();
+base.focusable = true;
+base.focus();
+win.visible = true;
+var changes = 0;
+base.onKeyDown = function(key, shift) {
+    if(key == 65) {
+        changes++;
+        base.fillRect(0, 0, 16, 16, 0xff203040 + changes * 0x010101);
+    }
+    if(key == 27) System.exit(0);
+};
