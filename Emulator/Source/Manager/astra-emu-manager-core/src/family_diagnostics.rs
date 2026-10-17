@@ -37,16 +37,21 @@ unsafe extern "C" fn emit(_: *mut c_void, raw: *const abi::LogRecord) {
             return;
         };
         let Ok(target) = (unsafe { raw.target.text(4096) }) else { return; };
+        let mut dropped = u64::from(raw.dropped_fields);
+        let target = bounded_text(target, 256, &mut dropped);
         if ENABLED.read().clone().is_some_and(|enabled| !enabled(level, target)) { return; }
         let Ok(event) = (unsafe { raw.event.text(4096) }) else { return; };
         let Ok(message) = (unsafe { raw.message.text(16384) }) else { return; };
+        let event = bounded_text(event, 256, &mut dropped);
+        let message = bounded_text(message, 4096, &mut dropped);
         let Ok(fields) = (unsafe { abi::borrowed_array(raw.fields, raw.field_count, 64) }) else { return; };
         let mut values = BTreeMap::new();
-        let mut dropped = u64::from(raw.dropped_fields);
         for field in fields {
-            let Ok(name) = (unsafe { field.name.text(256) }) else { dropped += 1; continue; };
+            if field.reserved != 0 || values.len() >= 62 { dropped += 1; continue; }
+            let Ok(name) = (unsafe { field.name.text(128) }) else { dropped += 1; continue; };
+            if name.is_empty() || name == "dropped_fields" || (name == "message" && !message.is_empty()) { dropped += 1; continue; }
             let value = match field.kind {
-                abi::FIELD_TEXT => match unsafe { field.text.text(16384) } { Ok(text) => serde_json::Value::String(text.into()), Err(_) => { dropped += 1; continue; } },
+                abi::FIELD_TEXT => match unsafe { field.text.text(16384) } { Ok(text) => serde_json::Value::String(bounded_text(text, 4096, &mut dropped).into()), Err(_) => { dropped += 1; continue; } },
                 abi::FIELD_I64 => field.signed.into(),
                 abi::FIELD_U64 => field.unsigned.into(),
                 abi::FIELD_F64 => match serde_json::Number::from_f64(field.number) { Some(number) => serde_json::Value::Number(number), None => { dropped += 1; continue; } },
@@ -59,4 +64,11 @@ unsafe extern "C" fn emit(_: *mut c_void, raw: *const abi::LogRecord) {
         values.insert("dropped_fields".into(), dropped.into());
         callback(NativeDiagnostic { level, target: target.into(), event: event.into(), fields: values });
     }));
+}
+fn bounded_text<'a>(text: &'a str, limit: usize, dropped: &mut u64) -> &'a str {
+    if text.len() <= limit { return text; }
+    *dropped += 1;
+    let mut end = limit;
+    while !text.is_char_boundary(end) { end -= 1; }
+    &text[..end]
 }
