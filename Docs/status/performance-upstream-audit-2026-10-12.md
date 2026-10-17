@@ -185,7 +185,7 @@ RFVP 元数据/hit-proxy 遍历与原 GPU rebuild 仍分别存在，列入测量
 ### 资源与环境限制
 
 - 短场景 private bytes 平稳不能排除泄露。Siglus 候选 D3D12 resource-state 错误及退出时 DXGI `Live Object : 18` 保留；尚未证明它随进程内重开增长。
-- Sandbox 配置请求启用 vGPU，实际 GPU 预检返回 Dx12 Microsoft Basic Render Driver / Cpu，并由 `ASTRA_EMU_FVP_GPU_HARDWARE_REQUIRED` 拒绝。15 项部署哈希一致。宿主有效策略 `HKLM\SOFTWARE\Policies\Microsoft\Windows\Sandbox\AllowVGPU=0` 禁止共享 GPU；[Microsoft 策略说明](https://learn.microsoft.com/en-us/windows/client-management/mdm/policy-csp-windowssandbox#allowvgpu)规定此值使用软件渲染。用户须手动启用该策略后重建 Sandbox，Agent 未修改安全设置。窗口、输入、媒体、新槽存读档及退出保持未验收；不以主机结果替代。
+- Sandbox 当前阻塞为环境启动崩溃。用户恢复策略后已实读 `AllowVGPU=1`，按原硬件配置重建；实例创建成功后从运行列表消失，Manager 与 guest 命令均未执行。同时间 WER 记录 `ContainerCrashDump`：bugcheck `0x3B`、异常 `0xC0000005`、RIP `0xFFFFF80479483152`，未取得可用 dump。宿主为 Windows 11 25H2 `26200.9711`、Sandbox `0.8.107.0`；[Microsoft Windows-Sandbox #131](https://github.com/microsoft/Windows-Sandbox/issues/131) 有相同构建与故障签名的报告，具体故障模块尚未定位。此前软件 GPU 预检由 `ASTRA_EMU_FVP_GPU_HARDWARE_REQUIRED` 明确拒绝、15 项部署哈希一致。当前窗口、输入、媒体、新槽存读档及退出仍未验收，主机结果单列。Agent 未修改安全策略、GPU 驱动或共享虚拟化服务。
 - 设备听音、四平台、商业长流程和正式性能仍未验收。Editor `--mcp` 持有 stdin 时关闭挂起仍待整改。
 - 许可证/covered-source 范围和其他机器的自包含运行库仍需发行前核验。库驻留至进程退出不是 session 资源泄露的豁免。
 

@@ -55,7 +55,7 @@
 
 ### 5. 建立性能基线，再实施剩余优化
 
-按下一节执行 **R09**。两核心整改前后各 15 组 headless 样本已采集，包含三轮实际游戏标题/开场和自制静态对照；真实窗口已取得进程级 GPU 完成、present CPU 和新图像上传数据。原版性能测试按用户决定取消，保留原生功能复现。正式验收使用 Sandbox，覆盖正文/电影、新槽恢复及退出；主机记录单列。当前宿主 `AllowVGPU=0`，待用户手动允许 vGPU 后重建 Sandbox；软件 GPU 预检已明确拒绝。保留静态跳过、纹理驻留、F32 owner 直通、非实时回收和按需 PNG。
+按下一节执行 **R09**。两核心整改前后各 15 组 headless 样本已采集，包含三轮实际游戏标题/开场和自制静态对照；真实窗口已取得进程级 GPU 完成、present CPU 和新图像上传数据。原版性能测试按用户决定取消，保留原生功能复现。正式验收使用 Sandbox，覆盖正文/电影、新槽恢复及退出；主机记录单列。用户已恢复 `AllowVGPU=1`，重建后 Sandbox 在产品运行前退出，同时间 WER 记录 `0x3B/0xC0000005`；宿主 `26200.9711` 的相关报告见[性能审计](performance-upstream-audit-2026-10-12.md#资源与环境限制)。先恢复 Sandbox 运行环境，再继续硬件验收。保留静态跳过、纹理驻留、F32 owner 直通、非实时回收和按需 PNG。
 
 ### 6. 重新固定并验证核心整合
 
@@ -87,4 +87,4 @@ EMU 正确性和最小适配收敛后，继续 Engine/VN 的实际 IO/媒体/保
 
 主线程使用独占 worktree/target，保留来源和用户已有存档。操作入口见[开发手册](../manual/development.md)、[AstraEMU 客户端](../manual/astraemu-client.md)、[Editor](../../Editor/README.md)、[NativeVN 样例](../../Examples/NativeVN/README.md)、[终之空资料](../samples/tsuinosora-modernization/README.md)。
 
-文档改动执行 `python Tools/check_docs.py`；代码改动按影响范围执行检查与真实运行。商业运行产物只留 ignored 区域；采样完成后移除临时探针。按用户最新要求，本批以 Sandbox 验收；宿主禁止 vGPU 时等待用户手动启用并重建，硬件 GPU 预检通过后继续。主机数据保留为独立证据，软件 GPU 或无声输出不替代对应设备验收。
+文档改动执行 `python Tools/check_docs.py`；代码改动按影响范围执行检查与真实运行。商业运行产物只留 ignored 区域；采样完成后移除临时探针。本批按用户要求使用 Sandbox 验收，当前待启动崩溃解决后继续硬件 GPU 预检。主机数据保留为独立证据，软件 GPU 或无声输出不替代对应设备验收。
