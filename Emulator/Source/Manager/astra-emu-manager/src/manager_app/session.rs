@@ -61,6 +61,7 @@ impl ActiveFamilySession {
                 initial_window,
                 host,
                 cancellation: services.cancellation,
+                d3d12: mailbox.d3d12()?,
             },
         );
         let session = match opened {

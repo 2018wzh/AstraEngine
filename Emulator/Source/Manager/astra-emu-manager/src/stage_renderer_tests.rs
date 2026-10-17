@@ -57,7 +57,7 @@ fn old_frame_and_shutdown_cannot_replace_or_clear_a_new_session_baseline() {
             generation: 1
         }
     );
-    assert_eq!(current.pixels(), &[5, 6, 7, 255]);
+    assert_eq!(current.pixels().unwrap(), &[5, 6, 7, 255]);
 }
 
 #[test]
@@ -83,7 +83,7 @@ fn replacement_and_close_preserve_an_already_acquired_cpu_lease() {
         .unwrap();
     mailbox.clear(3).unwrap();
     assert!(mailbox.snapshot().unwrap().is_none());
-    assert_eq!(held.pixels(), &[3, 4, 5, 255]);
+    assert_eq!(held.pixels().unwrap(), &[3, 4, 5, 255]);
 }
 
 #[test]
@@ -328,7 +328,7 @@ fn native_pixels_keep_row_padding_and_present_bgra_linear_ignored_alpha_after_re
             .iter()
             .zip(expected)
             .all(|(value, expected)| value.abs_diff(expected) <= 1));
-        renderer.teardown();
+        renderer.teardown().unwrap();
     }
     // Rebuilding the GPU does not discard the immutable complete CPU baseline.
     assert_eq!(

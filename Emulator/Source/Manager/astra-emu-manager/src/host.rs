@@ -69,7 +69,7 @@ pub trait AstraUnderlayRenderer: 'static {
         Ok(None)
     }
     fn render(&mut self, context: WgpuFrameContext<'_>) -> Result<(), String>;
-    fn teardown(&mut self);
+    fn teardown(&mut self) -> Result<(), String>;
 }
 
 pub trait ManagerController: 'static {
@@ -487,7 +487,7 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                 }
                 Ok(())
             },
-            slint::RenderingState::RenderingTeardown => { renderer_callback.borrow_mut().teardown(); Ok(()) }
+            slint::RenderingState::RenderingTeardown => renderer_callback.borrow_mut().teardown(),
             _ => Ok(()),
         })).unwrap_or_else(|_| Err("underlay renderer panicked".into()));
         if let Err(error) = result {
@@ -501,8 +501,15 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
     runtime_timer.stop();
     runtime_schedule.borrow_mut().take();
     let shutdown_result = controller.borrow_mut().leave_game();
+    // A notifier can be torn down only when the window is dropped. Drain the
+    // graphics owner explicitly before choosing the application's exit result.
+    let graphics_result = renderer.borrow_mut().teardown();
+    if let Err(error) = &graphics_result {
+        tracing::error!(event = "astra.emu.host.graphics_cleanup_failed", message = %error);
+    }
     run_result?;
     shutdown_result.map_err(HostError::Renderer)?;
+    graphics_result.map_err(HostError::Renderer)?;
     if let Some(error) = fatal_error.borrow_mut().take() {
         return Err(HostError::Renderer(error));
     }

@@ -49,6 +49,7 @@ fn request(game: &Path) -> NativeOpenRequest {
         },
         host: no_host_services(&cancellation),
         cancellation,
+        d3d12: None,
     }
 }
 
@@ -115,7 +116,7 @@ fn fvp_dynamic_core_scans_probes_configures_and_reopens() {
         assert!(lease.info.width != 0 && lease.info.height != 0);
         session.close().unwrap();
         assert!(
-            !lease.pixels().is_empty(),
+            !lease.pixels().unwrap().is_empty(),
             "CPU lease remains valid after native close"
         );
     }

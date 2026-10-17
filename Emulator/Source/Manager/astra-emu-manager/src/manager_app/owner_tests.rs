@@ -175,7 +175,7 @@ fn native_producer_runs_without_ui_ticks_and_cpu_lease_survives_close_error() {
     let update = harness.closed(epoch);
     assert!(update.error.unwrap().contains("ASTRA_TEST_CLOSE"));
     harness.owner.shutdown().unwrap();
-    assert_eq!(first.pixels(), &[23, 45, 67, 255]);
+    assert_eq!(first.pixels().unwrap(), &[23, 45, 67, 255]);
     let calls = harness.calls.lock();
     let input: Vec<_> = calls
         .iter()
@@ -198,7 +198,7 @@ fn reopen_is_admitted_only_after_consuming_closed_session() {
     let current = harness.frame();
     assert_ne!(next, first_epoch);
     assert_eq!(current.identity.session_epoch, next);
-    assert_eq!(old.pixels(), &[23, 45, 67, 255]);
+    assert_eq!(old.pixels().unwrap(), &[23, 45, 67, 255]);
     harness.owner.close(next, Vec::new()).unwrap();
     assert!(harness.closed(next).error.is_none());
     harness.owner.shutdown().unwrap();

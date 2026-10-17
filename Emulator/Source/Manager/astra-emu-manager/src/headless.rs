@@ -15,6 +15,8 @@ mod input;
 
 #[path = "headless_captures.rs"]
 mod captures;
+#[path = "headless_presenter.rs"]
+mod presenter;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -74,6 +76,12 @@ impl Capture {
 fn capture_image(frame: &FrameLease) -> FamilyResult<image::RgbaImage> {
     frame.validate()?;
     let info = frame.info;
+    let source = frame.pixels().ok_or_else(|| {
+        astra_emu_manager_core::model::FamilyError::invalid(
+            "ASTRA_EMU_HEADLESS_GPU_CAPTURE",
+            "GPU checkpoints must be captured at the Host presenter boundary",
+        )
+    })?;
     let bgra = matches!(
         info.format,
         FrameFormat::Bgra8Srgb { .. } | FrameFormat::Bgra8Linear { .. }
@@ -90,7 +98,7 @@ fn capture_image(frame: &FrameLease) -> FamilyResult<image::RgbaImage> {
             y
         };
         let begin = row * info.stride as usize;
-        for pixel in frame.pixels()[begin..begin + info.width as usize * 4]
+        for pixel in source[begin..begin + info.width as usize * 4]
             .as_chunks::<4>()
             .0
         {
@@ -121,6 +129,23 @@ fn capture_image(frame: &FrameLease) -> FamilyResult<image::RgbaImage> {
             "capture pixels have an invalid extent",
         )
     })
+}
+
+fn output_image(
+    capture: &Capture,
+    presenter: Option<&presenter::Presenter>,
+) -> Result<image::RgbaImage, String> {
+    let frame = capture
+        .frame
+        .as_ref()
+        .ok_or("ASTRA_EMU_HEADLESS_FRAME_MISSING")?;
+    if frame.d3d12().is_some() {
+        presenter
+            .ok_or("ASTRA_EMU_HEADLESS_GPU_PRESENTER_MISSING")?
+            .capture()
+    } else {
+        capture_image(frame).map_err(|error| error.to_string())
+    }
 }
 
 pub(crate) fn run(path: &Path) -> Result<(), String> {
@@ -246,6 +271,11 @@ fn run_session(
     let epoch = astra_emu_manager_core::model::allocate_session_epoch()
         .map_err(|error| error.to_string())?;
     let cancellation = astra_emu_manager_core::NativeCancellation::new(epoch);
+    let mut presenter = if plugin.supports_d3d12() {
+        presenter::Presenter::new(epoch)?
+    } else {
+        None
+    };
     let text = if let Some(data) = &config.manager_data {
         let extensions = astra_emu_manager_core::extensions::ExtensionStore::new(data).list()?;
         let profile = if config.translation_enabled {
@@ -305,6 +335,11 @@ fn run_session(
         },
         host,
         cancellation,
+        d3d12: presenter
+            .as_ref()
+            .map(|presenter| presenter.host())
+            .transpose()?
+            .flatten(),
     };
     tracing::info!(event = "astra.emu.headless.opening");
     let opening = Instant::now();
@@ -332,6 +367,16 @@ fn run_session(
                 return Err("ASTRA_EMU_HEADLESS_FRAME_TIMEOUT".into());
             }
             std::thread::sleep(Duration::from_millis(1));
+        }
+        if let Some(frame) = capture
+            .frame
+            .as_ref()
+            .filter(|frame| frame.d3d12().is_some())
+        {
+            presenter
+                .as_mut()
+                .ok_or("ASTRA_EMU_HEADLESS_GPU_PRESENTER_MISSING")?
+                .present(frame)?;
         }
         tracing::info!(
             event = "astra.emu.headless.first_frame",
@@ -365,6 +410,16 @@ fn run_session(
                 }
                 std::thread::sleep(Duration::from_millis(1));
             }
+            if let Some(frame) = capture
+                .frame
+                .as_ref()
+                .filter(|frame| frame.d3d12().is_some())
+            {
+                presenter
+                    .as_mut()
+                    .ok_or("ASTRA_EMU_HEADLESS_GPU_PRESENTER_MISSING")?
+                    .present(frame)?;
+            }
             let state = session.state().map_err(|error| error.to_string())?;
             if state.state == astra_emu_abi::SESSION_FAILED {
                 return Err(format!(
@@ -379,7 +434,7 @@ fn run_session(
             }
             let frame_poll_us = poll_start.elapsed().as_micros() as u64;
             let capture_start = Instant::now();
-            captures.write(index, capture.frame.as_ref())?;
+            captures.write(index, || output_image(&capture, presenter.as_ref()))?;
             tracing::info!(
                 event = "astra.emu.headless.sample",
                 sample = index,
@@ -396,15 +451,9 @@ fn run_session(
             }
         }
         captures.finish()?;
-        capture_image(
-            capture
-                .frame
-                .as_ref()
-                .ok_or("ASTRA_EMU_HEADLESS_FRAME_MISSING")?,
-        )
-        .map_err(|error| error.to_string())?
-        .save(output)
-        .map_err(|_| "ASTRA_EMU_HEADLESS_CAPTURE_WRITE".to_owned())
+        output_image(&capture, presenter.as_ref())?
+            .save(output)
+            .map_err(|_| "ASTRA_EMU_HEADLESS_CAPTURE_WRITE".to_owned())
     })();
     session.cancel();
     let text_result = text
@@ -412,7 +461,11 @@ fn run_session(
         .map_or(Ok(()), |text| text.close().map_err(|e| e.to_string()));
     drop(capture);
     let session_result = session.close().map_err(|error| error.to_string());
-    let errors: Vec<_> = [result, text_result, session_result]
+    let graphics_result = presenter
+        .as_mut()
+        .map_or(Ok(()), |presenter| presenter.close());
+    drop(presenter);
+    let errors: Vec<_> = [result, text_result, session_result, graphics_result]
         .into_iter()
         .filter_map(Result::err)
         .collect();

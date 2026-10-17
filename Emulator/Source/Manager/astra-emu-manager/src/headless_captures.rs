@@ -27,7 +27,7 @@ impl Captures {
     pub fn write(
         &mut self,
         frame: u32,
-        lease: Option<&astra_emu_manager_core::model::FrameLease>,
+        capture: impl FnOnce() -> Result<image::RgbaImage, String>,
     ) -> Result<(), String> {
         if !self.pending.contains(&frame) {
             return Ok(());
@@ -38,8 +38,7 @@ impl Captures {
             .expect("validated output filename")
             .to_os_string();
         name.push(format!(".frame-{frame}.png"));
-        super::capture_image(lease.ok_or("ASTRA_EMU_HEADLESS_FRAME_MISSING")?)
-            .map_err(|error| error.to_string())?
+        capture()?
             .save_with_format(self.output.with_file_name(name), image::ImageFormat::Png)
             .map_err(|_| "ASTRA_EMU_HEADLESS_CAPTURE_WRITE")?;
         self.pending.remove(&frame);

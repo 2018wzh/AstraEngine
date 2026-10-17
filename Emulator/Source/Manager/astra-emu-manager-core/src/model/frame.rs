@@ -119,11 +119,16 @@ impl<T: Send + Sync> PixelBytes for PixelOwner<T> {
     }
 }
 #[derive(Clone)]
+enum FrameStorage {
+    Cpu(Arc<dyn PixelBytes>),
+    D3D12(Arc<super::D3D12FrameOwner>),
+}
+#[derive(Clone)]
 pub struct FrameLease {
     pub info: FrameInfo,
     pub identity: FrameIdentity,
     pub timestamp_ns: u64,
-    pixels: Arc<dyn PixelBytes>,
+    storage: FrameStorage,
 }
 impl fmt::Debug for FrameLease {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -149,7 +154,7 @@ impl FrameLease {
             info,
             identity,
             timestamp_ns: 0,
-            pixels: Arc::new(PixelOwner { value, bytes }),
+            storage: FrameStorage::Cpu(Arc::new(PixelOwner { value, bytes })),
         })
     }
     pub fn from_vec(
@@ -159,14 +164,44 @@ impl FrameLease {
     ) -> FamilyResult<Self> {
         Self::from_owner(value, Vec::as_slice, info, identity)
     }
-    pub fn pixels(&self) -> &[u8] {
-        self.pixels.bytes()
+    pub fn pixels(&self) -> Option<&[u8]> {
+        match &self.storage {
+            FrameStorage::Cpu(pixels) => Some(pixels.bytes()),
+            _ => None,
+        }
+    }
+    pub fn d3d12(&self) -> Option<&Arc<super::D3D12FrameOwner>> {
+        match &self.storage {
+            FrameStorage::D3D12(owner) => Some(owner),
+            _ => None,
+        }
+    }
+    pub fn same_storage(&self, other: &Self) -> bool {
+        match (&self.storage, &other.storage) {
+            (FrameStorage::Cpu(a), FrameStorage::Cpu(b)) => {
+                a.bytes().as_ptr() == b.bytes().as_ptr()
+            }
+            (FrameStorage::D3D12(a), FrameStorage::D3D12(b)) => Arc::ptr_eq(a, b),
+            _ => false,
+        }
+    }
+    pub(crate) fn from_d3d12(owner: super::D3D12FrameOwner, info: FrameInfo) -> FamilyResult<Self> {
+        let frame = Self {
+            info,
+            identity: owner.descriptor().identity.into(),
+            timestamp_ns: owner.descriptor().timestamp_ns,
+            storage: FrameStorage::D3D12(Arc::new(owner)),
+        };
+        frame.validate()?;
+        Ok(frame)
     }
     pub fn validate(&self) -> FamilyResult<()> {
         self.info.validate()?;
         self.identity.validate(true)?;
-        if self.info.required_bytes() != Some(self.pixels().len()) {
-            return Err(invalid("ASTRA_EMU_FRAME_BYTES", "invalid frame byte count"));
+        if let Some(pixels) = self.pixels() {
+            if self.info.required_bytes() != Some(pixels.len()) {
+                return Err(invalid("ASTRA_EMU_FRAME_BYTES", "invalid frame byte count"));
+            }
         }
         Ok(())
     }

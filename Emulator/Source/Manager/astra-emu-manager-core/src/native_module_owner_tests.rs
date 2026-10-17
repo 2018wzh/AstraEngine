@@ -21,6 +21,7 @@ fn request() -> NativeOpenRequest {
         },
         host: no_host_services(&cancellation),
         cancellation,
+        d3d12: None,
     }
 }
 
@@ -51,7 +52,7 @@ fn one_explicit_owner_spans_reopen_and_cpu_lease_outlives_its_destruction() {
     }
     plugin.shutdown().unwrap();
     plugin.shutdown().unwrap();
-    assert_eq!(retained.unwrap().pixels(), &[23, 45, 67, 255]);
+    assert_eq!(retained.unwrap().pixels().unwrap(), &[23, 45, 67, 255]);
     assert_eq!(
         plugin
             .probe(ProbeRequest {
