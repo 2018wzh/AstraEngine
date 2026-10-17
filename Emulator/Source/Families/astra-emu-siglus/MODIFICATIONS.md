@@ -44,4 +44,6 @@
 
 设置 `ASTRA_SIGLUS_TEST_GAME` 指向授权可写副本，并明确 `ASTRA_SIGLUS_TEST_WRITABLE_COPY=1`。可设置 `ASTRA_SIGLUS_TEST_LIBRARY` 指向动态库，helper 将其驻留到进程退出；`ASTRA_SIGLUS_TEST_CAPTURE_DIR` 只能指向 ignored 私有证据目录。原始日志、帧及输入时间线保留在独占 worktree 的 `.work/siglus-verification`。
 
-旧 fixture 把 motion/down/up 放在同一批、在序章尚无保存 UI 时点击错误的 y=558，因而未证明菜单和保存。当前 fixture 分离真实输入时间线，保留原 native clock，使用实际 1280×720 控件及游戏内确认按钮；不伪造 Host 模态响应。完整路线仍是显式 `native_rewrite_save_load_and_route_attempt`，耗尽预算不算结束。桌面锁屏，未做交互窗口或听音验收，也未宣称商业结局。
+旧 fixture 把 motion/down/up 放在同一批、在序章尚无保存 UI 时点击错误的 y=558，因而未证明菜单和保存。当前 fixture 分离真实输入时间线，保留原 native clock，使用实际 1280×720 控件及游戏内确认按钮；不伪造 Host 模态响应。桌面锁屏，未做交互窗口或听音验收，也未宣称商业结局。
+
+路线观察入口 `native_rewrite_controlled_route` 从标准输入逐行接收 `wait MS`、`click X Y`、`key NAME MS`、`snapshot NAME`、`reopen`、`close`。它使用相同 C ABI、真实按键持续时间及原生渲染，输出每条输入完成标记、帧身份和 session 状态；截图仍写入上述 ignored 目录。操作者按实际画面判断选项和结局，测试关闭成功不代表结局通过。已移除把盲目输入后 `SESSION_FINISHED` 当作路线验收的旧测试。

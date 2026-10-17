@@ -1,8 +1,8 @@
-//! Rewrite+ route attempt and native quick-save/load checks. A route timeout is
-//! not completion. Native savedata is written only in the explicit test copy.
+//! Rewrite+ controlled route observation and native quick-save/load checks.
+//! Process exit is not ending evidence. Savedata stays in the explicit test copy.
 mod common;
-use astra_emu_abi as abi;
 use common::*;
+use std::io::{BufRead, Write};
 use std::{
     collections::BTreeMap,
     time::{Duration, Instant},
@@ -96,30 +96,57 @@ fn native_rewrite_save_load_close_reopen() {
 
 #[test]
 #[ignore = "requires a writable authorized Rewrite+ copy, hardware GPU and audio device"]
-fn native_rewrite_save_load_and_route_attempt() {
-    let session = saved_session();
-    let budget = std::env::var("ASTRA_SIGLUS_TEST_PLAYTHROUGH_BUDGET")
-        .map(|s| s.parse::<u64>().expect("integer observation budget"))
-        .unwrap_or(400_000);
-    assert!(budget > 0);
-    let mut finished = false;
-    for index in 0..budget {
-        if session.state().state == abi::SESSION_FINISHED {
-            finished = true;
-            break;
+fn native_rewrite_controlled_route() {
+    let mut session = Some(Native::open());
+    eprintln!("route ready: wait MS | click X Y | key NAME MS | snapshot NAME | reopen | close");
+    for line in std::io::stdin().lock().lines() {
+        let line = line.unwrap();
+        let words: Vec<_> = line.split_whitespace().collect();
+        eprintln!("route command: {line}");
+        match words.as_slice() {
+            ["wait", milliseconds] => {
+                session.as_ref().unwrap().wait(Duration::from_millis(
+                    milliseconds.parse().expect("integer milliseconds"),
+                ));
+            }
+            ["click", x, y] => session.as_ref().unwrap().click(
+                x.parse().expect("x coordinate"),
+                y.parse().expect("y coordinate"),
+            ),
+            ["key", name, milliseconds] => {
+                let native = session.as_ref().unwrap();
+                let mut press = native.event(astra_emu_abi::INPUT_KEY);
+                press.physical_key = astra_emu_abi::Bytes::new(name.as_bytes());
+                press.logical_key = press.physical_key;
+                press.pressed = 1;
+                native.send(&[press]);
+                native.wait(Duration::from_millis(
+                    milliseconds.parse().expect("integer milliseconds"),
+                ));
+                press.pressed = 0;
+                native.send(&[press]);
+            }
+            ["snapshot", name] => {
+                assert!(name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'));
+                let native = session.as_ref().unwrap();
+                native.snapshot(name);
+                eprintln!("route state: {:?}", native.state());
+            }
+            ["reopen"] => {
+                session.take().unwrap().close();
+                session = Some(Native::open());
+            }
+            ["close"] => {
+                session.take().unwrap().close();
+                eprintln!("route closed; ending requires separate visual evidence");
+                break;
+            }
+            _ => panic!("invalid route command: {line}"),
         }
-        if index % 12 == 0 {
-            session.click(640.0, 400.0);
-            session.key("Enter");
-        }
-        session.wait(Duration::from_millis(16));
+        eprintln!("route command complete: {line}");
+        std::io::stderr().flush().unwrap();
     }
-    session.close();
-    assert!(
-        finished,
-        "native route did not finish within the observation budget"
-    );
-    let reopened = Native::open();
-    reopened.frame();
-    reopened.close();
+    if let Some(native) = session {
+        native.close();
+    }
 }
