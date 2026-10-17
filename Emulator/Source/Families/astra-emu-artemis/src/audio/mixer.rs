@@ -103,7 +103,11 @@ pub(super) fn run(
                 MixerCommand::Suspend(value) => {
                     suspended = value;
                     for track in &mut buses {
-                        if value { track.pause(tween(0)); } else { track.resume(tween(0)); }
+                        if value {
+                            track.pause(tween(0));
+                        } else {
+                            track.resume(tween(0));
+                        }
                     }
                 }
                 MixerCommand::SetVolume { channel, value } => {

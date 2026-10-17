@@ -11,10 +11,10 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 use crate::error;
+use crate::error::{NativeError, NativeResult};
 use art3m1s_core::host_events::{HostEvents, EVENT_KIND_LOG, EVENT_KIND_MEDIA, EVENT_KIND_UI};
 use art3m1s_core::host_files::HostResources;
 use art3m1s_core::media::MediaSource;
-use crate::error::{NativeError, NativeResult};
 use serde::Deserialize;
 
 use crate::audio::{Channel, MixerCommand, SourcePair};
@@ -130,17 +130,26 @@ impl MediaSource for VideoAudioSource {
 #[derive(Debug)]
 pub(crate) enum WindowCommand {
     Title(String),
-    Pointer { x: Option<i32>, y: Option<i32>, visible: Option<bool>, autohide_ms: Option<u64> },
+    Pointer {
+        x: Option<i32>,
+        y: Option<i32>,
+        visible: Option<bool>,
+        autohide_ms: Option<u64>,
+    },
 }
 #[derive(Default)]
 pub(crate) struct WindowRequests(std::collections::VecDeque<WindowCommand>);
 impl WindowRequests {
     fn push(&mut self, command: WindowCommand) -> NativeResult<()> {
-        if self.0.len() == 128 { return Err(invalid()); }
+        if self.0.len() == 128 {
+            return Err(invalid());
+        }
         self.0.push_back(command);
         Ok(())
     }
-    pub(crate) fn take(&mut self) -> Option<WindowCommand> { self.0.pop_front() }
+    pub(crate) fn take(&mut self) -> Option<WindowCommand> {
+        self.0.pop_front()
+    }
 }
 
 pub(crate) fn drain(
@@ -228,7 +237,9 @@ fn parse_ui(bytes: &[u8]) -> NativeResult<WindowCommand> {
             data: String,
         }
         let caption: Caption = parse(envelope.payload)?;
-        if caption.data.len() > 4096 || caption.data.chars().any(char::is_control) { return Err(invalid()); }
+        if caption.data.len() > 4096 || caption.data.chars().any(char::is_control) {
+            return Err(invalid());
+        }
         Ok(WindowCommand::Title(caption.data))
     } else if envelope.kind == "mouse" {
         #[derive(Deserialize)]

@@ -1,26 +1,61 @@
 //! Native descriptor/configuration and original PFS probing.
-use std::path::{Path, PathBuf};
+use crate::{
+    error::{self, NativeResult},
+    session,
+};
 use art3m1s_core::archive as pfs_upk;
 use astra_emu_abi::*;
 use encoding_rs::{Encoding, GB18030, SHIFT_JIS, UTF_8};
-use crate::{error::{self, NativeResult}, session};
+use std::path::{Path, PathBuf};
 pub(crate) fn fields() -> [ConfigField; 1] {
     [ConfigField {
-        id: Bytes::new(b"archive"), label: Bytes::new(b"Base PFS archive (empty selects the only archive)"),
-        group: Bytes::new(b"Files"), default_value: ConfigValue { kind: VALUE_STRING, reserved: 0, integer: 0, number: 0.0, text: Bytes::EMPTY },
-        integer_min: 0, integer_max: 0, number_min: 0.0, number_max: 0.0, max_bytes: 255, reserved: 0,
-        choices: std::ptr::null(), choice_count: 0,
+        id: Bytes::new(b"archive"),
+        label: Bytes::new(b"Base PFS archive (empty selects the only archive)"),
+        group: Bytes::new(b"Files"),
+        default_value: ConfigValue {
+            kind: VALUE_STRING,
+            reserved: 0,
+            integer: 0,
+            number: 0.0,
+            text: Bytes::EMPTY,
+        },
+        integer_min: 0,
+        integer_max: 0,
+        number_min: 0.0,
+        number_max: 0.0,
+        max_bytes: 255,
+        reserved: 0,
+        choices: std::ptr::null(),
+        choice_count: 0,
     }]
 }
 pub(crate) fn probe(root: &Path) -> NativeResult<Option<String>> {
-    if !root.is_dir() { return Ok(None); }
-    let entries = std::fs::read_dir(root).map_err(|e| error::invalid("ASTRA_EMU_ARTEMIS_PROBE_PATH", e.to_string()))?;
+    if !root.is_dir() {
+        return Ok(None);
+    }
+    let entries = std::fs::read_dir(root)
+        .map_err(|e| error::invalid("ASTRA_EMU_ARTEMIS_PROBE_PATH", e.to_string()))?;
     for entry in entries {
-        let path = entry.map_err(|e| error::invalid("ASTRA_EMU_ARTEMIS_PROBE_PATH", e.to_string()))?.path();
-        if path.is_file() && path.extension().is_some_and(|e| e.eq_ignore_ascii_case("pfs"))
-            && ENTRY_ENCODINGS.iter().any(|encoding| pfs_upk::PfsArchive::open_with_encoding(&path, encoding).ok().is_some_and(|archive| archive.find(session::PROJECT_INI).is_some())) {
-            return root.file_name().and_then(|n| n.to_str()).map(|n| Some(n.to_owned()))
-                .ok_or_else(|| error::invalid("ASTRA_EMU_ARTEMIS_GAME_ID", "game ID is not valid UTF-8"));
+        let path = entry
+            .map_err(|e| error::invalid("ASTRA_EMU_ARTEMIS_PROBE_PATH", e.to_string()))?
+            .path();
+        if path.is_file()
+            && path
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("pfs"))
+            && ENTRY_ENCODINGS.iter().any(|encoding| {
+                pfs_upk::PfsArchive::open_with_encoding(&path, encoding)
+                    .ok()
+                    .is_some_and(|archive| archive.find(session::PROJECT_INI).is_some())
+            })
+        {
+            return root
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| Some(n.to_owned()))
+                .ok_or_else(|| {
+                    error::invalid("ASTRA_EMU_ARTEMIS_GAME_ID", "game ID is not valid UTF-8")
+                });
         }
     }
     Ok(None)
@@ -108,9 +143,18 @@ mod tests {
     #[test]
     fn typed_archive_configuration_rejects_unknown_and_wrong_type() {
         let fields = fields();
-        let entry = ConfigEntry { id: Bytes::new(b"unknown"), value: fields[0].default_value };
+        let entry = ConfigEntry {
+            id: Bytes::new(b"unknown"),
+            value: fields[0].default_value,
+        };
         assert!(unsafe { validate_config(&fields, &[entry]) }.is_err());
-        let entry = ConfigEntry { id: fields[0].id, value: ConfigValue { kind: VALUE_BOOL, ..fields[0].default_value } };
+        let entry = ConfigEntry {
+            id: fields[0].id,
+            value: ConfigValue {
+                kind: VALUE_BOOL,
+                ..fields[0].default_value
+            },
+        };
         assert!(unsafe { validate_config(&fields, &[entry]) }.is_err());
     }
 }

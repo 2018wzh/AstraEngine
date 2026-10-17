@@ -4,7 +4,7 @@ mod error;
 mod events;
 mod ffi;
 mod media;
-mod provider;
 mod platform;
+mod provider;
 mod session;
 pub use ffi::query as artemis_query;

@@ -6,10 +6,17 @@ pub(crate) struct NativeError {
 }
 pub(crate) type NativeResult<T> = Result<T, NativeError>;
 impl std::fmt::Display for NativeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "{}: {}", self.code, self.message) }
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.code, self.message)
+    }
 }
 impl std::error::Error for NativeError {}
 pub(crate) fn invalid(code: &'static str, message: impl Into<String>) -> NativeError {
-    NativeError { code, message: message.into() }
+    NativeError {
+        code,
+        message: message.into(),
+    }
 }
-pub(crate) fn engine(message: String) -> NativeError { invalid("ASTRA_EMU_ARTEMIS_ENGINE", message) }
+pub(crate) fn engine(message: String) -> NativeError {
+    invalid("ASTRA_EMU_ARTEMIS_ENGINE", message)
+}
