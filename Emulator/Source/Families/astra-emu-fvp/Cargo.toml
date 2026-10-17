@@ -10,37 +10,17 @@ doctest = false
 
 [features]
 default = []
-dynamic-plugin-export = []
+dynamic-plugin-export = ["rfvp-astra-embedded/dynamic-plugin-export"]
 
 [dependencies]
-abi_stable.workspace = true
-astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api", features = ["diagnostic-bridge"] }
-rfvp = { path = "../../../ThirdParty/rfvp/crates/rfvp", default-features = false, features = ["hosted-gpu"] }
-fontdb.workspace = true
-tracing.workspace = true
-crossbeam-channel.workspace = true
-pollster.workspace = true
-parking_lot = "0.12"
-time = { workspace = true, features = ["local-offset"] }
-symphonia = { version = "0.5", default-features = false, features = ["ogg", "vorbis", "wav", "pcm", "mp3", "flac"] }
-
-[build-dependencies]
-astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api", features = ["diagnostic-bridge"] }
-serde_json.workspace = true
-sha2.workspace = true
-
-[target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
-
-[dev-dependencies]
-tempfile.workspace = true
-image-native = { package = "image", version = "0.24.9", default-features = false }
+astra-emu-abi = { path = "../../FamilyApi/astra-emu-abi" }
+rfvp-astra-embedded = { path = "../../../ThirdParty/rfvp/crates/astra-embedded" }
 
 [package.metadata.astra]
 upstream = "https://github.com/xmoezzz/rfvp"
 upstream_revision = "af557db750c7833274f22a6d82b0dc33cdea2f85"
 hosted_fork = "https://github.com/2018wzh/rfvp"
-hosted_fork_branch = "astra"
-hosted_fork_revision = "dcd39c23ca59b38a9a96b6f301aeb05121aa3e18"
+hosted_fork_branch = "codex/emu-rfvp-embedded-20261018"
+hosted_fork_revision = "02b66d779f7c4ff6da5f4bc82d935a1088a834e0"
 license_notice = "THIRD_PARTY_NOTICES.md"
 modifications = "MODIFICATIONS.md"

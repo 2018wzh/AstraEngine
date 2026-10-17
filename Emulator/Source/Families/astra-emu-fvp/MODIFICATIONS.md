@@ -1,32 +1,33 @@
-# RFVP 上游差异
+# RFVP 原生嵌入差异
 
 ## 固定来源
 
-- 完整 fork：[xmoezzz/rfvp](https://github.com/xmoezzz/rfvp)，主仓 submodule：`Emulator/ThirdParty/rfvp`。
-- 上游 HEAD（2026-10-17 核对，0.6.0）：`af557db750c7833274f22a6d82b0dc33cdea2f85`。
-- 唯一适配提交：[`dcd39c23ca59b38a9a96b6f301aeb05121aa3e18`](https://github.com/2018wzh/rfvp/commit/dcd39c23ca59b38a9a96b6f301aeb05121aa3e18)，直接父提交为上述 HEAD；统一适配分支 `astra` 已推送 GitHub，远端 SHA 与主仓 gitlink 一致。
-- 来源历史、workspace、工具和许可证保留；不改写旧分支。
+- 上游基线为 `af557db750c7833274f22a6d82b0dc33cdea2f85`；本批从主仓原 pin `dcd39c23ca59b38a9a96b6f301aeb05121aa3e18` 继续，保留完整来源历史。
+- 原生生命周期修复为 `7e2016a0e0ef1c0b102185914cc7a8459bb2c9e1`；原生音频 worker 所有权接入为 `3359d8fbea3c53d6d262a9f71b6d4d79888c2368`，与适配分开。
+- 新适配提交及主仓 pin 为 [`02b66d779f7c4ff6da5f4bc82d935a1088a834e0`](https://github.com/2018wzh/rfvp/commit/02b66d779f7c4ff6da5f4bc82d935a1088a834e0)，发布在 `codex/emu-rfvp-embedded-20261018`。历史 `astra` 分支未改写；主线程整合时仍须按契约整理 fork/master 与 astra 基线。
+- C ABI 使用主仓共享实现 `94cd66ee9051d3643f51f4a61fed0466bf320280`。包元数据沿用现有 `hosted_fork_*` 字段记录来源，不代表保留 Hosted 运行链。
+- Kira 保持 0.10.8，固定 [`d2f10db15d9c451c7b2fd33043ae7732e75bee5d`](https://github.com/2018wzh/kira/commit/d2f10db15d9c451c7b2fd33043ae7732e75bee5d)。CPAL 保持 0.15.3，workspace 固定 WASAPI 关闭修复 `65ac8a6ac1a635cc26bfc5af331295b052044908`；主仓 workspace 须应用同一 patch。
 
-## 差异分类
+## 所有权与完整帧
 
-| 类别 | 当前内容 | 处置 |
-| --- | --- | --- |
-| 嵌入入口 | hosted 使用原 std 类型；字体/TTC 注入、资源读取、session globals、原音频状态接线、成功恢复通知 | 按实际消费者保留必要钩子，保持原操作语义 |
-| GPU 输出 | 同一 GpuPrimRenderer/RenderTarget；单 staging、submit/poll-into、原期限和代次取消；原目标同步捕获保存缩略图 | Family 三槽预留后提交，完成后沿用同一 Arc 分配发布 |
-| 资源与关闭 | 仅原 GPU cache 授权像素回收；原 Movie worker 停止接收后取消/join；独立 Movie stream ID | 保留实际所有权，不加第二播放器或永久 CPU 副本 |
-| 通用功能修复 | V1 修改像素/几何恢复、TextResume/协程取消与活跃文字等待取消 | 已独立提交原生 PR #51/#53，保留到上游合并 |
-| 构建身份 | na_mpeg2_decoder 版本 0.1.1 区分同名路径包 | 不改解码算法；不把包身份区分当作产物命名问题已解决 |
+`astra-emu-fvp` 只保留构建依赖和 `astra_emu_query` 注册入口。函数表、配置、探测、输入与 lease 包装位于 fork 的 `crates/astra-embedded`；App、调度、VM、资源、renderer、游戏 UI、音视频与保存继续由 RFVP 原生代码持有。旧 ProviderModule、公共 advance、HostedSession、Host PCM、替代文件系统及相应旧 ABI 测试已移除。
 
-## Family 与保存边界
+`App::render_frame` 仍先绘制原场景 RenderTarget，再将场景、`legacy_save_load_ui` 和 `exit_confirm_ui` 合成到独立最终离屏目标。CPU 回读只读取这个完整目标；SaveCreate 缩略图和遮罩转场仍在原时点读取原场景目标，不能借用 Host 输出 lease。
 
-Family 的 `src/embedding/` 收集原音频命令和绘制元数据，后者仅作变化/hit-proxy 观察；原 GPU 负责像素上传与绘制。NativeFileSystem 提供资源与原子保存；fontdb 解析实际系统字体和 TTC face。最终输出为不可变 CPU lease、有界 PCM，日志走共享桥。
+窗口外部尺寸 O 不改变 L/R，也不推进 VM。`render_scale` 为启动配置，范围 0.25–4，输出报告实际取整后的 R，并校验设备尺寸上限；未声明在线重配置。输入携带当前会话/输出代次和帧像素坐标，再复用原生窗口到逻辑/UI 映射。保留 `astra.emu.fvp`、文件 stem 游戏身份和 `script_encoding=shift_jis/gbk/utf8`，不丢已有配置关联。
 
-三个 `Arc<Vec<u8>>` 槽有明确写 owner；外部持满三个 lease 时不提交 GPU map，返回 Pending。释放一槽后 acquire 可在没有新 advance 时提交仍 dirty 的图像。初帧同步 capture 的 Vec 直接移入首槽；reset、原生保存捕获导致的取消、失败和 close 释放预留，旧 lease 保持不可变。同步 `map_to_rgba8/try_map_to_rgba8` 保留原生签名，内部复用同一 read-into 完成路径。
+原生 owner 使用独立 8 MiB 栈线程；平台线程只入队输入/控制及取得完成帧。三槽不可变 CPU 池满时跳过显示发布，VM、音频和存档继续执行。Ready/Pending/Unchanged 不以像素 hash 判断；已交付 lease 可跨关闭持有，归还只销毁纯 CPU owner。
 
-保存沿用上游 `SaveStateSnapshotV1` / `MotionManagerSnapshotV1`、RFVS、`GlobalSaveDataV1`/RFVG。旧 fork 的 V2 不是上游格式；旧扩展、重复 codec、版本识别/迁移/专门报错已删除。当前 V1 图像修复仍须按功能修复分类，不因此成为纯嵌入钩子。
+## 暂停、平台与关闭
 
-hosted 的 SaveCreate/yield 捕获暂停属于嵌入边界；原生控制组未证明通用缺陷。Family 回归校验保存 PC、缩略图、整张恢复像素与恢复后继续。电影/保存测试按三槽契约及时释放已消费 lease，不要求第四槽。
+暂停停止原生推进并暂停原 Kira mixer，恢复移动电影时钟原点，不补跑等待时长。WindowMode、F11 和指针位置/显隐经 typed 平台服务执行并反馈结果；等待期间保留最后一帧，取消独立唤醒平台服务。无窗口 Host 必须明确拒绝窗口请求。本核心不新增文字 Hook。
 
-## 结论与验证入口
+原 VM worker 增加指令边界取消和显式 join；原生读档成功递增 context epoch，取消旧平台请求和未完成回读。新 App 清空上一会话的 legacy 配置、文字历史、角色表和 UI 请求。关闭停止回读、VM、电影、原设备 watcher 和全部 streaming decoder，再调用原 RFVG 保存；即使关闭出错也完成 worker 回收。库不卸载，下一次启动重建会话资源。
 
-原生功能 PR 等待合并，严格最小钩子内容验收仍有上游依赖。当前 Family lib 29 项全部实际通过，包含四项原 GPU 回归、三槽背压与关闭、电影 EOF 和保存/恢复；真实 rlib 外部硬件 probe 两项验证 map abort、受控 timeout、取消代次及 read-into 恢复，临时导出已删除。Release Manager 自制场景精确验证 4×2 白色与相邻黑色像素，实际《樱花萌放》开场到正文截图、非零 PCM 和退出 0 已观察，发行/补丁修订未确认。Hosted 整改前后三轮成本与 Sandbox 验收见[性能审计](../../../../Docs/status/performance-upstream-audit-2026-10-12.md)及[实施计划](../../../../Docs/status/implementation-plan.md)。原版性能测试按用户决定取消。许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+Kira 的 DecoderOwner 独立于播放 handle；handle Drop 语义不变，Sound Drop 只发取消，不在设备 callback join。CPAL watcher 的启动握手、失败路径、唤醒与 join 在同版本 fork 修复；不替换 mixer/decoder/device。非商业复现位于 Kira 的 `tests/native_owners.rs`。
+
+## 验证边界
+
+本批 worker 按分工未运行 build、fmt、Clippy、测试或真实游戏。新增普通回归覆盖配置身份、非法配置和输入代次；`crates/astra-embedded/tests/native_cpu.rs` 的显式硬件用例覆盖原生菜单完整帧、R=1.5、暂停/窗口状态分离、三槽背压、跨关闭 lease、同进程重开，以及不让出的 VM 取消。Kira 的显式设备用例检查整机 mixer 暂停和 device/decoder join；静音夹具不代表可听音频验收。
+
+主线程整合后更新 workspace/native lockfile，运行上述用例及真实硬件产品流程，覆盖原存档、电影、可听音频、自由 resize/指针映射和结局。历史 Hosted 测试及旧商业截图不能作为本次原生路径验收。许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
