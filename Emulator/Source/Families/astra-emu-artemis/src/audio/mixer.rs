@@ -77,13 +77,31 @@ pub(super) fn run(
 ) -> NativeResult<()> {
     let mut manager = AudioManager::<DefaultBackend>::new(AudioManagerSettings::default())
         .map_err(|e| error::invalid("ASTRA_EMU_ARTEMIS_AUDIO_DEVICE", e.to_string()))?;
-    let _ = ready.send(true);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        run_manager(&mut manager, rx, state, ready)
+    }));
+    // This is the native audio owner, never the device's real-time callback.
+    // Join even when decoding, setup or a mixer command failed or panicked.
+    let shutdown = manager.backend_mut().stop_and_join()
+        .map_err(|e| error::invalid("ASTRA_EMU_ARTEMIS_AUDIO_SHUTDOWN", e.to_string()));
+    match result {
+        Ok(result) => result.and(shutdown),
+        Err(panic) => std::panic::resume_unwind(panic),
+    }
+}
+fn run_manager(
+    manager: &mut AudioManager<DefaultBackend>,
+    rx: Receiver<MixerCommand>,
+    state: &WorkerState,
+    ready: SyncSender<bool>,
+) -> NativeResult<()> {
     let mut add_bus = || {
         manager
             .add_sub_track(TrackBuilder::new())
             .map_err(|_| fail())
     };
     let mut buses: [TrackHandle; 4] = [add_bus()?, add_bus()?, add_bus()?, add_bus()?];
+    let _ = ready.send(true);
     let mut voices: Vec<Voice> = Vec::new();
     let mut suspended = false;
     loop {

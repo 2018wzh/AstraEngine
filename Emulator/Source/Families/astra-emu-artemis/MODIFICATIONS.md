@@ -26,6 +26,8 @@
 
 会话专属 native owner 创建、驱动和销毁原 VM、Vulkan/Metal、FFmpeg、资源与存档。上游没有设备 mixer，沿用现有 SDK Symphonia/Kira 解码混音，改由该会话的 Kira CPAL backend 持有真实设备；设备失败直接返回错误，不选 NullAudio。取消独立设置原子状态、唤醒 owner 并失效阻塞的 Host window 服务；关闭等待 owner 和音频 worker，库继续驻留。未支持的原生 UI/media 命令仍明确报错。
 
+Kira 保持 0.12.2，以发布来源 `e9cbb4608237bb339c3eaf498571000e6cce35ca` 为基线，使用独立通用修复 [2018wzh/kira@7d8961b20bce2ab8fd43b4bb34150d7e2898785c](https://github.com/2018wzh/kira/commit/7d8961b20bce2ab8fd43b4bb34150d7e2898785c)。原 CPAL stream-manager 丢弃 JoinHandle，仅 drop manager 不足以证明关闭。native 音频 owner 在成功、错误和 panic 退出均显式 `stop_and_join`，等待设备 callback/stream-manager 资源析构后才退出；普通 Kira Drop 仍非阻塞。Artemis 仅使用 StaticSoundData，不引入未使用的 StreamingSoundData scheduler 修改。workspace 与 SDK 必须统一此精确 Kira 来源，避免 StaticSoundData 跨 crate 实例不兼容。
+
 配置保留 `archive` 文件选择。CPU 捕获沿用原生完整 stage target，报告实际 L=R；窗口 drawable 变化不改原生尺寸。指针按正在显示帧的会话/输出代次校验，再执行一次 raster→logical 映射。读取成功的存档通知换代，旧输出不再接受输入，但旧租约可在 close 后任意线程释放。
 
 原生修复分别提交 [PR #5](https://github.com/Alphaly2K/art3m1s-core/pull/5)（onLoad，`ad20b8afd01ce2807510fa4e08629afc8e62345b`）、[PR #7](https://github.com/Alphaly2K/art3m1s-core/pull/7)（PF8，`186ccc17fb10a6c6b3ee931d98a7c9d6830e722e`）及 [PR #9](https://github.com/Alphaly2K/art3m1s-core/pull/9)（AVIO，`348b931068d31bd75eb5ec804967ce4b86448aee`）。最新远端核对均为 open、未合并。packed stereo 使用显式 `(i16, i16)`；同一非对称双声道样本在原 scalar 和 tuple 路径均正确，不将其报告为已证实缺陷。
