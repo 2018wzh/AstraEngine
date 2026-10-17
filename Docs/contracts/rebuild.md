@@ -42,9 +42,7 @@ FVP 共用 RFVP VM、原生媒体和存档，仅补必要接口。Musica 使用 
 
 成熟核心改动严格限必要嵌入钩子，复用原 GPU/媒体/平台实现；CPU lease 约束的是交付，不要求 CPU 渲染。产品硬件要求由显式嵌入配置或 Family 验证，不改变上游默认平台策略。实际视听使用硬件 GPU，Sandbox 可使用 GPU 虚拟化。
 
-核心诊断在 descriptor/probe/open 前接入 Manager。动态适配层安装共享日志桥，静态核心复用宿主订阅器；Manager 是日志 sink、级别过滤和 flush 的所有者。桥初始化冲突阻止加载。字符串、message、Debug/Display 正常有界转发，数值保留 typed 值，超限计入 dropped_fields；字段不经白名单或内容脱敏。当前最终输出缺口见审计 R08。
-
-
+核心诊断在 descriptor/probe/open 前接入 Manager。动态适配层安装共享日志桥，静态核心复用宿主订阅器；Manager 是日志 sink、级别过滤和 flush 的所有者。桥初始化冲突阻止加载。字符串、message、Debug/Display 正常有界转发，数值保留 typed 值，超限计入 dropped_fields；字段不经白名单或内容脱敏。
 
 Rust Family 可用 API crate 的 ProviderModule 管理 ABI 会话，不依赖 Engine/SDK。一个模块一个会话，由同一 owner 串行创建、推进、获取帧和完整关闭；关闭返回前不重开。panic 后拒绝继续工作，但允许取回会话清理；模块释放也关闭遗留会话。公共边界错误保留 SESSION_ACTIVE、SESSION、LOCK、PANIC 等诊断，核心错误保持原代码。
 
