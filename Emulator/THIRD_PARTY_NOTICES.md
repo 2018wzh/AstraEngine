@@ -14,26 +14,26 @@
 
 - Upstream: <https://github.com/xmoezzz/rfvp>
 - Upstream version: `0.6.0`, revision `af557db750c7833274f22a6d82b0dc33cdea2f85`
-- Hosted adaptation fork: <https://github.com/2018wzh/rfvp>
-- Hosted adaptation branch: `astra`
-- 当前 submodule 固定 revision：[`dcd39c23ca59b38a9a96b6f301aeb05121aa3e18`](https://github.com/2018wzh/rfvp/commit/dcd39c23ca59b38a9a96b6f301aeb05121aa3e18)，直接基于上述上游 HEAD 的一个适配提交，已推送至上述 fork 分支。
+- Native adaptation fork: <https://github.com/2018wzh/rfvp>
+- Native adaptation branch: `codex/emu-native-single-adaptation-20261018`
+- 当前 submodule 固定 revision：[`36786d644d988d1c84e129c915cc7bbdaf578ddd`](https://github.com/2018wzh/rfvp/commit/36786d644d988d1c84e129c915cc7bbdaf578ddd)，直接父提交为通用原生修复基线 `3359d8fbea3c53d6d262a9f71b6d4d79888c2368`。旧分支及来源历史保留。
 - License: Mozilla Public License 2.0.
 - Derivative source: <https://github.com/2018wzh/rfvp>
 - Astra wrapper source: `Emulator/Source/Families/astra-emu-fvp/`
-- 独立 Host 重构在 Family 内保留 RFVP 游戏行为，调整最终帧、混合 PCM、输入和生命周期边界。具体修改随 Family 源码记录；旧 Host VFS、effect journal 和统一 snapshot 接口不再作为产品接口。
+- 统一 C ABI 直接使用原生 App、VM、renderer、设备音频与保存。CPU lease 和 D3D12 共享纹理交付位于核心薄嵌入层；主仓 Family 不再实现 Hosted Tick、Host PCM 或另一套游戏执行。
 
 发布时提供与二进制对应的 MPL-2.0 covered source、修改说明和完整许可证，可随包分发源码或提供有效的 source offer。
 
-完整 fork 以 Git submodule 固定在 `Emulator/ThirdParty/rfvp/`；旧已发布基线不能代替当前二进制实际使用的 covered source。匹配当前 gitlink 的适配源码已推送 GitHub，二进制分发仍须提供对应源码、许可与修改记录。文件级变化与覆盖范围见该 Family 的 `MODIFICATIONS.md` 与 `THIRD_PARTY_NOTICES.md`。Family 以 rlib 链接核心，产品动态 ABI 边界由 `astra-emu-fvp` 持有；核心原有构建 targets 保留。原生四个系统字体槽由宿主通过 `fontdb` 按实际 family name 与 TTC index 绑定，不分发 Microsoft 字体，optional slot 沿用原生 fallback。
+完整 fork 以 Git submodule 固定在 `Emulator/ThirdParty/rfvp/`。文件级变化与覆盖范围见该 Family 的 `MODIFICATIONS.md` 与 `THIRD_PARTY_NOTICES.md`。当前原生字体构造仍嵌入上游四个 MS 命名字体文件；其分发授权未核验，不能沿用旧文档“不分发 Microsoft 字体”的结论，二进制发行保持阻塞。
 
 ## KrKr native development bundle
 
 - Upstream: <https://github.com/fenghengzhi/kirikiroid2-web>
 - Fixed upstream revision: `7105b50822097d11b7b1f5894bf541509fd51350`。
-- Local adaptation revision: `8bf8896dfaed4d1d956e7b8944ed643df848a26c`；尚未推送。
-- 原生核心保留完整 fork；本地适配整理为该上游提交的单个子提交，来源分支与历史保持不变。当前尚未完成原生游戏流程，不将开发运行包记为已验收或已发布核心。
+- 固定 fork revision：[`32130382185b60fe047ae9d98f8f3e4795c4db1e`](https://github.com/2018wzh/kirikiroid2-web/commit/32130382185b60fe047ae9d98f8f3e4795c4db1e)，分支 `codex/emu-native-krkr-20261018`。
+- 完整 fork 保留独立的 Windows 构建、可重入生命周期和游戏路径缓存修复。C++ 嵌入适配直接导出统一 ABI，删除 child/IPC；公开 TJS/PNG/OpenAL/取消与同 DLL 重开已验证，商业流程与结局尚未验收。
 - 运行包保留核心实际 `LICENSE`、Astra 适配的 BSD-3-Clause `LICENSE.astra`、`MODIFICATIONS.md`，以及固定安装依赖的 copyright 文件。根许可包含多个组件的实际条款，不用上游 README 的 MIT 概述替代。
-- 同目录 VC runtime 与 OpenMP runtime 来自构建工具链。FFmpeg 许可取决于实际配置；本批只作本地开发和 Sandbox 测试，未作整个依赖图的分发许可结论。
+- 同目录 VC runtime 与 OpenMP runtime 来自构建工具链。FFmpeg 许可取决于实际配置；当前只作本地主机硬件开发验收，未作整个依赖图的分发许可结论。
 
 ## Noto 字体
 
@@ -57,8 +57,15 @@ FVP 使用完整 RFVP fork 中的原生 `crates/na_wmv_player` 及原 Movie 路�
 - Fixed version: `1.8.2502`.
 - 应用的 HLSL 编译路径使用固定版本 DXC；分发编译器时一并保留官方发行包中的许可证和第三方说明。
 
-## CPAL 0.18.2
+## 原生音频依赖
 
-- Source: <https://github.com/RustAudio/cpal/releases/tag/v0.18.2>
-- License: Apache-2.0; minimum Rust version: 1.85.
-- Manager 使用 crates.io 的正式版本与锁文件 checksum。Windows WASAPI 播放进度读取该版本的设备 callback/playback 时间戳；其他后端仍可基础播放，但未提供相同精度的进度声明。发布包须包含完整 Apache-2.0 许可证。
+- CPAL 0.18.2：<https://github.com/RustAudio/cpal/releases/tag/v0.18.2>，Apache-2.0，Musica 的原生设备 owner 使用该版本；Manager 不再拥有核心 PCM 输出。
+- CPAL 0.15.3：`2018wzh/cpal@ecfda841a9140d60bbec1630d47ca91f1a77b8f3`，保留 WASAPI 关闭修复并将 ALSA 依赖对齐到 0.11。完整源码与 Apache-2.0 许可位于 `ThirdParty/cpal`。
+- Kira 保留各核心原版本，独立 fork 修复 decoder/device worker 的显式关闭。Musica/Artemis 使用 0.12.2 `7d8961b20bce2ab8fd43b4bb34150d7e2898785c`；RFVP 使用 0.10.8 `d2f10db15d9c451c7b2fd33043ae7732e75bee5d`；Siglus 嵌套 0.9.6 `a299b42690094a71885f6ed97dc504c4038da9a7`；Sena 使用 0.12.1 `523790dbb7ddea5ca432f375a9f3180923f2ea1e`。来源均为 <https://github.com/2018wzh/kira>，保留 MIT/Apache-2.0 文本和修改说明。
+
+## 其他原生核心
+
+- Siglus：`2018wzh/siglus_rs@03dac5349c615ebbbbc65b3fa9d19b0977dcc81a`，MPL-2.0，完整源码及嵌套 Kira 位于 `ThirdParty/siglus_rs`。来源与改动见 Family 的 `MODIFICATIONS.md`。
+- Artemis：`2018wzh/art3m1s-core@ae967d8446fe99b97f6e1df93fb1b61d8ada2040`，MPL-2.0，保留原生 Lua 5.1/Vulkan/FFmpeg 与完整来源，见 `ThirdParty/art3m1s-core/LICENSE`。
+- Sena：上游 <https://github.com/xmoezzz/sena-rs>，通用修复基线 `2d28936cce4cda95260c1e595bad77df14b5670c`，单适配 `2018wzh/sena-rs@4bcd69aa48c5c3bc940246ae7c63f0a35e1d6573`。完整 MPL-2.0 许可位于 `ThirdParty/sena-rs/LICENSE-MPL-2.0`；支持范围仍为原生 Koikake。
+- Ethornell：上游 <https://github.com/xmoezzz/ethornell-rs> 的 workspace 声明 MPL-2.0，但 crate 未继承且未提供许可文本。覆盖范围待澄清；本地适配未推送、未注册为可分发 submodule。

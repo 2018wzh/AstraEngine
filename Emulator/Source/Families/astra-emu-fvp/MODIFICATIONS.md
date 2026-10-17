@@ -6,7 +6,7 @@
 - 原生生命周期修复为 `7e2016a0e0ef1c0b102185914cc7a8459bb2c9e1`；原生音频 worker 所有权接入为 `3359d8fbea3c53d6d262a9f71b6d4d79888c2368`，与适配分开。
 - 原始适配为 `02b66d779f7c4ff6da5f4bc82d935a1088a834e0`；CPU 路径的 ABI 2 硬件验证增量为 [`40fe7c7b11a5c830303c33a975b1f4f7af333837`](https://github.com/2018wzh/rfvp/commit/40fe7c7b11a5c830303c33a975b1f4f7af333837)。Windows GPU 增量从兼容 flate2 提交 `3700dc093424d5948c39cd237d34a79ee0d33913` 继续，保留已发布历史。
 - C ABI 2 固定共享实现 `3c7762ad533c8641af51b8aff81794dc377e23a9`，D3D12 extension 单独使用 v1。`SessionState.flags=0`；RFVP 无 module-owner 扩展，OpenRequest 的该字段须为 null。包元数据沿用现有 `hosted_fork_*` 字段记录来源，不代表保留 Hosted 运行链。
-- 当前 GPU 适配为 `1f78df1a28467c4fa0bddaf6d0d322c14b2aa11e`，分支 `codex/emu-dx12-surface-20261018`；主仓以 submodule gitlink 固定该源代码。
+- 当前单适配提交为 `36786d644d988d1c84e129c915cc7bbdaf578ddd`，分支 `codex/emu-native-single-adaptation-20261018`，直接父提交为通用基线 `3359d8fbea3c53d6d262a9f71b6d4d79888c2368`。其源码 tree 与已验证的 GPU 增量 `1f78df1a28467c4fa0bddaf6d0d322c14b2aa11e` 相同；旧发布分支保持原状，主仓 gitlink 与 metadata 使用单适配提交。
 - Kira 运行层保持 0.10.8，固定 [`d2f10db15d9c451c7b2fd33043ae7732e75bee5d`](https://github.com/2018wzh/kira/commit/d2f10db15d9c451c7b2fd33043ae7732e75bee5d)；设备回归记录增量为 `bb64ffe37f1fa46e7e55c011e102ab28e344fbd3`，不改 mixer 运行实现。独立 workspace 的 CPAL 0.15.3 仍固定 `65ac8a6ac1a635cc26bfc5af331295b052044908`；主仓统一 patch 的 ALSA 0.11 兼容版本 `ecfda841a9140d60bbec1630d47ca91f1a77b8f3` 由主线程验证。
 
 ## 所有权与完整帧

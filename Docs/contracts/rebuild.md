@@ -96,6 +96,8 @@ FVP 共用 RFVP VM、原生媒体、V1/RFVS 与 GlobalSaveDataV1/RFVG；不增�
 
 核心诊断在 descriptor/probe/open 前接入 Manager。动态适配层安装共享日志桥，静态核心复用宿主订阅器；Manager 是日志 sink、级别过滤和 flush 的所有者。桥初始化冲突阻止加载。字符串、message、Debug/Display 正常有界转发，数值保留 typed 值，超限计入 dropped_fields；字段不经白名单或内容脱敏。
 
+没有结构化事件名的原生日志使用空 event；Manager 记为 `family.unstructured_log`，空 target 记为 `astra_emu::core`。原 message 与 typed 字段仍按边界完整转发或有界截断，超限计数，不为通过 sink 校验丢掉原日志。日志过滤在构造字段集合前执行。
+
 新会话包装仅处理 ABI 所有权、线程约束、请求与关闭，不继承旧 ProviderModule 驱动所有游戏 advance 的运行模型。普通控制入口按声明线程条件使用；取消入口必须能唤醒被 Hook/平台服务阻塞的 worker。关闭完成前不重开，panic 后禁止继续游戏操作但仍完成可达清理，保留原诊断码。
 
 ### 外部核心与 SDK 的重构边界

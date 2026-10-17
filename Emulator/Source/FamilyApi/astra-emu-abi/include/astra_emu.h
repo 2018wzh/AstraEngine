@@ -237,7 +237,13 @@ typedef struct AstraEmuLogField {
 typedef struct AstraEmuLogRecord {
   uint32_t level;
   uint32_t dropped_fields;
+  /**
+   * Empty targets identify unstructured native logs; the sink names them.
+   */
   struct AstraEmuBytes target;
+  /**
+   * May be empty for native logging systems without structured event names.
+   */
   struct AstraEmuBytes event;
   struct AstraEmuBytes message;
   const struct AstraEmuLogField *fields;

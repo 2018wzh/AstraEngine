@@ -6,36 +6,25 @@
 
 游戏输入、原生菜单和原生存读档由核心负责。关闭游戏回到资料库；重新启动创建新的会话。资料库、设置和运行日志保存在系统用户数据目录，不写入程序目录；游戏的既有存档仍按核心自身规则处理。联网元数据和翻译需要在设置中单独启用。
 
-出现 `ASTRA_EMU_AUDIO_DEVICE_UNAVAILABLE` 时，先检查运行环境是否提供音频设备。设置中心的 `NullAudioDevice` 仅供无声音测试，客户端会明确标记；它不表示音频播放已通过。
+核心自行打开真实音频设备；设备不可用或格式不支持时显示原生错误，不自动切换 NullAudio。Manager 不再驱动核心 Tick 或接收核心 PCM。
 
-FVP 保留原生字体语义，要求系统提供 `MS Gothic`；脚本请求其他 MS 字体时也需要对应字体。缺少字体会显示 `ASTRA_EMU_FVP_FONT_MISSING`，不会静默替换字体。运行包不分发 Windows 系统字体。
+FVP 当前原生 App 路径仍嵌入上游四个 MS 命名字体文件，分发授权尚未核验。完整说明见 [第三方声明](../../Emulator/THIRD_PARTY_NOTICES.md)，当前开发产物不能直接当作可分发 Release。
 
 客户端从程序相邻的 `cores/` 和用户数据目录的 `cores/` 同时发现核心。核心文件损坏、ABI 不符和重复 plugin ID 都会显示诊断；重复核心不会按目录顺序覆盖。替换核心后需要重启客户端。
 
-运行包只包含实际构建的核心，不代表任意游戏已兼容。GPU 离屏测试、NullAudio、真实窗口操作和可听音频是不同检查；实际视听与完整游戏流程未验收时，不声明可通关。KrKr 的 Windows 原生 OFF/ON 与 Family/child 生产构建已完成，开发包包含真实原生依赖及同目录 VC/OpenMP runtime。Sandbox 已使用 NVIDIA OpenGL 4.6 进入真实脚本，但样本的原生模态提示框被嵌入接口拒绝，尚未产生游戏最终帧，当前不作为已验收核心提供。
+新 Manager 只加载 C ABI v2 核心，旧 Family vtable 不兼容。核心自行运行 VM、原生菜单、渲染、音视频与保存；Manager 接收包含文字和游戏 UI 的完整帧。CPU lease 与 RFVP 的 D3D12 扩展共用呈现滤镜链。D3D12 使用独立 Device、共享图像及双向 fence，包含两次 GPU copy，不称零拷贝。
 
-当前 Windows 开发包已检查 FVP 游戏导入、标题与正文、输入、原生存档写入以及会话关闭重开。该游戏读档后会先恢复到保存菜单，点击游戏菜单的 `EXIT` 可返回所保存的剧情并继续推进；直接返回剧情的行为仍待修正。Sandbox 本次没有可用音频设备，使用 NullAudio，未完成可听音频、结局或正式呈现性能验收。
+当前 RFVP 已验证原生 CPU 菜单/缩略图/输入/关闭重开，以及 D3D12 导入、滤镜、resize、旧租约和设备丢失。Siglus 已通过新 ABI 的标题、影片、正文、存读档和同 DLL 重开代表流程。KrKr 已删除 child/IPC，公开 TJS/PNG/OpenAL 与重开验证通过。其余核心和七核心结局的实时状态统一见[实施计划](../status/implementation-plan.md)；旧 Hosted/Sandbox 结果不代表本次验收。
 
-其他核心的真实样本仍在检查。CMVS 样本启动后在命令 548 处报告 `ASTRA_EMU_CMVS_ACTION_UNBOUND`，当前部分实现无法继续该游戏。Siglus 的 Release 包未重现此前 Debug shader 栈溢出；不透明帧与混音器独立取消修复后，实际窗口完成 Rewrite+ 标题、开场 WMV 播放至结束、正文输入、原生存读档，以及 Manager 结束会话后重开并从标题读档。读档直接恢复 CG 与文字并可继续剧情，原生标题 Exit 已正常返回 Manager，随后重开、标题读档、正文推进及 Quit 确认后退出也已完成。正文鼠标 Quit 已直接打开原生确认框，No 返回正文后可继续推进；Title 返回标题、Exit 返回 Manager、重开读档后 Quit→Yes 退出均已完成，无需额外 Enter。完整路线仍未验收。Artemis 已通过原生启动媒体、标题、剧情、输入、普通存档及退出重开；修复加载等待归属后，标题读档直接恢复 CG 和保存处文字，新槽保存、原生退出及重开读取新槽均可继续剧情，完整路线仍未验收。未实现的 UI 或媒体请求仍明确失败。开发包的编译结果不能作为可玩或性能结论；实际游戏与性能检查使用 Release 包。调试统计中的 `core_advance_us` 是 Family advance 耗时，`frame_capture_us` 包含 Family 帧访问、可能的 GPU 回读及 Host 复制，`cpu_submission_us` 是 Host 提交 CPU 耗时，不表示 GPU 完成时间。
+Musica 提供同步文字 Hook；共享串行 Luau VM 执行已启用扩展。原生取消不排在 Luau 队列后。可安全重试的错误显示重试和结束，其他失败只允许结束。只安装可信本地扩展；CLI 为 `extension-install <id> <source.luau>`、`extension-enable <id> <true|false>`、`extension-configure <id> <configuration.json>`、`extension-list`。本批不提供在线扩展市场。
 
-本轮 Sandbox 的显示模式报告为 32 Hz，Slint 使用该频率进行窗口节流。实际窗口约 28–30 FPS 与这一限制相符，不能证明达到 60 Hz。核心推进、帧读取与 Host 提交开销分别测量，不通过更改宿主配置或强制重绘替代原生速率验收。
+`astra-emu-manager --headless <配置.json>` 与产品使用同一原生 ABI。`frames` 是观察次数，`sample_interval_ms` 控制观察间隔，不代表核心 Tick；`reopen_count` 在驻留 DLL 中重复关闭重开。检查点 PNG 和相邻 `.diagnostics` 目录保留真实结果。无窗口 Host 拒绝窗口与模态请求，不伪造点击或回答。
 
-Musica 已移除启动前的全归档扫描，并修复 Git LFS 字体尚未检出时的打包问题。优化包在硬件 DX12 GPU 与 NullAudio 下完成《夏空のペルセウス》的原生标题、正文绘制、键盘推进、快速与普通存读档，以及关闭重开后从标题读取普通存档；没有完成结局或可听音频验收。两次 PresentMon 采集均未输出帧记录，尚无有效呈现性能数据，不能声明达到可玩帧率。
-
-2026-10-12 在实际窗口的已存档剧情场景各采样约 30 秒，采样期间没有重型构建。使用 Release 包、NullAudio、Windows 11 build 26100、AMD Ryzen AI 9 HX 370（24 个逻辑处理器），Host 为 NVIDIA GeForce RTX 4070 Laptop GPU / Vulkan；Musica 核心使用硬件 DX12。下表是运行开销与推进频率，不是显示帧率；p95 单位为 ms。
-
-| 核心 | raster | Host 推进 Hz | 核心推进 p95 | 帧读取 p95 | Host CPU 提交 p95 |
-| --- | --- | ---: | ---: | ---: | ---: |
-| FVP | 1280×720 | 60.52 | 5.406 | 1.491 | 0.506 |
-| Artemis | 1600×1200 | 58.63 | 2.515 | 6.508 | 1.590 |
-| Siglus | 1280×720 | 57.82 | 3.802 | 13.082 | 0.865 |
-| Musica | 1280×720 | 59.34 | 7.894 | 8.563 | 0.807 |
-
-FVP 原先在 Host PCM 写入受阻时连带阻塞每帧音频控制命令，同一场景仅推进 46.85 Hz，核心推进 p95 为 24.088 ms。现在使用单一 PCM 写入线程，最多保留一个待接收的混音块；混音线程等待 Host 接收时仍处理有序控制命令，下一块混音仍等待实际接收确认。修复后推进间隔 p95 为 18.065 ms、最大 39.958 ms。其他三核心的推进间隔 p95 分别为 23.171、24.287、25.461 ms，仍存在抖动；上述采样不代表完整路线或原生速率呈现验收。
+当前桌面锁屏，实窗交互、可听音频和商业结局尚未全部验收。历史性能数据见[性能审计](../status/performance-upstream-audit-2026-10-12.md)；回读/上传、GPU copy、检查点捕获和实际桌面 Present 分别记录，不以观察频率或 CPU 成绩冒充 GPU 显示帧率。
 
 ## 构建运行包
 
-下面以 FVP 为例。先初始化主仓固定的 submodule；尚未推送的本地适配提交需要从开发来源恢复，不应换成旧版提交绕过构建失败。
+下面以 FVP 为例。先初始化主仓固定的完整 submodule；不要换回旧 revision 绕过失败。参与核心保留不同原生 Lua/音频依赖，分别构建，不将 Artemis Lua 5.1 和 Manager Luau 合并进同一次 Cargo 调用。
 
 ```sh
 # 替换为数据盘上的专用工作目录；构建、运行包和临时文件放在其中。
@@ -65,3 +54,7 @@ Linux/macOS 分别使用无 `.exe` 的可执行文件以及 `libastra_emu_fvp.so
 ```sh
 git lfs pull --include="Examples/NativeVN/Assets/Fonts/NotoSansJP-Variable.ttf,Examples/NativeVN/Assets/Fonts/NotoSansSC-Variable.ttf" --exclude=""
 ```
+
+Musica 动态核心须同时启用 `dynamic-plugin-export,ffmpeg-vcpkg`，并配置 FFmpeg vcpkg 环境。构建完成后立即把该 DLL 及匹配的 FFmpeg 依赖复制到独立运行目录，再启动 Manager；之后对同一 target 的 CLI/静态依赖构建可能覆盖未启用导出的同名 DLL。`astra_emu_query` 必须能协商 ABI v2，不能把普通 rlib 依赖构建产生的 DLL 当作产品核心。
+
+KrKr 原生运行目录用 `Tools/AstraEMU/package_krkr_runtime.py --native-runtime <目录> --output <新目录>` 组装，包含实际 DLL、Resources 和运行依赖；不再接收旧 Rust child 产物。该工具不代替商业流程和许可证核验。

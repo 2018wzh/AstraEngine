@@ -27,7 +27,9 @@ pub struct LogField {
 pub struct LogRecord {
     pub level: u32,
     pub dropped_fields: u32,
+    /// Empty targets identify unstructured native logs; the sink names them.
     pub target: Bytes,
+    /// May be empty for native logging systems without structured event names.
     pub event: Bytes,
     pub message: Bytes,
     pub fields: *const LogField,

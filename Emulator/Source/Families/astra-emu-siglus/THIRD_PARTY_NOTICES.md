@@ -3,12 +3,11 @@
 ## siglus_rs (`Emulator/ThirdParty/siglus_rs`)
 
 Git submodule of [`xmoezzz/siglus_rs`](https://github.com/xmoezzz/siglus_rs)
-pinned by exact gitlink to a local adaptation of the
+pinned by exact gitlink to the published adaptation of the
 [`2018wzh/siglus_rs`](https://github.com/2018wzh/siglus_rs) fork: upstream
 revision `5f358ef1360b0439e92aed2b749e8f25d8721954` (1.0.0), native lifecycle
-baseline `63ec1f79ec7811f49ad1611668740a09e0d17cc7`, embedded adapter
-`49457f433c24c4450c30b215e9518aff68499e29`, and ABI 2 verification fixes
-`4779a967d4cb04bb3de252f2bdc20f41dac416bb`, for an unofficial Rust
+baseline `63ec1f79ec7811f49ad1611668740a09e0d17cc7`, and single embedded adapter
+`03dac5349c615ebbbbc65b3fa9d19b0977dcc81a`, for an unofficial Rust
 reimplementation of SiglusEngine. The covered source is
 redistributed under the MPL-2.0; the complete license text is preserved at
 `Emulator/ThirdParty/siglus_rs/LICENSE-MPL-2.0`. The file-level change inventory is
