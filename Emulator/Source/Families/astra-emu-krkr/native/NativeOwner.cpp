@@ -65,8 +65,8 @@ std::string text(AstraEmuBytes value, size_t maximum = 4096) {
     return {reinterpret_cast<const char *>(value.data), value.len};
 }
 AstraEmuSurfaceInfo surface(AstraKrkrFrameInfo f) {
-    // This is the complete game canvas, not a layer for Host compositing.
-    // Preserve its bytes; the Host presents RGB without using texture alpha.
+    // TVPWindowLayer::UpdateDrawBuffer presents this same final texture with
+    // BlendFunc::DISABLE. Preserve that RGB presentation, not layer compositing.
     return {AstraEmuSURFACE_CPU, AstraEmuPIXEL_RGBA8, AstraEmuCOLOR_SRGB,
         AstraEmuALPHA_IGNORED, AstraEmuROWS_TOP_DOWN, 0,
         {f.logical_width, f.logical_height}, {f.width, f.height}, f.stride};
@@ -138,7 +138,6 @@ struct Session {
     void begin_native_operation() {
         std::lock_guard<std::mutex> lock(mutex);
         host_failure = AstraEmuOK;
-        host_failure_error = {};
     }
     void check_host_result(AstraEmuStatus status, AstraEmuError detail, const char *fallback) {
         if(status == AstraEmuOK) return;
