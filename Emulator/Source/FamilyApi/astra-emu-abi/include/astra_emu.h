@@ -73,6 +73,22 @@
  */
 #define AstraEmuSESSION_CAN_RETRY 1
 
+#define AstraEmuD3D12_EXTENSION_VERSION 1
+
+#define AstraEmuBACKEND_D3D12 1
+
+#define AstraEmuD3D12_FORMAT_RGBA8_UNORM_SRGB 29
+
+#define AstraEmuD3D12_FORMAT_BGRA8_UNORM_SRGB 91
+
+#define AstraEmuD3D12_COPY_SOURCE 1
+
+#define AstraEmuD3D12_COPY_DESTINATION 2
+
+#define AstraEmuD3D12_NOT_SUBMITTED 0
+
+#define AstraEmuD3D12_CONSUMED 1
+
 #define AstraEmuMODULE_OWNER_VERSION 1
 
 #define AstraEmuLOG_ERROR 1
@@ -625,6 +641,79 @@ typedef struct AstraEmuModuleOwnerApi {
   AstraEmuStatus (*create)(AstraEmuModuleOwner*, struct AstraEmuError*);
   AstraEmuStatus (*destroy)(AstraEmuModuleOwner, struct AstraEmuError*);
 } AstraEmuModuleOwnerApi;
+
+/**
+ * Actual Host adapter LUID and supported resource limits. The native core
+ * creates its own device; LUID equality never means device identity equality.
+ */
+typedef struct AstraEmuD3D12Host {
+  struct AstraEmuHeader header;
+  uint64_t adapter_luid;
+  uint32_t max_width;
+  uint32_t max_height;
+  uint32_t dxgi_format;
+  uint32_t copy_usage;
+} AstraEmuD3D12Host;
+
+/**
+ * Exactly one owned generation. Same-process NT handles are borrowed until
+ * release; Host opens its own COM references. Ready means the native queue
+ * Signal has been enqueued after returning the export resource to COMMON.
+ * Host queue waits ready, copies in COPY_SOURCE, returns it to COMMON, then
+ * enqueues done Signal. Host retains imports/fences through actual completion.
+ *
+ * release(owner, NOT_SUBMITTED) means no GPU access was submitted. CONSUMED
+ * promises the done Signal is already enqueued. Other dispositions are invalid
+ * and must never cause producer reuse. Return exactly once, from any thread.
+ * Retired leases stay valid after close and touch no VM or Host callback.
+ */
+typedef struct AstraEmuD3D12Lease {
+  void *owner;
+  size_t resource_handle;
+  size_t ready_fence_handle;
+  size_t done_fence_handle;
+  uint64_t ready_value;
+  uint64_t done_value;
+  void (*release)(void*, uint32_t);
+} AstraEmuD3D12Lease;
+
+typedef struct AstraEmuD3D12Frame {
+  uint32_t state;
+  uint32_t dxgi_format;
+  struct AstraEmuFrameIdentity identity;
+  uint64_t timestamp_ns;
+  struct AstraEmuSurfaceInfo info;
+  uint64_t adapter_luid;
+  /**
+   * Unique allocation identity within session/output epoch, not a frame ID.
+   */
+  uint64_t resource_id;
+  struct AstraEmuD3D12Lease lease;
+} AstraEmuD3D12Frame;
+
+/**
+ * open shares the normal core's native session/worker and all CoreApi controls.
+ * Host descriptor may be null: explicit CPU configuration uses normal CPU
+ * startup; explicit GPU configuration must reject a missing/incompatible Host.
+ * GPU startup never performs CPU capture as an implicit fallback.
+ *
+ * Each generation is single-acquire. Repeating an old `after` after issuance
+ * returns Pending until a new generation; matching `after` returns Unchanged.
+ * Native reuse requires lease return AND relevant ready/done completion.
+ * Close stops production, drains native writes with device-loss handling, and
+ * retires exports independently; it does not wait for Host-held leases.
+ */
+typedef struct AstraEmuD3D12Api {
+  struct AstraEmuHeader header;
+  AstraEmuStatus (*open)(const struct AstraEmuOpenRequest*,
+                         const struct AstraEmuD3D12Host*,
+                         struct AstraEmuOpenResult*,
+                         struct AstraEmuError*);
+  AstraEmuStatus (*acquire)(AstraEmuSession,
+                            struct AstraEmuFrameIdentity,
+                            struct AstraEmuD3D12Frame*,
+                            struct AstraEmuError*);
+} AstraEmuD3D12Api;
 
 #define AstraEmuOK 0
 

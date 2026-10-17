@@ -7,5 +7,5 @@ style = "both"
 sys_includes = ["stdint.h", "stddef.h"]
 
 [export]
-include = ["CoreApi", "Query", "CpuLease", "FrameSurface", "OpenRequest", "OpenResult", "SessionState", "Descriptor", "ProbeResult", "InputEvent", "ConfigField", "ConfigEntry", "Diagnostics", "HostServices", "ModuleOwnerApi"]
+include = ["CoreApi", "Query", "CpuLease", "FrameSurface", "OpenRequest", "OpenResult", "SessionState", "Descriptor", "ProbeResult", "InputEvent", "ConfigField", "ConfigEntry", "Diagnostics", "HostServices", "ModuleOwnerApi", "D3D12Api"]
 prefix = "AstraEmu"

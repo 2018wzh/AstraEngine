@@ -9,6 +9,7 @@
 
 mod config;
 mod core;
+mod d3d12;
 #[cfg(feature = "diagnostic-bridge")]
 pub mod diagnostic_bridge;
 mod lease;
@@ -17,6 +18,7 @@ mod services;
 mod surface;
 pub use config::*;
 pub use core::*;
+pub use d3d12::*;
 pub use lease::*;
 pub use module_owner::*;
 pub use services::*;

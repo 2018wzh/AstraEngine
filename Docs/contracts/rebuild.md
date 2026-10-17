@@ -48,6 +48,10 @@ CPU Surface 提供只读像素与 stride，复用不可变 lease、有界帧池�
 
 GPU Surface 保留核心自己的 Device 和 renderer，通过版本化图形扩展协商后端、设备兼容性、格式、共享句柄、导入与同步，不跨 ABI 传 wgpu::Texture 等 Rust 对象，也不把同一显卡当作同一 Device。核心完成写入后 Host 才能采样；Host 提交消费完成依赖后核心才能复用目标。先固定扩展发现机制和帧身份，具体后端协议随真实实现验收，不预先冻结虚构的跨后端 GPU 结构。
 
+Windows 首个后端使用 `astra.emu.surface.d3d12` v1：协商实际 adapter LUID、格式与尺寸上限，核心和 Host 各持自己的 Device。三槽导出资源与 ready/done shared fence 通过 NT handle 交接，GPU 资源回到 COMMON 后才排队 ready；Host 等待、复制到自己的滤镜输入、回到 COMMON 并排队 done。每个 generation 只发放一个独立租约；归还与 done 完成共同决定复用。未提交使用可显式放弃，不得伪造消费完成。原生最终目标→共享目标、共享目标→Host 私有输入各有一次 GPU copy，不称零拷贝。该协议随 RFVP/Presenter 实现验证，不能用类型编译或 CPU 结果宣称 GPU 验收。
+
+关闭先停止生产并排空原生写入，导出资源的租约不再依赖 VM 或 Host 回调。Host 保留 imported resource/fence 到实际 done 完成；不遗留 detached 退役线程。驱动未完成时保留有界资源并返回关闭错误、禁止重开，不能为了超时成功而提前释放 GPU 仍在使用的对象。
+
 每个核心在目标平台至少提供一种实际可用交付方式，不要求 CPU/GPU 双实现。未声明 CPU 回退的 GPU 核心遇到不支持的共享组合明确报错。Presenter 可丢弃未显示旧帧，但不能丢输入、逻辑步骤、声音或存档操作；原生转场历史、缩略图和内部捕获不得与 Host 持有的可写输出目标混用。CPU 交付不能标为 GPU 共享或无回读路径。
 
 ### RFVP 与 Manager
