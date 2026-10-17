@@ -12,6 +12,7 @@ use art3m1s_core::{
 use astra_emu_abi::*;
 use parking_lot::Mutex;
 use std::{
+    ops::ControlFlow,
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -66,6 +67,11 @@ enum Command {
     Input(Vec<Input>, SyncSender<NativeResult<()>>),
     Pause(bool, SyncSender<NativeResult<()>>),
 }
+struct OwnerState<'a> {
+    shared: &'a Mutex<Snapshot>,
+    stop: &'a AtomicBool,
+    context: &'a AtomicU64,
+}
 impl SessionOwner {
     pub(crate) fn open(
         path: PathBuf,
@@ -113,7 +119,17 @@ impl SessionOwner {
                     }
                     platform.check(epoch)?;
                     let _ = ready_tx.send(Ok(()));
-                    runtime.run(rx, &shared, &stop, &generation, epoch, window, platform)
+                    runtime.run(
+                        rx,
+                        OwnerState {
+                            shared: &shared,
+                            stop: &stop,
+                            context: &generation,
+                        },
+                        epoch,
+                        window,
+                        platform,
+                    )
                 }));
                 let failure = match result {
                     Ok(Ok(())) => None,
@@ -292,14 +308,18 @@ impl Runtime {
         epoch: u64,
         context: u64,
         request: &mut u64,
-    ) -> NativeResult<bool> {
+    ) -> NativeResult<ControlFlow<(), bool>> {
         let audio = self.audio.as_ref().unwrap();
-        platform.check(epoch)?;
+        if platform.cancelled(epoch) {
+            return Ok(ControlFlow::Break(()));
+        }
         for finished in audio.drain_finished() {
             self.rt.notify_sound_finished(finished.id.as_deref());
         }
         for command in media::drain(&self.events, &self.resources, &mut self.window)? {
-            audio.send(command)?;
+            if audio.send(command)?.is_break() {
+                return Ok(ControlFlow::Break(()));
+            }
         }
         let mut serviced = false;
         while let Some(command) = self.window.take() {
@@ -310,18 +330,21 @@ impl Runtime {
             serviced = true;
         }
         audio.check_error()?;
-        Ok(serviced)
+        Ok(ControlFlow::Continue(serviced))
     }
     fn run(
         &mut self,
         rx: Receiver<Command>,
-        shared: &Mutex<Snapshot>,
-        stop: &AtomicBool,
-        context: &AtomicU64,
+        owner: OwnerState<'_>,
         epoch: u64,
         mut window: WindowState,
         platform: Platform,
     ) -> NativeResult<()> {
+        let OwnerState {
+            shared,
+            stop,
+            context,
+        } = owner;
         let mut explicit_pause = false;
         let mut paused = false;
         let mut last = Instant::now();
@@ -330,7 +353,7 @@ impl Runtime {
         let mut request = 0;
         let mut pending = false;
         let mut pool: [Option<Arc<Vec<u8>>>; 3] = [None, None, None];
-        while !stop.load(Ordering::Acquire) && !platform.cancelled(epoch) {
+        'owner: while !stop.load(Ordering::Acquire) && !platform.cancelled(epoch) {
             for command in rx.try_iter() {
                 match command {
                     Command::Pause(value, reply) => {
@@ -342,7 +365,17 @@ impl Runtime {
                                 .unwrap()
                                 .send(MixerCommand::Suspend(effective))
                         } else {
-                            Ok(())
+                            Ok(ControlFlow::Continue(()))
+                        };
+                        let result = match result {
+                            Ok(ControlFlow::Break(())) => {
+                                let _ = reply.send(Err(error::invalid(
+                                    "ASTRA_EMU_ARTEMIS_CANCELLED",
+                                    "session was cancelled",
+                                )));
+                                break 'owner;
+                            }
+                            result => result.map(|_| ()),
                         };
                         if result.is_ok() {
                             if effective != paused {
@@ -384,10 +417,15 @@ impl Runtime {
             }
             let next_pause = explicit_pause || window.suspended != 0 || window.focused == 0;
             if next_pause != paused {
-                self.audio
+                if self
+                    .audio
                     .as_ref()
                     .unwrap()
-                    .send(MixerCommand::Suspend(next_pause))?;
+                    .send(MixerCommand::Suspend(next_pause))?
+                    .is_break()
+                {
+                    break;
+                }
                 self.rt.notify_lifecycle(if next_pause { 1 } else { 2 });
                 paused = next_pause;
                 remainder = 0;
@@ -407,14 +445,18 @@ impl Runtime {
             last = now;
             let elapsed = (remainder / 1_000_000).min(u64::MAX as u128) as u64;
             remainder %= 1_000_000;
-            if self.drain(
+            match self.drain(
                 platform,
                 epoch,
                 context.load(Ordering::Acquire),
                 &mut request,
             )? {
-                last = Instant::now();
-                remainder = 0;
+                ControlFlow::Break(()) => break,
+                ControlFlow::Continue(true) => {
+                    last = Instant::now();
+                    remainder = 0;
+                }
+                ControlFlow::Continue(false) => {}
             }
             pending |= self.rt.try_advance_frame(elapsed).map_err(error::engine)?;
             if self.rt.take_timeline_reset() {
@@ -440,14 +482,18 @@ impl Runtime {
                 remainder = 0;
                 last = Instant::now();
             }
-            if self.drain(
+            match self.drain(
                 platform,
                 epoch,
                 context.load(Ordering::Acquire),
                 &mut request,
             )? {
-                last = Instant::now();
-                remainder = 0;
+                ControlFlow::Break(()) => break,
+                ControlFlow::Continue(true) => {
+                    last = Instant::now();
+                    remainder = 0;
+                }
+                ControlFlow::Continue(false) => {}
             }
             if pending {
                 if let Some(slot) = pool.iter_mut().find(|slot| {

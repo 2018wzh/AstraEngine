@@ -2,6 +2,7 @@
 use crate::error::{self, NativeError, NativeResult};
 use art3m1s_core::media::MediaSource;
 use parking_lot::Mutex;
+use std::ops::ControlFlow;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender};
 use std::sync::Arc;
@@ -113,13 +114,22 @@ impl AudioBridge {
         }
         Ok(bridge)
     }
-    pub(crate) fn send(&self, command: MixerCommand) -> NativeResult<()> {
-        self.tx.try_send(command).map_err(|_| {
-            error::invalid(
+    pub(crate) fn send(&self, command: MixerCommand) -> NativeResult<ControlFlow<()>> {
+        if self.cancelled.load(Ordering::Acquire) {
+            return Ok(ControlFlow::Break(()));
+        }
+        match self.tx.try_send(command) {
+            Ok(()) => Ok(ControlFlow::Continue(())),
+            Err(std::sync::mpsc::TrySendError::Disconnected(_))
+                if self.cancelled.load(Ordering::Acquire) =>
+            {
+                Ok(ControlFlow::Break(()))
+            }
+            Err(_) => Err(error::invalid(
                 "ASTRA_EMU_ARTEMIS_AUDIO_QUEUE",
                 "audio command queue unavailable",
-            )
-        })
+            )),
+        }
     }
     pub(crate) fn drain_finished(&self) -> impl Iterator<Item = SoundFinished> + '_ {
         self.finished_rx.try_iter()

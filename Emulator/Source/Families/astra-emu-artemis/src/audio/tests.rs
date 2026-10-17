@@ -50,11 +50,17 @@ fn native_device_completion_pause_cancel_reopen_and_decode_failure() {
     for _ in 0..3 {
         let stop = Arc::new(AtomicBool::new(false));
         let audio = AudioBridge::start(stop.clone()).unwrap();
-        audio.send(play(wave(), false)).unwrap();
-        audio.send(MixerCommand::Suspend(true)).unwrap();
+        assert!(audio.send(play(wave(), false)).unwrap().is_continue());
+        assert!(audio
+            .send(MixerCommand::Suspend(true))
+            .unwrap()
+            .is_continue());
         std::thread::sleep(Duration::from_millis(50));
         assert_eq!(audio.drain_finished().count(), 0);
-        audio.send(MixerCommand::Suspend(false)).unwrap();
+        assert!(audio
+            .send(MixerCommand::Suspend(false))
+            .unwrap()
+            .is_continue());
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             audio.check_error().unwrap();
@@ -64,12 +70,15 @@ fn native_device_completion_pause_cancel_reopen_and_decode_failure() {
             assert!(Instant::now() < deadline);
             std::thread::sleep(Duration::from_millis(10));
         }
-        audio.send(play(wave(), true)).unwrap();
+        assert!(audio.send(play(wave(), true)).unwrap().is_continue());
         stop.store(true, Ordering::Release);
         audio.close().unwrap();
     }
     let audio = AudioBridge::start(Arc::new(AtomicBool::new(false))).unwrap();
-    audio.send(play(b"corrupt".to_vec(), false)).unwrap();
+    assert!(audio
+        .send(play(b"corrupt".to_vec(), false))
+        .unwrap()
+        .is_continue());
     let deadline = Instant::now() + Duration::from_secs(5);
     while audio.check_error().is_ok() {
         assert!(Instant::now() < deadline);
@@ -77,4 +86,31 @@ fn native_device_completion_pause_cancel_reopen_and_decode_failure() {
     }
     assert_eq!(audio.drain_finished().count(), 0);
     assert!(audio.close().is_err());
+}
+
+#[test]
+fn disconnected_queue_is_only_cancellation_when_requested() {
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    drop(rx);
+    let (_, finished_rx) = std::sync::mpsc::sync_channel(1);
+    let audio = AudioBridge {
+        tx,
+        finished_rx,
+        error: Arc::new(Mutex::new(None)),
+        cancelled: Arc::new(AtomicBool::new(false)),
+        handle: None,
+    };
+    assert_eq!(
+        audio
+            .send(MixerCommand::StopAll { fade_ms: 0 })
+            .unwrap_err()
+            .code,
+        "ASTRA_EMU_ARTEMIS_AUDIO_QUEUE"
+    );
+    audio.cancelled.store(true, Ordering::Release);
+    assert!(audio
+        .send(MixerCommand::StopAll { fade_ms: 0 })
+        .unwrap()
+        .is_break());
+    audio.close().unwrap();
 }

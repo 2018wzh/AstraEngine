@@ -11,10 +11,14 @@ pub(crate) fn request(
     context: u64,
     id: u64,
 ) -> NativeResult<()> {
+    let operation = match &command {
+        WindowCommand::Title(_) => "window.title",
+        WindowCommand::Pointer { .. } => "window.pointer",
+    };
     let callback = platform.0.request.ok_or_else(|| {
         error::invalid(
             "ASTRA_EMU_ARTEMIS_PLATFORM_UNAVAILABLE",
-            "native window service is unavailable",
+            format!("native window service is unavailable for {operation}"),
         )
     })?;
     let mut request = WindowRequest {
@@ -90,7 +94,7 @@ pub(crate) fn request(
         return Err(crate::error::invalid(
             "ASTRA_EMU_ARTEMIS_PLATFORM",
             format!(
-                "native platform request failed (status {status}): {}",
+                "native platform request {operation} failed (status {status}): {}",
                 String::from_utf8_lossy(
                     &error.message[..(error.message_len as usize).min(error.message.len())]
                 )

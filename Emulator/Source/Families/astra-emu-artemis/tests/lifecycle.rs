@@ -3,9 +3,11 @@ use astra_emu_artemis::artemis_query;
 use parking_lot::Mutex;
 use std::{
     ptr,
+    sync::atomic::{AtomicBool, Ordering},
     time::{Duration, Instant},
 };
 static SERIAL: Mutex<()> = Mutex::new(());
+static RESTORE_CLOSING: AtomicBool = AtomicBool::new(false);
 unsafe extern "C" fn emit(_: *mut std::ffi::c_void, record: *const LogRecord) {
     let record = unsafe { &*record };
     eprintln!(
@@ -26,6 +28,19 @@ unsafe extern "C" fn unavailable(
     UNSUPPORTED
 }
 unsafe extern "C" fn invalidate(_: *mut std::ffi::c_void, _: u64, _: u64) {}
+unsafe extern "C" fn restore_invalidate(_: *mut std::ffi::c_void, _: u64, context: u64) {
+    if context != 1 {
+        RESTORE_CLOSING.store(true, Ordering::Release);
+        return;
+    }
+    // Hold the restore callback until close cancels both native workers.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !RESTORE_CLOSING.load(Ordering::Acquire) && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    // A slow Host invalidation must not turn normal cancellation into a queue error.
+    std::thread::sleep(Duration::from_millis(50));
+}
 fn api() -> &'static CoreApi {
     let mut raw = ptr::null();
     assert_eq!(unsafe { artemis_query(ABI_VERSION, &mut raw) }, OK);
@@ -43,7 +58,13 @@ fn api() -> &'static CoreApi {
     );
     api
 }
-fn open(api: &CoreApi, root: &std::path::Path, epoch: u64) -> Result<OpenResult, Error> {
+fn open<'a>(
+    api: &CoreApi,
+    root: &std::path::Path,
+    epoch: u64,
+    error: &'a mut Error,
+    invalidate: unsafe extern "C" fn(*mut std::ffi::c_void, u64, u64),
+) -> Result<OpenResult, &'a Error> {
     let path = root.to_str().unwrap();
     let request = OpenRequest {
         header: Header::of::<OpenRequest>(),
@@ -79,8 +100,7 @@ fn open(api: &CoreApi, root: &std::path::Path, epoch: u64) -> Result<OpenResult,
         module_owner: ptr::null_mut(),
     };
     let mut output = std::mem::MaybeUninit::<OpenResult>::uninit();
-    let mut error = Error::default();
-    let status = unsafe { api.open.unwrap()(&request, output.as_mut_ptr(), &mut error) };
+    let status = unsafe { api.open.unwrap()(&request, output.as_mut_ptr(), error) };
     let output = unsafe { output.assume_init() };
     if status == OK {
         Ok(output)
@@ -146,7 +166,8 @@ fn malformed_archive_releases_native_session_lease() {
     let root = tempfile::tempdir().unwrap();
     std::fs::write(root.path().join("data.pfs"), b"bad").unwrap();
     for epoch in 1..=2 {
-        let failure = open(api, root.path(), epoch).unwrap_err();
+        let mut error = Error::default();
+        let failure = open(api, root.path(), epoch, &mut error, invalidate).unwrap_err();
         assert_eq!(
             &failure.code[..failure.code_len as usize],
             b"ASTRA_EMU_ARTEMIS_PROJECT_INI"
@@ -171,7 +192,7 @@ fn native_gpu_device_pause_close_reopen_and_detached_lease() {
     )
     .unwrap();
     for epoch in 10..13 {
-        let open = open(api, root.path(), epoch).unwrap();
+        let open = open(api, root.path(), epoch, &mut Error::default(), invalidate).unwrap();
         assert_eq!(
             open.surface.logical,
             Extent {
@@ -190,9 +211,11 @@ fn native_gpu_device_pause_close_reopen_and_detached_lease() {
             OK
         );
         unsafe { api.cancel.unwrap()(open.session) };
+        let mut close_error = Error::default();
         assert_eq!(
-            unsafe { api.close.unwrap()(open.session, &mut Error::default()) },
-            OK
+            unsafe { api.close.unwrap()(open.session, &mut close_error) },
+            OK,
+            "{close_error:?}"
         );
         std::thread::spawn(move || {
             assert_eq!(baseline.pixels().len(), 64 * 48 * 4);
@@ -222,7 +245,15 @@ fn native_save_restore_invalidates_output_context() {
         ]),
     )
     .unwrap();
-    let open = open(api, root.path(), 20).unwrap();
+    RESTORE_CLOSING.store(false, Ordering::Release);
+    let open = open(
+        api,
+        root.path(),
+        20,
+        &mut Error::default(),
+        restore_invalidate,
+    )
+    .unwrap();
     let before = frame(api, open.session, 20);
     let event = InputEvent {
         kind: INPUT_KEY,
@@ -265,9 +296,11 @@ fn native_save_restore_invalidates_output_context() {
         );
         std::thread::sleep(Duration::from_millis(10));
     }
+    let mut close_error = Error::default();
     assert_eq!(
-        unsafe { api.close.unwrap()(open.session, &mut Error::default()) },
-        OK
+        unsafe { api.close.unwrap()(open.session, &mut close_error) },
+        OK,
+        "{close_error:?}"
     );
     assert_eq!(before.pixels().len(), 64 * 48 * 4);
 }

@@ -312,9 +312,13 @@ unsafe extern "C" fn state(session: Session, out: *mut SessionState, error: *mut
     boundary(error, || {
         let owner = unsafe { owner(session)? };
         let snapshot = owner.snapshot.lock();
-        let mut value = SessionState { state: snapshot.state, flags: 0, context_epoch: owner.context.load(Ordering::Acquire),
-        output_epoch: snapshot.identity.output_epoch,
-        error: Error::default(), };
+        let mut value = SessionState {
+            state: snapshot.state,
+            flags: 0,
+            context_epoch: owner.context.load(Ordering::Acquire),
+            output_epoch: snapshot.identity.output_epoch,
+            error: Error::default(),
+        };
         if let Some(error) = &snapshot.error {
             value.error.set(error.code, &error.message);
         }
@@ -420,6 +424,9 @@ static API: CoreApi = CoreApi {
     extension: Some(extension),
 };
 /// Static registration and the dynamic symbol return the identical protocol table.
+///
+/// # Safety
+/// A non-null `out` must point to writable storage for one `*const CoreApi`.
 pub unsafe extern "C" fn query(version: u32, out: *mut *const CoreApi) -> Status {
     if out.is_null() {
         return INVALID_ARGUMENT;
