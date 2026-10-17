@@ -50,6 +50,9 @@ pub struct OpenRequest {
     pub configuration_count: usize,
     pub window: WindowState,
     pub host: HostServices,
+    /// Opaque owner from the negotiated module-owner extension, or null when
+    /// the core has no cross-session owner extension.
+    pub module_owner: crate::ModuleOwner,
 }
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
@@ -95,14 +98,39 @@ pub const SESSION_PAUSED: u32 = 2;
 pub const SESSION_WAITING: u32 = 3;
 pub const SESSION_FAILED: u32 = 4;
 pub const SESSION_FINISHED: u32 = 5;
+/// Only a retained, retry-safe operation may set this flag in SESSION_FAILED.
+/// Panic and fatal native failures leave it clear; Host offers End only.
+pub const SESSION_CAN_RETRY: u32 = 1;
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct SessionState {
     pub state: u32,
-    pub reserved: u32,
+    pub flags: u32,
     pub context_epoch: u64,
     pub output_epoch: u64,
     pub error: Error,
+}
+impl SessionState {
+    pub fn validate(&self) -> Result<(), Status> {
+        if !matches!(
+            self.state,
+            SESSION_RUNNING | SESSION_PAUSED | SESSION_WAITING | SESSION_FAILED | SESSION_FINISHED
+        ) || self.flags & !SESSION_CAN_RETRY != 0
+            || (self.flags != 0 && self.state != SESSION_FAILED)
+            || self.context_epoch == 0
+            || self.output_epoch == 0
+            || self.error.code_len as usize > self.error.code.len()
+            || self.error.message_len as usize > self.error.message.len()
+            || (self.state == SESSION_FAILED && self.error.code_len == 0)
+        {
+            return Err(crate::INVALID_ARGUMENT);
+        }
+        std::str::from_utf8(&self.error.code[..self.error.code_len as usize])
+            .map_err(|_| crate::INVALID_ARGUMENT)?;
+        std::str::from_utf8(&self.error.message[..self.error.message_len as usize])
+            .map_err(|_| crate::INVALID_ARGUMENT)?;
+        Ok(())
+    }
 }
 
 /// Ordinary calls are serialized by the Host. The core schedules itself; no

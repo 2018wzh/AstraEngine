@@ -22,6 +22,10 @@ NativeVN 的原生宿主与 Headless 共用物理输入到 UI request/completion
 
 同进程、单活动游戏，Dynamic/Static 共用 C 兼容结构、明确长度、不透明句柄和稳定错误码。动态入口 `astra_emu_query` 与静态注册的 `Query` 返回相同 `CoreApi`；查询只协商版本，不启动线程或安装日志。函数表含 initialize、describe、probe、open、input、control、state、frame、cancel、close 和 extension，不含 advance。普通调用串行，cancel 可并发唤醒阻塞服务；close 无论成功失败都消费句柄，返回前结束全部 worker 和回调。失败 open 不交付会话且完成清理。此为本轮实现版本，尚未完成七核心产品验收，不宣称已发布稳定 ABI。
 
+C ABI v2 在 OpenRequest 中携带可选 module owner。`astra.module_owner` v1 扩展只为真实跨会话资源提供 create/destroy；Host 模块实例持有 owner，全部会话关闭后在所属线程销毁，动态库仍驻留。Musica 用它持有显式 provider/graphics Instance，删除全局 graphics 缓存；不需要该能力的核心明确返回 Unsupported，不创建空 owner。
+
+`SessionState.flags` 的 `SESSION_CAN_RETRY` 只用于保留了可安全重试操作的 Failed 状态。panic 和其他不可恢复错误不设置此位，Host 只提供结束；取消不得把已发布失败改成正常 Finished。接受重试时先退出可重试状态，防止重复点击排入多次操作；队列拒绝则恢复原失败状态。
+
 核心自持 VM、原生调度、资源、渲染、游戏 UI、输入语义、音视频和存档。Manager 管理会话而非游戏 Tick 策略；不要求公共 advance，不强制固定 16 ms 推进、统一 SceneCommand/Mixer/VFS、Host PCM 或 no_std Runtime。上游 host_step 等入口可在嵌入运行层内部复用，不能把执行逻辑搬进另一套 Family 包装。音频优先使用核心原生输出，SDK 后端仅在平台确有需要时按需链接。
 
 应用级平台壳拥有 OS 事件循环与窗口，DLL 不再创建第二套 GUI 应用循环。Manager 是最终 Present 的唯一正式路径，上游独立应用只作为正常入口和行为对照。窗口与模态使用有界 typed 请求，Host 在窗口线程执行并反馈实际结果；无窗口 Host 明确拒绝，不伪造用户回答。默认允许自由缩放窗口，原生窗口行为作为按游戏启用的兼容策略。

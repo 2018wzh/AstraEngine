@@ -11,7 +11,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#define AstraEmuABI_VERSION 1
+#define AstraEmuABI_VERSION 2
 
 #define AstraEmuMAX_CONFIG_FIELDS 128
 
@@ -66,6 +66,14 @@
 #define AstraEmuSESSION_FAILED 4
 
 #define AstraEmuSESSION_FINISHED 5
+
+/**
+ * Only a retained, retry-safe operation may set this flag in SESSION_FAILED.
+ * Panic and fatal native failures leave it clear; Host offers End only.
+ */
+#define AstraEmuSESSION_CAN_RETRY 1
+
+#define AstraEmuMODULE_OWNER_VERSION 1
 
 #define AstraEmuLOG_ERROR 1
 
@@ -451,6 +459,8 @@ typedef struct AstraEmuHostServices {
   struct AstraEmuCancellationService cancellation;
 } AstraEmuHostServices;
 
+typedef void *AstraEmuModuleOwner;
+
 typedef struct AstraEmuOpenRequest {
   struct AstraEmuHeader header;
   struct AstraEmuBytes game_path;
@@ -459,6 +469,11 @@ typedef struct AstraEmuOpenRequest {
   size_t configuration_count;
   struct AstraEmuWindowState window;
   struct AstraEmuHostServices host;
+  /**
+   * Opaque owner from the negotiated module-owner extension, or null when
+   * the core has no cross-session owner extension.
+   */
+  AstraEmuModuleOwner module_owner;
 } AstraEmuOpenRequest;
 
 typedef void *AstraEmuSession;
@@ -519,7 +534,7 @@ typedef struct AstraEmuInputEvent {
 
 typedef struct AstraEmuSessionState {
   uint32_t state;
-  uint32_t reserved;
+  uint32_t flags;
   uint64_t context_epoch;
   uint64_t output_epoch;
   struct AstraEmuError error;
@@ -593,6 +608,23 @@ typedef struct AstraEmuCoreApi {
  * module table. It performs no IO, starts no workers and installs no logger.
  */
 typedef AstraEmuStatus (*AstraEmuQuery)(uint32_t, const struct AstraEmuCoreApi**);
+
+/**
+ * Optional ownership extension for real cross-session module resources, e.g.
+ * Musica's explicit graphics Instance owner. A Host core instance creates one
+ * owner after diagnostic initialization and retains it through all its sessions.
+ * Other cores report UNSUPPORTED rather than constructing a dummy owner.
+ *
+ * create does not start a game. On error it returns null after cleanup; Host
+ * also destroys a non-null failed result defensively. destroy consumes the owner
+ * on every outcome, only after sessions close and callbacks finish. Both calls
+ * run on the module owner thread. Libraries remain resident after destruction.
+ */
+typedef struct AstraEmuModuleOwnerApi {
+  struct AstraEmuHeader header;
+  AstraEmuStatus (*create)(AstraEmuModuleOwner*, struct AstraEmuError*);
+  AstraEmuStatus (*destroy)(AstraEmuModuleOwner, struct AstraEmuError*);
+} AstraEmuModuleOwnerApi;
 
 #define AstraEmuOK 0
 

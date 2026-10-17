@@ -215,3 +215,28 @@ fn spans_reject_null_nonempty_and_invalid_utf8_without_dereferencing_null() {
         assert_eq!(Bytes::new(b"a\0b").text(10), Err(INVALID_ARGUMENT));
     }
 }
+
+#[test]
+fn retry_requires_a_retained_failure_and_bounded_diagnostic() {
+    let mut state = SessionState {
+        state: SESSION_FAILED,
+        flags: SESSION_CAN_RETRY,
+        context_epoch: 1,
+        output_epoch: 1,
+        error: Error::default(),
+    };
+    assert_eq!(state.validate(), Err(INVALID_ARGUMENT));
+    state
+        .error
+        .set("CORE_HOOK_FAILED", "retry-safe native operation");
+    state.validate().unwrap();
+    state.state = SESSION_RUNNING;
+    assert_eq!(state.validate(), Err(INVALID_ARGUMENT));
+    state.state = SESSION_FAILED;
+    state.flags = 2;
+    assert_eq!(state.validate(), Err(INVALID_ARGUMENT));
+    state.flags = 0;
+    state.validate().unwrap();
+    state.error.code_len = 129;
+    assert_eq!(state.validate(), Err(INVALID_ARGUMENT));
+}

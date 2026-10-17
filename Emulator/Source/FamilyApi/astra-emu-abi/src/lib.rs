@@ -12,17 +12,19 @@ mod core;
 #[cfg(feature = "diagnostic-bridge")]
 pub mod diagnostic_bridge;
 mod lease;
+mod module_owner;
 mod services;
 mod surface;
 pub use config::*;
 pub use core::*;
 pub use lease::*;
+pub use module_owner::*;
 pub use services::*;
 pub use surface::*;
 
 use std::ffi::c_void;
 
-pub const ABI_VERSION: u32 = 1;
+pub const ABI_VERSION: u32 = 2;
 pub const QUERY_SYMBOL: &[u8] = b"astra_emu_query\0";
 pub type Status = i32;
 pub const OK: Status = 0;
