@@ -1,2 +1,5 @@
 // The host cancellation callback must interrupt this original VM loop.
+if(System.exePath.indexOf("cancel-loop/") < 0) throw "previous session game path leaked";
+Debug.message("KRKR_CANCEL_APP_PATH=" + System.exePath);
+Debug.message("KRKR_CANCEL_LOOP_ENTERED");
 while(true) {}

@@ -11,13 +11,19 @@
 #include <string>
 #include <chrono>
 #include <thread>
+#include <string_view>
 
 namespace {
 std::atomic<uint64_t> cancelled{0};
+std::atomic<bool> loop_entered{false};
 uint32_t is_cancelled(void *, uint64_t epoch) { return cancelled.load() == epoch; }
 void emit(void *, const AstraEmuLogRecord *record) {
     std::fprintf(stderr, "%.*s: %.*s\n", static_cast<int>(record->target.len), record->target.data,
         static_cast<int>(record->message.len), record->message.data);
+    if(record->message.len && std::string_view(
+        reinterpret_cast<const char *>(record->message.data), record->message.len)
+        .find("KRKR_CANCEL_LOOP_ENTERED") != std::string_view::npos)
+        loop_entered.store(true);
 }
 AstraEmuStatus window(void *, const AstraEmuWindowRequest *r, AstraEmuWindowResult *, AstraEmuError *) {
     // Never dismiss a commercial game's modal automatically. Interactive game
@@ -176,12 +182,16 @@ int wmain(int argc, wchar_t **argv) {
             request.host.cancellation = {nullptr,is_cancelled};
             request.host.window = {nullptr,window,invalidate};
             std::thread cancel_open([] {
-                std::this_thread::sleep_for(std::chrono::milliseconds(250));
+                const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+                while(!loop_entered.load() && std::chrono::steady_clock::now() < deadline)
+                    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+                if(loop_entered.load()) std::this_thread::sleep_for(std::chrono::milliseconds(50));
                 cancelled.store(3);
             });
             AstraEmuOpenResult aborted{};
             const auto status = api->open(&request, &aborted, &e);
             cancel_open.join();
+            if(!loop_entered.load()) throw std::runtime_error("startup cancellation did not reach original TJS loop");
             if(status != AstraEmuCANCELLED || aborted.session)
                 throw std::runtime_error("startup VM cancellation did not consume failed open");
             request.session_epoch = 4;

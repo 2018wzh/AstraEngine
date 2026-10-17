@@ -12,7 +12,7 @@ or second application event loop. Audio uses the original OpenAL playback device
 - Full retained repository: `fenghengzhi/kirikiroid2-web`, base
   `7105b50822097d11b7b1f5894bf541509fd51350`.
 - Owned fork: `https://github.com/2018wzh/kirikiroid2-web`, pinned at
-  `d3163b1a08a622f95f916c5bc896f71532578790`.
+  `32130382185b60fe047ae9d98f8f3e4795c4db1e`.
   The retained Windows patch is separate commit
   `cae1bd8b98a817505f5a973ac00e6b925fbe35e3`; lifecycle fixes follow it.
 - `layerExImage`: `23a9214f9b6e9bc3267b964707efa269c041b919`, compiled unchanged.
@@ -128,6 +128,8 @@ The harness loads the DLL exactly once. It verified:
 - Same-module close/reopen, real `System.exit(0)` reaching `Finished`.
 - Host cancellation of an infinite startup TJS loop before open returns:
   `CANCELLED` with null session, followed by another successful native open.
+- Cross-game `System.exePath` isolation: the cancellation fixture asserts its
+  own `cancel-loop/` application root before entering the infinite VM loop.
 
 Three successful native opens and one cancelled open completed in that one
 process/module load. Evidence is in the owned `.work/smoke-acceptance.log` and
