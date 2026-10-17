@@ -1,27 +1,37 @@
-# Siglus 上游差异
+# Siglus 原生嵌入差异
 
-## 固定来源
+## 精确来源
 
-- 完整 fork：[xmoezzz/siglus_rs](https://github.com/xmoezzz/siglus_rs)，主仓 submodule：`Emulator/ThirdParty/siglus_rs`。
-- 上游 HEAD（2026-10-17 核对，1.0.0）：`5f358ef1360b0439e92aed2b749e8f25d8721954`。
-- 唯一适配提交：[`29fb9582751fc8ddfc23b374d428d6eba30bcb40`](https://github.com/2018wzh/siglus_rs/commit/29fb9582751fc8ddfc23b374d428d6eba30bcb40)，直接父提交为上述 HEAD；统一适配分支 `astra` 已推送 GitHub，远端 SHA 与主仓 gitlink 一致。
-- 来源历史、原生平台与许可证保留；不改写旧分支。
+- 上游 `xmoezzz/siglus_rs`：`5f358ef1360b0439e92aed2b749e8f25d8721954`（1.0.0）。
+- 本次从旧适配 `29fb9582751fc8ddfc23b374d428d6eba30bcb40` 初始化独占 submodule，保留该已发布历史。
+- 通用原生基线：`63ec1f79ec7811f49ad1611668740a09e0d17cc7`，分支 `native-master-20261018`，直接建立于上述上游 revision。
+- 唯一嵌入提交：`49457f433c24c4450c30b215e9518aff68499e29`，分支 `astra-embedded-20261018`，直接父提交为通用原生基线。主仓 gitlink 与 package metadata 使用此 revision。
+- Kira 保留完整嵌套 submodule `vendor/kira`：0.9.6 上游 `dfb08d08d065930e9b257203bf11c6d34742f542`，`2018wzh/kira` 修复 `a299b42690094a71885f6ed97dc504c4038da9a7`。
+- Kira 固定 CPAL 0.15.3 的 WASAPI 关闭修复 `65ac8a6ac1a635cc26bfc5af331295b052044908`（`2018wzh/cpal`）；不升级 Kira 主版本。
+- 独立嵌入 manifest 固定共享 ABI `2018wzh/AstraEngine@94cd66ee9051d3643f51f4a61fed0466bf320280`。许可证及完整来源保留，见 `THIRD_PARTY_NOTICES.md`。
 
-## 核心差异
+## 通用原生修复
 
-- `astra-hosted`：Family 关闭默认 feature，接入原 Kira mixer 的 stereo F32 输出；原桌面默认 CPAL 与解码 features 保留，配置限于消费 crate。
-- Renderer 的 surface 可选，离屏与窗口共用初始化和 `render_frame_to_view`。保留原 sprite/wipe/shader/Emote/几何及 D3D9 byte-space 合成语义；离屏选择硬件 adapter。
-- 原生离屏成功绘制后递增 generation，跨 target resize 连续。Family 无新提交时不回读，不用 VM tick 或像素 hash 代替。
-- 单 staging 回读采用 `poll_frame_rgba(&mut Vec<u8>)` / `cancel_frame_readback`：首 poll 提交 copy/map，后续仅 `Maintain::Poll`；返回捕获时的尺寸与 generation。原子代次隔离取消后的晚回调，resize/Drop 取消旧 map。
-- 每 mixer 独立取消，先解除阻塞写再 join；替换 mixer 不取消 session sink。共享注册表使用 parking_lot，诊断复用原 log。
-- 成功 load、返回菜单和 restart 增加一次性 reset 通知；原 VM/过程流与实时时钟保留，不启用 replay-only virtual-clock。
-- WMV decoder 包版本 0.2.1 区分同名路径包，库产物名 `siglus_wmv_decoder` 避免与 RFVP 的 rlib/cdylib/staticlib 相互覆盖；VM 依赖别名和原生 CLI 目标保留，三个 CLI 的库引用随目标名迁移。解码算法与 features 不变。此前整组 Release 的 LNK2019 已复现，改名后相同四包命令构建通过且不再出现产物 collision。
-- 三个保留的原生 decoder CLI 已启用 `desktop-bins` 实际构建；原 `wmv-decoder` 入口解码单 ASF packet 的自制 WMV2 样本，输出五张 16×16 PNG、1920 字节原生 YUV，退出 0。此为改名后的真实调用验证，不把它当作商业电影流程或 WMV3/WVC1 验收。
+- `platform_time` 的可选 `pausable-clock` 排除暂停时长，使用真实单调时钟，不启用 replay-only virtual-clock。`SiglusHost::set_suspended` 同步暂停原 Kira mixer 并清理输入状态。
+- Kira 原 CPAL stream manager 持有 JoinHandle，启动握手返回设备错误；关闭先停设备、再 join。暂停作用于整个原 mixer，声音游标、track fade 和时钟不补跑；保留原设备切换路径。
+- Kira `DecoderOwner` 与 `StreamingSoundData::with_decoder_owner` 保留原解码、混音及 playback-handle drop 语义。普通 owner 线程取消并 join 全部 decoder，某个 worker panic 不跳过其他 join；实时 callback 不执行 join。
+- `AudioHub` 先关 device/mixer，再回收 decoder。MovieManager 原六类 worker 保留解码实现，接收端先断开再 join，避免有界发送阻塞关闭。被替换的语音 decoder 断开输出后保留 owner，完成时回收，关闭时全部 join，不把旧结果送入新语音。
+- 原 WMV crate 版本 0.2.1、库名 `siglus_wmv_decoder` 及三个 CLI 的引用修复归入通用基线，避免与其他核心的同名产物冲突。
 
-## Family 与 Host 边界
+## 唯一嵌入适配
 
-Family 负责 ABI、输入、PCM 队列和 CPU lease，调用原 `new_with_renderer_sync`；三个 `Arc<Vec<u8>>` 槽在提交前预留，外部持满三个 lease 时返回 Pending，不复制或扩为第四槽。map 使用同一五秒期限，resize/poll 不续期；reset/close 取消预留。boot 复用相同 poll 路径，每次未完成 sleep 1 ms。原 global/config/read 持久化在启动/关闭边界调用 `persist_global_if_changed`，不逐帧 hash 或复制 codec。Manager owner 一次性保留 8 MiB 栈，创建、推进、取帧和关闭保持同线程。
+- `astra/embedded` 持有 C ABI、描述/探测、输入映射、原生 worker、typed 平台桥及不可变 CPU lease。主仓 crate 仅保留注册、构建依赖和源桥，删除 ProviderModule、Family advance、Host PCM 链。
+- Dynamic `astra_emu_query` 与 Static `query` 返回同一 CoreApi。动态构建显式启用 `dynamic` 安装共享日志桥，静态构建复用宿主 subscriber；初始化先于 describe/probe/open。
+- worker 调用原 `SiglusHost::new_with_renderer_sync` / `step`，保持原 proc-stack、renderer、Kira、电影、输入和 savedata。Host 不传 elapsed，也不推进 VM。
+- 保留原离屏完整帧、sprite/wipe/shader/Emote/文字/系统 UI 及异步单 staging 回读。三个 Arc CPU 槽施加背压，不复制租约或扩为第四槽；五秒 map deadline 不因轮询或 resize 续期。
+- CPU lease 独立于 session/device，关闭后仍有效，允许任意线程释放。身份包含 session/output/generation；原生成功 load/restart 更新 context，取消旧 map 和平台请求。
+- L/R 使用原 Gameexe `SCREEN_SIZE`；保留原空配置 schema，typed 校验拒绝未知、重复和不支持的配置。窗口 O 改变不暗改 R。CPU 是唯一声明的输出路径，不声明 GPU sharing 或文字 Hook。
+- 同进程单活动 session；pause/focus/suspend 走显式事件，cancel 独立唤醒平台等待，open 阶段检查宿主取消。close 消费句柄，停产并回收 worker；句柄查询不解引用已关闭 session。无窗口 Host 的原生 modal 明确返回 UNSUPPORTED。
 
-## 结论与验证入口
+## 验证入口与状态
 
-RTX 4070 Laptop GPU / Vulkan 硬件回归验证非对齐行与 resize 像素、捕获 generation、三槽背压/指针复用/旧 lease 不变、跨 resize 固定期限、超时与取消恢复，共三项；原生 map 主动中止/取消后再提交一项通过。Family lib 六项通过，实际 Rewrite+ 输入/画面/PCM/关闭重开一项通过。样本执行原版 `Gameexe.dat` / `Scene.pck`，副本附带的汉化 V2 `.chs` 文件未启用。Release Manager 实跑 3000 帧，观察到 1280×720 动画标题，退出 0，NullAudio 收到非零 PCM。Hosted 整改前后成本、真实设备音频、Sandbox 窗口及长期资源验收见[性能审计](../../../../Docs/status/performance-upstream-audit-2026-10-12.md)及[实施计划](../../../../Docs/status/implementation-plan.md)。原版性能测试按用户决定取消。许可及自备密钥边界见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+本次未运行 build、lint、formatter、test 或真实运行；只解析并更新了依赖锁文件。旧 Family 的历史验证不代表新 C ABI 验收。
+
+主线程统一运行 `cargo test -p astra-emu-siglus --test native_contract`、受影响库检查，以及显式硬件回读测试。动态库构建使用 `cargo build -p astra-emu-siglus --release --features dynamic`，实际加载、设备音频与窗口交互由新 Manager 验证。
+
+真实 Rewrite+ 用例保留在 `tests/headless_game.rs`、`tests/headless_route.rs`、`tests/headless_playthrough.rs`。设置 `ASTRA_SIGLUS_TEST_GAME` 指向授权可写副本，并明确 `ASTRA_SIGLUS_TEST_WRITABLE_COPY=1`；不得使用原商业存档目录。代表流程为动画标题 → Start → 开场/影片 → 正文 → 原生保存/读取 → pause/focus/resume → close/reopen。保存测试检查真实数字槽变化及成功读档 context 换代；路线耗尽预算不算完成。自动化帧测试不替代可听音频和完整 UI 的人工观察。
