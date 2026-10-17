@@ -18,9 +18,12 @@ export component SettingsCategoryItem inherits Rectangle {
         : (cat-area.pressed
             ? Theme.surface-container-highest
             : (cat-area.has-hover ? Theme.surface-container-high : transparent));
-    border-width: active ? 1px : 0px;
+    border-width: active || category-focus.has-focus ? 1px : 0px;
     border-color: Theme.primary;
     animate background { duration: 120ms; }
+    accessible-role: button;
+    accessible-label: label;
+    accessible-action-default => { root.clicked(); }
 
     HorizontalLayout {
         padding-left: 14px;
@@ -60,8 +63,18 @@ export component SettingsCategoryItem inherits Rectangle {
         }
     }
 
-    cat-area := TouchArea {
-        clicked => { root.clicked(); }
+    category-focus := FocusScope {
+        key-pressed(event) => {
+            if event.text == Key.Return || event.text == " " {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+        cat-area := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { category-focus.focus(); root.clicked(); }
+        }
     }
 }
 

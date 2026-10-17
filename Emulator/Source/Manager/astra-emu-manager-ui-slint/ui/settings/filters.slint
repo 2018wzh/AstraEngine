@@ -1,10 +1,11 @@
 // Filter settings sub-page - extracted from legacy filters overlay.
 
-import { Button, ScrollView } from "std-widgets.slint";
+import { ScrollView } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
 import { Icon, Icons } from "../components/icons.slint";
 import { SettingsSectionHeader, SettingsDivider } from "../components/settings-card.slint";
 import { ConfigField, GenericConfigForm } from "../components/generic-config.slint";
+import { M3Button } from "../components/m3-widgets.slint";
 
 component FilterPresetRow inherits Rectangle {
     in property <string> title;
@@ -83,14 +84,15 @@ export component FilterSettingsPage inherits Rectangle {
             padding: 24px;
             spacing: 16px;
 
-            SettingsSectionHeader { title: "后处理着色器滤镜 (Final-frame Shader)"; }
-            if root.filter-preset == "external" : Text {
-                text: "当前使用外部 HLSL 效果";
+            SettingsSectionHeader { title: "画面滤镜"; }
+            Text {
+                text: "当前配置 · " + (root.filter-preset == "none" ? "原画" : root.filter-preset == "scale" ? "缩放" : root.filter-preset == "sharpen" ? "锐化" : root.filter-preset == "anime4k" ? "Anime4K" : root.filter-preset == "external" ? "外部 HLSL" : root.filter-preset);
                 color: Theme.primary;
+                wrap: word-wrap;
             }
 
             Text {
-                text: "由宿主硬件渲染管线驱动。直接在游戏画布输出前执行后处理着色，零额外帧缓冲回读延迟。";
+                text: "滤镜应用于包含游戏文字与界面的完整画面，不改变核心渲染尺寸。选择预设，或加载 Magpie format 4 HLSL 后调整参数。";
                 color: Theme.on-surface-variant;
                 wrap: word-wrap;
                 font-size: Theme.font-body-sm;
@@ -128,13 +130,13 @@ export component FilterSettingsPage inherits Rectangle {
                 selected(id) => { root.set-filter-preset(id); }
             }
 
-            Button { text: "加载外部 HLSL 效果（Magpie format 4）"; clicked => { root.load-filter-source(); } }
+            M3Button { text: "加载外部 HLSL"; icon: Icons.folder-open; variant: "outlined"; clicked => { root.load-filter-source(); } }
             SettingsDivider {}
 
             GenericConfigForm {
                 fields: root.filter-config-fields;
-                form-title: "Filter 通用配置";
-                form-description: "修改参数后保存；加载失败时保持当前滤镜。";
+                form-title: "滤镜参数";
+                form-description: "修改后保存；加载或校验失败会显示具体错误。";
                 field-changed(key, value) => { root.filter-config-changed(key, value); }
                 save => { root.save-filter-config(); }
                 reset => { root.reset-filter-config(); }

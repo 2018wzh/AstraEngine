@@ -2,7 +2,7 @@
 // Assembles theme, sidebar navigation, pages and the game view.
 // Exports ManagerWindow with the full public API consumed by the Rust adapter.
 
-import { AboutSlint, Button, CheckBox, ComboBox, LineEdit, ScrollView, SpinBox, TextEdit } from "std-widgets.slint";
+import { AboutSlint, Button, CheckBox, ComboBox, LineEdit, Palette, ScrollView, SpinBox, TextEdit } from "std-widgets.slint";
 import { Theme } from "./theme.slint";
 import { Sidebar, BottomNav } from "./components/sidebar.slint";
 import { GameCard } from "./components/cover-card.slint";
@@ -37,17 +37,12 @@ export component ManagerWindow inherits Window {
     preferred-width: 1280px;
     preferred-height: 800px;
 
-    // Safe area / usable region — Rinne three-breakpoint (narrow/medium/wide)
+    // Keep navigation and game geometry inside the platform safe area.
     property <length> usable-x: root.safe-area-insets.left;
     property <length> usable-y: root.safe-area-insets.top;
     property <length> usable-width: root.width - root.safe-area-insets.left - root.safe-area-insets.right;
     property <length> usable-height: root.height - root.safe-area-insets.top - root.safe-area-insets.bottom;
-    // narrow <840 → mobile 2-col, medium 840-1280 → 3-col, wide >=1280 → 4-6 col
-    property <bool> desktop-mode: root.usable-width >= 840px;
-    property <bool> wide-mode: root.usable-width >= 1280px;
-    property <bool> narrow-mode: root.usable-width < 840px;
-    // Adaptive columns for Rinne-style grid
-    property <int> adaptive-columns: root.wide-mode ? 5 : root.desktop-mode ? 3 : 2;
+    property <bool> desktop-mode: root.usable-width >= 1000px;
 
     // ===== Navigation =====
     in-out property <string> current-page: "library";
@@ -59,6 +54,10 @@ export component ManagerWindow inherits Window {
     in-out property <string> density <=> Theme.density;
     in-out property <int> grid-columns: 3;
     in-out property <string> view-mode: "grid";
+    // Native widgets and custom M3 controls share the same resolved appearance.
+    init => { Palette.color-scheme = Theme.effective-dark ? ColorScheme.dark : ColorScheme.light; }
+    changed theme-mode => { Palette.color-scheme = Theme.effective-dark ? ColorScheme.dark : ColorScheme.light; }
+    changed theme-dark => { Palette.color-scheme = Theme.effective-dark ? ColorScheme.dark : ColorScheme.light; }
 
     // ===== Library =====
     in property <[GameCard]> games;
@@ -173,12 +172,7 @@ export component ManagerWindow inherits Window {
     in property <string> build-identity;
 
     // ===== Settings navigation =====
-    in-out property <string> settings-category: "translation";
-
-    // ===== Legacy page flags (kept for adapter compatibility) =====
-    in-out property <bool> about-active: false;
-    in-out property <bool> settings-active: false;
-    in-out property <bool> metadata-active: false;
+    in-out property <string> settings-category: "appearance";
 
     // ===== Callbacks =====
     callback launch(string);
@@ -254,8 +248,9 @@ export component ManagerWindow inherits Window {
         pointer-content-width <=> root.game-content-window-width;
         pointer-content-height <=> root.game-content-window-height;
         cursor-visible: root.game-cursor-visible;
+        input-blocked: root.modal-active || root.fatal-error-active;
         game-input(control, pressed, value) => {
-            if !root.modal-active { root.game-input(control, pressed, value); }
+            if !root.modal-active && !root.fatal-error-active { root.game-input(control, pressed, value); }
         }
         leave-game => { root.leave-game(); }
 
@@ -266,6 +261,11 @@ export component ManagerWindow inherits Window {
         diagnostics-summary: root.diagnostics-summary;
         global-diagnostic: root.global-diagnostic;
         set-filter-preset(preset) => { root.set-filter-preset(preset); }
+        filter-config-fields: root.filter-config-fields;
+        filter-config-changed(key, value) => { root.filter-config-changed(key, value); }
+        load-filter-source => { root.load-filter-source(); }
+        save-filter-config => { root.save-filter-config(); }
+        reset-filter-config => { root.reset-filter-config(); }
 
     }
 
@@ -280,7 +280,7 @@ export component ManagerWindow inherits Window {
         // Desktop sidebar
         if root.desktop-mode : Sidebar {
             current-page: root.current-page;
-            dark-mode: root.theme-dark;
+            dark-mode: Theme.effective-dark;
             navigate(page) => { root.navigate(page); }
             toggle-theme => { root.toggle-theme(); }
         }
@@ -328,7 +328,7 @@ export component ManagerWindow inherits Window {
                     bangumi-rating <=> root.bangumi-rating;
                     bangumi-note <=> root.bangumi-note;
                     bangumi-sync-summary: root.bangumi-sync-summary;
-                    grid-columns: root.adaptive-columns;
+                    grid-columns: root.grid-columns;
                     desktop-mode: root.desktop-mode;
                     view-mode <=> root.view-mode;
                     density: root.density;
@@ -398,7 +398,7 @@ export component ManagerWindow inherits Window {
                     set-filter-preset(preset) => { root.set-filter-preset(preset); }
                     filter-config-changed(key, value) => { root.filter-config-changed(key, value); }
                     load-filter-source => { root.load-filter-source(); }
-                save-filter-config => { root.save-filter-config(); }
+                    save-filter-config => { root.save-filter-config(); }
                     reset-filter-config => { root.reset-filter-config(); }
 
                     // Compatibility
@@ -421,7 +421,7 @@ export component ManagerWindow inherits Window {
                     clear-per-game-input-mapping => { root.clear-per-game-input-mapping(); }
 
                     // Appearance
-                    dark-mode: root.theme-dark;
+                    dark-mode: Theme.effective-dark;
                     theme-mode <=> root.theme-mode;
                     accent <=> root.accent;
                     grid-columns <=> root.grid-columns;
@@ -479,16 +479,21 @@ export component ManagerWindow inherits Window {
         border-color: Theme.error;
         z: 100;
 
-        diagnostic-text := Text {
-            text: root.global-diagnostic;
-            color: Theme.on-error-container;
-            font-size: Theme.font-body-sm;
-            wrap: word-wrap;
-            vertical-alignment: center;
+        TouchArea {}
+        ScrollView {
             x: 16px;
             y: 12px;
             width: parent.width - 32px;
             height: parent.height - 24px;
+            VerticalLayout {
+                alignment: start;
+                diagnostic-text := Text {
+                    text: root.global-diagnostic;
+                    color: Theme.on-error-container;
+                    font-size: Theme.font-body-sm;
+                    wrap: word-wrap;
+                }
+            }
         }
     }
 

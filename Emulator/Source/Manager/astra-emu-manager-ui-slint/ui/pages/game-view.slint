@@ -1,10 +1,11 @@
 // Game view page - unobstructed stage below the host toolbar.
 
-import { Button } from "std-widgets.slint";
+import { ScrollView } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
-import { CheckButton, Icon, Icons } from "../components/icons.slint";
-import { FloatingPanel } from "../components/floating-panel.slint";
-import { M3Button, M3IconButton } from "../components/m3-widgets.slint";
+import { CheckButton, Icons } from "../components/icons.slint";
+import { M3Button } from "../components/m3-widgets.slint";
+import { ConfigField } from "../components/generic-config.slint";
+import { FilterSettingsPage } from "../settings/filters.slint";
 
 export component GameViewPage inherits Rectangle {
     // Stage
@@ -19,6 +20,7 @@ export component GameViewPage inherits Rectangle {
     in-out property <float> stage-content-height: 768;
     callback game-input(string, bool, float);
     callback leave-game();
+    in property <bool> input-blocked: false;
 
     // Overlay panel visibility
     in-out property <bool> translation-overlay-active: false;
@@ -60,6 +62,11 @@ export component GameViewPage inherits Rectangle {
     in-out property <bool> filters-collapsed: false;
     in-out property <string> filter-preset: "none";
     callback set-filter-preset(string);
+    in property <[ConfigField]> filter-config-fields;
+    callback filter-config-changed(string, string);
+    callback load-filter-source();
+    callback save-filter-config();
+    callback reset-filter-config();
 
     background: black;
     init => { game-focus.focus(); }
@@ -72,23 +79,23 @@ export component GameViewPage inherits Rectangle {
         width: root.stage-width;
         height: root.stage-height;
         image-fit: fill;
-        accessible-label: "Legacy game stage";
+        accessible-label: "游戏画面";
     }
 
     // Game input focus scope
     game-focus := FocusScope {
 
         TouchArea {
-            mouse-cursor: !root.overlay-active && !root.cursor-visible && self.mouse-x >= root.content-stage-x && self.mouse-x < root.content-stage-x + root.content-stage-width && self.mouse-y >= root.content-stage-y && self.mouse-y < root.content-stage-y + root.content-stage-height ? none : default;
+            mouse-cursor: !root.overlay-active && !root.input-blocked && !root.cursor-visible && self.mouse-x >= root.content-stage-x && self.mouse-x < root.content-stage-x + root.content-stage-width && self.mouse-y >= root.content-stage-y && self.mouse-y < root.content-stage-y + root.content-stage-height ? none : default;
             moved => {
-                if root.overlay-active { return; }
+                if root.overlay-active || root.input-blocked { return; }
                 if root.content-stage-width > 0px && root.content-stage-height > 0px && self.mouse-x >= root.content-stage-x && self.mouse-x < root.content-stage-x + root.content-stage-width && self.mouse-y >= root.content-stage-y && self.mouse-y < root.content-stage-y + root.content-stage-height {
                     root.game-input("pointer.x", true, (self.mouse-x - root.content-stage-x) / root.content-stage-width * root.stage-native-width);
                     root.game-input("pointer.y", true, (self.mouse-y - root.content-stage-y) / root.content-stage-height * root.stage-native-height);
                 }
             }
             pointer-event(event) => {
-                if root.overlay-active { return; }
+                if root.overlay-active || root.input-blocked { return; }
                 if event.kind == PointerEventKind.cancel {
                     root.game-input("pointer.primary", false, 0);
                     root.game-input("pointer.secondary", false, 0);
@@ -104,6 +111,7 @@ export component GameViewPage inherits Rectangle {
                     }
                     return;
                 }
+                if event.kind == PointerEventKind.down { game-focus.focus(); }
                 root.game-input("pointer.x", true, (self.mouse-x - root.content-stage-x) / root.content-stage-width * root.stage-native-width);
                 root.game-input("pointer.y", true, (self.mouse-y - root.content-stage-y) / root.content-stage-height * root.stage-native-height);
                 if event.button == PointerEventButton.left { root.game-input("pointer.primary", event.kind == PointerEventKind.down, 1); }
@@ -111,6 +119,7 @@ export component GameViewPage inherits Rectangle {
                 if event.button == PointerEventButton.middle { root.game-input("pointer.middle", event.kind == PointerEventKind.down, 1); }
             }
             scroll-event(event) => {
+                if root.overlay-active || root.input-blocked { return reject; }
                 if self.mouse-x < root.content-stage-x || self.mouse-x >= root.content-stage-x + root.content-stage-width || self.mouse-y < root.content-stage-y || self.mouse-y >= root.content-stage-y + root.content-stage-height {
                     return reject;
                 }
@@ -127,14 +136,15 @@ export component GameViewPage inherits Rectangle {
         width: parent.width;
         height: root.toolbar-height;
         z: 50;
-
+        background: Theme.surface-container-low;
+        TouchArea {}
         Rectangle {
             x: 16px;
             y: 10px;
             width: parent.width - 32px;
             height: 46px;
-            background: Theme.surface-overlay;
-            border-radius: 23px;
+            background: Theme.surface-container;
+            border-radius: Theme.shape-lg;
             border-width: 1px;
             border-color: Theme.outline-variant;
 
@@ -145,7 +155,7 @@ export component GameViewPage inherits Rectangle {
                 alignment: center;
 
                 M3Button {
-                    text: "返回管理器";
+                    text: root.width < 480px ? "返回" : "返回管理器";
                     icon: Icons.arrow-left;
                     variant: "tonal";
                     clicked => { root.leave-game(); }
@@ -154,7 +164,7 @@ export component GameViewPage inherits Rectangle {
                 Rectangle { horizontal-stretch: 1; }
 
                 CheckButton {
-                    label: "运行时诊断";
+                    label: "诊断";
                     checked: root.diagnostics-overlay-active;
                     clicked => {
                         root.translation-overlay-active = false;
@@ -163,7 +173,7 @@ export component GameViewPage inherits Rectangle {
                     }
                 }
                 CheckButton {
-                    label: "视觉滤镜";
+                    label: "滤镜";
                     checked: root.filters-overlay-active;
                     clicked => {
                         root.translation-overlay-active = false;
@@ -175,126 +185,77 @@ export component GameViewPage inherits Rectangle {
         }
     }
 
-    // Unified enhance bottom sheet (M3 Bottom Sheet with drag handle)
+    // Modal host sheet: the game stays visible, but receives no pointer input.
     if root.overlay-active : Rectangle {
-        x: (parent.width - min(parent.width, 680px)) / 2;
-        y: root.height - 360px;
-        width: min(parent.width, 680px);
-        height: 360px;
-        background: Theme.surface-container-high;
-        border-radius: Theme.shape-xl;
-        border-width: 1px;
-        border-color: Theme.outline-variant;
-        clip: true;
+        y: root.toolbar-height;
+        height: parent.height - self.y;
+        background: #0006;
         z: 60;
-        animate y { duration: 180ms; easing: ease-out; }
-
-        VerticalLayout {
-            spacing: 0px;
-
-            // Drag handle bar
-            Rectangle {
-                height: 20px;
-                Rectangle {
-                    width: 36px;
-                    height: 4px;
-                    border-radius: 2px;
-                    background: Theme.outline;
-                    x: (parent.width - self.width) / 2;
-                    y: 8px;
-                }
+        TouchArea {
+            clicked => {
+                root.translation-overlay-active = false;
+                root.diagnostics-overlay-active = false;
+                root.filters-overlay-active = false;
             }
+        }
 
-            // M3 Segmented tab bar
-            HorizontalLayout {
-                height: 40px;
-                padding-left: 16px;
-                padding-right: 16px;
-                spacing: 4px;
-
-                    Rectangle {
-                        horizontal-stretch: 1;
-                        border-radius: 8px;
-                        background: root.enhance-tab == "diagnostics" ? Theme.primary-container : Theme.surface-container;
-                        Text {
-                            text: "诊断";
-                            color: root.enhance-tab == "diagnostics" ? Theme.on-primary-container : Theme.on-surface-variant;
-                            font-size: Theme.font-label-lg;
-                            font-weight: root.enhance-tab == "diagnostics" ? 700 : 400;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-                        TouchArea { clicked => { root.enhance-tab = "diagnostics"; root.diagnostics-overlay-active = true; root.filters-overlay-active = false; } }
-                    }
-
-                    Rectangle {
-                        horizontal-stretch: 1;
-                        border-radius: 8px;
-                        background: root.enhance-tab == "filters" ? Theme.primary-container : Theme.surface-container;
-                        Text {
-                            text: "滤镜";
-                            color: root.enhance-tab == "filters" ? Theme.on-primary-container : Theme.on-surface-variant;
-                            font-size: Theme.font-label-lg;
-                            font-weight: root.enhance-tab == "filters" ? 700 : 400;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-                        TouchArea { clicked => { root.enhance-tab = "filters"; root.diagnostics-overlay-active = false; root.filters-overlay-active = true; } }
-                    }
-                }
-
-            Rectangle { height: 1px; background: Theme.outline-variant; }
-
-            // Content area
-            if root.enhance-tab == "diagnostics" : VerticalLayout {
-                padding: 16px;
-                spacing: 10px;
-                vertical-stretch: 1;
-
-                Text { text: "当前运行状态诊断"; color: Theme.on-surface; font-size: Theme.font-title-sm; font-weight: 600; }
-                Text { text: root.diagnostics-summary; color: Theme.on-surface-variant; wrap: word-wrap; font-size: Theme.font-body-sm; }
-                Text {
-                    text: root.global-diagnostic == "" ? "运行环境正常，无阻断性异常。" : root.global-diagnostic;
-                    color: root.global-diagnostic == "" ? Theme.on-success-container : Theme.error;
-                    wrap: word-wrap;
-                    font-size: Theme.font-body-sm;
-                }
-            }
-
-            if root.enhance-tab == "filters" : VerticalLayout {
-                padding: 16px;
-                spacing: 10px;
-                vertical-stretch: 1;
-
-                Text { text: "后处理着色器滤镜 (Final-frame Shader)"; color: Theme.primary; font-size: Theme.font-title-sm; font-weight: 600; }
-                Text {
-                    text: "对游戏最终画面应用滤镜。外部 HLSL 和参数可在设置中调整。";
-                    color: Theme.on-surface-variant;
-                    wrap: word-wrap;
-                    font-size: Theme.font-body-sm;
-                }
+        Rectangle {
+            x: parent.width - self.width;
+            width: min(parent.width, 600px);
+            height: parent.height;
+            background: Theme.surface;
+            TouchArea {}
+            VerticalLayout {
+                spacing: 0px;
                 HorizontalLayout {
+                    padding: 16px;
                     spacing: 8px;
-                    CheckButton { label: "原画 (Off)"; checked: root.filter-preset == "none"; clicked => { root.set-filter-preset("none"); } }
-                    CheckButton { label: "缩放 (Scale)"; checked: root.filter-preset == "scale"; clicked => { root.set-filter-preset("scale"); } }
-                    CheckButton { label: "锐化 (Sharpen)"; checked: root.filter-preset == "sharpen"; clicked => { root.set-filter-preset("sharpen"); } }
-                    CheckButton { label: "Anime4K 2×"; checked: root.filter-preset == "anime4k"; clicked => { root.set-filter-preset("anime4k"); } }
-                }
-            }
-
-            // Close button row
-            Rectangle {
-                height: 48px;
-                HorizontalLayout {
-                    alignment: center;
+                    Text {
+                        text: root.enhance-tab == "filters" ? "画面滤镜" : "运行诊断";
+                        color: Theme.on-surface;
+                        font-size: Theme.font-title-lg;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
                     M3Button {
-                        text: "收起面板";
+                        text: "关闭";
                         variant: "tonal";
                         clicked => {
+                            root.translation-overlay-active = false;
                             root.diagnostics-overlay-active = false;
                             root.filters-overlay-active = false;
                         }
                     }
+                }
+                Rectangle { height: 1px; background: Theme.outline-variant; }
+                if root.enhance-tab == "diagnostics" : ScrollView {
+                    VerticalLayout {
+                        padding: 24px;
+                        spacing: 16px;
+                        alignment: start;
+                        Text {
+                            text: root.diagnostics-summary == "" ? "尚无运行诊断数据" : root.diagnostics-summary;
+                            color: Theme.on-surface;
+                            wrap: word-wrap;
+                            font-size: Theme.font-body-md;
+                        }
+                        Text {
+                            text: root.global-diagnostic == "" ? "当前没有诊断消息" : root.global-diagnostic;
+                            color: root.global-diagnostic == "" ? Theme.on-surface-variant : Theme.error;
+                            wrap: word-wrap;
+                            font-size: Theme.font-body-md;
+                        }
+                    }
+                }
+                if root.enhance-tab == "filters" : FilterSettingsPage {
+                    filter-preset <=> root.filter-preset;
+                    filter-config-fields: root.filter-config-fields;
+                    set-filter-preset(preset) => { root.set-filter-preset(preset); }
+                    filter-config-changed(key, value) => { root.filter-config-changed(key, value); }
+                    load-filter-source => { root.load-filter-source(); }
+                    save-filter-config => { root.save-filter-config(); }
+                    reset-filter-config => { root.reset-filter-config(); }
                 }
             }
         }

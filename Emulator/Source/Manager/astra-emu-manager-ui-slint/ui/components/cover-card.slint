@@ -47,7 +47,7 @@ export component CoverCard inherits Rectangle {
         Rectangle {
             background: Theme.surface-container-highest;
             border-radius: Theme.shape-md;
-            min-height: 180px;
+            height: self.width * 4 / 3;
             clip: true;
 
             if game.cover-uri != "" : Image {
@@ -193,7 +193,7 @@ export component CoverCard inherits Rectangle {
 
         // M3 FAB / Pill Launch Button - hover or active
         Rectangle {
-            y: 154px;
+            y: 10px + (root.width - 20px) * 4 / 3 - 38px;
             x: parent.width - 76px;
             width: 70px;
             height: 30px;
