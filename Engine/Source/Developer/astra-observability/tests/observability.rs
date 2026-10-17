@@ -101,11 +101,89 @@ fn host_pipeline_writes_stable_bounded_redacted_logs_and_crash_tail() {
     assert!(!reloaded.contains("test.filtered"));
     assert!(reloaded.contains("test.after_reload"));
 
+    guard.reload_filter("error,astra_emu::core=info").unwrap();
+    assert!(guard.external_enabled(tracing::Level::INFO, "astra_emu::core"));
+    assert!(!guard.external_enabled(tracing::Level::TRACE, "astra_emu::core"));
+    assert!(!guard.external_enabled(tracing::Level::INFO, "other_core"));
+    let native_fields = std::collections::BTreeMap::from([
+        ("unsigned".into(), serde_json::Value::from(u64::MAX)),
+        ("signed".into(), serde_json::Value::from(-2_i64)),
+        ("fraction".into(), serde_json::Value::from(1.25)),
+        (
+            "asset_path".into(),
+            serde_json::Value::from("/public/fixture"),
+        ),
+        (
+            "message".into(),
+            serde_json::Value::from("https://example.invalid/native"),
+        ),
+    ]);
+    tracing::subscriber::with_default(tracing::subscriber::NoSubscriber::default(), || {
+        guard
+            .record_external(
+                tracing::Level::INFO,
+                "astra_emu::core",
+                "native.values",
+                native_fields,
+            )
+            .unwrap();
+    });
+    guard
+        .record_external(
+            tracing::Level::TRACE,
+            "astra_emu::core",
+            "native.filtered",
+            Default::default(),
+        )
+        .unwrap();
+    assert!(guard
+        .record_external(
+            tracing::Level::INFO,
+            "astra_emu::core",
+            "native.oversized",
+            std::collections::BTreeMap::from([(
+                "text".into(),
+                serde_json::Value::from("x".repeat(4097))
+            )]),
+        )
+        .is_err());
+    assert!(guard
+        .record_external(
+            tracing::Level::INFO,
+            "astra_emu::core",
+            "native.nested",
+            std::collections::BTreeMap::from([(
+                "fields".into(),
+                serde_json::json!({"nested": true})
+            )]),
+        )
+        .is_err());
+    guard.flush().unwrap();
+    let native_log = fs::read_to_string(log_dir.join("astra.jsonl")).unwrap();
+    let native = native_log
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .find(|record| record["event"] == "native.values")
+        .unwrap();
+    assert_eq!(native["fields"]["unsigned"].as_u64(), Some(u64::MAX));
+    assert_eq!(native["fields"]["signed"].as_i64(), Some(-2));
+    assert_eq!(native["fields"]["fraction"].as_f64(), Some(1.25));
+    assert_eq!(native["fields"]["asset_path"], "/public/fixture");
+    assert_eq!(
+        native["fields"]["message"],
+        "https://example.invalid/native"
+    );
+    assert!(!native_log.contains("native.filtered"));
+    assert!(!native_log.contains("native.oversized"));
+    assert!(!native_log.contains("native.nested"));
+    guard.reload_filter("error").unwrap();
+
     guard.flush().unwrap();
     tracing::trace!(event = "test.disabled_trace_warmup", sequence = 0_u64);
     let allocations_before = ALLOCATION_COUNT.load(Ordering::Relaxed);
     for sequence in 0_u64..1_000 {
         tracing::trace!(event = "test.disabled_trace", sequence);
+        assert!(!guard.external_enabled(tracing::Level::TRACE, "astra_emu::core"));
     }
     let allocations_after = ALLOCATION_COUNT.load(Ordering::Relaxed);
     assert_eq!(allocations_before, allocations_after);

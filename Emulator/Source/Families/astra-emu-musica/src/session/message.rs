@@ -15,33 +15,56 @@ impl MusicaSession {
         event: Option<MusicaVmEvent>,
     ) -> FamilyResult<Option<MusicaVmEvent>> {
         if self.pending.is_none() {
-            let enabled = self.replacement.as_ref().is_some_and(|s| s.0.text.is_some());
-            if !enabled || !matches!(event, Some(MusicaVmEvent::Message { .. } | MusicaVmEvent::Choice)) {
+            let enabled = self
+                .replacement
+                .as_ref()
+                .is_some_and(|s| s.0.text.is_some());
+            if !enabled
+                || !matches!(
+                    event,
+                    Some(MusicaVmEvent::Message { .. } | MusicaVmEvent::Choice)
+                )
+            {
                 return Ok(event);
             }
             self.generation = self.generation.checked_add(1).ok_or_else(|| {
                 error("ASTRA_EMU_MUSICA_TEXT_SEQUENCE", "text sequence overflowed")
             })?;
-            self.pending = Some(PendingText { id: self.generation, event: event.unwrap() });
+            self.pending = Some(PendingText {
+                id: self.generation,
+                event: event.unwrap(),
+            });
         }
         let pending = self.pending.as_ref().unwrap();
         let labels;
         let source = match &pending.event {
             MusicaVmEvent::Message { text, speaker, .. } => {
                 let mut source = vec![(astra_emu_abi::TEXT_DIALOGUE, text.as_str())];
-                if let Some(speaker) = speaker { source.push((astra_emu_abi::TEXT_SPEAKER, speaker.as_str())); }
+                if let Some(speaker) = speaker {
+                    source.push((astra_emu_abi::TEXT_SPEAKER, speaker.as_str()));
+                }
                 source
             }
             MusicaVmEvent::Choice => {
-                labels = self.vm.choice_display().map_err(vm_error)?.ok_or_else(|| {
-                    error("ASTRA_EMU_MUSICA_CHOICE", "choice is unavailable")
-                })?.0;
-                labels.iter().map(|text| (astra_emu_abi::TEXT_CHOICE, text.as_str())).collect()
+                labels = self
+                    .vm
+                    .choice_display()
+                    .map_err(vm_error)?
+                    .ok_or_else(|| error("ASTRA_EMU_MUSICA_CHOICE", "choice is unavailable"))?
+                    .0;
+                labels
+                    .iter()
+                    .map(|text| (astra_emu_abi::TEXT_CHOICE, text.as_str()))
+                    .collect()
             }
             _ => unreachable!(),
         };
         self.audio.suspend(true)?;
-        let result = self.replacement.as_ref().unwrap().transform(pending.id, &source);
+        let result = self
+            .replacement
+            .as_ref()
+            .unwrap()
+            .transform(pending.id, &source);
         self.reset_host_clock = true;
         self.phase = 0;
         self.input_pending = false;
@@ -56,7 +79,9 @@ impl MusicaSession {
         match &mut event {
             MusicaVmEvent::Message { text, speaker, .. } => {
                 *text = transformed.next().unwrap();
-                if speaker.is_some() { *speaker = transformed.next(); }
+                if speaker.is_some() {
+                    *speaker = transformed.next();
+                }
                 self.choice_text = None;
             }
             MusicaVmEvent::Choice => self.choice_text = Some(transformed.collect()),
@@ -67,13 +92,20 @@ impl MusicaSession {
     }
 
     pub(super) fn choice_display(&self) -> FamilyResult<Option<(Vec<String>, u32)>> {
-        let Some((labels, index)) = self.vm.choice_display().map_err(vm_error)? else { return Ok(None); };
+        let Some((labels, index)) = self.vm.choice_display().map_err(vm_error)? else {
+            return Ok(None);
+        };
         Ok(Some((self.choice_text.clone().unwrap_or(labels), index)))
     }
 
     pub(super) fn message(&mut self, text: String, speaker: Option<String>) -> FamilyResult<()> {
-        if text.len() > MAX_TEXT_BYTES || speaker.as_ref().is_some_and(|s| s.len() > MAX_SYMBOL_BYTES) {
-            return Err(error("ASTRA_EMU_MUSICA_TEXT_BOUND", "message exceeds supported bounds"));
+        if text.len() > MAX_TEXT_BYTES
+            || speaker.as_ref().is_some_and(|s| s.len() > MAX_SYMBOL_BYTES)
+        {
+            return Err(error(
+                "ASTRA_EMU_MUSICA_TEXT_BOUND",
+                "message exceeds supported bounds",
+            ));
         }
         self.message = Some((text, speaker));
         Ok(())

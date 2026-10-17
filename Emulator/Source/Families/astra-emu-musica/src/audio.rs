@@ -24,8 +24,8 @@ use std::{
     thread::{self, JoinHandle},
     time::Duration,
 };
-mod fade;
 mod device;
+mod fade;
 mod mixer;
 mod preferences;
 pub(crate) use preferences::AudioPreferences;
@@ -72,7 +72,9 @@ pub(crate) struct Audio {
 }
 impl Audio {
     pub fn start(archive: Arc<MusicaMountedVfs>, sink: Option<AudioSinkBox>) -> FamilyResult<Self> {
-        if let Some(sink) = &sink { sink.configure(FORMAT).into_result()?; }
+        if let Some(sink) = &sink {
+            sink.configure(FORMAT).into_result()?;
+        }
         let sink = sink.map(Arc::new);
         let stop = Arc::new(AtomicBool::new(false));
         let failure = Arc::new(Mutex::new(None));
@@ -105,10 +107,14 @@ impl Audio {
                         "audio worker panicked",
                     )),
                 };
-                if let Some(cause) = &error { let _ = ready_tx.try_send(Err(cause.clone())); }
+                if let Some(cause) = &error {
+                    let _ = ready_tx.try_send(Err(cause.clone()));
+                }
                 if error.is_some() {
                     if let Ok(mut slot) = f.lock() {
-                        if slot.is_none() { *slot = error; }
+                        if slot.is_none() {
+                            *slot = error;
+                        }
                     }
                 }
             })
@@ -118,9 +124,12 @@ impl Audio {
                     "audio worker could not start",
                 )
             })?;
-        if let Err(cause) = ready_rx.recv().unwrap_or_else(|_| Err(error(
-            "ASTRA_EMU_MUSICA_AUDIO_START", "audio worker exited during initialization",
-        ))) {
+        if let Err(cause) = ready_rx.recv().unwrap_or_else(|_| {
+            Err(error(
+                "ASTRA_EMU_MUSICA_AUDIO_START",
+                "audio worker exited during initialization",
+            ))
+        }) {
             stop.store(true, Ordering::Release);
             let _ = worker.join();
             return Err(cause);
@@ -199,7 +208,9 @@ impl Audio {
             }
         }
         if let Some(sink) = &self.sink {
-            if let Err(cancel_error) = sink.cancel().into_result() { return cancel_error; }
+            if let Err(cancel_error) = sink.cancel().into_result() {
+                return cancel_error;
+            }
         }
         failure
     }
@@ -208,7 +219,11 @@ impl Audio {
             return self.check();
         }
         self.stop.store(true, Ordering::Release);
-        let cancel = self.sink.as_ref().map(|sink| sink.cancel().into_result()).transpose();
+        let cancel = self
+            .sink
+            .as_ref()
+            .map(|sink| sink.cancel().into_result())
+            .transpose();
         let joined = self
             .worker
             .take()
@@ -239,7 +254,11 @@ fn run(
     #[cfg(feature = "ffmpeg-vcpkg")] movie: Arc<Mutex<Option<Arc<MoviePcm>>>>,
 ) -> FamilyResult<()> {
     let mut mixer = Mixer::new()?;
-    let mut device = if sink.is_none() { Some(device::DeviceOutput::open(stop.clone())?) } else { None };
+    let mut device = if sink.is_none() {
+        Some(device::DeviceOutput::open(stop.clone())?)
+    } else {
+        None
+    };
     let _ = ready.send(Ok(()));
     let mut samples = vec![0.0; 512 * 2];
     let mut suspended = false;
@@ -294,7 +313,11 @@ fn run(
             samples = device.write(samples, &stop)?;
             AudioWriteStatus::Accepted
         } else {
-            let status = sink.as_ref().unwrap().write(PcmChunk::F32(samples.into())).into_result()?;
+            let status = sink
+                .as_ref()
+                .unwrap()
+                .write(PcmChunk::F32(samples.into()))
+                .into_result()?;
             samples = vec![0.0; 512 * 2];
             status
         };
@@ -315,7 +338,9 @@ fn run(
             }
         }
     }
-    if let Some(device) = device { device.check()?; }
+    if let Some(device) = device {
+        device.check()?;
+    }
     Ok(())
 }
 fn validate_params(volume: f32, pan: f32) -> FamilyResult<()> {

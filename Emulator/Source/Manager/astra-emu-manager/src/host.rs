@@ -95,12 +95,30 @@ pub trait ManagerController: 'static {
     ) -> Result<(), String> {
         Err("ASTRA_EMU_MANAGER_MODAL_SERVICE_UNAVAILABLE".into())
     }
-    fn take_window_request(&mut self) -> Option<crate::window_service::WindowPresentation> { None }
-    fn respond_window(&mut self, _request: &crate::window_service::WindowPresentation, _result: Result<crate::window_service::WindowOutcome, String>) -> Result<(), String> { Err("ASTRA_EMU_WINDOW_SERVICE_UNAVAILABLE".into()) }
-    fn native_failure(&self) -> Option<&str> { None }
-    fn retry_native(&mut self) -> Result<(), String> { Err("ASTRA_EMU_CORE_RETRY_UNAVAILABLE".into()) }
-    fn set_window_state(&mut self, state: astra_emu_manager_core::model::WindowState) -> Result<(), String>;
-    fn physical_event(&mut self, event: astra_emu_manager_core::model::FamilyEvent) -> Result<(), String>;
+    fn take_window_request(&mut self) -> Option<crate::window_service::WindowPresentation> {
+        None
+    }
+    fn respond_window(
+        &mut self,
+        _request: &crate::window_service::WindowPresentation,
+        _result: Result<crate::window_service::WindowOutcome, String>,
+    ) -> Result<(), String> {
+        Err("ASTRA_EMU_WINDOW_SERVICE_UNAVAILABLE".into())
+    }
+    fn native_failure(&self) -> Option<(&str, bool)> {
+        None
+    }
+    fn retry_native(&mut self) -> Result<(), String> {
+        Err("ASTRA_EMU_CORE_RETRY_UNAVAILABLE".into())
+    }
+    fn set_window_state(
+        &mut self,
+        state: astra_emu_manager_core::model::WindowState,
+    ) -> Result<(), String>;
+    fn physical_event(
+        &mut self,
+        event: astra_emu_manager_core::model::FamilyEvent,
+    ) -> Result<(), String>;
     fn is_game_active(&self) -> bool;
     fn model(&self) -> Result<ManagerViewModel, String>;
     fn select_case(&mut self, case_id: &str) -> Result<ManagerViewModel, String>;
@@ -350,8 +368,8 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                         window.set_global_diagnostic(error.into());
                     }
                 }
-                if let Some(failure) = controller.borrow().native_failure() {
-                    window.set_core_retryable(true);
+                if let Some((failure, can_retry)) = controller.borrow().native_failure() {
+                    window.set_core_retryable(can_retry);
                     window.set_fatal_error_message(failure.into());
                     window.set_fatal_error_active(true);
                 }

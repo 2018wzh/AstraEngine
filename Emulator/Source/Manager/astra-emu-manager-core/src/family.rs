@@ -46,7 +46,12 @@ impl FamilyPluginDescriptor {
         if self.abi_fingerprint != INDEPENDENT_FAMILY_ABI_FINGERPRINT {
             return Err(FamilyPolicyError::AbiFingerprint);
         }
-        if !self.capabilities.iter().any(|capability| matches!(capability, FamilyCapability::CpuFrame | FamilyCapability::GpuFrame)) {
+        if !self.capabilities.iter().any(|capability| {
+            matches!(
+                capability,
+                FamilyCapability::CpuFrame | FamilyCapability::GpuFrame
+            )
+        }) {
             return Err(FamilyPolicyError::MissingCpuFrame);
         }
         for (index, capability) in self.capabilities.iter().enumerate() {

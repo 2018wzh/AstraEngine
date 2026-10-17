@@ -6,7 +6,6 @@ pub enum FamilyStatus {
     Finished,
 }
 
-
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FamilyPointerRequest {
     pub logical_x: Option<i32>,
@@ -64,4 +63,3 @@ impl FamilyWindowIcon {
         Ok(())
     }
 }
-

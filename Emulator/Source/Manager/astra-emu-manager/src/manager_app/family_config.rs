@@ -142,7 +142,11 @@ mod tests {
     use super::*;
 
     fn configuration_provider() -> astra_emu_manager_core::LoadedFamilyPlugin {
-        let mut fixture = crate::test_native::Fixture::new("config-test-plugin", "config-test-family", "config.test");
+        let mut fixture = crate::test_native::Fixture::new(
+            "config-test-plugin",
+            "config-test-family",
+            "config.test",
+        );
         fixture.config = true;
         crate::test_native::install(0, fixture)
     }
@@ -159,8 +163,7 @@ mod tests {
             descriptor: FamilyPluginDescriptor {
                 family_id: "config-test-family".into(),
                 plugin_id: "config-test-plugin".into(),
-                abi_fingerprint: astra_emu_manager_core::INDEPENDENT_FAMILY_ABI_FINGERPRINT
-                    .into(),
+                abi_fingerprint: astra_emu_manager_core::INDEPENDENT_FAMILY_ABI_FINGERPRINT.into(),
                 version: "1.0.0".into(),
                 capabilities: vec![astra_emu_manager_core::FamilyCapability::CpuFrame],
                 supported_formats: vec!["config.test".into()],
@@ -176,7 +179,8 @@ mod tests {
         )
         .unwrap();
         controller
-            .registry.register_provider(configuration_provider)
+            .registry
+            .register_provider(configuration_provider)
             .unwrap();
         controller
             .library
@@ -224,7 +228,7 @@ mod tests {
         );
         assert!(parse_config_value(&field, "NaN").is_err());
         field.kind = ConfigKind::Enum {
-            choices: vec!["shift_jis".into()].into(),
+            choices: vec!["shift_jis".into()],
         };
         assert!(parse_config_value(&field, "utf8").is_err());
         assert_eq!(display_config_value(&ConfigValue::Bool(false)), "false");

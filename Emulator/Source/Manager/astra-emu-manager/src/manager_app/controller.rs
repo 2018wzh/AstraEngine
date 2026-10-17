@@ -12,21 +12,57 @@ impl ManagerController for AstraEmuManagerController {
     ) -> Result<(), String> {
         self.registry.respond_modal(id, response)
     }
-    fn take_window_request(&mut self) -> Option<astra_emu_manager::window_service::WindowPresentation> { self.registry.take_window_request() }
-    fn respond_window(&mut self, request: &astra_emu_manager::window_service::WindowPresentation, result: Result<astra_emu_manager::window_service::WindowOutcome, String>) -> Result<(), String> {
+    fn take_window_request(
+        &mut self,
+    ) -> Option<astra_emu_manager::window_service::WindowPresentation> {
+        self.registry.take_window_request()
+    }
+    fn respond_window(
+        &mut self,
+        request: &astra_emu_manager::window_service::WindowPresentation,
+        result: Result<astra_emu_manager::window_service::WindowOutcome, String>,
+    ) -> Result<(), String> {
         if let Ok(outcome) = &result {
-            if let Some(active) = self.active.as_mut().filter(|active| active.epoch == request.session_epoch) {
-                if let astra_emu_manager::window_service::WindowCommand::Title(title) = &request.command { active.title = Some(title.clone()); }
-                if outcome.valid_fields & astra_emu_abi::WINDOW_RESULT_MODE != 0 { active.fullscreen = outcome.fullscreen != astra_emu_abi::FULLSCREEN_WINDOWED; }
+            if let Some(active) = self
+                .active
+                .as_mut()
+                .filter(|active| active.epoch == request.session_epoch)
+            {
+                if let astra_emu_manager::window_service::WindowCommand::Title(title) =
+                    &request.command
+                {
+                    active.title = Some(title.clone());
+                }
+                if outcome.valid_fields & astra_emu_abi::WINDOW_RESULT_MODE != 0 {
+                    active.fullscreen = outcome.fullscreen != astra_emu_abi::FULLSCREEN_WINDOWED;
+                }
             }
         }
         self.registry.respond_window(request, result)
     }
-    fn native_failure(&self) -> Option<&str> { self.active.as_ref().and_then(|active| active.failure.as_deref()) }
+    fn native_failure(&self) -> Option<(&str, bool)> {
+        self.active.as_ref().and_then(|active| {
+            active
+                .failure
+                .as_ref()
+                .map(|failure| (failure.message.as_str(), failure.can_retry))
+        })
+    }
     fn retry_native(&mut self) -> Result<(), String> {
         let active = self.active.as_mut().ok_or("ASTRA_EMU_CORE_CLOSED")?;
-        if active.failure.is_none() { return Err("ASTRA_EMU_CORE_RETRY_UNAVAILABLE".into()); }
-        self.registry.events(active.epoch, vec![FamilyEvent::Control { command: astra_emu_abi::CONTROL_RETRY }])?;
+        if active
+            .failure
+            .as_ref()
+            .is_none_or(|failure| !failure.can_retry)
+        {
+            return Err("ASTRA_EMU_CORE_RETRY_UNAVAILABLE".into());
+        }
+        self.registry.events(
+            active.epoch,
+            vec![FamilyEvent::Control {
+                command: astra_emu_abi::CONTROL_RETRY,
+            }],
+        )?;
         active.failure = None;
         Ok(())
     }
@@ -50,7 +86,9 @@ impl ManagerController for AstraEmuManagerController {
         self.handle_physical_event(event)
     }
     fn is_game_active(&self) -> bool {
-        self.active.as_ref().is_some_and(|active| active.closing.is_none())
+        self.active
+            .as_ref()
+            .is_some_and(|active| active.closing.is_none())
     }
     fn model(&self) -> Result<ManagerViewModel, String> {
         AstraEmuManagerController::model(self)
@@ -185,7 +223,9 @@ impl ManagerController for AstraEmuManagerController {
     }
 
     fn game_fullscreen(&self) -> bool {
-        self.active.as_ref().is_some_and(|active| active.closing.is_none() && active.fullscreen)
+        self.active
+            .as_ref()
+            .is_some_and(|active| active.closing.is_none() && active.fullscreen)
     }
 
     fn take_game_icon(&mut self) -> Option<astra_emu_manager_core::model::FamilyWindowIcon> {

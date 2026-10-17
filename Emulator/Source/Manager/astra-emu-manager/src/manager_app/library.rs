@@ -72,7 +72,8 @@ impl AstraEmuManagerController {
             diagnostic: String::new(),
             plugin_errors,
             data_dir,
-            _extensions: crate::text_service::ExtensionRuntime::new().map_err(|error| error.to_string())?,
+            _extensions: crate::text_service::ExtensionRuntime::new()
+                .map_err(|error| error.to_string())?,
             game_roots,
             mailbox,
             active: None,
@@ -147,7 +148,7 @@ impl AstraEmuManagerController {
         self.registry
             .probe(
                 &ProbeRequest {
-                    game_path: game_path.to_owned().into(),
+                    game_path: game_path.to_owned(),
                 },
                 None,
                 preferred_family_id.as_deref(),

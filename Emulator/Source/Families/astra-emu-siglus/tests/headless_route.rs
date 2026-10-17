@@ -16,8 +16,12 @@ fn native_rewrite_representative_route() {
         session.wait(Duration::from_millis(640));
         let frame = session.frame();
         let (sum, lit) = digest(&frame);
-        snapshots.insert(sum); visible |= lit > frame.pixels().len() / 400;
+        snapshots.insert(sum);
+        visible |= lit > frame.pixels().len() / 400;
     }
-    assert!(visible && snapshots.len() > 1, "representative route produces changing complete native frames");
+    assert!(
+        visible && snapshots.len() > 1,
+        "representative route produces changing complete native frames"
+    );
     session.close();
 }

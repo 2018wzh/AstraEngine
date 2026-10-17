@@ -70,7 +70,9 @@ pub(super) fn run(
             }
             Ok(Command::Events { epoch, events }) => {
                 if let Some(session) = active.as_mut().filter(|session| session.epoch() == epoch) {
-                    if pending.len() + events.len() > astra_emu_manager_core::model::MAX_INPUT_EVENTS {
+                    if pending.len() + events.len()
+                        > astra_emu_manager_core::model::MAX_INPUT_EVENTS
+                    {
                         finish(
                             &mut active,
                             Some("ASTRA_EMU_INPUT_QUEUE_FULL".into()),
@@ -82,7 +84,9 @@ pub(super) fn run(
                         pending.extend(events);
                         let result = session.input(&pending);
                         pending.clear();
-                        if let Err(error) = result { finish(&mut active, Some(error), &shared); }
+                        if let Err(error) = result {
+                            finish(&mut active, Some(error), &shared);
+                        }
                         notify(&wake);
                     }
                 }
@@ -110,8 +114,15 @@ pub(super) fn run(
                 let primary = shared.lock().error.take();
                 let session_error = active.take().and_then(|mut session| session.close().err());
                 let owner_error = registry.shutdown().err().map(|error| error.to_string());
-                let errors: Vec<_> = [primary, session_error, owner_error].into_iter().flatten().collect();
-                return if errors.is_empty() { Ok(()) } else { Err(errors.join("; ")) };
+                let errors: Vec<_> = [primary, session_error, owner_error]
+                    .into_iter()
+                    .flatten()
+                    .collect();
+                return if errors.is_empty() {
+                    Ok(())
+                } else {
+                    Err(errors.join("; "))
+                };
             }
             Err(RecvTimeoutError::Timeout) => {}
         }
@@ -149,9 +160,20 @@ pub(super) fn run(
     }
 }
 
-pub(super) fn service_due(session: &mut ActiveFamilySession, pending: &mut Vec<FamilyEvent>, now: Instant) -> Result<bool, String> {
-    if !pending.is_empty() { session.input(pending)?; pending.clear(); }
-    if now >= session.wake_deadline() { session.poll() } else { Ok(false) }
+pub(super) fn service_due(
+    session: &mut ActiveFamilySession,
+    pending: &mut Vec<FamilyEvent>,
+    now: Instant,
+) -> Result<bool, String> {
+    if !pending.is_empty() {
+        session.input(pending)?;
+        pending.clear();
+    }
+    if now >= session.wake_deadline() {
+        session.poll()
+    } else {
+        Ok(false)
+    }
 }
 
 fn initialize(

@@ -82,7 +82,9 @@ pub(super) fn run(
     }));
     // This is the native audio owner, never the device's real-time callback.
     // Join even when decoding, setup or a mixer command failed or panicked.
-    let shutdown = manager.backend_mut().stop_and_join()
+    let shutdown = manager
+        .backend_mut()
+        .stop_and_join()
         .map_err(|e| error::invalid("ASTRA_EMU_ARTEMIS_AUDIO_SHUTDOWN", e.to_string()));
     match result {
         Ok(result) => result.and(shutdown),

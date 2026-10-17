@@ -28,6 +28,9 @@ use crate::{
     ring::RingBuffer,
 };
 
+#[path = "external.rs"]
+mod external;
+
 #[derive(Debug, Error)]
 pub enum ObservabilityError {
     #[error("invalid observability configuration: {0}")]
@@ -58,6 +61,9 @@ pub struct ObservabilityGuard {
     dropped: Arc<AtomicU64>,
     crash_dir: Option<std::path::PathBuf>,
     max_crash_bundles: usize,
+    dispatch: tracing::Dispatch,
+    external: StableJsonLayer,
+    external_console_compact: bool,
 }
 
 impl ObservabilityGuard {
@@ -151,10 +157,13 @@ pub fn init_host(
         dropped: Arc::clone(&dropped),
         console_json: config.console && config.console_format == ConsoleFormat::Json,
     };
+    let external = stable.clone();
+    let external_console_compact =
+        config.console && config.console_format == ConsoleFormat::Compact;
     let filter = EnvFilter::try_new(&config.filter)?;
     let (filter_layer, reload) = reload::Layer::new(filter);
 
-    match (config.console, config.console_format) {
+    let dispatch = match (config.console, config.console_format) {
         (true, ConsoleFormat::Compact) => install_subscriber(
             filter_layer,
             tracing_subscriber::fmt::layer()
@@ -179,7 +188,7 @@ pub fn init_host(
                 .with_writer(std::io::sink),
             stable,
         )?,
-    }
+    };
 
     Ok(ObservabilityGuard {
         session_id,
@@ -191,6 +200,9 @@ pub fn init_host(
         dropped,
         crash_dir: config.crash_dir,
         max_crash_bundles: config.max_crash_bundles,
+        dispatch,
+        external,
+        external_console_compact,
     })
 }
 
@@ -198,7 +210,7 @@ fn install_subscriber<L>(
     filter: reload::Layer<EnvFilter, Registry>,
     console: L,
     stable: StableJsonLayer,
-) -> Result<(), tracing::subscriber::SetGlobalDefaultError>
+) -> Result<tracing::Dispatch, tracing::subscriber::SetGlobalDefaultError>
 where
     L: Layer<tracing_subscriber::layer::Layered<reload::Layer<EnvFilter, Registry>, Registry>>
         + Send
@@ -206,7 +218,9 @@ where
         + 'static,
 {
     let subscriber = Registry::default().with(filter).with(console).with(stable);
-    tracing::subscriber::set_global_default(subscriber)
+    let dispatch = tracing::Dispatch::new(subscriber);
+    tracing::dispatcher::set_global_default(dispatch.clone())?;
+    Ok(dispatch)
 }
 
 #[derive(Clone)]
@@ -296,9 +310,13 @@ where
             span_stack,
             fields: visitor.fields,
         };
-        let Ok(mut encoded) = serde_json::to_string(&record) else {
-            return;
-        };
+        let _ = self.submit(*metadata.level(), &record);
+    }
+}
+
+impl StableJsonLayer {
+    fn submit(&self, level: tracing::Level, record: &LogEventV1) -> Result<(), ObservabilityError> {
+        let mut encoded = serde_json::to_string(record)?;
         encoded.push('\n');
         if self.console_json {
             let _ = std::io::stderr().write_all(encoded.as_bytes());
@@ -306,10 +324,7 @@ where
         if let Ok(mut ring) = self.ring.lock() {
             ring.push(encoded.trim_end().to_string());
         }
-        if matches!(
-            *metadata.level(),
-            tracing::Level::WARN | tracing::Level::ERROR
-        ) {
+        if matches!(level, tracing::Level::WARN | tracing::Level::ERROR) {
             if let Some(writer) = &self.critical {
                 if let Ok(mut writer) = writer.lock() {
                     let _ = writer.write_all(encoded.as_bytes());
@@ -328,12 +343,12 @@ where
             Err(TrySendError::Disconnected(_)) => {
                 let dropped = self.dropped.fetch_add(1, Ordering::Relaxed) + 1;
                 self.record_drop_warning(dropped);
+                return Err(ObservabilityError::WriterStopped);
             }
         }
+        Ok(())
     }
-}
 
-impl StableJsonLayer {
     fn record_drop_warning(&self, dropped_count: u64) {
         let mut fields = BTreeMap::new();
         fields.insert("dropped_count".to_string(), Value::from(dropped_count));

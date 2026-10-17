@@ -78,14 +78,15 @@ pub(super) fn install<C: ManagerController>(
                         controller.borrow_mut().set_window_state(state)
                     })
                 }
-                WindowEvent::Resized(_) | WindowEvent::Occluded(_) | WindowEvent::ScaleFactorChanged { .. } => {
-                    current_window_state(native_window).and_then(|mut state| {
+                WindowEvent::Resized(_)
+                | WindowEvent::Occluded(_)
+                | WindowEvent::ScaleFactorChanged { .. } => current_window_state(native_window)
+                    .and_then(|mut state| {
                         if let WindowEvent::Occluded(occluded) = event {
                             state.visible = !occluded;
                         }
                         controller.borrow_mut().set_window_state(state)
-                    })
-                }
+                    }),
                 WindowEvent::ModifiersChanged(value) => {
                     let state = value.state();
                     modifiers = KeyModifiers {
@@ -100,13 +101,19 @@ pub(super) fn install<C: ManagerController>(
                     if let winit::keyboard::PhysicalKey::Code(code) = event.physical_key {
                         if let Some(code) = family_key(code) {
                             consumed = true;
-                            controller.borrow_mut().physical_event(FamilyEvent::Key { logical: match &event.logical_key { winit::keyboard::Key::Character(text) => Some(text.to_string()), _ => None }, code,
-                            modifiers,
-                            state: match (event.state, event.repeat) {
-                                (ElementState::Released, _) => KeyState::Released,
-                                (ElementState::Pressed, true) => KeyState::Repeated,
-                                (ElementState::Pressed, false) => KeyState::Pressed,
-                            }, })
+                            controller.borrow_mut().physical_event(FamilyEvent::Key {
+                                logical: match &event.logical_key {
+                                    winit::keyboard::Key::Character(text) => Some(text.to_string()),
+                                    _ => None,
+                                },
+                                code,
+                                modifiers,
+                                state: match (event.state, event.repeat) {
+                                    (ElementState::Released, _) => KeyState::Released,
+                                    (ElementState::Pressed, true) => KeyState::Repeated,
+                                    (ElementState::Pressed, false) => KeyState::Pressed,
+                                },
+                            })
                         } else {
                             Ok(())
                         }

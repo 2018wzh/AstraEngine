@@ -3,10 +3,10 @@ mod manager_app;
 mod metadata_runtime;
 mod platform_secret;
 mod stage_renderer;
-mod text_service;
 #[cfg(test)]
 #[path = "../../astra-emu-manager-core/src/test_native.rs"]
 mod test_native;
+mod text_service;
 
 use clap::Parser;
 use std::process::ExitCode;
@@ -26,10 +26,24 @@ struct Arguments {
 #[derive(clap::Subcommand)]
 pub(crate) enum ExtensionCommand {
     /// Install a trusted local Luau text extension, initially disabled.
-    ExtensionInstall { id: String, source: std::path::PathBuf },
-    ExtensionEnable { id: String, enabled: bool },
-    ExtensionConfigure { id: String, configuration: std::path::PathBuf },
-    ExtensionList,
+    #[command(name = "extension-install")]
+    Install {
+        id: String,
+        source: std::path::PathBuf,
+    },
+    #[command(name = "extension-enable")]
+    Enable {
+        id: String,
+        #[arg(action = clap::ArgAction::Set)]
+        enabled: bool,
+    },
+    #[command(name = "extension-configure")]
+    Configure {
+        id: String,
+        configuration: std::path::PathBuf,
+    },
+    #[command(name = "extension-list")]
+    List,
 }
 
 fn main() -> ExitCode {
@@ -37,7 +51,10 @@ fn main() -> ExitCode {
     if let Some(command) = arguments.extension {
         return match manager_app::run_extension_command(command) {
             Ok(()) => ExitCode::SUCCESS,
-            Err(error) => { eprintln!("{error}"); ExitCode::FAILURE }
+            Err(error) => {
+                eprintln!("{error}");
+                ExitCode::FAILURE
+            }
         };
     }
     if let Some(configuration) = arguments.headless {

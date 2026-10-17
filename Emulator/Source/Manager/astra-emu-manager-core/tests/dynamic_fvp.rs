@@ -1,5 +1,11 @@
-use astra_emu_manager_core::model::{ConfigEntry, ConfigKind, ConfigValue, FramePoll, ProbeRequest, WindowState, allocate_session_epoch};
-use astra_emu_manager_core::{FamilyCapability, FamilyProviderRegistry, NativeOpenRequest, NativeCancellation, no_host_services};
+use astra_emu_manager_core::model::{
+    allocate_session_epoch, ConfigEntry, ConfigKind, ConfigValue, FramePoll, ProbeRequest,
+    WindowState,
+};
+use astra_emu_manager_core::{
+    no_host_services, FamilyCapability, FamilyProviderRegistry, NativeCancellation,
+    NativeOpenRequest,
+};
 use std::path::Path;
 
 fn fixture(root: &Path) {
@@ -33,8 +39,7 @@ fn request(game: &Path) -> NativeOpenRequest {
         configuration: vec![ConfigEntry {
             id: "script_encoding".into(),
             value: ConfigValue::Enum("utf8".into()),
-        }]
-        .into(),
+        }],
         initial_window: WindowState {
             width: 640,
             height: 480,
@@ -73,7 +78,10 @@ fn fvp_dynamic_core_scans_probes_configures_and_reopens() {
     assert!(descriptor.has_capability(FamilyCapability::CpuFrame));
 
     let schema = registry.configuration("astra.emu.fvp").unwrap();
-    let encoding = schema.iter().find(|field| field.id == "script_encoding").expect("native script encoding schema");
+    let encoding = schema
+        .iter()
+        .find(|field| field.id == "script_encoding")
+        .expect("native script encoding schema");
     match &encoding.kind {
         ConfigKind::Enum { choices } => {
             assert!(choices.iter().any(|choice| choice.as_str() == "utf8"));
@@ -84,7 +92,7 @@ fn fvp_dynamic_core_scans_probes_configures_and_reopens() {
     let selection = registry
         .probe(
             &ProbeRequest {
-                game_path: game.to_string_lossy().to_string().into(),
+                game_path: game.to_string_lossy().into_owned(),
             },
             Some("astra.emu.fvp"),
             Some("fvp"),
@@ -98,12 +106,17 @@ fn fvp_dynamic_core_scans_probes_configures_and_reopens() {
         let mut session = registry.open_selected(&candidate, request(&game)).unwrap();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         let lease = loop {
-            if let FramePoll::Ready(frame) = session.acquire_frame(None).unwrap() { break frame; }
+            if let FramePoll::Ready(frame) = session.acquire_frame(None).unwrap() {
+                break frame;
+            }
             assert!(std::time::Instant::now() < deadline, "native frame timeout");
             std::thread::sleep(std::time::Duration::from_millis(1));
         };
         assert!(lease.info.width != 0 && lease.info.height != 0);
         session.close().unwrap();
-        assert!(!lease.pixels().is_empty(), "CPU lease remains valid after native close");
+        assert!(
+            !lease.pixels().is_empty(),
+            "CPU lease remains valid after native close"
+        );
     }
 }

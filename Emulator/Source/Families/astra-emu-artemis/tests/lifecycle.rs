@@ -76,6 +76,7 @@ fn open(api: &CoreApi, root: &std::path::Path, epoch: u64) -> Result<OpenResult,
                 is_cancelled: Some(cancelled),
             },
         },
+        module_owner: ptr::null_mut(),
     };
     let mut output = std::mem::MaybeUninit::<OpenResult>::uninit();
     let mut error = Error::default();

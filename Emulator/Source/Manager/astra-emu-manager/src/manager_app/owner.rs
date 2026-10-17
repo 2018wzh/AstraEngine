@@ -1,5 +1,7 @@
 use super::*;
-use astra_emu_manager_core::model::{ConfigEntry, ConfigField, FamilyPointerRequest, FamilyWindowIcon};
+use astra_emu_manager_core::model::{
+    ConfigEntry, ConfigField, FamilyPointerRequest, FamilyWindowIcon,
+};
 use crossbeam_channel::{bounded, Receiver, Sender};
 use parking_lot::Mutex;
 use std::sync::Arc;
@@ -8,13 +10,7 @@ use std::thread::JoinHandle;
 const COMMAND_CAPACITY: usize = 8;
 
 type RegistryJob = Box<dyn FnOnce(&mut FamilyProviderRegistry) + Send>;
-type Metadata = BTreeMap<
-    String,
-    (
-        FamilyPluginDescriptor,
-        Vec<ConfigField>,
-    ),
->;
+type Metadata = BTreeMap<String, (FamilyPluginDescriptor, Vec<ConfigField>)>;
 
 pub(super) enum Command {
     Registry(RegistryJob),
@@ -54,7 +50,7 @@ pub(super) struct ActiveSessionView {
     pub(super) title: Option<String>,
     pub(super) pending_icon: Option<FamilyWindowIcon>,
     pub(super) pending_pointer: Option<FamilyPointerRequest>,
-    pub(super) failure: Option<String>,
+    pub(super) failure: Option<super::session::NativeFailure>,
 }
 
 impl ActiveSessionView {
@@ -80,7 +76,7 @@ pub(super) struct Update {
     pub(super) opened: bool,
     pub(super) closed: bool,
     pub(super) error: Option<String>,
-    pub(super) failure: Option<String>,
+    pub(super) failure: Option<super::session::NativeFailure>,
 }
 
 pub(super) struct FamilyOwner {
@@ -141,10 +137,7 @@ impl FamilyOwner {
         self.metadata.values().map(|(descriptor, _)| descriptor)
     }
 
-    pub(super) fn configuration(
-        &self,
-        id: &str,
-    ) -> Result<Vec<ConfigField>, String> {
+    pub(super) fn configuration(&self, id: &str) -> Result<Vec<ConfigField>, String> {
         self.metadata
             .get(id)
             .map(|(_, schema)| schema.clone())
@@ -187,9 +180,14 @@ impl FamilyOwner {
     }
 
     #[cfg(test)]
-    pub(super) fn register_provider(&mut self, factory: impl FnOnce() -> astra_emu_manager_core::LoadedFamilyPlugin + Send + 'static) -> Result<(), String> {
+    pub(super) fn register_provider(
+        &mut self,
+        factory: impl FnOnce() -> astra_emu_manager_core::LoadedFamilyPlugin + Send + 'static,
+    ) -> Result<(), String> {
         self.metadata = self.registry_call(move |registry| {
-            registry.register_provider(factory()).map_err(|error| error.to_string())?;
+            registry
+                .register_provider(factory())
+                .map_err(|error| error.to_string())?;
             collect_metadata(registry)
         })?;
         Ok(())
@@ -205,7 +203,11 @@ impl FamilyOwner {
             ModalBridge::new(epoch, request.wake.clone()).map_err(|error| error.to_string())?;
         request.modal = Some(modal.clone());
         *self.modal.lock() = Some(modal.clone());
-        let window_service = astra_emu_manager::window_service::WindowBridge::new(epoch, modal.clone(), request.wake.clone());
+        let window_service = astra_emu_manager::window_service::WindowBridge::new(
+            epoch,
+            modal.clone(),
+            request.wake.clone(),
+        );
         request.window_service = Some(window_service.clone());
         *self.window_service.lock() = Some(window_service);
         *self.text.lock() = request.text.clone();
@@ -230,9 +232,15 @@ impl FamilyOwner {
     }
 
     pub(super) fn close(&self, epoch: u64, events: Vec<FamilyEvent>) -> Result<(), String> {
-        if let Some(window) = self.window_service.lock().as_ref() { window.close(); }
-        if let Some(text) = self.text.lock().as_ref() { text.cancel(); }
-        if let Some(cancellation) = self.cancellation.lock().as_ref() { cancellation.cancel(); }
+        if let Some(window) = self.window_service.lock().as_ref() {
+            window.close();
+        }
+        if let Some(text) = self.text.lock().as_ref() {
+            text.cancel();
+        }
+        if let Some(cancellation) = self.cancellation.lock().as_ref() {
+            cancellation.cancel();
+        }
         let modal = self
             .modal
             .lock()
@@ -291,11 +299,24 @@ impl FamilyOwner {
             .respond(id, response)
             .map_err(|error| error.to_string())
     }
-    pub(super) fn take_window_request(&self) -> Option<astra_emu_manager::window_service::WindowPresentation> {
-        self.window_service.lock().as_ref().and_then(|service| service.take())
+    pub(super) fn take_window_request(
+        &self,
+    ) -> Option<astra_emu_manager::window_service::WindowPresentation> {
+        self.window_service
+            .lock()
+            .as_ref()
+            .and_then(|service| service.take())
     }
-    pub(super) fn respond_window(&self, request: &astra_emu_manager::window_service::WindowPresentation, result: Result<astra_emu_manager::window_service::WindowOutcome, String>) -> Result<(), String> {
-        self.window_service.lock().as_ref().ok_or("ASTRA_EMU_WINDOW_CLOSED")?.respond(request, result)
+    pub(super) fn respond_window(
+        &self,
+        request: &astra_emu_manager::window_service::WindowPresentation,
+        result: Result<astra_emu_manager::window_service::WindowOutcome, String>,
+    ) -> Result<(), String> {
+        self.window_service
+            .lock()
+            .as_ref()
+            .ok_or("ASTRA_EMU_WINDOW_CLOSED")?
+            .respond(request, result)
     }
 
     fn send(&self, command: Command) -> Result<(), String> {
@@ -310,9 +331,15 @@ impl FamilyOwner {
     }
 
     pub(super) fn shutdown(&mut self) -> Result<(), String> {
-        if let Some(window) = self.window_service.lock().as_ref() { window.close(); }
-        if let Some(text) = self.text.lock().as_ref() { text.cancel(); }
-        if let Some(cancellation) = self.cancellation.lock().as_ref() { cancellation.cancel(); }
+        if let Some(window) = self.window_service.lock().as_ref() {
+            window.close();
+        }
+        if let Some(text) = self.text.lock().as_ref() {
+            text.cancel();
+        }
+        if let Some(cancellation) = self.cancellation.lock().as_ref() {
+            cancellation.cancel();
+        }
         let modal = self.modal.lock().as_ref().cloned();
         if let Some(modal) = modal {
             modal.cancel_pending();

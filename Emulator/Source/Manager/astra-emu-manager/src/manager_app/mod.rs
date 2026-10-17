@@ -1,6 +1,5 @@
 use crate::{
-    metadata_runtime, platform_secret, stage_renderer,
-    text_service::TextReplacementBridge,
+    metadata_runtime, platform_secret, stage_renderer, text_service::TextReplacementBridge,
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -9,16 +8,16 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use astra_emu_manager_core::model::{
-    FamilyEvent, FamilyStatus, KeyCode, KeyModifiers, KeyState,
-    ProbeRequest, WindowState,
-};
+use astra_emu_manager::modal_service::ModalBridge;
 #[cfg(not(target_os = "android"))]
 use astra_emu_manager::{run_manager_with_initial_state, HostWake, ManagerController};
+use astra_emu_manager_core::model::{
+    FamilyEvent, FamilyStatus, KeyCode, KeyModifiers, KeyState, ProbeRequest, WindowState,
+};
 use astra_emu_manager_core::{
     default_vn_preset, input_key_code as key_code, FamilyPluginDescriptor, FamilyProbeCandidate,
     FamilyProbeSelection, FamilyProviderRegistry, GameRecord, GamepadDeadzone, GamepadInput,
-    Library, PlaySessionEndReason, NativeOpenRequest, NativeSession,
+    Library, NativeOpenRequest, NativeSession, PlaySessionEndReason,
 };
 use astra_emu_manager_ui_slint::{
     AppearanceViewModel, GameCardViewModel, GamepadBindingViewModel, GenericConfigFieldViewModel,
@@ -35,13 +34,13 @@ use astra_emu_translation_openai_compatible::{
 use metadata_runtime::{MetadataCommand, MetadataCommandKind, MetadataPayload, MetadataRuntime};
 use platform_secret::ManagerSecretStore;
 use stage_renderer::{FrameMailbox, ManagerStageRenderer};
-use astra_emu_manager::modal_service::ModalBridge;
 
 const MAX_SCAN_DIRECTORIES: usize = 4_096;
 const MAX_SCAN_DEPTH: usize = 5;
 
 mod connection_test;
 mod controller;
+mod extensions;
 mod family_config;
 mod filters;
 mod input;
@@ -50,20 +49,21 @@ mod metadata;
 mod metadata_actions;
 #[cfg(test)]
 mod metadata_tests;
-#[cfg(test)]
-mod probe_state_tests;
 mod model;
 mod navigation;
-mod preferences;
 mod owner;
 mod owner_worker;
+mod preferences;
+#[cfg(test)]
+mod probe_state_tests;
 mod runtime;
 mod session;
 mod support;
 mod translation;
 mod view_fields;
-mod extensions;
-pub(super) fn run_extension_command(command: crate::ExtensionCommand) -> Result<(), String> { extensions::run(command) }
+pub(super) fn run_extension_command(command: crate::ExtensionCommand) -> Result<(), String> {
+    extensions::run(command)
+}
 use session::ActiveFamilySession;
 use support::*;
 
@@ -149,16 +149,28 @@ pub(super) fn run_application() -> Result<(), Box<dyn std::error::Error>> {
     observability.log_dir = Some(data_dir.join("diagnostics"));
     let _observability = std::sync::Arc::new(astra_observability::init_host(observability)?);
     let filter_guard = std::sync::Arc::downgrade(&_observability);
-    astra_emu_manager_core::set_diagnostic_enabled(move |level, target| filter_guard.upgrade().is_some_and(|guard| guard.external_enabled(level, target)));
+    astra_emu_manager_core::set_diagnostic_enabled(move |level, target| {
+        filter_guard
+            .upgrade()
+            .is_some_and(|guard| guard.external_enabled(level, target))
+    });
     let emit_guard = std::sync::Arc::downgrade(&_observability);
     astra_emu_manager_core::set_diagnostic_emit(move |record| {
         if let Some(guard) = emit_guard.upgrade() {
-            if let Err(error) = guard.record_external(record.level, &record.target, &record.event, record.fields) { tracing::error!(event = "astra.emu.diagnostics.record_failed", error = %error); }
+            if let Err(error) =
+                guard.record_external(record.level, &record.target, &record.event, record.fields)
+            {
+                tracing::error!(event = "astra.emu.diagnostics.record_failed", error = %error);
+            }
         }
     });
     let flush_guard = std::sync::Arc::downgrade(&_observability);
     astra_emu_manager_core::set_diagnostic_flush(move || {
-        if let Some(guard) = flush_guard.upgrade() { if let Err(error) = guard.flush() { tracing::error!(event = "astra.emu.diagnostics.flush_failed", error = %error); } }
+        if let Some(guard) = flush_guard.upgrade() {
+            if let Err(error) = guard.flush() {
+                tracing::error!(event = "astra.emu.diagnostics.flush_failed", error = %error);
+            }
+        }
     });
     let result = (|| {
         let mailbox = FrameMailbox::new();

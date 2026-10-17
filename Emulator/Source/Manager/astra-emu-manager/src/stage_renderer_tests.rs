@@ -1,8 +1,9 @@
 use super::*;
-use astra_emu_manager_core::model::{FrameAlpha, FrameFormat, FrameInfo, FrameLease, FrameRowOrder};
 use astra_emu_manager::effects::FilterPreset;
+use astra_emu_manager_core::model::{
+    FrameAlpha, FrameFormat, FrameInfo, FrameLease, FrameRowOrder,
+};
 use std::{collections::BTreeMap, path::PathBuf};
-
 
 fn info(width: u32, height: u32, stride: u32, alpha: FrameAlpha) -> FrameInfo {
     FrameInfo {
@@ -17,7 +18,16 @@ fn info(width: u32, height: u32, stride: u32, alpha: FrameAlpha) -> FrameInfo {
 }
 
 fn lease(pixels: Vec<u8>, info: FrameInfo, epoch: u64, generation: u64) -> FrameLease {
-    FrameLease::from_vec(pixels, info, FrameIdentity { session_epoch: epoch, output_epoch: 1, generation }).unwrap()
+    FrameLease::from_vec(
+        pixels,
+        info,
+        FrameIdentity {
+            session_epoch: epoch,
+            output_epoch: 1,
+            generation,
+        },
+    )
+    .unwrap()
 }
 
 #[test]
@@ -28,11 +38,25 @@ fn old_frame_and_shutdown_cannot_replace_or_clear_a_new_session_baseline() {
     mailbox.publish(old.clone()).unwrap();
     mailbox.clear(1).unwrap();
     mailbox.activate(2).unwrap();
-    mailbox.publish(lease(vec![5, 6, 7, 255], info(1, 1, 4, FrameAlpha::Opaque), 2, 1)).unwrap();
+    mailbox
+        .publish(lease(
+            vec![5, 6, 7, 255],
+            info(1, 1, 4, FrameAlpha::Opaque),
+            2,
+            1,
+        ))
+        .unwrap();
     assert!(mailbox.publish(old).is_err());
     mailbox.clear(1).unwrap();
     let current = mailbox.snapshot().unwrap().unwrap();
-    assert_eq!(current.identity, FrameIdentity { session_epoch: 2, output_epoch: 1, generation: 1 });
+    assert_eq!(
+        current.identity,
+        FrameIdentity {
+            session_epoch: 2,
+            output_epoch: 1,
+            generation: 1
+        }
+    );
     assert_eq!(current.pixels(), &[5, 6, 7, 255]);
 }
 
@@ -40,9 +64,23 @@ fn old_frame_and_shutdown_cannot_replace_or_clear_a_new_session_baseline() {
 fn replacement_and_close_preserve_an_already_acquired_cpu_lease() {
     let mailbox = FrameMailbox::new();
     mailbox.activate(3).unwrap();
-    mailbox.publish(lease(vec![3, 4, 5, 255], info(1, 1, 4, FrameAlpha::Opaque), 3, 1)).unwrap();
+    mailbox
+        .publish(lease(
+            vec![3, 4, 5, 255],
+            info(1, 1, 4, FrameAlpha::Opaque),
+            3,
+            1,
+        ))
+        .unwrap();
     let held = mailbox.snapshot().unwrap().unwrap();
-    mailbox.publish(lease(vec![7, 8, 9, 255], info(1, 1, 4, FrameAlpha::Opaque), 3, 2)).unwrap();
+    mailbox
+        .publish(lease(
+            vec![7, 8, 9, 255],
+            info(1, 1, 4, FrameAlpha::Opaque),
+            3,
+            2,
+        ))
+        .unwrap();
     mailbox.clear(3).unwrap();
     assert!(mailbox.snapshot().unwrap().is_none());
     assert_eq!(held.pixels(), &[3, 4, 5, 255]);
@@ -156,7 +194,12 @@ fn filter_configuration_rolls_back_and_reuses_uploaded_input() {
     assert_eq!((renderer.output_width, renderer.output_height), old_output);
 
     mailbox
-        .publish(lease(vec![1, 2, 3, 255], info(1, 1, 4, FrameAlpha::Opaque), 1, 1))
+        .publish(lease(
+            vec![1, 2, 3, 255],
+            info(1, 1, 4, FrameAlpha::Opaque),
+            1,
+            1,
+        ))
         .unwrap();
     renderer
         .render(WgpuFrameContext {
@@ -199,7 +242,10 @@ fn filter_configuration_rolls_back_and_reuses_uploaded_input() {
         read_pixels(&device, &queue, renderer.output_texture.as_ref().unwrap()),
         [200, 60, 10, 255]
     );
-    assert_eq!(renderer.output_texture.as_ref(), renderer.input_texture.as_ref());
+    assert_eq!(
+        renderer.output_texture.as_ref(),
+        renderer.input_texture.as_ref()
+    );
     assert!(renderer.filtered_texture.is_none());
     assert!(renderer.configure_filter(&config, Some(invalid)).is_err());
     renderer
@@ -234,32 +280,63 @@ fn native_pixels_keep_row_padding_and_present_bgra_linear_ignored_alpha_after_re
         power_preference: wgpu::PowerPreference::HighPerformance,
         compatible_surface: None,
         force_fallback_adapter: false,
-    })).unwrap();
+    }))
+    .unwrap();
     assert_ne!(adapter.get_info().device_type, wgpu::DeviceType::Cpu);
     let (device, queue) = pollster::block_on(adapter.request_device(&Default::default())).unwrap();
     let mailbox = FrameMailbox::new();
     mailbox.activate(7).unwrap();
     let frame = lease(
-        vec![128, 0, 0, 0, 0, 128, 0, 1, 42, 42, 42, 42,
-             0, 0, 128, 7, 128, 128, 128, 17, 42, 42, 42, 42],
+        vec![
+            128, 0, 0, 0, 0, 128, 0, 1, 42, 42, 42, 42, 0, 0, 128, 7, 128, 128, 128, 17, 42, 42,
+            42, 42,
+        ],
         FrameInfo {
-            width: 2, height: 2, logical_width: 2, logical_height: 2, stride: 12,
-            format: FrameFormat::Bgra8Linear { alpha: FrameAlpha::Ignored },
+            width: 2,
+            height: 2,
+            logical_width: 2,
+            logical_height: 2,
+            stride: 12,
+            format: FrameFormat::Bgra8Linear {
+                alpha: FrameAlpha::Ignored,
+            },
             rows: FrameRowOrder::BottomToTop,
-        }, 7, 1,
+        },
+        7,
+        1,
     );
     mailbox.publish(frame).unwrap();
     let mut renderer = ManagerStageRenderer::with_dxc_path(mailbox.clone(), PathBuf::new());
-    let expected = [188u8, 0, 0, 255, 188, 188, 188, 255,
-                    0, 0, 188, 255, 0, 188, 0, 255];
+    let expected = [
+        188u8, 0, 0, 255, 188, 188, 188, 255, 0, 0, 188, 255, 0, 188, 0, 255,
+    ];
     for _ in 0..2 {
-        renderer.setup(WgpuFrameContext { device: &device, queue: &queue }).unwrap();
-        renderer.render(WgpuFrameContext { device: &device, queue: &queue }).unwrap();
+        renderer
+            .setup(WgpuFrameContext {
+                device: &device,
+                queue: &queue,
+            })
+            .unwrap();
+        renderer
+            .render(WgpuFrameContext {
+                device: &device,
+                queue: &queue,
+            })
+            .unwrap();
         let actual = read_pixels(&device, &queue, renderer.output_texture.as_ref().unwrap());
-        assert!(actual.iter().zip(expected).all(|(value, expected)| value.abs_diff(expected) <= 1));
+        assert!(actual
+            .iter()
+            .zip(expected)
+            .all(|(value, expected)| value.abs_diff(expected) <= 1));
         renderer.teardown();
     }
     // Rebuilding the GPU does not discard the immutable complete CPU baseline.
-    assert_eq!(mailbox.snapshot().unwrap().unwrap().identity,
-        FrameIdentity { session_epoch: 7, output_epoch: 1, generation: 1 });
+    assert_eq!(
+        mailbox.snapshot().unwrap().unwrap().identity,
+        FrameIdentity {
+            session_epoch: 7,
+            output_epoch: 1,
+            generation: 1
+        }
+    );
 }

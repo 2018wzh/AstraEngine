@@ -4,7 +4,7 @@
 
 ## 当前结论
 
-- 已实现 `astra-emu-abi` C 函数表、typed 配置校验、会话/输出/帧代次、独立 CPU lease 和可选诊断桥，并运行真实 C→Rust DLL 边界 smoke。RFVP、Manager 与其他核心的产品调用链仍在迁移；GPU 交接及七核心验收尚未完成。
+- 已实现 C ABI v2、显式 module owner、typed 配置、CPU lease 与取消/重试边界；Manager 已切换原生查询/输入/观察路径。RFVP 首个 D3D12 交付正在实现，七核心结局与完整产品视听验收尚未完成。
 - 本次 Windows 交付覆盖 RFVP/FVP、Siglus、Artemis、Musica、Sena、Ethornell 和 KrKr；全部重新适配，最大化复用原生能力，最小化修改。CMVS 正在独立开发，本批不处理、不触碰其工作树。
 - RFVP 先完成 CPU 完整路径，再独立实现并验收首个 GPU 交付后端；只有 Musica 实现并验证文字 Hook。资源替换 Hook 暂不做，其他核心不新增文字 Hook。
 - Slint Manager 重做精炼 Material 3 界面，同窗口切换管理与游戏；迁移全部既有滤镜，提供内置 Luau 翻译扩展和本地扩展管理。
@@ -18,13 +18,14 @@
 | Engine/Runtime | 独立 EngineSession、typed 任务/保存、有界诊断与 worker/access plan 复用 | 完整产品的作用域、媒体、恢复、性能与平台组合验收 |
 | AstraVN/Player | VnSession、Yakui、公共 Canvas、媒体流、typed 输入/存读档与 Luau 显式 IO | 实际授权 IO、设备音频、跨平台输入/媒体/挂起恢复及长流程 |
 | Editor/Agent | GPUI、版本化事务、增量撤销、后台诊断、真实 Player 预览与 ACP/MCP | `--mcp` 持有 stdin 的关闭挂起；图/时间线/Agent 工作流、片段 seek 与三桌面验收 |
-| FVP | 原 RFVP GPU/媒体/保存；输入、V1/文字修复；非阻塞 read-into、三槽背压与恢复锚点 | 原生 Embedded、新 C ABI、完整 UI CPU 帧、R 配置、GPU 交接与结局验收 |
-| Siglus | 原 renderer/Kira/实时时钟；单 staging Poll、三槽取消/超时与独立完成轮询 | 新 ABI 最小适配、原生流程与结局；GPU 警告及长期资源归因 |
-| Artemis | 原 Vulkan/FFmpeg；PF8/AVIO 修复、显式硬件策略与成功恢复通知 | 新 ABI 最小适配、商业窗口/媒体/存读档与结局；既有上游缺陷单独归因 |
-| Musica/SDK | 公共文字/媒体/画布、纹理驻留；已有标题/剧情/选择/系统页/自有保存 | 新 ABI、文字 Hook 与共享 Luau 闭环、完整机制整合、逻辑尺寸收敛与结局 |
-| Sena | 已指定 sena-rs 原生来源，上游 README 以 Koikake 为目标 | 嵌入能力核对、新 ABI/Surface 最小适配、代表流程及结局 |
-| Ethornell | 已指定 ethornell-rs 的 BGI 原生来源 | 嵌入能力与许可核对、新 ABI/Surface 最小适配、代表流程及结局 |
-| KrKr | 既有 Kirikiroid2-web 原生适配与子进程传输成果 | 同进程重新适配、生命周期/关闭重开、原插件能力复用与结局 |
+| Manager | 原生 C ABI、驻留库、同进程关闭重开、完整滤镜链、M3 页面与本地 Luau 管理；真实外部 DLL Headless 检查通过 | 当前桌面锁屏，实际窗口输入、明暗主题与全部滤镜待验收；GPU import 整合中 |
+| FVP | 原生 App/VM/媒体/保存，完整 UI CPU 帧与 R 配置；公开硬件、RFVS 缩略图、输入与驻留 DLL 重开验证 | D3D12 GPU 交付、真实窗口/电影/设备声音及商业结局 |
+| Siglus | 新 C ABI 适配与原 renderer/Kira/实时时钟、显式 decoder/device join；实际 GPU/lease 检查 | 正在验证原生标题→电影→正文及存读档；结局和长期资源归因未完成 |
+| Artemis | 原 Vulkan/FFmpeg 与新 ABI 适配已整合，设备 worker 显式 join；原 PF8/AVIO 修复保留 | 最终独立构建单元、商业窗口/媒体/存读档与结局；上游问题单独归因 |
+| Musica/SDK | 原生 worker、独立音频、显式 graphics owner、同步文字 Hook 与共享 Luau；235 项相关检查通过 | 实际游戏 Hook/存读档闭环、完整机制与逻辑尺寸收敛、电影/设备声音及结局 |
+| Sena | 原生 Koikake Embedded、完整 GPU 场景 CPU 交付、ABI v2；适配构建与 4 项普通测试通过 | 授权 Koikake 游戏输入、真实代表流程/设备音频与结局，未扩大为所有 SoftPAL |
+| Ethornell | 原生 BGI Embedded 与 ABI v2 本地构建通过，原音频 decoder/device 生命周期修复 | 许可证覆盖待澄清（workspace 声明 MPL、crate 未继承且无许可文件）；适配未推送，真实流程与结局未验收 |
+| KrKr | 原生 C ABI，无 child/IPC；实际 TJS、PNG/文字、OpenAL 循环、取消及同 DLL 重开/持帧验证；运行目录打包通过 | Manager 窗口/交互模态与商业流程、原插件覆盖和结局；不能以公开夹具代替 |
 | CMVS | 独立开发中的原格式/VM/归档与 SDK 接入 | 本批不修改、整合或验收，保留来源成果 |
 | 终之空转换 | Story IR、37 路线输入生成、Classic/Modern 私有包与部分硬件运行 | Classic/Modern 全部 37 路线及系统/演出/视听验收 |
 | 平台/发行 | Windows 为主要实测环境，Linux/Android 有历史记录 | 当前整合基线四平台代表流程、macOS/Android 真机、设备音频及依赖/许可核验 |
@@ -75,6 +76,6 @@ fork/master 承载独立原生改进，astra 相对该基线仅一个必要适�
 - 主机硬件 GPU/音频为本批 Windows 正式验收环境；headless 先覆盖自动化可达流程，再运行实际窗口、输入、滤镜、原生菜单和设备音频。软件 adapter、NullAudio、首帧和公开夹具不能替代商业流程及结局。
 - 性能记录包含实际 R/O、帧交付方式、回读/上传字节、CPU/GPU 时间、帧池等待和显示延迟；按相同硬件、驱动、Release、游戏版本及语义场景分别记录冷启动与预热。短时平稳不作为长期无泄露结论。
 
-本轮已执行 `astra-emu-abi --features diagnostic-bridge` 的 6 项测试及 all-targets Clippy（`-D warnings`）。真实 C 程序通过生成的头文件调用 Rust DLL，验证 typed 配置、原分配 CPU 像素、跨线程 release、旧会话代次拒绝后的释放、文字输入模态回调与 open 前取消查询；该 smoke 不代表游戏或 GPU 验收。Slint 页面改动已整合，实窗交互、完整产品构建和各核心结局尚未验收。
+已执行：共享 ABI 7 项测试与 Clippy，observability 9 项测试与 Clippy；Manager 77 项检查及真实独立 DLL 配置/输入/帧/重开/拒绝窗口 smoke；Musica/SDK 235 项检查；TLS 等待中的原生取消与共享 Luau 队列恢复检查。本地扩展安装、启用、配置、禁用通过真实 CLI 验证。原生核心的独立硬件证据分别留在其修改说明与 ignored 输出中；当前没有核心被记为结局通过。前台为 Windows 默认锁屏界面，实窗交互未验收。CPAL 0.15/0.18 的 ALSA 绑定已对齐，WSL 编译与设备枚举通过，不代表 Linux 播放验收。
 
 操作入口：[开发手册](../manual/development.md)、[AstraEMU 客户端](../manual/astraemu-client.md)、[Editor](../../Editor/README.md)、[NativeVN 样例](../../Examples/NativeVN/README.md)、[终之空资料](../samples/tsuinosora-modernization/README.md)。

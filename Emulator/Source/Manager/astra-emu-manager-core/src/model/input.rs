@@ -1,8 +1,4 @@
-
-use super::{
-    FamilyError, FamilyResult, MAX_INPUT_EVENTS, MAX_TEXT_BYTES,
-    validate_dimensions,
-};
+use super::{validate_dimensions, FamilyError, FamilyResult, MAX_INPUT_EVENTS, MAX_TEXT_BYTES};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WindowState {
@@ -15,7 +11,12 @@ pub struct WindowState {
 
 impl WindowState {
     pub fn validate(&self) -> FamilyResult<()> {
-        if !self.scale_factor.is_finite() || self.scale_factor <= 0.0 { return Err(FamilyError::invalid("ASTRA_EMU_WINDOW_SCALE", "invalid window scale factor")); }
+        if !self.scale_factor.is_finite() || self.scale_factor <= 0.0 {
+            return Err(FamilyError::invalid(
+                "ASTRA_EMU_WINDOW_SCALE",
+                "invalid window scale factor",
+            ));
+        }
         validate_dimensions(self.width, self.height)
     }
 }
@@ -148,7 +149,9 @@ pub enum PointerButton {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum FamilyEvent {
-    Control { command: u32 },
+    Control {
+        command: u32,
+    },
     Key {
         code: KeyCode,
         state: KeyState,
@@ -185,7 +188,9 @@ pub enum FamilyEvent {
         width: u32,
         height: u32,
     },
-    WindowScale { factor: f64 },
+    WindowScale {
+        factor: f64,
+    },
     WindowVisibility {
         visible: bool,
     },
@@ -211,7 +216,9 @@ impl FamilyEvent {
                 "text input exceeds the ABI bound",
             )),
             Self::WindowResized { width, height } => validate_dimensions(*width, *height),
-            Self::WindowScale { factor } if !factor.is_finite() || *factor <= 0.0 => Err(FamilyError::invalid("ASTRA_EMU_WINDOW_SCALE", "invalid window scale factor")),
+            Self::WindowScale { factor } if !factor.is_finite() || *factor <= 0.0 => Err(
+                FamilyError::invalid("ASTRA_EMU_WINDOW_SCALE", "invalid window scale factor"),
+            ),
             _ => Ok(()),
         }
     }
@@ -229,4 +236,3 @@ pub(crate) fn validate_events(events: &[FamilyEvent]) -> FamilyResult<()> {
     }
     Ok(())
 }
-

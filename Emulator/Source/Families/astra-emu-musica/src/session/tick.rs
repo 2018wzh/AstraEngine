@@ -124,11 +124,19 @@ impl MusicaSession {
             }
         }
         let event = self.vm.step(tick).map_err(vm_error)?;
-        let hooked = self.replacement.as_ref().is_some_and(|service| service.0.text.is_some())
-            && matches!(event, Some(MusicaVmEvent::Message { .. } | MusicaVmEvent::Choice));
+        let hooked = self
+            .replacement
+            .as_ref()
+            .is_some_and(|service| service.0.text.is_some())
+            && matches!(
+                event,
+                Some(MusicaVmEvent::Message { .. } | MusicaVmEvent::Choice)
+            );
         let event = self.semantic_event(event)?;
         let changed = self.apply_event(event)?;
-        if hooked { self.update_pause()?; }
+        if hooked {
+            self.update_pause()?;
+        }
         Ok(changed || visual_completion)
     }
 

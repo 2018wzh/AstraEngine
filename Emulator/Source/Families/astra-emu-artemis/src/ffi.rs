@@ -312,13 +312,9 @@ unsafe extern "C" fn state(session: Session, out: *mut SessionState, error: *mut
     boundary(error, || {
         let owner = unsafe { owner(session)? };
         let snapshot = owner.snapshot.lock();
-        let mut value = SessionState {
-            state: snapshot.state,
-            reserved: 0,
-            context_epoch: owner.context.load(Ordering::Acquire),
-            output_epoch: snapshot.identity.output_epoch,
-            error: Error::default(),
-        };
+        let mut value = SessionState { state: snapshot.state, flags: 0, context_epoch: owner.context.load(Ordering::Acquire),
+        output_epoch: snapshot.identity.output_epoch,
+        error: Error::default(), };
         if let Some(error) = &snapshot.error {
             value.error.set(error.code, &error.message);
         }

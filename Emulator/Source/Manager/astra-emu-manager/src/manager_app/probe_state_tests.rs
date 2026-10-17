@@ -2,10 +2,17 @@ use super::*;
 
 use crate::test_native::{self, Fixture};
 
-fn provider(plugin_id: &'static str, confidence_permyriad: u16) -> astra_emu_manager_core::LoadedFamilyPlugin {
+fn provider(
+    plugin_id: &'static str,
+    confidence_permyriad: u16,
+) -> astra_emu_manager_core::LoadedFamilyPlugin {
     provider_with_marker(plugin_id, confidence_permyriad, "match")
 }
-fn provider_with_marker(plugin_id: &'static str, confidence_permyriad: u16, marker: &'static str) -> astra_emu_manager_core::LoadedFamilyPlugin {
+fn provider_with_marker(
+    plugin_id: &'static str,
+    confidence_permyriad: u16,
+    marker: &'static str,
+) -> astra_emu_manager_core::LoadedFamilyPlugin {
     let mut fixture = Fixture::new(plugin_id, "fixture", "fixture");
     fixture.confidence = u32::from(confidence_permyriad);
     fixture.marker = Some(marker);
@@ -32,7 +39,8 @@ fn imported_game_selection_loads_its_input_mapping() {
     let root = tempfile::tempdir().unwrap();
     let path = game(root.path());
     let mut app = controller(root.path());
-    app.registry.register_provider(move || provider("test-a", 9_000))
+    app.registry
+        .register_provider(move || provider("test-a", 9_000))
         .unwrap();
     app.input_mapping.deadzone = GamepadDeadzone::High;
     let model = app.add_game_directory(&path).unwrap();
@@ -45,7 +53,8 @@ fn unsupported_import_reports_the_selected_directory_with_existing_games() {
     let root = tempfile::tempdir().unwrap();
     let path = game(root.path());
     let mut app = controller(root.path());
-    app.registry.register_provider(move || provider("test-a", 9_000))
+    app.registry
+        .register_provider(move || provider("test-a", 9_000))
         .unwrap();
     app.add_game_directory(&path).unwrap();
     let unsupported = root.path().join("unsupported");
@@ -63,7 +72,8 @@ fn scanning_stops_inside_a_recognized_game() {
     std::fs::create_dir_all(&assets).unwrap();
     std::fs::write(assets.join("match"), b"archive marker").unwrap();
     let mut app = controller(root.path());
-    app.registry.register_provider(move || provider("test-a", 9_000))
+    app.registry
+        .register_provider(move || provider("test-a", 9_000))
         .unwrap();
     let imported = app.scan_paths(&[root.path().into(), assets]).unwrap();
     assert_eq!(imported, vec![path_id(&path)]);
@@ -77,7 +87,8 @@ fn importing_a_parent_keeps_the_existing_game_id_and_settings() {
     let alias = PathBuf::from(format!("{}{}", path.display(), std::path::MAIN_SEPARATOR));
     let id = path_id(&alias);
     let mut app = controller(root.path());
-    app.registry.register_provider(move || provider("test-a", 9_000))
+    app.registry
+        .register_provider(move || provider("test-a", 9_000))
         .unwrap();
     app.library
         .add_game(&GameRecord {
@@ -125,7 +136,8 @@ fn scanning_existing_path_aliases_keeps_both_records_without_a_location_conflict
     let path = game(root.path());
     let alias = root.path().join(".").join("game");
     let mut app = controller(root.path());
-    app.registry.register_provider(move || provider("test-a", 9_000))
+    app.registry
+        .register_provider(move || provider("test-a", 9_000))
         .unwrap();
     for (id, location) in [("original", &alias), ("canonical", &path)] {
         app.library
@@ -166,7 +178,8 @@ fn unavailable_game_does_not_block_library_startup_or_lose_metadata() {
     let path = game(root.path());
     let id = path_id(&path);
     let mut app = controller(root.path());
-    app.registry.register_provider(move || provider("test-a", 9_000))
+    app.registry
+        .register_provider(move || provider("test-a", 9_000))
         .unwrap();
     scan_once(&mut app, &path);
     app.library
@@ -198,7 +211,8 @@ fn selected_probe_is_cleared_on_no_match() {
             added_at_unix_ms: 7,
         })
         .unwrap();
-    app.registry.register_provider(move || provider("test-a", 9_000))
+    app.registry
+        .register_provider(move || provider("test-a", 9_000))
         .unwrap();
     scan_once(&mut app, &game_path);
 
@@ -235,13 +249,15 @@ fn ambiguous_probe_clears_old_candidate_and_rejects_old_choice_after_no_match() 
     let root = tempfile::tempdir().unwrap();
     let game_path = game(root.path());
     let mut app = controller(root.path());
-    app.registry.register_provider(move || provider("test-a", 9_000))
+    app.registry
+        .register_provider(move || provider("test-a", 9_000))
         .unwrap();
     scan_once(&mut app, &game_path);
 
     let id = path_id(&game_path);
     app.selected_case_id = Some(id.clone());
-    app.registry.register_provider(move || provider("test-b", 8_000))
+    app.registry
+        .register_provider(move || provider("test-b", 8_000))
         .unwrap();
     scan_once(&mut app, &game_path);
 
@@ -279,7 +295,8 @@ fn selected_probe_is_recreated_after_match_returns() {
     let root = tempfile::tempdir().unwrap();
     let game_path = game(root.path());
     let mut app = controller(root.path());
-    app.registry.register_provider(move || provider("test-a", 9_000))
+    app.registry
+        .register_provider(move || provider("test-a", 9_000))
         .unwrap();
     scan_once(&mut app, &game_path);
 
@@ -308,13 +325,15 @@ fn rescan_replaces_stale_provider_choice_with_current_candidate() {
     let game_path = game(root.path());
     std::fs::rename(game_path.join("match"), game_path.join("marker-a")).unwrap();
     let mut app = controller(root.path());
-    app.registry.register_provider(move || provider_with_marker("test-a", 9_000, "marker-a"))
+    app.registry
+        .register_provider(move || provider_with_marker("test-a", 9_000, "marker-a"))
         .unwrap();
     scan_once(&mut app, &game_path);
 
     let id = path_id(&game_path);
     app.selected_case_id = Some(id.clone());
-    app.registry.register_provider(move || provider_with_marker("test-b", 8_000, "marker-b"))
+    app.registry
+        .register_provider(move || provider_with_marker("test-b", 8_000, "marker-b"))
         .unwrap();
     std::fs::write(game_path.join("marker-b"), b"marker-b").unwrap();
     scan_once(&mut app, &game_path);

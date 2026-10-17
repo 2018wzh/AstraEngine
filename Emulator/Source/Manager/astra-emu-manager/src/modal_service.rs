@@ -72,7 +72,6 @@ impl ModalBridge {
         self.0.epoch
     }
 
-
     pub fn take_ui_update(&self) -> Option<ModalUiUpdate> {
         let mut state = self.0.state.lock();
         if let Some(id) = state.dismissed.take() {
@@ -120,8 +119,14 @@ impl ModalBridge {
         (self.0.wake)();
     }
 
-    pub fn request(&self, request: ModalRequest) -> FamilyResult<ModalResponse> { self.request_if(request, || true) }
-    pub fn request_if(&self, request: ModalRequest, valid: impl Fn() -> bool) -> FamilyResult<ModalResponse> {
+    pub fn request(&self, request: ModalRequest) -> FamilyResult<ModalResponse> {
+        self.request_if(request, || true)
+    }
+    pub fn request_if(
+        &self,
+        request: ModalRequest,
+        valid: impl Fn() -> bool,
+    ) -> FamilyResult<ModalResponse> {
         request.validate()?;
         let mut state = self.0.state.lock();
         if self.is_cancelled() || !valid() {
@@ -171,10 +176,14 @@ fn stale_response() -> FamilyError {
 }
 
 impl ModalBridge {
-    pub fn is_cancelled(&self) -> bool { self.0.cancelled.load(Ordering::Acquire) }
+    pub fn is_cancelled(&self) -> bool {
+        self.0.cancelled.load(Ordering::Acquire)
+    }
     pub fn invalidate_pending(&self) {
         let mut state = self.0.state.lock();
-        if let Some(pending) = state.pending.take() { state.dismissed = Some(pending.id); }
+        if let Some(pending) = state.pending.take() {
+            state.dismissed = Some(pending.id);
+        }
         self.0.completed.notify_all();
         drop(state);
         (self.0.wake)();

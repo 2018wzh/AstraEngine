@@ -91,7 +91,6 @@ pub(crate) fn validate_symbol(name: &str, value: &str) -> FamilyResult<()> {
     Ok(())
 }
 
-
 pub(crate) fn validate_game_path(path: &str) -> FamilyResult<()> {
     if path.is_empty() || path.len() > MAX_GAME_PATH_BYTES || path.contains('\0') {
         return Err(FamilyError::invalid(

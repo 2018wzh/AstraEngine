@@ -153,8 +153,5 @@ pub fn resolve_config(
                 .unwrap_or(&field.default)
                 .clone(),
         })
-        .collect::<Vec<_>>()
-        .into())
+        .collect::<Vec<_>>())
 }
-
-

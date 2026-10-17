@@ -1,6 +1,6 @@
 //! Typed startup configuration. Empty game ID denotes core defaults.
-use crate::{Library, LibraryError};
 use crate::model::{resolve_config, ConfigEntry, ConfigField};
+use crate::{Library, LibraryError};
 use rusqlite::{params, OptionalExtension};
 
 impl Library {
@@ -21,8 +21,7 @@ impl Library {
                 values.push(entry);
             }
         }
-        Ok(resolve_config(schema, &values)
-            .map_err(LibraryError::FamilyConfiguration)?)
+        resolve_config(schema, &values).map_err(LibraryError::FamilyConfiguration)
     }
 
     fn read_family_configuration(

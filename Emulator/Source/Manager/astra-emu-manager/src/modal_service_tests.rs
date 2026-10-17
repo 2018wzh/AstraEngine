@@ -5,7 +5,7 @@ fn request(input: bool) -> ModalRequest {
     ModalRequest {
         caption: "選択".into(),
         message: "原生服务".into(),
-        buttons: vec!["継続".into(), "戻る".into()].into(),
+        buttons: vec!["継続".into(), "戻る".into()],
         initial_text: if input { Some("初期".into()) } else { None },
     }
 }

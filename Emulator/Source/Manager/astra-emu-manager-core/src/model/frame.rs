@@ -1,5 +1,11 @@
-use super::{FamilyError, FamilyResult, validate_dimensions};
-use std::{fmt, sync::{Arc, atomic::{AtomicU64, Ordering}}};
+use super::{validate_dimensions, FamilyError, FamilyResult};
+use std::{
+    fmt,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+};
 static NEXT_SESSION_EPOCH: AtomicU64 = AtomicU64::new(1);
 
 /// Allocate in the host, then pass the value into the family open request.
@@ -89,7 +95,9 @@ pub struct FrameIdentity {
 
 impl FrameIdentity {
     pub fn validate(&self, completed: bool) -> FamilyResult<()> {
-        if self.session_epoch == 0 || (completed && (self.output_epoch == 0 || self.generation == 0)) {
+        if self.session_epoch == 0
+            || (completed && (self.output_epoch == 0 || self.generation == 0))
+        {
             return Err(invalid(
                 "ASTRA_EMU_FAMILY_FRAME_GENERATION",
                 "frame epoch or completed generation is zero",
@@ -98,9 +106,18 @@ impl FrameIdentity {
         Ok(())
     }
 }
-trait PixelBytes: Send + Sync { fn bytes(&self) -> &[u8]; }
-struct PixelOwner<T> { value: T, bytes: fn(&T) -> &[u8] }
-impl<T: Send + Sync> PixelBytes for PixelOwner<T> { fn bytes(&self) -> &[u8] { (self.bytes)(&self.value) } }
+trait PixelBytes: Send + Sync {
+    fn bytes(&self) -> &[u8];
+}
+struct PixelOwner<T> {
+    value: T,
+    bytes: fn(&T) -> &[u8],
+}
+impl<T: Send + Sync> PixelBytes for PixelOwner<T> {
+    fn bytes(&self) -> &[u8] {
+        (self.bytes)(&self.value)
+    }
+}
 #[derive(Clone)]
 pub struct FrameLease {
     pub info: FrameInfo,
@@ -109,20 +126,48 @@ pub struct FrameLease {
     pixels: Arc<dyn PixelBytes>,
 }
 impl fmt::Debug for FrameLease {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.debug_struct("FrameLease").field("info", &self.info).field("identity", &self.identity).finish() }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FrameLease")
+            .field("info", &self.info)
+            .field("identity", &self.identity)
+            .finish()
+    }
 }
 impl FrameLease {
-    pub fn from_owner<T: Send + Sync + 'static>(value: T, bytes: fn(&T) -> &[u8], info: FrameInfo, identity: FrameIdentity) -> FamilyResult<Self> {
+    pub fn from_owner<T: Send + Sync + 'static>(
+        value: T,
+        bytes: fn(&T) -> &[u8],
+        info: FrameInfo,
+        identity: FrameIdentity,
+    ) -> FamilyResult<Self> {
         info.validate()?;
         identity.validate(true)?;
-        if info.required_bytes() != Some(bytes(&value).len()) { return Err(invalid("ASTRA_EMU_FRAME_BYTES", "invalid frame byte count")); }
-        Ok(Self { info, identity, timestamp_ns: 0, pixels: Arc::new(PixelOwner { value, bytes }) })
+        if info.required_bytes() != Some(bytes(&value).len()) {
+            return Err(invalid("ASTRA_EMU_FRAME_BYTES", "invalid frame byte count"));
+        }
+        Ok(Self {
+            info,
+            identity,
+            timestamp_ns: 0,
+            pixels: Arc::new(PixelOwner { value, bytes }),
+        })
     }
-    pub fn from_vec(value: Vec<u8>, info: FrameInfo, identity: FrameIdentity) -> FamilyResult<Self> { Self::from_owner(value, Vec::as_slice, info, identity) }
-    pub fn pixels(&self) -> &[u8] { self.pixels.bytes() }
+    pub fn from_vec(
+        value: Vec<u8>,
+        info: FrameInfo,
+        identity: FrameIdentity,
+    ) -> FamilyResult<Self> {
+        Self::from_owner(value, Vec::as_slice, info, identity)
+    }
+    pub fn pixels(&self) -> &[u8] {
+        self.pixels.bytes()
+    }
     pub fn validate(&self) -> FamilyResult<()> {
-        self.info.validate()?; self.identity.validate(true)?;
-        if self.info.required_bytes() != Some(self.pixels().len()) { return Err(invalid("ASTRA_EMU_FRAME_BYTES", "invalid frame byte count")); }
+        self.info.validate()?;
+        self.identity.validate(true)?;
+        if self.info.required_bytes() != Some(self.pixels().len()) {
+            return Err(invalid("ASTRA_EMU_FRAME_BYTES", "invalid frame byte count"));
+        }
         Ok(())
     }
 }
@@ -155,10 +200,24 @@ impl FramePoll {
         }
     }
 }
-fn invalid(code: &str, message: &str) -> FamilyError { FamilyError::invalid(code, message) }
+fn invalid(code: &str, message: &str) -> FamilyError {
+    FamilyError::invalid(code, message)
+}
 impl From<astra_emu_abi::FrameIdentity> for FrameIdentity {
-    fn from(value: astra_emu_abi::FrameIdentity) -> Self { Self { session_epoch: value.session_epoch, output_epoch: value.output_epoch, generation: value.generation } }
+    fn from(value: astra_emu_abi::FrameIdentity) -> Self {
+        Self {
+            session_epoch: value.session_epoch,
+            output_epoch: value.output_epoch,
+            generation: value.generation,
+        }
+    }
 }
 impl From<FrameIdentity> for astra_emu_abi::FrameIdentity {
-    fn from(value: FrameIdentity) -> Self { Self { session_epoch: value.session_epoch, output_epoch: value.output_epoch, generation: value.generation } }
+    fn from(value: FrameIdentity) -> Self {
+        Self {
+            session_epoch: value.session_epoch,
+            output_epoch: value.output_epoch,
+            generation: value.generation,
+        }
+    }
 }

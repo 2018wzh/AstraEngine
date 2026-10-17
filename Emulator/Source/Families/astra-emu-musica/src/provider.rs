@@ -203,7 +203,9 @@ impl MusicaProvider {
         request: OpenRequest,
         replacement: Option<crate::native::text::TextBridge>,
     ) -> FamilyResult<(OpenResponse, MusicaSession)> {
-        if let Some(service) = &replacement { service.check_cancelled()?; }
+        if let Some(service) = &replacement {
+            service.check_cancelled()?;
+        }
         let descriptor = musica_descriptor();
         descriptor.validate()?;
         request.validate()?;
@@ -316,7 +318,9 @@ impl MusicaProvider {
         let root = Path::new(request.game_path.as_str());
         let (archive, texture_overrides) =
             mount_musica_with_texture_overrides(root, Path::new(&profile)).map_err(core_error)?;
-        if let Some(service) = &replacement { service.check_cancelled()?; }
+        if let Some(service) = &replacement {
+            service.check_cancelled()?;
+        }
         let archive = Arc::new(archive);
         let primary_encoding = encoding;
         let imported =
@@ -342,7 +346,9 @@ impl MusicaProvider {
             .unwrap_or(&entry);
         let uri = format!("musica:/scr/{script_name}");
         let loaded = crate::script_loader::load_script(&archive, &uri, primary_encoding)?;
-        if let Some(service) = &replacement { service.check_cancelled()?; }
+        if let Some(service) = &replacement {
+            service.check_cancelled()?;
+        }
         let encoding = loaded.script.encoding;
         let mut vm = MusicaVm::new(uri, loaded.hash, loaded.script, 0)
             .map_err(|_| error("ASTRA_EMU_MUSICA_VM", "entry script cannot be initialized"))?;
@@ -398,7 +404,9 @@ impl MusicaProvider {
                     "global progress cannot be applied",
                 )
             })?;
-        if let Some(service) = &replacement { service.check_cancelled()?; }
+        if let Some(service) = &replacement {
+            service.check_cancelled()?;
+        }
         if self.gpu_instance.is_none() {
             self.gpu_instance = Some(astra_platform_common::native_wgpu_instance().map_err(
                 |cause| {
@@ -424,7 +432,9 @@ impl MusicaProvider {
             texture_overrides,
             encoding,
         )?;
-        if let Some(service) = &replacement { service.check_cancelled()?; }
+        if let Some(service) = &replacement {
+            service.check_cancelled()?;
+        }
         scene.set_text_shadow(text_shadow);
         if title_launch {
             vm.begin_title_launch()
@@ -433,14 +443,18 @@ impl MusicaProvider {
         } else {
             scene.render(vm.state(), restored_message.as_ref(), None)?;
         }
-        if let Some(service) = &replacement { service.check_cancelled()?; }
+        if let Some(service) = &replacement {
+            service.check_cancelled()?;
+        }
         let audio = Audio::start(archive.clone(), request.host.audio_sink.into_option())?;
         audio.set_preferences(audio_preferences)?;
         audio.suspend(!visible || (!focused && !progress_in_background))?;
         if imported.is_some() {
             eden::restore_audio(&audio, vm.state())?;
         }
-        if let Some(service) = &replacement { service.check_cancelled()?; }
+        if let Some(service) = &replacement {
+            service.check_cancelled()?;
+        }
         self.next = self
             .next
             .checked_add(1)

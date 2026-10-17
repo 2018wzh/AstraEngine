@@ -2,15 +2,22 @@ use astra_emu_manager_core::model::{FrameAlpha, FrameFormat, FrameInfo, FrameRow
 
 pub(super) fn input_format(format: FrameFormat) -> wgpu::TextureFormat {
     match format {
-        FrameFormat::Rgba8Srgb { .. } | FrameFormat::Rgba8Linear { .. } => wgpu::TextureFormat::Rgba8Unorm,
-        FrameFormat::Bgra8Srgb { .. } | FrameFormat::Bgra8Linear { .. } => wgpu::TextureFormat::Bgra8Unorm,
+        FrameFormat::Rgba8Srgb { .. } | FrameFormat::Rgba8Linear { .. } => {
+            wgpu::TextureFormat::Rgba8Unorm
+        }
+        FrameFormat::Bgra8Srgb { .. } | FrameFormat::Bgra8Linear { .. } => {
+            wgpu::TextureFormat::Bgra8Unorm
+        }
     }
 }
 
 fn flags(info: FrameInfo) -> u32 {
     u32::from(info.rows == FrameRowOrder::BottomToTop)
         | (u32::from(info.format.alpha() == FrameAlpha::Ignored) << 1)
-        | (u32::from(matches!(info.format, FrameFormat::Rgba8Linear { .. } | FrameFormat::Bgra8Linear { .. })) << 2)
+        | (u32::from(matches!(
+            info.format,
+            FrameFormat::Rgba8Linear { .. } | FrameFormat::Bgra8Linear { .. }
+        )) << 2)
 }
 
 #[derive(Default)]
@@ -45,13 +52,20 @@ impl PixelPresentation {
             queue.write_buffer(&resources.uniform, 0, &flags.to_le_bytes());
             resources.flags = Some(flags);
         }
-        if resources.output.as_ref().is_none_or(|(texture, _)| texture.size() != input.size()) {
+        if resources
+            .output
+            .as_ref()
+            .is_none_or(|(texture, _)| texture.size() != input.size())
+        {
             let texture = device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("astra-emu-native-pixel-output"),
-                size: input.size(), mip_level_count: 1, sample_count: 1,
+                size: input.size(),
+                mip_level_count: 1,
+                sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
                 format: wgpu::TextureFormat::Rgba8Unorm,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING
                     | wgpu::TextureUsages::COPY_SRC,
                 view_formats: &[],
             });
@@ -61,10 +75,17 @@ impl PixelPresentation {
         if resources.input.as_ref() != Some(input) {
             let view = input.create_view(&Default::default());
             resources.binding = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("astra-emu-native-pixel-binding"), layout: &resources.layout,
+                label: Some("astra-emu-native-pixel-binding"),
+                layout: &resources.layout,
                 entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
-                    wgpu::BindGroupEntry { binding: 1, resource: resources.uniform.as_entire_binding() },
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: resources.uniform.as_entire_binding(),
+                    },
                 ],
             }));
             resources.input = Some(input.clone());
@@ -75,13 +96,22 @@ impl PixelPresentation {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("astra-emu-native-pixel-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view, resolve_target: None, depth_slice: None,
-                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), store: wgpu::StoreOp::Store },
+                    view,
+                    resolve_target: None,
+                    depth_slice: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Store,
+                    },
                 })],
                 ..Default::default()
             });
             pass.set_pipeline(&resources.pipeline);
-            pass.set_bind_group(0, resources.binding.as_ref().expect("pixel input bound"), &[]);
+            pass.set_bind_group(
+                0,
+                resources.binding.as_ref().expect("pixel input bound"),
+                &[],
+            );
             pass.draw(0..3, 0..1);
         }
         queue.submit([encoder.finish()]);
@@ -95,24 +125,31 @@ impl Resources {
             label: Some("astra-emu-native-pixel-layout"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
-                    binding: 0, visibility: wgpu::ShaderStages::FRAGMENT,
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                        view_dimension: wgpu::TextureViewDimension::D2, multisampled: false,
-                    }, count: None,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 1, visibility: wgpu::ShaderStages::FRAGMENT,
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false,
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
                         min_binding_size: wgpu::BufferSize::new(16),
-                    }, count: None,
+                    },
+                    count: None,
                 },
             ],
         });
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("astra-emu-native-pixels"),
-            source: wgpu::ShaderSource::Wgsl(r#"
+            source: wgpu::ShaderSource::Wgsl(
+                r#"
 @group(0) @binding(0) var image: texture_2d<f32>;
 @group(0) @binding(1) var<uniform> options: vec4<u32>;
 @vertex fn vs(@builtin(vertex_index) index: u32) -> @builtin(position) vec4<f32> {
@@ -135,30 +172,54 @@ impl Resources {
     if (options.x & 2u) != 0u { pixel.a = 1.0; }
     return pixel;
 }
-"#.into()),
+"#
+                .into(),
+            ),
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("astra-emu-native-pixel-pipeline-layout"),
-            bind_group_layouts: &[Some(&layout)], immediate_size: 0,
+            bind_group_layouts: &[Some(&layout)],
+            immediate_size: 0,
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("astra-emu-native-pixel-pipeline"), layout: Some(&pipeline_layout),
+            label: Some("astra-emu-native-pixel-pipeline"),
+            layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
-                module: &shader, entry_point: Some("vs"), compilation_options: Default::default(), buffers: &[],
+                module: &shader,
+                entry_point: Some("vs"),
+                compilation_options: Default::default(),
+                buffers: &[],
             },
             fragment: Some(wgpu::FragmentState {
-                module: &shader, entry_point: Some("fs"), compilation_options: Default::default(),
+                module: &shader,
+                entry_point: Some("fs"),
+                compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
-                    format: wgpu::TextureFormat::Rgba8Unorm, blend: None, write_mask: wgpu::ColorWrites::ALL,
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
-            primitive: Default::default(), depth_stencil: None, multisample: Default::default(),
-            multiview_mask: None, cache: None,
+            primitive: Default::default(),
+            depth_stencil: None,
+            multisample: Default::default(),
+            multiview_mask: None,
+            cache: None,
         });
         let uniform = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("astra-emu-native-pixel-options"), size: 16,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false,
+            label: Some("astra-emu-native-pixel-options"),
+            size: 16,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
         });
-        Self { layout, pipeline, uniform, flags: None, output: None, input: None, binding: None }
+        Self {
+            layout,
+            pipeline,
+            uniform,
+            flags: None,
+            output: None,
+            input: None,
+            binding: None,
+        }
     }
 }

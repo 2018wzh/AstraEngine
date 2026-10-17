@@ -1,4 +1,4 @@
-"""Exercise an independent public Family implementation with the existing Host."""
+"""Exercise a self-scheduled native C ABI core with the production Manager."""
 
 import argparse
 import json
@@ -20,7 +20,7 @@ def run(host: Path) -> None:
         project = Path(temporary)
         (project / "src").mkdir()
         shutil.copyfile(Path(__file__).parent / "tests/fixtures/external_family.rs", project / "src/lib.rs")
-        api = (repo / "Emulator/Source/FamilyApi/astra-emu-family-api").as_posix()
+        api = (repo / "Emulator/Source/FamilyApi/astra-emu-abi").as_posix()
         manifest = f'''[package]
 name = "external-family-probe"
 version = "0.1.0"
@@ -29,8 +29,8 @@ edition = "2024"
 [lib]
 crate-type = ["cdylib"]
 [dependencies]
-abi_stable = "0.11.3"
-astra-emu-family-api = {{ path = {json.dumps(api)}, features = ["diagnostic-bridge"] }}
+astra-emu-abi = {{ path = {json.dumps(api)}, features = ["diagnostic-bridge"] }}
+parking_lot = "0.12"
 tracing = "0.1"
 '''
         (project / "Cargo.toml").write_text(manifest, encoding="utf-8")
@@ -47,7 +47,7 @@ tracing = "0.1"
             ["cargo", "metadata", "--format-version", "1"], cwd=project, env=env, timeout=60
         ))
         astra = {p["name"] for p in metadata["packages"] if p["name"].startswith("astra-")}
-        if astra != {"astra-emu-family-api"}:
+        if astra != {"astra-emu-abi"}:
             raise RuntimeError(f"unexpected engine dependencies: {sorted(astra)}")
         library = "external_family_probe.dll" if os.name == "nt" else (
             "libexternal_family_probe.dylib" if os.sys.platform == "darwin" else "libexternal_family_probe.so"
@@ -58,14 +58,14 @@ tracing = "0.1"
         base = {
             "plugin": str(project / "target/debug" / library), "game": str(game),
             "configuration": [{"id": "intensity", "value": {"Integer": 96}}],
-            "frames": 12, "capture_frames": [0, 4],
+            "frames": 12, "capture_frames": [0, 4], "sample_interval_ms": 10,
             "inputs": [
                 {"frame": 2, "event": {"type": "key", "code": "enter", "pressed": True}},
                 {"frame": 3, "event": {"type": "key", "code": "enter", "pressed": False}},
             ],
         }
         cases = [
-            ("valid", True, {}), ("cold-reopen", True, {}),
+            ("valid", True, {}), ("same-process-reopen", True, {"reopen_count": 2}),
             ("bad-config", False, {"configuration": [{"id": "intensity", "value": {"Integer": 999}}]}),
             ("missing-input", False, {"inputs": []}),
             ("window-icon", False, {"configuration": [
@@ -84,20 +84,24 @@ tracing = "0.1"
                 capture_output=True, text=True, encoding="utf-8", errors="replace"
             )
             if name in {"window-title", "window-icon"}:
-                if "ASTRA_EMU_HEADLESS_WINDOW_COMMAND_UNAVAILABLE" not in result.stderr:
+                if "ASTRA_EMU_WINDOW_SERVICE_UNAVAILABLE" not in result.stderr:
                     raise RuntimeError(f"{name}: Host did not explicitly reject the request")
-                if "EXTERNAL_" in result.stderr:
-                    raise RuntimeError(f"{name}: Family cleanup failed")
+                if "EXTERNAL_INCOMPLETE_FLOW" in result.stderr:
+                    raise RuntimeError(f"{name}: native cleanup failed")
             if (result.returncode == 0) != valid:
                 raise RuntimeError(f"{name}: unexpected Host exit status {result.returncode}")
             if valid:
-                for frame, expected in [(0, (96, 0, 0, 255)), (4, (0, 96, 0, 255))]:
-                    with Image.open(project / f"{name}.png.frame-{frame}.png") as image:
-                        rgba = image.convert("RGBA")
-                        if rgba.size != (2, 2) or set(rgba.getdata()) != {expected}:
-                            raise RuntimeError(f"{name}: frame {frame} pixels differ")
+                outputs = [project / f"{name}.png"]
+                if name == "same-process-reopen":
+                    outputs.append(project / f"{name}.reopen-01.png")
+                for output in outputs:
+                    for frame, expected in [(0, (96, 0, 0, 255)), (4, (0, 96, 0, 255))]:
+                        with Image.open(Path(f"{output}.frame-{frame}.png")) as image:
+                            rgba = image.convert("RGBA")
+                            if rgba.size != (2, 2) or set(rgba.getdata()) != {expected}:
+                                raise RuntimeError(f"{output.name}: sample {frame} pixels differ")
             print(f"{name}: passed", flush=True)
-    print("External Family CPU-frame/NullAudio development regression passed.")
+    print("External native C ABI frame/input/worker/same-process-reopen regression passed.")
 
 
 if __name__ == "__main__":

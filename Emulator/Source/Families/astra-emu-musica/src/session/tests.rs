@@ -379,8 +379,11 @@ fn audio_close_cancels_blocked_write_and_joins_worker() {
         block: true,
         ..Default::default()
     };
-    let mut audio =
-        Audio::start(archive, Some(AudioSink_TO::from_value(sink.clone(), TD_Opaque))).unwrap();
+    let mut audio = Audio::start(
+        archive,
+        Some(AudioSink_TO::from_value(sink.clone(), TD_Opaque)),
+    )
+    .unwrap();
     until(|| sink.writes.load(Ordering::Acquire) > 0);
     let duration = audio.duration(4).unwrap();
     assert!(matches!(
@@ -415,8 +418,11 @@ fn audio_snapshot_timeout_cancels_blocked_worker_and_rejects_late_commands() {
         block: true,
         ..Default::default()
     };
-    let mut audio =
-        Audio::start(archive, Some(AudioSink_TO::from_value(sink.clone(), TD_Opaque))).unwrap();
+    let mut audio = Audio::start(
+        archive,
+        Some(AudioSink_TO::from_value(sink.clone(), TD_Opaque)),
+    )
+    .unwrap();
     until(|| sink.writes.load(Ordering::Acquire) > 0);
     assert_eq!(
         audio.snapshot().err().unwrap().code.as_str(),

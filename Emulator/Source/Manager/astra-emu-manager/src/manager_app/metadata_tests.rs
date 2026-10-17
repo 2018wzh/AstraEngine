@@ -21,7 +21,10 @@ fn damaged_core_keeps_manager_available_and_error_visible() {
     let cores = root.path().join("cores");
     std::fs::create_dir_all(&cores).unwrap();
     std::fs::write(
-        cores.join(format!("astra_emu_broken.{}", std::env::consts::DLL_EXTENSION)),
+        cores.join(format!(
+            "astra_emu_broken.{}",
+            std::env::consts::DLL_EXTENSION
+        )),
         b"not a dynamic library",
     )
     .unwrap();
@@ -36,10 +39,9 @@ fn damaged_core_keeps_manager_available_and_error_visible() {
         "astra_emu_broken.{}",
         std::env::consts::DLL_EXTENSION
     )));
-    assert!(!app.plugin_errors.contains_key(&format!(
-        "avcodec-62.{}",
-        std::env::consts::DLL_EXTENSION
-    )));
+    assert!(!app
+        .plugin_errors
+        .contains_key(&format!("avcodec-62.{}", std::env::consts::DLL_EXTENSION)));
     assert!(app.registry.descriptor("astra.emu.missing").is_none());
     assert!(app
         .rescan()

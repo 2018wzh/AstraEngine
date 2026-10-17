@@ -1,5 +1,8 @@
 use super::*;
-use crate::{model::ProbeRequest, test_native::{self, Fixture}};
+use crate::{
+    model::ProbeRequest,
+    test_native::{self, Fixture},
+};
 use std::path::Path;
 
 #[test]
@@ -7,9 +10,21 @@ fn static_queries_use_same_multi_probe_policy() {
     let mut registry = FamilyProviderRegistry::new();
     let mut first = Fixture::new("a", "fvp", "fvp.hcb");
     first.confidence = 8000;
-    registry.register_provider(test_native::install(0, first)).unwrap();
-    registry.register_provider(test_native::install(1, Fixture::new("b", "fvp", "fvp.hcb"))).unwrap();
-    let selection = registry.probe(&ProbeRequest { game_path: "game".into() }, None, None).unwrap();
+    registry
+        .register_provider(test_native::install(0, first))
+        .unwrap();
+    registry
+        .register_provider(test_native::install(1, Fixture::new("b", "fvp", "fvp.hcb")))
+        .unwrap();
+    let selection = registry
+        .probe(
+            &ProbeRequest {
+                game_path: "game".into(),
+            },
+            None,
+            None,
+        )
+        .unwrap();
     assert!(selection.requires_user_choice());
     assert_eq!(selection.candidates()[0].report.plugin_id, "b");
 }
@@ -17,8 +32,21 @@ fn static_queries_use_same_multi_probe_policy() {
 #[test]
 fn duplicate_static_id_disables_both_queries() {
     let mut registry = FamilyProviderRegistry::new();
-    registry.register_provider(test_native::install(0, Fixture::new("duplicate", "fvp", "fvp.hcb"))).unwrap();
-    assert_eq!(registry.register_provider(test_native::install(1, Fixture::new("duplicate", "fvp", "fvp.hcb"))).unwrap_err(), FamilyLoadError::DuplicatePlugin);
+    registry
+        .register_provider(test_native::install(
+            0,
+            Fixture::new("duplicate", "fvp", "fvp.hcb"),
+        ))
+        .unwrap();
+    assert_eq!(
+        registry
+            .register_provider(test_native::install(
+                1,
+                Fixture::new("duplicate", "fvp", "fvp.hcb")
+            ))
+            .unwrap_err(),
+        FamilyLoadError::DuplicatePlugin
+    );
     assert!(registry.descriptors().next().is_none());
 }
 
@@ -27,7 +55,10 @@ fn diagnostic_initialization_failure_prevents_describe_probe_and_open() {
     let mut fixture = Fixture::new("bad-diagnostics", "fvp", "fvp.hcb");
     fixture.init_error = true;
     let calls = fixture.calls.clone();
-    assert!(matches!(test_native::try_install(2, fixture), Err(FamilyLoadError::Diagnostics)));
+    assert!(matches!(
+        test_native::try_install(2, fixture),
+        Err(FamilyLoadError::Diagnostics)
+    ));
     let calls = calls.lock();
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].name, "initialize");

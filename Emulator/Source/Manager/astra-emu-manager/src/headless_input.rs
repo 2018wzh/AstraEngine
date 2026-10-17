@@ -1,5 +1,5 @@
-use astra_emu_manager_core::model::{FamilyEvent, KeyModifiers, KeyState, PointerButton};
 use astra_emu_manager_core::input_key_code;
+use astra_emu_manager_core::model::{FamilyEvent, KeyModifiers, KeyState, PointerButton};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -28,20 +28,34 @@ impl Input {
             }
         };
         Ok(match self {
-            Self::Control { action } => FamilyEvent::Control { command: match action.as_str() { "pause" => astra_emu_abi::CONTROL_PAUSE, "resume" => astra_emu_abi::CONTROL_RESUME, "retry" => astra_emu_abi::CONTROL_RETRY, _ => return Err("ASTRA_EMU_HEADLESS_CONTROL".into()) } },
-            Self::Key { code, pressed } => FamilyEvent::Key { logical: None, code: input_key_code(code).ok_or("ASTRA_EMU_HEADLESS_INPUT_KEY")?,
-            state: state(*pressed),
-            modifiers: KeyModifiers {
-                shift: false,
-                control: false,
-                alt: false,
-                super_key: false,
-            }, },
+            Self::Control { action } => FamilyEvent::Control {
+                command: match action.as_str() {
+                    "pause" => astra_emu_abi::CONTROL_PAUSE,
+                    "resume" => astra_emu_abi::CONTROL_RESUME,
+                    "retry" => astra_emu_abi::CONTROL_RETRY,
+                    _ => return Err("ASTRA_EMU_HEADLESS_CONTROL".into()),
+                },
+            },
+            Self::Key { code, pressed } => FamilyEvent::Key {
+                logical: None,
+                code: input_key_code(code).ok_or("ASTRA_EMU_HEADLESS_INPUT_KEY")?,
+                state: state(*pressed),
+                modifiers: KeyModifiers {
+                    shift: false,
+                    control: false,
+                    alt: false,
+                    super_key: false,
+                },
+            },
             Self::PointerMove { x, y } => {
                 if !x.is_finite() || !y.is_finite() {
                     return Err("ASTRA_EMU_HEADLESS_INPUT_COORDINATES".into());
                 }
-                FamilyEvent::PointerMove { x: *x, y: *y, displayed: None }
+                FamilyEvent::PointerMove {
+                    x: *x,
+                    y: *y,
+                    displayed: None,
+                }
             }
             Self::PointerButton { secondary, pressed } => FamilyEvent::PointerButton {
                 button: if *secondary {
@@ -91,7 +105,11 @@ mod tests {
         let events = prepare(&inputs, 4).unwrap();
         assert!(matches!(
             events[&2][0],
-            FamilyEvent::PointerMove { x: 120.0, y: 80.0, .. }
+            FamilyEvent::PointerMove {
+                x: 120.0,
+                y: 80.0,
+                ..
+            }
         ));
         assert!(matches!(
             events[&2][1],

@@ -9,8 +9,7 @@ use std::{
 use crate::model::ProbeRequest;
 
 use crate::family::{
-    FamilyPluginDescriptor, FamilyPluginRegistry, FamilyProbeReport,
-    FamilyProbeSelection,
+    FamilyPluginDescriptor, FamilyPluginRegistry, FamilyProbeReport, FamilyProbeSelection,
 };
 use crate::family_loader::{FamilyLoadError, LoadedFamilyPlugin, NativeOpenRequest, NativeSession};
 
@@ -86,7 +85,10 @@ impl FamilyProviderRegistry {
         }
     }
 
-    pub fn register_provider(&mut self, provider: LoadedFamilyPlugin) -> Result<(), FamilyLoadError> {
+    pub fn register_provider(
+        &mut self,
+        provider: LoadedFamilyPlugin,
+    ) -> Result<(), FamilyLoadError> {
         let manager = provider.manager_descriptor().clone();
         let plugin_id = manager.plugin_id.clone();
         if self.providers.contains_key(&plugin_id) || self.rejected_ids.contains(&plugin_id) {
@@ -94,13 +96,21 @@ impl FamilyProviderRegistry {
             self.remove(&plugin_id);
             return Err(FamilyLoadError::DuplicatePlugin);
         }
-        self.descriptors.register(manager).map_err(|_| FamilyLoadError::DuplicatePlugin)?;
+        self.descriptors
+            .register(manager)
+            .map_err(|_| FamilyLoadError::DuplicatePlugin)?;
         self.providers.insert(plugin_id, provider);
         Ok(())
     }
 
     /// Static factory returns the same process-lifetime C table as a DLL.
-    pub unsafe fn register_static(&mut self, query: astra_emu_abi::Query) -> Result<(), FamilyLoadError> {
+    /// # Safety
+    /// The query must satisfy `LoadedFamilyPlugin::from_query`, including
+    /// process-lifetime code/storage and the native ABI ownership contract.
+    pub unsafe fn register_static(
+        &mut self,
+        query: astra_emu_abi::Query,
+    ) -> Result<(), FamilyLoadError> {
         self.register_provider(unsafe { LoadedFamilyPlugin::from_query(query) }?)
     }
 
@@ -208,7 +218,9 @@ impl FamilyProviderRegistry {
         for (plugin_id, mut plugin) in std::mem::take(&mut self.providers) {
             if let Err(error) = plugin.shutdown() {
                 tracing::error!(event = "astra.emu.module_owner.shutdown_failed", plugin_id, diagnostic_code = %error.code());
-                if failure.is_none() { failure = Some(FamilyLoadError::ProviderError(error)); }
+                if failure.is_none() {
+                    failure = Some(FamilyLoadError::ProviderError(error));
+                }
             }
         }
         failure.map_or(Ok(()), Err)
@@ -218,8 +230,16 @@ impl FamilyProviderRegistry {
         self.descriptors.descriptor(plugin_id)
     }
 
-    pub fn configuration(&self, plugin_id: &str) -> Result<Vec<crate::model::ConfigField>, FamilyLoadError> {
-        Ok(self.providers.get(plugin_id).ok_or(FamilyLoadError::Provider)?.configuration().to_vec())
+    pub fn configuration(
+        &self,
+        plugin_id: &str,
+    ) -> Result<Vec<crate::model::ConfigField>, FamilyLoadError> {
+        Ok(self
+            .providers
+            .get(plugin_id)
+            .ok_or(FamilyLoadError::Provider)?
+            .configuration()
+            .to_vec())
     }
 
     pub fn descriptors(&self) -> impl Iterator<Item = &FamilyPluginDescriptor> {
@@ -232,9 +252,7 @@ impl FamilyProviderRegistry {
         preferred_plugin_id: Option<&str>,
         preferred_family_id: Option<&str>,
     ) -> Result<FamilyProbeSelection, FamilyLoadError> {
-        request
-            .validate()
-            .map_err(FamilyLoadError::ProbeError)?;
+        request.validate().map_err(FamilyLoadError::ProbeError)?;
         let mut reports = Vec::new();
         for (plugin_id, provider) in &self.providers {
             let Some(report) = provider
@@ -278,7 +296,6 @@ impl FamilyProviderRegistry {
             .map_err(FamilyLoadError::ProviderError)
     }
 }
-
 
 #[cfg(test)]
 #[path = "family_registry_tests.rs"]

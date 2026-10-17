@@ -1,5 +1,3 @@
-
-
 use super::{FamilyError, FamilyResult};
 
 pub const MAX_MODAL_TEXT_BYTES: usize = 65_536;

@@ -1,12 +1,24 @@
 [submodule "siglus"]
 	path = Emulator/ThirdParty/siglus_rs
 	url = https://github.com/2018wzh/siglus_rs
-	branch = astra
+	branch = astra-embedded-20261018
 [submodule "rfvp"]
 	path = Emulator/ThirdParty/rfvp
 	url = https://github.com/2018wzh/rfvp
-	branch = astra
+	branch = codex/emu-native-integration-20261018
 [submodule "artemis"]
 	path = Emulator/ThirdParty/art3m1s-core
 	url = https://github.com/2018wzh/art3m1s-core
 	branch = astra
+[submodule "Emulator/ThirdParty/sena-rs"]
+	path = Emulator/ThirdParty/sena-rs
+	url = https://github.com/2018wzh/sena-rs
+	branch = codex/emu-native-abi2-20261018
+[submodule "Emulator/ThirdParty/cpal"]
+	path = Emulator/ThirdParty/cpal
+	url = https://github.com/2018wzh/cpal.git
+	branch = codex/alsa-compat-0.15.3
+[submodule "Emulator/ThirdParty/kirikiri2"]
+	path = Emulator/ThirdParty/kirikiri2
+	url = https://github.com/2018wzh/kirikiroid2-web.git
+	branch = codex/emu-native-krkr-20261018
