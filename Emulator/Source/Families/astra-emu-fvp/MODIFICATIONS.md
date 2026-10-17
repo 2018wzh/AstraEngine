@@ -4,7 +4,7 @@
 
 - 完整 fork：[xmoezzz/rfvp](https://github.com/xmoezzz/rfvp)，主仓 submodule：`Emulator/ThirdParty/rfvp`。
 - 上游 HEAD（2026-10-17 核对，0.6.0）：`af557db750c7833274f22a6d82b0dc33cdea2f85`。
-- 唯一适配提交：[`dcd39c23ca59b38a9a96b6f301aeb05121aa3e18`](https://github.com/2018wzh/rfvp/commit/dcd39c23ca59b38a9a96b6f301aeb05121aa3e18)，直接父提交为上述 HEAD；分支 `codex/astra-minimal-native-20261017` 已推送 GitHub，远端 SHA 与主仓 gitlink 一致。
+- 唯一适配提交：[`dcd39c23ca59b38a9a96b6f301aeb05121aa3e18`](https://github.com/2018wzh/rfvp/commit/dcd39c23ca59b38a9a96b6f301aeb05121aa3e18)，直接父提交为上述 HEAD；统一适配分支 `astra` 已推送 GitHub，远端 SHA 与主仓 gitlink 一致。
 - 来源历史、workspace、工具和许可证保留；不改写旧分支。
 
 ## 差异分类

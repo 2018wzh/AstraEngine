@@ -8,7 +8,7 @@
 - FVP、Siglus、Artemis 已按上游 HEAD＋一个适配提交固定为 `Emulator/ThirdParty` submodule。结构通过，内容仍需处理审计 R01–R09。完整 SHA 和差异规模只在审计及各 Family MODIFICATIONS 维护。
 - 保持 CPU lease、原生 GPU/媒体/存档、固定 owner 与有界 PCM；先建性能基线，不先定任意容忍百分比。本批只定位内存风险，不承担长时间耐久验收。
 - CMVS、KrKr 跳过本批适配/整合，保留既有提交和未提交成果。其他来源工作树不归当前实例清理。
-- 已发布独立原生贡献：RFVP [V1 图像 #51](https://github.com/xmoezzz/rfvp/pull/51)、[文字等待 #53](https://github.com/xmoezzz/rfvp/pull/53)、[scratch 分配 #54](https://github.com/xmoezzz/rfvp/pull/54)；Artemis [onLoad #5](https://github.com/Alphaly2K/art3m1s-core/pull/5)、[PF8 #7](https://github.com/Alphaly2K/art3m1s-core/pull/7)、[AVIO #9](https://github.com/Alphaly2K/art3m1s-core/pull/9)。三个 fork 的 `codex/astra-minimal-native-20261017` 分支亦已按本次授权推送，未改默认分支或已发布历史；产品发行保持独立验收。
+- 已发布独立原生贡献：RFVP [V1 图像 #51](https://github.com/xmoezzz/rfvp/pull/51)、[文字等待 #53](https://github.com/xmoezzz/rfvp/pull/53)、[scratch 分配 #54](https://github.com/xmoezzz/rfvp/pull/54)；Artemis [onLoad #5](https://github.com/Alphaly2K/art3m1s-core/pull/5)、[PF8 #7](https://github.com/Alphaly2K/art3m1s-core/pull/7)、[AVIO #9](https://github.com/Alphaly2K/art3m1s-core/pull/9)。三个 fork 的适配分支已统一为 `astra` 并推送 GitHub，当前和后续适配均按[重构契约](../contracts/rebuild.md#外部核心与-sdk-的重构边界)使用该名称；未改默认分支或已发布提交，产品发行保持独立验收。
 
 ## 产品状态
 

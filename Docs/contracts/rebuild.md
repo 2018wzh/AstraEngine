@@ -54,11 +54,11 @@ Musica 的原生 stage 以完整资源序列、参考坐标、背景与立绘参
 
 Musica 的高清纹理替换只在私有 `MusicaProfile` 中声明 `texture_overrides` 映射：键是已挂载的 `musica:/` 原资源 URI，值是游戏目录内安全的 PNG 相对路径。启动时先验证原资源、ANI 原点和受支持的帧数，首次使用再解码原资源并按映射读取替换像素；替换像素只改变物理纹理，不改变脚本坐标、裁剪、命中区域、存档或 VM 时间。静态 PNG 和单帧 ANI 可以使用 PNG 替换，多帧 ANI、SQZ 及其他格式明确拒绝，不能只替换动画首帧后继续运行。缺失、越界、路径不安全、帧数不匹配或不支持的格式都返回诊断，不静默回退到原图。原生与替换像素使用同一个 SDK `TextureCache`，以不同身份键区分，随同一缓存的有界淘汰释放；替换素材只存在于 ignored 私有工作区。Family 负责 Musica 归档 URI 和 ANI 规则，SDK 只提供通用纹理帧与逻辑/物理尺寸类型。
 
-外部核心保留完整上游历史，整合目标为上游 HEAD 加一个必要适配提交，由 `Emulator/ThirdParty` submodule 固定精确 revision。分支名不能代替 gitlink，主仓不复制核心源码。
+外部核心保留完整上游历史，整合目标为上游 HEAD 加一个必要适配提交。所有 fork 的对外适配分支统一命名为 `astra`，当前与后续核心适配均沿用该名称；`.gitmodules` 的跟踪分支与 Family metadata 同步声明 `astra`。主仓仍由 `Emulator/ThirdParty` submodule 固定精确 revision，分支名不能代替 gitlink，不复制核心源码。
 
 descriptor、配置、日志桥、ABI 转换与产品策略放在 Family。核心只提供必要入口、原生输出和生命周期通知。游戏暴露的引擎功能缺陷独立提交上游 issue/PR，附自制最小复现；合并前标明依赖，不能长期混称为适配。适配自身回归由适配修正，不通过重写 VM/renderer/媒体或回退必要功能缩小 diff。
 
-整理使用独占新分支，保留许可证和 MODIFICATIONS 中的基线/差异，不改写来源或已发布历史。已授权发布上述上游功能修复；产品、完整适配分支和其他外发仍按各自授权执行。当前状态、审查结论及执行顺序只在 [status](../status/README.md) 维护。
+整理使用独占工作树和 `astra` 适配分支，保留许可证和 MODIFICATIONS 中的基线/差异，不改写来源或已发布历史。已授权发布上述上游功能修复；产品、完整适配分支和其他外发仍按各自授权执行。当前状态、审查结论及执行顺序只在 [status](../status/README.md) 维护。
 
 Musica 和 CMVS 一起驱动 `astra-emu-sdk` 模块化。先对照 AstraEngine 现有文字、绘制、解码、混音与字节源实现，再提取两个核心共同需要的能力；格式解析、VM 和原生存档语义继续由核心拥有。SDK 按需组合，不依赖 VN、World/package/registry 或强制 EngineSession；不建立纯转发 provider，不为成熟外部核心增加 SDK 依赖。替换调用方后删除重复实现。
 
