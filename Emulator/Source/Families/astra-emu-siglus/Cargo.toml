@@ -18,6 +18,7 @@ siglus_scene_vm = { path = "../../../ThirdParty/siglus_rs/crates/siglus_scene_vm
 pollster = "0.3"
 
 [dev-dependencies]
+libloading.workspace = true
 tempfile.workspace = true
 
 [package.metadata.astra]
@@ -27,7 +28,7 @@ hosted_fork = "https://github.com/2018wzh/siglus_rs"
 native_fork_branch = "native-master-20261018"
 native_fork_revision = "63ec1f79ec7811f49ad1611668740a09e0d17cc7"
 hosted_fork_branch = "astra-embedded-20261018"
-hosted_fork_revision = "49457f433c24c4450c30b215e9518aff68499e29"
+hosted_fork_revision = "4779a967d4cb04bb3de252f2bdc20f41dac416bb"
 kira_upstream_revision = "dfb08d08d065930e9b257203bf11c6d34742f542"
 kira_fork_revision = "a299b42690094a71885f6ed97dc504c4038da9a7"
 cpal_fork_revision = "65ac8a6ac1a635cc26bfc5af331295b052044908"

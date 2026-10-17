@@ -4,6 +4,9 @@ mod embedded;
 pub use embedded::query;
 
 /// Dynamic and static registration return the same native C function table.
+///
+/// # Safety
+/// A non-null `out` must point to writable storage for one core-table pointer.
 #[cfg(feature = "dynamic")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn astra_emu_query(

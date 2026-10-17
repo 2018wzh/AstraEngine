@@ -6,8 +6,9 @@ Git submodule of [`xmoezzz/siglus_rs`](https://github.com/xmoezzz/siglus_rs)
 pinned by exact gitlink to a local adaptation of the
 [`2018wzh/siglus_rs`](https://github.com/2018wzh/siglus_rs) fork: upstream
 revision `5f358ef1360b0439e92aed2b749e8f25d8721954` (1.0.0), native lifecycle
-baseline `63ec1f79ec7811f49ad1611668740a09e0d17cc7`, and the single embedded
-adapter `49457f433c24c4450c30b215e9518aff68499e29`, for an unofficial Rust
+baseline `63ec1f79ec7811f49ad1611668740a09e0d17cc7`, embedded adapter
+`49457f433c24c4450c30b215e9518aff68499e29`, and ABI 2 verification fixes
+`4779a967d4cb04bb3de252f2bdc20f41dac416bb`, for an unofficial Rust
 reimplementation of SiglusEngine. The covered source is
 redistributed under the MPL-2.0; the complete license text is preserved at
 `Emulator/ThirdParty/siglus_rs/LICENSE-MPL-2.0`. The file-level change inventory is
@@ -24,6 +25,9 @@ Kira 0.9.6 is preserved as the complete `vendor/kira` submodule, based on
 Apache-2.0 texts remain in that submodule. The fork pins the CPAL 0.15.3
 WASAPI teardown fix `65ac8a6ac1a635cc26bfc5af331295b052044908` from
 `2018wzh/cpal`, retaining its Apache-2.0 license and original implementation.
+The Windows host verification patches that same CPAL 0.15.3 source to
+`ecfda841a9140d60bbec1630d47ca91f1a77b8f3` for compatible ALSA dependency
+resolution; it retains the WASAPI teardown implementation and native Kira version.
 
 Registry dependencies (wgpu 0.20, winit 0.31.0-beta.3,
 egui 0.28, ab_glyph, encoding_rs, and the transitive closure) and the

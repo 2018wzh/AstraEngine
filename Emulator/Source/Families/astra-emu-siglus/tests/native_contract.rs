@@ -7,7 +7,7 @@ fn query_descriptor_config_and_cancelled_open() {
     let api = common::api();
     let mut pointer = api as *const _;
     assert_eq!(
-        unsafe { astra_emu_siglus::query(abi::ABI_VERSION + 1, &mut pointer) },
+        unsafe { common::query()(abi::ABI_VERSION + 1, &mut pointer) },
         abi::UNSUPPORTED
     );
     assert!(pointer.is_null());

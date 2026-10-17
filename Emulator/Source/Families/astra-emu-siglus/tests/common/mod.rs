@@ -5,7 +5,7 @@ use std::{
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
-        Once,
+        LazyLock, Once,
     },
     time::{Duration, Instant},
 };
@@ -14,6 +14,9 @@ static EPOCH: AtomicU64 = AtomicU64::new(1);
 unsafe extern "C" fn emit(_: *mut std::ffi::c_void, record: *const abi::LogRecord) {
     use std::io::Write;
     let record = unsafe { &*record };
+    if record.level > abi::LOG_INFO {
+        return;
+    }
     let target = unsafe { record.target.text(4096) }.unwrap_or("invalid target");
     let message = unsafe { record.message.text(16384) }.unwrap_or("invalid message");
     let _ = writeln!(std::io::stderr(), "{target}: {message}");
@@ -25,12 +28,22 @@ unsafe extern "C" fn flush(_: *mut std::ffi::c_void) {
 unsafe extern "C" fn cancelled(context: *mut std::ffi::c_void, _: u64) -> u32 {
     u32::from(unsafe { &*context.cast::<AtomicBool>() }.load(Ordering::Acquire))
 }
+pub fn query() -> abi::Query {
+    static QUERY: LazyLock<abi::Query> = LazyLock::new(|| {
+        let Some(path) = std::env::var_os("ASTRA_SIGLUS_TEST_LIBRARY") else {
+            return astra_emu_siglus::query;
+        };
+        // ABI tables and outstanding frame leases require process-long residency.
+        let library = unsafe { libloading::Library::new(path) }.unwrap();
+        let query = unsafe { *library.get::<abi::Query>(b"astra_emu_query\0").unwrap() };
+        std::mem::forget(library);
+        query
+    });
+    *QUERY
+}
 pub fn api() -> &'static abi::CoreApi {
     let mut pointer = std::ptr::null();
-    assert_eq!(
-        unsafe { astra_emu_siglus::query(abi::ABI_VERSION, &mut pointer) },
-        abi::OK
-    );
+    assert_eq!(unsafe { query()(abi::ABI_VERSION, &mut pointer) }, abi::OK);
     let api = unsafe { &*pointer };
     api.validate().unwrap();
     INIT.call_once(|| {
@@ -174,6 +187,22 @@ impl Native {
             std::thread::sleep(Duration::from_millis(1));
         }
     }
+    pub fn snapshot(&self, name: &str) {
+        let frame = self.frame();
+        eprintln!(
+            "checkpoint {name}: {:?}, {:?}",
+            frame.identity(),
+            digest(&frame)
+        );
+        let Some(directory) = std::env::var_os("ASTRA_SIGLUS_TEST_CAPTURE_DIR") else {
+            return;
+        };
+        // Keep optional commercial pixels only in the caller's ignored evidence directory.
+        let directory = PathBuf::from(directory);
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(directory.join(format!("{name}.rgba")), frame.pixels()).unwrap();
+        eprintln!("checkpoint {name} surface: {:?}", frame.info());
+    }
     pub fn control(&self, control: u32) {
         let mut error = abi::Error::default();
         success(
@@ -224,13 +253,18 @@ impl Native {
         }
     }
     pub fn key(&self, name: &'static str) {
+        self.hold_key(name, Duration::from_millis(80));
+    }
+    pub fn hold_key(&self, name: &'static str, duration: Duration) {
         let mut press = self.event(abi::INPUT_KEY);
         press.physical_key = abi::Bytes::new(name.as_bytes());
         press.logical_key = press.physical_key;
         press.pressed = 1;
         let mut release = press;
         release.pressed = 0;
-        self.send(&[press, release]);
+        self.send(&[press]);
+        self.wait(duration);
+        self.send(&[release]);
     }
     pub fn click(&self, x: f64, y: f64) {
         let mut motion = self.event(abi::INPUT_POINTER_MOVE);
@@ -242,7 +276,11 @@ impl Native {
         press.pressed = 1;
         let mut release = press;
         release.pressed = 0;
-        self.send(&[motion, press, release]);
+        self.send(&[motion]);
+        self.wait(Duration::from_millis(300));
+        self.send(&[press]);
+        self.wait(Duration::from_millis(300));
+        self.send(&[release]);
     }
     pub fn close(mut self) {
         let handle = std::mem::replace(&mut self.handle, std::ptr::null_mut());
@@ -267,7 +305,9 @@ impl Drop for Native {
 pub fn digest(frame: &abi::CpuFrame) -> (u64, usize) {
     frame
         .pixels()
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .fold((0, 0), |(sum, lit), p| {
             (
                 sum + p[..3].iter().map(|b| u64::from(*b)).sum::<u64>(),
@@ -277,16 +317,22 @@ pub fn digest(frame: &abi::CpuFrame) -> (u64, usize) {
 }
 pub fn rewrite_opening(session: &Native) {
     session.wait(Duration::from_secs(12));
+    session.snapshot("boot");
     session.click(640.0, 400.0);
     session.wait(Duration::from_secs(15));
+    session.snapshot("title");
     session.click(452.0, 645.0);
     session.wait(Duration::from_secs(70));
-    session.click(452.0, 645.0);
-    session.wait(Duration::from_secs(7));
-    for _ in 0..150 {
+    session.snapshot("intro");
+    session.hold_key("ControlLeft", Duration::from_secs(45));
+    session.wait(Duration::from_secs(180));
+    for _ in 0..30 {
         session.click(640.0, 400.0);
         if session.wait(Duration::from_millis(640)) {
             break;
         }
     }
+    // Let the final native scene transition and typewriter finish before menus.
+    session.wait(Duration::from_secs(15));
+    session.snapshot("opening");
 }

@@ -1,5 +1,5 @@
-//! Rewrite+ representative path: animated title -> Start -> copyright/intro ->
-//! title -> Start -> opening movie -> prologue. Uses real native wall time.
+//! Rewrite+ representative path: animated title -> Start -> intro ->
+//! opening movie -> classroom dialogue. Uses real native wall time.
 mod common;
 use common::*;
 use std::time::Duration;

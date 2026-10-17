@@ -28,16 +28,19 @@ fn slots() -> BTreeMap<std::path::PathBuf, Vec<u8>> {
         })
         .collect()
 }
-#[test]
-#[ignore = "requires a writable authorized Rewrite+ copy, hardware GPU and audio device"]
-fn native_rewrite_save_load_and_route_attempt() {
+fn saved_session() -> Native {
     let session = Native::open();
     rewrite_opening(&session);
     let before = slots();
-    session.click(1120.0, 558.0);
+    // These are the observed 1280x720 game controls, including its rendered
+    // confirmation dialog. No Host window/modal result is synthesized.
+    session.click(1140.0, 587.0);
     session.wait(Duration::from_secs(2));
-    session.key("Escape");
-    session.wait(Duration::from_secs(1));
+    session.click(1140.0, 587.0);
+    session.wait(Duration::from_secs(2));
+    session.snapshot("save-confirmation");
+    session.click(580.0, 335.0);
+    session.wait(Duration::from_secs(3));
     let saved = slots();
     assert!(
         saved
@@ -45,8 +48,14 @@ fn native_rewrite_save_load_and_route_attempt() {
             .any(|(path, bytes)| before.get(path) != Some(bytes)),
         "native quick-save must change a real numeric slot"
     );
+    eprintln!("native numeric save slots: {}", saved.len());
     let context = session.state().context_epoch;
-    session.click(1210.0, 558.0);
+    session.click(1220.0, 587.0);
+    session.wait(Duration::from_secs(2));
+    session.click(1220.0, 587.0);
+    session.wait(Duration::from_secs(2));
+    session.snapshot("load-confirmation");
+    session.click(580.0, 335.0);
     let deadline = Instant::now() + Duration::from_secs(10);
     while session.state().context_epoch == context {
         assert!(
@@ -55,7 +64,40 @@ fn native_rewrite_save_load_and_route_attempt() {
         );
         session.wait(Duration::from_millis(20));
     }
-    session.frame();
+    session.snapshot("loaded");
+    eprintln!(
+        "native load context: {context} -> {}",
+        session.state().context_epoch
+    );
+    session
+}
+
+#[test]
+#[ignore = "requires a writable authorized Rewrite+ copy, hardware GPU and audio device"]
+fn native_rewrite_save_load_close_reopen() {
+    let session = saved_session();
+    let first = session.frame();
+    let original = first.pixels().to_vec();
+    let mut digests = std::collections::BTreeSet::new();
+    for _ in 0..60 {
+        session.click(640.0, 400.0);
+        session.wait(Duration::from_millis(640));
+        digests.insert(digest(&session.frame()).0);
+    }
+    assert!(digests.len() > 1, "native story continues after load");
+    session.snapshot("continued");
+    session.close();
+    assert_eq!(first.pixels(), original, "pre-close lease stays immutable");
+    let reopened = Native::open();
+    reopened.frame();
+    reopened.close();
+    assert_eq!(first.pixels(), original, "lease survives same-DLL reopen");
+}
+
+#[test]
+#[ignore = "requires a writable authorized Rewrite+ copy, hardware GPU and audio device"]
+fn native_rewrite_save_load_and_route_attempt() {
+    let session = saved_session();
     let budget = std::env::var("ASTRA_SIGLUS_TEST_PLAYTHROUGH_BUDGET")
         .map(|s| s.parse::<u64>().expect("integer observation budget"))
         .unwrap_or(400_000);
