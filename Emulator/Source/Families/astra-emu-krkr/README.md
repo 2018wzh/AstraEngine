@@ -55,6 +55,8 @@ Host callbacks or session. Keep the DLL resident until every lease is released.
 Input uses the displayed frame identity and converts raster pixels to authored
 stage coordinates once. Stale identities fail explicitly. Horizontal wheel is
 unsupported; vertical wheel preserves fractional line detents.
+The final game canvas declares ignored alpha: Manager presents its original RGB
+as a complete image, rather than compositing it as a straight-alpha layer.
 
 `startup.tjs` directories and conventional `data.xp3` directories use the
 original selector entry rule. Only Cocos UI/cache files use a session-owned

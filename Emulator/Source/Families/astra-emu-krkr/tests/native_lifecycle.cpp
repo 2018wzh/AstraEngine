@@ -74,6 +74,8 @@ void verify_public_canvas(const AstraEmuFrameSurface &frame) {
     if(frame.info.raster.width != 320 || frame.info.raster.height != 240 ||
        frame.info.logical.width != 320 || frame.info.logical.height != 240)
         throw std::runtime_error("public fixture canvas geometry changed");
+    if(frame.info.alpha != AstraEmuALPHA_IGNORED)
+        throw std::runtime_error("complete game canvas must not request Host alpha compositing");
     const auto pixel = [&](size_t x, size_t y) {
         return frame.cpu.pixels.data + y * frame.info.stride + x * 4;
     };
@@ -130,6 +132,13 @@ int wmain(int argc, wchar_t **argv) {
                std::string_view(reinterpret_cast<const char *>(e.message), e.message_len) != "original title failure")
                 throw std::runtime_error("secondary error modal replaced original title failure");
             std::puts("first typed host failure survives secondary error modal");
+            request.session_epoch = 6;
+            request.host.window = {};
+            const auto unavailable = api->open(&request, &failed, &e);
+            if(unavailable != AstraEmuUNSUPPORTED || failed.session ||
+               std::string_view(reinterpret_cast<const char *>(e.message), e.message_len) != "KRKR_WINDOW_SERVICE_REQUIRED")
+                throw std::runtime_error("missing modal service replaced missing window service");
+            std::puts("missing window service remains the first failure");
         }
         AstraEmuFrameSurface retained{};
         uint64_t retained_hash = 0;

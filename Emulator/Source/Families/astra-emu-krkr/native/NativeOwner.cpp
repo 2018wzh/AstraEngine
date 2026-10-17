@@ -65,8 +65,10 @@ std::string text(AstraEmuBytes value, size_t maximum = 4096) {
     return {reinterpret_cast<const char *>(value.data), value.len};
 }
 AstraEmuSurfaceInfo surface(AstraKrkrFrameInfo f) {
+    // This is the complete game canvas, not a layer for Host compositing.
+    // Preserve its bytes; the Host presents RGB without using texture alpha.
     return {AstraEmuSURFACE_CPU, AstraEmuPIXEL_RGBA8, AstraEmuCOLOR_SRGB,
-        AstraEmuALPHA_STRAIGHT, AstraEmuROWS_TOP_DOWN, 0,
+        AstraEmuALPHA_IGNORED, AstraEmuROWS_TOP_DOWN, 0,
         {f.logical_width, f.logical_height}, {f.width, f.height}, f.stride};
 }
 struct Frames;
@@ -148,7 +150,6 @@ struct Session {
         auto &s = *static_cast<Session *>(p);
         try {
             require(!s.stopping(), "KRKR_CANCELLED", AstraEmuCANCELLED);
-            require(s.host.window.request, "KRKR_MODAL_SERVICE_REQUIRED", AstraEmuUNSUPPORTED);
             std::array<AstraEmuWindowButton, 16> buttons{};
             for(uint32_t i = 0; i < r->button_count; ++i)
                 buttons[i] = {i, 0, {r->buttons[i].data, static_cast<size_t>(r->buttons[i].bytes)}};
@@ -163,6 +164,7 @@ struct Session {
             spdlog::info("KRKR_HOST_MODAL request_id={} caption={} message={}", request.request_id,
                 std::string_view(reinterpret_cast<const char *>(r->caption.data), r->caption.bytes),
                 std::string_view(reinterpret_cast<const char *>(r->message.data), r->message.bytes));
+            require(s.host.window.request, "KRKR_MODAL_SERVICE_REQUIRED", AstraEmuUNSUPPORTED);
             AstraEmuWindowResult result{};
             result.input = {out->text, static_cast<size_t>(out->text_capacity), 0};
             AstraEmuError e{};
@@ -212,7 +214,8 @@ struct Session {
     }
     AstraEmuWindowResult window_request(uint32_t kind, uint32_t flags, AstraEmuBytes text) {
         require(!stopping(), "KRKR_CANCELLED", AstraEmuCANCELLED);
-        require(host.window.request, "KRKR_WINDOW_SERVICE_REQUIRED", AstraEmuUNSUPPORTED);
+        if(!host.window.request)
+            check_host_result(AstraEmuUNSUPPORTED, {}, "KRKR_WINDOW_SERVICE_REQUIRED");
         AstraEmuWindowRequest r{};
         r.session_epoch = epoch; r.context_epoch = 1; r.request_id = ++request_id;
         r.kind = kind; r.flags = flags; r.text = text;
