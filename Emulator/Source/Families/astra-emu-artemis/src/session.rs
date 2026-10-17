@@ -1,436 +1,228 @@
-//! Artemis family session: owns the engine runtime, the host-event queue, the
-//! audio bridge, and the CPU frame snapshot handed to the host.
-//!
-//! Ownership is pull-based and single-threaded: the session thread mounts the
-//! game archive, boots the runtime on the offscreen GPU backend, and drives
-//! one engine tick per `advance`; mixed PCM comes from the mixer worker
-//! thread through the bounded host sink queue.
-//!
-//! Save data stays in the game directory (`<game>/savedata`), owned entirely
-//! by the engine; the host provides only the game path.
-
-use std::{path::Path, sync::Arc};
-
-use art3m1s_core::backend::BackendSelection;
-use art3m1s_core::host_events::HostEvents;
-use art3m1s_core::host_files::HostResources;
-use astra_emu_family_api::{
-    AdvanceResponse, AudioSinkBox, FamilyError, FamilyEvent, FamilyResult, FamilySession,
-    FamilyStatus, FrameAlpha, FrameFormat, FrameIdentity, FrameInfo, FramePoll, FramePublisher,
-    FrameRowOrder, WindowState,
-};
-
-use art3m1s_core::runtime::CoreRuntime;
-
-use crate::audio::AudioBridge;
-use crate::{error, events, media, provider};
-
-/// The Artemis boot configuration entry inside the base archive.
+//! Dedicated native owner: original VM/GPU/media/save, autonomous scheduling.
+use std::{path::PathBuf, sync::{Arc, atomic::{AtomicBool, AtomicU64, Ordering}, mpsc::{self, SyncSender, Receiver}}, thread::JoinHandle, time::{Duration, Instant}};
+use parking_lot::Mutex;
+use art3m1s_core::{backend::BackendSelection, host_events::HostEvents, host_files::HostResources, runtime::CoreRuntime};
+use astra_emu_abi::*;
+use crate::{audio::{AudioBridge, MixerCommand}, error::{self, NativeError, NativeResult}, events::{self, Input}, media, provider};
 pub(crate) const PROJECT_INI: &str = "system.ini";
-/// How many settle frames `open` may spend waiting for the first composed
-/// frame before failing the boot.
-const FIRST_FRAME_SETTLE_FRAMES: u32 = 600;
-const FRAME_INTERVAL_MS: u64 = 16;
-
-pub(crate) struct ArtemisOpen {
-    pub(crate) session: ArtemisSession,
-    pub(crate) frame_info: FrameInfo,
+#[derive(Clone, Copy)]
+pub(crate) struct Platform(pub WindowService, pub CancellationService);
+// SAFETY: callbacks are thread-safe and valid through close; no runtime crosses threads.
+unsafe impl Send for Platform {}
+unsafe impl Sync for Platform {}
+impl Platform {
+    fn cancelled(self, epoch: u64) -> bool {
+        self.1.is_cancelled.is_none_or(|callback| unsafe { callback(self.1.context, epoch) != 0 })
+    }
+    fn check(self, epoch: u64) -> NativeResult<()> {
+        if self.cancelled(epoch) { Err(error::invalid("ASTRA_EMU_ARTEMIS_CANCELLED", "session was cancelled")) } else { Ok(()) }
+    }
 }
-
-pub(crate) struct ArtemisSession {
-    audio: AudioBridge,
-    rt: CoreRuntime,
-    resources: HostResources,
-    events: HostEvents,
-    _lease: provider::SessionLease,
-    suspended: bool,
-    pixels: [Option<Arc<Vec<u8>>>; 3],
-    published_frame: FramePublisher,
-    pending_frame: bool,
-    elapsed_remainder_ns: u64,
-    fatal: Option<FamilyError>,
-    pending_window: media::WindowRequests,
+pub(crate) struct Snapshot {
+    pub info: SurfaceInfo,
+    pub identity: FrameIdentity,
+    pub pixels: Option<Arc<Vec<u8>>>,
+    pub timestamp_ns: u64,
+    pub state: u32,
+    pub error: Option<NativeError>,
 }
-
-pub(crate) fn boot(
-    game_path: &Path,
-    base_archive: &Path,
-    initial_window: WindowState,
-    sink: AudioSinkBox,
-    lease: provider::SessionLease,
-    session_epoch: u64,
-) -> FamilyResult<ArtemisOpen> {
-    // Mount with the first entry-name encoding that exposes the boot
-    // configuration; a failed attempt is replaced by the next one.
-    let resources = HostResources::new();
-    let mut ini = None;
-    for encoding in provider::ENTRY_ENCODINGS {
-        if resources.mount_pfs(base_archive, encoding.name()).is_err() {
-            continue;
+pub(crate) struct SessionOwner {
+    commands: SyncSender<Command>,
+    pub snapshot: Arc<Mutex<Snapshot>>,
+    pub context: Arc<AtomicU64>,
+    cancelled: Arc<AtomicBool>,
+    platform: Platform,
+    epoch: u64,
+    wake: std::thread::Thread,
+    thread: Option<JoinHandle<()>>,
+}
+enum Command { Input(Vec<Input>, SyncSender<NativeResult<()>>), Pause(bool, SyncSender<NativeResult<()>>) }
+impl SessionOwner {
+    pub(crate) fn open(path: PathBuf, archive: PathBuf, epoch: u64, window: WindowState, platform: Platform) -> NativeResult<Box<Self>> {
+        let lease = provider::SessionLease::acquire()?;
+        let (tx, rx) = mpsc::sync_channel(128);
+        let (ready_tx, ready_rx) = mpsc::sync_channel(1);
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let context = Arc::new(AtomicU64::new(1));
+        let snapshot = Arc::new(Mutex::new(Snapshot { info: surface(1, 1), identity: FrameIdentity { session_epoch: epoch, output_epoch: 1, generation: 0 }, pixels: None, timestamp_ns: 0, state: SESSION_RUNNING, error: None }));
+        let shared = snapshot.clone();
+        let stop = cancelled.clone();
+        let generation = context.clone();
+        let thread = std::thread::Builder::new().name("artemis-native-owner".into()).spawn(move || {
+            let _lease = lease;
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                platform.check(epoch)?;
+                let mut runtime = Runtime::boot(path, archive, stop.clone(), platform, epoch)?;
+                { let mut state = shared.lock(); state.info = surface(runtime.rt.stage_width(), runtime.rt.stage_height()); state.info.validate().map_err(|_| error::invalid("ASTRA_EMU_ARTEMIS_FRAME_SIZE", "invalid native stage dimensions"))?; }
+                platform.check(epoch)?;
+                let _ = ready_tx.send(Ok(()));
+                runtime.run(rx, &shared, &stop, &generation, epoch, window, platform)
+            }));
+            let failure = match result { Ok(Ok(())) => None, Ok(Err(error)) => Some(error), Err(_) => Some(error::invalid("ASTRA_EMU_ARTEMIS_PANIC", "native owner panicked")) };
+            let mut state = shared.lock();
+            state.state = if failure.is_some() { SESSION_FAILED } else { SESSION_FINISHED };
+            state.error = failure.clone();
+            if let Some(error) = failure { let _ = ready_tx.try_send(Err(error)); }
+        }).map_err(|e| error::invalid("ASTRA_EMU_ARTEMIS_WORKER", e.to_string()))?;
+        let wake = thread.thread().clone();
+        let mut owner = Box::new(Self { commands: tx, snapshot, context, cancelled, platform, epoch, wake, thread: Some(thread) });
+        match ready_rx.recv() {
+            Ok(Ok(())) if !platform.cancelled(epoch) => Ok(owner),
+            value => { let failure = value.ok().and_then(Result::err).unwrap_or_else(|| error::invalid("ASTRA_EMU_ARTEMIS_BOOT", "native owner stopped or was cancelled during open")); let _ = owner.shutdown(); Err(failure) }
         }
-        match resources.read_file(PROJECT_INI) {
-            Ok(bytes) => {
-                ini = Some(bytes);
-                break;
+    }
+    fn request(&self, make: impl FnOnce(SyncSender<NativeResult<()>>) -> Command) -> NativeResult<()> {
+        if self.cancelled.load(Ordering::Acquire) { return Err(error::invalid("ASTRA_EMU_ARTEMIS_CANCELLED", "session is cancelled")); }
+        let (tx, rx) = mpsc::sync_channel(1);
+        self.commands.try_send(make(tx)).map_err(|_| error::invalid("ASTRA_EMU_ARTEMIS_COMMAND_QUEUE", "native command queue unavailable"))?;
+        rx.recv().map_err(|_| self.snapshot.lock().error.clone().unwrap_or_else(|| error::invalid("ASTRA_EMU_ARTEMIS_CLOSED", "native owner stopped")))?
+    }
+    pub(crate) fn input(&self, input: Vec<Input>) -> NativeResult<()> { self.request(|reply| Command::Input(input, reply)) }
+    pub(crate) fn pause(&self, paused: bool) -> NativeResult<()> { self.request(|reply| Command::Pause(paused, reply)) }
+    pub(crate) fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Release);
+        if let Some(invalidate) = self.platform.0.invalidate { unsafe { invalidate(self.platform.0.context, self.epoch, self.context.load(Ordering::Acquire)) }; }
+        self.wake.unpark();
+    }
+    pub(crate) fn shutdown(&mut self) -> NativeResult<()> {
+        self.cancel();
+        let joined = self.thread.take().map(|thread| thread.join()).transpose();
+        if joined.is_err() { return Err(error::invalid("ASTRA_EMU_ARTEMIS_PANIC", "native owner join failed")); }
+        let state = self.snapshot.lock();
+        state.error.clone().map_or(Ok(()), Err)
+    }
+}
+impl Drop for SessionOwner { fn drop(&mut self) { if self.thread.is_some() { let _ = self.shutdown(); } } }
+struct Runtime { rt: CoreRuntime, audio: Option<AudioBridge>, resources: HostResources, events: HostEvents, window: media::WindowRequests }
+impl Runtime {
+    fn boot(path: PathBuf, archive: PathBuf, stop: Arc<AtomicBool>, platform: Platform, epoch: u64) -> NativeResult<Self> {
+        let resources = HostResources::new();
+        let mut ini = None;
+        for encoding in provider::ENTRY_ENCODINGS {
+            platform.check(epoch)?;
+            if resources.mount_pfs(&archive, encoding.name()).is_ok() { if let Ok(bytes) = resources.read_file(PROJECT_INI) { ini = Some(bytes); break; } }
+        }
+        let ini = ini.ok_or_else(|| error::invalid("ASTRA_EMU_ARTEMIS_PROJECT_INI", "PFS has no readable system.ini"))?;
+        let save_dir = path.join("savedata");
+        std::fs::create_dir_all(&save_dir).map_err(|e| error::invalid("ASTRA_EMU_ARTEMIS_SAVE_DIR", e.to_string()))?;
+        resources.set_save_dir(Some(&save_dir)).map_err(error::engine)?;
+        #[cfg(target_os = "macos")]
+        let backend = BackendSelection::NativeMetal;
+        #[cfg(not(target_os = "macos"))]
+        let backend = BackendSelection::NativeVulkanHardware;
+        let mut rt = CoreRuntime::create(1280, 720, backend).map_err(error::engine)?;
+        platform.check(epoch)?;
+        rt.set_resources(resources.clone());
+        rt.set_runtime_media_enabled(true);
+        let events = HostEvents::new();
+        events.set_enabled(true);
+        let mut native = Self { rt, audio: None, resources, events, window: media::WindowRequests::default() };
+        native.audio = Some(AudioBridge::start(stop)?);
+        platform.check(epoch)?;
+        native.rt.load_project_bytes(&ini, "WINDOWS").map_err(error::engine)?;
+        native.rt.take_timeline_reset();
+        Ok(native)
+    }
+    fn drain(&mut self, platform: Platform, epoch: u64, context: u64, request: &mut u64) -> NativeResult<bool> {
+        let audio = self.audio.as_ref().unwrap();
+        platform.check(epoch)?;
+        for finished in audio.drain_finished() { self.rt.notify_sound_finished(finished.id.as_deref()); }
+        for command in media::drain(&self.events, &self.resources, &mut self.window)? { audio.send(command)?; }
+        let mut serviced = false;
+        while let Some(command) = self.window.take() {
+            *request = request.checked_add(1).ok_or_else(|| error::invalid("ASTRA_EMU_ARTEMIS_REQUEST_ID", "request IDs exhausted"))?;
+            crate::platform::request(platform, command, epoch, context, *request)?;
+            serviced = true;
+        }
+        audio.check_error()?;
+        Ok(serviced)
+    }
+    fn run(&mut self, rx: Receiver<Command>, shared: &Mutex<Snapshot>, stop: &AtomicBool, context: &AtomicU64, epoch: u64, mut window: WindowState, platform: Platform) -> NativeResult<()> {
+        let mut explicit_pause = false;
+        let mut paused = false;
+        let mut last = Instant::now();
+        let started = last;
+        let mut remainder = 0u128;
+        let mut request = 0;
+        let mut pending = false;
+        let mut pool: [Option<Arc<Vec<u8>>>; 3] = [None, None, None];
+        while !stop.load(Ordering::Acquire) && !platform.cancelled(epoch) {
+            for command in rx.try_iter() {
+                match command {
+                    Command::Pause(value, reply) => {
+                        explicit_pause = value;
+                        let effective = value || window.suspended != 0 || window.focused == 0;
+                        let result = if effective != paused { self.audio.as_ref().unwrap().send(MixerCommand::Suspend(effective)) } else { Ok(()) };
+                        if result.is_ok() {
+                            if effective != paused { self.rt.notify_lifecycle(if effective { 1 } else { 2 }); }
+                            paused = effective; remainder = 0; last = Instant::now();
+                            shared.lock().state = if paused { SESSION_PAUSED } else { SESSION_RUNNING };
+                        }
+                        let _ = reply.send(result.clone());
+                        result?;
+                    }
+                    Command::Input(inputs, reply) => {
+                        let state = shared.lock();
+                        let mut result = Ok(());
+                        for input in inputs {
+                            if let Input::Window(value) = input { window = value; self.events.set_window_state(if value.focused != 0 { 1 } else { 0 }); }
+                            else if let Err(error) = events::apply(&self.rt, input, state.info, state.identity) { result = Err(error); break; }
+                        }
+                        let _ = reply.send(result);
+                    }
+                }
             }
-            Err(_) => continue,
-        }
-    }
-    let Some(ini) = ini else {
-        return Err(error::invalid(
-            "ASTRA_EMU_ARTEMIS_PROJECT_INI",
-            "the PFS archive has no readable system.ini entry",
-        ));
-    };
-
-    let save_dir = game_path.join("savedata");
-    std::fs::create_dir_all(&save_dir).map_err(|_| {
-        error::invalid(
-            "ASTRA_EMU_ARTEMIS_SAVE_DIR",
-            "the game save directory is not creatable",
-        )
-    })?;
-    resources
-        .set_save_dir(Some(&save_dir))
-        .map_err(|save_error| {
-            error::invalid(
-                "ASTRA_EMU_ARTEMIS_SAVE_DIR",
-                format!("set save dir: {save_error}"),
-            )
-        })?;
-
-    // One active session per process: the host-events queue routes
-    // process-wide core output to the currently enabled handle only.
-    let host_events = HostEvents::new();
-    host_events.set_enabled(true);
-    host_events.set_window_state(if initial_window.focused { 1 } else { 0 });
-
-    let published_frame = FramePublisher::new(session_epoch)?;
-    let boot_result = boot_engine(
-        &resources,
-        &host_events,
-        &ini,
-        initial_window,
-        sink,
-        lease,
-        published_frame,
-    );
-    if boot_result.is_err() {
-        // Unwind the process-global host state so a later session cannot
-        // inherit a dead handle; the audio bridge cancels its worker.
-        host_events.set_enabled(false);
-    }
-    boot_result
-}
-
-fn boot_engine(
-    resources: &HostResources,
-    host_events: &HostEvents,
-    ini: &[u8],
-    initial_window: WindowState,
-    sink: AudioSinkBox,
-    lease: provider::SessionLease,
-    mut published_frame: FramePublisher,
-) -> FamilyResult<ArtemisOpen> {
-    let audio = AudioBridge::start(sink)?;
-    let mut rt = match build_runtime(resources, ini, initial_window) {
-        Ok(rt) => rt,
-        Err(boot_error) => {
-            let _ = audio.close();
-            host_events.set_enabled(false);
-            return Err(boot_error);
-        }
-    };
-
-    let width = rt.stage_width();
-    let height = rt.stage_height();
-    let frame_info = match frame_info_of(width, height) {
-        Ok(info) => info,
-        Err(frame_error) => {
-            let _ = audio.close();
-            host_events.set_enabled(false);
-            return Err(frame_error);
-        }
-    };
-
-    let mut settled = false;
-    let mut pending_window = media::WindowRequests::default();
-    for _ in 0..FIRST_FRAME_SETTLE_FRAMES {
-        let mut tick = TickContext {
-            host_events,
-            resources,
-            audio: &audio,
-            window: &mut pending_window,
-        };
-        match pump(&mut rt, &mut tick, FRAME_INTERVAL_MS, &[]) {
-            Ok(true) => {
-                settled = true;
-                break;
+            let next_pause = explicit_pause || window.suspended != 0 || window.focused == 0;
+            if next_pause != paused {
+                self.audio.as_ref().unwrap().send(MixerCommand::Suspend(next_pause))?;
+                self.rt.notify_lifecycle(if next_pause { 1 } else { 2 });
+                paused = next_pause; remainder = 0; last = Instant::now();
+                shared.lock().state = if paused { SESSION_PAUSED } else { SESSION_RUNNING };
             }
-            Ok(_) => {}
-            Err(step_error) => {
-                let _ = audio.close();
-                host_events.set_enabled(false);
-                return Err(step_error);
+            if paused { std::thread::park_timeout(Duration::from_millis(4)); continue; }
+            let now = Instant::now();
+            remainder += now.duration_since(last).as_nanos(); last = now;
+            let elapsed = (remainder / 1_000_000).min(u64::MAX as u128) as u64; remainder %= 1_000_000;
+            if self.drain(platform, epoch, context.load(Ordering::Acquire), &mut request)? { last = Instant::now(); remainder = 0; }
+            pending |= self.rt.try_advance_frame(elapsed).map_err(error::engine)?;
+            if self.rt.take_timeline_reset() {
+                let old = {
+                    let mut state = shared.lock();
+                    let old = context.load(Ordering::Acquire);
+                    let next = old.checked_add(1).ok_or_else(|| error::invalid("ASTRA_EMU_ARTEMIS_GENERATION", "context epoch exhausted"))?;
+                    state.identity.output_epoch = state.identity.output_epoch.checked_add(1).ok_or_else(|| error::invalid("ASTRA_EMU_ARTEMIS_GENERATION", "output epoch exhausted"))?;
+                    state.pixels = None; state.identity.generation = 0;
+                    context.store(next, Ordering::Release);
+                    old
+                };
+                if let Some(invalidate) = platform.0.invalidate { unsafe { invalidate(platform.0.context, epoch, old) }; }
+                pending = true; remainder = 0; last = Instant::now();
             }
+            if self.drain(platform, epoch, context.load(Ordering::Acquire), &mut request)? { last = Instant::now(); remainder = 0; }
+            if pending {
+                if let Some(slot) = pool.iter_mut().find(|slot| slot.as_ref().is_none_or(|pixels| Arc::strong_count(pixels) == 1)) {
+                    let pixels = slot.get_or_insert_with(|| Arc::new(Vec::new()));
+                    let bytes = Arc::get_mut(pixels).unwrap(); bytes.resize(self.rt.pixel_buffer_size(), 0);
+                    self.rt.try_capture_frame_into(bytes).map_err(error::engine)?;
+                    let info = surface(self.rt.stage_width(), self.rt.stage_height()); info.validate().map_err(|_| error::invalid("ASTRA_EMU_ARTEMIS_FRAME_SIZE", "invalid complete frame"))?;
+                    let mut state = shared.lock();
+                    if state.info.logical != info.logical || state.info.raster != info.raster {
+                        state.identity.output_epoch = state.identity.output_epoch.checked_add(1).ok_or_else(|| error::invalid("ASTRA_EMU_ARTEMIS_GENERATION", "output epoch exhausted"))?;
+                    }
+                    state.info = info; state.identity.generation = state.identity.generation.checked_add(1).ok_or_else(|| error::invalid("ASTRA_EMU_ARTEMIS_GENERATION", "frame generation exhausted"))?;
+                    state.pixels = Some(pixels.clone()); state.timestamp_ns = started.elapsed().as_nanos().min(u64::MAX as u128) as u64;
+                    pending = false;
+                }
+            }
+            if self.rt.is_exit_requested() { break; }
+            std::thread::park_timeout(Duration::from_millis(4));
         }
-    }
-    if !settled {
-        let _ = audio.close();
-        host_events.set_enabled(false);
-        return Err(error::invalid(
-            "ASTRA_EMU_ARTEMIS_BOOT_FRAME",
-            "the Artemis engine produced no composed frame during boot",
-        ));
-    }
-    let mut pixels = vec![0_u8; rt.pixel_buffer_size()];
-    if let Err(capture_error) = rt
-        .try_capture_frame_into(&mut pixels)
-        .map_err(error::engine)
-    {
-        let _ = audio.close();
-        host_events.set_enabled(false);
-        return Err(capture_error);
-    }
-    let pixels = Arc::new(pixels);
-    if let Err(publication_error) =
-        published_frame.publish(Arc::clone(&pixels), |pixels| pixels.as_slice(), frame_info)
-    {
-        let _ = audio.close();
-        host_events.set_enabled(false);
-        return Err(publication_error);
-    }
-    rt.take_timeline_reset();
-
-    Ok(ArtemisOpen {
-        frame_info,
-        session: ArtemisSession {
-            rt,
-            resources: resources.clone(),
-            events: host_events.clone(),
-            _lease: lease,
-            suspended: false,
-            audio,
-            pixels: [Some(pixels), None, None],
-            published_frame,
-            pending_frame: false,
-            elapsed_remainder_ns: 0,
-            fatal: None,
-            pending_window,
-        },
-    })
-}
-
-fn build_runtime(
-    resources: &HostResources,
-    ini: &[u8],
-    initial_window: WindowState,
-) -> FamilyResult<CoreRuntime> {
-    #[cfg(target_os = "macos")]
-    let backend = BackendSelection::NativeMetal;
-    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "android"))]
-    let backend = BackendSelection::NativeVulkanHardware;
-    #[cfg(not(any(
-        target_os = "windows",
-        target_os = "linux",
-        target_os = "macos",
-        target_os = "android"
-    )))]
-    return Err(error::invalid(
-        "ASTRA_EMU_ARTEMIS_PLATFORM",
-        "native GPU backend is unavailable on this platform",
-    ));
-    let mut rt = CoreRuntime::create(initial_window.width, initial_window.height, backend)
-        .map_err(error::engine)?;
-    rt.set_runtime_media_enabled(true);
-    rt.set_resources(resources.clone());
-    rt.load_project_bytes(ini, "WINDOWS")
-        .map_err(error::engine)?;
-    Ok(rt)
-}
-
-fn frame_info_of(width: u32, height: u32) -> FamilyResult<FrameInfo> {
-    if width == 0 || height == 0 {
-        return Err(error::invalid(
-            "ASTRA_EMU_ARTEMIS_FRAME_EMPTY",
-            "the engine reported an empty stage size",
-        ));
-    }
-    Ok(FrameInfo {
-        width,
-        height,
-        logical_width: width,
-        logical_height: height,
-        stride: width.checked_mul(4).ok_or_else(|| {
-            error::invalid("ASTRA_EMU_ARTEMIS_FRAME_SIZE", "frame stride overflows")
-        })?,
-        format: FrameFormat::Rgba8Srgb {
-            alpha: FrameAlpha::Ignored,
-        },
-        rows: FrameRowOrder::TopToBottom,
-    })
-}
-
-/// Per-tick services used while advancing the original core and media queues.
-struct TickContext<'a> {
-    host_events: &'a HostEvents,
-    resources: &'a HostResources,
-    audio: &'a AudioBridge,
-    window: &'a mut media::WindowRequests,
-}
-
-fn pump(
-    rt: &mut CoreRuntime,
-    tick: &mut TickContext<'_>,
-    elapsed_ms: u64,
-    input: &[FamilyEvent],
-) -> FamilyResult<bool> {
-    for finished in tick.audio.drain_finished() {
-        rt.notify_sound_finished(finished.id.as_deref());
-    }
-    for command in media::drain(tick.host_events, tick.resources, tick.window)? {
-        tick.audio.send(command)?;
-    }
-    events::apply(rt, input);
-    let changed = rt.try_advance_frame(elapsed_ms).map_err(error::engine)?;
-    for command in media::drain(tick.host_events, tick.resources, tick.window)? {
-        tick.audio.send(command)?;
-    }
-    tick.audio.check_error()?;
-    Ok(changed)
-}
-
-impl ArtemisSession {
-    fn ensure_live(&self) -> FamilyResult<()> {
-        if let Some(value) = &self.fatal {
-            return Err(value.clone());
-        }
+        self.rt.notify_lifecycle(0);
+        if let Some(audio) = self.audio.take() { audio.close()?; }
         Ok(())
     }
-
-    fn capture_pending(&mut self) -> FamilyResult<bool> {
-        let Some(index) = self.pixels.iter().position(|slot| {
-            slot.as_ref()
-                .is_none_or(|pixels| Arc::strong_count(pixels) == 1)
-        }) else {
-            return Ok(false);
-        };
-        let slot = self.pixels[index].get_or_insert_with(|| Arc::new(Vec::new()));
-        let pixels = Arc::get_mut(slot).ok_or_else(|| {
-            error::invalid(
-                "ASTRA_EMU_ARTEMIS_FRAME_OWNER",
-                "CPU frame buffer is still leased",
-            )
-        })?;
-        pixels.resize(self.rt.pixel_buffer_size(), 0);
-        self.rt
-            .try_capture_frame_into(pixels)
-            .map_err(error::engine)?;
-        let info = frame_info_of(self.rt.stage_width(), self.rt.stage_height())?;
-        self.published_frame
-            .publish(Arc::clone(slot), |pixels| pixels.as_slice(), info)?;
-        self.pending_frame = false;
-        Ok(true)
-    }
 }
-
-impl FamilySession for ArtemisSession {
-    fn advance(
-        &mut self,
-        elapsed_ns: u64,
-        events: &[FamilyEvent],
-    ) -> FamilyResult<AdvanceResponse> {
-        self.ensure_live()?;
-        self.audio.check_error()?;
-        let mut changed = false;
-        for event in events {
-            if let FamilyEvent::WindowSuspended { suspended } = event {
-                if self.suspended != *suspended {
-                    self.suspended = *suspended;
-                    changed = true;
-                }
-            }
-            if matches!(event, FamilyEvent::WindowCloseRequested) {
-                return Ok(AdvanceResponse {
-                    status: FamilyStatus::Finished,
-                    ..AdvanceResponse::running()
-                });
-            }
-        }
-        if changed {
-            self.audio
-                .send(crate::audio::MixerCommand::Suspend(self.suspended))?;
-        }
-        if self.suspended || changed {
-            self.elapsed_remainder_ns = 0;
-            return Ok(AdvanceResponse {
-                reset_clock: true,
-                ..AdvanceResponse::running()
-            });
-        }
-        let elapsed = self
-            .elapsed_remainder_ns
-            .checked_add(elapsed_ns)
-            .ok_or_else(|| error::invalid("ASTRA_EMU_ARTEMIS_TIME", "elapsed time overflow"))?;
-        let elapsed_ms = elapsed / 1_000_000;
-        self.elapsed_remainder_ns = elapsed % 1_000_000;
-        let mut tick = TickContext {
-            host_events: &self.events,
-            resources: &self.resources,
-            audio: &self.audio,
-            window: &mut self.pending_window,
-        };
-        match pump(&mut self.rt, &mut tick, elapsed_ms, events) {
-            Ok(changed) => self.pending_frame |= changed,
-            Err(failure) => {
-                self.fatal = Some(failure.clone());
-                return Err(failure);
-            }
-        }
-        let reset_clock = self.rt.take_timeline_reset();
-        if reset_clock {
-            self.elapsed_remainder_ns = 0;
-        }
-        if self.rt.is_exit_requested() {
-            return Ok(AdvanceResponse {
-                status: FamilyStatus::Finished,
-                reset_clock,
-                ..AdvanceResponse::running()
-            });
-        }
-        Ok(AdvanceResponse {
-            reset_clock,
-            window_command: self.pending_window.take().into(),
-            ..AdvanceResponse::running()
-        })
-    }
-
-    fn acquire_frame(&mut self, after: Option<FrameIdentity>) -> FamilyResult<FramePoll> {
-        self.ensure_live()?;
-        if self.pending_frame {
-            match self.capture_pending() {
-                Ok(false) => return Ok(self.published_frame.pending()),
-                Ok(true) => {}
-                Err(failure) => {
-                    self.fatal = Some(failure.clone());
-                    return Err(failure);
-                }
-            }
-        }
-        Ok(self.published_frame.poll(after))
-    }
-
-    fn close(self: Box<Self>) -> FamilyResult<()> {
-        let this = *self;
-        // Cancel the host queue and stop the mixer first so no worker outlives
-        // the session, then release the process-global host-events handle.
-        let audio_result = this.audio.close();
-        drop(this.rt);
-        this.events.set_enabled(false);
-        audio_result
-    }
+impl Drop for Runtime { fn drop(&mut self) { if let Some(audio) = self.audio.take() { let _ = audio.close(); } self.events.set_enabled(false); } }
+pub(crate) fn surface(width: u32, height: u32) -> SurfaceInfo {
+    SurfaceInfo { kind: SURFACE_CPU, pixel_format: PIXEL_RGBA8, color: COLOR_SRGB, alpha: ALPHA_IGNORED, rows: ROWS_TOP_DOWN, backend: 0, logical: Extent { width, height }, raster: Extent { width, height }, stride: u64::from(width) * 4 }
 }
-
-#[cfg(test)]
-#[path = "session_clock_tests.rs"]
-mod clock_tests;

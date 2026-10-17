@@ -32,7 +32,7 @@ fn script_gain_and_pan_use_native_thousandths() {
 fn native_caption_uses_the_host_window_title_contract() {
     let command = parse_ui(br#"{"kind":"caption","payload":{"data":"Native game"}}"#).unwrap();
     assert!(
-        matches!(command, FamilyWindowCommand::SetTitle(title) if title.as_str() == "Native game")
+        matches!(command, WindowCommand::Title(title) if title == "Native game")
     );
     assert!(parse_ui(br#"{"kind":"caption","payload":{"data":"bad\ncaption"}}"#).is_err());
     assert!(parse_ui(br#"{"kind":"caption","payload":{"data":42}}"#).is_err());
@@ -40,33 +40,19 @@ fn native_caption_uses_the_host_window_title_contract() {
 #[test]
 fn unsupported_native_ui_still_fails_with_the_request_kind() {
     let error = parse_ui(br#"{"kind":"dialog_show","payload":{}}"#).unwrap_err();
-    assert_eq!(error.code(), "ASTRA_EMU_ARTEMIS_UI_UNSUPPORTED");
+    assert_eq!(error.code, "ASTRA_EMU_ARTEMIS_UI_UNSUPPORTED");
     assert!(error.to_string().contains("dialog_show"));
 }
 
 #[test]
 fn native_mouse_preserves_nulls_and_pending_caption() {
     let mut pending = WindowRequests::default();
-    pending.push(parse_ui(br#"{"kind":"caption","payload":{"data":"Native game"}}"#).unwrap());
-    pending.push(
-        parse_ui(br#"{"kind":"mouse","payload":{"left":12,"top":null,"hide":1,"autohide":1000}}"#)
-            .unwrap(),
-    );
-    pending.push(
-        parse_ui(br#"{"kind":"mouse","payload":{"left":null,"top":34,"hide":null,"autohide":0}}"#)
-            .unwrap(),
-    );
-    assert!(matches!(
-        pending.take(),
-        Some(FamilyWindowCommand::SetTitle(_))
-    ));
-    let Some(FamilyWindowCommand::SetPointer(pointer)) = pending.take() else {
-        panic!("pending pointer must survive caption delivery");
-    };
-    assert_eq!(pointer.logical_x.into_option(), Some(12));
-    assert_eq!(pointer.logical_y.into_option(), Some(34));
-    assert_eq!(pointer.visible.into_option(), Some(false));
-    assert_eq!(pointer.autohide_ms.into_option(), Some(0));
+    pending.push(parse_ui(br#"{"kind":"caption","payload":{"data":"Native game"}}"#).unwrap()).unwrap();
+    pending.push(parse_ui(br#"{"kind":"mouse","payload":{"left":12,"top":null,"hide":1,"autohide":1000}}"#).unwrap()).unwrap();
+    pending.push(parse_ui(br#"{"kind":"mouse","payload":{"left":null,"top":34,"hide":null,"autohide":0}}"#).unwrap()).unwrap();
+    assert!(matches!(pending.take(), Some(WindowCommand::Title(_))));
+    assert!(matches!(pending.take(), Some(WindowCommand::Pointer { x: Some(12), y: None, visible: Some(false), autohide_ms: Some(1000) })));
+    assert!(matches!(pending.take(), Some(WindowCommand::Pointer { x: None, y: Some(34), visible: None, autohide_ms: Some(0) })));
     assert!(pending.take().is_none());
     assert!(parse_ui(br#"{"kind":"mouse","payload":{"hide":"bad"}}"#).is_err());
 }

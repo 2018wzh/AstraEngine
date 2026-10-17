@@ -14,7 +14,7 @@ use crate::error;
 use art3m1s_core::host_events::{HostEvents, EVENT_KIND_LOG, EVENT_KIND_MEDIA, EVENT_KIND_UI};
 use art3m1s_core::host_files::HostResources;
 use art3m1s_core::media::MediaSource;
-use astra_emu_family_api::{FamilyPointerRequest, FamilyResult, FamilyWindowCommand};
+use crate::error::{NativeError, NativeResult};
 use serde::Deserialize;
 
 use crate::audio::{Channel, MixerCommand, SourcePair};
@@ -101,7 +101,7 @@ struct VideoAudioSource {
 }
 
 impl VideoAudioSource {
-    fn open(path: &str) -> FamilyResult<Self> {
+    fn open(path: &str) -> NativeResult<Self> {
         let source_error = |cause: std::io::Error| {
             error::invalid("ASTRA_EMU_ARTEMIS_VIDEO_AUDIO_SOURCE", cause.to_string())
         };
@@ -127,39 +127,27 @@ impl MediaSource for VideoAudioSource {
     }
 }
 
-/// Only these two native window properties are supported here. Separate slots
-/// retain both requests when one native tick changes caption and pointer.
-#[derive(Default)]
-pub(crate) struct WindowRequests {
-    caption: Option<FamilyWindowCommand>,
-    pointer: Option<FamilyPointerRequest>,
+#[derive(Debug)]
+pub(crate) enum WindowCommand {
+    Title(String),
+    Pointer { x: Option<i32>, y: Option<i32>, visible: Option<bool>, autohide_ms: Option<u64> },
 }
-
+#[derive(Default)]
+pub(crate) struct WindowRequests(std::collections::VecDeque<WindowCommand>);
 impl WindowRequests {
-    fn push(&mut self, command: FamilyWindowCommand) {
-        match command {
-            FamilyWindowCommand::SetPointer(request) => {
-                self.pointer
-                    .get_or_insert_with(Default::default)
-                    .merge(request);
-            }
-            FamilyWindowCommand::SetTitle(_) => self.caption = Some(command),
-            _ => unreachable!("parse_ui only produces caption and pointer commands"),
-        }
+    fn push(&mut self, command: WindowCommand) -> NativeResult<()> {
+        if self.0.len() == 128 { return Err(invalid()); }
+        self.0.push_back(command);
+        Ok(())
     }
-
-    pub(crate) fn take(&mut self) -> Option<FamilyWindowCommand> {
-        self.caption
-            .take()
-            .or_else(|| self.pointer.take().map(FamilyWindowCommand::SetPointer))
-    }
+    pub(crate) fn take(&mut self) -> Option<WindowCommand> { self.0.pop_front() }
 }
 
 pub(crate) fn drain(
     events: &HostEvents,
     resources: &HostResources,
     window: &mut WindowRequests,
-) -> FamilyResult<Vec<MixerCommand>> {
+) -> NativeResult<Vec<MixerCommand>> {
     if events.dropped_events() != 0 {
         return Err(invalid());
     }
@@ -221,7 +209,7 @@ pub(crate) fn drain(
                 }
                 EVENT_KIND_MEDIA => commands.extend(parse_media(payload, resources)?),
                 EVENT_KIND_UI => {
-                    window.push(parse_ui(payload)?);
+                    window.push(parse_ui(payload)?)?;
                 }
                 _ => return Err(invalid()),
             }
@@ -232,7 +220,7 @@ pub(crate) fn drain(
     }
     Ok(commands)
 }
-fn parse_ui(bytes: &[u8]) -> FamilyResult<FamilyWindowCommand> {
+fn parse_ui(bytes: &[u8]) -> NativeResult<WindowCommand> {
     let envelope: CommandEnvelope = serde_json::from_slice(bytes).map_err(|_| invalid())?;
     if envelope.kind == "caption" {
         #[derive(Deserialize)]
@@ -240,9 +228,8 @@ fn parse_ui(bytes: &[u8]) -> FamilyResult<FamilyWindowCommand> {
             data: String,
         }
         let caption: Caption = parse(envelope.payload)?;
-        let command = FamilyWindowCommand::SetTitle(caption.data.into());
-        command.validate()?;
-        Ok(command)
+        if caption.data.len() > 4096 || caption.data.chars().any(char::is_control) { return Err(invalid()); }
+        Ok(WindowCommand::Title(caption.data))
     } else if envelope.kind == "mouse" {
         #[derive(Deserialize)]
         struct Mouse {
@@ -252,12 +239,12 @@ fn parse_ui(bytes: &[u8]) -> FamilyResult<FamilyWindowCommand> {
             autohide: Option<u64>,
         }
         let mouse: Mouse = parse(envelope.payload)?;
-        Ok(FamilyWindowCommand::SetPointer(FamilyPointerRequest {
-            logical_x: mouse.left.into(),
-            logical_y: mouse.top.into(),
-            visible: mouse.hide.map(|hide| hide == 0).into(),
-            autohide_ms: mouse.autohide.into(),
-        }))
+        Ok(WindowCommand::Pointer {
+            x: mouse.left,
+            y: mouse.top,
+            visible: mouse.hide.map(|hide| hide == 0),
+            autohide_ms: mouse.autohide,
+        })
     } else {
         Err(error::invalid(
             "ASTRA_EMU_ARTEMIS_UI_UNSUPPORTED",
@@ -268,16 +255,16 @@ fn parse_ui(bytes: &[u8]) -> FamilyResult<FamilyWindowCommand> {
         ))
     }
 }
-fn invalid() -> astra_emu_family_api::FamilyError {
+fn invalid() -> NativeError {
     error::invalid(
         "ASTRA_EMU_ARTEMIS_MEDIA_COMMAND",
         "invalid native media command",
     )
 }
-fn parse<T: serde::de::DeserializeOwned>(value: serde_json::Value) -> FamilyResult<T> {
+fn parse<T: serde::de::DeserializeOwned>(value: serde_json::Value) -> NativeResult<T> {
     serde_json::from_value(value).map_err(|_| invalid())
 }
-fn parse_media(bytes: &[u8], resources: &HostResources) -> FamilyResult<Vec<MixerCommand>> {
+fn parse_media(bytes: &[u8], resources: &HostResources) -> NativeResult<Vec<MixerCommand>> {
     let envelope: CommandEnvelope = serde_json::from_slice(bytes).map_err(|_| invalid())?;
     let command = match envelope.kind.as_str() {
         "video_stop_all" => MixerCommand::StopVideoAll,
@@ -365,8 +352,8 @@ fn parse_media(bytes: &[u8], resources: &HostResources) -> FamilyResult<Vec<Mixe
     };
     Ok(vec![command])
 }
-fn resolve_sources(p: &PlayPayload, resources: &HostResources) -> FamilyResult<SourcePair> {
-    let open = |path: &str| -> FamilyResult<Arc<dyn MediaSource>> {
+fn resolve_sources(p: &PlayPayload, resources: &HostResources) -> NativeResult<SourcePair> {
+    let open = |path: &str| -> NativeResult<Arc<dyn MediaSource>> {
         resources
             .open_media_source(path)
             .map_err(|e| error::invalid("ASTRA_EMU_ARTEMIS_AUDIO_SOURCE", e.to_string()))

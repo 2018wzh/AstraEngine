@@ -1,6 +1,6 @@
 use super::*;
 use kira::{
-    backend::{Backend, Renderer},
+    backend::DefaultBackend,
     sound::{
         static_sound::{StaticSoundData, StaticSoundHandle},
         PlaybackState,
@@ -9,20 +9,6 @@ use kira::{
     AudioManager, AudioManagerSettings, Decibels, Panning, Tween,
 };
 use std::time::Duration;
-struct PcmBackend {
-    renderer: Option<Renderer>,
-}
-impl Backend for PcmBackend {
-    type Settings = ();
-    type Error = std::convert::Infallible;
-    fn setup(_: (), _: usize) -> Result<(Self, u32), Self::Error> {
-        Ok((Self { renderer: None }, SAMPLE_RATE))
-    }
-    fn start(&mut self, renderer: Renderer) -> Result<(), Self::Error> {
-        self.renderer = Some(renderer);
-        Ok(())
-    }
-}
 struct Voice {
     id: Option<String>,
     channel: Channel,
@@ -51,7 +37,7 @@ fn bus(channel: Channel) -> usize {
         Channel::Video => 3,
     }
 }
-fn fail() -> FamilyError {
+fn fail() -> NativeError {
     error::invalid(
         "ASTRA_EMU_ARTEMIS_AUDIO_MIXER",
         "audio mixer capacity or data limit exceeded",
@@ -61,7 +47,7 @@ fn decode(
     source: &dyn MediaSource,
     stop: &AtomicBool,
     budget: usize,
-) -> FamilyResult<StaticSoundData> {
+) -> NativeResult<StaticSoundData> {
     let length = source.len().map_err(|_| fail())?;
     if length == 0 || length > 64 * 1024 * 1024 {
         return Err(fail());
@@ -87,13 +73,11 @@ fn decode(
 pub(super) fn run(
     rx: Receiver<MixerCommand>,
     state: &WorkerState,
-    sink: &AudioSinkBox,
-) -> FamilyResult<()> {
-    let mut manager = AudioManager::<PcmBackend>::new(AudioManagerSettings {
-        backend_settings: (),
-        ..Default::default()
-    })
-    .map_err(|_| fail())?;
+    ready: SyncSender<bool>,
+) -> NativeResult<()> {
+    let mut manager = AudioManager::<DefaultBackend>::new(AudioManagerSettings::default())
+        .map_err(|e| error::invalid("ASTRA_EMU_ARTEMIS_AUDIO_DEVICE", e.to_string()))?;
+    let _ = ready.send(true);
     let mut add_bus = || {
         manager
             .add_sub_track(TrackBuilder::new())
@@ -107,17 +91,21 @@ pub(super) fn run(
             return Ok(());
         }
         let mut commands = Vec::new();
-        if suspended || voices.is_empty() {
-            match rx.recv() {
-                Ok(command) => commands.push(command),
-                Err(_) => return Ok(()),
-            }
+        match rx.recv_timeout(Duration::from_millis(10)) {
+            Ok(command) => commands.push(command),
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return Ok(()),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
         }
         commands.extend(rx.try_iter());
         for command in commands {
             match command {
                 MixerCommand::Shutdown => return Ok(()),
-                MixerCommand::Suspend(value) => suspended = value,
+                MixerCommand::Suspend(value) => {
+                    suspended = value;
+                    for track in &mut buses {
+                        if value { track.pause(tween(0)); } else { track.resume(tween(0)); }
+                    }
+                }
                 MixerCommand::SetVolume { channel, value } => {
                     buses[bus(channel)].set_volume(db(value), tween(0))
                 }
@@ -230,25 +218,6 @@ pub(super) fn run(
         }
         if suspended {
             continue;
-        }
-        let mut samples = vec![0.0; CHUNK_FRAMES * 2];
-        let renderer = manager.backend_mut().renderer.as_mut().ok_or_else(fail)?;
-        renderer.on_start_processing();
-        renderer.process(&mut samples, 2);
-        if state.cancelled.load(Ordering::Acquire) {
-            return Ok(());
-        }
-        match sink.write(PcmChunk::F32(samples.into())).into_result()? {
-            AudioWriteStatus::Accepted => {}
-            AudioWriteStatus::Cancelled | AudioWriteStatus::Closed => {
-                if state.cancelled.load(Ordering::Acquire) {
-                    return Ok(());
-                }
-                return Err(error::invalid(
-                    "ASTRA_EMU_ARTEMIS_AUDIO_CLOSED",
-                    "host audio queue closed",
-                ));
-            }
         }
         voices.retain(|voice| {
             if voice.handle.state() != PlaybackState::Stopped {
