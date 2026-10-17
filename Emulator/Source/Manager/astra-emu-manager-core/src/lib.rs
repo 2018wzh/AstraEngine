@@ -20,6 +20,7 @@ mod native_config;
 mod native_frame;
 pub mod extensions;
 mod native_cancel;
+mod native_module_owner;
 pub use native_cancel::NativeCancellation;
 #[cfg(test)]
 extern crate self as astra_emu_manager_core;

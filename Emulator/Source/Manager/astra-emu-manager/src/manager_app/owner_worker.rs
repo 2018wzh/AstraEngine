@@ -107,10 +107,11 @@ pub(super) fn run(
                 }
             }
             Ok(Command::Shutdown) | Err(RecvTimeoutError::Disconnected) => {
-                if let Some(mut session) = active.take() {
-                    session.close()?;
-                }
-                return shared.lock().error.take().map_or(Ok(()), Err);
+                let primary = shared.lock().error.take();
+                let session_error = active.take().and_then(|mut session| session.close().err());
+                let owner_error = registry.shutdown().err().map(|error| error.to_string());
+                let errors: Vec<_> = [primary, session_error, owner_error].into_iter().flatten().collect();
+                return if errors.is_empty() { Ok(()) } else { Err(errors.join("; ")) };
             }
             Err(RecvTimeoutError::Timeout) => {}
         }

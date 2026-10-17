@@ -13,11 +13,14 @@ pub struct Fixture {
     pub gate: Option<std::sync::mpsc::Receiver<()>>,
     pub close_error: bool,
     pub init_error: bool,
+    pub module_owner: bool,
+    pub owner_create_error: bool,
+    pub owner_destroy_error: bool,
     formats: Box<[abi::Bytes]>, fields: Box<[abi::ConfigField]>, choices: Box<[abi::Bytes]>,
 }
 impl Fixture {
     pub fn new(plugin: &'static str, family: &'static str, format: &'static str) -> Self {
-        Self { plugin, family, format, confidence: 9000, marker: None, config: false, calls: Arc::new(Mutex::new(Vec::new())), entered: None, gate: None, close_error: false, init_error: false, formats: Box::new([]), fields: Box::new([]), choices: Box::new([]) }
+        Self { plugin, family, format, confidence: 9000, marker: None, config: false, calls: Arc::new(Mutex::new(Vec::new())), entered: None, gate: None, close_error: false, init_error: false, module_owner: false, owner_create_error: false, owner_destroy_error: false, formats: Box::new([]), fields: Box::new([]), choices: Box::new([]) }
     }
 }
 thread_local! { static FIXTURES: RefCell<[Option<Box<Fixture>>; 4]> = const { RefCell::new([None, None, None, None]) }; }
@@ -65,6 +68,14 @@ unsafe extern "C" fn open<const N: usize>(raw: *const abi::OpenRequest, out: *mu
         if unsafe { raw.host.cancellation.is_cancelled.unwrap()(raw.host.cancellation.context, raw.session_epoch) } != 0 {
             unsafe { (*error).set("ASTRA_TEST_OPEN_CANCELLED", "cancelled while opening"); } return abi::CANCELLED;
         }
+        if v.module_owner == raw.module_owner.is_null() {
+            unsafe { (*error).set("ASTRA_TEST_MODULE_OWNER", "module owner presence does not match the extension"); }
+            return abi::INVALID_ARGUMENT;
+        }
+        if v.module_owner {
+            let owner = unsafe { &*raw.module_owner.cast::<Resources>() };
+            record(&owner.calls, "module_use", String::new());
+        }
         let generation = Arc::new(AtomicU64::new(1)); let stop = Arc::new(AtomicBool::new(false));
         let producer_generation = generation.clone(); let producer_stop = stop.clone();
         let worker = std::thread::spawn(move || { while !producer_stop.load(Ordering::Acquire) { std::thread::sleep(Duration::from_millis(2)); producer_generation.fetch_add(1, Ordering::AcqRel); } });
@@ -98,9 +109,32 @@ unsafe extern "C" fn close(handle: abi::Session, error: *mut abi::Error) -> abi:
     session.worker.take().unwrap().join().unwrap(); record(&session.calls, "close", String::new());
     if session.close_error { unsafe { (*error).set("ASTRA_TEST_CLOSE", "close failed after cleanup"); } abi::CORE_ERROR } else { abi::OK }
 }
-unsafe extern "C" fn extension(_: abi::Bytes, _: u32, out: *mut *const std::ffi::c_void) -> abi::Status { unsafe { *out = std::ptr::null(); } abi::UNSUPPORTED }
+struct Resources { calls: Arc<Mutex<Vec<Call>>>, destroy_error: bool }
+unsafe extern "C" fn create_owner<const N: usize>(out: *mut abi::ModuleOwner, error: *mut abi::Error) -> abi::Status {
+    fixture::<N,_>(|fixture| {
+        record(&fixture.calls, "module_create", String::new());
+        unsafe { *out = Box::into_raw(Box::new(Resources { calls: fixture.calls.clone(), destroy_error: fixture.owner_destroy_error })).cast(); }
+        // Exercise host cleanup for a core that violates the null-on-error rule.
+        if fixture.owner_create_error { unsafe { (*error).set("ASTRA_TEST_MODULE_CREATE", "owner initialization failed"); } abi::CORE_ERROR } else { abi::OK }
+    })
+}
+unsafe extern "C" fn destroy_owner(handle: abi::ModuleOwner, error: *mut abi::Error) -> abi::Status {
+    let owner = unsafe { Box::from_raw(handle.cast::<Resources>()) };
+    record(&owner.calls, "module_destroy", String::new());
+    if owner.destroy_error { unsafe { (*error).set("ASTRA_TEST_MODULE_DESTROY", "owner destroyed with an error"); } abi::CORE_ERROR } else { abi::OK }
+}
+struct OwnerTable<const N: usize>;
+impl<const N: usize> OwnerTable<N> {
+    const API: abi::ModuleOwnerApi = abi::ModuleOwnerApi { header: abi::ModuleOwnerApi::HEADER, create: Some(create_owner::<N>), destroy: Some(destroy_owner) };
+}
+unsafe extern "C" fn extension<const N: usize>(id: abi::Bytes, version: u32, out: *mut *const std::ffi::c_void) -> abi::Status {
+    unsafe { *out = std::ptr::null(); }
+    if version != abi::MODULE_OWNER_VERSION || unsafe { id.as_slice(128) } != Ok(abi::MODULE_OWNER_EXTENSION) || !fixture::<N,_>(|value| value.module_owner) { return abi::UNSUPPORTED; }
+    unsafe { *out = (&OwnerTable::<N>::API as *const abi::ModuleOwnerApi).cast(); }
+    abi::OK
+}
 struct Table<const N: usize>;
-impl<const N: usize> Table<N> { const API: abi::CoreApi = abi::CoreApi { header: abi::Header::of::<abi::CoreApi>(), initialize: Some(initialize::<N>), describe: Some(describe::<N>), probe: Some(probe::<N>), open: Some(open::<N>), input: Some(input), control: Some(control), state: Some(state), frame: Some(frame), cancel: Some(cancel), close: Some(close), extension: Some(extension) }; }
+impl<const N: usize> Table<N> { const API: abi::CoreApi = abi::CoreApi { header: abi::Header::of::<abi::CoreApi>(), initialize: Some(initialize::<N>), describe: Some(describe::<N>), probe: Some(probe::<N>), open: Some(open::<N>), input: Some(input), control: Some(control), state: Some(state), frame: Some(frame), cancel: Some(cancel), close: Some(close), extension: Some(extension::<N>) }; }
 unsafe extern "C" fn query<const N: usize>(version: u32, out: *mut *const abi::CoreApi) -> abi::Status {
     unsafe { *out = std::ptr::null(); }
     if version != abi::ABI_VERSION { return abi::UNSUPPORTED; }

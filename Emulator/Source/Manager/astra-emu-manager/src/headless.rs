@@ -176,6 +176,7 @@ fn run_configuration(config: Configuration) -> Result<(), String> {
         .to_str()
         .ok_or("ASTRA_EMU_HEADLESS_GAME_ENCODING")?;
     let mut plugin = LoadedFamilyPlugin::load(&config.plugin).map_err(|error| error.to_string())?;
+    let run_result = (|| {
     if plugin
         .probe(ProbeRequest {
             game_path: game.into(),
@@ -195,7 +196,14 @@ fn run_configuration(config: Configuration) -> Result<(), String> {
         tracing::info!(event = "astra.emu.headless.reopen", cycle);
         run_session(&config, &mut plugin, game, &output)?;
     }
-    Ok(())
+        Ok(())
+    })();
+    let owner_result = plugin.shutdown().map_err(|error| error.to_string());
+    match (run_result, owner_result) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+        (Err(primary), Err(cleanup)) => Err(format!("{primary}; {cleanup}")),
+    }
 }
 
 fn run_session(config: &Configuration, plugin: &mut LoadedFamilyPlugin, game: &str, output: &Path) -> Result<(), String> {

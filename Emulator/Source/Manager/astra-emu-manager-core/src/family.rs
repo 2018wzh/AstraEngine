@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Host metadata identity for the versioned native C protocol.
-pub const INDEPENDENT_FAMILY_ABI_FINGERPRINT: &str = "astra.emu.native.c.v1";
+pub const INDEPENDENT_FAMILY_ABI_FINGERPRINT: &str = "astra.emu.native.c.v2";
 pub const MAX_FAMILY_ID_BYTES: usize = crate::model::MAX_SYMBOL_BYTES;
 pub const MAX_GAME_ID_BYTES: usize = 256;
 

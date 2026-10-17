@@ -200,6 +200,20 @@ impl FamilyProviderRegistry {
         self.providers.remove(plugin_id).is_some()
     }
 
+    /// Release every module's explicit resources after its sessions close.
+    /// Failures never skip destruction of the remaining module owners.
+    pub fn shutdown(&mut self) -> Result<(), FamilyLoadError> {
+        self.descriptors = FamilyPluginRegistry::new();
+        let mut failure = None;
+        for (plugin_id, mut plugin) in std::mem::take(&mut self.providers) {
+            if let Err(error) = plugin.shutdown() {
+                tracing::error!(event = "astra.emu.module_owner.shutdown_failed", plugin_id, diagnostic_code = %error.code());
+                if failure.is_none() { failure = Some(FamilyLoadError::ProviderError(error)); }
+            }
+        }
+        failure.map_or(Ok(()), Err)
+    }
+
     pub fn descriptor(&self, plugin_id: &str) -> Option<&FamilyPluginDescriptor> {
         self.descriptors.descriptor(plugin_id)
     }

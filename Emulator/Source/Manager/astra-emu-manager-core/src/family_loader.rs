@@ -58,7 +58,11 @@ pub(crate) unsafe fn text(bytes: abi::Bytes, limit: usize) -> FamilyResult<Strin
     unsafe { bytes.text(limit) }.map(str::to_owned).map_err(|_| FamilyError::invalid("ASTRA_EMU_CORE_METADATA", "invalid bounded UTF-8 metadata"))
 }
 
-struct NativeModule { api: abi::CoreApi }
+struct NativeModule {
+    api: abi::CoreApi,
+    resources: Option<crate::native_module_owner::ModuleResources>,
+    closed: bool,
+}
 pub struct LoadedFamilyPlugin {
     inner: Rc<NativeModule>,
     descriptor: FamilyPluginDescriptor,
@@ -90,12 +94,22 @@ impl LoadedFamilyPlugin {
         let mut error = abi::Error::default();
         checked(unsafe { api.describe.unwrap()(descriptor.as_mut_ptr(), &mut error) }, error).map_err(FamilyLoadError::DescriptorError)?;
         let (descriptor, configuration) = unsafe { super::native_config::descriptor(descriptor.assume_init()) }.map_err(FamilyLoadError::DescriptorError)?;
-        Ok(Self { inner: Rc::new(NativeModule { api }), descriptor, configuration, location: PathBuf::new() })
+        let resources = crate::native_module_owner::ModuleResources::discover(&api).map_err(FamilyLoadError::ProviderError)?;
+        Ok(Self { inner: Rc::new(NativeModule { api, resources, closed: false }), descriptor, configuration, location: PathBuf::new() })
     }
     pub fn location(&self) -> &Path { &self.location }
     pub fn manager_descriptor(&self) -> &FamilyPluginDescriptor { &self.descriptor }
     pub fn configuration(&self) -> &[ConfigField] { &self.configuration }
+    /// Consume cross-session resources only when every native session has
+    /// released its module reference. The dynamic library remains resident.
+    pub fn shutdown(&mut self) -> FamilyResult<()> {
+        let module = Rc::get_mut(&mut self.inner).ok_or_else(|| FamilyError::invalid("ASTRA_EMU_MODULE_OWNER_BUSY", "native sessions still retain this module"))?;
+        if module.closed { return Ok(()); }
+        module.closed = true;
+        module.resources.take().map_or(Ok(()), |mut resources| resources.close())
+    }
     pub fn probe(&self, request: ProbeRequest) -> FamilyResult<Option<ProbeReport>> {
+        if self.inner.closed { return Err(FamilyError::invalid("ASTRA_EMU_MODULE_CLOSED", "native module resources have been closed")); }
         request.validate()?;
         let mut out = MaybeUninit::uninit();
         let mut error = abi::Error::default();
@@ -114,6 +128,7 @@ impl LoadedFamilyPlugin {
         Ok(Some(report))
     }
     pub fn open(&mut self, request: NativeOpenRequest) -> FamilyResult<NativeSession> {
+        if self.inner.closed { return Err(FamilyError::invalid("ASTRA_EMU_MODULE_CLOSED", "native module resources have been closed")); }
         request.initial_window.validate()?;
         if request.session_epoch == 0 || request.cancellation.epoch() != request.session_epoch || request.cancellation.is_cancelled() {
             return Err(FamilyError::invalid("ASTRA_EMU_CORE_CANCELLED", "open context cancelled or invalid"));
@@ -124,6 +139,7 @@ impl LoadedFamilyPlugin {
         let raw = abi::OpenRequest {
             header: abi::Header::of::<abi::OpenRequest>(), game_path: abi::Bytes::new(request.game_path.as_bytes()), session_epoch: request.session_epoch,
             configuration: entries.as_ptr(), configuration_count: entries.len(), window: native_window(request.initial_window), host: request.host,
+            module_owner: self.inner.resources.as_ref().map_or(std::ptr::null_mut(), |resources| resources.handle()),
         };
         let mut output = MaybeUninit::<abi::OpenResult>::zeroed();
         let mut error = abi::Error::default();
@@ -133,7 +149,7 @@ impl LoadedFamilyPlugin {
             if !output.session.is_null() { unsafe { self.inner.api.cancel.unwrap()(output.session); self.inner.api.close.unwrap()(output.session, &mut abi::Error::default()); } }
             return checked(status, error).and_then(|_| unreachable!());
         }
-        let session = NativeSession { inner: Rc::clone(&self.inner), handle: output.session, session_epoch: request.session_epoch, window: raw.window, pointer: (0.0, 0.0), poisoned: false, cancellation: request.cancellation };
+        let session = NativeSession { inner: Some(Rc::clone(&self.inner)), handle: output.session, session_epoch: request.session_epoch, window: raw.window, pointer: (0.0, 0.0), poisoned: false, cancellation: request.cancellation };
         if !session.cancellation.publish() { drop(session); return Err(FamilyError::invalid("ASTRA_EMU_CORE_CANCELLED", "open cancelled before handle publication")); }
         if output.session.is_null() || output.context_epoch == 0 || output.output_epoch == 0 || output.surface.validate().is_err() || output.surface.kind != abi::SURFACE_CPU {
             drop(session);
@@ -158,7 +174,7 @@ fn native_window(state: WindowState) -> abi::WindowState {
 }
 
 pub struct NativeSession {
-    inner: Rc<NativeModule>, handle: abi::Session, session_epoch: u64,
+    inner: Option<Rc<NativeModule>>, handle: abi::Session, session_epoch: u64,
     window: abi::WindowState, pointer: (f64, f64), poisoned: bool,
     cancellation: crate::NativeCancellation,
 }
@@ -166,7 +182,7 @@ impl NativeSession {
     fn call(&mut self, call: impl FnOnce(abi::CoreApi, abi::Session, &mut abi::Error) -> abi::Status) -> FamilyResult<()> {
         if self.handle.is_null() || self.poisoned { return Err(FamilyError::invalid("ASTRA_EMU_CORE_SESSION_UNAVAILABLE", "session is closed or poisoned")); }
         let mut error = abi::Error::default();
-        let status = call(self.inner.api, self.handle, &mut error);
+        let status = call(self.inner.as_ref().expect("live session retains module").api, self.handle, &mut error);
         self.poisoned |= status == abi::PANICKED;
         checked(status, error)
     }
@@ -209,14 +225,16 @@ impl NativeSession {
         }
         unsafe { super::native_frame::take_surface(surface, self.session_epoch, after) }
     }
-    pub fn cancel(&self) { self.cancellation.cancel(); if !self.handle.is_null() { unsafe { self.inner.api.cancel.unwrap()(self.handle) }; } }
+    pub fn cancel(&self) { self.cancellation.cancel(); if !self.handle.is_null() { unsafe { self.inner.as_ref().expect("live session retains module").api.cancel.unwrap()(self.handle) }; } }
     pub fn close(&mut self) -> FamilyResult<()> {
         self.cancellation.cancel();
         let handle = std::mem::replace(&mut self.handle, std::ptr::null_mut());
+        let module = self.inner.take();
         if handle.is_null() { return Ok(()); }
-        unsafe { self.inner.api.cancel.unwrap()(handle) };
+        let module = module.expect("live session retains module");
+        unsafe { module.api.cancel.unwrap()(handle) };
         let mut error = abi::Error::default();
-        checked(unsafe { self.inner.api.close.unwrap()(handle, &mut error) }, error)
+        checked(unsafe { module.api.close.unwrap()(handle, &mut error) }, error)
     }
 }
 impl Drop for NativeSession { fn drop(&mut self) { if let Err(error) = self.close() { tracing::error!(event = "astra.emu.core.close_failed", code = %error.code()); } } }
