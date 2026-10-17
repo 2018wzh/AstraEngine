@@ -7,6 +7,7 @@ license.workspace = true
 [features]
 video-ffmpeg = ["dep:astra-media", "astra-media/ffmpeg-vcpkg"]
 audio = ["dep:kira", "dep:symphonia"]
+device-audio = ["dep:rubato"]
 default = ["text", "image", "archive", "cache"]
 archive = ["dep:astra-core", "dep:astra-byte-source", "dep:serde", "dep:serde_json", "dep:schemars"]
 cache = ["dep:astra-core", "dep:lru", "dep:windows"]
@@ -18,6 +19,7 @@ tracing.workspace = true
 astra-media = { path = "../../../../Engine/Source/Runtime/astra-media", optional = true }
 kira = { workspace = true, optional = true }
 symphonia = { workspace = true, optional = true }
+rubato = { workspace = true, optional = true }
 thiserror.workspace = true
 astra-byte-source = { path = "../../../../Engine/Source/Runtime/astra-byte-source", optional = true }
 serde = { workspace = true, optional = true }

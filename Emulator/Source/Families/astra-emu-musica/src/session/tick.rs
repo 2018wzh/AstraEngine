@@ -1,6 +1,12 @@
 use super::*;
 impl MusicaSession {
     pub(super) fn tick(&mut self) -> FamilyResult<bool> {
+        if self.pending.is_some() {
+            let event = self.semantic_event(None)?;
+            let changed = self.apply_event(event)?;
+            self.update_pause()?;
+            return Ok(changed);
+        }
         let visual_completion = matches!(
             self.vm.state().wait,
             Some(
@@ -118,6 +124,15 @@ impl MusicaSession {
             }
         }
         let event = self.vm.step(tick).map_err(vm_error)?;
+        let hooked = self.replacement.as_ref().is_some_and(|service| service.0.text.is_some())
+            && matches!(event, Some(MusicaVmEvent::Message { .. } | MusicaVmEvent::Choice));
+        let event = self.semantic_event(event)?;
+        let changed = self.apply_event(event)?;
+        if hooked { self.update_pause()?; }
+        Ok(changed || visual_completion)
+    }
+
+    fn apply_event(&mut self, event: Option<MusicaVmEvent>) -> FamilyResult<bool> {
         let changed: FamilyResult<bool> = match event {
             Some(MusicaVmEvent::Movie(state)) => {
                 if (state.width, state.height)
@@ -191,6 +206,7 @@ impl MusicaSession {
                 | MusicaVmEvent::Panel { .. },
             ) => Ok(true),
             Some(MusicaVmEvent::Terminal) => {
+                self.cancel_text()?;
                 if self.vm.state().system_ui.page == crate::MusicaSystemPage::Title {
                     self.audio.restore(Vec::new())?;
                     self.message = None;
@@ -204,6 +220,6 @@ impl MusicaSession {
             }
             None => Ok(false),
         };
-        changed.map(|changed| changed || visual_completion)
+        changed
     }
 }

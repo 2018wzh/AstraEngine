@@ -14,14 +14,16 @@ ffmpeg-vcpkg = ["astra-emu-sdk/video-ffmpeg"]
 dynamic-plugin-export = []
 
 [dependencies]
-astra-emu-sdk = { path = "../../SDK/astra-emu-sdk", features = ["audio"] }
+astra-emu-abi = { path = "../../FamilyApi/astra-emu-abi", features = ["diagnostic-bridge"] }
+cpal.workspace = true
+astra-emu-sdk = { path = "../../SDK/astra-emu-sdk", features = ["audio", "device-audio"] }
 astra-platform = { path = "../../../../Engine/Source/Platform/astra-platform" }
 astra-platform-common = { path = "../../../../Engine/Source/Platform/astra-platform-common" }
 pollster.workspace = true
 abi_stable.workspace = true
 astra-core = { path = "../../../../Engine/Source/Runtime/astra-core" }
 astra-byte-source = { path = "../../../../Engine/Source/Runtime/astra-byte-source" }
-astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api", features = ["diagnostic-bridge"] }
+astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api" }
 astra-text = { path = "../../../../Engine/Source/Runtime/astra-text" }
 astra-media-core = { path = "../../../../Engine/Source/Runtime/astra-media-core" }
 blowfish.workspace = true
@@ -44,3 +46,6 @@ wgpu.workspace = true
 
 time = { workspace = true, features = ["local-offset"] }
 tempfile.workspace = true
+
+[dev-dependencies]
+parking_lot = "0.12"

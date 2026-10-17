@@ -3,6 +3,10 @@
 mod audio;
 #[cfg(feature = "audio")]
 pub use audio::decode_audio;
+#[cfg(feature = "device-audio")]
+mod device_audio;
+#[cfg(feature = "device-audio")]
+pub use device_audio::NativeAudioConverter;
 #[cfg(feature = "archive")]
 mod archive;
 #[cfg(feature = "archive")]
