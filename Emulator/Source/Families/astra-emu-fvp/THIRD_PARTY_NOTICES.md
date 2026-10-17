@@ -2,7 +2,7 @@
 
 ## RFVP 完整覆盖源码
 
-`Emulator/ThirdParty/rfvp` 为 [`xmoezzz/rfvp`](https://github.com/xmoezzz/rfvp) 的完整 fork，以 Git submodule 固定精确提交。当前上游基线为 `af557db750c7833274f22a6d82b0dc33cdea2f85`，crate 版本 0.6.0；新的本地适配分支为 `codex/astra-upstream-head-20261016`，尚未发布远端。最终适配提交与变更分类见 [MODIFICATIONS.md](MODIFICATIONS.md)。
+`Emulator/ThirdParty/rfvp` 为 [`xmoezzz/rfvp`](https://github.com/xmoezzz/rfvp) 的完整 fork，以 Git submodule 固定精确提交。当前上游基线为 `af557db750c7833274f22a6d82b0dc33cdea2f85`，crate 版本 0.6.0；适配分支 [`codex/astra-minimal-native-20261017`](https://github.com/2018wzh/rfvp/tree/codex/astra-minimal-native-20261017) 已推送至 GitHub fork。精确适配提交与变更分类见 [MODIFICATIONS.md](MODIFICATIONS.md)。
 
 完整 MPL-2.0 许可位于 `../../../ThirdParty/rfvp/LICENSE`。发行时须保留覆盖源码、许可与变更记录，不以旧已发布基线替代当前二进制实际使用的源码。
 

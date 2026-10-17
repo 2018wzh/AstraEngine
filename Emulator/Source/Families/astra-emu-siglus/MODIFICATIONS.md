@@ -4,7 +4,7 @@
 
 - 完整 fork：[xmoezzz/siglus_rs](https://github.com/xmoezzz/siglus_rs)，主仓 submodule：`Emulator/ThirdParty/siglus_rs`。
 - 上游 HEAD（2026-10-17 核对，1.0.0）：`5f358ef1360b0439e92aed2b749e8f25d8721954`。
-- 唯一适配提交：`29fb9582751fc8ddfc23b374d428d6eba30bcb40`，直接父提交为上述 HEAD；分支 `codex/astra-minimal-native-20261017`，本地整合、未发布。
+- 唯一适配提交：[`29fb9582751fc8ddfc23b374d428d6eba30bcb40`](https://github.com/2018wzh/siglus_rs/commit/29fb9582751fc8ddfc23b374d428d6eba30bcb40)，直接父提交为上述 HEAD；分支 `codex/astra-minimal-native-20261017` 已推送 GitHub，远端 SHA 与主仓 gitlink 一致。
 - 来源历史、原生平台与许可证保留；不改写旧分支。
 
 ## 核心差异

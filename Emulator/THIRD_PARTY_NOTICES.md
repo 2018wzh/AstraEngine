@@ -16,7 +16,7 @@
 - Upstream version: `0.6.0`, revision `af557db750c7833274f22a6d82b0dc33cdea2f85`
 - Hosted adaptation fork: <https://github.com/2018wzh/rfvp>
 - Hosted adaptation branch: `codex/astra-minimal-native-20261017`
-- 当前 submodule 固定 revision：`dcd39c23ca59b38a9a96b6f301aeb05121aa3e18`，直接基于上述上游 HEAD 的一个适配提交；尚未推送。
+- 当前 submodule 固定 revision：[`dcd39c23ca59b38a9a96b6f301aeb05121aa3e18`](https://github.com/2018wzh/rfvp/commit/dcd39c23ca59b38a9a96b6f301aeb05121aa3e18)，直接基于上述上游 HEAD 的一个适配提交，已推送至上述 fork 分支。
 - License: Mozilla Public License 2.0.
 - Derivative source: <https://github.com/2018wzh/rfvp>
 - Astra wrapper source: `Emulator/Source/Families/astra-emu-fvp/`
@@ -24,7 +24,7 @@
 
 发布时提供与二进制对应的 MPL-2.0 covered source、修改说明和完整许可证，可随包分发源码或提供有效的 source offer。
 
-完整 fork 以 Git submodule 固定在 `Emulator/ThirdParty/rfvp/`；旧已发布基线不能代替当前二进制实际使用的 covered source。本地适配尚未发布，分发前必须提供匹配源码和修改记录。文件级变化与覆盖范围见该 Family 的 `MODIFICATIONS.md` 与 `THIRD_PARTY_NOTICES.md`。Family 以 rlib 链接核心，产品动态 ABI 边界由 `astra-emu-fvp` 持有；核心原有构建 targets 保留。原生四个系统字体槽由宿主通过 `fontdb` 按实际 family name 与 TTC index 绑定，不分发 Microsoft 字体，optional slot 沿用原生 fallback。
+完整 fork 以 Git submodule 固定在 `Emulator/ThirdParty/rfvp/`；旧已发布基线不能代替当前二进制实际使用的 covered source。匹配当前 gitlink 的适配源码已推送 GitHub，二进制分发仍须提供对应源码、许可与修改记录。文件级变化与覆盖范围见该 Family 的 `MODIFICATIONS.md` 与 `THIRD_PARTY_NOTICES.md`。Family 以 rlib 链接核心，产品动态 ABI 边界由 `astra-emu-fvp` 持有；核心原有构建 targets 保留。原生四个系统字体槽由宿主通过 `fontdb` 按实际 family name 与 TTC index 绑定，不分发 Microsoft 字体，optional slot 沿用原生 fallback。
 
 ## KrKr native development bundle
 

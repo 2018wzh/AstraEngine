@@ -4,11 +4,11 @@
 
 ## 当前结论
 
-- 本轮性能改动已本地整合；**严格最小适配和全产品验收均未完成**。
+- 本轮性能改动已本地整合，三个登记 fork 的适配分支已推送 GitHub；**严格最小适配和全产品验收均未完成**。
 - FVP、Siglus、Artemis 已按上游 HEAD＋一个适配提交固定为 `Emulator/ThirdParty` submodule。结构通过，内容仍需处理审计 R01–R09。完整 SHA 和差异规模只在审计及各 Family MODIFICATIONS 维护。
 - 保持 CPU lease、原生 GPU/媒体/存档、固定 owner 与有界 PCM；先建性能基线，不先定任意容忍百分比。本批只定位内存风险，不承担长时间耐久验收。
 - CMVS、KrKr 跳过本批适配/整合，保留既有提交和未提交成果。其他来源工作树不归当前实例清理。
-- 已发布独立原生贡献：RFVP [V1 图像 #51](https://github.com/xmoezzz/rfvp/pull/51)、[文字等待 #53](https://github.com/xmoezzz/rfvp/pull/53)、[scratch 分配 #54](https://github.com/xmoezzz/rfvp/pull/54)；Artemis [onLoad #5](https://github.com/Alphaly2K/art3m1s-core/pull/5)、[PF8 #7](https://github.com/Alphaly2K/art3m1s-core/pull/7)、[AVIO #9](https://github.com/Alphaly2K/art3m1s-core/pull/9)。产品及完整适配分支保持本地。
+- 已发布独立原生贡献：RFVP [V1 图像 #51](https://github.com/xmoezzz/rfvp/pull/51)、[文字等待 #53](https://github.com/xmoezzz/rfvp/pull/53)、[scratch 分配 #54](https://github.com/xmoezzz/rfvp/pull/54)；Artemis [onLoad #5](https://github.com/Alphaly2K/art3m1s-core/pull/5)、[PF8 #7](https://github.com/Alphaly2K/art3m1s-core/pull/7)、[AVIO #9](https://github.com/Alphaly2K/art3m1s-core/pull/9)。三个 fork 的 `codex/astra-minimal-native-20261017` 分支亦已按本次授权推送，未改默认分支或已发布历史；产品发行保持独立验收。
 
 ## 产品状态
 
@@ -62,7 +62,7 @@
 - 三核心已在新独占分支整理为实时 upstream HEAD 加一个适配提交，Family revision 与 `160000` gitlink 已核对一致，具体 SHA 见[性能审计](performance-upstream-audit-2026-10-12.md#固定核心基线)。RFVP PR #51/#53/#54、Artemis PR #5/#7/#9 仍待合并；合并后剔除重复修复，严格最小钩子内容验收保持待完成。
 - 核对直接父提交、提交计数、gitlink、Family 依赖 revision 和 MODIFICATIONS；有对象缺失先恢复精确对象，不降级核心或关闭 GPU 来消除解析错误。
 - 检查受影响 crate 的 fmt/Clippy/测试，运行 Manager 实际游戏路径；阶段末完成三个活动 workspace 检查。上游原测试错误、依赖缺失、decoder 产物重名分别记录。
-- 更新本页状态和审计证据，替换旧记录，不再追加整段过程日志。发布产品/完整适配分支须另按授权执行。
+- 更新本页状态和审计证据，替换旧记录，不再追加整段过程日志。三个 fork 适配分支已获本次授权并完成推送；产品发行须另按授权执行。
 
 ### 7. 继续产品重构与最终验收
 
