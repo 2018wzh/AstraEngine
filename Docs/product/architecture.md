@@ -16,7 +16,7 @@ AstraEngine 是单仓中的共享 2D 核心和产品组合。具体公共边界�
 
 .astra 经成熟 CST/AST 前端编译为 Story、Scene、Sequence、角色预设和 UI。图形编辑回写同一源文件。VN session 拥有游戏数据与剧情，场景实例拥有呈现对象与局部任务。Player 和预览使用相同 session 实现。
 
-Runtime 采用 60 Hz 逻辑与独立呈现；FSM、剧情执行器、轨道求值共用任务/作用域机制，不强迫互相转换。普通 Rust typed API 组合后端，不使用内部产品动态 ABI 转发。保存显式运行状态，不记录全量事件历史。
+Runtime 采用 60 Hz 逻辑与独立呈现；Actor/Component、flat FSM、剧情执行器和任务组合各司其职，不强迫互相转换。World 不强制携带 package，业务修改不强制经 FSM action。普通 Rust typed API 组合后端，不使用内部产品动态 ABI 转发。保存显式状态，不建设通用 replay、跨平台逐位确定性或全程 hash 链。
 
 AstraEMU 的目标为同进程单活动游戏。完整原生核心自主管理 VM、调度、资源、渲染、游戏 UI、音视频、输入语义和原生存档，通过统一 C ABI 交付完整 CPU 或 GPU FrameSurface；Manager 统一负责滤镜、视口、界面及 Present。核心优先保留自己的 GPU Device，不强制公共 advance、Host PCM、Mixer 或 VFS。Dynamic/Static 共用接口，动态库驻留至进程退出，关闭会话仍须回收 worker 与资源。
 
@@ -26,8 +26,10 @@ Manager 使用 Slint，重设计采用精炼 Material 3，在同一窗口切换�
 
 ## 交付边界
 
-先 EMU/SDK，再 Engine/VN、Editor/Agent 和终之空。Editor 覆盖三桌面；VN/EMU 覆盖 Windows/Linux/macOS/Android。终之空为本地转换项目与私有包，Classic/Modern 全部 37 路线。Web/iOS、RPG/TRPG、运行时 AI、完整 Live2D 与通用节点编程留后续路线。
+先 EMU/SDK，再 Engine/VN、Editor/Agent 和终之空。Editor 覆盖三桌面；VN/EMU 覆盖 Windows/Linux/macOS/Android。Android 默认将游戏导入应用管理目录，静态编译核心。终之空为本地转换项目与私有包，Classic/Modern 全部 37 路线。Web/iOS、RPG/TRPG、运行时 AI、完整 Live2D 与通用节点编程留后续路线。
 
 本次 EMU 首先交付 Windows：RFVP 原生 CPU 完整路径、Musica 文字 Hook 闭环、RFVP 首个 GPU 交付后端，再完成其余参与核心的原生整合与结局验收。CMVS 保持原状；Linux/macOS/Android 在后续平台阶段分别验收。新接口不维护核心自行 Present 的第二条 Manager 接入路径，上游独立程序继续作为行为对照。
+
+VN 性能目标为桌面 1440p120、移动 1080p60；EMU 按原生节奏分别测核心和 Host，以同场景配置建立基线后确定开销门槛。保留真实 shaping、字体 fallback、完整媒体与资源生命周期，不能用削减功能满足性能目标。
 
 普通分层测试与开发 Agent 真实操作共同验收，按实际设备测性能，不设置 evidence 审批体系。

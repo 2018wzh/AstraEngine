@@ -6,7 +6,7 @@
 
 公共 crate 使用 `astra-runtime`，公共会话使用 `EngineSession`；公共场景、任务、时钟、输入和呈现不得归入名为 AstraVNRuntime 的层。`VnSession` 持有 VN 剧情和系统状态，`VnRuntime` 名称仅用于 VN 业务。迁移必须调整实际所有权及调用方，不增加旧名称兼容别名。
 
-共享文字、图像、绘制、解码、混音与字节源可不创建 World/package/registry 而使用。Engine/VN 与 Musica 是实际消费者。NativeVN 以普通 Rust typed API 组合，FSM 不作为唯一修改入口；固定 60 Hz 逻辑和独立呈现共用明确生命周期。任务具有句柄、作用域、完成/取消/失败结果；旧代次结果拒绝。存档保存显式状态，删除通用回放和帧内全量事务。
+共享文字、图像、绘制、解码、混音与字节源可不创建 World/package/registry 而使用。Engine/VN 与 Musica 是实际消费者。NativeVN 以普通 Rust typed API 组合，FSM 不作为唯一修改入口；固定 60 Hz 逻辑和独立呈现共用明确生命周期。任务具有 owner、scope、句柄与完成/取消/失败结果，旧代次结果拒绝；新演出替换同属性旧任务，其他轨道继续。存档保存显式状态，事务限于编辑、存档和配置边界，不进行帧内全量克隆或序列化。
 
 `astra-vn::VnSession` 是 NativeVN 的 typed 产品入口，持有剧情、变量和系统状态，并组合 `astra-runtime::EngineSession`。EngineSession 创建和持有 RuntimeWorld、任务作用域及逻辑步生命周期；VN 在修改剧情前校验步序、seed 和恢复模式。关闭会话取消其任务，不影响其他会话。保存仍使用原有 SaveBlob 容器，读取失败保留当前状态。
 
@@ -104,9 +104,9 @@ CMVS 私有配置 `astra.emu.cmvs.profile.v2` 用有序 `archives: [{ role, path
 
 ## 创作与编辑
 
-.astra 是 Story/Scene/Sequence/角色预设/UI 的唯一创作来源。成熟 CST/AST 工具链保留注释/source map；布局保存作者元数据。高级逻辑是可信 Luau，保存显式状态，IO 通过平台宿主异步执行。
+.astra 是 Story/Scene/Sequence/角色预设/UI 的唯一创作来源。成熟 CST/AST 前端保留注释/source map；图和时间线回写同一源码，布局只是作者元数据。高级逻辑使用可信 Luau，文件/网络经平台宿主异步执行；存档保存显式状态，不保存闭包、协程栈或 native handle。
 
-GPUI Editor 使用独立真实 GPU 预览窗口。seek 仅当前片段，重建不重复外部 IO。统一版本化编辑 API 服务 UI、ACP 和 MCP；自主/逐批确认模式都支持取消、冲突检查、批量撤销。ACP 的模型配置由外部 Agent 持有。
+Editor 使用 GPUI，游戏 UI 使用 Yakui，EMU Manager 使用 Slint。Editor 的独立 GPU 预览复用真实 VN session，seek 仅限当前片段且不重复外部副作用。统一版本化编辑 API 服务 UI、ACP 和 MCP；支持批量撤销、自主/逐批确认、取消和冲突检查。ACP 的模型配置与 Agent 循环由外部 Agent 持有，Editor 不另写模型 API Agent 循环。
 
 `astra-vn-editor::AuthoringWorkspace` 是编辑事务 owner。`EditBatch` 使用 project-relative `.astra` 路径、预期文档版本和 UTF-8 字节范围；多文档全部校验后原子应用。undo/redo 不复用旧版本。CST attribute editing 只替换原 value span，保留注释和 source ID。ACP 通过回合内的 loopback HTTP MCP 服务访问同一文档，随机令牌仅留在该回合；MCP batch 同时绑定客户端读取的 version 和 session generation。外部权限请求单独交给用户，不能替代编辑事务审批。逐批确认延迟提交，人工修改造成的版本冲突、取消和关闭后的迟到结果必须拒绝。具体入口见 [Editor](../../Editor/README.md)。
 
