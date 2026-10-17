@@ -194,7 +194,7 @@ impl AstraEmuManagerController {
 
     pub(super) fn release_inputs(&mut self) -> Result<(), String> {
         let held = self.held_controls.iter().cloned().collect::<Vec<_>>();
-        let required = held.len() + self.physical_keys.len();
+        let required = held.len() + self.physical_keys.len() + held.iter().filter(|control| pointer_button(control).is_some()).count();
         if self.pending_events.len().saturating_add(required)
             > astra_emu_manager_core::model::MAX_INPUT_EVENTS
         {
@@ -207,6 +207,13 @@ impl AstraEmuManagerController {
         }
         for control in held {
             let event = if let Some(button) = pointer_button(&control) {
+                if let Some((identity, info)) = self.mailbox.displayed()? {
+                    self.pending_events.push(FamilyEvent::PointerMove {
+                        x: self.pointer_position.0 * info.width as f32 / info.logical_width as f32,
+                        y: self.pointer_position.1 * info.height as f32 / info.logical_height as f32,
+                        displayed: Some(identity),
+                    });
+                }
                 FamilyEvent::PointerButton {
                     button,
                     state: KeyState::Released,

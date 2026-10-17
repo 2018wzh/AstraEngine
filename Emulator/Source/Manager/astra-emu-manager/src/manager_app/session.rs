@@ -41,7 +41,6 @@ impl ActiveFamilySession {
     pub(super) fn epoch(&self) -> u64 { self.session_epoch }
     pub(super) fn wake_deadline(&self) -> Instant { self.next_poll }
     pub(super) fn input(&mut self, events: &[FamilyEvent]) -> Result<(), String> {
-        if self.failure.is_some() && !events.iter().any(|event| matches!(event, FamilyEvent::Control { .. } | FamilyEvent::WindowCloseRequested)) { return Ok(()); }
         if events.iter().any(|event| matches!(event, FamilyEvent::Control { command } if *command == astra_emu_abi::CONTROL_RETRY)) { self.failure = None; }
         let displayed = self.mailbox.displayed_identity()?;
         self.session.as_mut().ok_or("ASTRA_EMU_CORE_CLOSED")?.input(events, displayed).map_err(|e| e.to_string())

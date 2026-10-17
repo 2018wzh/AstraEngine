@@ -14,13 +14,10 @@ impl ManagerController for AstraEmuManagerController {
     }
     fn take_window_request(&mut self) -> Option<astra_emu_manager::window_service::WindowPresentation> { self.registry.take_window_request() }
     fn respond_window(&mut self, request: &astra_emu_manager::window_service::WindowPresentation, result: Result<astra_emu_manager::window_service::WindowOutcome, String>) -> Result<(), String> {
-        if result.is_ok() {
+        if let Ok(outcome) = &result {
             if let Some(active) = self.active.as_mut().filter(|active| active.epoch == request.session_epoch) {
-                match &request.command {
-                    astra_emu_manager::window_service::WindowCommand::Title(title) => active.title = Some(title.clone()),
-                    astra_emu_manager::window_service::WindowCommand::Fullscreen { mode, .. } => active.fullscreen = *mode != astra_emu_abi::FULLSCREEN_WINDOWED,
-                    _ => {}
-                }
+                if let astra_emu_manager::window_service::WindowCommand::Title(title) = &request.command { active.title = Some(title.clone()); }
+                if outcome.valid_fields & astra_emu_abi::WINDOW_RESULT_MODE != 0 { active.fullscreen = outcome.fullscreen != astra_emu_abi::FULLSCREEN_WINDOWED; }
             }
         }
         self.registry.respond_window(request, result)
