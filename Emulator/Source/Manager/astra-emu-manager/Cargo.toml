@@ -16,15 +16,14 @@ path = "src/bin_main.rs"
 [dependencies]
 astra-emu-manager-core = { path = "../astra-emu-manager-core" }
 astra-emu-manager-ui-slint = { path = "../astra-emu-manager-ui-slint" }
-astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api" }
+astra-emu-abi = { path = "../../FamilyApi/astra-emu-abi" }
+mlua.workspace = true
 astra-emu-metadata = { path = "../../Providers/astra-emu-metadata" }
 astra-emu-translation-openai-compatible = { path = "../../Providers/astra-emu-translation-openai-compatible" }
 astra-observability = { path = "../../../../Engine/Source/Developer/astra-observability" }
 astra-media-core = { path = "../../../../Engine/Source/Runtime/astra-media-core" }
-abi_stable.workspace = true
 clap.workspace = true
 serde.workspace = true
-cpal.workspace = true
 crossbeam-channel.workspace = true
 naga.workspace = true
 tokio.workspace = true
@@ -33,8 +32,6 @@ image.workspace = true
 pollster.workspace = true
 parking_lot = "0.12.5"
 serde_json.workspace = true
-rubato.workspace = true
-rtrb.workspace = true
 sha2.workspace = true
 slint = { workspace = true, features = ["std", "compat-1-2", "accessibility", "backend-winit", "renderer-femtovg-wgpu", "unstable-wgpu-29", "unstable-winit-030"] }
 thiserror.workspace = true

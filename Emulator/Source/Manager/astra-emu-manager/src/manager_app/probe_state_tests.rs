@@ -1,61 +1,15 @@
 use super::*;
 
-use astra_emu_family_api::{
-    FamilyDescriptor, FamilyOpen, FamilyProvider, FamilyResult, OpenRequest, ProbeReport,
-    ProbeRequest,
-};
+use crate::test_native::{self, Fixture};
 
-struct MarkerProvider {
-    descriptor: FamilyDescriptor,
-    confidence_permyriad: u16,
-    marker: String,
-}
-
-impl FamilyProvider for MarkerProvider {
-    fn descriptor(&self) -> FamilyResult<FamilyDescriptor> {
-        Ok(self.descriptor.clone())
-    }
-
-    fn probe(&self, request: ProbeRequest) -> FamilyResult<Option<ProbeReport>> {
-        let game_path = Path::new(request.game_path.as_str());
-        if !game_path.join(&self.marker).is_file() {
-            return Ok(None);
-        }
-        Ok(Some(ProbeReport {
-            family_id: "fixture".into(),
-            game_id: "fixture-game".into(),
-            format: "fixture".into(),
-            confidence_permyriad: self.confidence_permyriad,
-        }))
-    }
-
-    fn open(&mut self, _request: OpenRequest) -> FamilyResult<FamilyOpen> {
-        unreachable!("probe state tests do not open a family session")
-    }
-}
-
-fn provider(plugin_id: &str, confidence_permyriad: u16) -> MarkerProvider {
+fn provider(plugin_id: &'static str, confidence_permyriad: u16) -> astra_emu_manager_core::LoadedFamilyPlugin {
     provider_with_marker(plugin_id, confidence_permyriad, "match")
 }
-
-fn provider_with_marker(
-    plugin_id: &str,
-    confidence_permyriad: u16,
-    marker: &str,
-) -> MarkerProvider {
-    MarkerProvider {
-        descriptor: FamilyDescriptor {
-            configuration: Default::default(),
-            family_id: "fixture".into(),
-            plugin_id: plugin_id.into(),
-            abi_fingerprint: astra_emu_family_api::FAMILY_ABI_FINGERPRINT.into(),
-            version: "1.0.0".into(),
-            capabilities: vec![astra_emu_family_api::FamilyCapability::CpuFrame].into(),
-            supported_formats: vec!["fixture".into()].into(),
-        },
-        confidence_permyriad,
-        marker: marker.into(),
-    }
+fn provider_with_marker(plugin_id: &'static str, confidence_permyriad: u16, marker: &'static str) -> astra_emu_manager_core::LoadedFamilyPlugin {
+    let mut fixture = Fixture::new(plugin_id, "fixture", "fixture");
+    fixture.confidence = u32::from(confidence_permyriad);
+    fixture.marker = Some(marker);
+    test_native::install(if plugin_id == "test-a" { 0 } else { 1 }, fixture)
 }
 
 fn controller(root: &Path) -> AstraEmuManagerController {

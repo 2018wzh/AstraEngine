@@ -8,8 +8,6 @@ pub(super) fn install<C: ManagerController>(
     adapter.window().on_open_settings(move || {
         if let Some(window) = settings_weak.upgrade() {
             window.set_current_page("settings".into());
-            window.set_about_active(false);
-            window.set_settings_active(true);
         }
     });
     // ===== Navigation / theme / appearance =====

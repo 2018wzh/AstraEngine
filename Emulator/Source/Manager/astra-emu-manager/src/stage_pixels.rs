@@ -1,4 +1,4 @@
-use astra_emu_family_api::{FrameAlpha, FrameFormat, FrameInfo, FrameRowOrder};
+use astra_emu_manager_core::model::{FrameAlpha, FrameFormat, FrameInfo, FrameRowOrder};
 
 pub(super) fn input_format(format: FrameFormat) -> wgpu::TextureFormat {
     match format {

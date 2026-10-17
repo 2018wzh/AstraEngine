@@ -1,6 +1,6 @@
 use super::*;
 use crate::modal_service::{ModalPresentation, ModalUiUpdate};
-use astra_emu_family_api::ModalResponse;
+use astra_emu_manager_core::model::ModalResponse;
 use std::{cell::RefCell, rc::Rc};
 
 pub(super) type ModalUiState = Rc<RefCell<Option<ModalPresentation>>>;
@@ -25,9 +25,9 @@ pub(super) fn install<C: ManagerController>(
             return;
         };
         let text = if presentation.request.initial_text.is_some() {
-            abi_stable::std_types::ROption::RSome(value.as_str().into())
+            Some(value.as_str().into())
         } else {
-            abi_stable::std_types::ROption::RNone
+            None
         };
         match target.borrow_mut().respond_modal(
             presentation.id,
@@ -74,8 +74,8 @@ pub(super) fn service<C: ManagerController>(
                 window.set_modal_message(request.message.as_str().into());
                 window.set_modal_has_input(request.initial_text.is_some());
                 window.set_modal_text(match &request.initial_text {
-                    abi_stable::std_types::ROption::RSome(text) => text.as_str().into(),
-                    abi_stable::std_types::ROption::RNone => slint::SharedString::default(),
+                    Some(text) => text.as_str().into(),
+                    None => slint::SharedString::default(),
                 });
                 let buttons: Vec<slint::SharedString> = request
                     .buttons

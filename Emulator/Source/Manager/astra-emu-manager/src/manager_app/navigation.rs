@@ -104,20 +104,15 @@ impl AstraEmuManagerController {
             .launch_candidate_for_game(&game)
             .cloned()
             .ok_or_else(|| "ASTRA_EMU_FAMILY_PROBE_REQUIRED".to_owned())?;
-        let text = if self.translation_consent
-            && candidate
-                .descriptor
-                .has_capability(astra_emu_manager_core::FamilyCapability::TextReplacement)
-        {
-            let profile = self
-                .profile()?
-                .ok_or("ASTRA_EMU_TRANSLATION_PROFILE_REQUIRED")?;
-            let secrets =
-                std::sync::Arc::new(ManagerSecretStore::open().map_err(|error| error.to_string())?);
-            Some(TextReplacementBridge::new(profile, secrets).map_err(|error| error.to_string())?)
-        } else {
-            None
-        };
+        let epoch = astra_emu_manager_core::model::allocate_session_epoch().map_err(|error| error.to_string())?;
+        let text = if candidate.descriptor.has_capability(astra_emu_manager_core::FamilyCapability::TextReplacement) {
+            let profile = if self.translation_consent { Some(self.profile()?.ok_or("ASTRA_EMU_TRANSLATION_PROFILE_REQUIRED")?) } else { None };
+            let extensions = astra_emu_manager_core::extensions::ExtensionStore::new(&self.data_dir).list()?;
+            if profile.is_some() || extensions.iter().any(|extension| extension.enabled) {
+                let secrets = std::sync::Arc::new(ManagerSecretStore::open().map_err(|error| error.to_string())?);
+                Some(TextReplacementBridge::new(epoch, profile, secrets, extensions).map_err(|error| error.to_string())?)
+            } else { None }
+        } else { None };
         let wake = self
             .host_wake
             .clone()
@@ -130,7 +125,6 @@ impl AstraEmuManagerController {
             .library
             .family_configuration(&candidate.descriptor.plugin_id, case_id, &schema)
             .map_err(|error| error.to_string())?;
-        let epoch = astra_emu_family_api::allocate_session_epoch().map_err(|error| error.to_string())?;
         self.mailbox.activate(epoch).map_err(|error| error.to_string())?;
         self.registry.open(owner::OpenSession {
             epoch,
@@ -139,9 +133,10 @@ impl AstraEmuManagerController {
             configuration,
             window: self.window_state.ok_or("ASTRA_EMU_WINDOW_STATE_REQUIRED")?,
             text,
-            audio_device: self.audio_device,
             wake,
             modal: None,
+            window_service: None,
+            cancellation: astra_emu_manager_core::NativeCancellation::new(epoch),
         })?;
         self.selected_case_id = Some(case_id.into());
         self.pending_events.clear();

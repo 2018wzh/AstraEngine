@@ -7,6 +7,16 @@ pub(super) fn install<C: ManagerController, R: AstraUnderlayRenderer>(
     renderer: &std::rc::Rc<std::cell::RefCell<R>>,
     runtime_schedule: &HostCallbackSlot,
 ) {
+    let retry_controller = controller.clone();
+    let retry_window = adapter.window().as_weak();
+    let retry_schedule = runtime_schedule.clone();
+    adapter.window().on_retry_core(move || {
+        let Some(window) = retry_window.upgrade() else { return; };
+        match retry_controller.borrow_mut().retry_native() {
+            Ok(()) => { window.set_fatal_error_active(false); window.set_core_retryable(false); fire_host_callback(&retry_schedule); }
+            Err(error) => window.set_fatal_error_message(error.into()),
+        }
+    });
     let launch_weak = adapter.window().as_weak();
     let launch_controller = controller.clone();
     let launch_adapter = std::rc::Rc::downgrade(adapter);
@@ -29,6 +39,8 @@ pub(super) fn install<C: ManagerController, R: AstraUnderlayRenderer>(
                 }
                 apply_model(&launch_adapter, &model);
                 window.set_game_active(true);
+                window.set_fatal_error_active(false);
+                window.set_core_retryable(false);
                 window.set_has_game_title(false);
                 window.set_game_title("".into());
                 fire_host_callback(&launch_runtime_schedule);
@@ -55,6 +67,8 @@ pub(super) fn install<C: ManagerController, R: AstraUnderlayRenderer>(
             (Err(error), Err(cleanup)) => Err(format!("{error}; {cleanup}")),
         };
         window.set_game_active(false);
+        window.set_fatal_error_active(false);
+        window.set_core_retryable(false);
         window.window().set_fullscreen(false);
         match result {
             Ok(model) => {

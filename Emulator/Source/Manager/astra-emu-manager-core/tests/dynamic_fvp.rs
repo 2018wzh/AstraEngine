@@ -1,30 +1,6 @@
-use abi_stable::{std_types::ROption, type_level::downcasting::TD_Opaque};
-use astra_emu_family_api::{
-    AudioSink, AudioSink_TO, AudioWriteStatus, ConfigEntry, ConfigKind, ConfigValue,
-    FamilyHostServices, FfiFamilyResult, OpenRequest, PcmChunk, PcmFormatSpec, WindowState,
-};
-use astra_emu_manager_core::{FamilyCapability, FamilyProviderRegistry};
+use astra_emu_manager_core::model::{ConfigEntry, ConfigKind, ConfigValue, FramePoll, ProbeRequest, WindowState, allocate_session_epoch};
+use astra_emu_manager_core::{FamilyCapability, FamilyProviderRegistry, NativeOpenRequest, NativeCancellation, no_host_services};
 use std::path::Path;
-
-struct AcceptingSink;
-
-impl AudioSink for AcceptingSink {
-    fn configure(&self, _: PcmFormatSpec) -> FfiFamilyResult<()> {
-        Ok(()).into()
-    }
-
-    fn write(&self, _: PcmChunk) -> FfiFamilyResult<AudioWriteStatus> {
-        Ok(AudioWriteStatus::Accepted).into()
-    }
-
-    fn is_cancelled(&self) -> bool {
-        false
-    }
-
-    fn cancel(&self) -> FfiFamilyResult<()> {
-        Ok(()).into()
-    }
-}
 
 fn fixture(root: &Path) {
     let mut hcb = vec![0; 4];
@@ -48,10 +24,12 @@ fn fixture(root: &Path) {
     std::fs::write(root.join("fixture.hcb"), hcb).unwrap();
 }
 
-fn request(game: &Path) -> OpenRequest {
-    OpenRequest {
-        session_epoch: astra_emu_family_api::allocate_session_epoch().unwrap(),
-        game_path: game.to_string_lossy().to_string().into(),
+fn request(game: &Path) -> NativeOpenRequest {
+    let epoch = allocate_session_epoch().unwrap();
+    let cancellation = NativeCancellation::new(epoch);
+    NativeOpenRequest {
+        session_epoch: epoch,
+        game_path: game.to_string_lossy().into_owned(),
         configuration: vec![ConfigEntry {
             id: "script_encoding".into(),
             value: ConfigValue::Enum("utf8".into()),
@@ -60,14 +38,12 @@ fn request(game: &Path) -> OpenRequest {
         initial_window: WindowState {
             width: 640,
             height: 480,
+            scale_factor: 1.0,
             focused: true,
             visible: true,
         },
-        host: FamilyHostServices {
-            audio_sink: ROption::RSome(AudioSink_TO::from_value(AcceptingSink, TD_Opaque)),
-            text_replacement: ROption::RNone,
-            modal: ROption::RNone,
-        },
+        host: no_host_services(&cancellation),
+        cancellation,
     }
 }
 
@@ -95,13 +71,10 @@ fn fvp_dynamic_core_scans_probes_configures_and_reopens() {
     let descriptor = registry.descriptor("astra.emu.fvp").unwrap();
     assert_eq!(descriptor.family_id, "fvp");
     assert!(descriptor.has_capability(FamilyCapability::CpuFrame));
-    assert!(descriptor.has_capability(FamilyCapability::PcmAudio));
-    assert!(descriptor.has_capability(FamilyCapability::NativeSave));
 
     let schema = registry.configuration("astra.emu.fvp").unwrap();
-    assert_eq!(schema.len(), 1);
-    assert_eq!(schema[0].id.as_str(), "script_encoding");
-    match &schema[0].kind {
+    let encoding = schema.iter().find(|field| field.id == "script_encoding").expect("native script encoding schema");
+    match &encoding.kind {
         ConfigKind::Enum { choices } => {
             assert!(choices.iter().any(|choice| choice.as_str() == "utf8"));
         }
@@ -110,7 +83,7 @@ fn fvp_dynamic_core_scans_probes_configures_and_reopens() {
 
     let selection = registry
         .probe(
-            &astra_emu_family_api::ProbeRequest {
+            &ProbeRequest {
                 game_path: game.to_string_lossy().to_string().into(),
             },
             Some("astra.emu.fvp"),
@@ -122,10 +95,15 @@ fn fvp_dynamic_core_scans_probes_configures_and_reopens() {
     assert_eq!(candidate.report.format, "fvp.hcb");
 
     for _ in 0..2 {
-        let opened = registry.open_selected(&candidate, request(&game)).unwrap();
-        assert_eq!(opened.response.frame.width, 640);
-        assert_eq!(opened.response.frame.height, 480);
-        assert!(opened.response.audio_format.is_some());
-        opened.session.close().unwrap();
+        let mut session = registry.open_selected(&candidate, request(&game)).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let lease = loop {
+            if let FramePoll::Ready(frame) = session.acquire_frame(None).unwrap() { break frame; }
+            assert!(std::time::Instant::now() < deadline, "native frame timeout");
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        };
+        assert!(lease.info.width != 0 && lease.info.height != 0);
+        session.close().unwrap();
+        assert!(!lease.pixels().is_empty(), "CPU lease remains valid after native close");
     }
 }

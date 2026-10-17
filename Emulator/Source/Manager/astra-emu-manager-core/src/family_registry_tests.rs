@@ -1,76 +1,38 @@
 use super::*;
-use astra_emu_family_api::{
-    FamilyCapability as AbiCapability, FamilyDescriptor, FamilyResult, OpenRequest, ProbeReport,
-    ProbeRequest,
-};
+use crate::{model::ProbeRequest, test_native::{self, Fixture}};
 use std::path::Path;
 
-struct ProbeProvider {
-    descriptor: FamilyDescriptor,
-    report: Option<ProbeReport>,
-}
-
-impl FamilyProvider for ProbeProvider {
-    fn descriptor(&self) -> FamilyResult<FamilyDescriptor> {
-        Ok(self.descriptor.clone())
-    }
-
-    fn probe(&self, _request: ProbeRequest) -> FamilyResult<Option<ProbeReport>> {
-        Ok(self.report.clone())
-    }
-
-    fn open(&mut self, _request: OpenRequest) -> FamilyResult<FamilyOpen> {
-        unreachable!("probe registry test does not open sessions")
-    }
-}
-
-fn descriptor(plugin_id: &str, family_id: &str) -> FamilyDescriptor {
-    FamilyDescriptor {
-        configuration: Default::default(),
-        family_id: family_id.into(),
-        plugin_id: plugin_id.into(),
-        abi_fingerprint: astra_emu_family_api::FAMILY_ABI_FINGERPRINT.into(),
-        version: "1.0.0".into(),
-        capabilities: vec![AbiCapability::CpuFrame].into(),
-        supported_formats: vec!["fvp.hcb".into()].into(),
-    }
-}
-
-fn report(family_id: &str, confidence_permyriad: u16) -> ProbeReport {
-    ProbeReport {
-        family_id: family_id.into(),
-        game_id: "game".into(),
-        format: "fvp.hcb".into(),
-        confidence_permyriad,
-    }
+#[test]
+fn static_queries_use_same_multi_probe_policy() {
+    let mut registry = FamilyProviderRegistry::new();
+    let mut first = Fixture::new("a", "fvp", "fvp.hcb");
+    first.confidence = 8000;
+    registry.register_provider(test_native::install(0, first)).unwrap();
+    registry.register_provider(test_native::install(1, Fixture::new("b", "fvp", "fvp.hcb"))).unwrap();
+    let selection = registry.probe(&ProbeRequest { game_path: "game".into() }, None, None).unwrap();
+    assert!(selection.requires_user_choice());
+    assert_eq!(selection.candidates()[0].report.plugin_id, "b");
 }
 
 #[test]
-fn static_providers_use_same_multi_probe_policy() {
+fn duplicate_static_id_disables_both_queries() {
     let mut registry = FamilyProviderRegistry::new();
-    registry
-        .register_provider(ProbeProvider {
-            descriptor: descriptor("a", "fvp"),
-            report: Some(report("fvp", 8_000)),
-        })
-        .unwrap();
-    registry
-        .register_provider(ProbeProvider {
-            descriptor: descriptor("b", "fvp"),
-            report: Some(report("fvp", 9_000)),
-        })
-        .unwrap();
-    let selection = registry
-        .probe(
-            &ProbeRequest {
-                game_path: "game".into(),
-            },
-            None,
-            None,
-        )
-        .unwrap();
-    assert!(selection.requires_user_choice());
-    assert_eq!(selection.candidates()[0].report.plugin_id, "b");
+    registry.register_provider(test_native::install(0, Fixture::new("duplicate", "fvp", "fvp.hcb"))).unwrap();
+    assert_eq!(registry.register_provider(test_native::install(1, Fixture::new("duplicate", "fvp", "fvp.hcb"))).unwrap_err(), FamilyLoadError::DuplicatePlugin);
+    assert!(registry.descriptors().next().is_none());
+}
+
+#[test]
+fn diagnostic_initialization_failure_prevents_describe_probe_and_open() {
+    let mut fixture = Fixture::new("bad-diagnostics", "fvp", "fvp.hcb");
+    fixture.init_error = true;
+    let calls = fixture.calls.clone();
+    assert!(matches!(test_native::try_install(2, fixture), Err(FamilyLoadError::Diagnostics)));
+    let calls = calls.lock();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].name, "initialize");
+    assert_eq!(calls[0].thread, std::thread::current().id());
+    assert!(calls[0].key.is_empty());
 }
 
 fn library_path(directory: &Path, name: &str) -> std::path::PathBuf {

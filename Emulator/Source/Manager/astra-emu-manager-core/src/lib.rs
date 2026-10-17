@@ -15,6 +15,17 @@ mod library;
 mod metadata;
 mod play;
 mod work_settings;
+pub mod model;
+mod native_config;
+mod native_frame;
+pub mod extensions;
+mod native_cancel;
+pub use native_cancel::NativeCancellation;
+#[cfg(test)]
+extern crate self as astra_emu_manager_core;
+#[cfg(test)]
+mod test_native;
+pub use family_diagnostics::{NativeDiagnostic, set_emit as set_diagnostic_emit, set_flush as set_diagnostic_flush, set_enabled as set_diagnostic_enabled};
 
 pub use appearance::AppearanceSettings;
 pub use family::{
@@ -22,7 +33,7 @@ pub use family::{
     FamilyProbeCandidate, FamilyProbeReport, FamilyProbeSelection,
     INDEPENDENT_FAMILY_ABI_FINGERPRINT,
 };
-pub use family_loader::{FamilyLoadError, LoadedFamilyPlugin};
+pub use family_loader::{FamilyLoadError, LoadedFamilyPlugin, NativeOpenRequest, NativeSession, no_host_services};
 pub use family_registry::{
     is_family_library_path, FamilyDirectoryLoadError, FamilyDirectoryLoadReport,
     FamilyProviderRegistry,

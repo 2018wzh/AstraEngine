@@ -99,6 +99,8 @@ export component ManagerWindow inherits Window {
     callback set-audio-device(string);
     in-out property <bool> fatal-error-active: false;
     in-out property <string> fatal-error-message;
+    in-out property <bool> core-retryable: false;
+    callback retry-core();
 
     // ===== Game view =====
     in property <image> stage-frame;
@@ -537,10 +539,14 @@ export component ManagerWindow inherits Window {
                 }
                 HorizontalLayout {
                     alignment: end;
+                    if root.core-retryable : M3Button {
+                        text: "重试";
+                        clicked => { root.retry-core(); }
+                    }
                     M3Button {
-                        text: "知道了 (Acknowledge)";
+                        text: root.core-retryable ? "结束游戏" : "知道了";
                         primary: true;
-                        clicked => { root.fatal-error-active = false; }
+                        clicked => { if root.core-retryable { root.leave-game(); } root.core-retryable = false; root.fatal-error-active = false; }
                     }
                 }
             }

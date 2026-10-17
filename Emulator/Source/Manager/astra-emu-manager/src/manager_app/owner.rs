@@ -1,5 +1,5 @@
 use super::*;
-use astra_emu_family_api::{ConfigEntry, ConfigField, FamilyPointerRequest, FamilyWindowIcon};
+use astra_emu_manager_core::model::{ConfigEntry, ConfigField, FamilyPointerRequest, FamilyWindowIcon};
 use crossbeam_channel::{bounded, Receiver, Sender};
 use parking_lot::Mutex;
 use std::sync::Arc;
@@ -12,7 +12,7 @@ type Metadata = BTreeMap<
     String,
     (
         FamilyPluginDescriptor,
-        abi_stable::std_types::RVec<ConfigField>,
+        Vec<ConfigField>,
     ),
 >;
 
@@ -38,9 +38,10 @@ pub(super) struct OpenSession {
     pub(super) configuration: Vec<ConfigEntry>,
     pub(super) window: WindowState,
     pub(super) text: Option<TextReplacementBridge>,
-    pub(super) audio_device: audio_executor::AudioDeviceKind,
     pub(super) wake: HostWake,
     pub(super) modal: Option<ModalBridge>,
+    pub(super) window_service: Option<astra_emu_manager::window_service::WindowBridge>,
+    pub(super) cancellation: astra_emu_manager_core::NativeCancellation,
 }
 
 /// UI metadata only. Native sessions, providers and GPU owners never leave the worker.
@@ -53,6 +54,7 @@ pub(super) struct ActiveSessionView {
     pub(super) title: Option<String>,
     pub(super) pending_icon: Option<FamilyWindowIcon>,
     pub(super) pending_pointer: Option<FamilyPointerRequest>,
+    pub(super) failure: Option<String>,
 }
 
 impl ActiveSessionView {
@@ -66,6 +68,7 @@ impl ActiveSessionView {
             title: None,
             pending_icon: None,
             pending_pointer: None,
+            failure: None,
         }
     }
 }
@@ -77,11 +80,7 @@ pub(super) struct Update {
     pub(super) opened: bool,
     pub(super) closed: bool,
     pub(super) error: Option<String>,
-    pub(super) fullscreen: bool,
-    pub(super) title: Option<String>,
-    pub(super) title_changed: bool,
-    pub(super) icon: Option<FamilyWindowIcon>,
-    pub(super) pointer: Option<FamilyPointerRequest>,
+    pub(super) failure: Option<String>,
 }
 
 pub(super) struct FamilyOwner {
@@ -90,6 +89,9 @@ pub(super) struct FamilyOwner {
     worker: Option<JoinHandle<Result<(), String>>>,
     metadata: Metadata,
     modal: Mutex<Option<ModalBridge>>,
+    window_service: Mutex<Option<astra_emu_manager::window_service::WindowBridge>>,
+    text: Mutex<Option<TextReplacementBridge>>,
+    cancellation: Mutex<Option<astra_emu_manager_core::NativeCancellation>>,
 }
 
 impl FamilyOwner {
@@ -118,6 +120,9 @@ impl FamilyOwner {
                     worker: Some(worker),
                     metadata,
                     modal: Mutex::new(None),
+                    window_service: Mutex::new(None),
+                    text: Mutex::new(None),
+                    cancellation: Mutex::new(None),
                 },
                 errors,
             )),
@@ -139,7 +144,7 @@ impl FamilyOwner {
     pub(super) fn configuration(
         &self,
         id: &str,
-    ) -> Result<abi_stable::std_types::RVec<ConfigField>, String> {
+    ) -> Result<Vec<ConfigField>, String> {
         self.metadata
             .get(id)
             .map(|(_, schema)| schema.clone())
@@ -182,14 +187,9 @@ impl FamilyOwner {
     }
 
     #[cfg(test)]
-    pub(super) fn register_provider<P: astra_emu_family_api::FamilyProvider + 'static>(
-        &mut self,
-        factory: impl FnOnce() -> P + Send + 'static,
-    ) -> Result<(), String> {
+    pub(super) fn register_provider(&mut self, factory: impl FnOnce() -> astra_emu_manager_core::LoadedFamilyPlugin + Send + 'static) -> Result<(), String> {
         self.metadata = self.registry_call(move |registry| {
-            registry
-                .register_provider(factory())
-                .map_err(|error| error.to_string())?;
+            registry.register_provider(factory()).map_err(|error| error.to_string())?;
             collect_metadata(registry)
         })?;
         Ok(())
@@ -205,6 +205,11 @@ impl FamilyOwner {
             ModalBridge::new(epoch, request.wake.clone()).map_err(|error| error.to_string())?;
         request.modal = Some(modal.clone());
         *self.modal.lock() = Some(modal.clone());
+        let window_service = astra_emu_manager::window_service::WindowBridge::new(epoch, modal.clone(), request.wake.clone());
+        request.window_service = Some(window_service.clone());
+        *self.window_service.lock() = Some(window_service);
+        *self.text.lock() = request.text.clone();
+        *self.cancellation.lock() = Some(request.cancellation.clone());
         if let Err(error) = self.send(Command::Open(Box::new(request))) {
             modal.cancel_pending();
             self.modal.lock().take();
@@ -218,13 +223,16 @@ impl FamilyOwner {
     }
 
     pub(super) fn events(&self, epoch: u64, events: Vec<FamilyEvent>) -> Result<(), String> {
-        if events.len() > astra_emu_family_api::MAX_EVENTS_PER_ADVANCE {
+        if events.len() > astra_emu_manager_core::model::MAX_INPUT_EVENTS {
             return Err("ASTRA_EMU_INPUT_QUEUE_FULL".into());
         }
         self.send(Command::Events { epoch, events })
     }
 
     pub(super) fn close(&self, epoch: u64, events: Vec<FamilyEvent>) -> Result<(), String> {
+        if let Some(window) = self.window_service.lock().as_ref() { window.close(); }
+        if let Some(text) = self.text.lock().as_ref() { text.cancel(); }
+        if let Some(cancellation) = self.cancellation.lock().as_ref() { cancellation.cancel(); }
         let modal = self
             .modal
             .lock()
@@ -252,22 +260,13 @@ impl FamilyOwner {
             return None;
         }
         shared.dirty = false;
-        let title_changed = std::mem::take(&mut shared.title_changed);
         Some(Update {
             epoch,
             dirty: false,
             opened: shared.opened,
             closed: shared.closed,
             error: shared.error.take(),
-            fullscreen: shared.fullscreen,
-            title_changed,
-            title: if title_changed {
-                shared.title.clone()
-            } else {
-                None
-            },
-            icon: shared.icon.take(),
-            pointer: shared.pointer.take(),
+            failure: shared.failure.clone(),
         })
     }
 
@@ -283,7 +282,7 @@ impl FamilyOwner {
     pub(super) fn respond_modal(
         &self,
         id: astra_emu_manager::modal_service::ModalId,
-        response: astra_emu_family_api::ModalResponse,
+        response: astra_emu_manager_core::model::ModalResponse,
     ) -> Result<(), String> {
         self.modal
             .lock()
@@ -291,6 +290,12 @@ impl FamilyOwner {
             .ok_or_else(|| "ASTRA_EMU_MODAL_STALE_RESPONSE".to_owned())?
             .respond(id, response)
             .map_err(|error| error.to_string())
+    }
+    pub(super) fn take_window_request(&self) -> Option<astra_emu_manager::window_service::WindowPresentation> {
+        self.window_service.lock().as_ref().and_then(|service| service.take())
+    }
+    pub(super) fn respond_window(&self, request: &astra_emu_manager::window_service::WindowPresentation, result: Result<astra_emu_manager::window_service::WindowOutcome, String>) -> Result<(), String> {
+        self.window_service.lock().as_ref().ok_or("ASTRA_EMU_WINDOW_CLOSED")?.respond(request, result)
     }
 
     fn send(&self, command: Command) -> Result<(), String> {
@@ -305,6 +310,9 @@ impl FamilyOwner {
     }
 
     pub(super) fn shutdown(&mut self) -> Result<(), String> {
+        if let Some(window) = self.window_service.lock().as_ref() { window.close(); }
+        if let Some(text) = self.text.lock().as_ref() { text.cancel(); }
+        if let Some(cancellation) = self.cancellation.lock().as_ref() { cancellation.cancel(); }
         let modal = self.modal.lock().as_ref().cloned();
         if let Some(modal) = modal {
             modal.cancel_pending();

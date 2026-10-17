@@ -25,12 +25,7 @@ impl AstraEmuManagerController {
     fn poll_owner(&mut self) -> Result<bool, String> {
         let Some(active) = self.active.as_mut() else { return Ok(false); };
         let Some(update) = self.registry.take_update(active.epoch) else { return Ok(false); };
-        active.fullscreen = update.fullscreen;
-        if update.title_changed { active.title = update.title; }
-        if let Some(icon) = update.icon { active.pending_icon = Some(icon); }
-        if let Some(pointer) = update.pointer {
-            active.pending_pointer.get_or_insert_with(Default::default).merge(pointer);
-        }
+        active.failure = update.failure;
         if update.opened && !active.opened {
             active.opened = true;
             match self.library.start_play_session(&active.game_id, unix_time_ms()?) {
@@ -82,7 +77,7 @@ impl AstraEmuManagerController {
 
     pub(super) fn runtime_deadline(&self) -> Option<Instant> {
         // Presentation/input servicing only. Native deadlines are owned by FamilyOwner.
-        self.active.as_ref().map(|_| Instant::now() + Duration::from_nanos(FIXED_FRAME_NS))
+        self.active.as_ref().map(|_| Instant::now() + Duration::from_millis(8))
     }
 
     pub(super) fn advance_runtime(&mut self) -> Result<Option<ManagerViewModel>, String> {

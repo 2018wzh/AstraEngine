@@ -47,13 +47,6 @@ pub(super) fn run(
                 pending.clear();
                 let epoch = request.epoch;
                 wake = Some(request.wake.clone());
-                let audio = request
-                    .candidate
-                    .descriptor
-                    .has_capability(astra_emu_manager_core::FamilyCapability::PcmAudio)
-                    .then(|| {
-                        audio_executor::HostAudioExecutor::new(request.audio_device, wake.clone())
-                    });
                 match ActiveFamilySession::open(
                     (&request.game, request.configuration, epoch),
                     &request.candidate,
@@ -62,8 +55,9 @@ pub(super) fn run(
                     request.window,
                     super::session::SessionServices {
                         text: request.text,
-                        audio,
+                        window: request.window_service,
                         modal: request.modal,
+                        cancellation: request.cancellation,
                     },
                 ) {
                     Ok(mut session) => {
@@ -76,7 +70,7 @@ pub(super) fn run(
             }
             Ok(Command::Events { epoch, events }) => {
                 if let Some(session) = active.as_mut().filter(|session| session.epoch() == epoch) {
-                    if pending.len() + events.len() > astra_emu_family_api::MAX_EVENTS_PER_ADVANCE {
+                    if pending.len() + events.len() > astra_emu_manager_core::model::MAX_INPUT_EVENTS {
                         finish(
                             &mut active,
                             Some("ASTRA_EMU_INPUT_QUEUE_FULL".into()),
@@ -85,25 +79,11 @@ pub(super) fn run(
                         pending.clear();
                         notify(&wake);
                     } else {
-                        let lifecycle = events.iter().any(|event| {
-                            matches!(
-                                event,
-                                FamilyEvent::WindowFocused { .. }
-                                    | FamilyEvent::WindowVisibility { .. }
-                                    | FamilyEvent::WindowSuspended { .. }
-                            )
-                        });
                         pending.extend(events);
-                        if lifecycle {
-                            let result = session.advance_host_events(&pending);
-                            pending.clear();
-                            if let Err(error) = result {
-                                finish(&mut active, Some(error), &shared);
-                            } else if let Some(session) = active.as_mut() {
-                                publish(session, &shared);
-                            }
-                            notify(&wake);
-                        }
+                        let result = session.input(&pending);
+                        pending.clear();
+                        if let Err(error) = result { finish(&mut active, Some(error), &shared); }
+                        notify(&wake);
                     }
                 }
             }
@@ -112,14 +92,14 @@ pub(super) fn run(
                     let result = if pending.is_empty() {
                         Ok(())
                     } else {
-                        session.advance_host_events(&pending)
+                        session.input(&pending)
                     };
                     pending.clear();
                     let result = result.and_then(|()| {
                         if events.is_empty() {
                             Ok(())
                         } else {
-                            session.advance_host_events(&events)
+                            session.input(&events)
                         }
                     });
                     finish(&mut active, result.err(), &shared);
@@ -142,7 +122,7 @@ pub(super) fn run(
             pending.clear();
             notify(&wake);
         }
-        // Commands cannot starve the logical clock. UI/render cadence is irrelevant.
+        // Polling observes native production; it never drives VM scheduling.
         if let Some(session) = active.as_mut() {
             let result = service_due(session, &mut pending, Instant::now());
             let finished = session.status == FamilyStatus::Finished;
@@ -168,36 +148,9 @@ pub(super) fn run(
     }
 }
 
-/// GPU completion has its own wake; it must not consume a VM tick.
-pub(super) fn service_due(
-    session: &mut ActiveFamilySession,
-    pending: &mut Vec<FamilyEvent>,
-    now: Instant,
-) -> Result<bool, String> {
-    let mut changed = false;
-    if session
-        .frame_poll_deadline
-        .is_some_and(|deadline| now >= deadline)
-    {
-        changed = session.poll_pending_frame()?;
-    }
-    // A successful restore resumes time only after its first output is ready.
-    if !session.clock_reset_pending && now >= session.next_deadline {
-        let elapsed = session
-            .last_tick
-            .elapsed()
-            .as_nanos()
-            .min(u128::from(u64::MAX)) as u64;
-        let result = session
-            .audio
-            .as_ref()
-            .map_or(Ok(()), |audio| audio.check_health())
-            .and_then(|()| session.advance(elapsed.max(1), pending));
-        pending.clear();
-        result?;
-        changed = true;
-    }
-    Ok(changed)
+pub(super) fn service_due(session: &mut ActiveFamilySession, pending: &mut Vec<FamilyEvent>, now: Instant) -> Result<bool, String> {
+    if !pending.is_empty() { session.input(pending)?; pending.clear(); }
+    if now >= session.wake_deadline() { session.poll() } else { Ok(false) }
 }
 
 fn initialize(
@@ -205,8 +158,7 @@ fn initialize(
     directories: &[PathBuf],
 ) -> Result<BTreeMap<String, String>, String> {
     #[cfg(target_os = "android")]
-    registry
-        .register_provider(astra_emu_fvp::FvpProvider::default())
+    unsafe { registry.register_static(astra_emu_fvp::astra_emu_query) }
         .map_err(|error| error.to_string())?;
     let mut errors = BTreeMap::new();
     #[cfg(not(target_os = "android"))]
@@ -243,24 +195,8 @@ fn publish(session: &mut ActiveFamilySession, shared: &Mutex<Update>) {
         update.opened = true;
         update.dirty = true;
     }
-    if update.fullscreen != session.fullscreen {
-        update.fullscreen = session.fullscreen;
-        update.dirty = true;
-    }
-    if update.title != session.title {
-        update.title.clone_from(&session.title);
-        update.title_changed = true;
-        update.dirty = true;
-    }
-    if let Some(icon) = session.pending_icon.take() {
-        update.icon = Some(icon);
-        update.dirty = true;
-    }
-    if let Some(pointer) = session.pending_pointer.take() {
-        update
-            .pointer
-            .get_or_insert_with(Default::default)
-            .merge(pointer);
+    if update.failure != session.failure {
+        update.failure.clone_from(&session.failure);
         update.dirty = true;
     }
 }

@@ -1,5 +1,5 @@
 use super::*;
-use astra_emu_family_api::{ConfigField, ConfigKind, ConfigValue};
+use astra_emu_manager_core::model::{ConfigField, ConfigKind, ConfigValue};
 
 impl AstraEmuManagerController {
     pub(super) fn config_scope(&self) -> &str {
@@ -25,7 +25,7 @@ impl AstraEmuManagerController {
             .registry
             .configuration(&plugin)
             .map_err(|error| error.to_string())?;
-        Ok((plugin, schema.into_vec()))
+        Ok((plugin, schema))
     }
 
     pub(super) fn save_typed_family_config(&mut self) -> Result<(), String> {
@@ -141,43 +141,10 @@ fn parse_config_value(field: &ConfigField, raw: &str) -> Result<ConfigValue, Str
 mod tests {
     use super::*;
 
-    struct ConfigProvider;
-
-    impl astra_emu_family_api::FamilyProvider for ConfigProvider {
-        fn descriptor(&self) -> astra_emu_family_api::FamilyResult<astra_emu_family_api::FamilyDescriptor> {
-            Ok(astra_emu_family_api::FamilyDescriptor {
-                family_id: "config-test-family".into(),
-                plugin_id: "config-test-plugin".into(),
-                abi_fingerprint: astra_emu_family_api::FAMILY_ABI_FINGERPRINT.into(),
-                version: "1.0.0".into(),
-                capabilities: vec![astra_emu_family_api::FamilyCapability::CpuFrame].into(),
-                supported_formats: vec!["config.test".into()].into(),
-                configuration: vec![ConfigField {
-                    id: "launch_mode".into(),
-                    label: "Launch mode".into(),
-                    group: "Startup".into(),
-                    kind: ConfigKind::Enum {
-                        choices: vec!["direct".into(), "title".into()].into(),
-                    },
-                    default: ConfigValue::Enum("direct".into()),
-                }]
-                .into(),
-            })
-        }
-
-        fn probe(
-            &self,
-            _request: astra_emu_family_api::ProbeRequest,
-        ) -> astra_emu_family_api::FamilyResult<Option<astra_emu_family_api::ProbeReport>> {
-            Ok(None)
-        }
-
-        fn open(
-            &mut self,
-            _request: astra_emu_family_api::OpenRequest,
-        ) -> astra_emu_family_api::FamilyResult<astra_emu_family_api::FamilyOpen> {
-            unreachable!("configuration persistence test does not open a family session")
-        }
+    fn configuration_provider() -> astra_emu_manager_core::LoadedFamilyPlugin {
+        let mut fixture = crate::test_native::Fixture::new("config-test-plugin", "config-test-family", "config.test");
+        fixture.config = true;
+        crate::test_native::install(0, fixture)
     }
 
     fn configuration_candidate() -> FamilyProbeCandidate {
@@ -209,7 +176,7 @@ mod tests {
         )
         .unwrap();
         controller
-            .registry.register_provider(move || ConfigProvider)
+            .registry.register_provider(configuration_provider)
             .unwrap();
         controller
             .library

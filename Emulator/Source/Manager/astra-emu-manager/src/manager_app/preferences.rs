@@ -2,16 +2,8 @@ use super::*;
 
 impl AstraEmuManagerController {
     pub(super) fn set_audio_device(&mut self, value: &str) -> Result<(), String> {
-        if self.active.is_some() {
-            return Err("ASTRA_EMU_AUDIO_DEVICE_SESSION_ACTIVE".into());
-        }
-        self.audio_device = audio_executor::AudioDeviceKind::parse(value)?;
-        self.diagnostic.clear();
-        tracing::info!(
-            event = "astra.emu.audio.device_selected",
-            device_kind = self.audio_device.as_str()
-        );
-        Ok(())
+        let _ = value;
+        Err("ASTRA_EMU_AUDIO_CORE_OWNED: select audio through the native core configuration".into())
     }
     fn update_appearance(
         &mut self,
@@ -68,7 +60,7 @@ impl AstraEmuManagerController {
         if let Some(id) = key.strip_prefix("config.") {
             let (_, schema) = self.config_schema()?;
             if !schema.iter().any(|field| field.id == id)
-                || value.len() > astra_emu_family_api::MAX_CONFIG_TEXT_BYTES
+                || value.len() > astra_emu_manager_core::model::MAX_CONFIG_TEXT_BYTES
             {
                 return Err("ASTRA_EMU_FAMILY_CONFIG_FIELD_UNKNOWN".into());
             }

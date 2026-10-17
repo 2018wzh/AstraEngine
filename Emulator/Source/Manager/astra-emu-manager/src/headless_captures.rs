@@ -27,7 +27,7 @@ impl Captures {
     pub fn write(
         &mut self,
         frame: u32,
-        lease: Option<&astra_emu_family_api::FrameLease>,
+        lease: Option<&astra_emu_manager_core::model::FrameLease>,
     ) -> Result<(), String> {
         if !self.pending.contains(&frame) {
             return Ok(());

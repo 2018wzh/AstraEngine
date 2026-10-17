@@ -136,7 +136,7 @@ impl GameRecord {
 #[derive(Debug, Error)]
 pub enum LibraryError {
     #[error("{0}")]
-    FamilyConfiguration(astra_emu_family_api::FamilyError),
+    FamilyConfiguration(crate::model::FamilyError),
     #[error("ASTRA_EMU_LIBRARY_SQLITE: {0}")]
     Sqlite(#[from] rusqlite::Error),
     #[error("ASTRA_EMU_LIBRARY_SCHEMA_CORRUPT")]

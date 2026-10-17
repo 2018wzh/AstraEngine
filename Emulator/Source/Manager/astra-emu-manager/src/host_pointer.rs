@@ -6,7 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use astra_emu_family_api::FamilyPointerRequest;
+use astra_emu_manager_core::model::FamilyPointerRequest;
 use astra_emu_manager_ui_slint::{ManagerWindow, SlintManagerAdapter};
 use slint::{winit_030::WinitWindowAccessor, ComponentHandle};
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -71,12 +71,12 @@ impl HostPointer {
                 Ok(())
             })
             .ok_or_else(|| "ASTRA_EMU_HOST_WINDOW_UNAVAILABLE".to_owned())??;
-        let autohide = request.autohide_ms.into_option().map(Duration::from_millis);
+        let autohide = request.autohide_ms.map(Duration::from_millis);
         if autohide.is_some_and(|duration| Instant::now().checked_add(duration).is_none()) {
             return Err("ASTRA_EMU_HOST_POINTER_DURATION".into());
         }
-        let x = request.logical_x.into_option();
-        let y = request.logical_y.into_option();
+        let x = request.logical_x;
+        let y = request.logical_y;
         if x.is_some() || y.is_some() {
             let current = pointer.borrow().position;
             let rect = [
@@ -101,7 +101,7 @@ impl HostPointer {
                 .ok_or_else(|| "ASTRA_EMU_HOST_WINDOW_UNAVAILABLE".to_owned())??;
             pointer.borrow_mut().position = Some(position);
         }
-        let visible = request.visible.into_option();
+        let visible = request.visible;
         {
             let mut state = pointer.borrow_mut();
             if let Some(visible) = visible {
@@ -159,6 +159,7 @@ impl HostPointer {
         let game_visible = state.visible && !state.idle_hidden;
         window.set_game_cursor_visible(game_visible);
         let controlling = active
+            && !window.get_fatal_error_active()
             && !window.get_modal_active()
             && !window.get_translation_overlay_active()
             && !window.get_diagnostics_overlay_active()

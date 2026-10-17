@@ -1,6 +1,6 @@
 //! Typed startup configuration. Empty game ID denotes core defaults.
 use crate::{Library, LibraryError};
-use astra_emu_family_api::{resolve_config, ConfigEntry, ConfigField};
+use crate::model::{resolve_config, ConfigEntry, ConfigField};
 use rusqlite::{params, OptionalExtension};
 
 impl Library {
@@ -22,8 +22,7 @@ impl Library {
             }
         }
         Ok(resolve_config(schema, &values)
-            .map_err(LibraryError::FamilyConfiguration)?
-            .into_vec())
+            .map_err(LibraryError::FamilyConfiguration)?)
     }
 
     fn read_family_configuration(
@@ -69,7 +68,7 @@ impl Library {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use astra_emu_family_api::{ConfigKind, ConfigValue};
+    use crate::model::{ConfigKind, ConfigValue};
 
     #[test]
     fn persistence_defaults_overrides_reset_and_failed_write_preservation() {

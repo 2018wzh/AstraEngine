@@ -265,7 +265,7 @@ impl AstraEmuManagerController {
                 )
                 .collect::<Vec<_>>()
                 .join("\n"),
-            audio_device: self.audio_device.as_str().into(),
+            audio_device: "core-owned".into(),
             translation_endpoint_kind: profile_kind(profile.clone()),
             translation_endpoint: profile
                 .as_ref()

@@ -76,10 +76,10 @@ pub trait ManagerController: 'static {
     fn game_fullscreen(&self) -> bool {
         false
     }
-    fn take_game_icon(&mut self) -> Option<astra_emu_family_api::FamilyWindowIcon> {
+    fn take_game_icon(&mut self) -> Option<astra_emu_manager_core::model::FamilyWindowIcon> {
         None
     }
-    fn take_game_pointer(&mut self) -> Option<astra_emu_family_api::FamilyPointerRequest> {
+    fn take_game_pointer(&mut self) -> Option<astra_emu_manager_core::model::FamilyPointerRequest> {
         None
     }
     fn game_title(&self) -> Option<&str> {
@@ -91,12 +91,16 @@ pub trait ManagerController: 'static {
     fn respond_modal(
         &mut self,
         _id: crate::modal_service::ModalId,
-        _response: astra_emu_family_api::ModalResponse,
+        _response: astra_emu_manager_core::model::ModalResponse,
     ) -> Result<(), String> {
         Err("ASTRA_EMU_MANAGER_MODAL_SERVICE_UNAVAILABLE".into())
     }
-    fn set_window_state(&mut self, state: astra_emu_family_api::WindowState) -> Result<(), String>;
-    fn physical_event(&mut self, event: astra_emu_family_api::FamilyEvent) -> Result<(), String>;
+    fn take_window_request(&mut self) -> Option<crate::window_service::WindowPresentation> { None }
+    fn respond_window(&mut self, _request: &crate::window_service::WindowPresentation, _result: Result<crate::window_service::WindowOutcome, String>) -> Result<(), String> { Err("ASTRA_EMU_WINDOW_SERVICE_UNAVAILABLE".into()) }
+    fn native_failure(&self) -> Option<&str> { None }
+    fn retry_native(&mut self) -> Result<(), String> { Err("ASTRA_EMU_CORE_RETRY_UNAVAILABLE".into()) }
+    fn set_window_state(&mut self, state: astra_emu_manager_core::model::WindowState) -> Result<(), String>;
+    fn physical_event(&mut self, event: astra_emu_manager_core::model::FamilyEvent) -> Result<(), String>;
     fn is_game_active(&self) -> bool;
     fn model(&self) -> Result<ManagerViewModel, String>;
     fn select_case(&mut self, case_id: &str) -> Result<ManagerViewModel, String>;
@@ -333,19 +337,23 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                         terminate_game(&controller, &adapter, &window, error);
                     }
                 }
-                let fullscreen = controller.borrow().game_fullscreen();
-                if window.window().is_fullscreen() != fullscreen {
-                    window.window().set_fullscreen(fullscreen);
-                    tracing::debug!(
-                        event = "astra.emu.host.window.fullscreen_requested",
-                        fullscreen
-                    );
-                }
                 let pointer_request = controller.borrow_mut().take_game_pointer();
                 if let Some(request) = pointer_request {
                     if let Err(error) = pointer::HostPointer::apply(&pointer, &window, request) {
                         terminate_game(&controller, &adapter, &window, error);
                     }
+                }
+                let request = controller.borrow_mut().take_window_request();
+                if let Some(request) = request {
+                    let result = window_commands::execute(&window, &pointer, &request.command);
+                    if let Err(error) = controller.borrow_mut().respond_window(&request, result) {
+                        window.set_global_diagnostic(error.into());
+                    }
+                }
+                if let Some(failure) = controller.borrow().native_failure() {
+                    window.set_core_retryable(true);
+                    window.set_fatal_error_message(failure.into());
+                    window.set_fatal_error_active(true);
                 }
                 window.window().request_redraw();
             }
@@ -412,6 +420,7 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                 if let Some(window) = event_window.upgrade() {
                     modals::service(&window, &event_controller, &modal_ui);
                     let input_blocked = !window.get_game_active()
+                        || window.get_fatal_error_active()
                         || window.get_modal_active()
                         || window.get_translation_overlay_active()
                         || window.get_diagnostics_overlay_active()
@@ -549,5 +558,6 @@ fn terminate_game<C: ManagerController>(
     tracing::error!(event = "astra.emu.host.game_terminated", diagnostic_code);
     window.set_global_diagnostic(message.clone().into());
     window.set_fatal_error_message(message.into());
+    window.set_core_retryable(false);
     window.set_fatal_error_active(true);
 }

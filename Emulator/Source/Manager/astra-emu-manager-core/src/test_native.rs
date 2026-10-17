@@ -1,0 +1,108 @@
+//! Native C-table fixture for host lifecycle and policy tests.
+use astra_emu_abi as abi;
+use astra_emu_manager_core::LoadedFamilyPlugin;
+use std::{cell::RefCell, sync::{Arc, atomic::{AtomicBool, AtomicU64, Ordering}}, thread::{JoinHandle, ThreadId}, time::Duration};
+use parking_lot::Mutex;
+#[derive(Clone, Debug)]
+pub struct Call { pub name: &'static str, pub thread: ThreadId, pub key: String }
+pub struct Fixture {
+    pub plugin: &'static str, pub family: &'static str, pub format: &'static str,
+    pub confidence: u32, pub marker: Option<&'static str>, pub config: bool,
+    pub calls: Arc<Mutex<Vec<Call>>>,
+    pub entered: Option<std::sync::mpsc::Sender<()>>,
+    pub gate: Option<std::sync::mpsc::Receiver<()>>,
+    pub close_error: bool,
+    pub init_error: bool,
+    formats: Box<[abi::Bytes]>, fields: Box<[abi::ConfigField]>, choices: Box<[abi::Bytes]>,
+}
+impl Fixture {
+    pub fn new(plugin: &'static str, family: &'static str, format: &'static str) -> Self {
+        Self { plugin, family, format, confidence: 9000, marker: None, config: false, calls: Arc::new(Mutex::new(Vec::new())), entered: None, gate: None, close_error: false, init_error: false, formats: Box::new([]), fields: Box::new([]), choices: Box::new([]) }
+    }
+}
+thread_local! { static FIXTURES: RefCell<[Option<Box<Fixture>>; 4]> = const { RefCell::new([None, None, None, None]) }; }
+fn fixture<const N: usize, R>(f: impl FnOnce(&Fixture) -> R) -> R { FIXTURES.with(|slots| f(slots.borrow()[N].as_deref().unwrap())) }
+fn record(calls: &Mutex<Vec<Call>>, name: &'static str, key: String) { calls.lock().push(Call { name, thread: std::thread::current().id(), key }); }
+pub fn install(slot: usize, value: Fixture) -> LoadedFamilyPlugin { try_install(slot, value).unwrap() }
+pub fn try_install(slot: usize, mut value: Fixture) -> Result<LoadedFamilyPlugin, astra_emu_manager_core::FamilyLoadError> {
+    value.formats = vec![abi::Bytes::new(value.format.as_bytes())].into_boxed_slice();
+    if value.config {
+        value.choices = vec![abi::Bytes::new(b"direct"), abi::Bytes::new(b"title")].into_boxed_slice();
+        value.fields = vec![abi::ConfigField { id: abi::Bytes::new(b"launch_mode"), label: abi::Bytes::new(b"Launch mode"), group: abi::Bytes::new(b"Startup"),
+            default_value: abi::ConfigValue { kind: abi::VALUE_ENUM, reserved: 0, integer: 0, number: 0.0, text: abi::Bytes::new(b"direct") },
+            integer_min: 0, integer_max: 0, number_min: 0.0, number_max: 0.0, max_bytes: 0, reserved: 0, choices: value.choices.as_ptr(), choice_count: value.choices.len() }].into_boxed_slice();
+    }
+    FIXTURES.with(|slots| slots.borrow_mut()[slot] = Some(Box::new(value)));
+    unsafe { LoadedFamilyPlugin::from_query(match slot { 0 => query::<0>, 1 => query::<1>, 2 => query::<2>, 3 => query::<3>, _ => panic!("fixture slot") }) }
+}
+unsafe extern "C" fn initialize<const N: usize>(diagnostics: *const abi::Diagnostics, error: *mut abi::Error) -> abi::Status {
+    if diagnostics.is_null() { return abi::INVALID_ARGUMENT; }
+    fixture::<N,_>(|v| {
+        record(&v.calls, "initialize", String::new());
+        if v.init_error { unsafe { (*error).set("ASTRA_EMU_FAMILY_DIAGNOSTIC_INIT", "diagnostic bridge conflict"); } abi::CORE_ERROR } else { abi::OK }
+    })
+}
+unsafe extern "C" fn describe<const N: usize>(out: *mut abi::Descriptor, _: *mut abi::Error) -> abi::Status {
+    fixture::<N,_>(|v| { record(&v.calls, "describe", String::new()); unsafe { out.write(abi::Descriptor { header: abi::Header::of::<abi::Descriptor>(), family_id: abi::Bytes::new(v.family.as_bytes()), plugin_id: abi::Bytes::new(v.plugin.as_bytes()), version: abi::Bytes::new(b"1.0.0"), capabilities: abi::CAP_CPU_SURFACE, formats: v.formats.as_ptr(), format_count: v.formats.len(), configuration: v.fields.as_ptr(), configuration_count: v.fields.len() }); } }); abi::OK
+}
+unsafe extern "C" fn probe<const N: usize>(path: abi::Bytes, out: *mut abi::ProbeResult, _: *mut abi::Error) -> abi::Status {
+    fixture::<N,_>(|v| {
+        record(&v.calls, "probe", String::new());
+        let path = unsafe { path.text(4096) }.unwrap();
+        if v.marker.is_some_and(|marker| !std::path::Path::new(path).join(marker).is_file()) { return abi::NO_MATCH; }
+        unsafe { out.write(abi::ProbeResult { game_id: abi::Bytes::new(b"fixture-game"), format: abi::Bytes::new(v.format.as_bytes()), confidence_permyriad: v.confidence, reserved: 0 }); }
+        abi::OK
+    })
+}
+fn info() -> abi::SurfaceInfo { abi::SurfaceInfo { kind: abi::SURFACE_CPU, pixel_format: abi::PIXEL_RGBA8, color: abi::COLOR_SRGB, alpha: abi::ALPHA_OPAQUE, rows: abi::ROWS_TOP_DOWN, backend: 0, logical: abi::Extent { width: 1, height: 1 }, raster: abi::Extent { width: 1, height: 1 }, stride: 4 } }
+struct Session { epoch: u64, generation: Arc<AtomicU64>, stop: Arc<AtomicBool>, worker: Option<JoinHandle<()>>, calls: Arc<Mutex<Vec<Call>>>, close_error: bool }
+unsafe extern "C" fn open<const N: usize>(raw: *const abi::OpenRequest, out: *mut abi::OpenResult, error: *mut abi::Error) -> abi::Status {
+    let raw = unsafe { &*raw };
+    fixture::<N,_>(|v| {
+        record(&v.calls, "open", String::new());
+        if let Some(entered) = &v.entered { let _ = entered.send(()); }
+        if let Some(gate) = &v.gate { let _ = gate.recv(); }
+        if unsafe { raw.host.cancellation.is_cancelled.unwrap()(raw.host.cancellation.context, raw.session_epoch) } != 0 {
+            unsafe { (*error).set("ASTRA_TEST_OPEN_CANCELLED", "cancelled while opening"); } return abi::CANCELLED;
+        }
+        let generation = Arc::new(AtomicU64::new(1)); let stop = Arc::new(AtomicBool::new(false));
+        let producer_generation = generation.clone(); let producer_stop = stop.clone();
+        let worker = std::thread::spawn(move || { while !producer_stop.load(Ordering::Acquire) { std::thread::sleep(Duration::from_millis(2)); producer_generation.fetch_add(1, Ordering::AcqRel); } });
+        let session = Box::new(Session { epoch: raw.session_epoch, generation, stop, worker: Some(worker), calls: v.calls.clone(), close_error: v.close_error });
+        unsafe { out.write(abi::OpenResult { session: Box::into_raw(session).cast(), context_epoch: 1, output_epoch: 1, surface: info() }); } abi::OK
+    })
+}
+unsafe extern "C" fn input(handle: abi::Session, values: *const abi::InputEvent, count: usize, _: *mut abi::Error) -> abi::Status {
+    let session = unsafe { &*handle.cast::<Session>() };
+    for value in unsafe { abi::borrowed_array(values, count, 4096) }.unwrap() { record(&session.calls, "input", unsafe { value.physical_key.text(256) }.unwrap().to_owned()); }
+    abi::OK
+}
+unsafe extern "C" fn control(handle: abi::Session, _: u32, _: *mut abi::Error) -> abi::Status { let session = unsafe { &*handle.cast::<Session>() }; record(&session.calls, "control", String::new()); abi::OK }
+unsafe extern "C" fn state(handle: abi::Session, out: *mut abi::SessionState, _: *mut abi::Error) -> abi::Status {
+    let session = unsafe { &*handle.cast::<Session>() }; record(&session.calls, "state", String::new());
+    unsafe { out.write(abi::SessionState { state: abi::SESSION_RUNNING, reserved: 0, context_epoch: 1, output_epoch: 1, error: abi::Error::default() }); } abi::OK
+}
+unsafe extern "C" fn release(owner: *mut std::ffi::c_void) { drop(unsafe { Box::from_raw(owner.cast::<[u8;4]>()) }); }
+unsafe extern "C" fn frame(handle: abi::Session, after: abi::FrameIdentity, out: *mut abi::FrameSurface, _: *mut abi::Error) -> abi::Status {
+    let session = unsafe { &*handle.cast::<Session>() }; record(&session.calls, "frame", String::new());
+    let identity = abi::FrameIdentity { session_epoch: session.epoch, output_epoch: 1, generation: session.generation.load(Ordering::Acquire) };
+    let (state, cpu) = if after == identity { (abi::FRAME_UNCHANGED, abi::CpuLease { pixels: abi::Bytes::EMPTY, owner: std::ptr::null_mut(), release: None }) } else {
+        let bytes = Box::new([23,45,67,255]); let pixels = abi::Bytes::new(bytes.as_ref());
+        (abi::FRAME_READY, abi::CpuLease { pixels, owner: Box::into_raw(bytes).cast(), release: Some(release) })
+    };
+    unsafe { out.write(abi::FrameSurface { state, reserved: 0, identity, timestamp_ns: identity.generation * 2_000_000, info: info(), cpu }); } abi::OK
+}
+unsafe extern "C" fn cancel(handle: abi::Session) { let session = unsafe { &*handle.cast::<Session>() }; session.stop.store(true, Ordering::Release); }
+unsafe extern "C" fn close(handle: abi::Session, error: *mut abi::Error) -> abi::Status {
+    let mut session = unsafe { Box::from_raw(handle.cast::<Session>()) }; session.stop.store(true, Ordering::Release);
+    session.worker.take().unwrap().join().unwrap(); record(&session.calls, "close", String::new());
+    if session.close_error { unsafe { (*error).set("ASTRA_TEST_CLOSE", "close failed after cleanup"); } abi::CORE_ERROR } else { abi::OK }
+}
+unsafe extern "C" fn extension(_: abi::Bytes, _: u32, out: *mut *const std::ffi::c_void) -> abi::Status { unsafe { *out = std::ptr::null(); } abi::UNSUPPORTED }
+struct Table<const N: usize>;
+impl<const N: usize> Table<N> { const API: abi::CoreApi = abi::CoreApi { header: abi::Header::of::<abi::CoreApi>(), initialize: Some(initialize::<N>), describe: Some(describe::<N>), probe: Some(probe::<N>), open: Some(open::<N>), input: Some(input), control: Some(control), state: Some(state), frame: Some(frame), cancel: Some(cancel), close: Some(close), extension: Some(extension) }; }
+unsafe extern "C" fn query<const N: usize>(version: u32, out: *mut *const abi::CoreApi) -> abi::Status {
+    unsafe { *out = std::ptr::null(); }
+    if version != abi::ABI_VERSION { return abi::UNSUPPORTED; }
+    unsafe { *out = &Table::<N>::API; } abi::OK
+}

@@ -1,4 +1,4 @@
-use astra_emu_family_api::{FamilyEvent, KeyModifiers, KeyState, PointerButton};
+use astra_emu_manager_core::model::{FamilyEvent, KeyModifiers, KeyState, PointerButton};
 use astra_emu_manager_core::input_key_code;
 use serde::Deserialize;
 
@@ -15,6 +15,7 @@ pub(super) enum Input {
     Key { code: String, pressed: bool },
     PointerMove { x: f32, y: f32 },
     PointerButton { secondary: bool, pressed: bool },
+    Control { action: String },
 }
 
 impl Input {
@@ -27,21 +28,20 @@ impl Input {
             }
         };
         Ok(match self {
-            Self::Key { code, pressed } => FamilyEvent::Key {
-                code: input_key_code(code).ok_or("ASTRA_EMU_HEADLESS_INPUT_KEY")?,
-                state: state(*pressed),
-                modifiers: KeyModifiers {
-                    shift: false,
-                    control: false,
-                    alt: false,
-                    super_key: false,
-                },
-            },
+            Self::Control { action } => FamilyEvent::Control { command: match action.as_str() { "pause" => astra_emu_abi::CONTROL_PAUSE, "resume" => astra_emu_abi::CONTROL_RESUME, "retry" => astra_emu_abi::CONTROL_RETRY, _ => return Err("ASTRA_EMU_HEADLESS_CONTROL".into()) } },
+            Self::Key { code, pressed } => FamilyEvent::Key { logical: None, code: input_key_code(code).ok_or("ASTRA_EMU_HEADLESS_INPUT_KEY")?,
+            state: state(*pressed),
+            modifiers: KeyModifiers {
+                shift: false,
+                control: false,
+                alt: false,
+                super_key: false,
+            }, },
             Self::PointerMove { x, y } => {
                 if !x.is_finite() || !y.is_finite() {
                     return Err("ASTRA_EMU_HEADLESS_INPUT_COORDINATES".into());
                 }
-                FamilyEvent::PointerMove { x: *x, y: *y }
+                FamilyEvent::PointerMove { x: *x, y: *y, displayed: None }
             }
             Self::PointerButton { secondary, pressed } => FamilyEvent::PointerButton {
                 button: if *secondary {
@@ -50,6 +50,7 @@ impl Input {
                     PointerButton::Primary
                 },
                 state: state(*pressed),
+                displayed: None,
             },
         })
     }
@@ -67,7 +68,7 @@ pub(super) fn prepare(
         }
         previous = input.frame;
         let events = result.entry(input.frame).or_default();
-        if events.len() >= astra_emu_family_api::MAX_EVENTS_PER_ADVANCE {
+        if events.len() >= astra_emu_manager_core::model::MAX_INPUT_EVENTS {
             return Err("ASTRA_EMU_HEADLESS_INPUT_LIMIT".into());
         }
         events.push(input.event.to_event()?);
@@ -90,7 +91,7 @@ mod tests {
         let events = prepare(&inputs, 4).unwrap();
         assert!(matches!(
             events[&2][0],
-            FamilyEvent::PointerMove { x: 120.0, y: 80.0 }
+            FamilyEvent::PointerMove { x: 120.0, y: 80.0, .. }
         ));
         assert!(matches!(
             events[&2][1],

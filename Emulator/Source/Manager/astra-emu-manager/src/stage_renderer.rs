@@ -5,12 +5,12 @@ use std::{
     time::Instant,
 };
 
-use astra_emu_family_api::FrameIdentity;
+use astra_emu_manager_core::model::FrameIdentity;
 use astra_emu_manager::{
     effects::{FilterConfiguration, FilterEngine, FilterPreset},
     AstraUnderlayRenderer, StageTextureUpdate, WgpuFrameContext,
 };
-use astra_media_core::{Canvas2D, Extent2D, Viewport2D};
+use astra_media_core::Viewport2D;
 use wgpu::{Extent3d, TextureUsages};
 
 const DEFAULT_STAGE_WIDTH: u32 = 800;
@@ -304,6 +304,8 @@ impl AstraUnderlayRenderer for ManagerStageRenderer {
                 },
                 Extent3d { width: info.width, height: info.height, depth_or_array_layers: 1 },
             );
+            // Queue::write_texture copies source bytes before returning. The
+            // local immutable lease spans that copy, not arbitrary GPU latency.
             self.presented_input = Some(self.pixel_presentation.apply(
                 context.device, context.queue, input, info,
             ));
@@ -319,6 +321,7 @@ impl AstraUnderlayRenderer for ManagerStageRenderer {
             self.texture_dirty = true;
         }
         self.uploaded_identity = Some(frame.identity);
+        self.mailbox.presented(frame.identity, frame.info)?;
         self.filter_dirty = false;
         if let Some(started) = started {
             tracing::debug!(
@@ -368,65 +371,14 @@ pub(crate) fn content_viewport_for_output(
     output_width: u32,
     output_height: u32,
 ) -> Result<Viewport2D, String> {
-    if input_width == 0 || input_height == 0 || output_width == 0 || output_height == 0 {
+    if [logical_width, logical_height, input_width, input_height, output_width, output_height].contains(&0) {
         return Err("ASTRA_EMU_HOST_FRAME_DIMENSIONS".into());
     }
-    let canvas = Canvas2D::new(
-        Extent2D::new(logical_width, logical_height),
-        Extent2D::new(input_width, input_height),
-    )
-    .map_err(|_| "ASTRA_EMU_HOST_FRAME_DIMENSIONS".to_owned())?;
-    let input = canvas.viewport();
-    let right = input
-        .x
-        .checked_add(input.width)
-        .ok_or_else(|| "ASTRA_EMU_HOST_FRAME_DIMENSIONS".to_owned())?;
-    let bottom = input
-        .y
-        .checked_add(input.height)
-        .ok_or_else(|| "ASTRA_EMU_HOST_FRAME_DIMENSIONS".to_owned())?;
-    let x = scale_edge(input.x, output_width, input_width, false)?;
-    let y = scale_edge(input.y, output_height, input_height, false)?;
-    let output_right = scale_edge(right, output_width, input_width, true)?;
-    let output_bottom = scale_edge(bottom, output_height, input_height, true)?;
-    let right = output_right.min(output_width);
-    let bottom = output_bottom.min(output_height);
-    let width = right.saturating_sub(x).max(1);
-    let height = bottom.saturating_sub(y).max(1);
-    let right_edge = x
-        .checked_add(width)
-        .ok_or_else(|| "ASTRA_EMU_HOST_FRAME_DIMENSIONS".to_owned())?;
-    let bottom_edge = y
-        .checked_add(height)
-        .ok_or_else(|| "ASTRA_EMU_HOST_FRAME_DIMENSIONS".to_owned())?;
-    if x >= output_width
-        || y >= output_height
-        || right_edge > output_width
-        || bottom_edge > output_height
-    {
-        return Err("ASTRA_EMU_HOST_FRAME_DIMENSIONS".into());
-    }
-    Ok(Viewport2D {
-        x,
-        y,
-        width,
-        height,
-    })
+    // A native surface already includes the core's own scene/UI/letterboxing.
+    // Host V is the complete filtered raster; only the core maps pixels to L.
+    Ok(Viewport2D { x: 0, y: 0, width: output_width, height: output_height })
 }
 
-fn scale_edge(value: u32, output: u32, input: u32, ceil: bool) -> Result<u32, String> {
-    let product = u128::from(value) * u128::from(output);
-    let denominator = u128::from(input);
-    let value = if ceil {
-        product
-            .checked_add(denominator - 1)
-            .ok_or_else(|| "ASTRA_EMU_HOST_FRAME_DIMENSIONS".to_owned())?
-            / denominator
-    } else {
-        product / denominator
-    };
-    u32::try_from(value).map_err(|_| "ASTRA_EMU_HOST_FRAME_DIMENSIONS".to_owned())
-}
 
 fn create_stage_texture(
     device: &wgpu::Device,

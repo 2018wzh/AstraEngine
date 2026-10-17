@@ -6,16 +6,13 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use astra_emu_family_api::{
-    FamilyCapability as AbiCapability, FamilyDescriptor as AbiDescriptor, FamilyOpen,
-    FamilyProvider, OpenRequest, ProbeRequest,
-};
+use crate::model::ProbeRequest;
 
 use crate::family::{
-    FamilyCapability, FamilyPluginDescriptor, FamilyPluginRegistry, FamilyProbeReport,
+    FamilyPluginDescriptor, FamilyPluginRegistry, FamilyProbeReport,
     FamilyProbeSelection,
 };
-use crate::family_loader::{host_owned_error, FamilyLoadError, LoadedFamilyPlugin};
+use crate::family_loader::{FamilyLoadError, LoadedFamilyPlugin, NativeOpenRequest, NativeSession};
 
 /// Result of one deterministic scan of a Manager `cores` directory.
 ///
@@ -69,8 +66,9 @@ fn discover_family_libraries(directory: &Path) -> Result<Vec<PathBuf>, FamilyLoa
 /// Runtime registry used by Manager and CLI. Static and dynamic providers are
 /// registered through the same descriptor validation and probe-selection path.
 pub struct FamilyProviderRegistry {
-    providers: BTreeMap<String, Box<dyn FamilyProvider>>,
+    providers: BTreeMap<String, LoadedFamilyPlugin>,
     descriptors: FamilyPluginRegistry,
+    rejected_ids: BTreeSet<String>,
 }
 
 impl Default for FamilyProviderRegistry {
@@ -84,29 +82,26 @@ impl FamilyProviderRegistry {
         Self {
             providers: BTreeMap::new(),
             descriptors: FamilyPluginRegistry::new(),
+            rejected_ids: BTreeSet::new(),
         }
     }
 
-    pub fn register_provider<P>(&mut self, provider: P) -> Result<(), FamilyLoadError>
-    where
-        P: FamilyProvider + 'static,
-    {
-        let descriptor = provider
-            .descriptor()
-            .map_err(|error| FamilyLoadError::DescriptorError(host_owned_error(error)))?;
-        descriptor
-            .validate()
-            .map_err(|error| FamilyLoadError::DescriptorError(host_owned_error(error)))?;
-        let manager = manager_descriptor(&descriptor)?;
+    pub fn register_provider(&mut self, provider: LoadedFamilyPlugin) -> Result<(), FamilyLoadError> {
+        let manager = provider.manager_descriptor().clone();
         let plugin_id = manager.plugin_id.clone();
-        if self.providers.contains_key(&plugin_id) {
+        if self.providers.contains_key(&plugin_id) || self.rejected_ids.contains(&plugin_id) {
+            self.rejected_ids.insert(plugin_id.clone());
+            self.remove(&plugin_id);
             return Err(FamilyLoadError::DuplicatePlugin);
         }
-        self.descriptors
-            .register(manager)
-            .map_err(|_| FamilyLoadError::DuplicatePlugin)?;
-        self.providers.insert(plugin_id, Box::new(provider));
+        self.descriptors.register(manager).map_err(|_| FamilyLoadError::DuplicatePlugin)?;
+        self.providers.insert(plugin_id, provider);
         Ok(())
+    }
+
+    /// Static factory returns the same process-lifetime C table as a DLL.
+    pub unsafe fn register_static(&mut self, query: astra_emu_abi::Query) -> Result<(), FamilyLoadError> {
+        self.register_provider(unsafe { LoadedFamilyPlugin::from_query(query) }?)
     }
 
     pub fn load_dynamic(&mut self, path: impl AsRef<Path>) -> Result<(), FamilyLoadError> {
@@ -180,10 +175,12 @@ impl FamilyProviderRegistry {
 
         for plugin_id in &duplicate_ids {
             self.remove(plugin_id);
+            self.rejected_ids.insert(plugin_id.clone());
         }
         for (plugin_id, (path, plugin)) in candidates {
             if self.providers.contains_key(&plugin_id) {
                 self.remove(&plugin_id);
+                self.rejected_ids.insert(plugin_id.clone());
                 report.errors.push(FamilyDirectoryLoadError {
                     path,
                     error: FamilyLoadError::DuplicatePlugin,
@@ -207,21 +204,8 @@ impl FamilyProviderRegistry {
         self.descriptors.descriptor(plugin_id)
     }
 
-    pub fn configuration(
-        &self,
-        plugin_id: &str,
-    ) -> Result<abi_stable::std_types::RVec<astra_emu_family_api::ConfigField>, FamilyLoadError>
-    {
-        let descriptor = self
-            .providers
-            .get(plugin_id)
-            .ok_or(FamilyLoadError::Provider)?
-            .descriptor()
-            .map_err(FamilyLoadError::DescriptorError)?;
-        descriptor
-            .validate()
-            .map_err(FamilyLoadError::DescriptorError)?;
-        Ok(descriptor.configuration)
+    pub fn configuration(&self, plugin_id: &str) -> Result<Vec<crate::model::ConfigField>, FamilyLoadError> {
+        Ok(self.providers.get(plugin_id).ok_or(FamilyLoadError::Provider)?.configuration().to_vec())
     }
 
     pub fn descriptors(&self) -> impl Iterator<Item = &FamilyPluginDescriptor> {
@@ -236,12 +220,12 @@ impl FamilyProviderRegistry {
     ) -> Result<FamilyProbeSelection, FamilyLoadError> {
         request
             .validate()
-            .map_err(|error| FamilyLoadError::ProbeError(host_owned_error(error)))?;
+            .map_err(FamilyLoadError::ProbeError)?;
         let mut reports = Vec::new();
         for (plugin_id, provider) in &self.providers {
             let Some(report) = provider
                 .probe(request.clone())
-                .map_err(|error| FamilyLoadError::ProbeError(host_owned_error(error)))?
+                .map_err(FamilyLoadError::ProbeError)?
             else {
                 continue;
             };
@@ -261,8 +245,8 @@ impl FamilyProviderRegistry {
     pub fn open_selected(
         &mut self,
         candidate: &crate::family::FamilyProbeCandidate,
-        mut request: OpenRequest,
-    ) -> Result<FamilyOpen, FamilyLoadError> {
+        request: NativeOpenRequest,
+    ) -> Result<NativeSession, FamilyLoadError> {
         let checked = self
             .descriptors
             .choose_probe(
@@ -275,49 +259,12 @@ impl FamilyProviderRegistry {
             .providers
             .get_mut(&checked.report.plugin_id)
             .ok_or(FamilyLoadError::Provider)?;
-        let descriptor = provider
-            .descriptor()
-            .map_err(FamilyLoadError::DescriptorError)?;
-        request
-            .validate_for_descriptor(&descriptor)
-            .map_err(FamilyLoadError::ProviderError)?;
-        request.configuration =
-            astra_emu_family_api::resolve_config(&descriptor.configuration, &request.configuration)
-                .map_err(FamilyLoadError::ProviderError)?;
         provider
             .open(request)
-            .map_err(|error| FamilyLoadError::ProviderError(host_owned_error(error)))
+            .map_err(FamilyLoadError::ProviderError)
     }
 }
 
-pub(crate) fn manager_descriptor(
-    descriptor: &AbiDescriptor,
-) -> Result<FamilyPluginDescriptor, FamilyLoadError> {
-    let capabilities = descriptor
-        .capabilities
-        .iter()
-        .map(|capability| match capability {
-            AbiCapability::CpuFrame => FamilyCapability::CpuFrame,
-            AbiCapability::PcmAudio => FamilyCapability::PcmAudio,
-            AbiCapability::NativeSave => FamilyCapability::NativeSave,
-            AbiCapability::TextReplacement => FamilyCapability::TextReplacement,
-        })
-        .collect();
-    let result = FamilyPluginDescriptor {
-        family_id: descriptor.family_id.to_string(),
-        plugin_id: descriptor.plugin_id.to_string(),
-        abi_fingerprint: descriptor.abi_fingerprint.to_string(),
-        version: descriptor.version.to_string(),
-        capabilities,
-        supported_formats: descriptor
-            .supported_formats
-            .iter()
-            .map(ToString::to_string)
-            .collect(),
-    };
-    result.validate().map_err(|_| FamilyLoadError::Descriptor)?;
-    Ok(result)
-}
 
 #[cfg(test)]
 #[path = "family_registry_tests.rs"]

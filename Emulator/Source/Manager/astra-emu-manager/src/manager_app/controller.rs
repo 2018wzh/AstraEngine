@@ -8,9 +8,30 @@ impl ManagerController for AstraEmuManagerController {
     fn respond_modal(
         &mut self,
         id: astra_emu_manager::modal_service::ModalId,
-        response: astra_emu_family_api::ModalResponse,
+        response: astra_emu_manager_core::model::ModalResponse,
     ) -> Result<(), String> {
         self.registry.respond_modal(id, response)
+    }
+    fn take_window_request(&mut self) -> Option<astra_emu_manager::window_service::WindowPresentation> { self.registry.take_window_request() }
+    fn respond_window(&mut self, request: &astra_emu_manager::window_service::WindowPresentation, result: Result<astra_emu_manager::window_service::WindowOutcome, String>) -> Result<(), String> {
+        if result.is_ok() {
+            if let Some(active) = self.active.as_mut().filter(|active| active.epoch == request.session_epoch) {
+                match &request.command {
+                    astra_emu_manager::window_service::WindowCommand::Title(title) => active.title = Some(title.clone()),
+                    astra_emu_manager::window_service::WindowCommand::Fullscreen { mode, .. } => active.fullscreen = *mode != astra_emu_abi::FULLSCREEN_WINDOWED,
+                    _ => {}
+                }
+            }
+        }
+        self.registry.respond_window(request, result)
+    }
+    fn native_failure(&self) -> Option<&str> { self.active.as_ref().and_then(|active| active.failure.as_deref()) }
+    fn retry_native(&mut self) -> Result<(), String> {
+        let active = self.active.as_mut().ok_or("ASTRA_EMU_CORE_CLOSED")?;
+        if active.failure.is_none() { return Err("ASTRA_EMU_CORE_RETRY_UNAVAILABLE".into()); }
+        self.registry.events(active.epoch, vec![FamilyEvent::Control { command: astra_emu_abi::CONTROL_RETRY }])?;
+        active.failure = None;
+        Ok(())
     }
 
     fn set_system_theme(&mut self, dark: bool) {
@@ -170,14 +191,14 @@ impl ManagerController for AstraEmuManagerController {
         self.active.as_ref().is_some_and(|active| active.closing.is_none() && active.fullscreen)
     }
 
-    fn take_game_icon(&mut self) -> Option<astra_emu_family_api::FamilyWindowIcon> {
+    fn take_game_icon(&mut self) -> Option<astra_emu_manager_core::model::FamilyWindowIcon> {
         self.active
             .as_mut()
             .filter(|active| active.closing.is_none())
             .and_then(|active| active.pending_icon.take())
     }
 
-    fn take_game_pointer(&mut self) -> Option<astra_emu_family_api::FamilyPointerRequest> {
+    fn take_game_pointer(&mut self) -> Option<astra_emu_manager_core::model::FamilyPointerRequest> {
         self.active
             .as_mut()
             .filter(|active| active.closing.is_none())

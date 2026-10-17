@@ -1,5 +1,5 @@
 use super::*;
-use astra_emu_family_api::{FrameAlpha, FrameFormat, FrameInfo, FrameLease, FrameRowOrder};
+use astra_emu_manager_core::model::{FrameAlpha, FrameFormat, FrameInfo, FrameLease, FrameRowOrder};
 use astra_emu_manager::effects::FilterPreset;
 use std::{collections::BTreeMap, path::PathBuf};
 
@@ -17,7 +17,7 @@ fn info(width: u32, height: u32, stride: u32, alpha: FrameAlpha) -> FrameInfo {
 }
 
 fn lease(pixels: Vec<u8>, info: FrameInfo, epoch: u64, generation: u64) -> FrameLease {
-    FrameLease::from_vec(pixels, info, FrameIdentity { session_epoch: epoch, generation }).unwrap()
+    FrameLease::from_vec(pixels, info, FrameIdentity { session_epoch: epoch, output_epoch: 1, generation }).unwrap()
 }
 
 #[test]
@@ -32,7 +32,7 @@ fn old_frame_and_shutdown_cannot_replace_or_clear_a_new_session_baseline() {
     assert!(mailbox.publish(old).is_err());
     mailbox.clear(1).unwrap();
     let current = mailbox.snapshot().unwrap().unwrap();
-    assert_eq!(current.identity, FrameIdentity { session_epoch: 2, generation: 1 });
+    assert_eq!(current.identity, FrameIdentity { session_epoch: 2, output_epoch: 1, generation: 1 });
     assert_eq!(current.pixels(), &[5, 6, 7, 255]);
 }
 
@@ -49,15 +49,15 @@ fn replacement_and_close_preserve_an_already_acquired_cpu_lease() {
 }
 
 #[test]
-fn filtered_output_keeps_content_viewport_in_output_space() {
+fn filtered_output_keeps_the_complete_native_frame_interactive() {
     let content = super::content_viewport_for_output(1280, 720, 721, 1280, 1082, 1920).unwrap();
     assert_eq!(
         content,
         astra_media_core::Viewport2D {
             x: 0,
-            y: 655,
+            y: 0,
             width: 1082,
-            height: 608,
+            height: 1920,
         }
     );
 
@@ -66,9 +66,9 @@ fn filtered_output_keeps_content_viewport_in_output_space() {
         content,
         astra_media_core::Viewport2D {
             x: 0,
-            y: 90,
+            y: 0,
             width: 2880,
-            height: 1620,
+            height: 1800,
         }
     );
 }
@@ -261,5 +261,5 @@ fn native_pixels_keep_row_padding_and_present_bgra_linear_ignored_alpha_after_re
     }
     // Rebuilding the GPU does not discard the immutable complete CPU baseline.
     assert_eq!(mailbox.snapshot().unwrap().unwrap().identity,
-        FrameIdentity { session_epoch: 7, generation: 1 });
+        FrameIdentity { session_epoch: 7, output_epoch: 1, generation: 1 });
 }
