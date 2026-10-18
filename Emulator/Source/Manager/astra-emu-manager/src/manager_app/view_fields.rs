@@ -38,12 +38,14 @@ impl AstraEmuManagerController {
         }
     }
 
-    pub(super) fn family_fields(&self) -> Result<Vec<GenericConfigFieldViewModel>, String> {
+    pub(super) fn family_fields(
+        &self,
+    ) -> Result<(Vec<GenericConfigFieldViewModel>, Vec<GenericConfigFieldViewModel>), String> {
         let Some(game_id) = self.selected_case_id.as_deref() else {
-            return Ok(Vec::new());
+            return Ok((Vec::new(), Vec::new()));
         };
         let Some(choices) = self.probe_selection_for_game(game_id) else {
-            return Ok(Vec::new());
+            return Ok((Vec::new(), Vec::new()));
         };
         let installed = self
             .candidates
@@ -79,10 +81,11 @@ impl AstraEmuManagerController {
             min: 0,
             max: 0,
         }];
+        let mut common = Vec::new();
         if installed.is_some() && draft.is_none_or(|id| Some(id) == installed) {
-            fields.extend(self.typed_family_fields()?);
+            self.append_typed_family_fields(&mut common, &mut fields)?;
         }
-        Ok(fields)
+        Ok((common, fields))
     }
 
     pub(super) fn input_view(&self) -> InputConfigViewModel {

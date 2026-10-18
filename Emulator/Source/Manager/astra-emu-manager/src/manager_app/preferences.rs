@@ -49,7 +49,8 @@ impl AstraEmuManagerController {
             return Err("ASTRA_EMU_FAMILY_SESSION_ALREADY_ACTIVE".into());
         }
         if key == "manager.config_scope" && matches!(value, "game" | "core") {
-            self.family_options.clear();
+            self.family_options
+                .retain(|key, _| key == "manager.emulator_id");
             self.family_options.insert(key.into(), value.into());
             return Ok(());
         }

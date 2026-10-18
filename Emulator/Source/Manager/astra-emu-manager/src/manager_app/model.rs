@@ -203,6 +203,7 @@ impl AstraEmuManagerController {
                 }
             })
             .unwrap_or_default();
+        let (common_engine_config_fields, family_config_fields) = self.family_fields()?;
         Ok(ManagerViewModel {
             games: cards,
             metadata_busy: self.pending_metadata.values().any(|pending| {
@@ -331,7 +332,8 @@ impl AstraEmuManagerController {
             current_page: String::new(),
             input_config: self.input_view(),
             appearance: self.appearance_view(),
-            family_config_fields: self.family_fields()?,
+            common_engine_config_fields,
+            family_config_fields,
             musica_key_file_available: self.musica_key_file_available(),
             filter_config_fields: self.filter_fields()?,
             version: env!("CARGO_PKG_VERSION").into(),

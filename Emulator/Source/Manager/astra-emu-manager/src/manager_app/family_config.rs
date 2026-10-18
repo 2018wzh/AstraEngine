@@ -1,5 +1,5 @@
 use super::*;
-use astra_emu_manager_core::model::{ConfigField, ConfigKind, ConfigValue};
+use astra_emu_manager_core::model::{ConfigEntry, ConfigField, ConfigKind, ConfigValue};
 
 impl AstraEmuManagerController {
     pub(super) fn config_scope(&self) -> &str {
@@ -21,6 +21,13 @@ impl AstraEmuManagerController {
             .and_then(|id| self.candidates.get(id))
             .ok_or("ASTRA_EMU_FAMILY_PROBE_REQUIRED")?;
         let plugin = selected.descriptor.plugin_id.clone();
+        if self
+            .family_options
+            .get("manager.emulator_id")
+            .is_some_and(|draft| draft != &plugin)
+        {
+            return Err("ASTRA_EMU_EMULATOR_SELECTION_REQUIRED".into());
+        }
         let schema = self
             .registry
             .configuration(&plugin)
@@ -31,34 +38,35 @@ impl AstraEmuManagerController {
     pub(super) fn save_typed_family_config(&mut self) -> Result<(), String> {
         let (plugin, schema) = self.config_schema()?;
         let scope = self.config_scope().to_owned();
-        let mut entries = self
-            .library
-            .family_configuration(&plugin, &scope, &schema)
-            .map_err(|error| error.to_string())?;
-        for entry in &mut entries {
-            if let Some(raw) = self.family_options.get(&format!("config.{}", entry.id)) {
-                let field = schema
-                    .iter()
-                    .find(|field| field.id == entry.id)
-                    .ok_or("ASTRA_EMU_FAMILY_CONFIG")?;
-                entry.value = parse_config_value(field, raw)?;
-            }
-        }
-        self.library
-            .save_family_configuration(&plugin, &scope, &schema, &entries)
-            .map_err(|error| error.to_string())?;
+        save_config_draft(
+            &mut self.library,
+            &plugin,
+            &scope,
+            &schema,
+            &self.family_options,
+        )?;
         self.family_options
             .retain(|key, _| key == "manager.config_scope");
         Ok(())
     }
 
-    pub(super) fn typed_family_fields(&self) -> Result<Vec<GenericConfigFieldViewModel>, String> {
+    pub(super) fn append_typed_family_fields(
+        &self,
+        common: &mut Vec<GenericConfigFieldViewModel>,
+        specific: &mut Vec<GenericConfigFieldViewModel>,
+    ) -> Result<(), String> {
         let (plugin, schema) = self.config_schema()?;
         let entries = self
             .library
             .family_configuration(&plugin, self.config_scope(), &schema)
             .map_err(|error| error.to_string())?;
-        let mut fields = vec![GenericConfigFieldViewModel {
+        let descriptor = &self
+            .selected_case_id
+            .as_ref()
+            .and_then(|id| self.candidates.get(id))
+            .ok_or("ASTRA_EMU_FAMILY_PROBE_REQUIRED")?
+            .descriptor;
+        specific.push(GenericConfigFieldViewModel {
             key: "manager.config_scope".into(),
             label: "配置范围".into(),
             description: "core 为该模拟器默认值，game 为当前游戏覆盖；不同模拟器的配置相互独立，下次启动生效。".into(),
@@ -73,43 +81,139 @@ impl AstraEmuManagerController {
             required: true,
             min: 0,
             max: 0,
-        }];
-        for (field, entry) in schema.iter().zip(entries) {
-            let key = format!("config.{}", field.id);
-            let (kind, choices, constraint) = match &field.kind {
-                ConfigKind::Bool => ("bool", Vec::new(), String::new()),
-                ConfigKind::Integer { min, max } => {
-                    ("integer", Vec::new(), format!("{min} … {max}"))
-                }
-                ConfigKind::Number { min, max } => ("float", Vec::new(), format!("{min} … {max}")),
-                ConfigKind::String { max_bytes } => (
-                    "string",
-                    Vec::new(),
-                    format!("最多 {max_bytes} UTF-8 bytes"),
-                ),
-                ConfigKind::Enum { choices } => (
-                    "enum",
-                    choices.iter().map(ToString::to_string).collect(),
-                    String::new(),
-                ),
-            };
-            fields.push(GenericConfigFieldViewModel {
-                value: self
-                    .family_options
-                    .get(&key)
-                    .cloned()
-                    .unwrap_or_else(|| display_config_value(&entry.value)),
-                key,
-                label: field.label.to_string(),
-                description: format!("{} {constraint}", field.group),
-                kind: kind.into(),
-                enum_values: choices,
-                required: true,
-                min: 0,
-                max: 0,
-            });
+        });
+        append_config_fields(
+            descriptor,
+            &schema,
+            &entries,
+            &self.family_options,
+            common,
+            specific,
+        );
+        Ok(())
+    }
+}
+
+fn append_config_fields(
+    descriptor: &FamilyPluginDescriptor,
+    schema: &[ConfigField],
+    entries: &[ConfigEntry],
+    drafts: &BTreeMap<String, String>,
+    common: &mut Vec<GenericConfigFieldViewModel>,
+    specific: &mut Vec<GenericConfigFieldViewModel>,
+) {
+    let render_fields = native_render_fields(descriptor, schema);
+    for (field, entry) in schema.iter().zip(entries) {
+        let key = format!("config.{}", field.id);
+        let common_label = render_fields
+            .iter()
+            .find(|(id, _)| *id == field.id)
+            .map(|(_, label)| *label);
+        let (kind, choices, constraint) = match &field.kind {
+            ConfigKind::Bool => ("bool", Vec::new(), String::new()),
+            ConfigKind::Integer { min, max } => {
+                ("integer", Vec::new(), format!("{min} … {max}"))
+            }
+            ConfigKind::Number { min, max } => ("float", Vec::new(), format!("{min} … {max}")),
+            ConfigKind::String { max_bytes } => (
+                "string",
+                Vec::new(),
+                format!("最多 {max_bytes} UTF-8 bytes"),
+            ),
+            ConfigKind::Enum { choices } => (
+                "enum",
+                choices.iter().map(ToString::to_string).collect(),
+                String::new(),
+            ),
+        };
+        let view = GenericConfigFieldViewModel {
+            value: drafts
+                .get(&key)
+                .cloned()
+                .unwrap_or_else(|| display_config_value(&entry.value)),
+            key,
+            label: common_label.unwrap_or(&field.label).into(),
+            description: if common_label.is_some() {
+                let semantics = if field.id == "render_scale" {
+                    "核心原生渲染倍率，保持逻辑舞台宽高比"
+                } else {
+                    "核心原生渲染像素尺寸，不改变逻辑舞台"
+                };
+                format!("{semantics}；滤镜输入，{constraint}；下次启动生效。")
+            } else {
+                format!("{} {constraint}", field.group)
+            },
+            kind: kind.into(),
+            enum_values: choices,
+            required: true,
+            min: 0,
+            max: 0,
+        };
+        if common_label.is_some() {
+            common.push(view);
+        } else {
+            specific.push(view);
         }
-        Ok(fields)
+    }
+}
+
+fn save_config_draft(
+    library: &mut Library,
+    plugin: &str,
+    scope: &str,
+    schema: &[ConfigField],
+    drafts: &BTreeMap<String, String>,
+) -> Result<(), String> {
+    let mut entries = library
+        .family_configuration(plugin, scope, schema)
+        .map_err(|error| error.to_string())?;
+    for (field, entry) in schema.iter().zip(&mut entries) {
+        if let Some(raw) = drafts.get(&format!("config.{}", field.id)) {
+            entry.value = parse_config_value(field, raw)?;
+        }
+    }
+    library
+        .save_family_configuration(plugin, scope, schema, &entries)
+        .map_err(|error| error.to_string())
+}
+
+// Only known native descriptor conventions expose R. A width/height pair is
+// indivisible: an incomplete or changed schema stays simulator-specific.
+fn native_render_fields(
+    descriptor: &FamilyPluginDescriptor,
+    schema: &[ConfigField],
+) -> &'static [(&'static str, &'static str)] {
+    let (expected, bounds): (&[(&str, &str)], ConfigKind) =
+        match (descriptor.family_id.as_str(), descriptor.plugin_id.as_str()) {
+            ("fvp", "astra.emu.fvp") => (
+                &[("render_scale", "滤镜输入 · 核心原生渲染倍率")],
+                ConfigKind::Number { min: 0.25, max: 4.0 },
+            ),
+            ("musica", "astra.emu.musica") => (
+                &[
+                    ("render_width", "滤镜输入 · 核心原生渲染宽度"),
+                    ("render_height", "滤镜输入 · 核心原生渲染高度"),
+                ],
+                ConfigKind::Integer { min: 1, max: 16384 },
+            ),
+            ("softpal", "sena-native-koikake") => (
+                &[
+                    ("raster_width", "滤镜输入 · 核心原生渲染宽度"),
+                    ("raster_height", "滤镜输入 · 核心原生渲染高度"),
+                ],
+                ConfigKind::Integer { min: 320, max: 3840 },
+            ),
+            _ => return &[],
+        };
+    if expected.iter().all(|(id, _)| {
+        let mut matches = schema.iter().filter(|field| field.id == *id);
+        matches.next().is_some_and(|field| {
+            field.kind == bounds && field.kind.accepts(&field.default)
+        }) && matches.next().is_none()
+    }) {
+        expected
+    } else {
+        &[]
     }
 }
 
@@ -138,133 +242,5 @@ fn parse_config_value(field: &ConfigField, raw: &str) -> Result<ConfigValue, Str
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn configuration_provider() -> astra_emu_manager_core::LoadedFamilyPlugin {
-        let mut fixture = crate::test_native::Fixture::new(
-            "config-test-plugin",
-            "config-test-family",
-            "config.test",
-        );
-        fixture.config = true;
-        crate::test_native::install(0, fixture)
-    }
-
-    fn configuration_candidate() -> FamilyProbeCandidate {
-        FamilyProbeCandidate {
-            report: astra_emu_manager_core::FamilyProbeReport {
-                plugin_id: "config-test-plugin".into(),
-                family_id: "config-test-family".into(),
-                game_id: "game".into(),
-                format: "config.test".into(),
-                confidence_permyriad: 10_000,
-            },
-            descriptor: FamilyPluginDescriptor {
-                family_id: "config-test-family".into(),
-                plugin_id: "config-test-plugin".into(),
-                abi_fingerprint: astra_emu_manager_core::INDEPENDENT_FAMILY_ABI_FINGERPRINT.into(),
-                version: "1.0.0".into(),
-                capabilities: vec![astra_emu_manager_core::FamilyCapability::CpuFrame],
-                supported_formats: vec!["config.test".into()],
-            },
-        }
-    }
-
-    fn configuration_controller(root: &std::path::Path) -> AstraEmuManagerController {
-        let mut controller = AstraEmuManagerController::open_library(
-            root.to_path_buf(),
-            crate::stage_renderer::FrameMailbox::new(),
-            Vec::new(),
-        )
-        .unwrap();
-        controller
-            .registry
-            .register_provider(configuration_provider)
-            .unwrap();
-        controller
-            .library
-            .add_game(&GameRecord {
-                game_id: "game".into(),
-                title: "Configuration test".into(),
-                user_title: None,
-                location: "fixtures/config".into(),
-                family_id: Some("config-test-family".into()),
-                content_fingerprint: None,
-                added_at_unix_ms: 1,
-            })
-            .unwrap();
-        controller.selected_case_id = Some("game".into());
-        let candidate = configuration_candidate();
-        controller
-            .candidates
-            .insert("game".into(), candidate.clone());
-        controller
-            .probe_choices
-            .insert("game".into(), vec![candidate]);
-        controller
-    }
-
-    #[test]
-    fn form_parses_full_width_numeric_values_and_rejects_non_finite_or_wrong_enum() {
-        let mut field = ConfigField {
-            id: "count".into(),
-            label: "Count".into(),
-            group: "Test".into(),
-            kind: ConfigKind::Integer {
-                min: i64::MIN,
-                max: i64::MAX,
-            },
-            default: ConfigValue::Integer(0),
-        };
-        assert_eq!(
-            parse_config_value(&field, &i64::MAX.to_string()).unwrap(),
-            ConfigValue::Integer(i64::MAX)
-        );
-        assert!(parse_config_value(&field, "9223372036854775808").is_err());
-        field.kind = ConfigKind::Number {
-            min: -1.0,
-            max: 1.0,
-        };
-        assert_eq!(
-            parse_config_value(&field, "-0.25").unwrap(),
-            ConfigValue::Number(-0.25)
-        );
-        assert!(parse_config_value(&field, "NaN").is_err());
-        field.kind = ConfigKind::Enum {
-            choices: vec!["shift_jis".into()],
-        };
-        assert!(parse_config_value(&field, "utf8").is_err());
-        assert_eq!(display_config_value(&ConfigValue::Bool(false)), "false");
-    }
-
-    #[test]
-    fn typed_game_configuration_round_trips_after_controller_reopen() {
-        let root = tempfile::tempdir().unwrap();
-        {
-            let mut controller = configuration_controller(root.path());
-            controller
-                .family_config_changed("config.launch_mode", "title")
-                .unwrap();
-            controller.save_family_config().unwrap();
-
-            let schema = controller
-                .registry
-                .configuration("config-test-plugin")
-                .unwrap();
-            let entries = controller
-                .library
-                .family_configuration("config-test-plugin", "game", &schema)
-                .unwrap();
-            assert_eq!(entries[0].value, ConfigValue::Enum("title".into()));
-        }
-
-        let controller = configuration_controller(root.path());
-        let fields = controller.typed_family_fields().unwrap();
-        let launch_mode = fields
-            .iter()
-            .find(|field| field.key == "config.launch_mode")
-            .unwrap();
-        assert_eq!(launch_mode.value, "title");
-    }
-}
+#[path = "family_config_tests.rs"]
+mod tests;
