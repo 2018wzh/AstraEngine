@@ -119,15 +119,7 @@ impl Library {
              FROM external_identity WHERE game_id=?1 ORDER BY provider",
         )?;
         let records = statement
-            .query_map([game_id], |row| {
-                Ok(ExternalIdentityRecord {
-                    game_id: row.get(0)?,
-                    provider: row.get(1)?,
-                    remote_id: row.get(2)?,
-                    provenance: row.get(3)?,
-                    linked_at_unix_ms: row.get(4)?,
-                })
-            })?
+            .query_map([game_id], external_identity_from_row)?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(records)
     }
@@ -193,30 +185,46 @@ impl Library {
                         fetched_at_unix_ms, state
                  FROM metadata_snapshot WHERE game_id=?1 AND provider=?2",
                 rusqlite::params![game_id, provider],
-                |row| {
-                    let state: String = row.get(5)?;
-                    Ok(MetadataSnapshotRecord {
-                        game_id: row.get(0)?,
-                        provider: row.get(1)?,
-                        remote_id: row.get(2)?,
-                        metadata_json: row.get(3)?,
-                        fetched_at_unix_ms: row.get(4)?,
-                        state: MetadataSnapshotState::parse(&state).map_err(|_| {
-                            rusqlite::Error::FromSqlConversionFailure(
-                                5,
-                                rusqlite::types::Type::Text,
-                                Box::new(std::io::Error::new(
-                                    std::io::ErrorKind::InvalidData,
-                                    "metadata state",
-                                )),
-                            )
-                        })?,
-                    })
-                },
+                metadata_snapshot_from_row,
             )
             .optional()
             .map_err(LibraryError::from)
     }
+}
+
+pub(crate) fn external_identity_from_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<ExternalIdentityRecord> {
+    Ok(ExternalIdentityRecord {
+        game_id: row.get(0)?,
+        provider: row.get(1)?,
+        remote_id: row.get(2)?,
+        provenance: row.get(3)?,
+        linked_at_unix_ms: row.get(4)?,
+    })
+}
+
+pub(crate) fn metadata_snapshot_from_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<MetadataSnapshotRecord> {
+    let state: String = row.get(5)?;
+    Ok(MetadataSnapshotRecord {
+        game_id: row.get(0)?,
+        provider: row.get(1)?,
+        remote_id: row.get(2)?,
+        metadata_json: row.get(3)?,
+        fetched_at_unix_ms: row.get(4)?,
+        state: MetadataSnapshotState::parse(&state).map_err(|_| {
+            rusqlite::Error::FromSqlConversionFailure(
+                5,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "metadata state",
+                )),
+            )
+        })?,
+    })
 }
 
 #[cfg(test)]

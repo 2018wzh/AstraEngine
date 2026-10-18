@@ -152,17 +152,14 @@ impl Library {
 
     pub fn play_stats(&self, game_id: &str) -> Result<PlayStats, LibraryError> {
         validate_id(game_id)?;
-        let (total, last, count): (i64, Option<i64>, u32) = self.connection.query_row(
-            "SELECT COALESCE(SUM(duration_ms), 0), MAX(start_unix_ms), COUNT(*)
-             FROM play_session WHERE game_id=?1 AND end_unix_ms IS NOT NULL",
-            [game_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )?;
-        Ok(PlayStats {
-            total_duration_ms: total,
-            last_played_unix_ms: last,
-            session_count: count,
-        })
+        self.connection
+            .query_row(
+                "SELECT COALESCE(SUM(duration_ms), 0), MAX(start_unix_ms), COUNT(*)
+                 FROM play_session WHERE game_id=?1 AND end_unix_ms IS NOT NULL",
+                [game_id],
+                play_stats_from_row,
+            )
+            .map_err(LibraryError::from)
     }
 
     pub fn recent_games(&self, limit: u32) -> Result<Vec<RecentGameRecord>, LibraryError> {
@@ -199,6 +196,14 @@ impl Library {
             .collect::<Result<Vec<_>, _>>()?;
         Ok(records)
     }
+}
+
+pub(crate) fn play_stats_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<PlayStats> {
+    Ok(PlayStats {
+        total_duration_ms: row.get(0)?,
+        last_played_unix_ms: row.get(1)?,
+        session_count: row.get(2)?,
+    })
 }
 
 fn play_session_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<PlaySessionRecord> {

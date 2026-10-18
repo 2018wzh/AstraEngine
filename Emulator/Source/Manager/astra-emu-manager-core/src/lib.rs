@@ -48,7 +48,7 @@ pub use filter_settings::{FilterConfiguration, FilterPreset, FilterSettings};
 pub use input_mapping::{
     default_vn_preset, input_key_code, GamepadDeadzone, GamepadInput, InputMapping,
 };
-pub use library::{GameRecord, Library, LibraryError};
+pub use library::{GameRecord, Library, LibraryError, LibrarySnapshot};
 pub use metadata::{
     DisplayTitle, DisplayTitleSource, ExternalIdentityRecord, MetadataSnapshotRecord,
     MetadataSnapshotState,

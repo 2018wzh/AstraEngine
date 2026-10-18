@@ -17,6 +17,11 @@ use crate::{input_mapping::InputMapping, work_settings::GameSettings};
 #[path = "library_settings.rs"]
 mod settings;
 
+#[path = "library_snapshot.rs"]
+mod snapshot;
+
+pub use snapshot::LibrarySnapshot;
+
 const SCHEMA_VERSION: i64 = 5;
 const MAX_TITLE_CHARS: usize = 1_024;
 const MAX_LOCATION_BYTES: usize = 4_096;
