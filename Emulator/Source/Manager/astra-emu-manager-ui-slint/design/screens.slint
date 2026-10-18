@@ -1,0 +1,1015 @@
+// AstraEMU Manager 重做设计稿：页面。
+// 渲染（在本 crate 目录执行）：
+//   slint-viewer --style material --component <Screen> --size WxH --screenshot <out.png> design/screens.slint
+// 截图输出到仓库 ignored 的 .tmp/，不提交图片。
+
+import { Palette, ComboBox, Switch, Slider } from "std-widgets.slint";
+import {
+    Tok, G, Accent, Game, Icon, PillButton, IconBtn, SearchBar, FilterChip, Segmented, Tabs,
+    StatusBadge, Tag, CoverArt, CoverGrid, NavRail, BottomNav, BrandMark, SectionTitle,
+    StatTile, InfoRow, SettingRow,
+} from "kit.slint";
+
+global Data {
+    out property <[Game]> games: [
+        { title: "星屑のメモリア", studio: "Studio Hoshi", family: "FVP", hours: "12.5 小时", status: "completable", c1: #3b4cca, c2: #9b5de5 },
+        { title: "夏影ノスタルジア", studio: "Natsukage", family: "FVP", hours: "31 小时", status: "perfect", c1: #f4a259, c2: #e76f51 },
+        { title: "雨音ラプソディ", studio: "Amane Works", family: "Musica", hours: "4.2 小时", status: "flawed", c1: #2a9d8f, c2: #264653 },
+        { title: "硝子の鳥籠", studio: "Glassworks", family: "FVP", hours: "", status: "completable", c1: #8ecae6, c2: #219ebc },
+        { title: "月下の約束", studio: "Tsukishita", family: "Musica", hours: "18 小时", status: "perfect", c1: #4a4e69, c2: #22223b },
+        { title: "白昼夢の少女", studio: "Hakuchu", family: "FVP", hours: "2.1 小时", status: "boot_only", c1: #ffafcc, c2: #b392ac },
+        { title: "蒼穹のリフレイン", studio: "Soukyu", family: "FVP", hours: "46 小时", status: "perfect", c1: #00b4d8, c2: #0077b6 },
+        { title: "夜明けのソネット", studio: "Yoake Lab", family: "Musica", hours: "", status: "", c1: #e56b6f, c2: #6d597a },
+        { title: "ひだまり日和", studio: "Hidamari", family: "FVP", hours: "9 小时", status: "completable", c1: #f6bd60, c2: #f28482 },
+        { title: "紅月のエチュード", studio: "Kougetsu", family: "FVP", hours: "0.5 小时", status: "unplayable", c1: #d00000, c2: #6a040f },
+        { title: "春風アンサンブル", studio: "Harukaze", family: "Musica", hours: "22 小时", status: "flawed", c1: #95d5b2, c2: #40916c },
+        { title: "星降る街の灯台", studio: "Hoshifuru", family: "FVP", hours: "", status: "completable", c1: #fca311, c2: #14213d },
+        { title: "Afterglow Days", studio: "Sunset Soft", family: "FVP", hours: "7 小时", status: "perfect", c1: #ff7b54, c2: #ffb26b },
+        { title: "水彩のアトリエ", studio: "Suisai", family: "Musica", hours: "", status: "", c1: #a2d2ff, c2: #7f9cf5 },
+        { title: "千年桜の夢", studio: "Sennen", family: "FVP", hours: "15 小时", status: "completable", c1: #ff8fab, c2: #c9184a },
+        { title: "銀河鉄道の残響", studio: "Ginga", family: "FVP", hours: "3 小时", status: "flawed", c1: #415a77, c2: #1b263b },
+        { title: "潮騒のカノン", studio: "Shiosai", family: "FVP", hours: "11 小时", status: "completable", c1: #48cae4, c2: #023e8a },
+        { title: "黄昏のアリア", studio: "Tasogare", family: "Musica", hours: "", status: "perfect", c1: #ffb703, c2: #fb8500 },
+    ];
+}
+
+// ===== 游戏库 =====
+
+component ChipRow inherits HorizontalLayout {
+    in property <bool> show-sort: true;
+    spacing: 8px;
+    FilterChip { text: "全部"; count: "18"; selected: true; }
+    FilterChip { text: "最近游玩"; glyph: G.clock; }
+    FilterChip { text: "可通关"; }
+    FilterChip { text: "有瑕疵"; }
+    FilterChip { text: "未评级"; }
+    Rectangle { horizontal-stretch: 1; }
+    if root.show-sort : HorizontalLayout {
+        spacing: 8px;
+        Text { text: "排序"; color: Tok.on-variant; font-size: Tok.body-sm; vertical-alignment: center; }
+        ComboBox { width: 150px; model: ["最近游玩", "标题", "游玩时长", "兼容性"]; current-index: 0; }
+    }
+}
+
+component LibraryContent inherits Rectangle {
+    in property <[Game]> games: Data.games;
+    in property <int> cols: 6;
+    in property <int> hover-index: -1;
+    in property <int> selected-index: -1;
+    in property <bool> compact: false;
+    in property <length> search-width: 360px;
+    in property <length> pad: 32px;
+    property <length> grid-top: compact ? 210px : 150px;
+    background: Tok.surface;
+
+    if !root.compact : HorizontalLayout {
+        x: root.pad;
+        y: 24px;
+        width: parent.width - 2 * root.pad;
+        height: 48px;
+        spacing: 12px;
+        HorizontalLayout {
+            horizontal-stretch: 1;
+            spacing: 12px;
+            alignment: start;
+            Text { text: "游戏库"; font-size: Tok.headline; font-weight: 700; color: Tok.on-surface; vertical-alignment: center; }
+            Text { text: root.games.length + " 部作品"; font-size: Tok.body-sm; color: Tok.on-variant; vertical-alignment: center; }
+        }
+        SearchBar { width: root.search-width; placeholder: "搜索标题、别名或开发商"; shortcut: "Ctrl F"; }
+        IconBtn { glyph: G.refresh; variant: "tonal"; size: 48px; }
+        PillButton { text: "添加游戏"; glyph: G.plus; h: 48px; }
+    }
+
+    if root.compact : VerticalLayout {
+        x: root.pad;
+        y: 20px;
+        width: parent.width - 2 * root.pad;
+        spacing: 16px;
+        HorizontalLayout {
+            height: 48px;
+            spacing: 12px;
+            Text { text: "游戏库"; font-size: Tok.headline; font-weight: 700; color: Tok.on-surface; vertical-alignment: center; }
+            Text { text: root.games.length + " 部作品"; font-size: Tok.body-sm; color: Tok.on-variant; vertical-alignment: center; horizontal-stretch: 1; }
+            IconBtn { glyph: G.refresh; variant: "tonal"; size: 48px; }
+            PillButton { text: "添加游戏"; glyph: G.plus; h: 48px; }
+        }
+        SearchBar { placeholder: "搜索标题、别名或开发商"; }
+    }
+
+    ChipRow {
+        x: root.pad;
+        y: root.grid-top - 60px;
+        width: parent.width - 2 * root.pad;
+        height: 40px;
+    }
+
+    Rectangle {
+        x: root.pad - 8px;
+        y: root.grid-top - 8px;
+        width: parent.width - 2 * root.pad + 16px;
+        height: parent.height - root.grid-top + 8px;
+        clip: true;
+        CoverGrid {
+            x: 8px;
+            y: 12px;
+            width: parent.width - 16px;
+            height: parent.height;
+            games: root.games;
+            cols: root.cols;
+            hover-index: root.hover-index;
+            selected-index: root.selected-index;
+        }
+    }
+}
+
+// ===== 作品详情 =====
+
+component OverviewTab inherits VerticalLayout {
+    in property <Game> game;
+    in property <Accent> a;
+    spacing: 18px;
+    alignment: start;
+
+    Text {
+        text: "海边小镇的夏天，一封寄错的信让四个许久不见的人重新相遇。多视角叙事，共 5 条路线与 2 个结局。";
+        color: Tok.on-surface;
+        font-size: Tok.body;
+        wrap: word-wrap;
+    }
+    VerticalLayout {
+        spacing: 10px;
+        InfoRow { label: "开发商"; value: root.game.studio; }
+        InfoRow { label: "发售日"; value: "2014 年 7 月 25 日"; }
+        InfoRow { label: "原版平台"; value: "Windows"; }
+        InfoRow { label: "运行核心"; value: root.game.family; }
+    }
+    HorizontalLayout {
+        spacing: 6px;
+        alignment: start;
+        Tag { text: "恋爱"; }
+        Tag { text: "夏日"; }
+        Tag { text: "多结局"; }
+        Tag { text: "全语音"; }
+    }
+    Rectangle {
+        border-radius: Tok.r-lg;
+        background: Tok.surface-container;
+        VerticalLayout {
+            for row[i] in [
+                { t: "VNDB", d: "v20317 · 已关联，元数据 3 天前更新" },
+                { t: "Bangumi", d: "在玩 · 评分 8 · 已同步" },
+            ] : Rectangle {
+                height: 60px;
+                if i > 0 : Rectangle { x: 16px; width: parent.width - 32px; height: 1px; background: Tok.outline-variant; }
+                HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 12px;
+                    spacing: 12px;
+                    Rectangle {
+                        width: 36px;
+                        height: 36px;
+                        y: (parent.height - self.height) / 2;
+                        border-radius: 10px;
+                        background: root.a.soft;
+                        Icon { glyph: G.link; font-size: 13px; color: root.a.primary; }
+                    }
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        alignment: center;
+                        spacing: 2px;
+                        Text { text: row.t; color: Tok.on-surface; font-size: Tok.body-sm; font-weight: 600; }
+                        Text { text: row.d; color: Tok.on-variant; font-size: Tok.label; overflow: elide; }
+                    }
+                    Icon { glyph: G.chevron-right; font-size: 12px; width: 24px; }
+                }
+            }
+        }
+    }
+}
+
+component CompatTab inherits VerticalLayout {
+    in property <Game> game;
+    in property <Accent> a;
+    property <Accent> s: Tok.accent(Tok.status-seed(game.status), Tok.dark);
+    spacing: 18px;
+    alignment: start;
+
+    Rectangle {
+        border-radius: Tok.r-lg;
+        background: root.s.container;
+        HorizontalLayout {
+            padding: 16px;
+            spacing: 14px;
+            Rectangle {
+                width: 44px;
+                height: 44px;
+                border-radius: 12px;
+                background: root.s.primary;
+                Icon { glyph: G.triangle; font-size: 17px; color: root.s.on-primary; }
+            }
+            VerticalLayout {
+                spacing: 4px;
+                Text { text: Tok.status-label(root.game.status); color: root.s.on-container; font-size: Tok.title-md; font-weight: 700; }
+                Text { text: "可以通关。第 3 章片头动画音画不同步，不影响进度。"; color: root.s.on-container; font-size: Tok.body-sm; wrap: word-wrap; }
+                Text { text: "社区兼容性数据 · 2026 年 10 月 3 日更新"; color: root.s.on-container; opacity: 0.75; font-size: Tok.label; }
+            }
+        }
+    }
+
+    VerticalLayout {
+        spacing: 8px;
+        Text { text: "发行版本"; color: Tok.on-surface; font-size: Tok.body; font-weight: 600; }
+        ComboBox { model: ["通常版 · r45678", "初回限定版 · r45677", "DL 版 · r51022"]; current-index: 0; }
+        Text { text: "兼容性记录按 VNDB 发行版本匹配。"; color: Tok.on-variant; font-size: Tok.label; }
+    }
+
+    VerticalLayout {
+        spacing: 10px;
+        Text { text: "已知问题"; color: Tok.on-surface; font-size: Tok.body; font-weight: 600; }
+        for issue in ["第 3 章片头动画音画不同步", "部分 BGM 循环点有约 0.1 秒停顿"] : HorizontalLayout {
+            spacing: 10px;
+            Rectangle {
+                width: 6px;
+                height: 6px;
+                y: (parent.height - self.height) / 2;
+                border-radius: 3px;
+                background: root.s.primary;
+            }
+            Text { text: issue; color: Tok.on-surface; font-size: Tok.body-sm; wrap: word-wrap; horizontal-stretch: 1; }
+        }
+    }
+
+    HorizontalLayout {
+        alignment: start;
+        PillButton { text: "刷新兼容性数据"; glyph: G.refresh; variant: "text"; fill: root.a.primary; }
+    }
+}
+
+component DetailSheet inherits Rectangle {
+    in property <Game> game;
+    in property <int> tab: 0;
+    in property <bool> handle: false;
+    in property <string> total: "31 小时";
+    property <Accent> a: Tok.accent(game.c1, Tok.dark);
+    background: Tok.surface-low;
+    clip: true;
+
+    Rectangle {
+        height: 230px;
+        background: @linear-gradient(155deg, root.game.c1 0%, root.game.c2 100%);
+        opacity: Tok.dark ? 0.55 : 0.8;
+        Rectangle {
+            x: parent.width * 0.55;
+            y: -parent.width * 0.25;
+            width: parent.width * 0.7;
+            height: self.width;
+            border-radius: self.width / 2;
+            background: #ffffff26;
+        }
+    }
+    Rectangle {
+        y: 50px;
+        height: 180px;
+        background: @linear-gradient(180deg, Tok.surface-low.transparentize(1) 0%, Tok.surface-low 100%);
+    }
+
+    if root.handle : Rectangle {
+        width: 36px;
+        height: 4px;
+        x: (parent.width - self.width) / 2;
+        y: 10px;
+        border-radius: 2px;
+        background: Tok.on-surface.transparentize(0.6);
+    }
+    IconBtn { x: parent.width - 100px; y: 22px; glyph: G.more; variant: "tonal"; tint: Tok.on-surface; }
+    IconBtn { x: parent.width - 52px; y: 22px; glyph: G.xmark; variant: "tonal"; tint: Tok.on-surface; }
+
+    Rectangle {
+        x: 24px;
+        y: 88px;
+        width: 112px;
+        height: 150px;
+        border-radius: 12px;
+        background: root.game.c2;
+        drop-shadow-blur: 20px;
+        drop-shadow-offset-y: 8px;
+        drop-shadow-color: Tok.shadow-strong;
+        Rectangle {
+            border-radius: 12px;
+            clip: true;
+            CoverArt { game: root.game; show-title: false; width: parent.width; height: parent.height; }
+        }
+    }
+
+    VerticalLayout {
+        x: 152px;
+        y: 108px;
+        width: parent.width - 176px;
+        height: 130px;
+        alignment: end;
+        spacing: 6px;
+        Text { text: root.game.title; color: Tok.on-surface; font-size: Tok.title-lg; font-weight: 700; wrap: word-wrap; }
+        Text { text: root.game.studio + " · 2014"; color: Tok.on-variant; font-size: Tok.body-sm; }
+        HorizontalLayout {
+            spacing: 6px;
+            alignment: start;
+            Tag { text: root.game.family; bg: root.a.container; fg: root.a.on-container; }
+            StatusBadge { status: root.game.status; }
+        }
+    }
+
+    VerticalLayout {
+        x: 0;
+        y: 262px;
+        width: parent.width;
+        height: parent.height - self.y;
+        padding-left: 24px;
+        padding-right: 24px;
+        spacing: 16px;
+        alignment: start;
+
+        HorizontalLayout {
+            spacing: 8px;
+            PillButton {
+                horizontal-stretch: 1;
+                text: "开始游戏";
+                glyph: G.play;
+                h: 52px;
+                font: 15px;
+                fill: root.a.primary;
+                on-fill: root.a.on-primary;
+            }
+            IconBtn { glyph: G.folder-open; variant: "tonal"; size: 52px; }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            StatTile { horizontal-stretch: 1; glyph: G.clock; label: "累计时长"; value: root.total; tint: root.a.primary; }
+            StatTile { horizontal-stretch: 1; glyph: G.calendar; label: "上次游玩"; value: "昨天"; tint: root.a.primary; }
+            StatTile { horizontal-stretch: 1; glyph: G.history; label: "启动次数"; value: "42 次"; tint: root.a.primary; }
+        }
+        Tabs { items: ["概览", "兼容性", "记录", "选项"]; current: root.tab; accent: root.a.primary; }
+        if root.tab == 0 : OverviewTab { game: root.game; a: root.a; }
+        if root.tab == 1 : CompatTab { game: root.game; a: root.a; }
+    }
+}
+
+// ===== 屏幕 1：游戏库 · 桌面 · 深色（悬停状态） =====
+export component LibraryDesktopDark inherits Window {
+    width: 1440px;
+    height: 900px;
+    background: Tok.surface;
+    init => { Palette.color-scheme = ColorScheme.dark; }
+    NavRail { height: parent.height; current: 0; }
+    LibraryContent { x: 88px; width: parent.width - 88px; height: parent.height; cols: 6; hover-index: 2; }
+}
+
+// ===== 屏幕 2：作品详情 · 桌面 · 浅色（封面取色，概览） =====
+export component DetailDesktopLight inherits Window {
+    width: 1440px;
+    height: 900px;
+    background: Tok.surface;
+    init => { Palette.color-scheme = ColorScheme.light; }
+    NavRail { height: parent.height; current: 0; }
+    LibraryContent { x: 88px; width: parent.width - 88px - 440px; height: parent.height; cols: 4; selected-index: 1; search-width: 260px; }
+    Rectangle {
+        x: parent.width - 440px;
+        width: 440px;
+        drop-shadow-blur: 24px;
+        drop-shadow-color: Tok.shadow;
+        background: Tok.surface-low;
+        DetailSheet { game: Data.games[1]; tab: 0; }
+    }
+}
+
+// ===== 屏幕 3：作品详情 · 桌面 · 深色（兼容性） =====
+export component CompatDesktopDark inherits Window {
+    width: 1440px;
+    height: 900px;
+    background: Tok.surface;
+    init => { Palette.color-scheme = ColorScheme.dark; }
+    NavRail { height: parent.height; current: 0; }
+    LibraryContent { x: 88px; width: parent.width - 88px - 440px; height: parent.height; cols: 4; selected-index: 2; search-width: 260px; }
+    Rectangle {
+        x: parent.width - 440px;
+        width: 440px;
+        drop-shadow-blur: 24px;
+        drop-shadow-color: Tok.shadow;
+        background: Tok.surface-low;
+        DetailSheet { game: Data.games[2]; tab: 1; total: "4.2 小时"; }
+    }
+}
+
+// ===== 屏幕 4：首次启动空库 · 桌面 · 浅色 =====
+export component EmptyDesktopLight inherits Window {
+    width: 1440px;
+    height: 900px;
+    background: Tok.surface;
+    init => { Palette.color-scheme = ColorScheme.light; }
+    NavRail { height: parent.height; current: 0; }
+    Rectangle {
+        x: 88px;
+        width: parent.width - 88px;
+        HorizontalLayout {
+            x: 32px;
+            y: 24px;
+            width: parent.width - 64px;
+            height: 48px;
+            spacing: 12px;
+            Text { text: "游戏库"; font-size: Tok.headline; font-weight: 700; color: Tok.on-surface; vertical-alignment: center; horizontal-stretch: 1; }
+        }
+        // 插画：三张错落的封面
+        Rectangle {
+            x: (parent.width - 300px) / 2;
+            y: 210px;
+            width: 300px;
+            height: 220px;
+            for c[i] in [
+                { dx: 30px, dy: 30px, w: 120px, a: #f4a259, b: #e76f51 },
+                { dx: 150px, dy: 30px, w: 120px, a: #2a9d8f, b: #264653 },
+                { dx: 80px, dy: 0px, w: 140px, a: #3b4cca, b: #9b5de5 },
+            ] : Rectangle {
+                x: c.dx;
+                y: c.dy;
+                width: c.w;
+                height: c.w * 4 / 3;
+                border-radius: 14px;
+                background: @linear-gradient(155deg, c.a 0%, c.b 100%);
+                opacity: i == 2 ? 1 : 0.55;
+                drop-shadow-blur: i == 2 ? 24px : 8px;
+                drop-shadow-offset-y: i == 2 ? 10px : 3px;
+                drop-shadow-color: Tok.shadow;
+                if i == 2 : Rectangle {
+                    width: 52px;
+                    height: 52px;
+                    border-radius: 18px;
+                    background: #ffffffee;
+                    Icon { glyph: G.plus; font-size: 20px; color: #3b4cca; }
+                }
+            }
+        }
+        VerticalLayout {
+            x: (parent.width - 520px) / 2;
+            y: 470px;
+            width: 520px;
+            spacing: 12px;
+            Text { text: "添加第一个游戏目录"; color: Tok.on-surface; font-size: Tok.headline; font-weight: 700; horizontal-alignment: center; }
+            Text {
+                text: "AstraEMU 会识别目录里的作品，并匹配已安装的核心。联网获取封面和简介默认关闭，需要时在设置中开启。";
+                color: Tok.on-variant;
+                font-size: Tok.body;
+                wrap: word-wrap;
+                horizontal-alignment: center;
+            }
+            Rectangle { height: 12px; }
+            HorizontalLayout {
+                alignment: center;
+                spacing: 12px;
+                PillButton { text: "选择游戏目录"; glyph: G.folder-open; h: 48px; font: 14px; }
+                PillButton { text: "查看已安装的核心"; variant: "outlined"; h: 48px; font: 14px; }
+            }
+        }
+    }
+}
+
+// ===== 屏幕 5：核心管理 · 桌面 · 浅色 =====
+component CoreRow inherits Rectangle {
+    in property <string> mono;
+    in property <string> name;
+    in property <string> file;
+    in property <string> meta;
+    in property <[string]> caps;
+    in property <string> state; // ok | error | conflict
+    in property <string> message;
+    property <Accent> s: Tok.accent(state == "ok" ? oklch(0.6, 0.14, 160) : state == "conflict" ? oklch(0.65, 0.15, 50) : oklch(0.6, 0.17, 25), Tok.dark);
+
+    height: root.message == "" ? 92px : 128px;
+    border-radius: Tok.r-lg;
+    background: Tok.surface-container;
+
+    HorizontalLayout {
+        padding: 20px;
+        spacing: 16px;
+        Rectangle {
+            width: 52px;
+            height: 52px;
+            border-radius: 14px;
+            background: root.state == "ok" ? Tok.primary-container : Tok.surface-highest;
+            Text {
+                text: root.mono;
+                color: root.state == "ok" ? Tok.on-primary-container : Tok.on-variant;
+                font-size: 15px;
+                font-weight: 800;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 6px;
+            HorizontalLayout {
+                spacing: 10px;
+                alignment: start;
+                Text { text: root.name; color: Tok.on-surface; font-size: Tok.title-md; font-weight: 700; vertical-alignment: center; }
+                Text { text: root.file; color: Tok.on-variant; font-size: Tok.label; font-family: "Cascadia Mono"; vertical-alignment: center; }
+            }
+            Text { text: root.meta; color: Tok.on-variant; font-size: Tok.body-sm; }
+            if root.message != "" : Rectangle {
+                height: 36px;
+                border-radius: Tok.r-sm;
+                background: root.s.soft;
+                HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    spacing: 8px;
+                    Icon { glyph: G.triangle; font-size: 12px; color: root.s.primary; }
+                    Text { text: root.message; color: Tok.on-surface; font-size: Tok.body-sm; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
+                }
+            }
+        }
+        HorizontalLayout {
+            spacing: 6px;
+            alignment: end;
+            for cap in root.caps : VerticalLayout { alignment: start; Tag { text: cap; } }
+        }
+        VerticalLayout {
+            alignment: start;
+            Rectangle {
+                width: badge.preferred-width;
+                height: 28px;
+                border-radius: 14px;
+                background: root.s.container;
+                badge := HorizontalLayout {
+                    padding-left: 10px;
+                    padding-right: 12px;
+                    spacing: 6px;
+                    Icon { glyph: root.state == "ok" ? G.circle-check : G.circle-xmark; font-size: 12px; color: root.s.on-container; }
+                    Text {
+                        text: root.state == "ok" ? "已加载" : root.state == "conflict" ? "已禁用" : "未加载";
+                        color: root.s.on-container;
+                        font-size: Tok.label;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+        VerticalLayout { alignment: start; IconBtn { glyph: G.more; } }
+    }
+}
+
+export component CoresDesktopLight inherits Window {
+    width: 1440px;
+    height: 900px;
+    background: Tok.surface;
+    init => { Palette.color-scheme = ColorScheme.light; }
+    NavRail { height: parent.height; current: 1; }
+    VerticalLayout {
+        x: 88px + 32px;
+        y: 24px;
+        width: parent.width - 88px - 64px;
+        height: parent.height - 48px;
+        spacing: 16px;
+        alignment: start;
+
+        HorizontalLayout {
+            height: 48px;
+            spacing: 12px;
+            Text { text: "核心"; font-size: Tok.headline; font-weight: 700; color: Tok.on-surface; vertical-alignment: center; }
+            Text { text: "1 个可用 · 2 个需要处理"; font-size: Tok.body-sm; color: Tok.on-variant; vertical-alignment: center; horizontal-stretch: 1; }
+            PillButton { text: "打开 cores 文件夹"; glyph: G.folder-open; variant: "tonal"; h: 48px; }
+            IconBtn { glyph: G.refresh; variant: "tonal"; size: 48px; }
+        }
+        Text {
+            text: "Manager 启动时从程序目录和用户数据目录的 cores 文件夹发现核心。更新核心时替换文件，再点击重新扫描。";
+            color: Tok.on-variant;
+            font-size: Tok.body-sm;
+        }
+        Rectangle { height: 4px; }
+        SectionTitle { text: "已加载"; }
+        CoreRow {
+            mono: "FVP";
+            name: "FVP";
+            file: "astra_emu_fvp.dll";
+            meta: "版本 0.9.3 · Family ABI 2 · 程序目录";
+            caps: ["原生存档", "最终帧滤镜", "不支持正文替换"];
+            state: "ok";
+        }
+        Rectangle { height: 8px; }
+        SectionTitle { text: "需要处理"; }
+        CoreRow {
+            mono: "MU";
+            name: "Musica";
+            file: "astra_emu_musica.dll";
+            meta: "版本 0.4.0 · Family ABI 2 · 程序目录、用户数据目录";
+            caps: [];
+            state: "conflict";
+            message: "两个目录各有一份文件，插件 ID 都是 astra.musica，两份均已禁用。删除其中一份后重新扫描。";
+        }
+        CoreRow {
+            mono: "?";
+            name: "未知核心";
+            file: "astra_emu_legacy.dll";
+            meta: "用户数据目录";
+            caps: [];
+            state: "error";
+            message: "Family ABI 版本不匹配：需要 2，文件为 1。";
+        }
+        Rectangle { height: 8px; }
+        SectionTitle { text: "扫描目录"; }
+        Rectangle {
+            height: 120px;
+            border-radius: Tok.r-lg;
+            background: Tok.surface-container;
+            VerticalLayout {
+                for d[i] in [
+                    { t: "程序目录", p: "<程序目录>\\cores", n: "2 个文件" },
+                    { t: "用户数据目录", p: "<用户数据目录>\\cores", n: "2 个文件" },
+                ] : Rectangle {
+                    height: 60px;
+                    if i > 0 : Rectangle { x: 20px; width: parent.width - 40px; height: 1px; background: Tok.outline-variant; }
+                    HorizontalLayout {
+                        padding-left: 20px;
+                        padding-right: 12px;
+                        spacing: 16px;
+                        Icon { glyph: G.folder-open; font-size: 15px; width: 20px; }
+                        Text { text: d.t; color: Tok.on-surface; font-size: Tok.body; font-weight: 550; width: 120px; vertical-alignment: center; }
+                        Text { text: d.p; color: Tok.on-variant; font-size: Tok.body-sm; font-family: "Cascadia Mono"; vertical-alignment: center; horizontal-stretch: 1; }
+                        Text { text: d.n; color: Tok.on-variant; font-size: Tok.body-sm; vertical-alignment: center; }
+                        IconBtn { glyph: G.chevron-right; size: 36px; y: 12px; }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ===== 屏幕 6：设置 · 外观 · 桌面 · 深色 =====
+export component SettingsDesktopDark inherits Window {
+    width: 1440px;
+    height: 900px;
+    background: Tok.surface;
+    init => { Palette.color-scheme = ColorScheme.dark; }
+    NavRail { height: parent.height; current: 2; }
+
+    Rectangle {
+        x: 88px;
+        width: 288px;
+        VerticalLayout {
+            padding: 24px;
+            padding-left: 16px;
+            padding-right: 16px;
+            spacing: 4px;
+            alignment: start;
+            Text { text: "设置"; font-size: Tok.headline; font-weight: 700; color: Tok.on-surface; height: 48px; vertical-alignment: center; x: 16px; }
+            Rectangle { height: 12px; }
+            for c[i] in [
+                { g: G.palette, t: "外观" },
+                { g: G.keyboard, t: "输入与手柄" },
+                { g: G.wand, t: "画面滤镜" },
+                { g: G.volume, t: "音频" },
+                { g: G.language, t: "翻译" },
+                { g: G.database, t: "元数据与账号" },
+                { g: G.shield, t: "兼容性数据" },
+            ] : Rectangle {
+                height: 52px;
+                border-radius: 26px;
+                background: i == 0 ? Tok.primary-container : transparent;
+                HorizontalLayout {
+                    padding-left: 18px;
+                    spacing: 14px;
+                    Icon { glyph: c.g; font-size: 15px; width: 20px; color: i == 0 ? Tok.on-primary-container : Tok.on-variant; }
+                    Text {
+                        text: c.t;
+                        font-size: Tok.body;
+                        font-weight: i == 0 ? 650 : 500;
+                        color: i == 0 ? Tok.on-primary-container : Tok.on-surface;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+
+    VerticalLayout {
+        x: 88px + 288px + 24px;
+        y: 24px;
+        width: 760px;
+        spacing: 14px;
+        alignment: start;
+
+        Text { text: "外观"; font-size: Tok.title-lg; font-weight: 700; color: Tok.on-surface; height: 48px; vertical-alignment: center; }
+
+        Text { text: "主题"; color: Tok.primary; font-size: Tok.body-sm; font-weight: 650; }
+        Rectangle {
+            border-radius: Tok.r-lg;
+            background: Tok.surface-container;
+            VerticalLayout {
+                SettingRow {
+                    title: "颜色模式";
+                    desc: "跟随系统时，Windows 切换深浅色后 Manager 同步切换。";
+                    divider: false;
+                    Segmented { items: ["跟随系统", "浅色", "深色"]; current: 0; }
+                }
+                SettingRow {
+                    title: "强调色";
+                    desc: "使用系统强调色。界面按钮、导航和输入控件统一取这一色相。";
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Rectangle { width: 24px; height: 24px; border-radius: 12px; background: Tok.primary; }
+                        Text { text: "系统"; color: Tok.on-variant; font-size: Tok.body-sm; vertical-alignment: center; }
+                    }
+                }
+                SettingRow {
+                    title: "作品详情使用封面主色";
+                    desc: "打开作品详情时，按钮和标签改用从封面提取的颜色。";
+                    Switch { checked: true; }
+                }
+                SettingRow {
+                    title: "减少动态效果";
+                    desc: "关闭卡片悬停上浮和面板滑入动画。";
+                    Switch { checked: false; }
+                }
+            }
+        }
+
+        Rectangle { height: 6px; }
+        Text { text: "游戏库"; color: Tok.primary; font-size: Tok.body-sm; font-weight: 650; }
+        Rectangle {
+            border-radius: Tok.r-lg;
+            background: Tok.surface-container;
+            VerticalLayout {
+                SettingRow {
+                    title: "封面大小";
+                    desc: "列数随窗口宽度自动计算。";
+                    divider: false;
+                    Slider { width: 220px; value: 55; }
+                }
+                SettingRow {
+                    title: "在封面上显示兼容性分级";
+                    desc: "";
+                    Switch { checked: true; }
+                }
+                SettingRow {
+                    title: "模糊敏感封面";
+                    desc: "VNDB 标记为敏感的封面在游戏库中模糊显示。";
+                    Switch { checked: true; }
+                }
+            }
+        }
+    }
+}
+
+// ===== 屏幕 7：游戏运行 · 工具栏已呼出 =====
+component PresetTile inherits Rectangle {
+    in property <string> text;
+    in property <string> desc;
+    in property <bool> selected;
+    in property <color> c1;
+    in property <color> c2;
+    height: 96px;
+    border-radius: Tok.r-md;
+    background: root.selected ? Tok.primary-container : Tok.surface-high;
+    border-width: root.selected ? 2px : 0px;
+    border-color: Tok.primary;
+    VerticalLayout {
+        padding: 12px;
+        spacing: 4px;
+        Rectangle {
+            height: 30px;
+            border-radius: 6px;
+            background: @linear-gradient(90deg, root.c1 0%, root.c2 100%);
+        }
+        HorizontalLayout {
+            spacing: 6px;
+            Text { text: root.text; color: root.selected ? Tok.on-primary-container : Tok.on-surface; font-size: Tok.body-sm; font-weight: 650; horizontal-stretch: 1; }
+            if root.selected : Icon { glyph: G.check; font-size: 11px; color: Tok.on-primary-container; }
+        }
+        Text { text: root.desc; color: root.selected ? Tok.on-primary-container : Tok.on-variant; font-size: Tok.label-sm; }
+    }
+}
+
+export component GameViewToolbar inherits Window {
+    width: 1440px;
+    height: 900px;
+    background: #000000;
+    init => { Palette.color-scheme = ColorScheme.dark; }
+
+    // 舞台（4:3，左右黑边）
+    Rectangle {
+        x: 120px;
+        width: 1200px;
+        clip: true;
+        background: @linear-gradient(180deg, #6fa8ff 0%, #bcd7ff 50%, #ffe3c2 62%, #3d7fb8 63%, #1d4f7a 100%);
+        Rectangle { x: 820px; y: 160px; width: 150px; height: 150px; border-radius: 75px; background: #fff6dd; opacity: 0.85; }
+        Rectangle { x: 120px; y: 200px; width: 380px; height: 70px; border-radius: 35px; background: #ffffff70; }
+        Rectangle { x: 600px; y: 260px; width: 260px; height: 50px; border-radius: 25px; background: #ffffff55; }
+        Rectangle {
+            x: 60px;
+            y: parent.height - 220px;
+            width: parent.width - 120px;
+            height: 180px;
+            border-radius: 18px;
+            background: #0b1424c8;
+            border-width: 1px;
+            border-color: #ffffff30;
+            Rectangle {
+                x: 28px;
+                y: -18px;
+                width: 120px;
+                height: 36px;
+                border-radius: 10px;
+                background: #f28482;
+                Text { text: "ミナ"; color: #ffffff; font-size: 17px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+            }
+            Text {
+                x: 40px;
+                y: 44px;
+                width: parent.width - 80px;
+                text: "……今年の夏も、きっと同じだと思ってた。";
+                color: #ffffff;
+                font-size: 24px;
+                wrap: word-wrap;
+            }
+        }
+    }
+
+    // 顶部渐隐遮罩 + 工具栏
+    Rectangle {
+        height: 140px;
+        background: @linear-gradient(180deg, #000000b0 0%, #00000000 100%);
+    }
+    HorizontalLayout {
+        x: 24px;
+        y: 16px;
+        width: parent.width - 48px;
+        height: 56px;
+        spacing: 12px;
+        Rectangle {
+            width: 48px;
+            height: 48px;
+            y: 4px;
+            border-radius: 24px;
+            background: #ffffff24;
+            Icon { glyph: G.arrow-left; font-size: 16px; color: #ffffff; }
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            horizontal-stretch: 1;
+            Text { text: "夏影ノスタルジア"; color: #ffffff; font-size: Tok.title-md; font-weight: 700; }
+            Text { text: "FVP · 已运行 1 小时 12 分"; color: #ffffffb0; font-size: Tok.label; }
+        }
+        Rectangle {
+            width: 250px;
+            height: 56px;
+            border-radius: 28px;
+            background: #1a1a22e0;
+            border-width: 1px;
+            border-color: #ffffff1c;
+            HorizontalLayout {
+                padding: 4px;
+                spacing: 2px;
+                for b[i] in [
+                    { g: G.wand, on: true, off: false },
+                    { g: G.gauge, on: false, off: false },
+                    { g: G.language, on: false, off: true },
+                    { g: G.expand, on: false, off: false },
+                ] : Rectangle {
+                    width: 60px;
+                    border-radius: 24px;
+                    background: b.on ? Tok.primary-container : transparent;
+                    Icon {
+                        glyph: b.g;
+                        font-size: 17px;
+                        color: b.on ? Tok.on-primary-container : b.off ? #ffffff40 : #ffffffd8;
+                    }
+                }
+            }
+        }
+    }
+
+    // 滤镜弹出卡片
+    Rectangle {
+        x: parent.width - 24px - 360px;
+        y: 84px;
+        width: 360px;
+        height: 330px;
+        border-radius: 24px;
+        background: Tok.surface-container;
+        drop-shadow-blur: 30px;
+        drop-shadow-offset-y: 12px;
+        drop-shadow-color: #000000a0;
+        VerticalLayout {
+            padding: 20px;
+            spacing: 12px;
+            HorizontalLayout {
+                Text { text: "画面滤镜"; color: Tok.on-surface; font-size: Tok.title-md; font-weight: 700; horizontal-stretch: 1; vertical-alignment: center; }
+                Text { text: "立即生效"; color: Tok.on-variant; font-size: Tok.label; vertical-alignment: center; }
+            }
+            GridLayout {
+                spacing: 10px;
+                Row {
+                    PresetTile { text: "原画"; desc: "不做处理"; c1: #9fb7d9; c2: #9fb7d9; }
+                    PresetTile { text: "平滑缩放"; desc: "双线性放大"; c1: #8fb0e0; c2: #c3d6f2; }
+                }
+                Row {
+                    PresetTile { text: "锐化"; desc: "增强线条边缘"; c1: #4c79c4; c2: #e8f0ff; }
+                    PresetTile { text: "Anime4K"; desc: "2 倍放大与修复"; c1: #3b4cca; c2: #ffd6a5; selected: true; }
+                }
+            }
+            HorizontalLayout {
+                spacing: 6px;
+                Text { text: "参数与外部 HLSL 在 设置 › 画面滤镜 中调整"; color: Tok.on-variant; font-size: Tok.label; vertical-alignment: center; horizontal-stretch: 1; }
+                Icon { glyph: G.chevron-right; font-size: 10px; }
+            }
+        }
+    }
+
+    // 提示
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: parent.height - 56px;
+        width: hint.preferred-width + 28px;
+        height: 32px;
+        border-radius: 16px;
+        background: #000000a0;
+        hint := Text { text: "按 Esc 或移开鼠标隐藏工具栏 · 工具栏显示时游戏不接收输入"; color: #ffffffc0; font-size: Tok.label; horizontal-alignment: center; vertical-alignment: center; }
+    }
+}
+
+// ===== 屏幕 8：游戏库 · 平板竖屏 · 浅色 =====
+export component LibraryTabletLight inherits Window {
+    width: 834px;
+    height: 1194px;
+    background: Tok.surface;
+    init => { Palette.color-scheme = ColorScheme.light; }
+    NavRail { height: parent.height; current: 0; }
+    LibraryContent { x: 88px; width: parent.width - 88px; height: parent.height; cols: 4; compact: true; pad: 24px; }
+}
+
+// ===== 屏幕 9：游戏库 · 手机 · 深色 =====
+component PhoneLibrary inherits Rectangle {
+    background: Tok.surface;
+    HorizontalLayout {
+        x: 16px;
+        y: 12px;
+        width: parent.width - 32px;
+        height: 48px;
+        spacing: 4px;
+        Text { text: "游戏库"; color: Tok.on-surface; font-size: Tok.title-lg + 2px; font-weight: 700; vertical-alignment: center; horizontal-stretch: 1; }
+        IconBtn { glyph: G.refresh; size: 44px; y: 2px; }
+        IconBtn { glyph: G.plus; variant: "filled"; size: 44px; y: 2px; }
+    }
+    SearchBar { x: 16px; y: 68px; width: parent.width - 32px; placeholder: "搜索作品"; }
+    Rectangle {
+        x: 16px;
+        y: 128px;
+        width: parent.width - 16px;
+        height: 32px;
+        clip: true;
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: start;
+            FilterChip { text: "全部"; count: "18"; selected: true; }
+            FilterChip { text: "最近游玩"; glyph: G.clock; }
+            FilterChip { text: "可通关"; }
+            FilterChip { text: "有瑕疵"; }
+        }
+    }
+    Rectangle {
+        x: 8px;
+        y: 168px;
+        width: parent.width - 16px;
+        height: parent.height - 168px - 80px;
+        clip: true;
+        CoverGrid { x: 8px; y: 8px; width: parent.width - 16px; height: parent.height; games: Data.games; cols: 2; gap: 12px; row-gap: 16px; }
+    }
+    BottomNav { y: parent.height - 80px; width: parent.width; current: 0; }
+}
+
+export component LibraryPhoneDark inherits Window {
+    width: 390px;
+    height: 844px;
+    background: Tok.surface;
+    init => { Palette.color-scheme = ColorScheme.dark; }
+    PhoneLibrary { width: parent.width; height: parent.height; }
+}
+
+// ===== 屏幕 10：作品详情 · 手机 · 浅色（底部面板展开） =====
+export component DetailPhoneLight inherits Window {
+    width: 390px;
+    height: 844px;
+    background: Tok.surface;
+    init => { Palette.color-scheme = ColorScheme.light; }
+    PhoneLibrary { width: parent.width; height: parent.height; }
+    Rectangle { background: Tok.scrim; }
+    Rectangle {
+        y: 36px;
+        height: parent.height - 36px;
+        border-top-left-radius: Tok.r-xl;
+        border-top-right-radius: Tok.r-xl;
+        clip: true;
+        background: Tok.surface-low;
+        DetailSheet { game: Data.games[6]; tab: 0; handle: true; total: "46 小时"; }
+    }
+}
