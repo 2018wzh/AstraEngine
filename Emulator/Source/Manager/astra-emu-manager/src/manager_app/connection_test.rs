@@ -1,5 +1,5 @@
 use super::*;
-use std::sync::{mpsc, Arc};
+use std::sync::{Arc, mpsc};
 
 pub(super) struct ConnectionTest {
     receiver: mpsc::Receiver<Result<u64, String>>,

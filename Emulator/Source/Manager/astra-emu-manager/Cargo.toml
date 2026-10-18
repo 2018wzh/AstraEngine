@@ -28,7 +28,6 @@ crossbeam-channel.workspace = true
 naga.workspace = true
 tokio.workspace = true
 directories.workspace = true
-image.workspace = true
 pollster.workspace = true
 parking_lot = "0.12.5"
 serde_json.workspace = true

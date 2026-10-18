@@ -2,7 +2,7 @@ use super::*;
 use astra_emu_manager_core::model::{
     ConfigEntry, ConfigField, FamilyPointerRequest, FamilyWindowIcon,
 };
-use crossbeam_channel::{bounded, Receiver, Sender};
+use crossbeam_channel::{Receiver, Sender, bounded};
 use parking_lot::Mutex;
 use std::sync::Arc;
 use std::thread::JoinHandle;

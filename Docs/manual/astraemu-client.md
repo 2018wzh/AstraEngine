@@ -14,15 +14,13 @@ FVP 当前原生 App 路径仍嵌入上游四个 MS 命名字体文件，分发�
 
 新 Manager 只加载 C ABI v2 核心，旧 Family vtable 不兼容。核心自行运行 VM、原生菜单、渲染、音视频与保存；Manager 接收包含文字和游戏 UI 的完整帧。CPU lease 与 RFVP 的 D3D12 扩展共用呈现滤镜链。D3D12 使用独立 Device、共享图像及双向 fence，包含两次 GPU copy，不称零拷贝。
 
-当前 RFVP 已验证原生 CPU 菜单/缩略图/输入/关闭重开，以及 D3D12 导入、滤镜、resize、旧租约和设备丢失。Siglus 已通过新 ABI 的标题、影片、正文、存读档和同 DLL 重开代表流程。KrKr 已删除 child/IPC，公开 TJS/PNG/OpenAL 与重开验证通过。其余核心和七核心结局的实时状态统一见[实施计划](../status/implementation-plan.md)；旧 Hosted/Sandbox 结果不代表本次验收。
+当前 RFVP 已验证原生剧情、选择、菜单/缩略图、存读档和关闭重开，以及 D3D12 导入、滤镜、resize、旧租约和设备丢失。Siglus 已通过新 ABI 的标题、影片、正文、存读档和同 DLL 重开代表流程。KrKr 已删除 child/IPC，公开 TJS/PNG/OpenAL 与重开验证通过。七核心可玩范围及已知阻塞统一见[实施计划](../status/implementation-plan.md)；本轮不要求每核心通关，旧 Hosted/Sandbox 结果不代替本次验收。
 
 Musica 提供同步文字 Hook；共享串行 Luau VM 执行已启用扩展。原生取消不排在 Luau 队列后。可安全重试的错误显示重试和结束，其他失败只允许结束。只安装可信本地扩展；CLI 为 `extension-install <id> <source.luau>`、`extension-enable <id> <true|false>`、`extension-configure <id> <configuration.json>`、`extension-list`。本批不提供在线扩展市场。
 
-`astra-emu-manager --headless <配置.json>` 与产品使用同一原生 ABI。`frames` 是观察次数，`sample_interval_ms` 控制观察间隔，不代表核心 Tick；`reopen_count` 在驻留 DLL 中重复关闭重开。检查点 PNG 和相邻 `.diagnostics` 目录保留真实结果。无窗口 Host 拒绝窗口与模态请求，不伪造点击或回答。
+验收使用 Release Manager 和 Release 核心，由用户在实际窗口中手动操作。Manager 不再提供脚本式 headless、自动输入、截图或关闭重开入口；扩展管理 CLI 保留。BGI 已由用户确认人工通过，其他核心按用户实际结果记录，不以构建成功代替人工验收。
 
-Headless 首帧等待中也读取原生失败状态，不把已失败核心误报为帧超时。观察期间只有核心明确允许重试、且输入时间线包含未来的 `control/retry`，才保留最后一帧等待该显式操作；没有自动重试。键盘时间线使用配置键名，如 `enter`、`f5`、`f9`、`control_left`，到 C ABI 时转换为标准物理键名。
-
-已通过自有实际窗口的截图与消息级输入验证游戏库、设置导航和明暗主题；前台仍为 Windows 锁屏，未操作锁屏界面。完整游戏窗口、全部滤镜、可听音频和七核心结局继续逐项验收。历史性能数据见[性能审计](../status/performance-upstream-audit-2026-10-12.md)；回读/上传、GPU copy、检查点捕获和实际桌面 Present 分别记录，不以观察频率或 CPU 成绩冒充 GPU 显示帧率。
+历史开发证据保留在 Git 和 ignored 输出中。已知问题见[实施计划](../status/implementation-plan.md)；早期 Debug 或锁屏消息级结果不外推为本次 Release 性能、前台手感或听音结论。
 
 ## 构建运行包
 

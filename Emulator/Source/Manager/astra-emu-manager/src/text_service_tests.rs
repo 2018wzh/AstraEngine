@@ -64,7 +64,10 @@ fn invoke(
 }
 #[test]
 fn capacity_retry_retains_one_result_without_rerunning_luau() {
-    let bridge = bridge("capacity_hits = (capacity_hits or 0) + 1; return function(item) return item.text .. tostring(capacity_hits) end", 1001);
+    let bridge = bridge(
+        "capacity_hits = (capacity_hits or 0) + 1; return function(item) return item.text .. tostring(capacity_hits) end",
+        1001,
+    );
     let mut none = [];
     let mut ranges = [abi::TextRange {
         id: 0,
@@ -95,7 +98,10 @@ fn capacity_retry_retains_one_result_without_rerunning_luau() {
 }
 #[test]
 fn failed_luau_operation_retries_same_request_and_context_invalidation_rejects_old_result() {
-    let bridge = bridge("retry_hits=(retry_hits or 0)+1; return function(item) if retry_hits == 1 then error('failure') end return item.text end", 1002);
+    let bridge = bridge(
+        "retry_hits=(retry_hits or 0)+1; return function(item) if retry_hits == 1 then error('failure') end return item.text end",
+        1002,
+    );
     let mut bytes = [0; 32];
     let mut ranges = [abi::TextRange {
         id: 0,
@@ -222,7 +228,7 @@ fn native_cancel_stops_tls_wait_and_releases_the_shared_luau_queue() {
                         std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::ConnectionAborted
                     ) =>
                 {
-                    break true
+                    break true;
                 }
                 Err(_) => break false,
             }

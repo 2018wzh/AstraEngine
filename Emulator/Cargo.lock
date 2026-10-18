@@ -752,7 +752,6 @@ dependencies = [
  "directories",
  "gilrs",
  "hassle-rs 0.12.0",
- "image 0.25.10",
  "mlua",
  "naga 29.0.4",
  "parking_lot",

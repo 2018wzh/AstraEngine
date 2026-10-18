@@ -2,12 +2,11 @@ use std::{
     env,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
-    time::Instant,
 };
 
 use astra_emu_manager::{
-    effects::{FilterConfiguration, FilterEngine, FilterPreset},
     AstraUnderlayRenderer, StageTextureUpdate, WgpuFrameContext,
+    effects::{FilterConfiguration, FilterEngine, FilterPreset},
 };
 use astra_emu_manager_core::model::FrameIdentity;
 use astra_media_core::Viewport2D;
@@ -298,7 +297,6 @@ impl AstraUnderlayRenderer for ManagerStageRenderer {
         if Some(frame.identity) == self.uploaded_identity && !self.filter_dirty {
             return Ok(());
         }
-        let started = tracing::enabled!(tracing::Level::DEBUG).then(Instant::now);
         let info = frame.info;
         validate_dimensions(context.device, info.width, info.height)?;
         let (output_width, output_height) = self
@@ -406,16 +404,6 @@ impl AstraUnderlayRenderer for ManagerStageRenderer {
         self.uploaded_identity = Some(frame.identity);
         self.mailbox.presented(frame.identity, frame.info)?;
         self.filter_dirty = false;
-        if let Some(started) = started {
-            tracing::debug!(
-                event = "astra.emu.host.render_submission_timing",
-                session_epoch = frame.identity.session_epoch,
-                generation = frame.identity.generation,
-                raster_width = info.width,
-                raster_height = info.height,
-                cpu_submission_us = started.elapsed().as_micros() as u64
-            );
-        }
         Ok(())
     }
 
@@ -534,16 +522,3 @@ fn create_stage_texture(
 #[cfg(test)]
 #[path = "stage_renderer_tests.rs"]
 mod tests;
-
-#[cfg(all(test, windows))]
-impl ManagerStageRenderer {
-    pub(crate) fn native_export_for_capture(
-        &self,
-        frame: &astra_emu_manager_core::model::FrameLease,
-    ) -> Result<wgpu::Texture, String> {
-        self.d3d12
-            .as_ref()
-            .and_then(|importer| importer.source_for_capture(frame.d3d12()?.descriptor()))
-            .ok_or_else(|| "ASTRA_EMU_D3D12_CAPTURE_SOURCE_MISSING".into())
-    }
-}

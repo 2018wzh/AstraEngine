@@ -1,11 +1,11 @@
 [submodule "siglus"]
 	path = Emulator/ThirdParty/siglus_rs
 	url = https://github.com/2018wzh/siglus_rs
-	branch = codex/emu-native-abi2-final-20261018
+	branch = codex/emu-native-manual-clean-20261018
 [submodule "rfvp"]
 	path = Emulator/ThirdParty/rfvp
 	url = https://github.com/2018wzh/rfvp
-	branch = codex/emu-native-load-final-20261018
+	branch = codex/emu-native-manual-final-20261018
 [submodule "artemis"]
 	path = Emulator/ThirdParty/art3m1s-core
 	url = https://github.com/2018wzh/art3m1s-core
@@ -21,4 +21,4 @@
 [submodule "Emulator/ThirdParty/kirikiri2"]
 	path = Emulator/ThirdParty/kirikiri2
 	url = https://github.com/2018wzh/kirikiroid2-web.git
-	branch = codex/emu-native-krkr-20261018
+	branch = native-master-windowex-20261018

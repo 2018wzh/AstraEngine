@@ -14,7 +14,6 @@ pub(super) struct SessionServices {
     pub(super) cancellation: astra_emu_manager_core::NativeCancellation,
 }
 pub(super) struct ActiveFamilySession {
-    pub(super) family_id: String,
     session_epoch: u64,
     session: Option<NativeSession>,
     text: Option<TextReplacementBridge>,
@@ -80,7 +79,6 @@ impl ActiveFamilySession {
             }
         };
         let mut active = Self {
-            family_id: candidate.descriptor.family_id.clone(),
             session_epoch: epoch,
             session: Some(session),
             text: services.text,
@@ -116,7 +114,6 @@ impl ActiveFamilySession {
     }
     /// Host cadence only controls observation; native producer owns all game time.
     pub(super) fn poll(&mut self) -> Result<bool, String> {
-        let started = Instant::now();
         let session = self.session.as_mut().ok_or("ASTRA_EMU_CORE_CLOSED")?;
         let state = session.state().map_err(|e| e.to_string())?;
         let failure_changed = if state.state == astra_emu_abi::SESSION_FAILED {
@@ -155,7 +152,6 @@ impl ActiveFamilySession {
             self.mailbox.publish(frame).map_err(|e| e.to_string())?;
         }
         self.next_poll = Instant::now() + Duration::from_millis(2);
-        tracing::trace!(event = "astra.emu.host.poll_timing", family_id = %self.family_id, host_poll_us = started.elapsed().as_micros() as u64, ready);
         Ok(ready || failure_changed)
     }
     pub(super) fn close(&mut self) -> Result<(), String> {

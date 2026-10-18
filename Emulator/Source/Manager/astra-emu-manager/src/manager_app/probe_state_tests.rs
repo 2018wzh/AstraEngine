@@ -121,13 +121,14 @@ fn importing_a_parent_keeps_the_existing_game_id_and_settings() {
             .as_deref(),
         Some("My game")
     );
-    assert!(app
-        .library
-        .game_settings(&id)
-        .unwrap()
-        .unwrap()
-        .input_mapping
-        .is_some());
+    assert!(
+        app.library
+            .game_settings(&id)
+            .unwrap()
+            .unwrap()
+            .input_mapping
+            .is_some()
+    );
 }
 
 #[test]

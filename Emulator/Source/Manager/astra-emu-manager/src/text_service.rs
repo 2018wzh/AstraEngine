@@ -7,14 +7,14 @@ use astra_emu_translation_openai_compatible::{
     OpenAiCompatibleTranslationProvider, SecretResolver, TranslationProfile, TranslationRequest,
     TranslationSegment, TranslationSession,
 };
-use crossbeam_channel::{bounded, Sender};
+use crossbeam_channel::{Sender, bounded};
 use mlua::LuaSerdeExt;
 use parking_lot::{Condvar, Mutex};
 use std::{
     ffi::c_void,
     sync::{
-        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         Arc, LazyLock, Weak,
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
     thread::JoinHandle,
     time::Duration,

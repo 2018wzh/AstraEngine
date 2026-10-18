@@ -50,30 +50,16 @@ astra package bundle .tmp/game.astrapak \
   --crash-reporter target/debug/AstraCrashReporter.exe
 ```
 
-## EMU GPU Headless 调试
+## EMU Release 人工验收
 
-`astra-emu-manager --headless .tmp/run.json` 显式指定原生 C ABI 插件，定时观察完整帧并将结果写入 PNG；不传 elapsed，也不推进 VM。这条入口不写入 Manager 的 `cores/` 注册来源。核心保持自己的 GPU、调度和设备音频，不注入 Host PCM/NullAudio。命令成功不代表实际听音或游戏结局通过。
+AstraEMU 仅使用实际 Release Manager 和各核心 Release 动态库进行人工验收。启动产品窗口后，由用户选择游戏、推进剧情、操作菜单与存读档并退出重开；不得自动输入、截图或关闭用户窗口。Manager 的脚本式 headless 验收入口和额外硬件驱动已移除。
 
-配置包含 `plugin`、`game`、`configuration`、`frames` 和 `output`。路径相对运行目录解析，游戏副本与输出放在 ignored 目录，测试前保护原存档。`frames` 是 1–36000 个 Host 观察样本；`sample_interval_ms` 默认 10，范围 1–1000，在首个真实帧后锚定观察时钟。`reopen_count` 默认 1，范围 1–32，在同一驻留 DLL 上依次关闭重开。
-
-`capture_frames` 指定零起始观察样本，必须小于 `frames`，最多 128 项且不能重复。例如 `[120, 240, 360]` 会保存 `.frame-120.png` 等文件；它们不是 VM tick 编号。最后样本仍写入 `output`，后续重开输出追加 `.reopen-01` 等后缀。提前结束、缺图或写入失败均返回错误并关闭会话，不用最后一帧冒充未执行的样本。
-
-FVP 使用固定 RFVP 来源的原生 RFVS/RFVG 保存路径和格式；Astra 不添加旧格式 reader 或迁移层。测试只使用隔离副本与新槽，不覆盖原商业存档；读取失败保留原文件。
+FVP 使用固定 RFVP 来源的原生 RFVS/RFVG 保存路径和格式；Astra 不添加旧格式 reader 或迁移层。保护原商业存档，开发时使用隔离副本与新槽；读取失败保留原文件。
 
 Native VN 的 GPU Headless 使用 `render_policy: checkpoints` 时，独立资源变更可合并提交；同一资源再次变更前会先提交前一个待绘制帧，保留释放与重新上传的跨帧顺序。这些中间提交不执行像素回读，检查点仍读取最新画面。逐帧视听与性能测试使用 `all`。
 
 `astra-headless` 的日志过滤使用 `ASTRA_LOG`。长流程定位可设置 `ASTRA_LOG=info,astra_headless=trace,astra_platform_headless=debug`，查看等待完成的输入序号、tick 与资源提交边界；这些日志不包含剧情正文。
 
-`inputs` 按零起始观察样本排序，同样本保持给定顺序；按下和释放分别投递，坐标是完整游戏帧像素。键名复用 Manager 输入映射，例如 `enter`、`escape`、`space`。以下片段在第 120 个样本按下 Enter，下一样本释放：
-
-```json
-"inputs": [
-  {"frame": 120, "event": {"type": "key", "code": "enter", "pressed": true}},
-  {"frame": 121, "event": {"type": "key", "code": "enter", "pressed": false}}
-]
-```
-
-鼠标移动使用 `{"type":"pointer_move","x":640,"y":360}`；按钮使用 `{"type":"pointer_button","secondary":false,"pressed":true}`，`secondary` 选择右键。非法键名、坐标、帧顺序和越界帧在打开插件前拒绝。此入口用于复现问题；最终帧和进程成功退出不能替代完整产品验收。
 
 ## 核心适配与 Manager 日志
 
@@ -85,7 +71,7 @@ Native VN 的 GPU Headless 使用 `render_policy: checkpoints` 时，独立资�
 
 ```sh
 RUST_LOG=info,astra_emu::family=debug astra-emu-manager
-cargo build --manifest-path Emulator/Cargo.toml -p astra-emu-fvp --features dynamic-plugin-export
+cargo build --manifest-path Emulator/Cargo.toml --release -p astra-emu-fvp --features dynamic-plugin-export
 ```
 
 `core_target` 保留核心来源，`event` 是稳定事件名；`fields` 为有界结构化字段，超限字段计入 `dropped_fields`。日志桥不做内容脱敏或字符串白名单过滤，但产品日志仍不得主动记录游戏正文、路径或未经审计的整体 Debug 对象；若只看到 `family.unstructured_log`，应在对应核心根因边界增加安全的稳定事件和数值字段。日志桥初始化失败会阻止加载；读取损坏存档仍必须返回错误且保留原文件。
@@ -110,20 +96,11 @@ python Tools/TsuiNoSora/classic_route_inputs.py \
 
 对白进入 pending wait 时，文字可能还在逐字显示。第一次推进输入会补全文字，后续输入才推进剧情。Headless 可通过只读观察项 `vn.text_reveal_complete` 等待当前文字显示完成，再发送物理按键；它来自真实演出状态，不修改剧情游标或显示进度。没有正在显示的文字时为 true。Classic 路线脚本已按此区分对白等待与普通输入等待，不能仅凭 `vn.pending_wait_command` 就假设一次 Enter 足以推进。
 
-## 外部原生核心最小接入
+## 外部原生核心接入
 
-[公开最小核心](../../Tools/AstraEMU/tests/fixtures/external_family.rs) 直接导出 `astra_emu_query`／`CoreApi`，声明 typed 配置，自持调度 worker 和三槽 CPU 帧池；Host 仅投递输入、读取状态及完整帧，不调用 advance。它只依赖 `astra-emu-abi`，没有 SDK、VN、EngineSession 或 Manager 依赖，也不要求 Host PCM。
+核心直接导出 `astra_emu_query`／`CoreApi`，声明 typed 配置，自持调度和音视频，交付完整 CPU/GPU 帧；Host 投递输入、读取状态及帧，不调用 advance。动态导出及日志桥按各核心构建说明启用，静态链接使用相同 Query 函数表。
 
-示例启用可选 `diagnostic-bridge`，在 descriptor/probe/open 前安装 Host 诊断服务。实际核心保留原 VM、渲染、媒体与存档；静态链接使用相同 Query 函数表和宿主 subscriber。CPU owner 不依赖会话，Host 可以在关闭后归还持有的不可变 lease。
-
-先在当前独占树构建 Manager，再执行下列单用途开发回归。Python 需要 Pillow；脚本临时生成独立 Cargo 项目、lockfile 和 target，编译动态库并由已有 Manager 的 headless 入口加载。临时项目位于 ignored 目录，完成或失败后清理，不加入活动 workspace；没有继承主 workspace feature 集合或私有初始化步骤。
-
-```sh
-cargo build --manifest-path Emulator/Cargo.toml -p astra-emu-manager
-python Tools/AstraEMU/check_external_family.py --host Emulator/target/debug/astra-emu-manager
-```
-
-Windows 的 `--host` 参数添加 `.exe`。脚本检查依赖图只有 `astra-emu-abi` 这一 Astra crate、配置与 Enter 按下/释放的像素变化、自主 worker，以及同进程驻留 DLL 的两次打开/关闭。越界配置和缺失输入必须失败；Headless 对标题/图标请求明确返回窗口服务不可用。该 2×2 公开核心不播放音频，不代表 GPU、商业剧情或设备声音验收。真实核心仍须分别运行原生媒体、存读档、连续流程与结局。
+CPU owner 不依赖会话，Host 可以在关闭后归还持有的不可变 lease。实际游戏功能由用户在 Release Manager 中人工检查，不保留公开假核心或脚本自动验收入口。
 
 ## NativeVN 嵌入接口
 

@@ -3,8 +3,8 @@
 ## 精确来源
 
 - 上游 `xmoezzz/siglus_rs`：`5f358ef1360b0439e92aed2b749e8f25d8721954`（1.0.0）。
-- 通用原生基线：`a331ec8918e6d87bbf8bb2a3e651fe6531ffad00`，分支 `native-master-final-20261018`，包含原生生命周期和空栈后回标题修复。
-- 单次嵌入适配：`fd6b9f8e464cb06b4d0d17842342a15c8ee1be8a`，分支 `codex/emu-native-abi2-final-20261018`。清理提交 `20262f4141b6737c98deca8f26cc203500d597a0`（`codex/siglus-manual-release-20261018`）移除验收驱动；主仓 gitlink 与 metadata 固定清理后的源码，不改写已发布历史。
+- 通用原生基线：`13b55b47484faf8dfe03deb6ffd56ca0ec4ba3f2`，分支 `native-master-manual-clean-20261018`；在原生生命周期和空栈后回标题修复之上移除商业硬件验收驱动。
+- 单次嵌入适配：`f94c0dad6187844df1476381f473a7d395601b9b`，分支 `codex/emu-native-manual-clean-20261018`，直接父提交为上述通用基线。完整源码 tree 与 Release 构建的 `20262f4141b6737c98deca8f26cc203500d597a0` 相同；旧发布历史不改写。
 - Kira 保留完整嵌套 submodule `vendor/kira`：0.9.6 上游 `dfb08d08d065930e9b257203bf11c6d34742f542`，`2018wzh/kira` 修复 `a299b42690094a71885f6ed97dc504c4038da9a7`。
 - Kira 固定 CPAL 0.15.3 的 WASAPI 关闭修复 `65ac8a6ac1a635cc26bfc5af331295b052044908`（`2018wzh/cpal`）；Windows 宿主验证通过 workspace patch 使用兼容 ALSA 依赖的同版本 `ecfda841a9140d60bbec1630d47ca91f1a77b8f3`，不升级原 Kira 或替换设备后端。
 - 独立嵌入 manifest 固定共享 ABI 2 `2018wzh/AstraEngine@15a39a626b1316cb6137a75e17e14a2ff2d1ba88`。许可证及完整来源保留，见 `THIRD_PARTY_NOTICES.md`。

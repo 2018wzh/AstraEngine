@@ -98,31 +98,3 @@ fn repeated_core_directory_is_discovered_once() {
         .unwrap();
     assert_eq!(report.errors.len(), 1);
 }
-
-#[test]
-#[ignore = "requires explicitly built Family plugin binaries"]
-fn core_directory_rejects_duplicate_plugin_ids_as_a_group() {
-    let first = std::env::var_os("ASTRA_EMU_TEST_PLUGIN_A")
-        .expect("ASTRA_EMU_TEST_PLUGIN_A must identify a plugin");
-    let second = std::env::var_os("ASTRA_EMU_TEST_PLUGIN_B")
-        .expect("ASTRA_EMU_TEST_PLUGIN_B must identify a plugin");
-    let directory = tempfile::tempdir().unwrap();
-    let bundled = directory.path().join("bundled");
-    let user = directory.path().join("user");
-    std::fs::create_dir_all(&bundled).unwrap();
-    std::fs::create_dir_all(&user).unwrap();
-    let first_path = library_path(&bundled, "astra_emu_first");
-    let second_path = library_path(&user, "astra_emu_second");
-    std::fs::copy(first, &first_path).unwrap();
-    std::fs::copy(second, &second_path).unwrap();
-
-    let mut registry = FamilyProviderRegistry::new();
-    let report = registry.load_directories(&[bundled, user]).unwrap();
-    assert_eq!(report.loaded, 0);
-    assert_eq!(report.errors.len(), 2);
-    assert!(report
-        .errors
-        .iter()
-        .all(|entry| entry.error == FamilyLoadError::DuplicatePlugin));
-    assert!(registry.descriptors().next().is_none());
-}

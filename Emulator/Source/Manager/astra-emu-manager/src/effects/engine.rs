@@ -226,7 +226,3 @@ fn verify_dxc_path(path: &Path) -> Result<(), FilterError> {
 mod chain;
 
 use chain::CompiledChain;
-
-#[cfg(test)]
-#[path = "engine_tests.rs"]
-mod engine_tests;

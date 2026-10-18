@@ -10,14 +10,14 @@ use std::{
 
 use astra_emu_manager::modal_service::ModalBridge;
 #[cfg(not(target_os = "android"))]
-use astra_emu_manager::{run_manager_with_initial_state, HostWake, ManagerController};
+use astra_emu_manager::{HostWake, ManagerController, run_manager_with_initial_state};
 use astra_emu_manager_core::model::{
     FamilyEvent, FamilyStatus, KeyCode, KeyModifiers, KeyState, ProbeRequest, WindowState,
 };
 use astra_emu_manager_core::{
-    default_vn_preset, input_key_code as key_code, FamilyPluginDescriptor, FamilyProbeCandidate,
-    FamilyProbeSelection, FamilyProviderRegistry, GameRecord, GamepadDeadzone, GamepadInput,
-    Library, NativeOpenRequest, NativeSession, PlaySessionEndReason,
+    FamilyPluginDescriptor, FamilyProbeCandidate, FamilyProbeSelection, FamilyProviderRegistry,
+    GameRecord, GamepadDeadzone, GamepadInput, Library, NativeOpenRequest, NativeSession,
+    PlaySessionEndReason, default_vn_preset, input_key_code as key_code,
 };
 use astra_emu_manager_ui_slint::{
     AppearanceViewModel, GameCardViewModel, GamepadBindingViewModel, GenericConfigFieldViewModel,
@@ -25,8 +25,8 @@ use astra_emu_manager_ui_slint::{
 };
 use astra_emu_metadata::{
     BangumiPlayStatus, BangumiPlayUpdate, CompatibilityDatabase, CompatibilityEntry,
-    CompatibilityFetch, CoverAsset, MetadataProviderId, MetadataRecord, MetadataSearchQuery,
-    DEFAULT_COMPATIBILITY_SOURCE_URL,
+    CompatibilityFetch, CoverAsset, DEFAULT_COMPATIBILITY_SOURCE_URL, MetadataProviderId,
+    MetadataRecord, MetadataSearchQuery,
 };
 use astra_emu_translation_openai_compatible::{
     SecretResolver, TranslationEndpointKind, TranslationProfile, TranslationProtocol,

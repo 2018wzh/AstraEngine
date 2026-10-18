@@ -6,9 +6,9 @@ Git submodule of [`xmoezzz/siglus_rs`](https://github.com/xmoezzz/siglus_rs)
 pinned by exact gitlink to the published adaptation of the
 [`2018wzh/siglus_rs`](https://github.com/2018wzh/siglus_rs) fork: upstream
 revision `5f358ef1360b0439e92aed2b749e8f25d8721954` (1.0.0), native lifecycle
-baseline `a331ec8918e6d87bbf8bb2a3e651fe6531ffad00` and single embedded adapter
-`fd6b9f8e464cb06b4d0d17842342a15c8ee1be8a`, followed by acceptance-driver
-cleanup `20262f4141b6737c98deca8f26cc203500d597a0`, for an unofficial Rust reimplementation of SiglusEngine.
+baseline `13b55b47484faf8dfe03deb6ffd56ca0ec4ba3f2` and single embedded adapter
+`f94c0dad6187844df1476381f473a7d395601b9b`, for an unofficial Rust reimplementation
+of SiglusEngine. Its complete tree matches the Release build source `20262f4141b6737c98deca8f26cc203500d597a0`.
 The covered source is
 redistributed under the MPL-2.0; the complete license text is preserved at
 `Emulator/ThirdParty/siglus_rs/LICENSE-MPL-2.0`. The file-level change inventory is

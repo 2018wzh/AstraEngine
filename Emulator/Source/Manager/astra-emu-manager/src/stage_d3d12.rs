@@ -5,17 +5,17 @@ use astra_emu_abi as abi;
 use astra_emu_manager_core::model::D3D12FrameOwner;
 use std::{
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
     time::{Duration, Instant},
 };
 use windows::{
-    core::Interface,
     Win32::{
         Foundation::HANDLE,
         Graphics::{Direct3D12::*, Dxgi::Common::*},
     },
+    core::Interface,
 };
 
 type Result<T, E = String> = std::result::Result<T, E>;
@@ -321,17 +321,6 @@ impl Importer {
                 .map_err(error)?;
             owner.mark_consumed();
         }
-        tracing::debug!(
-            event = "astra.emu.d3d12.copy",
-            session_epoch = frame.identity.session_epoch,
-            generation = frame.identity.generation,
-            resource_id = frame.resource_id,
-            ready = frame.lease.ready_value,
-            done = frame.lease.done_value,
-            gpu_copy_bytes =
-                u64::from(frame.info.raster.width) * u64::from(frame.info.raster.height) * 4,
-            delivery_cpu_bytes = 0u64
-        );
         Ok(())
     }
 }
@@ -379,20 +368,5 @@ impl Drop for Importer {
             );
             std::mem::forget(std::mem::take(&mut self.pending));
         }
-    }
-}
-
-#[cfg(test)]
-impl Importer {
-    pub(super) fn source_for_capture(&self, frame: &abi::D3D12Frame) -> Option<wgpu::Texture> {
-        let key = (
-            frame.identity.session_epoch,
-            frame.identity.output_epoch,
-            frame.resource_id,
-        );
-        self.imports
-            .iter()
-            .find(|(identity, _)| *identity == key)
-            .map(|(_, imported)| imported.texture.clone())
     }
 }

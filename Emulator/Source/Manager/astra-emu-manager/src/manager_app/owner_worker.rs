@@ -1,4 +1,4 @@
-use super::owner::{collect_metadata, Command, Commands, Readiness, Update};
+use super::owner::{Command, Commands, Readiness, Update, collect_metadata};
 use super::*;
 use crossbeam_channel::RecvTimeoutError;
 use parking_lot::Mutex;

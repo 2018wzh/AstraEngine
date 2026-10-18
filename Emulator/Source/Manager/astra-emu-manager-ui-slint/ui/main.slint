@@ -557,10 +557,13 @@ export component ManagerWindow inherits Window {
                 }
                 ScrollView {
                     vertical-stretch: 1;
-                    Text {
-                        text: root.modal-message;
-                        color: Theme.on-surface;
-                        wrap: word-wrap;
+                    VerticalLayout {
+                        alignment: start;
+                        Text {
+                            text: root.modal-message;
+                            color: Theme.on-surface;
+                            wrap: word-wrap;
+                        }
                     }
                 }
                 if root.modal-has-input : LineEdit {

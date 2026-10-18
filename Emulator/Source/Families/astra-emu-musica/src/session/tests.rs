@@ -11,8 +11,6 @@ use std::{
 };
 // The provider intentionally permits one live session per process.
 static PROVIDER_SESSION: std::sync::Mutex<()> = std::sync::Mutex::new(());
-#[path = "tests/gpu_lifecycle.rs"]
-mod gpu_lifecycle;
 #[cfg(feature = "ffmpeg-vcpkg")]
 #[path = "tests/movie.rs"]
 mod movie;

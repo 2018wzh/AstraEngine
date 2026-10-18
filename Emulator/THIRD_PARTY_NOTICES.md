@@ -30,9 +30,9 @@
 
 - Upstream: <https://github.com/fenghengzhi/kirikiroid2-web>
 - Fixed upstream revision: `7105b50822097d11b7b1f5894bf541509fd51350`。
-- 固定 fork revision：[`32130382185b60fe047ae9d98f8f3e4795c4db1e`](https://github.com/2018wzh/kirikiroid2-web/commit/32130382185b60fe047ae9d98f8f3e4795c4db1e)，分支 `codex/emu-native-krkr-20261018`。
-- 完整 fork 保留独立的 Windows 构建、可重入生命周期和游戏路径缓存修复。C++ 嵌入适配直接导出统一 ABI，删除 child/IPC；公开 TJS/PNG/OpenAL/取消与同 DLL 重开已验证，商业流程与结局尚未验收。
-- 运行包保留核心实际 `LICENSE`、Astra 适配的 BSD-3-Clause `LICENSE.astra`、`MODIFICATIONS.md`，以及固定安装依赖的 copyright 文件。根许可包含多个组件的实际条款，不用上游 README 的 MIT 概述替代。
+- 固定 fork revision：[`5b2eccd0a51b6b47bb845f48acfd12bd2167c477`](https://github.com/2018wzh/kirikiroid2-web/commit/5b2eccd0a51b6b47bb845f48acfd12bd2167c477)，分支 `native-master-windowex-20261018`。
+- 完整 fork 保留独立的 Windows 构建、可重入生命周期、游戏路径缓存与 WindowEx overlay owner 初始化修复。C++ 嵌入适配直接导出统一 ABI，删除 child/IPC；清理后的 Release 由用户人工验收。
+- 本地运行包保留完整核心的实际 `LICENSE`、本仓 KrKr 适配说明及构建依赖的 copyright 文件；没有独立许可文本的文件不补造许可证。根许可包含多个组件的实际条款，不用上游 README 的 MIT 概述替代。
 - 同目录 VC runtime 与 OpenMP runtime 来自构建工具链。FFmpeg 许可取决于实际配置；当前只作本地主机硬件开发验收，未作整个依赖图的分发许可结论。
 
 ## Noto 字体
@@ -66,7 +66,7 @@ FVP 使用完整 RFVP fork 中的原生 `crates/na_wmv_player` 及原 Movie 路�
 
 ## 其他原生核心
 
-- Siglus：`2018wzh/siglus_rs@fd6b9f8e464cb06b4d0d17842342a15c8ee1be8a`，通用基线 `a331ec8918e6d87bbf8bb2a3e651fe6531ffad00`；MPL-2.0，完整源码及嵌套 Kira 位于 `ThirdParty/siglus_rs`。来源与改动见 Family 的 `MODIFICATIONS.md`。
+- Siglus：`2018wzh/siglus_rs@f94c0dad6187844df1476381f473a7d395601b9b`，通用基线 `13b55b47484faf8dfe03deb6ffd56ca0ec4ba3f2`；MPL-2.0，完整源码及嵌套 Kira 位于 `ThirdParty/siglus_rs`。自动验收驱动已移除，来源与改动见 Family 的 `MODIFICATIONS.md`。
 - Artemis：`2018wzh/art3m1s-core@ae967d8446fe99b97f6e1df93fb1b61d8ada2040`，MPL-2.0，保留原生 Lua 5.1/Vulkan/FFmpeg 与完整来源，见 `ThirdParty/art3m1s-core/LICENSE`。
 - Sena：上游 <https://github.com/xmoezzz/sena-rs>，通用修复基线 `5fd1a8e37600fb917e053f633671560df9ca42a7`，单适配 `2018wzh/sena-rs@9e565a491ad14f595d980be094edeca8bfa01203`。基线包含新会话读档后重新启用保存的修复；完整 MPL-2.0 许可位于 `ThirdParty/sena-rs/LICENSE-MPL-2.0`。支持范围仍为原生及 Steam Koikake，未扩大到其他 SoftPAL。
 - Ethornell：上游 <https://github.com/xmoezzz/ethornell-rs> 的 workspace 声明 MPL-2.0，但 crate 未继承且未提供许可文本。覆盖范围待澄清；本地适配未推送、未注册为可分发 submodule。

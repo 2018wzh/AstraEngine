@@ -1,4 +1,3 @@
-mod headless;
 mod manager_app;
 mod metadata_runtime;
 mod platform_secret;
@@ -16,9 +15,6 @@ const FAMILY_OWNER_STACK_BYTES: usize = 8 * 1024 * 1024;
 
 #[derive(Parser)]
 struct Arguments {
-    /// Observe a native core with bounded captures and a scripted input timeline.
-    #[arg(long)]
-    headless: Option<std::path::PathBuf>,
     #[command(subcommand)]
     extension: Option<ExtensionCommand>,
 }
@@ -50,15 +46,6 @@ fn main() -> ExitCode {
     let arguments = Arguments::parse();
     if let Some(command) = arguments.extension {
         return match manager_app::run_extension_command(command) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(error) => {
-                eprintln!("{error}");
-                ExitCode::FAILURE
-            }
-        };
-    }
-    if let Some(configuration) = arguments.headless {
-        return match headless::run(&configuration) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {
                 eprintln!("{error}");

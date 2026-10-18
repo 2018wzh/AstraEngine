@@ -23,9 +23,3 @@ add_custom_command(TARGET astra_krkr_native POST_BUILD
         "${GAME_RES_FOLDER}" "$<TARGET_FILE_DIR:astra_krkr_native>/Resources"
     VERBATIM)
 
-option(ASTRA_KRKR_BUILD_SMOKE "Build the real same-process C ABI lifecycle harness" OFF)
-if(ASTRA_KRKR_BUILD_SMOKE)
-    add_executable(astra_krkr_lifecycle_smoke ../tests/native_lifecycle.cpp)
-    target_include_directories(astra_krkr_lifecycle_smoke PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/include")
-endif()

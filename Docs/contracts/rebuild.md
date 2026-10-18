@@ -18,6 +18,8 @@ NativeVN 的原生宿主与 Headless 共用物理输入到 UI request/completion
 
 目标为原生核心 Embedded＋统一 C ABI＋CPU/GPU FrameSurface＋Manager 统一呈现。新协议由 [`astra-emu-abi`](../../Emulator/Source/FamilyApi/astra-emu-abi/src/lib.rs) 的 Rust 类型定义，C 头由 cbindgen 0.29.2 生成。旧 [Family API v13](../../Emulator/Source/FamilyApi/astra-emu-family-api/API_CONTRACT.md) 仅描述尚未迁移的消费者，不是新 ABI 的兼容基线；新 Manager 不加载旧 vtable，也不为 CMVS 增加兼容运行链。
 
+本轮 Windows 验收按用户最新决定缩小为“可玩”，并统一改为 Release 人工手动验收。用户自行进入剧情、连续操作、检查基本菜单与存读档、退出重开；不要求每核心结局或正式性能对照。停止自动操作窗口，移除为本轮自动化验收增加的入口、驱动、截图/输入脚本和测试钩子，保留生产修复及普通逻辑测试。BGI 按用户明确确认记为人工验收通过，不再重复验证；其余核心的 Release 构建不等于人工通过。CMVS 不动。
+
 ### 原生所有权与 ABI
 
 同进程、单活动游戏，Dynamic/Static 共用 C 兼容结构、明确长度、不透明句柄和稳定错误码。动态入口 `astra_emu_query` 与静态注册的 `Query` 返回相同 `CoreApi`；查询只协商版本，不启动线程或安装日志。函数表含 initialize、describe、probe、open、input、control、state、frame、cancel、close 和 extension，不含 advance。普通调用串行，cancel 可并发唤醒阻塞服务；close 无论成功失败都消费句柄，返回前结束全部 worker 和回调。失败 open 不交付会话且完成清理。此为本轮实现版本，尚未完成七核心产品验收，不宣称已发布稳定 ABI。
@@ -35,6 +37,8 @@ C ABI v2 在 OpenRequest 中携带可选 module owner。`astra.module_owner` v1 
 `HostServices.cancellation` 在 open 开始前就由 Host 持有；取消按会话代次查询，初始化和原生 worker 在阶段边界检查。Host 的请求登记、取消与成功 open 句柄发布使用同一同步边界；取消获胜时关闭刚返回的句柄，不发布运行会话。调用 close 前禁止新的 raw cancel 并等在途 cancel 返回，不能在已消费句柄上继续调用。
 
 当前 typed 窗口服务覆盖标题、全屏、图标、指针、窗口大小/位置/可见性/最小化，以及保留 caption、按钮 ID 和可选文字输入的模态。结果区分实际生效字段；异步窗口请求值不能冒充实际值。输入模态使用调用方有界输出缓冲，取消不伪造按钮或空输入。文件/文件夹选择器尚无可取消的 Host 原生 owner，桌面壁纸修改未接入，相关核心请求明确失败；这些能力不计为已完成。
+
+Host 始终返回窗口操作的真实结果。若固定原生前端已证明某个 void/best-effort 操作在执行失败时仅警告继续，薄适配应保留同等策略，而不是擅自升级为整会话终止；警告保留操作、状态码与原错误，失败不得更新成功状态。该边界不扩展到其他窗口/模态操作，取消、旧上下文及协议错误仍按原有控制流处理。
 
 `WINDOW_QUERY_STATE=10` 在窗口线程只读实际状态，通过已有 `WindowResult.valid_fields` 标记可观测字段；flags 必须为零，不修改窗口。焦点和挂起不能代替 fullscreen/minimized。需要这些原生位的核心在启动及窗口状态变化后读取真实结果；Host 不支持查询或缺少所需字段时明确失败，不猜测默认状态。该请求不改变 ABI v2 的结构布局。
 
@@ -80,7 +84,7 @@ Manager 使用 Slint 与精炼 Material 3，保留游戏库、核心配置和管
 
 ### 共享实现与核心迁移
 
-Manager headless 使用现有 `astra-observability` 的有界日志，与本次输出图像放在一起：将输出文件扩展名替换为 `.diagnostics` 作为日志目录。日志不写入游戏目录或存档，不属于 package；测试结束后按临时产物规则清理。
+Manager 的产品日志使用现有 `astra-observability`，保存在其用户数据目录的 `diagnostics/`，不写入游戏目录或原存档。脚本式 headless、自动截图及其旁置日志约定已随自动验收入口移除；既有原始证据仅作历史记录。
 
 共享音频的流式解码只将解码器明确返回的流结束视为完成。`SymphoniaAudioStreamDecoder` 遇到意外 EOF 返回 `ASTRA_AUDIO_STREAM_TRUNCATED_INPUT`；已输出的有效 PCM 前缀不代表整段播放成功，调用方须终止失败的播放请求。正常完整流和解码预算规则不变。
 
