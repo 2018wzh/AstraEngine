@@ -61,7 +61,7 @@ pub(crate) fn musica_descriptor() -> FamilyDescriptor {
         default: ConfigValue::Integer(default),
     };
     let mut configuration = vec![
-        field("profile_file", "Private PAZ profile", MUSICA_PROFILE_FILE),
+        field("profile_file", "Private PAZ JSON profile (absolute or game-relative path)", MUSICA_PROFILE_FILE),
         field("entry_script", "Entry script in scr archive", "test.sc"),
         field(
             "eden_import_file",
@@ -226,7 +226,6 @@ impl MusicaProvider {
         };
         let profile = get("profile_file")?;
         let entry = get("entry_script")?;
-        relative(&profile)?;
         relative(&entry)?;
         if entry.contains('/') || entry.contains('\\') || !entry.ends_with(".sc") {
             return Err(error(

@@ -27,6 +27,8 @@ pub struct MusicaProfile {
     pub schema: String,
     pub paz_version: u8,
     pub index_size_xor: u32,
+    #[serde(default = "default_rc4_skip_crc")]
+    pub rc4_skip_crc: bool,
     pub roles: BTreeMap<String, MusicaRolePrivateProfile>,
     #[serde(default)]
     pub texture_overrides: BTreeMap<String, String>,
@@ -54,11 +56,13 @@ pub(crate) fn mount_musica_with_texture_overrides(
     game_root: &Path,
     profile_path: &Path,
 ) -> Result<(MusicaMountedVfs, MusicaTextureOverrides), CoreError> {
-    let (profile, hash, root) = astra_emu_sdk::read_game_profile::<MusicaProfile>(
-        game_root,
-        profile_path,
-        MAX_PROFILE_BYTES,
+    let (bytes, hash, root) = astra_emu_sdk::read_configured_profile_bytes(
+        game_root, profile_path, MAX_PROFILE_BYTES,
     )?;
+    let profile: MusicaProfile = serde_json::from_slice(&bytes).map_err(|_| invalid(
+        "ASTRA_EMU_PROFILE_FORMAT",
+        "Musica needs a JSON profile; import key.toml or the selected GARbro scheme in game configuration first",
+    ))?;
     if profile.paz_version > 2 {
         return Err(invalid(
             "ASTRA_EMU_MUSICA_PROFILE_VERSION",
@@ -83,6 +87,17 @@ pub(crate) fn mount_musica_with_texture_overrides(
 }
 
 impl MusicaProfile {
+    pub(crate) fn validate(&self) -> Result<(), CoreError> {
+        if self.paz_version > 2 {
+            return Err(invalid("ASTRA_EMU_MUSICA_PROFILE_VERSION", "PAZ version is unsupported"));
+        }
+        MusicaPazDecryptProvider::new(
+            astra_core::Hash256::from_sha256(b"profile-validation"),
+            self.clone().into_schemes(self.index_size_xor)?,
+        )?;
+        Ok(())
+    }
+
     fn resolve_texture_overrides(&self, root: &Path) -> Result<MusicaTextureOverrides, CoreError> {
         if self.texture_overrides.len() > MAX_TEXTURE_OVERRIDES {
             return Err(invalid(
@@ -191,6 +206,7 @@ impl MusicaProfile {
                     role,
                     PazRoleScheme {
                         index_key: value.index_key,
+                        rc4_skip_crc: self.rc4_skip_crc,
                         data_key: value.data_key,
                         type_passwords: value.type_passwords,
                         archive_xor: value.archive_xor,
@@ -202,6 +218,10 @@ impl MusicaProfile {
     }
 }
 
+fn default_rc4_skip_crc() -> bool {
+    true
+}
+
 fn invalid(code: &'static str, message: &'static str) -> CoreError {
     CoreError::invalid(code, message)
 }
@@ -210,15 +230,13 @@ fn invalid(code: &'static str, message: &'static str) -> CoreError {
 mod tests {
     use super::*;
     #[test]
-    fn profile_rejects_external_or_oversized_input_without_creating_files() {
+    fn profile_accepts_explicit_external_profiles_but_keeps_resource_paths_confined() {
         let root = tempfile::tempdir().unwrap();
         let outside = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(outside.path(), b"invalid private profile").unwrap();
         assert_eq!(
-            mount_musica(root.path(), outside.path())
-                .err()
-                .unwrap()
-                .code(),
-            "ASTRA_EMU_PROFILE_PATH"
+            mount_musica(root.path(), outside.path()).err().unwrap().code(),
+            "ASTRA_EMU_PROFILE_FORMAT"
         );
         let file = root.path().join(MUSICA_PROFILE_FILE);
         std::fs::write(&file, vec![0; MAX_PROFILE_BYTES as usize + 1]).unwrap();
@@ -252,6 +270,7 @@ mod tests {
             schema: MUSICA_PROFILE_SCHEMA.into(),
             paz_version: 0,
             index_size_xor: 0,
+            rc4_skip_crc: true,
             roles,
             texture_overrides: BTreeMap::new(),
         };
@@ -277,6 +296,7 @@ mod tests {
             schema: MUSICA_PROFILE_SCHEMA.into(),
             paz_version: 0,
             index_size_xor: 0,
+            rc4_skip_crc: true,
             roles: BTreeMap::new(),
             texture_overrides: BTreeMap::from([("musica:/bg/BG.png".into(), "hd/BG.png".into())]),
         };

@@ -1,19 +1,17 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs::{self, File},
+    fs::File,
     io::Read,
     path::Path,
 };
 
-use astra_emu_musica::{
-    MusicaProfile, MusicaRolePrivateProfile, MUSICA_PROFILE_FILE, MUSICA_PROFILE_SCHEMA,
+use crate::{
+    MusicaProfile, MusicaRolePrivateProfile, MUSICA_PROFILE_SCHEMA,
     REQUIRED_ARCHIVE_ROLES,
 };
 use flate2::read::ZlibDecoder;
 
-use crate::garbro_nrbf::{NrbfGraph, NrbfValue};
-
-const PROFILE_NAME: &str = MUSICA_PROFILE_FILE;
+use super::garbro_nrbf::{NrbfGraph, NrbfValue};
 const MAX_GRAPH_NODES: usize = 1_000_000;
 const MAX_GRAPH_DEPTH: usize = 128;
 const MAX_DICTIONARY_ENTRIES: usize = 100_000;
@@ -32,18 +30,12 @@ struct ImportedRole {
 pub fn import(
     formats: &Path,
     title: &str,
-    game_dir: &Path,
+    output: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if title.is_empty() || title.len() > 512 {
         return Err("ASTRA_EMU_GARBRO_TITLE".into());
     }
-    if !game_dir.is_dir() {
-        return Err("ASTRA_EMU_GARBRO_GAME_DIRECTORY".into());
-    }
-    let profile_path = game_dir.join(PROFILE_NAME);
-    if fs::symlink_metadata(&profile_path).is_ok() {
-        return Err("ASTRA_EMU_GARBRO_OUTPUT_EXISTS".into());
-    }
+    super::ensure_new_output(output)?;
     let graph = load_graph(formats)?;
     let root = graph.root().map_err(|_| "ASTRA_EMU_GARBRO_ROOT")?;
     let records = find_dictionary_values(&graph, root, title)?;
@@ -65,6 +57,7 @@ pub fn import(
         schema: MUSICA_PROFILE_SCHEMA.into(),
         paz_version: u8::try_from(version).map_err(|_| "ASTRA_EMU_GARBRO_VERSION")?,
         index_size_xor: 0,
+        rc4_skip_crc: true,
         texture_overrides: BTreeMap::new(),
         roles: roles
             .into_iter()
@@ -82,19 +75,18 @@ pub fn import(
             })
             .collect(),
     };
-    let profile_bytes = serde_json::to_vec_pretty(&profile)?;
-    if profile_bytes.len() > 1024 * 1024 {
-        return Err("ASTRA_EMU_GARBRO_PROFILE_SIZE".into());
-    }
-    crate::private_output::write_new_private(&profile_path, &profile_bytes)?;
-    println!("{{\"schema\":\"astra.emu.musica.garbro_import.v3\",\"status\":\"passed\"}}");
+    super::write_profile(output, &profile)?;
     Ok(())
 }
 
 fn load_graph(formats: &Path) -> Result<NrbfGraph, Box<dyn std::error::Error>> {
     const MAX_FORMATS_BYTES: u64 = 256 * 1024 * 1024;
     let mut bytes = Vec::new();
-    File::open(formats)?
+    File::open(formats).map_err(|cause| match cause.kind() {
+        std::io::ErrorKind::NotFound => "ASTRA_EMU_GARBRO_MISSING: select an existing Formats.dat",
+        std::io::ErrorKind::PermissionDenied => "ASTRA_EMU_GARBRO_PERMISSION: grant this user read access to Formats.dat",
+        _ => "ASTRA_EMU_GARBRO_OPEN: selected scheme database could not be opened",
+    })?
         .take(MAX_FORMATS_BYTES + 1)
         .read_to_end(&mut bytes)?;
     if bytes.len() as u64 > MAX_FORMATS_BYTES {
@@ -397,14 +389,15 @@ fn array_bytes(
 
 #[cfg(test)]
 mod tests {
-    use super::{import, PROFILE_NAME};
+    use super::import;
 
     #[test]
     fn existing_output_blocks_before_formats_are_read() {
         let game = tempfile::tempdir().unwrap();
-        std::fs::write(game.path().join(PROFILE_NAME), b"private").unwrap();
-        let error = import(&game.path().join("missing.dat"), "title", game.path()).unwrap_err();
-        assert_eq!(error.to_string(), "ASTRA_EMU_GARBRO_OUTPUT_EXISTS");
+        let output = game.path().join("musica.profile.json");
+        std::fs::write(&output, b"private").unwrap();
+        let error = import(&game.path().join("missing.dat"), "title", &output).unwrap_err();
+        assert_eq!(error.to_string(), "ASTRA_EMU_PROFILE_OUTPUT_EXISTS");
     }
 }
 

@@ -8,7 +8,7 @@ SDK 提供移植核心共同使用的模块，当前替代 Musica 内部的文�
 
 `archive` 复用 `astra-byte-source` 提供本地归档节点、读取结果和索引校验，不提供 Host VFS、registry 或挂载工厂。`ArchiveManifest` 使用 `astra.emu.archive_manifest.v2`，是核心内部索引，不是产品 package。来源与条目的 `source_revision` 表示核心提供的索引/文件版本身份，并不声称是完整资源内容校验和；条目必须与其来源版本一致。核心可使用已读取的归档索引、分卷长度和修改时间生成该身份，不要求启动时扫描全部资产。`CacheIdentity` 使用相同字段及 v2 身份命名空间；旧字段和旧 manifest schema 直接移除，不保留兼容接口。Musica 原来的 `Paz*` 公共读取类型已改为相同的 `Archive*` 类型，不保留别名。
 
-`read_game_profile` 有界读取私有 JSON；相对配置路径以游戏目录为基准，绝对路径仍须位于游戏目录内。`resolve_game_file` 校验相对路径和 canonical 目录归属。错误码使用公共 `ASTRA_EMU_PROFILE_*`，解析失败不回显原文、不写文件。`cache` 复用原 Musica 的有界明文缓存、来源身份校验、淘汰和系统权限实现；是否创建磁盘缓存由核心明确选择。
+`read_game_profile` 有界读取游戏目录内私有 JSON。`read_configured_profile_bytes` 供明确支持私有外置配置的核心读取有界原始字节：绝对路径可以位于游戏目录外，相对路径仍须位于游戏目录内；返回值同时保留原始字节 SHA-256 和 canonical 游戏根。`resolve_game_file` 始终校验资源相对路径和 canonical 目录归属，不因 profile 外置而放宽资源路径。错误码使用公共 `ASTRA_EMU_PROFILE_*`，区分缺失、权限、非文件、格式、路径和大小限制，给出配置操作，不回显输入或私有路径、不写文件。`cache` 复用原 Musica 的有界明文缓存、来源身份校验、淘汰和系统权限实现；是否创建磁盘缓存由核心明确选择。
 
 `TextScene` 使用 `astra-text` 的字体排版和批量字形资源管理；调用方传入字体 provider、完整可见文字区域和颜色/位置，获得生命周期在前、绘制在后的 `SceneCommand`。区域消失时释放字形，共享字形在同一帧统一处理。SDK 不规定消息框坐标、字体或 VM 状态。返回命令须按顺序提交给同一渲染器；渲染失败关闭会话，不丢弃资源命令后继续。
 

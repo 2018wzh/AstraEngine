@@ -1,4 +1,4 @@
-use astra_emu_sdk::{read_game_profile, resolve_game_file};
+use astra_emu_sdk::{read_configured_profile_bytes, read_game_profile, resolve_game_file};
 use serde::Deserialize;
 use std::path::Path;
 
@@ -69,4 +69,28 @@ fn relative_game_root_resolves_profile_once_without_changing_working_directory()
     assert_eq!(profile.version, 1);
     assert_eq!(canonical, root.path().canonicalize().unwrap());
     assert_eq!(std::env::current_dir().unwrap(), cwd);
+}
+
+#[test]
+fn explicit_external_profile_keeps_game_root_and_exact_source_identity() {
+    let game = tempfile::tempdir().unwrap();
+    let private = tempfile::tempdir().unwrap();
+    let source = private.path().join("profile.json");
+    let bytes = br#"{"version":7}"#;
+    std::fs::write(&source, bytes).unwrap();
+    let (read, hash, root) = read_configured_profile_bytes(game.path(), &source, 64).unwrap();
+    assert_eq!(read, bytes);
+    assert_eq!(hash, astra_core::Hash256::from_sha256(bytes));
+    assert_eq!(root, game.path().canonicalize().unwrap());
+    assert_eq!(std::fs::read(&source).unwrap(), bytes);
+    assert!(resolve_game_file(&root, "../profile.json").is_err());
+    assert_eq!(
+        read_configured_profile_bytes(game.path(), Path::new("../profile.json"), 64)
+            .unwrap_err().code(),
+        "ASTRA_EMU_PROFILE_PATH"
+    );
+    let error = read_configured_profile_bytes(game.path(), Path::new("missing.json"), 64).unwrap_err();
+    assert_eq!(error.code(), "ASTRA_EMU_PROFILE_MISSING");
+    assert!(error.to_string().contains("configure"));
+    assert!(!error.to_string().contains(&source.to_string_lossy().to_string()));
 }

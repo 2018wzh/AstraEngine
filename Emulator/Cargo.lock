@@ -854,8 +854,10 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "time",
+ "toml",
  "tracing",
  "wgpu 29.0.4",
+ "windows 0.62.2",
 ]
 
 [[package]]
@@ -866,13 +868,11 @@ dependencies = [
  "astra-emu-musica",
  "astra-observability",
  "clap",
- "flate2",
  "image 0.25.10",
  "serde",
  "serde_json",
  "tempfile",
  "tracing",
- "windows 0.62.2",
 ]
 
 [[package]]

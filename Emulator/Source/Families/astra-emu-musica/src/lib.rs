@@ -13,6 +13,7 @@ mod image_container;
 mod message;
 mod paz;
 mod profile;
+pub mod profile_import;
 mod runtime;
 pub use message::*;
 mod script;

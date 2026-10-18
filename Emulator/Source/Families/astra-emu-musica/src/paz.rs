@@ -63,6 +63,7 @@ pub struct ArchiveEntryDescriptor {
 #[derive(Debug, Clone)]
 pub struct PazRoleScheme {
     pub index_key: Vec<u8>,
+    pub rc4_skip_crc: bool,
     pub data_key: Vec<u8>,
     pub type_passwords: BTreeMap<String, String>,
     pub archive_xor: Option<u32>,
@@ -299,7 +300,7 @@ impl MusicaPazDecryptProvider {
                     "entry RC4 key length is invalid",
                 )
             })?;
-            let version_skip = if version >= 2 {
+            let version_skip = if version >= 2 && scheme.rc4_skip_crc {
                 ((crc32fast::hash(&key) >> 12) & 0xff) as u64
             } else {
                 0

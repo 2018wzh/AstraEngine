@@ -124,8 +124,8 @@ fn imports_valid_nrbf_into_one_typed_json_profile_without_executable_patch() {
     std::fs::write(&formats_path, formats).unwrap();
     assert_eq!(list_titles(&formats_path).unwrap(), ["Public Fixture"]);
     assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
-    import(&formats_path, "Public Fixture", directory.path()).unwrap();
-    let output = directory.path().join(PROFILE_NAME);
+    let output = directory.path().join("musica.profile.json");
+    import(&formats_path, "Public Fixture", &output).unwrap();
     let profile: MusicaProfile = serde_json::from_slice(&std::fs::read(output).unwrap()).unwrap();
     assert_eq!(profile.schema, MUSICA_PROFILE_SCHEMA);
     assert_eq!(profile.paz_version, 0);

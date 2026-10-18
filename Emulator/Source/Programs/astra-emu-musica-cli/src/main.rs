@@ -14,10 +14,9 @@ use clap::{Parser, Subcommand};
 use serde::Serialize;
 
 mod eden_save;
-mod garbro_nrbf;
-mod importer;
+use astra_emu_musica::profile_import;
 mod inventory;
-mod private_output;
+use astra_emu_musica::profile_import::private_output;
 
 #[cfg(test)]
 mod census_tests;
@@ -74,7 +73,19 @@ enum Command {
         #[arg(long)]
         title: String,
         #[arg(long)]
-        game_dir: PathBuf,
+        output: PathBuf,
+    },
+    ImportKeyProfile {
+        #[arg(long)]
+        file: PathBuf,
+        #[arg(long)]
+        paz_version: u8,
+        #[arg(long)]
+        index_size_xor: u32,
+        #[arg(long, action = clap::ArgAction::Set, required = true)]
+        rc4_skip_crc: bool,
+        #[arg(long)]
+        output: PathBuf,
     },
     ListGarbroTitles {
         #[arg(long)]
@@ -105,6 +116,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Command::InspectEdenSave { .. } => "inspect_eden_save",
         Command::ScanArchives { .. } => "scan_archives",
         Command::ImportGarbroScheme { .. } => "import_garbro_scheme",
+        Command::ImportKeyProfile { .. } => "import_key_profile",
         Command::ListGarbroTitles { .. } => "list_garbro_titles",
         Command::CensusScripts { .. } => "census_scripts",
         Command::CensusMedia { .. } => "census_media",
@@ -137,12 +149,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Command::ImportGarbroScheme {
             formats,
             title,
-            game_dir,
-        } => importer::import(&formats, &title, &game_dir),
+            output,
+        } => profile_import::import_garbro_profile(&formats, &title, &output),
+        Command::ImportKeyProfile { file, paz_version, index_size_xor, rc4_skip_crc, output } =>
+            profile_import::import_key_profile(&file, paz_version, index_size_xor, rc4_skip_crc, &output),
         Command::ListGarbroTitles { formats } => {
             println!(
                 "{}",
-                serde_json::to_string(&importer::list_titles(&formats)?)?
+                serde_json::to_string(&profile_import::list_garbro_titles(&formats)?)?
             );
             Ok(())
         }
