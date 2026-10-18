@@ -6,7 +6,7 @@
 - 原生生命周期修复为 `7e2016a0e0ef1c0b102185914cc7a8459bb2c9e1`；原生音频 worker 所有权接入为 `3359d8fbea3c53d6d262a9f71b6d4d79888c2368`，与适配分开。
 - 原始适配为 `02b66d779f7c4ff6da5f4bc82d935a1088a834e0`；CPU 路径的 ABI 2 硬件验证增量为 [`40fe7c7b11a5c830303c33a975b1f4f7af333837`](https://github.com/2018wzh/rfvp/commit/40fe7c7b11a5c830303c33a975b1f4f7af333837)。Windows GPU 增量从兼容 flate2 提交 `3700dc093424d5948c39cd237d34a79ee0d33913` 继续，保留已发布历史。
 - C ABI 2 固定共享实现 `3c7762ad533c8641af51b8aff81794dc377e23a9`，D3D12 extension 单独使用 v1。`SessionState.flags=0`；RFVP 无 module-owner 扩展，OpenRequest 的该字段须为 null。包元数据沿用现有 `hosted_fork_*` 字段记录来源，不代表保留 Hosted 运行链。
-- 当前单适配提交为 `5995f46117e70586f9b51993da5a073aa47f6c2d`，分支 `codex/emu-native-load-final-20261018`，直接父提交为通用基线 `3359d8fbea3c53d6d262a9f71b6d4d79888c2368`。完整源码 tree 与已验证的读档修复 `11ecaa6a51aa545750bbbdec468626aa19e70553` 相同，保留 CPU/D3D12 及真实窗口服务；旧发布分支和来源历史不改写。
+- 当前单适配提交为 `478448ed9d60778f78d5de911fa5717c48cb201c`，分支 `codex/emu-native-manual-final-20261018`，直接父提交为通用基线 `3359d8fbea3c53d6d262a9f71b6d4d79888c2368`。完整源码 tree 与 Release 构建使用的 `ac13a9ee80b495b02734808b92a7223aba06cc1c` 相同；生产读档 epoch/错误传播修复保留，自动验收驱动已移除，旧公开历史不改写。
 - Kira 运行层保持 0.10.8，固定 [`d2f10db15d9c451c7b2fd33043ae7732e75bee5d`](https://github.com/2018wzh/kira/commit/d2f10db15d9c451c7b2fd33043ae7732e75bee5d)；设备回归记录增量为 `bb64ffe37f1fa46e7e55c011e102ab28e344fbd3`，不改 mixer 运行实现。独立 workspace 的 CPAL 0.15.3 仍固定 `65ac8a6ac1a635cc26bfc5af331295b052044908`；主仓统一 patch 的 ALSA 0.11 兼容版本 `ecfda841a9140d60bbec1630d47ca91f1a77b8f3` 由主线程验证。
 
 ## 所有权与完整帧
@@ -40,77 +40,24 @@ Host graphics owner 直接持有有界 retirement queue，不启动后台退役�
 
 Kira 的 DecoderOwner 独立于播放 handle；handle Drop 语义不变，Sound Drop 只发取消，不在设备 callback join。CPAL watcher 的启动握手、失败路径、唤醒与 join 在同版本 fork 修复；不替换 mixer/decoder/device。非商业复现位于 Kira 的 `tests/native_owners.rs`。
 
-## 既有 CPU 基线验证
+## 读档修复与验收策略
 
-在独占树执行最终检查，未使用主线程商业副本。原生 Cargo.lock 已记录 ABI 2、Kira 与 CPAL 的精确 Git 来源。
+保留 `11ecaa6a51aa545750bbbdec468626aa19e70553` 的两项生产修复：读档后向 Host invalidation 发布新 context epoch；在 shutdown 设置取消标志之前记录原取消状态，避免清理过程吞掉真实请求失败。未改原生 VM、renderer、音视频或存档格式。
 
-- `--locked` adapter 测试：4 项普通测试、3 项显式硬件 `native_cpu` 测试通过。包含不让出的 VM 取消、两个原生 modal UI、三槽背压、暂停恢复、跨关闭 lease、同进程重开。
-- Native RFVS 保存/加载通过：槽 0 保留 `global[0]=99`，读取后 context epoch 增加；完整 UI 为 960×720，原 96×72 缩略图仍是进入菜单前的黑色场景，不包含菜单。
-- Native adapter DLL 构建成功；实际加载 DLL 并查询符号执行 ABI 2 用例。DLL 驻留，epoch 41–43 连续打开/关闭，旧 CPU lease 在新会话启动后归还；关闭前后像素保持不变。输入 WindowState 报告 O=1920×1080、scale factor 2 后，R(864,664.5) 仍命中 L(576,443) 的菜单按钮；这是 headless 几何回归，不是 OS 窗口 resize 验收。
-- 无窗口 Host 对 F11 的 WINDOW_FULLSCREEN 返回实际 UNSUPPORTED，核心进入失败态；错误关闭完成回收，下一次打开成功，没有伪造窗口成功。
-- 实际 GPU：NVIDIA GeForce RTX 4070 Laptop GPU，Vulkan，驱动 610.88。L=640×480，验证 R=640×480/960×720。
-- Kira `native_owners` 4 项测试通过，包括真实 CPAL 输出的三轮关闭重开。选定 Logitech G431、F32、48 kHz、8 声道；暂停时播放位置不变，恢复后继续，decoder 已销毁且 watcher 已 join。该夹具静音，不代表可听音频验收。
+按用户最新要求，验收由用户使用 Release 产物手动完成。已移除适配新增的 `native_cpu.rs`、`native_abi.rs`、`tests/common/mod.rs` 硬件驱动、动态 DLL 验收及 HCB fixture，并移除它们专用的 `tempfile` / `libloading` dev-dependencies。generic `3359d8f` 不包含该适配测试目录；原生上游普通测试不变，`config.rs` 和 `input.rs` 的纯逻辑单元测试保留。没有新增自动输入、截图、定时关闭、Headless 或性能采样入口。
 
-检查命令（RFVP 项目下选择 `rfvp-astra-embedded`）：
+此前 Debug 运行记录仅保留为历史证据，不视为当前 Release 的人工验收结论。商业副本、生成存档及私有测试数据库已在前一轮清理；原始资源和旧存档未动。本轮不启动游戏，也不操作用户窗口。
 
-```sh
-cargo test -p rfvp-astra-embedded --locked --features dynamic-plugin-export --lib --test native_cpu -- --include-ignored --test-threads=1 --nocapture
-cargo build -p rfvp-astra-embedded --features native-dylib-export --lib
-cargo test -p rfvp-astra-embedded --features native-dylib-export --test native_abi -- --ignored --test-threads=1 --nocapture
-```
+## Release 构建与交付
 
-Kira fork 使用 `cargo test -p kira --test native_owners -- --include-ignored --test-threads=1 --nocapture`。运行保留 `VK_LAYER_KHRONOS_validation` 不可用告警及 RFVP 编译 warnings，未关闭检查或改写原 renderer。未运行 fmt、Clippy、商业游戏、电影播放或可听音频/结局验收；这些仍由主线程整合后的产品流程覆盖。许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
-
-## Windows D3D12 硬件验收
-
-2026-10-18，NVIDIA GeForce RTX 4070 Laptop GPU，驱动 610.88。RFVP wgpu 0.19 与 Manager wgpu 29 分别创建 D3D12 device，并检查 LUID、真实共享资源描述和双向 fence。
-
-- 真实 RFVP DLL 的 LoadFile、ExitDialog 各连续重开三轮。L=640×480、R=320×240；GPU 导入与同 generation 在 Host 边界回读后的 CPU 归一化逐字节一致，另与 `cpu_d3d12` 原生 CPU 基线比较。每次 GPU copy 为 307,200 字节，正常交付 CPU 字节为零。
-- 同一生产 PixelPresentation/FilterEngine 验证 2× 缩放后 O=640×480、切回 O=320×240；产出的真实 GPU texture 成功导入 `slint::Image`。Host resize 不改变 R，Escape 实际关闭原生 UI。三槽全被持有时不再发布第四个资源；未导入的旧 lease 在 native close 后仍能打开共享句柄并还原原 UI。
-- 用独立 Host gate fence 阻止消费队列：done 保持未完成时 native cancel/close 两轮用时 34/65 ms；放行后 done=1，旧帧继续可读。没有向 native queue 放入 Host 外部 Wait。
-- 对本次 Host device 调用真实 `ID3D12Device5::RemoveDevice`：Host 返回 GPU 清理失败并拒绝重开；原生 wgpu 分别在 UI 资源创建或队列提交处报告 validation panic / `Lost`，owner 捕获后返回 `RFVP_CLOSE_FAILED / RFVP_NATIVE_WORKER_PANICKED`。保留这些诊断，不将失败关闭写成成功回收。
-- 生产 Manager `--headless`，100 ms 观察间隔、60 次观察、同进程三轮重开：L=640×480，R=O=960×720。180 次观察、141 次 Host copy（389,836,800 字节）、493 次 native export copy（1,363,046,400 字节），每次 copy 为 2,764,800 字节。15 个 Host 检查点共回读 41,472,000 字节；这部分是截图验收开销，不是交付流量。三轮最终画面均为 Escape 关闭菜单后的黑场。
-- 正常生产运行无 ERROR；保留 24 条原生 downlevel capability / `CREATE_SAMPLER_COMPARISON_FUNC_IGNORED` 告警。观察次数、截图时间和 copy 数不作为 FPS 成绩。
-- 最终 RFVP 独立 workspace `--locked` 验证 7 项通过，包含原 CPU modal、保存缩略图、取消和重开；Manager 普通回归 78 项通过，三个 D3D12 硬件用例另以独立进程通过。Manager/manager-core 的 `Clippy --all-targets -- -D warnings` 通过。
-
-可复用的硬件测试在 Manager 的 `headless_presenter_tests.rs`，自行生成非商业 HCB。实际命令如下，工作目录为独占树根目录：
+在独占树根目录构建原生注册 DLL，不初始化其他核心：
 
 ```sh
-export ASTRA_EMU_RFVP_D3D12_PLUGIN=D:/Workspace/AstraEngine-emu-dx12-20261018/.work/target-d3d12/debug/astra_emu_fvp.dll
-export ASTRA_EMU_DXC_PATH=D:/Workspace/AstraEngine-emu-dx12-20261018/.work/dxc/dxcompiler.dll
-cargo build --manifest-path Emulator/Cargo.toml -p astra-emu-fvp --features dynamic-plugin-export --target-dir .work/target-d3d12 -j 4
-cargo test --manifest-path Emulator/Cargo.toml -p astra-emu-manager --bin astra-emu-manager rfvp_d3d12_production_presenter_pixels_leases_cancel_reopen --target-dir .work/target-d3d12 -- --ignored --test-threads=1 --nocapture
-cargo test --manifest-path Emulator/Cargo.toml -p astra-emu-manager --bin astra-emu-manager rfvp_d3d12_bidirectional_fence_does_not_block_native_close --target-dir .work/target-d3d12 -- --ignored --test-threads=1 --nocapture
-cargo test --manifest-path Emulator/Cargo.toml -p astra-emu-manager --bin astra-emu-manager rfvp_d3d12_device_loss_reports_failed_cleanup_and_blocks_reopen --target-dir .work/target-d3d12 -- --ignored --test-threads=1 --nocapture
-.work/target-d3d12/debug/astra-emu-manager.exe --headless .work/acceptance/gpu.json
+cargo build --manifest-path Emulator/ThirdParty/rfvp/Cargo.toml -p rfvp-astra-embedded --locked --release --features native-dylib-export --lib --target-dir .work/target-rfvp-release -j 4
 ```
 
-设备丢失测试必须单独进程运行。生产截图与诊断留在 ignored `.work/acceptance`。桌面处于锁屏状态，未验收可交互 Slint 窗口、实际桌面 Present、鼠标手感、可听音频或商业结局。
+构建输出为 `release [optimized]`。原产物位于 `.work/target-rfvp-release/release/rfvp_astra_embedded.dll`；供 Manager 手动安装的同一 DLL 复制为 `.work/release-fvp/astra_emu_fvp.dll`，导出 `astra_emu_query`。仅完成构建和静态导入/导出检查，没有加载 DLL 或运行验收。
 
-## 商业窗口验收与读档修复
+运行需要兼容 C ABI 2 的 Release Manager、x64 Windows 系统组件、VC++ 运行库及可用 GPU/音频驱动。静态导入包括 `VCRUNTIME140.dll`、UCRT、`mfplat.dll`（Media Foundation）和 `d3dcompiler_47.dll`；原生媒体实现没有额外 FFmpeg DLL 依赖。Vulkan 需驱动提供 loader，D3D12 交付仍要求 Host 扩展协商成功，不静默回退 CPU。
 
-2026-10-18，从 `f941a4ac2` 建独占树，以真实生产 Manager、ABI 2 DLL 和原商业资源验收。模式为 `surface=cpu`：原生 renderer 使用 NVIDIA GeForce RTX 4070 Laptop GPU / Vulkan 610.88，CPU lease 交付 RGBA8，L=R=1280×720、stride=5120。没有修改商业脚本、字体来源或旧存档。
-
-运行前确认 `EmbeddedApp::open_with_delivery` 将 base path 设为副本目录，`desktop_storage`、原生槽和全局配置只写副本内的 `save/`。资源复制排除旧 `save/`。证据留在 ignored `.work/acceptance`；商业资源和生成存档不提交。
-
-初始无窗口 Host 在首帧前不能执行 `WINDOW_FULLSCREEN`（kind=2、flags=0，即 WINDOWED），1280×720、context=1/request=1。原始 `RFVP_WINDOW_SERVICE_UNAVAILABLE`、Manager 的 `FRAME_TIMEOUT` 和两轮显式 `UNSUPPORTED` 诊断保留；这是无窗口 Host 的能力拒绝，不作为上游缺陷。临时 always-reject 商业诊断程序已移除，不保留为永久失败测试。
-
-随后使用真实 Slint 顶层窗口，通过精确 PID/HWND 的 `PrintWindow` 观察及窗口消息操作，不操作 LockApp，也不伪造 Host 返回值或焦点。该路径已显示标题和原生正文。最初误选的 GBK 使日文乱码，随后在真实核心配置 UI 改为 `shift_jis` 并重开，正文恢复正确；不归为解码器缺陷。原生选项中显式选择后台不停止、全部文字 skip、遇选择解除 skip，保持实际焦点状态。
-
-原生保存菜单创建了槽 1 和真实场景缩略图。首次原生读档后，退出菜单触发 `RFVP_INPUT_FAILED: RFVP_SESSION_CANCELLED`。定位为适配层的两个错误，修复提交 `11ecaa6a51aa545750bbbdec468626aa19e70553`，位于独立分支 `codex/emu-fvp-load-epoch-20261018`，直接接在公开 `36786d6` 后，没有改写公开历史：
-
-- 读档后向 Host invalidation 传入旧 context epoch，导致下一条窗口请求被判 stale；改为发布读档后的新 epoch。
-- 清理会设置 VM cancellation，旧代码在清理后判断取消状态，从而吞掉并非主动 session cancel 引起的请求错误；改为在清理前保存取消状态，保留真实失败。
-
-现有原生 RFVS 测试新增 Host epoch 断言，失败前为 `1 != 2`，修复后通过；新增非商业请求取消回归，失败前等待 Failed 超时，修复后保留 `RFVP_SESSION_CANCELLED` 并返回失败关闭。两项均使用真实硬件 GPU/Kira，各保留失败前与通过后日志，未把拒绝当成商业通过。
-
-修复 DLL 重新进入真实标题，从商业槽 1 读档、退出原生菜单并继续正文成功；原生 all-skip 已推进电车及城镇场景，随后保存新槽 2。返回 Manager 和 WM_CLOSE 均自然完成，进程 exit 0。当前记录覆盖标题、正文、原生 UI、保存缩略图、读档、关闭及重开；选择、电影和结局尚未记为通过。窗口消息验证不等于前台物理输入、听音或性能验收，RTSS 叠加层保持原样。
-
-构建命令：
-
-```sh
-cargo build --manifest-path Emulator/ThirdParty/rfvp/Cargo.toml -p rfvp-astra-embedded --locked --features native-dylib-export --lib --target-dir .work/target-rfvp -j 4
-cargo test --manifest-path Emulator/ThirdParty/rfvp/Cargo.toml -p rfvp-astra-embedded --locked --features dynamic-plugin-export --test native_cpu --no-run --target-dir .work/target-rfvp -j 4
-```
-
-定点运行 `native_cpu` 的 `native_save_load_keeps_scene_thumbnail_separate_from_ui` 和 `cancelled_window_request_without_session_cancel_remains_failed`，参数为 `--ignored --test-threads=1 --nocapture`。没有重跑完整既有 CPU/D3D12 基线；原生 warnings 保留。截图、操作时间线及 before/after 日志位于 `.work/acceptance/gui`，首轮真实失败诊断另存 `first-run-diagnostics`。
+资源目录仍须与旧存档隔离，原生保存写入游戏目录下的 `save/`。字体与媒体分发许可边界见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)；Release 编译不等于获得分发授权。

@@ -2,7 +2,7 @@
 
 ## RFVP 完整覆盖源码
 
-`Emulator/ThirdParty/rfvp` 为 [`xmoezzz/rfvp`](https://github.com/xmoezzz/rfvp) 的完整 fork，当前 pin 为 `5995f46117e70586f9b51993da5a073aa47f6c2d`，完整源码 tree 与本轮验收的 `11ecaa6a51aa545750bbbdec468626aa19e70553` 相同。上游基线为 `af557db750c7833274f22a6d82b0dc33cdea2f85`，crate 版本 0.6.0；新单适配分支 [`codex/emu-native-load-final-20261018`](https://github.com/2018wzh/rfvp/tree/codex/emu-native-load-final-20261018) 已推送，旧 `36786d6` 和来源历史保留。通用基线与变更分类见 [MODIFICATIONS.md](MODIFICATIONS.md)。
+`Emulator/ThirdParty/rfvp` 为 [`xmoezzz/rfvp`](https://github.com/xmoezzz/rfvp) 的完整 fork，当前 pin 为 `478448ed9d60778f78d5de911fa5717c48cb201c`，分支 [`codex/emu-native-manual-final-20261018`](https://github.com/2018wzh/rfvp/tree/codex/emu-native-manual-final-20261018) 已推送。完整源码 tree 与本地 Release 构建的 `ac13a9ee80b495b02734808b92a7223aba06cc1c` 相同。上游基线为 `af557db750c7833274f22a6d82b0dc33cdea2f85`，通用基线为 `3359d8fbea3c53d6d262a9f71b6d4d79888c2368`，crate 版本 0.6.0；保留生产修复及普通逻辑测试，旧公开历史不改写。变更分类见 [MODIFICATIONS.md](MODIFICATIONS.md)。
 
 完整 MPL-2.0 许可位于 `../../../ThirdParty/rfvp/LICENSE`。发行时须保留覆盖源码、许可与变更记录，不以旧已发布基线替代当前二进制实际使用的源码。
 
