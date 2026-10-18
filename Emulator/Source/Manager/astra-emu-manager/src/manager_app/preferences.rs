@@ -1,10 +1,6 @@
 use super::*;
 
 impl AstraEmuManagerController {
-    pub(super) fn set_audio_device(&mut self, value: &str) -> Result<(), String> {
-        let _ = value;
-        Err("ASTRA_EMU_AUDIO_CORE_OWNED: select audio through the native core configuration".into())
-    }
     fn update_appearance(
         &mut self,
         update: impl FnOnce(&mut astra_emu_manager_core::AppearanceSettings),

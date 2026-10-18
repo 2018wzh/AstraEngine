@@ -29,8 +29,7 @@ export component ManagerWindow inherits Window {
     in-out property <string> modal-text;
     callback modal-submit(int, string);
     callback modal-cancel();
-    title: (game-active && has-game-title ? game-title : (demo-mode ? "AstraEMU Manager [DEMO]" : "AstraEMU Manager"))
-        + (game-active && audio-device == "null" ? " [NullAudio]" : "");
+    title: game-active && has-game-title ? game-title : (demo-mode ? "AstraEMU Manager [DEMO]" : "AstraEMU Manager");
     background: Theme.background;
     min-width: 360px;
     min-height: 640px;
@@ -95,8 +94,6 @@ export component ManagerWindow inherits Window {
 
     // ===== Global diagnostic =====
     in property <string> global-diagnostic;
-    in property <string> audio-device: "native";
-    callback set-audio-device(string);
     in-out property <bool> fatal-error-active: false;
     in-out property <string> fatal-error-message;
     in-out property <bool> core-retryable: false;
@@ -272,15 +269,17 @@ export component ManagerWindow inherits Window {
     }
 
     // ===== Manager shell (hidden while game is active) =====
-    if !root.game-active : HorizontalLayout {
+    if !root.game-active : Rectangle {
         x: root.usable-x;
         y: root.usable-y;
         width: root.usable-width;
         height: root.usable-height;
-        spacing: 0px;
 
         // Desktop sidebar
         if root.desktop-mode : Sidebar {
+            x: 0px;
+            y: 0px;
+            height: parent.height;
             current-page: root.current-page;
             dark-mode: Theme.effective-dark;
             navigate(page) => { root.navigate(page); }
@@ -289,7 +288,10 @@ export component ManagerWindow inherits Window {
 
         // Content column
         VerticalLayout {
-            horizontal-stretch: 1;
+            x: root.desktop-mode ? 200px : 0px;
+            y: 0px;
+            width: parent.width - self.x;
+            height: parent.height;
             spacing: 0px;
 
             // Page content
@@ -363,8 +365,6 @@ export component ManagerWindow inherits Window {
 
 
                 if root.current-page == "settings" : SettingsPage {
-                    audio-device: root.audio-device;
-                    set-audio-device(device) => { root.set-audio-device(device); }
                     category <=> root.settings-category;
                     desktop-mode: root.desktop-mode;
                     has-selected-case: root.selected-case-id != "";
@@ -452,23 +452,6 @@ export component ManagerWindow inherits Window {
     }
 
     // ===== Global diagnostic banner (M3 Snackbar / Banner) =====
-    if root.game-active && root.audio-device == "null" : Rectangle {
-        x: root.usable-x + root.usable-width - self.width - 16px;
-        y: root.usable-y + 16px;
-        width: 208px;
-        height: 32px;
-        background: Theme.surface-container-high;
-        border-radius: Theme.shape-md;
-        z: 30;
-        Text {
-            text: "测试音频 · 不播放声音";
-            color: Theme.on-surface;
-            font-size: Theme.font-label-md;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-        }
-    }
-
     if root.global-diagnostic != "" : Rectangle {
         x: root.usable-x + 16px;
         y: root.usable-y + root.usable-height - self.height - 16px;

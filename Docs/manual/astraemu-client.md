@@ -20,7 +20,9 @@ Musica 提供同步文字 Hook；共享串行 Luau VM 执行已启用扩展。�
 
 `astra-emu-manager --headless <配置.json>` 与产品使用同一原生 ABI。`frames` 是观察次数，`sample_interval_ms` 控制观察间隔，不代表核心 Tick；`reopen_count` 在驻留 DLL 中重复关闭重开。检查点 PNG 和相邻 `.diagnostics` 目录保留真实结果。无窗口 Host 拒绝窗口与模态请求，不伪造点击或回答。
 
-当前桌面锁屏，实窗交互、可听音频和商业结局尚未全部验收。历史性能数据见[性能审计](../status/performance-upstream-audit-2026-10-12.md)；回读/上传、GPU copy、检查点捕获和实际桌面 Present 分别记录，不以观察频率或 CPU 成绩冒充 GPU 显示帧率。
+Headless 首帧等待中也读取原生失败状态，不把已失败核心误报为帧超时。观察期间只有核心明确允许重试、且输入时间线包含未来的 `control/retry`，才保留最后一帧等待该显式操作；没有自动重试。键盘时间线使用配置键名，如 `enter`、`f5`、`f9`、`control_left`，到 C ABI 时转换为标准物理键名。
+
+已通过自有实际窗口的截图与消息级输入验证游戏库、设置导航和明暗主题；前台仍为 Windows 锁屏，未操作锁屏界面。完整游戏窗口、全部滤镜、可听音频和七核心结局继续逐项验收。历史性能数据见[性能审计](../status/performance-upstream-audit-2026-10-12.md)；回读/上传、GPU copy、检查点捕获和实际桌面 Present 分别记录，不以观察频率或 CPU 成绩冒充 GPU 显示帧率。
 
 ## 构建运行包
 

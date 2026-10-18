@@ -187,7 +187,6 @@ pub trait ManagerController: 'static {
     fn set_accent(&mut self, _accent: &str) -> Result<(), String>;
     fn set_density(&mut self, _density: &str) -> Result<(), String>;
     fn set_view_mode(&mut self, _view_mode: &str) -> Result<(), String>;
-    fn set_audio_device(&mut self, device: &str) -> Result<(), String>;
     fn family_config_changed(&mut self, _key: &str, _value: &str) -> Result<(), String>;
     fn save_family_config(&mut self) -> Result<ManagerViewModel, String>;
     fn reset_family_config(&mut self) -> Result<ManagerViewModel, String>;

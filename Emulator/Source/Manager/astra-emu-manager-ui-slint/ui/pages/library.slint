@@ -401,6 +401,8 @@ export component LibraryPage inherits Rectangle {
     callback save-family-config();
     callback reset-family-config();
     property <int> visible-columns: max(1, min(root.grid-columns, Math.floor((root.width - (root.desktop-mode ? 26px : 14px)) / (root.desktop-mode ? 170px : 166px))));
+    property <length> grid-spacing: root.desktop-mode && root.density != "compact" ? 14px : 10px;
+    property <length> card-width: max(156px, min(240px, (root.width - (root.desktop-mode ? 48px : 32px) - root.grid-spacing * (root.visible-columns - 1)) / root.visible-columns));
     property <string> inspector-tab: "details";
 
     background: Theme.surface;
@@ -592,17 +594,26 @@ export component LibraryPage inherits Rectangle {
 
                 VerticalLayout {
                     spacing: 14px;
-                    GridLayout {
-                        spacing: root.density == "compact" ? 10px : 14px;
-
-                        for game[index] in games: CoverCard {
-                            row: Math.floor(index / root.visible-columns);
-                            col: Math.mod(index, root.visible-columns);
-                            game: game;
-                            selected: game.case-id == root.selected-case-id;
-                            activated(id) => { root.select-case(id); }
-                            launch(id) => { root.launch(id); }
+                    alignment: start;
+                    HorizontalLayout {
+                        vertical-stretch: 0;
+                        alignment: start;
+                        GridLayout {
+                            horizontal-stretch: 0;
+                            vertical-stretch: 0;
+                            spacing: root.grid-spacing;
+                            for game[index] in games: CoverCard {
+                                row: Math.floor(index / root.visible-columns);
+                                col: Math.mod(index, root.visible-columns);
+                                width: root.card-width;
+                                vertical-stretch: 0;
+                                game: game;
+                                selected: game.case-id == root.selected-case-id;
+                                activated(id) => { root.select-case(id); }
+                                launch(id) => { root.launch(id); }
+                            }
                         }
+                        Rectangle { horizontal-stretch: 1; }
                     }
 
                     // Empty state
@@ -803,16 +814,27 @@ export component LibraryPage inherits Rectangle {
         if root.view-mode == "grid" && root.games.length > 0 : ScrollView {
             mouse-drag-pan-enabled: true;
 
-            GridLayout {
-                spacing: 10px;
-
-                for game[index] in games: CoverCard {
-                    row: Math.floor(index / root.visible-columns);
-                    col: Math.mod(index, root.visible-columns);
-                    game: game;
-                    selected: game.case-id == root.selected-case-id;
-                    activated(id) => { root.select-case(id); }
-                    launch(id) => { root.launch(id); }
+            VerticalLayout {
+                alignment: start;
+                HorizontalLayout {
+                    vertical-stretch: 0;
+                    alignment: start;
+                    GridLayout {
+                        horizontal-stretch: 0;
+                        vertical-stretch: 0;
+                        spacing: root.grid-spacing;
+                        for game[index] in games: CoverCard {
+                            row: Math.floor(index / root.visible-columns);
+                            col: Math.mod(index, root.visible-columns);
+                            width: root.card-width;
+                            vertical-stretch: 0;
+                            game: game;
+                            selected: game.case-id == root.selected-case-id;
+                            activated(id) => { root.select-case(id); }
+                            launch(id) => { root.launch(id); }
+                        }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
                 }
             }
         }

@@ -5,7 +5,7 @@ mod tests {
 
     #[ignore = "requires the pinned local DXC DLL and a GPU adapter"]
     #[test]
-    fn compiles_anime_chain_with_pinned_dxc_when_available() {
+    fn anime_pixels_match_pinned_reference_and_retain_on_invalid_reload() {
         let dxc = std::env::var_os("ASTRA_EMU_DXC_PATH")
             .map(PathBuf::from)
             .expect("ASTRA_EMU_DXC_PATH must point to the pinned DXC DLL");
@@ -110,11 +110,29 @@ mod tests {
             .unwrap();
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         let anime_chain_pixels = readback(&device, &queue, &output, 34, 38);
-        assert!(anime_chain_pixels
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .all(|pixel| pixel[3] == 255));
+        // Independent CPU evaluation of the pinned upstream GLSL, with FP16
+        // intermediate storage and clamp-to-edge sampling. Samples cross the
+        // 8/16-pixel dispatch boundaries and asymmetric image edges.
+        assert_reference(
+            &anime_chain_pixels,
+            34,
+            &[
+                (0, 0, [0, 0, 0, 255]),
+                (1, 0, [2, 0, 3, 255]),
+                (33, 0, [156, 58, 0, 255]),
+                (0, 1, [0, 1, 0, 255]),
+                (7, 7, [46, 58, 78, 255]),
+                (8, 8, [52, 67, 89, 255]),
+                (9, 8, [57, 69, 98, 255]),
+                (15, 15, [101, 130, 174, 255]),
+                (16, 16, [106, 137, 184, 255]),
+                (17, 19, [118, 160, 204, 255]),
+                (33, 19, [204, 200, 81, 255]),
+                (0, 37, [55, 235, 127, 255]),
+                (17, 37, [137, 12, 3, 255]),
+                (33, 37, [229, 57, 141, 255]),
+            ],
+        );
         let anime_config = FilterConfiguration {
             preset: FilterPreset::Anime4kRestoreUpscale,
             scale: 2.0,
@@ -171,6 +189,27 @@ mod tests {
             )
             .unwrap();
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        let restored_pixels = readback(&device, &queue, &restore_output, 17, 19);
+        assert_reference(
+            &restored_pixels,
+            17,
+            &[
+                (0, 0, [0, 0, 0, 255]),
+                (1, 0, [9, 2, 15, 255]),
+                (16, 0, [161, 63, 1, 255]),
+                (0, 1, [2, 11, 6, 255]),
+                (7, 7, [98, 125, 168, 255]),
+                (8, 8, [111, 143, 191, 255]),
+                (9, 8, [124, 150, 210, 255]),
+                (15, 15, [222, 27, 116, 255]),
+                (16, 16, [220, 29, 128, 255]),
+                (8, 9, [112, 153, 196, 255]),
+                (16, 9, [202, 196, 78, 255]),
+                (0, 18, [54, 234, 126, 255]),
+                (8, 18, [129, 4, 0, 255]),
+                (16, 18, [228, 56, 140, 255]),
+            ],
+        );
         engine
             .reload_source(&device, external_source, &anime_config)
             .unwrap();
@@ -180,19 +219,26 @@ mod tests {
             .unwrap();
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         let external_pixels = readback(&device, &queue, &output, 34, 38);
-        assert!(external_pixels
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .all(|pixel| pixel[3] == 255));
-        assert!(external_pixels
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .any(|pixel| pixel[..3] != [0, 0, 0]));
-        for pixel in [0, 33, 34 * 37, 34 * 38 - 1] {
-            assert_eq!(external_pixels[pixel * 4 + 3], 255);
-        }
+        assert_reference(
+            &external_pixels,
+            34,
+            &[
+                (0, 0, [1, 1, 1, 255]),
+                (1, 0, [4, 2, 5, 255]),
+                (33, 0, [179, 83, 19, 255]),
+                (0, 1, [0, 3, 1, 255]),
+                (7, 7, [46, 59, 79, 255]),
+                (8, 8, [53, 68, 90, 255]),
+                (9, 8, [58, 70, 98, 255]),
+                (15, 15, [102, 131, 174, 255]),
+                (16, 16, [109, 140, 186, 255]),
+                (17, 19, [118, 161, 204, 255]),
+                (33, 19, [204, 201, 81, 255]),
+                (0, 37, [54, 234, 126, 255]),
+                (17, 37, [156, 31, 22, 255]),
+                (33, 37, [231, 59, 143, 255]),
+            ],
+        );
         let scale_output = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("effect-test-scale-output"),
             size: wgpu::Extent3d {
@@ -225,6 +271,25 @@ mod tests {
             let actual = &scale_pixels[((y * 26 + x) * 4) as usize..][..4];
             for (actual, expected) in actual.iter().zip(expected) {
                 assert!((*actual as i16 - expected as i16).abs() <= 2);
+            }
+        }
+    }
+
+    fn assert_reference(pixels: &[u8], width: usize, samples: &[(usize, usize, [u8; 4])]) {
+        assert!(
+            pixels
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .all(|pixel| pixel[3] == 255)
+        );
+        for &(x, y, expected) in samples {
+            let actual = &pixels[(y * width + x) * 4..][..4];
+            for (channel, (&actual, expected)) in actual.iter().zip(expected).enumerate() {
+                assert!(
+                    actual.abs_diff(expected) <= 3,
+                    "pixel ({x},{y}) channel {channel}: {actual}, expected {expected}"
+                );
             }
         }
     }

@@ -86,3 +86,11 @@ cargo test --manifest-path Emulator/Cargo.toml -p astra-emu-manager --bin astra-
 ```
 
 设备丢失测试必须单独进程运行。生产截图与诊断留在 ignored `.work/acceptance`。桌面处于锁屏状态，未验收可交互 Slint 窗口、实际桌面 Present、鼠标手感、可听音频或商业结局。
+
+## 商业启动阻塞
+
+在 `36786d644d988d1c84e129c915cc7bbdaf578ddd` 的真实 ABI 2 DLL 中，以 CPU lease 交付、Vulkan RTX4070 渲染，商业样本实际报告 L=R=1280×720。在首个完成帧前，脚本请求 `WINDOW_FULLSCREEN`，kind=2、flags=0（WINDOWED）、context=1、request=1；无窗口 Host 实际返回 Unsupported。核心进入 `SESSION_FAILED` / `RFVP_NATIVE_FAILED`，close 返回 `RFVP_CLOSE_FAILED`。同进程第二次 open 成功并到达同一请求，两轮均没有完成帧。
+
+原始 Manager 把该首错延迟成 `ASTRA_EMU_HEADLESS_FRAME_TIMEOUT`，已交主线程修正。独立诊断使用 ignored 的临时 always-reject callback，记录真实请求后拒绝，不填造成功结果；该诊断的失败不作为永久回归测试，也不算商业启动通过。
+
+这是当前无窗口 Host 的能力边界，未在独立原生桌面路径复现，不能归为上游引擎缺陷。正文、选择、商业 UI/存读档、电影、暂停恢复和结局仍未验收。副本排除旧 save，所有写入限制在副本的 save 目录；本次额外副本与存档已清理，原始诊断保留在 ignored 验收输出中。

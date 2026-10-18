@@ -4,8 +4,8 @@
 
 - 上游 `xmoezzz/siglus_rs`：`5f358ef1360b0439e92aed2b749e8f25d8721954`（1.0.0）。
 - 本次独占验证从 `49457f433c24c4450c30b215e9518aff68499e29` 初始化完整 Siglus 与嵌套 Kira submodule，保留已发布历史。
-- 通用原生基线：`63ec1f79ec7811f49ad1611668740a09e0d17cc7`，分支 `native-master-20261018`，直接建立于上述上游 revision。
-- 当前单适配提交：`03dac5349c615ebbbbc65b3fa9d19b0977dcc81a`，分支 `codex/emu-native-single-adaptation-20261018`，直接父提交为通用原生基线。其源码 tree 与已验证的 `4779a967d4cb04bb3de252f2bdc20f41dac416bb` 相同；旧嵌入基线 `49457f433c24c4450c30b215e9518aff68499e29` 及已发布分支保留，不改写历史。主仓 gitlink 与 package metadata 使用当前单适配提交。
+- 通用原生基线：`a331ec8918e6d87bbf8bb2a3e651fe6531ffad00`，分支 `native-master-final-20261018`。保留原基线 `63ec1f79ec7811f49ad1611668740a09e0d17cc7` 的历史，追加 movie fixture 修正、原生回标题修复，并把可复用离屏 renderer 放在通用层，使原生回归不依赖 Astra adapter。
+- 当前单适配提交：`fd6b9f8e464cb06b4d0d17842342a15c8ee1be8a`，分支 `codex/emu-native-abi2-final-20261018`，直接父提交为上述通用基线。运行代码与结局验收提交 `04614f02b35f623cdd1cd95b271c3b6cc309673a` 相同，差异仅 README 空行；旧 `49457f4`、`4779a96`、`03dac53` 及已发布分支不改写。gitlink 与 package metadata 使用当前单适配提交。
 - Kira 保留完整嵌套 submodule `vendor/kira`：0.9.6 上游 `dfb08d08d065930e9b257203bf11c6d34742f542`，`2018wzh/kira` 修复 `a299b42690094a71885f6ed97dc504c4038da9a7`。
 - Kira 固定 CPAL 0.15.3 的 WASAPI 关闭修复 `65ac8a6ac1a635cc26bfc5af331295b052044908`（`2018wzh/cpal`）；Windows 宿主验证通过 workspace patch 使用兼容 ALSA 依赖的同版本 `ecfda841a9140d60bbec1630d47ca91f1a77b8f3`，不升级原 Kira 或替换设备后端。
 - 独立嵌入 manifest 固定共享 ABI 2 `2018wzh/AstraEngine@15a39a626b1316cb6137a75e17e14a2ff2d1ba88`。许可证及完整来源保留，见 `THIRD_PARTY_NOTICES.md`。
@@ -55,5 +55,7 @@
 固定 `4779a967d4cb04bb3de252f2bdc20f41dac416bb` 首次到达 ED 后停在黑屏，ABI 仍为 Running。相同 pin、绕过 C ABI 的独立 `SiglusHost::new_with_renderer_sync/step` 从真实自动存档复现：`seen02000` 第 15962 行、`vm_halted=true`、proc stack 为 `[ReturnToMenu]`、`pending_exit=false`。原生空栈 `paused` latch 阻止 redraw 随后排入的回标题 proc；它不是 `set_suspended` 的时钟/音频暂停。
 
 通用修复 `04614f02b35f623cdd1cd95b271c3b6cc309673a` 删除该陈旧 latch，保留原 proc pump、游戏执行及真实暂停。对应硬件 regression `host::tests::idle_proc_stack_accepts_return_to_menu` 通过。此前 native lib-test 的旧 rewind fixture 仍直接赋值裸 receiver，独立测试修复 `f0bf0113960dddc95f97cee894f009d864fd87c2` 按既有 `JoinedReceiver::completed` 惯例修正。
+
+整理后的通用提交分别为 `043b22d`（fixture）、`50ce8c2`（回标题）与 `a331ec8`（通用离屏输出）；单个 Astra 适配提交 `fd6b9f8` 位于其后。全部已推送新分支，旧分支保留。
 
 修复后同一 ABI 2 路径从本轮真实快存重验尾段：小鳥战斗选择 → ED staff roll → **自动回标题** → 同驻留 DLL close/reopen。全部关闭成功，进程 exit 0；Gallery 已解锁，完成率 29%。证据保留在 `.work/siglus-ending`，包括 `ending-fixed-abi.log`、`direct-ending-untraced.log`、`return-menu-regression-passed.log` 和 `frames/fixed-ending-{roll,title,reopened}.png`。本轮游戏副本及测试存档已删除；原副本未写入。部分其他核心的短启动按主线程协调并行，本轮不作性能、实窗输入或听音结论。通用提交由主线程整理到新的原生基线，此记录不重写已发布 pin 历史。

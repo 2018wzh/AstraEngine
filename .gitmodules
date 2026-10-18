@@ -1,7 +1,7 @@
 [submodule "siglus"]
 	path = Emulator/ThirdParty/siglus_rs
 	url = https://github.com/2018wzh/siglus_rs
-	branch = codex/emu-native-single-adaptation-20261018
+	branch = codex/emu-native-abi2-final-20261018
 [submodule "rfvp"]
 	path = Emulator/ThirdParty/rfvp
 	url = https://github.com/2018wzh/rfvp
@@ -13,7 +13,7 @@
 [submodule "Emulator/ThirdParty/sena-rs"]
 	path = Emulator/ThirdParty/sena-rs
 	url = https://github.com/2018wzh/sena-rs
-	branch = codex/emu-native-single-adaptation-20261018
+	branch = codex/emu-native-abi2-final-20261018
 [submodule "Emulator/ThirdParty/cpal"]
 	path = Emulator/ThirdParty/cpal
 	url = https://github.com/2018wzh/cpal.git

@@ -46,6 +46,42 @@ fn default_reopen_count() -> u32 {
     1
 }
 
+fn failure_message(state: &astra_emu_abi::SessionState) -> String {
+    format!(
+        "{}: {}",
+        String::from_utf8_lossy(&state.error.code[..(state.error.code_len as usize).min(128)]),
+        String::from_utf8_lossy(
+            &state.error.message[..(state.error.message_len as usize).min(512)]
+        )
+    )
+}
+
+fn waiting_for_scheduled_retry(
+    state: &astra_emu_abi::SessionState,
+    index: u32,
+    inputs: &std::collections::BTreeMap<u32, Vec<astra_emu_manager_core::model::FamilyEvent>>,
+) -> Result<bool, String> {
+    if state.state != astra_emu_abi::SESSION_FAILED {
+        return Ok(false);
+    }
+    let retry = state.flags & astra_emu_abi::SESSION_CAN_RETRY != 0
+        && inputs.range((index + 1)..).any(|(_, events)| {
+            events.iter().any(|event| {
+                matches!(
+                    event,
+                    astra_emu_manager_core::model::FamilyEvent::Control {
+                        command: astra_emu_abi::CONTROL_RETRY
+                    }
+                )
+            })
+        });
+    if retry {
+        Ok(true)
+    } else {
+        Err(failure_message(state))
+    }
+}
+
 #[derive(Default)]
 struct Capture {
     frame: Option<FrameLease>,
@@ -363,6 +399,10 @@ fn run_session(
             {
                 break;
             }
+            let state = session.state().map_err(|error| error.to_string())?;
+            if state.state == astra_emu_abi::SESSION_FAILED {
+                return Err(failure_message(&state));
+            }
             if Instant::now() >= first_frame_deadline {
                 return Err("ASTRA_EMU_HEADLESS_FRAME_TIMEOUT".into());
             }
@@ -383,18 +423,33 @@ fn run_session(
             first_frame_wait_us = start.elapsed().as_micros() as u64
         );
         let start = Instant::now();
+        let mut failure_reported = false;
         for index in 0..config.frames {
             let scheduled = Duration::from_millis(u64::from(index) * config.sample_interval_ms);
             if let Some(delay) = scheduled.checked_sub(start.elapsed()) {
                 std::thread::sleep(delay);
             }
             let input_start = Instant::now();
-            session
-                .input(
-                    inputs.get(&index).map_or(&[], Vec::as_slice),
-                    capture.identity(),
-                )
-                .map_err(|error| error.to_string())?;
+            if let Some(events) = inputs.get(&index) {
+                if failure_reported {
+                    let state = session.state().map_err(|error| error.to_string())?;
+                    if state.state == astra_emu_abi::SESSION_FAILED
+                        && events.iter().any(|event| {
+                            !matches!(
+                                event,
+                                astra_emu_manager_core::model::FamilyEvent::Control {
+                                    command: astra_emu_abi::CONTROL_RETRY
+                                }
+                            )
+                        })
+                    {
+                        return Err(failure_message(&state));
+                    }
+                }
+                session
+                    .input(events, capture.identity())
+                    .map_err(|error| error.to_string())?;
+            }
             let input_us = input_start.elapsed().as_micros() as u64;
             let deadline = Instant::now() + Duration::from_secs(5);
             let poll_start = Instant::now();
@@ -403,6 +458,10 @@ fn run_session(
                     .acquire_frame(capture.identity())
                     .map_err(|error| error.to_string())?;
                 if capture.read(poll).map_err(|error| error.to_string())? {
+                    break;
+                }
+                let state = session.state().map_err(|error| error.to_string())?;
+                if state.state == astra_emu_abi::SESSION_FAILED {
                     break;
                 }
                 if Instant::now() >= deadline {
@@ -421,17 +480,19 @@ fn run_session(
                     .present(frame)?;
             }
             let state = session.state().map_err(|error| error.to_string())?;
-            if state.state == astra_emu_abi::SESSION_FAILED {
-                return Err(format!(
-                    "{}: {}",
-                    String::from_utf8_lossy(
-                        &state.error.code[..(state.error.code_len as usize).min(128)]
-                    ),
-                    String::from_utf8_lossy(
-                        &state.error.message[..(state.error.message_len as usize).min(512)]
-                    )
-                ));
+            if waiting_for_scheduled_retry(&state, index, &inputs)? {
+                if !failure_reported {
+                    tracing::error!(
+                        event = "astra.emu.headless.awaiting_scheduled_retry",
+                        sample = index,
+                        error = %failure_message(&state)
+                    );
+                }
+                failure_reported = true;
+                captures.write(index, || output_image(&capture, presenter.as_ref()))?;
+                continue;
             }
+            failure_reported = false;
             let frame_poll_us = poll_start.elapsed().as_micros() as u64;
             let capture_start = Instant::now();
             captures.write(index, || output_image(&capture, presenter.as_ref()))?;
@@ -474,5 +535,66 @@ fn run_session(
         Ok(())
     } else {
         Err(errors.join("; "))
+    }
+}
+
+#[cfg(test)]
+mod failure_tests {
+    use super::*;
+    use astra_emu_abi as abi;
+    use astra_emu_manager_core::model::FamilyEvent;
+
+    #[test]
+    fn only_explicit_future_retry_can_hold_a_retryable_failure() {
+        let mut state = abi::SessionState {
+            state: abi::SESSION_FAILED,
+            flags: abi::SESSION_CAN_RETRY,
+            context_epoch: 1,
+            output_epoch: 1,
+            error: abi::Error::default(),
+        };
+        state
+            .error
+            .set("NATIVE_HOOK_FAILED", "retained text operation");
+        let mut inputs = std::collections::BTreeMap::new();
+        let expected = "NATIVE_HOOK_FAILED: retained text operation";
+        assert_eq!(
+            waiting_for_scheduled_retry(&state, 4, &inputs).unwrap_err(),
+            expected
+        );
+        inputs.insert(
+            4,
+            vec![FamilyEvent::Control {
+                command: abi::CONTROL_RETRY,
+            }],
+        );
+        assert_eq!(
+            waiting_for_scheduled_retry(&state, 4, &inputs).unwrap_err(),
+            expected
+        );
+        inputs.insert(
+            5,
+            vec![FamilyEvent::Control {
+                command: abi::CONTROL_RESUME,
+            }],
+        );
+        assert_eq!(
+            waiting_for_scheduled_retry(&state, 4, &inputs).unwrap_err(),
+            expected
+        );
+        inputs.insert(
+            5,
+            vec![FamilyEvent::Control {
+                command: abi::CONTROL_RETRY,
+            }],
+        );
+        assert!(waiting_for_scheduled_retry(&state, 4, &inputs).unwrap());
+        state.flags = 0;
+        assert_eq!(
+            waiting_for_scheduled_retry(&state, 4, &inputs).unwrap_err(),
+            expected
+        );
+        state.state = abi::SESSION_RUNNING;
+        assert!(!waiting_for_scheduled_retry(&state, 4, &inputs).unwrap());
     }
 }

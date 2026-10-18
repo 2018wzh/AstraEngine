@@ -94,7 +94,6 @@ pub(super) fn install<C: ManagerController>(
     appearance_callback!(on_set_accent, set_accent);
     appearance_callback!(on_set_density, set_density);
     appearance_callback!(on_set_view_mode, set_view_mode);
-    appearance_callback!(on_set_audio_device, set_audio_device);
     // Generic config handlers
     {
         let c = controller.clone();

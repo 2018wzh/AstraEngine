@@ -272,9 +272,6 @@ impl ManagerController for AstraEmuManagerController {
     fn set_view_mode(&mut self, view_mode: &str) -> Result<(), String> {
         AstraEmuManagerController::set_view_mode(self, view_mode)
     }
-    fn set_audio_device(&mut self, device: &str) -> Result<(), String> {
-        AstraEmuManagerController::set_audio_device(self, device)
-    }
 
     fn family_config_changed(&mut self, key: &str, value: &str) -> Result<(), String> {
         AstraEmuManagerController::family_config_changed(self, key, value)

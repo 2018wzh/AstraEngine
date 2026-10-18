@@ -24,8 +24,6 @@ export component SettingsPage inherits Rectangle {
     in-out property <string> category: "appearance";
     in property <bool> desktop-mode: true;
     in property <bool> has-selected-case;
-    in property <string> audio-device: "native";
-    callback set-audio-device(string);
 
     // Translation
     in-out property <string> endpoint-kind;
@@ -91,7 +89,6 @@ export component SettingsPage inherits Rectangle {
     property <[SettingsDestination]> destinations: [
         { id: "appearance", title: "界面外观", description: "主题、布局与游戏库", icon: Icons.palette },
         { id: "filters", title: "画面滤镜", description: "缩放、锐化与外部效果", icon: Icons.funnel },
-        { id: "audio", title: "音频输出", description: "播放设备", icon: Icons.gamepad },
         { id: "input", title: "输入控制", description: "手柄键位与游戏配置", icon: Icons.keyboard },
         { id: "translation", title: "文本翻译", description: "服务、模型与授权", icon: Icons.language },
         { id: "metadata", title: "作品资料", description: "VNDB 与 Bangumi", icon: Icons.database },
@@ -101,6 +98,8 @@ export component SettingsPage inherits Rectangle {
     background: Theme.surface;
 
     if root.desktop-mode : Rectangle {
+        x: 0px;
+        y: 0px;
         width: 224px;
         height: parent.height;
         background: Theme.surface-container-low;
@@ -130,6 +129,8 @@ export component SettingsPage inherits Rectangle {
         }
     }
     if !root.desktop-mode : Rectangle {
+        x: 0px;
+        y: 0px;
         height: 72px;
         width: parent.width;
         background: Theme.surface-container-low;
@@ -145,8 +146,8 @@ export component SettingsPage inherits Rectangle {
             }
             ComboBox {
                 horizontal-stretch: 1;
-                model: ["界面外观", "画面滤镜", "音频输出", "输入控制", "文本翻译", "作品资料", "兼容性"];
-                current-index: root.category == "filters" ? 1 : root.category == "audio" ? 2 : root.category == "input" ? 3 : root.category == "translation" ? 4 : root.category == "metadata" ? 5 : root.category == "compatibility" ? 6 : 0;
+                model: ["界面外观", "画面滤镜", "输入控制", "文本翻译", "作品资料", "兼容性"];
+                current-index: root.category == "filters" ? 1 : root.category == "input" ? 2 : root.category == "translation" ? 3 : root.category == "metadata" ? 4 : root.category == "compatibility" ? 5 : 0;
                 selected(value) => { root.category = root.destinations[self.current-index].id; }
             }
         }
@@ -158,30 +159,6 @@ export component SettingsPage inherits Rectangle {
             height: parent.height - self.y;
             clip: true;
 
-            if root.category == "audio" : VerticalLayout {
-                padding: 24px;
-                spacing: 16px;
-                alignment: start;
-                Text {
-                    text: "音频输出";
-                    color: Theme.on-surface;
-                    font-size: Theme.font-title-lg;
-                    font-weight: 700;
-                }
-                ComboBox {
-                    model: ["系统默认音频设备", "NullAudioDevice（仅测试，不播放声音）"];
-                    current-index: root.audio-device == "null" ? 1 : 0;
-                    selected(value) => {
-                        root.set-audio-device(value == "系统默认音频设备" ? "native" : "null");
-                    }
-                }
-                Text {
-                    text: "测试后端按播放速度消费音频数据，适合没有声卡的自动化环境。它不会输出声音，不能用于听感或真实设备测试。选择仅在本次应用运行中生效，重启后恢复系统设备。";
-                    color: Theme.on-surface-variant;
-                    font-size: Theme.font-body-md;
-                    wrap: word-wrap;
-                }
-            }
 
             if root.category == "translation" : TranslationSettingsPage {
                 endpoint-kind <=> root.endpoint-kind;

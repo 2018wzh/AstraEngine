@@ -50,6 +50,7 @@ FVP 使用完整 RFVP fork 中的原生 `crates/na_wmv_player` 及原 Movie 路�
 - Copyright © 2019–2021 bloc97.
 - License: MIT.
 - 内置 Restore CNN S 与 Upscale CNN x2 S 从该版本的 GLSL shader 独立移植，随 shader 保留完整 MIT 许可证。Magpie format 4 的兼容解析与内建函数独立实现，不包含 Magpie GPL 实现代码。
+- 已按固定版本的 [Restore](https://github.com/bloc97/Anime4K/blob/7684e9586f8dcc738af08a1cdceb024cc184f426/glsl/Restore/Anime4K_Restore_CNN_S.glsl) / [Upscale](https://github.com/bloc97/Anime4K/blob/7684e9586f8dcc738af08a1cdceb024cc184f426/glsl/Upscale/Anime4K_Upscale_CNN_x2_S.glsl) 修正移植中的 8×8 调度覆盖、正负激活、Restore 最后一层输入和放大残差采样坐标；权重不变，完整游戏帧保持不透明 alpha。硬件像素回归与独立 CPU 参考比较链式和单独两种效果，覆盖非整组尺寸与图像边缘。
 
 ## DirectX Shader Compiler
 
@@ -65,7 +66,7 @@ FVP 使用完整 RFVP fork 中的原生 `crates/na_wmv_player` 及原 Movie 路�
 
 ## 其他原生核心
 
-- Siglus：`2018wzh/siglus_rs@03dac5349c615ebbbbc65b3fa9d19b0977dcc81a`，MPL-2.0，完整源码及嵌套 Kira 位于 `ThirdParty/siglus_rs`。来源与改动见 Family 的 `MODIFICATIONS.md`。
+- Siglus：`2018wzh/siglus_rs@fd6b9f8e464cb06b4d0d17842342a15c8ee1be8a`，通用基线 `a331ec8918e6d87bbf8bb2a3e651fe6531ffad00`；MPL-2.0，完整源码及嵌套 Kira 位于 `ThirdParty/siglus_rs`。来源与改动见 Family 的 `MODIFICATIONS.md`。
 - Artemis：`2018wzh/art3m1s-core@ae967d8446fe99b97f6e1df93fb1b61d8ada2040`，MPL-2.0，保留原生 Lua 5.1/Vulkan/FFmpeg 与完整来源，见 `ThirdParty/art3m1s-core/LICENSE`。
-- Sena：上游 <https://github.com/xmoezzz/sena-rs>，通用修复基线 `2d28936cce4cda95260c1e595bad77df14b5670c`，单适配 `2018wzh/sena-rs@4bcd69aa48c5c3bc940246ae7c63f0a35e1d6573`。完整 MPL-2.0 许可位于 `ThirdParty/sena-rs/LICENSE-MPL-2.0`；支持范围仍为原生 Koikake。
+- Sena：上游 <https://github.com/xmoezzz/sena-rs>，通用修复基线 `2d28936cce4cda95260c1e595bad77df14b5670c`，单适配 `2018wzh/sena-rs@67e269e4cd0387fd3292388ca7d4005bc902412d`。完整 MPL-2.0 许可位于 `ThirdParty/sena-rs/LICENSE-MPL-2.0`；支持范围仍为原生及 Steam Koikake，未扩大到其他 SoftPAL。
 - Ethornell：上游 <https://github.com/xmoezzz/ethornell-rs> 的 workspace 声明 MPL-2.0，但 crate 未继承且未提供许可文本。覆盖范围待澄清；本地适配未推送、未注册为可分发 submodule。

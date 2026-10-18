@@ -122,7 +122,6 @@ pub struct ManagerViewModel {
     pub endpoint_identity: String,
     pub model_identity: String,
     pub global_diagnostic: String,
-    pub audio_device: String,
     pub translation_endpoint_kind: String,
     pub translation_endpoint: String,
     pub translation_protocol: String,
@@ -347,8 +346,6 @@ impl SlintManagerAdapter {
             .set_model_identity(model.model_identity.as_str().into());
         self.window
             .set_global_diagnostic(model.global_diagnostic.as_str().into());
-        self.window
-            .set_audio_device(model.audio_device.as_str().into());
         self.window
             .set_selected_title(model.selected_title.as_str().into());
         self.window
