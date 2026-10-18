@@ -377,6 +377,7 @@ export component LibraryPage inherits Rectangle {
     in property <bool> desktop-mode: true;
     in-out property <string> view-mode: "grid";
     in property <string> density: "comfortable";
+    in property <[ConfigField]> common-engine-config-fields;
     in property <[ConfigField]> family-config-fields;
     in property <bool> musica-key-file-available;
     // Extended metadata (PotatoVN-style)
@@ -1125,30 +1126,56 @@ export component LibraryPage inherits Rectangle {
                         }
                         }
 
-                        if root.inspector-tab == "core" && root.family-config-fields.length == 0 : Text {
-                            text: "没有可用的模拟器配置；请检查模拟器安装与游戏识别结果。";
-                            color: Theme.on-surface-variant;
-                            wrap: word-wrap;
-                        }
-                        if root.inspector-tab == "core" && root.family-config-fields.length > 0 : GenericConfigForm {
-                            fields: root.family-config-fields;
-                            form-title: "模拟器配置";
-                            form-description: "按游戏选择模拟器，参数按模拟器独立保存，启动时应用。";
-                            has-selected-case: root.selected-case-id != "";
-                            field-changed(key, value) => { root.family-config-changed(key, value); }
-                            save => { root.save-family-config(); }
-                            reset => { root.reset-family-config(); }
-                        }
-                        if root.inspector-tab == "core" && root.musica-key-file-available : VerticalLayout {
-                            spacing: 8px;
-                            Text {
-                                text: "Musica 运行时只读取 key.toml；文件包含已确认的 PAZ 参数与密钥。其他格式请先用开发工具转换。";
-                                wrap: word-wrap;
-                                color: Theme.on-surface-variant;
+                        if root.inspector-tab == "core" : VerticalLayout {
+                            spacing: 12px;
+
+                            GenericConfigForm {
+                                fields: root.common-engine-config-fields;
+                                form-title: "引擎公共设置";
+                                form-description: "调整核心原生渲染分辨率（滤镜输入），保存后在下次启动时应用；不改变逻辑舞台或窗口尺寸。";
+                                empty-message: "当前模拟器未提供可调的核心原生渲染分辨率（滤镜输入）。若刚切换模拟器，请先保存选择；滤镜仍可独立配置。";
+                                show-actions: false;
+                                field-changed(key, value) => { root.family-config-changed(key, value); }
                             }
-                            M3Button {
-                                text: "选择 key.toml 并应用到当前游戏";
-                                clicked => { root.select-musica-key-file(); }
+
+                            Rectangle { height: 1px; background: Theme.outline-variant; }
+
+                            GenericConfigForm {
+                                fields: root.family-config-fields;
+                                form-title: "模拟器专属设置";
+                                form-description: "选择模拟器与配置范围；公共设置和专属参数一起保存，启动时应用。";
+                                empty-message: "没有可用的模拟器配置；请检查模拟器安装与游戏识别结果。";
+                                show-actions: false;
+                                field-changed(key, value) => { root.family-config-changed(key, value); }
+                            }
+
+                            if root.musica-key-file-available : VerticalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: "Musica 运行时只读取 key.toml；文件包含已确认的 PAZ 参数与密钥。其他格式请先用开发工具转换。";
+                                    wrap: word-wrap;
+                                    color: Theme.on-surface-variant;
+                                }
+                                M3Button {
+                                    text: "选择 key.toml 并应用到当前游戏";
+                                    clicked => { root.select-musica-key-file(); }
+                                }
+                            }
+
+                            if root.common-engine-config-fields.length > 0 || root.family-config-fields.length > 0 : HorizontalLayout {
+                                spacing: 10px;
+                                Rectangle { horizontal-stretch: 1; }
+                                M3Button {
+                                    text: "重置";
+                                    variant: "outlined";
+                                    clicked => { root.reset-family-config(); }
+                                }
+                                M3Button {
+                                    text: "保存配置";
+                                    primary: true;
+                                    enabled: root.selected-case-id != "";
+                                    clicked => { root.save-family-config(); }
+                                }
                             }
                         }
                     }

@@ -166,6 +166,7 @@ export component ManagerWindow inherits Window {
     in property <[GamepadBinding]> gamepad-bindings;
 
     // ===== Generic config (Family / Extension / Filter) =====
+    in property <[ConfigField]> common-engine-config-fields;
     in property <[ConfigField]> family-config-fields;
     in property <bool> musica-key-file-available;
     in property <[ConfigField]> filter-config-fields;
@@ -342,6 +343,7 @@ export component ManagerWindow inherits Window {
                     desktop-mode: root.desktop-mode;
                     view-mode <=> root.view-mode;
                     density: root.density;
+                    common-engine-config-fields: root.common-engine-config-fields;
                     family-config-fields: root.family-config-fields;
                     musica-key-file-available: root.musica-key-file-available;
                     select-musica-key-file => { root.select-musica-key-file(); }

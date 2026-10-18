@@ -27,6 +27,8 @@ export component GenericConfigForm inherits Rectangle {
     in property <string> form-title: "Configuration";
     in property <string> form-description: "";
     in property <bool> has-selected-case: true;
+    in property <bool> show-actions: true;
+    in property <string> empty-message: "当前没有可配置选项";
     callback field-changed(string, string);
     callback save();
     callback reset();
@@ -111,7 +113,7 @@ export component GenericConfigForm inherits Rectangle {
             Rectangle { height: 6px; }
         }
 
-        if fields.length > 0 : HorizontalLayout {
+        if show-actions && fields.length > 0 : HorizontalLayout {
             spacing: 10px;
             Rectangle { horizontal-stretch: 1; }
             M3Button { text: "重置"; variant: "outlined"; clicked => { root.reset(); } }
@@ -119,10 +121,11 @@ export component GenericConfigForm inherits Rectangle {
         }
 
         if fields.length == 0 : Text {
-            text: "当前没有可配置选项";
+            text: empty-message;
             color: Theme.text-muted;
             font-size: 12px;
             horizontal-alignment: center;
+            wrap: word-wrap;
         }
     }
 }

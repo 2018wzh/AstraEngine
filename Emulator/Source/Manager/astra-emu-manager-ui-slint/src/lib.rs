@@ -173,6 +173,8 @@ pub struct ManagerViewModel {
     pub input_config: InputConfigViewModel,
     /// Appearance preferences.
     pub appearance: AppearanceViewModel,
+    /// Common native render settings for the selected emulator (pre-filter input).
+    pub common_engine_config_fields: Vec<GenericConfigFieldViewModel>,
     /// Generic Family config fields for selected game (schema-driven).
     pub family_config_fields: Vec<GenericConfigFieldViewModel>,
     pub musica_key_file_available: bool,
@@ -205,10 +207,12 @@ pub struct SlintManagerAdapter {
     play_history: Rc<VecModel<PlaySession>>,
     releases: Rc<VecModel<ReleaseOption>>,
     gamepad_bindings: Rc<VecModel<GamepadBinding>>,
+    common_engine_config: Rc<VecModel<ConfigField>>,
     family_config: Rc<VecModel<ConfigField>>,
     filter_config: Rc<VecModel<ConfigField>>,
     image_cache: std::cell::RefCell<std::collections::HashMap<String, slint::Image>>,
     cached_games_signature: std::cell::RefCell<Vec<GameCardSignature>>,
+    cached_common_engine_config: std::cell::RefCell<Vec<GenericConfigFieldViewModel>>,
     cached_family_config: std::cell::RefCell<Vec<GenericConfigFieldViewModel>>,
     cached_filter_config: std::cell::RefCell<Vec<GenericConfigFieldViewModel>>,
 }
@@ -221,6 +225,7 @@ impl SlintManagerAdapter {
         let play_history = Rc::new(VecModel::default());
         let releases = Rc::new(VecModel::default());
         let gamepad_bindings = Rc::new(VecModel::default());
+        let common_engine_config = Rc::new(VecModel::default());
         let family_config = Rc::new(VecModel::default());
         let filter_config = Rc::new(VecModel::default());
         window.set_games(ModelRc::from(games.clone()));
@@ -228,6 +233,7 @@ impl SlintManagerAdapter {
         window.set_play_history(ModelRc::from(play_history.clone()));
         window.set_releases(ModelRc::from(releases.clone()));
         window.set_gamepad_bindings(ModelRc::from(gamepad_bindings.clone()));
+        window.set_common_engine_config_fields(ModelRc::from(common_engine_config.clone()));
         window.set_family_config_fields(ModelRc::from(family_config.clone()));
         window.set_filter_config_fields(ModelRc::from(filter_config.clone()));
         Ok(Self {
@@ -237,10 +243,12 @@ impl SlintManagerAdapter {
             play_history,
             releases,
             gamepad_bindings,
+            common_engine_config,
             family_config,
             filter_config,
             image_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
             cached_games_signature: std::cell::RefCell::new(Vec::new()),
+            cached_common_engine_config: std::cell::RefCell::default(),
             cached_family_config: std::cell::RefCell::default(),
             cached_filter_config: std::cell::RefCell::default(),
         })
@@ -328,6 +336,11 @@ impl SlintManagerAdapter {
                     key_name: binding.key_name.as_str().into(),
                 })
                 .collect::<Vec<_>>(),
+        );
+        config_model::update(
+            &self.common_engine_config,
+            &self.cached_common_engine_config,
+            &model.common_engine_config_fields,
         );
         config_model::update(
             &self.family_config,
