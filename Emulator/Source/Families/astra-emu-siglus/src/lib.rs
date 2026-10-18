@@ -15,3 +15,20 @@ pub unsafe extern "C" fn astra_emu_query(
 ) -> astra_emu_abi::Status {
     unsafe { query(version, out) }
 }
+
+#[cfg(all(test, feature = "dynamic"))]
+#[test]
+fn dynamic_and_static_registration_share_the_native_table() {
+    let mut dynamic = std::ptr::null();
+    let mut registered = std::ptr::null();
+    assert_eq!(
+        unsafe { astra_emu_query(astra_emu_abi::ABI_VERSION, &mut dynamic) },
+        astra_emu_abi::OK,
+    );
+    assert_eq!(
+        unsafe { query(astra_emu_abi::ABI_VERSION, &mut registered) },
+        astra_emu_abi::OK,
+    );
+    assert!(!dynamic.is_null());
+    assert_eq!(dynamic, registered);
+}
