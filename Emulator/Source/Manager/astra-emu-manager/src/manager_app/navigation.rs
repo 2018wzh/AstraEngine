@@ -89,8 +89,10 @@ impl AstraEmuManagerController {
                 astra_emu_manager_core::extensions::ExtensionStore::new(&self.data_dir).list()?;
             if profile.is_some() || extensions.iter().any(|extension| extension.enabled) {
                 if self.extensions.is_none() {
-                    self.extensions = Some(crate::text_service::ExtensionRuntime::new()
-                        .map_err(|error| error.to_string())?);
+                    self.extensions = Some(
+                        crate::text_service::ExtensionRuntime::new()
+                            .map_err(|error| error.to_string())?,
+                    );
                 }
                 let secrets = std::sync::Arc::new(
                     ManagerSecretStore::open().map_err(|error| error.to_string())?,

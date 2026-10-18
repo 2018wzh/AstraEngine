@@ -1,6 +1,6 @@
 use super::family_loader::text;
 use crate::{
-    model::*, FamilyCapability, FamilyPluginDescriptor, INDEPENDENT_FAMILY_ABI_FINGERPRINT,
+    FamilyCapability, FamilyPluginDescriptor, INDEPENDENT_FAMILY_ABI_FINGERPRINT, model::*,
 };
 use astra_emu_abi as abi;
 
@@ -100,7 +100,7 @@ unsafe fn value(value: abi::ConfigValue) -> FamilyResult<ConfigValue> {
             return Err(FamilyError::invalid(
                 "ASTRA_EMU_CORE_CONFIG",
                 "unknown configuration type",
-            ))
+            ));
         }
     })
 }

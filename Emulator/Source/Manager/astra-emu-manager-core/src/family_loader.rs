@@ -134,7 +134,7 @@ impl LoadedFamilyPlugin {
         #[cfg(target_os = "windows")]
         let loaded = {
             use libloading::os::windows::{
-                Library, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR,
+                LOAD_LIBRARY_SEARCH_DEFAULT_DIRS, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR, Library,
             };
             let absolute = std::fs::canonicalize(path).map_err(|_| FamilyLoadError::InvalidPath)?;
             // A core's app-local dependencies live beside its DLL, not beside

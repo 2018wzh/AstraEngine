@@ -10,7 +10,7 @@
 - Slint Manager 重做精炼 Material 3 界面，同窗口切换管理与游戏；迁移全部既有滤镜，提供内置 Luau 翻译扩展和本地扩展管理。
 - 用户最新决定：验收只要求可玩，由用户在 Release 版本中人工手动执行；停止所有自动输入、截图、重开、关闭及性能采样，移除为自动验收增加的入口、驱动和测试钩子。编译成功不冒记人工通过。
 - Manager 已提供“引擎公共设置”，分离滤镜前原生渲染分辨率与模拟器专属选项，映射 RFVP/Musica/Sena 现有参数，其余核心明确显示当前不可调整。Musica 默认 `title` 菜单启动，显式 `direct` 保留；运行时仍只读取 `keys.v2` 的 `key.toml`，其他格式转换只在开发 CLI。引擎/模拟器分离、按游戏选择、光标与输入适配修复保留，产品仍由用户人工 Release 验收。
-- 启动优化已接入：先显示缓存资料库，首帧后异步加载核心及刷新已登记游戏；识别提示按变化失效，手动完整扫描不阻塞界面，每次启动重新校验所选核心。封面按可见范围异步解码，元数据/统计批量读取；扩展 VM、游戏纹理及滤镜编译按需初始化。仅添加现有日志中的阶段标记，不恢复自动验收或性能采样；实际延迟和实窗效果待用户手动观察。
+- 启动优化改为手动刷新：先显示缓存资料库，不自动加载核心或识别游戏；“刷新核心”只异步加载核心，“扫描游戏”与“添加游戏”才刷新资料库，核心就绪不隐式变更游戏绑定。手动扫描按变化复用有效识别提示，每次启动重新校验所选核心。按需封面、批量元数据/统计及惰性扩展/滤镜资源保留；只向既有日志添加阶段标记，不恢复自动验收或性能采样。实窗效果待用户手动观察。
 - 既有 RFVP、Siglus、Artemis R01–R08、Hosted R09 数据和已发布 astra 分支是旧架构基线，不能算新架构验收。原生功能 PR 的未合并状态及 Sandbox 故障记录保留在审计，不再驱动本批实施顺序。
 
 ## 产品状态
@@ -40,7 +40,7 @@
 
 委派工具没有模型选择参数。本轮问题修复、Release 构建和 key-only 收口代理的受信任 runtime context 均确认 `openai-codex/gpt-6.1-sol`。此前实施曾使用已授权的 `gpt-6-astra` fallback；一次旧只读 scout 为非 Codex，未修改代码且已停止使用该路由。
 
-启动优化的四个子任务也均由已核实的 `openai-codex/gpt-6.1-sol` 执行，分别使用独占 detached 工作树；子代理不运行构建，主线程整合后统一检查。未改变原生核心 pin、ABI 或 CMVS。
+启动优化的四个子任务及两项手动刷新调整均由已核实的 `openai-codex/gpt-6.1-sol` 执行，分别使用独占 detached 工作树；子代理不运行构建，主线程整合后统一检查。未改变原生核心 pin、ABI 或 CMVS。
 
 ### 2. RFVP CPU 完整路径与 Manager
 
@@ -82,7 +82,7 @@ Sena/Ethornell 继承指定上游的实际支持范围；KrKr 继续使用既有
 
 清理前的开发证据包括 ABI/日志边界、Manager 同窗口输入与四类滤镜、Musica Hook 重试/读档上下文/真实 TLS 等待取消、RFVP 原生 UI/电影/选择及其他核心的代表流程。原始日志和已知问题保留；这些记录不冒充清理后的 Release 人工通过。自动验收入口、硬件/路线驱动、公开假核心、额外截图/输入脚本和测试访问钩子已删除，普通纯逻辑测试保留；本次清理后不再运行自动验收。
 
-上一版 key-only 七核心本地 Release 包保留。本轮已重建 Manager 与 Musica，并组装包含公共分辨率设置和 Title 默认值的新包，其余六个核心 DLL 复用，不重做 BGI 游戏验收。58 个 PE 均为 x64，七个核心均导出统一 query，静态依赖闭包无缺项；运行包仅包含一个 Manager executable，依赖、Resources 与许可完整保留，不纳入开发转换 CLI 或自动验收驱动。RFVP 字体及 Ethornell 许可未澄清，不公开发布二进制 Release。
+前一轮已保留 key-only 包，并重建 Manager 与 Musica，组装包含公共分辨率设置和 Title 默认值的七核心本地 Release；其余六个核心 DLL 复用，不重做 BGI 游戏验收。该包的 58 个 PE 均为 x64，七个核心均导出统一 query，静态依赖闭包无缺项；仅包含一个 Manager executable，依赖、Resources 与许可完整保留，不纳入开发转换 CLI 或自动验收驱动。RFVP 字体及 Ethornell 许可未澄清，不公开发布二进制 Release。
 
 前一轮共享改动已通过 root workspace 的 `cargo check --workspace --all-targets --features astra-media/ffmpeg-vcpkg`，以及 Editor 独立 workspace 的全 target check。本轮聚焦受影响的 Emulator 包及独占核心构建，未改动 Engine/Editor 的共享接口，CMVS 未编译；编译结果不替代运行证据。保留依赖 `binrw` 和 `proc-macro-error2` 的未来 Rust 兼容警告。
 
@@ -90,6 +90,8 @@ Sena/Ethornell 继承指定上游的实际支持范围；KrKr 继续使用既有
 
 前一轮实际执行运行包的 Manager `--help`，以及开发 CLI 三个转换子命令的 `--help`；公开合成 JSON 与 keys.v1 各完成一次真实转换，验证 keys.v2 TOML、显式 `false`、算法参数与可选项保留，重复输出明确拒绝且源文件哈希不变。
 
-本轮 16 项定向纯逻辑检查通过：公共/专属配置与作用域 5、识别与模拟器选择 10、Musica 标题状态 1。覆盖配置混合保存、重开继承、非法边界不覆盖、模拟器草稿隔离及已有标题语义；未运行 GPU/游戏夹具。实际查询新 Musica Release 的 C ABI descriptor，默认 `launch_mode=title`、显式 `direct` 选项保留，未调用 open/frame；新包中的 Manager `--help` 通过。未操作用户游戏窗口、资料库、密钥或存档；新分组、实际渲染尺寸和默认 Title 的实窗验收由用户手动执行。
+前一轮公共分辨率/Title 的 16 项定向纯逻辑检查通过：公共/专属配置与作用域 5、识别与模拟器选择 10、Musica 标题状态 1。覆盖配置混合保存、重开继承、非法边界不覆盖、模拟器草稿隔离及已有标题语义；未运行 GPU/游戏夹具。实际查询该 Musica Release 的 C ABI descriptor，默认 `launch_mode=title`、显式 `direct` 选项保留，未调用 open/frame；运行包中的 Manager `--help` 通过。未操作用户游戏窗口、资料库、密钥或存档；新分组、实际渲染尺寸和默认 Title 的实窗验收由用户手动执行。
+
+本轮启动与手动刷新改动通过 115 项纯逻辑回归：Manager 库 20、应用 47、资料库/Core 40、Slint 模型/封面 8。覆盖手动核心加载不变更游戏绑定、显式扫描后才发现游戏、缓存失效/偏好/重复 ID、选中核心的启动前校验、批量统计、封面过期任务和惰性滤镜状态。另执行公开 API 命令，真实创建并重开临时 SQLite，验证统计快照与非标准尺寸的惰性滤镜描述；指定不存在的 DXC 路径仍能完成元数据准备，未创建窗口、GPU 或游戏会话。文档检查 181 项通过；固定编译器实际报告 `1.8.2502.8`。
 
 操作入口：[开发手册](../manual/development.md)、[AstraEMU 客户端](../manual/astraemu-client.md)、[Editor](../../Editor/README.md)、[NativeVN 样例](../../Examples/NativeVN/README.md)、[终之空资料](../samples/tsuinosora-modernization/README.md)。

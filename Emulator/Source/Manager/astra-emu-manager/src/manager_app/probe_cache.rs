@@ -27,8 +27,18 @@ fn stamp(path: &Path, relative: PathBuf) -> Option<FileStamp> {
         path: relative,
         directory: metadata.is_dir(),
         len: metadata.len(),
-        modified_ns: metadata.modified().ok()?.duration_since(UNIX_EPOCH).ok()?.as_nanos(),
-        created_ns: metadata.created().ok()?.duration_since(UNIX_EPOCH).ok()?.as_nanos(),
+        modified_ns: metadata
+            .modified()
+            .ok()?
+            .duration_since(UNIX_EPOCH)
+            .ok()?
+            .as_nanos(),
+        created_ns: metadata
+            .created()
+            .ok()?
+            .duration_since(UNIX_EPOCH)
+            .ok()?
+            .as_nanos(),
     })
 }
 
@@ -90,7 +100,10 @@ impl Inventory {
         }
         files.sort_by(|left, right| left.path.cmp(&right.path));
         files.dedup();
-        Some(Self { files, descriptors: registry.descriptors().cloned().collect() })
+        Some(Self {
+            files,
+            descriptors: registry.descriptors().cloned().collect(),
+        })
     }
 }
 
@@ -127,33 +140,57 @@ impl ProbeCache {
         let path = data_dir.join("probe-cache.json");
         let stored = (|| {
             let file = fs::File::open(&path).ok()?;
-            if file.metadata().ok()?.len() > MAX_BYTES { return None; }
+            if file.metadata().ok()?.len() > MAX_BYTES {
+                return None;
+            }
             let mut bytes = Vec::new();
             file.take(MAX_BYTES + 1).read_to_end(&mut bytes).ok()?;
-            if bytes.len() as u64 > MAX_BYTES { return None; }
+            if bytes.len() as u64 > MAX_BYTES {
+                return None;
+            }
             let stored: Stored = serde_json::from_slice(&bytes).ok()?;
-            if stored.version != VERSION || Some(&stored.inventory) != inventory.as_ref()
+            if stored.version != VERSION
+                || Some(&stored.inventory) != inventory.as_ref()
                 || stored.entries.len() > MAX_ENTRIES
-                || stored.entries.values().any(|entry| entry.stamp.len() > MAX_FILES || entry.candidates.len() > MAX_CANDIDATES) {
+                || stored.entries.values().any(|entry| {
+                    entry.stamp.len() > MAX_FILES || entry.candidates.len() > MAX_CANDIDATES
+                })
+            {
                 return None;
             }
             Some(stored)
         })();
-        Self { path, inventory, entries: stored.map(|stored| stored.entries).unwrap_or_default() }
+        Self {
+            path,
+            inventory,
+            entries: stored.map(|stored| stored.entries).unwrap_or_default(),
+        }
     }
 
-    pub(super) fn get(&self, path: &Path, registry: &FamilyProviderRegistry) -> Option<Vec<FamilyProbeCandidate>> {
+    pub(super) fn get(
+        &self,
+        path: &Path,
+        registry: &FamilyProviderRegistry,
+    ) -> Option<Vec<FamilyProbeCandidate>> {
         self.inventory.as_ref()?;
         let key = fs::canonicalize(path).ok()?;
         let entry = self.entries.get(&key)?;
-        if game_stamp(&key)? != entry.stamp { return None; }
-        if entry.candidates.is_empty() { return None; }
+        if game_stamp(&key)? != entry.stamp {
+            return None;
+        }
+        if entry.candidates.is_empty() {
+            return None;
+        }
         for (index, candidate) in entry.candidates.iter().enumerate() {
             candidate.report.validate().ok()?;
             let current = registry.descriptor(&candidate.report.plugin_id)?;
-            if current != &candidate.descriptor || current.family_id != candidate.report.family_id
+            if current != &candidate.descriptor
+                || current.family_id != candidate.report.family_id
                 || !current.supported_formats.contains(&candidate.report.format)
-                || entry.candidates[..index].iter().any(|other| other.report.plugin_id == candidate.report.plugin_id) {
+                || entry.candidates[..index]
+                    .iter()
+                    .any(|other| other.report.plugin_id == candidate.report.plugin_id)
+            {
                 return None;
             }
         }
@@ -161,17 +198,29 @@ impl ProbeCache {
     }
 
     pub(super) fn probe(
-        &mut self, path: &Path, registry: &FamilyProviderRegistry, reuse: bool,
+        &mut self,
+        path: &Path,
+        registry: &FamilyProviderRegistry,
+        reuse: bool,
     ) -> Result<(Vec<FamilyProbeCandidate>, bool), String> {
         let canonical = fs::canonicalize(path).map_err(|_| "ASTRA_EMU_GAME_DIRECTORY_INVALID")?;
         let path = canonical.as_path();
         if reuse {
-            if let Some(candidates) = self.get(path, registry) { return Ok((candidates, true)); }
+            if let Some(candidates) = self.get(path, registry) {
+                return Ok((candidates, true));
+            }
         }
         self.entries.remove(path);
         let before = self.inventory.as_ref().and_then(|_| game_stamp(path));
         let game_path = path.to_str().ok_or("ASTRA_EMU_GAME_PATH_UTF8")?;
-        let selection = registry.probe(&ProbeRequest { game_path: game_path.into() }, None, None)
+        let selection = registry
+            .probe(
+                &ProbeRequest {
+                    game_path: game_path.into(),
+                },
+                None,
+                None,
+            )
             .map_err(|error| error.to_string())?;
         let candidates = match selection {
             FamilyProbeSelection::NoMatch => Vec::new(),
@@ -180,30 +229,64 @@ impl ProbeCache {
         };
         if !candidates.is_empty() && candidates.len() <= MAX_CANDIDATES {
             if let Some(stamp) = before.filter(|before| game_stamp(path).as_ref() == Some(before)) {
-                if self.entries.len() >= MAX_ENTRIES { self.entries.pop_first(); }
-                self.entries.insert(path.to_owned(), Entry { stamp, candidates: candidates.clone() });
+                if self.entries.len() >= MAX_ENTRIES {
+                    self.entries.pop_first();
+                }
+                self.entries.insert(
+                    path.to_owned(),
+                    Entry {
+                        stamp,
+                        candidates: candidates.clone(),
+                    },
+                );
             }
         }
         Ok((candidates, false))
     }
 
     pub(super) fn retain_registered(&mut self, games: &[GameRecord]) {
-        let registered: BTreeSet<_> = games.iter().filter_map(|game| fs::canonicalize(&game.location).ok()).collect();
+        let registered: BTreeSet<_> = games
+            .iter()
+            .filter_map(|game| fs::canonicalize(&game.location).ok())
+            .collect();
         self.entries.retain(|path, _| registered.contains(path));
     }
 
     pub(super) fn save(&self) -> Result<(), String> {
-        let Some(inventory) = self.inventory.as_ref() else { return Ok(()); };
-        let parent = self.path.parent().ok_or("ASTRA_EMU_PROBE_CACHE_DIRECTORY")?;
-        let mut temporary = tempfile::NamedTempFile::new_in(parent).map_err(|_| "ASTRA_EMU_PROBE_CACHE_CREATE")?;
+        let Some(inventory) = self.inventory.as_ref() else {
+            return Ok(());
+        };
+        let parent = self
+            .path
+            .parent()
+            .ok_or("ASTRA_EMU_PROBE_CACHE_DIRECTORY")?;
+        let mut temporary =
+            tempfile::NamedTempFile::new_in(parent).map_err(|_| "ASTRA_EMU_PROBE_CACHE_CREATE")?;
         {
-            let mut writer = std::io::BufWriter::new(LimitedWriter { inner: &mut temporary, remaining: MAX_BYTES });
-            serde_json::to_writer(&mut writer, &StoredRef { version: VERSION, inventory, entries: &self.entries })
+            let mut writer = std::io::BufWriter::new(LimitedWriter {
+                inner: &mut temporary,
+                remaining: MAX_BYTES,
+            });
+            serde_json::to_writer(
+                &mut writer,
+                &StoredRef {
+                    version: VERSION,
+                    inventory,
+                    entries: &self.entries,
+                },
+            )
+            .map_err(|_| "ASTRA_EMU_PROBE_CACHE_WRITE_OR_BOUNDS")?;
+            writer
+                .flush()
                 .map_err(|_| "ASTRA_EMU_PROBE_CACHE_WRITE_OR_BOUNDS")?;
-            writer.flush().map_err(|_| "ASTRA_EMU_PROBE_CACHE_WRITE_OR_BOUNDS")?;
         }
-        temporary.as_file().sync_all().map_err(|_| "ASTRA_EMU_PROBE_CACHE_SYNC")?;
-        temporary.persist(&self.path).map_err(|_| "ASTRA_EMU_PROBE_CACHE_PUBLISH")?;
+        temporary
+            .as_file()
+            .sync_all()
+            .map_err(|_| "ASTRA_EMU_PROBE_CACHE_SYNC")?;
+        temporary
+            .persist(&self.path)
+            .map_err(|_| "ASTRA_EMU_PROBE_CACHE_PUBLISH")?;
         Ok(())
     }
 }

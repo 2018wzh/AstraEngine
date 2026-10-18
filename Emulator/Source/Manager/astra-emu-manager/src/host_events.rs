@@ -3,8 +3,8 @@ use std::{cell::RefCell, rc::Rc};
 use astra_emu_manager_core::model::{FamilyEvent, KeyCode, KeyModifiers, KeyState, WindowState};
 use astra_emu_manager_ui_slint::SlintManagerAdapter;
 use slint::{
-    winit_030::{EventResult, WinitWindowAccessor},
     ComponentHandle,
+    winit_030::{EventResult, WinitWindowAccessor},
 };
 use winit::event::{ElementState, WindowEvent};
 

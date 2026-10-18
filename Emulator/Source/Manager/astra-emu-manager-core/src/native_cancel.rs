@@ -3,8 +3,8 @@ use parking_lot::Mutex;
 use std::{
     ffi::c_void,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
 };
 struct State {

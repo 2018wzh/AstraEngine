@@ -43,7 +43,7 @@ fn surface_info(surface: &abi::SurfaceInfo) -> FamilyResult<FrameInfo> {
             return Err(FamilyError::invalid(
                 "ASTRA_EMU_CORE_ALPHA",
                 "complete game frame requires opaque or ignored alpha",
-            ))
+            ));
         }
     };
     let format = match (surface.pixel_format, surface.color) {
@@ -55,7 +55,7 @@ fn surface_info(surface: &abi::SurfaceInfo) -> FamilyResult<FrameInfo> {
             return Err(FamilyError::invalid(
                 "ASTRA_EMU_CORE_FORMAT",
                 "unsupported surface format",
-            ))
+            ));
         }
     };
     let info = FrameInfo {

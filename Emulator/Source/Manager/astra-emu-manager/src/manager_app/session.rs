@@ -57,18 +57,20 @@ impl ActiveFamilySession {
             let path = fs::canonicalize(&game.location)
                 .map_err(|_| "ASTRA_EMU_GAME_DIRECTORY_INVALID".to_owned())?;
             let game_path = path.to_str().ok_or("ASTRA_EMU_GAME_PATH_UTF8")?.to_owned();
-            registry.open_selected(
-                candidate,
-                NativeOpenRequest {
-                    game_path,
-                    configuration,
-                    session_epoch: epoch,
-                    initial_window,
-                    host,
-                    cancellation: services.cancellation,
-                    d3d12: mailbox.d3d12()?,
-                },
-            ).map_err(|error| error.to_string())
+            registry
+                .open_selected(
+                    candidate,
+                    NativeOpenRequest {
+                        game_path,
+                        configuration,
+                        session_epoch: epoch,
+                        initial_window,
+                        host,
+                        cancellation: services.cancellation,
+                        d3d12: mailbox.d3d12()?,
+                    },
+                )
+                .map_err(|error| error.to_string())
         })();
         let session = match opened {
             Ok(session) => session,

@@ -9,7 +9,7 @@ use std::{
 
 use astra_emu_manager_core::model::FamilyPointerRequest;
 use astra_emu_manager_ui_slint::{ManagerWindow, SlintManagerAdapter};
-use slint::{winit_030::WinitWindowAccessor, ComponentHandle};
+use slint::{ComponentHandle, winit_030::WinitWindowAccessor};
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::{dpi::PhysicalPosition, event::WindowEvent};
 

@@ -1,8 +1,8 @@
 use crate::{
-    model::{allocate_session_epoch, FramePoll, ProbeRequest, WindowState},
+    FamilyProviderRegistry, NativeCancellation, NativeOpenRequest,
+    model::{FramePoll, ProbeRequest, WindowState, allocate_session_epoch},
     no_host_services,
     test_native::{self, Fixture},
-    FamilyProviderRegistry, NativeCancellation, NativeOpenRequest,
 };
 
 fn request() -> NativeOpenRequest {
@@ -44,10 +44,12 @@ fn one_explicit_owner_spans_reopen_and_cpu_lease_outlives_its_destruction() {
         };
         retained = Some(frame);
         session.close().unwrap();
-        assert!(!calls
-            .lock()
-            .iter()
-            .any(|call| call.name == "module_destroy"));
+        assert!(
+            !calls
+                .lock()
+                .iter()
+                .any(|call| call.name == "module_destroy")
+        );
         // A closed Rust session object must no longer retain the module owner.
         drop(session);
     }
@@ -86,9 +88,11 @@ fn one_explicit_owner_spans_reopen_and_cpu_lease_outlives_its_destruction() {
         1
     );
     assert_eq!(calls.last().unwrap().name, "module_destroy");
-    assert!(calls
-        .iter()
-        .all(|call| call.thread == std::thread::current().id()));
+    assert!(
+        calls
+            .iter()
+            .all(|call| call.thread == std::thread::current().id())
+    );
 }
 
 #[test]
@@ -99,10 +103,12 @@ fn last_session_reference_defers_destroy_after_registry_handle_drop() {
     let mut plugin = test_native::install(0, fixture);
     let mut session = plugin.open(request()).unwrap();
     drop(plugin);
-    assert!(!calls
-        .lock()
-        .iter()
-        .any(|call| call.name == "module_destroy"));
+    assert!(
+        !calls
+            .lock()
+            .iter()
+            .any(|call| call.name == "module_destroy")
+    );
     session.close().unwrap();
     let calls = calls.lock();
     let close = calls.iter().position(|call| call.name == "close").unwrap();
@@ -183,10 +189,12 @@ fn unsupported_extension_passes_null_without_creating_a_dummy_owner() {
     let mut session = plugin.open(request()).unwrap();
     session.close().unwrap();
     plugin.shutdown().unwrap();
-    assert!(!calls
-        .lock()
-        .iter()
-        .any(|call| call.name.starts_with("module_")));
+    assert!(
+        !calls
+            .lock()
+            .iter()
+            .any(|call| call.name.starts_with("module_"))
+    );
 }
 
 #[test]

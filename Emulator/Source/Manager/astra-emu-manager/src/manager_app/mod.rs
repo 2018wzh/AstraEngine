@@ -38,6 +38,7 @@ use stage_renderer::{FrameMailbox, ManagerStageRenderer};
 const MAX_SCAN_DIRECTORIES: usize = 4_096;
 const MAX_SCAN_DEPTH: usize = 5;
 
+mod background;
 mod connection_test;
 mod controller;
 mod extensions;
@@ -54,12 +55,11 @@ mod musica_keys;
 mod navigation;
 mod owner;
 mod owner_worker;
-mod probe_cache;
-mod probe_worker;
-mod background;
 mod preferences;
+mod probe_cache;
 #[cfg(test)]
 mod probe_state_tests;
+mod probe_worker;
 mod runtime;
 mod session;
 mod support;

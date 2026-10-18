@@ -2,11 +2,11 @@
 
 use std::collections::BTreeMap;
 
-use super::{game_from_row, GameRecord, Library, LibraryError};
+use super::{GameRecord, Library, LibraryError, game_from_row};
 use crate::{
+    ExternalIdentityRecord, MetadataSnapshotRecord, PlayStats,
     metadata::{external_identity_from_row, metadata_snapshot_from_row},
     play::play_stats_from_row,
-    ExternalIdentityRecord, MetadataSnapshotRecord, PlayStats,
 };
 
 /// Library records read from one database snapshot, without provider JSON parsing.

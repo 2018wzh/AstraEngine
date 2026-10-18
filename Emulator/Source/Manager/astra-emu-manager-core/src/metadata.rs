@@ -5,7 +5,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::library::{
-    validate_metadata, validate_provider, validate_remote_id, Library, LibraryError,
+    Library, LibraryError, validate_metadata, validate_provider, validate_remote_id,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

@@ -5,9 +5,9 @@ use astra_emu_manager_core::InputMapping;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 use std::{
     sync::{
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
         mpsc::{self, Receiver, SyncSender},
-        Arc, Mutex,
     },
     thread,
     time::Duration,
@@ -91,7 +91,7 @@ impl GameInputPump {
                 Ok(batch) => output.extend(batch?),
                 Err(mpsc::TryRecvError::Empty) => break,
                 Err(mpsc::TryRecvError::Disconnected) => {
-                    return Err("ASTRA_EMU_GAMEPAD_WORKER_STOPPED".into())
+                    return Err("ASTRA_EMU_GAMEPAD_WORKER_STOPPED".into());
                 }
             }
         }

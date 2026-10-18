@@ -1,9 +1,9 @@
-use super::{validate_dimensions, FamilyError, FamilyResult};
+use super::{FamilyError, FamilyResult, validate_dimensions};
 use std::{
     fmt,
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc,
+        atomic::{AtomicU64, Ordering},
     },
 };
 static NEXT_SESSION_EPOCH: AtomicU64 = AtomicU64::new(1);

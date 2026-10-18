@@ -7,7 +7,7 @@
 use std::{path::Path, time::Duration};
 
 use astra_emu_translation_openai_compatible::TranslationProfile;
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;

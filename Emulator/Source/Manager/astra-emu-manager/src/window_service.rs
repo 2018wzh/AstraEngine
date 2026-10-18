@@ -1,4 +1,4 @@
-use crate::{modal_service::ModalBridge, HostWake};
+use crate::{HostWake, modal_service::ModalBridge};
 use astra_emu_abi as abi;
 use astra_emu_manager_core::model::{
     FamilyPointerRequest, FamilyWindowIcon, ModalRequest, ModalResponse,
@@ -7,8 +7,8 @@ use parking_lot::{Condvar, Mutex};
 use std::{
     ffi::c_void,
     sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc,
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
 };
 #[derive(Debug, Clone)]

@@ -218,9 +218,11 @@ fn library_snapshot_reflects_metadata_changes_unlinks_and_deletion() {
     let changed = library.library_snapshot().unwrap();
     assert_eq!(before.metadata[&key], initial);
     assert_eq!(changed.metadata[&key], updated);
-    assert!(!changed
-        .metadata
-        .contains_key(&("one".into(), "bangumi".into())));
+    assert!(
+        !changed
+            .metadata
+            .contains_key(&("one".into(), "bangumi".into()))
+    );
     assert_eq!(
         changed.metadata[&("two".into(), "vndb".into())],
         other_metadata

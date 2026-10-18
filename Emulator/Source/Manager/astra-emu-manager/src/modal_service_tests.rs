@@ -37,24 +37,28 @@ fn invalid_answer_cannot_complete_pending_input_and_duplicate_requests_are_rejec
     let pending = thread::spawn(move || worker.request(request(true)));
     let id = presented(&bridge, &wake);
     assert!(bridge.request(request(false)).is_err());
-    assert!(bridge
-        .respond(
-            id,
-            ModalResponse::Submitted {
-                button_index: 2,
-                text: Some("戻る".into())
-            }
-        )
-        .is_err());
-    assert!(bridge
-        .respond(
-            id,
-            ModalResponse::Submitted {
-                button_index: 1,
-                text: None
-            }
-        )
-        .is_err());
+    assert!(
+        bridge
+            .respond(
+                id,
+                ModalResponse::Submitted {
+                    button_index: 2,
+                    text: Some("戻る".into())
+                }
+            )
+            .is_err()
+    );
+    assert!(
+        bridge
+            .respond(
+                id,
+                ModalResponse::Submitted {
+                    button_index: 1,
+                    text: None
+                }
+            )
+            .is_err()
+    );
     assert!(bridge.take_ui_update().is_none());
     let answer = ModalResponse::Submitted {
         button_index: 1,
@@ -74,15 +78,16 @@ fn cancellation_wakes_blocked_abi_request_and_old_answers_cannot_enter_new_epoch
     let old_id = presented(&old, &wake);
     old.cancel_pending();
     assert_eq!(pending.join().unwrap().unwrap(), ModalResponse::Cancelled);
-    assert!(old
-        .respond(
+    assert!(
+        old.respond(
             old_id,
             ModalResponse::Submitted {
                 button_index: 0,
                 text: None
             }
         )
-        .is_err());
+        .is_err()
+    );
     assert_eq!(
         old.request(request(true)).unwrap(),
         ModalResponse::Cancelled

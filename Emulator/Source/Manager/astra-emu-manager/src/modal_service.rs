@@ -1,8 +1,8 @@
 use astra_emu_manager_core::model::{FamilyError, FamilyResult, ModalRequest, ModalResponse};
 use parking_lot::{Condvar, Mutex};
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc,
+    atomic::{AtomicBool, Ordering},
 };
 
 use crate::HostWake;

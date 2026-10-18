@@ -25,7 +25,7 @@ fn damaged_core_keeps_manager_available_and_error_visible() {
     .unwrap();
 
     let mut app = controller(root.path());
-    app.start_background_initialization().unwrap();
+    app.refresh_cores().unwrap();
     super::probe_state_tests::settle_background(&mut app);
     assert!(app.plugin_errors.contains_key(&format!(
         "astra_emu_broken.{}",
@@ -37,7 +37,7 @@ fn damaged_core_keeps_manager_available_and_error_visible() {
     );
     assert!(app.registry.descriptor("astra.emu.missing").is_none());
     assert!(
-        app.rescan()
+        app.model()
             .unwrap()
             .global_diagnostic
             .contains("ASTRA_EMU_FAMILY_LOAD")

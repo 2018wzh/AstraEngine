@@ -228,7 +228,10 @@ impl AstraEmuManagerController {
         snapshots: &BTreeMap<(String, String), astra_emu_manager_core::MetadataSnapshotRecord>,
     ) -> Result<Option<MetadataRecord>, String> {
         for provider in [MetadataProviderId::Vndb, MetadataProviderId::Bangumi] {
-            let Some(identity) = identities.iter().find(|entry| entry.provider == provider.as_str()) else {
+            let Some(identity) = identities
+                .iter()
+                .find(|entry| entry.provider == provider.as_str())
+            else {
                 continue;
             };
             let snapshot = snapshots.get(&(game_id.to_owned(), provider.as_str().to_owned()));
@@ -243,15 +246,16 @@ impl AstraEmuManagerController {
         identity: &astra_emu_manager_core::ExternalIdentityRecord,
         snapshot: Option<&astra_emu_manager_core::MetadataSnapshotRecord>,
     ) -> Result<Option<MetadataRecord>, String> {
-        snapshot.map(|snapshot| {
-            if snapshot.remote_id != identity.remote_id {
-                return Err("ASTRA_EMU_METADATA_SNAPSHOT_IDENTITY_MISMATCH".into());
-            }
-            serde_json::from_str(&snapshot.metadata_json)
-                .map_err(|_| "ASTRA_EMU_METADATA_SNAPSHOT_INVALID".to_owned())
-        }).transpose()
+        snapshot
+            .map(|snapshot| {
+                if snapshot.remote_id != identity.remote_id {
+                    return Err("ASTRA_EMU_METADATA_SNAPSHOT_IDENTITY_MISMATCH".into());
+                }
+                serde_json::from_str(&snapshot.metadata_json)
+                    .map_err(|_| "ASTRA_EMU_METADATA_SNAPSHOT_INVALID".to_owned())
+            })
+            .transpose()
     }
-
 
     pub(super) fn compatibility_for_identities(
         &self,
@@ -262,7 +266,8 @@ impl AstraEmuManagerController {
         let vndb_id = identities
             .iter()
             .find(|identity| identity.provider == MetadataProviderId::Vndb.as_str())?
-            .remote_id.as_str();
+            .remote_id
+            .as_str();
         let pinned = self.pinned_releases.get(game_id);
         let mut matches = database
             .entries
@@ -275,5 +280,4 @@ impl AstraEmuManagerController {
         }
         first
     }
-
 }

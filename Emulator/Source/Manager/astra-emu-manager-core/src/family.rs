@@ -6,7 +6,7 @@
 //! these records, validates them here, and then hands a selected candidate to
 //! the runtime host.
 
-use std::collections::{btree_map::Entry, BTreeMap};
+use std::collections::{BTreeMap, btree_map::Entry};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

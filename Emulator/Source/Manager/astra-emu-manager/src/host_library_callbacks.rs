@@ -4,6 +4,18 @@ pub(super) fn install<C: ManagerController>(
     adapter: &std::rc::Rc<SlintManagerAdapter>,
     controller: &std::rc::Rc<std::cell::RefCell<C>>,
 ) {
+    let core_weak = adapter.window().as_weak();
+    let core_controller = controller.clone();
+    let core_adapter = std::rc::Rc::downgrade(adapter);
+    adapter.window().on_refresh_cores(move || {
+        let result = core_controller.borrow_mut().refresh_cores();
+        if let Some(window) = core_weak.upgrade() {
+            match result {
+                Ok(model) => apply_model(&core_adapter, &model),
+                Err(error) => window.set_global_diagnostic(error.into()),
+            }
+        }
+    });
     macro_rules! metadata_callback {
         ($callback:ident, $method:ident, |$($arg:ident),*|) => {{
             let weak = adapter.window().as_weak();

@@ -5,7 +5,9 @@ use astra_emu_manager_core::model::*;
 fn background(owner: &mut FamilyOwner) -> BackgroundEvent {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
-        if let Some(event) = owner.take_background() { return event; }
+        if let Some(event) = owner.take_background() {
+            return event;
+        }
         assert!(Instant::now() < deadline, "owner background result missing");
         std::thread::yield_now();
     }
@@ -28,7 +30,10 @@ impl Harness {
         owner.start().unwrap();
         loop {
             match background(&mut owner) {
-                BackgroundEvent::Ready(result) => { result.unwrap(); break; }
+                BackgroundEvent::Ready(result) => {
+                    result.unwrap();
+                    break;
+                }
                 BackgroundEvent::Scanned(_, _) => panic!("core loading must not scan games"),
                 BackgroundEvent::Exited(error) => panic!("owner exited during startup: {error}"),
             }
@@ -48,15 +53,23 @@ impl Harness {
             .unwrap();
         loop {
             match background(&mut owner) {
-                BackgroundEvent::Ready(result) => { result.unwrap(); break; }
-                BackgroundEvent::Exited(error) => panic!("owner exited during registration: {error}"),
+                BackgroundEvent::Ready(result) => {
+                    result.unwrap();
+                    break;
+                }
+                BackgroundEvent::Exited(error) => {
+                    panic!("owner exited during registration: {error}")
+                }
                 _ => {}
             }
         }
-        owner.scan(super::super::probe_worker::ScanRequest {
-            kind: super::super::probe_worker::ScanKind::Import,
-            paths: vec![PathBuf::from(".")], games: Vec::new(),
-        }).unwrap();
+        owner
+            .scan(super::super::probe_worker::ScanRequest {
+                kind: super::super::probe_worker::ScanKind::Import,
+                paths: vec![PathBuf::from(".")],
+                games: Vec::new(),
+            })
+            .unwrap();
         let candidate = loop {
             match background(&mut owner) {
                 BackgroundEvent::Scanned(_, result) => {

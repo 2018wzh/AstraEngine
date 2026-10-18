@@ -4,7 +4,10 @@ use astra_emu_manager_core::model::{
 };
 use crossbeam_channel::{Receiver, Sender, bounded, unbounded};
 use parking_lot::Mutex;
-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use std::thread::JoinHandle;
 
 const COMMAND_CAPACITY: usize = 8;
@@ -15,7 +18,10 @@ pub(super) type Metadata = BTreeMap<String, (FamilyPluginDescriptor, Vec<ConfigF
 
 pub(super) enum BackgroundEvent {
     Ready(Result<(Metadata, BTreeMap<String, String>), String>),
-    Scanned(super::probe_worker::ScanKind, Result<super::probe_worker::ScanReport, String>),
+    Scanned(
+        super::probe_worker::ScanKind,
+        Result<super::probe_worker::ScanReport, String>,
+    ),
     Exited(String),
 }
 
@@ -134,32 +140,45 @@ impl FamilyOwner {
         let shared = self.updates.clone();
         let wake = self.wake.clone();
         let cancelled = self.cancelled.clone();
-        self.worker = Some(std::thread::Builder::new()
-            .name("astra-family-owner".into())
-            .stack_size(super::super::FAMILY_OWNER_STACK_BYTES)
-            .spawn(move || {
-                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    super::owner_worker::run(
-                        data_dir, mailbox, receiver, shared.clone(), results.clone(),
-                        wake.clone(), cancelled,
-                    )
-                })).unwrap_or_else(|_| Err("ASTRA_EMU_OWNER_PANICKED".into()));
-                let diagnostic = result.as_ref().err().cloned()
-                    .unwrap_or_else(|| "ASTRA_EMU_OWNER_EXITED".into());
-                if let Err(error) = &result {
-                    let mut update = shared.lock();
-                    if update.epoch != 0 && !update.closed {
-                        update.closed = true;
-                        update.error = Some(error.clone());
-                        update.dirty = true;
+        self.worker = Some(
+            std::thread::Builder::new()
+                .name("astra-family-owner".into())
+                .stack_size(super::super::FAMILY_OWNER_STACK_BYTES)
+                .spawn(move || {
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        super::owner_worker::run(
+                            data_dir,
+                            mailbox,
+                            receiver,
+                            shared.clone(),
+                            results.clone(),
+                            wake.clone(),
+                            cancelled,
+                        )
+                    }))
+                    .unwrap_or_else(|_| Err("ASTRA_EMU_OWNER_PANICKED".into()));
+                    let diagnostic = result
+                        .as_ref()
+                        .err()
+                        .cloned()
+                        .unwrap_or_else(|| "ASTRA_EMU_OWNER_EXITED".into());
+                    if let Err(error) = &result {
+                        let mut update = shared.lock();
+                        if update.epoch != 0 && !update.closed {
+                            update.closed = true;
+                            update.error = Some(error.clone());
+                            update.dirty = true;
+                        }
                     }
-                }
-                let _ = results.send(BackgroundEvent::Exited(diagnostic));
-                let callback = wake.lock().clone();
-                if let Some(wake) = callback { wake(); }
-                result
-            })
-            .map_err(|error| format!("ASTRA_EMU_OWNER_START: {error}"))?);
+                    let _ = results.send(BackgroundEvent::Exited(diagnostic));
+                    let callback = wake.lock().clone();
+                    if let Some(wake) = callback {
+                        wake();
+                    }
+                    result
+                })
+                .map_err(|error| format!("ASTRA_EMU_OWNER_START: {error}"))?,
+        );
         Ok(())
     }
 
@@ -167,7 +186,9 @@ impl FamilyOwner {
         if let Ok(event) = self.background.try_recv() {
             if let BackgroundEvent::Ready(result) = &event {
                 self.ready = result.is_ok();
-                if let Ok((metadata, _)) = result { self.metadata.clone_from(metadata); }
+                if let Ok((metadata, _)) = result {
+                    self.metadata.clone_from(metadata);
+                }
             }
             if matches!(&event, BackgroundEvent::Exited(_)) {
                 self.ready = false;
@@ -193,7 +214,9 @@ impl FamilyOwner {
     }
 
     fn ensure_idle(&self) -> Result<(), String> {
-        if !self.ready { return Err("ASTRA_EMU_FAMILY_INITIALIZING".into()); }
+        if !self.ready {
+            return Err("ASTRA_EMU_FAMILY_INITIALIZING".into());
+        }
         let update = self.updates.lock();
         if update.epoch != 0 && !update.closed {
             return Err("ASTRA_EMU_FAMILY_SESSION_ALREADY_ACTIVE".into());
@@ -216,14 +239,15 @@ impl FamilyOwner {
             .ok_or_else(|| "ASTRA_EMU_FAMILY_PROVIDER_MISSING".into())
     }
 
-
     #[cfg(test)]
     pub(super) fn register_provider(
         &mut self,
         factory: impl FnOnce() -> astra_emu_manager_core::LoadedFamilyPlugin + Send + 'static,
     ) -> Result<(), String> {
         self.send(Command::Registry(Box::new(move |registry| {
-            registry.register_provider(factory()).map_err(|error| error.to_string())?;
+            registry
+                .register_provider(factory())
+                .map_err(|error| error.to_string())?;
             collect_metadata(registry)
         })))
     }
@@ -388,7 +412,9 @@ impl FamilyOwner {
         };
         // Final process teardown: ordered close, then join. Ordinary UI close is asynchronous.
         let _ = self.commands.try_send(Command::Shutdown);
-        worker.join().map_err(|_| "ASTRA_EMU_OWNER_PANICKED".to_owned())?
+        worker
+            .join()
+            .map_err(|_| "ASTRA_EMU_OWNER_PANICKED".to_owned())?
     }
 }
 

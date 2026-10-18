@@ -41,9 +41,16 @@ fn configuration_controller(root: &std::path::Path) -> AstraEmuManagerController
         .register_provider(configuration_provider)
         .unwrap();
     let deadline = Instant::now() + Duration::from_secs(5);
-    while controller.registry.descriptor("config-test-plugin").is_none() {
+    while controller
+        .registry
+        .descriptor("config-test-plugin")
+        .is_none()
+    {
         controller.poll_platform().unwrap();
-        assert!(Instant::now() < deadline, "provider metadata did not arrive");
+        assert!(
+            Instant::now() < deadline,
+            "provider metadata did not arrive"
+        );
         std::thread::yield_now();
     }
     controller

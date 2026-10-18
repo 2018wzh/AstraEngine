@@ -1,4 +1,4 @@
-use super::{validate_dimensions, FamilyError, FamilyResult, MAX_INPUT_EVENTS, MAX_TEXT_BYTES};
+use super::{FamilyError, FamilyResult, MAX_INPUT_EVENTS, MAX_TEXT_BYTES, validate_dimensions};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WindowState {

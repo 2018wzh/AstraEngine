@@ -10,6 +10,6 @@ pub mod format4;
 mod generator;
 
 pub use engine::{
-    FilterConfiguration, FilterEngine, FilterError, FilterPreset, PreparedFilter, DXC_VERSION,
-    MAGPIE_REVISION,
+    DXC_VERSION, FilterConfiguration, FilterEngine, FilterError, FilterPreset, MAGPIE_REVISION,
+    PreparedFilter,
 };

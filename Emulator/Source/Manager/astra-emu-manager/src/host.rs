@@ -2,8 +2,8 @@ use astra_emu_manager_core::InputMapping;
 use astra_media_core::Viewport2D;
 use std::{
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
     time::Instant,
 };
@@ -120,8 +120,8 @@ pub trait ManagerController: 'static {
         event: astra_emu_manager_core::model::FamilyEvent,
     ) -> Result<(), String>;
     fn is_game_active(&self) -> bool;
-    /// Starts deferred application work after the first UI frame; must not wait.
-    fn start_background_initialization(&mut self) -> Result<(), String>;
+    /// Starts core discovery only after a user action; never waits or scans games.
+    fn refresh_cores(&mut self) -> Result<ManagerViewModel, String>;
     fn model(&self) -> Result<ManagerViewModel, String>;
     fn select_case(&mut self, case_id: &str) -> Result<ManagerViewModel, String>;
     fn search(&mut self, query: &str) -> Result<ManagerViewModel, String>;
@@ -499,24 +499,9 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                 if first_ui_frame_pending.replace(false) {
                     crate::startup::mark("first_ui_frame_rendered");
                     let weak = event_window.clone();
-                    let controller = event_controller.clone();
-                    let adapter = event_adapter.clone();
                     slint::Timer::single_shot(std::time::Duration::ZERO, move || {
-                        let Some(window) = weak.upgrade() else { return; };
-                        window.set_cover_loading_enabled(true);
-                        let result = {
-                            let mut controller = controller.borrow_mut();
-                            controller.start_background_initialization()
-                                .and_then(|()| controller.model())
-                        };
-                        match result {
-                            Ok(model) => apply_model(&adapter, &model),
-                            Err(error) => {
-                                tracing::error!(event = "astra.emu.startup.failed", message = %error);
-                                window.set_startup_busy(false);
-                                window.set_startup_status(error.clone().into());
-                                window.set_global_diagnostic(error.into());
-                            }
+                        if let Some(window) = weak.upgrade() {
+                            window.set_cover_loading_enabled(true);
                         }
                     });
                 }

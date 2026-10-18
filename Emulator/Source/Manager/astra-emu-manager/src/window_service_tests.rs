@@ -152,8 +152,10 @@ fn invalidation_wakes_window_request_without_platform_response() {
         service.invalidate.unwrap()(service.context, 1, 2);
     }
     assert_eq!(worker.join().unwrap(), abi::CANCELLED);
-    assert!(bridge
-        .respond(&request, Ok(WindowOutcome::default()))
-        .is_err());
+    assert!(
+        bridge
+            .respond(&request, Ok(WindowOutcome::default()))
+            .is_err()
+    );
     bridge.close();
 }

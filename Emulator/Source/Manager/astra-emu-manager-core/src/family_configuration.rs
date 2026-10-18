@@ -1,7 +1,7 @@
 //! Typed startup configuration. Empty game ID denotes core defaults.
-use crate::model::{resolve_config, ConfigEntry, ConfigField};
+use crate::model::{ConfigEntry, ConfigField, resolve_config};
 use crate::{Library, LibraryError};
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{OptionalExtension, params};
 
 impl Library {
     pub fn family_configuration(
@@ -105,9 +105,11 @@ mod tests {
                 .unwrap(),
             vec![entry(0.7)]
         );
-        assert!(library
-            .save_family_configuration("test.core", "", &schema, &[entry(2.0)])
-            .is_err());
+        assert!(
+            library
+                .save_family_configuration("test.core", "", &schema, &[entry(2.0)])
+                .is_err()
+        );
         assert_eq!(
             library
                 .family_configuration("test.core", "", &schema)
@@ -141,9 +143,11 @@ mod tests {
                 [serde_json::to_string(&vec![entry(0.1), entry(0.2)]).unwrap()],
             )
             .unwrap();
-        assert!(library
-            .family_configuration("test.core", "game", &schema)
-            .is_err());
+        assert!(
+            library
+                .family_configuration("test.core", "game", &schema)
+                .is_err()
+        );
         library.remove_game("game").unwrap();
         assert_eq!(
             library
