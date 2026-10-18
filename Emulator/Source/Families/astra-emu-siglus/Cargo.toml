@@ -17,18 +17,14 @@ astra-emu-abi = { path = "../../FamilyApi/astra-emu-abi" }
 siglus_scene_vm = { path = "../../../ThirdParty/siglus_rs/crates/siglus_scene_vm", features = ["pausable-clock"] }
 pollster = "0.3"
 
-[dev-dependencies]
-libloading.workspace = true
-tempfile.workspace = true
-
 [package.metadata.astra]
 upstream = "https://github.com/xmoezzz/siglus_rs"
 upstream_revision = "5f358ef1360b0439e92aed2b749e8f25d8721954"
 hosted_fork = "https://github.com/2018wzh/siglus_rs"
 native_fork_branch = "native-master-final-20261018"
 native_fork_revision = "a331ec8918e6d87bbf8bb2a3e651fe6531ffad00"
-hosted_fork_branch = "codex/emu-native-abi2-final-20261018"
-hosted_fork_revision = "fd6b9f8e464cb06b4d0d17842342a15c8ee1be8a"
+hosted_fork_branch = "codex/siglus-manual-release-20261018"
+hosted_fork_revision = "20262f4141b6737c98deca8f26cc203500d597a0"
 kira_upstream_revision = "dfb08d08d065930e9b257203bf11c6d34742f542"
 kira_fork_revision = "a299b42690094a71885f6ed97dc504c4038da9a7"
 cpal_fork_revision = "65ac8a6ac1a635cc26bfc5af331295b052044908"

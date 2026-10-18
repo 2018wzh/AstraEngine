@@ -6,9 +6,10 @@ Git submodule of [`xmoezzz/siglus_rs`](https://github.com/xmoezzz/siglus_rs)
 pinned by exact gitlink to the published adaptation of the
 [`2018wzh/siglus_rs`](https://github.com/2018wzh/siglus_rs) fork: upstream
 revision `5f358ef1360b0439e92aed2b749e8f25d8721954` (1.0.0), native lifecycle
-baseline `a331ec8918e6d87bbf8bb2a3e651fe6531ffad00`, and single embedded adapter
-`fd6b9f8e464cb06b4d0d17842342a15c8ee1be8a`, for an unofficial Rust
-reimplementation of SiglusEngine. The covered source is
+baseline `a331ec8918e6d87bbf8bb2a3e651fe6531ffad00` and single embedded adapter
+`fd6b9f8e464cb06b4d0d17842342a15c8ee1be8a`, followed by acceptance-driver
+cleanup `20262f4141b6737c98deca8f26cc203500d597a0`, for an unofficial Rust reimplementation of SiglusEngine.
+The covered source is
 redistributed under the MPL-2.0; the complete license text is preserved at
 `Emulator/ThirdParty/siglus_rs/LICENSE-MPL-2.0`. The file-level change inventory is
 `MODIFICATIONS.md`; both it and the covered source must remain in the source
@@ -24,7 +25,7 @@ Kira 0.9.6 is preserved as the complete `vendor/kira` submodule, based on
 Apache-2.0 texts remain in that submodule. The fork pins the CPAL 0.15.3
 WASAPI teardown fix `65ac8a6ac1a635cc26bfc5af331295b052044908` from
 `2018wzh/cpal`, retaining its Apache-2.0 license and original implementation.
-The Windows host verification patches that same CPAL 0.15.3 source to
+The Windows host build patches that same CPAL 0.15.3 source to
 `ecfda841a9140d60bbec1630d47ca91f1a77b8f3` for compatible ALSA dependency
 resolution; it retains the WASAPI teardown implementation and native Kira version.
 

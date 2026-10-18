@@ -904,10 +904,8 @@ name = "astra-emu-siglus"
 version = "0.1.0"
 dependencies = [
  "astra-emu-abi",
- "libloading 0.8.9",
  "pollster 0.3.0",
  "siglus_scene_vm",
- "tempfile",
 ]
 
 [[package]]
