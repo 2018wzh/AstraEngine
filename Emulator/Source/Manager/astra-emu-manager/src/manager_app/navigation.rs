@@ -59,7 +59,7 @@ impl AstraEmuManagerController {
         if self.active.is_some() {
             return Err("ASTRA_EMU_FAMILY_SESSION_ALREADY_ACTIVE".into());
         }
-        if self.startup_busy() {
+        if self.startup_busy() || !self.cores_ready() {
             return Err("ASTRA_EMU_FAMILY_INITIALIZING".into());
         }
         let game = self.game(case_id)?;

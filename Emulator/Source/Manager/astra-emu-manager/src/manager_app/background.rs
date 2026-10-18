@@ -4,7 +4,6 @@ use probe_worker::{ScanKind, ScanReport, ScanRequest};
 pub(super) enum StartupState {
     Waiting,
     Loading,
-    Refreshing,
     Scanning(ScanKind),
     Ready,
     Failed(String),
@@ -12,41 +11,46 @@ pub(super) enum StartupState {
 
 impl AstraEmuManagerController {
     pub(super) fn startup_busy(&self) -> bool {
-        matches!(self.startup_state, StartupState::Waiting | StartupState::Loading | StartupState::Refreshing | StartupState::Scanning(_))
+        matches!(self.startup_state, StartupState::Loading | StartupState::Scanning(_))
+    }
+
+    pub(super) fn cores_ready(&self) -> bool {
+        self.registry.is_ready() && self.registry.descriptors().next().is_some()
+    }
+
+    pub(super) fn core_refresh_enabled(&self) -> bool {
+        matches!(self.startup_state, StartupState::Waiting)
     }
 
     pub(super) fn startup_status(&self) -> String {
         match &self.startup_state {
-            StartupState::Waiting => "等待窗口显示后加载模拟器核心…".into(),
+            StartupState::Waiting => "点击“刷新核心”加载模拟器核心，再扫描或添加游戏。".into(),
             StartupState::Loading => "正在加载模拟器核心…".into(),
-            StartupState::Refreshing => "正在刷新已登记游戏的兼容信息…".into(),
             StartupState::Scanning(ScanKind::Import) => "正在导入游戏目录…".into(),
             StartupState::Scanning(_) => "正在扫描游戏目录…".into(),
-            StartupState::Failed(error) => format!("后台初始化或扫描失败：{error}"),
-            StartupState::Ready if self.registry.descriptors().next().is_none() => "未加载模拟器核心，请检查核心安装或加载错误。".into(),
-            StartupState::Ready if !self.plugin_errors.is_empty() => format!("有 {} 个核心加载失败，请查看核心诊断。", self.plugin_errors.len()),
-            StartupState::Ready => String::new(),
+            StartupState::Failed(error) if self.registry.is_ready() => format!("游戏扫描失败：{error}"),
+            StartupState::Failed(error) => format!("核心加载或后台运行失败：{error}。请修复后重启应用。"),
+            StartupState::Ready if self.registry.descriptors().next().is_none() => "未加载模拟器核心，请检查核心安装和加载错误后重启应用。".into(),
+            StartupState::Ready if !self.plugin_errors.is_empty() => format!("有 {} 个核心加载失败，请查看核心诊断；修复或更换核心后需重启应用。", self.plugin_errors.len()),
+            StartupState::Ready => "核心已加载，可扫描或添加游戏。更换核心文件后需重启应用。".into(),
         }
     }
 
-    pub(super) fn start_background_initialization(&mut self) -> Result<(), String> {
-        if !matches!(self.startup_state, StartupState::Waiting) {
+    pub(super) fn refresh_cores(&mut self) -> Result<ManagerViewModel, String> {
+        if !self.core_refresh_enabled() {
             return Err("ASTRA_EMU_OWNER_ALREADY_STARTED".into());
         }
-        let games = self.startup_games.take().ok_or("ASTRA_EMU_OWNER_ALREADY_STARTED")?;
-        let result = self.registry.start(games);
-        match result {
-            Ok(()) => { self.startup_state = StartupState::Loading; Ok(()) }
-            Err(error) => {
-                self.startup_state = StartupState::Failed(error.clone());
-                self.diagnostic.clone_from(&error);
-                Err(error)
-            }
+        self.startup_state = StartupState::Loading;
+        if let Err(error) = self.registry.start() {
+            self.background_failed(error.clone());
+            return Err(error);
         }
+        self.model()
     }
 
     pub(super) fn begin_scan(&mut self, kind: ScanKind, paths: Vec<PathBuf>) -> Result<(), String> {
         if self.startup_busy() { return Err("ASTRA_EMU_FAMILY_INITIALIZING".into()); }
+        if !self.cores_ready() { return Err("ASTRA_EMU_CORES_NOT_READY".into()); }
         let games = self.library.list_games().map_err(|error| error.to_string())?;
         self.registry.scan(ScanRequest { kind, paths, games })?;
         self.startup_state = StartupState::Scanning(kind);
@@ -62,7 +66,7 @@ impl AstraEmuManagerController {
                 owner::BackgroundEvent::Ready(Ok((_, errors))) => {
                     self.plugin_errors = errors;
                     if matches!(self.startup_state, StartupState::Loading) {
-                        self.startup_state = StartupState::Refreshing;
+                        self.startup_state = StartupState::Ready;
                     }
                 }
                 owner::BackgroundEvent::Ready(Err(error)) => self.background_failed(error),

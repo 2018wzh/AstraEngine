@@ -34,7 +34,7 @@ fn configuration_controller(root: &std::path::Path) -> AstraEmuManagerController
         Vec::new(),
     )
     .unwrap();
-    controller.start_background_initialization().unwrap();
+    controller.refresh_cores().unwrap();
     crate::manager_app::probe_state_tests::settle_background(&mut controller);
     controller
         .registry

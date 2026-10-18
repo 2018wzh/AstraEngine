@@ -2,7 +2,7 @@ use super::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum ScanKind { Startup, Full, Import }
+pub(super) enum ScanKind { Full, Import }
 
 pub(super) struct ScanRequest {
     pub(super) kind: ScanKind,
@@ -43,19 +43,17 @@ pub(super) fn scan(
         }
     }
     let mut roots = BTreeSet::new();
-    if request.kind == ScanKind::Startup {
+    if request.kind == ScanKind::Full {
         roots.extend(known.keys().cloned());
         cache.retain_registered(&request.games);
-    } else {
-        for root in request.paths {
-            let path = match fs::canonicalize(root) {
-                Ok(path) if path.is_dir() => path,
-                _ if request.kind == ScanKind::Full => { report.missing += 1; continue; }
-                _ => return Err("ASTRA_EMU_GAME_DIRECTORY_INVALID".into()),
-            };
-            roots.insert(path);
-        }
-        if request.kind == ScanKind::Full { roots.extend(known.keys().cloned()); }
+    }
+    for root in request.paths {
+        let path = match fs::canonicalize(root) {
+            Ok(path) if path.is_dir() => path,
+            _ if request.kind == ScanKind::Full => { report.missing += 1; continue; }
+            _ => return Err("ASTRA_EMU_GAME_DIRECTORY_INVALID".into()),
+        };
+        roots.insert(path);
     }
     let mut visited = BTreeSet::new();
     let mut recognized = Vec::<PathBuf>::new();
@@ -69,7 +67,8 @@ pub(super) fn scan(
                 continue;
             }
             if visited.len() > MAX_SCAN_DIRECTORIES { return Err("ASTRA_EMU_GAME_DIRECTORY_BOUNDS".into()); }
-            let (candidates, hit) = cache.probe(&path, registry, request.kind == ScanKind::Startup)?;
+            let allow_hint = request.kind == ScanKind::Full && known.contains_key(&path);
+            let (candidates, hit) = cache.probe(&path, registry, allow_hint)?;
             report.cache_hits += usize::from(hit);
             let matched = !candidates.is_empty();
             if matched || known.contains_key(&path) {
@@ -77,7 +76,7 @@ pub(super) fn scan(
             }
             if matched {
                 recognized.push(path);
-            } else if request.kind != ScanKind::Startup && depth < MAX_SCAN_DEPTH {
+            } else if depth < MAX_SCAN_DEPTH {
                 let mut children = Vec::new();
                 for entry in fs::read_dir(&path).map_err(|_| "ASTRA_EMU_GAME_DIRECTORY_ENUMERATION")? {
                     let entry = entry.map_err(|_| "ASTRA_EMU_GAME_DIRECTORY_ENUMERATION")?;

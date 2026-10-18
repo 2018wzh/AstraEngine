@@ -20,13 +20,13 @@ fn game(path: &Path) -> GameRecord {
 
 fn refresh(registry: &FamilyProviderRegistry, cache: &mut ProbeCache, path: &Path) -> super::super::probe_worker::ScanReport {
     super::super::probe_worker::scan(registry, cache, super::super::probe_worker::ScanRequest {
-        kind: super::super::probe_worker::ScanKind::Startup,
+        kind: super::super::probe_worker::ScanKind::Full,
         paths: Vec::new(), games: vec![game(path)],
     }, &AtomicBool::new(false)).unwrap()
 }
 
 #[test]
-fn persistent_hints_skip_reprobes_but_boot_and_core_changes_invalidate_them() {
+fn manual_full_scan_reuses_registered_hints_until_boot_or_core_inventory_changes() {
     let root = tempfile::tempdir().unwrap();
     let cores = root.path().join("cores");
     let path = root.path().join("game");
@@ -89,17 +89,60 @@ fn malformed_cache_and_unknown_deep_layouts_are_misses_and_missing_roots_are_pru
 }
 
 #[test]
-fn startup_only_probes_registered_roots_and_never_discovers_children() {
+fn manual_full_scan_discovers_unregistered_children_with_fresh_probes() {
     let root = tempfile::tempdir().unwrap();
     let child = root.path().join("unregistered-game");
     fs::create_dir(&child).unwrap();
     fs::write(child.join("boot"), b"boot").unwrap();
-    let registry = registry();
+    let calls = std::sync::Arc::new(parking_lot::Mutex::new(Vec::new()));
+    let mut fixture = Fixture::new("cache-test", "fixture", "fixture");
+    fixture.marker = Some("boot");
+    fixture.calls = calls.clone();
+    let mut registry = FamilyProviderRegistry::new();
+    registry.register_provider(test_native::install(0, fixture)).unwrap();
     let mut cache = ProbeCache::load(root.path(), Inventory::read(&[], &registry));
-    let report = refresh(&registry, &mut cache, root.path());
+    // A hint from an earlier import cannot identify an unregistered discovery.
+    cache.probe(&child, &registry, false).unwrap();
+    let before = calls.lock().iter().filter(|call| call.name == "probe").count();
+    let report = super::super::probe_worker::scan(
+        &registry, &mut cache, super::super::probe_worker::ScanRequest {
+            kind: super::super::probe_worker::ScanKind::Full,
+            paths: vec![root.path().into()], games: Vec::new(),
+        }, &AtomicBool::new(false),
+    ).unwrap();
+    assert_eq!(report.cache_hits, 0);
     assert_eq!(report.games.len(), 1);
-    assert!(report.games[0].candidates.is_empty());
+    assert_eq!(report.games[0].path, fs::canonicalize(&child).unwrap());
+    assert!(report.games[0].game_ids.is_empty());
+    assert_eq!(report.games[0].candidates.len(), 1);
+    assert!(calls.lock().iter().filter(|call| call.name == "probe").count() > before);
+}
+
+#[test]
+fn explicit_import_always_probes_registered_paths_freshly() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("game");
+    fs::create_dir(&path).unwrap();
+    fs::write(path.join("boot"), b"boot").unwrap();
+    let calls = std::sync::Arc::new(parking_lot::Mutex::new(Vec::new()));
+    let mut fixture = Fixture::new("cache-test", "fixture", "fixture");
+    fixture.marker = Some("boot");
+    fixture.calls = calls.clone();
+    let mut registry = FamilyProviderRegistry::new();
+    registry.register_provider(test_native::install(0, fixture)).unwrap();
+    let mut cache = ProbeCache::load(root.path(), Inventory::read(&[], &registry));
+    refresh(&registry, &mut cache, &path);
+    let before = calls.lock().iter().filter(|call| call.name == "probe").count();
+    let report = super::super::probe_worker::scan(
+        &registry, &mut cache, super::super::probe_worker::ScanRequest {
+            kind: super::super::probe_worker::ScanKind::Import,
+            paths: vec![path.clone()], games: vec![game(&path)],
+        }, &AtomicBool::new(false),
+    ).unwrap();
+    assert_eq!(report.cache_hits, 0);
     assert_eq!(report.games[0].game_ids, ["registered"]);
+    assert_eq!(report.games[0].candidates.len(), 1);
+    assert_eq!(calls.lock().iter().filter(|call| call.name == "probe").count(), before + 1);
 }
 
 #[test]
@@ -189,7 +232,7 @@ fn already_registered_nested_games_are_independently_refreshed() {
     nested.game_id = "nested".into();
     let report = super::super::probe_worker::scan(
         &registry, &mut cache, super::super::probe_worker::ScanRequest {
-            kind: super::super::probe_worker::ScanKind::Startup,
+            kind: super::super::probe_worker::ScanKind::Full,
             paths: Vec::new(), games: vec![game(&path), nested],
         }, &AtomicBool::new(false),
     ).unwrap();

@@ -21,7 +21,7 @@ fn provider_with_marker(
 
 fn controller(root: &Path) -> AstraEmuManagerController {
     let mut app = AstraEmuManagerController::open_library(root.into(), FrameMailbox::new(), Vec::new()).unwrap();
-    app.start_background_initialization().unwrap();
+    app.refresh_cores().unwrap();
     settle_background(&mut app);
     app
 }
@@ -42,7 +42,17 @@ pub(super) fn settle_background(app: &mut AstraEmuManagerController) {
     }
 }
 
+fn settle_provider(app: &mut AstraEmuManagerController) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !app.cores_ready() {
+        app.poll_platform().unwrap();
+        assert!(Instant::now() < deadline, "provider metadata did not arrive");
+        std::thread::yield_now();
+    }
+}
+
 fn scan_paths(app: &mut AstraEmuManagerController, paths: &[PathBuf]) -> Vec<String> {
+    settle_provider(app);
     app.begin_scan(probe_worker::ScanKind::Import, paths.to_vec()).unwrap();
     settle_background(app);
     app.library.list_games().unwrap().into_iter().map(|game| game.game_id).collect()
@@ -53,9 +63,100 @@ fn scan_once(app: &mut AstraEmuManagerController, path: &Path) {
 }
 
 fn import(app: &mut AstraEmuManagerController, path: &Path) -> ManagerViewModel {
+    settle_provider(app);
     app.add_game_directory(path).unwrap();
     settle_background(app);
     app.model().unwrap()
+}
+
+#[test]
+fn core_loading_preserves_cached_library_bindings_until_an_explicit_scan() {
+    let root = tempfile::tempdir().unwrap();
+    let data = root.path().join("manager");
+    let games = root.path().join("games");
+    let path = game(&games);
+    let discovered = games.join("discovered");
+    fs::create_dir(&discovered).unwrap();
+    fs::write(discovered.join("match"), b"match").unwrap();
+    let id = path_id(&path);
+    {
+        let mut saved = AstraEmuManagerController::open_library(
+            data.clone(), FrameMailbox::new(), vec![games.clone()],
+        ).unwrap();
+        saved.library.add_game(&GameRecord {
+            game_id: id.clone(), title: "Cached game".into(),
+            user_title: Some("Saved title".into()), location: path.to_str().unwrap().into(),
+            family_id: Some("saved-family".into()),
+            content_fingerprint: Some("saved-fingerprint".into()), added_at_unix_ms: 7,
+        }).unwrap();
+        saved.library.set_game_settings(&id, &astra_emu_manager_core::GameSettings {
+            emulator_id: Some("test-a".into()), ..Default::default()
+        }).unwrap();
+    }
+    let mut app = AstraEmuManagerController::open_library(
+        data.clone(), FrameMailbox::new(), vec![games],
+    ).unwrap();
+    let initial = app.model().unwrap();
+    assert_eq!(initial.games.len(), 1);
+    assert_eq!(initial.games[0].title, "Saved title");
+    assert!(!initial.startup_busy);
+    assert!(!initial.cores_ready);
+    assert!(initial.core_refresh_enabled);
+    assert!(app.poll_platform().unwrap().is_none());
+    assert!(!data.join("cores").exists());
+    assert_eq!(app.search("Saved").unwrap().games.len(), 1);
+    app.search("").unwrap();
+    assert_eq!(app.rescan().unwrap_err(), "ASTRA_EMU_CORES_NOT_READY");
+    assert_eq!(app.add_game_directory(&path).unwrap_err(), "ASTRA_EMU_CORES_NOT_READY");
+
+    let pending = app.refresh_cores().unwrap();
+    assert!(pending.startup_busy);
+    assert!(!pending.core_refresh_enabled);
+    assert_eq!(pending.games.len(), 1);
+    assert!(app.refresh_cores().is_err());
+    settle_background(&mut app);
+    assert_eq!(app.game(&id).unwrap().family_id.as_deref(), Some("saved-family"));
+    assert_eq!(app.library.list_games().unwrap().len(), 1);
+    assert!(app.candidates.is_empty());
+    assert!(app.probe_choices.is_empty());
+    assert!(!app.core_refresh_enabled());
+
+    let calls = std::sync::Arc::new(parking_lot::Mutex::new(Vec::new()));
+    let sink = calls.clone();
+    app.registry.register_provider(move || {
+        let mut fixture = Fixture::new("test-a", "fixture", "fixture");
+        fixture.marker = Some("match");
+        fixture.calls = sink;
+        test_native::install(0, fixture)
+    }).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while app.registry.descriptor("test-a").is_none() {
+        app.poll_platform().unwrap();
+        assert!(Instant::now() < deadline, "provider metadata did not arrive");
+        std::thread::yield_now();
+    }
+    let loaded = app.model().unwrap();
+    assert!(loaded.cores_ready);
+    assert!(!loaded.startup_busy);
+    assert!(!loaded.core_refresh_enabled);
+    assert_eq!(loaded.games.len(), 1);
+    assert!(!loaded.selected_launchable);
+    assert_eq!(app.game(&id).unwrap().family_id.as_deref(), Some("saved-family"));
+    assert_eq!(app.library.game_settings(&id).unwrap().unwrap().emulator_id.as_deref(), Some("test-a"));
+    assert!(app.candidates.is_empty());
+    assert!(!calls.lock().iter().any(|call| call.name == "probe"));
+    assert!(app.refresh_cores().is_err());
+
+    app.rescan().unwrap();
+    settle_background(&mut app);
+    let scanned = app.model().unwrap();
+    assert_eq!(scanned.games.len(), 2);
+    assert!(scanned.selected_launchable);
+    assert_eq!(app.game(&id).unwrap().family_id.as_deref(), Some("fixture"));
+    assert_eq!(app.game(&id).unwrap().content_fingerprint.as_deref(), Some("saved-fingerprint"));
+    assert_eq!(app.game(&id).unwrap().user_title.as_deref(), Some("Saved title"));
+    assert_eq!(app.library.game_settings(&id).unwrap().unwrap().emulator_id.as_deref(), Some("test-a"));
+    assert!(calls.lock().iter().any(|call| call.name == "probe"));
 }
 
 #[test]
@@ -178,6 +279,7 @@ fn scanning_existing_path_aliases_keeps_both_records_without_a_location_conflict
             })
             .unwrap();
     }
+    settle_provider(&mut app);
     app.rescan().unwrap();
     settle_background(&mut app);
     assert_eq!(app.library.list_games().unwrap().len(), 2);
@@ -204,7 +306,7 @@ fn scanning_existing_path_aliases_keeps_both_records_without_a_location_conflict
 }
 
 #[test]
-fn unavailable_game_does_not_block_library_startup_or_lose_metadata() {
+fn manual_full_scan_preserves_unavailable_game_metadata() {
     let root = tempfile::tempdir().unwrap();
     let path = game(root.path());
     let id = path_id(&path);
@@ -431,13 +533,15 @@ fn import_returns_while_owner_is_busy_and_publishes_only_after_native_work_finis
     let root = tempfile::tempdir().unwrap();
     let path = game(root.path());
     let mut app = controller(root.path());
+    app.registry.register_provider(|| provider("test-a", 9_000)).unwrap();
+    settle_provider(&mut app);
     let (sender, gate) = std::sync::mpsc::channel();
     let mut release = Release(Some(sender));
     let (entered, receiver) = std::sync::mpsc::channel();
     app.registry.register_provider(move || {
         entered.send(()).unwrap();
         gate.recv().unwrap();
-        provider("test-a", 9_000)
+        provider_with_marker("test-b", 8_000, "absent-marker")
     }).unwrap();
     receiver.recv_timeout(Duration::from_secs(5)).unwrap();
     let pending = app.add_game_directory(&path).unwrap();
@@ -453,22 +557,35 @@ fn import_returns_while_owner_is_busy_and_publishes_only_after_native_work_finis
 }
 
 #[test]
-fn deferred_startup_failure_is_visible_and_shutdown_still_joins_the_owner() {
+fn manual_core_failure_requires_restart_and_shutdown_still_joins_the_owner() {
     let root = tempfile::tempdir().unwrap();
     let mut app = AstraEmuManagerController::open_library(
         root.path().into(), FrameMailbox::new(), Vec::new(),
     ).unwrap();
-    assert!(app.add_game_directory(root.path()).unwrap_err().contains("INITIALIZING"));
-    // This invalid installation is not touched until the post-frame kickoff.
+    let initial = app.model().unwrap();
+    assert!(!initial.startup_busy);
+    assert!(!initial.cores_ready);
+    assert!(initial.core_refresh_enabled);
+    assert_eq!(app.add_game_directory(root.path()).unwrap_err(), "ASTRA_EMU_CORES_NOT_READY");
+    assert_eq!(app.rescan().unwrap_err(), "ASTRA_EMU_CORES_NOT_READY");
+    // The core installation is untouched until the explicit action.
     fs::write(root.path().join("cores"), b"not a directory").unwrap();
-    app.start_background_initialization().unwrap();
+    assert!(app.poll_platform().unwrap().is_none());
+    assert!(app.core_refresh_enabled());
+    let pending = app.refresh_cores().unwrap();
+    assert!(pending.startup_busy);
+    assert!(!pending.core_refresh_enabled);
+    assert!(!pending.cores_ready);
     settle_background(&mut app);
     assert!(!app.startup_busy());
     assert!(app.startup_status().contains("ASTRA_EMU_CORES_DIRECTORY_CREATE"));
     assert!(app.diagnostic.contains("ASTRA_EMU_CORES_DIRECTORY_CREATE"));
+    assert!(app.startup_status().contains("重启"));
+    assert!(!app.cores_ready());
+    assert!(!app.core_refresh_enabled());
     app.registry.shutdown().unwrap();
     app.registry.shutdown().unwrap();
-    assert!(app.start_background_initialization().is_err());
+    assert!(app.refresh_cores().is_err());
 }
 
 #[test]

@@ -80,7 +80,6 @@ struct AstraEmuManagerController {
     registry: owner::FamilyOwner,
     candidates: BTreeMap<String, FamilyProbeCandidate>,
     startup_state: background::StartupState,
-    startup_games: Option<Vec<GameRecord>>,
     probe_choices: BTreeMap<String, Vec<FamilyProbeCandidate>>,
     selected_case_id: Option<String>,
     search_query: String,

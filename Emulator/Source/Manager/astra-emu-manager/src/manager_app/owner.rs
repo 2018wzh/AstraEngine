@@ -105,7 +105,7 @@ pub(super) struct FamilyOwner {
 }
 
 impl FamilyOwner {
-    /// Construction is DB/settings-only; the fixed native thread starts after rendering.
+    /// Construction is DB/settings-only; explicit core refresh starts the fixed native thread.
     pub(super) fn new(data_dir: PathBuf, mailbox: FrameMailbox) -> Self {
         let (commands, receiver) = bounded(COMMAND_CAPACITY);
         let (results, background) = unbounded();
@@ -127,7 +127,7 @@ impl FamilyOwner {
         }
     }
 
-    pub(super) fn start(&mut self, games: Vec<GameRecord>) -> Result<(), String> {
+    pub(super) fn start(&mut self) -> Result<(), String> {
         let Some((data_dir, mailbox, receiver, results)) = self.deferred.take() else {
             return Err("ASTRA_EMU_OWNER_ALREADY_STARTED".into());
         };
@@ -141,7 +141,7 @@ impl FamilyOwner {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     super::owner_worker::run(
                         data_dir, mailbox, receiver, shared.clone(), results.clone(),
-                        wake.clone(), cancelled, games,
+                        wake.clone(), cancelled,
                     )
                 })).unwrap_or_else(|_| Err("ASTRA_EMU_OWNER_PANICKED".into()));
                 let diagnostic = result.as_ref().err().cloned()
@@ -181,6 +181,10 @@ impl FamilyOwner {
             return Some(BackgroundEvent::Exited("ASTRA_EMU_OWNER_EXITED".into()));
         }
         None
+    }
+
+    pub(super) fn is_ready(&self) -> bool {
+        self.ready
     }
 
     pub(super) fn scan(&self, request: super::probe_worker::ScanRequest) -> Result<(), String> {

@@ -1,8 +1,8 @@
 use super::*;
 
 impl ManagerController for AstraEmuManagerController {
-    fn start_background_initialization(&mut self) -> Result<(), String> {
-        AstraEmuManagerController::start_background_initialization(self)
+    fn refresh_cores(&mut self) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::refresh_cores(self)
     }
 
     fn take_modal_update(&mut self) -> Option<astra_emu_manager::modal_service::ModalUiUpdate> {

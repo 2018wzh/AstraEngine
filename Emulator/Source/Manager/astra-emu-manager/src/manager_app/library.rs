@@ -45,7 +45,6 @@ impl AstraEmuManagerController {
             registry,
             candidates: BTreeMap::new(),
             startup_state: background::StartupState::Waiting,
-            startup_games: Some(games),
             probe_choices: BTreeMap::new(),
             selected_case_id,
             search_query: String::new(),

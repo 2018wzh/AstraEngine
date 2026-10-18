@@ -4,7 +4,6 @@ use crossbeam_channel::RecvTimeoutError;
 use parking_lot::Mutex;
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn run(
     data_dir: PathBuf,
     mailbox: FrameMailbox,
@@ -13,7 +12,6 @@ pub(super) fn run(
     results: BackgroundSender,
     wake: Arc<Mutex<Option<HostWake>>>,
     cancelled: Arc<AtomicBool>,
-    games: Vec<GameRecord>,
 ) -> Result<(), String> {
     let mut registry = FamilyProviderRegistry::new();
     astra_emu_manager::startup::mark("core_loading_started");
@@ -44,13 +42,6 @@ pub(super) fn run(
     };
     let inventory = probe_cache::Inventory::read(&directories, &registry);
     let mut cache = probe_cache::ProbeCache::load(&data_dir, inventory);
-    astra_emu_manager::startup::mark("probe_refresh_started");
-    let refreshed = probe_worker::scan(&registry, &mut cache, probe_worker::ScanRequest {
-        kind: probe_worker::ScanKind::Startup, paths: Vec::new(), games,
-    }, &cancelled);
-    astra_emu_manager::startup::mark("probe_refresh_complete");
-    let _ = results.send(BackgroundEvent::Scanned(probe_worker::ScanKind::Startup, refreshed));
-    notify(&wake);
     let mut active: Option<ActiveFamilySession> = None;
     let mut pending = Vec::new();
     loop {
