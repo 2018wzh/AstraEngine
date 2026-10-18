@@ -109,7 +109,7 @@ pub(super) fn execute(
                 }
                 WindowCommand::Visibility(value) => native.set_visible(*value),
                 WindowCommand::Minimized(value) => native.set_minimized(*value),
-                WindowCommand::Icon(_) | WindowCommand::Pointer(_) => {}
+                WindowCommand::QueryState | WindowCommand::Icon(_) | WindowCommand::Pointer(_) => {}
             }
             let size = native.inner_size();
             let mut result = WindowOutcome {

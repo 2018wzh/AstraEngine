@@ -138,6 +138,11 @@
 
 #define AstraEmuWINDOW_MINIMIZED 9
 
+/**
+ * Read actual window state without mutation. flags must be zero; inspect result valid_fields.
+ */
+#define AstraEmuWINDOW_QUERY_STATE 10
+
 #define AstraEmuMODAL_TEXT_INPUT 1
 
 #define AstraEmuMAX_MODAL_TEXT 65536
@@ -396,6 +401,8 @@ typedef struct AstraEmuWindowButton {
  * with <=256-byte labels. MODAL_TEXT_INPUT distinguishes empty input from
  * a message-only dialog. Cancellation returns CANCELLED, not a button answer.
  * Modal buttons are explicit IDs; Host never invents an answer headlessly.
+ * QUERY_STATE returns only fields the native platform can actually observe.
+ * Focus/suspension must never be substituted for fullscreen/minimized state.
  * FULLSCREEN flags select one FULLSCREEN_* mode; exclusive width/height
  * request an exact physical display mode. Unsupported modes fail explicitly.
  * POINTER flags select independent properties; x/y use the logical stage.

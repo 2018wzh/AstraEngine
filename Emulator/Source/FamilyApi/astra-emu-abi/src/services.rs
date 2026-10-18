@@ -113,6 +113,8 @@ pub const WINDOW_POSITION: u32 = 7;
 /// flags is exactly 0/1; Host reports actual state using matching result bit.
 pub const WINDOW_VISIBILITY: u32 = 8;
 pub const WINDOW_MINIMIZED: u32 = 9;
+/// Read actual window state without mutation. flags must be zero; inspect result valid_fields.
+pub const WINDOW_QUERY_STATE: u32 = 10;
 pub const MODAL_TEXT_INPUT: u32 = 1;
 pub const MAX_MODAL_TEXT: usize = 65536;
 pub const MAX_MODAL_BUTTONS: usize = 16;
@@ -138,6 +140,8 @@ pub const POINTER_SET_Y: u32 = 32;
 /// with <=256-byte labels. MODAL_TEXT_INPUT distinguishes empty input from
 /// a message-only dialog. Cancellation returns CANCELLED, not a button answer.
 /// Modal buttons are explicit IDs; Host never invents an answer headlessly.
+/// QUERY_STATE returns only fields the native platform can actually observe.
+/// Focus/suspension must never be substituted for fullscreen/minimized state.
 /// FULLSCREEN flags select one FULLSCREEN_* mode; exclusive width/height
 /// request an exact physical display mode. Unsupported modes fail explicitly.
 /// POINTER flags select independent properties; x/y use the logical stage.

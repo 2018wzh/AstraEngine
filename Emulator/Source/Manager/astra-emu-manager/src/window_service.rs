@@ -13,6 +13,7 @@ use std::{
 };
 #[derive(Debug, Clone)]
 pub enum WindowCommand {
+    QueryState,
     Title(String),
     Fullscreen { mode: u32, width: u32, height: u32 },
     Size { width: u32, height: u32 },
@@ -250,6 +251,12 @@ unsafe fn execute(
         }
     }
     let command = match raw.kind {
+        abi::WINDOW_QUERY_STATE => {
+            if raw.flags != 0 {
+                return Err(invalid());
+            }
+            WindowCommand::QueryState
+        }
         abi::WINDOW_TITLE => WindowCommand::Title(
             unsafe { raw.text.text(4096) }
                 .map_err(|_| invalid())?
