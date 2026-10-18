@@ -78,6 +78,8 @@ fork/master 承载独立原生改进，astra 相对该基线仅一个必要适�
 
 清理前的开发证据包括 ABI/日志边界、Manager 同窗口输入与四类滤镜、Musica Hook 重试/读档上下文/真实 TLS 等待取消、RFVP 原生 UI/电影/选择及其他核心的代表流程。原始日志和已知问题保留；这些记录不冒充清理后的 Release 人工通过。自动验收入口、硬件/路线驱动、公开假核心、额外截图/输入脚本和测试访问钩子已删除，普通纯逻辑测试保留；本次清理后不再运行自动验收。
 
+清理后的 Manager 与七核心 Release 产物已构建并组装为本地运行包，包含真实依赖和现有许可文本。静态检查确认七个核心均为 x64 PE、导出 `astra_emu_query`；包中唯一 executable 为 Manager，不包含验收脚本或驱动。仅检查了 Manager 的 `--help` 命令面，未自动启动 GUI 或游戏；实际可玩性由用户手动验收。BGI 已按用户确认记录，RFVP 字体及 Ethornell 许可未澄清，因此不公开发布二进制 Release。
+
 共享改动已通过 root workspace 的 `cargo check --workspace --all-targets --features astra-media/ffmpeg-vcpkg`，以及 Editor 独立 workspace 的全 target check。Emulator 按受影响包及独占 Family 构建验证，CMVS 未编译；编译结果不替代运行证据。保留依赖 `binrw` 和 `proc-macro-error2` 的未来 Rust 兼容警告。
 
 操作入口：[开发手册](../manual/development.md)、[AstraEMU 客户端](../manual/astraemu-client.md)、[Editor](../../Editor/README.md)、[NativeVN 样例](../../Examples/NativeVN/README.md)、[终之空资料](../samples/tsuinosora-modernization/README.md)。
