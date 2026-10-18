@@ -51,18 +51,25 @@ impl ActiveFamilySession {
         if let Some(window) = &services.window {
             host.window = window.sink();
         }
-        let opened = registry.open_selected(
-            candidate,
-            NativeOpenRequest {
-                game_path: game.location.clone(),
-                configuration,
-                session_epoch: epoch,
-                initial_window,
-                host,
-                cancellation: services.cancellation,
-                d3d12: mailbox.d3d12()?,
-            },
-        );
+        let opened = (|| {
+            // Probes use canonical directories; preserve stored aliases without
+            // changing the native identity between probing and opening.
+            let path = fs::canonicalize(&game.location)
+                .map_err(|_| "ASTRA_EMU_GAME_DIRECTORY_INVALID".to_owned())?;
+            let game_path = path.to_str().ok_or("ASTRA_EMU_GAME_PATH_UTF8")?.to_owned();
+            registry.open_selected(
+                candidate,
+                NativeOpenRequest {
+                    game_path,
+                    configuration,
+                    session_epoch: epoch,
+                    initial_window,
+                    host,
+                    cancellation: services.cancellation,
+                    d3d12: mailbox.d3d12()?,
+                },
+            ).map_err(|error| error.to_string())
+        })();
         let session = match opened {
             Ok(session) => session,
             Err(error) => {
@@ -75,7 +82,7 @@ impl ActiveFamilySession {
                 if let Some(modal) = &services.modal {
                     modal.cancel_pending();
                 }
-                return Err(error.to_string());
+                return Err(error);
             }
         };
         let mut active = Self {

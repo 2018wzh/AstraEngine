@@ -89,10 +89,11 @@ impl AstraEmuManagerController {
     }
 
     pub(super) fn poll_platform(&mut self) -> Result<Option<ManagerViewModel>, String> {
+        let background_changed = self.poll_background()?;
         let owner_changed = self.poll_owner()?;
         let connection_changed = self.poll_connection_test();
         let metadata_changed = self.poll_metadata()?;
-        if owner_changed || metadata_changed || connection_changed {
+        if background_changed || owner_changed || metadata_changed || connection_changed {
             Ok(Some(self.model()?))
         } else {
             Ok(None)
@@ -100,9 +101,7 @@ impl AstraEmuManagerController {
     }
 
     pub(super) fn set_host_wake(&mut self, wake: HostWake) {
-        if let Err(error) = self.registry.set_wake(wake.clone()) {
-            self.diagnostic = error;
-        }
+        self.registry.set_wake(wake.clone());
         self.host_wake = Some(wake.clone());
         self.metadata.set_wake(wake);
     }

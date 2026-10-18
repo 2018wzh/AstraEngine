@@ -2,18 +2,27 @@ use super::*;
 use astra_emu_manager_core::model::{
     ConfigEntry, ConfigField, FamilyPointerRequest, FamilyWindowIcon,
 };
-use crossbeam_channel::{Receiver, Sender, bounded};
+use crossbeam_channel::{Receiver, Sender, bounded, unbounded};
 use parking_lot::Mutex;
-use std::sync::Arc;
+use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use std::thread::JoinHandle;
 
 const COMMAND_CAPACITY: usize = 8;
 
-type RegistryJob = Box<dyn FnOnce(&mut FamilyProviderRegistry) + Send>;
-type Metadata = BTreeMap<String, (FamilyPluginDescriptor, Vec<ConfigField>)>;
+#[cfg(test)]
+type RegistryJob = Box<dyn FnOnce(&mut FamilyProviderRegistry) -> Result<Metadata, String> + Send>;
+pub(super) type Metadata = BTreeMap<String, (FamilyPluginDescriptor, Vec<ConfigField>)>;
+
+pub(super) enum BackgroundEvent {
+    Ready(Result<(Metadata, BTreeMap<String, String>), String>),
+    Scanned(super::probe_worker::ScanKind, Result<super::probe_worker::ScanReport, String>),
+    Exited(String),
+}
 
 pub(super) enum Command {
+    #[cfg(test)]
     Registry(RegistryJob),
+    Scan(super::probe_worker::ScanRequest),
     Open(Box<OpenSession>),
     Events {
         epoch: u64,
@@ -23,7 +32,6 @@ pub(super) enum Command {
         epoch: u64,
         events: Vec<FamilyEvent>,
     },
-    Wake(HostWake),
     Shutdown,
 }
 
@@ -83,6 +91,12 @@ pub(super) struct FamilyOwner {
     commands: Sender<Command>,
     updates: Arc<Mutex<Update>>,
     worker: Option<JoinHandle<Result<(), String>>>,
+    background: Receiver<BackgroundEvent>,
+    deferred: Option<(PathBuf, FrameMailbox, Commands, Sender<BackgroundEvent>)>,
+    wake: Arc<Mutex<Option<HostWake>>>,
+    cancelled: Arc<AtomicBool>,
+    ready: bool,
+    exit_reported: bool,
     metadata: Metadata,
     modal: Mutex<Option<ModalBridge>>,
     window_service: Mutex<Option<astra_emu_manager::window_service::WindowBridge>>,
@@ -91,42 +105,96 @@ pub(super) struct FamilyOwner {
 }
 
 impl FamilyOwner {
-    /// Construct the registry on its final thread; Rc-backed plugins are not Send.
-    pub(super) fn start(
-        directories: Vec<PathBuf>,
-        mailbox: FrameMailbox,
-    ) -> Result<(Self, BTreeMap<String, String>), String> {
+    /// Construction is DB/settings-only; the fixed native thread starts after rendering.
+    pub(super) fn new(data_dir: PathBuf, mailbox: FrameMailbox) -> Self {
         let (commands, receiver) = bounded(COMMAND_CAPACITY);
-        let (ready, readiness) = bounded(1);
-        let updates = Arc::new(Mutex::new(Update::default()));
-        let shared = updates.clone();
-        let worker = std::thread::Builder::new()
+        let (results, background) = unbounded();
+        Self {
+            commands,
+            updates: Arc::new(Mutex::new(Update::default())),
+            worker: None,
+            background,
+            deferred: Some((data_dir, mailbox, receiver, results)),
+            wake: Arc::new(Mutex::new(None)),
+            cancelled: Arc::new(AtomicBool::new(false)),
+            ready: false,
+            exit_reported: false,
+            metadata: BTreeMap::new(),
+            modal: Mutex::new(None),
+            window_service: Mutex::new(None),
+            text: Mutex::new(None),
+            cancellation: Mutex::new(None),
+        }
+    }
+
+    pub(super) fn start(&mut self, games: Vec<GameRecord>) -> Result<(), String> {
+        let Some((data_dir, mailbox, receiver, results)) = self.deferred.take() else {
+            return Err("ASTRA_EMU_OWNER_ALREADY_STARTED".into());
+        };
+        let shared = self.updates.clone();
+        let wake = self.wake.clone();
+        let cancelled = self.cancelled.clone();
+        self.worker = Some(std::thread::Builder::new()
             .name("astra-family-owner".into())
             .stack_size(super::super::FAMILY_OWNER_STACK_BYTES)
-            .spawn(move || super::owner_worker::run(directories, mailbox, receiver, shared, ready))
-            .map_err(|error| format!("ASTRA_EMU_OWNER_START: {error}"))?;
-        let initialized = readiness
-            .recv()
-            .map_err(|_| "ASTRA_EMU_OWNER_START_DISCONNECTED".to_owned());
-        match initialized.and_then(|result| result) {
-            Ok((metadata, errors)) => Ok((
-                Self {
-                    commands,
-                    updates,
-                    worker: Some(worker),
-                    metadata,
-                    modal: Mutex::new(None),
-                    window_service: Mutex::new(None),
-                    text: Mutex::new(None),
-                    cancellation: Mutex::new(None),
-                },
-                errors,
-            )),
-            Err(error) => {
-                let _ = worker.join();
-                Err(error)
+            .spawn(move || {
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    super::owner_worker::run(
+                        data_dir, mailbox, receiver, shared.clone(), results.clone(),
+                        wake.clone(), cancelled, games,
+                    )
+                })).unwrap_or_else(|_| Err("ASTRA_EMU_OWNER_PANICKED".into()));
+                let diagnostic = result.as_ref().err().cloned()
+                    .unwrap_or_else(|| "ASTRA_EMU_OWNER_EXITED".into());
+                if let Err(error) = &result {
+                    let mut update = shared.lock();
+                    if update.epoch != 0 && !update.closed {
+                        update.closed = true;
+                        update.error = Some(error.clone());
+                        update.dirty = true;
+                    }
+                }
+                let _ = results.send(BackgroundEvent::Exited(diagnostic));
+                let callback = wake.lock().clone();
+                if let Some(wake) = callback { wake(); }
+                result
+            })
+            .map_err(|error| format!("ASTRA_EMU_OWNER_START: {error}"))?);
+        Ok(())
+    }
+
+    pub(super) fn take_background(&mut self) -> Option<BackgroundEvent> {
+        if let Ok(event) = self.background.try_recv() {
+            if let BackgroundEvent::Ready(result) = &event {
+                self.ready = result.is_ok();
+                if let Ok((metadata, _)) = result { self.metadata.clone_from(metadata); }
             }
+            if matches!(&event, BackgroundEvent::Exited(_)) {
+                self.ready = false;
+                self.exit_reported = true;
+            }
+            return Some(event);
         }
+        if !self.exit_reported && self.worker.as_ref().is_some_and(JoinHandle::is_finished) {
+            self.exit_reported = true;
+            self.ready = false;
+            return Some(BackgroundEvent::Exited("ASTRA_EMU_OWNER_EXITED".into()));
+        }
+        None
+    }
+
+    pub(super) fn scan(&self, request: super::probe_worker::ScanRequest) -> Result<(), String> {
+        self.ensure_idle()?;
+        self.send(Command::Scan(request))
+    }
+
+    fn ensure_idle(&self) -> Result<(), String> {
+        if !self.ready { return Err("ASTRA_EMU_FAMILY_INITIALIZING".into()); }
+        let update = self.updates.lock();
+        if update.epoch != 0 && !update.closed {
+            return Err("ASTRA_EMU_FAMILY_SESSION_ALREADY_ACTIVE".into());
+        }
+        Ok(())
     }
 
     pub(super) fn descriptor(&self, id: &str) -> Option<&FamilyPluginDescriptor> {
@@ -144,56 +212,21 @@ impl FamilyOwner {
             .ok_or_else(|| "ASTRA_EMU_FAMILY_PROVIDER_MISSING".into())
     }
 
-    pub(super) fn probe(
-        &self,
-        request: &ProbeRequest,
-        plugin: Option<&str>,
-        family: Option<&str>,
-    ) -> Result<FamilyProbeSelection, String> {
-        let request = request.clone();
-        let plugin = plugin.map(str::to_owned);
-        let family = family.map(str::to_owned);
-        self.registry_call(move |registry| {
-            registry
-                .probe(&request, plugin.as_deref(), family.as_deref())
-                .map_err(|error| error.to_string())
-        })
-    }
-
-    fn registry_call<T: Send + 'static>(
-        &self,
-        call: impl FnOnce(&mut FamilyProviderRegistry) -> Result<T, String> + Send + 'static,
-    ) -> Result<T, String> {
-        // Registry RPC is only admitted while idle. Playback never waits on UI RPC.
-        let update = self.updates.lock();
-        if update.epoch != 0 && !update.closed {
-            return Err("ASTRA_EMU_FAMILY_SESSION_ALREADY_ACTIVE".into());
-        }
-        drop(update);
-        let (reply, response) = bounded(1);
-        self.send(Command::Registry(Box::new(move |registry| {
-            let _ = reply.send(call(registry));
-        })))?;
-        response
-            .recv()
-            .map_err(|_| "ASTRA_EMU_OWNER_DISCONNECTED".to_owned())?
-    }
 
     #[cfg(test)]
     pub(super) fn register_provider(
         &mut self,
         factory: impl FnOnce() -> astra_emu_manager_core::LoadedFamilyPlugin + Send + 'static,
     ) -> Result<(), String> {
-        self.metadata = self.registry_call(move |registry| {
-            registry
-                .register_provider(factory())
-                .map_err(|error| error.to_string())?;
+        self.send(Command::Registry(Box::new(move |registry| {
+            registry.register_provider(factory()).map_err(|error| error.to_string())?;
             collect_metadata(registry)
-        })?;
-        Ok(())
+        })))
     }
 
     pub(super) fn open(&self, mut request: OpenSession) -> Result<(), String> {
+        self.ensure_idle()?;
+        *self.wake.lock() = Some(request.wake.clone());
         let epoch = request.epoch;
         let mut shared = self.updates.lock();
         if shared.epoch != 0 && !shared.closed {
@@ -253,8 +286,8 @@ impl FamilyOwner {
         self.send(Command::Close { epoch, events })
     }
 
-    pub(super) fn set_wake(&self, wake: HostWake) -> Result<(), String> {
-        self.send(Command::Wake(wake))
+    pub(super) fn set_wake(&self, wake: HostWake) {
+        *self.wake.lock() = Some(wake);
     }
 
     pub(super) fn take_update(&self, epoch: u64) -> Option<Update> {
@@ -331,6 +364,8 @@ impl FamilyOwner {
     }
 
     pub(super) fn shutdown(&mut self) -> Result<(), String> {
+        self.cancelled.store(true, Ordering::Release);
+        self.deferred.take();
         if let Some(window) = self.window_service.lock().as_ref() {
             window.close();
         }
@@ -348,12 +383,8 @@ impl FamilyOwner {
             return Ok(());
         };
         // Final process teardown: ordered close, then join. Ordinary UI close is asynchronous.
-        let send = self.commands.send(Command::Shutdown);
-        let result = worker
-            .join()
-            .map_err(|_| "ASTRA_EMU_OWNER_PANICKED".to_owned())?;
-        result?;
-        send.map_err(|_| "ASTRA_EMU_OWNER_DISCONNECTED".into())
+        let _ = self.commands.try_send(Command::Shutdown);
+        worker.join().map_err(|_| "ASTRA_EMU_OWNER_PANICKED".to_owned())?
     }
 }
 
@@ -377,7 +408,7 @@ pub(super) fn collect_metadata(registry: &FamilyProviderRegistry) -> Result<Meta
         .collect()
 }
 
-pub(super) type Readiness = Sender<Result<(Metadata, BTreeMap<String, String>), String>>;
+pub(super) type BackgroundSender = Sender<BackgroundEvent>;
 pub(super) type Commands = Receiver<Command>;
 
 #[cfg(test)]

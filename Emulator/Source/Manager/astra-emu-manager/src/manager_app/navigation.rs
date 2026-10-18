@@ -39,43 +39,10 @@ impl AstraEmuManagerController {
     }
 
     pub(super) fn rescan(&mut self) -> Result<ManagerViewModel, String> {
-        let mut paths = self.game_roots.clone();
-        paths.extend(
-            self.library
-                .list_games()
-                .map_err(|error| error.to_string())?
-                .into_iter()
-                .map(|game| PathBuf::from(game.location)),
-        );
-        paths.sort();
-        paths.dedup();
-        self.candidates.clear();
-        self.probe_choices.clear();
-        self.diagnostic.clear();
-        let mut missing = 0;
-        for path in &paths {
-            if !path.is_dir() {
-                self.clear_probe_state(&path_id(path))?;
-                missing += 1;
-            }
+        if self.active.is_some() {
+            return Err("ASTRA_EMU_FAMILY_SESSION_ALREADY_ACTIVE".into());
         }
-        paths.retain(|path| path.is_dir());
-        if !paths.is_empty() {
-            self.scan_paths(&paths)?;
-        }
-        if missing > 0 {
-            self.diagnostic = format!(
-                "有 {missing} 个游戏目录当前不可用。资料库信息已保留，恢复目录后点击“扫描游戏”。"
-            );
-        }
-        if self.selected_case_id.is_none() {
-            self.selected_case_id = self
-                .library
-                .list_games()
-                .map_err(|error| error.to_string())?
-                .first()
-                .map(|game| game.game_id.clone());
-        }
+        self.begin_scan(probe_worker::ScanKind::Full, self.game_roots.clone())?;
         self.model()
     }
 
@@ -91,6 +58,9 @@ impl AstraEmuManagerController {
         tracing::info!(event = "astra.emu.manager.launch.opening");
         if self.active.is_some() {
             return Err("ASTRA_EMU_FAMILY_SESSION_ALREADY_ACTIVE".into());
+        }
+        if self.startup_busy() {
+            return Err("ASTRA_EMU_FAMILY_INITIALIZING".into());
         }
         let game = self.game(case_id)?;
         self.load_game_input_mapping(case_id)?;
@@ -118,6 +88,10 @@ impl AstraEmuManagerController {
             let extensions =
                 astra_emu_manager_core::extensions::ExtensionStore::new(&self.data_dir).list()?;
             if profile.is_some() || extensions.iter().any(|extension| extension.enabled) {
+                if self.extensions.is_none() {
+                    self.extensions = Some(crate::text_service::ExtensionRuntime::new()
+                        .map_err(|error| error.to_string())?);
+                }
                 let secrets = std::sync::Arc::new(
                     ManagerSecretStore::open().map_err(|error| error.to_string())?,
                 );

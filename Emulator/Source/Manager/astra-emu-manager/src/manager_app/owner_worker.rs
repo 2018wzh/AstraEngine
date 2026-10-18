@@ -1,36 +1,66 @@
-use super::owner::{Command, Commands, Readiness, Update, collect_metadata};
+use super::owner::{BackgroundEvent, BackgroundSender, Command, Commands, Update, collect_metadata};
 use super::*;
 use crossbeam_channel::RecvTimeoutError;
 use parking_lot::Mutex;
-use std::sync::Arc;
+use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn run(
-    directories: Vec<PathBuf>,
+    data_dir: PathBuf,
     mailbox: FrameMailbox,
     commands: Commands,
     shared: Arc<Mutex<Update>>,
-    ready: Readiness,
+    results: BackgroundSender,
+    wake: Arc<Mutex<Option<HostWake>>>,
+    cancelled: Arc<AtomicBool>,
+    games: Vec<GameRecord>,
 ) -> Result<(), String> {
     let mut registry = FamilyProviderRegistry::new();
-    let initialization = initialize(&mut registry, &directories);
-    match initialization {
-        Ok(errors) => {
-            let metadata = collect_metadata(&registry);
-            let successful = metadata.is_ok();
-            let _ = ready.send(metadata.map(|metadata| (metadata, errors)));
-            if !successful {
-                return Ok(());
-            }
+    astra_emu_manager::startup::mark("core_loading_started");
+    let initialized = (|| {
+        if cancelled.load(Ordering::Acquire) { return Err("ASTRA_EMU_OWNER_CANCELLED".into()); }
+        let cores = data_dir.join("cores");
+        fs::create_dir_all(&cores).map_err(|_| "ASTRA_EMU_CORES_DIRECTORY_CREATE")?;
+        #[cfg(not(target_os = "android"))]
+        let directories = core_directories(&cores)?;
+        #[cfg(target_os = "android")]
+        let directories = Vec::new();
+        let errors = initialize(&mut registry, &directories)?;
+        let metadata = collect_metadata(&registry)?;
+        Ok((directories, metadata, errors))
+    })();
+    let directories = match initialized {
+        Ok((directories, metadata, errors)) => {
+            astra_emu_manager::startup::mark("core_metadata_ready");
+            let _ = results.send(BackgroundEvent::Ready(Ok((metadata, errors))));
+            notify(&wake);
+            directories
         }
         Err(error) => {
-            let _ = ready.send(Err(error));
-            return Ok(());
+            let _ = results.send(BackgroundEvent::Ready(Err(error)));
+            notify(&wake);
+            return registry.shutdown().map_err(|error| error.to_string());
         }
-    }
+    };
+    let inventory = probe_cache::Inventory::read(&directories, &registry);
+    let mut cache = probe_cache::ProbeCache::load(&data_dir, inventory);
+    astra_emu_manager::startup::mark("probe_refresh_started");
+    let refreshed = probe_worker::scan(&registry, &mut cache, probe_worker::ScanRequest {
+        kind: probe_worker::ScanKind::Startup, paths: Vec::new(), games,
+    }, &cancelled);
+    astra_emu_manager::startup::mark("probe_refresh_complete");
+    let _ = results.send(BackgroundEvent::Scanned(probe_worker::ScanKind::Startup, refreshed));
+    notify(&wake);
     let mut active: Option<ActiveFamilySession> = None;
-    let mut wake: Option<HostWake> = None;
     let mut pending = Vec::new();
     loop {
+        if cancelled.load(Ordering::Acquire) {
+            let primary = shared.lock().error.take();
+            let session_error = active.take().and_then(|mut session| session.close().err());
+            let owner_error = registry.shutdown().err().map(|error| error.to_string());
+            let errors: Vec<_> = [primary, session_error, owner_error].into_iter().flatten().collect();
+            return if errors.is_empty() { Ok(()) } else { Err(errors.join("; ")) };
+        }
         let command = if let Some(session) = active.as_ref() {
             commands.recv_timeout(
                 session
@@ -41,12 +71,27 @@ pub(super) fn run(
             commands.recv().map_err(|_| RecvTimeoutError::Disconnected)
         };
         match command {
-            Ok(Command::Registry(call)) => call(&mut registry),
-            Ok(Command::Wake(value)) => wake = Some(value),
+            #[cfg(test)]
+            Ok(Command::Registry(call)) => {
+                let metadata = call(&mut registry);
+                let _ = results.send(BackgroundEvent::Ready(metadata.map(|metadata| (metadata, BTreeMap::new()))));
+                // A registry mutation invalidates hints, including duplicate rejection.
+                cache = probe_cache::ProbeCache::load(&data_dir, None);
+                notify(&wake);
+            }
+            Ok(Command::Scan(request)) => {
+                let kind = request.kind;
+                let result = if active.is_some() {
+                    Err("ASTRA_EMU_FAMILY_SESSION_ALREADY_ACTIVE".into())
+                } else {
+                    probe_worker::scan(&registry, &mut cache, request, &cancelled)
+                };
+                let _ = results.send(BackgroundEvent::Scanned(kind, result));
+                notify(&wake);
+            }
             Ok(Command::Open(request)) => {
                 pending.clear();
                 let epoch = request.epoch;
-                wake = Some(request.wake.clone());
                 match ActiveFamilySession::open(
                     (&request.game, request.configuration, epoch),
                     &request.candidate,
@@ -250,8 +295,9 @@ fn closed(epoch: u64, error: Option<String>, shared: &Mutex<Update>) {
     update.dirty = true;
 }
 
-fn notify(wake: &Option<HostWake>) {
-    if let Some(wake) = wake {
+fn notify(wake: &Mutex<Option<HostWake>>) {
+    let callback = wake.lock().clone();
+    if let Some(wake) = callback {
         wake();
     }
 }

@@ -34,10 +34,18 @@ fn configuration_controller(root: &std::path::Path) -> AstraEmuManagerController
         Vec::new(),
     )
     .unwrap();
+    controller.start_background_initialization().unwrap();
+    crate::manager_app::probe_state_tests::settle_background(&mut controller);
     controller
         .registry
         .register_provider(configuration_provider)
         .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while controller.registry.descriptor("config-test-plugin").is_none() {
+        controller.poll_platform().unwrap();
+        assert!(Instant::now() < deadline, "provider metadata did not arrive");
+        std::thread::yield_now();
+    }
     controller
         .library
         .add_game(&GameRecord {

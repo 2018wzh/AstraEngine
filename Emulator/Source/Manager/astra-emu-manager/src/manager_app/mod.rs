@@ -54,6 +54,9 @@ mod musica_keys;
 mod navigation;
 mod owner;
 mod owner_worker;
+mod probe_cache;
+mod probe_worker;
+mod background;
 mod preferences;
 #[cfg(test)]
 mod probe_state_tests;
@@ -76,13 +79,15 @@ struct AstraEmuManagerController {
     library: Library,
     registry: owner::FamilyOwner,
     candidates: BTreeMap<String, FamilyProbeCandidate>,
+    startup_state: background::StartupState,
+    startup_games: Option<Vec<GameRecord>>,
     probe_choices: BTreeMap<String, Vec<FamilyProbeCandidate>>,
     selected_case_id: Option<String>,
     search_query: String,
     diagnostic: String,
     plugin_errors: BTreeMap<String, String>,
     data_dir: PathBuf,
-    _extensions: crate::text_service::ExtensionRuntime,
+    extensions: Option<crate::text_service::ExtensionRuntime>,
     game_roots: Vec<PathBuf>,
     mailbox: FrameMailbox,
     active: Option<owner::ActiveSessionView>,
@@ -137,6 +142,7 @@ impl Drop for AstraEmuManagerController {
 }
 
 pub(super) fn run_application() -> Result<(), Box<dyn std::error::Error>> {
+    astra_emu_manager::startup::begin();
     let data_dir = platform_data_dir()?;
     fs::create_dir_all(&data_dir)?;
     let filter = match std::env::var("RUST_LOG") {
@@ -149,6 +155,7 @@ pub(super) fn run_application() -> Result<(), Box<dyn std::error::Error>> {
     observability.console = false;
     observability.log_dir = Some(data_dir.join("diagnostics"));
     let _observability = std::sync::Arc::new(astra_observability::init_host(observability)?);
+    astra_emu_manager::startup::mark("process_entry");
     let filter_guard = std::sync::Arc::downgrade(&_observability);
     astra_emu_manager_core::set_diagnostic_enabled(move |level, target| {
         filter_guard
@@ -176,6 +183,7 @@ pub(super) fn run_application() -> Result<(), Box<dyn std::error::Error>> {
     let result = (|| {
         let mailbox = FrameMailbox::new();
         let controller = AstraEmuManagerController::open(mailbox.clone())?;
+        astra_emu_manager::startup::mark("cached_controller_ready");
         run_manager_with_initial_state(controller, ManagerStageRenderer::new(mailbox), false)?;
         Ok(())
     })();

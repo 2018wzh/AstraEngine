@@ -20,7 +20,10 @@ fn provider_with_marker(
 }
 
 fn controller(root: &Path) -> AstraEmuManagerController {
-    AstraEmuManagerController::open_library(root.into(), FrameMailbox::new(), Vec::new()).unwrap()
+    let mut app = AstraEmuManagerController::open_library(root.into(), FrameMailbox::new(), Vec::new()).unwrap();
+    app.start_background_initialization().unwrap();
+    settle_background(&mut app);
+    app
 }
 
 fn game(root: &Path) -> PathBuf {
@@ -30,8 +33,29 @@ fn game(root: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap()
 }
 
+pub(super) fn settle_background(app: &mut AstraEmuManagerController) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while app.startup_busy() {
+        app.poll_platform().unwrap();
+        assert!(Instant::now() < deadline, "background operation did not complete");
+        std::thread::yield_now();
+    }
+}
+
+fn scan_paths(app: &mut AstraEmuManagerController, paths: &[PathBuf]) -> Vec<String> {
+    app.begin_scan(probe_worker::ScanKind::Import, paths.to_vec()).unwrap();
+    settle_background(app);
+    app.library.list_games().unwrap().into_iter().map(|game| game.game_id).collect()
+}
+
 fn scan_once(app: &mut AstraEmuManagerController, path: &Path) {
-    app.scan_paths(&[path.to_owned()]).unwrap();
+    scan_paths(app, &[path.to_owned()]);
+}
+
+fn import(app: &mut AstraEmuManagerController, path: &Path) -> ManagerViewModel {
+    app.add_game_directory(path).unwrap();
+    settle_background(app);
+    app.model().unwrap()
 }
 
 #[test]
@@ -43,7 +67,7 @@ fn imported_game_selection_loads_its_input_mapping() {
         .register_provider(move || provider("test-a", 9_000))
         .unwrap();
     app.input_mapping.deadzone = GamepadDeadzone::High;
-    let model = app.add_game_directory(&path).unwrap();
+    let model = import(&mut app, &path);
     assert_eq!(model.selected_case_id, Some(path_id(&path)));
     assert_eq!(app.input_mapping.deadzone, default_vn_preset().deadzone);
 }
@@ -56,10 +80,10 @@ fn unsupported_import_preserves_the_existing_game_and_selection() {
     app.registry
         .register_provider(move || provider("test-a", 9_000))
         .unwrap();
-    app.add_game_directory(&path).unwrap();
+    import(&mut app, &path);
     let unsupported = root.path().join("unsupported");
     std::fs::create_dir(&unsupported).unwrap();
-    let model = app.add_game_directory(&unsupported).unwrap();
+    let model = import(&mut app, &unsupported);
     assert_eq!(model.games.len(), 1);
     assert_eq!(model.selected_case_id, Some(path_id(&path)));
 }
@@ -75,7 +99,7 @@ fn scanning_stops_inside_a_recognized_game() {
     app.registry
         .register_provider(move || provider("test-a", 9_000))
         .unwrap();
-    let imported = app.scan_paths(&[root.path().into(), assets]).unwrap();
+    let imported = scan_paths(&mut app, &[root.path().into(), assets]);
     assert_eq!(imported, vec![path_id(&path)]);
     assert_eq!(app.library.list_games().unwrap().len(), 1);
 }
@@ -110,7 +134,7 @@ fn importing_a_parent_keeps_the_existing_game_id_and_settings() {
             },
         )
         .unwrap();
-    let imported = app.scan_paths(&[root.path().into()]).unwrap();
+    let imported = scan_paths(&mut app, &[root.path().into()]);
     assert_eq!(imported, vec![id.clone()]);
     assert_eq!(app.library.list_games().unwrap().len(), 1);
     assert_eq!(
@@ -155,6 +179,7 @@ fn scanning_existing_path_aliases_keeps_both_records_without_a_location_conflict
             .unwrap();
     }
     app.rescan().unwrap();
+    settle_background(&mut app);
     assert_eq!(app.library.list_games().unwrap().len(), 2);
     assert_eq!(
         app.library.game("original").unwrap().unwrap().location,
@@ -168,6 +193,7 @@ fn scanning_existing_path_aliases_keeps_both_records_without_a_location_conflict
     assert!(app.candidates.contains_key("original"));
     std::fs::remove_file(path.join("match")).unwrap();
     app.rescan().unwrap();
+    settle_background(&mut app);
     assert!(app.candidates.is_empty());
     for id in ["original", "canonical"] {
         assert_eq!(
@@ -191,7 +217,9 @@ fn unavailable_game_does_not_block_library_startup_or_lose_metadata() {
         .set_game_user_title(&id, Some("Saved title"))
         .unwrap();
     std::fs::remove_dir_all(&path).unwrap();
-    let model = app.rescan().unwrap();
+    app.rescan().unwrap();
+    settle_background(&mut app);
+    let model = app.model().unwrap();
     assert_eq!(model.games.len(), 1);
     assert_eq!(model.games[0].title, "Saved title");
     assert!(!model.games[0].diagnostic.is_empty());
@@ -390,4 +418,68 @@ fn missing_saved_emulator_requires_an_explicit_replacement() {
             .as_deref(),
         Some("test-b")
     );
+}
+
+#[test]
+fn import_returns_while_owner_is_busy_and_publishes_only_after_native_work_finishes() {
+    struct Release(Option<std::sync::mpsc::Sender<()>>);
+    impl Drop for Release {
+        fn drop(&mut self) {
+            if let Some(sender) = self.0.take() { let _ = sender.send(()); }
+        }
+    }
+    let root = tempfile::tempdir().unwrap();
+    let path = game(root.path());
+    let mut app = controller(root.path());
+    let (sender, gate) = std::sync::mpsc::channel();
+    let mut release = Release(Some(sender));
+    let (entered, receiver) = std::sync::mpsc::channel();
+    app.registry.register_provider(move || {
+        entered.send(()).unwrap();
+        gate.recv().unwrap();
+        provider("test-a", 9_000)
+    }).unwrap();
+    receiver.recv_timeout(Duration::from_secs(5)).unwrap();
+    let pending = app.add_game_directory(&path).unwrap();
+    assert!(pending.games.is_empty());
+    assert!(app.startup_busy());
+    assert!(app.poll_platform().unwrap().is_none());
+    release.0.take().unwrap().send(()).unwrap();
+    settle_background(&mut app);
+    let model = app.model().unwrap();
+    assert_eq!(model.games.len(), 1);
+    assert_eq!(model.selected_case_id, Some(path_id(&path)));
+    assert!(app.candidates.contains_key(&path_id(&path)));
+}
+
+#[test]
+fn deferred_startup_failure_is_visible_and_shutdown_still_joins_the_owner() {
+    let root = tempfile::tempdir().unwrap();
+    let mut app = AstraEmuManagerController::open_library(
+        root.path().into(), FrameMailbox::new(), Vec::new(),
+    ).unwrap();
+    assert!(app.add_game_directory(root.path()).unwrap_err().contains("INITIALIZING"));
+    // This invalid installation is not touched until the post-frame kickoff.
+    fs::write(root.path().join("cores"), b"not a directory").unwrap();
+    app.start_background_initialization().unwrap();
+    settle_background(&mut app);
+    assert!(!app.startup_busy());
+    assert!(app.startup_status().contains("ASTRA_EMU_CORES_DIRECTORY_CREATE"));
+    assert!(app.diagnostic.contains("ASTRA_EMU_CORES_DIRECTORY_CREATE"));
+    app.registry.shutdown().unwrap();
+    app.registry.shutdown().unwrap();
+    assert!(app.start_background_initialization().is_err());
+}
+
+#[test]
+fn failed_idle_owner_wakes_the_host_and_preserves_its_join_error() {
+    let root = tempfile::tempdir().unwrap();
+    let mut app = controller(root.path());
+    let (sender, receiver) = crossbeam_channel::bounded(1);
+    app.set_host_wake(std::sync::Arc::new(move || { let _ = sender.try_send(()); }));
+    app.registry.register_provider(|| panic!("intentional owner failure")).unwrap();
+    receiver.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert!(app.poll_platform().unwrap().is_some());
+    assert!(app.startup_status().contains("ASTRA_EMU_OWNER_PANICKED"));
+    assert!(app.registry.shutdown().unwrap_err().contains("ASTRA_EMU_OWNER_PANICKED"));
 }

@@ -2,6 +2,15 @@ use super::*;
 use crate::test_native::{self, Call, Fixture};
 use astra_emu_manager_core::model::*;
 
+fn background(owner: &mut FamilyOwner) -> BackgroundEvent {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if let Some(event) = owner.take_background() { return event; }
+        assert!(Instant::now() < deadline, "owner background result missing");
+        std::thread::yield_now();
+    }
+}
+
 struct Harness {
     owner: FamilyOwner,
     mailbox: FrameMailbox,
@@ -9,11 +18,21 @@ struct Harness {
     entered: std::sync::mpsc::Receiver<()>,
     wake: Receiver<()>,
     candidate: FamilyProbeCandidate,
+    _root: tempfile::TempDir,
 }
 impl Harness {
     fn new(gate: Option<std::sync::mpsc::Receiver<()>>, close_error: bool) -> Self {
         let mailbox = FrameMailbox::new();
-        let (mut owner, _) = FamilyOwner::start(Vec::new(), mailbox.clone()).unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let mut owner = FamilyOwner::new(root.path().to_owned(), mailbox.clone());
+        owner.start(Vec::new()).unwrap();
+        loop {
+            match background(&mut owner) {
+                BackgroundEvent::Scanned(_, result) => { result.unwrap(); break; }
+                BackgroundEvent::Ready(result) => { result.unwrap(); }
+                BackgroundEvent::Exited(error) => panic!("owner exited during startup: {error}"),
+            }
+        }
         let calls = Arc::new(Mutex::new(Vec::new()));
         let sink = calls.clone();
         let (entered, receiver) = std::sync::mpsc::channel();
@@ -27,18 +46,25 @@ impl Harness {
                 test_native::install(0, fixture)
             })
             .unwrap();
-        let candidate = match owner
-            .probe(
-                &ProbeRequest {
-                    game_path: ".".into(),
-                },
-                None,
-                None,
-            )
-            .unwrap()
-        {
-            FamilyProbeSelection::Selected(candidate) => *candidate,
-            other => panic!("unexpected selection: {other:?}"),
+        loop {
+            match background(&mut owner) {
+                BackgroundEvent::Ready(result) => { result.unwrap(); break; }
+                BackgroundEvent::Exited(error) => panic!("owner exited during registration: {error}"),
+                _ => {}
+            }
+        }
+        owner.scan(super::super::probe_worker::ScanRequest {
+            kind: super::super::probe_worker::ScanKind::Import,
+            paths: vec![PathBuf::from(".")], games: Vec::new(),
+        }).unwrap();
+        let candidate = loop {
+            match background(&mut owner) {
+                BackgroundEvent::Scanned(_, result) => {
+                    break result.unwrap().games.remove(0).candidates.remove(0);
+                }
+                BackgroundEvent::Exited(error) => panic!("owner exited during scan: {error}"),
+                _ => {}
+            }
         };
         let (_, wake) = bounded(1);
         Self {
@@ -48,6 +74,7 @@ impl Harness {
             entered: receiver,
             wake,
             candidate,
+            _root: root,
         }
     }
     fn request(&mut self) -> OpenSession {
