@@ -30,6 +30,8 @@ Kira 保持 0.12.2，以发布来源 `e9cbb4608237bb339c3eaf498571000e6cce35ca` 
 
 音频取消使用独立结果：在源读取之间或 SDK 解码中取消时退出播放任务，再停止并 join 设备；不把正常关闭误报为 mixer 容量错误。只识别 SDK 的 `ASTRA_EMU_AUDIO_CANCELLED`，同时发生的真实读取/解码错误仍保留。音频命令发送区分成功入队、取消和队列故障；取消后 native owner 停止派发并走关闭路径，避免音频 worker 先退出时把正常关闭误报为 `ASTRA_EMU_ARTEMIS_AUDIO_QUEUE`。没有取消的队列断开及 join 后的真实 worker 错误仍返回失败。无窗口 Host 拒绝保留具体 `window.title` / `window.pointer` 操作，不跳过原生请求。
 
+上游窗口位只来自 `WINDOW_QUERY_STATE` 的真实结果：bit0 为全屏、bit1 为最小化。首次运行及一批 `WindowState` 通知处理完后查询，不逐 tick 查询，也不把 `focused` 或 `suspended` 转成这些位。Host 必须同时提供有效 `MODE` 和 `MINIMIZED`；无窗口、不支持查询或返回字段不完整时明确报 `window.query_state` 错误。查询在 snapshot 锁外进行，取消结果结束当前任务并正常关闭，不发布缺失状态。原有失焦、挂起和显式暂停策略保持不变。
+
 配置保留 `archive` 文件选择。CPU 捕获沿用原生完整 stage target，报告实际 L=R；窗口 drawable 变化不改原生尺寸。指针按正在显示帧的会话/输出代次校验，再执行一次 raster→logical 映射。读取成功的存档通知换代，旧输出不再接受输入，但旧租约可在 close 后任意线程释放。
 
 原生修复分别提交 [PR #5](https://github.com/Alphaly2K/art3m1s-core/pull/5)（onLoad，`ad20b8afd01ce2807510fa4e08629afc8e62345b`）、[PR #7](https://github.com/Alphaly2K/art3m1s-core/pull/7)（PF8，`186ccc17fb10a6c6b3ee931d98a7c9d6830e722e`）及 [PR #9](https://github.com/Alphaly2K/art3m1s-core/pull/9)（AVIO，`348b931068d31bd75eb5ec804967ce4b86448aee`）。最新远端核对均为 open、未合并。packed stereo 使用显式 `(i16, i16)`；同一非对称双声道样本在原 scalar 和 tuple 路径均正确，不将其报告为已证实缺陷。
@@ -38,7 +40,7 @@ Kira 保持 0.12.2，以发布来源 `e9cbb4608237bb339c3eaf498571000e6cce35ca` 
 
 既有基线曾使用原生媒体启用 API，自然播放至ケロQ《終ノ空remake -2025ver-》Windows 版的 1600×1200 标题；该结果不作为本轮 C ABI 验收。严格最小钩子内容仍待上游修复合并，基线证据见[性能审计](../../../../Docs/status/performance-upstream-audit-2026-10-12.md)，执行顺序见[实施计划](../../../../Docs/status/implementation-plan.md)。许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
-2026-10-18 独立 Windows 验收已通过 build、Clippy（all-targets，`-D warnings`）、格式检查、13 项普通测试及以下 4 项硬件测试。硬件测试使用真实 GPU/音频设备与合成 PF6 作品，不代表商业视听验收；没有测性能或声明前台物理输入/听音通过。独立树只初始化 Artemis 与 CPAL，临时缩窄 workspace members 以避开未初始化的其他核心，保留全部依赖与 patch pin，验收后恢复 manifest/lock；Windows shaderc 使用映射短路径规避 MSVC 对象路径上限。
+2026-10-18 独立 Windows 验收已通过 build、Clippy（all-targets，`-D warnings`）、格式检查、17 项普通测试及以下 4 项硬件测试。两个会话硬件测试使用自建/销毁的真实隐藏 Win32 HWND，以实际窗口样式和 `IsIconic` 回答状态查询；受控逻辑输入仍是测试夹具，不代表前台物理输入或商业焦点验收。其余纯 GPU 捕获和普通逻辑测试保持原平台范围。本轮没有测性能或声明听音通过。独立树只初始化 Artemis 与 CPAL，临时缩窄 workspace members 以避开未初始化的其他核心，保留全部依赖与 patch pin；验收后恢复 workspace 和解析变化，仅保留新增 Windows 测试依赖。Windows shaderc 使用映射短路径规避 MSVC 对象路径上限。
 
 ```sh
 cargo build --manifest-path Emulator/Cargo.toml -p astra-emu-artemis
@@ -49,11 +51,11 @@ cargo test --manifest-path Emulator/Cargo.toml -p astra-emu-artemis --test lifec
 cargo test --manifest-path Emulator/Cargo.toml -p astra-emu-artemis --lib native_device_completion_pause_cancel_reopen_and_decode_failure -- --ignored --test-threads=1
 ```
 
-该组覆盖真实 native 创建/自主产帧、pause/resume、取消/关闭/同进程重开、跨线程归还 close 后租约、原生 save/load 代次失效及过小捕获缓冲区不破坏完整目标。恢复测试让 Host 失效回调等待关闭取消，已复现修复前的 `ASTRA_EMU_ARTEMIS_AUDIO_QUEUE`，修复后通过；音频测试覆盖播放完成、暂停恢复、取消、重开与坏音频明确失败。
+该组覆盖真实 native 创建/自主产帧、pause/resume、取消/关闭/同进程重开、跨线程归还 close 后租约、原生 save/load 代次失效及过小捕获缓冲区不破坏完整目标。真实 HWND 夹具验证首次查询、一批三次窗口更新只再查询一次、等待期间不重复查询。恢复测试让 Host 失效回调等待关闭取消，已复现修复前的 `ASTRA_EMU_ARTEMIS_AUDIO_QUEUE`，修复后通过；音频测试覆盖播放完成、暂停恢复、取消、重开与坏音频明确失败。
 
-商业 headless 验收使用新 ABI、独立游戏副本与复制到自有产物目录的 Manager：open 和首帧成功，保留两张 1600×1200 黑色启动帧后，`window.title` 实际返回 `ASTRA_EMU_ARTEMIS_PLATFORM_UNAVAILABLE: native window service is unavailable for window.title`，进程退出码 1。无窗口 Host 按契约拒绝此操作，没有伪造成功或跳过请求；该阻塞不是 PF8、AVIO 或 onLoad 的新上游缺陷证据。`reopen_count=2` 未进入第二轮。
+当前商业 headless 验收使用新 ABI、独立游戏副本与复制到自有产物目录的 Manager：open 后首次状态查询明确返回 `ASTRA_EMU_ARTEMIS_PLATFORM_UNAVAILABLE: native window service is unavailable for window.query_state`，进程退出码 1，没有首帧。无窗口 Host 按契约拒绝此操作，没有伪造状态或跳过请求；该阻塞不是 PF8、AVIO 或 onLoad 的新上游缺陷证据。`reopen_count=2` 未进入第二轮。
 
-随后重新复制隔离游戏，使用真实 Library API 注册，复制最新 Manager，在自有 PID/HWND 上通过 `PrintWindow` 与窗口消息操作实际 Slint 按钮。游戏库、启动按钮、运行诊断面板均可操作；日志记录真实 `session_started`，窗口保持黑色游戏区，`WM_CLOSE` 正常退出 0 并记录 `session_ended(reason=shutdown)`。该路径证明 Window Host 可达，不再以锁屏直接判定窗口路径不可用；本轮没有操作锁屏或伪造焦点。
+随后用支持查询的最新 Manager 及新核心重新执行真实窗口 smoke。隔离游戏由真实 Library API 注册，在自有 PID/HWND 上通过 `PrintWindow` 与窗口消息操作实际 Slint 按钮。游戏库、启动按钮、运行诊断面板均可操作；没有查询错误，窗口保持黑色游戏区，`WM_CLOSE` 正常退出 0。平台快照记录窗口不在前台、`IsIconic=false`；没有把失焦当成最小化或全屏。该路径证明 Window Host 可达，不再以锁屏直接判定窗口路径不可用；本轮没有操作锁屏或伪造焦点。
 
 当前阻塞是失焦暂停。独立核对的上游生产前端 [Art3m1s `2234686b9ccde9a4d6721ff0bfe8cf5364472bf7`](https://github.com/Alphaly2K/art3m1s/blob/2234686b9ccde9a4d6721ff0bfe8cf5364472bf7/lib/screens/player_screen.dart#L217-L245) 在 `inactive` 时设置 `_appActive=false`；[帧调度](https://github.com/Alphaly2K/art3m1s/blob/2234686b9ccde9a4d6721ff0bfe8cf5364472bf7/lib/screens/player_screen.dart#L603-L620) 要求 `_appActive`，否则停止 ticker。Flutter 的 [desktop inactive 定义](https://api.flutter.dev/flutter/dart-ui/AppLifecycleState.html) 是窗口可见但没有输入焦点。该前端声明 1.3.0/core 0.4.0 兼容，构建拉取 core master，没有精确 core gitlink；这里记录独立源码证据，不冒报同 pin 原生前端运行验证。没有发现后台推进配置，因此保留原生暂停策略，不为验收添加开关。真实窗口中脚本尚未推进到 `window.title`；媒体、正文、商业存读档、游戏重开和结局仍未通过，继续验收需要真实输入焦点。
 

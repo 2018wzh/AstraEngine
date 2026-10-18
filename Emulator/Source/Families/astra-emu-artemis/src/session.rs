@@ -326,7 +326,9 @@ impl Runtime {
             *request = request.checked_add(1).ok_or_else(|| {
                 error::invalid("ASTRA_EMU_ARTEMIS_REQUEST_ID", "request IDs exhausted")
             })?;
-            crate::platform::request(platform, command, epoch, context, *request)?;
+            if crate::platform::request(platform, command, epoch, context, *request)?.is_break() {
+                return Ok(ControlFlow::Break(()));
+            }
             serviced = true;
         }
         audio.check_error()?;
@@ -350,8 +352,9 @@ impl Runtime {
         let mut last = Instant::now();
         let started = last;
         let mut remainder = 0u128;
-        let mut request = 0;
+        let mut request = 0u64;
         let mut pending = false;
+        let mut window_state_dirty = true;
         let mut pool: [Option<Arc<Vec<u8>>>; 3] = [None, None, None];
         'owner: while !stop.load(Ordering::Acquire) && !platform.cancelled(epoch) {
             for command in rx.try_iter() {
@@ -399,11 +402,7 @@ impl Runtime {
                         for input in inputs {
                             if let Input::Window(value) = input {
                                 window = value;
-                                self.events.set_window_state(if value.focused != 0 {
-                                    1
-                                } else {
-                                    0
-                                });
+                                window_state_dirty = true;
                             } else if let Err(error) =
                                 events::apply(&self.rt, input, state.info, state.identity)
                             {
@@ -414,6 +413,24 @@ impl Runtime {
                         let _ = reply.send(result);
                     }
                 }
+            }
+            if window_state_dirty {
+                request = request.checked_add(1).ok_or_else(|| {
+                    error::invalid("ASTRA_EMU_ARTEMIS_REQUEST_ID", "request IDs exhausted")
+                })?;
+                let flags = match crate::platform::query_state(
+                    platform,
+                    epoch,
+                    context.load(Ordering::Acquire),
+                    request,
+                )? {
+                    ControlFlow::Continue(flags) => flags,
+                    ControlFlow::Break(()) => break,
+                };
+                self.events.set_window_state(flags);
+                window_state_dirty = false;
+                last = Instant::now();
+                remainder = 0;
             }
             let next_pause = explicit_pause || window.suspended != 0 || window.focused == 0;
             if next_pause != paused {

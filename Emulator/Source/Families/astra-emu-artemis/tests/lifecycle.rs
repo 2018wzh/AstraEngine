@@ -1,12 +1,17 @@
 use astra_emu_abi::*;
 use astra_emu_artemis::artemis_query;
 use parking_lot::Mutex;
+use std::ptr;
+#[cfg(windows)]
 use std::{
-    ptr,
     sync::atomic::{AtomicBool, Ordering},
     time::{Duration, Instant},
 };
+#[cfg(windows)]
+#[path = "support/window.rs"]
+mod native_window;
 static SERIAL: Mutex<()> = Mutex::new(());
+#[cfg(windows)]
 static RESTORE_CLOSING: AtomicBool = AtomicBool::new(false);
 unsafe extern "C" fn emit(_: *mut std::ffi::c_void, record: *const LogRecord) {
     let record = unsafe { &*record };
@@ -28,6 +33,7 @@ unsafe extern "C" fn unavailable(
     UNSUPPORTED
 }
 unsafe extern "C" fn invalidate(_: *mut std::ffi::c_void, _: u64, _: u64) {}
+#[cfg(windows)]
 unsafe extern "C" fn restore_invalidate(_: *mut std::ffi::c_void, _: u64, context: u64) {
     if context != 1 {
         RESTORE_CLOSING.store(true, Ordering::Release);
@@ -63,7 +69,7 @@ fn open<'a>(
     root: &std::path::Path,
     epoch: u64,
     error: &'a mut Error,
-    invalidate: unsafe extern "C" fn(*mut std::ffi::c_void, u64, u64),
+    window_host: WindowService,
 ) -> Result<OpenResult, &'a Error> {
     let path = root.to_str().unwrap();
     let request = OpenRequest {
@@ -87,11 +93,7 @@ fn open<'a>(
                 acknowledge: None,
                 invalidate: None,
             },
-            window: WindowService {
-                context: ptr::null_mut(),
-                request: Some(unavailable),
-                invalidate: Some(invalidate),
-            },
+            window: window_host,
             cancellation: CancellationService {
                 context: ptr::null_mut(),
                 is_cancelled: Some(cancelled),
@@ -110,6 +112,7 @@ fn open<'a>(
     }
 }
 // Public-domain miniature archive generated from the documented PF6 layout.
+#[cfg(windows)]
 fn archive(files: &[(&[u8], &[u8])]) -> Vec<u8> {
     let entries: usize = files.iter().map(|(n, _)| 16 + n.len()).sum();
     let index = 4 + entries + 4 + 8 * (files.len() + 1) + 4;
@@ -133,6 +136,7 @@ fn archive(files: &[(&[u8], &[u8])]) -> Vec<u8> {
     }
     bytes
 }
+#[cfg(windows)]
 fn frame(api: &CoreApi, session: Session, epoch: u64) -> CpuFrame {
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
@@ -167,18 +171,31 @@ fn malformed_archive_releases_native_session_lease() {
     std::fs::write(root.path().join("data.pfs"), b"bad").unwrap();
     for epoch in 1..=2 {
         let mut error = Error::default();
-        let failure = open(api, root.path(), epoch, &mut error, invalidate).unwrap_err();
+        let failure = open(
+            api,
+            root.path(),
+            epoch,
+            &mut error,
+            WindowService {
+                context: ptr::null_mut(),
+                request: Some(unavailable),
+                invalidate: Some(invalidate),
+            },
+        )
+        .unwrap_err();
         assert_eq!(
             &failure.code[..failure.code_len as usize],
             b"ASTRA_EMU_ARTEMIS_PROJECT_INI"
         );
     }
 }
+#[cfg(windows)]
 #[test]
-#[ignore = "requires real hardware GPU and audio output device"]
+#[ignore = "requires Windows native HWND, hardware GPU, and audio output device"]
 fn native_gpu_device_pause_close_reopen_and_detached_lease() {
     let _serial = SERIAL.lock();
     let api = api();
+    let host = native_window::Window::new();
     let root = tempfile::tempdir().unwrap();
     std::fs::write(
         root.path().join("data.pfs"),
@@ -192,7 +209,15 @@ fn native_gpu_device_pause_close_reopen_and_detached_lease() {
     )
     .unwrap();
     for epoch in 10..13 {
-        let open = open(api, root.path(), epoch, &mut Error::default(), invalidate).unwrap();
+        let query_baseline = host.queries();
+        let open = open(
+            api,
+            root.path(),
+            epoch,
+            &mut Error::default(),
+            host.service(invalidate),
+        )
+        .unwrap();
         assert_eq!(
             open.surface.logical,
             Extent {
@@ -201,11 +226,53 @@ fn native_gpu_device_pause_close_reopen_and_detached_lease() {
             }
         );
         let baseline = frame(api, open.session, epoch);
+        assert_eq!(host.queries(), query_baseline + 1);
+        let mut updates = [InputEvent {
+            kind: INPUT_WINDOW,
+            pressed: 0,
+            repeat: 0,
+            button: 0,
+            physical_key: Bytes::EMPTY,
+            logical_key: Bytes::EMPTY,
+            x: 0.0,
+            y: 0.0,
+            displayed: baseline.identity(),
+            window: WindowState {
+                drawable_width: 64,
+                drawable_height: 48,
+                scale_factor: 1.0,
+                focused: 1,
+                suspended: 0,
+            },
+        }; 3];
+        updates[0].window.drawable_width = 65;
+        updates[1].window.drawable_width = 66;
+        assert_eq!(
+            unsafe {
+                api.input.unwrap()(
+                    open.session,
+                    updates.as_ptr(),
+                    updates.len(),
+                    &mut Error::default(),
+                )
+            },
+            OK
+        );
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while host.queries() == query_baseline + 1 {
+            assert!(
+                Instant::now() < deadline,
+                "window update never queried Host state"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(host.queries(), query_baseline + 2);
         assert_eq!(
             unsafe { api.control.unwrap()(open.session, CONTROL_PAUSE, &mut Error::default()) },
             OK
         );
         std::thread::sleep(Duration::from_millis(30));
+        assert_eq!(host.queries(), query_baseline + 2);
         assert_eq!(
             unsafe { api.control.unwrap()(open.session, CONTROL_RESUME, &mut Error::default()) },
             OK
@@ -225,11 +292,13 @@ fn native_gpu_device_pause_close_reopen_and_detached_lease() {
         .unwrap();
     }
 }
+#[cfg(windows)]
 #[test]
-#[ignore = "requires real hardware GPU and audio output device"]
+#[ignore = "requires Windows native HWND, hardware GPU, and audio output device"]
 fn native_save_restore_invalidates_output_context() {
     let _serial = SERIAL.lock();
     let api = api();
+    let host = native_window::Window::new();
     let root = tempfile::tempdir().unwrap();
     std::fs::write(
         root.path().join("data.pfs"),
@@ -251,7 +320,7 @@ fn native_save_restore_invalidates_output_context() {
         root.path(),
         20,
         &mut Error::default(),
-        restore_invalidate,
+        host.service(restore_invalidate),
     )
     .unwrap();
     let before = frame(api, open.session, 20);
