@@ -38,7 +38,7 @@ Kira 保持 0.12.2，以发布来源 `e9cbb4608237bb339c3eaf498571000e6cce35ca` 
 
 既有基线曾使用原生媒体启用 API，自然播放至ケロQ《終ノ空remake -2025ver-》Windows 版的 1600×1200 标题；该结果不作为本轮 C ABI 验收。严格最小钩子内容仍待上游修复合并，基线证据见[性能审计](../../../../Docs/status/performance-upstream-audit-2026-10-12.md)，执行顺序见[实施计划](../../../../Docs/status/implementation-plan.md)。许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
-2026-10-18 独立 Windows 验收已通过 build、Clippy（all-targets，`-D warnings`）、格式检查、13 项普通测试及以下 4 项硬件测试。硬件测试使用真实 GPU/音频设备与合成 PF6 作品，不代表商业视听验收；没有测性能或声明锁屏下实窗输入/听音通过。独立树只初始化 Artemis 与 CPAL，临时缩窄 workspace members 以避开未初始化的其他核心，保留全部依赖与 patch pin，验收后恢复 manifest/lock；Windows shaderc 使用映射短路径规避 MSVC 对象路径上限。
+2026-10-18 独立 Windows 验收已通过 build、Clippy（all-targets，`-D warnings`）、格式检查、13 项普通测试及以下 4 项硬件测试。硬件测试使用真实 GPU/音频设备与合成 PF6 作品，不代表商业视听验收；没有测性能或声明前台物理输入/听音通过。独立树只初始化 Artemis 与 CPAL，临时缩窄 workspace members 以避开未初始化的其他核心，保留全部依赖与 patch pin，验收后恢复 manifest/lock；Windows shaderc 使用映射短路径规避 MSVC 对象路径上限。
 
 ```sh
 cargo build --manifest-path Emulator/Cargo.toml -p astra-emu-artemis
@@ -51,6 +51,10 @@ cargo test --manifest-path Emulator/Cargo.toml -p astra-emu-artemis --lib native
 
 该组覆盖真实 native 创建/自主产帧、pause/resume、取消/关闭/同进程重开、跨线程归还 close 后租约、原生 save/load 代次失效及过小捕获缓冲区不破坏完整目标。恢复测试让 Host 失效回调等待关闭取消，已复现修复前的 `ASTRA_EMU_ARTEMIS_AUDIO_QUEUE`，修复后通过；音频测试覆盖播放完成、暂停恢复、取消、重开与坏音频明确失败。
 
-商业验收使用新 ABI、独立游戏副本与复制到自有产物目录的 Manager：open 和首帧成功，保留两张 1600×1200 黑色启动帧后，`window.title` 实际返回 `ASTRA_EMU_ARTEMIS_PLATFORM_UNAVAILABLE: native window service is unavailable for window.title`，进程退出码 1。无窗口 Host 按契约拒绝此操作，没有伪造成功或跳过请求；该阻塞不是 PF8、AVIO 或 onLoad 的新上游缺陷证据。媒体、正文、商业存读档、关闭重开及结局均未通过，`reopen_count=2` 未进入第二轮。产品 desktop 路径需要真实窗口交互，当前锁屏下未执行；完成商业验收仍需可操作的窗口 Host。
+商业 headless 验收使用新 ABI、独立游戏副本与复制到自有产物目录的 Manager：open 和首帧成功，保留两张 1600×1200 黑色启动帧后，`window.title` 实际返回 `ASTRA_EMU_ARTEMIS_PLATFORM_UNAVAILABLE: native window service is unavailable for window.title`，进程退出码 1。无窗口 Host 按契约拒绝此操作，没有伪造成功或跳过请求；该阻塞不是 PF8、AVIO 或 onLoad 的新上游缺陷证据。`reopen_count=2` 未进入第二轮。
+
+随后重新复制隔离游戏，使用真实 Library API 注册，复制最新 Manager，在自有 PID/HWND 上通过 `PrintWindow` 与窗口消息操作实际 Slint 按钮。游戏库、启动按钮、运行诊断面板均可操作；日志记录真实 `session_started`，窗口保持黑色游戏区，`WM_CLOSE` 正常退出 0 并记录 `session_ended(reason=shutdown)`。该路径证明 Window Host 可达，不再以锁屏直接判定窗口路径不可用；本轮没有操作锁屏或伪造焦点。
+
+当前阻塞是失焦暂停。独立核对的上游生产前端 [Art3m1s `2234686b9ccde9a4d6721ff0bfe8cf5364472bf7`](https://github.com/Alphaly2K/art3m1s/blob/2234686b9ccde9a4d6721ff0bfe8cf5364472bf7/lib/screens/player_screen.dart#L217-L245) 在 `inactive` 时设置 `_appActive=false`；[帧调度](https://github.com/Alphaly2K/art3m1s/blob/2234686b9ccde9a4d6721ff0bfe8cf5364472bf7/lib/screens/player_screen.dart#L603-L620) 要求 `_appActive`，否则停止 ticker。Flutter 的 [desktop inactive 定义](https://api.flutter.dev/flutter/dart-ui/AppLifecycleState.html) 是窗口可见但没有输入焦点。该前端声明 1.3.0/core 0.4.0 兼容，构建拉取 core master，没有精确 core gitlink；这里记录独立源码证据，不冒报同 pin 原生前端运行验证。没有发现后台推进配置，因此保留原生暂停策略，不为验收添加开关。真实窗口中脚本尚未推进到 `window.title`；媒体、正文、商业存读档、游戏重开和结局仍未通过，继续验收需要真实输入焦点。
 
 商业作品入口为 `astra-emu-manager --headless <私有配置.json>`；`reopen_count` 保持 DLL 驻留，`frames` 是观察样本而非 VM tick。截图与 `.diagnostics` 留在 ignored 工作区，本次额外游戏副本及测试存档已删除，原游戏和原存档不改动。
