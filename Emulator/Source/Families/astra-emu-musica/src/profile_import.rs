@@ -12,14 +12,39 @@ pub mod private_output;
 pub use garbro::{import as import_garbro_profile, list_titles as list_garbro_titles};
 pub use key::import_key_profile;
 
+/// Validates a user-selected JSON profile without opening archives or a device.
+pub fn validate_profile_file(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Read;
+    let file = fs::File::open(path)
+        .map_err(|_| "ASTRA_EMU_PROFILE_OPEN: check access to the selected JSON profile")?;
+    if !file.metadata()?.is_file() {
+        return Err("ASTRA_EMU_PROFILE_FORMAT: select a regular JSON profile file".into());
+    }
+    let mut bytes = Vec::new();
+    file.take(1024 * 1024 + 1).read_to_end(&mut bytes)?;
+    if bytes.len() > 1024 * 1024 {
+        return Err("ASTRA_EMU_PROFILE_BOUND: profile exceeds 1 MiB".into());
+    }
+    let profile: MusicaProfile = serde_json::from_slice(&bytes)
+        .map_err(|_| "ASTRA_EMU_PROFILE_FORMAT: import key.toml or a GARbro scheme first; a typed JSON profile is required")?;
+    profile.validate()?;
+    Ok(())
+}
+
 fn ensure_new_output(output: &Path) -> Result<(), Box<dyn std::error::Error>> {
     if output.file_name().is_none() || !output.parent().is_some_and(Path::is_dir) {
-        return Err("ASTRA_EMU_PROFILE_OUTPUT_PARENT: select an existing private configuration directory".into());
+        return Err(
+            "ASTRA_EMU_PROFILE_OUTPUT_PARENT: select an existing private configuration directory"
+                .into(),
+        );
     }
     match fs::symlink_metadata(output) {
         Ok(_) => Err("ASTRA_EMU_PROFILE_OUTPUT_EXISTS".into()),
         Err(cause) if cause.kind() == ErrorKind::NotFound => Ok(()),
-        Err(_) => Err("ASTRA_EMU_PROFILE_OUTPUT_ACCESS: check access to the selected private destination".into()),
+        Err(_) => Err(
+            "ASTRA_EMU_PROFILE_OUTPUT_ACCESS: check access to the selected private destination"
+                .into(),
+        ),
     }
 }
 

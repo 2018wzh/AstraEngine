@@ -93,6 +93,7 @@ impl AstraEmuManagerController {
             input_config: InputConfigViewModel::default(),
             appearance,
             family_options: BTreeMap::new(),
+            musica_import: None,
             filter_options: BTreeMap::new(),
             metadata,
             metadata_sequence: 0,
@@ -162,9 +163,43 @@ impl AstraEmuManagerController {
         candidates: Vec<FamilyProbeCandidate>,
     ) -> Result<String, String> {
         let game_id = self.upsert_scanned_game(path, None)?;
-        self.clear_probe_state(&game_id)?;
-        self.probe_choices.insert(game_id.clone(), candidates);
+        self.set_probe_candidates(&game_id, candidates)?;
         Ok(game_id)
+    }
+
+    fn set_probe_candidates(
+        &mut self,
+        game_id: &str,
+        choices: Vec<FamilyProbeCandidate>,
+    ) -> Result<(), String> {
+        self.clear_probe_state(game_id)?;
+        let saved = self
+            .library
+            .game_settings(game_id)
+            .map_err(|error| error.to_string())?
+            .and_then(|settings| settings.emulator_id);
+        let selected = match saved {
+            Some(id) => choices.iter().find(|choice| choice.report.plugin_id == id),
+            None if choices.len() == 1 => choices.first(),
+            None => None,
+        }
+        .map(|choice| choice.report.plugin_id.clone());
+        if selected.is_none() {
+            if let Some(first) = choices.first().filter(|first| {
+                choices
+                    .iter()
+                    .all(|choice| choice.report.family_id == first.report.family_id)
+            }) {
+                self.library
+                    .set_game_family(game_id, Some(&first.report.family_id))
+                    .map_err(|error| error.to_string())?;
+            }
+        }
+        self.probe_choices.insert(game_id.to_owned(), choices);
+        if let Some(plugin_id) = selected {
+            self.install_probe_choice(game_id, &plugin_id)?;
+        }
+        Ok(())
     }
 
     pub(super) fn install_probe_choice(
@@ -172,20 +207,24 @@ impl AstraEmuManagerController {
         game_id: &str,
         plugin_id: &str,
     ) -> Result<(), String> {
-        let choices = self
+        let candidate = self
             .probe_choices
             .get(game_id)
-            .ok_or_else(|| "ASTRA_EMU_FAMILY_PROBE_NOT_AMBIGUOUS".to_owned())?;
-        let candidate = choices
-            .iter()
-            .find(|candidate| candidate.report.plugin_id == plugin_id)
+            .and_then(|choices| {
+                choices
+                    .iter()
+                    .find(|choice| choice.report.plugin_id == plugin_id)
+            })
             .cloned()
-            .ok_or_else(|| "ASTRA_EMU_FAMILY_PROVIDER_SELECTION_INVALID".to_owned())?;
+            .ok_or_else(|| "ASTRA_EMU_EMULATOR_SELECTION_INVALID".to_owned())?;
         self.library
-            .set_game_family(game_id, Some(&candidate.report.family_id))
+            .select_game_emulator(
+                game_id,
+                &candidate.report.family_id,
+                &candidate.report.plugin_id,
+            )
             .map_err(|error| error.to_string())?;
         self.candidates.insert(game_id.to_owned(), candidate);
-        self.probe_choices.remove(game_id);
         Ok(())
     }
 
@@ -200,17 +239,7 @@ impl AstraEmuManagerController {
         self.candidates.remove(game_id);
         self.probe_choices.remove(game_id);
         if self.selected_case_id.as_deref() == Some(game_id) {
-            self.family_options.remove("family.plugin_id");
-        }
-        if self
-            .library
-            .game(game_id)
-            .map_err(|error| error.to_string())?
-            .is_some()
-        {
-            self.library
-                .set_game_family(game_id, None)
-                .map_err(|error| error.to_string())?;
+            self.family_options.remove("manager.emulator_id");
         }
         Ok(())
     }
@@ -247,7 +276,7 @@ impl AstraEmuManagerController {
             .add_game(&game)
             .map_err(|error| error.to_string())?;
         if self.selected_case_id.as_deref() == Some(game_id.as_str()) {
-            self.family_options.remove("family.plugin_id");
+            self.family_options.remove("manager.emulator_id");
         }
         Ok(game_id)
     }
@@ -287,20 +316,16 @@ impl AstraEmuManagerController {
                     FamilyProbeSelection::Selected(candidate) => {
                         let game_id =
                             self.upsert_scanned_game(&path, Some(&candidate.report.family_id))?;
-                        self.probe_choices.remove(&game_id);
+                        self.set_probe_candidates(&game_id, vec![(*candidate).clone()])?;
                         imported.insert(game_id.clone());
-                        for game in known_games
-                            .iter()
-                            .filter(|game| matches_game_directory(&game.location, &path))
-                        {
+                        for game in known_games.iter().filter(|game| {
+                            game.game_id != game_id && matches_game_directory(&game.location, &path)
+                        }) {
                             self.library
                                 .set_game_family(&game.game_id, Some(&candidate.report.family_id))
                                 .map_err(|error| error.to_string())?;
-                            self.probe_choices.remove(&game.game_id);
-                            self.candidates
-                                .insert(game.game_id.clone(), (*candidate).clone());
+                            self.set_probe_candidates(&game.game_id, vec![(*candidate).clone()])?;
                         }
-                        self.candidates.insert(game_id, *candidate);
                         game_directories.push(path);
                     }
                     FamilyProbeSelection::NoMatch => {
@@ -327,18 +352,18 @@ impl AstraEmuManagerController {
                         }
                     }
                     FamilyProbeSelection::RequiresUserChoice(candidates) => {
-                        imported.insert(self.remember_probe_choice(&path, candidates.clone())?);
-                        for game in known_games
-                            .iter()
-                            .filter(|game| matches_game_directory(&game.location, &path))
-                        {
-                            self.clear_probe_state(&game.game_id)?;
-                            self.probe_choices
-                                .insert(game.game_id.clone(), candidates.clone());
+                        let game_id = self.remember_probe_choice(&path, candidates.clone())?;
+                        imported.insert(game_id.clone());
+                        for game in known_games.iter().filter(|game| {
+                            game.game_id != game_id && matches_game_directory(&game.location, &path)
+                        }) {
+                            self.set_probe_candidates(&game.game_id, candidates.clone())?;
                         }
                         game_directories.push(path);
-                        self.diagnostic =
-                            "Multiple family providers matched a game; choose a provider in Family configuration.".into();
+                        if !self.candidates.contains_key(&game_id) {
+                            self.diagnostic =
+                                "已保存的模拟器当前不可用，或需要首次选择；请在模拟器配置中明确选择。".into();
+                        }
                     }
                 }
             }

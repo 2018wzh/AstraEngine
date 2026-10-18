@@ -118,19 +118,21 @@ impl ActiveFamilySession {
         let state = session.state().map_err(|e| e.to_string())?;
         let failure_changed = if state.state == astra_emu_abi::SESSION_FAILED {
             let can_retry = state.flags & astra_emu_abi::SESSION_CAN_RETRY != 0;
-            let changed = self
-                .failure
-                .as_ref()
-                .is_none_or(|failure| failure.can_retry != can_retry);
+            let code = String::from_utf8_lossy(&state.error.code[..state.error.code_len as usize]);
+            let message =
+                String::from_utf8_lossy(&state.error.message[..state.error.message_len as usize]);
+            let changed = self.failure.as_ref().is_none_or(|failure| {
+                failure.can_retry != can_retry
+                    || failure
+                        .message
+                        .strip_prefix(code.as_ref())
+                        .and_then(|suffix| suffix.strip_prefix(": "))
+                        != Some(message.as_ref())
+            });
             if changed {
+                tracing::error!(event = "astra.emu.native.session_failed", operation = "state", diagnostic_code = %code, message = %message, can_retry);
                 self.failure = Some(NativeFailure {
-                    message: format!(
-                        "{}: {}",
-                        String::from_utf8_lossy(&state.error.code[..state.error.code_len as usize]),
-                        String::from_utf8_lossy(
-                            &state.error.message[..state.error.message_len as usize]
-                        )
-                    ),
+                    message: format!("{code}: {message}"),
                     can_retry,
                 });
             }

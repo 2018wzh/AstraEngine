@@ -66,7 +66,11 @@ impl FamilyLoadError {
     }
 }
 
-pub(crate) fn checked(status: abi::Status, error: abi::Error) -> FamilyResult<()> {
+pub(crate) fn checked(
+    operation: &'static str,
+    status: abi::Status,
+    error: abi::Error,
+) -> FamilyResult<()> {
     if status == abi::OK {
         return Ok(());
     }
@@ -84,13 +88,20 @@ pub(crate) fn checked(status: abi::Status, error: abi::Error) -> FamilyResult<()
             .unwrap_or_default(),
     )
     .unwrap_or("invalid core diagnostic encoding");
+    tracing::error!(
+        event = "astra.emu.native.call_failed",
+        operation,
+        status,
+        diagnostic_code = code,
+        message
+    );
     Err(FamilyError::new(
         if code.is_empty() {
             "ASTRA_EMU_CORE_ERROR"
         } else {
             code
         },
-        message,
+        format!("{operation} returned status {status}: {message}"),
     ))
 }
 pub(crate) unsafe fn text(bytes: abi::Bytes, limit: usize) -> FamilyResult<String> {
@@ -123,7 +134,7 @@ impl LoadedFamilyPlugin {
         #[cfg(target_os = "windows")]
         let loaded = {
             use libloading::os::windows::{
-                Library, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR,
+                LOAD_LIBRARY_SEARCH_DEFAULT_DIRS, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR, Library,
             };
             let absolute = std::fs::canonicalize(path).map_err(|_| FamilyLoadError::InvalidPath)?;
             // A core's app-local dependencies live beside its DLL, not beside
@@ -163,6 +174,7 @@ impl LoadedFamilyPlugin {
         api.validate().map_err(|_| FamilyLoadError::AbiLayout)?;
         let mut error = abi::Error::default();
         checked(
+            "initialize",
             unsafe { api.initialize.unwrap()(crate::family_diagnostics::sink(), &mut error) },
             error,
         )
@@ -170,6 +182,7 @@ impl LoadedFamilyPlugin {
         let mut descriptor = MaybeUninit::uninit();
         let mut error = abi::Error::default();
         checked(
+            "describe",
             unsafe { api.describe.unwrap()(descriptor.as_mut_ptr(), &mut error) },
             error,
         )
@@ -268,7 +281,7 @@ impl LoadedFamilyPlugin {
         if status == abi::NO_MATCH {
             return Ok(None);
         }
-        checked(status, error)?;
+        checked("probe", status, error)?;
         let out: abi::ProbeResult = unsafe { out.assume_init() };
         let report = ProbeReport {
             family_id: self.descriptor.family_id.clone(),
@@ -343,7 +356,7 @@ impl LoadedFamilyPlugin {
                     self.inner.api.close.unwrap()(output.session, &mut abi::Error::default());
                 }
             }
-            return checked(status, error).and_then(|_| unreachable!());
+            return checked("open", status, error).and_then(|_| unreachable!());
         }
         let session = NativeSession {
             inner: Some(Rc::clone(&self.inner)),
@@ -431,6 +444,7 @@ pub struct NativeSession {
 impl NativeSession {
     fn call(
         &mut self,
+        operation: &'static str,
         call: impl FnOnce(abi::CoreApi, abi::Session, &mut abi::Error) -> abi::Status,
     ) -> FamilyResult<()> {
         if self.handle.is_null() || self.poisoned {
@@ -449,7 +463,7 @@ impl NativeSession {
             &mut error,
         );
         self.poisoned |= status == abi::PANICKED;
-        checked(status, error)
+        checked(operation, status, error)
     }
     pub fn input(
         &mut self,
@@ -562,13 +576,15 @@ impl NativeSession {
                 }
             }
             raw.window = native_window(self.window);
-            self.call(|api, handle, error| unsafe { api.input.unwrap()(handle, &raw, 1, error) })?;
+            self.call("input", |api, handle, error| unsafe {
+                api.input.unwrap()(handle, &raw, 1, error)
+            })?;
         }
         Ok(())
     }
     pub fn state(&mut self) -> FamilyResult<abi::SessionState> {
         let mut state = MaybeUninit::uninit();
-        self.call(|api, handle, error| unsafe {
+        self.call("state", |api, handle, error| unsafe {
             api.state.unwrap()(handle, state.as_mut_ptr(), error)
         })?;
         let state = unsafe { state.assume_init() };
@@ -581,12 +597,14 @@ impl NativeSession {
         Ok(state)
     }
     pub fn control(&mut self, control: u32) -> FamilyResult<()> {
-        self.call(|api, handle, error| unsafe { api.control.unwrap()(handle, control, error) })
+        self.call("control", |api, handle, error| unsafe {
+            api.control.unwrap()(handle, control, error)
+        })
     }
     pub fn acquire_frame(&mut self, after: Option<FrameIdentity>) -> FamilyResult<FramePoll> {
         if let Some((api, host)) = self.d3d12 {
             let mut frame = MaybeUninit::<abi::D3D12Frame>::zeroed();
-            let result = self.call(|_, handle, error| unsafe {
+            let result = self.call("d3d12.acquire", |_, handle, error| unsafe {
                 api.acquire.unwrap()(
                     handle,
                     after.map(Into::into).unwrap_or_default(),
@@ -608,7 +626,7 @@ impl NativeSession {
             };
         }
         let mut surface = MaybeUninit::<abi::FrameSurface>::zeroed();
-        let result = self.call(|api, handle, error| unsafe {
+        let result = self.call("frame", |api, handle, error| unsafe {
             api.frame.unwrap()(
                 handle,
                 after.map(Into::into).unwrap_or_default(),
@@ -649,6 +667,7 @@ impl NativeSession {
         unsafe { module.api.cancel.unwrap()(handle) };
         let mut error = abi::Error::default();
         checked(
+            "close",
             unsafe { module.api.close.unwrap()(handle, &mut error) },
             error,
         )

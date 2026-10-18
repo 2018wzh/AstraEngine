@@ -45,6 +45,7 @@ impl ModuleResources {
         };
         let mut error = abi::Error::default();
         checked(
+            "module_owner.create",
             unsafe { api.create.expect("validated ModuleOwnerApi")(&mut owner.handle, &mut error) },
             error,
         )?;
@@ -63,6 +64,7 @@ impl ModuleResources {
         }
         let mut error = abi::Error::default();
         checked(
+            "module_owner.destroy",
             unsafe { self.api.destroy.expect("validated ModuleOwnerApi")(handle, &mut error) },
             error,
         )

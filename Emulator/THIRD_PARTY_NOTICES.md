@@ -66,7 +66,7 @@ FVP 使用完整 RFVP fork 中的原生 `crates/na_wmv_player` 及原 Movie 路�
 
 ## 其他原生核心
 
-- Siglus：`2018wzh/siglus_rs@f94c0dad6187844df1476381f473a7d395601b9b`，通用基线 `13b55b47484faf8dfe03deb6ffd56ca0ec4ba3f2`；MPL-2.0，完整源码及嵌套 Kira 位于 `ThirdParty/siglus_rs`。自动验收驱动已移除，来源与改动见 Family 的 `MODIFICATIONS.md`。
+- Siglus：`2018wzh/siglus_rs@a94565cccd4f6d5e0a341e5732c5d98e9de2c71f`，通用基线 `13b55b47484faf8dfe03deb6ffd56ca0ec4ba3f2`；MPL-2.0，完整源码及嵌套 Kira 位于 `ThirdParty/siglus_rs`。来源与输入边界改动见 Family 的 `MODIFICATIONS.md`。
 - Artemis：`2018wzh/art3m1s-core@ae967d8446fe99b97f6e1df93fb1b61d8ada2040`，MPL-2.0，保留原生 Lua 5.1/Vulkan/FFmpeg 与完整来源，见 `ThirdParty/art3m1s-core/LICENSE`。
-- Sena：上游 <https://github.com/xmoezzz/sena-rs>，通用修复基线 `5fd1a8e37600fb917e053f633671560df9ca42a7`，单适配 `2018wzh/sena-rs@9e565a491ad14f595d980be094edeca8bfa01203`。基线包含新会话读档后重新启用保存的修复；完整 MPL-2.0 许可位于 `ThirdParty/sena-rs/LICENSE-MPL-2.0`。支持范围仍为原生及 Steam Koikake，未扩大到其他 SoftPAL。
+- Sena：SoftPAL 引擎的模拟器，上游 <https://github.com/xmoezzz/sena-rs>，通用修复基线 `5fd1a8e37600fb917e053f633671560df9ca42a7`，单适配 `2018wzh/sena-rs@8465e2818842b95aeb37424104e3ab95feff777d`。基线包含新会话读档后重新启用保存的修复；完整 MPL-2.0 许可位于 `ThirdParty/sena-rs/LICENSE-MPL-2.0`。支持范围仍为原生及 Steam Koikake，未扩大到其他 SoftPAL。
 - Ethornell：上游 <https://github.com/xmoezzz/ethornell-rs> 的 workspace 声明 MPL-2.0，但 crate 未继承且未提供许可文本。适配源码按用户明确授权发布于 [2018wzh/ethornell-rs 的 astra](https://github.com/2018wzh/ethornell-rs/tree/astra)，当前 `e8adc0ca57d163cd9718c157d3f9c106aaf4fde0`；Release 对应的运行代码为 `b6991511b57d8031be14f366732c5f1974937c42`。发布不代表许可覆盖已经澄清，尚未注册为可分发 submodule，不公开发布二进制。

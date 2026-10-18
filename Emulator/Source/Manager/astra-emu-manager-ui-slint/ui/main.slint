@@ -66,6 +66,8 @@ export component ManagerWindow inherits Window {
     in property <string> model-identity;
     in property <string> selected-title;
     in property <string> selected-family;
+    in property <string> selected-emulator;
+    in property <bool> selected-launchable;
     in property <string> selected-play-time;
     in property <string> selected-last-played;
     in property <[PlaySession]> play-history;
@@ -114,12 +116,13 @@ export component ManagerWindow inherits Window {
     in-out property <float> game-content-window-y;
     in-out property <float> game-content-window-width;
     in-out property <float> game-content-window-height;
-    in-out property <bool> game-cursor-visible: true;
     callback pointer-state-changed();
     changed game-active => { root.pointer-state-changed(); }
     changed translation-overlay-active => { root.pointer-state-changed(); }
     changed diagnostics-overlay-active => { root.pointer-state-changed(); }
     changed filters-overlay-active => { root.pointer-state-changed(); }
+    changed modal-active => { root.pointer-state-changed(); }
+    changed fatal-error-active => { root.pointer-state-changed(); }
     changed game-content-window-x => { root.pointer-state-changed(); }
     changed game-content-window-y => { root.pointer-state-changed(); }
     changed game-content-window-width => { root.pointer-state-changed(); }
@@ -164,6 +167,8 @@ export component ManagerWindow inherits Window {
 
     // ===== Generic config (Family / Extension / Filter) =====
     in property <[ConfigField]> family-config-fields;
+    in property <bool> musica-profile-available;
+    in property <bool> musica-import-pending;
     in property <[ConfigField]> filter-config-fields;
 
     // ===== About =====
@@ -222,6 +227,7 @@ export component ManagerWindow inherits Window {
     callback load-filter-source();
     callback save-filter-config();
     callback reset-family-config();
+    callback musica-profile-action(string);
     callback reset-filter-config();
 
     // ===== Game view (overlays everything when active) =====
@@ -246,7 +252,6 @@ export component ManagerWindow inherits Window {
         pointer-content-y <=> root.game-content-window-y;
         pointer-content-width <=> root.game-content-window-width;
         pointer-content-height <=> root.game-content-window-height;
-        cursor-visible: root.game-cursor-visible;
         input-blocked: root.modal-active || root.fatal-error-active;
         game-input(control, pressed, value) => {
             if !root.modal-active && !root.fatal-error-active { root.game-input(control, pressed, value); }
@@ -317,6 +322,8 @@ export component ManagerWindow inherits Window {
                     model-identity: root.model-identity;
                     selected-title: root.selected-title;
                     selected-family: root.selected-family;
+                    selected-emulator: root.selected-emulator;
+                    selected-launchable: root.selected-launchable;
                     selected-play-time: root.selected-play-time;
                     selected-last-played: root.selected-last-played;
                     play-history: root.play-history;
@@ -337,6 +344,9 @@ export component ManagerWindow inherits Window {
                     view-mode <=> root.view-mode;
                     density: root.density;
                     family-config-fields: root.family-config-fields;
+                    musica-profile-available: root.musica-profile-available;
+                    musica-import-pending: root.musica-import-pending;
+                    musica-profile-action(action) => { root.musica-profile-action(action); }
                     selected-developer: root.selected-developer;
                     selected-release-date: root.selected-release-date;
                     selected-platforms: root.selected-platforms;

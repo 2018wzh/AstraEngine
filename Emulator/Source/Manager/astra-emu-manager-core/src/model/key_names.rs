@@ -93,7 +93,7 @@ impl KeyCode {
             Self::Period => "Period",
             Self::Slash => "Slash",
             Self::Semicolon => "Semicolon",
-            Self::Apostrophe => "Apostrophe",
+            Self::Apostrophe => "Quote",
             Self::BracketLeft => "BracketLeft",
             Self::BracketRight => "BracketRight",
             Self::Backslash => "Backslash",

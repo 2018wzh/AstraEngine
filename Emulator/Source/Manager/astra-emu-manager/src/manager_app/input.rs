@@ -378,8 +378,14 @@ impl AstraEmuManagerController {
             return Err("ASTRA_EMU_INPUT_CLOSE_GAME_BEFORE_CONFIGURATION".into());
         }
         let game = self.selected_game()?;
+        let mut settings = self
+            .library
+            .game_settings(&game.game_id)
+            .map_err(|error| error.to_string())?
+            .unwrap_or_default();
+        settings.input_mapping = None;
         self.library
-            .clear_game_settings(&game.game_id)
+            .set_game_settings(&game.game_id, &settings)
             .map_err(|error| error.to_string())?;
         self.load_game_input_mapping(&game.game_id)?;
         self.model()

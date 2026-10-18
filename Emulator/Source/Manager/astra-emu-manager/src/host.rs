@@ -2,8 +2,8 @@ use astra_emu_manager_core::InputMapping;
 use astra_media_core::Viewport2D;
 use std::{
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
     time::Instant,
 };
@@ -190,6 +190,7 @@ pub trait ManagerController: 'static {
     fn family_config_changed(&mut self, _key: &str, _value: &str) -> Result<(), String>;
     fn save_family_config(&mut self) -> Result<ManagerViewModel, String>;
     fn reset_family_config(&mut self) -> Result<ManagerViewModel, String>;
+    fn musica_profile_action(&mut self, action: &str) -> Result<ManagerViewModel, String>;
     fn filter_config_changed(&mut self, _key: &str, _value: &str) -> Result<(), String>;
     fn reset_filter_config(&mut self) -> Result<ManagerViewModel, String>;
     /// Library sort mode: "title" | "recent" | "play_time".
@@ -579,7 +580,7 @@ fn terminate_game<C: ManagerController>(
                     .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_')
         })
         .unwrap_or("ASTRA_EMU_SESSION_FAILED");
-    tracing::error!(event = "astra.emu.host.game_terminated", diagnostic_code);
+    tracing::error!(event = "astra.emu.host.game_terminated", diagnostic_code, message = %message);
     window.set_global_diagnostic(message.clone().into());
     window.set_fatal_error_message(message.into());
     window.set_core_retryable(false);

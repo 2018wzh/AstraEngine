@@ -1,14 +1,13 @@
 //! Durable Manager data for games, play records, metadata, and settings.
 //!
-//! This database is deliberately independent from a running Family. Opening
-//! a database with an old or unknown schema explicitly rebuilds the Manager
-//! tables; native game save files live below the game location and are never
-//! touched by this code.
+//! This database is independent from a running emulator. Schema 4 upgrades
+//! in place; older unsupported schemas rebuild only Manager tables. Native
+//! game save files are never touched by this code.
 
 use std::{path::Path, time::Duration};
 
 use astra_emu_translation_openai_compatible::TranslationProfile;
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -18,7 +17,7 @@ use crate::{input_mapping::InputMapping, work_settings::GameSettings};
 #[path = "library_settings.rs"]
 mod settings;
 
-const SCHEMA_VERSION: i64 = 4;
+const SCHEMA_VERSION: i64 = 5;
 const MAX_TITLE_CHARS: usize = 1_024;
 const MAX_LOCATION_BYTES: usize = 4_096;
 const MAX_METADATA_BYTES: usize = 1_048_576;
@@ -192,6 +191,19 @@ impl Library {
             }
             return Ok(());
         }
+        if version == 4 {
+            if table_count != REQUIRED_TABLES.len() || !self.required_tables_present()? {
+                return Err(LibraryError::SchemaCorrupt);
+            }
+            let transaction = self.connection.transaction()?;
+            transaction.execute(
+                "UPDATE library_game SET family_id='softpal' WHERE family_id='sena'",
+                [],
+            )?;
+            transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+            transaction.commit()?;
+            return Ok(());
+        }
 
         if version != 0 || table_count != 0 {
             self.rebuild_manager_tables()?;
@@ -359,6 +371,37 @@ impl Library {
         }
         Ok(())
     }
+
+    /// Bind the detected engine and selected emulator atomically, retaining other overrides.
+    pub fn select_game_emulator(
+        &mut self,
+        game_id: &str,
+        engine_id: &str,
+        emulator_id: &str,
+    ) -> Result<(), LibraryError> {
+        validate_id(game_id)?;
+        validate_id(engine_id)?;
+        validate_id(emulator_id)?;
+        let mut settings = self.game_settings(game_id)?.unwrap_or_default();
+        settings.emulator_id = Some(emulator_id.to_owned());
+        settings.validate().map_err(|_| LibraryError::Settings)?;
+        let encoded = serde_json::to_string(&settings).map_err(|_| LibraryError::Serialization)?;
+        let transaction = self.connection.transaction()?;
+        if transaction.execute(
+            "UPDATE library_game SET family_id=?2 WHERE game_id=?1",
+            params![game_id, engine_id],
+        )? == 0
+        {
+            return Err(LibraryError::GameNotFound);
+        }
+        transaction.execute(
+            "INSERT INTO game_settings(game_id, settings_json) VALUES(?1, ?2)
+             ON CONFLICT(game_id) DO UPDATE SET settings_json=excluded.settings_json",
+            params![game_id, encoded],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
 }
 
 fn game_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<GameRecord> {
@@ -497,5 +540,79 @@ mod tests {
         assert!(library.add_game(&game("game-b", "same-location")).is_err());
         assert!(library.remove_game("game-a").unwrap());
         assert!(library.game("game-a").unwrap().is_none());
+    }
+
+    #[test]
+    fn schema_four_renames_engine_without_losing_library_or_settings() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch(SCHEMA_SQL).unwrap();
+        connection.pragma_update(None, "user_version", 4).unwrap();
+        let mut old = Library { connection };
+        let mut record = game("softpal-game", "existing-installation");
+        record.family_id = Some("sena".into());
+        record.user_title = Some("My title".into());
+        old.add_game(&record).unwrap();
+        let settings = GameSettings {
+            input_mapping: Some(default_vn_preset()),
+            ..Default::default()
+        };
+        old.set_game_settings(&record.game_id, &settings).unwrap();
+        let upgraded = Library::from_connection(old.connection).unwrap();
+        let saved = upgraded.game(&record.game_id).unwrap().unwrap();
+        assert_eq!(saved.family_id.as_deref(), Some("softpal"));
+        assert_eq!(saved.user_title, record.user_title);
+        assert_eq!(saved.location, record.location);
+        assert_eq!(
+            upgraded.game_settings(&record.game_id).unwrap(),
+            Some(settings)
+        );
+    }
+
+    #[test]
+    fn emulator_choices_are_per_game_durable_and_preserve_input_overrides() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("library.sqlite3");
+        let settings = GameSettings {
+            input_mapping: Some(default_vn_preset()),
+            ..Default::default()
+        };
+        {
+            let mut library = Library::open(&path).unwrap();
+            library.add_game(&game("one", "location-one")).unwrap();
+            library.add_game(&game("two", "location-two")).unwrap();
+            library.set_game_settings("one", &settings).unwrap();
+            library
+                .select_game_emulator("one", "softpal", "astra.emu.sena")
+                .unwrap();
+            library
+                .select_game_emulator("two", "softpal", "alternate.softpal")
+                .unwrap();
+            assert!(library.select_game_emulator("one", "softpal", "").is_err());
+            assert!(matches!(
+                library.select_game_emulator("absent", "softpal", "astra.emu.sena"),
+                Err(LibraryError::GameNotFound)
+            ));
+        }
+        let library = Library::open(path).unwrap();
+        let one = library.game_settings("one").unwrap().unwrap();
+        assert_eq!(one.emulator_id.as_deref(), Some("astra.emu.sena"));
+        assert_eq!(one.input_mapping, settings.input_mapping);
+        assert_eq!(
+            library
+                .game_settings("two")
+                .unwrap()
+                .unwrap()
+                .emulator_id
+                .as_deref(),
+            Some("alternate.softpal")
+        );
+        assert_eq!(
+            library.game("one").unwrap().unwrap().family_id.as_deref(),
+            Some("softpal")
+        );
+        assert_eq!(
+            library.game("two").unwrap().unwrap().family_id.as_deref(),
+            Some("softpal")
+        );
     }
 }

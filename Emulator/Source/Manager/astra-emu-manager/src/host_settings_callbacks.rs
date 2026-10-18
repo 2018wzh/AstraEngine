@@ -97,16 +97,31 @@ pub(super) fn install<C: ManagerController>(
     // Generic config handlers
     {
         let c = controller.clone();
+        let a = std::rc::Rc::downgrade(adapter);
         let w = adapter.window().as_weak();
         adapter
             .window()
             .on_family_config_changed(move |key, value| {
-                if let Err(error) = c
-                    .borrow_mut()
-                    .family_config_changed(key.as_str(), value.as_str())
-                {
-                    if let Some(window) = w.upgrade() {
-                        window.set_global_diagnostic(error.into());
+                let result = {
+                    let mut controller = c.borrow_mut();
+                    controller
+                        .family_config_changed(key.as_str(), value.as_str())
+                        .and_then(|()| {
+                            if matches!(
+                                key.as_str(),
+                                "manager.emulator_id" | "manager.config_scope"
+                            ) {
+                                controller.model().map(Some)
+                            } else {
+                                Ok(None)
+                            }
+                        })
+                };
+                if let Some(window) = w.upgrade() {
+                    match result {
+                        Ok(Some(model)) => apply_model(&a, &model),
+                        Ok(None) => {}
+                        Err(error) => window.set_global_diagnostic(error.into()),
                     }
                 }
             });
@@ -131,6 +146,20 @@ pub(super) fn install<C: ManagerController>(
         let w = adapter.window().as_weak();
         adapter.window().on_reset_family_config(move || {
             let result = c.borrow_mut().reset_family_config();
+            if let Some(window) = w.upgrade() {
+                match result {
+                    Ok(model) => apply_model(&a, &model),
+                    Err(error) => window.set_global_diagnostic(error.into()),
+                }
+            }
+        });
+    }
+    {
+        let c = controller.clone();
+        let a = std::rc::Rc::downgrade(adapter);
+        let w = adapter.window().as_weak();
+        adapter.window().on_musica_profile_action(move |action| {
+            let result = c.borrow_mut().musica_profile_action(action.as_str());
             if let Some(window) = w.upgrade() {
                 match result {
                     Ok(model) => apply_model(&a, &model),

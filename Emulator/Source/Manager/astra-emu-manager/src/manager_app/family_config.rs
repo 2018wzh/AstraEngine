@@ -61,7 +61,7 @@ impl AstraEmuManagerController {
         let mut fields = vec![GenericConfigFieldViewModel {
             key: "manager.config_scope".into(),
             label: "配置范围".into(),
-            description: "core 为该核心默认值，game 为当前游戏覆盖；下次启动生效。".into(),
+            description: "core 为该模拟器默认值，game 为当前游戏覆盖；不同模拟器的配置相互独立，下次启动生效。".into(),
             kind: "enum".into(),
             value: if self.config_scope().is_empty() {
                 "core"
@@ -195,9 +195,9 @@ mod tests {
             })
             .unwrap();
         controller.selected_case_id = Some("game".into());
-        controller
-            .candidates
-            .insert("game".into(), configuration_candidate());
+        let candidate = configuration_candidate();
+        controller.candidates.insert("game".into(), candidate.clone());
+        controller.probe_choices.insert("game".into(), vec![candidate]);
         controller
     }
 

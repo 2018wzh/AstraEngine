@@ -7,8 +7,8 @@ pinned by exact gitlink to the published adaptation of the
 [`2018wzh/siglus_rs`](https://github.com/2018wzh/siglus_rs) fork: upstream
 revision `5f358ef1360b0439e92aed2b749e8f25d8721954` (1.0.0), native lifecycle
 baseline `13b55b47484faf8dfe03deb6ffd56ca0ec4ba3f2` and single embedded adapter
-`f94c0dad6187844df1476381f473a7d395601b9b`, for an unofficial Rust reimplementation
-of SiglusEngine. Its complete tree matches the Release build source `20262f4141b6737c98deca8f26cc203500d597a0`.
+`a94565cccd4f6d5e0a341e5732c5d98e9de2c71f`, for an unofficial Rust reimplementation
+of SiglusEngine. Its complete tree matches this Release build source `a67786e80e663e982605e69164ac6bc7d0b148ee`.
 The covered source is
 redistributed under the MPL-2.0; the complete license text is preserved at
 `Emulator/ThirdParty/siglus_rs/LICENSE-MPL-2.0`. The file-level change inventory is

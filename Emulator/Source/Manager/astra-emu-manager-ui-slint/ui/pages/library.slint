@@ -355,6 +355,8 @@ export component LibraryPage inherits Rectangle {
     in property <string> model-identity;
     in property <string> selected-title;
     in property <string> selected-family;
+    in property <string> selected-emulator;
+    in property <bool> selected-launchable;
     in property <string> selected-play-time;
     in property <string> selected-last-played;
     in property <[PlaySession]> play-history;
@@ -376,6 +378,8 @@ export component LibraryPage inherits Rectangle {
     in-out property <string> view-mode: "grid";
     in property <string> density: "comfortable";
     in property <[ConfigField]> family-config-fields;
+    in property <bool> musica-profile-available;
+    in property <bool> musica-import-pending;
     // Extended metadata (PotatoVN-style)
     in property <string> selected-developer;
     in property <string> selected-release-date;
@@ -400,6 +404,7 @@ export component LibraryPage inherits Rectangle {
     callback family-config-changed(string, string);
     callback save-family-config();
     callback reset-family-config();
+    callback musica-profile-action(string);
     property <int> visible-columns: max(1, min(root.grid-columns, Math.floor((root.width - (root.desktop-mode ? 26px : 14px)) / (root.desktop-mode ? 170px : 166px))));
     property <length> grid-spacing: root.desktop-mode && root.density != "compact" ? 14px : 10px;
     property <length> card-width: max(156px, min(240px, (root.width - (root.desktop-mode ? 48px : 32px) - root.grid-spacing * (root.visible-columns - 1)) / root.visible-columns));
@@ -919,10 +924,16 @@ export component LibraryPage inherits Rectangle {
                         }
 
                         Text {
-                            text: "核心 · " + root.selected-family;
+                            text: "引擎 · " + root.selected-family;
                             color: Theme.primary;
                             font-size: Theme.font-label-md;
                             font-weight: 600;
+                        }
+                        Text {
+                            text: "模拟器 · " + (root.selected-emulator != "" ? root.selected-emulator : "请选择");
+                            color: Theme.on-surface-variant;
+                            font-size: Theme.font-label-md;
+                            wrap: word-wrap;
                         }
                     }
 
@@ -954,7 +965,7 @@ export component LibraryPage inherits Rectangle {
                         text: "立即启动";
                         icon: Icons.play;
                         primary: true;
-                        enabled: root.selected-family != "";
+                        enabled: root.selected-launchable;
                         clicked => { root.launch(root.selected-case-id); }
                     }
 
@@ -969,7 +980,7 @@ export component LibraryPage inherits Rectangle {
                         clicked => { root.inspector-tab = "details"; }
                     }
                     M3Button {
-                        text: "核心配置";
+                        text: "模拟器配置";
                         variant: root.inspector-tab == "core" ? "tonal" : "text";
                         clicked => { root.inspector-tab = "core"; }
                     }
@@ -1116,18 +1127,43 @@ export component LibraryPage inherits Rectangle {
                         }
 
                         if root.inspector-tab == "core" && root.family-config-fields.length == 0 : Text {
-                            text: "此核心没有可配置选项";
+                            text: "没有可用的模拟器配置；请检查模拟器安装与游戏识别结果。";
                             color: Theme.on-surface-variant;
                             wrap: word-wrap;
                         }
                         if root.inspector-tab == "core" && root.family-config-fields.length > 0 : GenericConfigForm {
                             fields: root.family-config-fields;
-                            form-title: "核心配置";
-                            form-description: "为当前游戏保存核心选项，启动时应用。";
+                            form-title: "模拟器配置";
+                            form-description: "按游戏选择模拟器，参数按模拟器独立保存，启动时应用。";
                             has-selected-case: root.selected-case-id != "";
                             field-changed(key, value) => { root.family-config-changed(key, value); }
                             save => { root.save-family-config(); }
                             reset => { root.reset-family-config(); }
+                        }
+                        if root.inspector-tab == "core" && root.musica-profile-available : VerticalLayout {
+                            spacing: 8px;
+                            Text {
+                                text: "Musica 私有配置：选择已有 JSON，或从 GARbro / key.toml 导入。导入结果只保存在应用数据目录，并应用到当前游戏。";
+                                wrap: word-wrap;
+                                color: Theme.on-surface-variant;
+                            }
+                            M3Button {
+                                text: "选择已有 JSON 配置";
+                                clicked => { root.musica-profile-action("json"); }
+                            }
+                            M3Button {
+                                text: "选择 GARbro Formats.dat";
+                                clicked => { root.musica-profile-action("garbro"); }
+                            }
+                            M3Button {
+                                text: "选择 key.toml";
+                                clicked => { root.musica-profile-action("key"); }
+                            }
+                            if root.musica-import-pending : M3Button {
+                                text: "导入并应用所选配置";
+                                primary: true;
+                                clicked => { root.musica-profile-action("import"); }
+                            }
                         }
                     }
                 }

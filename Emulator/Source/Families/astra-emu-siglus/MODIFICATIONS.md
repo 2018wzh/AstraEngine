@@ -4,8 +4,8 @@
 
 - 上游 `xmoezzz/siglus_rs`：`5f358ef1360b0439e92aed2b749e8f25d8721954`（1.0.0）。
 - 通用原生基线：`13b55b47484faf8dfe03deb6ffd56ca0ec4ba3f2`，保留于 `astra` 的历史；在原生生命周期和空栈后回标题修复之上移除商业硬件验收驱动。
-- 已发布嵌入适配基线：`f94c0dad6187844df1476381f473a7d395601b9b`，直接父提交为上述通用基线。该版本源码 tree 与此前 Release 构建的 `20262f4141b6737c98deca8f26cc203500d597a0` 相同；既有远端引用保持不变。
-- 本次输入边界修复：`a67786e80e663e982605e69164ac6bc7d0b148ee`，在上述适配基线上追加，仅修改 `astra/embedded`。交接时未 push；主线程最终整合时按通用基线整理单次适配，旧发布 SHA 保留。
+- 嵌入适配：`a94565cccd4f6d5e0a341e5732c5d98e9de2c71f`，直接父提交为上述通用基线，包含输入边界修复，已按用户授权使用 lease 更新 `astra`。旧发布引用已保存为本地 Git bundle。
+- 本次 Release 构建与 9 项纯逻辑回归的源码为 `a67786e80e663e982605e69164ac6bc7d0b148ee`；整理后的提交具有完全相同的 tree `4c20acad370f7eaddb0eed52e2947734b5b4e6ec`。
 - Kira 保留完整嵌套 submodule `vendor/kira`：0.9.6 上游 `dfb08d08d065930e9b257203bf11c6d34742f542`，`2018wzh/kira` 修复 `a299b42690094a71885f6ed97dc504c4038da9a7`。
 - Kira 固定 CPAL 0.15.3 的 WASAPI 关闭修复 `65ac8a6ac1a635cc26bfc5af331295b052044908`（`2018wzh/cpal`）；Windows 宿主验证通过 workspace patch 使用兼容 ALSA 依赖的同版本 `ecfda841a9140d60bbec1630d47ca91f1a77b8f3`，不升级原 Kira 或替换设备后端。
 - 独立嵌入 manifest 固定共享 ABI 2 `2018wzh/AstraEngine@15a39a626b1316cb6137a75e17e14a2ff2d1ba88`。许可证及完整来源保留，见 `THIRD_PARTY_NOTICES.md`。
@@ -39,7 +39,7 @@
 
 现有日志在 2026-10-18 07:18:45 只保留 `ASTRA_EMU_SIGLUS_ARGUMENT`，缺少 operation、原始 ABI status 和完整 error message，无法确定当次具体输入或调用。该 code 来自 ABI 请求路径；图形初始化和 VM 指令失败经 `ASTRA_EMU_SIGLUS_ENGINE` 返回，扩展协商自身不会生成 ARGUMENT。不能把后续其他核心的通用 SESSION_FAILED 记录归为 Siglus，也不能将此次日志归因于图形或原生指令扩展。
 
-普通确定性回归覆盖键名映射、原生未映射键的事件分发、提交文本和边界、未知输入继续拒绝、扩展查询无状态污染、原生错误 cause chain，以及 Dynamic/Static 返回同一 API。未运行这些测试，也未启动游戏；产品验收仍由用户在 Release 中人工执行。
+9 项普通确定性回归已通过，覆盖键名映射、原生未映射键分发、提交文本与边界、未知输入拒绝、扩展查询无状态污染、原生错误 cause chain，以及 Dynamic/Static API 一致性。未启动游戏；产品验收仍由用户在 Release 中人工执行。
 
 ## Release 构建与人工验收
 

@@ -49,7 +49,7 @@ fn imported_game_selection_loads_its_input_mapping() {
 }
 
 #[test]
-fn unsupported_import_reports_the_selected_directory_with_existing_games() {
+fn unsupported_import_preserves_the_existing_game_and_selection() {
     let root = tempfile::tempdir().unwrap();
     let path = game(root.path());
     let mut app = controller(root.path());
@@ -61,7 +61,7 @@ fn unsupported_import_reports_the_selected_directory_with_existing_games() {
     std::fs::create_dir(&unsupported).unwrap();
     let model = app.add_game_directory(&unsupported).unwrap();
     assert_eq!(model.games.len(), 1);
-    assert!(model.global_diagnostic.contains("所选目录中未发现"));
+    assert_eq!(model.selected_case_id, Some(path_id(&path)));
 }
 
 #[test]
@@ -106,6 +106,7 @@ fn importing_a_parent_keeps_the_existing_game_id_and_settings() {
             &id,
             &astra_emu_manager_core::GameSettings {
                 input_mapping: Some(default_vn_preset()),
+                ..Default::default()
             },
         )
         .unwrap();
@@ -169,7 +170,10 @@ fn scanning_existing_path_aliases_keeps_both_records_without_a_location_conflict
     app.rescan().unwrap();
     assert!(app.candidates.is_empty());
     for id in ["original", "canonical"] {
-        assert_eq!(app.library.game(id).unwrap().unwrap().family_id, None);
+        assert_eq!(
+            app.library.game(id).unwrap().unwrap().family_id.as_deref(),
+            Some("fixture")
+        );
     }
 }
 
@@ -192,7 +196,6 @@ fn unavailable_game_does_not_block_library_startup_or_lose_metadata() {
     assert_eq!(model.games[0].title, "Saved title");
     assert!(!model.games[0].diagnostic.is_empty());
     assert!(!app.candidates.contains_key(&id));
-    assert!(model.global_diagnostic.contains("1 个游戏目录当前不可用"));
 }
 
 #[test]
@@ -229,16 +232,26 @@ fn selected_probe_is_cleared_on_no_match() {
 
     assert!(!app.candidates.contains_key(&id));
     assert!(!app.probe_choices.contains_key(&id));
-    assert_eq!(app.library.game(&id).unwrap().unwrap().family_id, None);
+    assert_eq!(
+        app.library.game(&id).unwrap().unwrap().family_id.as_deref(),
+        Some("fixture")
+    );
     let record = app.library.game(&id).unwrap().unwrap();
     assert_eq!(record.user_title.as_deref(), Some("Custom title"));
     assert_eq!(record.content_fingerprint.as_deref(), Some("fingerprint"));
     assert_eq!(record.added_at_unix_ms, 7);
     let model = app.model().unwrap();
-    assert_eq!(model.games[0].family, "probe required");
-    assert_eq!(model.games[0].diagnostic, "family probe required");
-    assert!(model.selected_family.is_empty());
     assert!(model.family_config_fields.is_empty());
+    assert!(!model.selected_launchable);
+    assert_eq!(
+        app.library
+            .game_settings(&id)
+            .unwrap()
+            .unwrap()
+            .emulator_id
+            .as_deref(),
+        Some("test-a")
+    );
     assert_eq!(
         app.launch(&id).unwrap_err(),
         "ASTRA_EMU_FAMILY_PROBE_REQUIRED"
@@ -246,49 +259,49 @@ fn selected_probe_is_cleared_on_no_match() {
 }
 
 #[test]
-fn ambiguous_probe_clears_old_candidate_and_rejects_old_choice_after_no_match() {
+fn selected_emulator_survives_additional_same_engine_matches_and_reopening() {
     let root = tempfile::tempdir().unwrap();
     let game_path = game(root.path());
+    let id = path_id(&game_path);
+    {
+        let mut app = controller(root.path());
+        app.registry
+            .register_provider(move || provider("test-a", 9_000))
+            .unwrap();
+        scan_once(&mut app, &game_path);
+        app.selected_case_id = Some(id.clone());
+        app.registry
+            .register_provider(move || provider("test-b", 8_000))
+            .unwrap();
+        scan_once(&mut app, &game_path);
+        assert_eq!(app.candidates[&id].report.plugin_id, "test-a");
+        assert_eq!(app.probe_choices[&id].len(), 2);
+        app.family_config_changed("manager.emulator_id", "test-b")
+            .unwrap();
+        app.save_family_config().unwrap();
+        assert_eq!(app.candidates[&id].report.plugin_id, "test-b");
+        app.clear_per_game_input_mapping().unwrap();
+        assert_eq!(
+            app.library
+                .game_settings(&id)
+                .unwrap()
+                .unwrap()
+                .emulator_id
+                .as_deref(),
+            Some("test-b")
+        );
+    }
     let mut app = controller(root.path());
     app.registry
         .register_provider(move || provider("test-a", 9_000))
         .unwrap();
-    scan_once(&mut app, &game_path);
-
-    let id = path_id(&game_path);
-    app.selected_case_id = Some(id.clone());
     app.registry
         .register_provider(move || provider("test-b", 8_000))
         .unwrap();
     scan_once(&mut app, &game_path);
-
-    assert!(!app.candidates.contains_key(&id));
-    assert_eq!(app.probe_choices.get(&id).unwrap().len(), 2);
-    assert_eq!(app.library.game(&id).unwrap().unwrap().family_id, None);
-    let model = app.model().unwrap();
-    assert_eq!(model.games[0].diagnostic, "provider selection required");
-    assert!(model.selected_family.is_empty());
-    assert_eq!(
-        app.launch(&id).unwrap_err(),
-        "ASTRA_EMU_FAMILY_PROVIDER_SELECTION_REQUIRED"
-    );
-    app.family_config_changed("family.plugin_id", "test-a")
-        .unwrap();
-
-    std::fs::remove_file(game_path.join("match")).unwrap();
-    scan_once(&mut app, &game_path);
-
-    assert!(!app.candidates.contains_key(&id));
-    assert!(!app.probe_choices.contains_key(&id));
-    assert_eq!(
-        app.family_config_changed("family.plugin_id", "test-a")
-            .unwrap_err(),
-        "ASTRA_EMU_FAMILY_PROVIDER_SELECTION_NOT_REQUIRED"
-    );
-    assert_eq!(
-        app.save_family_config().unwrap_err(),
-        "ASTRA_EMU_FAMILY_PROBE_REQUIRED"
-    );
+    assert_eq!(app.candidates[&id].report.plugin_id, "test-b");
+    app.selected_case_id = Some(id);
+    assert!(app.model().unwrap().selected_launchable);
 }
 
 #[test]
@@ -307,7 +320,10 @@ fn selected_probe_is_recreated_after_match_returns() {
     std::fs::remove_file(game_path.join("match")).unwrap();
     scan_once(&mut app, &game_path);
     assert!(!app.candidates.contains_key(&id));
-    assert_eq!(app.library.game(&id).unwrap().unwrap().family_id, None);
+    assert_eq!(
+        app.library.game(&id).unwrap().unwrap().family_id.as_deref(),
+        Some("fixture")
+    );
 
     std::fs::write(game_path.join("match"), b"match").unwrap();
     scan_once(&mut app, &game_path);
@@ -321,7 +337,7 @@ fn selected_probe_is_recreated_after_match_returns() {
 }
 
 #[test]
-fn rescan_replaces_stale_provider_choice_with_current_candidate() {
+fn missing_saved_emulator_requires_an_explicit_replacement() {
     let root = tempfile::tempdir().unwrap();
     let game_path = game(root.path());
     std::fs::rename(game_path.join("match"), game_path.join("marker-a")).unwrap();
@@ -339,19 +355,39 @@ fn rescan_replaces_stale_provider_choice_with_current_candidate() {
     std::fs::write(game_path.join("marker-b"), b"marker-b").unwrap();
     scan_once(&mut app, &game_path);
     assert_eq!(app.probe_choices.get(&id).unwrap().len(), 2);
-    app.family_config_changed("family.plugin_id", "test-a")
+    app.family_config_changed("manager.emulator_id", "test-a")
         .unwrap();
 
     std::fs::remove_file(game_path.join("marker-a")).unwrap();
     scan_once(&mut app, &game_path);
 
-    assert!(!app.probe_choices.contains_key(&id));
-    assert_eq!(app.candidates.get(&id).unwrap().report.plugin_id, "test-b");
-    assert!(!app.family_options.contains_key("family.plugin_id"));
+    assert!(!app.candidates.contains_key(&id));
+    assert_eq!(app.probe_choices[&id][0].report.plugin_id, "test-b");
+    assert!(!app.model().unwrap().selected_launchable);
     assert_eq!(
-        app.family_config_changed("family.plugin_id", "test-a")
-            .unwrap_err(),
-        "ASTRA_EMU_FAMILY_PROVIDER_SELECTION_NOT_REQUIRED"
+        app.library
+            .game_settings(&id)
+            .unwrap()
+            .unwrap()
+            .emulator_id
+            .as_deref(),
+        Some("test-a")
     );
+    assert!(
+        app.family_config_changed("manager.emulator_id", "test-a")
+            .is_err()
+    );
+    app.family_config_changed("manager.emulator_id", "test-b")
+        .unwrap();
     app.save_family_config().unwrap();
+    assert_eq!(app.candidates[&id].report.plugin_id, "test-b");
+    assert_eq!(
+        app.library
+            .game_settings(&id)
+            .unwrap()
+            .unwrap()
+            .emulator_id
+            .as_deref(),
+        Some("test-b")
+    );
 }

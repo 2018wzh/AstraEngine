@@ -71,18 +71,18 @@ impl AstraEmuManagerController {
             .iter()
             .map(
                 |(game, duration_ms, last_played_ms, cover_uri, compatibility_status)| {
-                    let selection_required = self.probe_choices.contains_key(&game.game_id);
                     let launchable = self.launch_candidate_for_game(game).is_some();
+                    let selection_required =
+                        self.probe_choices.contains_key(&game.game_id) && !launchable;
                     GameCardViewModel {
                         case_id: game.game_id.clone(),
                         title: game.display_title().into(),
-                        family: if selection_required {
-                            "selection required".into()
-                        } else if launchable {
-                            game.family_id.clone().unwrap_or_else(|| "unknown".into())
-                        } else {
-                            "probe required".into()
-                        },
+                        family: game
+                            .family_id
+                            .as_deref()
+                            .map(Self::engine_label)
+                            .unwrap_or("未识别引擎")
+                            .into(),
                         cover_uri: cover_uri.clone(),
                         diagnostic: if selection_required {
                             "provider selection required".into()
@@ -307,13 +307,15 @@ impl AstraEmuManagerController {
                 .as_ref()
                 .map(|game| game.display_title().into())
                 .unwrap_or_default(),
-            selected_family: selected
-                .as_ref()
-                .and_then(|game| {
-                    self.launch_candidate_for_game(game)
-                        .map(|candidate| candidate.report.family_id.clone())
-                })
+            selected_family: selected.as_ref()
+                .and_then(|game| game.family_id.as_deref())
+                .map(Self::engine_label).unwrap_or_default().into(),
+            selected_emulator: selected.as_ref()
+                .and_then(|game| self.launch_candidate_for_game(game))
+                .map(|candidate| Self::emulator_label(&candidate.descriptor))
                 .unwrap_or_default(),
+            selected_launchable: selected.as_ref()
+                .is_some_and(|game| self.launch_candidate_for_game(game).is_some()),
             selected_play_time,
             selected_last_played,
             play_history: history,
@@ -330,6 +332,8 @@ impl AstraEmuManagerController {
             input_config: self.input_view(),
             appearance: self.appearance_view(),
             family_config_fields: self.family_fields()?,
+            musica_profile_available: self.musica_profile_available(),
+            musica_import_pending: self.musica_profile_import_pending(),
             filter_config_fields: self.filter_fields()?,
             version: env!("CARGO_PKG_VERSION").into(),
             build_identity: option_env!("ASTRA_EMU_MANAGER_RUSTC_FINGERPRINT")

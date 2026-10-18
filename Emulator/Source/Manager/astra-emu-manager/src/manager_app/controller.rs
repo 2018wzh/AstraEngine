@@ -288,6 +288,10 @@ impl ManagerController for AstraEmuManagerController {
         AstraEmuManagerController::reset_family_config(self)
     }
 
+    fn musica_profile_action(&mut self, action: &str) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::musica_profile_action(self, action)
+    }
+
     fn filter_config_changed(&mut self, key: &str, value: &str) -> Result<(), String> {
         AstraEmuManagerController::filter_config_changed(self, key, value)
     }

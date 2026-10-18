@@ -20,6 +20,14 @@ NativeVN 的原生宿主与 Headless 共用物理输入到 UI request/completion
 
 本轮 Windows 验收按用户最新决定缩小为“可玩”，并统一改为 Release 人工手动验收。用户自行进入剧情、连续操作、检查基本菜单与存读档、退出重开；不要求每核心结局或正式性能对照。停止自动操作窗口，移除为本轮自动化验收增加的入口、驱动、截图/输入脚本和测试钩子，保留生产修复及普通逻辑测试。BGI 按用户明确确认记为人工验收通过，不再重复验证；其余核心的 Release 构建不等于人工通过。CMVS 不动。
 
+引擎身份与模拟器身份分离：ABI 的 `family_id` 表示原版引擎，`plugin_id` 表示模拟器实现。同一引擎允许安装多个不同 plugin ID 的模拟器；重复 plugin ID 仍拒绝。Sena 的引擎为 `softpal`，模拟器标识保持 `sena-native-koikake`，不扩大其游戏兼容范围，也不改变原生存档身份。
+
+Manager 在每个游戏的设置中持久保存模拟器选择，配置继续按 plugin ID 和游戏/默认范围独立保存。重新扫描或重启保留选择；已选模拟器缺失时要求用户明确替换，不能自动换用其他实现。重置输入映射不清除模拟器选择。资料库 schema 4 升级到 5 时只迁移原 `sena` 引擎标识，保留游戏、元数据、配置及输入设置。
+
+Musica 的私有 profile 在游戏配置中显式选择或导入：支持已有 typed JSON、GARbro `Formats.dat` 的指定方案和已确认 schema 的 `key.toml`。JSON 有界读取；导入结果为应用数据目录内的新私有文件，不覆盖既有文件或修改原游戏。`key.toml` 缺少的 PAZ 版本、索引 XOR 和 RC4 CRC 跳过参数必须明确填写，不推测或尝试其他密钥。
+
+Host 独占 OS 光标显隐，Slint 不另行隐藏游戏光标；原生指针策略在 Slint 事件分发后重新同步，焦点、模态与错误界面沿用实际状态。Siglus 正常提交文本和已支持物理键沿用原生输入路径；真实不支持的输入仍报错。调用失败保留 operation、ABI status、错误码与完整有界原因，不能只留下通用会话失败码。
+
 ### 原生所有权与 ABI
 
 同进程、单活动游戏，Dynamic/Static 共用 C 兼容结构、明确长度、不透明句柄和稳定错误码。动态入口 `astra_emu_query` 与静态注册的 `Query` 返回相同 `CoreApi`；查询只协商版本，不启动线程或安装日志。函数表含 initialize、describe、probe、open、input、control、state、frame、cancel、close 和 extension，不含 advance。普通调用串行，cancel 可并发唤醒阻塞服务；close 无论成功失败都消费句柄，返回前结束全部 worker 和回调。失败 open 不交付会话且完成清理。此为本轮实现版本，尚未完成七核心产品验收，不宣称已发布稳定 ABI。

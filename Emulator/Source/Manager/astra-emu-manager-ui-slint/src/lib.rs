@@ -142,6 +142,8 @@ pub struct ManagerViewModel {
     /// Inspector details for the selected game.
     pub selected_title: String,
     pub selected_family: String,
+    pub selected_emulator: String,
+    pub selected_launchable: bool,
     pub selected_play_time: String,
     pub selected_last_played: String,
     /// Finished play sessions for the selected game, most recent first.
@@ -173,6 +175,8 @@ pub struct ManagerViewModel {
     pub appearance: AppearanceViewModel,
     /// Generic Family config fields for selected game (schema-driven).
     pub family_config_fields: Vec<GenericConfigFieldViewModel>,
+    pub musica_profile_available: bool,
+    pub musica_import_pending: bool,
     /// Generic Extension config fields (e.g. translate).
     /// Generic Filter config fields.
     pub filter_config_fields: Vec<GenericConfigFieldViewModel>,
@@ -350,6 +354,14 @@ impl SlintManagerAdapter {
             .set_selected_title(model.selected_title.as_str().into());
         self.window
             .set_selected_family(model.selected_family.as_str().into());
+        self.window
+            .set_selected_emulator(model.selected_emulator.as_str().into());
+        self.window
+            .set_selected_launchable(model.selected_launchable);
+        self.window
+            .set_musica_profile_available(model.musica_profile_available);
+        self.window
+            .set_musica_import_pending(model.musica_import_pending);
         self.window
             .set_selected_play_time(model.selected_play_time.as_str().into());
         self.window

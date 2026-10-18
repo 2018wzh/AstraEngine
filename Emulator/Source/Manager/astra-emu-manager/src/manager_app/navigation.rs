@@ -5,9 +5,6 @@ impl AstraEmuManagerController {
         &self,
         game: &GameRecord,
     ) -> Option<&FamilyProbeCandidate> {
-        if self.probe_choices.contains_key(&game.game_id) {
-            return None;
-        }
         let candidate = self.candidates.get(&game.game_id)?;
         if game.family_id.as_deref() != Some(candidate.report.family_id.as_str())
             || candidate.descriptor.family_id != candidate.report.family_id
@@ -97,7 +94,7 @@ impl AstraEmuManagerController {
         }
         let game = self.game(case_id)?;
         self.load_game_input_mapping(case_id)?;
-        if self.probe_choices.contains_key(case_id) {
+        if self.probe_choices.contains_key(case_id) && !self.candidates.contains_key(case_id) {
             return Err("ASTRA_EMU_FAMILY_PROVIDER_SELECTION_REQUIRED".to_owned());
         }
         let candidate = self
