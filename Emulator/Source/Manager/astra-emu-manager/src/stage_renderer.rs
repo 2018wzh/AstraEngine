@@ -6,9 +6,9 @@ use std::{
 
 use astra_emu_manager::{
     AstraUnderlayRenderer, StageTextureUpdate, WgpuFrameContext,
-    effects::{FilterConfiguration, FilterEngine, FilterPreset},
+    effects::{FilterConfiguration, FilterEngine, FilterPreset, PreparedFilter},
 };
-use astra_emu_manager_core::model::FrameIdentity;
+use astra_emu_manager_core::model::{FrameIdentity, FrameLease};
 use astra_media_core::Viewport2D;
 use wgpu::{Extent3d, TextureUsages};
 
@@ -18,6 +18,8 @@ const DEFAULT_STAGE_HEIGHT: u32 = 600;
 #[cfg(windows)]
 #[path = "stage_d3d12.rs"]
 mod d3d12;
+#[path = "stage_filter.rs"]
+mod filter;
 #[path = "stage_frame.rs"]
 mod frame;
 #[path = "stage_pixels.rs"]
@@ -44,7 +46,7 @@ pub(crate) struct ManagerStageRenderer {
     filter_engine: FilterEngine,
     filter_configuration: FilterConfiguration,
     filter_dirty: bool,
-    filter_source: Option<String>,
+    filter_activation: filter::FilterActivation,
     #[cfg(windows)]
     d3d12: Option<d3d12::Importer>,
 }
@@ -78,7 +80,7 @@ impl ManagerStageRenderer {
             dxc_path,
             filter_configuration: FilterConfiguration::default(),
             filter_dirty: false,
-            filter_source: None,
+            filter_activation: filter::FilterActivation::default(),
             #[cfg(windows)]
             d3d12: None,
         }
@@ -89,23 +91,34 @@ impl ManagerStageRenderer {
         config: &FilterConfiguration,
         source: Option<&str>,
     ) -> Result<(), String> {
+        let prepared = PreparedFilter::new(config, source).map_err(|error| error.to_string())?;
+        if self.uploaded_identity.is_none() {
+            self.filter_activation.defer(prepared);
+            return Ok(());
+        }
+        self.activate_filter(prepared, self.input_width, self.input_height)?;
+        self.filter_activation.complete(Ok(()));
+        Ok(())
+    }
+
+    fn activate_filter(
+        &mut self,
+        prepared: PreparedFilter,
+        input_width: u32,
+        input_height: u32,
+    ) -> Result<(), String> {
         let device = self
             .device
             .as_ref()
             .ok_or_else(|| "ASTRA_EMU_HOST_RENDERER_NOT_SETUP".to_owned())?;
-        config.validate().map_err(|error| error.to_string())?;
+        let (output_width, output_height) = prepared
+            .output_dimensions(input_width, input_height)
+            .map_err(|error| error.to_string())?;
+        validate_dimensions(device, output_width, output_height)?;
+        let config = prepared.configuration().clone();
         let mut candidate = FilterEngine::new(self.dxc_path.clone());
-        if let Some(source) = source {
-            candidate
-                .reload_source(device, source, config)
-                .map_err(|error| error.to_string())?;
-        } else {
-            candidate
-                .reload(device, config)
-                .map_err(|error| error.to_string())?;
-        }
-        let (output_width, output_height) = candidate
-            .active_output_dimensions(self.input_width, self.input_height)
+        candidate
+            .reload_prepared(device, prepared)
             .map_err(|error| error.to_string())?;
         let replacement = if config.preset == FilterPreset::None {
             None
@@ -124,8 +137,7 @@ impl ManagerStageRenderer {
         };
 
         self.filter_engine = candidate;
-        self.filter_configuration = config.clone();
-        self.filter_source = source.map(str::to_owned);
+        self.filter_configuration = config;
         self.filtered_texture = replacement;
         self.output_width = output_width;
         self.output_height = output_height;
@@ -147,6 +159,10 @@ impl ManagerStageRenderer {
         let input = create_stage_texture(device, input_width, input_height, "input", input_format)?;
         let filtered = if self.filter_configuration.preset == FilterPreset::None {
             None
+        } else if self.filtered_texture.as_ref().is_some_and(|texture| {
+            texture.width() == output_width && texture.height() == output_height
+        }) {
+            self.filtered_texture.clone()
         } else {
             Some(create_stage_texture(
                 device,
@@ -168,137 +184,25 @@ impl ManagerStageRenderer {
         self.texture_dirty = true;
         Ok(())
     }
-}
 
-fn default_dxc_path() -> PathBuf {
-    let executable = env::current_exe().unwrap_or_else(|_| PathBuf::from("astra-emu-manager"));
-    dxc_path_for_executable(&executable)
-}
-
-fn dxc_path_for_executable(executable: &Path) -> PathBuf {
-    let filename = format!(
-        "{}dxcompiler.{}",
-        std::env::consts::DLL_PREFIX,
-        std::env::consts::DLL_EXTENSION
-    );
-    match executable.parent() {
-        Some(directory) => directory.join(filename),
-        None => PathBuf::from(filename),
-    }
-}
-
-impl AstraUnderlayRenderer for ManagerStageRenderer {
-    fn configure_filter(
+    fn render_frame(
         &mut self,
-        config: &FilterConfiguration,
-        source: Option<&str>,
+        context: WgpuFrameContext<'_>,
+        frame: &FrameLease,
     ) -> Result<(), String> {
-        self.configure_filter_inner(config, source)
-    }
-
-    fn setup(&mut self, context: WgpuFrameContext<'_>) -> Result<(), String> {
-        if self.input_texture.is_some() || self.output_texture.is_some() {
-            return Err("ASTRA_EMU_HOST_RENDERER_DUPLICATE_SETUP".into());
-        }
-        let adapter = context.device.adapter_info();
-        tracing::info!(
-            event = "astra.emu.host.gpu.created",
-            backend = ?adapter.backend,
-            device_type = ?adapter.device_type,
-            device = %adapter.name,
-            vendor_id = adapter.vendor,
-            device_id = adapter.device,
-            driver = %adapter.driver,
-        );
-        self.device = Some(context.device.clone());
-        #[cfg(windows)]
-        {
-            self.d3d12 = d3d12::Importer::new(context.device)?;
-            self.mailbox
-                .set_d3d12(self.d3d12.as_ref().map(|importer| importer.host))?;
-        }
-        self.filter_engine = FilterEngine::new(self.dxc_path.clone());
-        self.filter_dirty = false;
-        self.recreate_textures(
-            context.device,
-            DEFAULT_STAGE_WIDTH,
-            DEFAULT_STAGE_HEIGHT,
-            DEFAULT_STAGE_WIDTH,
-            DEFAULT_STAGE_HEIGHT,
-            wgpu::TextureFormat::Rgba8Unorm,
-        )
-    }
-
-    fn take_stage_texture_update(&mut self) -> Result<Option<StageTextureUpdate>, String> {
-        if !self.texture_dirty {
-            return Ok(None);
-        }
-        let texture = self
-            .output_texture
-            .clone()
-            .ok_or_else(|| "ASTRA_EMU_HOST_RENDERER_OUTPUT_MISSING".to_owned())?;
-        let content = content_viewport_for_output(
-            self.logical_width,
-            self.logical_height,
-            self.input_width,
-            self.input_height,
-            texture.width(),
-            texture.height(),
-        )?;
-        self.texture_dirty = false;
-        Ok(Some(StageTextureUpdate {
-            raster_width: texture.width(),
-            raster_height: texture.height(),
-            texture,
-            logical_width: self.logical_width,
-            logical_height: self.logical_height,
-            content,
-        }))
-    }
-
-    fn render(&mut self, context: WgpuFrameContext<'_>) -> Result<(), String> {
-        #[cfg(windows)]
-        if let Some(importer) = &mut self.d3d12 {
-            importer.reap()?;
-        }
-        let Some(frame) = self.mailbox.snapshot()? else {
-            #[cfg(windows)]
-            if let Some(importer) = &mut self.d3d12 {
-                importer.drain()?;
-            }
-            if self.uploaded_identity.is_some() {
-                if let Some(output) = &self.output_texture {
-                    let view = output.create_view(&Default::default());
-                    let mut encoder = context.device.create_command_encoder(&Default::default());
-                    {
-                        let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                                view: &view,
-                                depth_slice: None,
-                                resolve_target: None,
-                                ops: wgpu::Operations {
-                                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                                    store: wgpu::StoreOp::Store,
-                                },
-                            })],
-                            ..Default::default()
-                        });
-                    }
-                    context.queue.submit([encoder.finish()]);
-                }
-                self.input_texture = None;
-                self.presented_input = None;
-                self.pixel_presentation = pixels::PixelPresentation::default();
-                self.uploaded_identity = None;
-                self.filter_dirty = false;
-            }
+        let info = frame.info;
+        let pending = self.filter_activation.take_pending();
+        if pending.is_none() && !self.filter_activation.ready_for_frame()? {
             return Ok(());
-        };
+        }
+        validate_dimensions(context.device, info.width, info.height)?;
+        if let Some(prepared) = pending {
+            self.activate_filter(prepared, info.width, info.height)?;
+            self.filter_activation.complete(Ok(()));
+        }
         if Some(frame.identity) == self.uploaded_identity && !self.filter_dirty {
             return Ok(());
         }
-        let info = frame.info;
-        validate_dimensions(context.device, info.width, info.height)?;
         let (output_width, output_height) = self
             .filter_engine
             .active_output_dimensions(info.width, info.height)
@@ -406,6 +310,133 @@ impl AstraUnderlayRenderer for ManagerStageRenderer {
         self.filter_dirty = false;
         Ok(())
     }
+}
+
+fn default_dxc_path() -> PathBuf {
+    let executable = env::current_exe().unwrap_or_else(|_| PathBuf::from("astra-emu-manager"));
+    dxc_path_for_executable(&executable)
+}
+
+fn dxc_path_for_executable(executable: &Path) -> PathBuf {
+    let filename = format!(
+        "{}dxcompiler.{}",
+        std::env::consts::DLL_PREFIX,
+        std::env::consts::DLL_EXTENSION
+    );
+    match executable.parent() {
+        Some(directory) => directory.join(filename),
+        None => PathBuf::from(filename),
+    }
+}
+
+impl AstraUnderlayRenderer for ManagerStageRenderer {
+    fn configure_filter(
+        &mut self,
+        config: &FilterConfiguration,
+        source: Option<&str>,
+    ) -> Result<(), String> {
+        self.configure_filter_inner(config, source)
+    }
+
+    fn setup(&mut self, context: WgpuFrameContext<'_>) -> Result<(), String> {
+        if self.device.is_some() {
+            return Err("ASTRA_EMU_HOST_RENDERER_DUPLICATE_SETUP".into());
+        }
+        let adapter = context.device.adapter_info();
+        tracing::info!(
+            event = "astra.emu.host.gpu.created",
+            backend = ?adapter.backend,
+            device_type = ?adapter.device_type,
+            device = %adapter.name,
+            vendor_id = adapter.vendor,
+            device_id = adapter.device,
+            driver = %adapter.driver,
+        );
+        #[cfg(windows)]
+        {
+            let importer = d3d12::Importer::new(context.device)?;
+            self.mailbox
+                .set_d3d12(importer.as_ref().map(|importer| importer.host))?;
+            self.d3d12 = importer;
+        }
+        self.device = Some(context.device.clone());
+        self.filter_dirty = false;
+        Ok(())
+    }
+
+    fn take_stage_texture_update(&mut self) -> Result<Option<StageTextureUpdate>, String> {
+        if !self.texture_dirty {
+            return Ok(None);
+        }
+        let texture = self
+            .output_texture
+            .clone()
+            .ok_or_else(|| "ASTRA_EMU_HOST_RENDERER_OUTPUT_MISSING".to_owned())?;
+        let content = content_viewport_for_output(
+            self.logical_width,
+            self.logical_height,
+            self.input_width,
+            self.input_height,
+            texture.width(),
+            texture.height(),
+        )?;
+        self.texture_dirty = false;
+        Ok(Some(StageTextureUpdate {
+            raster_width: texture.width(),
+            raster_height: texture.height(),
+            texture,
+            logical_width: self.logical_width,
+            logical_height: self.logical_height,
+            content,
+        }))
+    }
+
+    fn render(&mut self, context: WgpuFrameContext<'_>) -> Result<(), String> {
+        #[cfg(windows)]
+        if let Some(importer) = &mut self.d3d12 {
+            importer.reap()?;
+        }
+        let Some(frame) = self.mailbox.snapshot()? else {
+            #[cfg(windows)]
+            if let Some(importer) = &mut self.d3d12 {
+                importer.drain()?;
+            }
+            if self.uploaded_identity.is_some() {
+                if let Some(output) = &self.output_texture {
+                    let view = output.create_view(&Default::default());
+                    let mut encoder = context.device.create_command_encoder(&Default::default());
+                    {
+                        let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                view: &view,
+                                depth_slice: None,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                    store: wgpu::StoreOp::Store,
+                                },
+                            })],
+                            ..Default::default()
+                        });
+                    }
+                    context.queue.submit([encoder.finish()]);
+                }
+                self.input_texture = None;
+                self.presented_input = None;
+                self.pixel_presentation = pixels::PixelPresentation::default();
+                self.uploaded_identity = None;
+                self.filter_dirty = false;
+            }
+            return Ok(());
+        };
+        let first_frame = self.uploaded_identity.is_none();
+        let result = self.render_frame(context, &frame);
+        if first_frame && result.is_err() {
+            self.filter_activation.complete(result);
+            return self.filter_activation.ready_for_frame().map(|_| ());
+        }
+        result
+    }
 
     fn teardown(&mut self) -> Result<(), String> {
         #[cfg(windows)]
@@ -426,6 +457,10 @@ impl AstraUnderlayRenderer for ManagerStageRenderer {
         self.presented_input = None;
         self.pixel_presentation = pixels::PixelPresentation::default();
         self.device = None;
+        self.input_width = DEFAULT_STAGE_WIDTH;
+        self.input_height = DEFAULT_STAGE_HEIGHT;
+        self.output_width = DEFAULT_STAGE_WIDTH;
+        self.output_height = DEFAULT_STAGE_HEIGHT;
         self.logical_width = DEFAULT_STAGE_WIDTH;
         self.logical_height = DEFAULT_STAGE_HEIGHT;
         self.uploaded_identity = None;
@@ -433,7 +468,7 @@ impl AstraUnderlayRenderer for ManagerStageRenderer {
         self.filter_engine = FilterEngine::new(self.dxc_path.clone());
         self.filter_configuration = FilterConfiguration::default();
         self.filter_dirty = false;
-        self.filter_source = None;
+        self.filter_activation = filter::FilterActivation::default();
         gpu_result.and(mailbox_result)
     }
 }

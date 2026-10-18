@@ -83,6 +83,47 @@ pub enum FilterError {
     Compile(String),
 }
 
+/// Validated effect metadata, without loading DXC or creating GPU resources.
+pub struct PreparedFilter {
+    configuration: FilterConfiguration,
+    chain: Option<PreparedChain>,
+}
+
+impl PreparedFilter {
+    pub fn new(
+        config: &FilterConfiguration,
+        source: Option<&str>,
+    ) -> Result<Self, FilterError> {
+        config.validate()?;
+        let chain = if config.preset == FilterPreset::None {
+            None
+        } else {
+            Some(PreparedChain::new(config, source).map_err(FilterError::Compile)?)
+        };
+        Ok(Self {
+            configuration: config.clone(),
+            chain,
+        })
+    }
+
+    pub fn configuration(&self) -> &FilterConfiguration {
+        &self.configuration
+    }
+
+    pub fn output_dimensions(
+        &self,
+        input_width: u32,
+        input_height: u32,
+    ) -> Result<(u32, u32), FilterError> {
+        if input_width == 0 || input_height == 0 {
+            return Err(FilterError::TextureDimensions);
+        }
+        self.chain.as_ref().map_or(Ok((input_width, input_height)), |chain| {
+            chain.output_dimensions(input_width, input_height, &self.configuration)
+        })
+    }
+}
+
 pub struct FilterEngine {
     dxc_path: PathBuf,
     active: Option<CompiledChain>,
@@ -136,44 +177,33 @@ impl FilterEngine {
             .map(|chain| chain.output_dimensions(input_width, input_height))
             .unwrap_or(Ok((input_width, input_height)))
     }
-    pub fn reload(
-        &mut self,
-        device: &wgpu::Device,
-        config: &FilterConfiguration,
-    ) -> Result<(), FilterError> {
-        self.reload_with_source(device, config, None)
-    }
 
-    pub fn reload_source(
+    /// Compile a prepared request transactionally; failures keep the active chain.
+    pub fn reload_prepared(
         &mut self,
         device: &wgpu::Device,
-        source: &str,
-        config: &FilterConfiguration,
+        prepared: PreparedFilter,
     ) -> Result<(), FilterError> {
-        self.reload_with_source(device, config, Some(source))
-    }
-
-    fn reload_with_source(
-        &mut self,
-        device: &wgpu::Device,
-        config: &FilterConfiguration,
-        source_override: Option<&str>,
-    ) -> Result<(), FilterError> {
-        config.validate()?;
-        if matches!(config.preset, FilterPreset::None) {
+        let PreparedFilter {
+            configuration,
+            chain,
+        } = prepared;
+        let Some(chain) = chain else {
             self.active = None;
             return Ok(());
-        }
+        };
         verify_dxc_path(&self.dxc_path)?;
-        if matches!(config.preset, FilterPreset::Anime4kRestoreUpscale)
+        if matches!(configuration.preset, FilterPreset::Anime4kRestoreUpscale)
             && !device.features().contains(Self::required_features())
         {
             return Err(FilterError::CapabilityMissing);
         }
         let error_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
-        let new_chain = CompiledChain::build(device, &self.dxc_path, config, source_override)
-            .map_err(FilterError::Compile)?;
-        if let Some(error) = pollster::block_on(error_scope.pop()) {
+        let result = CompiledChain::build(device, &self.dxc_path, configuration, chain)
+            .map_err(FilterError::Compile);
+        let validation_error = pollster::block_on(error_scope.pop());
+        let new_chain = result?;
+        if let Some(error) = validation_error {
             return Err(FilterError::Compile(format!(
                 "ASTRA_EMU_FILTER_WGPU_BUILD: {error}"
             )));
@@ -225,4 +255,86 @@ fn verify_dxc_path(path: &Path) -> Result<(), FilterError> {
 #[path = "chain.rs"]
 mod chain;
 
-use chain::CompiledChain;
+use chain::{CompiledChain, PreparedChain};
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prepared_dimensions_follow_the_selected_source() {
+        let scale = FilterConfiguration {
+            preset: FilterPreset::Scale,
+            scale: 1.5,
+            ..Default::default()
+        };
+        assert_eq!(
+            PreparedFilter::new(&scale, None)
+                .unwrap()
+                .output_dimensions(721, 1280)
+                .unwrap(),
+            (1082, 1920)
+        );
+        assert_eq!(
+            PreparedFilter::new(&scale, Some(SCALE_SOURCE))
+                .unwrap()
+                .output_dimensions(721, 1280)
+                .unwrap(),
+            (721, 1280)
+        );
+        assert_eq!(
+            PreparedFilter::new(&scale, Some(UPSCALE_SOURCE))
+                .unwrap()
+                .output_dimensions(721, 1280)
+                .unwrap(),
+            (1442, 2560)
+        );
+        let anime = FilterConfiguration {
+            preset: FilterPreset::Anime4kRestoreUpscale,
+            scale: 2.0,
+            ..Default::default()
+        };
+        assert_eq!(
+            PreparedFilter::new(&anime, Some(SCALE_SOURCE))
+                .unwrap()
+                .output_dimensions(721, 1280)
+                .unwrap(),
+            (721, 1280)
+        );
+    }
+
+    #[test]
+    fn prepared_none_ignores_unused_source_and_scale() {
+        let config = FilterConfiguration {
+            scale: 4.0,
+            ..Default::default()
+        };
+        let prepared = PreparedFilter::new(&config, Some("not an effect")).unwrap();
+        assert_eq!(prepared.output_dimensions(1280, 720).unwrap(), (1280, 720));
+        assert!(matches!(
+            prepared.output_dimensions(0, 720),
+            Err(FilterError::TextureDimensions)
+        ));
+    }
+
+    #[test]
+    fn preparation_rejects_invalid_source_metadata_and_parameters() {
+        let mut config = FilterConfiguration {
+            preset: FilterPreset::Scale,
+            ..Default::default()
+        };
+        assert!(PreparedFilter::new(&config, Some("not an effect")).is_err());
+        let invalid_format = UPSCALE_SOURCE.replace("R16G16B16A16_FLOAT", "R32_FLOAT");
+        let error = PreparedFilter::new(&config, Some(&invalid_format))
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(error.contains("ASTRA_EMU_EFFECT_TEXTURE_FORMAT_UNSUPPORTED"));
+        config.parameters.insert("unknown".into(), 1.0);
+        let error = PreparedFilter::new(&config, None)
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(error.contains("ASTRA_EMU_EFFECT_PARAMETER_UNKNOWN_unknown"));
+    }
+}

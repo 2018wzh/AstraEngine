@@ -108,3 +108,89 @@ fn filtered_output_keeps_the_complete_native_frame_interactive() {
         }
     );
 }
+
+#[test]
+fn saved_filter_is_prepared_without_a_device_or_compiler() {
+    let mut renderer = ManagerStageRenderer::with_dxc_path(
+        FrameMailbox::new(),
+        PathBuf::from("unavailable/dxcompiler.dll"),
+    );
+    let config = FilterConfiguration {
+        preset: FilterPreset::Anime4kRestoreUpscale,
+        scale: 2.0,
+        ..Default::default()
+    };
+    renderer.configure_filter_inner(&config, None).unwrap();
+    assert!(renderer.take_stage_texture_update().unwrap().is_none());
+    let prepared = renderer.filter_activation.take_pending().unwrap();
+    assert_eq!(prepared.output_dimensions(721, 1280).unwrap(), (1442, 2560));
+    assert!(!renderer.filter_activation.ready_for_frame().unwrap());
+}
+
+#[test]
+fn invalid_reconfigure_preserves_the_pending_good_request() {
+    let mut renderer = ManagerStageRenderer::new(FrameMailbox::new());
+    let config = FilterConfiguration {
+        preset: FilterPreset::Scale,
+        scale: 1.5,
+        ..Default::default()
+    };
+    renderer.configure_filter_inner(&config, None).unwrap();
+    let invalid = FilterConfiguration {
+        scale: f32::NAN,
+        ..config.clone()
+    };
+    assert_eq!(
+        renderer.configure_filter_inner(&invalid, None).unwrap_err(),
+        "ASTRA_EMU_FILTER_PARAMETER_scale"
+    );
+    assert!(
+        renderer
+            .configure_filter_inner(&config, Some("invalid format-4 source"))
+            .is_err()
+    );
+    let prepared = renderer.filter_activation.take_pending().unwrap();
+    assert_eq!(prepared.output_dimensions(721, 1280).unwrap(), (1082, 1920));
+}
+
+#[test]
+fn deferred_dimension_failure_reports_once_and_requires_reconfiguration() {
+    let config = FilterConfiguration {
+        preset: FilterPreset::Anime4kRestoreUpscale,
+        scale: 2.0,
+        ..Default::default()
+    };
+    let mut activation = filter::FilterActivation::default();
+    activation.defer(PreparedFilter::new(&config, None).unwrap());
+    let prepared = activation.take_pending().unwrap();
+    let error = prepared
+        .output_dimensions(u32::MAX, 720)
+        .unwrap_err()
+        .to_string();
+    activation.complete(Err(error.clone()));
+    assert_eq!(activation.ready_for_frame().unwrap_err(), error);
+    for _ in 0..3 {
+        assert!(activation.take_pending().is_none());
+        assert!(!activation.ready_for_frame().unwrap());
+    }
+    activation.defer(PreparedFilter::new(&FilterConfiguration::default(), None).unwrap());
+    let prepared = activation.take_pending().unwrap();
+    assert_eq!(prepared.output_dimensions(1280, 720).unwrap(), (1280, 720));
+    activation.complete(Ok(()));
+    assert!(activation.ready_for_frame().unwrap());
+}
+
+#[test]
+fn teardown_discards_pending_filter_without_activating_it() {
+    let mut renderer = ManagerStageRenderer::new(FrameMailbox::new());
+    let config = FilterConfiguration {
+        preset: FilterPreset::Sharpen,
+        ..Default::default()
+    };
+    renderer.configure_filter_inner(&config, None).unwrap();
+    renderer.teardown().unwrap();
+    assert!(renderer.filter_activation.take_pending().is_none());
+    assert!(renderer.take_stage_texture_update().unwrap().is_none());
+    renderer.configure_filter_inner(&config, None).unwrap();
+    assert!(renderer.filter_activation.take_pending().is_some());
+}

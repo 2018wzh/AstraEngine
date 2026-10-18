@@ -21,6 +21,13 @@ use layout::{
     write_f32, write_u32,
 };
 
+pub(super) struct PreparedChain {
+    sources: Vec<(EffectSource, bool)>,
+    kind: ChainKind,
+    output_mode: OutputMode,
+    external_source: bool,
+}
+
 pub(super) struct CompiledChain {
     passes: Vec<CompiledPass>,
     stages: Vec<EffectSource>,
@@ -41,6 +48,33 @@ enum OutputMode {
     Source,
     ConfigScale,
 }
+
+impl OutputMode {
+    fn dimensions(
+        self,
+        source: Option<&EffectSource>,
+        config: &FilterConfiguration,
+        input_width: u32,
+        input_height: u32,
+    ) -> Result<(u32, u32), FilterError> {
+        if input_width == 0 || input_height == 0 {
+            return Err(FilterError::TextureDimensions);
+        }
+        match self {
+            Self::ConfigScale => {
+                FilterEngine::output_dimensions(input_width, input_height, config)
+            }
+            Self::Source => texture_dimensions(
+                source.ok_or_else(|| FilterError::Compile("effect source has no stages".into()))?,
+                "OUTPUT",
+                input_width,
+                input_height,
+                None,
+            ),
+        }
+    }
+}
+
 struct CompiledPass {
     pipeline: wgpu::ComputePipeline,
     layout: wgpu::BindGroupLayout,
@@ -50,10 +84,8 @@ struct CompiledPass {
     block_size: u32,
 }
 
-impl CompiledChain {
-    pub(super) fn build(
-        device: &wgpu::Device,
-        dxc_path: &Path,
+impl PreparedChain {
+    pub(super) fn new(
         config: &FilterConfiguration,
         source_override: Option<&str>,
     ) -> Result<Self, String> {
@@ -78,13 +110,53 @@ impl CompiledChain {
                     || matches!(texture.height, Some(TextureDimension::InputTimes(2)))
             });
         validate_texture_metadata(&source, source_is_upscale)?;
-        let mut sources = vec![(source.clone(), false)];
+        let mut sources = vec![(source, false)];
         if matches!(kind, ChainKind::Anime) {
             let upscale = EffectSource::parse(UPSCALE_SOURCE).map_err(|e| e.to_string())?;
             validate_parameter_values(&upscale, config)?;
             validate_texture_metadata(&upscale, true)?;
             sources.push((upscale, true));
         }
+        Ok(Self {
+            sources,
+            kind,
+            output_mode: if external_source || !matches!(config.preset, FilterPreset::Scale) {
+                OutputMode::Source
+            } else {
+                OutputMode::ConfigScale
+            },
+            external_source,
+        })
+    }
+
+    pub(super) fn output_dimensions(
+        &self,
+        input_width: u32,
+        input_height: u32,
+        config: &FilterConfiguration,
+    ) -> Result<(u32, u32), FilterError> {
+        self.output_mode.dimensions(
+            self.sources.last().map(|(effect, _)| effect),
+            config,
+            input_width,
+            input_height,
+        )
+    }
+}
+
+impl CompiledChain {
+    pub(super) fn build(
+        device: &wgpu::Device,
+        dxc_path: &Path,
+        config: FilterConfiguration,
+        prepared: PreparedChain,
+    ) -> Result<Self, String> {
+        let PreparedChain {
+            sources,
+            kind,
+            output_mode,
+            external_source,
+        } = prepared;
         let mut passes = Vec::new();
         let mut stage_pass_counts = Vec::new();
         for (effect, anime_upscale) in &sources {
@@ -136,13 +208,9 @@ impl CompiledChain {
             stages: sources.into_iter().map(|(effect, _)| effect).collect(),
             stage_pass_counts,
             preset: config.preset,
-            config: config.clone(),
+            config,
             kind,
-            output_mode: if external_source || !matches!(config.preset, FilterPreset::Scale) {
-                OutputMode::Source
-            } else {
-                OutputMode::ConfigScale
-            },
+            output_mode,
             scratch: Mutex::new(BTreeMap::new()),
         })
     }
@@ -151,23 +219,12 @@ impl CompiledChain {
         input_width: u32,
         input_height: u32,
     ) -> Result<(u32, u32), FilterError> {
-        if input_width == 0 || input_height == 0 {
-            return Err(FilterError::TextureDimensions);
-        }
-        match self.output_mode {
-            OutputMode::ConfigScale => {
-                FilterEngine::output_dimensions(input_width, input_height, &self.config)
-            }
-            OutputMode::Source => texture_dimensions(
-                self.stages
-                    .last()
-                    .ok_or(FilterError::Compile("effect source has no stages".into()))?,
-                "OUTPUT",
-                input_width,
-                input_height,
-                None,
-            ),
-        }
+        self.output_mode.dimensions(
+            self.stages.last(),
+            &self.config,
+            input_width,
+            input_height,
+        )
     }
     pub(super) fn apply(
         &self,
