@@ -156,6 +156,86 @@ mod tests {
     use super::*;
 
     #[test]
+    fn pointer_requests_preserve_partial_updates_at_the_host_boundary() {
+        #[derive(Debug, Default, PartialEq)]
+        struct Capture {
+            kind: u32,
+            flags: u32,
+            x: i32,
+            y: i32,
+            autohide_ms: u64,
+        }
+        unsafe extern "C" fn capture(
+            context: *mut std::ffi::c_void,
+            request: *const WindowRequest,
+            _: *mut WindowResult,
+            _: *mut Error,
+        ) -> Status {
+            let request = unsafe { &*request };
+            unsafe {
+                *context.cast::<Capture>() = Capture {
+                    kind: request.kind,
+                    flags: request.flags,
+                    x: request.x,
+                    y: request.y,
+                    autohide_ms: request.autohide_ms,
+                };
+            }
+            OK
+        }
+        for visible in [None, Some(false), Some(true)] {
+            for autohide_ms in [None, Some(0), Some(1000)] {
+                let mut actual = Capture::default();
+                let platform = Platform(
+                    WindowService {
+                        context: (&mut actual as *mut Capture).cast(),
+                        request: Some(capture),
+                        invalidate: None,
+                    },
+                    CancellationService {
+                        context: std::ptr::null_mut(),
+                        is_cancelled: None,
+                    },
+                );
+                assert!(request(
+                    platform,
+                    WindowCommand::Pointer {
+                        x: Some(12),
+                        y: None,
+                        visible,
+                        autohide_ms,
+                    },
+                    1,
+                    1,
+                    1,
+                )
+                .unwrap()
+                .is_continue());
+                let mut flags = POINTER_SET_X;
+                if let Some(visible) = visible {
+                    flags |= POINTER_SET_VISIBILITY;
+                    if visible {
+                        flags |= POINTER_VISIBLE;
+                    }
+                }
+                if autohide_ms.is_some() {
+                    flags |= POINTER_SET_AUTOHIDE;
+                }
+                assert_eq!(
+                    actual,
+                    Capture {
+                        kind: WINDOW_POINTER,
+                        flags,
+                        x: 12,
+                        y: 0,
+                        autohide_ms: autohide_ms.unwrap_or(0),
+                    }
+                );
+            }
+        }
+    }
+
+    #[test]
     fn native_window_flags_use_only_actual_mode_and_minimized() {
         let valid = WINDOW_RESULT_MODE | WINDOW_RESULT_MINIMIZED;
         for mode in [

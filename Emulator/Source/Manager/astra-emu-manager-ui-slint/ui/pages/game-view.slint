@@ -47,7 +47,6 @@ export component GameViewPage inherits Rectangle {
     in-out property <float> pointer-content-y: (root.absolute-position.y + root.content-stage-y) / 1px;
     in-out property <float> pointer-content-width: root.content-stage-width / 1px;
     in-out property <float> pointer-content-height: root.content-stage-height / 1px;
-    in property <bool> cursor-visible: true;
 
     // Diagnostics panel state
     in-out property <length> diagnostics-x: 40px;
@@ -86,7 +85,7 @@ export component GameViewPage inherits Rectangle {
     game-focus := FocusScope {
 
         TouchArea {
-            mouse-cursor: !root.overlay-active && !root.input-blocked && !root.cursor-visible && self.mouse-x >= root.content-stage-x && self.mouse-x < root.content-stage-x + root.content-stage-width && self.mouse-y >= root.content-stage-y && self.mouse-y < root.content-stage-y + root.content-stage-height ? none : default;
+            // HostPointer owns visibility; Slint only selects control shapes.
             moved => {
                 if root.overlay-active || root.input-blocked { return; }
                 if root.content-stage-width > 0px && root.content-stage-height > 0px && self.mouse-x >= root.content-stage-x && self.mouse-x < root.content-stage-x + root.content-stage-width && self.mouse-y >= root.content-stage-y && self.mouse-y < root.content-stage-y + root.content-stage-height {

@@ -88,6 +88,32 @@ fn native_mouse_preserves_nulls_and_pending_caption() {
 }
 
 #[test]
+fn native_mouse_distinguishes_explicit_visibility_from_idle_policy() {
+    for (payload, expected_visible, expected_autohide) in [
+        (r#"{"hide":0}"#, Some(true), None),
+        (r#"{"hide":1}"#, Some(false), None),
+        (r#"{"hide":-1}"#, Some(false), None),
+        (r#"{"autohide":1000}"#, None, Some(1000)),
+        (r#"{"autohide":0}"#, None, Some(0)),
+        (r#"{"hide":null,"autohide":null}"#, None, None),
+    ] {
+        let bytes = format!(r#"{{"kind":"mouse","payload":{payload}}}"#);
+        let WindowCommand::Pointer {
+            x,
+            y,
+            visible,
+            autohide_ms,
+        } = parse_ui(bytes.as_bytes()).unwrap()
+        else {
+            panic!("mouse configuration must remain a pointer command");
+        };
+        assert_eq!((x, y), (None, None));
+        assert_eq!(visible, expected_visible);
+        assert_eq!(autohide_ms, expected_autohide);
+    }
+}
+
+#[test]
 fn native_video_audio_keeps_an_open_source_after_temporary_cleanup() {
     let temporary = tempfile::tempdir().unwrap();
     let path = temporary.path().join("video.wav");

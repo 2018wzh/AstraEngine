@@ -34,6 +34,10 @@ Kira 保持 0.12.2，以发布来源 `e9cbb4608237bb339c3eaf498571000e6cce35ca` 
 
 配置保留 `archive` 文件选择。CPU 捕获沿用原生完整 stage target，报告实际 L=R；窗口 drawable 变化不改原生尺寸。指针按正在显示帧的会话/输出代次校验，再执行一次 raster→logical 映射。读取成功的存档通知换代，旧输出不再接受输入，但旧租约可在 close 后任意线程释放。
 
+鼠标适配保留原生 `hide`（零显示、非零显式隐藏）与 `autohide`（毫秒、零停用）的独立含义，`null` 不修改已有设置。显式隐藏不会被移动解除；空闲隐藏在指针活动后解除。上游对应实现见 [Art3m1s `applyMouseConfig` / `notifyMouseActivity`](https://github.com/Alphaly2K/Art3m1s/blob/2234686b9ccde9a4d6721ff0bfe8cf5364472bf7/lib/engine/backends/art3m1s_engine_runtime.dart#L456-L519)，核心继续只发送原生命令，不增加绘制或窗口旁路。
+
+Manager 的 `HostPointer` 统一管理原生光标可见性，Slint 游戏区域不再同时声明 `mouse-cursor: none`。Slint 1.17.1 更换控件光标形状时也调用 winit `set_cursor_visible`，Host 在事件分发后重新同步，不能用上次写入值缓存冒充当前 OS 状态。游戏区域以外、失焦、宿主模态/错误/工具面板显示时恢复系统指针并暂停空闲计时；重新进入后重新计时，仍遵守游戏显式隐藏。退出会话清除显式与空闲隐藏，重开不继承旧状态。窗口句柄和指针定位失败保留底层错误。纯逻辑回归覆盖这些状态转换和原生命令映射；Release 真实指针效果由用户人工验收，不自动启动游戏或注入输入。
+
 原生修复分别提交 [PR #5](https://github.com/Alphaly2K/art3m1s-core/pull/5)（onLoad，`ad20b8afd01ce2807510fa4e08629afc8e62345b`）、[PR #7](https://github.com/Alphaly2K/art3m1s-core/pull/7)（PF8，`186ccc17fb10a6c6b3ee931d98a7c9d6830e722e`）及 [PR #9](https://github.com/Alphaly2K/art3m1s-core/pull/9)（AVIO，`348b931068d31bd75eb5ec804967ce4b86448aee`）。最新远端核对均为 open、未合并。packed stereo 使用显式 `(i16, i16)`；同一非对称双声道样本在原 scalar 和 tuple 路径均正确，不将其报告为已证实缺陷。
 
 ## Release 构建与人工验收
