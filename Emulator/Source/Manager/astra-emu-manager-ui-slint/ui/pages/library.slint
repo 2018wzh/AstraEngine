@@ -23,18 +23,29 @@ export struct ReleaseOption {
 component StartupBanner inherits Rectangle {
     in property <bool> busy;
     in property <string> status;
-    height: 36px;
+    in property <bool> core-refresh-enabled;
+    callback refresh-cores();
+    min-height: 58px;
+    vertical-stretch: 0;
     border-radius: Theme.shape-sm;
     background: busy ? Theme.surface-container-high : Theme.surface-container;
-    Text {
-        x: 12px;
-        width: parent.width - 24px;
-        height: parent.height;
-        text: root.status != "" ? root.status : "正在初始化模拟器…";
-        color: root.busy ? Theme.primary : Theme.on-surface-variant;
-        font-size: Theme.font-body-sm;
-        vertical-alignment: center;
-        overflow: elide;
+    HorizontalLayout {
+        padding: 10px;
+        spacing: 12px;
+        Text {
+            horizontal-stretch: 1;
+            text: root.status != "" ? root.status : root.busy ? "正在刷新核心…" : "请点击“刷新核心”加载模拟器，再手动扫描或添加游戏。";
+            color: root.busy ? Theme.primary : Theme.on-surface-variant;
+            font-size: Theme.font-body-sm;
+            vertical-alignment: center;
+            wrap: word-wrap;
+        }
+        M3Button {
+            text: "刷新核心";
+            icon: Icons.rotate;
+            enabled: root.core-refresh-enabled;
+            clicked => { root.refresh-cores(); }
+        }
     }
 }
 
@@ -373,6 +384,8 @@ export component LibraryPage inherits Rectangle {
     in property <[MatchReview]> match-reviews;
     in property <bool> metadata-busy;
     in property <string> metadata-status;
+    in property <bool> cores-ready;
+    in property <bool> core-refresh-enabled;
     in property <bool> startup-busy;
     in property <string> startup-status;
     in property <bool> cover-loading-enabled;
@@ -431,6 +444,7 @@ export component LibraryPage inherits Rectangle {
     callback select-case(string);
     callback search(string);
     callback rescan();
+    callback refresh-cores();
     callback add-game-directory();
     callback set-library-sort(string);
     callback refresh-compatibility();
@@ -464,9 +478,11 @@ export component LibraryPage inherits Rectangle {
                 font-size: Theme.font-headline-md;
                 font-weight: 600;
             }
-            if root.startup-busy || root.startup-status != "" : StartupBanner {
+            if root.core-refresh-enabled || root.startup-busy || root.startup-status != "" : StartupBanner {
                 busy: root.startup-busy;
                 status: root.startup-status;
+                core-refresh-enabled: root.core-refresh-enabled;
+                refresh-cores => { root.refresh-cores(); }
             }
 
             searchDebounce := Timer {
@@ -546,11 +562,17 @@ export component LibraryPage inherits Rectangle {
                     }
                 }
 
-                M3Button { text: "添加游戏"; primary: true; clicked => { root.add-game-directory(); } }
+                M3Button {
+                    text: "添加游戏";
+                    primary: true;
+                    enabled: root.cores-ready && !root.startup-busy;
+                    clicked => { root.add-game-directory(); }
+                }
                 M3Button {
                     text: "扫描游戏";
                     icon: Icons.rotate;
                     variant: "tonal";
+                    enabled: root.cores-ready && !root.startup-busy;
                     clicked => { root.rescan(); }
                 }
 
@@ -688,7 +710,7 @@ export component LibraryPage inherits Rectangle {
                                 horizontal-alignment: center;
                             }
                             Text {
-                                text: root.search-query != "" ? "尝试更换关键字或重置筛选条件" : "点击“添加游戏”选择游戏目录。联网元数据可在设置中单独启用。";
+                                text: root.search-query != "" ? "尝试更换关键字或重置筛选条件" : !root.cores-ready ? "请先点击“刷新核心”，再手动扫描或添加游戏。" : "点击“添加游戏”选择游戏目录。联网元数据可在设置中单独启用。";
                                 color: Theme.on-surface-variant;
                                 font-size: Theme.font-body-sm;
                                 wrap: word-wrap;
@@ -706,6 +728,7 @@ export component LibraryPage inherits Rectangle {
                                     text: "添加游戏";
                                     icon: Icons.gamepad;
                                     primary: true;
+                                    enabled: root.cores-ready && !root.startup-busy;
                                     clicked => { root.add-game-directory(); }
                                 }
                             }
@@ -747,14 +770,18 @@ export component LibraryPage inherits Rectangle {
                                 horizontal-alignment: center;
                             }
                             Text {
-                                text: "请点击“扫描游戏”载入已授权目录中的作品。";
+                                text: root.cores-ready ? "请点击“扫描游戏”载入已授权目录中的作品。" : "请先点击“刷新核心”，再手动扫描或添加游戏。";
                                 color: Theme.on-surface-variant;
                                 font-size: Theme.font-body-sm;
                                 horizontal-alignment: center;
                             }
                             HorizontalLayout {
                                 alignment: center;
-                                Button { text: "扫描游戏"; clicked => { root.rescan(); } }
+                                Button {
+                                    text: "扫描游戏";
+                                    enabled: root.cores-ready && !root.startup-busy;
+                                    clicked => { root.rescan(); }
+                                }
                             }
                         }
                     }
@@ -777,9 +804,11 @@ export component LibraryPage inherits Rectangle {
             font-size: Theme.font-headline-md;
             font-weight: 600;
         }
-        if root.startup-busy || root.startup-status != "" : StartupBanner {
+        if root.core-refresh-enabled || root.startup-busy || root.startup-status != "" : StartupBanner {
             busy: root.startup-busy;
             status: root.startup-status;
+            core-refresh-enabled: root.core-refresh-enabled;
+            refresh-cores => { root.refresh-cores(); }
         }
 
         mobileSearchDebounce := Timer {
@@ -842,11 +871,13 @@ export component LibraryPage inherits Rectangle {
                 text: "扫描";
                 icon: Icons.rotate;
                 variant: "tonal";
+                enabled: root.cores-ready && !root.startup-busy;
                 clicked => { root.rescan(); }
             }
             M3IconButton {
                 icon: Icons.folder-open;
                 accessible-label: "添加游戏目录";
+                enabled: root.cores-ready && !root.startup-busy;
                 clicked => { root.add-game-directory(); }
             }
         }
@@ -926,6 +957,7 @@ export component LibraryPage inherits Rectangle {
                 text: "添加游戏目录";
                 icon: Icons.folder-open;
                 primary: true;
+                enabled: root.cores-ready && !root.startup-busy;
                 clicked => { root.add-game-directory(); }
             }
         }

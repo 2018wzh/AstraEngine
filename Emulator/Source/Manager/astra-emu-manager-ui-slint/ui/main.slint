@@ -60,6 +60,8 @@ export component ManagerWindow inherits Window {
 
     // ===== Library =====
     in property <[GameCard]> games;
+    in property <bool> cores-ready;
+    in property <bool> core-refresh-enabled;
     in property <bool> startup-busy;
     in property <string> startup-status;
     in-out property <bool> cover-loading-enabled: false;
@@ -197,6 +199,7 @@ export component ManagerWindow inherits Window {
     callback open-translation();
     callback open-filters();
     callback rescan();
+    callback refresh-cores();
     callback add-game-directory();
     callback open-settings();
     callback set-library-sort(string);
@@ -315,6 +318,8 @@ export component ManagerWindow inherits Window {
 
                 if root.current-page == "library" : LibraryPage {
                     games: root.games;
+                    cores-ready: root.cores-ready;
+                    core-refresh-enabled: root.core-refresh-enabled;
                     startup-busy: root.startup-busy;
                     startup-status: root.startup-status;
                     cover-loading-enabled: root.cover-loading-enabled;
@@ -373,6 +378,7 @@ export component ManagerWindow inherits Window {
                     select-case(id) => { root.select-case(id); }
                     search(query) => { root.search(query); }
                     rescan => { root.rescan(); }
+                    refresh-cores => { root.refresh-cores(); }
                     add-game-directory => { root.add-game-directory(); }
                     set-library-sort(mode) => { root.set-library-sort(mode); }
                     refresh-compatibility => { root.refresh-compatibility(); }

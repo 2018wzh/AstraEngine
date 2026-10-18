@@ -118,6 +118,9 @@ pub struct ManagerViewModel {
     pub match_reviews: Vec<MatchReviewViewModel>,
     pub metadata_busy: bool,
     pub metadata_status: String,
+    pub cores_ready: bool,
+    /// Enables the process's single manual core load; loaded DLLs require restart to replace.
+    pub core_refresh_enabled: bool,
     pub startup_busy: bool,
     pub startup_status: String,
     pub selected_case_id: Option<String>,
@@ -265,6 +268,9 @@ impl SlintManagerAdapter {
     }
 
     pub fn apply(&self, model: &ManagerViewModel) {
+        self.window.set_cores_ready(model.cores_ready);
+        self.window
+            .set_core_refresh_enabled(model.core_refresh_enabled);
         self.window.set_startup_busy(model.startup_busy);
         self.window
             .set_startup_status(model.startup_status.as_str().into());
