@@ -95,7 +95,11 @@ fn request(root: &std::path::Path, sink: Sink) -> OpenRequest {
     OpenRequest {
         session_epoch: astra_emu_family_api::allocate_session_epoch().unwrap(),
         game_path: root.to_str().unwrap().into(),
-        configuration: Default::default(),
+        configuration: vec![ConfigEntry {
+            id: "launch_mode".into(),
+            value: ConfigValue::Enum("direct".into()),
+        }]
+        .into(),
         initial_window: WindowState {
             width: 1280,
             height: 720,

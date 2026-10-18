@@ -40,7 +40,13 @@ impl AstraEmuManagerController {
 
     pub(super) fn family_fields(
         &self,
-    ) -> Result<(Vec<GenericConfigFieldViewModel>, Vec<GenericConfigFieldViewModel>), String> {
+    ) -> Result<
+        (
+            Vec<GenericConfigFieldViewModel>,
+            Vec<GenericConfigFieldViewModel>,
+        ),
+        String,
+    > {
         let Some(game_id) = self.selected_case_id.as_deref() else {
             return Ok((Vec::new(), Vec::new()));
         };

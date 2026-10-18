@@ -82,10 +82,11 @@ pub(super) fn png(w: u32, h: u32, color: [u8; 4]) -> Vec<u8> {
 }
 pub(super) fn title_request(root: &std::path::Path) -> OpenRequest {
     let mut req = request(root, Sink::default());
-    req.configuration.push(ConfigEntry {
-        id: "launch_mode".into(),
-        value: ConfigValue::Enum("title".into()),
-    });
+    req.configuration
+        .iter_mut()
+        .find(|entry| entry.id == "launch_mode")
+        .unwrap()
+        .value = ConfigValue::Enum("title".into());
     req
 }
 

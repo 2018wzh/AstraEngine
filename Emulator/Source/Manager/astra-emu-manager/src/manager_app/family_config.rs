@@ -111,9 +111,7 @@ fn append_config_fields(
             .map(|(_, label)| *label);
         let (kind, choices, constraint) = match &field.kind {
             ConfigKind::Bool => ("bool", Vec::new(), String::new()),
-            ConfigKind::Integer { min, max } => {
-                ("integer", Vec::new(), format!("{min} … {max}"))
-            }
+            ConfigKind::Integer { min, max } => ("integer", Vec::new(), format!("{min} … {max}")),
             ConfigKind::Number { min, max } => ("float", Vec::new(), format!("{min} … {max}")),
             ConfigKind::String { max_bytes } => (
                 "string",
@@ -183,32 +181,38 @@ fn native_render_fields(
     descriptor: &FamilyPluginDescriptor,
     schema: &[ConfigField],
 ) -> &'static [(&'static str, &'static str)] {
-    let (expected, bounds): (&[(&str, &str)], ConfigKind) =
+    let (expected, scaled): (&[(&str, &str)], bool) =
         match (descriptor.family_id.as_str(), descriptor.plugin_id.as_str()) {
-            ("fvp", "astra.emu.fvp") => (
-                &[("render_scale", "滤镜输入 · 核心原生渲染倍率")],
-                ConfigKind::Number { min: 0.25, max: 4.0 },
-            ),
+            ("fvp", "astra.emu.fvp") => (&[("render_scale", "滤镜输入 · 核心原生渲染倍率")], true),
             ("musica", "astra.emu.musica") => (
                 &[
                     ("render_width", "滤镜输入 · 核心原生渲染宽度"),
                     ("render_height", "滤镜输入 · 核心原生渲染高度"),
                 ],
-                ConfigKind::Integer { min: 1, max: 16384 },
+                false,
             ),
             ("softpal", "sena-native-koikake") => (
                 &[
                     ("raster_width", "滤镜输入 · 核心原生渲染宽度"),
                     ("raster_height", "滤镜输入 · 核心原生渲染高度"),
                 ],
-                ConfigKind::Integer { min: 320, max: 3840 },
+                false,
             ),
             _ => return &[],
         };
     if expected.iter().all(|(id, _)| {
         let mut matches = schema.iter().filter(|field| field.id == *id);
         matches.next().is_some_and(|field| {
-            field.kind == bounds && field.kind.accepts(&field.default)
+            let native_range = match (&field.kind, scaled) {
+                (ConfigKind::Number { min, max }, true) => {
+                    min.is_finite() && max.is_finite() && *min > 0.0 && max >= min
+                }
+                (ConfigKind::Integer { min, max }, false) => {
+                    *min >= 1 && max >= min && *max <= i64::from(u32::MAX)
+                }
+                _ => false,
+            };
+            native_range && field.kind.accepts(&field.default)
         }) && matches.next().is_none()
     }) {
         expected

@@ -81,7 +81,7 @@ pub(crate) fn musica_descriptor() -> FamilyDescriptor {
         kind: ConfigKind::Enum {
             choices: vec!["direct".into(), "title".into()].into(),
         },
-        default: ConfigValue::Enum("direct".into()),
+        default: ConfigValue::Enum("title".into()),
     });
     configuration.push(ConfigField {
         id: "message_speed_auto_play".into(),
