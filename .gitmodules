@@ -5,7 +5,7 @@
 [submodule "rfvp"]
 	path = Emulator/ThirdParty/rfvp
 	url = https://github.com/2018wzh/rfvp
-	branch = codex/emu-native-single-adaptation-20261018
+	branch = codex/emu-native-load-final-20261018
 [submodule "artemis"]
 	path = Emulator/ThirdParty/art3m1s-core
 	url = https://github.com/2018wzh/art3m1s-core
@@ -13,7 +13,7 @@
 [submodule "Emulator/ThirdParty/sena-rs"]
 	path = Emulator/ThirdParty/sena-rs
 	url = https://github.com/2018wzh/sena-rs
-	branch = codex/emu-native-abi2-final-20261018
+	branch = codex/emu-native-save-final-20261018
 [submodule "Emulator/ThirdParty/cpal"]
 	path = Emulator/ThirdParty/cpal
 	url = https://github.com/2018wzh/cpal.git
