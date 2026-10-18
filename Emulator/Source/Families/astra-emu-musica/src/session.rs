@@ -528,7 +528,9 @@ impl MusicaSession {
         }
         self.persist_progress()?;
         Ok(AdvanceResponse {
-            reset_clock: std::mem::take(&mut self.reset_host_clock),
+            // Backpressure pauses the native VM; do not replay that wait as elapsed game time.
+            reset_clock: std::mem::take(&mut self.reset_host_clock)
+                | self.audio.take_backpressure(),
             status: if self.finished {
                 FamilyStatus::Finished
             } else if self.vm.state().wait.is_some() {

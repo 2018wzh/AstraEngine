@@ -78,6 +78,7 @@ pub(super) fn run(
     })?;
     let shared = Arc::new(Shared {
         services: services.clone(),
+        audio_stop: session.native_audio_cancellation(),
         frame: Mutex::new(Published {
             info,
             pixels,
@@ -95,7 +96,7 @@ pub(super) fn run(
         leases: Arc::new(AtomicUsize::new(0)),
     });
     if ready.send(Ok(shared.clone())).is_err() {
-        services.cancel();
+        shared.cancel();
     }
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         pump(&mut session, &shared, commands)
@@ -282,6 +283,11 @@ fn pump(
                 }
             }
             Err(cause) => {
+                if cause.code.as_str() == "ASTRA_EMU_AUDIO_CANCELLED"
+                    && shared.services.is_cancelled()
+                {
+                    break;
+                }
                 failed = true;
                 fail(shared, &cause.into(), session.native_failed_hook());
                 previous = Instant::now();

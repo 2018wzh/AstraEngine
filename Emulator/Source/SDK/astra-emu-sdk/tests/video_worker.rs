@@ -277,3 +277,70 @@ fn packet_exceeding_batch_budget_fails_without_returning_a_partial_success() {
     assert!(worker.request_next(1, 1024).is_err());
     worker.close().unwrap();
 }
+
+#[test]
+fn owned_file_decodes_and_is_removed_after_native_close() {
+    use std::io::Write;
+    let (created, path) = std::sync::mpsc::sync_channel(1);
+    let bytes = source();
+    let mut worker = VideoDecoderWorker::open_file(
+        move |_| {
+            let mut file = tempfile::NamedTempFile::new().unwrap();
+            file.write_all(&bytes).unwrap();
+            created.send(file.path().to_owned()).unwrap();
+            Ok(file)
+        },
+        FfmpegStreamLimits::default(),
+        None,
+    )
+    .unwrap();
+    let path = path.recv_timeout(Duration::from_secs(5)).unwrap();
+    let DecodeCompletion::Opened(config) = receive(&mut worker) else {
+        panic!("expected opened file");
+    };
+    assert!(config.has_audio && config.has_video);
+    worker.request_seek(config.duration_us / 2).unwrap();
+    assert!(matches!(
+        receive(&mut worker),
+        DecodeCompletion::Seeked { generation: 2 }
+    ));
+    worker.request_next(1, 64 * 1024 * 1024).unwrap();
+    assert!(receive_packet(&mut worker).is_some());
+    assert!(path.exists(), "encoded source must outlive demuxer IO");
+    worker.close().unwrap();
+    assert!(
+        !path.exists(),
+        "close must release native handles before deleting the source"
+    );
+}
+
+#[test]
+fn cancelling_file_preparation_joins_and_removes_partial_source() {
+    use std::{
+        io::Write,
+        sync::atomic::{AtomicBool, Ordering},
+    };
+    let observed = Arc::new(AtomicBool::new(false));
+    let cancellation = observed.clone();
+    let (created, path) = std::sync::mpsc::sync_channel(1);
+    let worker = VideoDecoderWorker::open_file(
+        move |stop| {
+            let mut file = tempfile::NamedTempFile::new().unwrap();
+            file.write_all(b"partial encoded source").unwrap();
+            created.send(file.path().to_owned()).unwrap();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !stop.load(Ordering::Acquire) && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            cancellation.store(stop.load(Ordering::Acquire), Ordering::Release);
+            Ok(file)
+        },
+        FfmpegStreamLimits::default(),
+        None,
+    )
+    .unwrap();
+    let path = path.recv_timeout(Duration::from_secs(5)).unwrap();
+    worker.close().unwrap();
+    assert!(observed.load(Ordering::Acquire));
+    assert!(!path.exists());
+}

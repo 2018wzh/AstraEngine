@@ -86,7 +86,10 @@ impl Mixer {
         uri: &str,
         archive: &MusicaMountedVfs,
         stop: &AtomicBool,
-    ) -> FamilyResult<()> {
+    ) -> FamilyResult<Option<()>> {
+        if stop.load(Ordering::Acquire) {
+            return Ok(None);
+        }
         bus_index(uri)?;
         if self.sounds.len() >= 64 && !self.sounds.contains_key(&id) {
             return Err(error(
@@ -100,8 +103,12 @@ impl Mixer {
             .map(|s| s.data.frames.len())
             .sum::<usize>();
         let bytes = read_asset(archive, uri, 64 * 1024 * 1024)?;
-        let data = astra_emu_sdk::decode_audio(&bytes, MAX_FRAMES.saturating_sub(used), stop)
-            .map_err(crate::scene::core_error)?;
+        let data = match astra_emu_sdk::decode_audio(&bytes, MAX_FRAMES.saturating_sub(used), stop)
+        {
+            Ok(data) => data,
+            Err(cause) if cause.code() == "ASTRA_EMU_AUDIO_CANCELLED" => return Ok(None),
+            Err(cause) => return Err(crate::scene::core_error(cause)),
+        };
         if let Some(mut previous) = self.sounds.remove(&id) {
             if let Some(h) = &mut previous.handle {
                 h.stop(immediate());
@@ -124,7 +131,7 @@ impl Mixer {
                 },
             },
         );
-        Ok(())
+        Ok(Some(()))
     }
     fn play(
         &mut self,
@@ -179,7 +186,7 @@ impl Mixer {
         command: MusicaAudioCommand,
         archive: &MusicaMountedVfs,
         stop: &AtomicBool,
-    ) -> FamilyResult<()> {
+    ) -> FamilyResult<Option<()>> {
         match command {
             MusicaAudioCommand::LoadResource {
                 stream_id,
@@ -193,7 +200,9 @@ impl Mixer {
                 repeat,
                 fade_in_ms,
                 ..
-            } => self.play(stream_id, volume, pan, repeat, fade_in_ms),
+            } => self
+                .play(stream_id, volume, pan, repeat, fade_in_ms)
+                .map(Some),
             MusicaAudioCommand::Stop {
                 stream_id, fade_ms, ..
             } => {
@@ -217,7 +226,7 @@ impl Mixer {
                         }
                     }
                 }
-                Ok(())
+                Ok(Some(()))
             }
             MusicaAudioCommand::SetParams {
                 stream_id,
@@ -246,7 +255,7 @@ impl Mixer {
                 s.state.volume = volume;
                 s.state.pan = pan;
                 s.state.repeat = repeat;
-                Ok(())
+                Ok(Some(()))
             }
         }
     }
@@ -309,7 +318,10 @@ impl Mixer {
         snapshot: Vec<SoundSnapshot>,
         archive: &MusicaMountedVfs,
         stop: &AtomicBool,
-    ) -> FamilyResult<()> {
+    ) -> FamilyResult<Option<()>> {
+        if stop.load(Ordering::Acquire) {
+            return Ok(None);
+        }
         if snapshot.len() > 64 {
             return Err(error(
                 "ASTRA_EMU_MUSICA_AUDIO_SNAPSHOT",
@@ -328,7 +340,9 @@ impl Mixer {
             if let Some(fade) = &s.fade {
                 fade.validate(s.playing)?;
             }
-            next.load(s.id, &s.uri, archive, stop)?;
+            if next.load(s.id, &s.uri, archive, stop)?.is_none() {
+                return Ok(None);
+            }
             let data = &next.sounds[&s.id].data;
             // Use the same frame/rate units as Kira's playback cursor, without
             // rounding through Duration. The endpoint is valid for ended sounds.
@@ -375,13 +389,10 @@ impl Mixer {
             sound.state = s;
         }
         if stop.load(Ordering::Acquire) {
-            return Err(error(
-                "ASTRA_EMU_AUDIO_CANCELLED",
-                "audio restore cancelled",
-            ));
+            return Ok(None);
         }
         *self = next;
-        Ok(())
+        Ok(Some(()))
     }
 }
 

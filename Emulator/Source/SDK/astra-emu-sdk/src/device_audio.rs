@@ -1,6 +1,6 @@
 //! Native device conversion extracted from the Manager PCM output backend.
-//! Keeps its Rubato policy and mono/stereo mapping without a host mixer or ABI
-//! dependency. Storage is allocated at construction and reused while streaming.
+//! Mono/stereo sources use the front channels; additional device channels stay
+//! silent. Downmix precedes resampling, expansion follows it. Storage is reused.
 use rubato::{
     audioadapter_buffers::direct::SequentialSliceOfVecs, Async, FixedAsync, PolynomialDegree,
     Resampler, SincInterpolationParameters, SincInterpolationType, WindowFunction,
@@ -27,9 +27,7 @@ impl NativeAudioConverter {
         if source_rate == 0 || target_rate == 0 || source_channels == 0 || target_channels == 0 {
             return Err("ASTRA_EMU_AUDIO_CHANNELS".into());
         }
-        if !matches!((source_channels, target_channels), (1, 1) | (1, 2) | (2, 1))
-            && source_channels != target_channels
-        {
+        if source_channels > 2 && source_channels != target_channels {
             return Err("ASTRA_EMU_AUDIO_CHANNEL_LAYOUT_UNSUPPORTED".into());
         }
         if source_rate == target_rate && source_channels == target_channels {
@@ -43,10 +41,15 @@ impl NativeAudioConverter {
             });
         }
         let target_channels = usize::from(target_channels);
+        let processing_channels = usize::from(source_channels).min(target_channels);
         let resampler = if source_rate == target_rate {
             None
         } else {
-            Some(new_resampler(source_rate, target_rate, target_channels)?)
+            Some(new_resampler(
+                source_rate,
+                target_rate,
+                processing_channels,
+            )?)
         };
         let output_frames = resampler
             .as_ref()
@@ -56,7 +59,7 @@ impl NativeAudioConverter {
             .filter(|size| *size <= MAX_OUTPUT_SAMPLES)
             .ok_or("ASTRA_EMU_AUDIO_CONVERSION_BUDGET")?;
         let planar_output = if resampler.is_some() {
-            vec![vec![0.0; output_frames]; target_channels]
+            vec![vec![0.0; output_frames]; processing_channels]
         } else {
             Vec::new()
         };
@@ -64,7 +67,7 @@ impl NativeAudioConverter {
             source_channels: usize::from(source_channels),
             target_channels,
             resampler,
-            pending: (0..target_channels)
+            pending: (0..processing_channels)
                 .map(|_| Vec::with_capacity(BLOCK_FRAMES))
                 .collect(),
             planar_output,
@@ -105,11 +108,12 @@ impl NativeAudioConverter {
             let count =
                 (required - self.pending[0].len()).min(remaining.len() / self.source_channels);
             let (input, rest) = remaining.split_at(count * self.source_channels);
+            let processing_channels = self.pending.len();
             append_channel_map(
                 &mut self.pending,
                 input,
                 self.source_channels,
-                self.target_channels,
+                processing_channels,
             );
             remaining = rest;
             if self.resampler.is_some() && self.pending[0].len() < required {
@@ -118,12 +122,12 @@ impl NativeAudioConverter {
             self.interleaved.clear();
             if let Some(resampler) = self.resampler.as_mut() {
                 let input =
-                    SequentialSliceOfVecs::new(&self.pending, self.target_channels, required)
+                    SequentialSliceOfVecs::new(&self.pending, processing_channels, required)
                         .map_err(|error| format!("ASTRA_EMU_AUDIO_RESAMPLER_INPUT:{error}"))?;
                 let max_output = self.planar_output[0].len();
                 let mut output = SequentialSliceOfVecs::new_mut(
                     &mut self.planar_output,
-                    self.target_channels,
+                    processing_channels,
                     max_output,
                 )
                 .map_err(|error| format!("ASTRA_EMU_AUDIO_RESAMPLER_OUTPUT:{error}"))?;
@@ -133,17 +137,19 @@ impl NativeAudioConverter {
                 if consumed != required {
                     return Err("ASTRA_EMU_AUDIO_RESAMPLE_ALIGNMENT".into());
                 }
-                for frame in 0..produced {
-                    for channel in &self.planar_output {
-                        self.interleaved.push(channel[frame]);
-                    }
-                }
+                interleave(
+                    &self.planar_output,
+                    produced,
+                    self.target_channels,
+                    &mut self.interleaved,
+                );
             } else {
-                for frame in 0..self.pending[0].len() {
-                    for channel in &self.pending {
-                        self.interleaved.push(channel[frame]);
-                    }
-                }
+                interleave(
+                    &self.pending,
+                    self.pending[0].len(),
+                    self.target_channels,
+                    &mut self.interleaved,
+                );
             }
             for channel in &mut self.pending {
                 channel.clear();
@@ -162,18 +168,26 @@ fn append_channel_map(pending: &mut [Vec<f32>], samples: &[f32], source: usize, 
                 }
             }
         }
-        (1, 2) => {
-            for sample in samples {
-                pending[0].push(*sample);
-                pending[1].push(*sample);
-            }
-        }
         (2, 1) => {
             for frame in samples.as_chunks::<2>().0 {
                 pending[0].push((frame[0] + frame[1]) * 0.5);
             }
         }
         _ => unreachable!("constructor validates the channel map"),
+    }
+}
+
+fn interleave(planar: &[Vec<f32>], frames: usize, target_channels: usize, output: &mut Vec<f32>) {
+    let duplicate_mono = planar.len() == 1 && target_channels > 1;
+    let silent_channels = target_channels - planar.len() - usize::from(duplicate_mono);
+    for frame in 0..frames {
+        for channel in planar {
+            output.push(channel[frame]);
+        }
+        if duplicate_mono {
+            output.push(planar[0][frame]);
+        }
+        output.resize(output.len() + silent_channels, 0.0);
     }
 }
 fn new_resampler(
@@ -258,8 +272,49 @@ mod tests {
         }
     }
     #[test]
+    fn front_channels_preserve_stereo_and_mono_on_surround_devices() {
+        for (channels, input, front) in [
+            (2, vec![0.25, -0.75], [0.25, -0.75]),
+            (1, vec![0.5], [0.5, 0.5]),
+        ] {
+            for target in [6, 8] {
+                let mut output = Vec::new();
+                NativeAudioConverter::new(48000, channels, 48000, target)
+                    .unwrap()
+                    .convert(&input, |chunk| {
+                        output.extend_from_slice(chunk);
+                        Ok(())
+                    })
+                    .unwrap();
+                let mut expected = vec![0.0; usize::from(target)];
+                expected[..2].copy_from_slice(&front);
+                assert_eq!(output, expected);
+            }
+        }
+    }
+    #[test]
+    fn surround_resampling_preserves_front_channels_and_silent_rears() {
+        let input: Vec<_> = (0..1024).flat_map(|_| [0.25, -0.75]).collect();
+        let mut converter = NativeAudioConverter::new(48000, 2, 44100, 8).unwrap();
+        let mut last = [0.0; 2];
+        for _ in 0..8 {
+            converter
+                .convert(&input, |chunk| {
+                    for frame in chunk.as_chunks::<8>().0 {
+                        assert!(frame[2..].iter().all(|sample| *sample == 0.0));
+                        assert!((frame[0] * 3.0 + frame[1]).abs() < 1e-5);
+                        last.copy_from_slice(&frame[..2]);
+                    }
+                    Ok(())
+                })
+                .unwrap();
+        }
+        assert!((last[0] - 0.25).abs() < 1e-4);
+        assert!((last[1] + 0.75).abs() < 1e-4);
+    }
+    #[test]
     fn unsupported_channel_layout_and_nonfinite_samples_fail() {
-        assert!(NativeAudioConverter::new(48000, 2, 48000, 6).is_err());
+        assert!(NativeAudioConverter::new(48000, 6, 48000, 2).is_err());
         assert!(NativeAudioConverter::new(48000, 2, 44100, 2)
             .unwrap()
             .convert(&[f32::NAN, 0.0], |_| Ok(()))

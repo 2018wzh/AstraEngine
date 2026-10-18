@@ -400,6 +400,55 @@ fn audio_close_cancels_blocked_write_and_joins_worker() {
     assert_eq!(sink.writes.load(Ordering::Acquire), writes);
 }
 #[test]
+fn full_audio_control_queue_waits_and_cancellation_releases_the_sender() {
+    let root = tempfile::tempdir().unwrap();
+    fixture::game(root.path(), b".end\r\n");
+    let archive =
+        Arc::new(mount_musica(root.path(), &root.path().join(MUSICA_PROFILE_FILE)).unwrap());
+    let sink = Sink {
+        block: true,
+        ..Default::default()
+    };
+    let audio = Arc::new(
+        Audio::start(
+            archive,
+            Some(AudioSink_TO::from_value(sink.clone(), TD_Opaque)),
+        )
+        .unwrap(),
+    );
+    until(|| sink.writes.load(Ordering::Acquire) > 0);
+    for _ in 0..crate::audio::COMMAND_CAPACITY {
+        audio.suspend(false).unwrap();
+    }
+    let (completed, completion) = std::sync::mpsc::sync_channel(1);
+    let sender = audio.clone();
+    let worker = std::thread::spawn(move || {
+        let result = sender.suspend(true);
+        completed.send(()).unwrap();
+        result
+    });
+    until(|| audio.take_backpressure());
+    let pending = matches!(
+        completion.recv_timeout(Duration::from_millis(30)),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+    );
+    audio.cancellation_flag().store(true, Ordering::Release);
+    sink.cancel().into_result().unwrap();
+    let result = worker.join().unwrap();
+    let mut audio =
+        Arc::try_unwrap(audio).unwrap_or_else(|_| panic!("audio sender still retained"));
+    audio.shutdown().unwrap();
+    assert!(
+        pending,
+        "a full queue must apply backpressure, not fail gameplay"
+    );
+    assert_eq!(
+        result.unwrap_err().code.as_str(),
+        "ASTRA_EMU_AUDIO_CANCELLED"
+    );
+    assert!(!audio.take_backpressure());
+}
+#[test]
 fn decoded_audio_rejects_expansion_budget_and_cancellation() {
     let bytes = fixture::wave();
     let stop = AtomicBool::new(false);

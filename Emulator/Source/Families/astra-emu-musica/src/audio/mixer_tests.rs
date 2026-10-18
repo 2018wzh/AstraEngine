@@ -61,10 +61,31 @@ fn cancelled_empty_restore_cannot_clear_the_live_mixer() {
     mixer.play(1, 0.5, 0.0, true, 0).unwrap();
     rendered(&mut mixer, 512);
     let before = postcard::to_allocvec(&mixer.snapshot()).unwrap();
-    let error = mixer
+    assert!(mixer
         .restore(Vec::new(), &archive, &AtomicBool::new(true))
-        .unwrap_err();
-    assert_eq!(error.code.as_str(), "ASTRA_EMU_AUDIO_CANCELLED");
+        .unwrap()
+        .is_none());
+    assert_eq!(postcard::to_allocvec(&mixer.snapshot()).unwrap(), before);
+    assert!(rendered(&mut mixer, 512)
+        .iter()
+        .any(|sample| sample.abs() > 0.001));
+}
+
+#[test]
+fn cancelled_load_keeps_the_existing_stream_and_playback() {
+    let (_root, archive, mut mixer) = setup();
+    mixer.play(1, 0.5, 0.0, true, 0).unwrap();
+    rendered(&mut mixer, 512);
+    let before = postcard::to_allocvec(&mixer.snapshot()).unwrap();
+    assert!(mixer
+        .load(
+            1,
+            "musica:/bgm/not-present.ogg",
+            &archive,
+            &AtomicBool::new(true)
+        )
+        .unwrap()
+        .is_none());
     assert_eq!(postcard::to_allocvec(&mixer.snapshot()).unwrap(), before);
     assert!(rendered(&mut mixer, 512)
         .iter()

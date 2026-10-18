@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [features]
-video-ffmpeg = ["dep:astra-media", "astra-media/ffmpeg-vcpkg"]
+video-ffmpeg = ["dep:astra-media", "astra-media/ffmpeg-vcpkg", "dep:tempfile"]
 audio = ["dep:kira", "dep:symphonia"]
 device-audio = ["dep:rubato"]
 default = ["text", "image", "archive", "cache"]
@@ -20,6 +20,7 @@ astra-media = { path = "../../../../Engine/Source/Runtime/astra-media", optional
 kira = { workspace = true, optional = true }
 symphonia = { workspace = true, optional = true }
 rubato = { workspace = true, optional = true }
+tempfile = { workspace = true, optional = true }
 thiserror.workspace = true
 astra-byte-source = { path = "../../../../Engine/Source/Runtime/astra-byte-source", optional = true }
 serde = { workspace = true, optional = true }

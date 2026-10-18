@@ -41,6 +41,7 @@ fn handle_fixture() -> *mut c_void {
     .unwrap();
     let shared = Arc::new(Shared {
         services,
+        audio_stop: Arc::new(AtomicBool::new(false)),
         canvas,
         frame: Mutex::new(Published {
             info,

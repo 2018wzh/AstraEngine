@@ -225,10 +225,17 @@ struct Published {
 }
 struct Shared {
     services: Arc<text::ServiceContext>,
+    audio_stop: Arc<AtomicBool>,
     canvas: astra_emu_sdk::StageCanvas,
     frame: Mutex<Published>,
     state: Mutex<abi::SessionState>,
     leases: Arc<AtomicUsize>,
+}
+impl Shared {
+    fn cancel(&self) {
+        self.services.cancel();
+        self.audio_stop.store(true, Ordering::Release);
+    }
 }
 enum Command {
     Input(Vec<FamilyEvent>),
@@ -242,7 +249,7 @@ struct Handle {
 impl Drop for Handle {
     fn drop(&mut self) {
         if let Some(worker) = self.worker.take() {
-            self.shared.services.cancel();
+            self.shared.cancel();
             let _ = worker.join();
         }
     }
@@ -546,7 +553,7 @@ unsafe extern "C" fn frame(
 unsafe extern "C" fn cancel(session: abi::Session) {
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         if let Ok(handle) = unsafe { handle(session) } {
-            handle.shared.services.cancel();
+            handle.shared.cancel();
         }
     }));
 }
@@ -556,7 +563,7 @@ unsafe extern "C" fn close(session: abi::Session, error: *mut abi::Error) -> abi
             return Err(invalid(abi::INVALID_ARGUMENT));
         }
         let mut handle = unsafe { Box::from_raw(session.cast::<Handle>()) };
-        handle.shared.services.cancel();
+        handle.shared.cancel();
         if let Some(worker) = handle.worker.take() {
             worker.join().map_err(|_| {
                 Failure::new(

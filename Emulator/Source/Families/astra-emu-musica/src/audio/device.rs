@@ -117,12 +117,16 @@ impl DeviceOutput {
             Ok(())
         }
     }
-    pub fn write(&mut self, samples: Vec<f32>, stop: &AtomicBool) -> FamilyResult<Vec<f32>> {
+    pub fn write(
+        &mut self,
+        samples: Vec<f32>,
+        stop: &AtomicBool,
+    ) -> FamilyResult<Option<Vec<f32>>> {
         // wait_for_capacity observes this independent flag at most every 20 ms.
         // The device error callback also sets it, waking a blocked producer.
         self.check()?;
         if stop.load(Ordering::Acquire) {
-            return Ok(samples);
+            return Ok(None);
         }
         if self.converter.needs_conversion() {
             let producer = &mut self.producer;
@@ -159,7 +163,8 @@ impl DeviceOutput {
                     Ok(())
                 })
                 .map_err(conversion_error)?;
-            return Ok(samples);
+            self.check()?;
+            return Ok((!stop.load(Ordering::Acquire)).then_some(samples));
         }
         self.producer
             .wait_for_capacity(samples.len(), stop)
@@ -171,9 +176,9 @@ impl DeviceOutput {
             ));
         }
         if stop.load(Ordering::Acquire) {
-            return Ok(samples);
+            return Ok(None);
         }
-        self.producer.submit(samples).map_err(|_| {
+        self.producer.submit(samples).map(Some).map_err(|_| {
             error(
                 "ASTRA_EMU_MUSICA_AUDIO_QUEUE",
                 "device queue submission failed",

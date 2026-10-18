@@ -767,6 +767,7 @@ dependencies = [
  "tokio",
  "tracing",
  "wgpu 29.0.4",
+ "windows 0.62.2",
  "winit 0.30.13",
 ]
 
@@ -8284,6 +8285,7 @@ dependencies = [
  "chrono",
  "clap",
  "crossbeam-channel",
+ "d3d12 0.19.0",
  "egui 0.27.2",
  "egui-wgpu 0.27.2",
  "encoding_rs",
@@ -8320,6 +8322,7 @@ dependencies = [
  "uuid",
  "video-sys",
  "wgpu 0.19.4",
+ "windows 0.62.2",
  "winit 0.30.13",
  "wmv-decoder 0.2.0",
 ]

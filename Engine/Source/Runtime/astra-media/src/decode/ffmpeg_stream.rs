@@ -56,7 +56,6 @@ pub struct FfmpegAudioOutputFormat {
 }
 
 pub struct FfmpegPlaybackDecoder {
-    _source: NamedTempFile,
     input: ffmpeg::format::context::Input,
     audio: Option<AudioDecoder>,
     video: Option<VideoDecoder>,
@@ -69,6 +68,7 @@ pub struct FfmpegPlaybackDecoder {
     pending: VecDeque<FfmpegDecodedPacket>,
     demux_eof: bool,
     cancelled: bool,
+    _source: NamedTempFile,
 }
 
 impl FfmpegPlaybackDecoder {
@@ -82,24 +82,13 @@ impl FfmpegPlaybackDecoder {
         limits: FfmpegStreamLimits,
         audio_output: Option<FfmpegAudioOutputFormat>,
     ) -> Result<Self, MediaError> {
-        validate_limits(&limits)?;
-        if audio_output.is_some_and(|format| {
-            format.sample_rate == 0 || format.channels == 0 || format.channels > 8
-        }) {
-            return Err(decode_error(
-                "ASTRA_FFMPEG_STREAM_AUDIO_OUTPUT",
-                "FFmpeg target audio format is invalid",
-            ));
-        }
+        Self::validate_input(&limits, audio_output)?;
         if !safe_codec(codec) || bytes.is_empty() || bytes.len() > limits.max_encoded_bytes {
             return Err(decode_error(
                 "ASTRA_FFMPEG_STREAM_INPUT",
                 "FFmpeg stream codec or encoded byte budget is invalid",
             ));
         }
-        ffmpeg::init().map_err(|error| {
-            ffmpeg_error("ASTRA_FFMPEG_STREAM_PROBE", "initialize FFmpeg", error)
-        })?;
         let suffix = format!(".{codec}");
         let mut source = Builder::new()
             .prefix("astra-media-stream-")
@@ -112,6 +101,55 @@ impl FfmpegPlaybackDecoder {
         source
             .flush()
             .map_err(|error| io_error("flush FFmpeg stream input", error))?;
+        Self::from_file(source, limits, audio_output)
+    }
+
+    /// Consume an encoded temporary file without materializing another byte buffer.
+    /// The native demuxer is destroyed before the file is removed.
+    pub fn open_owned_file(
+        source: NamedTempFile,
+        limits: FfmpegStreamLimits,
+        audio_output: Option<FfmpegAudioOutputFormat>,
+    ) -> Result<Self, MediaError> {
+        Self::validate_input(&limits, audio_output)?;
+        let length = source
+            .as_file()
+            .metadata()
+            .map_err(|error| io_error("inspect FFmpeg stream input", error))?
+            .len();
+        if length == 0 || length > limits.max_encoded_bytes as u64 {
+            return Err(decode_error(
+                "ASTRA_FFMPEG_STREAM_INPUT",
+                "FFmpeg stream encoded byte budget is invalid",
+            ));
+        }
+        Self::from_file(source, limits, audio_output)
+    }
+
+    fn validate_input(
+        limits: &FfmpegStreamLimits,
+        audio_output: Option<FfmpegAudioOutputFormat>,
+    ) -> Result<(), MediaError> {
+        validate_limits(limits)?;
+        if audio_output.is_some_and(|format| {
+            format.sample_rate == 0 || format.channels == 0 || format.channels > 8
+        }) {
+            return Err(decode_error(
+                "ASTRA_FFMPEG_STREAM_AUDIO_OUTPUT",
+                "FFmpeg target audio format is invalid",
+            ));
+        }
+        Ok(())
+    }
+
+    fn from_file(
+        source: NamedTempFile,
+        limits: FfmpegStreamLimits,
+        audio_output: Option<FfmpegAudioOutputFormat>,
+    ) -> Result<Self, MediaError> {
+        ffmpeg::init().map_err(|error| {
+            ffmpeg_error("ASTRA_FFMPEG_STREAM_PROBE", "initialize FFmpeg", error)
+        })?;
         let input = ffmpeg::format::input(source.path()).map_err(|error| {
             ffmpeg_error("ASTRA_FFMPEG_STREAM_DEMUX", "open encoded stream", error)
         })?;

@@ -30,6 +30,9 @@ use crate::{MUSICA_DECRYPT_DESCRIPTOR_SCHEMA, MUSICA_DECRYPT_PROVIDER_ID, MUSICA
 
 type PazError = crate::CoreError;
 
+#[cfg(any(feature = "ffmpeg-vcpkg", test))]
+mod movie_stream;
+
 pub const REQUIRED_ARCHIVE_ROLES: [&str; 8] =
     ["bg", "bgm", "scr", "st", "sys", "se", "voice", "mov"];
 pub const MAX_INDEX_BYTES: u64 = 256 * 1024 * 1024;
@@ -236,7 +239,12 @@ impl MusicaPazDecryptProvider {
                 }
                 return Ok(bytes);
             }
-            let material = format!("{} {:08X} ", entry.name.to_lowercase(), entry.unpacked_size);
+            let material = format!(
+                "{} {:08X} {}",
+                entry.name.to_lowercase(),
+                entry.unpacked_size,
+                password_for_entry(entry, scheme).unwrap_or_default()
+            );
             let (entry_key, _, malformed) = SHIFT_JIS.encode(&material);
             if malformed || entry_key.is_empty() {
                 return Err(error(
@@ -616,9 +624,12 @@ impl MusicaMountedVfs {
 
     fn entry(&self, uri: &str) -> Result<&MountedEntry, PazError> {
         validate_archive_uri(&self.prefix, uri)?;
-        self.entries
-            .get(uri)
-            .ok_or_else(|| error("ASTRA_EMU_VFS_NOT_FOUND", "VFS entry was not found"))
+        self.entries.get(uri).ok_or_else(|| {
+            error(
+                "ASTRA_EMU_VFS_NOT_FOUND",
+                format!("VFS entry was not found: {uri}"),
+            )
+        })
     }
 }
 
