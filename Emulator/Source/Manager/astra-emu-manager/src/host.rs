@@ -2,8 +2,8 @@ use astra_emu_manager_core::InputMapping;
 use astra_media_core::Viewport2D;
 use std::{
     sync::{
-        Arc,
         atomic::{AtomicBool, Ordering},
+        Arc,
     },
     time::Instant,
 };
@@ -120,6 +120,8 @@ pub trait ManagerController: 'static {
         event: astra_emu_manager_core::model::FamilyEvent,
     ) -> Result<(), String>;
     fn is_game_active(&self) -> bool;
+    /// Starts deferred application work after the first UI frame; must not wait.
+    fn start_background_initialization(&mut self) -> Result<(), String>;
     fn model(&self) -> Result<ManagerViewModel, String>;
     fn select_case(&mut self, case_id: &str) -> Result<ManagerViewModel, String>;
     fn search(&mut self, query: &str) -> Result<ManagerViewModel, String>;
@@ -256,6 +258,7 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
     renderer: R,
     game_active: bool,
 ) -> Result<(), HostError> {
+    crate::startup::mark("ui_backend_begin");
     #[cfg(not(target_os = "android"))]
     {
         let mut settings = slint::wgpu_29::WGPUSettings::default();
@@ -270,8 +273,11 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
             .require_wgpu_29(slint::wgpu_29::WGPUConfiguration::Automatic(settings))
             .select()?;
     }
+    crate::startup::mark("ui_backend_selected");
     let adapter = std::rc::Rc::new(SlintManagerAdapter::new()?);
+    crate::startup::mark("window_object_created");
     adapter.apply(&controller.model().map_err(HostError::Renderer)?);
+    crate::startup::mark("initial_model_applied");
     adapter.window().set_game_active(game_active);
     let controller = std::rc::Rc::new(std::cell::RefCell::new(controller));
     let renderer = std::rc::Rc::new(std::cell::RefCell::new(renderer));
@@ -398,6 +404,7 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
     let event_pending = async_events_pending.clone();
     let renderer_callback = renderer.clone();
     let initial_window_pending = std::cell::Cell::new(true);
+    let first_ui_frame_pending = std::cell::Cell::new(true);
     adapter.window().window().set_rendering_notifier(move |state, api| {
         let slint::GraphicsAPI::WGPU29 { device, queue, .. } = api else {
             record_fatal(&fatal_error_callback, "rendering notifier did not provide WGPU 29".into());
@@ -407,6 +414,7 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
         let context = WgpuFrameContext { device, queue };
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match state {
             slint::RenderingState::RenderingSetup => {
+                crate::startup::mark("ui_gpu_ready");
                 renderer_callback.borrow_mut().setup(context)?;
                 if let Some(window) = event_window.upgrade() {
                     if initial_window_pending.replace(false) {
@@ -487,6 +495,33 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                 }
                 Ok(())
             },
+            slint::RenderingState::AfterRendering => {
+                if first_ui_frame_pending.replace(false) {
+                    crate::startup::mark("first_ui_frame_rendered");
+                    let weak = event_window.clone();
+                    let controller = event_controller.clone();
+                    let adapter = event_adapter.clone();
+                    slint::Timer::single_shot(std::time::Duration::ZERO, move || {
+                        let Some(window) = weak.upgrade() else { return; };
+                        window.set_cover_loading_enabled(true);
+                        let result = {
+                            let mut controller = controller.borrow_mut();
+                            controller.start_background_initialization()
+                                .and_then(|()| controller.model())
+                        };
+                        match result {
+                            Ok(model) => apply_model(&adapter, &model),
+                            Err(error) => {
+                                tracing::error!(event = "astra.emu.startup.failed", message = %error);
+                                window.set_startup_busy(false);
+                                window.set_startup_status(error.clone().into());
+                                window.set_global_diagnostic(error.into());
+                            }
+                        }
+                    });
+                }
+                Ok(())
+            },
             slint::RenderingState::RenderingTeardown => renderer_callback.borrow_mut().teardown(),
             _ => Ok(()),
         })).unwrap_or_else(|_| Err("underlay renderer panicked".into()));
@@ -496,7 +531,9 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
             let _ = slint::quit_event_loop();
         }
     }).map_err(|error| HostError::Renderer(error.to_string()))?;
+    crate::startup::mark("window_show_requested");
     adapter.window().show()?;
+    crate::startup::mark("window_show_returned");
     let run_result = adapter.window().run();
     runtime_timer.stop();
     runtime_schedule.borrow_mut().take();

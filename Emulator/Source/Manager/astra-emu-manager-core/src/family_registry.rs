@@ -281,8 +281,13 @@ impl FamilyProviderRegistry {
         plugin_id: &str,
     ) -> Result<FamilyProbeSelection, FamilyLoadError> {
         request.validate().map_err(FamilyLoadError::ProbeError)?;
-        let provider = self.providers.get(plugin_id).ok_or(FamilyLoadError::Provider)?;
-        let report = provider.probe(request.clone()).map_err(FamilyLoadError::ProbeError)?
+        let provider = self
+            .providers
+            .get(plugin_id)
+            .ok_or(FamilyLoadError::Provider)?;
+        let report = provider
+            .probe(request.clone())
+            .map_err(FamilyLoadError::ProbeError)?
             .map(|report| FamilyProbeReport {
                 plugin_id: plugin_id.to_owned(),
                 family_id: report.family_id.to_string(),
@@ -290,7 +295,8 @@ impl FamilyProviderRegistry {
                 format: report.format.to_string(),
                 confidence_permyriad: report.confidence_permyriad,
             });
-        self.descriptors.select_probe(report, Some(plugin_id), None)
+        self.descriptors
+            .select_probe(report, Some(plugin_id), None)
             .map_err(|error| FamilyLoadError::PolicyError(error.to_string()))
     }
 
@@ -308,19 +314,28 @@ impl FamilyProviderRegistry {
             )
             .map_err(|error| FamilyLoadError::PolicyError(error.to_string()))?;
         if checked.descriptor != candidate.descriptor {
-            return Err(FamilyLoadError::PolicyError("ASTRA_EMU_FAMILY_PROVIDER_CHANGED".into()));
+            return Err(FamilyLoadError::PolicyError(
+                "ASTRA_EMU_FAMILY_PROVIDER_CHANGED".into(),
+            ));
         }
         let fresh = self.probe_selected(
-            &ProbeRequest { game_path: request.game_path.clone() },
+            &ProbeRequest {
+                game_path: request.game_path.clone(),
+            },
             &checked.report.plugin_id,
         )?;
         let FamilyProbeSelection::Selected(fresh) = fresh else {
-            return Err(FamilyLoadError::PolicyError("ASTRA_EMU_FAMILY_FRESH_PROBE_NO_MATCH".into()));
+            return Err(FamilyLoadError::PolicyError(
+                "ASTRA_EMU_FAMILY_FRESH_PROBE_NO_MATCH".into(),
+            ));
         };
         if fresh.report.game_id != checked.report.game_id
             || fresh.report.family_id != checked.report.family_id
-            || fresh.report.format != checked.report.format {
-            return Err(FamilyLoadError::PolicyError("ASTRA_EMU_FAMILY_FRESH_PROBE_CHANGED".into()));
+            || fresh.report.format != checked.report.format
+        {
+            return Err(FamilyLoadError::PolicyError(
+                "ASTRA_EMU_FAMILY_FRESH_PROBE_CHANGED".into(),
+            ));
         }
         let provider = self
             .providers

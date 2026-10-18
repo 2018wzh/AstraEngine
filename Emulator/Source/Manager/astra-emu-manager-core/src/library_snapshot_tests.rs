@@ -70,9 +70,21 @@ fn library_snapshot_aggregates_sessions_without_multiplying_provider_rows() {
         library.set_external_identity(record).unwrap();
     }
     let records = [
-        metadata(&a_vndb, MetadataSnapshotState::Fresh, "{\n  \"title\": \"A\"\n}"),
-        metadata(&a_bangumi, MetadataSnapshotState::Stale, r#"{"title":"A old"}"#),
-        metadata(&a_other, MetadataSnapshotState::Failed, r#"{"error":"unavailable"}"#),
+        metadata(
+            &a_vndb,
+            MetadataSnapshotState::Fresh,
+            "{\n  \"title\": \"A\"\n}",
+        ),
+        metadata(
+            &a_bangumi,
+            MetadataSnapshotState::Stale,
+            r#"{"title":"A old"}"#,
+        ),
+        metadata(
+            &a_other,
+            MetadataSnapshotState::Failed,
+            r#"{"error":"unavailable"}"#,
+        ),
         metadata(&b_vndb, MetadataSnapshotState::Fresh, r#"{"title":"B"}"#),
     ];
     for record in &records {
@@ -163,7 +175,11 @@ fn library_snapshot_reflects_metadata_changes_unlinks_and_deletion() {
     let vndb = identity("one", "vndb", "v1");
     let bangumi = identity("one", "bangumi", "10");
     let other = identity("two", "vndb", "v3");
-    let initial = metadata(&vndb, MetadataSnapshotState::Fresh, r#"{"title":"Original"}"#);
+    let initial = metadata(
+        &vndb,
+        MetadataSnapshotState::Fresh,
+        r#"{"title":"Original"}"#,
+    );
     let bangumi_metadata = metadata(&bangumi, MetadataSnapshotState::Stale, "{}");
     let other_metadata = metadata(&other, MetadataSnapshotState::Fresh, r#"{"title":"Other"}"#);
     for record in [&vndb, &bangumi, &other] {
@@ -179,9 +195,16 @@ fn library_snapshot_reflects_metadata_changes_unlinks_and_deletion() {
     let relinked_snapshot = library.library_snapshot().unwrap();
     let key = ("one".into(), "vndb".into());
     assert_eq!(relinked_snapshot.metadata[&key], initial);
-    assert_eq!(relinked_snapshot.identities["one"], vec![bangumi, relinked.clone()]);
+    assert_eq!(
+        relinked_snapshot.identities["one"],
+        vec![bangumi, relinked.clone()]
+    );
 
-    let mut updated = metadata(&relinked, MetadataSnapshotState::Failed, r#"{"title":"Updated"}"#);
+    let mut updated = metadata(
+        &relinked,
+        MetadataSnapshotState::Failed,
+        r#"{"title":"Updated"}"#,
+    );
     updated.fetched_at_unix_ms = 10;
     library.set_metadata_snapshot(&updated).unwrap();
     assert!(library.remove_external_identity("one", "vndb").unwrap());
@@ -195,16 +218,27 @@ fn library_snapshot_reflects_metadata_changes_unlinks_and_deletion() {
     let changed = library.library_snapshot().unwrap();
     assert_eq!(before.metadata[&key], initial);
     assert_eq!(changed.metadata[&key], updated);
-    assert!(!changed.metadata.contains_key(&("one".into(), "bangumi".into())));
-    assert_eq!(changed.metadata[&("two".into(), "vndb".into())], other_metadata);
+    assert!(!changed
+        .metadata
+        .contains_key(&("one".into(), "bangumi".into())));
+    assert_eq!(
+        changed.metadata[&("two".into(), "vndb".into())],
+        other_metadata
+    );
     assert_eq!(changed.identities["one"].len(), 1);
     assert_eq!(changed.identities["one"][0].provider, "bangumi");
 
     assert!(library.remove_game("one").unwrap());
     let removed = library.library_snapshot().unwrap();
     assert_eq!(removed.games, vec![two]);
-    assert_eq!(removed.play_stats, BTreeMap::from([("two".into(), PlayStats::default())]));
-    assert_eq!(removed.identities, BTreeMap::from([("two".into(), vec![other])]));
+    assert_eq!(
+        removed.play_stats,
+        BTreeMap::from([("two".into(), PlayStats::default())])
+    );
+    assert_eq!(
+        removed.identities,
+        BTreeMap::from([("two".into(), vec![other])])
+    );
     assert_eq!(
         removed.metadata,
         BTreeMap::from([(("two".into(), "vndb".into()), other_metadata)]),
@@ -227,19 +261,15 @@ fn library_snapshot_rejects_invalid_metadata_state_and_releases_failed_read() {
         .unwrap();
     assert!(matches!(
         library.library_snapshot(),
-        Err(LibraryError::Sqlite(rusqlite::Error::FromSqlConversionFailure(
-            5,
-            rusqlite::types::Type::Text,
-            _,
-        ))),
+        Err(LibraryError::Sqlite(
+            rusqlite::Error::FromSqlConversionFailure(5, rusqlite::types::Type::Text, _,)
+        )),
     ));
     assert!(matches!(
         library.metadata_snapshot("one", "vndb"),
-        Err(LibraryError::Sqlite(rusqlite::Error::FromSqlConversionFailure(
-            5,
-            rusqlite::types::Type::Text,
-            _,
-        ))),
+        Err(LibraryError::Sqlite(
+            rusqlite::Error::FromSqlConversionFailure(5, rusqlite::types::Type::Text, _,)
+        )),
     ));
 
     library.set_metadata_snapshot(&record).unwrap();

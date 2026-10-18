@@ -158,11 +158,9 @@ impl HostPointer {
                 .window()
                 .with_winit_window(|native| {
                     let position = map_position(x, y, current, rect, stage, native.scale_factor())?;
-                    native
-                        .set_cursor_position(position)
-                        .map_err(|error| {
-                            format!("ASTRA_EMU_HOST_POINTER_POSITION_UNAVAILABLE: {error}")
-                        })?;
+                    native.set_cursor_position(position).map_err(|error| {
+                        format!("ASTRA_EMU_HOST_POINTER_POSITION_UNAVAILABLE: {error}")
+                    })?;
                     Ok::<_, String>(position)
                 })
                 .ok_or_else(|| "ASTRA_EMU_HOST_WINDOW_UNAVAILABLE".to_owned())??;
@@ -304,7 +302,12 @@ fn map_position(
 mod tests {
     use super::*;
 
-    fn configure(state: &mut PointerVisibility, visible: Option<bool>, ms: Option<u64>, now: Instant) {
+    fn configure(
+        state: &mut PointerVisibility,
+        visible: Option<bool>,
+        ms: Option<u64>,
+        now: Instant,
+    ) {
         state.apply(
             &FamilyPointerRequest {
                 visible,

@@ -158,3 +158,44 @@ fn rejected_duplicate_provider_cannot_be_revived_by_a_persistent_hint() {
     assert!(cache.get(&path, &registry).is_none());
     assert!(registry.probe_selected(&ProbeRequest { game_path: path.to_str().unwrap().into() }, "cache-test").is_err());
 }
+
+#[test]
+fn owned_musica_saves_do_not_invalidate_game_identification() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("game");
+    let saves = path.join(".astra-musica").join("saves");
+    fs::create_dir_all(&saves).unwrap();
+    fs::write(path.join("boot"), b"boot").unwrap();
+    let registry = registry();
+    let mut cache = ProbeCache::load(root.path(), Inventory::read(&[], &registry));
+    assert_eq!(refresh(&registry, &mut cache, &path).cache_hits, 0);
+    fs::write(saves.join("slot-01"), b"new save data").unwrap();
+    assert_eq!(refresh(&registry, &mut cache, &path).cache_hits, 1);
+    fs::write(path.join("boot"), b"changed game assets").unwrap();
+    assert_eq!(refresh(&registry, &mut cache, &path).cache_hits, 0);
+}
+
+#[test]
+fn already_registered_nested_games_are_independently_refreshed() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("parent-game");
+    let child = path.join("child-game");
+    fs::create_dir_all(&child).unwrap();
+    fs::write(path.join("boot"), b"parent").unwrap();
+    fs::write(child.join("boot"), b"child").unwrap();
+    let registry = registry();
+    let mut cache = ProbeCache::load(root.path(), Inventory::read(&[], &registry));
+    let mut nested = game(&child);
+    nested.game_id = "nested".into();
+    let report = super::super::probe_worker::scan(
+        &registry, &mut cache, super::super::probe_worker::ScanRequest {
+            kind: super::super::probe_worker::ScanKind::Startup,
+            paths: Vec::new(), games: vec![game(&path), nested],
+        }, &AtomicBool::new(false),
+    ).unwrap();
+    assert_eq!(report.games.len(), 2);
+    for (index, expected) in ["registered", "nested"].iter().enumerate() {
+        assert_eq!(report.games[index].game_ids, [*expected]);
+        assert_eq!(report.games[index].candidates.len(), 1);
+    }
+}

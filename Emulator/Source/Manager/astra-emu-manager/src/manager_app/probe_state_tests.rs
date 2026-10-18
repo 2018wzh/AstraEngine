@@ -478,8 +478,11 @@ fn failed_idle_owner_wakes_the_host_and_preserves_its_join_error() {
     let (sender, receiver) = crossbeam_channel::bounded(1);
     app.set_host_wake(std::sync::Arc::new(move || { let _ = sender.try_send(()); }));
     app.registry.register_provider(|| panic!("intentional owner failure")).unwrap();
-    receiver.recv_timeout(Duration::from_secs(5)).unwrap();
-    assert!(app.poll_platform().unwrap().is_some());
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !matches!(app.startup_state, background::StartupState::Failed(_)) {
+        receiver.recv_timeout(deadline.saturating_duration_since(Instant::now())).unwrap();
+        app.poll_platform().unwrap();
+    }
     assert!(app.startup_status().contains("ASTRA_EMU_OWNER_PANICKED"));
     assert!(app.registry.shutdown().unwrap_err().contains("ASTRA_EMU_OWNER_PANICKED"));
 }

@@ -90,10 +90,7 @@ pub struct PreparedFilter {
 }
 
 impl PreparedFilter {
-    pub fn new(
-        config: &FilterConfiguration,
-        source: Option<&str>,
-    ) -> Result<Self, FilterError> {
+    pub fn new(config: &FilterConfiguration, source: Option<&str>) -> Result<Self, FilterError> {
         config.validate()?;
         let chain = if config.preset == FilterPreset::None {
             None
@@ -118,9 +115,11 @@ impl PreparedFilter {
         if input_width == 0 || input_height == 0 {
             return Err(FilterError::TextureDimensions);
         }
-        self.chain.as_ref().map_or(Ok((input_width, input_height)), |chain| {
-            chain.output_dimensions(input_width, input_height, &self.configuration)
-        })
+        self.chain
+            .as_ref()
+            .map_or(Ok((input_width, input_height)), |chain| {
+                chain.output_dimensions(input_width, input_height, &self.configuration)
+            })
     }
 }
 

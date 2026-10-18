@@ -43,6 +43,10 @@ Musica 编译期嵌入 Noto Sans JP 与 Noto Sans SC，使用 SIL Open Font Lice
 
 `toml 1.1.3+spec-1.1.0` 来源为 <https://github.com/toml-rs/toml>，许可为 MIT OR Apache-2.0；`winnow 1.0.4` 来源为 <https://github.com/winnow-rs/winnow>，许可为 MIT。具体解析、序列化与关联 crate 版本固定于 Emulator lockfile；本地运行包在 `licenses/rust/` 保留本轮新增解析依赖的完整许可文本。
 
+## 异步 GIF 封面
+
+封面缩略图使用 `image` 的 GIF 解码支持：[`gif 0.14.2`](https://crates.io/crates/gif/0.14.2) 与 [`weezl 0.1.12`](https://crates.io/crates/weezl/0.1.12) 为 MIT OR Apache-2.0，关联的 [`color_quant 1.1.0`](https://crates.io/crates/color_quant/1.1.0) 为 MIT。本地运行包在 `licenses/rust/` 保留这些版本的完整许可文本。
+
 ## WMV decoder
 
 FVP 使用完整 RFVP fork 中的原生 `crates/na_wmv_player` 及原 Movie 路径处理 ASF/WMV/WMA，不再直接依赖主仓 `Emulator/Source/Families/na_wmv_player`。原生 decoder 清单没有独立 license 字段，须保留完整 fork 许可与来源，并在分发前核实实际覆盖范围，不能从 FFmpeg 算法名称推断额外授权。主仓旧独立 decoder/工具的来源和许可不明问题仍保留在其 `THIRD_PARTY_NOTICES.md`，不能混称为当前 FVP 的直接依赖。打包复制当前 Family 的说明与完整 RFVP 许可，不再附加旧 decoder 的错误归因。

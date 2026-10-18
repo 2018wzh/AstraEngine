@@ -6,16 +6,6 @@ fn controller(root: &Path) -> AstraEmuManagerController {
 
 #[test]
 #[cfg(not(target_os = "android"))]
-fn desktop_library_creates_empty_cores_directory_without_static_fvp() {
-    let root = tempfile::tempdir().unwrap();
-    let app = controller(root.path());
-    assert!(root.path().join("cores").is_dir());
-    assert!(app.registry.descriptor("astra.emu.fvp").is_none());
-    assert!(app.plugin_errors.is_empty());
-}
-
-#[test]
-#[cfg(not(target_os = "android"))]
 fn damaged_core_keeps_manager_available_and_error_visible() {
     let root = tempfile::tempdir().unwrap();
     let cores = root.path().join("cores");
@@ -35,6 +25,8 @@ fn damaged_core_keeps_manager_available_and_error_visible() {
     .unwrap();
 
     let mut app = controller(root.path());
+    app.start_background_initialization().unwrap();
+    super::probe_state_tests::settle_background(&mut app);
     assert!(app.plugin_errors.contains_key(&format!(
         "astra_emu_broken.{}",
         std::env::consts::DLL_EXTENSION

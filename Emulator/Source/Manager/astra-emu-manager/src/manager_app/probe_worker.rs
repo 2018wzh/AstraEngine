@@ -63,7 +63,11 @@ pub(super) fn scan(
         let mut queue = vec![(root, 0_usize)];
         while let Some((path, depth)) = queue.pop() {
             if cancelled.load(Ordering::Acquire) { return Err("ASTRA_EMU_OWNER_CANCELLED".into()); }
-            if recognized.iter().any(|game| path.starts_with(game)) || !visited.insert(path.clone()) { continue; }
+            if (!known.contains_key(&path) && recognized.iter().any(|game| path.starts_with(game)))
+                || !visited.insert(path.clone())
+            {
+                continue;
+            }
             if visited.len() > MAX_SCAN_DIRECTORIES { return Err("ASTRA_EMU_GAME_DIRECTORY_BOUNDS".into()); }
             let (candidates, hit) = cache.probe(&path, registry, request.kind == ScanKind::Startup)?;
             report.cache_hits += usize::from(hit);

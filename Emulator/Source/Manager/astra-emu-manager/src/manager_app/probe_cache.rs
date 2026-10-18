@@ -41,6 +41,10 @@ fn game_stamp(root: &Path) -> Option<Vec<FileStamp>> {
     while let Some((directory, depth)) = pending.pop() {
         for entry in fs::read_dir(directory).ok()? {
             let entry = entry.ok()?;
+            // Core-owned saves/configuration are not inputs to native game identification.
+            if depth == 0 && entry.file_name() == ".astra-musica" {
+                continue;
+            }
             let path = entry.path();
             let value = stamp(&path, path.strip_prefix(&root).ok()?.to_owned())?;
             if value.directory {

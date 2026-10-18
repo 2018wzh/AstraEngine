@@ -120,7 +120,11 @@ impl ManagerStageRenderer {
         candidate
             .reload_prepared(device, prepared)
             .map_err(|error| error.to_string())?;
-        let replacement = if config.preset == FilterPreset::None {
+        let replacement = if config.preset == FilterPreset::None
+            || self.input_texture.is_none()
+            || self.input_width != input_width
+            || self.input_height != input_height
+        {
             None
         } else if self.filtered_texture.as_ref().is_some_and(|texture| {
             texture.width() == output_width && texture.height() == output_height

@@ -2,14 +2,17 @@ use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque},
     path::{Path, PathBuf},
-    sync::{Arc, atomic::{AtomicU64, Ordering}},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
     thread::JoinHandle,
     time::SystemTime,
 };
 
+use crate::{GameCard, ManagerWindow};
 use parking_lot::{Condvar, Mutex};
 use slint::{Model, ModelTracker, VecModel};
-use crate::{GameCard, ManagerWindow};
 
 const IN_FLIGHT: usize = 4;
 const CACHE_SIZE: usize = 64;
@@ -102,6 +105,7 @@ struct Demand {
     desired: BTreeSet<usize>,
     completed: HashSet<usize>,
     in_flight: HashSet<usize>,
+    revalidate_after_inflight: bool,
     cache: VecDeque<Cached>,
 }
 
@@ -125,9 +129,21 @@ impl Demand {
     }
 
     fn next_rows(&self) -> impl Iterator<Item = usize> + '_ {
-        self.desired.iter().copied()
+        self.desired
+            .iter()
+            .copied()
             .filter(|row| !self.completed.contains(row) && !self.in_flight.contains(row))
             .take(IN_FLIGHT.saturating_sub(self.in_flight.len()))
+    }
+
+    fn take_revalidation(&mut self) -> Option<u64> {
+        if !self.in_flight.is_empty() || !self.revalidate_after_inflight {
+            return None;
+        }
+        self.revision += 1;
+        self.completed.clear();
+        self.revalidate_after_inflight = false;
+        Some(self.revision)
     }
 }
 
@@ -179,24 +195,46 @@ impl CoverModel {
                 }
             }
         }).map_err(|_| slint::PlatformError::Other("Cannot start cover decoder".into()))?;
-        Ok(Self { rows: VecModel::default(), indices: RefCell::default(), demand: RefCell::default(), shared, worker: Some(worker) })
+        Ok(Self {
+            rows: VecModel::default(),
+            indices: RefCell::default(),
+            demand: RefCell::default(),
+            shared,
+            worker: Some(worker),
+        })
     }
 
     pub(crate) fn replace(&self, cards: Vec<GameCard>, window: &ManagerWindow) {
         self.reset();
-        *self.indices.borrow_mut() = cards.iter().enumerate()
-            .map(|(row, card)| (card.case_id.to_string(), row)).collect();
+        *self.indices.borrow_mut() = cards
+            .iter()
+            .enumerate()
+            .map(|(row, card)| (card.case_id.to_string(), row))
+            .collect();
         self.rows.set_vec(cards);
-        self.demand.borrow_mut().visible.values_mut().for_each(|visible| {
-            visible.retain(|_, id| self.indices.borrow().contains_key(id));
-        });
+        self.demand
+            .borrow_mut()
+            .visible
+            .values_mut()
+            .for_each(|visible| {
+                visible.retain(|_, id| self.indices.borrow().contains_key(id));
+            });
         self.update_demand(window);
     }
 
     pub(crate) fn refresh(&self, window: &ManagerWindow) {
+        if !window.get_cover_loading_enabled()
+            || window.get_game_active()
+            || window.get_current_page() != "library"
+        {
+            self.update_demand(window);
+            return;
+        }
         // Revalidate metadata off-thread even when a locator did not change.
         if self.demand.borrow().in_flight.is_empty() {
             self.reset();
+        } else {
+            self.demand.borrow_mut().revalidate_after_inflight = true;
         }
         self.update_demand(window);
     }
@@ -206,19 +244,30 @@ impl CoverModel {
         demand.revision += 1;
         demand.completed.clear();
         demand.in_flight.clear();
+        demand.revalidate_after_inflight = false;
         self.shared.cancel(demand.revision);
     }
 
-    pub(crate) fn demand(&self, row: i32, case_id: &str, needed: bool, view: &str, window: &ManagerWindow) {
+    pub(crate) fn demand(
+        &self,
+        row: i32,
+        case_id: &str,
+        needed: bool,
+        view: &str,
+        window: &ManagerWindow,
+    ) {
         if row >= 0 && !case_id.is_empty() {
-            self.demand.borrow_mut().record_visible(row as usize, case_id, needed, view);
+            self.demand
+                .borrow_mut()
+                .record_visible(row as usize, case_id, needed, view);
         }
         self.update_demand(window);
     }
 
     fn update_demand(&self, window: &ManagerWindow) {
         let enabled = window.get_cover_loading_enabled()
-            && window.get_current_page() == "library" && !window.get_game_active();
+            && window.get_current_page() == "library"
+            && !window.get_game_active();
         let mut desired = BTreeSet::new();
         if enabled {
             let demand = self.demand.borrow();
@@ -235,7 +284,11 @@ impl CoverModel {
         }
         let removed = {
             let mut demand = self.demand.borrow_mut();
-            let removed = demand.desired.difference(&desired).copied().collect::<Vec<_>>();
+            let removed = demand
+                .desired
+                .difference(&desired)
+                .copied()
+                .collect::<Vec<_>>();
             for row in &removed {
                 demand.completed.remove(row);
             }
@@ -259,25 +312,40 @@ impl CoverModel {
 
     fn pump(&self) {
         let mut demand = self.demand.borrow_mut();
+        if let Some(revision) = demand.take_revalidation() {
+            self.shared.cancel(revision);
+        }
         loop {
-            let Some(row) = demand.next_rows().next() else { break };
-            let Some(card) = self.rows.row_data(row) else { break };
+            let Some(row) = demand.next_rows().next() else {
+                break;
+            };
+            let Some(card) = self.rows.row_data(row) else {
+                break;
+            };
             if card.cover_uri.is_empty() {
                 demand.completed.insert(row);
                 continue;
             }
-            let previous = demand.cache.iter().find(|entry| entry.locator == card.cover_uri.as_str())
+            let previous = demand
+                .cache
+                .iter()
+                .find(|entry| entry.locator == card.cover_uri.as_str())
                 .map(|entry| entry.stamp.clone());
             self.shared.push(Request {
-                revision: demand.revision, row, case_id: card.case_id.to_string(),
-                locator: card.cover_uri.to_string(), previous,
+                revision: demand.revision,
+                row,
+                case_id: card.case_id.to_string(),
+                locator: card.cover_uri.to_string(),
+                previous,
             });
             demand.in_flight.insert(row);
         }
     }
 
     fn complete(&self, request: Request, decoded: Decoded, window: &ManagerWindow) {
-        let Some(mut card) = self.rows.row_data(request.row) else { return };
+        let Some(mut card) = self.rows.row_data(request.row) else {
+            return;
+        };
         let image = {
             let mut demand = self.demand.borrow_mut();
             if request.revision != demand.revision {
@@ -294,16 +362,30 @@ impl CoverModel {
                 Decoded::Image(stamp, pixels) => {
                     // Only the bounded thumbnail crosses into Slint's shared allocation.
                     let buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(
-                        &pixels.rgba, pixels.width, pixels.height,
+                        &pixels.rgba,
+                        pixels.width,
+                        pixels.height,
                     );
                     let image = slint::Image::from_rgba8(buffer);
-                    demand.cache.retain(|entry| entry.locator != request.locator);
-                    demand.cache.push_back(Cached { locator: request.locator, stamp, image: image.clone() });
-                    while demand.cache.len() > CACHE_SIZE { demand.cache.pop_front(); }
+                    demand
+                        .cache
+                        .retain(|entry| entry.locator != request.locator);
+                    demand.cache.push_back(Cached {
+                        locator: request.locator,
+                        stamp,
+                        image: image.clone(),
+                    });
+                    while demand.cache.len() > CACHE_SIZE {
+                        demand.cache.pop_front();
+                    }
                     image
                 }
                 Decoded::Unchanged(stamp) => {
-                    if let Some(index) = demand.cache.iter().position(|entry| entry.locator == request.locator && entry.stamp == stamp) {
+                    if let Some(index) = demand
+                        .cache
+                        .iter()
+                        .position(|entry| entry.locator == request.locator && entry.stamp == stamp)
+                    {
                         let entry = demand.cache.remove(index).unwrap();
                         let image = entry.image.clone();
                         demand.cache.push_back(entry);
@@ -315,7 +397,9 @@ impl CoverModel {
                     }
                 }
                 Decoded::Missing | Decoded::Failed(_) => {
-                    demand.cache.retain(|entry| entry.locator != request.locator);
+                    demand
+                        .cache
+                        .retain(|entry| entry.locator != request.locator);
                     slint::Image::default()
                 }
             }
@@ -328,18 +412,31 @@ impl CoverModel {
 
     fn update_inspector(&self, window: &ManagerWindow) {
         let selected = window.get_selected_case_id();
-        let cover = self.indices.borrow().get(selected.as_str())
-            .and_then(|row| self.rows.row_data(*row)).map(|card| card.cover).unwrap_or_default();
+        let cover = self
+            .indices
+            .borrow()
+            .get(selected.as_str())
+            .and_then(|row| self.rows.row_data(*row))
+            .map(|card| card.cover)
+            .unwrap_or_default();
         window.set_selected_cover(cover);
     }
 }
 
 impl Model for CoverModel {
     type Data = GameCard;
-    fn row_count(&self) -> usize { self.rows.row_count() }
-    fn row_data(&self, row: usize) -> Option<GameCard> { self.rows.row_data(row) }
-    fn model_tracker(&self) -> &dyn ModelTracker { self.rows.model_tracker() }
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn row_count(&self) -> usize {
+        self.rows.row_count()
+    }
+    fn row_data(&self, row: usize) -> Option<GameCard> {
+        self.rows.row_data(row)
+    }
+    fn model_tracker(&self) -> &dyn ModelTracker {
+        self.rows.model_tracker()
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 impl Drop for CoverModel {
@@ -351,7 +448,11 @@ impl Drop for CoverModel {
             queue.pending.clear();
         }
         self.shared.wake.notify_one();
-        if self.worker.take().is_some_and(|worker| worker.join().is_err()) {
+        if self
+            .worker
+            .take()
+            .is_some_and(|worker| worker.join().is_err())
+        {
             tracing::error!(target: "astra.emu.cover", code = "worker_panicked", "Cover decoder shutdown failed");
         }
     }
@@ -360,7 +461,8 @@ impl Drop for CoverModel {
 fn stamp(path: &Path) -> Result<Option<Stamp>, &'static str> {
     match std::fs::metadata(path) {
         Ok(metadata) if metadata.is_file() => Ok(Some(Stamp {
-            path: path.to_owned(), length: metadata.len(),
+            path: path.to_owned(),
+            length: metadata.len(),
             modified: metadata.modified().map_err(|_| "cover_timestamp")?,
         })),
         Ok(_) => Ok(None),
@@ -371,10 +473,14 @@ fn stamp(path: &Path) -> Result<Option<Stamp>, &'static str> {
 
 fn resolve(locator: &str) -> Result<Option<Stamp>, &'static str> {
     let path = Path::new(locator);
-    if let Some(stamp) = stamp(path)? { return Ok(Some(stamp)); }
+    if let Some(stamp) = stamp(path)? {
+        return Ok(Some(stamp));
+    }
     if path.extension().is_none() {
         for extension in ["png", "jpg", "webp", "gif", "bmp"] {
-            if let Some(stamp) = stamp(&path.with_extension(extension))? { return Ok(Some(stamp)); }
+            if let Some(stamp) = stamp(&path.with_extension(extension))? {
+                return Ok(Some(stamp));
+            }
         }
     }
     Ok(None)
@@ -390,9 +496,16 @@ fn decode(request: &Request) -> Decoded {
         return Decoded::Unchanged(before);
     }
     let result = (|| {
-        let mut reader = image::ImageReader::open(&before.path).map_err(|error| {
-            if error.kind() == std::io::ErrorKind::NotFound { "cover_disappeared" } else { "cover_open" }
-        })?.with_guessed_format().map_err(|_| "cover_format")?;
+        let mut reader = image::ImageReader::open(&before.path)
+            .map_err(|error| {
+                if error.kind() == std::io::ErrorKind::NotFound {
+                    "cover_disappeared"
+                } else {
+                    "cover_open"
+                }
+            })?
+            .with_guessed_format()
+            .map_err(|_| "cover_format")?;
         let mut limits = image::Limits::default();
         limits.max_image_width = Some(16_384);
         limits.max_image_height = Some(16_384);
@@ -407,7 +520,11 @@ fn decode(request: &Request) -> Decoded {
         if resolve(&request.locator)?.as_ref() != Some(&before) {
             return Err("cover_changed_during_decode");
         }
-        Ok(Pixels { width: rgba.width(), height: rgba.height(), rgba: rgba.into_raw() })
+        Ok(Pixels {
+            width: rgba.width(),
+            height: rgba.height(),
+            rgba: rgba.into_raw(),
+        })
     })();
     match result {
         Ok(pixels) => Decoded::Image(before, pixels),
@@ -421,7 +538,13 @@ mod tests {
     use super::*;
 
     fn request(row: usize, revision: u64) -> Request {
-        Request { revision, row, case_id: format!("game-{row}"), locator: format!("cover-{row}"), previous: None }
+        Request {
+            revision,
+            row,
+            case_id: format!("game-{row}"),
+            locator: format!("cover-{row}"),
+            previous: None,
+        }
     }
 
     #[test]
@@ -447,18 +570,26 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let locator = directory.path().join("game-0");
         let png = locator.with_extension("png");
-        image::RgbaImage::from_pixel(2, 3, image::Rgba([12, 34, 56, 255])).save(&png).unwrap();
+        image::RgbaImage::from_pixel(2, 3, image::Rgba([12, 34, 56, 255]))
+            .save(&png)
+            .unwrap();
         let mut request = request(0, 1);
         request.locator = locator.to_str().unwrap().to_owned();
-        let Decoded::Image(stamp, pixels) = decode(&request) else { panic!("Expected decoded PNG") };
+        let Decoded::Image(stamp, pixels) = decode(&request) else {
+            panic!("Expected decoded PNG")
+        };
         assert_eq!((pixels.width, pixels.height), (2, 3));
         assert_eq!(&pixels.rgba[..4], &[12, 34, 56, 255]);
         request.previous = Some(stamp);
         assert!(matches!(decode(&request), Decoded::Unchanged(_)));
         std::fs::remove_file(png).unwrap();
         let bmp = locator.with_extension("bmp");
-        image::RgbaImage::from_pixel(4, 5, image::Rgba([98, 76, 54, 255])).save(&bmp).unwrap();
-        let Decoded::Image(_, pixels) = decode(&request) else { panic!("Expected replacement BMP") };
+        image::RgbaImage::from_pixel(4, 5, image::Rgba([98, 76, 54, 255]))
+            .save(&bmp)
+            .unwrap();
+        let Decoded::Image(_, pixels) = decode(&request) else {
+            panic!("Expected replacement BMP")
+        };
         assert_eq!((pixels.width, pixels.height), (4, 5));
         assert_eq!(&pixels.rgba[..4], &[98, 76, 54, 255]);
         std::fs::remove_file(bmp).unwrap();
@@ -467,12 +598,16 @@ mod tests {
 
     #[test]
     fn saturation_keeps_remaining_visible_work_until_completion() {
-        let mut demand = Demand { desired: (0..19).collect(), ..Demand::default() };
+        let mut demand = Demand {
+            desired: (0..19).collect(),
+            ..Demand::default()
+        };
         let mut visited = Vec::new();
         while demand.completed.len() != demand.desired.len() {
             let batch = demand.next_rows().collect::<Vec<_>>();
-            assert!(!batch.is_empty());
-            for row in batch { demand.in_flight.insert(row); }
+            for row in batch {
+                demand.in_flight.insert(row);
+            }
             assert!(demand.in_flight.len() <= IN_FLIGHT);
             let row = *demand.in_flight.iter().next().unwrap();
             demand.in_flight.remove(&row);
@@ -486,8 +621,16 @@ mod tests {
     #[test]
     fn late_completion_cannot_replace_reordered_removed_or_revised_card() {
         let request = request(0, 3);
-        let mut demand = Demand { revision: 3, desired: [0].into(), ..Demand::default() };
-        let mut card = GameCard { case_id: "game-0".into(), cover_uri: "cover-0".into(), ..GameCard::default() };
+        let mut demand = Demand {
+            revision: 3,
+            desired: [0].into(),
+            ..Demand::default()
+        };
+        let mut card = GameCard {
+            case_id: "game-0".into(),
+            cover_uri: "cover-0".into(),
+            ..GameCard::default()
+        };
         assert!(demand.accepts(&request, Some(&card)));
         assert!(!demand.accepts(&request, None));
         card.case_id = "game-1".into();
@@ -504,8 +647,39 @@ mod tests {
     }
 
     #[test]
+    fn refresh_during_decode_revalidates_after_the_current_batch() {
+        let old = request(0, 3);
+        let card = GameCard {
+            case_id: "game-0".into(),
+            cover_uri: "cover-0".into(),
+            ..GameCard::default()
+        };
+        let mut demand = Demand {
+            revision: 3,
+            desired: [0, 1].into(),
+            completed: [0].into(),
+            in_flight: [1].into(),
+            revalidate_after_inflight: true,
+            ..Demand::default()
+        };
+        assert!(demand.take_revalidation().is_none());
+        assert!(demand.next_rows().next().is_none());
+        demand.in_flight.remove(&1);
+        demand.completed.insert(1);
+        let revision = demand.take_revalidation().unwrap();
+        assert_eq!(demand.next_rows().collect::<Vec<_>>(), [0, 1]);
+        assert!(!demand.accepts(&old, Some(&card)));
+        assert!(demand.accepts(&Request { revision, ..old }, Some(&card)));
+        assert!(demand.take_revalidation().is_none());
+    }
+
+    #[test]
     fn cancellation_removes_queued_work_and_stop_wakes_waiting_worker() {
-        let shared = Arc::new(Shared { queue: Mutex::default(), wake: Condvar::new(), revision: AtomicU64::new(1) });
+        let shared = Arc::new(Shared {
+            queue: Mutex::default(),
+            wake: Condvar::new(),
+            revision: AtomicU64::new(1),
+        });
         shared.push(request(0, 1));
         shared.cancel(2);
         assert!(!shared.current(&request(0, 1)));

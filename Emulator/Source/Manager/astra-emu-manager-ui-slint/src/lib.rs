@@ -3,7 +3,7 @@ mod covers;
 
 use std::rc::Rc;
 
-use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 
 slint::include_modules!();
 
@@ -291,18 +291,16 @@ impl SlintManagerAdapter {
             let cards = model
                 .games
                 .iter()
-                .map(|game| {
-                    GameCard {
-                        case_id: SharedString::from(&game.case_id),
-                        title: SharedString::from(&game.title),
-                        family: SharedString::from(&game.family),
-                        cover_uri: SharedString::from(&game.cover_uri),
-                        cover: slint::Image::default(),
-                        diagnostic: SharedString::from(&game.diagnostic),
-                        play_time: SharedString::from(&game.play_time),
-                        last_played: SharedString::from(&game.last_played),
-                        compatibility_status: SharedString::from(&game.compatibility_status),
-                    }
+                .map(|game| GameCard {
+                    case_id: SharedString::from(&game.case_id),
+                    title: SharedString::from(&game.title),
+                    family: SharedString::from(&game.family),
+                    cover_uri: SharedString::from(&game.cover_uri),
+                    cover: slint::Image::default(),
+                    diagnostic: SharedString::from(&game.diagnostic),
+                    play_time: SharedString::from(&game.play_time),
+                    last_played: SharedString::from(&game.last_played),
+                    compatibility_status: SharedString::from(&game.compatibility_status),
                 })
                 .collect::<Vec<_>>();
             self.games.replace(cards, &self.window);

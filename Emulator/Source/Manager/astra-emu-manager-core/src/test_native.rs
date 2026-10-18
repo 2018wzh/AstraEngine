@@ -5,8 +5,8 @@ use parking_lot::Mutex;
 use std::{
     cell::RefCell,
     sync::{
-        Arc,
         atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc,
     },
     thread::{JoinHandle, ThreadId},
     time::Duration,

@@ -61,9 +61,7 @@ impl OutputMode {
             return Err(FilterError::TextureDimensions);
         }
         match self {
-            Self::ConfigScale => {
-                FilterEngine::output_dimensions(input_width, input_height, config)
-            }
+            Self::ConfigScale => FilterEngine::output_dimensions(input_width, input_height, config),
             Self::Source => texture_dimensions(
                 source.ok_or_else(|| FilterError::Compile("effect source has no stages".into()))?,
                 "OUTPUT",
@@ -219,12 +217,8 @@ impl CompiledChain {
         input_width: u32,
         input_height: u32,
     ) -> Result<(u32, u32), FilterError> {
-        self.output_mode.dimensions(
-            self.stages.last(),
-            &self.config,
-            input_width,
-            input_height,
-        )
+        self.output_mode
+            .dimensions(self.stages.last(), &self.config, input_width, input_height)
     }
     pub(super) fn apply(
         &self,
