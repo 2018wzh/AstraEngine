@@ -94,4 +94,6 @@ Sena/Ethornell 继承指定上游的实际支持范围；KrKr 继续使用既有
 
 本轮启动与手动刷新改动通过 115 项纯逻辑回归：Manager 库 20、应用 47、资料库/Core 40、Slint 模型/封面 8。覆盖手动核心加载不变更游戏绑定、显式扫描后才发现游戏、缓存失效/偏好/重复 ID、选中核心的启动前校验、批量统计、封面过期任务和惰性滤镜状态。另执行公开 API 命令，真实创建并重开临时 SQLite，验证统计快照与非标准尺寸的惰性滤镜描述；指定不存在的 DXC 路径仍能完成元数据准备，未创建窗口、GPU 或游戏会话。文档检查 181 项通过；固定编译器实际报告 `1.8.2502.8`。
 
+三个受影响 Manager crate 的全 target Clippy（`--no-deps -D warnings`）及 locked Release 构建通过。新手动刷新运行包仅重建 Manager，七核心 DLL 保持前一版哈希；随包 52 个运行 DLL 包含固定 DXC/dxil，60 个 PE 均为 x64，七个核心 query 导出及静态依赖闭包已核对。实际运行新包 Manager `--help` 通过，PATH 仅保留 Windows 系统目录；未打开 GUI 或游戏。六个代理工作树已在 Git bundle 备份后删除，主整合工作树、旧运行包和其他任务保留。首窗实际耗时、交互、听音与滤镜仍由用户人工 Release 验收。
+
 操作入口：[开发手册](../manual/development.md)、[AstraEMU 客户端](../manual/astraemu-client.md)、[Editor](../../Editor/README.md)、[NativeVN 样例](../../Examples/NativeVN/README.md)、[终之空资料](../samples/tsuinosora-modernization/README.md)。
