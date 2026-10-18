@@ -58,7 +58,7 @@ fn manual_full_scan_reuses_registered_hints_until_boot_or_core_inventory_changes
     registry
         .register_provider(test_native::install(0, fixture))
         .unwrap();
-    let inventory = Inventory::read(&[cores.clone()], &registry).unwrap();
+    let inventory = Inventory::read(std::slice::from_ref(&cores), &registry).unwrap();
     let mut cache = ProbeCache::load(root.path(), Some(inventory.clone()));
     let first = refresh(&registry, &mut cache, &path);
     assert_eq!(first.cache_hits, 0);

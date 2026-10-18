@@ -28,15 +28,12 @@ impl Harness {
         let root = tempfile::tempdir().unwrap();
         let mut owner = FamilyOwner::new(root.path().to_owned(), mailbox.clone());
         owner.start().unwrap();
-        loop {
-            match background(&mut owner) {
-                BackgroundEvent::Ready(result) => {
-                    result.unwrap();
-                    break;
-                }
-                BackgroundEvent::Scanned(_, _) => panic!("core loading must not scan games"),
-                BackgroundEvent::Exited(error) => panic!("owner exited during startup: {error}"),
+        match background(&mut owner) {
+            BackgroundEvent::Ready(result) => {
+                result.unwrap();
             }
+            BackgroundEvent::Scanned(_, _) => panic!("core loading must not scan games"),
+            BackgroundEvent::Exited(error) => panic!("owner exited during startup: {error}"),
         }
         let calls = Arc::new(Mutex::new(Vec::new()));
         let sink = calls.clone();
