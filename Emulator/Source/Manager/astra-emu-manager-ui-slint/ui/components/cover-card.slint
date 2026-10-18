@@ -22,6 +22,20 @@ export component CoverCard inherits Rectangle {
     in property <bool> selected: false;
     callback activated(string);
     callback launch(string);
+    in property <bool> cover-needed;
+    private property <string> cover-case-id: game.case-id;
+    private property <string> demanded-case-id;
+    callback cover-demand(string, bool);
+    function report-cover() {
+        if root.demanded-case-id != root.cover-case-id && root.demanded-case-id != "" {
+            root.cover-demand(root.demanded-case-id, false);
+        }
+        root.demanded-case-id = root.cover-case-id;
+        root.cover-demand(root.cover-case-id, root.cover-needed);
+    }
+    init => { root.report-cover(); }
+    changed cover-needed => { root.report-cover(); }
+    changed cover-case-id => { root.report-cover(); }
 
     background: selected
         ? Theme.surface-container-high
@@ -47,17 +61,17 @@ export component CoverCard inherits Rectangle {
         Rectangle {
             background: Theme.surface-container-highest;
             border-radius: Theme.shape-md;
-            min-height: 180px;
+            height: self.width * 4 / 3;
             clip: true;
 
-            if game.cover-uri != "" : Image {
+            if game.cover.width > 0 : Image {
                 source: game.cover;
                 image-fit: cover;
                 width: parent.width;
                 height: parent.height;
             }
 
-            if game.cover-uri == "" : Rectangle {
+            if game.cover.width == 0 : Rectangle {
                 background: @linear-gradient(135deg, Theme.surface-container-high 0%, Theme.surface-container-lowest 100%);
                 border-radius: Theme.shape-md;
 
@@ -193,7 +207,7 @@ export component CoverCard inherits Rectangle {
 
         // M3 FAB / Pill Launch Button - hover or active
         Rectangle {
-            y: 154px;
+            y: 10px + (root.width - 20px) * 4 / 3 - 38px;
             x: parent.width - 76px;
             width: 70px;
             height: 30px;

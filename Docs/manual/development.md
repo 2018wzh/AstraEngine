@@ -26,6 +26,8 @@ cargo test --manifest-path Emulator/Cargo.toml -p astra-emu-family-api
 
 CI 对三桌面的 Engine、EMU、Editor 分别执行 `check`，EMU job 检出时递归初始化固定提交的子模块；各 job 拉取 Git LFS 资产。`check` 执行链接检查、格式、clippy、产品构建和完整测试；`fmt` 只处理所选 workspace 的成员，不格式化第三方路径依赖。`test -p` 是普通定向测试，不启动或预构建 Headless。完整产品测试先构建所选产品的程序，供真正的 CLI/宿主测试使用。
 
+EMU 的 `Source/Families` 核心由 xtask 分成独立 Cargo 构建/Clippy/测试单元，避免把 Artemis Lua 5.1 与 Manager Luau 等互斥运行时 feature 合并。动态核心仍在同一 Manager 进程运行；这不是进程隔离。静态组合与后续平台需要另外验证，不能用独立 DLL 的编译结果代替。
+
 全量开发测试会产生较大的调试符号和增量缓存。CI 设置以下环境变量以控制空间，本地空间有限时也可使用；它们不改变 Release 配置。需要调试器符号时移除 debug 设置并重建。遇到 rustc/LLVM OOM 时先限制编译并发，不修改生产逻辑或跳过失败用例；GPU/窗口测试也应串行占用设备。
 
 ```bash
@@ -36,7 +38,7 @@ export CARGO_INCREMENTAL=0
 cargo xtask check --workspace engine
 ```
 
-只限制并发、保留已有 Debug 配置时，可以执行 `cargo build --workspace -j 1`，再执行 `cargo test --workspace -j 1 -- --test-threads=1`。同一 target 的构建按需串行或另设 CARGO_TARGET_DIR，避免锁等待和产物覆盖；不清理其他正在使用的构建目录。
+只限制并发、保留已有 Debug 配置时，Engine/Editor 可执行 `cargo build --workspace -j 1`，再执行 `cargo test --workspace -j 1 -- --test-threads=1`；EMU 使用 `cargo xtask build --workspace emu`、`cargo xtask test --workspace emu`，或按核心分开执行 `cargo -p`，不要合并互斥 Lua 后端。完整检查与定向检查不要同时使用同一 target；先等前一项结束，或显式使用本工作树内的独占目录，不清理其他正在使用的构建目录。
 
 ## 按改动选择验证
 
@@ -71,42 +73,28 @@ astra package bundle .tmp/game.astrapak \
   --crash-reporter target/debug/AstraCrashReporter.exe
 ```
 
-## EMU GPU Headless 调试
+## EMU Release 人工验收
 
-`astra-emu-manager --headless .tmp/run.json` 为调试入口显式指定 Family 插件，以 60 Hz 推进并将最后一帧写入 PNG；这条入口不写入 Manager 的 `cores/` 注册来源。插件继续使用自己的渲染器；FVP 要求硬件或 Sandbox 虚拟 GPU，拒绝软件 adapter。音频使用按采样时钟消费 PCM 的 Null 后端，因此此入口不验证实际声音。
+AstraEMU 仅使用实际 Release Manager 和各核心 Release 动态库进行人工验收。启动产品窗口后，由用户选择游戏、推进剧情、操作菜单与存读档并退出重开；不得自动输入、截图或关闭用户窗口。Manager 的脚本式 headless 验收入口和额外硬件驱动已移除。
 
-配置包含 `plugin`、`game`、`configuration`、`frames` 和 `output`。路径相对运行目录解析，游戏副本与输出放在 ignored 目录，测试前保护原存档。`frames` 范围为 1–36000。
-
-可选 `capture_frames` 在同一会话内保存指定帧，适合比较输入推进和存读档前后的画面。例如 `"capture_frames": [120, 240, 360]` 在各帧输入和推进完成后截图；帧从 0 开始，必须小于 `frames`，最多 128 项且不能重复。文件名在 `output` 文件名后追加 `.frame-120.png` 等后缀，最后一帧仍写入 `output`。游戏提前结束而未到达要求的截图帧，或截图缺失、写入失败时，测试明确失败并关闭会话；不会用最后一帧冒充未执行的帧。截图只能保存在 ignored 私有目录。
-
-FVP 的 RFVS v2 保存原生动画容器及剩余进度，读档后继续透明度、移动等演出。旧 RFVS v1 缺少这部分状态，读取时明确拒绝且保留文件；测试使用新空槽位，不覆盖旧档。RFVG 全局存档格式保持不变。
+FVP 使用固定 RFVP 来源的原生 RFVS/RFVG 保存路径和格式；Astra 不添加旧格式 reader 或迁移层。保护原商业存档，开发时使用隔离副本与新槽；读取失败保留原文件。
 
 Native VN 的 GPU Headless 使用 `render_policy: checkpoints` 时，独立资源变更可合并提交；同一资源再次变更前会先提交前一个待绘制帧，保留释放与重新上传的跨帧顺序。这些中间提交不执行像素回读，检查点仍读取最新画面。逐帧视听与性能测试使用 `all`。
 
 `astra-headless` 的日志过滤使用 `ASTRA_LOG`。长流程定位可设置 `ASTRA_LOG=info,astra_headless=trace,astra_platform_headless=debug`，查看等待完成的输入序号、tick 与资源提交边界；这些日志不包含剧情正文。
 
-可选 `inputs` 按零起始帧号排序，同帧保留给定顺序。输入只投递物理键鼠事件，点击需要分别指定按下与释放；坐标使用游戏原始画面像素。键名复用 Manager 输入映射，例如 `enter`、`escape` 和 `space`。以下片段在第 120 帧按下 Enter，下一帧释放：
-
-```json
-"inputs": [
-  {"frame": 120, "event": {"type": "key", "code": "enter", "pressed": true}},
-  {"frame": 121, "event": {"type": "key", "code": "enter", "pressed": false}}
-]
-```
-
-鼠标移动使用 `{"type":"pointer_move","x":640,"y":360}`；按钮使用 `{"type":"pointer_button","secondary":false,"pressed":true}`，`secondary` 选择右键。非法键名、坐标、帧顺序和越界帧在打开插件前拒绝。此入口用于复现问题；最终帧和进程成功退出不能替代完整产品验收。
 
 ## 核心适配与 Manager 日志
 
 适配优先启用核心现成的 GPU feature 和平台能力，仅修改嵌入入口、Family API 和必要生命周期边界；复用原生渲染、媒体、VM 及存档，不另建竞争路径。差异写入各 Family 的 MODIFICATIONS.md。CPU 最终帧是交付格式，不代表使用 CPU 渲染。
 
-动态核心的 tracing/log 由 Family API v7 日志桥接入 Manager。构建动态插件时开启 `dynamic-plugin-export`，再把生成的 `astra_emu_`（Unix 为 `libastra_emu_`）动态库和其依赖放入 Manager 数据目录 `cores/`；Manager 冷启动自动扫描并在加载失败时按文件给出诊断。更新核心需重启 Manager，运行期间不热加载。静态核心使用宿主订阅器。
+动态核心通过 `astra-emu-abi` 的诊断桥接入 Manager，静态核心复用宿主 subscriber。按各核心说明启用动态导出 feature，将 `astra_emu_`（Unix 为 `libastra_emu_`）动态库及其依赖放入数据目录 `cores/`；Manager 冷启动扫描，按文件保留加载诊断。更新需替换文件并重启，不热加载，也不加载旧 abi_stable 协议。
 
 视觉滤镜使用锁定的 DirectXShaderCompiler 版本；Windows 发布目录需同时携带 `dxcompiler.dll` 和 `dxil.dll`，并与 Manager 可执行文件放在同一目录。Manager 默认按可执行文件目录定位 `dxcompiler.dll`，不会依赖启动时的工作目录或系统 PATH；`ASTRA_EMU_DXC_PATH` 只用于显式指定并校验一个替代位置，缺失或校验失败会直接报告滤镜诊断。
 
 ```sh
 RUST_LOG=info,astra_emu::family=debug astra-emu-manager
-cargo build --manifest-path Emulator/Cargo.toml -p astra-emu-fvp --features dynamic-plugin-export
+cargo build --manifest-path Emulator/Cargo.toml --release -p astra-emu-fvp --features dynamic-plugin-export
 ```
 
 `core_target` 保留核心来源，`event` 是稳定事件名；`fields` 为有界结构化字段，超限字段计入 `dropped_fields`。日志桥不做内容脱敏或字符串白名单过滤，但产品日志仍不得主动记录游戏正文、路径或未经审计的整体 Debug 对象；若只看到 `family.unstructured_log`，应在对应核心根因边界增加安全的稳定事件和数值字段。日志桥初始化失败会阻止加载；读取损坏存档仍必须返回错误且保留原文件。
@@ -131,20 +119,11 @@ python Tools/TsuiNoSora/classic_route_inputs.py \
 
 对白进入 pending wait 时，文字可能还在逐字显示。第一次推进输入会补全文字，后续输入才推进剧情。Headless 可通过只读观察项 `vn.text_reveal_complete` 等待当前文字显示完成，再发送物理按键；它来自真实演出状态，不修改剧情游标或显示进度。没有正在显示的文字时为 true。Classic 路线脚本已按此区分对白等待与普通输入等待，不能仅凭 `vn.pending_wait_command` 就假设一次 Enter 足以推进。
 
-## 外部 Family 最小接入
+## 外部原生核心接入
 
-[公开最小核心](../../Tools/AstraEMU/tests/fixtures/external_family.rs) 复用现有 `FamilyProvider`、`FamilySession` 和 `ProviderModule`，声明启动配置、借用 CPU 帧与固定格式 PCM。它没有 SDK、VN、EngineSession 或 Manager 依赖。实际核心可替换这三个实现中的 fixture 逻辑，继续拥有原生 VM、渲染和存档。
+核心直接导出 `astra_emu_query`／`CoreApi`，声明 typed 配置，自持调度和音视频，交付完整 CPU/GPU 帧；Host 投递输入、读取状态及帧，不调用 advance。动态导出及日志桥按各核心构建说明启用，静态链接使用相同 Query 函数表。
 
-示例选择 Family API 的 `diagnostic-bridge` feature，因为现有 `ProviderModule` 和 tracing/log 桥在该 feature 下提供；这不是 Family ABI 强制依赖。直接实现 `FamilyModule` 的核心可使用 `default-features = false`，自行将诊断送入 Host 安装的 `DiagnosticSink`。不能跳过诊断初始化后宣称日志已接通。
-
-先在当前独占树构建 Manager，再执行下列单用途开发回归。Python 需要 Pillow；脚本临时生成独立 Cargo 项目、lockfile 和 target，编译动态库并由已有 Manager 的 headless 入口加载。临时项目位于 ignored 目录，完成或失败后清理，不加入活动 workspace；没有继承主 workspace feature 集合或私有初始化步骤。
-
-```sh
-cargo build --manifest-path Emulator/Cargo.toml -p astra-emu-manager
-python Tools/AstraEMU/check_external_family.py --host Emulator/target/debug/astra-emu-manager
-```
-
-Windows 的 `--host` 参数添加 `.exe`。回归检查依赖图仅包含 Family API 这一 Astra crate、显式配置改变帧颜色、物理 Enter 按下/释放改变像素、PCM worker 至少一次写入成功，以及关闭取消并等待 worker。两次冷启动通过；越界配置和缺失输入必须失败。外部核心另请求标题和 RGBA8 图标，Headless 必须返回明确的窗口能力不可用错误，并完成 PCM worker 取消关闭。音频经过真实 Host 的有界 NullAudio 队列，但不会发声；2×2 CPU 帧只验证 ABI 交付，不代表 GPU、游戏或实际声音验收。真实核心的原生媒体、存读档和连续流程仍需单独运行。
+CPU owner 不依赖会话，Host 可以在关闭后归还持有的不可变 lease。实际游戏功能由用户在 Release Manager 中人工检查，不保留公开假核心或脚本自动验收入口。
 
 ## NativeVN 嵌入接口
 

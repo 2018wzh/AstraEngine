@@ -166,14 +166,13 @@ fn native_gpu_visibility_event_reaches_title_and_pauses_playback() {
     let _session = PROVIDER_SESSION.lock().unwrap();
     for title_launch in [true, false] {
         let root = tempfile::tempdir().unwrap();
-        fixture::game(root.path(), b".wait 1000\r\n.end\r\n");
-        let mut req = request(root.path(), Sink::default());
-        if !title_launch {
-            req.configuration.push(ConfigEntry {
-                id: "launch_mode".into(),
-                value: ConfigValue::Enum("direct".into()),
-            });
-        }
+        let req = if title_launch {
+            title::game(root.path());
+            title::title_request(root.path())
+        } else {
+            fixture::game(root.path(), b".wait 1000\r\n.end\r\n");
+            request(root.path(), Sink::default())
+        };
         let (_, mut session) = fixture::provider().open_session(req).unwrap();
         session.advance(16_666_667, &[]).unwrap();
         let before = session.vm.state().fixed_tick;
@@ -218,11 +217,7 @@ fn native_gpu_lifecycle_precedes_elapsed_guard_and_drops_paused_wall_time() {
     ] {
         let root = tempfile::tempdir().unwrap();
         fixture::game(root.path(), b".wait 1000\r\n.end\r\n");
-        let mut req = request(root.path(), Sink::default());
-        req.configuration.push(ConfigEntry {
-            id: "launch_mode".into(),
-            value: ConfigValue::Enum("direct".into()),
-        });
+        let req = request(root.path(), Sink::default());
         let (_, mut session) = fixture::provider().open_session(req).unwrap();
         session.advance(16_666_667, &[]).unwrap();
         let before = session.vm.state().fixed_tick;
@@ -253,10 +248,6 @@ fn native_gpu_background_focus_remains_active_but_keeps_elapsed_guard() {
     fixture::game(root.path(), b".wait 1000\r\n.end\r\n");
     let mut req = request(root.path(), Sink::default());
     req.configuration.push(ConfigEntry {
-        id: "launch_mode".into(),
-        value: ConfigValue::Enum("direct".into()),
-    });
-    req.configuration.push(ConfigEntry {
         id: "progress_in_background".into(),
         value: ConfigValue::Bool(true),
     });
@@ -283,11 +274,7 @@ fn native_gpu_active_elapsed_remains_bounded() {
     let _session = PROVIDER_SESSION.lock().unwrap();
     let root = tempfile::tempdir().unwrap();
     fixture::game(root.path(), b".wait 1000\r\n.end\r\n");
-    let mut request = request(root.path(), Sink::default());
-    request.configuration.push(ConfigEntry {
-        id: "launch_mode".into(),
-        value: ConfigValue::Enum("direct".into()),
-    });
+    let request = request(root.path(), Sink::default());
     let (_, mut session) = fixture::provider().open_session(request).unwrap();
     let error = session.advance(1_000_000_001, &[]).unwrap_err();
     assert_eq!(error.code.as_str(), "ASTRA_EMU_MUSICA_ELAPSED");

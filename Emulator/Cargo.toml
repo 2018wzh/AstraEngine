@@ -5,6 +5,7 @@ members = [
     "Source/Families/astra-emu-cmvs",
     "Source/Families/astra-emu-artemis",
     "Source/FamilyApi/astra-emu-family-api",
+    "Source/FamilyApi/astra-emu-abi",
     "Source/Families/astra-emu-fvp",
     "Source/Families/astra-emu-siglus",
     "Source/Families/astra-emu-musica",
@@ -20,6 +21,8 @@ exclude = [
     "ThirdParty/art3m1s-core",
     "ThirdParty/rfvp",
     "ThirdParty/siglus_rs",
+    "ThirdParty/sena-rs",
+    "ThirdParty/cpal",
     "Source/FamilyApi/astra-emu-extension-api",
     "Source/FamilyCore/astra-emu-family-core",
     "Source/FamilySupport/astra-emu-family-support",
@@ -178,3 +181,11 @@ oboe = "0.6.1"
 astra-byte-source = { path = "../Engine/Source/Runtime/astra-byte-source" }
 astra-core = { path = "../Engine/Source/Runtime/astra-core" }
 astra-emu-family-api = { path = "Source/FamilyApi/astra-emu-family-api" }
+astra-emu-abi = { path = "Source/FamilyApi/astra-emu-abi" }
+
+[patch.crates-io]
+kira = { git = "https://github.com/2018wzh/kira.git", rev = "7d8961b20bce2ab8fd43b4bb34150d7e2898785c" }
+cpal = { path = "ThirdParty/cpal" }
+
+[patch."https://github.com/2018wzh/cpal.git"]
+cpal = { path = "ThirdParty/cpal" }

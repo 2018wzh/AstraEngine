@@ -1,18 +1,16 @@
 use crate::test_fixture as fixture;
-use crate::{audio::Audio, mount_musica, scene::core_error, MusicaVm, MUSICA_PROFILE_FILE};
+use crate::{MUSICA_KEY_FILE, MusicaVm, audio::Audio, mount_musica, scene::core_error};
 use abi_stable::{std_types::ROption, type_level::downcasting::TD_Opaque};
 use astra_emu_family_api::*;
 use std::{
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
 };
 // The provider intentionally permits one live session per process.
 static PROVIDER_SESSION: std::sync::Mutex<()> = std::sync::Mutex::new(());
-#[path = "tests/gpu_lifecycle.rs"]
-mod gpu_lifecycle;
 #[cfg(feature = "ffmpeg-vcpkg")]
 #[path = "tests/movie.rs"]
 mod movie;
@@ -93,53 +91,15 @@ impl AudioSink for Sink {
         Ok(()).into()
     }
 }
-#[derive(Clone, Default)]
-struct Translation {
-    request: Arc<std::sync::Mutex<Option<TextReplacementRequest>>>,
-    mode: Arc<AtomicUsize>,
-    cancellations: Arc<AtomicUsize>,
-    resets: Arc<AtomicUsize>,
-}
-impl TextReplacementService for Translation {
-    fn reset(&self, _: TextResetReason) -> FfiFamilyResult<()> {
-        *self.request.lock().unwrap() = None;
-        self.resets.fetch_add(1, Ordering::Relaxed);
-        Ok(()).into()
-    }
-    fn submit(&self, request: TextReplacementRequest) -> FfiFamilyResult<()> {
-        *self.request.lock().unwrap() = Some(request);
-        Ok(()).into()
-    }
-    fn poll(&self, id: abi_stable::std_types::RString) -> FfiFamilyResult<TextPollResult> {
-        match self.mode.load(Ordering::Acquire) {
-            1 => Ok(TextPollResult::Ready(TextReplacementResponse {
-                request_id: id,
-                replacement: "Translated".into(),
-            }))
-            .into(),
-            2 => Ok(TextPollResult::Failed(FamilyError::invalid(
-                "TEST_TRANSLATION_FAILED",
-                "fixture failure",
-            )))
-            .into(),
-            3 => Ok(TextPollResult::Ready(TextReplacementResponse {
-                request_id: id,
-                replacement: "\u{10ffff}".into(),
-            }))
-            .into(),
-            _ => Ok(TextPollResult::Pending).into(),
-        }
-    }
-    fn cancel(&self, _: abi_stable::std_types::RString) -> FfiFamilyResult<()> {
-        self.cancellations.fetch_add(1, Ordering::Relaxed);
-        Ok(()).into()
-    }
-}
 fn request(root: &std::path::Path, sink: Sink) -> OpenRequest {
     OpenRequest {
         session_epoch: astra_emu_family_api::allocate_session_epoch().unwrap(),
         game_path: root.to_str().unwrap().into(),
-        configuration: Default::default(),
+        configuration: vec![ConfigEntry {
+            id: "launch_mode".into(),
+            value: ConfigValue::Enum("direct".into()),
+        }]
+        .into(),
         initial_window: WindowState {
             width: 1280,
             height: 720,
@@ -323,12 +283,14 @@ fn native_gpu_crossfade_clear_removes_the_previous_effect_frame() {
     frame
         .read(opened.session.acquire_frame(None).unwrap())
         .unwrap();
-    assert!(frame
-        .0
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .all(|pixel| *pixel == [0, 0, 0, 255]));
+    assert!(
+        frame
+            .0
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|pixel| *pixel == [0, 0, 0, 255])
+    );
     opened.session.close().unwrap();
 }
 #[test]
@@ -340,12 +302,14 @@ fn native_family_advances_real_archive_scene_audio_input_save_restore_and_close(
         b".stage * BG.png 0 0\r\n.playBGM tone.ogg[50,-100]\r\n.message 1   Hello\r\n.end\r\n",
     );
     let mut provider = fixture::provider();
-    assert!(provider
-        .probe(ProbeRequest {
-            game_path: root.path().to_str().unwrap().into()
-        })
-        .unwrap()
-        .is_some());
+    assert!(
+        provider
+            .probe(ProbeRequest {
+                game_path: root.path().to_str().unwrap().into()
+            })
+            .unwrap()
+            .is_some()
+    );
     let sink = Sink::default();
     let mut opened = provider.open(request(root.path(), sink.clone())).unwrap();
     assert_eq!(
@@ -374,12 +338,14 @@ fn native_family_advances_real_archive_scene_audio_input_save_restore_and_close(
         .read(opened.session.acquire_frame(None).unwrap())
         .unwrap();
     let dialogue = frame.0.clone();
-    assert!(dialogue
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .skip(528 * 1280)
-        .any(|p| p[0] > 0));
+    assert!(
+        dialogue
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .skip(528 * 1280)
+            .any(|p| p[0] > 0)
+    );
     opened.session.advance(0, &[key(KeyCode::F5)]).unwrap();
     assert_eq!(
         opened
@@ -407,43 +373,13 @@ fn native_family_advances_real_archive_scene_audio_input_save_restore_and_close(
         .open(request(root.path(), Sink::default()))
         .unwrap();
     reopened.session.close().unwrap();
-    // A supplied enhancement pauses only the message; input received while pending is discarded.
-    let root = tempfile::tempdir().unwrap();
-    fixture::game(root.path(), b".message 1   Hello\r\n.end\r\n");
-    let translation = Translation::default();
-    let mut req = request(root.path(), Sink::default());
-    req.host.text_replacement = ROption::RSome(TextReplacementService_TO::from_value(
-        translation.clone(),
-        TD_Opaque,
-    ));
-    let (_, mut translated) = provider.open_session(req).unwrap();
-    translated.advance(16_666_667, &[]).unwrap();
-    translated.advance(0, &[key(KeyCode::F5)]).unwrap();
-    translated
-        .advance(16_666_667, &[key(KeyCode::Enter)])
-        .unwrap();
-    assert!(translated.pending.is_some());
-    translated.advance(0, &[key(KeyCode::F9)]).unwrap();
-    assert_eq!(translation.cancellations.load(Ordering::Relaxed), 1);
-    assert_eq!(translation.resets.load(Ordering::Relaxed), 2);
-    assert!(translated.pending.is_none());
-    assert_eq!(translated.message.as_ref().unwrap().0, "Hello");
-    translated.message("Hello".into(), None).unwrap();
-    translation.mode.store(1, Ordering::Release);
-    translated.advance(0, &[]).unwrap();
-    assert_eq!(translated.message.as_ref().unwrap().0, "Translated");
-    translated.message("Keep original".into(), None).unwrap();
-    translation.mode.store(2, Ordering::Release);
-    translated.advance(0, &[]).unwrap();
-    assert_eq!(translated.message.as_ref().unwrap().0, "Keep original");
-    Box::new(translated).close().unwrap();
 }
 #[test]
 fn audio_close_cancels_blocked_write_and_joins_worker() {
     let root = tempfile::tempdir().unwrap();
     fixture::game(root.path(), b".end\r\n");
     let archive = Arc::new(
-        mount_musica(root.path(), &root.path().join(MUSICA_PROFILE_FILE))
+        mount_musica(root.path(), &root.path().join(MUSICA_KEY_FILE))
             .map_err(core_error)
             .unwrap(),
     );
@@ -451,8 +387,11 @@ fn audio_close_cancels_blocked_write_and_joins_worker() {
         block: true,
         ..Default::default()
     };
-    let mut audio =
-        Audio::start(archive, AudioSink_TO::from_value(sink.clone(), TD_Opaque)).unwrap();
+    let mut audio = Audio::start(
+        archive,
+        Some(AudioSink_TO::from_value(sink.clone(), TD_Opaque)),
+    )
+    .unwrap();
     until(|| sink.writes.load(Ordering::Acquire) > 0);
     let duration = audio.duration(4).unwrap();
     assert!(matches!(
@@ -469,6 +408,54 @@ fn audio_close_cancels_blocked_write_and_joins_worker() {
     assert_eq!(sink.writes.load(Ordering::Acquire), writes);
 }
 #[test]
+fn full_audio_control_queue_waits_and_cancellation_releases_the_sender() {
+    let root = tempfile::tempdir().unwrap();
+    fixture::game(root.path(), b".end\r\n");
+    let archive = Arc::new(mount_musica(root.path(), &root.path().join(MUSICA_KEY_FILE)).unwrap());
+    let sink = Sink {
+        block: true,
+        ..Default::default()
+    };
+    let audio = Arc::new(
+        Audio::start(
+            archive,
+            Some(AudioSink_TO::from_value(sink.clone(), TD_Opaque)),
+        )
+        .unwrap(),
+    );
+    until(|| sink.writes.load(Ordering::Acquire) > 0);
+    for _ in 0..crate::audio::COMMAND_CAPACITY {
+        audio.suspend(false).unwrap();
+    }
+    let (completed, completion) = std::sync::mpsc::sync_channel(1);
+    let sender = audio.clone();
+    let worker = std::thread::spawn(move || {
+        let result = sender.suspend(true);
+        completed.send(()).unwrap();
+        result
+    });
+    until(|| audio.take_backpressure());
+    let pending = matches!(
+        completion.recv_timeout(Duration::from_millis(30)),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+    );
+    audio.cancellation_flag().store(true, Ordering::Release);
+    sink.cancel().into_result().unwrap();
+    let result = worker.join().unwrap();
+    let mut audio =
+        Arc::try_unwrap(audio).unwrap_or_else(|_| panic!("audio sender still retained"));
+    audio.shutdown().unwrap();
+    assert!(
+        pending,
+        "a full queue must apply backpressure, not fail gameplay"
+    );
+    assert_eq!(
+        result.unwrap_err().code.as_str(),
+        "ASTRA_EMU_AUDIO_CANCELLED"
+    );
+    assert!(!audio.take_backpressure());
+}
+#[test]
 fn decoded_audio_rejects_expansion_budget_and_cancellation() {
     let bytes = fixture::wave();
     let stop = AtomicBool::new(false);
@@ -481,14 +468,16 @@ fn decoded_audio_rejects_expansion_budget_and_cancellation() {
 fn audio_snapshot_timeout_cancels_blocked_worker_and_rejects_late_commands() {
     let root = tempfile::tempdir().unwrap();
     fixture::game(root.path(), b".end\r\n");
-    let archive =
-        Arc::new(mount_musica(root.path(), &root.path().join(MUSICA_PROFILE_FILE)).unwrap());
+    let archive = Arc::new(mount_musica(root.path(), &root.path().join(MUSICA_KEY_FILE)).unwrap());
     let sink = Sink {
         block: true,
         ..Default::default()
     };
-    let mut audio =
-        Audio::start(archive, AudioSink_TO::from_value(sink.clone(), TD_Opaque)).unwrap();
+    let mut audio = Audio::start(
+        archive,
+        Some(AudioSink_TO::from_value(sink.clone(), TD_Opaque)),
+    )
+    .unwrap();
     until(|| sink.writes.load(Ordering::Acquire) > 0);
     assert_eq!(
         audio.snapshot().err().unwrap().code.as_str(),

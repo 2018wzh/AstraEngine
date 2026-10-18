@@ -31,44 +31,86 @@ fn script_gain_and_pan_use_native_thousandths() {
 #[test]
 fn native_caption_uses_the_host_window_title_contract() {
     let command = parse_ui(br#"{"kind":"caption","payload":{"data":"Native game"}}"#).unwrap();
-    assert!(
-        matches!(command, FamilyWindowCommand::SetTitle(title) if title.as_str() == "Native game")
-    );
+    assert!(matches!(command, WindowCommand::Title(title) if title == "Native game"));
     assert!(parse_ui(br#"{"kind":"caption","payload":{"data":"bad\ncaption"}}"#).is_err());
     assert!(parse_ui(br#"{"kind":"caption","payload":{"data":42}}"#).is_err());
 }
 #[test]
 fn unsupported_native_ui_still_fails_with_the_request_kind() {
     let error = parse_ui(br#"{"kind":"dialog_show","payload":{}}"#).unwrap_err();
-    assert_eq!(error.code(), "ASTRA_EMU_ARTEMIS_UI_UNSUPPORTED");
+    assert_eq!(error.code, "ASTRA_EMU_ARTEMIS_UI_UNSUPPORTED");
     assert!(error.to_string().contains("dialog_show"));
 }
 
 #[test]
 fn native_mouse_preserves_nulls_and_pending_caption() {
     let mut pending = WindowRequests::default();
-    pending.push(parse_ui(br#"{"kind":"caption","payload":{"data":"Native game"}}"#).unwrap());
-    pending.push(
-        parse_ui(br#"{"kind":"mouse","payload":{"left":12,"top":null,"hide":1,"autohide":1000}}"#)
+    pending
+        .push(parse_ui(br#"{"kind":"caption","payload":{"data":"Native game"}}"#).unwrap())
+        .unwrap();
+    pending
+        .push(
+            parse_ui(
+                br#"{"kind":"mouse","payload":{"left":12,"top":null,"hide":1,"autohide":1000}}"#,
+            )
             .unwrap(),
-    );
-    pending.push(
-        parse_ui(br#"{"kind":"mouse","payload":{"left":null,"top":34,"hide":null,"autohide":0}}"#)
+        )
+        .unwrap();
+    pending
+        .push(
+            parse_ui(
+                br#"{"kind":"mouse","payload":{"left":null,"top":34,"hide":null,"autohide":0}}"#,
+            )
             .unwrap(),
-    );
+        )
+        .unwrap();
+    assert!(matches!(pending.take(), Some(WindowCommand::Title(_))));
     assert!(matches!(
         pending.take(),
-        Some(FamilyWindowCommand::SetTitle(_))
+        Some(WindowCommand::Pointer {
+            x: Some(12),
+            y: None,
+            visible: Some(false),
+            autohide_ms: Some(1000)
+        })
     ));
-    let Some(FamilyWindowCommand::SetPointer(pointer)) = pending.take() else {
-        panic!("pending pointer must survive caption delivery");
-    };
-    assert_eq!(pointer.logical_x.into_option(), Some(12));
-    assert_eq!(pointer.logical_y.into_option(), Some(34));
-    assert_eq!(pointer.visible.into_option(), Some(false));
-    assert_eq!(pointer.autohide_ms.into_option(), Some(0));
+    assert!(matches!(
+        pending.take(),
+        Some(WindowCommand::Pointer {
+            x: None,
+            y: Some(34),
+            visible: None,
+            autohide_ms: Some(0)
+        })
+    ));
     assert!(pending.take().is_none());
     assert!(parse_ui(br#"{"kind":"mouse","payload":{"hide":"bad"}}"#).is_err());
+}
+
+#[test]
+fn native_mouse_distinguishes_explicit_visibility_from_idle_policy() {
+    for (payload, expected_visible, expected_autohide) in [
+        (r#"{"hide":0}"#, Some(true), None),
+        (r#"{"hide":1}"#, Some(false), None),
+        (r#"{"hide":-1}"#, Some(false), None),
+        (r#"{"autohide":1000}"#, None, Some(1000)),
+        (r#"{"autohide":0}"#, None, Some(0)),
+        (r#"{"hide":null,"autohide":null}"#, None, None),
+    ] {
+        let bytes = format!(r#"{{"kind":"mouse","payload":{payload}}}"#);
+        let WindowCommand::Pointer {
+            x,
+            y,
+            visible,
+            autohide_ms,
+        } = parse_ui(bytes.as_bytes()).unwrap()
+        else {
+            panic!("mouse configuration must remain a pointer command");
+        };
+        assert_eq!((x, y), (None, None));
+        assert_eq!(visible, expected_visible);
+        assert_eq!(autohide_ms, expected_autohide);
+    }
 }
 
 #[test]

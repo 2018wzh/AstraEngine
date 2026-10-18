@@ -1,13 +1,13 @@
 use crate::{
-    MusicaProfile, MusicaRolePrivateProfile, MUSICA_PROFILE_FILE, MUSICA_PROFILE_SCHEMA,
-    REQUIRED_ARCHIVE_ROLES,
+    MUSICA_KEY_FILE, MUSICA_KEY_SCHEMA, MusicaArchiveKey, MusicaKeyFile, REQUIRED_ARCHIVE_ROLES,
 };
 use blowfish::{
-    cipher::{BlockCipherEncrypt, KeyInit},
     Blowfish,
+    cipher::{BlockCipherEncrypt, KeyInit},
 };
 use std::{collections::BTreeMap, io::Cursor, path::Path};
 const KEY: &[u8] = b"public-fixture-key";
+const KEY_HEX: &str = "7075626c69632d666978747572652d6b6579";
 // The test binary is the graphics owner; sessions still own separate devices.
 pub(crate) fn gpu_instance() -> &'static wgpu::Instance {
     static INSTANCE: std::sync::OnceLock<wgpu::Instance> = std::sync::OnceLock::new();
@@ -93,30 +93,35 @@ pub(crate) fn game(root: &Path, script: &[u8]) {
         )
         .unwrap();
     }
-    let profile = MusicaProfile {
-        schema: MUSICA_PROFILE_SCHEMA.into(),
+    let key = MusicaKeyFile {
+        schema: MUSICA_KEY_SCHEMA.into(),
         paz_version: 0,
         index_size_xor: 0,
+        rc4_skip_crc: true,
         texture_overrides: BTreeMap::new(),
-        roles: REQUIRED_ARCHIVE_ROLES
+        archive_keys: REQUIRED_ARCHIVE_ROLES
             .iter()
             .map(|role| {
                 (
                     (*role).into(),
-                    MusicaRolePrivateProfile {
-                        index_key: KEY.to_vec(),
-                        data_key: if *role == "mov" { vec![] } else { KEY.to_vec() },
+                    MusicaArchiveKey {
+                        index_key_hex: KEY_HEX.into(),
+                        data_key_hex: if *role == "mov" {
+                            String::new()
+                        } else {
+                            KEY_HEX.into()
+                        },
                         type_passwords: BTreeMap::new(),
                         archive_xor: None,
-                        video_key: None,
+                        video_key_hex: None,
                     },
                 )
             })
             .collect(),
     };
     std::fs::write(
-        root.join(MUSICA_PROFILE_FILE),
-        serde_json::to_vec(&profile).unwrap(),
+        root.join(MUSICA_KEY_FILE),
+        toml::to_string_pretty(&key).unwrap(),
     )
     .unwrap();
 }

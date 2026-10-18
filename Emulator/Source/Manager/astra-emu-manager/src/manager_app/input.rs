@@ -3,15 +3,20 @@ use super::*;
 impl AstraEmuManagerController {
     pub(super) fn update_window_state(&mut self, mut state: WindowState) -> Result<(), String> {
         if state.width == 0 || state.height == 0 {
-            // A minimized surface has no drawable extent. Preserve the last
-            // real extent and communicate the visibility change separately.
+            // Keep the last drawable extent while the platform surface is
+            // suspended; OS visibility remains an independent fact.
             let previous = self.window_state.ok_or("ASTRA_EMU_WINDOW_NOT_DRAWABLE")?;
             state.width = previous.width;
             state.height = previous.height;
-            state.visible = false;
+            state.suspended = true;
         }
         state.validate().map_err(|error| error.to_string())?;
         if let Some(previous) = self.window_state {
+            if previous.scale_factor != state.scale_factor {
+                self.handle_physical_event(FamilyEvent::WindowScale {
+                    factor: state.scale_factor,
+                })?;
+            }
             if previous.focused != state.focused {
                 self.handle_physical_event(FamilyEvent::WindowFocused {
                     focused: state.focused,
@@ -20,6 +25,11 @@ impl AstraEmuManagerController {
             if previous.visible != state.visible {
                 self.handle_physical_event(FamilyEvent::WindowVisibility {
                     visible: state.visible,
+                })?;
+            }
+            if previous.suspended != state.suspended {
+                self.handle_physical_event(FamilyEvent::WindowSuspended {
+                    suspended: state.suspended,
                 })?;
             }
             if (previous.width, previous.height) != (state.width, state.height) {
@@ -34,23 +44,29 @@ impl AstraEmuManagerController {
     }
 
     pub(super) fn handle_physical_event(&mut self, event: FamilyEvent) -> Result<(), String> {
-        if self.active.as_ref().is_none_or(|active| active.closing.is_some()) {
+        if self
+            .active
+            .as_ref()
+            .is_none_or(|active| active.closing.is_some())
+        {
             return Ok(());
         }
         if matches!(
             event,
             FamilyEvent::WindowFocused { focused: false }
                 | FamilyEvent::WindowVisibility { visible: false }
+                | FamilyEvent::WindowSuspended { suspended: true }
         ) {
             self.release_inputs()?;
         }
-        if self.pending_events.len() >= astra_emu_family_api::MAX_EVENTS_PER_ADVANCE {
+        if self.pending_events.len() >= astra_emu_manager_core::model::MAX_INPUT_EVENTS {
             return Err("ASTRA_EMU_INPUT_QUEUE_FULL".into());
         }
         if let FamilyEvent::Key {
             code,
             state,
             modifiers,
+            ..
         } = &event
         {
             self.key_modifiers = *modifiers;
@@ -98,13 +114,17 @@ impl AstraEmuManagerController {
         pressed: bool,
         value: f32,
     ) -> Result<(), String> {
-        if self.active.as_ref().is_none_or(|active| active.closing.is_some()) {
+        if self
+            .active
+            .as_ref()
+            .is_none_or(|active| active.closing.is_some())
+        {
             return Err("ASTRA_EMU_FAMILY_SESSION_NOT_ACTIVE".into());
         }
-        if self.pending_events.len() >= astra_emu_family_api::MAX_EVENTS_PER_ADVANCE {
+        if self.pending_events.len() >= astra_emu_manager_core::model::MAX_INPUT_EVENTS {
             return Err("ASTRA_EMU_INPUT_QUEUE_FULL".into());
         }
-        let event = match control {
+        let mut event = match control {
             "pointer.x" => {
                 if !value.is_finite() {
                     return Err("ASTRA_EMU_INPUT_POINTER_INVALID".into());
@@ -113,6 +133,7 @@ impl AstraEmuManagerController {
                 FamilyEvent::PointerMove {
                     x: self.pointer_position.0,
                     y: self.pointer_position.1,
+                    displayed: None,
                 }
             }
             "pointer.y" => {
@@ -123,6 +144,7 @@ impl AstraEmuManagerController {
                 FamilyEvent::PointerMove {
                     x: self.pointer_position.0,
                     y: self.pointer_position.1,
+                    displayed: None,
                 }
             }
             "pointer.primary" | "pointer.secondary" | "pointer.middle" => {
@@ -138,6 +160,7 @@ impl AstraEmuManagerController {
                     } else {
                         KeyState::Released
                     },
+                    displayed: None,
                 }
             }
             "wheel" => {
@@ -156,6 +179,7 @@ impl AstraEmuManagerController {
                     self.set_physical_control(control, true);
                 }
                 let event = FamilyEvent::Key {
+                    logical: None,
                     code,
                     state: if pressed {
                         KeyState::Pressed
@@ -170,20 +194,52 @@ impl AstraEmuManagerController {
                 event
             }
         };
+        if matches!(
+            &event,
+            FamilyEvent::PointerMove { .. } | FamilyEvent::PointerButton { .. }
+        ) {
+            let Some((identity, info)) = self.mailbox.displayed()? else {
+                return Ok(());
+            };
+            match &mut event {
+                FamilyEvent::PointerMove { x, y, displayed } => {
+                    let viewport = stage_renderer::content_viewport_for_output(
+                        info.logical_width,
+                        info.logical_height,
+                        info.width,
+                        info.height,
+                        info.width,
+                        info.height,
+                    )?;
+                    *x = viewport.x as f32 + *x * viewport.width as f32 / info.logical_width as f32;
+                    *y = viewport.y as f32
+                        + *y * viewport.height as f32 / info.logical_height as f32;
+                    *displayed = Some(identity);
+                }
+                FamilyEvent::PointerButton { displayed, .. } => *displayed = Some(identity),
+                _ => {}
+            }
+        }
         self.pending_events.push(event);
         Ok(())
     }
 
     pub(super) fn release_inputs(&mut self) -> Result<(), String> {
         let held = self.held_controls.iter().cloned().collect::<Vec<_>>();
-        let required = held.len() + self.physical_keys.len();
+        let required = held.len()
+            + self.physical_keys.len()
+            + held
+                .iter()
+                .filter(|control| pointer_button(control).is_some())
+                .count();
         if self.pending_events.len().saturating_add(required)
-            > astra_emu_family_api::MAX_EVENTS_PER_ADVANCE
+            > astra_emu_manager_core::model::MAX_INPUT_EVENTS
         {
             return Err("ASTRA_EMU_INPUT_QUEUE_FULL".into());
         }
         for code in std::mem::take(&mut self.physical_keys) {
             self.pending_events.push(FamilyEvent::Key {
+                logical: None,
                 code,
                 state: KeyState::Released,
                 modifiers: self.key_modifiers,
@@ -191,14 +247,24 @@ impl AstraEmuManagerController {
         }
         for control in held {
             let event = if let Some(button) = pointer_button(&control) {
+                if let Some((identity, info)) = self.mailbox.displayed()? {
+                    self.pending_events.push(FamilyEvent::PointerMove {
+                        x: self.pointer_position.0 * info.width as f32 / info.logical_width as f32,
+                        y: self.pointer_position.1 * info.height as f32
+                            / info.logical_height as f32,
+                        displayed: Some(identity),
+                    });
+                }
                 FamilyEvent::PointerButton {
                     button,
                     state: KeyState::Released,
+                    displayed: self.mailbox.displayed_identity()?,
                 }
             } else {
                 let code = key_code(&control)
                     .ok_or_else(|| "ASTRA_EMU_INPUT_CONTROL_INVALID".to_owned())?;
                 FamilyEvent::Key {
+                    logical: None,
                     code,
                     state: KeyState::Released,
                     modifiers: self.key_modifiers,
@@ -312,16 +378,22 @@ impl AstraEmuManagerController {
             return Err("ASTRA_EMU_INPUT_CLOSE_GAME_BEFORE_CONFIGURATION".into());
         }
         let game = self.selected_game()?;
+        let mut settings = self
+            .library
+            .game_settings(&game.game_id)
+            .map_err(|error| error.to_string())?
+            .unwrap_or_default();
+        settings.input_mapping = None;
         self.library
-            .clear_game_settings(&game.game_id)
+            .set_game_settings(&game.game_id, &settings)
             .map_err(|error| error.to_string())?;
         self.load_game_input_mapping(&game.game_id)?;
         self.model()
     }
 }
 
-fn pointer_button(control: &str) -> Option<astra_emu_family_api::PointerButton> {
-    use astra_emu_family_api::PointerButton;
+fn pointer_button(control: &str) -> Option<astra_emu_manager_core::model::PointerButton> {
+    use astra_emu_manager_core::model::PointerButton;
     match control {
         "pointer.primary" => Some(PointerButton::Primary),
         "pointer.secondary" => Some(PointerButton::Secondary),

@@ -82,19 +82,20 @@ pub(super) fn png(w: u32, h: u32, color: [u8; 4]) -> Vec<u8> {
 }
 pub(super) fn title_request(root: &std::path::Path) -> OpenRequest {
     let mut req = request(root, Sink::default());
-    req.configuration.push(ConfigEntry {
-        id: "launch_mode".into(),
-        value: ConfigValue::Enum("title".into()),
-    });
+    req.configuration
+        .iter_mut()
+        .find(|entry| entry.id == "launch_mode")
+        .unwrap()
+        .value = ConfigValue::Enum("title".into());
     req
 }
 
 fn omit_texture_overrides(root: &std::path::Path) {
-    let profile_path = root.join(MUSICA_PROFILE_FILE);
-    let mut profile: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&profile_path).unwrap()).unwrap();
-    profile.as_object_mut().unwrap().remove("texture_overrides");
-    std::fs::write(&profile_path, serde_json::to_vec(&profile).unwrap()).unwrap();
+    let profile_path = root.join(MUSICA_KEY_FILE);
+    let mut key: toml::Table =
+        toml::from_str(&std::fs::read_to_string(&profile_path).unwrap()).unwrap();
+    key.remove("texture_overrides");
+    std::fs::write(&profile_path, toml::to_string_pretty(&key).unwrap()).unwrap();
 }
 
 fn single_pixel_ani() -> Vec<u8> {
@@ -280,9 +281,11 @@ fn native_gpu_title_config_returns_and_missing_art_fails_explicitly() {
     Box::new(session).close().unwrap();
     let missing = tempfile::tempdir().unwrap();
     fixture::game(missing.path(), b".end\r\n");
-    assert!(provider
-        .open_session(title_request(missing.path()))
-        .is_err());
+    assert!(
+        provider
+            .open_session(title_request(missing.path()))
+            .is_err()
+    );
     let opened = provider
         .open(request(missing.path(), Sink::default()))
         .unwrap();

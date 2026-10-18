@@ -3,12 +3,16 @@
 mod audio;
 #[cfg(feature = "audio")]
 pub use audio::decode_audio;
+#[cfg(feature = "device-audio")]
+mod device_audio;
+#[cfg(feature = "device-audio")]
+pub use device_audio::NativeAudioConverter;
 #[cfg(feature = "archive")]
 mod archive;
 #[cfg(feature = "archive")]
 mod profile;
 #[cfg(feature = "archive")]
-pub use profile::{read_game_profile, resolve_game_file};
+pub use profile::{read_configured_profile_bytes, read_game_profile, resolve_game_file};
 #[cfg(feature = "cache")]
 mod cache;
 mod error;

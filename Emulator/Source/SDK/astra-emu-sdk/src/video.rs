@@ -45,13 +45,38 @@ impl VideoDecoderWorker {
         limits: FfmpegStreamLimits,
         audio: Option<FfmpegAudioOutputFormat>,
     ) -> Result<Self, CoreError> {
+        Self::start(move |_| {
+            FfmpegPlaybackDecoder::open_with_audio_output(&codec, &bytes, limits, audio)
+                .map_err(decode_error)
+        })
+    }
+
+    /// Prepare an owned encoded file on the decoder thread. The source must
+    /// observe cancellation during long reads; no native decoder crosses threads.
+    pub fn open_file(
+        source: impl FnOnce(&AtomicBool) -> Result<tempfile::NamedTempFile, CoreError> + Send + 'static,
+        limits: FfmpegStreamLimits,
+        audio: Option<FfmpegAudioOutputFormat>,
+    ) -> Result<Self, CoreError> {
+        Self::start(move |stop| {
+            let file = source(stop)?;
+            if stop.load(Ordering::Acquire) {
+                return Err(closed());
+            }
+            FfmpegPlaybackDecoder::open_owned_file(file, limits, audio).map_err(decode_error)
+        })
+    }
+
+    fn start(
+        create: impl FnOnce(&AtomicBool) -> Result<FfmpegPlaybackDecoder, CoreError> + Send + 'static,
+    ) -> Result<Self, CoreError> {
         let (commands, requests) = mpsc::sync_channel(1);
         let (replies, results) = mpsc::sync_channel(1);
         let stop = Arc::new(AtomicBool::new(false));
         let cancelled = stop.clone();
         let worker = std::thread::Builder::new()
             .name("astra-emu-video".into())
-            .spawn(move || run(codec, bytes, limits, audio, requests, replies, cancelled))
+            .spawn(move || run(create, requests, replies, cancelled))
             .map_err(|cause| CoreError::invalid("ASTRA_EMU_VIDEO_THREAD", cause.to_string()))?;
         Ok(Self {
             commands: Some(commands),
@@ -137,13 +162,29 @@ fn closed() -> CoreError {
     CoreError::invalid("ASTRA_EMU_VIDEO_CLOSED", "decoder channel is closed")
 }
 fn decode_error(cause: astra_media::MediaError) -> CoreError {
-    CoreError::invalid("ASTRA_EMU_VIDEO_DECODE", cause.to_string())
+    match cause {
+        astra_media::MediaError::Diagnostics(diagnostics) => diagnostics
+            .into_iter()
+            .next()
+            .map(|diagnostic| {
+                CoreError::invalid(
+                    "ASTRA_EMU_VIDEO_DECODE",
+                    format!("{}: {}", diagnostic.code, diagnostic.message),
+                )
+            })
+            .unwrap_or_else(|| {
+                CoreError::invalid(
+                    "ASTRA_EMU_VIDEO_DECODE",
+                    "decoder returned an empty diagnostic set",
+                )
+            }),
+        astra_media::MediaError::Message(message) => {
+            CoreError::invalid("ASTRA_EMU_VIDEO_DECODE", message)
+        }
+    }
 }
 fn run(
-    codec: String,
-    bytes: Arc<[u8]>,
-    limits: FfmpegStreamLimits,
-    audio: Option<FfmpegAudioOutputFormat>,
+    create: impl FnOnce(&AtomicBool) -> Result<FfmpegPlaybackDecoder, CoreError>,
     requests: mpsc::Receiver<Command>,
     replies: mpsc::SyncSender<Result<DecodeCompletion, CoreError>>,
     stop: Arc<AtomicBool>,
@@ -151,14 +192,13 @@ fn run(
     if stop.load(Ordering::Acquire) {
         return Ok(());
     }
-    let mut decoder =
-        match FfmpegPlaybackDecoder::open_with_audio_output(&codec, &bytes, limits, audio) {
-            Ok(decoder) => decoder,
-            Err(cause) => {
-                let _ = replies.send(Err(decode_error(cause)));
-                return Ok(());
-            }
-        };
+    let mut decoder = match create(&stop) {
+        Ok(decoder) => decoder,
+        Err(cause) => {
+            let _ = replies.send(Err(cause));
+            return Ok(());
+        }
+    };
     let mut carried = None;
     if !stop.load(Ordering::Acquire)
         && replies

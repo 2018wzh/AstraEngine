@@ -10,9 +10,6 @@ impl MusicaSession {
             )
         })?;
         self.cancel_text()?;
-        if let Some(service) = &self.replacement {
-            service.reset(TextResetReason::NewGame).into_result()?;
-        }
         self.audio.restore(Vec::new())?;
         self.vm
             .start_menu_script(uri, loaded.hash, loaded.script)

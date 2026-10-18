@@ -11,7 +11,7 @@ pub(crate) use playback::Movie;
 pub(crate) struct Movie;
 #[cfg(not(feature = "ffmpeg-vcpkg"))]
 impl Movie {
-    pub fn open(_: &MusicaMountedVfs, _: &MusicaMovieState) -> FamilyResult<Self> {
+    pub fn open(_: &std::sync::Arc<MusicaMountedVfs>, _: &MusicaMovieState) -> FamilyResult<Self> {
         Err(error(
             "ASTRA_EMU_MUSICA_MOVIE_UNAVAILABLE",
             "movie playback requires ffmpeg-vcpkg",

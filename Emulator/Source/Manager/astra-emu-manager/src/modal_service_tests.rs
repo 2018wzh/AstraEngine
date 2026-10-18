@@ -1,13 +1,12 @@
 use super::*;
-use abi_stable::std_types::ROption::{RNone, RSome};
 use std::{sync::mpsc, thread, time::Duration};
 
 fn request(input: bool) -> ModalRequest {
     ModalRequest {
         caption: "選択".into(),
         message: "原生服务".into(),
-        buttons: vec!["継続".into(), "戻る".into()].into(),
-        initial_text: if input { RSome("初期".into()) } else { RNone },
+        buttons: vec!["継続".into(), "戻る".into()],
+        initial_text: if input { Some("初期".into()) } else { None },
     }
 }
 
@@ -35,15 +34,15 @@ fn presented(bridge: &ModalBridge, receiver: &mpsc::Receiver<()>) -> ModalId {
 fn invalid_answer_cannot_complete_pending_input_and_duplicate_requests_are_rejected() {
     let (bridge, wake) = bridge(7);
     let worker = bridge.clone();
-    let pending = thread::spawn(move || worker.request(request(true)).into_result());
+    let pending = thread::spawn(move || worker.request(request(true)));
     let id = presented(&bridge, &wake);
-    assert!(bridge.request(request(false)).into_result().is_err());
+    assert!(bridge.request(request(false)).is_err());
     assert!(bridge
         .respond(
             id,
             ModalResponse::Submitted {
                 button_index: 2,
-                text: RSome("戻る".into())
+                text: Some("戻る".into())
             }
         )
         .is_err());
@@ -52,14 +51,14 @@ fn invalid_answer_cannot_complete_pending_input_and_duplicate_requests_are_rejec
             id,
             ModalResponse::Submitted {
                 button_index: 1,
-                text: RNone
+                text: None
             }
         )
         .is_err());
     assert!(bridge.take_ui_update().is_none());
     let answer = ModalResponse::Submitted {
         button_index: 1,
-        text: RSome("修改后的文本".into()),
+        text: Some("修改后的文本".into()),
     };
     bridge.respond(id, answer.clone()).unwrap();
     assert_eq!(pending.join().unwrap().unwrap(), answer);
@@ -70,8 +69,8 @@ fn invalid_answer_cannot_complete_pending_input_and_duplicate_requests_are_rejec
 #[test]
 fn cancellation_wakes_blocked_abi_request_and_old_answers_cannot_enter_new_epoch() {
     let (old, wake) = bridge(11);
-    let sink = old.sink();
-    let pending = thread::spawn(move || sink.request(request(false)).into_result());
+    let sink = old.clone();
+    let pending = thread::spawn(move || sink.request(request(false)));
     let old_id = presented(&old, &wake);
     old.cancel_pending();
     assert_eq!(pending.join().unwrap().unwrap(), ModalResponse::Cancelled);
@@ -80,17 +79,17 @@ fn cancellation_wakes_blocked_abi_request_and_old_answers_cannot_enter_new_epoch
             old_id,
             ModalResponse::Submitted {
                 button_index: 0,
-                text: RNone
+                text: None
             }
         )
         .is_err());
     assert_eq!(
-        old.request(request(true)).into_result().unwrap(),
+        old.request(request(true)).unwrap(),
         ModalResponse::Cancelled
     );
     let (new, wake) = bridge(12);
     let worker = new.clone();
-    let pending = thread::spawn(move || worker.request(request(false)).into_result());
+    let pending = thread::spawn(move || worker.request(request(false)));
     let new_id = presented(&new, &wake);
     assert!(new.respond(old_id, ModalResponse::Cancelled).is_err());
     new.respond(new_id, ModalResponse::Cancelled).unwrap();
@@ -101,13 +100,13 @@ fn cancellation_wakes_blocked_abi_request_and_old_answers_cannot_enter_new_epoch
 fn consecutive_requests_preserve_dismissal_then_new_presentation() {
     let (bridge, wake) = bridge(19);
     let worker = bridge.clone();
-    let first = thread::spawn(move || worker.request(request(false)).into_result());
+    let first = thread::spawn(move || worker.request(request(false)));
     let first_id = presented(&bridge, &wake);
     bridge.respond(first_id, ModalResponse::Cancelled).unwrap();
     first.join().unwrap().unwrap();
     wake.recv_timeout(Duration::from_secs(5)).unwrap();
     let worker = bridge.clone();
-    let second = thread::spawn(move || worker.request(request(true)).into_result());
+    let second = thread::spawn(move || worker.request(request(true)));
     wake.recv_timeout(Duration::from_secs(5)).unwrap();
     assert!(matches!(bridge.take_ui_update(), Some(ModalUiUpdate::Dismiss(id)) if id == first_id));
     let second_id = match bridge.take_ui_update().unwrap() {

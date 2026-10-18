@@ -1,6 +1,10 @@
 use super::*;
 
 impl ManagerController for AstraEmuManagerController {
+    fn refresh_cores(&mut self) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::refresh_cores(self)
+    }
+
     fn take_modal_update(&mut self) -> Option<astra_emu_manager::modal_service::ModalUiUpdate> {
         self.registry.take_modal_update()
     }
@@ -8,9 +12,66 @@ impl ManagerController for AstraEmuManagerController {
     fn respond_modal(
         &mut self,
         id: astra_emu_manager::modal_service::ModalId,
-        response: astra_emu_family_api::ModalResponse,
+        response: astra_emu_manager_core::model::ModalResponse,
     ) -> Result<(), String> {
         self.registry.respond_modal(id, response)
+    }
+    fn take_window_request(
+        &mut self,
+    ) -> Option<astra_emu_manager::window_service::WindowPresentation> {
+        self.registry.take_window_request()
+    }
+    fn respond_window(
+        &mut self,
+        request: &astra_emu_manager::window_service::WindowPresentation,
+        result: Result<astra_emu_manager::window_service::WindowOutcome, String>,
+    ) -> Result<(), String> {
+        if let Ok(outcome) = &result {
+            if let Some(active) = self
+                .active
+                .as_mut()
+                .filter(|active| active.epoch == request.session_epoch)
+            {
+                if let astra_emu_manager::window_service::WindowCommand::Title(title) =
+                    &request.command
+                {
+                    active.title = Some(title.clone());
+                }
+                if outcome.valid_fields & astra_emu_abi::WINDOW_RESULT_MODE != 0 {
+                    active.fullscreen = outcome.fullscreen != astra_emu_abi::FULLSCREEN_WINDOWED;
+                }
+            }
+        }
+        self.registry.respond_window(request, result)
+    }
+    fn native_failure(&self) -> Option<(&str, bool)> {
+        self.active
+            .as_ref()
+            .filter(|active| active.closing.is_none())
+            .and_then(|active| {
+                active
+                    .failure
+                    .as_ref()
+                    .map(|failure| (failure.message.as_str(), failure.can_retry))
+            })
+    }
+    fn retry_native(&mut self) -> Result<(), String> {
+        let active = self.active.as_mut().ok_or("ASTRA_EMU_CORE_CLOSED")?;
+        if active
+            .failure
+            .as_ref()
+            .is_none_or(|failure| !failure.can_retry)
+        {
+            return Err("ASTRA_EMU_CORE_RETRY_UNAVAILABLE".into());
+        }
+        self.registry.events(
+            active.epoch,
+            vec![FamilyEvent::Control {
+                command: astra_emu_abi::CONTROL_RETRY,
+            }],
+        )?;
+        active.failure = None;
+        Ok(())
     }
 
     fn set_system_theme(&mut self, dark: bool) {
@@ -32,7 +93,9 @@ impl ManagerController for AstraEmuManagerController {
         self.handle_physical_event(event)
     }
     fn is_game_active(&self) -> bool {
-        self.active.as_ref().is_some_and(|active| active.closing.is_none())
+        self.active
+            .as_ref()
+            .is_some_and(|active| active.closing.is_none())
     }
     fn model(&self) -> Result<ManagerViewModel, String> {
         AstraEmuManagerController::model(self)
@@ -167,17 +230,19 @@ impl ManagerController for AstraEmuManagerController {
     }
 
     fn game_fullscreen(&self) -> bool {
-        self.active.as_ref().is_some_and(|active| active.closing.is_none() && active.fullscreen)
+        self.active
+            .as_ref()
+            .is_some_and(|active| active.closing.is_none() && active.fullscreen)
     }
 
-    fn take_game_icon(&mut self) -> Option<astra_emu_family_api::FamilyWindowIcon> {
+    fn take_game_icon(&mut self) -> Option<astra_emu_manager_core::model::FamilyWindowIcon> {
         self.active
             .as_mut()
             .filter(|active| active.closing.is_none())
             .and_then(|active| active.pending_icon.take())
     }
 
-    fn take_game_pointer(&mut self) -> Option<astra_emu_family_api::FamilyPointerRequest> {
+    fn take_game_pointer(&mut self) -> Option<astra_emu_manager_core::model::FamilyPointerRequest> {
         self.active
             .as_mut()
             .filter(|active| active.closing.is_none())
@@ -214,9 +279,6 @@ impl ManagerController for AstraEmuManagerController {
     fn set_view_mode(&mut self, view_mode: &str) -> Result<(), String> {
         AstraEmuManagerController::set_view_mode(self, view_mode)
     }
-    fn set_audio_device(&mut self, device: &str) -> Result<(), String> {
-        AstraEmuManagerController::set_audio_device(self, device)
-    }
 
     fn family_config_changed(&mut self, key: &str, value: &str) -> Result<(), String> {
         AstraEmuManagerController::family_config_changed(self, key, value)
@@ -228,6 +290,10 @@ impl ManagerController for AstraEmuManagerController {
 
     fn reset_family_config(&mut self) -> Result<ManagerViewModel, String> {
         AstraEmuManagerController::reset_family_config(self)
+    }
+
+    fn select_musica_key_file(&mut self) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::select_musica_key_file(self)
     }
 
     fn filter_config_changed(&mut self, key: &str, value: &str) -> Result<(), String> {

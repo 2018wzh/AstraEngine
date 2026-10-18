@@ -1,172 +1,71 @@
-//! Descriptor, probe, and open for the Artemis family.
-
-use std::path::{Path, PathBuf};
-
-use abi_stable::std_types::ROption;
-use art3m1s_core::archive as pfs_upk;
-use astra_emu_family_api::{
-    resolve_config, ConfigField, ConfigKind, ConfigValue, FamilyCapability, FamilyDescriptor,
-    FamilyOpen, FamilyProvider, FamilyResult, OpenRequest, OpenResponse, ProbeReport, ProbeRequest,
+//! Native descriptor/configuration and original PFS probing.
+use crate::{
+    error::{self, NativeResult},
+    session,
 };
+use art3m1s_core::archive as pfs_upk;
+use astra_emu_abi::*;
 use encoding_rs::{Encoding, GB18030, SHIFT_JIS, UTF_8};
-
-use crate::{error, session};
-
-pub fn artemis_descriptor() -> FamilyDescriptor {
-    FamilyDescriptor {
-        family_id: "artemis".into(),
-        plugin_id: "astra.emu.artemis".into(),
-        abi_fingerprint: astra_emu_family_api::FAMILY_ABI_FINGERPRINT.into(),
-        version: env!("CARGO_PKG_VERSION").into(),
-        capabilities: vec![
-            FamilyCapability::CpuFrame,
-            FamilyCapability::PcmAudio,
-            FamilyCapability::NativeSave,
-        ]
-        .into(),
-        supported_formats: vec!["artemis.pfs".into()].into(),
-        configuration: vec![ConfigField {
-            id: "archive".into(),
-            label: "Base PFS archive (empty selects the only archive)".into(),
-            group: "Files".into(),
-            kind: ConfigKind::String { max_bytes: 255 },
-            default: ConfigValue::String("".into()),
-        }]
-        .into(),
-    }
+use std::path::{Path, PathBuf};
+pub(crate) fn fields() -> [ConfigField; 1] {
+    [ConfigField {
+        id: Bytes::new(b"archive"),
+        label: Bytes::new(b"Base PFS archive (empty selects the only archive)"),
+        group: Bytes::new(b"Files"),
+        default_value: ConfigValue {
+            kind: VALUE_STRING,
+            reserved: 0,
+            integer: 0,
+            number: 0.0,
+            text: Bytes::EMPTY,
+        },
+        integer_min: 0,
+        integer_max: 0,
+        number_min: 0.0,
+        number_max: 0.0,
+        max_bytes: 255,
+        reserved: 0,
+        choices: std::ptr::null(),
+        choice_count: 0,
+    }]
 }
-
+pub(crate) fn probe(root: &Path) -> NativeResult<Option<String>> {
+    if !root.is_dir() {
+        return Ok(None);
+    }
+    let entries = std::fs::read_dir(root)
+        .map_err(|e| error::invalid("ASTRA_EMU_ARTEMIS_PROBE_PATH", e.to_string()))?;
+    for entry in entries {
+        let path = entry
+            .map_err(|e| error::invalid("ASTRA_EMU_ARTEMIS_PROBE_PATH", e.to_string()))?
+            .path();
+        if path.is_file()
+            && path
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("pfs"))
+            && ENTRY_ENCODINGS.iter().any(|encoding| {
+                pfs_upk::PfsArchive::open_with_encoding(&path, encoding)
+                    .ok()
+                    .is_some_and(|archive| archive.find(session::PROJECT_INI).is_some())
+            })
+        {
+            return root
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| Some(n.to_owned()))
+                .ok_or_else(|| {
+                    error::invalid("ASTRA_EMU_ARTEMIS_GAME_ID", "game ID is not valid UTF-8")
+                });
+        }
+    }
+    Ok(None)
+}
 /// Entry-name encodings tried in order when opening a PFS archive. Artemis
 /// titles store entry names either as UTF-8 (all recent games) or in a
 /// legacy Windows code page.
 pub(crate) const ENTRY_ENCODINGS: [&Encoding; 3] = [UTF_8, SHIFT_JIS, GB18030];
 
-#[derive(Default)]
-pub struct ArtemisProvider {
-    next_session_id: u64,
-}
-
-impl FamilyProvider for ArtemisProvider {
-    fn descriptor(&self) -> FamilyResult<FamilyDescriptor> {
-        let descriptor = artemis_descriptor();
-        descriptor.validate()?;
-        Ok(descriptor)
-    }
-
-    fn probe(&self, request: ProbeRequest) -> FamilyResult<Option<ProbeReport>> {
-        request.validate().map_err(|_| {
-            error::invalid(
-                "ASTRA_EMU_ARTEMIS_PROBE_PATH",
-                "the game directory is not readable",
-            )
-        })?;
-        let root = Path::new(request.game_path.as_str());
-        if !root.is_dir() {
-            return Ok(None);
-        }
-        // The complete Artemis layout signature is a readable PFS base
-        // archive whose index contains the boot configuration entry. Use the
-        // engine's own reader so a probe hit means the engine can actually
-        // boot the directory.
-        let has_project_ini = std::fs::read_dir(root)
-            .ok()
-            .into_iter()
-            .flatten()
-            .filter_map(Result::ok)
-            .any(|entry| {
-                let path = entry.path();
-                path.is_file()
-                    && path
-                        .extension()
-                        .is_some_and(|e| e.eq_ignore_ascii_case("pfs"))
-                    && ENTRY_ENCODINGS.iter().any(|encoding| {
-                        pfs_upk::PfsArchive::open_with_encoding(&path, encoding)
-                            .ok()
-                            .is_some_and(|archive| archive.find(session::PROJECT_INI).is_some())
-                    })
-            });
-        if !has_project_ini {
-            return Ok(None);
-        }
-        let game_id = root
-            .file_name()
-            .and_then(|name| name.to_str())
-            .ok_or_else(|| {
-                error::invalid(
-                    "ASTRA_EMU_ARTEMIS_GAME_ID",
-                    "the Artemis game ID is not valid UTF-8",
-                )
-            })?;
-        let report = ProbeReport {
-            family_id: "artemis".into(),
-            game_id: game_id.into(),
-            format: "artemis.pfs".into(),
-            // PFS base archive + system.ini is the complete Artemis layout.
-            confidence_permyriad: 10_000,
-        };
-        report.validate().map_err(|_| {
-            error::invalid(
-                "ASTRA_EMU_ARTEMIS_PROBE_REPORT",
-                "the Artemis probe produced an invalid report",
-            )
-        })?;
-        Ok(Some(report))
-    }
-
-    fn open(&mut self, request: OpenRequest) -> FamilyResult<FamilyOpen> {
-        let _span = tracing::info_span!(
-            "artemis_session_open",
-            event = "astra.emu.artemis.session.opening"
-        )
-        .entered();
-        let descriptor = self.descriptor()?;
-        request.validate_for_descriptor(&descriptor)?;
-        let config = resolve_config(&descriptor.configuration, &request.configuration)?;
-        let ConfigValue::String(archive) = &config[0].value else {
-            unreachable!()
-        };
-        let archive = find_base_archive(Path::new(request.game_path.as_str()), archive.as_str())?;
-        let lease = SessionLease::acquire()?;
-        let sink = match request.host.audio_sink {
-            ROption::RSome(sink) => sink,
-            ROption::RNone => {
-                return Err(error::invalid(
-                    "ASTRA_EMU_ARTEMIS_AUDIO_SINK",
-                    "the Artemis family requires the host audio sink",
-                ))
-            }
-        };
-        let game_path = Path::new(request.game_path.as_str()).to_owned();
-        let id = self.next_session_id;
-        self.next_session_id = id.checked_add(1).ok_or_else(|| {
-            error::invalid("ASTRA_EMU_ARTEMIS_SESSION_ID", "session ID exhausted")
-        })?;
-        let open = session::boot(
-            &game_path,
-            &archive,
-            request.initial_window,
-            sink,
-            lease,
-            request.session_epoch,
-        )?;
-        let frame_info = open.frame_info;
-        tracing::info!(
-            event = "astra.emu.artemis.session.open",
-            width = frame_info.width,
-            height = frame_info.height
-        );
-        Ok(FamilyOpen {
-            response: OpenResponse {
-                session_id: format!("artemis-{id}").into(),
-                frame: frame_info,
-                audio_format: ROption::RSome(crate::audio::OUTPUT_FORMAT),
-            },
-            session: Box::new(open.session),
-        })
-    }
-}
-
-pub(crate) fn find_base_archive(root: &Path, selected: &str) -> FamilyResult<PathBuf> {
+pub(crate) fn find_base_archive(root: &Path, selected: &str) -> NativeResult<PathBuf> {
     if !selected.is_empty() {
         if selected.contains(['/', '\\', ':']) || !selected.to_ascii_lowercase().ends_with(".pfs") {
             return Err(error::invalid(
@@ -202,7 +101,7 @@ pub(crate) fn find_base_archive(root: &Path, selected: &str) -> FamilyResult<Pat
 static ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 pub(crate) struct SessionLease;
 impl SessionLease {
-    pub(crate) fn acquire() -> FamilyResult<Self> {
+    pub(crate) fn acquire() -> NativeResult<Self> {
         ACTIVE
             .compare_exchange(
                 false,
@@ -243,19 +142,19 @@ mod tests {
     }
     #[test]
     fn typed_archive_configuration_rejects_unknown_and_wrong_type() {
-        let d = artemis_descriptor();
-        d.validate().unwrap();
-        for entry in [
-            astra_emu_family_api::ConfigEntry {
-                id: "unknown".into(),
-                value: ConfigValue::String("".into()),
+        let fields = fields();
+        let entry = ConfigEntry {
+            id: Bytes::new(b"unknown"),
+            value: fields[0].default_value,
+        };
+        assert!(unsafe { validate_config(&fields, &[entry]) }.is_err());
+        let entry = ConfigEntry {
+            id: fields[0].id,
+            value: ConfigValue {
+                kind: VALUE_BOOL,
+                ..fields[0].default_value
             },
-            astra_emu_family_api::ConfigEntry {
-                id: "archive".into(),
-                value: ConfigValue::Bool(true),
-            },
-        ] {
-            assert!(resolve_config(&d.configuration, &[entry]).is_err());
-        }
+        };
+        assert!(unsafe { validate_config(&fields, &[entry]) }.is_err());
     }
 }

@@ -20,6 +20,7 @@ export component M3Button inherits Rectangle {
     border-radius: custom-radius >= 0px ? custom-radius : self.height / 2;
     accessible-role: button;
     accessible-label: text;
+    accessible-action-default => { if root.enabled { root.clicked(); } }
 
     // Background calculation
     background: !enabled
@@ -35,8 +36,8 @@ export component M3Button inherits Rectangle {
                         : (btn-area.pressed ? Theme.surface-container-high : btn-area.has-hover ? Theme.surface-container-low : transparent);
 
     // Border
-    border-width: (!enabled || variant != "outlined") ? 0px : 1px;
-    border-color: danger ? Theme.error : Theme.outline-variant;
+    border-width: root.enabled && (button-focus.has-focus || variant == "outlined") ? 1px : 0px;
+    border-color: button-focus.has-focus ? Theme.primary : danger ? Theme.error : Theme.outline-variant;
 
     animate background { duration: 120ms; easing: ease-out; }
 
@@ -51,9 +52,8 @@ export component M3Button inherits Rectangle {
             font-size: 14px;
             color: !root.enabled
                 ? Theme.on-surface-variant.transparentize(0.5)
-                : root.danger || root.primary || root.variant == "filled"
-                    ? #ffffff
-                    : Theme.on-surface;
+                : root.danger ? Theme.on-error
+                : root.primary || root.variant == "filled" ? Theme.on-primary : Theme.on-surface;
             vertical-alignment: center;
         }
 
@@ -63,18 +63,27 @@ export component M3Button inherits Rectangle {
             font-weight: (root.primary || root.variant == "filled") ? 700 : 600;
             color: !root.enabled
                 ? Theme.on-surface-variant.transparentize(0.5)
-                : root.danger || root.primary || root.variant == "filled"
-                    ? #ffffff
-                    : Theme.on-surface;
+                : root.danger ? Theme.on-error
+                : root.primary || root.variant == "filled" ? Theme.on-primary : Theme.on-surface;
             vertical-alignment: center;
             horizontal-alignment: center;
         }
     }
 
-    btn-area := TouchArea {
+    button-focus := FocusScope {
         enabled: root.enabled;
-        mouse-cursor: root.enabled ? pointer : default;
-        clicked => { root.clicked(); }
+        key-pressed(event) => {
+            if event.text == Key.Return || event.text == " " {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+        btn-area := TouchArea {
+            enabled: root.enabled;
+            mouse-cursor: root.enabled ? pointer : default;
+            clicked => { button-focus.focus(); root.clicked(); }
+        }
     }
 }
 
@@ -91,6 +100,7 @@ export component M3IconButton inherits Rectangle {
     height: size;
     border-radius: size / 2;
     accessible-role: button;
+    accessible-action-default => { if root.enabled { root.clicked(); } }
 
     background: !enabled
         ? transparent
@@ -102,8 +112,8 @@ export component M3IconButton inherits Rectangle {
                     ? (icon-btn-area.pressed ? Theme.surface-container-high : icon-btn-area.has-hover ? Theme.surface-container-low : transparent)
                     : (icon-btn-area.pressed ? Theme.surface-container-high : icon-btn-area.has-hover ? Theme.surface-container-low : transparent);
 
-    border-width: (variant == "outlined" && enabled) ? 1px : 0px;
-    border-color: Theme.outline-variant;
+    border-width: root.enabled && (icon-focus.has-focus || variant == "outlined") ? 1px : 0px;
+    border-color: icon-focus.has-focus ? Theme.primary : Theme.outline-variant;
 
     animate background { duration: 120ms; }
 
@@ -113,7 +123,7 @@ export component M3IconButton inherits Rectangle {
         color: !root.enabled
             ? Theme.outline
             : root.variant == "filled"
-                ? #ffffff
+                ? Theme.on-primary
                 : icon-btn-area.has-hover
                     ? Theme.on-surface
                     : root.icon-color;
@@ -121,10 +131,20 @@ export component M3IconButton inherits Rectangle {
         vertical-alignment: center;
     }
 
-    icon-btn-area := TouchArea {
+    icon-focus := FocusScope {
         enabled: root.enabled;
-        mouse-cursor: root.enabled ? pointer : default;
-        clicked => { root.clicked(); }
+        key-pressed(event) => {
+            if event.text == Key.Return || event.text == " " {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+        icon-btn-area := TouchArea {
+            enabled: root.enabled;
+            mouse-cursor: root.enabled ? pointer : default;
+            clicked => { icon-focus.focus(); root.clicked(); }
+        }
     }
 }
 

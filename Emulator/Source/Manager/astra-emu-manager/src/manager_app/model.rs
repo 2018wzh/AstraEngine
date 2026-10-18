@@ -4,14 +4,34 @@ impl AstraEmuManagerController {
     pub(super) fn model(&self) -> Result<ManagerViewModel, String> {
         let now_ms = unix_time_ms()?;
         let query = self.search_query.trim().to_ascii_lowercase();
-        let all_games = self
+        let astra_emu_manager_core::LibrarySnapshot {
+            games,
+            play_stats,
+            identities,
+            metadata: metadata_snapshots,
+        } = self
             .library
-            .list_games()
+            .library_snapshot()
             .map_err(|error| error.to_string())?;
+        let mut selected = None;
+        let mut metadata = None;
+        let startup_busy = self.startup_busy();
         let mut rows = Vec::new();
-        for mut game in all_games {
-            if let Some(metadata) = self.metadata_for_game(&game.game_id)? {
-                game.title = metadata.title;
+        for mut game in games {
+            let linked = identities
+                .get(&game.game_id)
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
+            let record = Self::metadata_from_snapshot(&game.game_id, linked, &metadata_snapshots)?;
+            let has_metadata = record.is_some();
+            if self.selected_case_id.as_deref() == Some(game.game_id.as_str()) {
+                if let Some(record) = record {
+                    game.title.clone_from(&record.title);
+                    metadata = Some(record);
+                }
+                selected = Some(game.clone());
+            } else if let Some(record) = record {
+                game.title = record.title;
             }
             if !query.is_empty()
                 && !game.display_title().to_ascii_lowercase().contains(&query)
@@ -19,12 +39,23 @@ impl AstraEmuManagerController {
             {
                 continue;
             }
-            let stats = self
-                .library
-                .play_stats(&game.game_id)
-                .map_err(|error| error.to_string())?;
-            let cover_uri = self.cover_uri(&game.game_id)?;
-            let compatibility_status = self.compatibility_status_for_game(&game)?;
+            let stats = play_stats
+                .get(&game.game_id)
+                .ok_or("ASTRA_EMU_LIBRARY_SNAPSHOT_STATS")?;
+            let cover_uri = if has_metadata {
+                self.data_dir
+                    .join("covers")
+                    .join(&game.game_id)
+                    .to_str()
+                    .ok_or("ASTRA_EMU_METADATA_COVER_PATH_UTF8")?
+                    .to_owned()
+            } else {
+                String::new()
+            };
+            let compatibility_status = self
+                .compatibility_for_identities(&game.game_id, linked)
+                .map(|entry| entry.status.as_str().to_owned())
+                .unwrap_or_default();
             if self.compatibility_filter != "all"
                 && (self.compatibility_filter == "unknown" && !compatibility_status.is_empty()
                     || self.compatibility_filter != "unknown"
@@ -67,58 +98,52 @@ impl AstraEmuManagerController {
                     .then_with(|| left.0.game_id.cmp(&right.0.game_id))
             }),
         }
+        if self.selected_case_id.is_some() && selected.is_none() {
+            return Err("ASTRA_EMU_GAME_NOT_FOUND".into());
+        }
         let cards = rows
-            .iter()
+            .into_iter()
             .map(
-                |(game, duration_ms, last_played_ms, cover_uri, compatibility_status)| {
-                    let selection_required = self.probe_choices.contains_key(&game.game_id);
-                    let launchable = self.launch_candidate_for_game(game).is_some();
+                |(mut game, duration_ms, last_played_ms, cover_uri, compatibility_status)| {
+                    let launchable = self.launch_candidate_for_game(&game).is_some();
+                    let selection_required =
+                        self.probe_choices.contains_key(&game.game_id) && !launchable;
+                    let title = game.user_title.take().unwrap_or(game.title);
+                    let family = game
+                        .family_id
+                        .as_deref()
+                        .map(Self::engine_label)
+                        .unwrap_or("未识别引擎")
+                        .to_owned();
                     GameCardViewModel {
-                        case_id: game.game_id.clone(),
-                        title: game.display_title().into(),
-                        family: if selection_required {
-                            "selection required".into()
-                        } else if launchable {
-                            game.family_id.clone().unwrap_or_else(|| "unknown".into())
-                        } else {
-                            "probe required".into()
-                        },
-                        cover_uri: cover_uri.clone(),
-                        diagnostic: if selection_required {
-                            "provider selection required".into()
-                        } else if launchable {
+                        case_id: game.game_id,
+                        title,
+                        family,
+                        cover_uri,
+                        diagnostic: if launchable {
                             String::new()
+                        } else if startup_busy {
+                            "正在加载核心或校验游戏".into()
+                        } else if selection_required {
+                            "provider selection required".into()
                         } else {
                             "family probe required".into()
                         },
-                        play_time: human_duration(*duration_ms),
+                        play_time: human_duration(duration_ms),
                         last_played: last_played_ms
                             .map(|value| human_relative(value, now_ms))
                             .unwrap_or_default(),
-                        compatibility_status: compatibility_status.clone(),
+                        compatibility_status,
                     }
                 },
             )
             .collect();
-
-        let selected = self
-            .selected_case_id
-            .as_deref()
-            .map(|id| {
-                let mut game = self.game(id)?;
-                if let Some(metadata) = self.metadata_for_game(id)? {
-                    game.title = metadata.title;
-                }
-                Ok::<_, String>(game)
-            })
-            .transpose()?;
         let selected_id = selected.as_ref().map(|game| game.game_id.clone());
         let (selected_play_time, selected_last_played, history) = match selected_id.as_deref() {
             Some(game_id) => {
-                let stats = self
-                    .library
-                    .play_stats(game_id)
-                    .map_err(|error| error.to_string())?;
+                let stats = play_stats
+                    .get(game_id)
+                    .ok_or("ASTRA_EMU_LIBRARY_SNAPSHOT_STATS")?;
                 let history = self
                     .library
                     .session_history(game_id)
@@ -144,21 +169,18 @@ impl AstraEmuManagerController {
             }
             None => (String::new(), String::new(), Vec::new()),
         };
-        let metadata = selected_id
-            .as_deref()
-            .map(|id| self.metadata_for_game(id))
-            .transpose()?
-            .flatten();
         let profile = self.profile()?;
         let selected_releases = selected_id
             .as_deref()
             .and_then(|id| self.releases.get(id).cloned())
             .unwrap_or_default();
-        let selected_compatibility = selected
-            .as_ref()
-            .map(|game| self.compatibility_for_game(game))
-            .transpose()?
-            .flatten();
+        let selected_compatibility = selected.as_ref().and_then(|game| {
+            let linked = identities
+                .get(&game.game_id)
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
+            self.compatibility_for_identities(&game.game_id, linked)
+        });
         let selected_compatibility_status = selected_compatibility
             .as_ref()
             .map(|entry| compatibility_status_label(entry.status.as_str()))
@@ -203,8 +225,13 @@ impl AstraEmuManagerController {
                 }
             })
             .unwrap_or_default();
+        let (common_engine_config_fields, family_config_fields) = self.family_fields()?;
         Ok(ManagerViewModel {
             games: cards,
+            startup_busy,
+            startup_status: self.startup_status(),
+            cores_ready: self.cores_ready(),
+            core_refresh_enabled: self.core_refresh_enabled(),
             metadata_busy: self.pending_metadata.values().any(|pending| {
                 pending.game_id.is_some() && pending.game_id == self.selected_case_id
             }),
@@ -265,7 +292,6 @@ impl AstraEmuManagerController {
                 )
                 .collect::<Vec<_>>()
                 .join("\n"),
-            audio_device: self.audio_device.as_str().into(),
             translation_endpoint_kind: profile_kind(profile.clone()),
             translation_endpoint: profile
                 .as_ref()
@@ -308,13 +334,15 @@ impl AstraEmuManagerController {
                 .as_ref()
                 .map(|game| game.display_title().into())
                 .unwrap_or_default(),
-            selected_family: selected
-                .as_ref()
-                .and_then(|game| {
-                    self.launch_candidate_for_game(game)
-                        .map(|candidate| candidate.report.family_id.clone())
-                })
+            selected_family: selected.as_ref()
+                .and_then(|game| game.family_id.as_deref())
+                .map(Self::engine_label).unwrap_or_default().into(),
+            selected_emulator: selected.as_ref()
+                .and_then(|game| self.launch_candidate_for_game(game))
+                .map(|candidate| Self::emulator_label(&candidate.descriptor))
                 .unwrap_or_default(),
+            selected_launchable: selected.as_ref()
+                .is_some_and(|game| self.launch_candidate_for_game(game).is_some()),
             selected_play_time,
             selected_last_played,
             play_history: history,
@@ -330,7 +358,9 @@ impl AstraEmuManagerController {
             current_page: String::new(),
             input_config: self.input_view(),
             appearance: self.appearance_view(),
-            family_config_fields: self.family_fields()?,
+            common_engine_config_fields,
+            family_config_fields,
+            musica_key_file_available: self.musica_key_file_available(),
             filter_config_fields: self.filter_fields()?,
             version: env!("CARGO_PKG_VERSION").into(),
             build_identity: option_env!("ASTRA_EMU_MANAGER_RUSTC_FINGERPRINT")

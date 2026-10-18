@@ -247,8 +247,8 @@ pub fn default_vn_preset() -> InputMapping {
     }
 }
 
-pub fn input_key_code(control: &str) -> Option<astra_emu_family_api::KeyCode> {
-    use astra_emu_family_api::KeyCode;
+pub fn input_key_code(control: &str) -> Option<crate::model::KeyCode> {
+    use crate::model::KeyCode;
     Some(match control {
         "a" => KeyCode::A,
         "b" => KeyCode::B,

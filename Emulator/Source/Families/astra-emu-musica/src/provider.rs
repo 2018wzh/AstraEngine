@@ -1,10 +1,10 @@
 use crate::{
+    MUSICA_KEY_FILE, MusicaVm, ScriptEncoding,
     audio::Audio,
     profile::mount_musica_with_texture_overrides,
-    scene::{core_error, error, Scene},
+    scene::{Scene, core_error, error},
     session::MusicaSession,
     storage::Storage,
-    MusicaVm, ScriptEncoding, MUSICA_PROFILE_FILE,
 };
 use abi_stable::std_types::ROption;
 use astra_core::Hash256;
@@ -12,8 +12,8 @@ use astra_emu_family_api::*;
 use std::{
     path::{Component, Path},
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
 };
 mod eden;
@@ -38,14 +38,11 @@ impl Drop for SessionLease {
     }
 }
 #[derive(Default)]
-pub struct MusicaProvider {
+pub(crate) struct MusicaProvider {
     next: u64,
     gpu_instance: Option<wgpu::Instance>,
 }
-pub fn create_musica_provider() -> Box<dyn FamilyProvider> {
-    Box::new(MusicaProvider::default())
-}
-pub fn musica_descriptor() -> FamilyDescriptor {
+pub(crate) fn musica_descriptor() -> FamilyDescriptor {
     let field = |id: &str, label: &str, default: &str| ConfigField {
         id: id.into(),
         label: label.into(),
@@ -64,7 +61,11 @@ pub fn musica_descriptor() -> FamilyDescriptor {
         default: ConfigValue::Integer(default),
     };
     let mut configuration = vec![
-        field("profile_file", "Private PAZ profile", MUSICA_PROFILE_FILE),
+        field(
+            "profile_file",
+            "Private PAZ key.toml (absolute or game-relative path)",
+            MUSICA_KEY_FILE,
+        ),
         field("entry_script", "Entry script in scr archive", "test.sc"),
         field(
             "eden_import_file",
@@ -80,7 +81,7 @@ pub fn musica_descriptor() -> FamilyDescriptor {
         kind: ConfigKind::Enum {
             choices: vec!["direct".into(), "title".into()].into(),
         },
-        default: ConfigValue::Enum("direct".into()),
+        default: ConfigValue::Enum("title".into()),
     });
     configuration.push(ConfigField {
         id: "message_speed_auto_play".into(),
@@ -147,6 +148,7 @@ pub fn musica_descriptor() -> FamilyDescriptor {
         configuration: configuration.into(),
     }
 }
+#[cfg(test)]
 impl FamilyProvider for MusicaProvider {
     fn descriptor(&self) -> FamilyResult<FamilyDescriptor> {
         let d = musica_descriptor();
@@ -192,12 +194,25 @@ impl MusicaProvider {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn open_session(
         &mut self,
         request: OpenRequest,
     ) -> FamilyResult<(OpenResponse, MusicaSession)> {
-        let descriptor = self.descriptor()?;
-        request.validate_for_descriptor(&descriptor)?;
+        self.open_native_session(request, None)
+    }
+
+    pub(crate) fn open_native_session(
+        &mut self,
+        request: OpenRequest,
+        replacement: Option<crate::native::text::TextBridge>,
+    ) -> FamilyResult<(OpenResponse, MusicaSession)> {
+        if let Some(service) = &replacement {
+            service.check_cancelled()?;
+        }
+        let descriptor = musica_descriptor();
+        descriptor.validate()?;
+        request.validate()?;
         let config = resolve_config(&descriptor.configuration, &request.configuration)?;
         let get = |key: &str| -> FamilyResult<String> {
             match &config
@@ -215,7 +230,6 @@ impl MusicaProvider {
         };
         let profile = get("profile_file")?;
         let entry = get("entry_script")?;
-        relative(&profile)?;
         relative(&entry)?;
         if entry.contains('/') || entry.contains('\\') || !entry.ends_with(".sc") {
             return Err(error(
@@ -234,7 +248,7 @@ impl MusicaProvider {
                 return Err(error(
                     "ASTRA_EMU_MUSICA_CONFIG",
                     "background playback preference is missing or invalid",
-                ))
+                ));
             }
         };
         let text_shadow = match config
@@ -247,7 +261,7 @@ impl MusicaProvider {
                 return Err(error(
                     "ASTRA_EMU_MUSICA_CONFIG",
                     "text shadow preference is missing or invalid",
-                ))
+                ));
             }
         };
         let render_extent = |key: &str| -> FamilyResult<u32> {
@@ -289,7 +303,7 @@ impl MusicaProvider {
                 return Err(error(
                     "ASTRA_EMU_MUSICA_CONFIG",
                     "unsupported script encoding",
-                ))
+                ));
             }
         };
         let title_launch = match config
@@ -307,6 +321,9 @@ impl MusicaProvider {
         let root = Path::new(request.game_path.as_str());
         let (archive, texture_overrides) =
             mount_musica_with_texture_overrides(root, Path::new(&profile)).map_err(core_error)?;
+        if let Some(service) = &replacement {
+            service.check_cancelled()?;
+        }
         let archive = Arc::new(archive);
         let primary_encoding = encoding;
         let imported =
@@ -332,6 +349,9 @@ impl MusicaProvider {
             .unwrap_or(&entry);
         let uri = format!("musica:/scr/{script_name}");
         let loaded = crate::script_loader::load_script(&archive, &uri, primary_encoding)?;
+        if let Some(service) = &replacement {
+            service.check_cancelled()?;
+        }
         let encoding = loaded.script.encoding;
         let mut vm = MusicaVm::new(uri, loaded.hash, loaded.script, 0)
             .map_err(|_| error("ASTRA_EMU_MUSICA_VM", "entry script cannot be initialized"))?;
@@ -387,6 +407,9 @@ impl MusicaProvider {
                     "global progress cannot be applied",
                 )
             })?;
+        if let Some(service) = &replacement {
+            service.check_cancelled()?;
+        }
         if self.gpu_instance.is_none() {
             self.gpu_instance = Some(astra_platform_common::native_wgpu_instance().map_err(
                 |cause| {
@@ -412,6 +435,9 @@ impl MusicaProvider {
             texture_overrides,
             encoding,
         )?;
+        if let Some(service) = &replacement {
+            service.check_cancelled()?;
+        }
         scene.set_text_shadow(text_shadow);
         if title_launch {
             vm.begin_title_launch()
@@ -420,26 +446,17 @@ impl MusicaProvider {
         } else {
             scene.render(vm.state(), restored_message.as_ref(), None)?;
         }
-        let replacement = request.host.text_replacement.into_option();
         if let Some(service) = &replacement {
-            service
-                .reset(if imported.is_some() {
-                    TextResetReason::Load
-                } else {
-                    TextResetReason::NewGame
-                })
-                .into_result()?;
+            service.check_cancelled()?;
         }
-        let sink = request
-            .host
-            .audio_sink
-            .into_option()
-            .ok_or_else(|| error("ASTRA_EMU_MUSICA_AUDIO_SINK", "PCM sink is required"))?;
-        let audio = Audio::start(archive.clone(), sink)?;
+        let audio = Audio::start(archive.clone(), request.host.audio_sink.into_option())?;
         audio.set_preferences(audio_preferences)?;
         audio.suspend(!visible || (!focused && !progress_in_background))?;
         if imported.is_some() {
             eden::restore_audio(&audio, vm.state())?;
+        }
+        if let Some(service) = &replacement {
+            service.check_cancelled()?;
         }
         self.next = self
             .next
@@ -464,7 +481,7 @@ impl MusicaProvider {
             frame: info,
             audio_format: ROption::RSome(crate::audio::FORMAT),
         };
-        response.validate_for_descriptor(&descriptor)?;
+        response.validate()?;
         let mut session = MusicaSession::new(
             id,
             info,

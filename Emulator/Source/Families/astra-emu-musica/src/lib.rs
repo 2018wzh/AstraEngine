@@ -33,12 +33,11 @@ pub const MUSICA_DECRYPT_PROVIDER_ID: &str = "astra.emu.musica.paz.decrypt.v1";
 pub const MUSICA_DECRYPT_DESCRIPTOR_SCHEMA: &str = "astra.emu.musica.paz.decrypt_descriptor.v1";
 pub const MUSICA_SCRIPT_IR_SCHEMA: &str = "astra.emu.musica.script_ir.v3";
 
-pub use provider::{create_musica_provider, musica_descriptor, MusicaProvider};
+mod native;
+pub use native::musica_query;
 
-#[cfg(feature = "dynamic-plugin-export")]
-mod ffi;
-#[cfg(feature = "dynamic-plugin-export")]
-pub use ffi::astra_musica_family_root_module;
+#[cfg(test)]
+pub(crate) use provider::{MusicaProvider, musica_descriptor};
 
 #[cfg(test)]
 mod test_fixture;

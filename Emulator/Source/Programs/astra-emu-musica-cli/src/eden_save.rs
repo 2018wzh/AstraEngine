@@ -93,7 +93,7 @@ mod tests {
         let output = root.path().join("eden0020.sav");
         let thumbnail = output.with_extension("png");
         std::fs::write(&thumbnail, b"existing native thumbnail").unwrap();
-        assert!(export(root.path(), Path::new("missing.profile"), 0, &output).is_err());
+        assert!(export(root.path(), Path::new("missing-key.toml"), 0, &output).is_err());
         assert!(!output.exists());
         assert_eq!(
             std::fs::read(thumbnail).unwrap(),
@@ -106,7 +106,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let output = root.path().join("eden0000.sav");
         std::fs::write(&output, b"original commercial slot").unwrap();
-        assert!(export(root.path(), Path::new("missing.profile"), 0, &output).is_err());
+        assert!(export(root.path(), Path::new("missing-key.toml"), 0, &output).is_err());
         assert_eq!(std::fs::read(&output).unwrap(), b"original commercial slot");
         assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
     }

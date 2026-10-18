@@ -1,6 +1,5 @@
 use crate::{
-    audio_executor, metadata_runtime, platform_secret, stage_renderer,
-    text_service::TextReplacementBridge,
+    metadata_runtime, platform_secret, stage_renderer, text_service::TextReplacementBridge,
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -9,17 +8,16 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use abi_stable::std_types::ROption;
-use astra_emu_family_api::{
-    FamilyEvent, FamilyHostServices, FamilySession, FamilyStatus, KeyCode, KeyModifiers, KeyState,
-    OpenRequest, ProbeRequest, WindowState,
-};
+use astra_emu_manager::modal_service::ModalBridge;
 #[cfg(not(target_os = "android"))]
-use astra_emu_manager::{run_manager_with_initial_state, HostWake, ManagerController};
+use astra_emu_manager::{HostWake, ManagerController, run_manager_with_initial_state};
+use astra_emu_manager_core::model::{
+    FamilyEvent, FamilyStatus, KeyCode, KeyModifiers, KeyState, ProbeRequest, WindowState,
+};
 use astra_emu_manager_core::{
-    default_vn_preset, input_key_code as key_code, FamilyPluginDescriptor, FamilyProbeCandidate,
-    FamilyProbeSelection, FamilyProviderRegistry, GameRecord, GamepadDeadzone, GamepadInput,
-    Library, PlaySessionEndReason,
+    FamilyPluginDescriptor, FamilyProbeCandidate, FamilyProbeSelection, FamilyProviderRegistry,
+    GameRecord, GamepadDeadzone, GamepadInput, Library, NativeOpenRequest, NativeSession,
+    PlaySessionEndReason, default_vn_preset, input_key_code as key_code,
 };
 use astra_emu_manager_ui_slint::{
     AppearanceViewModel, GameCardViewModel, GamepadBindingViewModel, GenericConfigFieldViewModel,
@@ -27,8 +25,8 @@ use astra_emu_manager_ui_slint::{
 };
 use astra_emu_metadata::{
     BangumiPlayStatus, BangumiPlayUpdate, CompatibilityDatabase, CompatibilityEntry,
-    CompatibilityFetch, CoverAsset, MetadataProviderId, MetadataRecord, MetadataSearchQuery,
-    DEFAULT_COMPATIBILITY_SOURCE_URL,
+    CompatibilityFetch, CoverAsset, DEFAULT_COMPATIBILITY_SOURCE_URL, MetadataProviderId,
+    MetadataRecord, MetadataSearchQuery,
 };
 use astra_emu_translation_openai_compatible::{
     SecretResolver, TranslationEndpointKind, TranslationProfile, TranslationProtocol,
@@ -36,14 +34,14 @@ use astra_emu_translation_openai_compatible::{
 use metadata_runtime::{MetadataCommand, MetadataCommandKind, MetadataPayload, MetadataRuntime};
 use platform_secret::ManagerSecretStore;
 use stage_renderer::{FrameMailbox, ManagerStageRenderer};
-use astra_emu_manager::modal_service::ModalBridge;
 
-const FIXED_FRAME_NS: u64 = 16_666_667;
 const MAX_SCAN_DIRECTORIES: usize = 4_096;
 const MAX_SCAN_DEPTH: usize = 5;
 
+mod background;
 mod connection_test;
 mod controller;
+mod extensions;
 mod family_config;
 mod filters;
 mod input;
@@ -52,18 +50,24 @@ mod metadata;
 mod metadata_actions;
 #[cfg(test)]
 mod metadata_tests;
-#[cfg(test)]
-mod probe_state_tests;
 mod model;
+mod musica_keys;
 mod navigation;
-mod preferences;
 mod owner;
 mod owner_worker;
+mod preferences;
+mod probe_cache;
+#[cfg(test)]
+mod probe_state_tests;
+mod probe_worker;
 mod runtime;
 mod session;
 mod support;
 mod translation;
 mod view_fields;
+pub(super) fn run_extension_command(command: crate::ExtensionCommand) -> Result<(), String> {
+    extensions::run(command)
+}
 use session::ActiveFamilySession;
 use support::*;
 
@@ -75,16 +79,17 @@ struct AstraEmuManagerController {
     library: Library,
     registry: owner::FamilyOwner,
     candidates: BTreeMap<String, FamilyProbeCandidate>,
+    startup_state: background::StartupState,
     probe_choices: BTreeMap<String, Vec<FamilyProbeCandidate>>,
     selected_case_id: Option<String>,
     search_query: String,
     diagnostic: String,
     plugin_errors: BTreeMap<String, String>,
     data_dir: PathBuf,
+    extensions: Option<crate::text_service::ExtensionRuntime>,
     game_roots: Vec<PathBuf>,
     mailbox: FrameMailbox,
     active: Option<owner::ActiveSessionView>,
-    audio_device: audio_executor::AudioDeviceKind,
     active_play_session: Option<String>,
     pending_events: Vec<FamilyEvent>,
     window_state: Option<WindowState>,
@@ -136,6 +141,7 @@ impl Drop for AstraEmuManagerController {
 }
 
 pub(super) fn run_application() -> Result<(), Box<dyn std::error::Error>> {
+    astra_emu_manager::startup::begin();
     let data_dir = platform_data_dir()?;
     fs::create_dir_all(&data_dir)?;
     let filter = match std::env::var("RUST_LOG") {
@@ -147,10 +153,36 @@ pub(super) fn run_application() -> Result<(), Box<dyn std::error::Error>> {
     observability.role = astra_observability::HostRole::Manager;
     observability.console = false;
     observability.log_dir = Some(data_dir.join("diagnostics"));
-    let _observability = astra_observability::init_host(observability)?;
+    let _observability = std::sync::Arc::new(astra_observability::init_host(observability)?);
+    astra_emu_manager::startup::mark("process_entry");
+    let filter_guard = std::sync::Arc::downgrade(&_observability);
+    astra_emu_manager_core::set_diagnostic_enabled(move |level, target| {
+        filter_guard
+            .upgrade()
+            .is_some_and(|guard| guard.external_enabled(level, target))
+    });
+    let emit_guard = std::sync::Arc::downgrade(&_observability);
+    astra_emu_manager_core::set_diagnostic_emit(move |record| {
+        if let Some(guard) = emit_guard.upgrade() {
+            if let Err(error) =
+                guard.record_external(record.level, &record.target, &record.event, record.fields)
+            {
+                tracing::error!(event = "astra.emu.diagnostics.record_failed", error = %error);
+            }
+        }
+    });
+    let flush_guard = std::sync::Arc::downgrade(&_observability);
+    astra_emu_manager_core::set_diagnostic_flush(move || {
+        if let Some(guard) = flush_guard.upgrade() {
+            if let Err(error) = guard.flush() {
+                tracing::error!(event = "astra.emu.diagnostics.flush_failed", error = %error);
+            }
+        }
+    });
     let result = (|| {
         let mailbox = FrameMailbox::new();
         let controller = AstraEmuManagerController::open(mailbox.clone())?;
+        astra_emu_manager::startup::mark("cached_controller_ready");
         run_manager_with_initial_state(controller, ManagerStageRenderer::new(mailbox), false)?;
         Ok(())
     })();

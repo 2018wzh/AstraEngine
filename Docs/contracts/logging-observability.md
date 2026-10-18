@@ -12,11 +12,13 @@ Windows crash artifact 始终是 local-private 敏感数据，不进入 package�
 
 - `HostObservabilityConfig`：host role、filter、console format、file/ring limit 和 crash policy。
 - `init_host(config)`：安装一次 host subscriber，返回 `ObservabilityGuard`。
-- `ObservabilityGuard`：公开 session id、runtime filter reload、flush 和 fatal bundle 写入。
+- `ObservabilityGuard`：公开 session id、runtime filter reload、flush、fatal bundle，以及 `external_enabled`／`record_external` 原生诊断入口。
 - `LogEventV1`：`astra.log_event.v1` 的稳定 DTO。
 - `CrashBundleManifestV1`、`CrashArtifactRef`：fatal tail 与 crash artifact 引用 DTO。
 
 库 crate 只发 `tracing` span/event。二进制 host 负责初始化 sink 和持有 guard，不能由库私自安装 subscriber。
+
+EMU 动态适配层可以在模块内安装 tracing/log 桥，但不创建文件 sink。Host 先用 `external_enabled(level, target)` 查询当前可重载过滤器，再复制有界字段，通过 `record_external` 写入既有 writer、ring 和 critical sink。后者保留数值、布尔及字符串类型，不把整个字段表格式化成 Debug 字符串；最多 64 个标量字段，字段名 128 bytes、字符串 4096 bytes、target/event 256 bytes。普通 Engine tracing 的既有字段处理不变。
 
 ## 3. 级别与事件所有权
 
@@ -40,6 +42,8 @@ JSON file、critical file 和 ring 使用同一 schema，固定包含：
 - 经审计的结构化 `fields`。
 
 compact stderr 只供人读，不作为稳定交换格式，并按日志级别启用 ANSI 颜色。ANSI 只属于 console sink；JSON file、critical file、ring 和 crash tail 始终保持无颜色的 `astra.log_event.v1`。字段只允许 step、schema、hash、diagnostic code、provider/action/plugin id、状态和计数。禁止正文、payload、secret、native handle、原始环境值、绝对路径和未经审计的整体 `Debug` 输出。
+
+原生核心桥接是显式例外：它正常转发有界的 message、字符串和 Debug/Display 结果，不按内容脱敏；原生数值保留 typed 值，超限由边界计入 dropped_fields。该规则不授权调用方主动记录正文、凭据或未经审计的数据。日志仍只在 Host 诊断目录和本地 crash tail 保存，不进入游戏目录、存档或 package。
 
 ## 5. Sink 与背压
 

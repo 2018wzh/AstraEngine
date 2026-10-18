@@ -5,9 +5,6 @@ impl AstraEmuManagerController {
         &self,
         game: &GameRecord,
     ) -> Option<&FamilyProbeCandidate> {
-        if self.probe_choices.contains_key(&game.game_id) {
-            return None;
-        }
         let candidate = self.candidates.get(&game.game_id)?;
         if game.family_id.as_deref() != Some(candidate.report.family_id.as_str())
             || candidate.descriptor.family_id != candidate.report.family_id
@@ -42,43 +39,10 @@ impl AstraEmuManagerController {
     }
 
     pub(super) fn rescan(&mut self) -> Result<ManagerViewModel, String> {
-        let mut paths = self.game_roots.clone();
-        paths.extend(
-            self.library
-                .list_games()
-                .map_err(|error| error.to_string())?
-                .into_iter()
-                .map(|game| PathBuf::from(game.location)),
-        );
-        paths.sort();
-        paths.dedup();
-        self.candidates.clear();
-        self.probe_choices.clear();
-        self.diagnostic.clear();
-        let mut missing = 0;
-        for path in &paths {
-            if !path.is_dir() {
-                self.clear_probe_state(&path_id(path))?;
-                missing += 1;
-            }
+        if self.active.is_some() {
+            return Err("ASTRA_EMU_FAMILY_SESSION_ALREADY_ACTIVE".into());
         }
-        paths.retain(|path| path.is_dir());
-        if !paths.is_empty() {
-            self.scan_paths(&paths)?;
-        }
-        if missing > 0 {
-            self.diagnostic = format!(
-                "有 {missing} 个游戏目录当前不可用。资料库信息已保留，恢复目录后点击“扫描游戏”。"
-            );
-        }
-        if self.selected_case_id.is_none() {
-            self.selected_case_id = self
-                .library
-                .list_games()
-                .map_err(|error| error.to_string())?
-                .first()
-                .map(|game| game.game_id.clone());
-        }
+        self.begin_scan(probe_worker::ScanKind::Full, self.game_roots.clone())?;
         self.model()
     }
 
@@ -95,26 +59,51 @@ impl AstraEmuManagerController {
         if self.active.is_some() {
             return Err("ASTRA_EMU_FAMILY_SESSION_ALREADY_ACTIVE".into());
         }
+        if self.startup_busy() || !self.cores_ready() {
+            return Err("ASTRA_EMU_FAMILY_INITIALIZING".into());
+        }
         let game = self.game(case_id)?;
         self.load_game_input_mapping(case_id)?;
-        if self.probe_choices.contains_key(case_id) {
+        if self.probe_choices.contains_key(case_id) && !self.candidates.contains_key(case_id) {
             return Err("ASTRA_EMU_FAMILY_PROVIDER_SELECTION_REQUIRED".to_owned());
         }
         let candidate = self
             .launch_candidate_for_game(&game)
             .cloned()
             .ok_or_else(|| "ASTRA_EMU_FAMILY_PROBE_REQUIRED".to_owned())?;
-        let text = if self.translation_consent
-            && candidate
-                .descriptor
-                .has_capability(astra_emu_manager_core::FamilyCapability::TextReplacement)
+        let epoch = astra_emu_manager_core::model::allocate_session_epoch()
+            .map_err(|error| error.to_string())?;
+        let text = if candidate
+            .descriptor
+            .has_capability(astra_emu_manager_core::FamilyCapability::TextReplacement)
         {
-            let profile = self
-                .profile()?
-                .ok_or("ASTRA_EMU_TRANSLATION_PROFILE_REQUIRED")?;
-            let secrets =
-                std::sync::Arc::new(ManagerSecretStore::open().map_err(|error| error.to_string())?);
-            Some(TextReplacementBridge::new(profile, secrets).map_err(|error| error.to_string())?)
+            let profile = if self.translation_consent {
+                Some(
+                    self.profile()?
+                        .ok_or("ASTRA_EMU_TRANSLATION_PROFILE_REQUIRED")?,
+                )
+            } else {
+                None
+            };
+            let extensions =
+                astra_emu_manager_core::extensions::ExtensionStore::new(&self.data_dir).list()?;
+            if profile.is_some() || extensions.iter().any(|extension| extension.enabled) {
+                if self.extensions.is_none() {
+                    self.extensions = Some(
+                        crate::text_service::ExtensionRuntime::new()
+                            .map_err(|error| error.to_string())?,
+                    );
+                }
+                let secrets = std::sync::Arc::new(
+                    ManagerSecretStore::open().map_err(|error| error.to_string())?,
+                );
+                Some(
+                    TextReplacementBridge::new(epoch, profile, secrets, extensions)
+                        .map_err(|error| error.to_string())?,
+                )
+            } else {
+                None
+            }
         } else {
             None
         };
@@ -130,8 +119,9 @@ impl AstraEmuManagerController {
             .library
             .family_configuration(&candidate.descriptor.plugin_id, case_id, &schema)
             .map_err(|error| error.to_string())?;
-        let epoch = astra_emu_family_api::allocate_session_epoch().map_err(|error| error.to_string())?;
-        self.mailbox.activate(epoch).map_err(|error| error.to_string())?;
+        self.mailbox
+            .activate(epoch)
+            .map_err(|error| error.to_string())?;
         self.registry.open(owner::OpenSession {
             epoch,
             game,
@@ -139,9 +129,10 @@ impl AstraEmuManagerController {
             configuration,
             window: self.window_state.ok_or("ASTRA_EMU_WINDOW_STATE_REQUIRED")?,
             text,
-            audio_device: self.audio_device,
             wake,
             modal: None,
+            window_service: None,
+            cancellation: astra_emu_manager_core::NativeCancellation::new(epoch),
         })?;
         self.selected_case_id = Some(case_id.into());
         self.pending_events.clear();

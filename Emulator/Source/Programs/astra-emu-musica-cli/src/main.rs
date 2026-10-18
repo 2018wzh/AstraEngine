@@ -7,20 +7,21 @@ use std::{
 
 use astra_core::Hash256;
 use astra_emu_musica::{
-    mount_musica, parse_audio_resource_spec, parse_sc, MusicaAniArchive, MusicaSqzArchive,
-    ScCensus, ScLineKind, ScOpcodeCatalog, ScOperand, ScScript, MAX_ENTRY_BYTES,
+    MAX_ENTRY_BYTES, MusicaAniArchive, MusicaSqzArchive, ScCensus, ScLineKind, ScOpcodeCatalog,
+    ScOperand, ScScript, mount_musica, parse_audio_resource_spec, parse_sc,
 };
 use clap::{Parser, Subcommand};
 use serde::Serialize;
 
 mod eden_save;
-mod garbro_nrbf;
-mod importer;
 mod inventory;
 mod private_output;
+mod profile_import;
 
 #[cfg(test)]
 mod census_tests;
+#[cfg(test)]
+mod command_tests;
 
 #[derive(Debug, Parser)]
 #[command(name = "astra-emu-musica-cli")]
@@ -35,7 +36,7 @@ enum Command {
     ExportEdenSave {
         #[arg(long)]
         game_dir: PathBuf,
-        #[arg(long)]
+        #[arg(long, help = "Production keys.v2 key.toml, game-relative or absolute")]
         profile: PathBuf,
         #[arg(long)]
         slot: u32,
@@ -48,7 +49,7 @@ enum Command {
         file: PathBuf,
         #[arg(long)]
         game_dir: PathBuf,
-        #[arg(long)]
+        #[arg(long, help = "Production keys.v2 key.toml, game-relative or absolute")]
         profile: PathBuf,
         #[arg(long, value_enum)]
         edition: eden_save::Edition,
@@ -74,7 +75,30 @@ enum Command {
         #[arg(long)]
         title: String,
         #[arg(long)]
-        game_dir: PathBuf,
+        index_size_xor: u32,
+        #[arg(long, action = clap::ArgAction::Set, required = true)]
+        rc4_skip_crc: bool,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    ImportKeyProfile {
+        #[arg(long)]
+        file: PathBuf,
+        #[arg(long)]
+        paz_version: u8,
+        #[arg(long)]
+        index_size_xor: u32,
+        #[arg(long, action = clap::ArgAction::Set, required = true)]
+        rc4_skip_crc: bool,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    /// Convert a strict legacy profile.v1 JSON file into a new keys.v2 key.toml.
+    ImportJsonProfile {
+        #[arg(long)]
+        file: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
     },
     ListGarbroTitles {
         #[arg(long)]
@@ -83,13 +107,13 @@ enum Command {
     CensusScripts {
         #[arg(long)]
         game_dir: PathBuf,
-        #[arg(long)]
+        #[arg(long, help = "Production keys.v2 key.toml, game-relative or absolute")]
         profile: PathBuf,
     },
     CensusMedia {
         #[arg(long)]
         game_dir: PathBuf,
-        #[arg(long)]
+        #[arg(long, help = "Production keys.v2 key.toml, game-relative or absolute")]
         profile: PathBuf,
     },
 }
@@ -105,6 +129,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Command::InspectEdenSave { .. } => "inspect_eden_save",
         Command::ScanArchives { .. } => "scan_archives",
         Command::ImportGarbroScheme { .. } => "import_garbro_scheme",
+        Command::ImportKeyProfile { .. } => "import_key_profile",
+        Command::ImportJsonProfile { .. } => "import_json_profile",
         Command::ListGarbroTitles { .. } => "list_garbro_titles",
         Command::CensusScripts { .. } => "census_scripts",
         Command::CensusMedia { .. } => "census_media",
@@ -137,12 +163,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Command::ImportGarbroScheme {
             formats,
             title,
-            game_dir,
-        } => importer::import(&formats, &title, &game_dir),
+            index_size_xor,
+            rc4_skip_crc,
+            output,
+        } => profile_import::import_garbro_profile(
+            &formats,
+            &title,
+            index_size_xor,
+            rc4_skip_crc,
+            &output,
+        ),
+        Command::ImportKeyProfile {
+            file,
+            paz_version,
+            index_size_xor,
+            rc4_skip_crc,
+            output,
+        } => profile_import::import_key_profile(
+            &file,
+            paz_version,
+            index_size_xor,
+            rc4_skip_crc,
+            &output,
+        ),
+        Command::ImportJsonProfile { file, output } => {
+            profile_import::import_json_profile(&file, &output)
+        }
         Command::ListGarbroTitles { formats } => {
             println!(
                 "{}",
-                serde_json::to_string(&importer::list_titles(&formats)?)?
+                serde_json::to_string(&profile_import::list_garbro_titles(&formats)?)?
             );
             Ok(())
         }

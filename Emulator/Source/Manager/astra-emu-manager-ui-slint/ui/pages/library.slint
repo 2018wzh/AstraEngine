@@ -19,6 +19,36 @@ export struct ReleaseOption {
     label: string,
 }
 
+
+component StartupBanner inherits Rectangle {
+    in property <bool> busy;
+    in property <string> status;
+    in property <bool> core-refresh-enabled;
+    callback refresh-cores();
+    min-height: 58px;
+    vertical-stretch: 0;
+    border-radius: Theme.shape-sm;
+    background: busy ? Theme.surface-container-high : Theme.surface-container;
+    HorizontalLayout {
+        padding: 10px;
+        spacing: 12px;
+        Text {
+            horizontal-stretch: 1;
+            text: root.status != "" ? root.status : root.busy ? "正在刷新核心…" : "请点击“刷新核心”加载模拟器，再手动扫描或添加游戏。";
+            color: root.busy ? Theme.primary : Theme.on-surface-variant;
+            font-size: Theme.font-body-sm;
+            vertical-alignment: center;
+            wrap: word-wrap;
+        }
+        M3Button {
+            text: "刷新核心";
+            icon: Icons.rotate;
+            enabled: root.core-refresh-enabled;
+            clicked => { root.refresh-cores(); }
+        }
+    }
+}
+
 component InspectorRow inherits Rectangle {
     in property <string> label;
     in property <string> value;
@@ -51,6 +81,20 @@ component GameListRow inherits Rectangle {
     in property <string> density: "comfortable";
     callback activated(string);
     callback launch(string);
+    in property <bool> cover-needed;
+    private property <string> cover-case-id: game.case-id;
+    private property <string> demanded-case-id;
+    callback cover-demand(string, bool);
+    function report-cover() {
+        if root.demanded-case-id != root.cover-case-id && root.demanded-case-id != "" {
+            root.cover-demand(root.demanded-case-id, false);
+        }
+        root.demanded-case-id = root.cover-case-id;
+        root.cover-demand(root.cover-case-id, root.cover-needed);
+    }
+    init => { root.report-cover(); }
+    changed cover-needed => { root.report-cover(); }
+    changed cover-case-id => { root.report-cover(); }
 
     height: density == "compact" ? 60px : 72px;
     background: selected
@@ -81,13 +125,13 @@ component GameListRow inherits Rectangle {
             border-radius: Theme.shape-xs;
             clip: true;
 
-            if game.cover-uri != "" : Image {
+            if game.cover.width > 0 : Image {
                 source: game.cover;
                 image-fit: cover;
                 width: parent.width;
                 height: parent.height;
             }
-            if game.cover-uri == "" : Icon {
+            if game.cover.width == 0 : Icon {
                 glyph: Icons.gamepad;
                 font-size: 16px;
                 color: Theme.outline;
@@ -340,6 +384,13 @@ export component LibraryPage inherits Rectangle {
     in property <[MatchReview]> match-reviews;
     in property <bool> metadata-busy;
     in property <string> metadata-status;
+    in property <bool> cores-ready;
+    in property <bool> core-refresh-enabled;
+    in property <bool> startup-busy;
+    in property <string> startup-status;
+    in property <bool> cover-loading-enabled;
+    in property <image> selected-cover;
+    callback cover-demand(int, string, bool, string);
     in property <bool> vndb-consent;
     in property <bool> bangumi-consent;
     callback search-metadata(string, string);
@@ -355,6 +406,8 @@ export component LibraryPage inherits Rectangle {
     in property <string> model-identity;
     in property <string> selected-title;
     in property <string> selected-family;
+    in property <string> selected-emulator;
+    in property <bool> selected-launchable;
     in property <string> selected-play-time;
     in property <string> selected-last-played;
     in property <[PlaySession]> play-history;
@@ -375,7 +428,9 @@ export component LibraryPage inherits Rectangle {
     in property <bool> desktop-mode: true;
     in-out property <string> view-mode: "grid";
     in property <string> density: "comfortable";
+    in property <[ConfigField]> common-engine-config-fields;
     in property <[ConfigField]> family-config-fields;
+    in property <bool> musica-key-file-available;
     // Extended metadata (PotatoVN-style)
     in property <string> selected-developer;
     in property <string> selected-release-date;
@@ -389,6 +444,7 @@ export component LibraryPage inherits Rectangle {
     callback select-case(string);
     callback search(string);
     callback rescan();
+    callback refresh-cores();
     callback add-game-directory();
     callback set-library-sort(string);
     callback refresh-compatibility();
@@ -400,6 +456,11 @@ export component LibraryPage inherits Rectangle {
     callback family-config-changed(string, string);
     callback save-family-config();
     callback reset-family-config();
+    callback select-musica-key-file();
+    property <int> visible-columns: max(1, min(root.grid-columns, Math.floor((root.width - (root.desktop-mode ? 26px : 14px)) / (root.desktop-mode ? 170px : 166px))));
+    property <length> grid-spacing: root.desktop-mode && root.density != "compact" ? 14px : 10px;
+    property <length> card-width: max(156px, min(240px, (root.width - (root.desktop-mode ? 48px : 32px) - root.grid-spacing * (root.visible-columns - 1)) / root.visible-columns));
+    property <string> inspector-tab: "details";
 
     background: Theme.surface;
 
@@ -411,6 +472,18 @@ export component LibraryPage inherits Rectangle {
             x: 0px; y: 0px; width: parent.width; height: parent.height;
             padding: 20px;
             spacing: 14px;
+            Text {
+                text: "游戏库";
+                color: Theme.on-surface;
+                font-size: Theme.font-headline-md;
+                font-weight: 600;
+            }
+            if root.core-refresh-enabled || root.startup-busy || root.startup-status != "" : StartupBanner {
+                busy: root.startup-busy;
+                status: root.startup-status;
+                core-refresh-enabled: root.core-refresh-enabled;
+                refresh-cores => { root.refresh-cores(); }
+            }
 
             searchDebounce := Timer {
                 interval: 300ms;
@@ -489,11 +562,17 @@ export component LibraryPage inherits Rectangle {
                     }
                 }
 
-                M3Button { text: "添加游戏"; primary: true; clicked => { root.add-game-directory(); } }
+                M3Button {
+                    text: "添加游戏";
+                    primary: true;
+                    enabled: root.cores-ready && !root.startup-busy;
+                    clicked => { root.add-game-directory(); }
+                }
                 M3Button {
                     text: "扫描游戏";
                     icon: Icons.rotate;
                     variant: "tonal";
+                    enabled: root.cores-ready && !root.startup-busy;
                     clicked => { root.rescan(); }
                 }
 
@@ -579,22 +658,33 @@ export component LibraryPage inherits Rectangle {
             }
 
             // Content view (Grid or List)
-            if root.view-mode == "grid" : ScrollView {
+            if root.view-mode == "grid" : desktop-grid := ScrollView {
                 mouse-drag-pan-enabled: true;
 
                 VerticalLayout {
                     spacing: 14px;
-                    GridLayout {
-                        spacing: root.density == "compact" ? 10px : 14px;
-
-                        for game[index] in games: CoverCard {
-                            row: Math.floor(index / root.grid-columns);
-                            col: Math.mod(index, root.grid-columns);
-                            game: game;
-                            selected: game.case-id == root.selected-case-id;
-                            activated(id) => { root.select-case(id); }
-                            launch(id) => { root.launch(id); }
+                    alignment: start;
+                    HorizontalLayout {
+                        vertical-stretch: 0;
+                        alignment: start;
+                        GridLayout {
+                            horizontal-stretch: 0;
+                            vertical-stretch: 0;
+                            spacing: root.grid-spacing;
+                            for game[index] in games: CoverCard {
+                                row: Math.floor(index / root.visible-columns);
+                                col: Math.mod(index, root.visible-columns);
+                                width: root.card-width;
+                                vertical-stretch: 0;
+                                game: game;
+                                selected: game.case-id == root.selected-case-id;
+                                cover-needed: root.cover-loading-enabled && self.y + self.height >= -desktop-grid.viewport-y - self.height && self.y <= -desktop-grid.viewport-y + desktop-grid.height + self.height;
+                                cover-demand(id, needed) => { root.cover-demand(index, id, needed, "grid"); }
+                                activated(id) => { root.select-case(id); }
+                                launch(id) => { root.launch(id); }
+                            }
                         }
+                        Rectangle { horizontal-stretch: 1; }
                     }
 
                     // Empty state
@@ -620,7 +710,7 @@ export component LibraryPage inherits Rectangle {
                                 horizontal-alignment: center;
                             }
                             Text {
-                                text: root.search-query != "" ? "尝试更换关键字或重置筛选条件" : "点击“添加游戏”选择游戏目录。联网元数据可在设置中单独启用。";
+                                text: root.search-query != "" ? "尝试更换关键字或重置筛选条件" : !root.cores-ready ? "请先点击“刷新核心”，再手动扫描或添加游戏。" : "点击“添加游戏”选择游戏目录。联网元数据可在设置中单独启用。";
                                 color: Theme.on-surface-variant;
                                 font-size: Theme.font-body-sm;
                                 wrap: word-wrap;
@@ -638,6 +728,7 @@ export component LibraryPage inherits Rectangle {
                                     text: "添加游戏";
                                     icon: Icons.gamepad;
                                     primary: true;
+                                    enabled: root.cores-ready && !root.startup-busy;
                                     clicked => { root.add-game-directory(); }
                                 }
                             }
@@ -647,16 +738,18 @@ export component LibraryPage inherits Rectangle {
             }
 
             // List View
-            if root.view-mode == "list" : ScrollView {
+            if root.view-mode == "list" : desktop-list := ScrollView {
                 mouse-drag-pan-enabled: true;
 
                 VerticalLayout {
                     spacing: root.density == "compact" ? 6px : 8px;
 
-                    for game in games: GameListRow {
+                    for game[index] in games: GameListRow {
                         game: game;
                         selected: game.case-id == root.selected-case-id;
                         density: root.density;
+                        cover-needed: root.cover-loading-enabled && self.y + self.height >= -desktop-list.viewport-y - self.height && self.y <= -desktop-list.viewport-y + desktop-list.height + self.height;
+                        cover-demand(id, needed) => { root.cover-demand(index, id, needed, "list"); }
                         activated(id) => { root.select-case(id); }
                         launch(id) => { root.launch(id); }
                     }
@@ -677,14 +770,18 @@ export component LibraryPage inherits Rectangle {
                                 horizontal-alignment: center;
                             }
                             Text {
-                                text: "请点击“扫描游戏”载入已授权目录中的作品。";
+                                text: root.cores-ready ? "请点击“扫描游戏”载入已授权目录中的作品。" : "请先点击“刷新核心”，再手动扫描或添加游戏。";
                                 color: Theme.on-surface-variant;
                                 font-size: Theme.font-body-sm;
                                 horizontal-alignment: center;
                             }
                             HorizontalLayout {
                                 alignment: center;
-                                Button { text: "扫描游戏"; clicked => { root.rescan(); } }
+                                Button {
+                                    text: "扫描游戏";
+                                    enabled: root.cores-ready && !root.startup-busy;
+                                    clicked => { root.rescan(); }
+                                }
                             }
                         }
                     }
@@ -692,22 +789,196 @@ export component LibraryPage inherits Rectangle {
             }
         }
 
+    }
+
+    // Compact library shares the full inspector with the desktop layout.
+    if !root.desktop-mode : VerticalLayout {
+        padding-top: 12px;
+        padding-left: 12px;
+        padding-right: 12px;
+        padding-bottom: 8px;
+        spacing: 10px;
+        Text {
+            text: "游戏库";
+            color: Theme.on-surface;
+            font-size: Theme.font-headline-md;
+            font-weight: 600;
+        }
+        if root.core-refresh-enabled || root.startup-busy || root.startup-status != "" : StartupBanner {
+            busy: root.startup-busy;
+            status: root.startup-status;
+            core-refresh-enabled: root.core-refresh-enabled;
+            refresh-cores => { root.refresh-cores(); }
+        }
+
+        mobileSearchDebounce := Timer {
+            interval: 300ms;
+            triggered => { root.search(root.search-query); }
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+
+            Rectangle {
+                horizontal-stretch: 1;
+                height: 38px;
+                border-radius: 19px;
+                background: Theme.surface-container-high;
+                border-width: 1px;
+                border-color: Theme.outline-variant;
+
+                HorizontalLayout {
+                    padding-left: 14px;
+                    padding-right: 12px;
+                    spacing: 8px;
+                    alignment: center;
+
+                    Icon {
+                        glyph: Icons.search;
+                        font-size: 14px;
+                        color: Theme.on-surface-variant;
+                        vertical-alignment: center;
+                    }
+
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        height: 28px;
+
+                        if root.search-query == "" : Text {
+                            text: "搜索作品库";
+                            color: Theme.on-surface-variant;
+                            font-size: Theme.font-body-md;
+                            vertical-alignment: center;
+                            x: 0px;
+                            width: parent.width;
+                        }
+
+                        TextInput {
+                            text <=> root.search-query;
+                            color: Theme.on-surface;
+                            font-size: Theme.font-body-md;
+                            vertical-alignment: center;
+                            single-line: true;
+                            x: 0px;
+                            width: parent.width;
+                            edited => { mobileSearchDebounce.restart(); }
+                        }
+                    }
+                }
+            }
+
+            M3Button {
+                text: "扫描";
+                icon: Icons.rotate;
+                variant: "tonal";
+                enabled: root.cores-ready && !root.startup-busy;
+                clicked => { root.rescan(); }
+            }
+            M3IconButton {
+                icon: Icons.folder-open;
+                accessible-label: "添加游戏目录";
+                enabled: root.cores-ready && !root.startup-busy;
+                clicked => { root.add-game-directory(); }
+            }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            ComboBox {
+                horizontal-stretch: 1;
+                model: ["标题排序", "最近游玩", "累计时长"];
+                current-index: root.library-sort == "recent" ? 1 : root.library-sort == "play_time" ? 2 : 0;
+                selected(value) => { root.set-library-sort(value == "最近游玩" ? "recent" : value == "累计时长" ? "play_time" : "title"); }
+            }
+            ComboBox {
+                horizontal-stretch: 1;
+                model: ["全部兼容性", "完美", "可通关", "有瑕疵", "仅启动", "无法运行", "未知"];
+                current-index: root.compatibility-filter == "perfect" ? 1 : root.compatibility-filter == "completable" ? 2 : root.compatibility-filter == "flawed" ? 3 : root.compatibility-filter == "boot_only" ? 4 : root.compatibility-filter == "unplayable" ? 5 : root.compatibility-filter == "unknown" ? 6 : 0;
+                selected(value) => { root.set-compatibility-filter(value == "完美" ? "perfect" : value == "可通关" ? "completable" : value == "有瑕疵" ? "flawed" : value == "仅启动" ? "boot_only" : value == "无法运行" ? "unplayable" : value == "未知" ? "unknown" : "all"); }
+            }
+        }
+
+        if root.view-mode == "grid" && root.games.length > 0 : mobile-grid := ScrollView {
+            mouse-drag-pan-enabled: true;
+
+            VerticalLayout {
+                alignment: start;
+                HorizontalLayout {
+                    vertical-stretch: 0;
+                    alignment: start;
+                    GridLayout {
+                        horizontal-stretch: 0;
+                        vertical-stretch: 0;
+                        spacing: root.grid-spacing;
+                        for game[index] in games: CoverCard {
+                            row: Math.floor(index / root.visible-columns);
+                            col: Math.mod(index, root.visible-columns);
+                            width: root.card-width;
+                            vertical-stretch: 0;
+                            game: game;
+                            selected: game.case-id == root.selected-case-id;
+                            cover-needed: root.cover-loading-enabled && self.y + self.height >= -mobile-grid.viewport-y - self.height && self.y <= -mobile-grid.viewport-y + mobile-grid.height + self.height;
+                            cover-demand(id, needed) => { root.cover-demand(index, id, needed, "grid"); }
+                            activated(id) => { root.select-case(id); }
+                            launch(id) => { root.launch(id); }
+                        }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+            }
+        }
+
+        if root.view-mode == "list" && root.games.length > 0 : mobile-list := ScrollView {
+            mouse-drag-pan-enabled: true;
+
+            VerticalLayout {
+                spacing: 6px;
+
+                for game[index] in games: GameListRow {
+                    game: game;
+                    selected: game.case-id == root.selected-case-id;
+                    density: root.density;
+                    cover-needed: root.cover-loading-enabled && self.y + self.height >= -mobile-list.viewport-y - self.height && self.y <= -mobile-list.viewport-y + mobile-list.height + self.height;
+                    cover-demand(id, needed) => { root.cover-demand(index, id, needed, "list"); }
+                    activated(id) => { root.selected-case-id = id; root.select-case(id); }
+                    launch(id) => { root.launch(id); }
+                }
+            }
+        }
+        if root.games.length == 0 : VerticalLayout {
+            alignment: center;
+            spacing: 16px;
+            Text {
+                text: root.search-query == "" ? "游戏库暂无作品" : "没有匹配的作品";
+                color: Theme.on-surface;
+                font-size: Theme.font-title-lg;
+                horizontal-alignment: center;
+            }
+            M3Button {
+                text: "添加游戏目录";
+                icon: Icons.folder-open;
+                primary: true;
+                enabled: root.cores-ready && !root.startup-busy;
+                clicked => { root.add-game-directory(); }
+            }
+        }
+
+    }
         // Backdrop to dismiss side sheet
         if root.selected-case-id != "" : Rectangle {
             x: 0px;
             y: 0px;
-            width: parent.width - 340px;
+            width: parent.width;
             height: parent.height;
             background: #66000000;
             z: 9;
             TouchArea { clicked => { root.select-case(""); } }
         }
 
-        // M3 Side Sheet Inspector (Desktop)
+        // Shared inspector keeps core settings and metadata available at every width.
         if root.selected-case-id != "" : Rectangle {
-            x: parent.width - 340px;
+            x: parent.width - self.width;
             y: 0px;
-            width: 340px;
+            width: min(420px, parent.width);
             height: parent.height;
             background: Theme.surface-container-low;
             border-width: 1px;
@@ -715,7 +986,7 @@ export component LibraryPage inherits Rectangle {
             border-radius: Theme.shape-xl;
             clip: true;
             z: 10;
-            animate x { duration: 180ms; easing: ease-out; }
+            TouchArea {}
 
             VerticalLayout {
                 padding: 18px;
@@ -725,6 +996,19 @@ export component LibraryPage inherits Rectangle {
                 HorizontalLayout {
                     spacing: 8px;
                     alignment: start;
+                    Rectangle {
+                        width: 64px;
+                        height: 88px;
+                        border-radius: Theme.shape-sm;
+                        background: Theme.surface-container-highest;
+                        clip: true;
+                        Image {
+                            source: root.selected-cover;
+                            width: parent.width;
+                            height: parent.height;
+                            image-fit: cover;
+                        }
+                    }
 
                     VerticalLayout {
                         horizontal-stretch: 1;
@@ -739,10 +1023,16 @@ export component LibraryPage inherits Rectangle {
                         }
 
                         Text {
-                            text: "Family: " + root.selected-family;
+                            text: "引擎 · " + root.selected-family;
                             color: Theme.primary;
                             font-size: Theme.font-label-md;
                             font-weight: 600;
+                        }
+                        Text {
+                            text: "模拟器 · " + (root.selected-emulator != "" ? root.selected-emulator : root.startup-busy ? "正在初始化" : "请选择");
+                            color: Theme.on-surface-variant;
+                            font-size: Theme.font-label-md;
+                            wrap: word-wrap;
                         }
                     }
 
@@ -774,13 +1064,26 @@ export component LibraryPage inherits Rectangle {
                         text: "立即启动";
                         icon: Icons.play;
                         primary: true;
-                        enabled: root.selected-family != "";
+                        enabled: root.selected-launchable;
                         clicked => { root.launch(root.selected-case-id); }
                     }
 
                 }
 
                 Rectangle { height: 1px; background: Theme.outline-variant; }
+                HorizontalLayout {
+                    spacing: 8px;
+                    M3Button {
+                        text: "作品资料";
+                        variant: root.inspector-tab == "details" ? "tonal" : "text";
+                        clicked => { root.inspector-tab = "details"; }
+                    }
+                    M3Button {
+                        text: "模拟器配置";
+                        variant: root.inspector-tab == "core" ? "tonal" : "text";
+                        clicked => { root.inspector-tab = "core"; }
+                    }
+                }
 
                 // Scrollable Inspector Details
                 ScrollView {
@@ -789,6 +1092,8 @@ export component LibraryPage inherits Rectangle {
                     VerticalLayout {
                         spacing: 12px;
 
+                        if root.inspector-tab == "details" : VerticalLayout {
+                            spacing: 12px;
                         WorkAssociation {
                             work-id: root.selected-case-id;
                             candidates: root.match-reviews;
@@ -918,180 +1223,62 @@ export component LibraryPage inherits Rectangle {
                             has-case: root.selected-case-id != "";
                             sync(status, rating, note) => { root.update-bangumi-play-status(status, rating, note); }
                         }
+                        }
 
-                        Rectangle { height: 1px; background: Theme.outline-variant; }
+                        if root.inspector-tab == "core" : VerticalLayout {
+                            spacing: 12px;
 
-                        // Family specific config
-                        if root.family-config-fields.length > 0 : GenericConfigForm {
-                            fields: root.family-config-fields;
-                            form-title: "Family 选项";
-                            form-description: "通用配置表单引擎";
-                            has-selected-case: root.selected-case-id != "";
-                            field-changed(key, value) => { root.family-config-changed(key, value); }
-                            save => { root.save-family-config(); }
-                            reset => { root.reset-family-config(); }
+                            GenericConfigForm {
+                                fields: root.common-engine-config-fields;
+                                form-title: "引擎公共设置";
+                                form-description: "调整核心原生渲染分辨率（滤镜输入），保存后在下次启动时应用；不改变逻辑舞台或窗口尺寸。";
+                                empty-message: "当前模拟器未提供可调的核心原生渲染分辨率（滤镜输入）。若刚切换模拟器，请先保存选择；滤镜仍可独立配置。";
+                                show-actions: false;
+                                field-changed(key, value) => { root.family-config-changed(key, value); }
+                            }
+
+                            Rectangle { height: 1px; background: Theme.outline-variant; }
+
+                            GenericConfigForm {
+                                fields: root.family-config-fields;
+                                form-title: "模拟器专属设置";
+                                form-description: "选择模拟器与配置范围；公共设置和专属参数一起保存，启动时应用。";
+                                empty-message: "没有可用的模拟器配置；请检查模拟器安装与游戏识别结果。";
+                                show-actions: false;
+                                field-changed(key, value) => { root.family-config-changed(key, value); }
+                            }
+
+                            if root.musica-key-file-available : VerticalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: "Musica 运行时只读取 key.toml；文件包含已确认的 PAZ 参数与密钥。其他格式请先用开发工具转换。";
+                                    wrap: word-wrap;
+                                    color: Theme.on-surface-variant;
+                                }
+                                M3Button {
+                                    text: "选择 key.toml 并应用到当前游戏";
+                                    clicked => { root.select-musica-key-file(); }
+                                }
+                            }
+
+                            if root.common-engine-config-fields.length > 0 || root.family-config-fields.length > 0 : HorizontalLayout {
+                                spacing: 10px;
+                                Rectangle { horizontal-stretch: 1; }
+                                M3Button {
+                                    text: "重置";
+                                    variant: "outlined";
+                                    clicked => { root.reset-family-config(); }
+                                }
+                                M3Button {
+                                    text: "保存配置";
+                                    primary: true;
+                                    enabled: root.selected-case-id != "";
+                                    clicked => { root.save-family-config(); }
+                                }
+                            }
                         }
                     }
                 }
             }
         }
-    }
-
-    // Mobile layout: 2-column grid + bottom action sheet
-    if !root.desktop-mode : VerticalLayout {
-        padding-top: 12px;
-        padding-left: 12px;
-        padding-right: 12px;
-        padding-bottom: 8px;
-        spacing: 10px;
-
-        mobileSearchDebounce := Timer {
-            interval: 300ms;
-            triggered => { root.search(root.search-query); }
-        }
-
-        HorizontalLayout {
-            spacing: 8px;
-
-            Rectangle {
-                horizontal-stretch: 1;
-                height: 38px;
-                border-radius: 19px;
-                background: Theme.surface-container-high;
-                border-width: 1px;
-                border-color: Theme.outline-variant;
-
-                HorizontalLayout {
-                    padding-left: 14px;
-                    padding-right: 12px;
-                    spacing: 8px;
-                    alignment: center;
-
-                    Icon {
-                        glyph: Icons.search;
-                        font-size: 14px;
-                        color: Theme.on-surface-variant;
-                        vertical-alignment: center;
-                    }
-
-                    Rectangle {
-                        horizontal-stretch: 1;
-                        height: 28px;
-
-                        if root.search-query == "" : Text {
-                            text: "搜索作品库";
-                            color: Theme.on-surface-variant;
-                            font-size: Theme.font-body-md;
-                            vertical-alignment: center;
-                            x: 0px;
-                            width: parent.width;
-                        }
-
-                        TextInput {
-                            text <=> root.search-query;
-                            color: Theme.on-surface;
-                            font-size: Theme.font-body-md;
-                            vertical-alignment: center;
-                            single-line: true;
-                            x: 0px;
-                            width: parent.width;
-                            edited => { mobileSearchDebounce.restart(); }
-                        }
-                    }
-                }
-            }
-
-            M3Button {
-                text: "扫描";
-                icon: Icons.rotate;
-                variant: "tonal";
-                clicked => { root.rescan(); }
-            }
-        }
-
-        if root.view-mode == "grid" : ScrollView {
-            mouse-drag-pan-enabled: true;
-
-            GridLayout {
-                spacing: 10px;
-
-                for game[index] in games: CoverCard {
-                    row: Math.floor(index / 2);
-                    col: Math.mod(index, 2);
-                    game: game;
-                    selected: game.case-id == root.selected-case-id;
-                    activated(id) => { root.select-case(id); }
-                    launch(id) => { root.launch(id); }
-                }
-            }
-        }
-
-        if root.view-mode == "list" : ScrollView {
-            mouse-drag-pan-enabled: true;
-
-            VerticalLayout {
-                spacing: 6px;
-
-                for game in games: GameListRow {
-                    game: game;
-                    selected: game.case-id == root.selected-case-id;
-                    density: root.density;
-                    activated(id) => { root.selected-case-id = id; root.select-case(id); }
-                    launch(id) => { root.launch(id); }
-                }
-            }
-        }
-
-        // Mobile Bottom Sheet on selection
-        if root.selected-case-id != "" : Rectangle {
-            background: Theme.surface-container-high;
-            border-radius: Theme.shape-lg;
-            border-width: 1px;
-            border-color: Theme.outline-variant;
-
-            VerticalLayout {
-                padding: 14px;
-                spacing: 10px;
-
-                HorizontalLayout {
-                    spacing: 8px;
-
-                    VerticalLayout {
-                        horizontal-stretch: 1;
-                        alignment: center;
-                        spacing: 2px;
-
-                        Text {
-                            text: root.selected-title != "" ? root.selected-title : root.selected-case-id;
-                            color: Theme.on-surface;
-                            wrap: word-wrap;
-                            font-weight: 600;
-                        }
-                        Text {
-                            text: root.selected-family;
-                            color: Theme.primary;
-                            font-size: Theme.font-label-md;
-                        }
-                    }
-
-                    Button {
-                        text: "启动";
-                        enabled: root.selected-family != "";
-                        clicked => { root.launch(root.selected-case-id); }
-                    }
-                }
-
-                Rectangle { height: 1px; background: Theme.outline-variant; }
-
-                BangumiProgressSection {
-                    play-status <=> root.bangumi-play-status;
-                    rating <=> root.bangumi-rating;
-                    note <=> root.bangumi-note;
-                    sync-summary: root.bangumi-sync-summary;
-                    has-case: root.selected-case-id != "";
-                    sync(status, rating, note) => { root.update-bangumi-play-status(status, rating, note); }
-                }
-            }
-        }
-    }
 }

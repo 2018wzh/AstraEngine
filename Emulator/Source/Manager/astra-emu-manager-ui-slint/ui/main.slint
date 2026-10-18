@@ -2,7 +2,7 @@
 // Assembles theme, sidebar navigation, pages and the game view.
 // Exports ManagerWindow with the full public API consumed by the Rust adapter.
 
-import { AboutSlint, Button, CheckBox, ComboBox, LineEdit, ScrollView, SpinBox, TextEdit } from "std-widgets.slint";
+import { AboutSlint, Button, CheckBox, ComboBox, LineEdit, Palette, ScrollView, SpinBox, TextEdit } from "std-widgets.slint";
 import { Theme } from "./theme.slint";
 import { Sidebar, BottomNav } from "./components/sidebar.slint";
 import { GameCard } from "./components/cover-card.slint";
@@ -29,25 +29,19 @@ export component ManagerWindow inherits Window {
     in-out property <string> modal-text;
     callback modal-submit(int, string);
     callback modal-cancel();
-    title: (game-active && has-game-title ? game-title : (demo-mode ? "AstraEMU Manager [DEMO]" : "AstraEMU Manager"))
-        + (game-active && audio-device == "null" ? " [NullAudio]" : "");
+    title: game-active && has-game-title ? game-title : (demo-mode ? "AstraEMU Manager [DEMO]" : "AstraEMU Manager");
     background: Theme.background;
     min-width: 360px;
     min-height: 640px;
     preferred-width: 1280px;
     preferred-height: 800px;
 
-    // Safe area / usable region — Rinne three-breakpoint (narrow/medium/wide)
+    // Keep navigation and game geometry inside the platform safe area.
     property <length> usable-x: root.safe-area-insets.left;
     property <length> usable-y: root.safe-area-insets.top;
     property <length> usable-width: root.width - root.safe-area-insets.left - root.safe-area-insets.right;
     property <length> usable-height: root.height - root.safe-area-insets.top - root.safe-area-insets.bottom;
-    // narrow <840 → mobile 2-col, medium 840-1280 → 3-col, wide >=1280 → 4-6 col
-    property <bool> desktop-mode: root.usable-width >= 840px;
-    property <bool> wide-mode: root.usable-width >= 1280px;
-    property <bool> narrow-mode: root.usable-width < 840px;
-    // Adaptive columns for Rinne-style grid
-    property <int> adaptive-columns: root.wide-mode ? 5 : root.desktop-mode ? 3 : 2;
+    property <bool> desktop-mode: root.usable-width >= 1000px;
 
     // ===== Navigation =====
     in-out property <string> current-page: "library";
@@ -59,15 +53,32 @@ export component ManagerWindow inherits Window {
     in-out property <string> density <=> Theme.density;
     in-out property <int> grid-columns: 3;
     in-out property <string> view-mode: "grid";
+    // Native widgets and custom M3 controls share the same resolved appearance.
+    init => { Palette.color-scheme = Theme.effective-dark ? ColorScheme.dark : ColorScheme.light; }
+    changed theme-mode => { Palette.color-scheme = Theme.effective-dark ? ColorScheme.dark : ColorScheme.light; }
+    changed theme-dark => { Palette.color-scheme = Theme.effective-dark ? ColorScheme.dark : ColorScheme.light; }
 
     // ===== Library =====
     in property <[GameCard]> games;
+    in property <bool> cores-ready;
+    in property <bool> core-refresh-enabled;
+    in property <bool> startup-busy;
+    in property <string> startup-status;
+    in-out property <bool> cover-loading-enabled: false;
+    in property <image> selected-cover;
+    callback cover-demand(int, string, bool, string);
+    changed cover-loading-enabled => { root.cover-demand(-1, "", false, ""); }
+    changed selected-case-id => { root.cover-demand(-1, "", false, ""); }
+    changed current-page => { root.cover-demand(-1, "", false, ""); }
+    changed view-mode => { root.cover-demand(-1, "", false, ""); }
     in-out property <string> selected-case-id;
     in-out property <string> search-query;
     in property <string> endpoint-identity;
     in property <string> model-identity;
     in property <string> selected-title;
     in property <string> selected-family;
+    in property <string> selected-emulator;
+    in property <bool> selected-launchable;
     in property <string> selected-play-time;
     in property <string> selected-last-played;
     in property <[PlaySession]> play-history;
@@ -96,10 +107,10 @@ export component ManagerWindow inherits Window {
 
     // ===== Global diagnostic =====
     in property <string> global-diagnostic;
-    in property <string> audio-device: "native";
-    callback set-audio-device(string);
     in-out property <bool> fatal-error-active: false;
     in-out property <string> fatal-error-message;
+    in-out property <bool> core-retryable: false;
+    callback retry-core();
 
     // ===== Game view =====
     in property <image> stage-frame;
@@ -116,12 +127,13 @@ export component ManagerWindow inherits Window {
     in-out property <float> game-content-window-y;
     in-out property <float> game-content-window-width;
     in-out property <float> game-content-window-height;
-    in-out property <bool> game-cursor-visible: true;
     callback pointer-state-changed();
-    changed game-active => { root.pointer-state-changed(); }
+    changed game-active => { root.pointer-state-changed(); root.cover-demand(-1, "", false, ""); }
     changed translation-overlay-active => { root.pointer-state-changed(); }
     changed diagnostics-overlay-active => { root.pointer-state-changed(); }
     changed filters-overlay-active => { root.pointer-state-changed(); }
+    changed modal-active => { root.pointer-state-changed(); }
+    changed fatal-error-active => { root.pointer-state-changed(); }
     changed game-content-window-x => { root.pointer-state-changed(); }
     changed game-content-window-y => { root.pointer-state-changed(); }
     changed game-content-window-width => { root.pointer-state-changed(); }
@@ -165,7 +177,9 @@ export component ManagerWindow inherits Window {
     in property <[GamepadBinding]> gamepad-bindings;
 
     // ===== Generic config (Family / Extension / Filter) =====
+    in property <[ConfigField]> common-engine-config-fields;
     in property <[ConfigField]> family-config-fields;
+    in property <bool> musica-key-file-available;
     in property <[ConfigField]> filter-config-fields;
 
     // ===== About =====
@@ -173,12 +187,7 @@ export component ManagerWindow inherits Window {
     in property <string> build-identity;
 
     // ===== Settings navigation =====
-    in-out property <string> settings-category: "translation";
-
-    // ===== Legacy page flags (kept for adapter compatibility) =====
-    in-out property <bool> about-active: false;
-    in-out property <bool> settings-active: false;
-    in-out property <bool> metadata-active: false;
+    in-out property <string> settings-category: "appearance";
 
     // ===== Callbacks =====
     callback launch(string);
@@ -190,6 +199,7 @@ export component ManagerWindow inherits Window {
     callback open-translation();
     callback open-filters();
     callback rescan();
+    callback refresh-cores();
     callback add-game-directory();
     callback open-settings();
     callback set-library-sort(string);
@@ -229,6 +239,7 @@ export component ManagerWindow inherits Window {
     callback load-filter-source();
     callback save-filter-config();
     callback reset-family-config();
+    callback select-musica-key-file();
     callback reset-filter-config();
 
     // ===== Game view (overlays everything when active) =====
@@ -253,9 +264,9 @@ export component ManagerWindow inherits Window {
         pointer-content-y <=> root.game-content-window-y;
         pointer-content-width <=> root.game-content-window-width;
         pointer-content-height <=> root.game-content-window-height;
-        cursor-visible: root.game-cursor-visible;
+        input-blocked: root.modal-active || root.fatal-error-active;
         game-input(control, pressed, value) => {
-            if !root.modal-active { root.game-input(control, pressed, value); }
+            if !root.modal-active && !root.fatal-error-active { root.game-input(control, pressed, value); }
         }
         leave-game => { root.leave-game(); }
 
@@ -266,28 +277,38 @@ export component ManagerWindow inherits Window {
         diagnostics-summary: root.diagnostics-summary;
         global-diagnostic: root.global-diagnostic;
         set-filter-preset(preset) => { root.set-filter-preset(preset); }
+        filter-config-fields: root.filter-config-fields;
+        filter-config-changed(key, value) => { root.filter-config-changed(key, value); }
+        load-filter-source => { root.load-filter-source(); }
+        save-filter-config => { root.save-filter-config(); }
+        reset-filter-config => { root.reset-filter-config(); }
 
     }
 
     // ===== Manager shell (hidden while game is active) =====
-    if !root.game-active : HorizontalLayout {
+    if !root.game-active : Rectangle {
         x: root.usable-x;
         y: root.usable-y;
         width: root.usable-width;
         height: root.usable-height;
-        spacing: 0px;
 
         // Desktop sidebar
         if root.desktop-mode : Sidebar {
+            x: 0px;
+            y: 0px;
+            height: parent.height;
             current-page: root.current-page;
-            dark-mode: root.theme-dark;
+            dark-mode: Theme.effective-dark;
             navigate(page) => { root.navigate(page); }
             toggle-theme => { root.toggle-theme(); }
         }
 
         // Content column
         VerticalLayout {
-            horizontal-stretch: 1;
+            x: root.desktop-mode ? 200px : 0px;
+            y: 0px;
+            width: parent.width - self.x;
+            height: parent.height;
             spacing: 0px;
 
             // Page content
@@ -297,6 +318,13 @@ export component ManagerWindow inherits Window {
 
                 if root.current-page == "library" : LibraryPage {
                     games: root.games;
+                    cores-ready: root.cores-ready;
+                    core-refresh-enabled: root.core-refresh-enabled;
+                    startup-busy: root.startup-busy;
+                    startup-status: root.startup-status;
+                    cover-loading-enabled: root.cover-loading-enabled;
+                    selected-cover: root.selected-cover;
+                    cover-demand(row, id, needed, view) => { root.cover-demand(row, id, needed, view); }
                     match-reviews: root.match-reviews;
                     metadata-busy: root.metadata-busy;
                     metadata-status: root.metadata-status;
@@ -313,6 +341,8 @@ export component ManagerWindow inherits Window {
                     model-identity: root.model-identity;
                     selected-title: root.selected-title;
                     selected-family: root.selected-family;
+                    selected-emulator: root.selected-emulator;
+                    selected-launchable: root.selected-launchable;
                     selected-play-time: root.selected-play-time;
                     selected-last-played: root.selected-last-played;
                     play-history: root.play-history;
@@ -328,11 +358,14 @@ export component ManagerWindow inherits Window {
                     bangumi-rating <=> root.bangumi-rating;
                     bangumi-note <=> root.bangumi-note;
                     bangumi-sync-summary: root.bangumi-sync-summary;
-                    grid-columns: root.adaptive-columns;
+                    grid-columns: root.grid-columns;
                     desktop-mode: root.desktop-mode;
                     view-mode <=> root.view-mode;
                     density: root.density;
+                    common-engine-config-fields: root.common-engine-config-fields;
                     family-config-fields: root.family-config-fields;
+                    musica-key-file-available: root.musica-key-file-available;
+                    select-musica-key-file => { root.select-musica-key-file(); }
                     selected-developer: root.selected-developer;
                     selected-release-date: root.selected-release-date;
                     selected-platforms: root.selected-platforms;
@@ -345,6 +378,7 @@ export component ManagerWindow inherits Window {
                     select-case(id) => { root.select-case(id); }
                     search(query) => { root.search(query); }
                     rescan => { root.rescan(); }
+                    refresh-cores => { root.refresh-cores(); }
                     add-game-directory => { root.add-game-directory(); }
                     set-library-sort(mode) => { root.set-library-sort(mode); }
                     refresh-compatibility => { root.refresh-compatibility(); }
@@ -361,8 +395,6 @@ export component ManagerWindow inherits Window {
 
 
                 if root.current-page == "settings" : SettingsPage {
-                    audio-device: root.audio-device;
-                    set-audio-device(device) => { root.set-audio-device(device); }
                     category <=> root.settings-category;
                     desktop-mode: root.desktop-mode;
                     has-selected-case: root.selected-case-id != "";
@@ -398,7 +430,7 @@ export component ManagerWindow inherits Window {
                     set-filter-preset(preset) => { root.set-filter-preset(preset); }
                     filter-config-changed(key, value) => { root.filter-config-changed(key, value); }
                     load-filter-source => { root.load-filter-source(); }
-                save-filter-config => { root.save-filter-config(); }
+                    save-filter-config => { root.save-filter-config(); }
                     reset-filter-config => { root.reset-filter-config(); }
 
                     // Compatibility
@@ -421,7 +453,7 @@ export component ManagerWindow inherits Window {
                     clear-per-game-input-mapping => { root.clear-per-game-input-mapping(); }
 
                     // Appearance
-                    dark-mode: root.theme-dark;
+                    dark-mode: Theme.effective-dark;
                     theme-mode <=> root.theme-mode;
                     accent <=> root.accent;
                     grid-columns <=> root.grid-columns;
@@ -450,23 +482,6 @@ export component ManagerWindow inherits Window {
     }
 
     // ===== Global diagnostic banner (M3 Snackbar / Banner) =====
-    if root.game-active && root.audio-device == "null" : Rectangle {
-        x: root.usable-x + root.usable-width - self.width - 16px;
-        y: root.usable-y + 16px;
-        width: 208px;
-        height: 32px;
-        background: Theme.surface-container-high;
-        border-radius: Theme.shape-md;
-        z: 30;
-        Text {
-            text: "测试音频 · 不播放声音";
-            color: Theme.on-surface;
-            font-size: Theme.font-label-md;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-        }
-    }
-
     if root.global-diagnostic != "" : Rectangle {
         x: root.usable-x + 16px;
         y: root.usable-y + root.usable-height - self.height - 16px;
@@ -479,16 +494,21 @@ export component ManagerWindow inherits Window {
         border-color: Theme.error;
         z: 100;
 
-        diagnostic-text := Text {
-            text: root.global-diagnostic;
-            color: Theme.on-error-container;
-            font-size: Theme.font-body-sm;
-            wrap: word-wrap;
-            vertical-alignment: center;
+        TouchArea {}
+        ScrollView {
             x: 16px;
             y: 12px;
             width: parent.width - 32px;
             height: parent.height - 24px;
+            VerticalLayout {
+                alignment: start;
+                diagnostic-text := Text {
+                    text: root.global-diagnostic;
+                    color: Theme.on-error-container;
+                    font-size: Theme.font-body-sm;
+                    wrap: word-wrap;
+                }
+            }
         }
     }
 
@@ -532,10 +552,14 @@ export component ManagerWindow inherits Window {
                 }
                 HorizontalLayout {
                     alignment: end;
+                    if root.core-retryable : M3Button {
+                        text: "重试";
+                        clicked => { root.retry-core(); }
+                    }
                     M3Button {
-                        text: "知道了 (Acknowledge)";
+                        text: root.game-active ? "结束游戏" : "知道了";
                         primary: true;
-                        clicked => { root.fatal-error-active = false; }
+                        clicked => { if root.game-active { root.leave-game(); } root.core-retryable = false; root.fatal-error-active = false; }
                     }
                 }
             }
@@ -563,10 +587,13 @@ export component ManagerWindow inherits Window {
                 }
                 ScrollView {
                     vertical-stretch: 1;
-                    Text {
-                        text: root.modal-message;
-                        color: Theme.on-surface;
-                        wrap: word-wrap;
+                    VerticalLayout {
+                        alignment: start;
+                        Text {
+                            text: root.modal-message;
+                            color: Theme.on-surface;
+                            wrap: word-wrap;
+                        }
                     }
                 }
                 if root.modal-has-input : LineEdit {

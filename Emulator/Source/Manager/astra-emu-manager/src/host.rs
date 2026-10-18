@@ -69,17 +69,17 @@ pub trait AstraUnderlayRenderer: 'static {
         Ok(None)
     }
     fn render(&mut self, context: WgpuFrameContext<'_>) -> Result<(), String>;
-    fn teardown(&mut self);
+    fn teardown(&mut self) -> Result<(), String>;
 }
 
 pub trait ManagerController: 'static {
     fn game_fullscreen(&self) -> bool {
         false
     }
-    fn take_game_icon(&mut self) -> Option<astra_emu_family_api::FamilyWindowIcon> {
+    fn take_game_icon(&mut self) -> Option<astra_emu_manager_core::model::FamilyWindowIcon> {
         None
     }
-    fn take_game_pointer(&mut self) -> Option<astra_emu_family_api::FamilyPointerRequest> {
+    fn take_game_pointer(&mut self) -> Option<astra_emu_manager_core::model::FamilyPointerRequest> {
         None
     }
     fn game_title(&self) -> Option<&str> {
@@ -91,13 +91,37 @@ pub trait ManagerController: 'static {
     fn respond_modal(
         &mut self,
         _id: crate::modal_service::ModalId,
-        _response: astra_emu_family_api::ModalResponse,
+        _response: astra_emu_manager_core::model::ModalResponse,
     ) -> Result<(), String> {
         Err("ASTRA_EMU_MANAGER_MODAL_SERVICE_UNAVAILABLE".into())
     }
-    fn set_window_state(&mut self, state: astra_emu_family_api::WindowState) -> Result<(), String>;
-    fn physical_event(&mut self, event: astra_emu_family_api::FamilyEvent) -> Result<(), String>;
+    fn take_window_request(&mut self) -> Option<crate::window_service::WindowPresentation> {
+        None
+    }
+    fn respond_window(
+        &mut self,
+        _request: &crate::window_service::WindowPresentation,
+        _result: Result<crate::window_service::WindowOutcome, String>,
+    ) -> Result<(), String> {
+        Err("ASTRA_EMU_WINDOW_SERVICE_UNAVAILABLE".into())
+    }
+    fn native_failure(&self) -> Option<(&str, bool)> {
+        None
+    }
+    fn retry_native(&mut self) -> Result<(), String> {
+        Err("ASTRA_EMU_CORE_RETRY_UNAVAILABLE".into())
+    }
+    fn set_window_state(
+        &mut self,
+        state: astra_emu_manager_core::model::WindowState,
+    ) -> Result<(), String>;
+    fn physical_event(
+        &mut self,
+        event: astra_emu_manager_core::model::FamilyEvent,
+    ) -> Result<(), String>;
     fn is_game_active(&self) -> bool;
+    /// Starts core discovery only after a user action; never waits or scans games.
+    fn refresh_cores(&mut self) -> Result<ManagerViewModel, String>;
     fn model(&self) -> Result<ManagerViewModel, String>;
     fn select_case(&mut self, case_id: &str) -> Result<ManagerViewModel, String>;
     fn search(&mut self, query: &str) -> Result<ManagerViewModel, String>;
@@ -165,10 +189,10 @@ pub trait ManagerController: 'static {
     fn set_accent(&mut self, _accent: &str) -> Result<(), String>;
     fn set_density(&mut self, _density: &str) -> Result<(), String>;
     fn set_view_mode(&mut self, _view_mode: &str) -> Result<(), String>;
-    fn set_audio_device(&mut self, device: &str) -> Result<(), String>;
     fn family_config_changed(&mut self, _key: &str, _value: &str) -> Result<(), String>;
     fn save_family_config(&mut self) -> Result<ManagerViewModel, String>;
     fn reset_family_config(&mut self) -> Result<ManagerViewModel, String>;
+    fn select_musica_key_file(&mut self) -> Result<ManagerViewModel, String>;
     fn filter_config_changed(&mut self, _key: &str, _value: &str) -> Result<(), String>;
     fn reset_filter_config(&mut self) -> Result<ManagerViewModel, String>;
     /// Library sort mode: "title" | "recent" | "play_time".
@@ -234,6 +258,7 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
     renderer: R,
     game_active: bool,
 ) -> Result<(), HostError> {
+    crate::startup::mark("ui_backend_begin");
     #[cfg(not(target_os = "android"))]
     {
         let mut settings = slint::wgpu_29::WGPUSettings::default();
@@ -248,8 +273,11 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
             .require_wgpu_29(slint::wgpu_29::WGPUConfiguration::Automatic(settings))
             .select()?;
     }
+    crate::startup::mark("ui_backend_selected");
     let adapter = std::rc::Rc::new(SlintManagerAdapter::new()?);
+    crate::startup::mark("window_object_created");
     adapter.apply(&controller.model().map_err(HostError::Renderer)?);
+    crate::startup::mark("initial_model_applied");
     adapter.window().set_game_active(game_active);
     let controller = std::rc::Rc::new(std::cell::RefCell::new(controller));
     let renderer = std::rc::Rc::new(std::cell::RefCell::new(renderer));
@@ -333,19 +361,23 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                         terminate_game(&controller, &adapter, &window, error);
                     }
                 }
-                let fullscreen = controller.borrow().game_fullscreen();
-                if window.window().is_fullscreen() != fullscreen {
-                    window.window().set_fullscreen(fullscreen);
-                    tracing::debug!(
-                        event = "astra.emu.host.window.fullscreen_requested",
-                        fullscreen
-                    );
-                }
                 let pointer_request = controller.borrow_mut().take_game_pointer();
                 if let Some(request) = pointer_request {
                     if let Err(error) = pointer::HostPointer::apply(&pointer, &window, request) {
                         terminate_game(&controller, &adapter, &window, error);
                     }
+                }
+                let request = controller.borrow_mut().take_window_request();
+                if let Some(request) = request {
+                    let result = window_commands::execute(&window, &pointer, &request.command);
+                    if let Err(error) = controller.borrow_mut().respond_window(&request, result) {
+                        window.set_global_diagnostic(error.into());
+                    }
+                }
+                if let Some((failure, can_retry)) = controller.borrow().native_failure() {
+                    window.set_core_retryable(can_retry);
+                    window.set_fatal_error_message(failure.into());
+                    window.set_fatal_error_active(true);
                 }
                 window.window().request_redraw();
             }
@@ -372,6 +404,7 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
     let event_pending = async_events_pending.clone();
     let renderer_callback = renderer.clone();
     let initial_window_pending = std::cell::Cell::new(true);
+    let first_ui_frame_pending = std::cell::Cell::new(true);
     adapter.window().window().set_rendering_notifier(move |state, api| {
         let slint::GraphicsAPI::WGPU29 { device, queue, .. } = api else {
             record_fatal(&fatal_error_callback, "rendering notifier did not provide WGPU 29".into());
@@ -381,6 +414,7 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
         let context = WgpuFrameContext { device, queue };
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match state {
             slint::RenderingState::RenderingSetup => {
+                crate::startup::mark("ui_gpu_ready");
                 renderer_callback.borrow_mut().setup(context)?;
                 if let Some(window) = event_window.upgrade() {
                     if initial_window_pending.replace(false) {
@@ -412,6 +446,7 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                 if let Some(window) = event_window.upgrade() {
                     modals::service(&window, &event_controller, &modal_ui);
                     let input_blocked = !window.get_game_active()
+                        || window.get_fatal_error_active()
                         || window.get_modal_active()
                         || window.get_translation_overlay_active()
                         || window.get_diagnostics_overlay_active()
@@ -460,7 +495,19 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                 }
                 Ok(())
             },
-            slint::RenderingState::RenderingTeardown => { renderer_callback.borrow_mut().teardown(); Ok(()) }
+            slint::RenderingState::AfterRendering => {
+                if first_ui_frame_pending.replace(false) {
+                    crate::startup::mark("first_ui_frame_rendered");
+                    let weak = event_window.clone();
+                    slint::Timer::single_shot(std::time::Duration::ZERO, move || {
+                        if let Some(window) = weak.upgrade() {
+                            window.set_cover_loading_enabled(true);
+                        }
+                    });
+                }
+                Ok(())
+            },
+            slint::RenderingState::RenderingTeardown => renderer_callback.borrow_mut().teardown(),
             _ => Ok(()),
         })).unwrap_or_else(|_| Err("underlay renderer panicked".into()));
         if let Err(error) = result {
@@ -469,13 +516,22 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
             let _ = slint::quit_event_loop();
         }
     }).map_err(|error| HostError::Renderer(error.to_string()))?;
+    crate::startup::mark("window_show_requested");
     adapter.window().show()?;
+    crate::startup::mark("window_show_returned");
     let run_result = adapter.window().run();
     runtime_timer.stop();
     runtime_schedule.borrow_mut().take();
     let shutdown_result = controller.borrow_mut().leave_game();
+    // A notifier can be torn down only when the window is dropped. Drain the
+    // graphics owner explicitly before choosing the application's exit result.
+    let graphics_result = renderer.borrow_mut().teardown();
+    if let Err(error) = &graphics_result {
+        tracing::error!(event = "astra.emu.host.graphics_cleanup_failed", message = %error);
+    }
     run_result?;
     shutdown_result.map_err(HostError::Renderer)?;
+    graphics_result.map_err(HostError::Renderer)?;
     if let Some(error) = fatal_error.borrow_mut().take() {
         return Err(HostError::Renderer(error));
     }
@@ -546,8 +602,9 @@ fn terminate_game<C: ManagerController>(
                     .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_')
         })
         .unwrap_or("ASTRA_EMU_SESSION_FAILED");
-    tracing::error!(event = "astra.emu.host.game_terminated", diagnostic_code);
+    tracing::error!(event = "astra.emu.host.game_terminated", diagnostic_code, message = %message);
     window.set_global_diagnostic(message.clone().into());
     window.set_fatal_error_message(message.into());
+    window.set_core_retryable(false);
     window.set_fatal_error_active(true);
 }

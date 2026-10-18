@@ -219,6 +219,33 @@ impl AstraEmuManagerController {
             .library
             .metadata_snapshot(game_id, provider.as_str())
             .map_err(|error| error.to_string())?;
+        Self::decode_metadata_snapshot(identity, snapshot.as_ref())
+    }
+
+    pub(super) fn metadata_from_snapshot(
+        game_id: &str,
+        identities: &[astra_emu_manager_core::ExternalIdentityRecord],
+        snapshots: &BTreeMap<(String, String), astra_emu_manager_core::MetadataSnapshotRecord>,
+    ) -> Result<Option<MetadataRecord>, String> {
+        for provider in [MetadataProviderId::Vndb, MetadataProviderId::Bangumi] {
+            let Some(identity) = identities
+                .iter()
+                .find(|entry| entry.provider == provider.as_str())
+            else {
+                continue;
+            };
+            let snapshot = snapshots.get(&(game_id.to_owned(), provider.as_str().to_owned()));
+            if let Some(record) = Self::decode_metadata_snapshot(identity, snapshot)? {
+                return Ok(Some(record));
+            }
+        }
+        Ok(None)
+    }
+
+    fn decode_metadata_snapshot(
+        identity: &astra_emu_manager_core::ExternalIdentityRecord,
+        snapshot: Option<&astra_emu_manager_core::MetadataSnapshotRecord>,
+    ) -> Result<Option<MetadataRecord>, String> {
         snapshot
             .map(|snapshot| {
                 if snapshot.remote_id != identity.remote_id {
@@ -230,76 +257,27 @@ impl AstraEmuManagerController {
             .transpose()
     }
 
-    pub(super) fn metadata_for_game(
+    pub(super) fn compatibility_for_identities(
         &self,
         game_id: &str,
-    ) -> Result<Option<MetadataRecord>, String> {
-        if let Some(record) = self.metadata_record(game_id, MetadataProviderId::Vndb)? {
-            return Ok(Some(record));
-        }
-        self.metadata_record(game_id, MetadataProviderId::Bangumi)
-    }
-
-    pub(super) fn cover_uri(&self, game_id: &str) -> Result<String, String> {
-        if self.metadata_for_game(game_id)?.is_none() {
-            return Ok(String::new());
-        }
-        let directory = self.data_dir.join("covers");
-        for extension in ["png", "jpg", "webp", "gif", "bmp"] {
-            let path = directory.join(format!("{game_id}.{extension}"));
-            match fs::metadata(&path) {
-                Ok(metadata) if metadata.is_file() => {
-                    return path
-                        .to_str()
-                        .map(ToOwned::to_owned)
-                        .ok_or_else(|| "ASTRA_EMU_METADATA_COVER_PATH_UTF8".to_owned());
-                }
-                Ok(_) => return Err("ASTRA_EMU_METADATA_COVER_NOT_FILE".into()),
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(_) => return Err("ASTRA_EMU_METADATA_COVER_STAT".into()),
-            }
-        }
-        Ok(String::new())
-    }
-
-    pub(super) fn compatibility_for_game(
-        &self,
-        game: &GameRecord,
-    ) -> Result<Option<CompatibilityEntry>, String> {
-        let Some(database) = self.compatibility_database.as_ref() else {
-            return Ok(None);
-        };
-        let identities = self
-            .library
-            .external_identities(&game.game_id)
-            .map_err(|error| error.to_string())?;
-        let Some(vndb_id) = identities
+        identities: &[astra_emu_manager_core::ExternalIdentityRecord],
+    ) -> Option<&CompatibilityEntry> {
+        let database = self.compatibility_database.as_ref()?;
+        let vndb_id = identities
             .iter()
-            .find(|identity| identity.provider == MetadataProviderId::Vndb.as_str())
-            .map(|identity| identity.remote_id.as_str())
-        else {
-            return Ok(None);
-        };
-        let pinned = self.pinned_releases.get(&game.game_id);
+            .find(|identity| identity.provider == MetadataProviderId::Vndb.as_str())?
+            .remote_id
+            .as_str();
+        let pinned = self.pinned_releases.get(game_id);
         let mut matches = database
             .entries
             .iter()
             .filter(|entry| entry.vn_id == vndb_id)
             .filter(|entry| pinned.is_none_or(|release| entry.release_id == *release));
-        let first = matches.next().cloned();
+        let first = matches.next();
         if pinned.is_none() && matches.next().is_some() {
-            return Ok(None);
+            return None;
         }
-        Ok(first)
-    }
-
-    pub(super) fn compatibility_status_for_game(
-        &self,
-        game: &GameRecord,
-    ) -> Result<String, String> {
-        Ok(self
-            .compatibility_for_game(game)?
-            .map(|entry| entry.status.as_str().to_owned())
-            .unwrap_or_default())
+        first
     }
 }

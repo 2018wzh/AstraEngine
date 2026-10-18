@@ -8,8 +8,6 @@ pub(super) fn install<C: ManagerController>(
     adapter.window().on_open_settings(move || {
         if let Some(window) = settings_weak.upgrade() {
             window.set_current_page("settings".into());
-            window.set_about_active(false);
-            window.set_settings_active(true);
         }
     });
     // ===== Navigation / theme / appearance =====
@@ -96,20 +94,34 @@ pub(super) fn install<C: ManagerController>(
     appearance_callback!(on_set_accent, set_accent);
     appearance_callback!(on_set_density, set_density);
     appearance_callback!(on_set_view_mode, set_view_mode);
-    appearance_callback!(on_set_audio_device, set_audio_device);
     // Generic config handlers
     {
         let c = controller.clone();
+        let a = std::rc::Rc::downgrade(adapter);
         let w = adapter.window().as_weak();
         adapter
             .window()
             .on_family_config_changed(move |key, value| {
-                if let Err(error) = c
-                    .borrow_mut()
-                    .family_config_changed(key.as_str(), value.as_str())
-                {
-                    if let Some(window) = w.upgrade() {
-                        window.set_global_diagnostic(error.into());
+                let result = {
+                    let mut controller = c.borrow_mut();
+                    controller
+                        .family_config_changed(key.as_str(), value.as_str())
+                        .and_then(|()| {
+                            if matches!(
+                                key.as_str(),
+                                "manager.emulator_id" | "manager.config_scope"
+                            ) {
+                                controller.model().map(Some)
+                            } else {
+                                Ok(None)
+                            }
+                        })
+                };
+                if let Some(window) = w.upgrade() {
+                    match result {
+                        Ok(Some(model)) => apply_model(&a, &model),
+                        Ok(None) => {}
+                        Err(error) => window.set_global_diagnostic(error.into()),
                     }
                 }
             });
@@ -134,6 +146,20 @@ pub(super) fn install<C: ManagerController>(
         let w = adapter.window().as_weak();
         adapter.window().on_reset_family_config(move || {
             let result = c.borrow_mut().reset_family_config();
+            if let Some(window) = w.upgrade() {
+                match result {
+                    Ok(model) => apply_model(&a, &model),
+                    Err(error) => window.set_global_diagnostic(error.into()),
+                }
+            }
+        });
+    }
+    {
+        let c = controller.clone();
+        let a = std::rc::Rc::downgrade(adapter);
+        let w = adapter.window().as_weak();
+        adapter.window().on_select_musica_key_file(move || {
+            let result = c.borrow_mut().select_musica_key_file();
             if let Some(window) = w.upgrade() {
                 match result {
                     Ok(model) => apply_model(&a, &model),

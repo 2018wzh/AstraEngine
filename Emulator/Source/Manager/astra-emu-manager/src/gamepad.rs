@@ -91,7 +91,7 @@ impl GameInputPump {
                 Ok(batch) => output.extend(batch?),
                 Err(mpsc::TryRecvError::Empty) => break,
                 Err(mpsc::TryRecvError::Disconnected) => {
-                    return Err("ASTRA_EMU_GAMEPAD_WORKER_STOPPED".into())
+                    return Err("ASTRA_EMU_GAMEPAD_WORKER_STOPPED".into());
                 }
             }
         }

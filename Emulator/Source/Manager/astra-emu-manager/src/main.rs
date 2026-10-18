@@ -1,9 +1,10 @@
-mod audio_executor;
-mod headless;
 mod manager_app;
 mod metadata_runtime;
 mod platform_secret;
 mod stage_renderer;
+#[cfg(test)]
+#[path = "../../astra-emu-manager-core/src/test_native.rs"]
+mod test_native;
 mod text_service;
 
 use clap::Parser;
@@ -14,14 +15,37 @@ const FAMILY_OWNER_STACK_BYTES: usize = 8 * 1024 * 1024;
 
 #[derive(Parser)]
 struct Arguments {
-    /// Run a local family startup test using the clocked null audio device.
-    #[arg(long)]
-    headless: Option<std::path::PathBuf>,
+    #[command(subcommand)]
+    extension: Option<ExtensionCommand>,
+}
+
+#[derive(clap::Subcommand)]
+pub(crate) enum ExtensionCommand {
+    /// Install a trusted local Luau text extension, initially disabled.
+    #[command(name = "extension-install")]
+    Install {
+        id: String,
+        source: std::path::PathBuf,
+    },
+    #[command(name = "extension-enable")]
+    Enable {
+        id: String,
+        #[arg(action = clap::ArgAction::Set)]
+        enabled: bool,
+    },
+    #[command(name = "extension-configure")]
+    Configure {
+        id: String,
+        configuration: std::path::PathBuf,
+    },
+    #[command(name = "extension-list")]
+    List,
 }
 
 fn main() -> ExitCode {
-    if let Some(configuration) = Arguments::parse().headless {
-        return match headless::run(&configuration) {
+    let arguments = Arguments::parse();
+    if let Some(command) = arguments.extension {
+        return match manager_app::run_extension_command(command) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {
                 eprintln!("{error}");

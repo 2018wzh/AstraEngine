@@ -143,9 +143,6 @@ impl MusicaSession {
                 .map(|(labels, index)| (labels.as_slice(), *index)),
         )?;
         self.cancel_text()?;
-        if let Some(service) = &self.replacement {
-            service.reset(TextResetReason::Load).into_result()?;
-        }
         self.generation = self.generation.checked_add(1).ok_or_else(|| {
             error(
                 "ASTRA_EMU_MUSICA_TEXT_SEQUENCE",

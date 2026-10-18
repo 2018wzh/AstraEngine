@@ -1,8 +1,8 @@
 # Independent Family API v13
 
-本文记录尚未迁移的 v13 实现。新的目标为 [Embedded C ABI 与 FrameSurface](../../../../Docs/contracts/rebuild.md#emu-family-api)，包括核心自主调度、原生音频优先和 CPU/GPU 交付；下述 abi_stable、公共 advance 和必需 CPU/PCM 规则不再约束新实现。迁移时更新所有参与消费者并替换本文的旧实现描述，不提供旧 ABI 运行时兼容层；CMVS 按实施计划排除本次迁移。
+本文记录尚未迁移的 v13 实现。新协议为 [`astra-emu-abi`](../astra-emu-abi/src/lib.rs)，设计与迁移边界见 [Embedded C ABI 与 FrameSurface](../../../../Docs/contracts/rebuild.md#emu-family-api)。新 Manager 使用 C 函数表，不加载本文的 abi_stable vtable，也不驱动公共 advance。CMVS 排除本批迁移，其既有依赖保持原状，不为它增加新 Manager 兼容链。
 
-`astra-emu-family-api` 是 Family 插件唯一必需的契约依赖。不依赖 RuntimeWorld、package/save、VFS、renderer/audio backend 或 UI。静态核心和动态核心共用 typed DTO；动态入口使用 `abi_stable` 的 `FamilyModule`，提供 descriptor/probe/open/advance/frame/close。
+以下条款仅约束旧 `astra-emu-family-api` 消费者：无 RuntimeWorld、package/save、VFS、renderer/audio backend 或 UI 依赖；动态入口 `FamilyModule` 提供 descriptor/probe/open/advance/frame/close。它不是新原生适配的契约依赖。
 
 v13 在 v12 CPU lease/固定 owner 契约上增加 session-scoped typed 模态服务，消费者同批迁移；Manager 宿主服务与 Slint 原按钮/输入/取消已实际验证，KrKr native dialog/NativeOwner 接入和真实游戏验收仍未完成。统一重建插件，不保留旧同步帧 visitor、旧 vtable 或模态默认答案。
 

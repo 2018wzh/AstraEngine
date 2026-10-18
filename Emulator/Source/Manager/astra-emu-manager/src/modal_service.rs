@@ -1,8 +1,4 @@
-use abi_stable::type_level::downcasting::TD_Opaque;
-use astra_emu_family_api::{
-    FamilyError, FamilyResult, FfiFamilyResult, ModalRequest, ModalResponse, ModalService,
-    ModalServiceBox, ModalService_TO,
-};
+use astra_emu_manager_core::model::{FamilyError, FamilyResult, ModalRequest, ModalResponse};
 use parking_lot::{Condvar, Mutex};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -76,10 +72,6 @@ impl ModalBridge {
         self.0.epoch
     }
 
-    pub fn sink(&self) -> ModalServiceBox {
-        ModalService_TO::from_value(self.clone(), TD_Opaque)
-    }
-
     pub fn take_ui_update(&self) -> Option<ModalUiUpdate> {
         let mut state = self.0.state.lock();
         if let Some(id) = state.dismissed.take() {
@@ -127,10 +119,17 @@ impl ModalBridge {
         (self.0.wake)();
     }
 
-    fn wait_for_response(&self, request: ModalRequest) -> FamilyResult<ModalResponse> {
+    pub fn request(&self, request: ModalRequest) -> FamilyResult<ModalResponse> {
+        self.request_if(request, || true)
+    }
+    pub fn request_if(
+        &self,
+        request: ModalRequest,
+        valid: impl Fn() -> bool,
+    ) -> FamilyResult<ModalResponse> {
         request.validate()?;
         let mut state = self.0.state.lock();
-        if self.is_cancelled() {
+        if self.is_cancelled() || !valid() {
             return Ok(ModalResponse::Cancelled);
         }
         if state.pending.is_some() {
@@ -156,7 +155,7 @@ impl ModalBridge {
         (self.0.wake)();
         let mut state = self.0.state.lock();
         loop {
-            if self.is_cancelled() {
+            if self.is_cancelled() || !valid() {
                 return Ok(ModalResponse::Cancelled);
             }
             let pending = state.pending.as_mut().ok_or_else(stale_response)?;
@@ -176,18 +175,18 @@ fn stale_response() -> FamilyError {
     )
 }
 
-impl ModalService for ModalBridge {
-    fn request(&self, request: ModalRequest) -> FfiFamilyResult<ModalResponse> {
-        self.wait_for_response(request).into()
-    }
-
-    fn is_cancelled(&self) -> bool {
+impl ModalBridge {
+    pub fn is_cancelled(&self) -> bool {
         self.0.cancelled.load(Ordering::Acquire)
     }
-
-    fn cancel(&self) -> FfiFamilyResult<()> {
-        self.cancel_pending();
-        Ok(()).into()
+    pub fn invalidate_pending(&self) {
+        let mut state = self.0.state.lock();
+        if let Some(pending) = state.pending.take() {
+            state.dismissed = Some(pending.id);
+        }
+        self.0.completed.notify_all();
+        drop(state);
+        (self.0.wake)();
     }
 }
 

@@ -409,7 +409,7 @@ fn parse_sampler(lines: &[&str], start: usize) -> Result<(Sampler, usize), Forma
                 return Err(error(
                     index + 1,
                     format!("unknown sampler directive `{line}`"),
-                ))
+                ));
             }
         });
         index += 1;

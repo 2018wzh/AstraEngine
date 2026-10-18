@@ -10,16 +10,21 @@ use crate::input_mapping::InputMapping;
 pub struct GameSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_mapping: Option<InputMapping>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emulator_id: Option<String>,
 }
 
 impl GameSettings {
     pub fn is_empty(&self) -> bool {
-        self.input_mapping.is_none()
+        self.input_mapping.is_none() && self.emulator_id.is_none()
     }
 
     pub fn validate(&self) -> Result<(), String> {
         if let Some(mapping) = &self.input_mapping {
             mapping.validate()?;
+        }
+        if let Some(id) = &self.emulator_id {
+            crate::library::validate_id(id).map_err(|_| "ASTRA_EMU_EMULATOR_ID".to_owned())?;
         }
         Ok(())
     }

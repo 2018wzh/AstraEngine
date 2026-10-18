@@ -1,5 +1,5 @@
 use super::*;
-use crate::{mount_musica, parse_sc, MusicaVm, ScOpcodeCatalog, MUSICA_PROFILE_FILE};
+use crate::{MUSICA_KEY_FILE, MusicaVm, ScOpcodeCatalog, mount_musica, parse_sc};
 use astra_core::Hash256;
 
 #[test]
@@ -9,7 +9,7 @@ fn native_stage_gpu_restore_preserves_position_and_rejects_invalid_sequences() {
     let source = b".stage BG.png -4 2 * 0 0\r\n.end\r\n";
     crate::test_fixture::game(root.path(), source);
     let archive =
-        Arc::new(mount_musica(root.path(), std::path::Path::new(MUSICA_PROFILE_FILE)).unwrap());
+        Arc::new(mount_musica(root.path(), std::path::Path::new(MUSICA_KEY_FILE)).unwrap());
     let make_vm = || {
         MusicaVm::new(
             "musica:/scr/test.sc".into(),
@@ -91,7 +91,7 @@ fn dual_stage_screen_prefix_orders_layers_and_restores_without_partial_frames() 
         ],
     );
     let archive =
-        Arc::new(mount_musica(root.path(), std::path::Path::new(MUSICA_PROFILE_FILE)).unwrap());
+        Arc::new(mount_musica(root.path(), std::path::Path::new(MUSICA_KEY_FILE)).unwrap());
     let make_vm = || {
         MusicaVm::new(
             "musica:/scr/test.sc".into(),
@@ -162,7 +162,7 @@ fn panel_modes_draw_at_native_positions_and_clear_after_restore() {
         ],
     );
     let archive =
-        Arc::new(mount_musica(root.path(), std::path::Path::new(MUSICA_PROFILE_FILE)).unwrap());
+        Arc::new(mount_musica(root.path(), std::path::Path::new(MUSICA_KEY_FILE)).unwrap());
     let make_vm = || {
         MusicaVm::new(
             "musica:/scr/test.sc".into(),
@@ -218,7 +218,7 @@ fn screen_shake_gpu_preserves_composed_clipping_and_restores_mid_interval() {
     let source = b".stage BG.png 0 0 * 0 0\r\n.shakescreen V 4 30\r\n.transition 0 * 0\r\n.end\r\n";
     crate::test_fixture::game(root.path(), source);
     let archive =
-        Arc::new(mount_musica(root.path(), std::path::Path::new(MUSICA_PROFILE_FILE)).unwrap());
+        Arc::new(mount_musica(root.path(), std::path::Path::new(MUSICA_KEY_FILE)).unwrap());
     let make_vm = || {
         MusicaVm::new(
             "musica:/scr/test.sc".into(),
@@ -278,7 +278,7 @@ fn scrollxf_gpu_crops_translates_and_accepts_empty_extent() {
     let source=b".stage * BG.png 0 0\r\n.scrollxf 16 16 8 8 0 0 8 8 100 0\r\n.scrollxf 0 0 0 0 0 0 0 0 100 0\r\n.end\r\n";
     crate::test_fixture::game(root.path(), source);
     let archive =
-        Arc::new(mount_musica(root.path(), std::path::Path::new(MUSICA_PROFILE_FILE)).unwrap());
+        Arc::new(mount_musica(root.path(), std::path::Path::new(MUSICA_KEY_FILE)).unwrap());
     let make_vm = || {
         MusicaVm::new(
             "musica:/scr/test.sc".into(),
@@ -323,12 +323,14 @@ fn scrollxf_gpu_crops_translates_and_accepts_empty_extent() {
     assert_eq!(scene.pixels, cropped);
     vm.step(3).unwrap();
     scene.render(vm.state(), None, None).unwrap();
-    assert!(scene
-        .pixels
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .all(|pixel| pixel == &[0, 0, 0, 255]));
+    assert!(
+        scene
+            .pixels
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|pixel| pixel == &[0, 0, 0, 255])
+    );
 }
 
 #[test]
@@ -363,7 +365,7 @@ fn native_gpu_scaled_ani_offset_scroll_clip_and_shake_preserve_logical_geometry(
     crate::test_fixture::asset(root.path(), "bg", "BG.ani", &ani);
 
     let archive =
-        Arc::new(mount_musica(root.path(), std::path::Path::new(MUSICA_PROFILE_FILE)).unwrap());
+        Arc::new(mount_musica(root.path(), std::path::Path::new(MUSICA_KEY_FILE)).unwrap());
     let make_vm = || {
         MusicaVm::new(
             "musica:/scr/test.sc".into(),
@@ -512,7 +514,7 @@ fn moving_shared_asset_reuses_gpu_pixels_and_reappears_after_release() {
         .unwrap();
     crate::test_fixture::assets(root.path(), "bg", &[("BG.png", png.get_ref())]);
     let archive =
-        Arc::new(mount_musica(root.path(), std::path::Path::new(MUSICA_PROFILE_FILE)).unwrap());
+        Arc::new(mount_musica(root.path(), std::path::Path::new(MUSICA_KEY_FILE)).unwrap());
     let mut scene = Scene::new(
         crate::test_fixture::gpu_instance(),
         archive,
@@ -548,21 +550,25 @@ fn moving_shared_asset_reuses_gpu_pixels_and_reappears_after_release() {
         }
     }
     scene.submit(Vec::new()).unwrap();
-    assert!(scene
-        .pixels
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .all(|pixel| *pixel == [0, 0, 0, 255]));
+    assert!(
+        scene
+            .pixels
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|pixel| *pixel == [0, 0, 0, 255])
+    );
     let mut commands = Vec::new();
     scene
         .layer(&mut commands, "musica:/bg/BG.png", 0, 0, 1.0)
         .unwrap();
     scene.submit(commands).unwrap();
-    assert!(scene
-        .pixels
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .all(|pixel| *pixel == [255, 0, 0, 255]));
+    assert!(
+        scene
+            .pixels
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|pixel| *pixel == [255, 0, 0, 255])
+    );
 }

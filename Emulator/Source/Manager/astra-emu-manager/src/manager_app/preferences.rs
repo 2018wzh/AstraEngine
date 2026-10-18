@@ -1,18 +1,6 @@
 use super::*;
 
 impl AstraEmuManagerController {
-    pub(super) fn set_audio_device(&mut self, value: &str) -> Result<(), String> {
-        if self.active.is_some() {
-            return Err("ASTRA_EMU_AUDIO_DEVICE_SESSION_ACTIVE".into());
-        }
-        self.audio_device = audio_executor::AudioDeviceKind::parse(value)?;
-        self.diagnostic.clear();
-        tracing::info!(
-            event = "astra.emu.audio.device_selected",
-            device_kind = self.audio_device.as_str()
-        );
-        Ok(())
-    }
     fn update_appearance(
         &mut self,
         update: impl FnOnce(&mut astra_emu_manager_core::AppearanceSettings),
@@ -61,21 +49,22 @@ impl AstraEmuManagerController {
             return Err("ASTRA_EMU_FAMILY_SESSION_ALREADY_ACTIVE".into());
         }
         if key == "manager.config_scope" && matches!(value, "game" | "core") {
-            self.family_options.clear();
+            self.family_options
+                .retain(|key, _| key == "manager.emulator_id");
             self.family_options.insert(key.into(), value.into());
             return Ok(());
         }
         if let Some(id) = key.strip_prefix("config.") {
             let (_, schema) = self.config_schema()?;
             if !schema.iter().any(|field| field.id == id)
-                || value.len() > astra_emu_family_api::MAX_CONFIG_TEXT_BYTES
+                || value.len() > astra_emu_manager_core::model::MAX_CONFIG_TEXT_BYTES
             {
                 return Err("ASTRA_EMU_FAMILY_CONFIG_FIELD_UNKNOWN".into());
             }
             self.family_options.insert(key.into(), value.into());
             return Ok(());
         }
-        if key != "family.plugin_id" {
+        if key != "manager.emulator_id" {
             return Err("ASTRA_EMU_FAMILY_CONFIG_FIELD_UNKNOWN".into());
         }
         let game_id = self
@@ -84,13 +73,15 @@ impl AstraEmuManagerController {
             .ok_or_else(|| "ASTRA_EMU_CASE_SELECTION_MISSING".to_owned())?;
         let choices = self
             .probe_selection_for_game(game_id)
-            .ok_or_else(|| "ASTRA_EMU_FAMILY_PROVIDER_SELECTION_NOT_REQUIRED".to_owned())?;
+            .ok_or_else(|| "ASTRA_EMU_EMULATOR_PROBE_REQUIRED".to_owned())?;
         if !choices
             .iter()
             .any(|candidate| candidate.report.plugin_id == value)
         {
-            return Err("ASTRA_EMU_FAMILY_PROVIDER_SELECTION_INVALID".into());
+            return Err("ASTRA_EMU_EMULATOR_SELECTION_INVALID".into());
         }
+        self.family_options
+            .retain(|key, _| key == "manager.config_scope");
         self.family_options.insert(key.into(), value.into());
         Ok(())
     }
@@ -103,28 +94,24 @@ impl AstraEmuManagerController {
             .selected_case_id
             .clone()
             .ok_or_else(|| "ASTRA_EMU_CASE_SELECTION_MISSING".to_owned())?;
-        if self.probe_choices.contains_key(&game_id) {
-            let plugin_id = self
-                .family_options
-                .get("family.plugin_id")
-                .cloned()
-                .ok_or_else(|| "ASTRA_EMU_FAMILY_PROVIDER_SELECTION_REQUIRED".to_owned())?;
-            self.install_probe_choice(&game_id, &plugin_id)?;
-            self.family_options.remove("family.plugin_id");
-            self.diagnostic.clear();
-        } else if let Some(value) = self.family_options.get("family.plugin_id") {
-            let selected = self
-                .selected_case_id
-                .as_deref()
-                .and_then(|id| self.candidates.get(id))
-                .ok_or_else(|| "ASTRA_EMU_FAMILY_PROBE_REQUIRED".to_owned())?;
-            if value != &selected.descriptor.plugin_id {
-                return Err("ASTRA_EMU_FAMILY_PROVIDER_SELECTION_INVALID".into());
+        if let Some(plugin_id) = self.family_options.get("manager.emulator_id").cloned() {
+            let current = self
+                .candidates
+                .get(&game_id)
+                .map(|candidate| &candidate.report.plugin_id);
+            if current != Some(&plugin_id) {
+                self.install_probe_choice(&game_id, &plugin_id)?;
+                self.family_options
+                    .retain(|key, _| key == "manager.config_scope");
+                self.diagnostic.clear();
+                return self.model();
             }
+            self.family_options.remove("manager.emulator_id");
         }
-        if !self.probe_choices.contains_key(&game_id) {
-            self.save_typed_family_config()?;
+        if !self.candidates.contains_key(&game_id) {
+            return Err("ASTRA_EMU_EMULATOR_SELECTION_REQUIRED".into());
         }
+        self.save_typed_family_config()?;
         self.model()
     }
 

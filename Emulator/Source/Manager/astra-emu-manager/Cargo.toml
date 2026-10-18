@@ -16,25 +16,22 @@ path = "src/bin_main.rs"
 [dependencies]
 astra-emu-manager-core = { path = "../astra-emu-manager-core" }
 astra-emu-manager-ui-slint = { path = "../astra-emu-manager-ui-slint" }
-astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api" }
+astra-emu-abi = { path = "../../FamilyApi/astra-emu-abi" }
+astra-emu-musica = { path = "../../Families/astra-emu-musica", default-features = false }
+mlua.workspace = true
 astra-emu-metadata = { path = "../../Providers/astra-emu-metadata" }
 astra-emu-translation-openai-compatible = { path = "../../Providers/astra-emu-translation-openai-compatible" }
 astra-observability = { path = "../../../../Engine/Source/Developer/astra-observability" }
 astra-media-core = { path = "../../../../Engine/Source/Runtime/astra-media-core" }
-abi_stable.workspace = true
 clap.workspace = true
 serde.workspace = true
-cpal.workspace = true
 crossbeam-channel.workspace = true
 naga.workspace = true
 tokio.workspace = true
 directories.workspace = true
-image.workspace = true
 pollster.workspace = true
 parking_lot = "0.12.5"
 serde_json.workspace = true
-rubato.workspace = true
-rtrb.workspace = true
 sha2.workspace = true
 slint = { workspace = true, features = ["std", "compat-1-2", "accessibility", "backend-winit", "renderer-femtovg-wgpu", "unstable-wgpu-29", "unstable-winit-030"] }
 thiserror.workspace = true
@@ -43,6 +40,9 @@ tracing.workspace = true
 winit.workspace = true
 hassle-rs = "=0.12.0"
 wgpu.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Direct3D12", "Win32_Graphics_Dxgi_Common"] }
 
 [target.'cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))'.dependencies]
 gilrs = { workspace = true, features = ["wgi"] }

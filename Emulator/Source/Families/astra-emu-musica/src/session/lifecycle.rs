@@ -20,7 +20,7 @@ impl FamilySession for MusicaSession {
                 "session panicked and must be closed",
             ))
         });
-        if result.is_err() {
+        if result.is_err() && !self.hook_failed {
             self.poisoned = true;
         }
         if result.as_ref().is_ok_and(|response| response.reset_clock) {

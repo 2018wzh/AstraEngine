@@ -4,6 +4,12 @@ use std::{
     process::Command,
 };
 
+#[derive(Clone)]
+struct Package {
+    name: String,
+    isolated: bool,
+}
+
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let Some(task) = args.first() else {
@@ -77,7 +83,7 @@ fn main() -> Result<()> {
         if matches!(task.as_str(), "fmt" | "check") {
             let mut options = vec!["fmt".into(), "--check".into()];
             for package in &selected {
-                options.extend(["--package".into(), package.clone()]);
+                options.extend(["--package".into(), package.name.clone()]);
             }
             run(&workspace, "cargo", &options)?;
         }
@@ -95,7 +101,7 @@ fn main() -> Result<()> {
             // rebuilding it in place would fail; lint and test still cover it.
             let products: Vec<_> = selected
                 .iter()
-                .filter(|name| name.as_str() != "xtask")
+                .filter(|package| package.name != "xtask")
                 .cloned()
                 .collect();
             if !products.is_empty() {
@@ -109,7 +115,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn members(workspace: &PathBuf, requested: &[String]) -> Result<Vec<String>> {
+fn members(workspace: &PathBuf, requested: &[String]) -> Result<Vec<Package>> {
     let output = Command::new("cargo")
         .args(["metadata", "--no-deps", "--format-version", "1"])
         .current_dir(workspace)
@@ -125,37 +131,60 @@ fn members(workspace: &PathBuf, requested: &[String]) -> Result<Vec<String>> {
     let ids = metadata["workspace_members"]
         .as_array()
         .context("workspace_members")?;
-    let names: Vec<String> = metadata["packages"]
+    let family_root = workspace.join("Source/Families");
+    let packages: Vec<Package> = metadata["packages"]
         .as_array()
         .context("packages")?
         .iter()
         .filter(|package| ids.contains(&package["id"]))
         .map(|package| {
-            package["name"]
+            let name = package["name"].as_str().context("package name")?;
+            let manifest = package["manifest_path"]
                 .as_str()
-                .context("package name")
-                .map(str::to_owned)
+                .context("package manifest")?;
+            Ok(Package {
+                name: name.to_owned(),
+                isolated: Path::new(manifest).starts_with(&family_root),
+            })
         })
         .collect::<Result<_>>()?;
     for name in requested {
-        if !names.contains(name) {
+        if !packages.iter().any(|package| &package.name == name) {
             bail!("{name} is not a member of the selected workspace");
         }
     }
     Ok(if requested.is_empty() {
-        names
+        packages
     } else {
-        requested.to_vec()
+        packages
+            .into_iter()
+            .filter(|package| requested.contains(&package.name))
+            .collect()
     })
 }
 
-fn cargo(root: &Path, task: &str, packages: &[String], extra: &[&str]) -> Result<()> {
-    let mut args = vec![task.into()];
-    for name in packages {
-        args.extend(["--package".into(), name.clone()]);
+fn cargo(root: &Path, task: &str, packages: &[Package], extra: &[&str]) -> Result<()> {
+    let run_unit = |unit: &[&Package]| -> Result<()> {
+        let mut args = vec![task.into()];
+        for package in unit {
+            args.extend(["--package".into(), package.name.clone()]);
+        }
+        args.extend(extra.iter().map(|value| (*value).to_owned()));
+        run(root, "cargo", &args)
+    };
+    let shared: Vec<_> = packages
+        .iter()
+        .filter(|package| !package.isolated)
+        .collect();
+    if !shared.is_empty() {
+        run_unit(&shared)?;
     }
-    args.extend(extra.iter().map(|value| (*value).to_owned()));
-    run(root, "cargo", &args)
+    // Native libraries own their runtimes. In particular Artemis Lua 5.1 and
+    // Manager Luau must not have their mutually exclusive mlua features merged.
+    for package in packages.iter().filter(|package| package.isolated) {
+        run_unit(&[package])?;
+    }
+    Ok(())
 }
 
 fn run(root: &Path, program: &str, args: &[String]) -> Result<()> {

@@ -1,6 +1,32 @@
 use super::*;
 
 impl AstraEmuManagerController {
+    pub(super) fn engine_label(id: &str) -> &str {
+        match id {
+            "fvp" => "FVP",
+            "siglus" => "SiglusEngine",
+            "artemis" => "Artemis",
+            "musica" => "Musica",
+            "softpal" => "SoftPAL",
+            "ethornell" => "Ethornell / BGI",
+            "krkr" => "KiriKiri",
+            _ => id,
+        }
+    }
+
+    pub(super) fn emulator_label(descriptor: &FamilyPluginDescriptor) -> String {
+        let name = match descriptor.plugin_id.as_str() {
+            "astra.emu.fvp" => "RFVP",
+            "astra.emu.siglus" => "siglus-rs",
+            "astra.emu.artemis" => "Art3m1s",
+            "astra.emu.musica" => "Astra Musica",
+            "sena-native-koikake" => "Sena",
+            "ethornell-native" => "ethornell-rs",
+            _ => &descriptor.plugin_id,
+        };
+        format!("{name} · {}", descriptor.version)
+    }
+
     pub(super) fn appearance_view(&self) -> AppearanceViewModel {
         AppearanceViewModel {
             theme_dark: self.appearance.theme_dark,
@@ -12,42 +38,60 @@ impl AstraEmuManagerController {
         }
     }
 
-    pub(super) fn candidate_descriptor(&self, game_id: &str) -> Option<FamilyPluginDescriptor> {
-        let game = self.game(game_id).ok()?;
-        self.launch_candidate_for_game(&game)
-            .map(|candidate| candidate.descriptor.clone())
-    }
-
-    pub(super) fn family_fields(&self) -> Result<Vec<GenericConfigFieldViewModel>, String> {
+    pub(super) fn family_fields(
+        &self,
+    ) -> Result<
+        (
+            Vec<GenericConfigFieldViewModel>,
+            Vec<GenericConfigFieldViewModel>,
+        ),
+        String,
+    > {
         let Some(game_id) = self.selected_case_id.as_deref() else {
-            return Ok(Vec::new());
+            return Ok((Vec::new(), Vec::new()));
         };
-        if let Some(choices) = self.probe_selection_for_game(game_id) {
-            return Ok(vec![GenericConfigFieldViewModel {
-                key: "family.plugin_id".into(),
-                label: "Family provider".into(),
-                description:
-                    "Multiple providers matched this game. Select one explicitly before launching."
-                        .into(),
-                kind: "enum".into(),
-                value: self
-                    .family_options
-                    .get("family.plugin_id")
-                    .cloned()
-                    .unwrap_or_default(),
-                enum_values: choices
-                    .iter()
-                    .map(|choice| choice.report.plugin_id.clone())
-                    .collect(),
-                required: true,
-                min: 0,
-                max: 0,
-            }]);
+        let Some(choices) = self.probe_selection_for_game(game_id) else {
+            return Ok((Vec::new(), Vec::new()));
+        };
+        let installed = self
+            .candidates
+            .get(game_id)
+            .map(|candidate| candidate.report.plugin_id.as_str());
+        let draft = self
+            .family_options
+            .get("manager.emulator_id")
+            .map(String::as_str);
+        let mut fields = vec![GenericConfigFieldViewModel {
+            key: "manager.emulator_id".into(),
+            label: "模拟器".into(),
+            description: choices
+                .iter()
+                .map(|choice| {
+                    format!(
+                        "{} / {} ({})",
+                        Self::engine_label(&choice.report.family_id),
+                        Self::emulator_label(&choice.descriptor),
+                        choice.report.plugin_id,
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+                + "\n更换模拟器后保存以加载其配置；选择按游戏保存。",
+            kind: "enum".into(),
+            value: draft.or(installed).unwrap_or_default().into(),
+            enum_values: choices
+                .iter()
+                .map(|choice| choice.report.plugin_id.clone())
+                .collect(),
+            required: true,
+            min: 0,
+            max: 0,
+        }];
+        let mut common = Vec::new();
+        if installed.is_some() && draft.is_none_or(|id| Some(id) == installed) {
+            self.append_typed_family_fields(&mut common, &mut fields)?;
         }
-        if self.candidate_descriptor(game_id).is_none() {
-            return Ok(Vec::new());
-        }
-        self.typed_family_fields()
+        Ok((common, fields))
     }
 
     pub(super) fn input_view(&self) -> InputConfigViewModel {

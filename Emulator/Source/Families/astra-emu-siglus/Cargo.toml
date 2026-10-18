@@ -8,25 +8,25 @@ license = "MPL-2.0"
 crate-type = ["rlib", "cdylib"]
 doctest = false
 
-[dependencies]
-abi_stable.workspace = true
-astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api", features = ["diagnostic-bridge"] }
-siglus_scene_vm = { path = "../../../ThirdParty/siglus_rs/crates/siglus_scene_vm", default-features = false, features = ["astra-hosted"] }
-tracing.workspace = true
-crossbeam-channel.workspace = true
-parking_lot = "0.12.5"
-anyhow = "1"
-pollster = "0.3"
+[features]
+default = []
+dynamic = ["astra-emu-abi/diagnostic-bridge"]
 
-[dev-dependencies]
-env_logger = "0.11"
-tempfile.workspace = true
+[dependencies]
+astra-emu-abi = { path = "../../FamilyApi/astra-emu-abi" }
+siglus_scene_vm = { path = "../../../ThirdParty/siglus_rs/crates/siglus_scene_vm", features = ["pausable-clock"] }
+pollster = "0.3"
 
 [package.metadata.astra]
 upstream = "https://github.com/xmoezzz/siglus_rs"
 upstream_revision = "5f358ef1360b0439e92aed2b749e8f25d8721954"
 hosted_fork = "https://github.com/2018wzh/siglus_rs"
+native_fork_branch = "astra"
+native_fork_revision = "13b55b47484faf8dfe03deb6ffd56ca0ec4ba3f2"
 hosted_fork_branch = "astra"
-hosted_fork_revision = "29fb9582751fc8ddfc23b374d428d6eba30bcb40"
+hosted_fork_revision = "a94565cccd4f6d5e0a341e5732c5d98e9de2c71f"
+kira_upstream_revision = "dfb08d08d065930e9b257203bf11c6d34742f542"
+kira_fork_revision = "a299b42690094a71885f6ed97dc504c4038da9a7"
+cpal_fork_revision = "65ac8a6ac1a635cc26bfc5af331295b052044908"
 license_notice = "THIRD_PARTY_NOTICES.md"
 modifications = "MODIFICATIONS.md"

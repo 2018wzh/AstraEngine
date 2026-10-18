@@ -12,13 +12,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-/// ABI fingerprint expected by the independent AstraEMU host.
-///
-/// The Family API crate exports the same value.  Keeping the check in this
-/// policy layer means a plugin can never become selectable merely because it
-/// has a plausible family ID or a matching file extension.
-pub use astra_emu_family_api::FAMILY_ABI_FINGERPRINT as INDEPENDENT_FAMILY_ABI_FINGERPRINT;
-pub const MAX_FAMILY_ID_BYTES: usize = astra_emu_family_api::MAX_SYMBOL_BYTES;
+/// Host metadata identity for the versioned native C protocol.
+pub const INDEPENDENT_FAMILY_ABI_FINGERPRINT: &str = "astra.emu.native.c.v2";
+pub const MAX_FAMILY_ID_BYTES: usize = crate::model::MAX_SYMBOL_BYTES;
 pub const MAX_GAME_ID_BYTES: usize = 256;
 
 #[derive(
@@ -27,8 +23,7 @@ pub const MAX_GAME_ID_BYTES: usize = 256;
 #[serde(rename_all = "snake_case")]
 pub enum FamilyCapability {
     CpuFrame,
-    PcmAudio,
-    NativeSave,
+    GpuFrame,
     TextReplacement,
 }
 
@@ -51,8 +46,12 @@ impl FamilyPluginDescriptor {
         if self.abi_fingerprint != INDEPENDENT_FAMILY_ABI_FINGERPRINT {
             return Err(FamilyPolicyError::AbiFingerprint);
         }
-        if self.capabilities.is_empty() || !self.capabilities.contains(&FamilyCapability::CpuFrame)
-        {
+        if !self.capabilities.iter().any(|capability| {
+            matches!(
+                capability,
+                FamilyCapability::CpuFrame | FamilyCapability::GpuFrame
+            )
+        }) {
             return Err(FamilyPolicyError::MissingCpuFrame);
         }
         for (index, capability) in self.capabilities.iter().enumerate() {

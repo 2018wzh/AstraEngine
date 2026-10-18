@@ -18,12 +18,13 @@ use std::{
     collections::BTreeMap,
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc::{sync_channel, Receiver, SyncSender},
+        mpsc::{sync_channel, Receiver, SyncSender, TrySendError},
         Arc, Mutex,
     },
     thread::{self, JoinHandle},
     time::Duration,
 };
+mod device;
 mod fade;
 mod mixer;
 mod preferences;
@@ -41,6 +42,7 @@ pub(crate) const FORMAT: PcmFormatSpec = PcmFormatSpec {
     format: PcmFormat::F32,
 };
 const MAX_FRAMES: usize = 32 * 1024 * 1024;
+pub(crate) const COMMAND_CAPACITY: usize = 64;
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct SoundSnapshot {
     pub id: u32,
@@ -64,18 +66,22 @@ pub(crate) struct Audio {
     #[cfg(feature = "ffmpeg-vcpkg")]
     movie: Arc<Mutex<Option<Arc<MoviePcm>>>>,
     commands: SyncSender<Command>,
-    sink: Arc<AudioSinkBox>,
+    sink: Option<Arc<AudioSinkBox>>,
     stop: Arc<AtomicBool>,
+    backpressured: AtomicBool,
     failure: Arc<Mutex<Option<FamilyError>>>,
     worker: Option<JoinHandle<()>>,
 }
 impl Audio {
-    pub fn start(archive: Arc<MusicaMountedVfs>, sink: AudioSinkBox) -> FamilyResult<Self> {
-        sink.configure(FORMAT).into_result()?;
-        let sink = Arc::new(sink);
+    pub fn start(archive: Arc<MusicaMountedVfs>, sink: Option<AudioSinkBox>) -> FamilyResult<Self> {
+        if let Some(sink) = &sink {
+            sink.configure(FORMAT).into_result()?;
+        }
+        let sink = sink.map(Arc::new);
         let stop = Arc::new(AtomicBool::new(false));
         let failure = Arc::new(Mutex::new(None));
-        let (tx, rx) = sync_channel(64);
+        let (tx, rx) = sync_channel(COMMAND_CAPACITY);
+        let (ready_tx, ready_rx) = sync_channel(1);
         let (s, c, f) = (sink.clone(), stop.clone(), failure.clone());
         #[cfg(feature = "ffmpeg-vcpkg")]
         let movie = Arc::new(Mutex::new(None));
@@ -89,7 +95,8 @@ impl Audio {
                         archive,
                         s.clone(),
                         c.clone(),
-                        rx,
+                        &rx,
+                        &ready_tx,
                         #[cfg(feature = "ffmpeg-vcpkg")]
                         movie_worker,
                     )
@@ -102,9 +109,14 @@ impl Audio {
                         "audio worker panicked",
                     )),
                 };
-                if !c.load(Ordering::Acquire) {
+                if let Some(cause) = &error {
+                    let _ = ready_tx.try_send(Err(cause.clone()));
+                }
+                if error.is_some() {
                     if let Ok(mut slot) = f.lock() {
-                        *slot = error;
+                        if slot.is_none() {
+                            *slot = error;
+                        }
                     }
                 }
             })
@@ -114,12 +126,23 @@ impl Audio {
                     "audio worker could not start",
                 )
             })?;
+        if let Err(cause) = ready_rx.recv().unwrap_or_else(|_| {
+            Err(error(
+                "ASTRA_EMU_MUSICA_AUDIO_START",
+                "audio worker exited during initialization",
+            ))
+        }) {
+            stop.store(true, Ordering::Release);
+            let _ = worker.join();
+            return Err(cause);
+        }
         Ok(Self {
             #[cfg(feature = "ffmpeg-vcpkg")]
             movie,
             commands: tx,
             sink,
             stop,
+            backpressured: AtomicBool::new(false),
             failure,
             worker: Some(worker),
         })
@@ -138,15 +161,39 @@ impl Audio {
     }
     fn send(&self, command: Command) -> FamilyResult<()> {
         self.check()?;
-        self.commands.try_send(command).map_err(|_| {
-            error(
-                "ASTRA_EMU_MUSICA_AUDIO_QUEUE",
-                "audio command queue is full or closed",
-            )
+        if self.stop.load(Ordering::Acquire) {
+            return Err(cancelled_error());
+        }
+        match self.commands.try_send(command) {
+            Ok(()) => Ok(()),
+            Err(TrySendError::Full(command)) => {
+                self.backpressured.store(true, Ordering::Release);
+                self.commands.send(command).map_err(|_| self.unavailable())
+            }
+            Err(TrySendError::Disconnected(_)) => Err(self.unavailable()),
+        }
+    }
+    fn unavailable(&self) -> FamilyError {
+        self.check().err().unwrap_or_else(|| {
+            if self.stop.load(Ordering::Acquire) {
+                cancelled_error()
+            } else {
+                error(
+                    "ASTRA_EMU_MUSICA_AUDIO_QUEUE",
+                    "audio command queue is closed",
+                )
+            }
         })
     }
+    pub(crate) fn take_backpressure(&self) -> bool {
+        self.backpressured.swap(false, Ordering::AcqRel)
+    }
     pub fn apply(&self, commands: Vec<MusicaAudioCommand>) -> FamilyResult<()> {
-        self.send(Command::Apply(commands))
+        if commands.is_empty() {
+            self.check()
+        } else {
+            self.send(Command::Apply(commands))
+        }
     }
     pub fn set_preferences(&self, preferences: AudioPreferences) -> FamilyResult<()> {
         preferences.gains()?;
@@ -154,6 +201,9 @@ impl Audio {
     }
     pub fn suspend(&self, value: bool) -> FamilyResult<()> {
         self.send(Command::Suspend(value))
+    }
+    pub(crate) fn cancellation_flag(&self) -> Arc<AtomicBool> {
+        self.stop.clone()
     }
     pub fn duration(&self, stream: u32) -> FamilyResult<Receiver<FamilyResult<u32>>> {
         let (tx, rx) = sync_channel(1);
@@ -164,6 +214,12 @@ impl Audio {
         let (tx, rx) = sync_channel(1);
         self.send(Command::Snapshot(tx))?;
         rx.recv_timeout(Duration::from_secs(5)).map_err(|_| {
+            if let Err(cause) = self.check() {
+                return cause;
+            }
+            if self.stop.load(Ordering::Acquire) {
+                return cancelled_error();
+            }
             self.fail_request(error(
                 "ASTRA_EMU_MUSICA_AUDIO_SNAPSHOT",
                 "audio snapshot did not complete",
@@ -174,6 +230,12 @@ impl Audio {
         let (tx, rx) = sync_channel(1);
         self.send(Command::Restore(snapshot, tx))?;
         rx.recv_timeout(Duration::from_secs(15)).map_err(|_| {
+            if let Err(cause) = self.check() {
+                return cause;
+            }
+            if self.stop.load(Ordering::Acquire) {
+                return cancelled_error();
+            }
             self.fail_request(error(
                 "ASTRA_EMU_MUSICA_AUDIO_RESTORE",
                 "audio restore did not complete",
@@ -187,8 +249,10 @@ impl Audio {
                 *slot = Some(failure.clone());
             }
         }
-        if let Err(cancel_error) = self.sink.cancel().into_result() {
-            return cancel_error;
+        if let Some(sink) = &self.sink {
+            if let Err(cancel_error) = sink.cancel().into_result() {
+                return cancel_error;
+            }
         }
         failure
     }
@@ -197,7 +261,11 @@ impl Audio {
             return self.check();
         }
         self.stop.store(true, Ordering::Release);
-        let cancel = self.sink.cancel().into_result();
+        let cancel = self
+            .sink
+            .as_ref()
+            .map(|sink| sink.cancel().into_result())
+            .transpose();
         let joined = self
             .worker
             .take()
@@ -221,34 +289,54 @@ impl Drop for Audio {
 }
 fn run(
     archive: Arc<MusicaMountedVfs>,
-    sink: Arc<AudioSinkBox>,
+    sink: Option<Arc<AudioSinkBox>>,
     stop: Arc<AtomicBool>,
-    commands: Receiver<Command>,
+    commands: &Receiver<Command>,
+    ready: &SyncSender<FamilyResult<()>>,
     #[cfg(feature = "ffmpeg-vcpkg")] movie: Arc<Mutex<Option<Arc<MoviePcm>>>>,
 ) -> FamilyResult<()> {
     let mut mixer = Mixer::new()?;
+    let mut device = if sink.is_none() {
+        Some(device::DeviceOutput::open(stop.clone())?)
+    } else {
+        None
+    };
+    let _ = ready.send(Ok(()));
+    let mut samples = vec![0.0; 512 * 2];
     let mut suspended = false;
-    while !stop.load(Ordering::Acquire) {
-        for command in commands.try_iter().take(64) {
+    'running: while !stop.load(Ordering::Acquire) {
+        for command in commands.try_iter().take(COMMAND_CAPACITY) {
             if stop.load(Ordering::Acquire) {
-                return Ok(());
+                break 'running;
             }
             match command {
                 Command::Apply(list) => {
                     for command in list {
                         if stop.load(Ordering::Acquire) {
-                            return Ok(());
+                            break 'running;
                         }
-                        mixer.apply(command, &archive, &stop)?
+                        if mixer.apply(command, &archive, &stop)?.is_none() {
+                            break 'running;
+                        }
                     }
                 }
                 Command::Snapshot(reply) => {
                     let _ = reply.send(Ok(mixer.snapshot()));
                 }
                 Command::Restore(snapshot, reply) => {
-                    let result = mixer.restore(snapshot, &archive, &stop);
-                    let _ = reply.send(result.clone());
-                    result?;
+                    match mixer.restore(snapshot, &archive, &stop) {
+                        Ok(Some(())) => {
+                            let _ = reply.send(Ok(()));
+                        }
+                        Ok(None) => {
+                            let _ = reply.send(Err(cancelled_error()));
+                            break 'running;
+                        }
+                        Err(cause) => {
+                            let _ = reply.send(Err(cause.clone()));
+                            return Err(cause);
+                        }
+                    }
                 }
                 Command::Suspend(value) => suspended = value,
                 Command::Preferences(value) => mixer.set_preferences(value)?,
@@ -259,7 +347,7 @@ fn run(
                 }
             }
         }
-        let mut samples = vec![0.0; 512 * 2];
+        samples.fill(0.0);
         if !suspended {
             mixer.render(&mut samples);
         }
@@ -275,7 +363,22 @@ fn run(
         } else {
             None
         };
-        match sink.write(PcmChunk::F32(samples.into())).into_result()? {
+        let status = if let Some(device) = &mut device {
+            let Some(next) = device.write(samples, &stop)? else {
+                break;
+            };
+            samples = next;
+            AudioWriteStatus::Accepted
+        } else {
+            let status = sink
+                .as_ref()
+                .unwrap()
+                .write(PcmChunk::F32(samples.into()))
+                .into_result()?;
+            samples = vec![0.0; 512 * 2];
+            status
+        };
+        match status {
             AudioWriteStatus::Accepted =>
             {
                 #[cfg(feature = "ffmpeg-vcpkg")]
@@ -292,7 +395,13 @@ fn run(
             }
         }
     }
+    if let Some(device) = device {
+        device.check()?;
+    }
     Ok(())
+}
+fn cancelled_error() -> FamilyError {
+    error("ASTRA_EMU_AUDIO_CANCELLED", "audio operation cancelled")
 }
 fn validate_params(volume: f32, pan: f32) -> FamilyResult<()> {
     if !volume.is_finite()

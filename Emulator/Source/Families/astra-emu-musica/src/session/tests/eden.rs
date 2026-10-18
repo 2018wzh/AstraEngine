@@ -64,12 +64,14 @@ fn native_gpu_eden_import_continues_saves_and_exports_authoritative_message() {
     assert_eq!(session.message.as_ref().unwrap().0, "saved");
     let mut capture = Capture(Vec::new());
     capture.read(session.acquire_frame(None).unwrap()).unwrap();
-    assert!(capture
-        .0
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .any(|pixel| pixel[..3] != [0, 0, 0]));
+    assert!(
+        capture
+            .0
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .any(|pixel| pixel[..3] != [0, 0, 0])
+    );
     session.advance(16_666_667, &[key(KeyCode::Enter)]).unwrap();
     assert_eq!(session.message.as_ref().unwrap().0, "continued");
     session.advance(0, &[key(KeyCode::F5)]).unwrap();
@@ -81,16 +83,18 @@ fn native_gpu_eden_import_continues_saves_and_exports_authoritative_message() {
     assert_eq!(result.code(), "ASTRA_EMU_MUSICA_SAVE_CANVAS");
     assert_eq!(session.vm.encode_native_save().unwrap(), before);
     assert_eq!(session.message.as_ref().unwrap().0, "continued");
-    assert!(crate::eden_save::export_slot(
-        root.path(),
-        std::path::Path::new(crate::MUSICA_PROFILE_FILE),
-        11,
-    )
-    .is_err());
+    assert!(
+        crate::eden_save::export_slot(
+            root.path(),
+            std::path::Path::new(crate::MUSICA_KEY_FILE),
+            11,
+        )
+        .is_err()
+    );
     Box::new(session).close().unwrap();
     let exported = crate::eden_save::export_slot(
         root.path(),
-        std::path::Path::new(crate::MUSICA_PROFILE_FILE),
+        std::path::Path::new(crate::MUSICA_KEY_FILE),
         10,
     )
     .unwrap();

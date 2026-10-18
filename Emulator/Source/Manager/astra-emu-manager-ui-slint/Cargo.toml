@@ -11,6 +11,12 @@ doctest = false
 [dependencies]
 serde.workspace = true
 slint = { workspace = true, features = ["std", "compat-1-2", "serde"] }
+image = { workspace = true, features = ["gif"] }
+tracing.workspace = true
+parking_lot = "0.12.5"
 
 [build-dependencies]
 slint-build.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

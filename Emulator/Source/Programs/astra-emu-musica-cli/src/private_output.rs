@@ -1,4 +1,4 @@
-//! Publish a private profile atomically without replacing any existing file.
+//! Publish private output atomically without replacing any existing file.
 use std::{io::Write, path::Path};
 
 pub fn write_new_private(path: &Path, bytes: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
@@ -20,17 +20,17 @@ pub fn write_new_private(path: &Path, bytes: &[u8]) -> Result<(), Box<dyn std::e
 fn restrict_windows_path(path: &Path) -> std::io::Result<()> {
     use std::os::windows::ffi::OsStrExt;
     use windows::{
-        core::PCWSTR,
         Win32::{
-            Foundation::{LocalFree, HLOCAL},
+            Foundation::{HLOCAL, LocalFree},
             Security::{
                 Authorization::{
                     ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
                 },
-                SetFileSecurityW, DACL_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
-                PSECURITY_DESCRIPTOR,
+                DACL_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
+                PSECURITY_DESCRIPTOR, SetFileSecurityW,
             },
         },
+        core::PCWSTR,
     };
     let path: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
     let sddl: Vec<u16> = "D:P(A;;FA;;;OW)".encode_utf16().chain(Some(0)).collect();
@@ -65,7 +65,7 @@ mod tests {
     #[test]
     fn publish_preserves_existing_profile_and_cleans_temporary_files() {
         let directory = tempfile::tempdir().unwrap();
-        let output = directory.path().join("musica.profile.json");
+        let output = directory.path().join("key.toml");
         write_new_private(&output, b"first").unwrap();
         assert!(write_new_private(&output, b"second").is_err());
         assert_eq!(std::fs::read(&output).unwrap(), b"first");

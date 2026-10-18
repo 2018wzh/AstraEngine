@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use astra_emu_family_api::{FamilyEvent, KeyCode, KeyModifiers, KeyState, WindowState};
+use astra_emu_manager_core::model::{FamilyEvent, KeyCode, KeyModifiers, KeyState, WindowState};
 use astra_emu_manager_ui_slint::SlintManagerAdapter;
 use slint::{
     winit_030::{EventResult, WinitWindowAccessor},
@@ -25,10 +25,12 @@ pub(super) fn current_window_state(window: &slint::Window) -> Result<WindowState
             Ok(WindowState {
                 width: size.width,
                 height: size.height,
+                scale_factor: window.scale_factor(),
                 focused: window.has_focus(),
                 visible: window
                     .is_visible()
                     .ok_or("ASTRA_EMU_WINDOW_VISIBILITY_UNAVAILABLE")?,
+                suspended: window.is_minimized() == Some(true),
             })
         })
         .ok_or_else(|| "ASTRA_EMU_WINDOW_UNAVAILABLE".to_owned())?
@@ -47,6 +49,7 @@ pub(super) fn install<C: ManagerController>(
         alt: false,
         super_key: false,
     };
+    let mut occluded = false;
     adapter
         .window()
         .window()
@@ -55,6 +58,7 @@ pub(super) fn install<C: ManagerController>(
                 return EventResult::Propagate;
             };
             let input_active = window.get_game_active()
+                && !window.get_fatal_error_active()
                 && !window.get_modal_active()
                 && !window.get_translation_overlay_active()
                 && !window.get_diagnostics_overlay_active()
@@ -72,18 +76,21 @@ pub(super) fn install<C: ManagerController>(
                 }
                 WindowEvent::Focused(focused) => {
                     current_window_state(native_window).and_then(|mut state| {
+                        state.suspended |= occluded;
                         state.focused = *focused;
                         controller.borrow_mut().set_window_state(state)
                     })
                 }
-                WindowEvent::Resized(_) | WindowEvent::Occluded(_) => {
-                    current_window_state(native_window).and_then(|mut state| {
-                        if let WindowEvent::Occluded(occluded) = event {
-                            state.visible = !occluded;
+                WindowEvent::Resized(_)
+                | WindowEvent::Occluded(_)
+                | WindowEvent::ScaleFactorChanged { .. } => current_window_state(native_window)
+                    .and_then(|mut state| {
+                        if let WindowEvent::Occluded(value) = event {
+                            occluded = *value;
                         }
+                        state.suspended |= occluded;
                         controller.borrow_mut().set_window_state(state)
-                    })
-                }
+                    }),
                 WindowEvent::ModifiersChanged(value) => {
                     let state = value.state();
                     modifiers = KeyModifiers {
@@ -99,6 +106,10 @@ pub(super) fn install<C: ManagerController>(
                         if let Some(code) = family_key(code) {
                             consumed = true;
                             controller.borrow_mut().physical_event(FamilyEvent::Key {
+                                logical: match &event.logical_key {
+                                    winit::keyboard::Key::Character(text) => Some(text.to_string()),
+                                    _ => None,
+                                },
                                 code,
                                 modifiers,
                                 state: match (event.state, event.repeat) {

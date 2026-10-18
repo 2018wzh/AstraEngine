@@ -1,36 +1,71 @@
-use super::owner::{collect_metadata, Command, Commands, Readiness, Update};
+use super::owner::{
+    BackgroundEvent, BackgroundSender, Command, Commands, Update, collect_metadata,
+};
 use super::*;
 use crossbeam_channel::RecvTimeoutError;
 use parking_lot::Mutex;
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 pub(super) fn run(
-    directories: Vec<PathBuf>,
+    data_dir: PathBuf,
     mailbox: FrameMailbox,
     commands: Commands,
     shared: Arc<Mutex<Update>>,
-    ready: Readiness,
+    results: BackgroundSender,
+    wake: Arc<Mutex<Option<HostWake>>>,
+    cancelled: Arc<AtomicBool>,
 ) -> Result<(), String> {
     let mut registry = FamilyProviderRegistry::new();
-    let initialization = initialize(&mut registry, &directories);
-    match initialization {
-        Ok(errors) => {
-            let metadata = collect_metadata(&registry);
-            let successful = metadata.is_ok();
-            let _ = ready.send(metadata.map(|metadata| (metadata, errors)));
-            if !successful {
-                return Ok(());
-            }
+    astra_emu_manager::startup::mark("core_loading_started");
+    let initialized = (|| {
+        if cancelled.load(Ordering::Acquire) {
+            return Err("ASTRA_EMU_OWNER_CANCELLED".into());
+        }
+        let cores = data_dir.join("cores");
+        fs::create_dir_all(&cores).map_err(|_| "ASTRA_EMU_CORES_DIRECTORY_CREATE")?;
+        #[cfg(not(target_os = "android"))]
+        let directories = core_directories(&cores)?;
+        #[cfg(target_os = "android")]
+        let directories = Vec::new();
+        let errors = initialize(&mut registry, &directories)?;
+        let metadata = collect_metadata(&registry)?;
+        Ok((directories, metadata, errors))
+    })();
+    let directories = match initialized {
+        Ok((directories, metadata, errors)) => {
+            astra_emu_manager::startup::mark("core_metadata_ready");
+            let _ = results.send(BackgroundEvent::Ready(Ok((metadata, errors))));
+            notify(&wake);
+            directories
         }
         Err(error) => {
-            let _ = ready.send(Err(error));
-            return Ok(());
+            let _ = results.send(BackgroundEvent::Ready(Err(error)));
+            notify(&wake);
+            return registry.shutdown().map_err(|error| error.to_string());
         }
-    }
+    };
+    let inventory = probe_cache::Inventory::read(&directories, &registry);
+    let mut cache = probe_cache::ProbeCache::load(&data_dir, inventory);
     let mut active: Option<ActiveFamilySession> = None;
-    let mut wake: Option<HostWake> = None;
     let mut pending = Vec::new();
     loop {
+        if cancelled.load(Ordering::Acquire) {
+            let primary = shared.lock().error.take();
+            let session_error = active.take().and_then(|mut session| session.close().err());
+            let owner_error = registry.shutdown().err().map(|error| error.to_string());
+            let errors: Vec<_> = [primary, session_error, owner_error]
+                .into_iter()
+                .flatten()
+                .collect();
+            return if errors.is_empty() {
+                Ok(())
+            } else {
+                Err(errors.join("; "))
+            };
+        }
         let command = if let Some(session) = active.as_ref() {
             commands.recv_timeout(
                 session
@@ -41,19 +76,29 @@ pub(super) fn run(
             commands.recv().map_err(|_| RecvTimeoutError::Disconnected)
         };
         match command {
-            Ok(Command::Registry(call)) => call(&mut registry),
-            Ok(Command::Wake(value)) => wake = Some(value),
+            #[cfg(test)]
+            Ok(Command::Registry(call)) => {
+                let metadata = call(&mut registry);
+                let _ = results.send(BackgroundEvent::Ready(
+                    metadata.map(|metadata| (metadata, BTreeMap::new())),
+                ));
+                // A registry mutation invalidates hints, including duplicate rejection.
+                cache = probe_cache::ProbeCache::load(&data_dir, None);
+                notify(&wake);
+            }
+            Ok(Command::Scan(request)) => {
+                let kind = request.kind;
+                let result = if active.is_some() {
+                    Err("ASTRA_EMU_FAMILY_SESSION_ALREADY_ACTIVE".into())
+                } else {
+                    probe_worker::scan(&registry, &mut cache, request, &cancelled)
+                };
+                let _ = results.send(BackgroundEvent::Scanned(kind, result));
+                notify(&wake);
+            }
             Ok(Command::Open(request)) => {
                 pending.clear();
                 let epoch = request.epoch;
-                wake = Some(request.wake.clone());
-                let audio = request
-                    .candidate
-                    .descriptor
-                    .has_capability(astra_emu_manager_core::FamilyCapability::PcmAudio)
-                    .then(|| {
-                        audio_executor::HostAudioExecutor::new(request.audio_device, wake.clone())
-                    });
                 match ActiveFamilySession::open(
                     (&request.game, request.configuration, epoch),
                     &request.candidate,
@@ -62,8 +107,9 @@ pub(super) fn run(
                     request.window,
                     super::session::SessionServices {
                         text: request.text,
-                        audio,
+                        window: request.window_service,
                         modal: request.modal,
+                        cancellation: request.cancellation,
                     },
                 ) {
                     Ok(mut session) => {
@@ -76,7 +122,9 @@ pub(super) fn run(
             }
             Ok(Command::Events { epoch, events }) => {
                 if let Some(session) = active.as_mut().filter(|session| session.epoch() == epoch) {
-                    if pending.len() + events.len() > astra_emu_family_api::MAX_EVENTS_PER_ADVANCE {
+                    if pending.len() + events.len()
+                        > astra_emu_manager_core::model::MAX_INPUT_EVENTS
+                    {
                         finish(
                             &mut active,
                             Some("ASTRA_EMU_INPUT_QUEUE_FULL".into()),
@@ -85,25 +133,13 @@ pub(super) fn run(
                         pending.clear();
                         notify(&wake);
                     } else {
-                        let lifecycle = events.iter().any(|event| {
-                            matches!(
-                                event,
-                                FamilyEvent::WindowFocused { .. }
-                                    | FamilyEvent::WindowVisibility { .. }
-                                    | FamilyEvent::WindowSuspended { .. }
-                            )
-                        });
                         pending.extend(events);
-                        if lifecycle {
-                            let result = session.advance_host_events(&pending);
-                            pending.clear();
-                            if let Err(error) = result {
-                                finish(&mut active, Some(error), &shared);
-                            } else if let Some(session) = active.as_mut() {
-                                publish(session, &shared);
-                            }
-                            notify(&wake);
+                        let result = session.input(&pending);
+                        pending.clear();
+                        if let Err(error) = result {
+                            finish(&mut active, Some(error), &shared);
                         }
+                        notify(&wake);
                     }
                 }
             }
@@ -112,14 +148,14 @@ pub(super) fn run(
                     let result = if pending.is_empty() {
                         Ok(())
                     } else {
-                        session.advance_host_events(&pending)
+                        session.input(&pending)
                     };
                     pending.clear();
                     let result = result.and_then(|()| {
                         if events.is_empty() {
                             Ok(())
                         } else {
-                            session.advance_host_events(&events)
+                            session.input(&events)
                         }
                     });
                     finish(&mut active, result.err(), &shared);
@@ -127,10 +163,18 @@ pub(super) fn run(
                 }
             }
             Ok(Command::Shutdown) | Err(RecvTimeoutError::Disconnected) => {
-                if let Some(mut session) = active.take() {
-                    session.close()?;
-                }
-                return shared.lock().error.take().map_or(Ok(()), Err);
+                let primary = shared.lock().error.take();
+                let session_error = active.take().and_then(|mut session| session.close().err());
+                let owner_error = registry.shutdown().err().map(|error| error.to_string());
+                let errors: Vec<_> = [primary, session_error, owner_error]
+                    .into_iter()
+                    .flatten()
+                    .collect();
+                return if errors.is_empty() {
+                    Ok(())
+                } else {
+                    Err(errors.join("; "))
+                };
             }
             Err(RecvTimeoutError::Timeout) => {}
         }
@@ -142,7 +186,7 @@ pub(super) fn run(
             pending.clear();
             notify(&wake);
         }
-        // Commands cannot starve the logical clock. UI/render cadence is irrelevant.
+        // Polling observes native production; it never drives VM scheduling.
         if let Some(session) = active.as_mut() {
             let result = service_due(session, &mut pending, Instant::now());
             let finished = session.status == FamilyStatus::Finished;
@@ -168,36 +212,20 @@ pub(super) fn run(
     }
 }
 
-/// GPU completion has its own wake; it must not consume a VM tick.
 pub(super) fn service_due(
     session: &mut ActiveFamilySession,
     pending: &mut Vec<FamilyEvent>,
     now: Instant,
 ) -> Result<bool, String> {
-    let mut changed = false;
-    if session
-        .frame_poll_deadline
-        .is_some_and(|deadline| now >= deadline)
-    {
-        changed = session.poll_pending_frame()?;
-    }
-    // A successful restore resumes time only after its first output is ready.
-    if !session.clock_reset_pending && now >= session.next_deadline {
-        let elapsed = session
-            .last_tick
-            .elapsed()
-            .as_nanos()
-            .min(u128::from(u64::MAX)) as u64;
-        let result = session
-            .audio
-            .as_ref()
-            .map_or(Ok(()), |audio| audio.check_health())
-            .and_then(|()| session.advance(elapsed.max(1), pending));
+    if !pending.is_empty() {
+        session.input(pending)?;
         pending.clear();
-        result?;
-        changed = true;
     }
-    Ok(changed)
+    if now >= session.wake_deadline() {
+        session.poll()
+    } else {
+        Ok(false)
+    }
 }
 
 fn initialize(
@@ -205,8 +233,7 @@ fn initialize(
     directories: &[PathBuf],
 ) -> Result<BTreeMap<String, String>, String> {
     #[cfg(target_os = "android")]
-    registry
-        .register_provider(astra_emu_fvp::FvpProvider::default())
+    unsafe { registry.register_static(astra_emu_fvp::astra_emu_query) }
         .map_err(|error| error.to_string())?;
     let mut errors = BTreeMap::new();
     #[cfg(not(target_os = "android"))]
@@ -243,24 +270,8 @@ fn publish(session: &mut ActiveFamilySession, shared: &Mutex<Update>) {
         update.opened = true;
         update.dirty = true;
     }
-    if update.fullscreen != session.fullscreen {
-        update.fullscreen = session.fullscreen;
-        update.dirty = true;
-    }
-    if update.title != session.title {
-        update.title.clone_from(&session.title);
-        update.title_changed = true;
-        update.dirty = true;
-    }
-    if let Some(icon) = session.pending_icon.take() {
-        update.icon = Some(icon);
-        update.dirty = true;
-    }
-    if let Some(pointer) = session.pending_pointer.take() {
-        update
-            .pointer
-            .get_or_insert_with(Default::default)
-            .merge(pointer);
+    if update.failure != session.failure {
+        update.failure.clone_from(&session.failure);
         update.dirty = true;
     }
 }
@@ -291,8 +302,9 @@ fn closed(epoch: u64, error: Option<String>, shared: &Mutex<Update>) {
     update.dirty = true;
 }
 
-fn notify(wake: &Option<HostWake>) {
-    if let Some(wake) = wake {
+fn notify(wake: &Mutex<Option<HostWake>>) {
+    let callback = wake.lock().clone();
+    if let Some(wake) = callback {
         wake();
     }
 }

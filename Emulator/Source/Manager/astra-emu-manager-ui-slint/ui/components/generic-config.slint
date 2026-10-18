@@ -27,6 +27,8 @@ export component GenericConfigForm inherits Rectangle {
     in property <string> form-title: "Configuration";
     in property <string> form-description: "";
     in property <bool> has-selected-case: true;
+    in property <bool> show-actions: true;
+    in property <string> empty-message: "当前没有可配置选项";
     callback field-changed(string, string);
     callback save();
     callback reset();
@@ -85,14 +87,14 @@ export component GenericConfigForm inherits Rectangle {
 
             if field.kind == "string" || field.kind == "float" : LineEdit {
                 text: field.value;
-                placeholder-text: field.required ? "Required" : "Optional";
+                placeholder-text: field.required ? "必填" : "选填";
                 edited(value) => { root.field-changed(field.key, value); }
             }
 
             if field.kind == "secret" : LineEdit {
                 text: field.value;
                 input-type: password;
-                placeholder-text: field.required ? "Required" : "Leave blank to keep";
+                placeholder-text: field.required ? "必填" : "留空保留当前值";
                 edited(value) => { root.field-changed(field.key, value); }
             }
 
@@ -103,7 +105,7 @@ export component GenericConfigForm inherits Rectangle {
             }
 
             if field.kind == "bool" : CheckBox {
-                text: field.value == "true" ? "Enabled" : "Disabled";
+                text: field.value == "true" ? "已启用" : "已关闭";
                 checked: field.value == "true";
                 toggled => { root.field-changed(field.key, self.checked ? "true" : "false"); }
             }
@@ -111,18 +113,19 @@ export component GenericConfigForm inherits Rectangle {
             Rectangle { height: 6px; }
         }
 
-        if fields.length > 0 : HorizontalLayout {
+        if show-actions && fields.length > 0 : HorizontalLayout {
             spacing: 10px;
             Rectangle { horizontal-stretch: 1; }
-            M3Button { text: "重置 (Reset)"; variant: "outlined"; clicked => { root.reset(); } }
-            M3Button { text: "保存配置 (Save)"; primary: true; enabled: has-selected-case; clicked => { root.save(); } }
+            M3Button { text: "重置"; variant: "outlined"; clicked => { root.reset(); } }
+            M3Button { text: "保存配置"; primary: true; enabled: has-selected-case; clicked => { root.save(); } }
         }
 
         if fields.length == 0 : Text {
-            text: "No configurable fields for this selection.";
+            text: empty-message;
             color: Theme.text-muted;
             font-size: 12px;
             horizontal-alignment: center;
+            wrap: word-wrap;
         }
     }
 }

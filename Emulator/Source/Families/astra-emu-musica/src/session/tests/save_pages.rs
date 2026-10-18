@@ -89,7 +89,7 @@ fn native_gpu_save_pages_navigate_save_and_restore_gameplay() {
         54,
         image::imageops::FilterType::Triangle,
     );
-    assert_eq!(thumbnail.rgba8.as_ref(), expected.as_raw());
+    assert_eq!(&thumbnail.rgba8[..], expected.as_raw().as_slice());
     session.advance(0, &[key(KeyCode::Escape)]).unwrap();
     assert!(session.scene.pixels == first);
     session.advance(16_666_667, &[key(KeyCode::Enter)]).unwrap();

@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
-    mount_musica, parse_sc, profile::mount_musica_with_texture_overrides, MusicaVm,
-    ScOpcodeCatalog, MUSICA_PROFILE_FILE,
+    MUSICA_KEY_FILE, MusicaVm, ScOpcodeCatalog, mount_musica, parse_sc,
+    profile::mount_musica_with_texture_overrides,
 };
 use astra_core::Hash256;
 use std::io::{Cursor, Write};
@@ -110,14 +110,13 @@ fn profile_texture_overrides_preserve_native_geometry_and_ani_origin() {
     let replacement_ani = png(24, 20, [80, 220, 100, 255]);
     std::fs::write(root.path().join("hd/static.png"), replacement_png).unwrap();
     std::fs::write(root.path().join("hd/ani.png"), replacement_ani).unwrap();
-    let profile_path = root.path().join(MUSICA_PROFILE_FILE);
-    let mut profile: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&profile_path).unwrap()).unwrap();
-    profile["texture_overrides"] = serde_json::json!({
-        "musica:/bg/BG.png": "hd/static.png",
-        "musica:/bg/BG.ANI": "hd/ani.png",
-    });
-    std::fs::write(&profile_path, serde_json::to_vec(&profile).unwrap()).unwrap();
+    let profile_path = root.path().join(MUSICA_KEY_FILE);
+    let mut key = crate::load_musica_key_file(&profile_path).unwrap();
+    key.texture_overrides = std::collections::BTreeMap::from([
+        ("musica:/bg/BG.png".into(), "hd/static.png".into()),
+        ("musica:/bg/BG.ANI".into(), "hd/ani.png".into()),
+    ]);
+    std::fs::write(&profile_path, toml::to_string_pretty(&key).unwrap()).unwrap();
 
     let (archive, overrides) =
         mount_musica_with_texture_overrides(root.path(), &profile_path).unwrap();
@@ -167,14 +166,12 @@ fn texture_override_profile_rejects_unsupported_archive_sources() {
         png(16, 16, [1, 2, 3, 255]),
     )
     .unwrap();
-    let profile_path = root.path().join(MUSICA_PROFILE_FILE);
-    let mut profile: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&profile_path).unwrap()).unwrap();
-    let set_override = |profile: &mut serde_json::Value, source: &str| {
-        profile["texture_overrides"] = serde_json::json!({
-            source: "hd/replacement.png",
-        });
-        std::fs::write(&profile_path, serde_json::to_vec(profile).unwrap()).unwrap();
+    let profile_path = root.path().join(MUSICA_KEY_FILE);
+    let mut profile = crate::load_musica_key_file(&profile_path).unwrap();
+    let set_override = |key: &mut crate::MusicaKeyFile, source: &str| {
+        key.texture_overrides =
+            std::collections::BTreeMap::from([(source.into(), "hd/replacement.png".into())]);
+        std::fs::write(&profile_path, toml::to_string_pretty(key).unwrap()).unwrap();
     };
     let validate_profile = || {
         let (archive, overrides) =
@@ -228,14 +225,13 @@ fn profile_texture_overrides_render_gpu_at_all_scales_with_crop_and_offset() {
         png(24, 20, [80, 220, 100, 255]),
     )
     .unwrap();
-    let profile_path = root.path().join(MUSICA_PROFILE_FILE);
-    let mut profile: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&profile_path).unwrap()).unwrap();
-    profile["texture_overrides"] = serde_json::json!({
-        "musica:/bg/BG.png": "hd/static.png",
-        "musica:/bg/BG.ANI": "hd/ani.png",
-    });
-    std::fs::write(&profile_path, serde_json::to_vec(&profile).unwrap()).unwrap();
+    let profile_path = root.path().join(MUSICA_KEY_FILE);
+    let mut key = crate::load_musica_key_file(&profile_path).unwrap();
+    key.texture_overrides = std::collections::BTreeMap::from([
+        ("musica:/bg/BG.png".into(), "hd/static.png".into()),
+        ("musica:/bg/BG.ANI".into(), "hd/ani.png".into()),
+    ]);
+    std::fs::write(&profile_path, toml::to_string_pretty(&key).unwrap()).unwrap();
 
     let (archive, overrides) =
         mount_musica_with_texture_overrides(root.path(), &profile_path).unwrap();
@@ -374,7 +370,7 @@ fn native_container_images_use_shared_gpu_cache_and_restore() {
             &[(name, &payload), ("bad.ani", b"invalid")],
         );
         let archive =
-            Arc::new(mount_musica(root.path(), std::path::Path::new(MUSICA_PROFILE_FILE)).unwrap());
+            Arc::new(mount_musica(root.path(), std::path::Path::new(MUSICA_KEY_FILE)).unwrap());
         let mut vm = MusicaVm::new(
             "musica:/scr/test.sc".into(),
             Hash256::from_sha256(source.as_bytes()),

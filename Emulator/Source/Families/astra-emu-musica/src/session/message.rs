@@ -1,52 +1,104 @@
 use super::*;
 impl MusicaSession {
     pub(super) fn cancel_text(&mut self) -> FamilyResult<()> {
-        if let Some(pending) = self.pending.take() {
-            if let Some(service) = &self.replacement {
-                service.cancel(pending.id.into()).into_result()?;
-            }
+        if let Some(service) = &self.replacement {
+            service.invalidate();
         }
+        self.pending = None;
+        self.hook_failed = false;
+        self.choice_text = None;
         Ok(())
     }
-    pub(super) fn poll_text(&mut self) -> FamilyResult<bool> {
-        let Some(pending) = &self.pending else {
-            return Ok(false);
+
+    pub(super) fn semantic_event(
+        &mut self,
+        event: Option<MusicaVmEvent>,
+    ) -> FamilyResult<Option<MusicaVmEvent>> {
+        if self.pending.is_none() {
+            let enabled = self
+                .replacement
+                .as_ref()
+                .is_some_and(|s| s.0.text.is_some());
+            if !enabled
+                || !matches!(
+                    event,
+                    Some(MusicaVmEvent::Message { .. } | MusicaVmEvent::Choice)
+                )
+            {
+                return Ok(event);
+            }
+            self.generation = self.generation.checked_add(1).ok_or_else(|| {
+                error("ASTRA_EMU_MUSICA_TEXT_SEQUENCE", "text sequence overflowed")
+            })?;
+            self.pending = Some(PendingText {
+                id: self.generation,
+                event: event.unwrap(),
+            });
+        }
+        let pending = self.pending.as_ref().unwrap();
+        let labels;
+        let source = match &pending.event {
+            MusicaVmEvent::Message { text, speaker, .. } => {
+                let mut source = vec![(astra_emu_abi::TEXT_DIALOGUE, text.as_str())];
+                if let Some(speaker) = speaker {
+                    source.push((astra_emu_abi::TEXT_SPEAKER, speaker.as_str()));
+                }
+                source
+            }
+            MusicaVmEvent::Choice => {
+                labels = self
+                    .vm
+                    .choice_display()
+                    .map_err(vm_error)?
+                    .ok_or_else(|| error("ASTRA_EMU_MUSICA_CHOICE", "choice is unavailable"))?
+                    .0;
+                labels
+                    .iter()
+                    .map(|text| (astra_emu_abi::TEXT_CHOICE, text.as_str()))
+                    .collect()
+            }
+            _ => unreachable!(),
         };
-        let service = self
+        self.audio.suspend(true)?;
+        let result = self
             .replacement
             .as_ref()
-            .ok_or_else(|| error("ASTRA_EMU_MUSICA_TEXT_STATE", "text service is unavailable"))?;
-        if pending.started.elapsed() > Duration::from_secs(15) {
-            self.cancel_text()?;
-            tracing::warn!(event = "astra.emu.musica.translation.timeout");
-            return Ok(false);
-        }
-        match service.poll(pending.id.clone().into()).into_result() {
-            Ok(TextPollResult::Pending) => Ok(false),
-            Ok(TextPollResult::Ready(response)) => {
-                let valid = response.validate().is_ok() && response.request_id == pending.id;
-                self.pending = None;
-                if !valid {
-                    tracing::warn!(event = "astra.emu.musica.translation.invalid");
-                    return Ok(false);
-                }
-                if let Some((_, speaker)) = &self.message {
-                    let replacement = (response.replacement.to_string(), speaker.clone());
-                    self.scene
-                        .render(self.vm.state(), Some(&replacement), None)?;
-                    self.message = Some(replacement);
-                }
-                Ok(false)
+            .unwrap()
+            .transform(pending.id, &source);
+        self.reset_host_clock = true;
+        self.phase = 0;
+        self.input_pending = false;
+        let mut transformed = match result {
+            Ok(result) => result.into_iter(),
+            Err(cause) => {
+                self.hook_failed = true;
+                return Err(cause);
             }
-            Ok(TextPollResult::Cancelled | TextPollResult::Failed(_)) | Err(_) => {
-                self.pending = None;
-                tracing::warn!(event = "astra.emu.musica.translation.failed");
-                Ok(false)
+        };
+        let mut event = self.pending.take().unwrap().event;
+        match &mut event {
+            MusicaVmEvent::Message { text, speaker, .. } => {
+                *text = transformed.next().unwrap();
+                if speaker.is_some() {
+                    *speaker = transformed.next();
+                }
+                self.choice_text = None;
             }
+            MusicaVmEvent::Choice => self.choice_text = Some(transformed.collect()),
+            _ => unreachable!(),
         }
+        self.hook_failed = false;
+        Ok(Some(event))
     }
+
+    pub(super) fn choice_display(&self) -> FamilyResult<Option<(Vec<String>, u32)>> {
+        let Some((labels, index)) = self.vm.choice_display().map_err(vm_error)? else {
+            return Ok(None);
+        };
+        Ok(Some((self.choice_text.clone().unwrap_or(labels), index)))
+    }
+
     pub(super) fn message(&mut self, text: String, speaker: Option<String>) -> FamilyResult<()> {
-        self.cancel_text()?;
         if text.len() > MAX_TEXT_BYTES
             || speaker.as_ref().is_some_and(|s| s.len() > MAX_SYMBOL_BYTES)
         {
@@ -55,29 +107,7 @@ impl MusicaSession {
                 "message exceeds supported bounds",
             ));
         }
-        self.generation = self
-            .generation
-            .checked_add(1)
-            .ok_or_else(|| error("ASTRA_EMU_MUSICA_TEXT_SEQUENCE", "text sequence overflowed"))?;
-        self.message = Some((text.clone(), speaker.clone()));
-        if let Some(service) = &self.replacement {
-            let id = format!("{}.text.{}", self.id, self.generation);
-            let request = TextReplacementRequest {
-                request_id: id.clone().into(),
-                source: text.into(),
-                speaker: speaker.unwrap_or_default().into(),
-                ruby: "".into(),
-            };
-            match service.submit(request).into_result() {
-                Ok(()) => {
-                    self.pending = Some(PendingText {
-                        id,
-                        started: Instant::now(),
-                    })
-                }
-                Err(_) => tracing::warn!(event = "astra.emu.musica.translation.submit_failed"),
-            }
-        }
+        self.message = Some((text, speaker));
         Ok(())
     }
     pub(super) fn poll_voice_duration(&mut self) -> FamilyResult<()> {

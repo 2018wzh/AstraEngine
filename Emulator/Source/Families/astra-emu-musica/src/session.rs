@@ -2,6 +2,7 @@ mod backlog;
 mod config;
 mod gallery;
 mod lifecycle;
+mod native;
 mod tick;
 use lifecycle::vm_error;
 mod message;
@@ -23,8 +24,8 @@ use std::{
     time::{Duration, Instant},
 };
 struct PendingText {
-    id: String,
-    started: Instant,
+    id: u64,
+    event: MusicaVmEvent,
 }
 pub(crate) struct MusicaSession {
     id: String,
@@ -36,7 +37,9 @@ pub(crate) struct MusicaSession {
     scene: Scene,
     audio: Audio,
     movie: Option<crate::movie::Movie>,
-    replacement: Option<TextReplacementServiceBox>,
+    replacement: Option<crate::native::text::TextBridge>,
+    hook_failed: bool,
+    choice_text: Option<Vec<String>>,
     pending: Option<PendingText>,
     voice_duration: Option<(std::sync::mpsc::Receiver<FamilyResult<u32>>, Instant)>,
     generation: u64,
@@ -78,7 +81,7 @@ impl MusicaSession {
         vm: MusicaVm,
         scene: Scene,
         audio: Audio,
-        replacement: Option<TextReplacementServiceBox>,
+        replacement: Option<crate::native::text::TextBridge>,
         storage: Storage,
         game: Hash256,
         lease: SessionLease,
@@ -106,6 +109,8 @@ impl MusicaSession {
             audio,
             movie: None,
             replacement,
+            hook_failed: false,
+            choice_text: None,
             storage,
             game,
             _lease: lease,
@@ -416,12 +421,13 @@ impl MusicaSession {
         if load {
             self.quick_load()?;
         }
-        let mut dirty = self.poll_text()? || choice_dirty;
+        let mut dirty = choice_dirty;
         dirty |= self.advance_movie(elapsed_ns)?;
         if !self.paused()
             && self.movie.is_none()
             && !self.finished
             && self.vm.state().system_ui.page == crate::MusicaSystemPage::None
+            && !self.hook_failed
         {
             if self.vm.config().animation {
                 dirty |= self
@@ -481,6 +487,7 @@ impl MusicaSession {
             while self.phase >= 1_000_000_000
                 && !self.finished
                 && self.vm.state().system_ui.page == crate::MusicaSystemPage::None
+                && !self.hook_failed
             {
                 self.phase -= 1_000_000_000;
                 dirty |= self.tick()?;
@@ -507,7 +514,7 @@ impl MusicaSession {
                 &self.save_cards,
             )?;
         } else if dirty && self.movie.is_none() {
-            let choices = self.vm.choice_display().map_err(vm_error)?;
+            let choices = self.choice_display()?;
             self.scene.render(
                 self.vm.state(),
                 self.message.as_ref(),
@@ -521,7 +528,9 @@ impl MusicaSession {
         }
         self.persist_progress()?;
         Ok(AdvanceResponse {
-            reset_clock: std::mem::take(&mut self.reset_host_clock),
+            // Backpressure pauses the native VM; do not replay that wait as elapsed game time.
+            reset_clock: std::mem::take(&mut self.reset_host_clock)
+                | self.audio.take_backpressure(),
             status: if self.finished {
                 FamilyStatus::Finished
             } else if self.vm.state().wait.is_some() {

@@ -1,32 +1,63 @@
-# RFVP 上游差异
+# RFVP 原生嵌入差异
 
 ## 固定来源
 
-- 完整 fork：[xmoezzz/rfvp](https://github.com/xmoezzz/rfvp)，主仓 submodule：`Emulator/ThirdParty/rfvp`。
-- 上游 HEAD（2026-10-17 核对，0.6.0）：`af557db750c7833274f22a6d82b0dc33cdea2f85`。
-- 唯一适配提交：[`dcd39c23ca59b38a9a96b6f301aeb05121aa3e18`](https://github.com/2018wzh/rfvp/commit/dcd39c23ca59b38a9a96b6f301aeb05121aa3e18)，直接父提交为上述 HEAD；统一适配分支 `astra` 已推送 GitHub，远端 SHA 与主仓 gitlink 一致。
-- 来源历史、workspace、工具和许可证保留；不改写旧分支。
+- 上游基线为 `af557db750c7833274f22a6d82b0dc33cdea2f85`；本批从主仓原 pin `dcd39c23ca59b38a9a96b6f301aeb05121aa3e18` 继续，保留完整来源历史。
+- 原生生命周期修复为 `7e2016a0e0ef1c0b102185914cc7a8459bb2c9e1`；原生音频 worker 所有权接入为 `3359d8fbea3c53d6d262a9f71b6d4d79888c2368`，与适配分开。
+- 原始适配为 `02b66d779f7c4ff6da5f4bc82d935a1088a834e0`；CPU 路径的 ABI 2 硬件验证增量为 [`40fe7c7b11a5c830303c33a975b1f4f7af333837`](https://github.com/2018wzh/rfvp/commit/40fe7c7b11a5c830303c33a975b1f4f7af333837)。Windows GPU 增量从兼容 flate2 提交 `3700dc093424d5948c39cd237d34a79ee0d33913` 继续，保留已发布历史。
+- C ABI 2 固定共享实现 `3c7762ad533c8641af51b8aff81794dc377e23a9`，D3D12 extension 单独使用 v1。`SessionState.flags=0`；RFVP 无 module-owner 扩展，OpenRequest 的该字段须为 null。包元数据沿用现有 `hosted_fork_*` 字段记录来源，不代表保留 Hosted 运行链。
+- 当前单适配提交为 `478448ed9d60778f78d5de911fa5717c48cb201c`，已发布到 fork 的 `astra`，直接父提交为通用基线 `3359d8fbea3c53d6d262a9f71b6d4d79888c2368`。完整源码 tree 与 Release 构建使用的 `ac13a9ee80b495b02734808b92a7223aba06cc1c` 相同；生产读档 epoch/错误传播修复保留，自动验收驱动已移除。本轮临时分支已清理，强推切换由用户明确批准，旧引用备份在本地 Git bundle。
+- Kira 运行层保持 0.10.8，固定 [`d2f10db15d9c451c7b2fd33043ae7732e75bee5d`](https://github.com/2018wzh/kira/commit/d2f10db15d9c451c7b2fd33043ae7732e75bee5d)；设备回归记录增量为 `bb64ffe37f1fa46e7e55c011e102ab28e344fbd3`，不改 mixer 运行实现。独立 workspace 的 CPAL 0.15.3 仍固定 `65ac8a6ac1a635cc26bfc5af331295b052044908`；主仓统一 patch 的 ALSA 0.11 兼容版本 `ecfda841a9140d60bbec1630d47ca91f1a77b8f3` 由主线程验证。
 
-## 差异分类
+## 所有权与完整帧
 
-| 类别 | 当前内容 | 处置 |
-| --- | --- | --- |
-| 嵌入入口 | hosted 使用原 std 类型；字体/TTC 注入、资源读取、session globals、原音频状态接线、成功恢复通知 | 按实际消费者保留必要钩子，保持原操作语义 |
-| GPU 输出 | 同一 GpuPrimRenderer/RenderTarget；单 staging、submit/poll-into、原期限和代次取消；原目标同步捕获保存缩略图 | Family 三槽预留后提交，完成后沿用同一 Arc 分配发布 |
-| 资源与关闭 | 仅原 GPU cache 授权像素回收；原 Movie worker 停止接收后取消/join；独立 Movie stream ID | 保留实际所有权，不加第二播放器或永久 CPU 副本 |
-| 通用功能修复 | V1 修改像素/几何恢复、TextResume/协程取消与活跃文字等待取消 | 已独立提交原生 PR #51/#53，保留到上游合并 |
-| 构建身份 | na_mpeg2_decoder 版本 0.1.1 区分同名路径包 | 不改解码算法；不把包身份区分当作产物命名问题已解决 |
+`astra-emu-fvp` 只保留构建依赖和 `astra_emu_query` 注册入口。函数表、配置、探测、输入与 lease 包装位于 fork 的 `crates/astra-embedded`；App、调度、VM、资源、renderer、游戏 UI、音视频与保存继续由 RFVP 原生代码持有。旧 ProviderModule、公共 advance、HostedSession、Host PCM、替代文件系统及相应旧 ABI 测试已移除。
 
-## Family 与保存边界
+`App::render_frame` 仍先绘制原场景 RenderTarget，再将场景、`legacy_save_load_ui` 和 `exit_confirm_ui` 合成到独立最终离屏目标。CPU 回读只读取这个完整目标；SaveCreate 缩略图和遮罩转场仍在原时点读取原场景目标，不能借用 Host 输出 lease。
 
-Family 的 `src/embedding/` 收集原音频命令和绘制元数据，后者仅作变化/hit-proxy 观察；原 GPU 负责像素上传与绘制。NativeFileSystem 提供资源与原子保存；fontdb 解析实际系统字体和 TTC face。最终输出为不可变 CPU lease、有界 PCM，日志走共享桥。
+窗口外部尺寸 O 不改变 L/R，也不推进 VM。`render_scale` 为启动配置，范围 0.25–4，输出报告实际取整后的 R，并校验设备尺寸上限；未声明在线重配置。输入携带当前会话/输出代次和帧像素坐标，再复用原生窗口到逻辑/UI 映射。保留 `astra.emu.fvp`、文件 stem 游戏身份和 `script_encoding=shift_jis/gbk/utf8`，不丢已有配置关联。
 
-三个 `Arc<Vec<u8>>` 槽有明确写 owner；外部持满三个 lease 时不提交 GPU map，返回 Pending。释放一槽后 acquire 可在没有新 advance 时提交仍 dirty 的图像。初帧同步 capture 的 Vec 直接移入首槽；reset、原生保存捕获导致的取消、失败和 close 释放预留，旧 lease 保持不可变。同步 `map_to_rgba8/try_map_to_rgba8` 保留原生签名，内部复用同一 read-into 完成路径。
+原生 owner 使用独立 8 MiB 栈线程；平台线程只入队输入/控制及取得完成帧。三槽不可变 CPU 池满时跳过显示发布，VM、音频和存档继续执行。Ready/Pending/Unchanged 不以像素 hash 判断；已交付 lease 可跨关闭持有，归还只销毁纯 CPU owner。
 
-保存沿用上游 `SaveStateSnapshotV1` / `MotionManagerSnapshotV1`、RFVS、`GlobalSaveDataV1`/RFVG。旧 fork 的 V2 不是上游格式；旧扩展、重复 codec、版本识别/迁移/专门报错已删除。当前 V1 图像修复仍须按功能修复分类，不因此成为纯嵌入钩子。
+### Windows D3D12 交付
 
-hosted 的 SaveCreate/yield 捕获暂停属于嵌入边界；原生控制组未证明通用缺陷。Family 回归校验保存 PC、缩略图、整张恢复像素与恢复后继续。电影/保存测试按三槽契约及时释放已消费 lease，不要求第四槽。
+`surface=cpu` 保留原默认路径；`surface=cpu_d3d12` 使用原 CPU 交付和 D3D12 原生设备，供同 backend 对照；`surface=d3d12` 使用 `astra.emu.surface.d3d12` v1。Manager 从已有 Slint wgpu 29 设备取得 LUID、格式和限制，通过扩展 open 传入。RFVP 在同一个原生 owner 中选择对应 LUID 的 DX12 adapter，创建独立 wgpu 0.19 device；缺少兼容 Host、格式或设备时明确失败，不回退 CPU。
 
-## 结论与验证入口
+GPU 路径有两次 GPU copy：包含两个原生 UI 的最终目标 → 三槽共享 export；Host import → 私有滤镜输入。正常交付没有 CPU 回读或上传。共享资源与原场景、缩略图、转场历史分离，Host 仍复用 PixelPresentation、FilterEngine 和 Slint StageTextureUpdate。Headless 截图只在 Host 完成这些步骤后回读，并单独记录 `host_readback_bytes`。
 
-原生功能 PR 等待合并，严格最小钩子内容验收仍有上游依赖。当前 Family lib 29 项全部实际通过，包含四项原 GPU 回归、三槽背压与关闭、电影 EOF 和保存/恢复；真实 rlib 外部硬件 probe 两项验证 map abort、受控 timeout、取消代次及 read-into 恢复，临时导出已删除。Release Manager 自制场景精确验证 4×2 白色与相邻黑色像素，实际《樱花萌放》开场到正文截图、非零 PCM 和退出 0 已观察，发行/补丁修订未确认。Hosted 整改前后三轮成本与 Sandbox 验收见[性能审计](../../../../Docs/status/performance-upstream-audit-2026-10-12.md)及[实施计划](../../../../Docs/status/implementation-plan.md)。原版性能测试按用户决定取消。许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+每个 generation 只 acquire 一次。ready/done 为两个共享 D3D12 fence；资源在设备之间以 COMMON 状态交接。Host 在自己的队列等待 ready、复制、恢复 COMMON，再 signal done。原生端同时确认 lease 已归还和消费 fence 已完成才复用槽，不向原生队列提交外部无限 Wait。池满只丢显示发布；关闭只排空原生写入，不等待 Host 持有的旧 lease。Host 的已提交 imports/fences 保留到真实 done 完成或设备丢失。
+
+Host 检查导入资源的实际 DXGI 格式、尺寸、mip/sample、heap、共享 fence 和所属设备。wgpu 29 的 `create_texture_from_hal` 使用 `TextureClearMode::None`；不能用普通未初始化 texture 包装导入资源，否则延迟清零可能覆盖原生像素。
+
+Host graphics owner 直接持有有界 retirement queue，不启动后台退役线程。正常关闭等待实际 done；五秒超时会返回 GPU 清理错误并禁止同进程重开，同时继续取消和回收原生 VM/服务。未完成的最多三个 imports/lease 不会被提前销毁，最终退出只能留到进程回收；实际 device-lost 则按 API 返回退役。超时不记作成功关闭。
+
+
+## 暂停、平台与关闭
+
+暂停停止原生推进并暂停原 Kira mixer，恢复移动电影时钟原点，不补跑等待时长。WindowMode、F11 和指针位置/显隐经 typed 平台服务执行并反馈结果；等待期间保留最后一帧，取消独立唤醒平台服务。无窗口 Host 必须明确拒绝窗口请求。本核心不新增文字 Hook。
+
+原 VM worker 增加指令边界取消和显式 join；原生读档成功递增 context epoch，取消旧平台请求和未完成回读。新 App 清空上一会话的 legacy 配置、文字历史、角色表和 UI 请求。关闭停止回读、VM、电影、原设备 watcher 和全部 streaming decoder，再调用原 RFVG 保存；即使关闭出错也完成 worker 回收。库不卸载，下一次启动重建会话资源。
+
+Kira 的 DecoderOwner 独立于播放 handle；handle Drop 语义不变，Sound Drop 只发取消，不在设备 callback join。CPAL watcher 的启动握手、失败路径、唤醒与 join 在同版本 fork 修复；不替换 mixer/decoder/device。非商业复现位于 Kira 的 `tests/native_owners.rs`。
+
+## 读档修复与验收策略
+
+保留 `11ecaa6a51aa545750bbbdec468626aa19e70553` 的两项生产修复：读档后向 Host invalidation 发布新 context epoch；在 shutdown 设置取消标志之前记录原取消状态，避免清理过程吞掉真实请求失败。未改原生 VM、renderer、音视频或存档格式。
+
+按用户最新要求，验收由用户使用 Release 产物手动完成。已移除适配新增的 `native_cpu.rs`、`native_abi.rs`、`tests/common/mod.rs` 硬件驱动、动态 DLL 验收及 HCB fixture，并移除它们专用的 `tempfile` / `libloading` dev-dependencies。generic `3359d8f` 不包含该适配测试目录；原生上游普通测试不变，`config.rs` 和 `input.rs` 的纯逻辑单元测试保留。没有新增自动输入、截图、定时关闭、Headless 或性能采样入口。
+
+此前 Debug 运行记录仅保留为历史证据，不视为当前 Release 的人工验收结论。商业副本、生成存档及私有测试数据库已在前一轮清理；原始资源和旧存档未动。本轮不启动游戏，也不操作用户窗口。
+
+## Release 构建与交付
+
+在独占树根目录构建原生注册 DLL，不初始化其他核心：
+
+```sh
+cargo build --manifest-path Emulator/ThirdParty/rfvp/Cargo.toml -p rfvp-astra-embedded --locked --release --features native-dylib-export --lib --target-dir .work/target-rfvp-release -j 4
+```
+
+构建输出为 `release [optimized]`。原产物位于 `.work/target-rfvp-release/release/rfvp_astra_embedded.dll`；供 Manager 手动安装的同一 DLL 复制为 `.work/release-fvp/astra_emu_fvp.dll`，导出 `astra_emu_query`。仅完成构建和静态导入/导出检查，没有加载 DLL 或运行验收。
+
+运行需要兼容 C ABI 2 的 Release Manager、x64 Windows 系统组件、VC++ 运行库及可用 GPU/音频驱动。静态导入包括 `VCRUNTIME140.dll`、UCRT、`mfplat.dll`（Media Foundation）和 `d3dcompiler_47.dll`；原生媒体实现没有额外 FFmpeg DLL 依赖。Vulkan 需驱动提供 loader，D3D12 交付仍要求 Host 扩展协商成功，不静默回退 CPU。
+
+资源目录仍须与旧存档隔离，原生保存写入游戏目录下的 `save/`。字体与媒体分发许可边界见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)；Release 编译不等于获得分发授权。

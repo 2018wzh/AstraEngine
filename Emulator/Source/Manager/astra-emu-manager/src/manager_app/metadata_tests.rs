@@ -6,22 +6,15 @@ fn controller(root: &Path) -> AstraEmuManagerController {
 
 #[test]
 #[cfg(not(target_os = "android"))]
-fn desktop_library_creates_empty_cores_directory_without_static_fvp() {
-    let root = tempfile::tempdir().unwrap();
-    let app = controller(root.path());
-    assert!(root.path().join("cores").is_dir());
-    assert!(app.registry.descriptor("astra.emu.fvp").is_none());
-    assert!(app.plugin_errors.is_empty());
-}
-
-#[test]
-#[cfg(not(target_os = "android"))]
 fn damaged_core_keeps_manager_available_and_error_visible() {
     let root = tempfile::tempdir().unwrap();
     let cores = root.path().join("cores");
     std::fs::create_dir_all(&cores).unwrap();
     std::fs::write(
-        cores.join(format!("astra_emu_broken.{}", std::env::consts::DLL_EXTENSION)),
+        cores.join(format!(
+            "astra_emu_broken.{}",
+            std::env::consts::DLL_EXTENSION
+        )),
         b"not a dynamic library",
     )
     .unwrap();
@@ -32,55 +25,23 @@ fn damaged_core_keeps_manager_available_and_error_visible() {
     .unwrap();
 
     let mut app = controller(root.path());
+    app.refresh_cores().unwrap();
+    super::probe_state_tests::settle_background(&mut app);
     assert!(app.plugin_errors.contains_key(&format!(
         "astra_emu_broken.{}",
         std::env::consts::DLL_EXTENSION
     )));
-    assert!(!app.plugin_errors.contains_key(&format!(
-        "avcodec-62.{}",
-        std::env::consts::DLL_EXTENSION
-    )));
+    assert!(
+        !app.plugin_errors
+            .contains_key(&format!("avcodec-62.{}", std::env::consts::DLL_EXTENSION))
+    );
     assert!(app.registry.descriptor("astra.emu.missing").is_none());
-    assert!(app
-        .rescan()
-        .unwrap()
-        .global_diagnostic
-        .contains("ASTRA_EMU_FAMILY_LOAD"));
-}
-
-#[test]
-#[cfg(not(target_os = "android"))]
-#[ignore = "requires an explicitly built Family plugin binary and its runtime dependencies"]
-fn real_core_is_loaded_from_cores_on_each_manager_restart() {
-    let path = PathBuf::from(std::env::var_os("ASTRA_EMU_TEST_PLUGIN").unwrap());
-    let root = tempfile::tempdir().unwrap();
-    let cores = root.path().join("cores");
-    std::fs::create_dir_all(&cores).unwrap();
-    let source_dir = path.parent().expect("plugin has a parent directory");
-    for entry in std::fs::read_dir(source_dir).unwrap() {
-        let entry = entry.unwrap();
-        if entry
-            .path()
-            .extension()
-            .and_then(|value| value.to_str())
-            .is_some_and(|extension| {
-                extension.eq_ignore_ascii_case(std::env::consts::DLL_EXTENSION)
-            })
-        {
-            std::fs::copy(entry.path(), cores.join(entry.file_name())).unwrap();
-        }
-    }
-    let file_name = path.file_name().unwrap();
-    let copied = cores.join(file_name);
-    assert!(copied.is_file());
-    let app = controller(root.path());
-    let id = app.registry.descriptors().next().unwrap().plugin_id.clone();
-    assert!(app.plugin_errors.is_empty());
-    assert!(app.registry.descriptor(&id).is_some());
-    drop(app);
-    let app = controller(root.path());
-    assert!(app.plugin_errors.is_empty());
-    assert!(app.registry.descriptor(&id).is_some());
+    assert!(
+        app.model()
+            .unwrap()
+            .global_diagnostic
+            .contains("ASTRA_EMU_FAMILY_LOAD")
+    );
 }
 
 fn add_game(controller: &mut AstraEmuManagerController, id: &str) {
@@ -198,10 +159,11 @@ fn metadata_linked_title_persists_and_unlink_hides_stale_snapshot() {
     app.library.set_game_user_title("first", None).unwrap();
     app.unlink_identity("vndb").unwrap();
     assert_eq!(app.model().unwrap().selected_title, "Imported folder");
-    assert!(app
-        .metadata_record("first", MetadataProviderId::Vndb)
-        .unwrap()
-        .is_none());
+    assert!(
+        app.metadata_record("first", MetadataProviderId::Vndb)
+            .unwrap()
+            .is_none()
+    );
     assert_eq!(
         app.refresh_metadata("vndb").unwrap_err(),
         "ASTRA_EMU_METADATA_NOT_LINKED"

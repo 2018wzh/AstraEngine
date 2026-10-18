@@ -9,6 +9,7 @@ use std::{
 const BATCH_PACKETS: usize = 4;
 const AUDIO_PACKET_BYTES: usize = 64 * 1024;
 const VIDEO_BYTES: usize = 64 * 1024 * 1024;
+const MAX_ENCODED_BYTES: u64 = 512 * 1024 * 1024;
 
 pub(crate) struct Movie {
     decoder: VideoDecoderWorker,
@@ -24,34 +25,29 @@ pub(crate) struct Movie {
     remainder_ns: u64,
 }
 impl Movie {
-    pub fn open(archive: &MusicaMountedVfs, state: &MusicaMovieState) -> FamilyResult<Self> {
+    pub fn open(archive: &Arc<MusicaMountedVfs>, state: &MusicaMovieState) -> FamilyResult<Self> {
         let stat = archive.stat(&state.resource_uri).map_err(core_error)?;
-        if stat.size == 0 || stat.size > 512 * 1024 * 1024 {
+        if stat.size == 0 || stat.size > MAX_ENCODED_BYTES {
             return Err(error(
                 "ASTRA_EMU_MUSICA_MOVIE_RESOURCE",
                 "movie exceeds encoded byte budget",
             ));
         }
-        let bytes = archive
-            .read_range(&state.resource_uri, 0, stat.size)
-            .map_err(core_error)?
-            .bytes;
-        let codec = state
-            .resource_uri
-            .rsplit_once('.')
-            .ok_or_else(|| {
-                error(
-                    "ASTRA_EMU_MUSICA_MOVIE_RESOURCE",
-                    "movie has no codec extension",
-                )
-            })?
-            .1
-            .to_owned();
-        let decoder = VideoDecoderWorker::open(
-            codec,
-            Arc::from(bytes.as_ref()),
+        let archive = archive.clone();
+        let uri = state.resource_uri.clone();
+        let decoder = VideoDecoderWorker::open_file(
+            move |stop| {
+                let mut file = tempfile::Builder::new()
+                    .prefix("astra-musica-movie-")
+                    .tempfile()
+                    .map_err(|cause| {
+                        crate::CoreError::invalid("ASTRA_EMU_MUSICA_MOVIE_FILE", cause.to_string())
+                    })?;
+                archive.write_movie(&uri, &mut file, MAX_ENCODED_BYTES, stop)?;
+                Ok(file)
+            },
             FfmpegStreamLimits {
-                max_encoded_bytes: 512 * 1024 * 1024,
+                max_encoded_bytes: MAX_ENCODED_BYTES as usize,
                 max_audio_packet_bytes: AUDIO_PACKET_BYTES,
                 ..Default::default()
             },

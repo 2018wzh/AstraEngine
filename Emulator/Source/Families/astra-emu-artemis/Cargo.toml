@@ -8,9 +8,12 @@ license = "MPL-2.0"
 crate-type = ["rlib", "cdylib"]
 doctest = false
 
+[features]
+default = []
+static-core = []
+
 [dependencies]
-abi_stable.workspace = true
-astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api", features = ["diagnostic-bridge"] }
+astra-emu-abi = { path = "../../FamilyApi/astra-emu-abi", features = ["diagnostic-bridge"] }
 art3m1s-core = { path = "../../../ThirdParty/art3m1s-core", default-features = false, features = [
     "ffmpeg",
 ] }
@@ -18,8 +21,9 @@ encoding_rs = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json.workspace = true
 astra-emu-sdk = { path = "../../SDK/astra-emu-sdk", default-features = false, features = ["audio"] }
-kira.workspace = true
+kira = { workspace = true, features = ["cpal"] }
 tracing.workspace = true
+parking_lot = "0.12"
 
 [target.'cfg(any(target_os = "windows", target_os = "linux", target_os = "android"))'.dependencies]
 art3m1s-core = { path = "../../../ThirdParty/art3m1s-core", default-features = false, features = ["vulkan-backend"] }
@@ -28,8 +32,6 @@ art3m1s-core = { path = "../../../ThirdParty/art3m1s-core", default-features = f
 art3m1s-core = { path = "../../../ThirdParty/art3m1s-core", default-features = false, features = ["metal-backend"] }
 
 [dev-dependencies]
-env_logger = "0.11"
-image = { workspace = true, features = ["png"] }
 tempfile.workspace = true
 
 [package.metadata.astra]
