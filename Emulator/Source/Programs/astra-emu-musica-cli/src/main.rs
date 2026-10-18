@@ -14,12 +14,14 @@ use clap::{Parser, Subcommand};
 use serde::Serialize;
 
 mod eden_save;
-use astra_emu_musica::profile_import;
+mod profile_import;
 mod inventory;
-use astra_emu_musica::profile_import::private_output;
+mod private_output;
 
 #[cfg(test)]
 mod census_tests;
+#[cfg(test)]
+mod command_tests;
 
 #[derive(Debug, Parser)]
 #[command(name = "astra-emu-musica-cli")]
@@ -34,7 +36,7 @@ enum Command {
     ExportEdenSave {
         #[arg(long)]
         game_dir: PathBuf,
-        #[arg(long)]
+        #[arg(long, help = "Production keys.v2 key.toml, game-relative or absolute")]
         profile: PathBuf,
         #[arg(long)]
         slot: u32,
@@ -47,7 +49,7 @@ enum Command {
         file: PathBuf,
         #[arg(long)]
         game_dir: PathBuf,
-        #[arg(long)]
+        #[arg(long, help = "Production keys.v2 key.toml, game-relative or absolute")]
         profile: PathBuf,
         #[arg(long, value_enum)]
         edition: eden_save::Edition,
@@ -73,6 +75,10 @@ enum Command {
         #[arg(long)]
         title: String,
         #[arg(long)]
+        index_size_xor: u32,
+        #[arg(long, action = clap::ArgAction::Set, required = true)]
+        rc4_skip_crc: bool,
+        #[arg(long)]
         output: PathBuf,
     },
     ImportKeyProfile {
@@ -87,6 +93,13 @@ enum Command {
         #[arg(long)]
         output: PathBuf,
     },
+    /// Convert a strict legacy profile.v1 JSON file into a new keys.v2 key.toml.
+    ImportJsonProfile {
+        #[arg(long)]
+        file: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+    },
     ListGarbroTitles {
         #[arg(long)]
         formats: PathBuf,
@@ -94,13 +107,13 @@ enum Command {
     CensusScripts {
         #[arg(long)]
         game_dir: PathBuf,
-        #[arg(long)]
+        #[arg(long, help = "Production keys.v2 key.toml, game-relative or absolute")]
         profile: PathBuf,
     },
     CensusMedia {
         #[arg(long)]
         game_dir: PathBuf,
-        #[arg(long)]
+        #[arg(long, help = "Production keys.v2 key.toml, game-relative or absolute")]
         profile: PathBuf,
     },
 }
@@ -117,6 +130,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Command::ScanArchives { .. } => "scan_archives",
         Command::ImportGarbroScheme { .. } => "import_garbro_scheme",
         Command::ImportKeyProfile { .. } => "import_key_profile",
+        Command::ImportJsonProfile { .. } => "import_json_profile",
         Command::ListGarbroTitles { .. } => "list_garbro_titles",
         Command::CensusScripts { .. } => "census_scripts",
         Command::CensusMedia { .. } => "census_media",
@@ -149,10 +163,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Command::ImportGarbroScheme {
             formats,
             title,
+            index_size_xor,
+            rc4_skip_crc,
             output,
-        } => profile_import::import_garbro_profile(&formats, &title, &output),
+        } => profile_import::import_garbro_profile(&formats, &title, index_size_xor, rc4_skip_crc, &output),
         Command::ImportKeyProfile { file, paz_version, index_size_xor, rc4_skip_crc, output } =>
             profile_import::import_key_profile(&file, paz_version, index_size_xor, rc4_skip_crc, &output),
+        Command::ImportJsonProfile { file, output } =>
+            profile_import::import_json_profile(&file, &output),
         Command::ListGarbroTitles { formats } => {
             println!(
                 "{}",

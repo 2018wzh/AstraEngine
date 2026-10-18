@@ -13,10 +13,14 @@ astra-core = { path = "../../../../Engine/Source/Runtime/astra-core" }
 astra-emu-musica = { path = "../../Families/astra-emu-musica" }
 astra-observability = { path = "../../../../Engine/Source/Developer/astra-observability" }
 clap.workspace = true
+encoding_rs.workspace = true
+flate2.workspace = true
 image.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+tempfile.workspace = true
+toml = "1.1"
 tracing.workspace = true
 
-[dev-dependencies]
-tempfile.workspace = true
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization"] }
