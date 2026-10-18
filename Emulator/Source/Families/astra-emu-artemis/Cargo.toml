@@ -34,9 +34,6 @@ art3m1s-core = { path = "../../../ThirdParty/art3m1s-core", default-features = f
 [dev-dependencies]
 tempfile.workspace = true
 
-[target.'cfg(windows)'.dev-dependencies]
-windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
-
 [package.metadata.astra]
 upstream = "https://github.com/Alphaly2K/art3m1s-core"
 upstream_revision = "ad90a62cb192b119b7cf8589aa7f87a94bd747c8"
