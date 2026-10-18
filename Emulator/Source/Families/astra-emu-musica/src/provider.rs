@@ -4,7 +4,7 @@ use crate::{
     scene::{core_error, error, Scene},
     session::MusicaSession,
     storage::Storage,
-    MusicaVm, ScriptEncoding, MUSICA_PROFILE_FILE,
+    MusicaVm, ScriptEncoding, MUSICA_KEY_FILE,
 };
 use abi_stable::std_types::ROption;
 use astra_core::Hash256;
@@ -61,7 +61,7 @@ pub(crate) fn musica_descriptor() -> FamilyDescriptor {
         default: ConfigValue::Integer(default),
     };
     let mut configuration = vec![
-        field("profile_file", "Private PAZ JSON profile (absolute or game-relative path)", MUSICA_PROFILE_FILE),
+        field("profile_file", "Private PAZ key.toml (absolute or game-relative path)", MUSICA_KEY_FILE),
         field("entry_script", "Entry script in scr archive", "test.sc"),
         field(
             "eden_import_file",

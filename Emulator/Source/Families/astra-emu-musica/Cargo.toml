@@ -51,5 +51,3 @@ tempfile.workspace = true
 [dev-dependencies]
 parking_lot = "0.12"
 
-[target.'cfg(windows)'.dependencies]
-windows = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization"] }

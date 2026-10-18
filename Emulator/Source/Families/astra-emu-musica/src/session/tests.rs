@@ -1,5 +1,5 @@
 use crate::test_fixture as fixture;
-use crate::{audio::Audio, mount_musica, scene::core_error, MusicaVm, MUSICA_PROFILE_FILE};
+use crate::{audio::Audio, mount_musica, scene::core_error, MusicaVm, MUSICA_KEY_FILE};
 use abi_stable::{std_types::ROption, type_level::downcasting::TD_Opaque};
 use astra_emu_family_api::*;
 use std::{
@@ -369,7 +369,7 @@ fn audio_close_cancels_blocked_write_and_joins_worker() {
     let root = tempfile::tempdir().unwrap();
     fixture::game(root.path(), b".end\r\n");
     let archive = Arc::new(
-        mount_musica(root.path(), &root.path().join(MUSICA_PROFILE_FILE))
+        mount_musica(root.path(), &root.path().join(MUSICA_KEY_FILE))
             .map_err(core_error)
             .unwrap(),
     );
@@ -402,7 +402,7 @@ fn full_audio_control_queue_waits_and_cancellation_releases_the_sender() {
     let root = tempfile::tempdir().unwrap();
     fixture::game(root.path(), b".end\r\n");
     let archive =
-        Arc::new(mount_musica(root.path(), &root.path().join(MUSICA_PROFILE_FILE)).unwrap());
+        Arc::new(mount_musica(root.path(), &root.path().join(MUSICA_KEY_FILE)).unwrap());
     let sink = Sink {
         block: true,
         ..Default::default()
@@ -460,7 +460,7 @@ fn audio_snapshot_timeout_cancels_blocked_worker_and_rejects_late_commands() {
     let root = tempfile::tempdir().unwrap();
     fixture::game(root.path(), b".end\r\n");
     let archive =
-        Arc::new(mount_musica(root.path(), &root.path().join(MUSICA_PROFILE_FILE)).unwrap());
+        Arc::new(mount_musica(root.path(), &root.path().join(MUSICA_KEY_FILE)).unwrap());
     let sink = Sink {
         block: true,
         ..Default::default()

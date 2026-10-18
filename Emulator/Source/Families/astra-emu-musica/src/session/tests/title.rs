@@ -90,11 +90,11 @@ pub(super) fn title_request(root: &std::path::Path) -> OpenRequest {
 }
 
 fn omit_texture_overrides(root: &std::path::Path) {
-    let profile_path = root.join(MUSICA_PROFILE_FILE);
-    let mut profile: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&profile_path).unwrap()).unwrap();
-    profile.as_object_mut().unwrap().remove("texture_overrides");
-    std::fs::write(&profile_path, serde_json::to_vec(&profile).unwrap()).unwrap();
+    let profile_path = root.join(MUSICA_KEY_FILE);
+    let mut key: toml::Table =
+        toml::from_str(&std::fs::read_to_string(&profile_path).unwrap()).unwrap();
+    key.remove("texture_overrides");
+    std::fs::write(&profile_path, toml::to_string_pretty(&key).unwrap()).unwrap();
 }
 
 fn single_pixel_ani() -> Vec<u8> {

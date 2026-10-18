@@ -113,7 +113,7 @@ fn native_crop_and_coordinate_overflow_fail_without_saturation() {
 #[test]
 #[ignore = "requires a hardware GPU"]
 fn native_stand_gpu_uses_metadata_crop_and_restore_without_changing_cached_pixels() {
-    use crate::{mount_musica, parse_sc, MusicaVm, ScOpcodeCatalog, MUSICA_PROFILE_FILE};
+    use crate::{mount_musica, parse_sc, MusicaVm, ScOpcodeCatalog, MUSICA_KEY_FILE};
     use astra_core::Hash256;
     let root = tempfile::tempdir().unwrap();
     let script = b".stage * * 0 0 Stand.png 16,9\r\n.end\r\n";
@@ -123,7 +123,7 @@ fn native_stand_gpu_uses_metadata_crop_and_restore_without_changing_cached_pixel
         &png(&[("ol", "3", 0), ("or", "5", 1), ("ob", "6", 2)]),
     );
     let archive =
-        Arc::new(mount_musica(root.path(), std::path::Path::new(MUSICA_PROFILE_FILE)).unwrap());
+        Arc::new(mount_musica(root.path(), std::path::Path::new(MUSICA_KEY_FILE)).unwrap());
     let make_vm = || {
         MusicaVm::new(
             "musica:/scr/test.sc".into(),

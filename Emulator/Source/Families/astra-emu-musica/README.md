@@ -6,7 +6,7 @@ Musica 提供独立 `FamilyProvider`、`FamilySession` 和可选 `abi_stable` �
 
 ## 启动和输入
 
-原生 C ABI v2 descriptor 提供 `profile_file`（默认 `musica.profile.json`）、`entry_script`（默认 `test.sc`）等 typed 启动配置，完整字段以 Rust descriptor/schema 为准。profile 可选显式绝对路径，或游戏目录内安全相对路径；入口是 scr archive 内单个 `.sc` 文件名。`test.sc` 延续此前明确选择的观察入口，可按游戏修改。不会在入口失败后猜测另一个脚本。
+原生 C ABI v2 descriptor 提供 `profile_file`（界面显示 key.toml，默认 `key.toml`）、`entry_script`（默认 `test.sc`）等 typed 启动配置，完整字段以 Rust descriptor/schema 为准。key.toml 可选显式绝对路径，或游戏目录内安全相对路径；入口是 scr archive 内单个 `.sc` 文件名。`test.sc` 延续此前明确选择的观察入口，可按游戏修改。不会在入口失败后猜测另一个脚本。
 
 已接入的渲染路径保留既有 1280×720 坐标与 Noto Sans JP 字体绑定。Host resize 只改变窗口，不改游戏内部布局。Session 按 60 Hz 逻辑处理有界 elapsed interval，显示纹理、消息、面板和已验证的 CrossFade2；字形结果与纹理有界缓存。Enter、Space 和鼠标主键推进消息；F5 保存，F9 读取。关闭和销毁都会取消文字请求、取消 PCM 写入并等待 audio worker 结束；同进程不能同时打开两个 Musica session。
 
@@ -14,15 +14,15 @@ Musica 提供独立 `FamilyProvider`、`FamilySession` 和可选 `abi_stable` �
 
 ## 私有配置与存档
 
-`mount_musica(game_root, profile_path)` 加载不超过 1 MiB 的 JSON，按原始文件字节 SHA-256 绑定 profile identity。`MusicaProfile` 使用 `astra.emu.musica.profile.v1`，包含 `paz_version`、`index_size_xor`、`rc4_skip_crc` 和八个固定 role 的密钥设置。`rc4_skip_crc` 控制 PAZ v2 的 entry CRC32 skip；已有 JSON 未声明时沿用原有启用行为，导入原生 key 时必须明确选择。配置包含私有解密信息，不进 Git、日志或报告；读取失败不写文件。
+`mount_musica(game_root, profile_path)` 只读取不超过 1 MiB 的 UTF-8 TOML，按原始文件字节 SHA-256 绑定私有配置身份。`MusicaKeyFile` 使用 `astra.emu.musica.keys.v2`，必须明确声明 `paz_version`、`index_size_xor`、`rc4_skip_crc` 和八个固定 role 的 `archive_keys`。`rc4_skip_crc` 控制 PAZ v2 的 entry CRC32 skip，缺失算法参数直接拒绝，不补默认值。配置包含私有解密信息，不进 Git、日志或报告；读取失败不写文件。
 
-PAZ 探测只识别引擎，不能据此得出解密配置已安装。Manager 可通过 `profile_import::list_garbro_titles` 和 `import_garbro_profile` 显式选择 GARbro 作品，或通过 `import_key_profile(file, paz_version, index_size_xor, rc4_skip_crc, output)` 导入已确认的原生 `astra.emu.musica.keys.v1` TOML。key 文件自身没有这三个算法参数，必须从对应游戏的原有 profile 明确提供；不按目录名、文件是否存在或其他作品密钥猜测。接口不创建 session；CLI 与 Manager 共用同一实现，无旧 Family 工厂转发。
+每个 `MusicaArchiveKey` 声明偶数长度的 `index_key_hex` 和 `data_key_hex`，接受大小写十六进制；mov 允许空 data key。可选字段保留各 role 的 `type_passwords`、`archive_xor` 和 256 字节 `video_key_hex`，`texture_overrides` 仍是整份配置的可选映射。`MusicaKeyFile::validate` 纯校验 schema、算法参数、密钥和路径语法；`load_musica_key_file` 有界读取普通文件并校验，不初始化游戏或设备。TOML 错误不回显源行、密钥或路径。
 
-导入目标由调用方明确提供，应位于应用管理的私有配置目录。导入器有界读取，先校验完整 profile，再以 0600/Windows owner-only protected DACL 原子发布新文件；已有目标、权限失败和发布冲突均报错，原游戏、key 与旧 profile 保持不变。将目标绝对路径保存到当前游戏的 `profile_file` 后启动。缺失、权限、非文件、格式、越界和过大输入分别报 `ASTRA_EMU_PROFILE_*`，不回显私有内容或路径。旧 Luau patch/YAML 不作为运行时配置。
+PAZ 探测只识别引擎，不能据此得出密钥已安装。Manager 只选择现有 key.toml，并将明确路径保存到当前游戏的 `profile_file`；JSON profile、GARbro 方案和旧 `keys.v1` TOML 的转换只由开发 CLI 提供。运行时没有导入器、兼容解析或格式回退。转换说明见 [CLI](../../Programs/astra-emu-musica-cli/README.md)；原游戏、密钥与存档保持不变。
 
-同一 profile 可以可选地声明 `texture_overrides`。它是 `musica:/` 原资源 URI 到游戏目录内安全相对 PNG 路径的显式映射，例如 `musica:/bg/BG.png` 到 `hd/BG.png`。启动先验证原资源、帧数和映射路径，首次使用先解码原资源；逻辑尺寸与 ANI 原点始终来自原资源，替换图只提供物理像素。静态 PNG 与单帧 ANI 支持 PNG 替换；多帧 ANI、SQZ、缺失文件、非法路径、尺寸超限和解码失败都明确报错，不回退原图。原生和替换纹理共用 SDK `TextureCache`，通过不同 cache identity 区分。高清素材放在 ignored 私有目录，不进入仓库、日志或存档。
+同一 key.toml 可以可选地声明 `texture_overrides`。它是 `musica:/` 原资源 URI 到游戏目录内安全相对 PNG 路径的显式映射，例如 `musica:/bg/BG.png` 到 `hd/BG.png`。启动先验证原资源、帧数和映射路径，首次使用先解码原资源；逻辑尺寸与 ANI 原点始终来自原资源，替换图只提供物理像素。静态 PNG 与单帧 ANI 支持 PNG 替换；多帧 ANI、SQZ、缺失文件、非法路径、尺寸超限和解码失败都明确报错，不回退原图。原生和替换纹理共用 SDK `TextureCache`，通过不同 cache identity 区分。高清素材放在 ignored 私有目录，不进入仓库、日志或存档。
 
-PAZ 的边界/重叠校验、分卷读取、Blowfish/RC4、XOR、解压和源文件变化校验保留。SDK 的 `ArchiveManifest` 是核心本地索引，不是 Host VFS 或产品 package。私有配置有界读取与明文缓存也由 SDK 共用；配置相对路径以游戏目录为基准，公共读取错误使用 `ASTRA_EMU_PROFILE_*`。导入/读取不运行 managed helper、BinaryFormatter 或 executable patch。
+PAZ 的边界/重叠校验、分卷读取、Blowfish/RC4、XOR、解压和源文件变化校验保留。SDK 的 `ArchiveManifest` 是核心本地索引，不是 Host VFS 或产品 package。配置相对路径以游戏目录为基准，资源始终限于游戏目录内；公共读取错误使用 `ASTRA_EMU_PROFILE_*`。读取不运行 managed helper、BinaryFormatter 或 executable patch。
 
 核心自有 slot 位于游戏目录 `.astra-musica/saves/slot-000.asav`。容器 `AMUSSV05` 包含长度、SHA-256 与 postcard snapshot，保存 VM、当前文本、等待进度以及 sound resource/播放位置/volume/pan/repeat。它绑定同一 archive/profile identity；加载重建脚本、场景和声音后提交。临时文件 flush 后原子替换；损坏、异版本或外部格式文件拒绝覆盖。此格式不宣称兼容原版存档。加载恢复声音的当前参数、位置与尚未完成的音量渐变。渐变保存分贝起止值、总采样数、已推进采样数和结束停止意图；按剩余采样继续，暂停不推进渐变。新音量命令替换旧渐变。旧 AMUSSV04 及更早内部格式明确拒绝，不覆盖旧 slot。
 
