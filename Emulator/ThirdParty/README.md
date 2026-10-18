@@ -11,6 +11,6 @@
 | `kirikiri2/` | `5b2eccd0a51b6b47bb845f48acfd12bd2167c477` | 完整 Kirikiroid2-web，保留原组件许可、独立生命周期及 WindowEx owner 初始化修复 |
 | `cpal/` | `ecfda841a9140d60bbec1630d47ca91f1a77b8f3` | CPAL 0.15.3 的 WASAPI 关闭与 ALSA 依赖兼容修复，Apache-2.0 |
 
-上述精确提交均已推送对应 fork；旧分支与完整来源历史保留。RFVP 适配分支是 `codex/emu-native-manual-final-20261018`，Siglus 是 `codex/emu-native-manual-clean-20261018`，Sena 是 `codex/emu-native-save-final-20261018`；各自直接基于通用修复基线。
+RFVP、Siglus、Artemis、Sena 和 Kirikiroid2-web 的核心源码统一发布于各 fork 的 `astra`；主仓仍固定上表的精确 revision。通用修复基线保留在提交历史中，CPAL/Kira 使用按版本命名的稳定分支。本轮临时分支已清理，旧引用另存 Git bundle；`astra` 强推切换经用户明确批准。
 
-这些目录不是替代 Manager 的应用入口。构建只选择相应 native library，不将其他核心一起初始化或编译作为前置条件。Ethornell 的许可覆盖待澄清，本地适配尚未注册或推送；具体分发限制见 [第三方声明](../THIRD_PARTY_NOTICES.md)。
+这些目录不是替代 Manager 的应用入口。构建只选择相应 native library，不将其他核心一起初始化或编译作为前置条件。Ethornell 适配另发布于 [2018wzh/ethornell-rs 的 astra](https://github.com/2018wzh/ethornell-rs/tree/astra)；许可覆盖仍待澄清，尚未注册为可分发 submodule，具体限制见 [第三方声明](../THIRD_PARTY_NOTICES.md)。

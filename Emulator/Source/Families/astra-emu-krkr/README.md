@@ -13,6 +13,7 @@ or second application event loop. Audio uses the original OpenAL playback device
   `7105b50822097d11b7b1f5894bf541509fd51350`.
 - Owned fork: `https://github.com/2018wzh/kirikiroid2-web`, pinned at
   `5b2eccd0a51b6b47bb845f48acfd12bd2167c477`.
+  The publication branch is `astra`; temporary integration branches are retired.
   The retained Windows patch is separate commit
   `cae1bd8b98a817505f5a973ac00e6b925fbe35e3`; lifecycle fixes follow it.
 - `layerExImage`: `23a9214f9b6e9bc3267b964707efa269c041b919`, compiled unchanged.

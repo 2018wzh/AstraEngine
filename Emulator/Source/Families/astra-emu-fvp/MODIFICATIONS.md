@@ -6,7 +6,7 @@
 - 原生生命周期修复为 `7e2016a0e0ef1c0b102185914cc7a8459bb2c9e1`；原生音频 worker 所有权接入为 `3359d8fbea3c53d6d262a9f71b6d4d79888c2368`，与适配分开。
 - 原始适配为 `02b66d779f7c4ff6da5f4bc82d935a1088a834e0`；CPU 路径的 ABI 2 硬件验证增量为 [`40fe7c7b11a5c830303c33a975b1f4f7af333837`](https://github.com/2018wzh/rfvp/commit/40fe7c7b11a5c830303c33a975b1f4f7af333837)。Windows GPU 增量从兼容 flate2 提交 `3700dc093424d5948c39cd237d34a79ee0d33913` 继续，保留已发布历史。
 - C ABI 2 固定共享实现 `3c7762ad533c8641af51b8aff81794dc377e23a9`，D3D12 extension 单独使用 v1。`SessionState.flags=0`；RFVP 无 module-owner 扩展，OpenRequest 的该字段须为 null。包元数据沿用现有 `hosted_fork_*` 字段记录来源，不代表保留 Hosted 运行链。
-- 当前单适配提交为 `478448ed9d60778f78d5de911fa5717c48cb201c`，分支 `codex/emu-native-manual-final-20261018`，直接父提交为通用基线 `3359d8fbea3c53d6d262a9f71b6d4d79888c2368`。完整源码 tree 与 Release 构建使用的 `ac13a9ee80b495b02734808b92a7223aba06cc1c` 相同；生产读档 epoch/错误传播修复保留，自动验收驱动已移除，旧公开历史不改写。
+- 当前单适配提交为 `478448ed9d60778f78d5de911fa5717c48cb201c`，已发布到 fork 的 `astra`，直接父提交为通用基线 `3359d8fbea3c53d6d262a9f71b6d4d79888c2368`。完整源码 tree 与 Release 构建使用的 `ac13a9ee80b495b02734808b92a7223aba06cc1c` 相同；生产读档 epoch/错误传播修复保留，自动验收驱动已移除。本轮临时分支已清理，强推切换由用户明确批准，旧引用备份在本地 Git bundle。
 - Kira 运行层保持 0.10.8，固定 [`d2f10db15d9c451c7b2fd33043ae7732e75bee5d`](https://github.com/2018wzh/kira/commit/d2f10db15d9c451c7b2fd33043ae7732e75bee5d)；设备回归记录增量为 `bb64ffe37f1fa46e7e55c011e102ab28e344fbd3`，不改 mixer 运行实现。独立 workspace 的 CPAL 0.15.3 仍固定 `65ac8a6ac1a635cc26bfc5af331295b052044908`；主仓统一 patch 的 ALSA 0.11 兼容版本 `ecfda841a9140d60bbec1630d47ca91f1a77b8f3` 由主线程验证。
 
 ## 所有权与完整帧

@@ -24,7 +24,7 @@
 | Artemis | 原 Vulkan/FFmpeg、新 ABI；解码取消、restore-close 音频竞态和真实窗口查询修复保留，自动验收驱动已清理，Release DLL 已构建 | 人工 Release 验收待用户执行；此前只取得通用 `ASTRA_EMU_SESSION_FAILED`，具体原因未归因，不再自动重开复现 |
 | Musica/SDK | 真实标题/重开、连续对白 Hook、错误重试、存读档、网络取消；音频快进背压与 MOV 类型密码、流式落盘已修，OP 与影片中保存恢复通过 | OP 后复合图像参数阻塞；确认来源 `00610272` 也没有对应解析，不丢参数或另猜语义。选择项 Hook 实玩与逻辑尺寸收敛仍有缺口 |
 | Sena | 真实简中标题、连续剧情/CG、菜单、存读档、关闭重开；新会话读档后保存修复已整合，原生 1920×1080 与设备初始化通过 | 后续目的地流程 `0xCDFF8 → 0xCD6E4` 循环已在固定 native `2d28936c` 独立实窗复现；另有 EV417/MIX 错误，不外推完整兼容 |
-| Ethornell/BGI | 用户明确确认人工验收完毕；原生等价 cursor 错误策略修复保留，Release DLL 已构建 | 不再重复自动验收；许可覆盖待澄清，仅本地交付，不 public push |
+| Ethornell/BGI | 用户明确确认人工验收完毕；原生等价 cursor 策略修复保留，Release DLL 已构建；源码已按本次授权发布到 fork 的 astra | 不再重复自动验收；许可覆盖仍待澄清，二进制只作本地交付 |
 | KrKr | 原生 C ABI、完整画布 Alpha、首错保留与 WindowEx overlay owner 初始化修复保留 | 自动验收驱动及钩子已移除；清理后 Release 产物供用户人工验收，不把历史开发结果冒充本次人工通过 |
 | CMVS | 独立开发中的原格式/VM/归档与 SDK 接入 | 本批不修改、整合或验收，保留来源成果 |
 | 终之空转换 | Story IR、37 路线输入生成、Classic/Modern 私有包与部分硬件运行 | Classic/Modern 全部 37 路线及系统/演出/视听验收 |
@@ -34,7 +34,7 @@
 
 ### 1. 共享契约与隔离任务
 
-主线程维护共享 `astra-emu-abi` 与整合工作树 `codex/emu-native-implementation-20261018`，从 `9b34d2d32` 接续。独立 Codex 任务分别负责 RFVP、Manager UI、Manager 运行层、Musica、Siglus、Artemis、Sena、Ethornell 和 KrKr，独占工作树、分支和构建产物；共享边界另由 Codex 只读检查。CMVS 不修改、不编译、不验收。
+主线程维护共享 `astra-emu-abi` 与整合工作树，从 `9b34d2d32` 接续；当前稳定发布分支为主仓 `astra`。独立 Codex 任务曾负责 RFVP、Manager UI、Manager 运行层、Musica、Siglus、Artemis、Sena、Ethornell 和 KrKr，独占工作树与产物；本轮临时分支现已清理，未提交内容留在原工作树。CMVS 不修改、不编译、不验收。
 
 委派工具没有模型选择参数。上述实施代理的受信任 runtime context 均报告 `openai-codex/gpt-6-astra`，按已授权的 Codex fallback 执行，未宣称使用 `gpt-6.1-sol`。一次只读 scout 报告非 Codex 模型，未修改代码，停止使用该路由。
 
@@ -64,7 +64,7 @@ Sena/Ethornell 继承指定上游的实际支持范围；KrKr 继续使用既有
 
 ### 6. 整合与后续平台
 
-fork/master 承载独立原生改进，astra 相对该基线仅一个必要适配提交，主仓固定精确 pin。已授权推送本次工作分支与核心 fork，并在验收后合入主线；不改写来源或已发布历史，不自动发布二进制 Release。既有原生 PR 保留独立归因，不能为满足单提交外观混入适配。
+核心适配统一推送各 fork 的 `astra`，主仓固定精确 pin，主仓工作成果也保存在 `astra`；没有合入或改动其他实例的 `master`。用户本次明确批准带 lease 的强推覆盖，并清理本轮本地及远端临时分支；旧引用先存本地 Git bundle，其他任务分支与 CMVS 保留。该授权不等于公开发布二进制 Release，也不改变人工验收要求。
 
 本次 Windows 产品验收完成后再逐项推进 Linux/macOS/Android，不能以平台编译结果替代实际运行。Engine/VN、Editor 与终之空保持既有目标，终之空 Classic/Modern 仍需全部 37 路线；不将无关产品重写混入本批 EMU 任务。
 

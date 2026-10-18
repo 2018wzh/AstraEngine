@@ -116,7 +116,7 @@ Musica 的原生 stage 以完整资源序列、参考坐标、背景与立绘参
 
 Musica 的高清纹理替换只在私有 `MusicaProfile` 中声明 `texture_overrides` 映射：键是已挂载的 `musica:/` 原资源 URI，值是游戏目录内安全的 PNG 相对路径。启动时先验证原资源、ANI 原点和受支持的帧数，首次使用再解码原资源并按映射读取替换像素；替换像素只改变物理纹理，不改变脚本坐标、裁剪、命中区域、存档或 VM 时间。静态 PNG 和单帧 ANI 可以使用 PNG 替换，多帧 ANI、SQZ 及其他格式明确拒绝，不能只替换动画首帧后继续运行。缺失、越界、路径不安全、帧数不匹配或不支持的格式都返回诊断，不静默回退到原图。原生与替换像素使用同一个 SDK `TextureCache`，以不同身份键区分，随同一缓存的有界淘汰释放；替换素材只存在于 ignored 私有工作区。Family 负责 Musica 归档 URI 和 ANI 规则，SDK 只提供通用纹理帧与逻辑/物理尺寸类型。
 
-外部核心采用 upstream → fork/master → astra → 主仓精确 pin。fork/master 承载单独提交的通用原生修复与能力改进，astra 相对该基线只有一个必要适配提交；上游合并后更新基线并移除重复修复。完整历史、许可证、MODIFICATIONS、gitlink 与 metadata 一致，不以分支名代替 revision，不改写来源或已发布历史。
+外部核心采用 upstream → 通用原生修复基线 → astra → 主仓精确 pin。通用修复与必要嵌入适配分别提交；RFVP、Siglus 等已整理的适配相对其通用基线保持单提交。分支名不代替精确 revision，许可证、MODIFICATIONS、gitlink 与 metadata 保持一致。本次用户明确批准将自有 `astra` 强推覆盖为当前 Release 源码并清理临时分支；操作使用 lease，旧引用先存本地 Git bundle，不改上游或他人分支。
 
 ABI 导出、描述/配置、原生会话包装、Surface 输出、Hook 接线、日志与必要平台桥放在核心的薄嵌入层；Manager 不维护第二套游戏执行实现。帧池、协议包装和通用同步辅助可复用 SDK，但不强迫成熟核心依赖其运行层。上游功能缺陷另行提交非商业最小复现，适配回归在适配内修复。
 
