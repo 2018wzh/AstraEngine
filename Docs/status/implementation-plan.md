@@ -79,10 +79,12 @@ Sena/Ethornell 继承指定上游的实际支持范围；KrKr 继续使用既有
 
 清理前的开发证据包括 ABI/日志边界、Manager 同窗口输入与四类滤镜、Musica Hook 重试/读档上下文/真实 TLS 等待取消、RFVP 原生 UI/电影/选择及其他核心的代表流程。原始日志和已知问题保留；这些记录不冒充清理后的 Release 人工通过。自动验收入口、硬件/路线驱动、公开假核心、额外截图/输入脚本和测试访问钩子已删除，普通纯逻辑测试保留；本次清理后不再运行自动验收。
 
-上一版七核心本地 Release 包保留。本轮 Manager、Musica、Artemis、Siglus 与 Sena 的 Release 已构建，正在组装与静态检查最终运行包；BGI、RFVP 与 KrKr 不重做游戏验收。产品包只保留 Manager executable、真实运行依赖、Resources 与许可，不纳入开发转换 CLI 或自动验收驱动。实际可玩性由用户手动验收。RFVP 字体及 Ethornell 许可未澄清，不公开发布二进制 Release。
+上一版七核心本地 Release 包保留。本轮 Manager、Musica、Artemis、Siglus 与 Sena 的新 Release 已组装为独立本地运行包，BGI、RFVP 与 KrKr 复用原 Release，不重做游戏验收。58 个 PE 均为 x64，七个核心均导出 `astra_emu_query`，静态导入依赖闭包无缺项；包中唯一 executable 为 Manager，保留真实依赖、Resources 与许可，不纳入开发转换 CLI 或自动验收驱动。RFVP 字体及 Ethornell 许可未澄清，不公开发布二进制 Release。
 
 前一轮共享改动已通过 root workspace 的 `cargo check --workspace --all-targets --features astra-media/ffmpeg-vcpkg`，以及 Editor 独立 workspace 的全 target check。本轮聚焦受影响的 Emulator 包及独占核心构建，未改动 Engine/Editor 的共享接口，CMVS 未编译；编译结果不替代运行证据。保留依赖 `binrw` 和 `proc-macro-error2` 的未来 Rust 兼容警告。
 
 本轮 97 项定向纯逻辑回归通过：资料库 7、Manager 识别/选择 10 与配置 2、指针 5、Musica key 10 与 PAZ 11、开发 CLI 20、Siglus 9、Artemis 18、Sena 5。检查使用临时合成数据，不触碰用户游戏、原 key 或实际资料库；未启动游戏窗口。
+
+实际执行新运行包的 Manager `--help`，以及开发 CLI 三个转换子命令的 `--help`；公开合成 JSON 与 keys.v1 各完成一次真实转换，验证 keys.v2 TOML、显式 `false`、算法参数与可选项保留，重复输出明确拒绝且源文件哈希不变。未启动 GUI/游戏、未自动输入、截图或关闭用户进程；实际可玩性与本轮 UI 改动仍由用户手动验收。
 
 操作入口：[开发手册](../manual/development.md)、[AstraEMU 客户端](../manual/astraemu-client.md)、[Editor](../../Editor/README.md)、[NativeVN 样例](../../Examples/NativeVN/README.md)、[终之空资料](../samples/tsuinosora-modernization/README.md)。
