@@ -19,6 +19,25 @@ export struct ReleaseOption {
     label: string,
 }
 
+
+component StartupBanner inherits Rectangle {
+    in property <bool> busy;
+    in property <string> status;
+    height: 36px;
+    border-radius: Theme.shape-sm;
+    background: busy ? Theme.surface-container-high : Theme.surface-container;
+    Text {
+        x: 12px;
+        width: parent.width - 24px;
+        height: parent.height;
+        text: root.status != "" ? root.status : "正在初始化模拟器…";
+        color: root.busy ? Theme.primary : Theme.on-surface-variant;
+        font-size: Theme.font-body-sm;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+}
+
 component InspectorRow inherits Rectangle {
     in property <string> label;
     in property <string> value;
@@ -51,6 +70,20 @@ component GameListRow inherits Rectangle {
     in property <string> density: "comfortable";
     callback activated(string);
     callback launch(string);
+    in property <bool> cover-needed;
+    private property <string> cover-case-id: game.case-id;
+    private property <string> demanded-case-id;
+    callback cover-demand(string, bool);
+    function report-cover() {
+        if root.demanded-case-id != root.cover-case-id && root.demanded-case-id != "" {
+            root.cover-demand(root.demanded-case-id, false);
+        }
+        root.demanded-case-id = root.cover-case-id;
+        root.cover-demand(root.cover-case-id, root.cover-needed);
+    }
+    init => { root.report-cover(); }
+    changed cover-needed => { root.report-cover(); }
+    changed cover-case-id => { root.report-cover(); }
 
     height: density == "compact" ? 60px : 72px;
     background: selected
@@ -81,13 +114,13 @@ component GameListRow inherits Rectangle {
             border-radius: Theme.shape-xs;
             clip: true;
 
-            if game.cover-uri != "" : Image {
+            if game.cover.width > 0 : Image {
                 source: game.cover;
                 image-fit: cover;
                 width: parent.width;
                 height: parent.height;
             }
-            if game.cover-uri == "" : Icon {
+            if game.cover.width == 0 : Icon {
                 glyph: Icons.gamepad;
                 font-size: 16px;
                 color: Theme.outline;
@@ -340,6 +373,11 @@ export component LibraryPage inherits Rectangle {
     in property <[MatchReview]> match-reviews;
     in property <bool> metadata-busy;
     in property <string> metadata-status;
+    in property <bool> startup-busy;
+    in property <string> startup-status;
+    in property <bool> cover-loading-enabled;
+    in property <image> selected-cover;
+    callback cover-demand(int, string, bool, string);
     in property <bool> vndb-consent;
     in property <bool> bangumi-consent;
     callback search-metadata(string, string);
@@ -425,6 +463,10 @@ export component LibraryPage inherits Rectangle {
                 color: Theme.on-surface;
                 font-size: Theme.font-headline-md;
                 font-weight: 600;
+            }
+            if root.startup-busy || root.startup-status != "" : StartupBanner {
+                busy: root.startup-busy;
+                status: root.startup-status;
             }
 
             searchDebounce := Timer {
@@ -594,7 +636,7 @@ export component LibraryPage inherits Rectangle {
             }
 
             // Content view (Grid or List)
-            if root.view-mode == "grid" : ScrollView {
+            if root.view-mode == "grid" : desktop-grid := ScrollView {
                 mouse-drag-pan-enabled: true;
 
                 VerticalLayout {
@@ -614,6 +656,8 @@ export component LibraryPage inherits Rectangle {
                                 vertical-stretch: 0;
                                 game: game;
                                 selected: game.case-id == root.selected-case-id;
+                                cover-needed: root.cover-loading-enabled && self.y + self.height >= -desktop-grid.viewport-y - self.height && self.y <= -desktop-grid.viewport-y + desktop-grid.height + self.height;
+                                cover-demand(id, needed) => { root.cover-demand(index, id, needed, "grid"); }
                                 activated(id) => { root.select-case(id); }
                                 launch(id) => { root.launch(id); }
                             }
@@ -671,16 +715,18 @@ export component LibraryPage inherits Rectangle {
             }
 
             // List View
-            if root.view-mode == "list" : ScrollView {
+            if root.view-mode == "list" : desktop-list := ScrollView {
                 mouse-drag-pan-enabled: true;
 
                 VerticalLayout {
                     spacing: root.density == "compact" ? 6px : 8px;
 
-                    for game in games: GameListRow {
+                    for game[index] in games: GameListRow {
                         game: game;
                         selected: game.case-id == root.selected-case-id;
                         density: root.density;
+                        cover-needed: root.cover-loading-enabled && self.y + self.height >= -desktop-list.viewport-y - self.height && self.y <= -desktop-list.viewport-y + desktop-list.height + self.height;
+                        cover-demand(id, needed) => { root.cover-demand(index, id, needed, "list"); }
                         activated(id) => { root.select-case(id); }
                         launch(id) => { root.launch(id); }
                     }
@@ -730,6 +776,10 @@ export component LibraryPage inherits Rectangle {
             color: Theme.on-surface;
             font-size: Theme.font-headline-md;
             font-weight: 600;
+        }
+        if root.startup-busy || root.startup-status != "" : StartupBanner {
+            busy: root.startup-busy;
+            status: root.startup-status;
         }
 
         mobileSearchDebounce := Timer {
@@ -816,7 +866,7 @@ export component LibraryPage inherits Rectangle {
             }
         }
 
-        if root.view-mode == "grid" && root.games.length > 0 : ScrollView {
+        if root.view-mode == "grid" && root.games.length > 0 : mobile-grid := ScrollView {
             mouse-drag-pan-enabled: true;
 
             VerticalLayout {
@@ -835,6 +885,8 @@ export component LibraryPage inherits Rectangle {
                             vertical-stretch: 0;
                             game: game;
                             selected: game.case-id == root.selected-case-id;
+                            cover-needed: root.cover-loading-enabled && self.y + self.height >= -mobile-grid.viewport-y - self.height && self.y <= -mobile-grid.viewport-y + mobile-grid.height + self.height;
+                            cover-demand(id, needed) => { root.cover-demand(index, id, needed, "grid"); }
                             activated(id) => { root.select-case(id); }
                             launch(id) => { root.launch(id); }
                         }
@@ -844,16 +896,18 @@ export component LibraryPage inherits Rectangle {
             }
         }
 
-        if root.view-mode == "list" && root.games.length > 0 : ScrollView {
+        if root.view-mode == "list" && root.games.length > 0 : mobile-list := ScrollView {
             mouse-drag-pan-enabled: true;
 
             VerticalLayout {
                 spacing: 6px;
 
-                for game in games: GameListRow {
+                for game[index] in games: GameListRow {
                     game: game;
                     selected: game.case-id == root.selected-case-id;
                     density: root.density;
+                    cover-needed: root.cover-loading-enabled && self.y + self.height >= -mobile-list.viewport-y - self.height && self.y <= -mobile-list.viewport-y + mobile-list.height + self.height;
+                    cover-demand(id, needed) => { root.cover-demand(index, id, needed, "list"); }
                     activated(id) => { root.selected-case-id = id; root.select-case(id); }
                     launch(id) => { root.launch(id); }
                 }
@@ -910,6 +964,19 @@ export component LibraryPage inherits Rectangle {
                 HorizontalLayout {
                     spacing: 8px;
                     alignment: start;
+                    Rectangle {
+                        width: 64px;
+                        height: 88px;
+                        border-radius: Theme.shape-sm;
+                        background: Theme.surface-container-highest;
+                        clip: true;
+                        Image {
+                            source: root.selected-cover;
+                            width: parent.width;
+                            height: parent.height;
+                            image-fit: cover;
+                        }
+                    }
 
                     VerticalLayout {
                         horizontal-stretch: 1;
@@ -930,7 +997,7 @@ export component LibraryPage inherits Rectangle {
                             font-weight: 600;
                         }
                         Text {
-                            text: "模拟器 · " + (root.selected-emulator != "" ? root.selected-emulator : "请选择");
+                            text: "模拟器 · " + (root.selected-emulator != "" ? root.selected-emulator : root.startup-busy ? "正在初始化" : "请选择");
                             color: Theme.on-surface-variant;
                             font-size: Theme.font-label-md;
                             wrap: word-wrap;

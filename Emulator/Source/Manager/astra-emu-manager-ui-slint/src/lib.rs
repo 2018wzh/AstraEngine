@@ -1,8 +1,9 @@
 mod config_model;
+mod covers;
 
-use std::{path::Path, rc::Rc};
+use std::rc::Rc;
 
-use slint::{ModelRc, SharedString, VecModel};
+use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 slint::include_modules!();
 
@@ -117,6 +118,8 @@ pub struct ManagerViewModel {
     pub match_reviews: Vec<MatchReviewViewModel>,
     pub metadata_busy: bool,
     pub metadata_status: String,
+    pub startup_busy: bool,
+    pub startup_status: String,
     pub selected_case_id: Option<String>,
     pub search_query: String,
     pub endpoint_identity: String,
@@ -202,7 +205,7 @@ type GameCardSignature = (String, String, String, String, String, String, String
 
 pub struct SlintManagerAdapter {
     window: ManagerWindow,
-    games: Rc<VecModel<GameCard>>,
+    games: Rc<covers::CoverModel>,
     reviews: Rc<VecModel<MatchReview>>,
     play_history: Rc<VecModel<PlaySession>>,
     releases: Rc<VecModel<ReleaseOption>>,
@@ -210,7 +213,6 @@ pub struct SlintManagerAdapter {
     common_engine_config: Rc<VecModel<ConfigField>>,
     family_config: Rc<VecModel<ConfigField>>,
     filter_config: Rc<VecModel<ConfigField>>,
-    image_cache: std::cell::RefCell<std::collections::HashMap<String, slint::Image>>,
     cached_games_signature: std::cell::RefCell<Vec<GameCardSignature>>,
     cached_common_engine_config: std::cell::RefCell<Vec<GenericConfigFieldViewModel>>,
     cached_family_config: std::cell::RefCell<Vec<GenericConfigFieldViewModel>>,
@@ -220,7 +222,7 @@ pub struct SlintManagerAdapter {
 impl SlintManagerAdapter {
     pub fn new() -> Result<Self, slint::PlatformError> {
         let window = ManagerWindow::new()?;
-        let games = Rc::new(VecModel::default());
+        let games = Rc::new(covers::CoverModel::new(window.as_weak())?);
         let reviews = Rc::new(VecModel::default());
         let play_history = Rc::new(VecModel::default());
         let releases = Rc::new(VecModel::default());
@@ -236,6 +238,15 @@ impl SlintManagerAdapter {
         window.set_common_engine_config_fields(ModelRc::from(common_engine_config.clone()));
         window.set_family_config_fields(ModelRc::from(family_config.clone()));
         window.set_filter_config_fields(ModelRc::from(filter_config.clone()));
+        let cover_window = window.as_weak();
+        window.on_cover_demand(move |row, case_id, needed, view| {
+            if let Some(window) = cover_window.upgrade() {
+                let games = window.get_games();
+                if let Some(covers) = games.as_any().downcast_ref::<covers::CoverModel>() {
+                    covers.demand(row, case_id.as_str(), needed, view.as_str(), &window);
+                }
+            }
+        });
         Ok(Self {
             window,
             games,
@@ -246,7 +257,6 @@ impl SlintManagerAdapter {
             common_engine_config,
             family_config,
             filter_config,
-            image_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
             cached_games_signature: std::cell::RefCell::new(Vec::new()),
             cached_common_engine_config: std::cell::RefCell::default(),
             cached_family_config: std::cell::RefCell::default(),
@@ -255,6 +265,9 @@ impl SlintManagerAdapter {
     }
 
     pub fn apply(&self, model: &ManagerViewModel) {
+        self.window.set_startup_busy(model.startup_busy);
+        self.window
+            .set_startup_status(model.startup_status.as_str().into());
         self.window.set_metadata_busy(model.metadata_busy);
         self.window
             .set_metadata_status(model.metadata_status.as_str().into());
@@ -275,27 +288,16 @@ impl SlintManagerAdapter {
             .collect();
 
         if *self.cached_games_signature.borrow() != current_signature {
-            let mut cache = self.image_cache.borrow_mut();
             let cards = model
                 .games
                 .iter()
                 .map(|game| {
-                    let cover = if game.cover_uri.is_empty() {
-                        slint::Image::default()
-                    } else if let Some(cached) = cache.get(&game.cover_uri) {
-                        cached.clone()
-                    } else {
-                        let img = slint::Image::load_from_path(Path::new(&game.cover_uri))
-                            .unwrap_or_default();
-                        cache.insert(game.cover_uri.clone(), img.clone());
-                        img
-                    };
                     GameCard {
                         case_id: SharedString::from(&game.case_id),
                         title: SharedString::from(&game.title),
                         family: SharedString::from(&game.family),
                         cover_uri: SharedString::from(&game.cover_uri),
-                        cover,
+                        cover: slint::Image::default(),
                         diagnostic: SharedString::from(&game.diagnostic),
                         play_time: SharedString::from(&game.play_time),
                         last_played: SharedString::from(&game.last_played),
@@ -303,8 +305,10 @@ impl SlintManagerAdapter {
                     }
                 })
                 .collect::<Vec<_>>();
-            self.games.set_vec(cards);
+            self.games.replace(cards, &self.window);
             *self.cached_games_signature.borrow_mut() = current_signature;
+        } else {
+            self.games.refresh(&self.window);
         }
         self.reviews.set_vec(
             model

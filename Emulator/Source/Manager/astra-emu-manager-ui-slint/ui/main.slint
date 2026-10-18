@@ -60,6 +60,15 @@ export component ManagerWindow inherits Window {
 
     // ===== Library =====
     in property <[GameCard]> games;
+    in property <bool> startup-busy;
+    in property <string> startup-status;
+    in-out property <bool> cover-loading-enabled: false;
+    in property <image> selected-cover;
+    callback cover-demand(int, string, bool, string);
+    changed cover-loading-enabled => { root.cover-demand(-1, "", false, ""); }
+    changed selected-case-id => { root.cover-demand(-1, "", false, ""); }
+    changed current-page => { root.cover-demand(-1, "", false, ""); }
+    changed view-mode => { root.cover-demand(-1, "", false, ""); }
     in-out property <string> selected-case-id;
     in-out property <string> search-query;
     in property <string> endpoint-identity;
@@ -117,7 +126,7 @@ export component ManagerWindow inherits Window {
     in-out property <float> game-content-window-width;
     in-out property <float> game-content-window-height;
     callback pointer-state-changed();
-    changed game-active => { root.pointer-state-changed(); }
+    changed game-active => { root.pointer-state-changed(); root.cover-demand(-1, "", false, ""); }
     changed translation-overlay-active => { root.pointer-state-changed(); }
     changed diagnostics-overlay-active => { root.pointer-state-changed(); }
     changed filters-overlay-active => { root.pointer-state-changed(); }
@@ -306,6 +315,11 @@ export component ManagerWindow inherits Window {
 
                 if root.current-page == "library" : LibraryPage {
                     games: root.games;
+                    startup-busy: root.startup-busy;
+                    startup-status: root.startup-status;
+                    cover-loading-enabled: root.cover-loading-enabled;
+                    selected-cover: root.selected-cover;
+                    cover-demand(row, id, needed, view) => { root.cover-demand(row, id, needed, view); }
                     match-reviews: root.match-reviews;
                     metadata-busy: root.metadata-busy;
                     metadata-status: root.metadata-status;
