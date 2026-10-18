@@ -79,7 +79,7 @@ Sena/Ethornell 继承指定上游的实际支持范围；KrKr 继续使用既有
 
 清理前的开发证据包括 ABI/日志边界、Manager 同窗口输入与四类滤镜、Musica Hook 重试/读档上下文/真实 TLS 等待取消、RFVP 原生 UI/电影/选择及其他核心的代表流程。原始日志和已知问题保留；这些记录不冒充清理后的 Release 人工通过。自动验收入口、硬件/路线驱动、公开假核心、额外截图/输入脚本和测试访问钩子已删除，普通纯逻辑测试保留；本次清理后不再运行自动验收。
 
-上一版 key-only 七核心本地 Release 包保留。本轮仅重建 Manager 与 Musica，正在组装包含公共分辨率设置和 Title 默认值的新包，其余六个核心 DLL 复用，不重做 BGI 游戏验收。运行依赖、Resources 与许可继续完整保留，不纳入开发转换 CLI 或自动验收驱动。RFVP 字体及 Ethornell 许可未澄清，不公开发布二进制 Release。
+上一版 key-only 七核心本地 Release 包保留。本轮已重建 Manager 与 Musica，并组装包含公共分辨率设置和 Title 默认值的新包，其余六个核心 DLL 复用，不重做 BGI 游戏验收。58 个 PE 均为 x64，七个核心均导出统一 query，静态依赖闭包无缺项；运行包仅包含一个 Manager executable，依赖、Resources 与许可完整保留，不纳入开发转换 CLI 或自动验收驱动。RFVP 字体及 Ethornell 许可未澄清，不公开发布二进制 Release。
 
 前一轮共享改动已通过 root workspace 的 `cargo check --workspace --all-targets --features astra-media/ffmpeg-vcpkg`，以及 Editor 独立 workspace 的全 target check。本轮聚焦受影响的 Emulator 包及独占核心构建，未改动 Engine/Editor 的共享接口，CMVS 未编译；编译结果不替代运行证据。保留依赖 `binrw` 和 `proc-macro-error2` 的未来 Rust 兼容警告。
 
@@ -87,6 +87,6 @@ Sena/Ethornell 继承指定上游的实际支持范围；KrKr 继续使用既有
 
 前一轮实际执行运行包的 Manager `--help`，以及开发 CLI 三个转换子命令的 `--help`；公开合成 JSON 与 keys.v1 各完成一次真实转换，验证 keys.v2 TOML、显式 `false`、算法参数与可选项保留，重复输出明确拒绝且源文件哈希不变。
 
-本轮 16 项定向纯逻辑检查通过：公共/专属配置与作用域 5、识别与模拟器选择 10、Musica 标题状态 1。覆盖配置混合保存、重开继承、非法边界不覆盖、模拟器草稿隔离及已有标题语义；未运行 GPU/游戏夹具。实际查询新 Musica Release 的 C ABI descriptor，默认 `launch_mode=title`、显式 `direct` 选项保留，未调用 open/frame 或操作用户游戏窗口。Manager 与 Musica Release 构建完成，产品实窗仍待用户手动验收。
+本轮 16 项定向纯逻辑检查通过：公共/专属配置与作用域 5、识别与模拟器选择 10、Musica 标题状态 1。覆盖配置混合保存、重开继承、非法边界不覆盖、模拟器草稿隔离及已有标题语义；未运行 GPU/游戏夹具。实际查询新 Musica Release 的 C ABI descriptor，默认 `launch_mode=title`、显式 `direct` 选项保留，未调用 open/frame；新包中的 Manager `--help` 通过。未操作用户游戏窗口、资料库、密钥或存档；新分组、实际渲染尺寸和默认 Title 的实窗验收由用户手动执行。
 
 操作入口：[开发手册](../manual/development.md)、[AstraEMU 客户端](../manual/astraemu-client.md)、[Editor](../../Editor/README.md)、[NativeVN 样例](../../Examples/NativeVN/README.md)、[终之空资料](../samples/tsuinosora-modernization/README.md)。
