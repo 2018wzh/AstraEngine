@@ -7,16 +7,16 @@ use std::{
 
 use astra_core::Hash256;
 use astra_emu_musica::{
-    mount_musica, parse_audio_resource_spec, parse_sc, MusicaAniArchive, MusicaSqzArchive,
-    ScCensus, ScLineKind, ScOpcodeCatalog, ScOperand, ScScript, MAX_ENTRY_BYTES,
+    MAX_ENTRY_BYTES, MusicaAniArchive, MusicaSqzArchive, ScCensus, ScLineKind, ScOpcodeCatalog,
+    ScOperand, ScScript, mount_musica, parse_audio_resource_spec, parse_sc,
 };
 use clap::{Parser, Subcommand};
 use serde::Serialize;
 
 mod eden_save;
-mod profile_import;
 mod inventory;
 mod private_output;
+mod profile_import;
 
 #[cfg(test)]
 mod census_tests;
@@ -166,11 +166,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             index_size_xor,
             rc4_skip_crc,
             output,
-        } => profile_import::import_garbro_profile(&formats, &title, index_size_xor, rc4_skip_crc, &output),
-        Command::ImportKeyProfile { file, paz_version, index_size_xor, rc4_skip_crc, output } =>
-            profile_import::import_key_profile(&file, paz_version, index_size_xor, rc4_skip_crc, &output),
-        Command::ImportJsonProfile { file, output } =>
-            profile_import::import_json_profile(&file, &output),
+        } => profile_import::import_garbro_profile(
+            &formats,
+            &title,
+            index_size_xor,
+            rc4_skip_crc,
+            &output,
+        ),
+        Command::ImportKeyProfile {
+            file,
+            paz_version,
+            index_size_xor,
+            rc4_skip_crc,
+            output,
+        } => profile_import::import_key_profile(
+            &file,
+            paz_version,
+            index_size_xor,
+            rc4_skip_crc,
+            &output,
+        ),
+        Command::ImportJsonProfile { file, output } => {
+            profile_import::import_json_profile(&file, &output)
+        }
         Command::ListGarbroTitles { formats } => {
             println!(
                 "{}",

@@ -9,6 +9,7 @@
 - RFVP 先完成 CPU 完整路径，再独立实现并验收首个 GPU 交付后端；只有 Musica 实现并验证文字 Hook。资源替换 Hook 暂不做，其他核心不新增文字 Hook。
 - Slint Manager 重做精炼 Material 3 界面，同窗口切换管理与游戏；迁移全部既有滤镜，提供内置 Luau 翻译扩展和本地扩展管理。
 - 用户最新决定：验收只要求可玩，由用户在 Release 版本中人工手动执行；停止所有自动输入、截图、重开、关闭及性能采样，移除为自动验收增加的入口、驱动和测试钩子。编译成功不冒记人工通过。
+- 当前修复将 Musica 解密配置统一为 `keys.v2` 的 `key.toml`，JSON/GARbro/旧 key 转换仅留开发 CLI；Manager 只选择并校验 TOML。引擎身份与模拟器身份分离，Sena 归属 SoftPAL，模拟器按游戏持久选择；缺失时不自动替换。Artemis 光标与 Siglus 输入适配修复已整合，本轮产品仍待人工 Release 验收。
 - 既有 RFVP、Siglus、Artemis R01–R08、Hosted R09 数据和已发布 astra 分支是旧架构基线，不能算新架构验收。原生功能 PR 的未合并状态及 Sandbox 故障记录保留在审计，不再驱动本批实施顺序。
 
 ## 产品状态
@@ -18,12 +19,12 @@
 | Engine/Runtime | 独立 EngineSession、typed 任务/保存、有界诊断与 worker/access plan 复用 | 完整产品的作用域、媒体、恢复、性能与平台组合验收 |
 | AstraVN/Player | VnSession、Yakui、公共 Canvas、媒体流、typed 输入/存读档与 Luau 显式 IO | 实际授权 IO、设备音频、跨平台输入/媒体/挂起恢复及长流程 |
 | Editor/Agent | GPUI、版本化事务、增量撤销、后台诊断、真实 Player 预览与 ACP/MCP | `--mcp` 持有 stdin 的关闭挂起；图/时间线/Agent 工作流、片段 seek 与三桌面验收 |
-| Manager | 原生 C ABI、驻留库、CPU/D3D12 呈现、本地 Luau；实窗完成同窗口剧情输入、返回/重开、窄屏导航、明暗主题及四类滤镜，修复 Anime4K 移植错误并通过参考像素回归 | 前台物理输入、听音与性能验收；当前实窗证据为自有窗口消息级交互 |
+| Manager | 同窗口原生会话、CPU/D3D12、Luau 与既有滤镜；分别显示引擎和模拟器，按游戏保存模拟器选择，schema 4→5 保留资料库；Host 统一光标显隐，原生失败保留操作、状态码与原因 | 本轮配置选择与光标行为尚待用户在 Release 中人工验证，不以逻辑检查代替实窗 |
 | FVP | 历史开发已覆盖连续正文、三次选择、菜单存读档、OP、最小化恢复与重开；自动驱动已移除，Release DLL 已构建 | Release 人工验收待用户执行；Debug 低帧率未完成归因，停止自动采样。字体分发授权未核验 |
-| Siglus | 已完成 Rewrite 小鳥结局、ED staff roll、自动回标题、同驻留 DLL 重开；通用空栈暂停 latch 修复单独归因并整理入新原生基线 | 前台输入、听音、长期资源归因及其他平台未完成 |
-| Artemis | 原 Vulkan/FFmpeg、新 ABI；解码取消、restore-close 音频竞态和真实窗口查询修复保留，自动验收驱动已清理，Release DLL 已构建 | 人工 Release 验收待用户执行；此前只取得通用 `ASTRA_EMU_SESSION_FAILED`，具体原因未归因，不再自动重开复现 |
-| Musica/SDK | 真实标题/重开、连续对白 Hook、错误重试、存读档、网络取消；音频快进背压与 MOV 类型密码、流式落盘已修，OP 与影片中保存恢复通过 | OP 后复合图像参数阻塞；确认来源 `00610272` 也没有对应解析，不丢参数或另猜语义。选择项 Hook 实玩与逻辑尺寸收敛仍有缺口 |
-| Sena | 真实简中标题、连续剧情/CG、菜单、存读档、关闭重开；新会话读档后保存修复已整合，原生 1920×1080 与设备初始化通过 | 后续目的地流程 `0xCDFF8 → 0xCD6E4` 循环已在固定 native `2d28936c` 独立实窗复现；另有 EV417/MIX 错误，不外推完整兼容 |
+| Siglus | 正常提交文本、翻页/标点/数字小键盘沿用原生输入路径，保留错误 cause chain；9 项纯回归通过、Release DLL 已构建；既有长流程见审计 | 旧日志只保留 `ASTRA_EMU_SIGLUS_ARGUMENT`，不能确定当次触发输入；本轮人工 Release 复测、听音及其他平台未完成 |
+| Artemis | 原 Vulkan/FFmpeg 与既有生命周期修复保留；Host 独占光标显隐并在 Slint 分发后同步；18 项核心纯回归通过、Release DLL 已构建 | 光标修复的人工 Release 验收待用户执行；不再自动重开复现旧通用失败 |
+| Musica/SDK | 运行时只读完整 `key.toml`，JSON/GARbro/旧 key 转换仅在开发 CLI；21 项 key/PAZ 纯回归及 20 项 CLI 回归通过，Release 核心与开发工具已构建 | 人工复测待用户执行；OP 后复合图像参数、选择项 Hook 实玩与逻辑尺寸收敛的既有缺口保留，不猜测脚本语义 |
+| SoftPAL / Sena | 引擎标识为 `softpal`，模拟器标识保持 `sena-native-koikake`；既有 Koikake 范围不变；5 项纯回归通过、Release DLL 已构建 | 既有目的地 `0xCDFF8 → 0xCD6E4` 循环及 EV417/MIX 问题保留，不外推完整 SoftPAL 兼容 |
 | Ethornell/BGI | 用户明确确认人工验收完毕；原生等价 cursor 策略修复保留，Release DLL 已构建；源码已按本次授权发布到 fork 的 astra | 不再重复自动验收；许可覆盖仍待澄清，二进制只作本地交付 |
 | KrKr | 原生 C ABI、完整画布 Alpha、首错保留与 WindowEx overlay owner 初始化修复保留 | 自动验收驱动及钩子已移除；清理后 Release 产物供用户人工验收，不把历史开发结果冒充本次人工通过 |
 | CMVS | 独立开发中的原格式/VM/归档与 SDK 接入 | 本批不修改、整合或验收，保留来源成果 |
@@ -34,9 +35,9 @@
 
 ### 1. 共享契约与隔离任务
 
-主线程维护共享 `astra-emu-abi` 与整合工作树，从 `9b34d2d32` 接续；当前稳定发布分支为主仓 `astra`。独立 Codex 任务曾负责 RFVP、Manager UI、Manager 运行层、Musica、Siglus、Artemis、Sena、Ethornell 和 KrKr，独占工作树与产物；本轮临时分支现已清理，未提交内容留在原工作树。CMVS 不修改、不编译、不验收。
+主线程维护共享 `astra-emu-abi` 与整合工作树，从 `9b34d2d32` 接续，稳定发布分支为主仓 `astra`。本轮从现有稳定成果建立独占 detached 工作树，分别整合 Manager、Musica 和外部适配；不覆盖其他实例的工作区或建立新临时分支。CMVS 不修改、不编译、不验收。
 
-委派工具没有模型选择参数。上述实施代理的受信任 runtime context 均报告 `openai-codex/gpt-6-astra`，按已授权的 Codex fallback 执行，未宣称使用 `gpt-6.1-sol`。一次只读 scout 报告非 Codex 模型，未修改代码，停止使用该路由。
+委派工具没有模型选择参数。本轮问题修复、Release 构建和 key-only 收口代理的受信任 runtime context 均确认 `openai-codex/gpt-6.1-sol`。此前实施曾使用已授权的 `gpt-6-astra` fallback；一次旧只读 scout 为非 Codex，未修改代码且已停止使用该路由。
 
 ### 2. RFVP CPU 完整路径与 Manager
 
@@ -78,8 +79,10 @@ Sena/Ethornell 继承指定上游的实际支持范围；KrKr 继续使用既有
 
 清理前的开发证据包括 ABI/日志边界、Manager 同窗口输入与四类滤镜、Musica Hook 重试/读档上下文/真实 TLS 等待取消、RFVP 原生 UI/电影/选择及其他核心的代表流程。原始日志和已知问题保留；这些记录不冒充清理后的 Release 人工通过。自动验收入口、硬件/路线驱动、公开假核心、额外截图/输入脚本和测试访问钩子已删除，普通纯逻辑测试保留；本次清理后不再运行自动验收。
 
-清理后的 Manager 与七核心 Release 产物已构建并组装为本地运行包，包含真实依赖和现有许可文本。静态检查确认七个核心均为 x64 PE、导出 `astra_emu_query`；包中唯一 executable 为 Manager，不包含验收脚本或驱动。仅检查了 Manager 的 `--help` 命令面，未自动启动 GUI 或游戏；实际可玩性由用户手动验收。BGI 已按用户确认记录，RFVP 字体及 Ethornell 许可未澄清，因此不公开发布二进制 Release。
+上一版七核心本地 Release 包保留。本轮 Manager、Musica、Artemis、Siglus 与 Sena 的 Release 已构建，正在组装与静态检查最终运行包；BGI、RFVP 与 KrKr 不重做游戏验收。产品包只保留 Manager executable、真实运行依赖、Resources 与许可，不纳入开发转换 CLI 或自动验收驱动。实际可玩性由用户手动验收。RFVP 字体及 Ethornell 许可未澄清，不公开发布二进制 Release。
 
-共享改动已通过 root workspace 的 `cargo check --workspace --all-targets --features astra-media/ffmpeg-vcpkg`，以及 Editor 独立 workspace 的全 target check。Emulator 按受影响包及独占 Family 构建验证，CMVS 未编译；编译结果不替代运行证据。保留依赖 `binrw` 和 `proc-macro-error2` 的未来 Rust 兼容警告。
+前一轮共享改动已通过 root workspace 的 `cargo check --workspace --all-targets --features astra-media/ffmpeg-vcpkg`，以及 Editor 独立 workspace 的全 target check。本轮聚焦受影响的 Emulator 包及独占核心构建，未改动 Engine/Editor 的共享接口，CMVS 未编译；编译结果不替代运行证据。保留依赖 `binrw` 和 `proc-macro-error2` 的未来 Rust 兼容警告。
+
+本轮 97 项定向纯逻辑回归通过：资料库 7、Manager 识别/选择 10 与配置 2、指针 5、Musica key 10 与 PAZ 11、开发 CLI 20、Siglus 9、Artemis 18、Sena 5。检查使用临时合成数据，不触碰用户游戏、原 key 或实际资料库；未启动游戏窗口。
 
 操作入口：[开发手册](../manual/development.md)、[AstraEMU 客户端](../manual/astraemu-client.md)、[Editor](../../Editor/README.md)、[NativeVN 样例](../../Examples/NativeVN/README.md)、[终之空资料](../samples/tsuinosora-modernization/README.md)。

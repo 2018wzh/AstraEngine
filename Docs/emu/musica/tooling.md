@@ -6,6 +6,8 @@ Musica 已通过当前 Family API 接入 [独立 Host](../../migrations/astraemu
 
 NRBF reader 先收集对象和 metadata，再解析 forward reference；未知 record、断裂 reference、重复 id 和非预期 Musica/PAZ graph 必须报错。后续接入不得改用 BinaryFormatter 或外部 managed helper。旧 importer 输出的 Luau/mount 配置属于旧架构，届时应按新 Family 自有文件边界调整，不保留兼容桥。
 
+运行时与 Manager 仅接受 `astra.emu.musica.keys.v2` 的 `key.toml`。GARbro、旧 JSON profile 与缺少算法参数的 `keys.v1` 读取器仅保留在本 CLI，转换后输出完整 TOML；不会嵌入 Manager 或动态核心。转换命令、显式参数和私有输出边界见 [CLI 说明](../../../Emulator/Source/Programs/astra-emu-musica-cli/README.md)。
+
 ## eden 存档检查
 
 ```bash
@@ -13,7 +15,7 @@ cargo run --manifest-path Emulator/Cargo.toml -p astra-emu-musica-cli -- inspect
   --file private-copy/eden0001.sav --edition english --encoding gbk
 cargo run --manifest-path Emulator/Cargo.toml -p astra-emu-musica-cli -- check-eden-restore \
   --file private-copy/eden0001.sav --game-dir private-copy/game \
-  --profile musica.profile.json --edition english --encoding gbk
+  --profile key.toml --edition english --encoding gbk
 ```
 
 `profile` 相对游戏目录解析。两个命令都只读输入，不生成存档，也不覆盖原版槽位。第一个命令检查容器；第二个命令读取挂载的真实脚本，检查当前消息、历史消息和 VM 恢复候选。它不会打开 GPU 窗口或播放声音，不能替代原版导入、继续游玩、导出和原版读回的完整流程。
@@ -32,7 +34,7 @@ Family 启动配置 `eden_import_file` 指向游戏副本内的只读原版存�
 
 ```sh
 cargo run --manifest-path Emulator/Cargo.toml -p astra-emu-musica-cli -- export-eden-save \
-  --game-dir private-copy/game --profile musica.profile.json --slot 10 \
+  --game-dir private-copy/game --profile key.toml --slot 10 \
   --output private-export/eden0020.sav
 ```
 

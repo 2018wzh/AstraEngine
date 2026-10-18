@@ -50,7 +50,7 @@ mod metadata_actions;
 #[cfg(test)]
 mod metadata_tests;
 mod model;
-mod musica_profiles;
+mod musica_keys;
 mod navigation;
 mod owner;
 mod owner_worker;
@@ -102,7 +102,6 @@ struct AstraEmuManagerController {
     input_config: InputConfigViewModel,
     appearance: astra_emu_manager_core::AppearanceSettings,
     family_options: BTreeMap<String, String>,
-    musica_import: Option<musica_profiles::ProfileImport>,
     filter_options: BTreeMap<String, String>,
     metadata: MetadataRuntime,
     metadata_sequence: u64,

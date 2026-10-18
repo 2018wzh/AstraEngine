@@ -196,8 +196,12 @@ mod tests {
             .unwrap();
         controller.selected_case_id = Some("game".into());
         let candidate = configuration_candidate();
-        controller.candidates.insert("game".into(), candidate.clone());
-        controller.probe_choices.insert("game".into(), vec![candidate]);
+        controller
+            .candidates
+            .insert("game".into(), candidate.clone());
+        controller
+            .probe_choices
+            .insert("game".into(), vec![candidate]);
         controller
     }
 

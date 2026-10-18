@@ -24,7 +24,7 @@ NativeVN 的原生宿主与 Headless 共用物理输入到 UI request/completion
 
 Manager 在每个游戏的设置中持久保存模拟器选择，配置继续按 plugin ID 和游戏/默认范围独立保存。重新扫描或重启保留选择；已选模拟器缺失时要求用户明确替换，不能自动换用其他实现。重置输入映射不清除模拟器选择。资料库 schema 4 升级到 5 时只迁移原 `sena` 引擎标识，保留游戏、元数据、配置及输入设置。
 
-Musica 的私有 profile 在游戏配置中显式选择或导入：支持已有 typed JSON、GARbro `Formats.dat` 的指定方案和已确认 schema 的 `key.toml`。JSON 有界读取；导入结果为应用数据目录内的新私有文件，不覆盖既有文件或修改原游戏。`key.toml` 缺少的 PAZ 版本、索引 XOR 和 RC4 CRC 跳过参数必须明确填写，不推测或尝试其他密钥。
+Musica 运行时只读取 `key.toml`，使用自包含的 `astra.emu.musica.keys.v2`：明确保存 PAZ 版本、索引 XOR、RC4 CRC 跳过参数、八个 role 的十六进制密钥及既有可选配置。Manager 只选择并校验该文件，按游戏保存路径，不转换其他格式。JSON profile、GARbro 与缺少算法参数的旧 key 格式仅由开发 CLI 显式转换为新 TOML；缺失参数必须提供，不猜测、不兼容回退。转换有界读取，私有新文件不覆盖源文件或原游戏；运行时继续按原始配置字节绑定身份。
 
 Host 独占 OS 光标显隐，Slint 不另行隐藏游戏光标；原生指针策略在 Slint 事件分发后重新同步，焦点、模态与错误界面沿用实际状态。Siglus 正常提交文本和已支持物理键沿用原生输入路径；真实不支持的输入仍报错。调用失败保留 operation、ABI status、错误码与完整有界原因，不能只留下通用会话失败码。
 
@@ -126,7 +126,7 @@ SDK 提取自有引擎实际共用的能力，按需组合；格式解析、VM �
 
 Musica 的原生 stage 以完整资源序列、参考坐标、背景与立绘参数保存于 `runtime_state.v24`，替换丢失参数的旧图层表示。正常绘制与读档重建共用 Family Scene；未实现的序列或立绘语义必须明确失败，不能丢弃参数。v23 及更早状态直接拒绝，格式与诊断见 [Musica 脚本执行](../emu/musica/script-execution.md)。
 
-Musica 的高清纹理替换只在私有 `MusicaProfile` 中声明 `texture_overrides` 映射：键是已挂载的 `musica:/` 原资源 URI，值是游戏目录内安全的 PNG 相对路径。启动时先验证原资源、ANI 原点和受支持的帧数，首次使用再解码原资源并按映射读取替换像素；替换像素只改变物理纹理，不改变脚本坐标、裁剪、命中区域、存档或 VM 时间。静态 PNG 和单帧 ANI 可以使用 PNG 替换，多帧 ANI、SQZ 及其他格式明确拒绝，不能只替换动画首帧后继续运行。缺失、越界、路径不安全、帧数不匹配或不支持的格式都返回诊断，不静默回退到原图。原生与替换像素使用同一个 SDK `TextureCache`，以不同身份键区分，随同一缓存的有界淘汰释放；替换素材只存在于 ignored 私有工作区。Family 负责 Musica 归档 URI 和 ANI 规则，SDK 只提供通用纹理帧与逻辑/物理尺寸类型。
+Musica 的高清纹理替换只在私有 `key.toml`（`MusicaKeyFile`）中声明 `texture_overrides` 映射：键是已挂载的 `musica:/` 原资源 URI，值是游戏目录内安全的 PNG 相对路径。启动时先验证原资源、ANI 原点和受支持的帧数，首次使用再解码原资源并按映射读取替换像素；替换像素只改变物理纹理，不改变脚本坐标、裁剪、命中区域、存档或 VM 时间。静态 PNG 和单帧 ANI 可以使用 PNG 替换，多帧 ANI、SQZ 及其他格式明确拒绝，不能只替换动画首帧后继续运行。缺失、越界、路径不安全、帧数不匹配或不支持的格式都返回诊断，不静默回退到原图。原生与替换像素使用同一个 SDK `TextureCache`，以不同身份键区分，随同一缓存的有界淘汰释放；替换素材只存在于 ignored 私有工作区。Family 负责 Musica 归档 URI 和 ANI 规则，SDK 只提供通用纹理帧与逻辑/物理尺寸类型。
 
 外部核心采用 upstream → 通用原生修复基线 → astra → 主仓精确 pin。通用修复与必要嵌入适配分别提交；RFVP、Siglus 等已整理的适配相对其通用基线保持单提交。分支名不代替精确 revision，许可证、MODIFICATIONS、gitlink 与 metadata 保持一致。本次用户明确批准将自有 `astra` 强推覆盖为当前 Release 源码并清理临时分支；操作使用 lease，旧引用先存本地 Git bundle，不改上游或他人分支。
 

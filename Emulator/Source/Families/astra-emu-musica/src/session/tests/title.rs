@@ -280,9 +280,11 @@ fn native_gpu_title_config_returns_and_missing_art_fails_explicitly() {
     Box::new(session).close().unwrap();
     let missing = tempfile::tempdir().unwrap();
     fixture::game(missing.path(), b".end\r\n");
-    assert!(provider
-        .open_session(title_request(missing.path()))
-        .is_err());
+    assert!(
+        provider
+            .open_session(title_request(missing.path()))
+            .is_err()
+    );
     let opened = provider
         .open(request(missing.path(), Sink::default()))
         .unwrap();

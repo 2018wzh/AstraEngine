@@ -37,7 +37,7 @@ mod native;
 pub use native::musica_query;
 
 #[cfg(test)]
-pub(crate) use provider::{musica_descriptor, MusicaProvider};
+pub(crate) use provider::{MusicaProvider, musica_descriptor};
 
 #[cfg(test)]
 mod test_fixture;

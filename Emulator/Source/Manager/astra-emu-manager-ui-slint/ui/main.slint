@@ -167,8 +167,7 @@ export component ManagerWindow inherits Window {
 
     // ===== Generic config (Family / Extension / Filter) =====
     in property <[ConfigField]> family-config-fields;
-    in property <bool> musica-profile-available;
-    in property <bool> musica-import-pending;
+    in property <bool> musica-key-file-available;
     in property <[ConfigField]> filter-config-fields;
 
     // ===== About =====
@@ -227,7 +226,7 @@ export component ManagerWindow inherits Window {
     callback load-filter-source();
     callback save-filter-config();
     callback reset-family-config();
-    callback musica-profile-action(string);
+    callback select-musica-key-file();
     callback reset-filter-config();
 
     // ===== Game view (overlays everything when active) =====
@@ -344,9 +343,8 @@ export component ManagerWindow inherits Window {
                     view-mode <=> root.view-mode;
                     density: root.density;
                     family-config-fields: root.family-config-fields;
-                    musica-profile-available: root.musica-profile-available;
-                    musica-import-pending: root.musica-import-pending;
-                    musica-profile-action(action) => { root.musica-profile-action(action); }
+                    musica-key-file-available: root.musica-key-file-available;
+                    select-musica-key-file => { root.select-musica-key-file(); }
                     selected-developer: root.selected-developer;
                     selected-release-date: root.selected-release-date;
                     selected-platforms: root.selected-platforms;

@@ -175,8 +175,7 @@ pub struct ManagerViewModel {
     pub appearance: AppearanceViewModel,
     /// Generic Family config fields for selected game (schema-driven).
     pub family_config_fields: Vec<GenericConfigFieldViewModel>,
-    pub musica_profile_available: bool,
-    pub musica_import_pending: bool,
+    pub musica_key_file_available: bool,
     /// Generic Extension config fields (e.g. translate).
     /// Generic Filter config fields.
     pub filter_config_fields: Vec<GenericConfigFieldViewModel>,
@@ -359,9 +358,7 @@ impl SlintManagerAdapter {
         self.window
             .set_selected_launchable(model.selected_launchable);
         self.window
-            .set_musica_profile_available(model.musica_profile_available);
-        self.window
-            .set_musica_import_pending(model.musica_import_pending);
+            .set_musica_key_file_available(model.musica_key_file_available);
         self.window
             .set_selected_play_time(model.selected_play_time.as_str().into());
         self.window

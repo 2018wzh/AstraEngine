@@ -766,7 +766,6 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tracing",
- "uuid",
  "wgpu 29.0.4",
  "windows 0.62.2",
  "winit 0.30.13",
@@ -859,7 +858,6 @@ dependencies = [
  "toml",
  "tracing",
  "wgpu 29.0.4",
- "windows 0.62.2",
 ]
 
 [[package]]
@@ -870,11 +868,15 @@ dependencies = [
  "astra-emu-musica",
  "astra-observability",
  "clap",
+ "encoding_rs",
+ "flate2",
  "image 0.25.10",
  "serde",
  "serde_json",
  "tempfile",
+ "toml",
  "tracing",
+ "windows 0.62.2",
 ]
 
 [[package]]

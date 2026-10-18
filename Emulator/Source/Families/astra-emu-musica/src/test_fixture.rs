@@ -1,10 +1,9 @@
 use crate::{
-    MusicaKeyFile, MusicaArchiveKey, MUSICA_KEY_FILE, MUSICA_KEY_SCHEMA,
-    REQUIRED_ARCHIVE_ROLES,
+    MUSICA_KEY_FILE, MUSICA_KEY_SCHEMA, MusicaArchiveKey, MusicaKeyFile, REQUIRED_ARCHIVE_ROLES,
 };
 use blowfish::{
-    cipher::{BlockCipherEncrypt, KeyInit},
     Blowfish,
+    cipher::{BlockCipherEncrypt, KeyInit},
 };
 use std::{collections::BTreeMap, io::Cursor, path::Path};
 const KEY: &[u8] = b"public-fixture-key";
@@ -107,7 +106,11 @@ pub(crate) fn game(root: &Path, script: &[u8]) {
                     (*role).into(),
                     MusicaArchiveKey {
                         index_key_hex: KEY_HEX.into(),
-                        data_key_hex: if *role == "mov" { String::new() } else { KEY_HEX.into() },
+                        data_key_hex: if *role == "mov" {
+                            String::new()
+                        } else {
+                            KEY_HEX.into()
+                        },
                         type_passwords: BTreeMap::new(),
                         archive_xor: None,
                         video_key_hex: None,

@@ -190,7 +190,7 @@ pub trait ManagerController: 'static {
     fn family_config_changed(&mut self, _key: &str, _value: &str) -> Result<(), String>;
     fn save_family_config(&mut self) -> Result<ManagerViewModel, String>;
     fn reset_family_config(&mut self) -> Result<ManagerViewModel, String>;
-    fn musica_profile_action(&mut self, action: &str) -> Result<ManagerViewModel, String>;
+    fn select_musica_key_file(&mut self) -> Result<ManagerViewModel, String>;
     fn filter_config_changed(&mut self, _key: &str, _value: &str) -> Result<(), String>;
     fn reset_filter_config(&mut self) -> Result<ManagerViewModel, String>;
     /// Library sort mode: "title" | "recent" | "play_time".

@@ -38,12 +38,6 @@ impl AstraEmuManagerController {
         }
     }
 
-    pub(super) fn candidate_descriptor(&self, game_id: &str) -> Option<FamilyPluginDescriptor> {
-        let game = self.game(game_id).ok()?;
-        self.launch_candidate_for_game(&game)
-            .map(|candidate| candidate.descriptor.clone())
-    }
-
     pub(super) fn family_fields(&self) -> Result<Vec<GenericConfigFieldViewModel>, String> {
         let Some(game_id) = self.selected_case_id.as_deref() else {
             return Ok(Vec::new());
@@ -87,7 +81,6 @@ impl AstraEmuManagerController {
         }];
         if installed.is_some() && draft.is_none_or(|id| Some(id) == installed) {
             fields.extend(self.typed_family_fields()?);
-            fields.extend(self.musica_import_fields());
         }
         Ok(fields)
     }

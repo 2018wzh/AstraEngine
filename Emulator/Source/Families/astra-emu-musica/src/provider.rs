@@ -1,10 +1,10 @@
 use crate::{
+    MUSICA_KEY_FILE, MusicaVm, ScriptEncoding,
     audio::Audio,
     profile::mount_musica_with_texture_overrides,
-    scene::{core_error, error, Scene},
+    scene::{Scene, core_error, error},
     session::MusicaSession,
     storage::Storage,
-    MusicaVm, ScriptEncoding, MUSICA_KEY_FILE,
 };
 use abi_stable::std_types::ROption;
 use astra_core::Hash256;
@@ -12,8 +12,8 @@ use astra_emu_family_api::*;
 use std::{
     path::{Component, Path},
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
 };
 mod eden;
@@ -61,7 +61,11 @@ pub(crate) fn musica_descriptor() -> FamilyDescriptor {
         default: ConfigValue::Integer(default),
     };
     let mut configuration = vec![
-        field("profile_file", "Private PAZ key.toml (absolute or game-relative path)", MUSICA_KEY_FILE),
+        field(
+            "profile_file",
+            "Private PAZ key.toml (absolute or game-relative path)",
+            MUSICA_KEY_FILE,
+        ),
         field("entry_script", "Entry script in scr archive", "test.sc"),
         field(
             "eden_import_file",
@@ -244,7 +248,7 @@ impl MusicaProvider {
                 return Err(error(
                     "ASTRA_EMU_MUSICA_CONFIG",
                     "background playback preference is missing or invalid",
-                ))
+                ));
             }
         };
         let text_shadow = match config
@@ -257,7 +261,7 @@ impl MusicaProvider {
                 return Err(error(
                     "ASTRA_EMU_MUSICA_CONFIG",
                     "text shadow preference is missing or invalid",
-                ))
+                ));
             }
         };
         let render_extent = |key: &str| -> FamilyResult<u32> {
@@ -299,7 +303,7 @@ impl MusicaProvider {
                 return Err(error(
                     "ASTRA_EMU_MUSICA_CONFIG",
                     "unsupported script encoding",
-                ))
+                ));
             }
         };
         let title_launch = match config

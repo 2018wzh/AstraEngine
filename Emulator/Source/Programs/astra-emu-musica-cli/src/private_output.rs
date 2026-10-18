@@ -20,17 +20,17 @@ pub fn write_new_private(path: &Path, bytes: &[u8]) -> Result<(), Box<dyn std::e
 fn restrict_windows_path(path: &Path) -> std::io::Result<()> {
     use std::os::windows::ffi::OsStrExt;
     use windows::{
-        core::PCWSTR,
         Win32::{
-            Foundation::{LocalFree, HLOCAL},
+            Foundation::{HLOCAL, LocalFree},
             Security::{
                 Authorization::{
                     ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
                 },
-                SetFileSecurityW, DACL_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
-                PSECURITY_DESCRIPTOR,
+                DACL_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
+                PSECURITY_DESCRIPTOR, SetFileSecurityW,
             },
         },
+        core::PCWSTR,
     };
     let path: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
     let sddl: Vec<u16> = "D:P(A;;FA;;;OW)".encode_utf16().chain(Some(0)).collect();

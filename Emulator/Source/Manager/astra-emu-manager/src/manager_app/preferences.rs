@@ -53,9 +53,6 @@ impl AstraEmuManagerController {
             self.family_options.insert(key.into(), value.into());
             return Ok(());
         }
-        if key.starts_with("manager.musica.") {
-            return self.musica_import_changed(key, value);
-        }
         if let Some(id) = key.strip_prefix("config.") {
             let (_, schema) = self.config_schema()?;
             if !schema.iter().any(|field| field.id == id)

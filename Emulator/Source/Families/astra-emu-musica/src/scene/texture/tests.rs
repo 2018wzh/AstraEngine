@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
-    mount_musica, parse_sc, profile::mount_musica_with_texture_overrides, MusicaVm,
-    ScOpcodeCatalog, MUSICA_KEY_FILE,
+    MUSICA_KEY_FILE, MusicaVm, ScOpcodeCatalog, mount_musica, parse_sc,
+    profile::mount_musica_with_texture_overrides,
 };
 use astra_core::Hash256;
 use std::io::{Cursor, Write};
@@ -169,9 +169,8 @@ fn texture_override_profile_rejects_unsupported_archive_sources() {
     let profile_path = root.path().join(MUSICA_KEY_FILE);
     let mut profile = crate::load_musica_key_file(&profile_path).unwrap();
     let set_override = |key: &mut crate::MusicaKeyFile, source: &str| {
-        key.texture_overrides = std::collections::BTreeMap::from([
-            (source.into(), "hd/replacement.png".into()),
-        ]);
+        key.texture_overrides =
+            std::collections::BTreeMap::from([(source.into(), "hd/replacement.png".into())]);
         std::fs::write(&profile_path, toml::to_string_pretty(key).unwrap()).unwrap();
     };
     let validate_profile = || {

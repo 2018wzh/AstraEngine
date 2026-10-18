@@ -158,8 +158,8 @@ pub(super) fn install<C: ManagerController>(
         let c = controller.clone();
         let a = std::rc::Rc::downgrade(adapter);
         let w = adapter.window().as_weak();
-        adapter.window().on_musica_profile_action(move |action| {
-            let result = c.borrow_mut().musica_profile_action(action.as_str());
+        adapter.window().on_select_musica_key_file(move || {
+            let result = c.borrow_mut().select_musica_key_file();
             if let Some(window) = w.upgrade() {
                 match result {
                     Ok(model) => apply_model(&a, &model),

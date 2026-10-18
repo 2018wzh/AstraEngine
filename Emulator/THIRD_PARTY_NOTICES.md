@@ -39,6 +39,10 @@
 
 Musica 编译期嵌入 Noto Sans JP 与 Noto Sans SC，使用 SIL Open Font License 1.1。字体通过仓库 Git LFS 提供，运行包在 `licenses/noto/OFL.txt` 保留相应许可；它们不替代 FVP 请求的原生系统字体。
 
+## Musica key.toml 解析
+
+`toml 1.1.3+spec-1.1.0` 来源为 <https://github.com/toml-rs/toml>，许可为 MIT OR Apache-2.0；`winnow 1.0.4` 来源为 <https://github.com/winnow-rs/winnow>，许可为 MIT。具体解析、序列化与关联 crate 版本固定于 Emulator lockfile；本地运行包在 `licenses/rust/` 保留本轮新增解析依赖的完整许可文本。
+
 ## WMV decoder
 
 FVP 使用完整 RFVP fork 中的原生 `crates/na_wmv_player` 及原 Movie 路径处理 ASF/WMV/WMA，不再直接依赖主仓 `Emulator/Source/Families/na_wmv_player`。原生 decoder 清单没有独立 license 字段，须保留完整 fork 许可与来源，并在分发前核实实际覆盖范围，不能从 FFmpeg 算法名称推断额外授权。主仓旧独立 decoder/工具的来源和许可不明问题仍保留在其 `THIRD_PARTY_NOTICES.md`，不能混称为当前 FVP 的直接依赖。打包复制当前 Family 的说明与完整 RFVP 许可，不再附加旧 decoder 的错误归因。

@@ -93,7 +93,6 @@ impl AstraEmuManagerController {
             input_config: InputConfigViewModel::default(),
             appearance,
             family_options: BTreeMap::new(),
-            musica_import: None,
             filter_options: BTreeMap::new(),
             metadata,
             metadata_sequence: 0,

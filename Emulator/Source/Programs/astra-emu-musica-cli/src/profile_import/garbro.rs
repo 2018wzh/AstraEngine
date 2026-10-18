@@ -6,7 +6,7 @@ use std::{
 };
 
 use astra_emu_musica::{
-    MusicaArchiveKey, MusicaKeyFile, MUSICA_KEY_SCHEMA, REQUIRED_ARCHIVE_ROLES,
+    MUSICA_KEY_SCHEMA, MusicaArchiveKey, MusicaKeyFile, REQUIRED_ARCHIVE_ROLES,
 };
 use flate2::read::ZlibDecoder;
 
@@ -84,13 +84,20 @@ fn load_graph(formats: &Path) -> Result<NrbfGraph, Box<dyn std::error::Error>> {
     let mut bytes = Vec::new();
     let source = File::open(formats).map_err(|cause| match cause.kind() {
         std::io::ErrorKind::NotFound => "ASTRA_EMU_GARBRO_MISSING: select an existing Formats.dat",
-        std::io::ErrorKind::PermissionDenied => "ASTRA_EMU_GARBRO_PERMISSION: grant this user read access to Formats.dat",
+        std::io::ErrorKind::PermissionDenied => {
+            "ASTRA_EMU_GARBRO_PERMISSION: grant this user read access to Formats.dat"
+        }
         _ => "ASTRA_EMU_GARBRO_OPEN: selected scheme database could not be opened",
     })?;
-    if !source.metadata().map_err(|_| "ASTRA_EMU_GARBRO_METADATA")?.is_file() {
+    if !source
+        .metadata()
+        .map_err(|_| "ASTRA_EMU_GARBRO_METADATA")?
+        .is_file()
+    {
         return Err("ASTRA_EMU_GARBRO_FILE: select a regular Formats.dat file".into());
     }
-    source.take(MAX_FORMATS_BYTES + 1)
+    source
+        .take(MAX_FORMATS_BYTES + 1)
         .read_to_end(&mut bytes)
         .map_err(|_| "ASTRA_EMU_GARBRO_READ")?;
     if bytes.len() as u64 > MAX_FORMATS_BYTES {
@@ -401,7 +408,8 @@ mod tests {
         let game = tempfile::tempdir().unwrap();
         let output = game.path().join("key.toml");
         std::fs::write(&output, b"private").unwrap();
-        let error = import(&game.path().join("missing.dat"), "title", 0, true, &output).unwrap_err();
+        let error =
+            import(&game.path().join("missing.dat"), "title", 0, true, &output).unwrap_err();
         assert_eq!(error.to_string(), "ASTRA_EMU_PROFILE_OUTPUT_EXISTS");
     }
 }

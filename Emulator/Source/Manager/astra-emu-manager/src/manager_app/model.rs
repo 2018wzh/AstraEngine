@@ -332,8 +332,7 @@ impl AstraEmuManagerController {
             input_config: self.input_view(),
             appearance: self.appearance_view(),
             family_config_fields: self.family_fields()?,
-            musica_profile_available: self.musica_profile_available(),
-            musica_import_pending: self.musica_profile_import_pending(),
+            musica_key_file_available: self.musica_key_file_available(),
             filter_config_fields: self.filter_fields()?,
             version: env!("CARGO_PKG_VERSION").into(),
             build_identity: option_env!("ASTRA_EMU_MANAGER_RUSTC_FINGERPRINT")

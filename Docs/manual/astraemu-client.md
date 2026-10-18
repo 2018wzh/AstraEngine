@@ -28,13 +28,9 @@ Musica 提供同步文字 Hook；共享串行 Luau VM 执行已启用扩展。�
 
 ## Musica 私有配置
 
-识别到 PAZ 不等于具备解密配置。遇到 `private game profile cannot be read` 时，在该游戏的“模拟器配置”中选择 Astra Musica 并保存，然后使用以下入口：
+Musica 运行时只读取 `key.toml`（`astra.emu.musica.keys.v2`），包含已确认的 PAZ 参数、八个归档 role 的密钥及可选纹理替换映射。默认从游戏目录读取；也可在该游戏的“模拟器配置”中点击“选择 key.toml 并应用到当前游戏”，校验后保存绝对路径。Manager 不转换格式、不生成密钥，也不修改所选文件。
 
-- **选择已有 JSON 配置**：验证并保存该文件的绝对路径，只覆盖当前游戏的 `profile_file` 设置。
-- **选择 GARbro Formats.dat**：在表单中明确选择对应游戏方案，再点击“导入并应用所选配置”。
-- **选择 key.toml**：填写已确认的 PAZ 版本、索引长度 XOR（十进制或 `0x` 十六进制）及 RC4 跳过 CRC 参数，再导入。这些参数不在旧 key 文件中，程序不会猜测。
-
-导入结果保存在系统应用数据目录的 `private-profiles/`，只为当前游戏应用。原始 key/profile、游戏和既有存档均不改写；不会覆盖已存在的私有配置文件。不要公开提交或分享含密钥的配置。
+JSON profile、GARbro `Formats.dat` 和旧 `keys.v1` 只在[开发工具](../../Emulator/Source/Programs/astra-emu-musica-cli/README.md)中转换为新 `key.toml`，不作为运行时输入。旧 key 缺少的算法参数须明确提供。配置、密钥和既有存档不自动改写；不要公开提交或分享私有文件。
 
 ## 构建运行包
 

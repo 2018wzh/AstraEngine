@@ -378,8 +378,7 @@ export component LibraryPage inherits Rectangle {
     in-out property <string> view-mode: "grid";
     in property <string> density: "comfortable";
     in property <[ConfigField]> family-config-fields;
-    in property <bool> musica-profile-available;
-    in property <bool> musica-import-pending;
+    in property <bool> musica-key-file-available;
     // Extended metadata (PotatoVN-style)
     in property <string> selected-developer;
     in property <string> selected-release-date;
@@ -404,7 +403,7 @@ export component LibraryPage inherits Rectangle {
     callback family-config-changed(string, string);
     callback save-family-config();
     callback reset-family-config();
-    callback musica-profile-action(string);
+    callback select-musica-key-file();
     property <int> visible-columns: max(1, min(root.grid-columns, Math.floor((root.width - (root.desktop-mode ? 26px : 14px)) / (root.desktop-mode ? 170px : 166px))));
     property <length> grid-spacing: root.desktop-mode && root.density != "compact" ? 14px : 10px;
     property <length> card-width: max(156px, min(240px, (root.width - (root.desktop-mode ? 48px : 32px) - root.grid-spacing * (root.visible-columns - 1)) / root.visible-columns));
@@ -1140,29 +1139,16 @@ export component LibraryPage inherits Rectangle {
                             save => { root.save-family-config(); }
                             reset => { root.reset-family-config(); }
                         }
-                        if root.inspector-tab == "core" && root.musica-profile-available : VerticalLayout {
+                        if root.inspector-tab == "core" && root.musica-key-file-available : VerticalLayout {
                             spacing: 8px;
                             Text {
-                                text: "Musica 私有配置：选择已有 JSON，或从 GARbro / key.toml 导入。导入结果只保存在应用数据目录，并应用到当前游戏。";
+                                text: "Musica 运行时只读取 key.toml；文件包含已确认的 PAZ 参数与密钥。其他格式请先用开发工具转换。";
                                 wrap: word-wrap;
                                 color: Theme.on-surface-variant;
                             }
                             M3Button {
-                                text: "选择已有 JSON 配置";
-                                clicked => { root.musica-profile-action("json"); }
-                            }
-                            M3Button {
-                                text: "选择 GARbro Formats.dat";
-                                clicked => { root.musica-profile-action("garbro"); }
-                            }
-                            M3Button {
-                                text: "选择 key.toml";
-                                clicked => { root.musica-profile-action("key"); }
-                            }
-                            if root.musica-import-pending : M3Button {
-                                text: "导入并应用所选配置";
-                                primary: true;
-                                clicked => { root.musica-profile-action("import"); }
+                                text: "选择 key.toml 并应用到当前游戏";
+                                clicked => { root.select-musica-key-file(); }
                             }
                         }
                     }

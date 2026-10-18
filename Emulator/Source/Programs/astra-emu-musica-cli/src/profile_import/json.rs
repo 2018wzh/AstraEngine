@@ -1,5 +1,8 @@
-use astra_emu_musica::{MusicaArchiveKey, MusicaKeyFile, MUSICA_KEY_SCHEMA};
-use serde::{de::{MapAccess, Visitor}, Deserialize, Deserializer};
+use astra_emu_musica::{MUSICA_KEY_SCHEMA, MusicaArchiveKey, MusicaKeyFile};
+use serde::{
+    Deserialize, Deserializer,
+    de::{MapAccess, Visitor},
+};
 use std::{collections::BTreeMap, fmt, fs::File, io::Read, marker::PhantomData, path::Path};
 
 const PROFILE_SCHEMA: &str = "astra.emu.musica.profile.v1";
@@ -34,7 +37,9 @@ struct LegacyRole {
 
 // profile.v1 defined an omitted rc4_skip_crc as true. Preserve that schema's
 // behavior here; production keys.v2 requires the field explicitly.
-fn legacy_rc4_skip_crc() -> bool { true }
+fn legacy_rc4_skip_crc() -> bool {
+    true
+}
 
 fn unique_map<'de, D, V>(deserializer: D) -> Result<BTreeMap<String, V>, D::Error>
 where
@@ -64,11 +69,17 @@ pub fn import_json_profile(file: &Path, output: &Path) -> Result<(), Box<dyn std
     super::ensure_new_output(output)?;
     let source = File::open(file)
         .map_err(|_| "ASTRA_EMU_PROFILE_OPEN: check access to the selected JSON profile")?;
-    if !source.metadata().map_err(|_| "ASTRA_EMU_PROFILE_METADATA")?.is_file() {
+    if !source
+        .metadata()
+        .map_err(|_| "ASTRA_EMU_PROFILE_METADATA")?
+        .is_file()
+    {
         return Err("ASTRA_EMU_PROFILE_FILE: select a regular JSON profile file".into());
     }
     let mut bytes = Vec::new();
-    source.take(MAX_PROFILE_BYTES + 1).read_to_end(&mut bytes)
+    source
+        .take(MAX_PROFILE_BYTES + 1)
+        .read_to_end(&mut bytes)
         .map_err(|_| "ASTRA_EMU_PROFILE_READ: check access to the selected JSON profile")?;
     super::write_profile(output, &decode(&bytes)?)
 }
@@ -88,15 +99,22 @@ fn decode(bytes: &[u8]) -> Result<MusicaKeyFile, Box<dyn std::error::Error>> {
         paz_version: profile.paz_version,
         index_size_xor: profile.index_size_xor,
         rc4_skip_crc: profile.rc4_skip_crc,
-        archive_keys: profile.roles.into_iter().map(|(role, value)| {
-            (role, MusicaArchiveKey {
-                index_key_hex: super::encode_hex(&value.index_key),
-                data_key_hex: super::encode_hex(&value.data_key),
-                type_passwords: value.type_passwords,
-                archive_xor: value.archive_xor,
-                video_key_hex: value.video_key.map(|bytes| super::encode_hex(&bytes)),
+        archive_keys: profile
+            .roles
+            .into_iter()
+            .map(|(role, value)| {
+                (
+                    role,
+                    MusicaArchiveKey {
+                        index_key_hex: super::encode_hex(&value.index_key),
+                        data_key_hex: super::encode_hex(&value.data_key),
+                        type_passwords: value.type_passwords,
+                        archive_xor: value.archive_xor,
+                        video_key_hex: value.video_key.map(|bytes| super::encode_hex(&bytes)),
+                    },
+                )
             })
-        }).collect(),
+            .collect(),
         texture_overrides: profile.texture_overrides,
     };
     key.validate()?;
@@ -106,8 +124,8 @@ fn decode(bytes: &[u8]) -> Result<MusicaKeyFile, Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use astra_emu_musica::{load_musica_key_file, REQUIRED_ARCHIVE_ROLES};
-    use serde_json::{json, Value};
+    use astra_emu_musica::{REQUIRED_ARCHIVE_ROLES, load_musica_key_file};
+    use serde_json::{Value, json};
 
     fn fixture() -> Value {
         let roles = REQUIRED_ARCHIVE_ROLES.into_iter().enumerate().map(|(index, role)| {
@@ -145,15 +163,27 @@ mod tests {
         for (index, role) in REQUIRED_ARCHIVE_ROLES.into_iter().enumerate() {
             let key = &imported.archive_keys[role];
             assert_eq!(key.index_key_hex, "01020304");
-            assert_eq!(key.data_key_hex, if role == "mov" { "" } else { "05060708" });
+            assert_eq!(
+                key.data_key_hex,
+                if role == "mov" { "" } else { "05060708" }
+            );
             assert_eq!(key.type_passwords["sc"], format!("public-fixture-{index}"));
             assert_eq!(key.type_passwords["png"], "画像");
             assert_eq!(key.archive_xor, Some(123));
-            assert_eq!(key.video_key_hex.as_deref(), if role == "mov" {
-                Some(super::super::encode_hex(&(0..=255).collect::<Vec<u8>>()))
-            } else { None }.as_deref());
+            assert_eq!(
+                key.video_key_hex.as_deref(),
+                if role == "mov" {
+                    Some(super::super::encode_hex(&(0..=255).collect::<Vec<u8>>()))
+                } else {
+                    None
+                }
+                .as_deref()
+            );
         }
-        assert_eq!(imported.texture_overrides["musica:/bg/public.png"], "overrides/public.png");
+        assert_eq!(
+            imported.texture_overrides["musica:/bg/public.png"],
+            "overrides/public.png"
+        );
         assert!(import_json_profile(&source, &output).is_err());
         assert!(import_json_profile(&source, &source).is_err());
         assert_eq!(std::fs::read(&source).unwrap(), original);
@@ -172,7 +202,11 @@ mod tests {
         let key = decode(&serde_json::to_vec(&value).unwrap()).unwrap();
         assert!(key.rc4_skip_crc);
         assert!(key.texture_overrides.is_empty());
-        assert!(key.archive_keys.values().all(|role| role.archive_xor.is_none() && role.video_key_hex.is_none()));
+        assert!(
+            key.archive_keys
+                .values()
+                .all(|role| role.archive_xor.is_none() && role.video_key_hex.is_none())
+        );
     }
 
     #[test]
@@ -193,9 +227,28 @@ mod tests {
             invalid.push(serde_json::to_vec(&value).unwrap());
         }
         let text = serde_json::to_string(&original).unwrap();
-        invalid.push(text.replacen("\"schema\":", "\"schema\":\"private-secret\",\"schema\":", 1).into_bytes());
-        invalid.push(text.replace("\"type_passwords\":{", "\"type_passwords\":{\"sc\":\"private-secret\",").into_bytes());
-        invalid.push(text.replace("\"texture_overrides\":{", "\"texture_overrides\":{\"musica:/bg/public.png\":\"private-secret\",").into_bytes());
+        invalid.push(
+            text.replacen(
+                "\"schema\":",
+                "\"schema\":\"private-secret\",\"schema\":",
+                1,
+            )
+            .into_bytes(),
+        );
+        invalid.push(
+            text.replace(
+                "\"type_passwords\":{",
+                "\"type_passwords\":{\"sc\":\"private-secret\",",
+            )
+            .into_bytes(),
+        );
+        invalid.push(
+            text.replace(
+                "\"texture_overrides\":{",
+                "\"texture_overrides\":{\"musica:/bg/public.png\":\"private-secret\",",
+            )
+            .into_bytes(),
+        );
         invalid.push(text.replace("\"roles\":{", "\"roles\":{\"bg\":{\"index_key\":[1,2,3,4],\"data_key\":[5,6,7,8],\"type_passwords\":{}},").into_bytes());
         for bytes in invalid {
             let error = decode(&bytes).err().unwrap().to_string();

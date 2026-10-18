@@ -67,7 +67,7 @@ impl Scene {
                     return Err(error(
                         "ASTRA_EMU_MUSICA_WSCROLL2_STAGE_LAYERS",
                         "unsupported panorama draw",
-                    ))
+                    ));
                 }
             };
             if destination.width < self.width || destination.height < self.height {
@@ -149,7 +149,7 @@ fn parse_wscroll2_sync(bytes: &[u8]) -> FamilyResult<Vec<i32>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{mount_musica, parse_sc, MusicaVm, ScOpcodeCatalog, MUSICA_KEY_FILE};
+    use crate::{MUSICA_KEY_FILE, MusicaVm, ScOpcodeCatalog, mount_musica, parse_sc};
     use astra_core::Hash256;
     #[test]
     fn wscroll2_sync_rejects_invalid_and_excessive_rows() {
