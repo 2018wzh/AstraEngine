@@ -28,7 +28,7 @@ C ABI v2 在 OpenRequest 中携带可选 module owner。`astra.module_owner` v1 
 
 `SessionState.flags` 的 `SESSION_CAN_RETRY` 只用于保留了可安全重试操作的 Failed 状态。panic 和其他不可恢复错误不设置此位，Host 只提供结束；取消不得把已发布失败改成正常 Finished。接受重试时先退出可重试状态，防止重复点击排入多次操作；队列拒绝则恢复原失败状态。
 
-核心自持 VM、原生调度、资源、渲染、游戏 UI、输入语义、音视频和存档。Manager 管理会话而非游戏 Tick 策略；不要求公共 advance，不强制固定 16 ms 推进、统一 SceneCommand/Mixer/VFS、Host PCM 或 no_std Runtime。上游 host_step 等入口可在嵌入运行层内部复用，不能把执行逻辑搬进另一套 Family 包装。音频优先使用核心原生输出，SDK 后端仅在平台确有需要时按需链接。
+核心自持 VM、调度、资源、渲染、游戏 UI、输入语义、音视频和存档。Manager 管理会话而非游戏 Tick 策略；不要求公共 advance，不强制固定 16 ms 推进、统一 SceneCommand/Mixer/VFS、Host PCM 或 no_std Runtime。外部核心复用原生执行与音频，不能把执行逻辑搬进另一套 Family 包装；Musica/CMVS 等自有引擎可以直接组合 SDK 的运行、呈现和媒体能力，不受外部核心薄适配限制。
 
 应用级平台壳拥有 OS 事件循环与窗口，DLL 不再创建第二套 GUI 应用循环。Manager 是最终 Present 的唯一正式路径，上游独立应用只作为正常入口和行为对照。窗口与模态使用有界 typed 请求，Host 在窗口线程执行并反馈实际结果；无窗口 Host 明确拒绝，不伪造用户回答。默认允许自由缩放窗口，原生窗口行为作为按游戏启用的兼容策略。
 
@@ -92,17 +92,17 @@ GPU 回读后的 CPU 存储可以在进程内保留共享所有权。`OwnedPixel
 
 `WgpuOffscreenRenderer` 的 Rust 构造入口显式接收 graphics owner 持有的 `wgpu::Instance`，不再按 renderer 隐式创建 Instance。Musica 的持久 provider 持有 Instance，普通启动和恢复候选共用它；Headless factory 的克隆共享 Instance，使用 `HeadlessThreadOwner` 时由该 owner 跨 session 保留。原生 backend 和 Windows StaticDxc 配置保持不变，每个 renderer 仍独立选择并验证 adapter policy、创建 device/queue 和场景资源。关闭 session 释放自身 GPU 资源并取消、等待其 worker，不能缓存整个 renderer 或 device 冒充释放。Instance 随显式 owner 结束而释放，不用生产全局静态缓存，也不保证同一进程无限次销毁和重建整个 graphics owner。旧的无 Instance 构造调用直接迁移，不保留兼容入口；错误保留原诊断 code 和安全 operation，不增加软件 fallback 或失败重试。
 
-公共 `astra-media-core` 的 `Extent2D`/`Canvas2D` 负责逻辑舞台到 raster canvas 的比例校验、根变换和坐标映射，并复用 `RectI`、`Transform2D`、`TextureFrame`、`SceneCommand`。四个空间必须分开：逻辑舞台决定 VM、存档、时间和动画几何；资产保存物理像素并显式声明逻辑尺寸及格式原点；raster canvas 是 GPU 目标；窗口输出由 Host 做 letterbox 和 pointer 逆映射。`astra-emu-sdk` 只提供薄语义 `StageCanvas` 与 `TextureAsset`，不依赖 VN；AstraVN presentation 直接消费同一 `Canvas2D`，作为第二个真实调用方。
+公共 `astra-media-core` 的 `Extent2D`/`Canvas2D` 负责逻辑舞台到 raster canvas 的比例校验、根变换和坐标映射，并复用 `RectI`、`Transform2D`、`TextureFrame`、`SceneCommand`。四个空间必须分开：逻辑舞台决定 VM、存档、时间和动画几何；资产保存物理像素并显式声明逻辑尺寸及格式原点；raster canvas 是 GPU 目标；窗口输出由 Host 做 letterbox 和 pointer 逆映射。`astra-emu-sdk` 通过 `StageCanvas` 与 `TextureAsset` 接入这些共享类型，不依赖 VN；AstraVN presentation 直接消费同一 `Canvas2D`，作为第二个真实调用方。这些现有入口不限制自有引擎与 SDK 的进一步集成。
 
 Musica 的产品目标为固定 `1280×720` 逻辑舞台及 `1.0/1.5/2.0/3.0` render scale。当前实现仍暴露 `logical_width/logical_height` 与 `render_width/render_height`，支持更广的逻辑/raster 尺寸；包括 eden 旧 1024×640 的整合尚未收敛，不能将目标写成已实现。现行 Canvas 以统一 scale 和居中 aspect-fit viewport 输出，viewport 外指针不进入游戏；配置/预算无效明确失败。资产密度不能改变逻辑 quad、ANI 原点、动画几何、VM、保存或时间，文字按 raster density 排版后映回逻辑坐标。尺寸契约收敛须保留这些不变量及已有存档身份校验，不通过静默缩放修改游戏语义。
 
-本次参与核心为 RFVP/FVP、Siglus、Artemis、Musica、[Sena](https://github.com/xmoezzz/sena-rs)、[Ethornell](https://github.com/xmoezzz/ethornell-rs) 和 KrKr，均重新适配同一 C ABI，最大化复用原生能力、最小化核心修改。继承各上游真实支持范围，不承诺所有 SoftPAL/BGI/KAG 游戏兼容。KrKr 使用既有 Kirikiroid2-web 来源和已有可编译插件能力，不替换为 Artemis 的 KrKr renderer，不新增任意旧 Windows DLL/TPM 兼容层。旧子进程隔离不满足同进程关闭重开要求，必要生命周期修复须与 Astra 适配分开。CMVS 正在独立开发，本次不修改、整合或验收其实现及工作树，也不为它在新 Manager 增加旧 ABI 兼容运行链。
+本次参与核心为 RFVP/FVP、Siglus、Artemis、Musica、[Sena](https://github.com/xmoezzz/sena-rs)、[Ethornell](https://github.com/xmoezzz/ethornell-rs) 和 KrKr，统一使用同一 C ABI。Musica/CMVS 属于自有引擎，允许适配能力直接融入引擎与 SDK；其余外部核心最大化复用原生能力、最小化修改，继承各上游真实支持范围，不承诺所有 SoftPAL/BGI/KAG 游戏兼容。KrKr 使用既有 Kirikiroid2-web 来源和已有可编译插件能力，不替换为 Artemis 的 KrKr renderer，不新增任意旧 Windows DLL/TPM 兼容层。旧子进程隔离不满足同进程关闭重开要求，必要生命周期修复须与 Astra 适配分开。CMVS 正在独立开发，本次不修改、整合或验收其实现及工作树，也不为它在新 Manager 增加旧 ABI 兼容运行链。
 
 沿用有界 typed 配置 schema 的语义：bool/integer/number/string/enum、分组、默认值和唯一字段 ID。未知键、重复键、类型/范围/枚举不匹配返回可定位错误，不静默丢配置。旧 FamilyDescriptor/OpenRequest 的 Rust/abi_stable 布局不是 C ABI 兼容要求，参与核心和消费者统一迁移并重建。
 
 FVP 共用 RFVP VM、原生媒体、V1/RFVS 与 GlobalSaveDataV1/RFVG；不增加旧存档识别、迁移、兼容 reader 或专门旧版本报错。Musica 使用 SDK，自有存档不覆盖原版，原版兼容不属于当前发布要求。GARbro scheme 保留纯 Rust 两阶段 NRBF reader，先收集对象再解析引用；未知、断裂、重复、越界或非法对象图明确失败，不用 BinaryFormatter 或启发式 fallback。SDK 不依赖 VN，不强迫核心创建 RuntimeWorld。
 
-成熟核心改动严格限必要嵌入钩子，复用原 GPU/媒体/平台实现；CPU lease 约束的是交付，不要求 CPU 渲染。产品硬件要求由显式嵌入配置或 Family 验证，不改变上游默认平台策略。实际视听使用硬件 GPU，Sandbox 可使用 GPU 虚拟化。
+外部核心改动严格限必要嵌入钩子，复用原 GPU/媒体/平台实现；CPU lease 约束的是交付，不要求 CPU 渲染。产品硬件要求由显式嵌入配置或 Family 验证，不改变上游默认平台策略。实际视听使用硬件 GPU，Sandbox 可使用 GPU 虚拟化。
 
 核心诊断在 descriptor/probe/open 前接入 Manager。动态适配层安装共享日志桥，静态核心复用宿主订阅器；Manager 是日志 sink、级别过滤和 flush 的所有者。桥初始化冲突阻止加载。字符串、message、Debug/Display 正常有界转发，数值保留 typed 值，超限计入 dropped_fields；字段不经白名单或内容脱敏。
 
@@ -110,7 +110,11 @@ FVP 共用 RFVP VM、原生媒体、V1/RFVS 与 GlobalSaveDataV1/RFVG；不增�
 
 新会话包装仅处理 ABI 所有权、线程约束、请求与关闭，不继承旧 ProviderModule 驱动所有游戏 advance 的运行模型。普通控制入口按声明线程条件使用；取消入口必须能唤醒被 Hook/平台服务阻塞的 worker。关闭完成前不重开，panic 后禁止继续游戏操作但仍完成可达清理，保留原诊断码。
 
-### 外部核心与 SDK 的重构边界
+### 自有引擎、外部核心与 SDK 的重构边界
+
+Musica/CMVS 的适配层可以直接嵌入自有引擎，不要求保留独立的薄 Family 包装。ABI 导出、会话生命周期、FrameSurface、配置、Hook、取消和媒体接线可与引擎实现一起设计，并与 SDK 深度集成；切换时迁移实际调用方，删除被取代的包装、转换和转发层，不保留第二套执行链。统一 C ABI、Manager 最终呈现、资源所有权和关闭取消契约继续适用。
+
+SDK 提取自有引擎实际共用的能力，按需组合；格式解析、VM 指令、游戏 UI 与原生存档语义仍由各引擎负责，不为了共用而搬入通用层。外部核心不受此深集成授权扩展，继续保留原生运行方式与薄适配。
 
 Musica 的原生 stage 以完整资源序列、参考坐标、背景与立绘参数保存于 `runtime_state.v24`，替换丢失参数的旧图层表示。正常绘制与读档重建共用 Family Scene；未实现的序列或立绘语义必须明确失败，不能丢弃参数。v23 及更早状态直接拒绝，格式与诊断见 [Musica 脚本执行](../emu/musica/script-execution.md)。
 
@@ -118,11 +122,11 @@ Musica 的高清纹理替换只在私有 `MusicaProfile` 中声明 `texture_over
 
 外部核心采用 upstream → 通用原生修复基线 → astra → 主仓精确 pin。通用修复与必要嵌入适配分别提交；RFVP、Siglus 等已整理的适配相对其通用基线保持单提交。分支名不代替精确 revision，许可证、MODIFICATIONS、gitlink 与 metadata 保持一致。本次用户明确批准将自有 `astra` 强推覆盖为当前 Release 源码并清理临时分支；操作使用 lease，旧引用先存本地 Git bundle，不改上游或他人分支。
 
-ABI 导出、描述/配置、原生会话包装、Surface 输出、Hook 接线、日志与必要平台桥放在核心的薄嵌入层；Manager 不维护第二套游戏执行实现。帧池、协议包装和通用同步辅助可复用 SDK，但不强迫成熟核心依赖其运行层。上游功能缺陷另行提交非商业最小复现，适配回归在适配内修复。
+外部核心的 ABI 导出、描述/配置、原生会话包装、Surface 输出、Hook 接线、日志与必要平台桥放在薄嵌入层，复用其 VM、renderer、decoder、调度、音频与存档；Manager 不维护第二套游戏执行实现。帧池、协议包装和通用同步辅助可复用 SDK，但不强迫外部核心采用 SDK 运行层。上游功能缺陷独立归因，适配回归在适配内修复。
 
 实施使用独占工作树与产物，共享契约由主线程整合。推送与验收后主线整合的本次授权、模型选择和具体状态统一记录在 [实施计划](../status/implementation-plan.md)，不自动发布二进制 Release。
 
-Musica 与 CMVS 的既有共同需求是 `astra-emu-sdk` 模块化依据；本次 CMVS 保持原状，不把它作为本批 SDK 迁移或验收的前置条件。先复用 AstraEngine 现有文字、绘制、解码、混音与字节源，格式解析、VM 和原生存档语义继续由核心拥有。SDK 按需组合，不依赖 VN、World/package/registry 或强制 EngineSession，不增加纯转发 provider。
+Musica 与 CMVS 的共同需求是 `astra-emu-sdk` 模块化依据，两者可以直接消费和共同演进 SDK；不因薄适配原则限制自有引擎内部重构。本次 CMVS 独立工作树仍保持原状，不作为本批迁移或验收前置。优先复用 AstraEngine 现有文字、绘制、解码、混音与字节源；SDK 不依赖 VN、World/package/registry 或强制 EngineSession，不增加纯转发 provider。
 
 CMVS 私有配置 `astra.emu.cmvs.profile.v2` 用有序 `archives: [{ role, path }]` 声明原生归档优先级，role 必须唯一，路径仍由 SDK 限制在授权游戏目录。`mount_cmvs` 保留列表顺序，同名脚本沿该顺序查找；不得转换成排序映射。旧 v1 配置直接拒绝，使用者按预期优先级重写，不提供推测顺序的迁移。配置校验失败不得开始会话，也不能以另一归档次序重试；真实游戏代表流程仍是完成条件。
 

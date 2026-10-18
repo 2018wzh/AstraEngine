@@ -5,7 +5,7 @@
 ## 当前结论
 
 - 已实现 C ABI v2、显式 module owner、typed 配置、CPU lease 与取消/重试边界，Manager 使用原生运行路径。RFVP 的 D3D12 交付已整合并通过独立硬件验证；本轮按最新决定收口到七核心的可玩代表流程。
-- 本次 Windows 交付覆盖 RFVP/FVP、Siglus、Artemis、Musica、Sena、Ethornell 和 KrKr；全部重新适配，最大化复用原生能力，最小化修改。CMVS 正在独立开发，本批不处理、不触碰其工作树。
+- 本次 Windows 交付覆盖 RFVP/FVP、Siglus、Artemis、Musica、Sena、Ethornell 和 KrKr。Musica/CMVS 属于自有引擎，可直接嵌入适配能力并与 SDK 深度集成；其余外部核心保持薄适配、最大化复用原生实现。CMVS 仍由独立任务开发，本批不触碰其工作树。
 - RFVP 先完成 CPU 完整路径，再独立实现并验收首个 GPU 交付后端；只有 Musica 实现并验证文字 Hook。资源替换 Hook 暂不做，其他核心不新增文字 Hook。
 - Slint Manager 重做精炼 Material 3 界面，同窗口切换管理与游戏；迁移全部既有滤镜，提供内置 Luau 翻译扩展和本地扩展管理。
 - 用户最新决定：验收只要求可玩，由用户在 Release 版本中人工手动执行；停止所有自动输入、截图、重开、关闭及性能采样，移除为自动验收增加的入口、驱动和测试钩子。编译成功不冒记人工通过。
@@ -56,7 +56,7 @@ Manager 在 Slint 中重做精炼 Material 3 界面，保留游戏库/配置/管
 
 ### 5. 其余核心重新适配与可玩验收
 
-Siglus、Artemis、Musica、Sena、Ethornell、KrKr 全部按新 ABI 重新适配；共享契约稳定后可并行独立任务，不复制 VM、renderer、decoder、调度或保存实现。每个核心至少实现一种真实可用的 Surface，不要求同时实现 CPU/GPU。
+Siglus、Artemis、Sena、Ethornell、KrKr 按新 ABI 做薄适配，不复制或替换其 VM、renderer、decoder、调度、音频与存档。Musica/CMVS 允许将适配直接融入自有引擎与 SDK，删除多余包装和转发；这是设计授权，不代表深集成重构已经完成。所有核心仍遵守统一 ABI、资源生命周期和取消边界，每个核心至少提供一种实际可用的 Surface。
 
 Sena/Ethornell 继承指定上游的实际支持范围；KrKr 继续使用既有 Kirikiroid2-web 和已有插件能力。KrKr 必须验证同进程关闭重开，旧 child/IPC 隔离不算完成；必要通用生命周期修复与 Astra 适配分别提交。
 
