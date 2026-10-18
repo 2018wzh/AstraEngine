@@ -3,12 +3,12 @@ use super::*;
 impl AstraEmuManagerController {
     pub(super) fn update_window_state(&mut self, mut state: WindowState) -> Result<(), String> {
         if state.width == 0 || state.height == 0 {
-            // A minimized surface has no drawable extent. Preserve the last
-            // real extent and communicate the visibility change separately.
+            // Keep the last drawable extent while the platform surface is
+            // suspended; OS visibility remains an independent fact.
             let previous = self.window_state.ok_or("ASTRA_EMU_WINDOW_NOT_DRAWABLE")?;
             state.width = previous.width;
             state.height = previous.height;
-            state.visible = false;
+            state.suspended = true;
         }
         state.validate().map_err(|error| error.to_string())?;
         if let Some(previous) = self.window_state {
@@ -25,6 +25,11 @@ impl AstraEmuManagerController {
             if previous.visible != state.visible {
                 self.handle_physical_event(FamilyEvent::WindowVisibility {
                     visible: state.visible,
+                })?;
+            }
+            if previous.suspended != state.suspended {
+                self.handle_physical_event(FamilyEvent::WindowSuspended {
+                    suspended: state.suspended,
                 })?;
             }
             if (previous.width, previous.height) != (state.width, state.height) {
@@ -50,6 +55,7 @@ impl AstraEmuManagerController {
             event,
             FamilyEvent::WindowFocused { focused: false }
                 | FamilyEvent::WindowVisibility { visible: false }
+                | FamilyEvent::WindowSuspended { suspended: true }
         ) {
             self.release_inputs()?;
         }

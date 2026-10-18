@@ -527,9 +527,9 @@ export component ManagerWindow inherits Window {
                         clicked => { root.retry-core(); }
                     }
                     M3Button {
-                        text: root.core-retryable ? "结束游戏" : "知道了";
+                        text: root.game-active ? "结束游戏" : "知道了";
                         primary: true;
-                        clicked => { if root.core-retryable { root.leave-game(); } root.core-retryable = false; root.fatal-error-active = false; }
+                        clicked => { if root.game-active { root.leave-game(); } root.core-retryable = false; root.fatal-error-active = false; }
                     }
                 }
             }

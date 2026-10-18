@@ -30,6 +30,7 @@ pub(super) fn current_window_state(window: &slint::Window) -> Result<WindowState
                 visible: window
                     .is_visible()
                     .ok_or("ASTRA_EMU_WINDOW_VISIBILITY_UNAVAILABLE")?,
+                suspended: window.is_minimized() == Some(true),
             })
         })
         .ok_or_else(|| "ASTRA_EMU_WINDOW_UNAVAILABLE".to_owned())?
@@ -48,6 +49,7 @@ pub(super) fn install<C: ManagerController>(
         alt: false,
         super_key: false,
     };
+    let mut occluded = false;
     adapter
         .window()
         .window()
@@ -74,6 +76,7 @@ pub(super) fn install<C: ManagerController>(
                 }
                 WindowEvent::Focused(focused) => {
                     current_window_state(native_window).and_then(|mut state| {
+                        state.suspended |= occluded;
                         state.focused = *focused;
                         controller.borrow_mut().set_window_state(state)
                     })
@@ -82,9 +85,10 @@ pub(super) fn install<C: ManagerController>(
                 | WindowEvent::Occluded(_)
                 | WindowEvent::ScaleFactorChanged { .. } => current_window_state(native_window)
                     .and_then(|mut state| {
-                        if let WindowEvent::Occluded(occluded) = event {
-                            state.visible = !occluded;
+                        if let WindowEvent::Occluded(value) = event {
+                            occluded = *value;
                         }
+                        state.suspended |= occluded;
                         controller.borrow_mut().set_window_state(state)
                     }),
                 WindowEvent::ModifiersChanged(value) => {

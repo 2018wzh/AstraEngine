@@ -18,6 +18,7 @@ fn request() -> NativeOpenRequest {
             scale_factor: 1.0,
             focused: true,
             visible: true,
+            suspended: false,
         },
         host: no_host_services(&cancellation),
         cancellation,

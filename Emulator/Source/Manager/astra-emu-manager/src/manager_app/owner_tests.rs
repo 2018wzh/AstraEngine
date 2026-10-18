@@ -73,6 +73,7 @@ impl Harness {
                 scale_factor: 1.0,
                 focused: true,
                 visible: true,
+                suspended: false,
             },
             text: None,
             wake: Arc::new(move || {

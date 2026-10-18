@@ -7,6 +7,7 @@ pub struct WindowState {
     pub scale_factor: f64,
     pub focused: bool,
     pub visible: bool,
+    pub suspended: bool,
 }
 
 impl WindowState {

@@ -52,6 +52,7 @@ fn request(
             height: 600,
             focused: true,
             visible: true,
+            suspended: false,
             scale_factor: 1.0,
         },
         host: no_host_services(&cancellation),

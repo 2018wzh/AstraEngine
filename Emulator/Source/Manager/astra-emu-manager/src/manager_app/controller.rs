@@ -41,12 +41,15 @@ impl ManagerController for AstraEmuManagerController {
         self.registry.respond_window(request, result)
     }
     fn native_failure(&self) -> Option<(&str, bool)> {
-        self.active.as_ref().and_then(|active| {
-            active
-                .failure
-                .as_ref()
-                .map(|failure| (failure.message.as_str(), failure.can_retry))
-        })
+        self.active
+            .as_ref()
+            .filter(|active| active.closing.is_none())
+            .and_then(|active| {
+                active
+                    .failure
+                    .as_ref()
+                    .map(|failure| (failure.message.as_str(), failure.can_retry))
+            })
     }
     fn retry_native(&mut self) -> Result<(), String> {
         let active = self.active.as_mut().ok_or("ASTRA_EMU_CORE_CLOSED")?;

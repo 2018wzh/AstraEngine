@@ -19,13 +19,13 @@
 | AstraVN/Player | VnSession、Yakui、公共 Canvas、媒体流、typed 输入/存读档与 Luau 显式 IO | 实际授权 IO、设备音频、跨平台输入/媒体/挂起恢复及长流程 |
 | Editor/Agent | GPUI、版本化事务、增量撤销、后台诊断、真实 Player 预览与 ACP/MCP | `--mcp` 持有 stdin 的关闭挂起；图/时间线/Agent 工作流、片段 seek 与三桌面验收 |
 | Manager | 原生 C ABI、驻留库、CPU/D3D12 呈现、本地 Luau；实窗完成同窗口剧情输入、返回/重开、窄屏导航、明暗主题及四类滤镜，修复 Anime4K 移植错误并通过参考像素回归 | 前台物理输入、听音与性能验收；当前实窗证据为自有窗口消息级交互 |
-| FVP | 原生 App/VM/媒体/保存、完整 UI CPU 帧；CPU 与 D3D12 的输入、缩略图、fence、旧 lease 和重开硬件验证 | 商业首帧前请求 WINDOWED，被无窗口 Host 拒绝；需实际窗口继续，不能归因上游；字体分发授权未核验 |
+| FVP | 真实标题、正文、原生菜单/存读档缩略图、OP 自然播放后回正文、关闭重开；修复读档 context 失效和错误吞没，新增最小化/恢复实窗证据 | 选择及结局仍在推进；既有 CPU/D3D12 硬件验证不替代本轮完整路线，字体分发授权未核验 |
 | Siglus | 已完成 Rewrite 小鳥结局、ED staff roll、自动回标题、同驻留 DLL 重开；通用空栈暂停 latch 修复单独归因并整理入新原生基线 | 前台输入、听音、长期资源归因及其他平台未完成 |
 | Artemis | 原 Vulkan/FFmpeg、新 ABI、17 项普通与 4 项硬件检查；修复解码取消、restore-close 音频竞态和真实窗口状态查询，实窗正常关闭 | 原生失焦暂停使锁屏环境下剧情不推进；正文、商业保存及结局需要真实焦点，不新增后台开关绕过 |
 | Musica/SDK | 真实标题/重开、8 声道设备、对白 Hook/错误重试/存读档/网络取消；音频快进背压与 MOV 类型密码、流式落盘已修，真实 OP 播放及影片中保存恢复通过 | OP 后复合图像参数阻塞；确认来源 `00610272` 也没有对应解析，不丢参数或另猜语义。选择项 Hook 实玩、逻辑尺寸收敛、听音及结局待完成 |
-| Sena | ABI v2、原生 GPU/设备音频 owner；5 项普通检查，修复准确 Steam Koikake 身份识别 | 真实 probe 已通过，open 要求窗口 Host 而拒绝 headless；无可达帧、商业代表流程或结局，不扩大为所有 SoftPAL |
-| Ethornell | 本地 ABI v2 构建，修复格式标识；真实 descriptor/probe、Vulkan 与字体初始化通过 | 首次 VM tick 前请求 window.title，无窗口 Host 拒绝；许可证覆盖待澄清，适配不推送；结局未完成 |
-| KrKr | 原生 C ABI，无 child/IPC；完整画布 Alpha 语义、首错保留；真实 Manager 公开画面、输入、两轮重开及 System.exit 通过 | 商业 startup 请求“corrupted execution file”提示后被 headless 拒绝；原插件/商业流程和结局待验收，不归因上游 |
+| Sena | 真实简中标题、剧情/CG、菜单、存读档、关闭重开；修复新会话读档后不能再保存，原生 1920×1080 与硬件设备初始化通过 | 街道目的地流程 `0xCDFF8 → 0xCD6E4` 循环已在固定 native `2d28936c` 独立实窗复现，未到结局；另有 EV417 资源与 MIX 解码错误，不宣称完整画音通过 |
+| Ethornell | 本地 ABI v2、真实标题/正文/原生 UI；新版 Manager 的失败结束、同驻留 DLL 重开已实测 | 15th/HD 首指令缺口已在固定原生路径复现；其他授权版本的存读档遇锁屏下真实 cursor warp 拒绝，继续可达路线。许可覆盖待澄清，适配不推送，结局未完成 |
+| KrKr | 原生 C ABI，无 child/IPC；完整画布 Alpha、首错保留；公开画面/输入/两轮重开及 System.exit 通过，另一个授权商业入口已通过真实 Information 模态 | 商业启动继续后进程以 `0xc0000374` 退出，尚未归因，需原生堆损坏定位；商业代表流程与结局未通过 |
 | CMVS | 独立开发中的原格式/VM/归档与 SDK 接入 | 本批不修改、整合或验收，保留来源成果 |
 | 终之空转换 | Story IR、37 路线输入生成、Classic/Modern 私有包与部分硬件运行 | Classic/Modern 全部 37 路线及系统/演出/视听验收 |
 | 平台/发行 | Windows 为主要实测环境，Linux/Android 有历史记录 | 当前整合基线四平台代表流程、macOS/Android 真机、设备音频及依赖/许可核验 |
@@ -76,6 +76,8 @@ fork/master 承载独立原生改进，astra 相对该基线仅一个必要适�
 - 主机硬件 GPU/音频为本批 Windows 正式验收环境；headless 先覆盖自动化可达流程，再运行实际窗口、输入、滤镜、原生菜单和设备音频。软件 adapter、NullAudio、首帧和公开夹具不能替代商业流程及结局。
 - 性能记录包含实际 R/O、帧交付方式、回读/上传字节、CPU/GPU 时间、帧池等待和显示延迟；按相同硬件、驱动、Release、游戏版本及语义场景分别记录冷启动与预热。短时平稳不作为长期无泄露结论。
 
-已执行：共享 ABI 7 项与 observability 9 项检查及 Clippy；Manager 77 项普通检查、1 项独立参考像素 GPU 回归、真实独立 DLL smoke、自有窗口操作。实窗覆盖缩放、锐化、Anime4K、文件选择器加载/保存外部 HLSL、坏源错误及旧滤镜保留；缩放后的真实 NewGame 输入到达正文，同窗口返回后再次打开标题，最终退出 0。Musica/SDK 整合回归 237 项，随后音频 27 项、归档 10 项、视频 worker/PCM 11 项针对性检查均通过。真实 Musica VM 在 TLS ServerHello 等待中收到原生取消，连接结束、Manager 正常退出，临时测试凭据已删除；不以该用例宣称远端翻译质量。CLI 安装/启用/配置/禁用、语义 Hook 错误重试及存读档后新上下文均有实际运行证据。Artemis 整合树的 17 项普通检查与 Clippy 通过；4 项硬件结果来自独占验收树。各核心商业阻塞与硬件结果保留在修改说明和 ignored 原始输出中。CPAL ALSA 依赖对齐后的 WSL 编译与枚举已通过，不代表 Linux 播放验收。
+已执行：共享 ABI 7 项与 observability 9 项检查及 Clippy；Manager 78 项普通检查、1 项独立参考像素 GPU 回归、真实独立 DLL smoke、自有窗口操作。实窗覆盖缩放、锐化、Anime4K、文件选择器加载/保存外部 HLSL、坏源错误及旧滤镜保留；缩放后的真实 NewGame 输入到达正文，同窗口返回后再次打开标题，最终退出 0。RFVP 最小化 8 秒后恢复仍为原句/场景，继续输入可推进；Ethornell 不可重试失败经“结束游戏”返回库，同进程重开标题。Musica/SDK 整合回归 237 项，随后音频 27 项、归档 10 项、视频 worker/PCM 11 项针对性检查均通过。真实 Musica VM 在 TLS ServerHello 等待中收到原生取消，连接结束、Manager 正常退出，临时测试凭据已删除；不以该用例宣称远端翻译质量。CLI 安装/启用/配置/禁用、语义 Hook 错误重试及存读档后新上下文均有实际运行证据。Artemis 整合树的 17 项普通检查与 Clippy 通过；4 项硬件结果来自独占验收树。各核心商业阻塞与硬件结果保留在修改说明和 ignored 原始输出中。CPAL ALSA 依赖对齐后的 WSL 编译与枚举已通过，不代表 Linux 播放验收。
+
+共享改动已通过 root workspace 的 `cargo check --workspace --all-targets --features astra-media/ffmpeg-vcpkg`，以及 Editor 独立 workspace 的全 target check。Emulator 按受影响包及独占 Family 构建验证，CMVS 未编译；编译结果不替代运行证据。保留依赖 `binrw` 和 `proc-macro-error2` 的未来 Rust 兼容警告。
 
 操作入口：[开发手册](../manual/development.md)、[AstraEMU 客户端](../manual/astraemu-client.md)、[Editor](../../Editor/README.md)、[NativeVN 样例](../../Examples/NativeVN/README.md)、[终之空资料](../samples/tsuinosora-modernization/README.md)。

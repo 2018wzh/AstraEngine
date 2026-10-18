@@ -349,7 +349,7 @@ impl LoadedFamilyPlugin {
             inner: Some(Rc::clone(&self.inner)),
             handle: output.session,
             session_epoch: request.session_epoch,
-            window: raw.window,
+            window: request.initial_window,
             pointer: (0.0, 0.0),
             poisoned: false,
             cancellation: request.cancellation,
@@ -413,7 +413,7 @@ fn native_window(state: WindowState) -> abi::WindowState {
         drawable_width: state.width,
         drawable_height: state.height,
         focused: state.focused as u32,
-        suspended: (!state.visible) as u32,
+        suspended: (!state.visible || state.suspended) as u32,
         scale_factor: state.scale_factor,
     }
 }
@@ -422,7 +422,7 @@ pub struct NativeSession {
     inner: Option<Rc<NativeModule>>,
     handle: abi::Session,
     session_epoch: u64,
-    window: abi::WindowState,
+    window: WindowState,
     pointer: (f64, f64),
     poisoned: bool,
     cancellation: crate::NativeCancellation,
@@ -468,7 +468,7 @@ impl NativeSession {
                 x: self.pointer.0,
                 y: self.pointer.1,
                 displayed: displayed.map(Into::into).unwrap_or_default(),
-                window: self.window,
+                window: native_window(self.window),
             };
             match event {
                 FamilyEvent::Control { command } => {
@@ -536,12 +536,12 @@ impl NativeSession {
                     raw.y = f64::from(*delta_y);
                 }
                 FamilyEvent::WindowFocused { focused } => {
-                    self.window.focused = *focused as u32;
+                    self.window.focused = *focused;
                     raw.kind = abi::INPUT_WINDOW;
                 }
                 FamilyEvent::WindowResized { width, height } => {
-                    self.window.drawable_width = *width;
-                    self.window.drawable_height = *height;
+                    self.window.width = *width;
+                    self.window.height = *height;
                     raw.kind = abi::INPUT_WINDOW;
                 }
                 FamilyEvent::WindowScale { factor } => {
@@ -549,11 +549,11 @@ impl NativeSession {
                     raw.kind = abi::INPUT_WINDOW;
                 }
                 FamilyEvent::WindowVisibility { visible } => {
-                    self.window.suspended = (!visible) as u32;
+                    self.window.visible = *visible;
                     raw.kind = abi::INPUT_WINDOW;
                 }
                 FamilyEvent::WindowSuspended { suspended } => {
-                    self.window.suspended = *suspended as u32;
+                    self.window.suspended = *suspended;
                     raw.kind = abi::INPUT_WINDOW;
                 }
                 FamilyEvent::WindowCloseRequested => {
@@ -561,7 +561,7 @@ impl NativeSession {
                     continue;
                 }
             }
-            raw.window = self.window;
+            raw.window = native_window(self.window);
             self.call(|api, handle, error| unsafe { api.input.unwrap()(handle, &raw, 1, error) })?;
         }
         Ok(())
@@ -659,5 +659,31 @@ impl Drop for NativeSession {
         if let Err(error) = self.close() {
             tracing::error!(event = "astra.emu.core.close_failed", code = %error.code());
         }
+    }
+}
+
+#[cfg(test)]
+mod window_tests {
+    use super::*;
+
+    #[test]
+    fn restoring_one_window_condition_does_not_clear_another_suspension() {
+        let mut state = WindowState {
+            width: 1280,
+            height: 720,
+            scale_factor: 1.0,
+            focused: false,
+            visible: true,
+            suspended: true,
+        };
+        assert_eq!(native_window(state).suspended, 1);
+        state.visible = false;
+        state.suspended = false;
+        assert_eq!(native_window(state).suspended, 1);
+        state.suspended = true;
+        state.visible = true;
+        assert_eq!(native_window(state).suspended, 1);
+        state.suspended = false;
+        assert_eq!(native_window(state).suspended, 0);
     }
 }
