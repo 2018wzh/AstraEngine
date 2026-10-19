@@ -1,0 +1,9 @@
+{
+  "astra.emu.fvp": { "display_name": "RFVP", "family_name": "FVP", "license": "MPL-2.0" },
+  "astra.emu.siglus": { "display_name": "siglus-rs", "family_name": "SiglusEngine", "license": "MPL-2.0" },
+  "astra.emu.artemis": { "display_name": "Art3m1s", "family_name": "Artemis", "license": "MPL-2.0" },
+  "astra.emu.musica": { "display_name": "Astra Musica", "family_name": "Musica", "license": "MIT OR Apache-2.0" },
+  "sena-native-koikake": { "display_name": "Sena", "family_name": "SoftPAL", "license": "MPL-2.0" },
+  "astra-emu-krkr": { "display_name": "KiriKiri2", "family_name": "KiriKiri", "license": "(MIT OR Apache-2.0) AND LicenseRef-KiriKiri2" },
+  "astra-emu-ethornell": { "display_name": "ethornell-rs", "family_name": "Ethornell / BGI", "license": "MPL-2.0" }
+}
