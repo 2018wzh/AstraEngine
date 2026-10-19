@@ -122,6 +122,7 @@ fn semantic_hook_failure_retries_same_event_without_reexecuting_vm() {
     let (_, mut session) = provider
         .open_native_session(
             request(root.path(), Sink::default()),
+            astra_emu_abi::Extent::default(),
             Some(service.bridge()),
         )
         .unwrap();
@@ -216,6 +217,7 @@ fn hook_glyph_error_is_a_renderer_failure_not_a_retryable_service_error() {
     let (_, mut session) = fixture::provider()
         .open_native_session(
             request(root.path(), Sink::default()),
+            astra_emu_abi::Extent::default(),
             Some(service.bridge()),
         )
         .unwrap();
@@ -307,6 +309,7 @@ fn native_display_precedes_hook_and_retry_keeps_original_vm_and_hook_identity() 
     let (_, mut session) = fixture::provider()
         .open_native_session(
             localized_request(root.path(), "replace"),
+            astra_emu_abi::Extent::default(),
             Some(service.bridge()),
         )
         .unwrap();
@@ -355,7 +358,11 @@ fn overlay_tab_release_and_save_restore_preserve_chinese_base_and_cached_text() 
     );
     native_table(root.path());
     let (_, mut session) = fixture::provider()
-        .open_native_session(localized_request(root.path(), "overlay"), None)
+        .open_native_session(
+            localized_request(root.path(), "overlay"),
+            astra_emu_abi::Extent::default(),
+            None,
+        )
         .unwrap();
     session.advance(16_666_667, &[]).unwrap();
     assert_eq!(session.message.as_ref().unwrap().0, "Hello");

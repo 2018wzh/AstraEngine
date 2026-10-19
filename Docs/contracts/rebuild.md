@@ -138,7 +138,7 @@ GPU 回读后的 CPU 存储可以在进程内保留共享所有权。`OwnedPixel
 
 公共 `astra-media-core` 的 `Extent2D`/`Canvas2D` 负责逻辑舞台到 raster canvas 的比例校验、根变换和坐标映射，并复用 `RectI`、`Transform2D`、`TextureFrame`、`SceneCommand`。四个空间必须分开：逻辑舞台决定 VM、存档、时间和动画几何；资产保存物理像素并显式声明逻辑尺寸及格式原点；raster canvas 是 GPU 目标；窗口输出由 Host 做 letterbox 和 pointer 逆映射。`astra-emu-sdk` 通过 `StageCanvas` 与 `TextureAsset` 接入这些共享类型，不依赖 VN；AstraVN presentation 直接消费同一 `Canvas2D`，作为第二个真实调用方。这些现有入口不限制自有引擎与 SDK 的进一步集成。
 
-Musica 的产品目标为固定 `1280×720` 逻辑舞台及 `1.0/1.5/2.0/3.0` render scale。当前实现仍暴露 `logical_width/logical_height` 与 `render_width/render_height`，支持更广的逻辑/raster 尺寸；包括 eden 旧 1024×640 的整合尚未收敛，不能将目标写成已实现。现行 Canvas 以统一 scale 和居中 aspect-fit viewport 输出，viewport 外指针不进入游戏；配置/预算无效明确失败。资产密度不能改变逻辑 quad、ANI 原点、动画几何、VM、保存或时间，文字按 raster density 排版后映回逻辑坐标。尺寸契约收敛须保留这些不变量及已有存档身份校验，不通过静默缩放修改游戏语义。
+Musica 的产品目标为固定 `1280×720` 逻辑舞台。当前实现仍以高级配置暴露 `logical_width/logical_height`；光栅尺寸经 C ABI v3 的 `render_extent` 请求（320×180–16384×16384，0×0 为逻辑尺寸），包括 eden 旧 1024×640 的整合尚未收敛，不能将目标写成已实现。现行 Canvas 以统一 scale 和居中 aspect-fit viewport 输出，viewport 外指针不进入游戏；配置/预算无效明确失败。资产密度不能改变逻辑 quad、ANI 原点、动画几何、VM、保存或时间，文字按 raster density 排版后映回逻辑坐标。尺寸契约收敛须保留这些不变量及已有存档身份校验，不通过静默缩放修改游戏语义。
 
 本次参与核心为 RFVP/FVP、Siglus、Artemis、Musica、[Sena](https://github.com/xmoezzz/sena-rs)、[Ethornell](https://github.com/xmoezzz/ethornell-rs) 和 KrKr，统一使用同一 C ABI。Musica/CMVS 属于自有引擎，允许适配能力直接融入引擎与 SDK；其余外部核心最大化复用原生能力、最小化修改，继承各上游真实支持范围，不承诺所有 SoftPAL/BGI/KAG 游戏兼容。KrKr 使用既有 Kirikiroid2-web 来源和已有可编译插件能力，不替换为 Artemis 的 KrKr renderer，不新增任意旧 Windows DLL/TPM 兼容层。旧子进程隔离不满足同进程关闭重开要求，必要生命周期修复须与 Astra 适配分开。CMVS 正在独立开发，本次不修改、整合或验收其实现及工作树，也不为它在新 Manager 增加旧 ABI 兼容运行链。
 

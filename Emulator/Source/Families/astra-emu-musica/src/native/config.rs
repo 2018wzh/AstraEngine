@@ -3,7 +3,7 @@ use astra_emu_family_api as legacy;
 use std::sync::LazyLock;
 struct Schema {
     descriptor: abi::Descriptor,
-    _source: legacy::FamilyDescriptor,
+    _source: Vec<crate::provider::MusicaField>,
     _fields: Vec<abi::ConfigField>,
     _formats: Vec<abi::Bytes>,
     _choices: Vec<Vec<abi::Bytes>>,
@@ -11,11 +11,29 @@ struct Schema {
 // All pointers refer to immutable module-lifetime allocations built once.
 unsafe impl Send for Schema {}
 unsafe impl Sync for Schema {}
+const RENDER: abi::RenderExtentSupport = abi::RenderExtentSupport {
+    min: abi::Extent {
+        width: 320,
+        height: 180,
+    },
+    max: abi::Extent {
+        width: 16384,
+        height: 16384,
+    },
+    default: abi::Extent {
+        width: 0,
+        height: 0,
+    },
+    flags: 0,
+    reserved: 0,
+};
+const CAPABILITIES: u64 = abi::CAP_CPU_SURFACE | abi::CAP_TEXT_HOOK | abi::CAP_RENDER_EXTENT;
 static SCHEMA: LazyLock<Schema> = LazyLock::new(|| {
-    let source = crate::provider::musica_descriptor();
+    let source = crate::provider::musica_fields();
     let mut all_choices = Vec::new();
-    let mut fields = Vec::with_capacity(source.configuration.len());
-    for field in &source.configuration {
+    let mut fields = Vec::with_capacity(source.len());
+    for presented in &source {
+        let field = &presented.field;
         let mut target = abi::ConfigField {
             id: bytes(&field.id),
             label: bytes(&field.label),
@@ -26,9 +44,13 @@ static SCHEMA: LazyLock<Schema> = LazyLock::new(|| {
             number_min: 0.0,
             number_max: 0.0,
             max_bytes: 0,
-            reserved: 0,
+            flags: presented.flags,
             choices: std::ptr::null(),
             choice_count: 0,
+            description: bytes(presented.description),
+            choice_labels: std::ptr::null(),
+            step: presented.step,
+            unit: bytes(presented.unit),
         };
         match &field.kind {
             legacy::ConfigKind::Bool => {}
@@ -43,31 +65,34 @@ static SCHEMA: LazyLock<Schema> = LazyLock::new(|| {
             legacy::ConfigKind::String { max_bytes } => target.max_bytes = *max_bytes,
             legacy::ConfigKind::Enum { choices } => {
                 let choices: Vec<_> = choices.iter().map(|v| bytes(v)).collect();
+                let labels: Vec<_> = presented.choice_labels.iter().map(|v| bytes(v)).collect();
                 target.choices = choices.as_ptr();
                 target.choice_count = choices.len();
+                target.choice_labels = labels.as_ptr();
                 all_choices.push(choices);
+                all_choices.push(labels);
             }
-        }
-        if matches!(
-            field.id.as_str(),
-            "logical_width" | "logical_height" | "render_width" | "render_height"
-        ) {
-            target.integer_max = target.integer_max.min(16384);
         }
         fields.push(target);
     }
-    let formats: Vec<_> = source.supported_formats.iter().map(|v| bytes(v)).collect();
+    let formats: Vec<_> = crate::provider::SUPPORTED_FORMATS
+        .iter()
+        .map(|v| bytes(v))
+        .collect();
     Schema {
         descriptor: abi::Descriptor {
             header: abi::Header::of::<abi::Descriptor>(),
-            family_id: bytes(&source.family_id),
-            plugin_id: bytes(&source.plugin_id),
-            version: bytes(&source.version),
-            capabilities: abi::CAP_CPU_SURFACE | abi::CAP_TEXT_HOOK,
+            family_id: bytes(crate::provider::FAMILY_ID),
+            plugin_id: bytes(crate::provider::PLUGIN_ID),
+            version: bytes(env!("CARGO_PKG_VERSION")),
+            capabilities: CAPABILITIES,
             formats: formats.as_ptr(),
             format_count: formats.len(),
             configuration: fields.as_ptr(),
             configuration_count: fields.len(),
+            display_name: bytes("Astra Musica"),
+            family_name: bytes("Musica"),
+            render: RENDER,
         },
         _source: source,
         _fields: fields,
@@ -77,6 +102,18 @@ static SCHEMA: LazyLock<Schema> = LazyLock::new(|| {
 });
 pub(super) fn descriptor() -> abi::Descriptor {
     SCHEMA.descriptor
+}
+pub(super) fn render_extent(request: &abi::OpenRequest) -> Result<abi::Extent, Failure> {
+    RENDER
+        .validate_request(CAPABILITIES, request.render_extent)
+        .map_err(|status| {
+            Failure::new(
+                status,
+                "ASTRA_EMU_MUSICA_RENDER_EXTENT",
+                "render extent is outside the supported range",
+            )
+        })?;
+    Ok(request.render_extent)
 }
 fn bytes(value: &str) -> abi::Bytes {
     abi::Bytes::new(value.as_bytes())

@@ -1,6 +1,6 @@
 use astra_emu_family_api::*;
 
-const BUSES: [(&str, &str); 3] = [("bgm", "BGM"), ("voice", "Voice"), ("se", "Sound effects")];
+const BUSES: [(&str, &str); 3] = [("bgm", "背景音乐"), ("voice", "语音"), ("se", "音效")];
 
 /// User bus gain is separate from authored volume and never stored in a save slot.
 #[derive(Clone, Debug)]
@@ -17,25 +17,29 @@ impl Default for AudioPreferences {
     }
 }
 impl AudioPreferences {
-    pub fn fields() -> Vec<ConfigField> {
+    pub(crate) fn fields() -> Vec<crate::provider::MusicaField> {
+        use crate::provider::MusicaField;
         BUSES
             .iter()
             .flat_map(|(id, label)| {
                 [
-                    ConfigField {
-                        id: format!("{id}_volume").into(),
-                        label: format!("{label} volume").into(),
-                        group: "Audio".into(),
-                        kind: ConfigKind::Integer { min: 0, max: 100 },
-                        default: ConfigValue::Integer(100),
-                    },
-                    ConfigField {
-                        id: format!("{id}_muted").into(),
-                        label: format!("Mute {label}").into(),
-                        group: "Audio".into(),
-                        kind: ConfigKind::Bool,
-                        default: ConfigValue::Bool(false),
-                    },
+                    MusicaField::new(
+                        &format!("{id}_volume"),
+                        &format!("{label}音量"),
+                        "初始音量设置",
+                        ConfigKind::Integer { min: 0, max: 100 },
+                        ConfigValue::Integer(100),
+                        "该声道的播放音量；游戏内尚未保存设置时作为初始值。",
+                    )
+                    .step(1.0, "%"),
+                    MusicaField::new(
+                        &format!("{id}_muted"),
+                        &format!("{label}静音"),
+                        "初始音量设置",
+                        ConfigKind::Bool,
+                        ConfigValue::Bool(false),
+                        "开启后该声道不出声；游戏内尚未保存设置时作为初始值。",
+                    ),
                 ]
             })
             .collect()

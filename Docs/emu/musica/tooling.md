@@ -30,7 +30,7 @@ cargo run --manifest-path Emulator/Cargo.toml -p astra-emu-musica-cli -- check-e
 
 ## 从核心槽导出 eden 存档
 
-Family 启动配置 `eden_import_file` 指向游戏副本内的只读原版存档，`eden_import_edition` 与 `script_encoding` 必须匹配文件。原版 eden 的逻辑画布须显式配置为 `logical_width=1024`、`logical_height=640`；`render_width`、`render_height` 独立控制 GPU 光栅尺寸，继续使用等比例黑边与指针映射。核心自有槽保存逻辑画布身份，尺寸不符时拒绝加载。使用 direct 模式进入恢复的消息后，正常推进并通过 F5 或保存页产生核心自有槽，关闭会话后执行：
+Family 启动配置 `eden_import_file` 指向游戏副本内的只读原版存档，`eden_import_edition` 与 `script_encoding` 必须匹配文件。原版 eden 的逻辑画布须显式配置为 `logical_width=1024`、`logical_height=640`；光栅尺寸由 Manager 传入的渲染分辨率（`OpenRequest.render_extent`）独立控制，继续使用等比例黑边与指针映射。核心自有槽保存逻辑画布身份，尺寸不符时拒绝加载。使用 direct 模式进入恢复的消息后，正常推进并通过 F5 或保存页产生核心自有槽，关闭会话后执行：
 
 ```sh
 cargo run --manifest-path Emulator/Cargo.toml -p astra-emu-musica-cli -- export-eden-save \

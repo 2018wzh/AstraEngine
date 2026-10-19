@@ -300,12 +300,15 @@ unsafe extern "C" fn open(
         if services.is_cancelled() {
             return Err(invalid(abi::CANCELLED));
         }
-        let path = unsafe { request.game_path.text(32768) }
-            .map_err(invalid)?
-            .to_owned();
-        let configuration = unsafe { config::entries(request) }?;
+        let launch = worker::Launch {
+            path: unsafe { request.game_path.text(32768) }
+                .map_err(invalid)?
+                .to_owned(),
+            configuration: unsafe { config::entries(request) }?,
+            render_extent: config::render_extent(request)?,
+            window: request.window,
+        };
         let graphics_owner = unsafe { owner::borrow(request.module_owner) }?;
-        let window = request.window;
         let (commands, receiver) = sync_channel(64);
         let (ready, ready_rx) = sync_channel(1);
         let worker_services = services.clone();
@@ -315,9 +318,7 @@ unsafe extern "C" fn open(
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     worker::run(
                         graphics_owner,
-                        path,
-                        configuration,
-                        window,
+                        launch,
                         worker_services.clone(),
                         receiver,
                         &ready,

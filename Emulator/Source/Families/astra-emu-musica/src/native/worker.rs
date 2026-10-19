@@ -8,15 +8,25 @@ use std::{
     time::{Duration, Instant},
 };
 
+pub(super) struct Launch {
+    pub path: String,
+    pub configuration: Vec<astra_emu_family_api::ConfigEntry>,
+    pub render_extent: abi::Extent,
+    pub window: abi::WindowState,
+}
 pub(super) fn run(
     graphics_owner: owner::GraphicsOwner,
-    path: String,
-    configuration: Vec<astra_emu_family_api::ConfigEntry>,
-    window: abi::WindowState,
+    launch: Launch,
     services: Arc<text::ServiceContext>,
     commands: Receiver<Command>,
     ready: &SyncSender<Result<Arc<Shared>, Failure>>,
 ) -> Result<(), Failure> {
+    let Launch {
+        path,
+        configuration,
+        render_extent,
+        window,
+    } = launch;
     let request = OpenRequest {
         game_path: path.into(),
         session_epoch: services.session,
@@ -35,7 +45,11 @@ pub(super) fn run(
     };
     let (_, mut session) = {
         let mut owner = graphics_owner.lock().map_err(|_| invalid(abi::PANICKED))?;
-        owner.open_native_session(request, Some(text::TextBridge(services.clone())))?
+        owner.open_native_session(
+            request,
+            render_extent,
+            Some(text::TextBridge(services.clone())),
+        )?
     };
     if window.suspended != 0 {
         session.native_pause(true)?;
@@ -47,7 +61,6 @@ pub(super) fn run(
         color: abi::COLOR_SRGB,
         alpha: abi::ALPHA_IGNORED,
         rows: abi::ROWS_TOP_DOWN,
-        backend: 0,
         logical: abi::Extent {
             width: info.logical_width,
             height: info.logical_height,

@@ -45,6 +45,36 @@ fn unsupported_command_diagnostic_keeps_ordinal_without_source_text() {
     );
 }
 
+#[test]
+fn render_extent_sets_raster_and_zero_uses_logical_canvas() {
+    let _session = PROVIDER_SESSION.lock();
+    let root = tempfile::tempdir().unwrap();
+    fixture::game(root.path(), b".message 1  speaker First\r\n.end\r\n");
+    let mut provider = fixture::provider();
+    for (requested, raster) in [((0, 0), (1280, 720)), ((1920, 1080), (1920, 1080))] {
+        let (response, session) = provider
+            .open_native_session(
+                request(root.path(), Sink::default()),
+                astra_emu_abi::Extent {
+                    width: requested.0,
+                    height: requested.1,
+                },
+                None,
+            )
+            .unwrap();
+        assert_eq!(
+            (
+                response.frame.width,
+                response.frame.height,
+                response.frame.logical_width,
+                response.frame.logical_height
+            ),
+            (raster.0, raster.1, 1280, 720)
+        );
+        drop(session);
+    }
+}
+
 #[derive(Clone, Default)]
 struct Sink {
     cancelled: Arc<AtomicBool>,

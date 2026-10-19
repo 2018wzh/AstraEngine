@@ -1,12 +1,36 @@
 use astra_emu_family_api::*;
 
-const FIELDS: [(&str, &str); 6] = [
-    ("backlog_voice_playback", "Backlog voice playback"),
-    ("voice_ren", "Ren voice"),
-    ("voice_sui", "Sui voice"),
-    ("voice_aya", "Aya voice"),
-    ("voice_tou", "Tou voice"),
-    ("voice_mot", "Other character voice"),
+const FIELDS: [(&str, &str, &str); 6] = [
+    (
+        "backlog_voice_playback",
+        "回想中播放语音",
+        "是否允许在回想记录中重播角色语音；游戏内尚未保存设置时作为初始值。",
+    ),
+    (
+        "voice_ren",
+        "Ren 的语音",
+        "是否播放语音文件名以 ren 开头的角色语音；游戏内尚未保存设置时作为初始值。",
+    ),
+    (
+        "voice_sui",
+        "Sui 的语音",
+        "是否播放语音文件名以 sui 开头的角色语音；游戏内尚未保存设置时作为初始值。",
+    ),
+    (
+        "voice_aya",
+        "Aya 的语音",
+        "是否播放语音文件名以 aya 开头的角色语音；游戏内尚未保存设置时作为初始值。",
+    ),
+    (
+        "voice_tou",
+        "Tou 的语音",
+        "是否播放语音文件名以 tou 开头的角色语音；游戏内尚未保存设置时作为初始值。",
+    ),
+    (
+        "voice_mot",
+        "其他角色语音",
+        "是否播放语音文件名以 mot 开头的其他角色语音；游戏内尚未保存设置时作为初始值。",
+    ),
 ];
 
 // Startup preferences belong to Manager configuration, not a game save slot.
@@ -24,21 +48,24 @@ impl Default for VoicePreferences {
     }
 }
 impl VoicePreferences {
-    pub fn fields() -> Vec<ConfigField> {
+    pub(crate) fn fields() -> Vec<crate::provider::MusicaField> {
         FIELDS
             .iter()
-            .map(|(id, label)| ConfigField {
-                id: (*id).into(),
-                label: (*label).into(),
-                group: "Voice".into(),
-                kind: ConfigKind::Bool,
-                default: ConfigValue::Bool(true),
+            .map(|(id, label, description)| {
+                crate::provider::MusicaField::new(
+                    id,
+                    label,
+                    "初始语音设置",
+                    ConfigKind::Bool,
+                    ConfigValue::Bool(true),
+                    description,
+                )
             })
             .collect()
     }
     pub fn resolve(entries: &[ConfigEntry]) -> FamilyResult<Self> {
         let mut flags = [true; 6];
-        for (index, (id, _)) in FIELDS.iter().enumerate() {
+        for (index, (id, _, _)) in FIELDS.iter().enumerate() {
             flags[index] = match entries
                 .iter()
                 .find(|entry| entry.id == *id)

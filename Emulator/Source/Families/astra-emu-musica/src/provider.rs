@@ -41,134 +41,247 @@ pub(crate) struct MusicaProvider {
     next: u64,
     gpu_instance: Option<wgpu::Instance>,
 }
-pub(crate) fn musica_descriptor() -> FamilyDescriptor {
-    let field = |id: &str, label: &str, default: &str| ConfigField {
-        id: id.into(),
-        label: label.into(),
-        group: "Files".into(),
-        kind: ConfigKind::String { max_bytes: 256 },
-        default: ConfigValue::String(default.into()),
-    };
-    let render_extent = |id: &str, label: &str, default: i64| ConfigField {
-        id: id.into(),
-        label: label.into(),
-        group: "Presentation".into(),
-        kind: ConfigKind::Integer {
-            min: 1,
-            max: i64::from(u32::MAX),
-        },
-        default: ConfigValue::Integer(default),
-    };
-    let mut configuration = vec![
-        field(
-            "profile_file",
-            "Private PAZ key.toml (absolute or game-relative path)",
-            MUSICA_KEY_FILE,
-        ),
-        field("entry_script", "Entry script in scr archive", "test.sc"),
-        field(
-            "eden_import_file",
-            "Native eden save to import (read only)",
-            "",
-        ),
-    ];
-    for (id, label) in [
-        ("scr_archive", "Script PAZ path (empty: scr.paz)"),
-        ("sys_archive", "System PAZ path (empty: sys.paz)"),
-        ("script_directory", "Loose script directory (game-relative)"),
-        (
-            "translation_table",
-            "Native translation table v2 (game-relative)",
-        ),
-        ("subtitle_map", "Movie subtitle map (game-relative)"),
-        ("font_path", "Font file (game-relative)"),
-    ] {
-        configuration.push(ConfigField {
-            id: id.into(),
-            label: label.into(),
-            group: "Files".into(),
-            kind: ConfigKind::String { max_bytes: 4096 },
-            default: ConfigValue::String("".into()),
-        });
-    }
-    configuration.push(ConfigField {
-        id: "translation_mode".into(),
-        label: "Translation display".into(),
-        group: "Presentation".into(),
-        kind: ConfigKind::Enum {
-            choices: vec!["replace".into(), "overlay".into()].into(),
-        },
-        default: ConfigValue::Enum("replace".into()),
-    });
-    configuration.push(eden::edition_field());
-    configuration.push(ConfigField {
-        id: "launch_mode".into(),
-        label: "Launch mode".into(),
-        group: "Playback".into(),
-        kind: ConfigKind::Enum {
-            choices: vec!["direct".into(), "title".into()].into(),
-        },
-        default: ConfigValue::Enum("title".into()),
-    });
-    configuration.push(ConfigField {
-        id: "message_speed_auto_play".into(),
-        label: "Auto message delay (10 ms units)".into(),
-        group: "Playback".into(),
-        kind: ConfigKind::Integer { min: 0, max: 100 },
-        default: ConfigValue::Integer(50),
-    });
-    configuration.push(ConfigField {
-        id: "progress_in_background".into(),
-        label: "Continue playback in background".into(),
-        group: "Playback".into(),
-        kind: ConfigKind::Bool,
-        default: ConfigValue::Bool(false),
-    });
-    configuration.push(ConfigField {
-        id: "text_shadow".into(),
-        label: "Text shadow".into(),
-        group: "Presentation".into(),
-        kind: ConfigKind::Bool,
-        default: ConfigValue::Bool(true),
-    });
-    configuration.push(render_extent("render_width", "GPU render width", 1280));
-    configuration.push(render_extent("render_height", "GPU render height", 720));
-    configuration.push(render_extent("logical_width", "Game logical width", 1280));
-    configuration.push(render_extent("logical_height", "Game logical height", 720));
-    configuration.push(ConfigField {
-        id: "script_encoding".into(),
-        label: "Script encoding".into(),
-        group: "Script".into(),
-        kind: ConfigKind::Enum {
-            choices: vec!["shift_jis".into(), "gbk".into()].into(),
-        },
-        default: ConfigValue::Enum("shift_jis".into()),
-    });
-    configuration.extend(crate::voice_preferences::VoicePreferences::fields());
-    configuration.extend(crate::audio::AudioPreferences::fields());
-    for field in &mut configuration {
-        if !matches!(
-            field.id.as_str(),
-            "profile_file"
-                | "entry_script"
-                | "launch_mode"
-                | "script_encoding"
-                | "eden_import_file"
-                | "eden_import_edition"
-                | "scr_archive"
-                | "sys_archive"
-                | "script_directory"
-                | "translation_table"
-                | "translation_mode"
-                | "subtitle_map"
-                | "font_path"
-        ) {
-            field.group = format!("Initial {} defaults", field.group).into();
+pub(crate) const FAMILY_ID: &str = "musica";
+pub(crate) const PLUGIN_ID: &str = "astra.emu.musica";
+pub(crate) const SUPPORTED_FORMATS: [&str; 2] = ["musica.paz", "musica.sc"];
+
+/// Family schema field plus the C ABI presentation metadata shown by Manager.
+pub(crate) struct MusicaField {
+    pub field: ConfigField,
+    pub description: &'static str,
+    pub choice_labels: Vec<&'static str>,
+    pub flags: u32,
+    pub step: f64,
+    pub unit: &'static str,
+}
+impl MusicaField {
+    pub(crate) fn new(
+        id: &str,
+        label: &str,
+        group: &str,
+        kind: ConfigKind,
+        default: ConfigValue,
+        description: &'static str,
+    ) -> Self {
+        Self {
+            field: ConfigField {
+                id: id.into(),
+                label: label.into(),
+                group: group.into(),
+                kind,
+                default,
+            },
+            description,
+            choice_labels: Vec::new(),
+            flags: 0,
+            step: 0.0,
+            unit: "",
         }
     }
+    fn text(id: &str, label: &str, group: &str, default: &str, description: &'static str) -> Self {
+        Self::new(
+            id,
+            label,
+            group,
+            ConfigKind::String { max_bytes: 4096 },
+            ConfigValue::String(default.into()),
+            description,
+        )
+    }
+    pub(crate) fn choice(
+        id: &str,
+        label: &str,
+        group: &str,
+        choices: &[(&'static str, &'static str)],
+        default: &str,
+        description: &'static str,
+    ) -> Self {
+        let mut field = Self::new(
+            id,
+            label,
+            group,
+            ConfigKind::Enum {
+                choices: choices.iter().map(|(choice, _)| (*choice).into()).collect(),
+            },
+            ConfigValue::Enum(default.into()),
+            description,
+        );
+        field.choice_labels = choices.iter().map(|(_, label)| *label).collect();
+        field
+    }
+    pub(crate) fn flags(mut self, flags: u32) -> Self {
+        self.flags = flags;
+        self
+    }
+    pub(crate) fn step(mut self, step: f64, unit: &'static str) -> Self {
+        self.step = step;
+        self.unit = unit;
+        self
+    }
+}
+pub(crate) fn musica_fields() -> Vec<MusicaField> {
+    use astra_emu_abi::{
+        CONFIG_FLAG_ADVANCED as ADVANCED, CONFIG_FLAG_DIRECTORY_PATH as DIRECTORY,
+        CONFIG_FLAG_FILE_PATH as FILE, CONFIG_FLAG_GAME_RELATIVE as GAME_RELATIVE,
+    };
+    let mut fields = vec![
+        MusicaField::new(
+            "profile_file",
+            "密钥文件（key.toml）",
+            "文件",
+            ConfigKind::String { max_bytes: 256 },
+            ConfigValue::String(MUSICA_KEY_FILE.into()),
+            "解密 PAZ 归档所需的私有密钥文件；相对路径按游戏目录解析，也可以填写绝对路径。",
+        )
+        .flags(FILE | GAME_RELATIVE),
+        MusicaField::new(
+            "entry_script",
+            "入口脚本",
+            "脚本",
+            ConfigKind::String { max_bytes: 256 },
+            ConfigValue::String("test.sc".into()),
+            "直接进入脚本时从 scr 归档加载的 .sc 文件名，只能填写单个文件名。",
+        )
+        .flags(ADVANCED),
+        MusicaField::new(
+            "eden_import_file",
+            "导入 eden 原版存档",
+            "文件",
+            ConfigKind::String { max_bytes: 256 },
+            ConfigValue::String("".into()),
+            "启动时只读导入的 eden 原版存档，路径相对游戏目录且须位于游戏目录内；留空则不导入。",
+        )
+        .flags(FILE | GAME_RELATIVE),
+        MusicaField::text(
+            "scr_archive",
+            "脚本归档",
+            "文件",
+            "",
+            "代替 scr.paz 读取的脚本归档，路径相对游戏目录；留空使用 scr.paz。",
+        )
+        .flags(FILE | GAME_RELATIVE | ADVANCED),
+        MusicaField::text(
+            "sys_archive",
+            "系统归档",
+            "文件",
+            "",
+            "代替 sys.paz 读取的系统归档，路径相对游戏目录；留空使用 sys.paz。",
+        )
+        .flags(FILE | GAME_RELATIVE | ADVANCED),
+        MusicaField::text(
+            "script_directory",
+            "散装脚本目录",
+            "脚本",
+            "",
+            "目录中的 .sc 文件优先于 scr 归档中的同名脚本，路径相对游戏目录；留空则不使用。",
+        )
+        .flags(DIRECTORY | GAME_RELATIVE | ADVANCED),
+        MusicaField::text(
+            "translation_table",
+            "翻译表",
+            "语言",
+            "",
+            "原生翻译表 v2 文件，用于显示译文，路径相对游戏目录；留空则显示原文。",
+        )
+        .flags(FILE | GAME_RELATIVE),
+        MusicaField::text(
+            "subtitle_map",
+            "影片字幕映射",
+            "语言",
+            "",
+            "为过场影片加载字幕的映射文件，路径相对游戏目录；留空则不显示影片字幕。",
+        )
+        .flags(FILE | GAME_RELATIVE),
+        MusicaField::text(
+            "font_path",
+            "字体文件",
+            "显示",
+            "",
+            "替换正文字体的字体文件，路径相对游戏目录；留空使用默认字体。",
+        )
+        .flags(FILE | GAME_RELATIVE),
+        MusicaField::choice(
+            "translation_mode",
+            "译文显示方式",
+            "语言",
+            &[("replace", "替换原文"), ("overlay", "叠加显示")],
+            "replace",
+            "加载翻译表后，译文直接替换原文，或与原文叠加显示。",
+        ),
+        eden::edition_field(),
+        MusicaField::choice(
+            "launch_mode",
+            "启动方式",
+            "播放",
+            &[("direct", "直接进入脚本"), ("title", "标题菜单启动")],
+            "title",
+            "从标题菜单正常启动，或跳过标题直接运行入口脚本；导入 eden 存档时须直接进入脚本。",
+        ),
+        MusicaField::new(
+            "message_speed_auto_play",
+            "自动播放间隔",
+            "播放",
+            ConfigKind::Integer { min: 0, max: 100 },
+            ConfigValue::Integer(50),
+            "自动播放时每条消息结束后的等待时间；游戏内尚未保存设置时作为初始值。",
+        )
+        .step(1.0, "×10 ms"),
+        MusicaField::new(
+            "progress_in_background",
+            "后台继续运行",
+            "播放",
+            ConfigKind::Bool,
+            ConfigValue::Bool(false),
+            "窗口失去焦点时是否继续推进剧情和声音；游戏内尚未保存设置时作为初始值。",
+        ),
+        MusicaField::new(
+            "text_shadow",
+            "文字阴影",
+            "显示",
+            ConfigKind::Bool,
+            ConfigValue::Bool(true),
+            "是否为正文文字绘制阴影；游戏内尚未保存设置时作为初始值。",
+        ),
+        MusicaField::new(
+            "logical_width",
+            "逻辑画布宽度",
+            "渲染",
+            ConfigKind::Integer { min: 1, max: 16384 },
+            ConfigValue::Integer(1280),
+            "游戏脚本使用的坐标宽度，导入 eden 原版存档时须为 1024；未指定渲染分辨率时按此尺寸渲染。",
+        )
+        .flags(ADVANCED)
+        .step(1.0, "px"),
+        MusicaField::new(
+            "logical_height",
+            "逻辑画布高度",
+            "渲染",
+            ConfigKind::Integer { min: 1, max: 16384 },
+            ConfigValue::Integer(720),
+            "游戏脚本使用的坐标高度，导入 eden 原版存档时须为 640；未指定渲染分辨率时按此尺寸渲染。",
+        )
+        .flags(ADVANCED)
+        .step(1.0, "px"),
+        MusicaField::choice(
+            "script_encoding",
+            "脚本编码",
+            "脚本",
+            &[
+                ("shift_jis", "Shift-JIS（日文原版）"),
+                ("gbk", "GBK（简体中文）"),
+            ],
+            "shift_jis",
+            "解码脚本文本所用的编码，须与游戏版本一致。",
+        ),
+    ];
+    fields.extend(crate::voice_preferences::VoicePreferences::fields());
+    fields.extend(crate::audio::AudioPreferences::fields());
+    fields
+}
+pub(crate) fn musica_descriptor() -> FamilyDescriptor {
     FamilyDescriptor {
-        family_id: "musica".into(),
-        plugin_id: "astra.emu.musica".into(),
+        family_id: FAMILY_ID.into(),
+        plugin_id: PLUGIN_ID.into(),
         abi_fingerprint: FAMILY_ABI_FINGERPRINT.into(),
         version: env!("CARGO_PKG_VERSION").into(),
         capabilities: vec![
@@ -178,8 +291,14 @@ pub(crate) fn musica_descriptor() -> FamilyDescriptor {
             FamilyCapability::TextReplacement,
         ]
         .into(),
-        supported_formats: vec!["musica.paz".into(), "musica.sc".into()].into(),
-        configuration: configuration.into(),
+        supported_formats: SUPPORTED_FORMATS
+            .iter()
+            .map(|format| (*format).into())
+            .collect(),
+        configuration: musica_fields()
+            .into_iter()
+            .map(|field| field.field)
+            .collect(),
     }
 }
 #[cfg(test)]
@@ -233,12 +352,15 @@ impl MusicaProvider {
         &mut self,
         request: OpenRequest,
     ) -> FamilyResult<(OpenResponse, MusicaSession)> {
-        self.open_native_session(request, None)
+        self.open_native_session(request, astra_emu_abi::Extent::default(), None)
     }
 
+    /// `render_extent` is already checked against the declared render support;
+    /// 0x0 renders at the logical canvas size.
     pub(crate) fn open_native_session(
         &mut self,
         request: OpenRequest,
+        render_extent: astra_emu_abi::Extent,
         replacement: Option<crate::native::text::TextBridge>,
     ) -> FamilyResult<(OpenResponse, MusicaSession)> {
         if let Some(service) = &replacement {
@@ -298,7 +420,7 @@ impl MusicaProvider {
                 ));
             }
         };
-        let render_extent = |key: &str| -> FamilyResult<u32> {
+        let logical_extent = |key: &str| -> FamilyResult<u32> {
             let value = config
                 .iter()
                 .find(|entry| entry.id == key)
@@ -306,26 +428,29 @@ impl MusicaProvider {
                 .ok_or_else(|| {
                     error(
                         "ASTRA_EMU_MUSICA_RENDER_DIMENSIONS",
-                        "render dimension is missing",
+                        "logical dimension is missing",
                     )
                 })?;
             let ConfigValue::Integer(value) = value else {
                 return Err(error(
                     "ASTRA_EMU_MUSICA_RENDER_DIMENSIONS",
-                    "render dimension must be a positive integer",
+                    "logical dimension must be a positive integer",
                 ));
             };
             u32::try_from(*value).map_err(|_| {
                 error(
                     "ASTRA_EMU_MUSICA_RENDER_DIMENSIONS",
-                    "render dimension is outside the supported integer range",
+                    "logical dimension is outside the supported integer range",
                 )
             })
         };
-        let raster_width = render_extent("render_width")?;
-        let raster_height = render_extent("render_height")?;
-        let logical_width = render_extent("logical_width")?;
-        let logical_height = render_extent("logical_height")?;
+        let logical_width = logical_extent("logical_width")?;
+        let logical_height = logical_extent("logical_height")?;
+        let (raster_width, raster_height) = if render_extent == astra_emu_abi::Extent::default() {
+            (logical_width, logical_height)
+        } else {
+            (render_extent.width, render_extent.height)
+        };
         let encoding = match config
             .iter()
             .find(|e| e.id == "script_encoding")

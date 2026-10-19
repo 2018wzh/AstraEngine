@@ -3,16 +3,15 @@ use crate::eden_save::{EdenEdition, EdenSave, EdenSaveEncoding};
 use crate::MusicaMountedVfs;
 use std::io::Read;
 
-pub(super) fn edition_field() -> ConfigField {
-    ConfigField {
-        id: "eden_import_edition".into(),
-        label: "Native eden save edition".into(),
-        group: "Files".into(),
-        kind: ConfigKind::Enum {
-            choices: vec!["english".into(), "japanese".into()].into(),
-        },
-        default: ConfigValue::Enum("english".into()),
-    }
+pub(super) fn edition_field() -> MusicaField {
+    MusicaField::choice(
+        "eden_import_edition",
+        "eden 存档版本",
+        "文件",
+        &[("english", "英文版"), ("japanese", "日文版")],
+        "english",
+        "导入的 eden 原版存档来自英文版还是日文版，须与存档文件一致。",
+    )
 }
 
 pub(super) fn read_import(

@@ -8,7 +8,6 @@ fn handle_fixture() -> *mut c_void {
         color: abi::COLOR_SRGB,
         alpha: abi::ALPHA_IGNORED,
         rows: abi::ROWS_TOP_DOWN,
-        backend: 0,
         logical: abi::Extent {
             width: 2,
             height: 1,
@@ -79,6 +78,85 @@ fn query_has_one_native_table_and_rejects_other_versions() {
         abi::UNSUPPORTED
     );
     assert!(table.is_null());
+}
+#[test]
+fn descriptor_declares_v3_presentation_and_render_extent() {
+    let descriptor = config::descriptor();
+    unsafe { descriptor.validate() }.unwrap();
+    let fields = unsafe {
+        abi::borrowed_array(
+            descriptor.configuration,
+            descriptor.configuration_count,
+            abi::MAX_CONFIG_FIELDS,
+        )
+    }
+    .unwrap();
+    unsafe { abi::validate_config(fields, &[]) }.unwrap();
+    let field = |id: &str| {
+        *fields
+            .iter()
+            .find(|field| unsafe { field.id.text(128) } == Ok(id))
+            .unwrap()
+    };
+    assert_eq!(
+        unsafe { descriptor.display_name.text(64) },
+        Ok("Astra Musica")
+    );
+    assert_eq!(unsafe { descriptor.family_name.text(64) }, Ok("Musica"));
+    assert!(fields.iter().all(
+        |field| ["render_width", "render_height"]
+            .iter()
+            .all(|id| unsafe { field.id.text(128) } != Ok(*id))
+    ));
+    assert_eq!(
+        field("profile_file").flags,
+        abi::CONFIG_FLAG_FILE_PATH | abi::CONFIG_FLAG_GAME_RELATIVE
+    );
+    assert_eq!(
+        field("script_directory").flags,
+        abi::CONFIG_FLAG_DIRECTORY_PATH
+            | abi::CONFIG_FLAG_GAME_RELATIVE
+            | abi::CONFIG_FLAG_ADVANCED
+    );
+    assert_eq!(field("logical_width").flags, abi::CONFIG_FLAG_ADVANCED);
+    let volume = field("bgm_volume");
+    assert_eq!(
+        (volume.step, unsafe { volume.unit.text(16) }),
+        (1.0, Ok("%"))
+    );
+    let encoding = field("script_encoding");
+    let labels =
+        unsafe { abi::borrowed_array(encoding.choice_labels, encoding.choice_count, 8) }.unwrap();
+    assert_eq!(
+        labels
+            .iter()
+            .map(|label| unsafe { label.text(64) }.unwrap())
+            .collect::<Vec<_>>(),
+        ["Shift-JIS（日文原版）", "GBK（简体中文）"]
+    );
+    assert_eq!(
+        unsafe { field("bgm_muted").group.text(256) },
+        Ok("初始音量设置")
+    );
+    assert_eq!(
+        unsafe { field("voice_aya").group.text(256) },
+        Ok("初始语音设置")
+    );
+    let render = descriptor.render;
+    let extent = |width, height| abi::Extent { width, height };
+    assert_eq!(render.default, extent(0, 0));
+    assert_eq!(render.flags, 0);
+    for accepted in [extent(0, 0), extent(320, 180), extent(16384, 16384)] {
+        render
+            .validate_request(descriptor.capabilities, accepted)
+            .unwrap();
+    }
+    for rejected in [extent(319, 180), extent(320, 179), extent(16385, 720)] {
+        assert_eq!(
+            render.validate_request(descriptor.capabilities, rejected),
+            Err(abi::INVALID_ARGUMENT)
+        );
+    }
 }
 #[test]
 fn cpu_leases_are_bounded_and_outlive_the_session() {
