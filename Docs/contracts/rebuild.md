@@ -105,7 +105,7 @@ Manager 使用 Slint 与精炼 Material 3，保留游戏库、核心配置和管
 
 ### 显式离线文件转换
 
-[`astra-emu-patch`](../../Emulator/Source/Tools/astra-emu-patch/src/lib.rs) 是同步、独立的可信 Luau 文件转换库，不依赖 Manager、游戏核心或 GPU。每次任务独占新 VM，不复用文字 Hook 的 VM、队列或配置；输入只读，版本/指纹判断和游戏格式规则属于脚本。CLI 与 Manager 必须复用此实现，均不在应用或游戏启动时自动转换。
+[`astra-emu-patch`](../../Emulator/Source/Tools/astra-emu-patch/src/lib.rs) 是同步、独立的可信 Luau 文件转换库，不依赖 Manager、游戏核心或 GPU。优先复用或补齐引擎原生的格式、语言、字体与资源机制，不用脚本重写已有 reader/writer。仅在旧补丁封装不能直接消费时显式转换，产物收敛为标准原生资源与 typed 配置；播放时不依赖转换脚本。每次任务独占新 VM，不复用文字 Hook 的 VM、队列或配置；输入只读，必要转换的版本/指纹判断和旧封装恢复属于脚本。CLI 与 Manager 必须复用此实现，均不在应用或游戏启动时自动转换。
 
 输出必须是与 source/patch 输入树均不重叠的新目录。先校验授权目录句柄和路径，再在同父目录建立 owner-only staging；所有写入只发生在此树。路径按规范相对分量校验，拒绝穿越、设备名、ADS 和输出链接/重解析点；枚举不隐式跟随链接。输出完整独立，不硬链接原文件或回退读取原安装，不复制旧存档。异常或发布前取消删除本次 staging；原目录和既有输出不变。原子发布不覆盖目标，发布后到达的取消不撤销成品。
 
@@ -114,6 +114,12 @@ VM 内存上限 256MiB，文件读范围复用 `ByteRange` 的 16MiB 上限，�
 宿主仅提供 source/patch 只读文件与枚举、staging 普通文件操作、入口目录内的模块加载，以及有界 codec/hash/encoding/crypto/JSON/TOML/BMP/PNG 原语；没有任意绝对路径、进程、网络或 FFI 入口。zlib 和 aPLib 必须满足声明长度、EOF 与 back-reference 边界；旧密码算法仅用于离线格式兼容，不作为安全验证。错误保留稳定 `ASTRA_EMU_PATCH_*` 类别、脚本相对文件/行号及可跨线程持有的原因链，不记录资源正文或密钥。
 
 完成前关闭输出句柄，校验脚本返回的 `OutputProfile`，生成 `astra-patch-result.json` 收据，再发布目录。收据 schema 为 `astra.emu.file_patch.v1`，记录 recipe id/version、入口及已加载模块和读取输入的 SHA256、所有成品文件的大小/SHA256及 typed 配置；只用相对路径，不含绝对输入路径、正文、密钥或原库 ID，也不包含收据自身。收据用于重现和显式导入，不做自动缓存命中、跳过转换或执行所引用的脚本。
+
+### 原生 ASS 字幕
+
+`astra-subtitle` 是独立的 owner-thread 原生组件，固定 libass 0.17.4，不依赖 Luau、SDK 或游戏核心。Windows 使用独立 vcpkg manifest 和 `x64-windows-static-md`；`ASTRA_SUBTITLE_VCPKG_ROOT` 指向该安装，不更改既有 FFmpeg 根目录。只加载调用方提供的内存字体，禁用系统字体和默认字体回退；实际缺字、缺字体及原生失败返回安全的类别和阶段，不输出字幕正文。
+
+调用方传入实际媒体毫秒时钟、视频存储尺寸和显示 raster，暂停、跳转、替换与结束由媒体生命周期控制。帧借用有序 bitmap runs，区分内容变化、仅位置变化和未变化；mask 及描述符复用，不能跨下一次 render 保留借用。ASS 的矩阵声明与实际视频 SDR 矩阵/range 共同决定颜色，不按分辨率猜测；窗口 letterbox、裁剪和 HDR 策略由消费者显式处理。该组件不复制整张游戏帧，也不逐帧执行脚本。
 
 ### 共享实现与核心迁移
 

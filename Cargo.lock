@@ -1236,6 +1236,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "astra-subtitle"
+version = "0.1.0"
+dependencies = [
+ "cc",
+ "pkg-config",
+ "vcpkg",
+]
+
+[[package]]
 name = "astra-target"
 version = "0.1.0"
 dependencies = [

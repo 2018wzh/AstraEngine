@@ -1,0 +1,13 @@
+[package]
+name = "astra-subtitle"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+rust-version.workspace = true
+links = "astra_subtitle_ass"
+description = "Owner-thread libass subtitle masks at explicit media timestamps"
+
+[build-dependencies]
+vcpkg = "=0.2.15"
+cc = "1"
+pkg-config = "0.3"

@@ -1,0 +1,16 @@
+[Script Info]
+Title: Astra public subtitle renderer fixture
+ScriptType: v4.00+
+PlayResX: 320
+PlayResY: 180
+ScaledBorderAndShadow: yes
+YCbCr Matrix: None
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Noto Sans SC Thin,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,{\an7\pos(20,40)}字幕
+Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,{\an7\pos(80,40)\p1\bord0\shad0\1c&H0000FF&\1a&H80&}m 0 0 l 30 0 30 20 0 20
