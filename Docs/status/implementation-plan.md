@@ -158,6 +158,8 @@ Beta1 的 Manager/独立 CLI 全 target Clippy（`--no-deps -D warnings`）及 C
 
 Beta2 使用唯一的 `astra-emu-manager`：补丁 CLI 已迁入 `patch` 子命令，GUI 直接调用共享 `astra-emu-patch` 库；独立程序 crate、打包参数及旧命令 shim 均已移除。Manager 已完成实际 Release 重建，根版本输出为 `0.1.0-beta.2`，原 `extension-*` 命令名保留；迁移后的 12 项真实进程回归、Manager 库/应用 77 项回归、Release 全 target Clippy 及打包器 24 项行为检查通过。在独立隐藏测试控制台发送真实 Ctrl-C，纯 Luau 循环和 2 GiB 原生复制的子进程均在非空 staging 后返回 130，工作线程回收且无输出/残留，公开源哈希不变；未操作用户控制台或游戏窗口。七核心沿用冻结 Beta1 的相同哈希 DLL，仅重建 Manager；整包结果以本批 `release-manifest.json` 与 `SHA256SUMS` 为准。字体、Ethornell 和静态 FriBidi 许可限制仍禁止公开二进制发布，实际 GUI/游戏验收仍由用户手动执行。
 
+单程序 Beta2 已按 `cdebd898c599df211fa36a21e7a5ff64a3e58afd` 组装为 `AstraEMU-0.1.0-beta.2-win64.zip`。递归核对仅有 `astra-emu-manager.exe` 一个 EXE，独立补丁程序不存在；60 个 x64 PE、7 个 query 导出、783 条静态导入边无缺项，323 个 ZIP 文件逐项 SHA-256 均匹配。包内 `patch list/apply`、公开 PE 转换、旧扩展命令帮助及真实 Ctrl-C 证据通过，七核心 DLL 与冻结 Beta1 哈希相同。ZIP SHA-256 为 `b06aeb5642c70e110013ad9ff72b75d8b46cb85d5261f349ba6d74a921995c7b`。本批仍只供本机私测，不代表实际 GUI/游戏或未解本地化消费者已验收。
+
 ### Beta1 后的只读分析
 
 前奏诗的十五条姓名（零基行 28–42）已通过原版拷贝的生产者与绘制调用链定位：`0x4A1140` 从原始 CLog 说话人构造独立回看标题，全部生成字节与有序 ACR 身份匹配；34/35 保留原有重复与 first-record 语义。27/43 也分别定位到隐藏姓名的条件生产者。原生 `runtime/message.rs` 在会话替换之前保存回看文本，`scene.rs` 的回看分支直接拼接计数与旧说话人，未走该标题身份和 names-first 查找。后续应在引擎中保留原始身份、生产并翻译回看/隐藏姓名，不增加旧封装脚本或删除记录；本轮只分析，Beta 及目录登记保持不变。
