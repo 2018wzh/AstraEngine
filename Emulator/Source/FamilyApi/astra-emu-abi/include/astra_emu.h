@@ -11,7 +11,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#define AstraEmuABI_VERSION 2
+#define AstraEmuABI_VERSION 3
 
 #define AstraEmuMAX_CONFIG_FIELDS 128
 
@@ -27,13 +27,33 @@
 
 #define AstraEmuVALUE_ENUM 5
 
-#define AstraEmuCAP_CPU_SURFACE 1
+#define AstraEmuMAX_CONFIG_DESCRIPTION 512
 
-#define AstraEmuCAP_GPU_SURFACE 2
+#define AstraEmuMAX_CHOICE_LABEL 64
+
+#define AstraEmuMAX_CONFIG_UNIT 16
+
+#define AstraEmuCONFIG_FLAG_FILE_PATH 1
+
+#define AstraEmuCONFIG_FLAG_DIRECTORY_PATH 2
+
+#define AstraEmuCONFIG_FLAG_ADVANCED 4
+
+#define AstraEmuCONFIG_FLAG_GAME_RELATIVE 8
+
+#define AstraEmuCAP_CPU_SURFACE 1
 
 #define AstraEmuCAP_TEXT_HOOK 4
 
 #define AstraEmuCAP_LIVE_CONFIGURATION 8
+
+#define AstraEmuCAP_RENDER_EXTENT 16
+
+#define AstraEmuMAX_DISPLAY_NAME_BYTES 64
+
+#define AstraEmuMAX_RENDER_EXTENT 16384
+
+#define AstraEmuRENDER_PRESERVE_ASPECT 1
 
 #define AstraEmuINPUT_KEY 1
 
@@ -73,52 +93,7 @@
  */
 #define AstraEmuSESSION_CAN_RETRY 1
 
-#define AstraEmuD3D12_EXTENSION_VERSION 1
-
-#define AstraEmuBACKEND_D3D12 1
-
-#define AstraEmuD3D12_FORMAT_RGBA8_UNORM_SRGB 29
-
-#define AstraEmuD3D12_FORMAT_BGRA8_UNORM_SRGB 91
-
-#define AstraEmuD3D12_COPY_SOURCE 1
-
-#define AstraEmuD3D12_COPY_DESTINATION 2
-
-#define AstraEmuD3D12_NOT_SUBMITTED 0
-
-#define AstraEmuD3D12_CONSUMED 1
-
 #define AstraEmuMODULE_OWNER_VERSION 1
-
-#define AstraEmuSESSION_MENU_VERSION 1
-
-/**
- * Core-defined control commands start here; built-in CONTROL_* stay below.
- */
-#define AstraEmuCONTROL_CORE_BASE 4096
-
-#define AstraEmuSESSION_MENU_MAX_ITEMS 16
-
-#define AstraEmuSESSION_MENU_LABEL_MAX 64
-
-#define AstraEmuMENU_ICON_GENERIC 0
-
-#define AstraEmuMENU_ICON_QUICK_SAVE 1
-
-#define AstraEmuMENU_ICON_QUICK_LOAD 2
-
-#define AstraEmuMENU_ICON_SAVE 3
-
-#define AstraEmuMENU_ICON_LOAD 4
-
-#define AstraEmuMENU_ICON_AUTO 5
-
-#define AstraEmuMENU_ICON_SKIP 6
-
-#define AstraEmuMENU_ICON_BACKLOG 7
-
-#define AstraEmuMENU_ICON_SETTINGS 8
 
 #define AstraEmuLOG_ERROR 1
 
@@ -210,9 +185,36 @@
 
 #define AstraEmuPOINTER_SET_Y 32
 
-#define AstraEmuSURFACE_CPU 1
+#define AstraEmuSESSION_MENU_VERSION 1
 
-#define AstraEmuSURFACE_GPU 2
+/**
+ * Core-defined control commands start here; built-in CONTROL_* stay below.
+ */
+#define AstraEmuCONTROL_CORE_BASE 4096
+
+#define AstraEmuSESSION_MENU_MAX_ITEMS 16
+
+#define AstraEmuSESSION_MENU_LABEL_MAX 64
+
+#define AstraEmuMENU_ICON_GENERIC 0
+
+#define AstraEmuMENU_ICON_QUICK_SAVE 1
+
+#define AstraEmuMENU_ICON_QUICK_LOAD 2
+
+#define AstraEmuMENU_ICON_SAVE 3
+
+#define AstraEmuMENU_ICON_LOAD 4
+
+#define AstraEmuMENU_ICON_AUTO 5
+
+#define AstraEmuMENU_ICON_SKIP 6
+
+#define AstraEmuMENU_ICON_BACKLOG 7
+
+#define AstraEmuMENU_ICON_SETTINGS 8
+
+#define AstraEmuSURFACE_CPU 1
 
 #define AstraEmuPIXEL_RGBA8 1
 
@@ -318,6 +320,13 @@ typedef struct AstraEmuConfigValue {
   struct AstraEmuBytes text;
 } AstraEmuConfigValue;
 
+/**
+ * Path flags apply only to STRING fields and are mutually exclusive;
+ * GAME_RELATIVE requires one of them. `choice_labels` is null when
+ * `choice_count` is zero, otherwise exactly `choice_count` user-visible labels
+ * parallel to `choices`. `step` is 0 for none, a positive finite value for
+ * NUMBER, or an integral value of at least 1 for INTEGER.
+ */
 typedef struct AstraEmuConfigField {
   struct AstraEmuBytes id;
   struct AstraEmuBytes label;
@@ -328,11 +337,37 @@ typedef struct AstraEmuConfigField {
   double number_min;
   double number_max;
   uint32_t max_bytes;
-  uint32_t reserved;
+  uint32_t flags;
   const struct AstraEmuBytes *choices;
   size_t choice_count;
+  struct AstraEmuBytes description;
+  const struct AstraEmuBytes *choice_labels;
+  double step;
+  struct AstraEmuBytes unit;
 } AstraEmuConfigField;
 
+typedef struct AstraEmuExtent {
+  uint32_t width;
+  uint32_t height;
+} AstraEmuExtent;
+
+/**
+ * Render extents a core accepts in `OpenRequest.render_extent`. All members
+ * are zero unless the descriptor declares `CAP_RENDER_EXTENT`. A zero
+ * `default` means the core's native raster size.
+ */
+typedef struct AstraEmuRenderExtentSupport {
+  struct AstraEmuExtent min;
+  struct AstraEmuExtent max;
+  struct AstraEmuExtent default_;
+  uint32_t flags;
+  uint32_t reserved;
+} AstraEmuRenderExtentSupport;
+
+/**
+ * `display_name` is the emulator name and `family_name` the engine name shown
+ * to users; both are 1..=64 UTF-8 bytes without control characters.
+ */
 typedef struct AstraEmuDescriptor {
   struct AstraEmuHeader header;
   struct AstraEmuBytes family_id;
@@ -343,6 +378,9 @@ typedef struct AstraEmuDescriptor {
   size_t format_count;
   const struct AstraEmuConfigField *configuration;
   size_t configuration_count;
+  struct AstraEmuBytes display_name;
+  struct AstraEmuBytes family_name;
+  struct AstraEmuRenderExtentSupport render;
 } AstraEmuDescriptor;
 
 /**
@@ -532,14 +570,15 @@ typedef struct AstraEmuOpenRequest {
    * the core has no cross-session owner extension.
    */
   AstraEmuModuleOwner module_owner;
+  /**
+   * 0x0 selects the core default. Nonzero values require
+   * `CAP_RENDER_EXTENT` and must lie within the declared min/max; otherwise
+   * open fails with INVALID_ARGUMENT.
+   */
+  struct AstraEmuExtent render_extent;
 } AstraEmuOpenRequest;
 
 typedef void *AstraEmuSession;
-
-typedef struct AstraEmuExtent {
-  uint32_t width;
-  uint32_t height;
-} AstraEmuExtent;
 
 typedef struct AstraEmuSurfaceInfo {
   uint32_t kind;
@@ -547,10 +586,6 @@ typedef struct AstraEmuSurfaceInfo {
   uint32_t color;
   uint32_t alpha;
   uint32_t rows;
-  /**
-   * Zero for CPU. GPU value is defined by its versioned backend extension.
-   */
-  uint32_t backend;
   struct AstraEmuExtent logical;
   struct AstraEmuExtent raster;
   uint64_t stride;
@@ -617,8 +652,7 @@ typedef struct AstraEmuFrameSurface {
   uint64_t timestamp_ns;
   struct AstraEmuSurfaceInfo info;
   /**
-   * Populated only for a Ready CPU frame. GPU delivery lives entirely in its
-   * negotiated extension, including acquire and consumption-complete fences.
+   * Populated only for a Ready frame.
    */
   struct AstraEmuCpuLease cpu;
 } AstraEmuFrameSurface;
@@ -683,79 +717,6 @@ typedef struct AstraEmuModuleOwnerApi {
   AstraEmuStatus (*create)(AstraEmuModuleOwner*, struct AstraEmuError*);
   AstraEmuStatus (*destroy)(AstraEmuModuleOwner, struct AstraEmuError*);
 } AstraEmuModuleOwnerApi;
-
-/**
- * Actual Host adapter LUID and supported resource limits. The native core
- * creates its own device; LUID equality never means device identity equality.
- */
-typedef struct AstraEmuD3D12Host {
-  struct AstraEmuHeader header;
-  uint64_t adapter_luid;
-  uint32_t max_width;
-  uint32_t max_height;
-  uint32_t dxgi_format;
-  uint32_t copy_usage;
-} AstraEmuD3D12Host;
-
-/**
- * Exactly one owned generation. Same-process NT handles are borrowed until
- * release; Host opens its own COM references. Ready means the native queue
- * Signal has been enqueued after returning the export resource to COMMON.
- * Host queue waits ready, copies in COPY_SOURCE, returns it to COMMON, then
- * enqueues done Signal. Host retains imports/fences through actual completion.
- *
- * release(owner, NOT_SUBMITTED) means no GPU access was submitted. CONSUMED
- * promises the done Signal is already enqueued. Other dispositions are invalid
- * and must never cause producer reuse. Return exactly once, from any thread.
- * Retired leases stay valid after close and touch no VM or Host callback.
- */
-typedef struct AstraEmuD3D12Lease {
-  void *owner;
-  size_t resource_handle;
-  size_t ready_fence_handle;
-  size_t done_fence_handle;
-  uint64_t ready_value;
-  uint64_t done_value;
-  void (*release)(void*, uint32_t);
-} AstraEmuD3D12Lease;
-
-typedef struct AstraEmuD3D12Frame {
-  uint32_t state;
-  uint32_t dxgi_format;
-  struct AstraEmuFrameIdentity identity;
-  uint64_t timestamp_ns;
-  struct AstraEmuSurfaceInfo info;
-  uint64_t adapter_luid;
-  /**
-   * Unique allocation identity within session/output epoch, not a frame ID.
-   */
-  uint64_t resource_id;
-  struct AstraEmuD3D12Lease lease;
-} AstraEmuD3D12Frame;
-
-/**
- * open shares the normal core's native session/worker and all CoreApi controls.
- * Host descriptor may be null: explicit CPU configuration uses normal CPU
- * startup; explicit GPU configuration must reject a missing/incompatible Host.
- * GPU startup never performs CPU capture as an implicit fallback.
- *
- * Each generation is single-acquire. Repeating an old `after` after issuance
- * returns Pending until a new generation; matching `after` returns Unchanged.
- * Native reuse requires lease return AND relevant ready/done completion.
- * Close stops production, drains native writes with device-loss handling, and
- * retires exports independently; it does not wait for Host-held leases.
- */
-typedef struct AstraEmuD3D12Api {
-  struct AstraEmuHeader header;
-  AstraEmuStatus (*open)(const struct AstraEmuOpenRequest*,
-                         const struct AstraEmuD3D12Host*,
-                         struct AstraEmuOpenResult*,
-                         struct AstraEmuError*);
-  AstraEmuStatus (*acquire)(AstraEmuSession,
-                            struct AstraEmuFrameIdentity,
-                            struct AstraEmuD3D12Frame*,
-                            struct AstraEmuError*);
-} AstraEmuD3D12Api;
 
 /**
  * One Host-invoked session control. `control` is unique and

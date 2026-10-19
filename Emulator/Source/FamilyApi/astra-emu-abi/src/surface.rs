@@ -2,7 +2,6 @@ use crate::{Bytes, Status, INVALID_ARGUMENT, STALE_CONTEXT};
 use std::ffi::c_void;
 
 pub const SURFACE_CPU: u32 = 1;
-pub const SURFACE_GPU: u32 = 2;
 pub const PIXEL_RGBA8: u32 = 1;
 pub const PIXEL_BGRA8: u32 = 2;
 pub const COLOR_SRGB: u32 = 1;
@@ -39,15 +38,13 @@ pub struct SurfaceInfo {
     pub color: u32,
     pub alpha: u32,
     pub rows: u32,
-    /// Zero for CPU. GPU value is defined by its versioned backend extension.
-    pub backend: u32,
     pub logical: Extent,
     pub raster: Extent,
     pub stride: u64,
 }
 impl SurfaceInfo {
     pub fn validate(&self) -> Result<(), Status> {
-        if !matches!(self.kind, SURFACE_CPU | SURFACE_GPU)
+        if self.kind != SURFACE_CPU
             || !matches!(self.pixel_format, PIXEL_RGBA8 | PIXEL_BGRA8)
             || !matches!(self.color, COLOR_SRGB | COLOR_LINEAR_SRGB)
             || !matches!(
@@ -63,14 +60,10 @@ impl SurfaceInfo {
             ]
             .iter()
             .any(|&n| n == 0 || n > 16384)
-            || (self.kind == SURFACE_CPU && self.backend != 0)
-            || (self.kind == SURFACE_GPU && self.backend == 0)
         {
             return Err(INVALID_ARGUMENT);
         }
-        if self.kind == SURFACE_CPU {
-            self.cpu_bytes()?;
-        }
+        self.cpu_bytes()?;
         Ok(())
     }
     pub fn cpu_bytes(&self) -> Result<usize, Status> {
@@ -104,8 +97,7 @@ pub struct FrameSurface {
     pub identity: FrameIdentity,
     pub timestamp_ns: u64,
     pub info: SurfaceInfo,
-    /// Populated only for a Ready CPU frame. GPU delivery lives entirely in its
-    /// negotiated extension, including acquire and consumption-complete fences.
+    /// Populated only for a Ready frame.
     pub cpu: CpuLease,
 }
 impl FrameSurface {

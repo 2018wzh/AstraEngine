@@ -7,6 +7,17 @@ pub const VALUE_INTEGER: u32 = 2;
 pub const VALUE_NUMBER: u32 = 3;
 pub const VALUE_STRING: u32 = 4;
 pub const VALUE_ENUM: u32 = 5;
+pub const MAX_CONFIG_DESCRIPTION: usize = 512;
+pub const MAX_CHOICE_LABEL: usize = 64;
+pub const MAX_CONFIG_UNIT: usize = 16;
+pub const CONFIG_FLAG_FILE_PATH: u32 = 1;
+pub const CONFIG_FLAG_DIRECTORY_PATH: u32 = 2;
+pub const CONFIG_FLAG_ADVANCED: u32 = 4;
+pub const CONFIG_FLAG_GAME_RELATIVE: u32 = 8;
+const CONFIG_FLAGS: u32 = CONFIG_FLAG_FILE_PATH
+    | CONFIG_FLAG_DIRECTORY_PATH
+    | CONFIG_FLAG_ADVANCED
+    | CONFIG_FLAG_GAME_RELATIVE;
 
 /// Only the member selected by `kind` is meaningful. Boolean uses integer 0/1.
 /// Reserved members must be zero; no Rust enum or owning string crosses the ABI.
@@ -25,6 +36,11 @@ pub struct ConfigEntry {
     pub id: Bytes,
     pub value: ConfigValue,
 }
+/// Path flags apply only to STRING fields and are mutually exclusive;
+/// GAME_RELATIVE requires one of them. `choice_labels` is null when
+/// `choice_count` is zero, otherwise exactly `choice_count` user-visible labels
+/// parallel to `choices`. `step` is 0 for none, a positive finite value for
+/// NUMBER, or an integral value of at least 1 for INTEGER.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct ConfigField {
@@ -37,9 +53,13 @@ pub struct ConfigField {
     pub number_min: f64,
     pub number_max: f64,
     pub max_bytes: u32,
-    pub reserved: u32,
+    pub flags: u32,
     pub choices: *const Bytes,
     pub choice_count: usize,
+    pub description: Bytes,
+    pub choice_labels: *const Bytes,
+    pub step: f64,
+    pub unit: Bytes,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ConfigError {
@@ -53,7 +73,48 @@ fn valid_id(id: &str) -> bool {
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
 }
+fn has_control(text: &str) -> bool {
+    text.chars().any(char::is_control)
+}
 impl ConfigField {
+    /// # Safety
+    /// All spans and arrays in this field must be valid during the call.
+    unsafe fn presentation_valid(&self) -> Result<bool, Status> {
+        let path = self.flags & (CONFIG_FLAG_FILE_PATH | CONFIG_FLAG_DIRECTORY_PATH);
+        if self.flags & !CONFIG_FLAGS != 0
+            || (path != 0 && self.default_value.kind != VALUE_STRING)
+            || path == CONFIG_FLAG_FILE_PATH | CONFIG_FLAG_DIRECTORY_PATH
+            || (self.flags & CONFIG_FLAG_GAME_RELATIVE != 0 && path == 0)
+        {
+            return Ok(false);
+        }
+        let step_valid = match self.default_value.kind {
+            _ if self.step == 0.0 => true,
+            VALUE_NUMBER => self.step.is_finite() && self.step > 0.0,
+            VALUE_INTEGER => self.step.is_finite() && self.step >= 1.0 && self.step.fract() == 0.0,
+            _ => false,
+        };
+        let description = unsafe { self.description.text(MAX_CONFIG_DESCRIPTION)? };
+        let unit = unsafe { self.unit.text(MAX_CONFIG_UNIT)? };
+        if !step_valid || has_control(description) || has_control(unit) {
+            return Ok(false);
+        }
+        if self.choice_count == 0 {
+            return Ok(self.choice_labels.is_null());
+        }
+        if self.choice_labels.is_null() {
+            return Ok(false);
+        }
+        let labels =
+            unsafe { borrowed_array(self.choice_labels, self.choice_count, MAX_CONFIG_FIELDS)? };
+        for label in labels {
+            let text = unsafe { label.text(MAX_CHOICE_LABEL)? };
+            if text.is_empty() || has_control(text) {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
     /// # Safety
     /// All spans in this field and `value` must be valid during the call.
     pub unsafe fn accepts(&self, value: &ConfigValue) -> Result<bool, Status> {
@@ -101,7 +162,7 @@ pub unsafe fn validate_config(
     for (index, field) in fields.iter().enumerate() {
         let validate = || -> Result<(), Status> {
             let id = unsafe { field.id.text(128)? };
-            if !valid_id(id) || field.reserved != 0 {
+            if !valid_id(id) || !unsafe { field.presentation_valid()? } {
                 return Err(INVALID_ARGUMENT);
             }
             for previous in &fields[..index] {

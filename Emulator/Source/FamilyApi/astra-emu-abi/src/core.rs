@@ -1,13 +1,74 @@
 use crate::{
-    Bytes, ConfigEntry, ConfigField, Diagnostics, Error, FrameIdentity, FrameSurface, Header,
-    HostServices, Session, Status, SurfaceInfo,
+    Bytes, ConfigEntry, ConfigField, Diagnostics, Error, Extent, FrameIdentity, FrameSurface,
+    Header, HostServices, Session, Status, SurfaceInfo, INVALID_ARGUMENT, UNSUPPORTED,
 };
 use std::ffi::c_void;
 
 pub const CAP_CPU_SURFACE: u64 = 1;
-pub const CAP_GPU_SURFACE: u64 = 2;
 pub const CAP_TEXT_HOOK: u64 = 4;
 pub const CAP_LIVE_CONFIGURATION: u64 = 8;
+pub const CAP_RENDER_EXTENT: u64 = 16;
+pub const MAX_DISPLAY_NAME_BYTES: usize = 64;
+pub const MAX_RENDER_EXTENT: u32 = 16384;
+pub const RENDER_PRESERVE_ASPECT: u32 = 1;
+
+/// Render extents a core accepts in `OpenRequest.render_extent`. All members
+/// are zero unless the descriptor declares `CAP_RENDER_EXTENT`. A zero
+/// `default` means the core's native raster size.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RenderExtentSupport {
+    pub min: Extent,
+    pub max: Extent,
+    pub default: Extent,
+    pub flags: u32,
+    pub reserved: u32,
+}
+impl RenderExtentSupport {
+    pub fn validate(&self, capabilities: u64) -> Result<(), Status> {
+        if capabilities & CAP_RENDER_EXTENT == 0 {
+            return if *self == Self::default() {
+                Ok(())
+            } else {
+                Err(UNSUPPORTED)
+            };
+        }
+        let axes = [
+            (self.min.width, self.max.width, self.default.width),
+            (self.min.height, self.max.height, self.default.height),
+        ];
+        let native_default = self.default == Extent::default();
+        if self.flags & !RENDER_PRESERVE_ASPECT != 0
+            || self.reserved != 0
+            || axes.iter().any(|&(min, max, default)| {
+                min == 0
+                    || min > max
+                    || max > MAX_RENDER_EXTENT
+                    || (!native_default && !(min..=max).contains(&default))
+            })
+        {
+            return Err(UNSUPPORTED);
+        }
+        Ok(())
+    }
+    /// Checks an `OpenRequest.render_extent` against a validated declaration.
+    /// 0x0 always selects the core default.
+    pub fn validate_request(&self, capabilities: u64, requested: Extent) -> Result<(), Status> {
+        if requested == Extent::default() {
+            return Ok(());
+        }
+        if capabilities & CAP_RENDER_EXTENT == 0
+            || !(self.min.width..=self.max.width).contains(&requested.width)
+            || !(self.min.height..=self.max.height).contains(&requested.height)
+        {
+            return Err(INVALID_ARGUMENT);
+        }
+        Ok(())
+    }
+}
+
+/// `display_name` is the emulator name and `family_name` the engine name shown
+/// to users; both are 1..=64 UTF-8 bytes without control characters.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct Descriptor {
@@ -20,6 +81,27 @@ pub struct Descriptor {
     pub format_count: usize,
     pub configuration: *const ConfigField,
     pub configuration_count: usize,
+    pub display_name: Bytes,
+    pub family_name: Bytes,
+    pub render: RenderExtentSupport,
+}
+impl Descriptor {
+    /// Validates header, capabilities, display names and render declaration.
+    /// Configuration is validated separately by `validate_config`.
+    /// # Safety
+    /// Name spans must be readable and immutable during the call.
+    pub unsafe fn validate(&self) -> Result<(), Status> {
+        if !self.header.accepts::<Self>() || self.capabilities & CAP_CPU_SURFACE == 0 {
+            return Err(UNSUPPORTED);
+        }
+        for name in [self.display_name, self.family_name] {
+            let text = unsafe { name.text(MAX_DISPLAY_NAME_BYTES)? };
+            if text.is_empty() || text.chars().any(char::is_control) {
+                return Err(INVALID_ARGUMENT);
+            }
+        }
+        self.render.validate(self.capabilities)
+    }
 }
 /// Probe strings borrow module storage until the next ordinary module call.
 /// Manager copies bounded metadata before making that call. NO_MATCH is normal.
@@ -53,6 +135,10 @@ pub struct OpenRequest {
     /// Opaque owner from the negotiated module-owner extension, or null when
     /// the core has no cross-session owner extension.
     pub module_owner: crate::ModuleOwner,
+    /// 0x0 selects the core default. Nonzero values require
+    /// `CAP_RENDER_EXTENT` and must lie within the declared min/max; otherwise
+    /// open fails with INVALID_ARGUMENT.
+    pub render_extent: Extent,
 }
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]

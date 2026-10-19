@@ -9,7 +9,6 @@
 
 mod config;
 mod core;
-mod d3d12;
 #[cfg(feature = "diagnostic-bridge")]
 pub mod diagnostic_bridge;
 mod lease;
@@ -19,7 +18,6 @@ mod session_menu;
 mod surface;
 pub use config::*;
 pub use core::*;
-pub use d3d12::*;
 pub use lease::*;
 pub use module_owner::*;
 pub use services::*;
@@ -28,7 +26,7 @@ pub use surface::*;
 
 use std::ffi::c_void;
 
-pub const ABI_VERSION: u32 = 2;
+pub const ABI_VERSION: u32 = 3;
 pub const QUERY_SYMBOL: &[u8] = b"astra_emu_query\0";
 pub type Status = i32;
 pub const OK: Status = 0;

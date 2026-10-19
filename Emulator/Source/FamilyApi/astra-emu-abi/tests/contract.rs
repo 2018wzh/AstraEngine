@@ -24,9 +24,336 @@ fn field() -> ConfigField {
         number_min: 0.0,
         number_max: 0.0,
         max_bytes: 0,
-        reserved: 0,
+        flags: 0,
         choices: std::ptr::null(),
         choice_count: 0,
+        description: Bytes::EMPTY,
+        choice_labels: std::ptr::null(),
+        step: 0.0,
+        unit: Bytes::EMPTY,
+    }
+}
+fn text(value: &'static [u8]) -> ConfigValue {
+    ConfigValue {
+        kind: VALUE_STRING,
+        text: Bytes::from_static(value),
+        ..integer(0)
+    }
+}
+fn path_field(flags: u32) -> ConfigField {
+    ConfigField {
+        id: Bytes::new(b"archive"),
+        default_value: text(b""),
+        max_bytes: 260,
+        flags,
+        ..field()
+    }
+}
+const SCHEMA_ERROR: &str = "invalid schema, duplicate ID or invalid default";
+fn schema_error(field: ConfigField) -> Option<&'static str> {
+    unsafe { validate_config(&[field], &[]) }
+        .err()
+        .map(|e| e.reason)
+}
+#[test]
+fn enum_choice_labels_must_match_choice_count() {
+    let choices = [Bytes::new(b"shift_jis"), Bytes::new(b"gbk")];
+    let labels = [
+        Bytes::new("Shift-JIS（日文原版）".as_bytes()),
+        Bytes::new("GBK（简体中文）".as_bytes()),
+    ];
+    let enumeration = ConfigField {
+        id: Bytes::new(b"script_encoding"),
+        default_value: ConfigValue {
+            kind: VALUE_ENUM,
+            text: Bytes::new(b"shift_jis"),
+            ..integer(0)
+        },
+        choices: choices.as_ptr(),
+        choice_count: choices.len(),
+        choice_labels: labels.as_ptr(),
+        ..field()
+    };
+    let empty_label = [Bytes::new(b"Shift-JIS"), Bytes::EMPTY];
+    assert_eq!(schema_error(enumeration), None);
+    assert_eq!(
+        schema_error(ConfigField {
+            choice_labels: std::ptr::null(),
+            ..enumeration
+        }),
+        Some(SCHEMA_ERROR)
+    );
+    assert_eq!(
+        schema_error(ConfigField {
+            choice_labels: empty_label.as_ptr(),
+            ..enumeration
+        }),
+        Some(SCHEMA_ERROR)
+    );
+    assert_eq!(
+        schema_error(ConfigField {
+            choice_labels: labels.as_ptr(),
+            ..field()
+        }),
+        Some(SCHEMA_ERROR)
+    );
+}
+#[test]
+fn path_flags_are_string_only_exclusive_and_anchor_game_relative() {
+    assert_eq!(schema_error(path_field(CONFIG_FLAG_FILE_PATH)), None);
+    assert_eq!(
+        schema_error(path_field(
+            CONFIG_FLAG_DIRECTORY_PATH | CONFIG_FLAG_GAME_RELATIVE | CONFIG_FLAG_ADVANCED
+        )),
+        None
+    );
+    for flags in [
+        CONFIG_FLAG_FILE_PATH | CONFIG_FLAG_DIRECTORY_PATH,
+        CONFIG_FLAG_GAME_RELATIVE,
+        16,
+    ] {
+        assert_eq!(schema_error(path_field(flags)), Some(SCHEMA_ERROR));
+    }
+    assert_eq!(
+        schema_error(ConfigField {
+            flags: CONFIG_FLAG_FILE_PATH,
+            ..field()
+        }),
+        Some(SCHEMA_ERROR)
+    );
+    assert_eq!(
+        schema_error(ConfigField {
+            flags: CONFIG_FLAG_ADVANCED,
+            ..field()
+        }),
+        None
+    );
+}
+#[test]
+fn step_description_and_unit_are_bounded_presentation_metadata() {
+    let number = ConfigField {
+        default_value: ConfigValue {
+            kind: VALUE_NUMBER,
+            number: 1.0,
+            ..integer(0)
+        },
+        number_min: 0.0,
+        number_max: 4.0,
+        ..field()
+    };
+    let description = "渲染宽度，影响画面清晰度。".as_bytes();
+    assert_eq!(
+        schema_error(ConfigField {
+            step: 1.0,
+            unit: Bytes::new(b"%"),
+            description: Bytes::new(description),
+            ..field()
+        }),
+        None
+    );
+    assert_eq!(
+        schema_error(ConfigField {
+            step: 0.25,
+            ..number
+        }),
+        None
+    );
+    for step in [0.5, -1.0, f64::NAN] {
+        assert_eq!(
+            schema_error(ConfigField { step, ..field() }),
+            Some(SCHEMA_ERROR)
+        );
+    }
+    for step in [-0.25, f64::INFINITY] {
+        assert_eq!(
+            schema_error(ConfigField { step, ..number }),
+            Some(SCHEMA_ERROR)
+        );
+    }
+    assert_eq!(
+        schema_error(ConfigField {
+            step: 1.0,
+            ..path_field(0)
+        }),
+        Some(SCHEMA_ERROR)
+    );
+    let long = [b'a'; 513];
+    let long_unit = [b'u'; 17];
+    for invalid in [
+        ConfigField {
+            description: Bytes::new(&long),
+            ..field()
+        },
+        ConfigField {
+            description: Bytes::new(b"line\nbreak"),
+            ..field()
+        },
+        ConfigField {
+            unit: Bytes::new(&long_unit),
+            ..field()
+        },
+        ConfigField {
+            unit: Bytes::new(b"\t"),
+            ..field()
+        },
+    ] {
+        assert_eq!(schema_error(invalid), Some(SCHEMA_ERROR));
+    }
+}
+fn extent(width: u32, height: u32) -> Extent {
+    Extent { width, height }
+}
+fn render_support() -> RenderExtentSupport {
+    RenderExtentSupport {
+        min: extent(320, 180),
+        max: extent(3840, 3840),
+        default: extent(1280, 720),
+        flags: 0,
+        reserved: 0,
+    }
+}
+const RENDER_CAPS: u64 = CAP_CPU_SURFACE | CAP_RENDER_EXTENT;
+#[test]
+fn render_extent_support_requires_capability_and_ordered_bounds() {
+    let support = render_support();
+    support.validate(RENDER_CAPS).unwrap();
+    RenderExtentSupport {
+        default: Extent::default(),
+        flags: RENDER_PRESERVE_ASPECT,
+        ..support
+    }
+    .validate(RENDER_CAPS)
+    .unwrap();
+    RenderExtentSupport::default()
+        .validate(CAP_CPU_SURFACE)
+        .unwrap();
+    let inverted = RenderExtentSupport {
+        min: extent(320, 180),
+        max: extent(160, 90),
+        default: Extent::default(),
+        ..support
+    };
+    assert_eq!(inverted.validate(RENDER_CAPS), Err(UNSUPPORTED));
+    assert_eq!(support.validate(CAP_CPU_SURFACE), Err(UNSUPPORTED));
+    for invalid in [
+        RenderExtentSupport {
+            min: extent(0, 180),
+            ..support
+        },
+        RenderExtentSupport {
+            max: extent(16385, 3840),
+            ..support
+        },
+        RenderExtentSupport {
+            default: extent(100, 720),
+            ..support
+        },
+        RenderExtentSupport {
+            default: extent(0, 720),
+            ..support
+        },
+        RenderExtentSupport {
+            flags: 2,
+            ..support
+        },
+        RenderExtentSupport {
+            reserved: 1,
+            ..support
+        },
+    ] {
+        assert_eq!(invalid.validate(RENDER_CAPS), Err(UNSUPPORTED));
+    }
+}
+#[test]
+fn requested_render_extent_must_fit_declared_range() {
+    let support = render_support();
+    support
+        .validate_request(RENDER_CAPS, Extent::default())
+        .unwrap();
+    support
+        .validate_request(RENDER_CAPS, extent(1920, 1080))
+        .unwrap();
+    RenderExtentSupport::default()
+        .validate_request(CAP_CPU_SURFACE, Extent::default())
+        .unwrap();
+    assert_eq!(
+        support.validate_request(RENDER_CAPS, extent(160, 1080)),
+        Err(INVALID_ARGUMENT)
+    );
+    assert_eq!(
+        support.validate_request(RENDER_CAPS, extent(1920, 4000)),
+        Err(INVALID_ARGUMENT)
+    );
+    assert_eq!(
+        RenderExtentSupport::default().validate_request(CAP_CPU_SURFACE, extent(1280, 720)),
+        Err(INVALID_ARGUMENT)
+    );
+}
+fn descriptor() -> Descriptor {
+    Descriptor {
+        header: Header::of::<Descriptor>(),
+        family_id: Bytes::new(b"astra.emu.sena"),
+        plugin_id: Bytes::new(b"sena-native-koikake"),
+        version: Bytes::new(b"1.0.0"),
+        capabilities: RENDER_CAPS,
+        formats: std::ptr::null(),
+        format_count: 0,
+        configuration: std::ptr::null(),
+        configuration_count: 0,
+        display_name: Bytes::new(b"Sena"),
+        family_name: Bytes::new(b"SoftPAL"),
+        render: render_support(),
+    }
+}
+#[test]
+fn descriptor_validates_names_capabilities_and_render() {
+    unsafe {
+        descriptor().validate().unwrap();
+        Descriptor {
+            family_name: Bytes::new("Ethornell / BGI".as_bytes()),
+            display_name: Bytes::new("模拟器".as_bytes()),
+            ..descriptor()
+        }
+        .validate()
+        .unwrap();
+        let long = [b'n'; 65];
+        for invalid in [Bytes::EMPTY, Bytes::new(&long), Bytes::new(b"tab\tname")] {
+            assert_eq!(
+                Descriptor {
+                    display_name: invalid,
+                    ..descriptor()
+                }
+                .validate(),
+                Err(INVALID_ARGUMENT)
+            );
+            assert_eq!(
+                Descriptor {
+                    family_name: invalid,
+                    ..descriptor()
+                }
+                .validate(),
+                Err(INVALID_ARGUMENT)
+            );
+        }
+        assert_eq!(
+            Descriptor {
+                capabilities: CAP_CPU_SURFACE,
+                ..descriptor()
+            }
+            .validate(),
+            Err(UNSUPPORTED)
+        );
+        assert_eq!(
+            Descriptor {
+                capabilities: CAP_RENDER_EXTENT,
+                ..descriptor()
+            }
+            .validate(),
+            Err(UNSUPPORTED)
+        );
+        let mut stale = descriptor();
+        stale.header.version = 2;
+        assert_eq!(stale.validate(), Err(UNSUPPORTED));
     }
 }
 #[test]
@@ -148,7 +475,6 @@ fn frame(drops: Arc<AtomicUsize>) -> FrameSurface {
             color: COLOR_SRGB,
             alpha: ALPHA_IGNORED,
             rows: ROWS_TOP_DOWN,
-            backend: 0,
             logical: Extent {
                 width: 1280,
                 height: 720,
