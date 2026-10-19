@@ -5,7 +5,7 @@ use std::{
 };
 
 use astra_core::Hash256;
-use astra_emu_musica::REQUIRED_ARCHIVE_ROLES;
+use astra_emu_musica_keys::REQUIRED_ARCHIVE_ROLES;
 use serde::Serialize;
 
 const MAX_SCANNED_FILES: usize = 100_000;

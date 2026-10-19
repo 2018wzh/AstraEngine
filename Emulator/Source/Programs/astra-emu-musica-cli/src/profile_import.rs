@@ -1,6 +1,6 @@
 //! Developer-only conversions into the production key.toml schema.
 //! Source parsers never initialize a core, modify a game, or select another key.
-use astra_emu_musica::MusicaKeyFile;
+use astra_emu_musica_keys::MusicaKeyFile;
 use std::{fs, io::ErrorKind, path::Path};
 
 mod garbro;

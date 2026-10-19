@@ -253,6 +253,7 @@ impl Importer {
                     usage: wgpu::TextureUsages::COPY_SRC,
                     view_formats: &[],
                 },
+                wgpu::TextureUses::UNINITIALIZED,
             )
         };
         let imported = Arc::new(Imported {

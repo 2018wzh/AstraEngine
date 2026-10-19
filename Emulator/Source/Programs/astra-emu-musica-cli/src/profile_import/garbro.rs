@@ -5,8 +5,8 @@ use std::{
     path::Path,
 };
 
-use astra_emu_musica::{
-    MUSICA_KEY_SCHEMA, MusicaArchiveKey, MusicaKeyFile, REQUIRED_ARCHIVE_ROLES,
+use astra_emu_musica_keys::{
+    MusicaArchiveKey, MusicaKeyFile, MUSICA_KEY_SCHEMA, REQUIRED_ARCHIVE_ROLES,
 };
 use flate2::read::ZlibDecoder;
 

@@ -1,7 +1,8 @@
 use crate::test_fixture as fixture;
-use crate::{audio::Audio, mount_musica, scene::core_error, MusicaVm, MUSICA_KEY_FILE};
+use crate::{audio::Audio, mount_musica, scene::core_error, MusicaVm};
 use abi_stable::{std_types::ROption, type_level::downcasting::TD_Opaque};
 use astra_emu_family_api::*;
+use astra_emu_musica_keys::MUSICA_KEY_FILE;
 use std::{
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},

@@ -34,7 +34,7 @@ Library SQLite schema 4 分别保存资料库、外观、全局手柄映射、�
 
 Host 直接处理 Family 最终帧，交付缩放、锐化、Anime4K Restore_S 与 Upscale_S。效果链可加载外部 Magpie 格式 HLSL 并调整参数。兼容范围固定在 Magpie revision `3396e1e000bbab050d098032dac04ba0250683ad` 的 format 4、上述效果所需指令；未知指令或能力显式报错。兼容解析和内建函数独立实现，不复制 Magpie GPL 实现。
 
-内置 Anime4K shader 从 MIT upstream revision `7684e9586f8dcc738af08a1cdceb024cc184f426` 独立移植，保留许可。使用固定 DXC 1.8.2502 和 hassle-rs 0.12 生成 SPIR-V，经 Naga 校验并转为 WGSL，再交给 wgpu 29；不走 unsafe passthrough。RGBA16F read/write storage texture 需要显式 device feature，最终输出 RGBA8 并与 Slint 共用 device。失败的新配置不生效，显示错误并保留之前有效配置。已完成的独立探测只证明编译与 GPU 多 pass 可行，不能替代产品集成和视觉测试。
+内置 Anime4K shader 从 MIT upstream revision `7684e9586f8dcc738af08a1cdceb024cc184f426` 独立移植，保留许可。使用固定 DXC 1.8.2502 和 hassle-rs 0.12 生成 SPIR-V，经 Naga 校验并转为 WGSL，再交给 wgpu 30；不走 unsafe passthrough。RGBA16F read/write storage texture 需要显式 device feature，最终输出 RGBA8 并与 Slint 共用 device。失败的新配置不生效，显示错误并保留之前有效配置。已完成的独立探测只证明编译与 GPU 多 pass 可行，不能替代产品集成和视觉测试。
 
 
 ## 交付边界

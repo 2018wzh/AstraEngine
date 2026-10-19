@@ -19,7 +19,7 @@ astra-vn-core + astra-vn-system
 
 `astra-ui-core` 只保存 typed input、semantic、action、theme、texture 和 mesh DTO；live frame 不经过 JSON/postcard，package/Evidence 冷路径才编码对应 persisted DTO。`astra-vn-ui` 保存 VN ViewModel builder、binding resolver、action router 和 Controller host。`astra-ui-yakui` 只做通用 Yakui adapter；`astra-vn-ui-yakui` 实现 Message、Choice、SaveSlot、Backlog、GalleryCard、RouteChart 和 AstraText 等 VN widget。
 
-Yakui、Slint、taffy、wgpu、winit 类型不得从 adapter crate 的 public product contract 泄漏。AstraEMU 使用独立 `astra-emu-manager-ui-slint` adapter；Slint host 持有 winit event loop、surface 和同一套 wgpu 29.0.4 `Device`/`Queue`，family 只输出 renderer-neutral DTO。
+Yakui、Slint、taffy、wgpu、winit 类型不得从 adapter crate 的 public product contract 泄漏。AstraEMU 使用独立 `astra-emu-manager-ui-slint` adapter；Slint host 持有 winit event loop、surface 和同一套 wgpu 30.0.1 `Device`/`Queue`，family 只输出 renderer-neutral DTO。
 
 ## Script 编译
 

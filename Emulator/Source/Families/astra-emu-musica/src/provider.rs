@@ -4,10 +4,11 @@ use crate::{
     scene::{core_error, error, Scene},
     session::MusicaSession,
     storage::Storage,
-    MusicaVm, ScriptEncoding, MUSICA_KEY_FILE,
+    MusicaVm, ScriptEncoding,
 };
 use abi_stable::std_types::ROption;
 use astra_emu_family_api::*;
+use astra_emu_musica_keys::MUSICA_KEY_FILE;
 use std::{
     path::{Component, Path},
     sync::{
@@ -192,7 +193,7 @@ impl FamilyProvider for MusicaProvider {
     fn probe(&self, request: ProbeRequest) -> FamilyResult<Option<ProbeReport>> {
         request.validate()?;
         let root = Path::new(request.game_path.as_str());
-        if !crate::REQUIRED_ARCHIVE_ROLES
+        if !astra_emu_musica_keys::REQUIRED_ARCHIVE_ROLES
             .iter()
             .all(|r| root.join(format!("{r}.paz")).is_file())
         {

@@ -27,14 +27,13 @@ use sha2::{Digest, Sha256};
 use crate::archive::{CacheIdentity, PlaintextCache, PlaintextCacheError};
 
 use crate::{MUSICA_DECRYPT_DESCRIPTOR_SCHEMA, MUSICA_DECRYPT_PROVIDER_ID, MUSICA_READER_ID};
+use astra_emu_musica_keys::REQUIRED_ARCHIVE_ROLES;
 
 type PazError = crate::CoreError;
 
 #[cfg(any(feature = "ffmpeg-vcpkg", test))]
 mod movie_stream;
 
-pub const REQUIRED_ARCHIVE_ROLES: [&str; 8] =
-    ["bg", "bgm", "scr", "st", "sys", "se", "voice", "mov"];
 pub const MAX_INDEX_BYTES: u64 = 256 * 1024 * 1024;
 pub const MAX_ENTRY_BYTES: u64 = 1024 * 1024 * 1024;
 

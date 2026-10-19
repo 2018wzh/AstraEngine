@@ -28,7 +28,7 @@ impl AstraEmuManagerController {
         else {
             return self.model();
         };
-        astra_emu_musica::load_musica_key_file(&path).map_err(|error| error.to_string())?;
+        astra_emu_musica_keys::load_musica_key_file(&path).map_err(|e| e.to_string())?;
         let path = fs::canonicalize(path).map_err(|error| error.to_string())?;
         let path = path.to_str().ok_or("ASTRA_EMU_MUSICA_KEY_PATH_UTF8")?;
         let game_id = self.selected_game()?.game_id;

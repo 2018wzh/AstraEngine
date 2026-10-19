@@ -182,7 +182,7 @@ unsafe extern "C" fn probe(
             return Err(invalid(abi::INVALID_ARGUMENT));
         }
         let root = std::path::Path::new(unsafe { path.text(32768) }.map_err(invalid)?);
-        if !crate::REQUIRED_ARCHIVE_ROLES
+        if !astra_emu_musica_keys::REQUIRED_ARCHIVE_ROLES
             .iter()
             .all(|role| root.join(format!("{role}.paz")).is_file())
         {

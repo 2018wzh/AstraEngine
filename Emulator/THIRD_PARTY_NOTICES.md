@@ -2,7 +2,7 @@
 
 本文件随 AstraEMU Windows 应用分发。发布包还需包含活动依赖的完整许可证文本；以下条目记录需要单独保留的来源与归因。
 
-## Slint 1.17.1
+## Slint 1.18.1
 
 - Copyright © SixtyFPS GmbH.
 - License mode: Slint Royalty-free Desktop, Mobile, and Web Applications License 2.0.

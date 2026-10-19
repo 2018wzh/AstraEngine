@@ -1,5 +1,5 @@
-use astra_emu_musica::{
-    MUSICA_KEY_SCHEMA, MusicaArchiveKey, MusicaKeyFile, REQUIRED_ARCHIVE_ROLES,
+use astra_emu_musica_keys::{
+    MusicaArchiveKey, MusicaKeyFile, MUSICA_KEY_SCHEMA, REQUIRED_ARCHIVE_ROLES,
 };
 use serde::Deserialize;
 use std::{
@@ -176,7 +176,7 @@ mod tests {
         let bytes = fixture();
         std::fs::write(&source, &bytes).unwrap();
         import_key_profile(&source, 2, 123, false, &output).unwrap();
-        let imported = astra_emu_musica::load_musica_key_file(&output).unwrap();
+        let imported = astra_emu_musica_keys::load_musica_key_file(&output).unwrap();
         assert_eq!(imported.paz_version, 2);
         assert_eq!(imported.index_size_xor, 123);
         assert!(!imported.rc4_skip_crc);
