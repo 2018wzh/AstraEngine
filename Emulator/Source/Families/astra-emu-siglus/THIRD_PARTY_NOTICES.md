@@ -6,8 +6,9 @@ Git submodule of [`xmoezzz/siglus_rs`](https://github.com/xmoezzz/siglus_rs)
 pinned by exact gitlink to the published adaptation of the
 [`2018wzh/siglus_rs`](https://github.com/2018wzh/siglus_rs) fork: upstream
 revision `5f358ef1360b0439e92aed2b749e8f25d8721954` (1.0.0), historical native lifecycle
-baseline `13b55b47484faf8dfe03deb6ffd56ca0ec4ba3f2`, and current published `astra`
-revision [`23d082a76dfcb071224056858c49abd53f63cbc3`](https://github.com/2018wzh/siglus_rs/commit/23d082a76dfcb071224056858c49abd53f63cbc3),
+baseline `13b55b47484faf8dfe03deb6ffd56ca0ec4ba3f2`, and current `astra` revision
+[`aed3cbc5a9e5029b2ecbe33c2b114537f94ef5b3`](https://github.com/2018wzh/siglus_rs/commit/aed3cbc5a9e5029b2ecbe33c2b114537f94ef5b3)
+(ABI 3 port on top of the previously published `23d082a76dfcb071224056858c49abd53f63cbc3`),
 for an unofficial Rust reimplementation of SiglusEngine. Adapter
 `a94565cccd4f6d5e0a341e5732c5d98e9de2c71f` and its tree-equivalent Release source
 `a67786e80e663e982605e69164ac6bc7d0b148ee` are historical, not the current build source.
