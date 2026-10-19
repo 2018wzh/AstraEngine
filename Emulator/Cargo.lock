@@ -743,7 +743,7 @@ dependencies = [
 
 [[package]]
 name = "astra-emu-manager"
-version = "0.1.0"
+version = "0.1.0-beta.1"
 dependencies = [
  "astra-emu-abi",
  "astra-emu-fvp",
@@ -919,7 +919,7 @@ dependencies = [
 
 [[package]]
 name = "astra-emu-patch-cli"
-version = "0.1.0"
+version = "0.1.0-beta.1"
 dependencies = [
  "astra-emu-patch",
  "clap",

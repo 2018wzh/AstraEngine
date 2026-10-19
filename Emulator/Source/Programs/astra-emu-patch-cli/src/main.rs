@@ -16,6 +16,7 @@ use std::{
 #[derive(Parser)]
 #[command(
     name = "astra-emu-patch",
+    version,
     about = "Apply trusted offline Luau file patches"
 )]
 struct Arguments {

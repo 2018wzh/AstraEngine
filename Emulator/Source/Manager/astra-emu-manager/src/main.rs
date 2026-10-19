@@ -14,6 +14,7 @@ use std::process::ExitCode;
 const FAMILY_OWNER_STACK_BYTES: usize = 8 * 1024 * 1024;
 
 #[derive(Parser)]
+#[command(version)]
 struct Arguments {
     #[command(subcommand)]
     extension: Option<ExtensionCommand>,
