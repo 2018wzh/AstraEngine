@@ -22,7 +22,7 @@ or second application event loop. Audio uses the original OpenAL playback device
   The eleven-file retained native seam is the origin of `native/`; `HostAudio.h`
   and the private process ABI exports were removed by this cutover.
 - `native/include/astra_emu.h` is the generated shared header at AstraEngine
-  `15a39a626b1316cb6137a75e17e14a2ff2d1ba88` (ABI v2). Regenerate/copy it with the shared
+  `6799938dc33b25bcca4d9a11ddbea1366bf7d93c` (ABI v3). Regenerate/copy it with the shared
   crate whenever that ABI revision changes; do not edit the header independently.
 - The Astra-specific C++ adapter lives in this main-repository `native/`
   directory. The fork supplies retained build/platform seams and general
@@ -71,6 +71,9 @@ are unchanged. Never run acceptance against the sole commercial save copy.
 Only compiled original plugins are registered; arbitrary legacy TPM/DLL loading
 is not introduced. Unsupported platform requests fail instead of inventing a
 modal answer. No text-hook capability is advertised.
+The descriptor names the emulator `KiriKiri2` and the engine `KiriKiri`. It
+declares no configuration and no render-extent capability; open rejects a
+nonzero `render_extent` with `KRKR_RENDER_EXTENT_UNSUPPORTED`.
 
 Host request failures retain their original typed status, code and message for
 the current native operation. If TJS catches a window failure and then requests

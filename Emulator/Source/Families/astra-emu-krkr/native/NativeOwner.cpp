@@ -68,7 +68,7 @@ AstraEmuSurfaceInfo surface(AstraKrkrFrameInfo f) {
     // TVPWindowLayer::UpdateDrawBuffer presents this same final texture with
     // BlendFunc::DISABLE. Preserve that RGB presentation, not layer compositing.
     return {AstraEmuSURFACE_CPU, AstraEmuPIXEL_RGBA8, AstraEmuCOLOR_SRGB,
-        AstraEmuALPHA_IGNORED, AstraEmuROWS_TOP_DOWN, 0,
+        AstraEmuALPHA_IGNORED, AstraEmuROWS_TOP_DOWN,
         {f.logical_width, f.logical_height}, {f.width, f.height}, f.stride};
 }
 struct Frames;
@@ -353,7 +353,8 @@ AstraEmuStatus describe(AstraEmuDescriptor *out, AstraEmuError *e) noexcept {
     return boundary(e, [&] {
         require(out, "KRKR_DESCRIPTOR_NULL");
         static const AstraEmuBytes formats[] = {literal("xp3"), literal("tjs")};
-        *out = {{sizeof(*out), AstraEmuABI_VERSION}, literal("krkr"), literal("astra-emu-krkr"), literal("0.1.0"), AstraEmuCAP_CPU_SURFACE, formats, 2, nullptr, 0};
+        *out = {{sizeof(*out), AstraEmuABI_VERSION}, literal("krkr"), literal("astra-emu-krkr"), literal("0.1.0"), AstraEmuCAP_CPU_SURFACE, formats, 2, nullptr, 0,
+            literal("KiriKiri2"), literal("KiriKiri"), {}};
     });
 }
 AstraEmuStatus probe(AstraEmuBytes path, AstraEmuProbeResult *out, AstraEmuError *e) noexcept {
@@ -378,6 +379,7 @@ AstraEmuStatus open(const AstraEmuOpenRequest *r, AstraEmuOpenResult *out, Astra
         require(r->host.header.size >= sizeof(r->host) && r->host.header.version == AstraEmuABI_VERSION && r->host.cancellation.is_cancelled, "KRKR_HOST_HEADER");
         require(!r->host.window.request || r->host.window.invalidate, "KRKR_WINDOW_CANCELLATION_REQUIRED");
         require(!r->configuration_count, "KRKR_CONFIGURATION_UNSUPPORTED", AstraEmuUNSUPPORTED);
+        require(!r->render_extent.width && !r->render_extent.height, "KRKR_RENDER_EXTENT_UNSUPPORTED");
         window_state(r->window);
         require(!runtime_poisoned.load(), "KRKR_PREVIOUS_TEARDOWN_FAILED", AstraEmuINVALID_STATE);
         require(!occupied.exchange(true), "KRKR_SESSION_ACTIVE", AstraEmuINVALID_STATE);
