@@ -36,10 +36,17 @@ impl AstraEmuManagerController {
     }
 
     fn poll_owner(&mut self) -> Result<bool, String> {
-        let Some(active) = self.active.as_mut() else {
+        let Some(epoch) = self.active.as_ref().map(|active| active.epoch) else {
             return Ok(false);
         };
-        let Some(update) = self.registry.take_update(active.epoch) else {
+        let Some(update) = self.registry.take_update(epoch) else {
+            return Ok(false);
+        };
+        if let Some(error) = update.action_error {
+            self.action_message = astra_emu_manager_ui_slint::describe_error(&error).title;
+            self.action_serial = self.action_serial.saturating_add(1);
+        }
+        let Some(active) = self.active.as_mut() else {
             return Ok(false);
         };
         active.failure = update.failure;

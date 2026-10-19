@@ -49,6 +49,7 @@ impl AstraEmuManagerController {
         self.family_options
             .insert("manager.config_scope".into(), "game".into());
         self.diagnostic = "已为当前游戏应用 key.toml；原始文件未修改。".into();
+        self.diagnostic_severity = "success";
         self.model()
     }
 }

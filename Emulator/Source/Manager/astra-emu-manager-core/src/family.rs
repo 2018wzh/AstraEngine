@@ -27,6 +27,13 @@ pub enum FamilyCapability {
     TextReplacement,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionMenuEntry {
+    pub control: u32,
+    pub icon: u32,
+    pub label: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FamilyPluginDescriptor {

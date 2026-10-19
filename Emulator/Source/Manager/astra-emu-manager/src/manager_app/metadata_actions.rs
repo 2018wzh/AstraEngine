@@ -192,6 +192,7 @@ impl AstraEmuManagerController {
         self.pending_metadata
             .insert(request_id, PendingMetadata { game_id: None });
         self.diagnostic = "Compatibility refresh queued".into();
+        self.diagnostic_severity = "info";
         self.model()
     }
 

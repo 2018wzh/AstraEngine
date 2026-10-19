@@ -91,6 +91,35 @@
 
 #define AstraEmuMODULE_OWNER_VERSION 1
 
+#define AstraEmuSESSION_MENU_VERSION 1
+
+/**
+ * Core-defined control commands start here; built-in CONTROL_* stay below.
+ */
+#define AstraEmuCONTROL_CORE_BASE 4096
+
+#define AstraEmuSESSION_MENU_MAX_ITEMS 16
+
+#define AstraEmuSESSION_MENU_LABEL_MAX 64
+
+#define AstraEmuMENU_ICON_GENERIC 0
+
+#define AstraEmuMENU_ICON_QUICK_SAVE 1
+
+#define AstraEmuMENU_ICON_QUICK_LOAD 2
+
+#define AstraEmuMENU_ICON_SAVE 3
+
+#define AstraEmuMENU_ICON_LOAD 4
+
+#define AstraEmuMENU_ICON_AUTO 5
+
+#define AstraEmuMENU_ICON_SKIP 6
+
+#define AstraEmuMENU_ICON_BACKLOG 7
+
+#define AstraEmuMENU_ICON_SETTINGS 8
+
 #define AstraEmuLOG_ERROR 1
 
 #define AstraEmuLOG_WARN 2
@@ -727,6 +756,29 @@ typedef struct AstraEmuD3D12Api {
                             struct AstraEmuD3D12Frame*,
                             struct AstraEmuError*);
 } AstraEmuD3D12Api;
+
+/**
+ * One Host-invoked session control. `control` is unique and
+ * `>= CONTROL_CORE_BASE`. `label` is library-lifetime UTF-8.
+ */
+typedef struct AstraEmuSessionMenuItem {
+  uint32_t control;
+  uint32_t icon;
+  struct AstraEmuBytes label;
+} AstraEmuSessionMenuItem;
+
+/**
+ * Core-defined in-session menu. The table and labels are library-lifetime,
+ * immutable, UTF-8. Invoking an item means the Host calls
+ * `CoreApi.control(session, item.control)`. Controls are `>= CONTROL_CORE_BASE`
+ * and unique. A core returns `INVALID_STATE` when the action is not possible
+ * now; this is not a session failure.
+ */
+typedef struct AstraEmuSessionMenuApi {
+  struct AstraEmuHeader header;
+  const struct AstraEmuSessionMenuItem *items;
+  size_t count;
+} AstraEmuSessionMenuApi;
 
 #define AstraEmuOK 0
 

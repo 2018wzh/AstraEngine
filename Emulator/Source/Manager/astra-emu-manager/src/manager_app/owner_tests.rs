@@ -241,3 +241,49 @@ fn reopen_is_admitted_only_after_consuming_closed_session() {
     assert!(harness.closed(next).error.is_none());
     harness.owner.shutdown().unwrap();
 }
+
+#[test]
+fn action_error_keeps_the_session_open() {
+    let mut harness = Harness::new(None, false);
+    let epoch = harness.open();
+    let _ = harness.frame();
+    harness.owner.action(epoch, 0x1002).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let update = loop {
+        if let Some(update) = harness.owner.take_update(epoch) {
+            if update.action_error.is_some() || update.closed {
+                break update;
+            }
+        }
+        assert!(Instant::now() < deadline, "action error did not arrive");
+        let _ = harness.wake.recv_timeout(Duration::from_millis(10));
+    };
+    assert!(update.action_error.is_some());
+    assert!(!update.closed);
+    harness.owner.action(epoch, 0x1001).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let controls = harness
+            .calls
+            .lock()
+            .iter()
+            .filter(|call| call.name == "control")
+            .count();
+        if controls >= 2 {
+            break;
+        }
+        if let Some(update) = harness.owner.take_update(epoch) {
+            assert!(update.action_error.is_none());
+            assert!(!update.closed);
+        }
+        assert!(Instant::now() < deadline, "successful action did not run");
+        let _ = harness.wake.recv_timeout(Duration::from_millis(10));
+    }
+    if let Some(update) = harness.owner.take_update(epoch) {
+        assert!(update.action_error.is_none());
+        assert!(!update.closed);
+    }
+    harness.owner.close(epoch, Vec::new()).unwrap();
+    assert!(harness.closed(epoch).error.is_none());
+    harness.owner.shutdown().unwrap();
+}

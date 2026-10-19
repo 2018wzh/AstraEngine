@@ -1,47 +1,16 @@
 use super::*;
 
 impl AstraEmuManagerController {
-    fn update_appearance(
+    pub(super) fn set_appearance(
         &mut self,
-        update: impl FnOnce(&mut astra_emu_manager_core::AppearanceSettings),
-    ) -> Result<(), String> {
-        let mut candidate = self.appearance.clone();
-        update(&mut candidate);
-        candidate.validate()?;
+        settings: astra_emu_manager_core::AppearanceSettings,
+    ) -> Result<ManagerViewModel, String> {
+        settings.validate()?;
         self.library
-            .save_appearance_settings(&candidate)
+            .save_appearance_settings(&settings)
             .map_err(|e| e.to_string())?;
-        self.appearance = candidate;
-        Ok(())
-    }
-
-    pub(super) fn set_theme(&mut self, dark: bool) -> Result<(), String> {
-        self.update_appearance(|settings| {
-            settings.theme_dark = dark;
-            settings.theme_mode = if dark { "dark" } else { "light" }.into();
-        })
-    }
-    pub(super) fn set_grid_columns(&mut self, columns: i32) -> Result<(), String> {
-        self.update_appearance(|settings| settings.grid_columns = columns)
-    }
-    pub(super) fn set_theme_mode(&mut self, mode: &str) -> Result<(), String> {
-        self.update_appearance(|settings| {
-            settings.theme_mode = mode.into();
-            match mode {
-                "dark" => settings.theme_dark = true,
-                "light" => settings.theme_dark = false,
-                _ => {}
-            }
-        })
-    }
-    pub(super) fn set_accent(&mut self, accent: &str) -> Result<(), String> {
-        self.update_appearance(|settings| settings.accent = accent.into())
-    }
-    pub(super) fn set_density(&mut self, density: &str) -> Result<(), String> {
-        self.update_appearance(|settings| settings.density = density.into())
-    }
-    pub(super) fn set_view_mode(&mut self, view_mode: &str) -> Result<(), String> {
-        self.update_appearance(|settings| settings.view_mode = view_mode.into())
+        self.appearance = settings;
+        self.model()
     }
 
     pub(super) fn family_config_changed(&mut self, key: &str, value: &str) -> Result<(), String> {

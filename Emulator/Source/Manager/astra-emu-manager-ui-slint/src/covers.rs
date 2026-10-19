@@ -10,9 +10,9 @@ use std::{
     time::SystemTime,
 };
 
-use crate::{GameCard, ManagerWindow};
+use crate::{App, GameCard, Library, ManagerWindow, Selection, Session};
 use parking_lot::{Condvar, Mutex};
-use slint::{Model, ModelTracker, VecModel};
+use slint::{ComponentHandle, Model, ModelTracker, VecModel};
 
 const IN_FLIGHT: usize = 4;
 const CACHE_SIZE: usize = 64;
@@ -37,8 +37,8 @@ struct Pixels {
     width: u32,
     height: u32,
     rgba: Vec<u8>,
+    tint: slint::Color,
 }
-
 enum Decoded {
     Missing,
     Unchanged(Stamp),
@@ -96,8 +96,8 @@ struct Cached {
     locator: String,
     stamp: Stamp,
     image: slint::Image,
+    tint: slint::Color,
 }
-
 #[derive(Default)]
 struct Demand {
     revision: u64,
@@ -123,8 +123,7 @@ impl Demand {
         request.revision == self.revision
             && self.desired.contains(&request.row)
             && card.is_some_and(|card| {
-                card.case_id.as_str() == request.case_id
-                    && card.cover_uri.as_str() == request.locator
+                card.id.as_str() == request.case_id && card.cover_uri.as_str() == request.locator
             })
     }
 
@@ -184,7 +183,7 @@ impl CoverModel {
                 let weak = window.clone();
                 if slint::invoke_from_event_loop(move || {
                     if let Some(window) = weak.upgrade() {
-                        let model = window.get_games();
+                        let model = window.global::<Library>().get_games();
                         if let Some(covers) = model.as_any().downcast_ref::<CoverModel>() {
                             covers.complete(request, decoded, &window);
                         }
@@ -209,7 +208,7 @@ impl CoverModel {
         *self.indices.borrow_mut() = cards
             .iter()
             .enumerate()
-            .map(|(row, card)| (card.case_id.to_string(), row))
+            .map(|(row, card)| (card.id.to_string(), row))
             .collect();
         self.rows.set_vec(cards);
         self.demand
@@ -223,9 +222,9 @@ impl CoverModel {
     }
 
     pub(crate) fn refresh(&self, window: &ManagerWindow) {
-        if !window.get_cover_loading_enabled()
-            || window.get_game_active()
-            || window.get_current_page() != "library"
+        if !window.global::<Library>().get_cover_loading()
+            || window.global::<Session>().get_active()
+            || window.global::<App>().get_page() != "library"
         {
             self.update_demand(window);
             return;
@@ -265,17 +264,18 @@ impl CoverModel {
     }
 
     fn update_demand(&self, window: &ManagerWindow) {
-        let enabled = window.get_cover_loading_enabled()
-            && window.get_current_page() == "library"
-            && !window.get_game_active();
+        let enabled = window.global::<Library>().get_cover_loading()
+            && window.global::<App>().get_page() == "library"
+            && !window.global::<Session>().get_active();
         let mut desired = BTreeSet::new();
         if enabled {
             let demand = self.demand.borrow();
-            if let Some(visible) = demand.visible.get(window.get_view_mode().as_str()) {
+            let view_mode = window.global::<App>().get_appearance().view_mode;
+            if let Some(visible) = demand.visible.get(view_mode.as_str()) {
                 let indices = self.indices.borrow();
                 desired.extend(visible.values().filter_map(|id| indices.get(id).copied()));
             }
-            let selected = window.get_selected_case_id();
+            let selected = window.global::<Library>().get_selected_id();
             if !selected.is_empty() {
                 if let Some(row) = self.indices.borrow().get(selected.as_str()) {
                     desired.insert(*row);
@@ -303,6 +303,7 @@ impl CoverModel {
         for row in removed {
             if let Some(mut card) = self.rows.row_data(row) {
                 card.cover = slint::Image::default();
+                card.tint = slint::Color::default();
                 self.rows.set_row_data(row, card);
             }
         }
@@ -334,7 +335,7 @@ impl CoverModel {
             self.shared.push(Request {
                 revision: demand.revision,
                 row,
-                case_id: card.case_id.to_string(),
+                case_id: card.id.to_string(),
                 locator: card.cover_uri.to_string(),
                 previous,
             });
@@ -346,7 +347,7 @@ impl CoverModel {
         let Some(mut card) = self.rows.row_data(request.row) else {
             return;
         };
-        let image = {
+        let (image, tint) = {
             let mut demand = self.demand.borrow_mut();
             if request.revision != demand.revision {
                 return;
@@ -360,13 +361,13 @@ impl CoverModel {
             demand.completed.insert(request.row);
             match decoded {
                 Decoded::Image(stamp, pixels) => {
-                    // Only the bounded thumbnail crosses into Slint's shared allocation.
                     let buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(
                         &pixels.rgba,
                         pixels.width,
                         pixels.height,
                     );
                     let image = slint::Image::from_rgba8(buffer);
+                    let tint = pixels.tint;
                     demand
                         .cache
                         .retain(|entry| entry.locator != request.locator);
@@ -374,11 +375,12 @@ impl CoverModel {
                         locator: request.locator,
                         stamp,
                         image: image.clone(),
+                        tint,
                     });
                     while demand.cache.len() > CACHE_SIZE {
                         demand.cache.pop_front();
                     }
-                    image
+                    (image, tint)
                 }
                 Decoded::Unchanged(stamp) => {
                     if let Some(index) = demand
@@ -388,38 +390,43 @@ impl CoverModel {
                     {
                         let entry = demand.cache.remove(index).unwrap();
                         let image = entry.image.clone();
+                        let tint = entry.tint;
                         demand.cache.push_back(entry);
-                        image
+                        (image, tint)
                     } else {
-                        // An LRU eviction during validation needs a decode, not a lost cover.
                         demand.completed.remove(&request.row);
-                        slint::Image::default()
+                        (slint::Image::default(), slint::Color::default())
                     }
                 }
                 Decoded::Missing | Decoded::Failed(_) => {
                     demand
                         .cache
                         .retain(|entry| entry.locator != request.locator);
-                    slint::Image::default()
+                    (slint::Image::default(), slint::Color::default())
                 }
             }
         };
         card.cover = image;
+        card.tint = tint;
         self.rows.set_row_data(request.row, card);
         self.update_inspector(window);
         self.pump();
     }
 
     fn update_inspector(&self, window: &ManagerWindow) {
-        let selected = window.get_selected_case_id();
-        let cover = self
+        let selected = window.global::<Library>().get_selected_id();
+        let card = self
             .indices
             .borrow()
             .get(selected.as_str())
-            .and_then(|row| self.rows.row_data(*row))
-            .map(|card| card.cover)
+            .and_then(|row| self.rows.row_data(*row));
+        let cover = card
+            .as_ref()
+            .map(|card| card.cover.clone())
             .unwrap_or_default();
-        window.set_selected_cover(cover);
+        let tint = card.map(|card| card.tint).unwrap_or_default();
+        window.global::<Selection>().set_cover(cover);
+        window.global::<Selection>().set_tint(tint);
     }
 }
 
@@ -486,6 +493,34 @@ fn resolve(locator: &str) -> Result<Option<Stamp>, &'static str> {
     Ok(None)
 }
 
+fn cover_tint(rgba: &[u8]) -> slint::Color {
+    let mut weighted_r = 0.0_f32;
+    let mut weighted_g = 0.0_f32;
+    let mut weighted_b = 0.0_f32;
+    let mut total = 0.0_f32;
+    for pixel in rgba.as_chunks::<4>().0 {
+        let r = f32::from(pixel[0]);
+        let g = f32::from(pixel[1]);
+        let b = f32::from(pixel[2]);
+        let a = f32::from(pixel[3]);
+        let max = r.max(g).max(b);
+        let min = r.min(g).min(b);
+        let weight = (a / 255.0) * (1.0 + 4.0 * (max - min) / 255.0);
+        weighted_r += r * weight;
+        weighted_g += g * weight;
+        weighted_b += b * weight;
+        total += weight;
+    }
+    if total == 0.0 {
+        return slint::Color::from_argb_u8(0, 0, 0, 0);
+    }
+    slint::Color::from_rgb_u8(
+        (weighted_r / total).round() as u8,
+        (weighted_g / total).round() as u8,
+        (weighted_b / total).round() as u8,
+    )
+}
+
 fn decode(request: &Request) -> Decoded {
     let before = match resolve(&request.locator) {
         Ok(Some(stamp)) => stamp,
@@ -520,10 +555,15 @@ fn decode(request: &Request) -> Decoded {
         if resolve(&request.locator)?.as_ref() != Some(&before) {
             return Err("cover_changed_during_decode");
         }
+        let width = rgba.width();
+        let height = rgba.height();
+        let raw = rgba.into_raw();
+        let tint = cover_tint(&raw);
         Ok(Pixels {
-            width: rgba.width(),
-            height: rgba.height(),
-            rgba: rgba.into_raw(),
+            width,
+            height,
+            rgba: raw,
+            tint,
         })
     })();
     match result {
@@ -545,6 +585,19 @@ mod tests {
             locator: format!("cover-{row}"),
             previous: None,
         }
+    }
+
+    #[test]
+    fn cover_tint_weights_saturated_red_over_gray() {
+        assert_eq!(
+            cover_tint(&[255, 0, 0, 255, 128, 128, 128, 255]),
+            slint::Color::from_rgb_u8(234, 21, 21)
+        );
+    }
+
+    #[test]
+    fn cover_tint_ignores_transparent_pixels() {
+        assert_eq!(cover_tint(&[1, 2, 3, 0]).alpha(), 0);
     }
 
     #[test]
@@ -627,15 +680,15 @@ mod tests {
             ..Demand::default()
         };
         let mut card = GameCard {
-            case_id: "game-0".into(),
+            id: "game-0".into(),
             cover_uri: "cover-0".into(),
             ..GameCard::default()
         };
         assert!(demand.accepts(&request, Some(&card)));
         assert!(!demand.accepts(&request, None));
-        card.case_id = "game-1".into();
+        card.id = "game-1".into();
         assert!(!demand.accepts(&request, Some(&card)));
-        card.case_id = "game-0".into();
+        card.id = "game-0".into();
         card.cover_uri = "replacement".into();
         assert!(!demand.accepts(&request, Some(&card)));
         card.cover_uri = "cover-0".into();
@@ -650,7 +703,7 @@ mod tests {
     fn refresh_during_decode_revalidates_after_the_current_batch() {
         let old = request(0, 3);
         let card = GameCard {
-            case_id: "game-0".into(),
+            id: "game-0".into(),
             cover_uri: "cover-0".into(),
             ..GameCard::default()
         };

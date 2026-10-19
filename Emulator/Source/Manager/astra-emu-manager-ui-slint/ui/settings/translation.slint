@@ -1,141 +1,212 @@
-// Translation settings sub-page - migrated from legacy TranslationSettings.
-
-import { Button, ComboBox, LineEdit, ScrollView, SpinBox, TextEdit } from "std-widgets.slint";
+import { ComboBox, LineEdit, ScrollView, SpinBox } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
-import { Icon, Icons } from "../components/icons.slint";
-import { SettingsSectionHeader, SettingsDivider } from "../components/settings-card.slint";
-import { ConfigField, GenericConfigForm } from "../components/generic-config.slint";
-import { M3Button, M3Card } from "../components/m3-widgets.slint";
+import { Settings } from "../globals.slint";
+import { Card, PillButton, SwitchRow, Segmented, SettingRow } from "../components/controls.slint";
 
 export component TranslationSettingsPage inherits Rectangle {
-    in-out property <string> endpoint-kind;
-    in-out property <string> endpoint;
-    in-out property <string> protocol;
-    in-out property <string> model;
-    in-out property <string> target-language;
-    in-out property <int> timeout-ms;
-    in-out property <string> secret-input;
-    in property <bool> consent-present;
-    in-out property <bool> expert-mode: false;
-    callback save(string, string, string, string, string, int, string);
-    callback grant-consent();
-    callback test-connection();
+    background: Theme.surface;
+    private property <bool> advanced: false;
+    property <[string]> kind-labels: ["OpenAI 兼容服务", "OpenAI 官方", "ECNU 服务", "其他第三方服务"];
+    property <[string]> kind-values: ["openai-compatible", "openai", "ecnu", "third_party"];
 
-    background: Theme.background;
+    pure function kind-index(kind: string) -> int {
+        return kind == "openai" ? 1 : kind == "ecnu" ? 2 : kind == "third_party" ? 3 : 0;
+    }
+    pure function kind-from-label(label: string) -> string {
+        return label == "OpenAI 官方" ? "openai" : label == "ECNU 服务" ? "ecnu" : label == "其他第三方服务" ? "third_party" : "openai-compatible";
+    }
 
     ScrollView {
         mouse-drag-pan-enabled: true;
-
         VerticalLayout {
-            padding: 20px;
-            spacing: 12px;
-
-            SettingsSectionHeader { title: "Provider profile"; }
+            padding: 24px;
+            spacing: 16px;
+            alignment: start;
 
             Text {
-                text: "The endpoint, protocol and model are explicit. AstraEMU never switches them after a failure.";
-                color: Theme.text-muted;
-                wrap: word-wrap;
-                font-size: 12px;
+                text: "实时翻译";
+                color: Theme.on-surface;
+                font-size: Theme.headline;
+                font-weight: 700;
             }
 
-            // Simple / Expert toggle
-            Rectangle {
-                height: 36px;
-                border-radius: 18px;
-                background: Theme.surface-raised;
-                border-width: 1px;
-                border-color: Theme.border;
-
-                HorizontalLayout {
-                    padding: 3px;
-                    spacing: 3px;
-                    Rectangle {
-                        horizontal-stretch: 1;
-                        border-radius: 15px;
-                        background: !root.expert-mode ? Theme.primary : transparent;
-                        Text { text: "简易"; color: !root.expert-mode ? Theme.on-primary : Theme.text-muted; font-size: 13px; font-weight: !root.expert-mode ? 600 : 400; horizontal-alignment: center; vertical-alignment: center; }
-                        TouchArea { clicked => { root.expert-mode = false; } }
+            Card {
+                VerticalLayout {
+                    SettingRow {
+                        title: "服务类型";
+                        desc: "";
+                        divider: false;
+                        ComboBox {
+                            width: 200px;
+                            model: root.kind-labels;
+                            current-index: root.kind-index(Settings.translation.kind);
+                            selected(value) => {
+                                Settings.translation = {
+                                    kind: root.kind-from-label(value),
+                                    endpoint: Settings.translation.endpoint,
+                                    protocol: Settings.translation.protocol,
+                                    model: Settings.translation.model,
+                                    language: Settings.translation.language,
+                                    timeout-ms: Settings.translation.timeout-ms,
+                                };
+                            }
+                        }
                     }
-                    Rectangle {
-                        horizontal-stretch: 1;
-                        border-radius: 15px;
-                        background: root.expert-mode ? Theme.primary : transparent;
-                        Text { text: "专家"; color: root.expert-mode ? Theme.on-primary : Theme.text-muted; font-size: 13px; font-weight: root.expert-mode ? 600 : 400; horizontal-alignment: center; vertical-alignment: center; }
-                        TouchArea { clicked => { root.expert-mode = true; } }
+                    SettingRow {
+                        title: "接口地址";
+                        desc: "";
+                        LineEdit {
+                            width: 280px;
+                            text: Settings.translation.endpoint;
+                            placeholder-text: "https://…/v1";
+                            edited(value) => {
+                                Settings.translation = {
+                                    kind: Settings.translation.kind,
+                                    endpoint: value,
+                                    protocol: Settings.translation.protocol,
+                                    model: Settings.translation.model,
+                                    language: Settings.translation.language,
+                                    timeout-ms: Settings.translation.timeout-ms,
+                                };
+                            }
+                        }
+                    }
+                    SettingRow {
+                        title: "模型名称";
+                        desc: "必填";
+                        LineEdit {
+                            width: 220px;
+                            text: Settings.translation.model;
+                            placeholder-text: "必填";
+                            edited(value) => {
+                                Settings.translation = {
+                                    kind: Settings.translation.kind,
+                                    endpoint: Settings.translation.endpoint,
+                                    protocol: Settings.translation.protocol,
+                                    model: value,
+                                    language: Settings.translation.language,
+                                    timeout-ms: Settings.translation.timeout-ms,
+                                };
+                            }
+                        }
+                    }
+                    SettingRow {
+                        title: "目标语言";
+                        desc: "例如 zh-CN";
+                        LineEdit {
+                            width: 160px;
+                            text: Settings.translation.language;
+                            placeholder-text: "例如 zh-CN";
+                            edited(value) => {
+                                Settings.translation = {
+                                    kind: Settings.translation.kind,
+                                    endpoint: Settings.translation.endpoint,
+                                    protocol: Settings.translation.protocol,
+                                    model: Settings.translation.model,
+                                    language: value,
+                                    timeout-ms: Settings.translation.timeout-ms,
+                                };
+                            }
+                        }
+                    }
+                    SettingRow {
+                        title: "超时（毫秒）";
+                        desc: "";
+                        SpinBox {
+                            width: 140px;
+                            value: Settings.translation.timeout-ms;
+                            minimum: 1000;
+                            maximum: 120000;
+                            step-size: 1000;
+                            edited(value) => {
+                                Settings.translation = {
+                                    kind: Settings.translation.kind,
+                                    endpoint: Settings.translation.endpoint,
+                                    protocol: Settings.translation.protocol,
+                                    model: Settings.translation.model,
+                                    language: Settings.translation.language,
+                                    timeout-ms: value,
+                                };
+                            }
+                        }
+                    }
+                    SettingRow {
+                        title: "API 密钥";
+                        desc: "留空则保留已保存的密钥";
+                        LineEdit {
+                            width: 240px;
+                            text <=> Settings.translation-secret;
+                            input-type: password;
+                            placeholder-text: "留空则保留已保存的密钥";
+                        }
+                    }
+                    SwitchRow {
+                        label: "高级";
+                        description: "";
+                        checked <=> root.advanced;
+                    }
+                    if root.advanced : SettingRow {
+                        title: "协议";
+                        desc: "";
+                        HorizontalLayout {
+                            horizontal-stretch: 0;
+                            Segmented {
+                                items: ["Responses 接口", "Chat Completions 接口"];
+                                current: Settings.translation.protocol == "chat_completions" ? 1 : 0;
+                                segment-width: 160px;
+                                selected(i) => {
+                                    Settings.translation = {
+                                        kind: Settings.translation.kind,
+                                        endpoint: Settings.translation.endpoint,
+                                        protocol: i == 1 ? "chat_completions" : "responses",
+                                        model: Settings.translation.model,
+                                        language: Settings.translation.language,
+                                        timeout-ms: Settings.translation.timeout-ms,
+                                    };
+                                }
+                            }
+                        }
                     }
                 }
             }
-
-            Text { text: "Endpoint kind"; color: Theme.text-muted; font-size: 12px; }
-            ComboBox {
-                model: ["openai-compatible", "openai", "ecnu", "third_party"];
-                current-value: root.endpoint-kind;
-                selected(value) => { root.endpoint-kind = value; }
-            }
-
-            Text { text: "HTTPS API base URL"; color: Theme.text-muted; font-size: 12px; }
-            LineEdit { text <=> root.endpoint; placeholder-text: "https://…/v1"; }
-
-            Text { text: "Model"; color: Theme.text-muted; font-size: 12px; }
-            LineEdit { text <=> root.model; placeholder-text: "Required; no implicit default"; }
-
-            Text { text: "Target language"; color: Theme.text-muted; font-size: 12px; }
-            LineEdit { text <=> root.target-language; placeholder-text: "zh-CN"; }
-
-            if root.expert-mode : Text { text: "Protocol"; color: Theme.text-muted; font-size: 12px; }
-            if root.expert-mode : ComboBox {
-                model: ["responses", "chat_completions"];
-                current-index: root.protocol == "chat_completions" ? 1 : 0;
-                selected(value) => { root.protocol = value; }
-            }
-
-            Text { text: "上下文固定保留最近 8 段，最多 6000 字符；切换游戏、读档或配置变更时清空。"; color: Theme.text-muted; wrap: word-wrap; }
-            Text { text: "超时（毫秒）"; color: Theme.text-muted; }
-            SpinBox { value <=> root.timeout-ms; minimum: 1000; maximum: 120000; step-size: 1000; }
-
-            Text { text: "API credential"; color: Theme.text-muted; font-size: 12px; }
-            LineEdit { text <=> root.secret-input; input-type: password; placeholder-text: "Leave blank to keep the platform-stored credential"; }
 
             HorizontalLayout {
-                M3Button {
-                    text: "保存翻译提供方配置";
-                    icon: Icons.check;
-                    primary: true;
+                spacing: 8px;
+                Rectangle { horizontal-stretch: 1; }
+                PillButton {
+                    text: "保存";
+                    variant: "filled";
                     clicked => {
-                        root.save(root.endpoint-kind, root.endpoint, root.protocol, root.model, root.target-language, root.timeout-ms, root.secret-input);
-                        root.secret-input = "";
+                        Settings.save-translation(Settings.translation, Settings.translation-secret);
+                        Settings.translation-secret = "";
+                    }
+                }
+                PillButton {
+                    text: "测试连接";
+                    variant: "outlined";
+                    clicked => { Settings.test-translation(); }
+                }
+            }
+
+            Card {
+                VerticalLayout {
+                    padding: 16px;
+                    spacing: 12px;
+                    Text {
+                        text: Settings.translation-consent
+                            ? "已授权当前翻译服务。更改配置后需重新授权。"
+                            : "翻译服务会将当前游戏台词及上下文发送至指定的接口与模型。授权为全局生效。";
+                        color: Theme.on-variant;
+                        wrap: word-wrap;
+                        font-size: Theme.body-sm;
+                    }
+                    if !Settings.translation-consent : PillButton {
+                        text: "授予联网权限";
+                        variant: "tonal";
+                        clicked => { Settings.grant-translation-consent(); }
                     }
                 }
             }
-
-            Button { text: "测试已保存配置的连接"; clicked => { root.test-connection(); } }
-            SettingsDivider {}
-
-            SettingsSectionHeader { title: "网络访问授权"; }
-
-            Text {
-                text: root.consent-present
-                    ? "已授权当前提供方配置。更改配置后需重新授权。"
-                    : "翻译服务会将当前游戏台词及上下文发送至指定的端点与模型。授权为全局生效。";
-                color: Theme.on-surface-variant;
-                wrap: word-wrap;
-                font-size: Theme.font-body-sm;
-            }
-
-            if !root.consent-present : HorizontalLayout {
-                M3Button {
-                    text: "授予全局翻译网络权限";
-                    icon: Icons.shield;
-                    variant: "tonal";
-                    clicked => { root.grant-consent(); }
-                }
-            }
-
-            SettingsDivider {}
-
-
-
         }
     }
 }

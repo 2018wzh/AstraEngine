@@ -2,6 +2,7 @@ use super::*;
 use crate::{
     model::ProbeRequest,
     test_native::{self, Fixture},
+    SessionMenuEntry,
 };
 use std::path::Path;
 
@@ -97,4 +98,20 @@ fn repeated_core_directory_is_discovered_once() {
         .load_directories(&[directory.path().into(), directory.path().into()])
         .unwrap();
     assert_eq!(report.errors.len(), 1);
+}
+
+#[test]
+fn session_menu_is_copied_from_core_extension() {
+    let mut registry = FamilyProviderRegistry::new();
+    registry
+        .register_provider(test_native::install(0, Fixture::new("a", "fvp", "fvp.hcb")))
+        .unwrap();
+    assert_eq!(
+        registry.session_menu("a"),
+        [SessionMenuEntry {
+            control: 0x1001,
+            icon: 0,
+            label: "测试动作".into(),
+        }]
+    );
 }

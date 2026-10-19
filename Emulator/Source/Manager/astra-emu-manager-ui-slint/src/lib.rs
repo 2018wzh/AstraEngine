@@ -1,63 +1,139 @@
+mod adapter;
 mod config_model;
 mod covers;
-
-use std::rc::Rc;
-
-use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
+mod notices;
 
 slint::include_modules!();
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+pub use adapter::SlintManagerAdapter;
+pub use notices::{describe_error, report_error, ErrorText};
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ManagerViewModel {
+    pub library: LibraryViewModel,
+    pub selection: SelectionViewModel,
+    pub cores: CoresViewModel,
+    pub settings: SettingsViewModel,
+    pub appearance: AppearanceViewModel,
+    pub notices: Vec<NoticeViewModel>,
+    pub about: AboutViewModel,
+    pub session: SessionViewModel,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LibraryViewModel {
+    pub games: Vec<GameCardViewModel>,
+    pub query: String,
+    pub sort: String,
+    pub compat_filter: String,
+    pub cores_ready: bool,
+    pub can_load_cores: bool,
+    pub busy: bool,
+    pub status: String,
+    pub selected_id: String,
+}
+
+impl Default for LibraryViewModel {
+    fn default() -> Self {
+        Self {
+            games: Vec::new(),
+            query: String::new(),
+            sort: "title".into(),
+            compat_filter: "all".into(),
+            cores_ready: false,
+            can_load_cores: false,
+            busy: false,
+            status: String::new(),
+            selected_id: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct GameCardViewModel {
-    pub case_id: String,
+    pub id: String,
     pub title: String,
     pub family: String,
     pub cover_uri: String,
-    pub diagnostic: String,
+    pub problem: String,
     pub play_time: String,
     pub last_played: String,
-    /// Compatibility grade: "" | "perfect" | "completable" | "flawed" |
-    /// "boot_only" | "unplayable".
-    pub compatibility_status: String,
+    pub compat: String,
 }
 
-/// One finished play session row shown in the inspector history list.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SelectionViewModel {
+    pub id: String,
+    pub title: String,
+    pub family: String,
+    pub emulator: String,
+    pub launchable: bool,
+    pub problem: String,
+    pub play_time: String,
+    pub last_played: String,
+    pub developer: String,
+    pub release_date: String,
+    pub platforms: String,
+    pub engine: String,
+    pub description: String,
+    pub tags: String,
+    pub aliases: String,
+    pub compat: CompatViewModel,
+    pub releases: Vec<ReleaseViewModel>,
+    pub history: Vec<PlaySessionViewModel>,
+    pub matches: Vec<MatchViewModel>,
+    pub metadata_busy: bool,
+    pub metadata_status: String,
+    pub bangumi: BangumiViewModel,
+    pub engine_fields: Vec<ConfigFieldViewModel>,
+    pub family_fields: Vec<ConfigFieldViewModel>,
+    pub musica_key_available: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CompatViewModel {
+    pub status: String,
+    pub notes: String,
+    pub updated: String,
+    pub vndb_id: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ReleaseViewModel {
+    pub id: String,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct PlaySessionViewModel {
-    pub start_time: String,
+    pub started: String,
     pub duration: String,
     pub ended_by: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MatchReviewViewModel {
-    pub candidate_id: String,
-    pub case_id: String,
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct MatchViewModel {
+    pub id: String,
     pub provider: String,
-    pub remote_id: String,
     pub title: String,
     pub aliases: String,
     pub release_date: String,
     pub developer: String,
-    pub evidence: String,
-    pub score_millis: i32,
-    pub diagnostic: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct InputConfigViewModel {
-    pub gamepad_enabled: bool,
-    pub gamepad_deadzone: String,
-    pub gamepad_bindings: Vec<GamepadBindingViewModel>,
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct BangumiViewModel {
+    pub status: String,
+    pub rating: i32,
+    pub note: String,
+    pub summary: String,
 }
 
-/// Generic config field for Family/Extension/Filter schema-driven forms.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GenericConfigFieldViewModel {
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ConfigFieldViewModel {
     pub key: String,
     pub label: String,
     pub description: String,
-    /// "string" | "secret" | "integer" | "bool" | "enum"
     pub kind: String,
     pub value: String,
     pub enum_values: Vec<String>,
@@ -66,460 +142,156 @@ pub struct GenericConfigFieldViewModel {
     pub max: i32,
 }
 
-/// A single gamepad-input -> key-name binding row for the settings UI.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GamepadBindingViewModel {
-    pub button_id: String,
-    pub button_label: String,
-    pub key_name: String,
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CoresViewModel {
+    pub items: Vec<CoreViewModel>,
+    pub restart_required: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CoreViewModel {
+    pub key: String,
+    pub name: String,
+    pub monogram: String,
+    pub version: String,
+    pub capabilities: Vec<String>,
+    pub state: String,
+    pub source: String,
+    pub file: String,
+    pub message: String,
+    pub removable: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SettingsViewModel {
+    pub translation: TranslationViewModel,
+    pub translation_consent: bool,
+    pub vndb_enabled: bool,
+    pub bangumi_enabled: bool,
+    pub sensitive_covers: bool,
+    pub input: InputConfigViewModel,
+    pub filter_preset: String,
+    pub filter_fields: Vec<ConfigFieldViewModel>,
+    pub compat_source: String,
+    pub compat_summary: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TranslationViewModel {
+    pub kind: String,
+    pub endpoint: String,
+    pub protocol: String,
+    pub model: String,
+    pub language: String,
+    pub timeout_ms: i32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct InputConfigViewModel {
+    pub gamepad_enabled: bool,
+    pub deadzone: String,
+    pub bindings: Vec<GamepadBindingViewModel>,
 }
 
 impl Default for InputConfigViewModel {
     fn default() -> Self {
         Self {
             gamepad_enabled: true,
-            gamepad_deadzone: "medium".into(),
-            gamepad_bindings: Vec::new(),
+            deadzone: "medium".into(),
+            bindings: Vec::new(),
         }
     }
 }
 
-/// Theme / layout appearance preferences.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GamepadBindingViewModel {
+    pub id: String,
+    pub label: String,
+    pub key: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppearanceViewModel {
-    pub theme_dark: bool,
-    /// "dark" | "light" | "system"
     pub theme_mode: String,
-    /// "blue" | "purple"
-    pub accent: String,
-    pub grid_columns: i32,
-    /// "comfortable" | "compact"
     pub density: String,
-    /// "grid" | "list"
+    pub cover_size: String,
     pub view_mode: String,
+    pub reduce_motion: bool,
+    pub cover_badges: bool,
 }
 
 impl Default for AppearanceViewModel {
     fn default() -> Self {
         Self {
-            theme_dark: true,
             theme_mode: "system".into(),
-            accent: "blue".into(),
-            grid_columns: 3,
             density: "comfortable".into(),
+            cover_size: "medium".into(),
             view_mode: "grid".into(),
+            reduce_motion: false,
+            cover_badges: true,
         }
     }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct ManagerViewModel {
-    pub games: Vec<GameCardViewModel>,
-    pub match_reviews: Vec<MatchReviewViewModel>,
-    pub metadata_busy: bool,
-    pub metadata_status: String,
-    pub cores_ready: bool,
-    /// Enables the process's single manual core load; loaded DLLs require restart to replace.
-    pub core_refresh_enabled: bool,
-    pub startup_busy: bool,
-    pub startup_status: String,
-    pub selected_case_id: Option<String>,
-    pub search_query: String,
-    pub endpoint_identity: String,
-    pub model_identity: String,
-    pub global_diagnostic: String,
-    pub translation_endpoint_kind: String,
-    pub translation_endpoint: String,
-    pub translation_protocol: String,
-    pub translation_model: String,
-    pub translation_target_language: String,
-    pub translation_timeout_ms: i32,
-    pub translation_consent_present: bool,
-    pub filter_preset: String,
-    pub diagnostics_summary: String,
-    pub vndb_consent: bool,
-    pub bangumi_consent: bool,
-    pub sensitive_covers: bool,
-    pub bangumi_play_status: String,
-    pub bangumi_rating: i32,
-    pub bangumi_note: String,
-    pub bangumi_sync_summary: String,
-    // ===== New fields (UI redesign) =====
-    /// Inspector details for the selected game.
-    pub selected_title: String,
-    pub selected_family: String,
-    pub selected_emulator: String,
-    pub selected_launchable: bool,
-    pub selected_play_time: String,
-    pub selected_last_played: String,
-    /// Finished play sessions for the selected game, most recent first.
-    pub play_history: Vec<PlaySessionViewModel>,
-    /// Library sort mode: "title" | "recent" | "play_time".
-    pub library_sort: String,
-    /// Compatibility filter: "all" | "perfect" | "completable" | "flawed" |
-    /// "boot_only" | "unplayable" | "unknown".
-    pub compatibility_filter: String,
-    /// Configured compatibility database source URL (read-only in the UI).
-    pub compatibility_source_url: String,
-    /// Human-readable compatibility sync state (last fetch / entry count).
-    pub compatibility_sync_summary: String,
-    /// Compatibility details for the selected game.
-    pub selected_compatibility_status: String,
-    pub selected_compatibility_notes: String,
-    pub selected_compatibility_updated: String,
-    /// VNDB game/version identity: `vID / rID` (VNDB is the authoritative
-    /// source for compatibility).
-    pub selected_compatibility_vndb_id: String,
-    /// Selectable VNDB releases (rID + human label) used to pin the local
-    /// installation to a specific game version. `(release_id, label)`.
-    pub selected_releases: Vec<(String, String)>,
-    /// Navigation. Empty `current_page` means "do not change the current page".
-    pub current_page: String,
-    /// Input configuration.
-    pub input_config: InputConfigViewModel,
-    /// Appearance preferences.
-    pub appearance: AppearanceViewModel,
-    /// Common native render settings for the selected emulator (pre-filter input).
-    pub common_engine_config_fields: Vec<GenericConfigFieldViewModel>,
-    /// Generic Family config fields for selected game (schema-driven).
-    pub family_config_fields: Vec<GenericConfigFieldViewModel>,
-    pub musica_key_file_available: bool,
-    /// Generic Extension config fields (e.g. translate).
-    /// Generic Filter config fields.
-    pub filter_config_fields: Vec<GenericConfigFieldViewModel>,
-    /// About page metadata.
+pub struct NoticeViewModel {
+    pub id: String,
+    pub severity: String,
+    pub title: String,
+    pub detail: String,
+    pub code: String,
+    pub core: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct AboutViewModel {
     pub version: String,
-    pub build_identity: String,
-    /// Demo mode flag — when true title shows [DEMO] and no diagnostic mask.
-    pub is_demo: bool,
-    // ===== PotatoVN-style extended metadata (VNDB/Bangumi enriched) =====
-    pub selected_developer: String,
-    pub selected_release_date: String,
-    pub selected_platforms: String,
-    pub selected_engine: String,
-    pub selected_cover_meta: String,
-    pub selected_description: String,
-    pub selected_tags: String,
-    pub selected_aliases: String,
+    pub build: String,
 }
 
-/// Per-game fields whose change invalidates the rendered card list cache.
-type GameCardSignature = (String, String, String, String, String, String, String);
-
-pub struct SlintManagerAdapter {
-    window: ManagerWindow,
-    games: Rc<covers::CoverModel>,
-    reviews: Rc<VecModel<MatchReview>>,
-    play_history: Rc<VecModel<PlaySession>>,
-    releases: Rc<VecModel<ReleaseOption>>,
-    gamepad_bindings: Rc<VecModel<GamepadBinding>>,
-    common_engine_config: Rc<VecModel<ConfigField>>,
-    family_config: Rc<VecModel<ConfigField>>,
-    filter_config: Rc<VecModel<ConfigField>>,
-    cached_games_signature: std::cell::RefCell<Vec<GameCardSignature>>,
-    cached_common_engine_config: std::cell::RefCell<Vec<GenericConfigFieldViewModel>>,
-    cached_family_config: std::cell::RefCell<Vec<GenericConfigFieldViewModel>>,
-    cached_filter_config: std::cell::RefCell<Vec<GenericConfigFieldViewModel>>,
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SessionViewModel {
+    pub actions: Vec<EngineActionViewModel>,
+    pub action_message: String,
+    pub action_serial: u32,
 }
 
-impl SlintManagerAdapter {
-    pub fn new() -> Result<Self, slint::PlatformError> {
-        let window = ManagerWindow::new()?;
-        let games = Rc::new(covers::CoverModel::new(window.as_weak())?);
-        let reviews = Rc::new(VecModel::default());
-        let play_history = Rc::new(VecModel::default());
-        let releases = Rc::new(VecModel::default());
-        let gamepad_bindings = Rc::new(VecModel::default());
-        let common_engine_config = Rc::new(VecModel::default());
-        let family_config = Rc::new(VecModel::default());
-        let filter_config = Rc::new(VecModel::default());
-        window.set_games(ModelRc::from(games.clone()));
-        window.set_match_reviews(ModelRc::from(reviews.clone()));
-        window.set_play_history(ModelRc::from(play_history.clone()));
-        window.set_releases(ModelRc::from(releases.clone()));
-        window.set_gamepad_bindings(ModelRc::from(gamepad_bindings.clone()));
-        window.set_common_engine_config_fields(ModelRc::from(common_engine_config.clone()));
-        window.set_family_config_fields(ModelRc::from(family_config.clone()));
-        window.set_filter_config_fields(ModelRc::from(filter_config.clone()));
-        let cover_window = window.as_weak();
-        window.on_cover_demand(move |row, case_id, needed, view| {
-            if let Some(window) = cover_window.upgrade() {
-                let games = window.get_games();
-                if let Some(covers) = games.as_any().downcast_ref::<covers::CoverModel>() {
-                    covers.demand(row, case_id.as_str(), needed, view.as_str(), &window);
-                }
-            }
-        });
-        Ok(Self {
-            window,
-            games,
-            reviews,
-            play_history,
-            releases,
-            gamepad_bindings,
-            common_engine_config,
-            family_config,
-            filter_config,
-            cached_games_signature: std::cell::RefCell::new(Vec::new()),
-            cached_common_engine_config: std::cell::RefCell::default(),
-            cached_family_config: std::cell::RefCell::default(),
-            cached_filter_config: std::cell::RefCell::default(),
-        })
-    }
-
-    pub fn apply(&self, model: &ManagerViewModel) {
-        self.window.set_cores_ready(model.cores_ready);
-        self.window
-            .set_core_refresh_enabled(model.core_refresh_enabled);
-        self.window.set_startup_busy(model.startup_busy);
-        self.window
-            .set_startup_status(model.startup_status.as_str().into());
-        self.window.set_metadata_busy(model.metadata_busy);
-        self.window
-            .set_metadata_status(model.metadata_status.as_str().into());
-        let current_signature: Vec<GameCardSignature> = model
-            .games
-            .iter()
-            .map(|g| {
-                (
-                    g.case_id.clone(),
-                    g.title.clone(),
-                    g.family.clone(),
-                    g.cover_uri.clone(),
-                    g.diagnostic.clone(),
-                    g.play_time.clone(),
-                    g.compatibility_status.clone(),
-                )
-            })
-            .collect();
-
-        if *self.cached_games_signature.borrow() != current_signature {
-            let cards = model
-                .games
-                .iter()
-                .map(|game| GameCard {
-                    case_id: SharedString::from(&game.case_id),
-                    title: SharedString::from(&game.title),
-                    family: SharedString::from(&game.family),
-                    cover_uri: SharedString::from(&game.cover_uri),
-                    cover: slint::Image::default(),
-                    diagnostic: SharedString::from(&game.diagnostic),
-                    play_time: SharedString::from(&game.play_time),
-                    last_played: SharedString::from(&game.last_played),
-                    compatibility_status: SharedString::from(&game.compatibility_status),
-                })
-                .collect::<Vec<_>>();
-            self.games.replace(cards, &self.window);
-            *self.cached_games_signature.borrow_mut() = current_signature;
-        } else {
-            self.games.refresh(&self.window);
-        }
-        self.reviews.set_vec(
-            model
-                .match_reviews
-                .iter()
-                .map(|item| MatchReview {
-                    candidate_id: item.candidate_id.as_str().into(),
-                    case_id: item.case_id.as_str().into(),
-                    provider: item.provider.as_str().into(),
-                    remote_id: item.remote_id.as_str().into(),
-                    title: item.title.as_str().into(),
-                    aliases: item.aliases.as_str().into(),
-                    release_date: item.release_date.as_str().into(),
-                    developer: item.developer.as_str().into(),
-                    evidence: item.evidence.as_str().into(),
-                    score_millis: item.score_millis,
-                    diagnostic: item.diagnostic.as_str().into(),
-                })
-                .collect::<Vec<_>>(),
-        );
-        self.gamepad_bindings.set_vec(
-            model
-                .input_config
-                .gamepad_bindings
-                .iter()
-                .map(|binding| GamepadBinding {
-                    button_id: binding.button_id.as_str().into(),
-                    button_label: binding.button_label.as_str().into(),
-                    key_name: binding.key_name.as_str().into(),
-                })
-                .collect::<Vec<_>>(),
-        );
-        config_model::update(
-            &self.common_engine_config,
-            &self.cached_common_engine_config,
-            &model.common_engine_config_fields,
-        );
-        config_model::update(
-            &self.family_config,
-            &self.cached_family_config,
-            &model.family_config_fields,
-        );
-        config_model::update(
-            &self.filter_config,
-            &self.cached_filter_config,
-            &model.filter_config_fields,
-        );
-        self.window
-            .set_selected_case_id(model.selected_case_id.as_deref().unwrap_or_default().into());
-        self.window
-            .set_search_query(model.search_query.as_str().into());
-        self.window
-            .set_endpoint_identity(model.endpoint_identity.as_str().into());
-        self.window
-            .set_model_identity(model.model_identity.as_str().into());
-        self.window
-            .set_global_diagnostic(model.global_diagnostic.as_str().into());
-        self.window
-            .set_selected_title(model.selected_title.as_str().into());
-        self.window
-            .set_selected_family(model.selected_family.as_str().into());
-        self.window
-            .set_selected_emulator(model.selected_emulator.as_str().into());
-        self.window
-            .set_selected_launchable(model.selected_launchable);
-        self.window
-            .set_musica_key_file_available(model.musica_key_file_available);
-        self.window
-            .set_selected_play_time(model.selected_play_time.as_str().into());
-        self.window
-            .set_selected_last_played(model.selected_last_played.as_str().into());
-        self.window
-            .set_library_sort(model.library_sort.as_str().into());
-        self.window
-            .set_compatibility_filter(model.compatibility_filter.as_str().into());
-        self.window
-            .set_compatibility_source_url(model.compatibility_source_url.as_str().into());
-        self.window
-            .set_compatibility_sync_summary(model.compatibility_sync_summary.as_str().into());
-        self.window
-            .set_selected_compatibility_status(model.selected_compatibility_status.as_str().into());
-        self.window.set_selected_compatibility_updated(
-            model.selected_compatibility_updated.as_str().into(),
-        );
-        self.window.set_selected_compatibility_vndb_id(
-            model.selected_compatibility_vndb_id.as_str().into(),
-        );
-        self.releases.set_vec(
-            model
-                .selected_releases
-                .iter()
-                .map(|(release_id, label)| ReleaseOption {
-                    release_id: release_id.as_str().into(),
-                    label: label.as_str().into(),
-                })
-                .collect::<Vec<_>>(),
-        );
-        self.play_history.set_vec(
-            model
-                .play_history
-                .iter()
-                .map(|session| PlaySession {
-                    start_time: session.start_time.as_str().into(),
-                    duration: session.duration.as_str().into(),
-                    ended_by: session.ended_by.as_str().into(),
-                })
-                .collect::<Vec<_>>(),
-        );
-        self.window
-            .set_translation_endpoint_kind(model.translation_endpoint_kind.as_str().into());
-        self.window
-            .set_translation_profile_endpoint(model.translation_endpoint.as_str().into());
-        self.window
-            .set_translation_profile_protocol(model.translation_protocol.as_str().into());
-        self.window
-            .set_translation_profile_model(model.translation_model.as_str().into());
-        self.window
-            .set_translation_target_language(model.translation_target_language.as_str().into());
-        self.window
-            .set_translation_timeout_ms(model.translation_timeout_ms);
-        self.window
-            .set_translation_consent_present(model.translation_consent_present);
-        self.window
-            .set_filter_preset(model.filter_preset.as_str().into());
-        self.window
-            .set_diagnostics_summary(model.diagnostics_summary.as_str().into());
-        self.window.set_vndb_consent(model.vndb_consent);
-        self.window.set_bangumi_consent(model.bangumi_consent);
-        self.window.set_sensitive_covers(model.sensitive_covers);
-        self.window
-            .set_bangumi_play_status(model.bangumi_play_status.as_str().into());
-        self.window.set_bangumi_rating(model.bangumi_rating);
-        self.window
-            .set_bangumi_note(model.bangumi_note.as_str().into());
-        self.window
-            .set_bangumi_sync_summary(model.bangumi_sync_summary.as_str().into());
-        self.window
-            .set_gamepad_enabled(model.input_config.gamepad_enabled);
-        self.window
-            .set_gamepad_deadzone(model.input_config.gamepad_deadzone.as_str().into());
-        self.window.set_theme_dark(model.appearance.theme_dark);
-        self.window
-            .set_theme_mode(model.appearance.theme_mode.as_str().into());
-        self.window
-            .set_accent(model.appearance.accent.as_str().into());
-        self.window.set_grid_columns(model.appearance.grid_columns);
-        self.window
-            .set_density(model.appearance.density.as_str().into());
-        self.window
-            .set_view_mode(model.appearance.view_mode.as_str().into());
-        self.window.set_version(model.version.as_str().into());
-        self.window
-            .set_build_identity(model.build_identity.as_str().into());
-        self.window.set_demo_mode(model.is_demo);
-        self.window
-            .set_selected_developer(model.selected_developer.as_str().into());
-        self.window
-            .set_selected_release_date(model.selected_release_date.as_str().into());
-        self.window
-            .set_selected_platforms(model.selected_platforms.as_str().into());
-        self.window
-            .set_selected_engine(model.selected_engine.as_str().into());
-        self.window
-            .set_selected_cover_meta(model.selected_cover_meta.as_str().into());
-        self.window
-            .set_selected_description(model.selected_description.as_str().into());
-        self.window
-            .set_selected_tags(model.selected_tags.as_str().into());
-        self.window
-            .set_selected_aliases(model.selected_aliases.as_str().into());
-        // An empty current_page means "keep whatever the UI is showing".
-        if !model.current_page.is_empty() {
-            self.window
-                .set_current_page(model.current_page.as_str().into());
-        }
-    }
-
-    /// Switch the color theme directly (UI-initiated toggle).
-    pub fn set_theme(&self, dark: bool) {
-        self.window.set_theme_dark(dark);
-    }
-
-    pub fn window(&self) -> &ManagerWindow {
-        &self.window
-    }
-
-    pub fn set_game_active(&self, active: bool) {
-        self.window.set_game_active(active);
-    }
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct EngineActionViewModel {
+    pub control: i32,
+    pub label: String,
+    pub icon: String,
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        AppearanceViewModel, GameCardViewModel, InputConfigViewModel, ManagerViewModel,
-        MatchReviewViewModel, PlaySessionViewModel,
-    };
+    use super::*;
 
     fn assert_contract_is_send_sync<T: Send + Sync>() {}
 
     #[test]
     fn public_view_models_do_not_require_ui_thread_types() {
-        assert_contract_is_send_sync::<GameCardViewModel>();
         assert_contract_is_send_sync::<ManagerViewModel>();
-        assert_contract_is_send_sync::<MatchReviewViewModel>();
-        assert_contract_is_send_sync::<InputConfigViewModel>();
-        assert_contract_is_send_sync::<AppearanceViewModel>();
+        assert_contract_is_send_sync::<LibraryViewModel>();
+        assert_contract_is_send_sync::<GameCardViewModel>();
+        assert_contract_is_send_sync::<SelectionViewModel>();
+        assert_contract_is_send_sync::<CompatViewModel>();
+        assert_contract_is_send_sync::<ReleaseViewModel>();
         assert_contract_is_send_sync::<PlaySessionViewModel>();
+        assert_contract_is_send_sync::<MatchViewModel>();
+        assert_contract_is_send_sync::<BangumiViewModel>();
+        assert_contract_is_send_sync::<ConfigFieldViewModel>();
+        assert_contract_is_send_sync::<CoresViewModel>();
+        assert_contract_is_send_sync::<CoreViewModel>();
+        assert_contract_is_send_sync::<SettingsViewModel>();
+        assert_contract_is_send_sync::<TranslationViewModel>();
+        assert_contract_is_send_sync::<InputConfigViewModel>();
+        assert_contract_is_send_sync::<GamepadBindingViewModel>();
+        assert_contract_is_send_sync::<AppearanceViewModel>();
+        assert_contract_is_send_sync::<NoticeViewModel>();
+        assert_contract_is_send_sync::<AboutViewModel>();
+        assert_contract_is_send_sync::<SessionViewModel>();
+        assert_contract_is_send_sync::<EngineActionViewModel>();
+        assert_contract_is_send_sync::<ErrorText>();
     }
 }

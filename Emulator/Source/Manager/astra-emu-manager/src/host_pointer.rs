@@ -8,7 +8,7 @@ use std::{
 };
 
 use astra_emu_manager_core::model::FamilyPointerRequest;
-use astra_emu_manager_ui_slint::{ManagerWindow, SlintManagerAdapter};
+use astra_emu_manager_ui_slint::{Dialogs, ManagerWindow, Session, SlintManagerAdapter};
 use slint::{winit_030::WinitWindowAccessor, ComponentHandle};
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::{dpi::PhysicalPosition, event::WindowEvent};
@@ -104,11 +104,16 @@ impl HostPointer {
         }));
         let weak_pointer = Rc::downgrade(&pointer);
         let weak_window = adapter.window().as_weak();
-        adapter.window().on_pointer_state_changed(move || {
-            if let (Some(pointer), Some(window)) = (weak_pointer.upgrade(), weak_window.upgrade()) {
-                Self::synchronize(&pointer, &window);
-            }
-        });
+        adapter
+            .window()
+            .global::<Session>()
+            .on_pointer_state_changed(move || {
+                if let (Some(pointer), Some(window)) =
+                    (weak_pointer.upgrade(), weak_window.upgrade())
+                {
+                    Self::synchronize(&pointer, &window);
+                }
+            });
         pointer
     }
 
@@ -144,15 +149,16 @@ impl HostPointer {
         let y = request.logical_y;
         if x.is_some() || y.is_some() {
             let current = pointer.borrow().position;
+            let session = window.global::<Session>();
             let rect = [
-                window.get_game_content_window_x() as f64,
-                window.get_game_content_window_y() as f64,
-                window.get_game_content_window_width() as f64,
-                window.get_game_content_window_height() as f64,
+                session.get_pointer_x() as f64,
+                session.get_pointer_y() as f64,
+                session.get_pointer_width() as f64,
+                session.get_pointer_height() as f64,
             ];
             let stage = [
-                window.get_stage_native_width() as f64,
-                window.get_stage_native_height() as f64,
+                session.get_native_width() as f64,
+                session.get_native_height() as f64,
             ];
             let position = window
                 .window()
@@ -217,13 +223,13 @@ impl HostPointer {
     fn synchronize(pointer: &Rc<RefCell<Self>>, window: &ManagerWindow) {
         let mut state = pointer.borrow_mut();
         state.timer.stop();
-        let active = window.get_game_active();
+        let session = window.global::<Session>();
+        let dialogs = window.global::<Dialogs>();
+        let active = session.get_active();
         let controlling = active
-            && !window.get_fatal_error_active()
-            && !window.get_modal_active()
-            && !window.get_translation_overlay_active()
-            && !window.get_diagnostics_overlay_active()
-            && !window.get_filters_overlay_active()
+            && !dialogs.get_fatal_active()
+            && !dialogs.get_modal_active()
+            && !session.get_menu_open()
             && state.inside_window
             && window
                 .window()
@@ -232,12 +238,12 @@ impl HostPointer {
                         && state.position.is_some_and(|position| {
                             let x = position.x / native.scale_factor();
                             let y = position.y / native.scale_factor();
-                            let left = window.get_game_content_window_x() as f64;
-                            let top = window.get_game_content_window_y() as f64;
+                            let left = session.get_pointer_x() as f64;
+                            let top = session.get_pointer_y() as f64;
                             x >= left
                                 && y >= top
-                                && x < left + window.get_game_content_window_width() as f64
-                                && y < top + window.get_game_content_window_height() as f64
+                                && x < left + session.get_pointer_width() as f64
+                                && y < top + session.get_pointer_height() as f64
                         })
                 })
                 .unwrap_or(false);

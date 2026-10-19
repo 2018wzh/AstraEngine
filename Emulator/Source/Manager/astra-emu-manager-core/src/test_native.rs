@@ -293,9 +293,24 @@ unsafe extern "C" fn input(
     }
     abi::OK
 }
-unsafe extern "C" fn control(handle: abi::Session, _: u32, _: *mut abi::Error) -> abi::Status {
+unsafe extern "C" fn control(
+    handle: abi::Session,
+    command: u32,
+    error: *mut abi::Error,
+) -> abi::Status {
     let session = unsafe { &*handle.cast::<Session>() };
     record(&session.calls, "control", String::new());
+    if command == 0x1002 {
+        if !error.is_null() {
+            unsafe {
+                (*error).set(
+                    "ASTRA_EMU_TEST_ACTION_UNAVAILABLE",
+                    "test action unavailable",
+                );
+            }
+        }
+        return abi::INVALID_STATE;
+    }
     abi::OK
 }
 unsafe extern "C" fn state(
@@ -434,6 +449,16 @@ impl<const N: usize> OwnerTable<N> {
         destroy: Some(destroy_owner),
     };
 }
+static TEST_MENU: [abi::SessionMenuItem; 1] = [abi::SessionMenuItem {
+    control: 0x1001,
+    icon: abi::MENU_ICON_GENERIC,
+    label: abi::Bytes::from_static("测试动作".as_bytes()),
+}];
+static TEST_MENU_API: abi::SessionMenuApi = abi::SessionMenuApi {
+    header: abi::SessionMenuApi::HEADER,
+    items: TEST_MENU.as_ptr(),
+    count: 1,
+};
 unsafe extern "C" fn extension<const N: usize>(
     id: abi::Bytes,
     version: u32,
@@ -442,8 +467,18 @@ unsafe extern "C" fn extension<const N: usize>(
     unsafe {
         *out = std::ptr::null();
     }
+    let name = match unsafe { id.as_slice(128) } {
+        Ok(name) => name,
+        Err(_) => return abi::UNSUPPORTED,
+    };
+    if name == abi::SESSION_MENU_EXTENSION && version == abi::SESSION_MENU_VERSION {
+        unsafe {
+            *out = (&TEST_MENU_API as *const abi::SessionMenuApi).cast();
+        }
+        return abi::OK;
+    }
     if version != abi::MODULE_OWNER_VERSION
-        || unsafe { id.as_slice(128) } != Ok(abi::MODULE_OWNER_EXTENSION)
+        || name != abi::MODULE_OWNER_EXTENSION
         || !fixture::<N, _>(|value| value.module_owner)
     {
         return abi::UNSUPPORTED;

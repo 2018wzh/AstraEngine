@@ -1,78 +1,138 @@
-// Game view page - unobstructed stage below the host toolbar.
-
 import { ScrollView } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
-import { CheckButton, Icons } from "../components/icons.slint";
-import { M3Button } from "../components/m3-widgets.slint";
-import { ConfigField } from "../components/generic-config.slint";
-import { FilterSettingsPage } from "../settings/filters.slint";
+import { Session, Selection, Dialogs, Filters } from "../globals.slint";
+import { Icon, Icons } from "../components/icons.slint";
+import { IconBtn, Toast } from "../components/controls.slint";
+import { GenericConfigForm } from "../components/generic-config.slint";
+import { FilterPresetGrid } from "../settings/filters.slint";
+
+component MenuRow inherits Rectangle {
+    in property <string> glyph;
+    in property <string> label;
+    in property <color> fg: Theme.on-surface;
+    callback clicked();
+    height: 52px;
+    background: area.has-hover ? Theme.surface-high : transparent;
+    accessible-role: button;
+    accessible-label: label;
+    accessible-action-default => { root.clicked(); }
+    animate background { duration: Theme.motion-fast; }
+
+    HorizontalLayout {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        padding-left: 20px;
+        padding-right: 20px;
+        spacing: 14px;
+        Icon {
+            glyph: root.glyph;
+            font-size: 16px;
+            width: 22px;
+            color: root.fg;
+        }
+        Text {
+            text: root.label;
+            color: root.fg;
+            font-size: Theme.body;
+            font-weight: 550;
+            vertical-alignment: center;
+        }
+    }
+
+    row-focus := FocusScope {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        key-pressed(event) => {
+            if event.text == Key.Return || event.text == " " {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+        area := TouchArea {
+            mouse-cursor: pointer;
+            clicked => {
+                row-focus.focus();
+                root.clicked();
+            }
+        }
+    }
+}
 
 export component GameViewPage inherits Rectangle {
-    // Stage
-    in property <image> stage-frame;
-    in-out property <float> stage-native-width: 1024;
-    in-out property <float> stage-native-height: 768;
-    in-out property <float> stage-raster-width: 1024;
-    in-out property <float> stage-raster-height: 768;
-    in-out property <float> stage-content-x: 0;
-    in-out property <float> stage-content-y: 0;
-    in-out property <float> stage-content-width: 1024;
-    in-out property <float> stage-content-height: 768;
-    callback game-input(string, bool, float);
-    callback leave-game();
-    in property <bool> input-blocked: false;
+    background: #000000;
 
-    // Overlay panel visibility
-    in-out property <bool> translation-overlay-active: false;
-    in-out property <bool> diagnostics-overlay-active: false;
-    in-out property <bool> filters-overlay-active: false;
-    property <bool> overlay-active: root.translation-overlay-active || root.diagnostics-overlay-active || root.filters-overlay-active;
-    in-out property <string> enhance-tab: "filters";
-
-    // Keep host controls outside the game's original input and image area.
-    property <length> toolbar-height: 64px;
-    property <length> stage-available-height: max(1px, root.height - root.toolbar-height);
-    in property <float> stage-output-aspect: 1.333333;
-    property <float> stage-aspect: root.stage-output-aspect;
+    property <length> stage-available-height: root.height;
+    property <float> stage-aspect: Session.output-aspect;
     property <length> stage-width: root.width / root.stage-available-height > root.stage-aspect ? root.stage-available-height * root.stage-aspect : root.width;
     property <length> stage-height: root.width / root.stage-available-height > root.stage-aspect ? root.stage-available-height : root.width / root.stage-aspect;
     property <length> stage-x: (root.width - root.stage-width) / 2;
-    property <length> stage-y: root.toolbar-height + (root.stage-available-height - root.stage-height) / 2;
-    property <length> content-stage-x: root.stage-raster-width > 0 ? root.stage-x + root.stage-content-x / root.stage-raster-width * root.stage-width : root.stage-x;
-    property <length> content-stage-y: root.stage-raster-height > 0 ? root.stage-y + root.stage-content-y / root.stage-raster-height * root.stage-height : root.stage-y;
-    property <length> content-stage-width: root.stage-raster-width > 0 ? root.stage-content-width / root.stage-raster-width * root.stage-width : 0px;
-    property <length> content-stage-height: root.stage-raster-height > 0 ? root.stage-content-height / root.stage-raster-height * root.stage-height : 0px;
-    // Export the same viewport used by input, in window logical pixels.
-    in-out property <float> pointer-content-x: (root.absolute-position.x + root.content-stage-x) / 1px;
-    in-out property <float> pointer-content-y: (root.absolute-position.y + root.content-stage-y) / 1px;
-    in-out property <float> pointer-content-width: root.content-stage-width / 1px;
-    in-out property <float> pointer-content-height: root.content-stage-height / 1px;
+    property <length> stage-y: (root.stage-available-height - root.stage-height) / 2;
+    property <length> content-stage-x: Session.raster-width > 0 ? root.stage-x + Session.content-x / Session.raster-width * root.stage-width : root.stage-x;
+    property <length> content-stage-y: Session.raster-height > 0 ? root.stage-y + Session.content-y / Session.raster-height * root.stage-height : root.stage-y;
+    property <length> content-stage-width: Session.raster-width > 0 ? Session.content-width / Session.raster-width * root.stage-width : 0px;
+    property <length> content-stage-height: Session.raster-height > 0 ? Session.content-height / Session.raster-height * root.stage-height : 0px;
 
-    // Diagnostics panel state
-    in-out property <length> diagnostics-x: 40px;
-    in-out property <length> diagnostics-y: 120px;
-    in-out property <bool> diagnostics-collapsed: false;
-    in property <string> diagnostics-summary;
-    in property <string> global-diagnostic;
+    property <float> computed-px: (root.absolute-position.x + root.content-stage-x) / 1px;
+    property <float> computed-py: (root.absolute-position.y + root.content-stage-y) / 1px;
+    property <float> computed-pw: root.content-stage-width / 1px;
+    property <float> computed-ph: root.content-stage-height / 1px;
 
-    // Filters panel state
-    in-out property <length> filters-x: 80px;
-    in-out property <length> filters-y: 200px;
-    in-out property <bool> filters-collapsed: false;
-    in-out property <string> filter-preset: "none";
-    callback set-filter-preset(string);
-    in property <[ConfigField]> filter-config-fields;
-    callback filter-config-changed(string, string);
-    callback load-filter-source();
-    callback save-filter-config();
-    callback reset-filter-config();
+    property <bool> input-blocked: Session.menu-open || Dialogs.modal-active || Dialogs.fatal-active;
+    property <bool> handle-visible: true;
+    property <bool> hint-visible: true;
+    property <bool> panel-seen: false;
+    property <length> menu-w: min(360px, root.width);
 
-    background: black;
-    init => { game-focus.focus(); }
+    function push-pointer() {
+        Session.pointer-x = root.computed-px;
+        Session.pointer-y = root.computed-py;
+        Session.pointer-width = root.computed-pw;
+        Session.pointer-height = root.computed-ph;
+    }
+    function ping-handle() {
+        root.handle-visible = true;
+        idle-timer.running = false;
+        idle-timer.running = true;
+    }
+    function open-menu() {
+        Session.menu-open = true;
+        Session.menu-page = "main";
+    }
+    function close-menu() {
+        Session.menu-open = false;
+        Session.menu-page = "main";
+        root.panel-seen = false;
+    }
 
-    // Game stage image
+    init => {
+        game-focus.focus();
+        root.push-pointer();
+        idle-timer.running = true;
+        hint-timer.running = true;
+    }
+    changed computed-px => { root.push-pointer(); }
+    changed computed-py => { root.push-pointer(); }
+    changed computed-pw => { root.push-pointer(); }
+    changed computed-ph => { root.push-pointer(); }
+
+    idle-timer := Timer {
+        interval: 3s;
+        running: false;
+        triggered => { root.handle-visible = false; }
+    }
+    hint-timer := Timer {
+        interval: 3s;
+        running: false;
+        triggered => { root.hint-visible = false; }
+    }
+
     Image {
-        source: root.stage-frame;
+        source: Session.frame;
         x: root.stage-x;
         y: root.stage-y;
         width: root.stage-width;
@@ -81,182 +141,271 @@ export component GameViewPage inherits Rectangle {
         accessible-label: "游戏画面";
     }
 
-    // Game input focus scope
     game-focus := FocusScope {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
 
-        TouchArea {
-            // HostPointer owns visibility; Slint only selects control shapes.
+        game-area := TouchArea {
             moved => {
-                if root.overlay-active || root.input-blocked { return; }
+                root.ping-handle();
+                if root.input-blocked { return; }
                 if root.content-stage-width > 0px && root.content-stage-height > 0px && self.mouse-x >= root.content-stage-x && self.mouse-x < root.content-stage-x + root.content-stage-width && self.mouse-y >= root.content-stage-y && self.mouse-y < root.content-stage-y + root.content-stage-height {
-                    root.game-input("pointer.x", true, (self.mouse-x - root.content-stage-x) / root.content-stage-width * root.stage-native-width);
-                    root.game-input("pointer.y", true, (self.mouse-y - root.content-stage-y) / root.content-stage-height * root.stage-native-height);
+                    Session.input("pointer.x", true, (self.mouse-x - root.content-stage-x) / root.content-stage-width * Session.native-width);
+                    Session.input("pointer.y", true, (self.mouse-y - root.content-stage-y) / root.content-stage-height * Session.native-height);
                 }
             }
             pointer-event(event) => {
-                if root.overlay-active || root.input-blocked { return; }
+                root.ping-handle();
+                if root.input-blocked { return; }
                 if event.kind == PointerEventKind.cancel {
-                    root.game-input("pointer.primary", false, 0);
-                    root.game-input("pointer.secondary", false, 0);
-                    root.game-input("pointer.middle", false, 0);
+                    Session.input("pointer.primary", false, 0);
+                    Session.input("pointer.secondary", false, 0);
+                    Session.input("pointer.middle", false, 0);
                     return;
                 }
                 if event.kind != PointerEventKind.down && event.kind != PointerEventKind.up { return; }
                 if self.mouse-x < root.content-stage-x || self.mouse-x >= root.content-stage-x + root.content-stage-width || self.mouse-y < root.content-stage-y || self.mouse-y >= root.content-stage-y + root.content-stage-height {
                     if event.kind == PointerEventKind.up {
-                        if event.button == PointerEventButton.left { root.game-input("pointer.primary", false, 0); }
-                        if event.button == PointerEventButton.right { root.game-input("pointer.secondary", false, 0); }
-                        if event.button == PointerEventButton.middle { root.game-input("pointer.middle", false, 0); }
+                        if event.button == PointerEventButton.left { Session.input("pointer.primary", false, 0); }
+                        if event.button == PointerEventButton.right { Session.input("pointer.secondary", false, 0); }
+                        if event.button == PointerEventButton.middle { Session.input("pointer.middle", false, 0); }
                     }
                     return;
                 }
                 if event.kind == PointerEventKind.down { game-focus.focus(); }
-                root.game-input("pointer.x", true, (self.mouse-x - root.content-stage-x) / root.content-stage-width * root.stage-native-width);
-                root.game-input("pointer.y", true, (self.mouse-y - root.content-stage-y) / root.content-stage-height * root.stage-native-height);
-                if event.button == PointerEventButton.left { root.game-input("pointer.primary", event.kind == PointerEventKind.down, 1); }
-                if event.button == PointerEventButton.right { root.game-input("pointer.secondary", event.kind == PointerEventKind.down, 1); }
-                if event.button == PointerEventButton.middle { root.game-input("pointer.middle", event.kind == PointerEventKind.down, 1); }
+                Session.input("pointer.x", true, (self.mouse-x - root.content-stage-x) / root.content-stage-width * Session.native-width);
+                Session.input("pointer.y", true, (self.mouse-y - root.content-stage-y) / root.content-stage-height * Session.native-height);
+                if event.button == PointerEventButton.left { Session.input("pointer.primary", event.kind == PointerEventKind.down, 1); }
+                if event.button == PointerEventButton.right { Session.input("pointer.secondary", event.kind == PointerEventKind.down, 1); }
+                if event.button == PointerEventButton.middle { Session.input("pointer.middle", event.kind == PointerEventKind.down, 1); }
             }
             scroll-event(event) => {
-                if root.overlay-active || root.input-blocked { return reject; }
+                if root.input-blocked { return reject; }
                 if self.mouse-x < root.content-stage-x || self.mouse-x >= root.content-stage-x + root.content-stage-width || self.mouse-y < root.content-stage-y || self.mouse-y >= root.content-stage-y + root.content-stage-height {
                     return reject;
                 }
-                root.game-input("wheel", false, event.delta-y / 60px);
+                Session.input("wheel", false, event.delta-y / 60px);
                 return accept;
             }
+            changed has-hover => { root.ping-handle(); }
         }
     }
 
-    // Persistent host toolbar above the stage.
-    toolbar-area := Rectangle {
+    Rectangle {
+        x: parent.width - 56px;
+        y: 16px;
+        z: 30;
+        width: 40px;
+        height: 40px;
+        border-radius: 20px;
+        background: #0008;
+        opacity: Session.menu-open ? 0 : (root.handle-visible ? 1 : 0);
+        animate opacity { duration: Theme.motion-medium; }
+        IconBtn {
+            x: 0px;
+            y: 0px;
+            glyph: Icons.bars;
+            label: "打开快捷菜单";
+            variant: "standard";
+            size: 40px;
+            tint: #ffffff;
+            clicked => { root.open-menu(); }
+        }
+    }
+
+    edge := TouchArea {
+        x: parent.width - 12px;
+        y: 0px;
+        width: 12px;
+        height: parent.height;
+        z: 25;
+    }
+    edge-timer := Timer {
+        interval: 300ms;
+        running: edge.has-hover && !Session.menu-open;
+        triggered => { root.open-menu(); }
+    }
+
+    if root.hint-visible && !Session.menu-open : Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: 16px;
+        z: 28;
+        height: 36px;
+        width: hint-text.preferred-width + 28px;
+        border-radius: 18px;
+        background: #000000a8;
+        hint-text := Text {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: parent.height;
+            text: "移动鼠标后点按右上角按钮，可打开快捷菜单";
+            color: #ffffff;
+            font-size: Theme.label;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        TouchArea { }
+    }
+
+    if Session.menu-open : Rectangle {
         x: 0px;
         y: 0px;
         width: parent.width;
-        height: root.toolbar-height;
-        z: 50;
-        background: Theme.surface-container-low;
-        TouchArea {}
-        Rectangle {
-            x: 16px;
-            y: 10px;
-            width: parent.width - 32px;
-            height: 46px;
-            background: Theme.surface-container;
-            border-radius: Theme.shape-lg;
-            border-width: 1px;
-            border-color: Theme.outline-variant;
+        height: parent.height;
+        z: 40;
+        background: #0000004d;
 
-            HorizontalLayout {
-                padding-left: 14px;
-                padding-right: 14px;
-                spacing: 8px;
-                alignment: center;
-
-                M3Button {
-                    text: root.width < 480px ? "返回" : "返回管理器";
-                    icon: Icons.arrow-left;
-                    variant: "tonal";
-                    clicked => { root.leave-game(); }
-                }
-
-                Rectangle { horizontal-stretch: 1; }
-
-                CheckButton {
-                    label: "诊断";
-                    checked: root.diagnostics-overlay-active;
-                    clicked => {
-                        root.translation-overlay-active = false;
-                        root.filters-overlay-active = false;
-                        if root.diagnostics-overlay-active { root.diagnostics-overlay-active = false; } else { root.diagnostics-overlay-active = true; root.enhance-tab = "diagnostics"; }
-                    }
-                }
-                CheckButton {
-                    label: "滤镜";
-                    checked: root.filters-overlay-active;
-                    clicked => {
-                        root.translation-overlay-active = false;
-                        root.diagnostics-overlay-active = false;
-                        if root.filters-overlay-active { root.filters-overlay-active = false; } else { root.filters-overlay-active = true; root.enhance-tab = "filters"; }
-                    }
-                }
-            }
-        }
-    }
-
-    // Modal host sheet: the game stays visible, but receives no pointer input.
-    if root.overlay-active : Rectangle {
-        y: root.toolbar-height;
-        height: parent.height - self.y;
-        background: #0006;
-        z: 60;
-        TouchArea {
-            clicked => {
-                root.translation-overlay-active = false;
-                root.diagnostics-overlay-active = false;
-                root.filters-overlay-active = false;
-            }
+        scrim-area := TouchArea {
+            clicked => { root.close-menu(); }
         }
 
-        Rectangle {
-            x: parent.width - self.width;
-            width: min(parent.width, 600px);
+        panel := Rectangle {
+            x: parent.width - root.menu-w;
+            y: 0px;
+            width: root.menu-w;
             height: parent.height;
-            background: Theme.surface;
-            TouchArea {}
-            VerticalLayout {
+            background: Theme.surface-container;
+            border-top-left-radius: Theme.r-xl;
+            border-bottom-left-radius: Theme.r-xl;
+            drop-shadow-blur: 24px;
+            drop-shadow-offset-x: -8px;
+            drop-shadow-color: Theme.shadow-strong;
+
+            panel-area := TouchArea {
+                changed has-hover => { if self.has-hover { root.panel-seen = true; } }
+            }
+
+            if Session.menu-page == "main" : VerticalLayout {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: parent.height;
+                padding-top: 20px;
+                padding-bottom: 16px;
                 spacing: 0px;
-                HorizontalLayout {
-                    padding: 16px;
-                    spacing: 8px;
+
+                VerticalLayout {
+                    padding-left: 20px;
+                    padding-right: 20px;
+                    padding-bottom: 12px;
+                    spacing: 4px;
                     Text {
-                        text: root.enhance-tab == "filters" ? "画面滤镜" : "运行诊断";
+                        text: Session.title != "" ? Session.title : Selection.game.title;
                         color: Theme.on-surface;
-                        font-size: Theme.font-title-lg;
-                        font-weight: 600;
-                        vertical-alignment: center;
-                        horizontal-stretch: 1;
+                        font-size: Theme.title-md;
+                        font-weight: 700;
+                        overflow: elide;
                     }
-                    M3Button {
-                        text: "关闭";
-                        variant: "tonal";
-                        clicked => {
-                            root.translation-overlay-active = false;
-                            root.diagnostics-overlay-active = false;
-                            root.filters-overlay-active = false;
-                        }
+                    Text {
+                        text: Selection.game.family;
+                        color: Theme.on-variant;
+                        font-size: Theme.body-sm;
                     }
+                }
+
+                MenuRow {
+                    glyph: Icons.play;
+                    label: "继续游戏";
+                    clicked => { root.close-menu(); }
                 }
                 Rectangle { height: 1px; background: Theme.outline-variant; }
-                if root.enhance-tab == "diagnostics" : ScrollView {
+
+                for action in Session.actions : MenuRow {
+                    glyph: Icons.action-glyph(action.icon);
+                    label: action.label;
+                    clicked => { Session.engine-action(action.control); }
+                }
+
+                Rectangle { height: 1px; background: Theme.outline-variant; }
+                MenuRow {
+                    glyph: Icons.wand;
+                    label: "画面滤镜";
+                    clicked => { Session.menu-page = "filters"; }
+                }
+                MenuRow {
+                    glyph: Session.fullscreen ? Icons.compress : Icons.expand;
+                    label: Session.fullscreen ? "退出全屏" : "全屏";
+                    clicked => { Session.set-fullscreen(!Session.fullscreen); }
+                }
+                Rectangle { height: 1px; background: Theme.outline-variant; }
+                MenuRow {
+                    glyph: Icons.arrow-left;
+                    label: "返回游戏库";
+                    fg: Theme.error;
+                    clicked => { Session.leave(); }
+                }
+
+                Rectangle { vertical-stretch: 1; }
+
+                Toast {
+                    text: Session.action-message;
+                    serial: Session.action-serial;
+                }
+                Rectangle { height: 8px; }
+                Text {
+                    text: "菜单打开时，键盘和手柄仍会传给游戏";
+                    color: Theme.on-variant;
+                    font-size: Theme.label-sm;
+                    horizontal-alignment: center;
+                }
+            }
+
+            if Session.menu-page == "filters" : VerticalLayout {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: parent.height;
+                padding: 16px;
+                spacing: 12px;
+                HorizontalLayout {
+                    spacing: 8px;
+                    IconBtn {
+                        glyph: Icons.arrow-left;
+                        label: "返回";
+                        clicked => { Session.menu-page = "main"; }
+                    }
                     VerticalLayout {
-                        padding: 24px;
-                        spacing: 16px;
-                        alignment: start;
+                        horizontal-stretch: 1;
+                        alignment: center;
                         Text {
-                            text: root.diagnostics-summary == "" ? "尚无运行诊断数据" : root.diagnostics-summary;
+                            text: "画面滤镜";
                             color: Theme.on-surface;
-                            wrap: word-wrap;
-                            font-size: Theme.font-body-md;
+                            font-size: Theme.title-md;
+                            font-weight: 700;
                         }
                         Text {
-                            text: root.global-diagnostic == "" ? "当前没有诊断消息" : root.global-diagnostic;
-                            color: root.global-diagnostic == "" ? Theme.on-surface-variant : Theme.error;
-                            wrap: word-wrap;
-                            font-size: Theme.font-body-md;
+                            text: "立即生效";
+                            color: Theme.on-variant;
+                            font-size: Theme.label;
                         }
                     }
                 }
-                if root.enhance-tab == "filters" : FilterSettingsPage {
-                    filter-preset <=> root.filter-preset;
-                    filter-config-fields: root.filter-config-fields;
-                    set-filter-preset(preset) => { root.set-filter-preset(preset); }
-                    filter-config-changed(key, value) => { root.filter-config-changed(key, value); }
-                    load-filter-source => { root.load-filter-source(); }
-                    save-filter-config => { root.save-filter-config(); }
-                    reset-filter-config => { root.reset-filter-config(); }
+                ScrollView {
+                    vertical-stretch: 1;
+                    mouse-drag-pan-enabled: true;
+                    VerticalLayout {
+                        spacing: 12px;
+                        alignment: start;
+                        FilterPresetGrid { }
+                        GenericConfigForm {
+                            fields: Filters.fields;
+                            form-title: "效果参数";
+                            field-changed(key, value) => { Filters.field-changed(key, value); }
+                            save => { Filters.save(); }
+                            reset => { Filters.reset(); }
+                        }
+                    }
                 }
             }
+        }
+
+        hide-timer := Timer {
+            interval: 800ms;
+            running: root.panel-seen && Session.menu-page == "main" && scrim-area.has-hover && !panel-area.has-hover;
+            triggered => { root.close-menu(); }
         }
     }
 }

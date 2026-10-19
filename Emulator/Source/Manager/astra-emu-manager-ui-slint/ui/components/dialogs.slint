@@ -1,0 +1,196 @@
+import { LineEdit, ScrollView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { Dialogs, Session } from "../globals.slint";
+import { PillButton } from "./controls.slint";
+
+export component ModalDialog inherits Rectangle {
+    z: 110;
+    visible: Dialogs.modal-active;
+    x: 0px;
+    y: 0px;
+    width: 100%;
+    height: 100%;
+    background: Theme.scrim;
+
+    TouchArea {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+    }
+
+    Rectangle {
+        width: min(640px, parent.width - 32px);
+        height: min(560px, parent.height - 32px);
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        border-radius: Theme.r-xl;
+        background: Theme.surface-high;
+        drop-shadow-blur: 24px;
+        drop-shadow-offset-y: 8px;
+        drop-shadow-color: Theme.shadow-strong;
+
+        TouchArea {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: parent.height;
+        }
+
+        VerticalLayout {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: parent.height;
+            padding: 24px;
+            spacing: 16px;
+
+            Text {
+                text: Dialogs.modal-caption;
+                color: Theme.on-surface;
+                font-size: Theme.title-lg;
+                font-weight: 700;
+                wrap: word-wrap;
+            }
+
+            ScrollView {
+                vertical-stretch: 1;
+                mouse-drag-pan-enabled: true;
+                VerticalLayout {
+                    alignment: start;
+                    Text {
+                        text: Dialogs.modal-message;
+                        color: Theme.on-surface;
+                        font-size: Theme.body;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+
+            if Dialogs.modal-has-input : LineEdit {
+                text <=> Dialogs.modal-text;
+            }
+
+            ScrollView {
+                height: min(180px, modal-actions.preferred-height);
+                mouse-drag-pan-enabled: true;
+                modal-actions := VerticalLayout {
+                    spacing: 8px;
+                    for label[index] in Dialogs.modal-buttons : PillButton {
+                        text: label;
+                        variant: "tonal";
+                        clicked => { Dialogs.modal-submit(index, Dialogs.modal-text); }
+                    }
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 8px;
+                PillButton {
+                    text: "取消";
+                    variant: "text";
+                    clicked => { Dialogs.modal-cancel(); }
+                }
+                PillButton {
+                    text: "退出游戏";
+                    variant: "danger";
+                    clicked => { Session.leave(); }
+                }
+            }
+        }
+    }
+}
+
+export component FatalDialog inherits Rectangle {
+    z: 1000;
+    visible: Dialogs.fatal-active;
+    x: 0px;
+    y: 0px;
+    width: 100%;
+    height: 100%;
+    background: Theme.scrim;
+
+    TouchArea {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+    }
+
+    Rectangle {
+        width: min(parent.width - 32px, 560px);
+        height: min(parent.height - 32px, 400px);
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        background: Theme.surface-high;
+        border-color: Theme.error;
+        border-width: 1px;
+        border-radius: Theme.r-xl;
+        drop-shadow-blur: 24px;
+        drop-shadow-offset-y: 8px;
+        drop-shadow-color: Theme.shadow-strong;
+
+        TouchArea {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: parent.height;
+        }
+
+        VerticalLayout {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: parent.height;
+            padding: 24px;
+            spacing: 16px;
+
+            Text {
+                text: Dialogs.fatal-title;
+                color: Theme.error;
+                font-size: Theme.title-lg;
+                font-weight: 700;
+                wrap: word-wrap;
+            }
+
+            ScrollView {
+                vertical-stretch: 1;
+                mouse-drag-pan-enabled: true;
+                VerticalLayout {
+                    alignment: start;
+                    spacing: 8px;
+                    Text {
+                        text: Dialogs.fatal-detail;
+                        color: Theme.on-surface;
+                        font-size: Theme.body;
+                        wrap: word-wrap;
+                    }
+                    if Dialogs.fatal-code != "" : Text {
+                        text: "错误代码 " + Dialogs.fatal-code;
+                        color: Theme.on-variant;
+                        font-size: Theme.label-sm;
+                    }
+                }
+            }
+
+            HorizontalLayout {
+                alignment: end;
+                spacing: 8px;
+                if Dialogs.fatal-retryable : PillButton {
+                    text: "重试";
+                    variant: "tonal";
+                    clicked => { Dialogs.retry(); }
+                }
+                PillButton {
+                    text: Session.active ? "结束游戏" : "知道了";
+                    variant: "filled";
+                    clicked => {
+                        if Session.active { Session.leave(); }
+                        Dialogs.fatal-retryable = false;
+                        Dialogs.fatal-active = false;
+                    }
+                }
+            }
+        }
+    }
+}

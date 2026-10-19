@@ -48,33 +48,37 @@ pub(super) fn install<C: ManagerController, R: AstraUnderlayRenderer>(
     let r = renderer.clone();
     let a = std::rc::Rc::downgrade(adapter);
     let w = adapter.window().as_weak();
-    adapter.window().on_set_filter_preset(move |preset| {
-        let result = (|| {
-            c.borrow_mut()
-                .filter_config_changed("filter.preset", preset.as_str())?;
-            apply(&mut *c.borrow_mut(), &mut *r.borrow_mut())
-        })();
-        if let Some(window) = w.upgrade() {
-            match result {
-                Ok(model) => {
-                    apply_model(&a, &model);
-                    window.window().request_redraw();
+    adapter
+        .window()
+        .global::<Filters>()
+        .on_set_preset(move |preset| {
+            let result = (|| {
+                c.borrow_mut()
+                    .filter_config_changed("filter.preset", preset.as_str())?;
+                apply(&mut *c.borrow_mut(), &mut *r.borrow_mut())
+            })();
+            if let Some(window) = w.upgrade() {
+                match result {
+                    Ok(model) => {
+                        apply_model(&a, &model);
+                        window.window().request_redraw();
+                    }
+                    Err(error) => report_error(&window, &error),
                 }
-                Err(error) => window.set_global_diagnostic(error.into()),
             }
-        }
-    });
+        });
     let c = controller.clone();
     let w = adapter.window().as_weak();
     adapter
         .window()
-        .on_filter_config_changed(move |key, value| {
+        .global::<Filters>()
+        .on_field_changed(move |key, value| {
             if let Err(error) = c
                 .borrow_mut()
                 .filter_config_changed(key.as_str(), value.as_str())
             {
                 if let Some(window) = w.upgrade() {
-                    window.set_global_diagnostic(error.into());
+                    report_error(&window, &error);
                 }
             }
         });
@@ -82,7 +86,7 @@ pub(super) fn install<C: ManagerController, R: AstraUnderlayRenderer>(
     let r = renderer.clone();
     let a = std::rc::Rc::downgrade(adapter);
     let w = adapter.window().as_weak();
-    adapter.window().on_save_filter_config(move || {
+    adapter.window().global::<Filters>().on_save(move || {
         let result = apply(&mut *c.borrow_mut(), &mut *r.borrow_mut());
         if let Some(window) = w.upgrade() {
             match result {
@@ -90,52 +94,56 @@ pub(super) fn install<C: ManagerController, R: AstraUnderlayRenderer>(
                     apply_model(&a, &model);
                     window.window().request_redraw();
                 }
-                Err(error) => window.set_global_diagnostic(error.into()),
+                Err(error) => report_error(&window, &error),
             }
         }
     });
     let c = controller.clone();
     let a = std::rc::Rc::downgrade(adapter);
     let w = adapter.window().as_weak();
-    adapter.window().on_reset_filter_config(move || {
+    adapter.window().global::<Filters>().on_reset(move || {
         let result = c.borrow_mut().reset_filter_config();
         if let Some(window) = w.upgrade() {
             match result {
                 Ok(model) => apply_model(&a, &model),
-                Err(error) => window.set_global_diagnostic(error.into()),
+                Err(error) => report_error(&window, &error),
             }
         }
     });
     let c = controller.clone();
     let a = std::rc::Rc::downgrade(adapter);
     let w = adapter.window().as_weak();
-    adapter.window().on_load_filter_source(move || {
-        let Some(path) = rfd::FileDialog::new()
-            .add_filter("HLSL", &["hlsl"])
-            .pick_file()
-        else {
-            return;
-        };
-        let result = (|| {
-            use std::io::Read;
-            let file = std::fs::File::open(path).map_err(|_| "ASTRA_EMU_FILTER_SOURCE_OPEN")?;
-            let mut bytes = Vec::new();
-            file.take(1_048_577)
-                .read_to_end(&mut bytes)
-                .map_err(|_| "ASTRA_EMU_FILTER_SOURCE_READ")?;
-            if bytes.len() > 1_048_576 {
-                return Err("ASTRA_EMU_FILTER_SOURCE_SIZE".into());
+    adapter
+        .window()
+        .global::<Filters>()
+        .on_load_source(move || {
+            let Some(path) = rfd::FileDialog::new()
+                .add_filter("HLSL", &["hlsl"])
+                .pick_file()
+            else {
+                return;
+            };
+            let result = (|| {
+                use std::io::Read;
+                let file = std::fs::File::open(path).map_err(|_| "ASTRA_EMU_FILTER_SOURCE_OPEN")?;
+                let mut bytes = Vec::new();
+                file.take(1_048_577)
+                    .read_to_end(&mut bytes)
+                    .map_err(|_| "ASTRA_EMU_FILTER_SOURCE_READ")?;
+                if bytes.len() > 1_048_576 {
+                    return Err("ASTRA_EMU_FILTER_SOURCE_SIZE".into());
+                }
+                let source =
+                    String::from_utf8(bytes).map_err(|_| "ASTRA_EMU_FILTER_SOURCE_UTF8")?;
+                c.borrow_mut()
+                    .filter_config_changed("filter.source", &source)?;
+                c.borrow().model()
+            })();
+            if let Some(window) = w.upgrade() {
+                match result {
+                    Ok(model) => apply_model(&a, &model),
+                    Err(error) => report_error(&window, &error),
+                }
             }
-            let source = String::from_utf8(bytes).map_err(|_| "ASTRA_EMU_FILTER_SOURCE_UTF8")?;
-            c.borrow_mut()
-                .filter_config_changed("filter.source", &source)?;
-            c.borrow().model()
-        })();
-        if let Some(window) = w.upgrade() {
-            match result {
-                Ok(model) => apply_model(&a, &model),
-                Err(error) => window.set_global_diagnostic(error.into()),
-            }
-        }
-    });
+        });
 }

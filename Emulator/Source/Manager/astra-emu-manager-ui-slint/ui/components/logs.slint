@@ -1,0 +1,108 @@
+import { TextEdit } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { Logs } from "../globals.slint";
+import { PillButton, Segmented } from "./controls.slint";
+
+export component LogPanel inherits Rectangle {
+    z: 105;
+    visible: Logs.open;
+    x: 0px;
+    y: 0px;
+    width: 100%;
+    height: 100%;
+    background: Theme.scrim;
+
+    TouchArea {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+    }
+
+    Rectangle {
+        width: min(760px, parent.width - 32px);
+        height: min(560px, parent.height - 32px);
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        border-radius: Theme.r-xl;
+        background: Theme.surface-high;
+        drop-shadow-blur: 24px;
+        drop-shadow-offset-y: 8px;
+        drop-shadow-color: Theme.shadow-strong;
+
+        TouchArea {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: parent.height;
+        }
+
+        VerticalLayout {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: parent.height;
+            padding: 24px;
+            spacing: 16px;
+
+            HorizontalLayout {
+                spacing: 16px;
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 4px;
+                    Text {
+                        text: "日志";
+                        color: Theme.on-surface;
+                        font-size: Theme.title-lg;
+                        font-weight: 700;
+                    }
+                    Text {
+                        text: Logs.scope == "core" ? "核心：" + Logs.core : "全部记录";
+                        color: Theme.on-variant;
+                        font-size: Theme.body-sm;
+                    }
+                }
+                if Logs.core != "" : Segmented {
+                    horizontal-stretch: 0;
+                    items: ["仅此核心", "全部"];
+                    current: Logs.scope == "core" ? 0 : 1;
+                    segment-width: 96px;
+                    selected(i) => {
+                        if i == 0 {
+                            Logs.scope = "core";
+                            Logs.load(Logs.core);
+                        } else {
+                            Logs.scope = "all";
+                            Logs.load("");
+                        }
+                    }
+                }
+            }
+
+            TextEdit {
+                vertical-stretch: 1;
+                read-only: true;
+                font-family: "Consolas";
+                font-size: 12px;
+                text: Logs.text;
+            }
+
+            HorizontalLayout {
+                spacing: 12px;
+                Text {
+                    horizontal-stretch: 1;
+                    text: "共 " + Logs.count + " 条（最近 200 条）";
+                    color: Theme.on-variant;
+                    font-size: Theme.body-sm;
+                    vertical-alignment: center;
+                }
+                PillButton {
+                    horizontal-stretch: 0;
+                    text: "关闭";
+                    variant: "text";
+                    clicked => { Logs.open = false; }
+                }
+            }
+        }
+    }
+}

@@ -1,145 +1,148 @@
-// Filter settings sub-page - extracted from legacy filters overlay.
-
 import { ScrollView } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
+import { Filters } from "../globals.slint";
 import { Icon, Icons } from "../components/icons.slint";
-import { SettingsSectionHeader, SettingsDivider } from "../components/settings-card.slint";
-import { ConfigField, GenericConfigForm } from "../components/generic-config.slint";
-import { M3Button } from "../components/m3-widgets.slint";
+import { GenericConfigForm } from "../components/generic-config.slint";
 
-component FilterPresetRow inherits Rectangle {
+component PresetTile inherits Rectangle {
     in property <string> title;
     in property <string> description;
     in property <string> preset-id;
     in property <bool> active: false;
-    callback selected(string);
+    callback selected();
 
-    min-height: 56px;
-    border-radius: Theme.shape-lg;
-    background: active
-        ? Theme.primary-container
-        : (preset-area.has-hover ? Theme.surface-container-high : Theme.surface-container-low);
+    min-height: 88px;
+    border-radius: Theme.r-lg;
+    background: active ? Theme.primary-container : (area.has-hover ? Theme.surface-high : Theme.surface-container);
     border-width: active ? 2px : 1px;
     border-color: active ? Theme.primary : Theme.outline-variant;
-    animate background, border-color { duration: 120ms; }
+    accessible-role: button;
+    accessible-label: title;
+    accessible-action-default => { root.selected(); }
+    animate background { duration: Theme.motion-fast; }
 
-    HorizontalLayout {
-        padding-left: 16px;
-        padding-right: 16px;
-        padding-top: 10px;
-        padding-bottom: 10px;
-        spacing: 12px;
+    VerticalLayout {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        padding: 14px;
+        spacing: 4px;
         alignment: center;
-
-        Icon {
-            glyph: active ? Icons.check : Icons.sliders;
-            color: active ? Theme.primary : Theme.on-surface-variant;
-            font-size: 16px;
-            vertical-alignment: center;
-            horizontal-alignment: center;
-            width: 24px;
+        HorizontalLayout {
+            spacing: 8px;
+            Icon {
+                glyph: root.active ? Icons.check : Icons.wand;
+                font-size: 14px;
+                color: root.active ? Theme.on-primary-container : Theme.on-variant;
+                width: 18px;
+            }
+            Text {
+                text: root.title;
+                color: root.active ? Theme.on-primary-container : Theme.on-surface;
+                font-size: Theme.title-sm;
+                font-weight: 650;
+                vertical-alignment: center;
+            }
         }
-
-        VerticalLayout {
-            horizontal-stretch: 1;
-            spacing: 2px;
-            alignment: center;
-
-            Text {
-                text: title;
-                color: active ? Theme.on-primary-container : Theme.on-surface;
-                font-size: Theme.font-title-sm;
-                font-weight: active ? 700 : 600;
-            }
-            Text {
-                text: description;
-                color: active ? Theme.on-primary-container.transparentize(0.2) : Theme.on-surface-variant;
-                font-size: Theme.font-label-md;
-                wrap: word-wrap;
-            }
+        Text {
+            text: root.description;
+            color: root.active ? Theme.on-primary-container : Theme.on-variant;
+            font-size: Theme.body-sm;
+            wrap: word-wrap;
         }
     }
 
-    preset-area := TouchArea {
-        mouse-cursor: pointer;
-        clicked => { root.selected(root.preset-id); }
+    tile-focus := FocusScope {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        key-pressed(event) => {
+            if event.text == Key.Return || event.text == " " {
+                root.selected();
+                return accept;
+            }
+            return reject;
+        }
+        area := TouchArea {
+            mouse-cursor: pointer;
+            clicked => {
+                tile-focus.focus();
+                root.selected();
+            }
+        }
+    }
+}
+
+export component FilterPresetGrid inherits VerticalLayout {
+    spacing: 10px;
+    GridLayout {
+        spacing: 10px;
+        PresetTile {
+            row: 0; col: 0;
+            title: "原画";
+            description: "不做处理";
+            preset-id: "none";
+            active: Filters.preset == "none";
+            selected => { Filters.set-preset("none"); }
+        }
+        PresetTile {
+            row: 0; col: 1;
+            title: "平滑放大";
+            description: "按倍率放大画面";
+            preset-id: "scale";
+            active: Filters.preset == "scale";
+            selected => { Filters.set-preset("scale"); }
+        }
+        PresetTile {
+            row: 1; col: 0;
+            title: "锐化";
+            description: "增强线条边缘";
+            preset-id: "sharpen";
+            active: Filters.preset == "sharpen";
+            selected => { Filters.set-preset("sharpen"); }
+        }
+        PresetTile {
+            row: 1; col: 1;
+            title: "Anime4K";
+            description: "修复并 2 倍放大";
+            preset-id: "anime4k";
+            active: Filters.preset == "anime4k";
+            selected => { Filters.set-preset("anime4k"); }
+        }
+    }
+    PresetTile {
+        title: "外部效果文件";
+        description: "从文件加载画面效果";
+        preset-id: "external";
+        active: Filters.preset == "external";
+        selected => { Filters.load-source(); }
     }
 }
 
 export component FilterSettingsPage inherits Rectangle {
-    in-out property <string> filter-preset: "none";
-    in property <[ConfigField]> filter-config-fields;
-    callback set-filter-preset(string);
-    callback filter-config-changed(string, string);
-    callback load-filter-source();
-    callback save-filter-config();
-    callback reset-filter-config();
-
-    background: Theme.background;
+    background: Theme.surface;
 
     ScrollView {
         mouse-drag-pan-enabled: true;
-
         VerticalLayout {
             padding: 24px;
             spacing: 16px;
-
-            SettingsSectionHeader { title: "画面滤镜"; }
+            alignment: start;
             Text {
-                text: "当前配置 · " + (root.filter-preset == "none" ? "原画" : root.filter-preset == "scale" ? "缩放" : root.filter-preset == "sharpen" ? "锐化" : root.filter-preset == "anime4k" ? "Anime4K" : root.filter-preset == "external" ? "外部 HLSL" : root.filter-preset);
-                color: Theme.primary;
-                wrap: word-wrap;
+                text: "画面滤镜";
+                color: Theme.on-surface;
+                font-size: Theme.headline;
+                font-weight: 700;
             }
-
-            Text {
-                text: "滤镜应用于包含游戏文字与界面的完整画面，不改变核心渲染尺寸。选择预设，或加载 Magpie format 4 HLSL 后调整参数。";
-                color: Theme.on-surface-variant;
-                wrap: word-wrap;
-                font-size: Theme.font-body-sm;
-            }
-
-            FilterPresetRow {
-                title: "原画直出 (Off)";
-                description: "无着色器后处理，忠实还原游戏原始分辨率与像素呈现";
-                preset-id: "none";
-                active: root.filter-preset == "none";
-                selected(id) => { root.set-filter-preset(id); }
-            }
-
-            FilterPresetRow {
-                title: "缩放 (Scale)";
-                description: "按指定倍率放大游戏画面";
-                preset-id: "scale";
-                active: root.filter-preset == "scale";
-                selected(id) => { root.set-filter-preset(id); }
-            }
-
-            FilterPresetRow {
-                title: "锐化 (Sharpen)";
-                description: "调整最终画面的锐化强度";
-                preset-id: "sharpen";
-                active: root.filter-preset == "sharpen";
-                selected(id) => { root.set-filter-preset(id); }
-            }
-
-            FilterPresetRow {
-                title: "Anime4K Restore + Upscale";
-                description: "Restore CNN S 修复与 Upscale CNN x2 S 二倍放大";
-                preset-id: "anime4k";
-                active: root.filter-preset == "anime4k";
-                selected(id) => { root.set-filter-preset(id); }
-            }
-
-            M3Button { text: "加载外部 HLSL"; icon: Icons.folder-open; variant: "outlined"; clicked => { root.load-filter-source(); } }
-            SettingsDivider {}
-
+            FilterPresetGrid { }
             GenericConfigForm {
-                fields: root.filter-config-fields;
-                form-title: "滤镜参数";
-                form-description: "修改后保存；加载或校验失败会显示具体错误。";
-                field-changed(key, value) => { root.filter-config-changed(key, value); }
-                save => { root.save-filter-config(); }
-                reset => { root.reset-filter-config(); }
+                fields: Filters.fields;
+                form-title: "效果参数";
+                field-changed(key, value) => { Filters.field-changed(key, value); }
+                save => { Filters.save(); }
+                reset => { Filters.reset(); }
             }
         }
     }

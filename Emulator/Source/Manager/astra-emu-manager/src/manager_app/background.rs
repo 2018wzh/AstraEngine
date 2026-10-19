@@ -164,6 +164,7 @@ impl AstraEmuManagerController {
             }
             if imported.is_empty() {
                 self.diagnostic = "所选目录中未发现当前核心支持的游戏。请选择原生游戏目录，或检查运行包包含的核心。".into();
+                self.diagnostic_severity = "warning";
             }
         }
         if report.missing > 0 {
@@ -171,6 +172,7 @@ impl AstraEmuManagerController {
                 "有 {} 个游戏目录当前不可用。资料库信息已保留，恢复目录后点击“扫描游戏”。",
                 report.missing
             );
+            self.diagnostic_severity = "warning";
         }
         if self.selected_case_id.is_none() {
             self.selected_case_id = self

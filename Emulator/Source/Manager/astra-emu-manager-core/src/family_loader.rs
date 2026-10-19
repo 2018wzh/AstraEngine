@@ -1,5 +1,8 @@
 //! Native C protocol loader. A loaded library is resident even if validation fails.
-use crate::{family::FamilyPluginDescriptor, model::*};
+use crate::{
+    family::{FamilyPluginDescriptor, SessionMenuEntry},
+    model::*,
+};
 use astra_emu_abi as abi;
 use std::{
     mem::{ManuallyDrop, MaybeUninit},
@@ -123,6 +126,7 @@ pub struct LoadedFamilyPlugin {
     descriptor: FamilyPluginDescriptor,
     configuration: Vec<ConfigField>,
     location: PathBuf,
+    menu: Vec<SessionMenuEntry>,
 }
 impl LoadedFamilyPlugin {
     pub fn load(path: impl AsRef<Path>) -> Result<Self, FamilyLoadError> {
@@ -219,6 +223,60 @@ impl LoadedFamilyPlugin {
             table.validate().map_err(|_| FamilyLoadError::AbiLayout)?;
             Some(table)
         };
+        let mut extension = std::ptr::null();
+        let status = unsafe {
+            api.extension.unwrap()(
+                abi::Bytes::new(abi::SESSION_MENU_EXTENSION),
+                abi::SESSION_MENU_VERSION,
+                &mut extension,
+            )
+        };
+        let menu = if status == abi::UNSUPPORTED && extension.is_null() {
+            Vec::new()
+        } else {
+            if status != abi::OK
+                || extension.is_null()
+                || !extension.cast::<abi::SessionMenuApi>().is_aligned()
+            {
+                return Err(FamilyLoadError::AbiLayout);
+            }
+            let header = unsafe { *extension.cast::<abi::Header>() };
+            if header.version != abi::SESSION_MENU_VERSION
+                || header.size < abi::SessionMenuApi::HEADER.size
+            {
+                return Err(FamilyLoadError::AbiLayout);
+            }
+            let table = unsafe { *extension.cast::<abi::SessionMenuApi>() };
+            table.validate().map_err(|_| FamilyLoadError::AbiLayout)?;
+            let items = unsafe {
+                abi::borrowed_array(table.items, table.count, abi::SESSION_MENU_MAX_ITEMS)
+            }
+            .map_err(|_| FamilyLoadError::AbiLayout)?;
+            let mut menu = Vec::with_capacity(items.len());
+            let mut seen = Vec::with_capacity(items.len());
+            for item in items {
+                if item.control < abi::CONTROL_CORE_BASE || seen.contains(&item.control) {
+                    return Err(FamilyLoadError::AbiLayout);
+                }
+                seen.push(item.control);
+                let label = unsafe { text(item.label, abi::SESSION_MENU_LABEL_MAX) }
+                    .map_err(|_| FamilyLoadError::AbiLayout)?;
+                if label.is_empty() {
+                    return Err(FamilyLoadError::AbiLayout);
+                }
+                let icon = if item.icon > abi::MENU_ICON_SETTINGS {
+                    abi::MENU_ICON_GENERIC
+                } else {
+                    item.icon
+                };
+                menu.push(SessionMenuEntry {
+                    control: item.control,
+                    icon,
+                    label,
+                });
+            }
+            menu
+        };
         Ok(Self {
             inner: Rc::new(NativeModule {
                 api,
@@ -229,6 +287,7 @@ impl LoadedFamilyPlugin {
             descriptor,
             configuration,
             location: PathBuf::new(),
+            menu,
         })
     }
     pub fn supports_d3d12(&self) -> bool {
@@ -242,6 +301,9 @@ impl LoadedFamilyPlugin {
     }
     pub fn configuration(&self) -> &[ConfigField] {
         &self.configuration
+    }
+    pub fn session_menu(&self) -> &[SessionMenuEntry] {
+        &self.menu
     }
     /// Consume cross-session resources only when every native session has
     /// released its module reference. The dynamic library remains resident.
@@ -600,6 +662,9 @@ impl NativeSession {
         self.call("control", |api, handle, error| unsafe {
             api.control.unwrap()(handle, control, error)
         })
+    }
+    pub fn poisoned(&self) -> bool {
+        self.poisoned
     }
     pub fn acquire_frame(&mut self, after: Option<FrameIdentity>) -> FamilyResult<FramePoll> {
         if let Some((api, host)) = self.d3d12 {

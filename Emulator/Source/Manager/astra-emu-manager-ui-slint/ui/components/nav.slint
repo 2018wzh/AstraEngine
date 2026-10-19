@@ -1,0 +1,136 @@
+import { Theme } from "../theme.slint";
+import { App } from "../globals.slint";
+import { Icon, Icons } from "./icons.slint";
+
+
+component RailItem inherits Rectangle {
+    in property <string> glyph;
+    in property <string> text;
+    in property <bool> active;
+    callback clicked();
+
+    height: 64px;
+    accessible-role: button;
+    accessible-label: text;
+    accessible-action-default => { root.clicked(); }
+
+    Rectangle {
+        width: 56px;
+        height: 32px;
+        x: (parent.width - self.width) / 2;
+        y: 6px;
+        border-radius: 16px;
+        background: root.active ? Theme.primary-container : (area.has-hover ? Theme.surface-high : transparent);
+        animate background { duration: Theme.motion-fast; }
+        Icon {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: parent.height;
+            glyph: root.glyph;
+            font-size: 17px;
+            color: root.active ? Theme.on-primary-container : Theme.on-variant;
+        }
+    }
+    Text {
+        x: 0px;
+        y: 42px;
+        width: parent.width;
+        text: root.text;
+        font-size: Theme.label;
+        font-weight: root.active ? 700 : 500;
+        color: root.active ? Theme.on-surface : Theme.on-variant;
+        horizontal-alignment: center;
+    }
+
+    item-focus := FocusScope {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        key-pressed(event) => {
+            if event.text == Key.Return || event.text == " " {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+        area := TouchArea {
+            mouse-cursor: pointer;
+            clicked => {
+                item-focus.focus();
+                root.clicked();
+            }
+        }
+    }
+}
+
+export component BrandMark inherits Rectangle {
+    in property <length> size: 44px;
+    width: size;
+    height: size;
+    border-radius: size * 0.3;
+    background: @linear-gradient(140deg, Theme.primary 0%, oklch(0.68, 0.13, Theme.hue + 50) 100%);
+    Text {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        text: "A";
+        color: Theme.on-primary;
+        font-size: root.size * 0.5;
+        font-weight: 800;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+export component NavRail inherits Rectangle {
+    width: 88px;
+    background: Theme.surface-low;
+
+    BrandMark {
+        x: (parent.width - self.width) / 2;
+        y: 20px;
+    }
+
+    for item[i] in [
+        { id: "library", glyph: Icons.gamepad, label: "游戏库" },
+        { id: "cores", glyph: Icons.microchip, label: "核心" },
+        { id: "settings", glyph: Icons.gear, label: "设置" },
+        { id: "about", glyph: Icons.info, label: "关于" },
+    ] : RailItem {
+        x: 0px;
+        y: 92px + i * 72px;
+        width: root.width;
+        glyph: item.glyph;
+        text: item.label;
+        active: App.page == item.id;
+        clicked => { App.page = item.id; }
+    }
+}
+
+export component BottomNav inherits Rectangle {
+    height: 80px;
+    background: Theme.surface-container;
+
+    HorizontalLayout {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        padding-top: 8px;
+        for item[i] in [
+            { id: "library", glyph: Icons.gamepad, label: "游戏库" },
+            { id: "cores", glyph: Icons.microchip, label: "核心" },
+            { id: "settings", glyph: Icons.gear, label: "设置" },
+            { id: "about", glyph: Icons.info, label: "关于" },
+        ] : RailItem {
+            horizontal-stretch: 1;
+            glyph: item.glyph;
+            text: item.label;
+            active: App.page == item.id;
+            clicked => { App.page = item.id; }
+        }
+    }
+}

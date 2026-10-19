@@ -84,6 +84,7 @@ impl AstraEmuManagerController {
                             .insert(game_id, "请求失败，请检查错误信息后重试".into());
                     }
                     self.diagnostic = error;
+                    self.diagnostic_severity = "error";
                 }
             }
         }

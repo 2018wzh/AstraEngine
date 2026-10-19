@@ -121,6 +121,16 @@ impl ActiveFamilySession {
             .input(events, displayed)
             .map_err(|e| e.to_string())
     }
+    pub(super) fn control(&mut self, control: u32) -> Result<(), String> {
+        self.session
+            .as_mut()
+            .ok_or("ASTRA_EMU_CORE_CLOSED")?
+            .control(control)
+            .map_err(|e| e.to_string())
+    }
+    pub(super) fn poisoned(&self) -> bool {
+        self.session.as_ref().is_some_and(NativeSession::poisoned)
+    }
     /// Host cadence only controls observation; native producer owns all game time.
     pub(super) fn poll(&mut self) -> Result<bool, String> {
         let session = self.session.as_mut().ok_or("ASTRA_EMU_CORE_CLOSED")?;

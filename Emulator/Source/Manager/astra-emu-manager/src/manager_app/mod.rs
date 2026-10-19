@@ -10,7 +10,7 @@ use std::{
 
 use astra_emu_manager::modal_service::ModalBridge;
 #[cfg(not(target_os = "android"))]
-use astra_emu_manager::{HostWake, ManagerController, run_manager_with_initial_state};
+use astra_emu_manager::{HostExit, HostWake, ManagerController, run_manager_with_initial_state};
 use astra_emu_manager_core::model::{
     FamilyEvent, FamilyStatus, KeyCode, KeyModifiers, KeyState, ProbeRequest, WindowState,
 };
@@ -20,8 +20,8 @@ use astra_emu_manager_core::{
     PlaySessionEndReason, default_vn_preset, input_key_code as key_code,
 };
 use astra_emu_manager_ui_slint::{
-    AppearanceViewModel, GameCardViewModel, GamepadBindingViewModel, GenericConfigFieldViewModel,
-    InputConfigViewModel, ManagerViewModel, MatchReviewViewModel, PlaySessionViewModel,
+    AppearanceViewModel, ConfigFieldViewModel, GamepadBindingViewModel, InputConfigViewModel,
+    ManagerViewModel,
 };
 use astra_emu_metadata::{
     BangumiPlayStatus, BangumiPlayUpdate, CompatibilityDatabase, CompatibilityEntry,
@@ -41,6 +41,7 @@ const MAX_SCAN_DEPTH: usize = 5;
 mod background;
 mod connection_test;
 mod controller;
+mod cores;
 mod extensions;
 mod family_config;
 mod filters;
@@ -84,6 +85,7 @@ struct AstraEmuManagerController {
     selected_case_id: Option<String>,
     search_query: String,
     diagnostic: String,
+    diagnostic_severity: &'static str,
     plugin_errors: BTreeMap<String, String>,
     data_dir: PathBuf,
     extensions: Option<crate::text_service::ExtensionRuntime>,
@@ -103,7 +105,6 @@ struct AstraEmuManagerController {
     pinned_releases: BTreeMap<String, String>,
     filter_settings: astra_emu_manager_core::FilterSettings,
     input_mapping: astra_emu_manager_core::InputMapping,
-    input_config: InputConfigViewModel,
     appearance: astra_emu_manager_core::AppearanceSettings,
     family_options: BTreeMap<String, String>,
     filter_options: BTreeMap<String, String>,
@@ -124,6 +125,8 @@ struct AstraEmuManagerController {
     held_controls: BTreeSet<String>,
     key_modifiers: KeyModifiers,
     pointer_position: (f32, f32),
+    action_message: String,
+    action_serial: u32,
 }
 
 impl Drop for AstraEmuManagerController {
@@ -183,7 +186,16 @@ pub(super) fn run_application() -> Result<(), Box<dyn std::error::Error>> {
         let mailbox = FrameMailbox::new();
         let controller = AstraEmuManagerController::open(mailbox.clone())?;
         astra_emu_manager::startup::mark("cached_controller_ready");
-        run_manager_with_initial_state(controller, ManagerStageRenderer::new(mailbox), false)?;
+        let exit = run_manager_with_initial_state(
+            controller,
+            ManagerStageRenderer::new(mailbox),
+            false,
+        )?;
+        if matches!(exit, HostExit::Restart) {
+            std::process::Command::new(std::env::current_exe()?)
+                .args(std::env::args_os().skip(1))
+                .spawn()?;
+        }
         Ok(())
     })();
     if result.is_err() {

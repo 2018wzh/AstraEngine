@@ -1,0 +1,128 @@
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { Notice, Notices, Logs, Session } from "../globals.slint";
+import { Icon, Icons } from "./icons.slint";
+import { PillButton, IconBtn } from "./controls.slint";
+
+component NoticeCard inherits Rectangle {
+    in property <Notice> notice;
+    in property <bool> show-toggle: false;
+    border-radius: Theme.r-lg;
+    height: body.preferred-height;
+    background: notice.severity == "error" ? Theme.error-container : Theme.surface-high;
+    drop-shadow-blur: 16px;
+    drop-shadow-offset-y: 4px;
+    drop-shadow-color: Theme.shadow;
+
+    property <color> title-color: notice.severity == "error" ? Theme.on-error-container : Theme.on-surface;
+    property <color> body-color: notice.severity == "error" ? Theme.on-error-container : Theme.on-variant;
+
+    body := VerticalLayout {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        padding: 14px;
+        spacing: 8px;
+
+        HorizontalLayout {
+            spacing: 10px;
+            Icon {
+                glyph: root.notice.severity == "error" ? Icons.triangle : Icons.circle-info;
+                font-size: 16px;
+                width: 20px;
+                height: 20px;
+                color: root.notice.severity == "error" ? Theme.error : Theme.primary;
+            }
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 4px;
+                Text {
+                    text: root.notice.title;
+                    color: root.title-color;
+                    font-size: Theme.title-sm;
+                    font-weight: 600;
+                    wrap: word-wrap;
+                }
+                if root.notice.detail != "" : Text {
+                    text: root.notice.detail;
+                    color: root.body-color;
+                    font-size: Theme.body-sm;
+                    wrap: word-wrap;
+                    overflow: elide;
+                    height: 42px;
+                }
+                if root.notice.code != "" : Text {
+                    text: "错误代码 " + root.notice.code;
+                    color: Theme.on-variant;
+                    font-size: Theme.label-sm;
+                }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: start;
+            if root.notice.core != "" : PillButton {
+                text: "查看日志";
+                variant: "text";
+                h: 32px;
+                clicked => {
+                    Logs.core = root.notice.core;
+                    Logs.scope = "core";
+                    Logs.open = true;
+                    Logs.load(root.notice.core);
+                }
+            }
+            if root.show-toggle && Notices.items.length > 1 : PillButton {
+                text: "全部 (" + Notices.items.length + ")";
+                variant: "text";
+                h: 32px;
+                clicked => { Notices.expanded = !Notices.expanded; }
+            }
+            Rectangle { horizontal-stretch: 1; }
+            IconBtn {
+                glyph: Icons.xmark;
+                label: "关闭";
+                size: 32px;
+                clicked => { Notices.dismiss(root.notice.id); }
+            }
+        }
+    }
+}
+
+export component NoticeStack inherits Rectangle {
+    in property <bool> compact: false;
+    z: 100;
+    x: 0px;
+    y: 0px;
+    width: 100%;
+    height: 100%;
+    background: transparent;
+    visible: !(Session.active && Session.menu-open) && Notices.items.length > 0;
+
+    stack := VerticalLayout {
+        x: 16px;
+        y: root.height - self.preferred-height - (root.compact ? 96px : 16px);
+        width: min(560px, root.width - 32px);
+        spacing: 8px;
+
+        if !Notices.expanded && Notices.items.length > 0 : NoticeCard {
+            notice: Notices.items[0];
+            show-toggle: true;
+        }
+
+        if Notices.expanded : ScrollView {
+            height: min(360px, list.preferred-height);
+            mouse-drag-pan-enabled: true;
+            list := VerticalLayout {
+                padding: 0px;
+                spacing: 8px;
+                alignment: start;
+                for n[i] in Notices.items : NoticeCard {
+                    notice: n;
+                    show-toggle: i == 0;
+                }
+            }
+        }
+    }
+}

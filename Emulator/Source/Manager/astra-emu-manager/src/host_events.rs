@@ -1,7 +1,7 @@
 use std::{cell::RefCell, rc::Rc};
 
 use astra_emu_manager_core::model::{FamilyEvent, KeyCode, KeyModifiers, KeyState, WindowState};
-use astra_emu_manager_ui_slint::SlintManagerAdapter;
+use astra_emu_manager_ui_slint::{report_error, App, SlintManagerAdapter};
 use slint::{
     winit_030::{EventResult, WinitWindowAccessor},
     ComponentHandle,
@@ -57,20 +57,13 @@ pub(super) fn install<C: ManagerController>(
             let Some(window) = weak.upgrade() else {
                 return EventResult::Propagate;
             };
-            let input_active = window.get_game_active()
-                && !window.get_fatal_error_active()
-                && !window.get_modal_active()
-                && !window.get_translation_overlay_active()
-                && !window.get_diagnostics_overlay_active()
-                && !window.get_filters_overlay_active();
+            let input_active = super::session_input_open(&window);
             super::pointer::HostPointer::observe(&pointer, &window, event);
             let mut consumed = false;
             let result = match event {
-                WindowEvent::ThemeChanged(theme) => {
-                    if window.get_theme_mode() == "system" {
-                        let dark = *theme == winit::window::Theme::Dark;
-                        controller.borrow_mut().set_system_theme(dark);
-                        window.set_theme_dark(dark);
+                WindowEvent::ThemeChanged(_) => {
+                    if let Ok(dark) = system_theme(native_window) {
+                        window.global::<App>().set_system_dark(dark);
                     }
                     Ok(())
                 }
@@ -134,7 +127,7 @@ pub(super) fn install<C: ManagerController>(
                 if controller.borrow().is_game_active() {
                     super::terminate_game(&controller, &weak_adapter, &window, error);
                 } else {
-                    window.set_global_diagnostic(error.into());
+                    report_error(&window, &error);
                 }
             }
             if consumed {

@@ -1,7 +1,35 @@
 use super::*;
 
+fn migrate_appearance(raw: &str) -> Option<crate::AppearanceSettings> {
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Previous {
+        theme_dark: bool,
+        theme_mode: String,
+        accent: String,
+        grid_columns: i32,
+        density: String,
+        view_mode: String,
+    }
+    let previous: Previous = serde_json::from_str(raw).ok()?;
+    if !matches!(previous.accent.as_str(), "blue" | "purple")
+        || !(1..=8).contains(&previous.grid_columns)
+    {
+        return None;
+    }
+    let _ = previous.theme_dark;
+    let settings = crate::AppearanceSettings {
+        theme_mode: previous.theme_mode,
+        density: previous.density,
+        view_mode: previous.view_mode,
+        ..Default::default()
+    };
+    settings.validate().ok()?;
+    Some(settings)
+}
+
 impl Library {
-    pub fn appearance_settings(&self) -> Result<crate::AppearanceSettings, LibraryError> {
+    pub fn appearance_settings(&mut self) -> Result<crate::AppearanceSettings, LibraryError> {
         let raw: Option<String> = self
             .connection
             .query_row(
@@ -10,12 +38,22 @@ impl Library {
                 |row| row.get(0),
             )
             .optional()?;
-        let settings: crate::AppearanceSettings = match raw {
-            Some(raw) => serde_json::from_str(&raw).map_err(|_| LibraryError::Settings)?,
-            None => crate::AppearanceSettings::default(),
-        };
-        settings.validate().map_err(|_| LibraryError::Settings)?;
-        Ok(settings)
+        match raw {
+            Some(raw) => match serde_json::from_str::<crate::AppearanceSettings>(&raw) {
+                Ok(settings) if settings.validate().is_ok() => Ok(settings),
+                _ => {
+                    if let Some(settings) = migrate_appearance(&raw) {
+                        self.save_appearance_settings(&settings)?;
+                        return Ok(settings);
+                    }
+                    tracing::warn!(event = "astra.emu.manager.appearance_reset");
+                    let defaults = crate::AppearanceSettings::default();
+                    self.save_appearance_settings(&defaults)?;
+                    Ok(defaults)
+                }
+            },
+            None => Ok(crate::AppearanceSettings::default()),
+        }
     }
 
     pub fn save_appearance_settings(
@@ -187,8 +225,8 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("library.db");
         let appearance = crate::AppearanceSettings {
-            grid_columns: 6,
-            accent: "purple".into(),
+            cover_size: "small".into(),
+            reduce_motion: true,
             ..Default::default()
         };
         let filter = crate::FilterSettings {
@@ -210,7 +248,7 @@ mod tests {
             invalid.configuration.scale = f32::NAN;
             assert!(library.save_filter_settings(&invalid).is_err());
             let invalid = crate::AppearanceSettings {
-                grid_columns: 0,
+                cover_size: "huge".into(),
                 ..appearance.clone()
             };
             assert!(library.save_appearance_settings(&invalid).is_err());
@@ -220,7 +258,7 @@ mod tests {
                 .insert(crate::GamepadInput::South, "unknown_key".into());
             assert!(library.save_input_mapping(&mapping).is_err());
         }
-        let library = Library::open(path).unwrap();
+        let mut library = Library::open(path).unwrap();
         assert_eq!(library.appearance_settings().unwrap(), appearance);
         assert_eq!(library.filter_settings().unwrap(), Some(filter));
         assert_eq!(
@@ -242,5 +280,53 @@ mod tests {
         next.configuration.preset = crate::FilterPreset::Sharpen;
         assert!(library.save_filter_settings(&next).is_err());
         assert_eq!(library.filter_settings().unwrap(), Some(previous));
+    }
+
+    #[test]
+    fn previous_appearance_preserves_shared_preferences_after_reopen() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("library.db");
+        {
+            let mut library = Library::open(&path).unwrap();
+            library.connection.execute(
+                "INSERT INTO appearance_settings(singleton, settings_json) VALUES(1, ?1)",
+                [r#"{"theme_dark":true,"theme_mode":"dark","accent":"purple","grid_columns":4,"density":"compact","view_mode":"list"}"#],
+            ).unwrap();
+            let migrated = library.appearance_settings().unwrap();
+            assert_eq!(migrated.theme_mode, "dark");
+            assert_eq!(migrated.density, "compact");
+            assert_eq!(migrated.view_mode, "list");
+        }
+        let mut reopened = Library::open(path).unwrap();
+        let settings = reopened.appearance_settings().unwrap();
+        assert_eq!(settings.theme_mode, "dark");
+        assert_eq!(settings.density, "compact");
+        assert_eq!(settings.view_mode, "list");
+    }
+
+    #[test]
+    fn invalid_appearance_json_resets_to_defaults() {
+        let mut library = Library::in_memory().unwrap();
+        library
+            .connection
+            .execute(
+                "INSERT INTO appearance_settings(singleton, settings_json) VALUES(1, ?1)",
+                [r#"{"theme_dark":true}"#],
+            )
+            .unwrap();
+        let settings = library.appearance_settings().unwrap();
+        assert_eq!(settings, crate::AppearanceSettings::default());
+        let stored: String = library
+            .connection
+            .query_row(
+                "SELECT settings_json FROM appearance_settings WHERE singleton=1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            stored,
+            serde_json::to_string(&crate::AppearanceSettings::default()).unwrap()
+        );
     }
 }

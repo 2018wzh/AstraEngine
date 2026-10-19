@@ -1,4 +1,5 @@
 use astra_emu_manager_core::model::FamilyWindowIcon;
+use astra_emu_manager_ui_slint::Session;
 use slint::winit_030::WinitWindowAccessor;
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
@@ -30,9 +31,9 @@ pub(super) fn set_icon(
         })
         .transpose()?;
     window
-        .with_winit_window(|window| {
+        .with_winit_window(|native| {
             if icon.is_some() {
-                let handle = window
+                let handle = native
                     .window_handle()
                     .map_err(|_| "ASTRA_EMU_HOST_WINDOW_UNAVAILABLE")?;
                 if !matches!(
@@ -42,7 +43,7 @@ pub(super) fn set_icon(
                     return Err("ASTRA_EMU_HOST_WINDOW_ICON_UNAVAILABLE".to_owned());
                 }
             }
-            window.set_window_icon(icon);
+            native.set_window_icon(icon);
             Ok(())
         })
         .ok_or_else(|| "ASTRA_EMU_HOST_WINDOW_UNAVAILABLE".to_owned())?
@@ -69,8 +70,7 @@ pub(super) fn execute(
             match command {
                 WindowCommand::Title(title) => {
                     native.set_title(title);
-                    window.set_game_title(title.as_str().into());
-                    window.set_has_game_title(true);
+                    window.global::<Session>().set_title(title.as_str().into());
                 }
                 WindowCommand::Fullscreen {
                     mode,
@@ -98,6 +98,9 @@ pub(super) fn execute(
                         }
                         _ => return Err("ASTRA_EMU_WINDOW_FULLSCREEN".into()),
                     };
+                    window
+                        .global::<Session>()
+                        .set_fullscreen(fullscreen.is_some());
                     native.set_fullscreen(fullscreen);
                 }
                 WindowCommand::Size { width, height } => {

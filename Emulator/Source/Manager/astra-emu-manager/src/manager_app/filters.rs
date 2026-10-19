@@ -3,10 +3,10 @@ use astra_emu_manager::effects::format4::EffectSource;
 use astra_emu_manager_core::{FilterPreset, FilterSettings};
 
 impl AstraEmuManagerController {
-    pub(super) fn filter_fields(&self) -> Result<Vec<GenericConfigFieldViewModel>, String> {
+    pub(super) fn filter_fields(&self) -> Result<Vec<ConfigFieldViewModel>, String> {
         let config = &self.filter_settings.configuration;
         let field = |key: &str, label: &str, value: String, description: String| {
-            GenericConfigFieldViewModel {
+            ConfigFieldViewModel {
                 key: key.into(),
                 label: label.into(),
                 description,

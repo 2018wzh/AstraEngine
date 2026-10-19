@@ -1,92 +1,65 @@
-// Compatibility settings sub-page - central community compatibility database.
-// Read-only source + explicit refresh. Network access reuses the metadata
-// consent gate (enable VNDB or Bangumi network access under Metadata).
-
-import { Button, ScrollView } from "std-widgets.slint";
+import { ScrollView } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
-import { Icon, Icons } from "../components/icons.slint";
-import { SettingsSectionHeader, SettingsDivider } from "../components/settings-card.slint";
-import { M3Button, M3Card } from "../components/m3-widgets.slint";
+import { Settings, Selection } from "../globals.slint";
+import { Card, PillButton, InfoRow } from "../components/controls.slint";
 
 export component CompatibilitySettingsPage inherits Rectangle {
-    in property <string> source-url;
-    in property <string> sync-summary;
-    in property <bool> network-consent;
-    callback refresh-compatibility();
-
-    background: Theme.background;
+    background: Theme.surface;
 
     ScrollView {
         mouse-drag-pan-enabled: true;
-
         VerticalLayout {
-            padding: 20px;
-            spacing: 12px;
+            padding: 24px;
+            spacing: 16px;
+            alignment: start;
 
-            SettingsSectionHeader { title: "Compatibility database"; }
+            Text {
+                text: "兼容性数据";
+                color: Theme.on-surface;
+                font-size: Theme.headline;
+                font-weight: 700;
+            }
 
-            HorizontalLayout {
-                spacing: 8px;
-
-                Icon {
-                    glyph: Icons.clipboard-check;
-                    color: Theme.primary;
-                    font-size: 15px;
-                    vertical-alignment: center;
-                    width: 20px;
+            Card {
+                VerticalLayout {
+                    padding: 20px;
+                    spacing: 12px;
+                    Text {
+                        text: "社区兼容性数据";
+                        color: Theme.on-surface;
+                        font-size: Theme.title-md;
+                        font-weight: 650;
+                    }
+                    Text {
+                        text: "由社区维护的视觉小说运行情况评级。";
+                        color: Theme.on-variant;
+                        font-size: Theme.body-sm;
+                        wrap: word-wrap;
+                    }
+                    InfoRow {
+                        label: "数据来源";
+                        value: Settings.compat-source != "" ? Settings.compat-source : "未配置";
+                    }
+                    InfoRow {
+                        label: "同步状态";
+                        value: Settings.compat-summary != "" ? Settings.compat-summary : "尚未同步";
+                    }
+                    HorizontalLayout {
+                        alignment: start;
+                        PillButton {
+                            text: "刷新兼容性数据";
+                            variant: "filled";
+                            enabled: Settings.vndb-enabled || Settings.bangumi-enabled;
+                            clicked => { Selection.refresh-compat(); }
+                        }
+                    }
+                    if !(Settings.vndb-enabled || Settings.bangumi-enabled) : Text {
+                        text: "请先在“作品资料与账号”中开启联网。";
+                        color: Theme.error;
+                        wrap: word-wrap;
+                        font-size: Theme.body-sm;
+                    }
                 }
-                Text {
-                    text: "Community-maintained VN adaptation grades (Perfect, Completable, Flawed, Boot only, Unplayable).";
-                    color: Theme.text-muted;
-                    wrap: word-wrap;
-                    font-size: 12px;
-                    horizontal-stretch: 1;
-                }
-            }
-
-            Text {
-                text: "Source";
-                color: Theme.text;
-                font-size: 14px;
-                font-weight: 600;
-            }
-            Text {
-                text: root.source-url == "" ? "Not configured" : root.source-url;
-                color: Theme.text-muted;
-                wrap: word-wrap;
-                font-size: 12px;
-            }
-
-            SettingsDivider {}
-
-            Text {
-                text: "Sync status";
-                color: Theme.text;
-                font-size: 14px;
-                font-weight: 600;
-            }
-            Text {
-                text: root.sync-summary == "" ? "Never fetched." : root.sync-summary;
-                color: Theme.text-muted;
-                wrap: word-wrap;
-                font-size: 12px;
-            }
-
-            HorizontalLayout {
-                M3Button {
-                    text: "刷新社区适配数据";
-                    icon: Icons.arrows-rotate;
-                    primary: true;
-                    enabled: root.network-consent;
-                    clicked => { root.refresh-compatibility(); }
-                }
-            }
-
-            if !root.network-consent : Text {
-                text: "请先在“作品元数据”中开启 VNDB 或 Bangumi 网络访问授权，以拉取社区兼容性数据。";
-                color: Theme.error;
-                wrap: word-wrap;
-                font-size: Theme.font-label-md;
             }
         }
     }

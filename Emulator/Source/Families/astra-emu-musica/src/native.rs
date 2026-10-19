@@ -1,7 +1,7 @@
 //! C ownership boundary. The native worker owns the existing Musica session;
 //! polling and input submission never execute the VM on the platform thread.
 use astra_emu_abi as abi;
-use astra_emu_family_api::{FamilyError, FamilyEvent};
+use astra_emu_family_api::{FamilyError, FamilyEvent, KeyCode, KeyModifiers, KeyState};
 use std::{
     borrow::Cow,
     ffi::c_void,
@@ -411,6 +411,19 @@ unsafe extern "C" fn input(
             })
     })
 }
+fn menu_key(control: u32) -> Option<KeyCode> {
+    Some(match control {
+        0x1001 => KeyCode::F5,
+        0x1002 => KeyCode::F9,
+        0x1003 => KeyCode::F6,
+        0x1004 => KeyCode::F8,
+        0x1005 => KeyCode::A,
+        0x1006 => KeyCode::S,
+        0x1007 => KeyCode::PageUp,
+        0x1008 => KeyCode::F7,
+        _ => return None,
+    })
+}
 unsafe extern "C" fn control(
     session: abi::Session,
     command: u32,
@@ -418,6 +431,41 @@ unsafe extern "C" fn control(
 ) -> abi::Status {
     boundary(error, || {
         let handle = unsafe { handle(session) }?;
+        if let Some(code) = menu_key(command) {
+            if handle.shared.services.is_cancelled() {
+                return Err(invalid(abi::CANCELLED));
+            }
+            if code == KeyCode::F9 {
+                handle.shared.services.invalidate();
+            }
+            let modifiers = KeyModifiers {
+                shift: false,
+                control: false,
+                alt: false,
+                super_key: false,
+            };
+            return handle
+                .commands
+                .try_send(Command::Input(vec![
+                    FamilyEvent::Key {
+                        code,
+                        state: KeyState::Pressed,
+                        modifiers,
+                    },
+                    FamilyEvent::Key {
+                        code,
+                        state: KeyState::Released,
+                        modifiers,
+                    },
+                ]))
+                .map_err(|_| {
+                    Failure::new(
+                        abi::CAPACITY,
+                        "ASTRA_EMU_MUSICA_INPUT_QUEUE",
+                        "native input queue is full or closed",
+                    )
+                });
+        }
         if !matches!(
             command,
             abi::CONTROL_PAUSE | abi::CONTROL_RESUME | abi::CONTROL_RETRY
@@ -576,6 +624,53 @@ unsafe extern "C" fn close(session: abi::Session, error: *mut abi::Error) -> abi
         Ok(())
     })
 }
+static MENU: [abi::SessionMenuItem; 8] = [
+    abi::SessionMenuItem {
+        control: 0x1001,
+        icon: abi::MENU_ICON_QUICK_SAVE,
+        label: abi::Bytes::from_static("快速存档".as_bytes()),
+    },
+    abi::SessionMenuItem {
+        control: 0x1002,
+        icon: abi::MENU_ICON_QUICK_LOAD,
+        label: abi::Bytes::from_static("快速读档".as_bytes()),
+    },
+    abi::SessionMenuItem {
+        control: 0x1003,
+        icon: abi::MENU_ICON_SAVE,
+        label: abi::Bytes::from_static("存档…".as_bytes()),
+    },
+    abi::SessionMenuItem {
+        control: 0x1004,
+        icon: abi::MENU_ICON_LOAD,
+        label: abi::Bytes::from_static("读档…".as_bytes()),
+    },
+    abi::SessionMenuItem {
+        control: 0x1005,
+        icon: abi::MENU_ICON_AUTO,
+        label: abi::Bytes::from_static("自动播放".as_bytes()),
+    },
+    abi::SessionMenuItem {
+        control: 0x1006,
+        icon: abi::MENU_ICON_SKIP,
+        label: abi::Bytes::from_static("快进".as_bytes()),
+    },
+    abi::SessionMenuItem {
+        control: 0x1007,
+        icon: abi::MENU_ICON_BACKLOG,
+        label: abi::Bytes::from_static("回想".as_bytes()),
+    },
+    abi::SessionMenuItem {
+        control: 0x1008,
+        icon: abi::MENU_ICON_SETTINGS,
+        label: abi::Bytes::from_static("游戏设置".as_bytes()),
+    },
+];
+static MENU_API: abi::SessionMenuApi = abi::SessionMenuApi {
+    header: abi::SessionMenuApi::HEADER,
+    items: MENU.as_ptr(),
+    count: 8,
+};
 unsafe extern "C" fn extension(
     name: abi::Bytes,
     version: u32,
@@ -589,6 +684,10 @@ unsafe extern "C" fn extension(
         Ok(name) => name,
         Err(status) => return status,
     };
+    if name == abi::SESSION_MENU_EXTENSION && version == abi::SESSION_MENU_VERSION {
+        unsafe { output.write((&MENU_API as *const abi::SessionMenuApi).cast()) };
+        return abi::OK;
+    }
     if name != abi::MODULE_OWNER_EXTENSION || version != abi::MODULE_OWNER_VERSION {
         return abi::UNSUPPORTED;
     }

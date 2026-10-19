@@ -1,626 +1,143 @@
-// AstraEMU Manager - main entry.
-// Assembles theme, sidebar navigation, pages and the game view.
-// Exports ManagerWindow with the full public API consumed by the Rust adapter.
-
-import { AboutSlint, Button, CheckBox, ComboBox, LineEdit, Palette, ScrollView, SpinBox, TextEdit } from "std-widgets.slint";
+import { Palette } from "std-widgets.slint";
 import { Theme } from "./theme.slint";
-import { Sidebar, BottomNav } from "./components/sidebar.slint";
-import { GameCard } from "./components/cover-card.slint";
-import { MatchReview } from "./components/work-association.slint";
-import { GamepadBinding } from "./settings/input.slint";
-import { LibraryPage, PlaySession, ReleaseOption } from "./pages/library.slint";
-import { AboutPage } from "./pages/about.slint";
+import {
+    App, Library, Selection, Cores, Logs, Notices, Dialogs, Settings, Filters, Session,
+    GameCard, CoreInfo, Notice, EngineAction, Appearance, SelectedGame, CompatInfo,
+    ReleaseOption, PlaySession, MatchReview, BangumiProgress, ConfigField,
+    TranslationProfile, GamepadBinding,
+} from "./globals.slint";
+import { NavRail, BottomNav } from "./components/nav.slint";
+import { NoticeStack } from "./components/notices.slint";
+import { LogPanel } from "./components/logs.slint";
+import { ModalDialog, FatalDialog } from "./components/dialogs.slint";
+import { LibraryPage } from "./pages/library.slint";
+import { CoresPage } from "./pages/cores.slint";
 import { SettingsPage } from "./pages/settings.slint";
+import { AboutPage } from "./pages/about.slint";
 import { GameViewPage } from "./pages/game-view.slint";
-import { ConfigField } from "./components/generic-config.slint";
-import { M3Button } from "./components/m3-widgets.slint";
 
-export { GameCard, MatchReview, PlaySession, ReleaseOption }
+export {
+    App, Library, Selection, Cores, Logs, Notices, Dialogs, Settings, Filters, Session,
+    GameCard, CoreInfo, Notice, EngineAction, Appearance, SelectedGame, CompatInfo,
+    ReleaseOption, PlaySession, MatchReview, BangumiProgress, ConfigField,
+    TranslationProfile, GamepadBinding,
+}
 
 export component ManagerWindow inherits Window {
-    in property <bool> demo-mode: false;
-    in property <string> game-title;
-    in property <bool> has-game-title: false;
-    in property <bool> modal-active: false;
-    in property <string> modal-caption;
-    in property <string> modal-message;
-    in property <[string]> modal-buttons;
-    in property <bool> modal-has-input: false;
-    in-out property <string> modal-text;
-    callback modal-submit(int, string);
-    callback modal-cancel();
-    title: game-active && has-game-title ? game-title : (demo-mode ? "AstraEMU Manager [DEMO]" : "AstraEMU Manager");
-    background: Theme.background;
+    title: Session.active && Session.title != "" ? Session.title : "AstraEMU";
+    background: Theme.surface;
     min-width: 360px;
     min-height: 640px;
     preferred-width: 1280px;
     preferred-height: 800px;
 
-    // Keep navigation and game geometry inside the platform safe area.
     property <length> usable-x: root.safe-area-insets.left;
     property <length> usable-y: root.safe-area-insets.top;
     property <length> usable-width: root.width - root.safe-area-insets.left - root.safe-area-insets.right;
     property <length> usable-height: root.height - root.safe-area-insets.top - root.safe-area-insets.bottom;
-    property <bool> desktop-mode: root.usable-width >= 1000px;
+    property <bool> compact: usable-width < 600px;
 
-    // ===== Navigation =====
-    in-out property <string> current-page: "library";
+    init => { Palette.color-scheme = App.dark ? ColorScheme.dark : ColorScheme.light; }
+    property <bool> watch-dark: App.dark;
+    changed watch-dark => { Palette.color-scheme = App.dark ? ColorScheme.dark : ColorScheme.light; }
 
-    // ===== Theme / appearance =====
-    in-out property <bool> theme-dark <=> Theme.dark-mode;
-    in-out property <string> theme-mode <=> Theme.theme-mode;
-    in-out property <string> accent <=> Theme.accent;
-    in-out property <string> density <=> Theme.density;
-    in-out property <int> grid-columns: 3;
-    in-out property <string> view-mode: "grid";
-    // Native widgets and custom M3 controls share the same resolved appearance.
-    init => { Palette.color-scheme = Theme.effective-dark ? ColorScheme.dark : ColorScheme.light; }
-    changed theme-mode => { Palette.color-scheme = Theme.effective-dark ? ColorScheme.dark : ColorScheme.light; }
-    changed theme-dark => { Palette.color-scheme = Theme.effective-dark ? ColorScheme.dark : ColorScheme.light; }
+    property <bool> watch-session-active: Session.active;
+    changed watch-session-active => {
+        Session.pointer-state-changed();
+        if !Session.active {
+            Session.menu-open = false;
+            Session.menu-page = "main";
+        }
+        Library.cover-demand(-1, "", false, "");
+    }
+    property <bool> watch-menu-open: Session.menu-open;
+    changed watch-menu-open => { Session.pointer-state-changed(); }
+    property <bool> watch-modal: Dialogs.modal-active;
+    changed watch-modal => { Session.pointer-state-changed(); }
+    property <bool> watch-fatal: Dialogs.fatal-active;
+    changed watch-fatal => { Session.pointer-state-changed(); }
+    property <float> watch-pointer-x: Session.pointer-x;
+    changed watch-pointer-x => { Session.pointer-state-changed(); }
+    property <float> watch-pointer-y: Session.pointer-y;
+    changed watch-pointer-y => { Session.pointer-state-changed(); }
+    property <float> watch-pointer-w: Session.pointer-width;
+    changed watch-pointer-w => { Session.pointer-state-changed(); }
+    property <float> watch-pointer-h: Session.pointer-height;
+    changed watch-pointer-h => { Session.pointer-state-changed(); }
 
-    // ===== Library =====
-    in property <[GameCard]> games;
-    in property <bool> cores-ready;
-    in property <bool> core-refresh-enabled;
-    in property <bool> startup-busy;
-    in property <string> startup-status;
-    in-out property <bool> cover-loading-enabled: false;
-    in property <image> selected-cover;
-    callback cover-demand(int, string, bool, string);
-    changed cover-loading-enabled => { root.cover-demand(-1, "", false, ""); }
-    changed selected-case-id => { root.cover-demand(-1, "", false, ""); }
-    changed current-page => { root.cover-demand(-1, "", false, ""); }
-    changed view-mode => { root.cover-demand(-1, "", false, ""); }
-    in-out property <string> selected-case-id;
-    in-out property <string> search-query;
-    in property <string> endpoint-identity;
-    in property <string> model-identity;
-    in property <string> selected-title;
-    in property <string> selected-family;
-    in property <string> selected-emulator;
-    in property <bool> selected-launchable;
-    in property <string> selected-play-time;
-    in property <string> selected-last-played;
-    in property <[PlaySession]> play-history;
-    in-out property <string> library-sort: "title";
+    property <string> watch-selected: Library.selected-id;
+    changed watch-selected => { Library.cover-demand(-1, "", false, ""); }
+    property <string> watch-page: App.page;
+    changed watch-page => { Library.cover-demand(-1, "", false, ""); }
+    property <string> watch-view: App.appearance.view-mode;
+    changed watch-view => { Library.cover-demand(-1, "", false, ""); }
+    property <bool> watch-cover-loading: Library.cover-loading;
+    changed watch-cover-loading => { Library.cover-demand(-1, "", false, ""); }
 
-    // ===== Compatibility =====
-    in-out property <string> compatibility-filter: "all";
-    in property <string> compatibility-source-url;
-    in property <string> compatibility-sync-summary;
-    in property <string> selected-compatibility-status;
-    in property <string> selected-compatibility-notes;
-    in property <string> selected-compatibility-updated;
-    // VNDB game + version identity (`vID / rID`).
-    in property <string> selected-compatibility-vndb-id;
-    // VNDB releases (rIDs) pinned to a specific game version.
-    in property <[ReleaseOption]> releases;
-    // ===== Extended metadata (PotatoVN-style) =====
-    in property <string> selected-developer;
-    in property <string> selected-release-date;
-    in property <string> selected-platforms;
-    in property <string> selected-engine;
-    in property <string> selected-cover-meta;
-    in property <string> selected-description;
-    in property <string> selected-tags;
-    in property <string> selected-aliases;
+    if !root.compact : NavRail {
+        x: root.usable-x;
+        y: root.usable-y;
+        height: root.usable-height;
+    }
 
-    // ===== Global diagnostic =====
-    in property <string> global-diagnostic;
-    in-out property <bool> fatal-error-active: false;
-    in-out property <string> fatal-error-message;
-    in-out property <bool> core-retryable: false;
-    callback retry-core();
+    pages := Rectangle {
+        x: root.usable-x + (root.compact ? 0px : 88px);
+        y: root.usable-y;
+        width: root.usable-width - (root.compact ? 0px : 88px);
+        height: root.usable-height - (root.compact ? 80px : 0px);
+        clip: true;
 
-    // ===== Game view =====
-    in property <image> stage-frame;
-    in-out property <float> stage-output-aspect: 1.333333;
-    in-out property <float> stage-native-width: 1024;
-    in-out property <float> stage-native-height: 768;
-    in-out property <float> stage-raster-width: 1024;
-    in-out property <float> stage-raster-height: 768;
-    in-out property <float> stage-content-x: 0;
-    in-out property <float> stage-content-y: 0;
-    in-out property <float> stage-content-width: 1024;
-    in-out property <float> stage-content-height: 768;
-    in-out property <float> game-content-window-x;
-    in-out property <float> game-content-window-y;
-    in-out property <float> game-content-window-width;
-    in-out property <float> game-content-window-height;
-    callback pointer-state-changed();
-    changed game-active => { root.pointer-state-changed(); root.cover-demand(-1, "", false, ""); }
-    changed translation-overlay-active => { root.pointer-state-changed(); }
-    changed diagnostics-overlay-active => { root.pointer-state-changed(); }
-    changed filters-overlay-active => { root.pointer-state-changed(); }
-    changed modal-active => { root.pointer-state-changed(); }
-    changed fatal-error-active => { root.pointer-state-changed(); }
-    changed game-content-window-x => { root.pointer-state-changed(); }
-    changed game-content-window-y => { root.pointer-state-changed(); }
-    changed game-content-window-width => { root.pointer-state-changed(); }
-    changed game-content-window-height => { root.pointer-state-changed(); }
-    in-out property <bool> game-active: false;
+        if App.page == "library" : LibraryPage {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: parent.height;
+            compact: root.compact;
+        }
+        if App.page == "cores" : CoresPage {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: parent.height;
+        }
+        if App.page == "settings" : SettingsPage {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: parent.height;
+            compact: root.compact;
+        }
+        if App.page == "about" : AboutPage {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: parent.height;
+        }
+    }
 
-    // ===== Overlay panels (game view) =====
-    in-out property <bool> translation-overlay-active: false;
-    in-out property <bool> diagnostics-overlay-active: false;
-    in-out property <bool> filters-overlay-active: false;
-    in-out property <string> filter-preset: "none";
-    in property <string> diagnostics-summary;
+    if root.compact : BottomNav {
+        x: root.usable-x;
+        y: root.usable-y + root.usable-height - 80px;
+        width: root.usable-width;
+    }
 
-    // ===== Translation =====
-    in-out property <string> translation-endpoint-kind: "ecnu";
-    in-out property <string> translation-profile-endpoint;
-    in-out property <string> translation-profile-protocol: "responses";
-    in-out property <string> translation-profile-model;
-    in-out property <string> translation-target-language: "zh-CN";
-    in-out property <int> translation-timeout-ms: 30000;
-    in-out property <string> translation-background;
-    in-out property <string> translation-secret-input;
-    in property <bool> translation-consent-present;
-
-    // ===== Metadata =====
-    in property <[MatchReview]> match-reviews;
-    in-out property <bool> vndb-consent;
-    in-out property <bool> bangumi-consent;
-    in-out property <bool> sensitive-covers;
-    in-out property <string> metadata-provider: "vndb";
-    in-out property <string> bangumi-token-input;
-    in-out property <string> bangumi-play-status: "doing";
-    in-out property <int> bangumi-rating: 1;
-    in-out property <string> bangumi-note;
-    in property <string> bangumi-sync-summary;
-
-
-    // ===== Input config =====
-    in-out property <bool> gamepad-enabled: true;
-    in-out property <string> gamepad-deadzone: "medium";
-    in property <[GamepadBinding]> gamepad-bindings;
-
-    // ===== Generic config (Family / Extension / Filter) =====
-    in property <[ConfigField]> common-engine-config-fields;
-    in property <[ConfigField]> family-config-fields;
-    in property <bool> musica-key-file-available;
-    in property <[ConfigField]> filter-config-fields;
-
-    // ===== About =====
-    in property <string> version;
-    in property <string> build-identity;
-
-    // ===== Settings navigation =====
-    in-out property <string> settings-category: "appearance";
-
-    // ===== Callbacks =====
-    callback launch(string);
-    callback select-case(string);
-    callback search(string);
-    callback game-input(string, bool, float);
-    callback leave-game();
-    callback open-diagnostics();
-    callback open-translation();
-    callback open-filters();
-    callback rescan();
-    callback refresh-cores();
-    callback add-game-directory();
-    callback open-settings();
-    callback set-library-sort(string);
-    callback refresh-compatibility();
-    callback set-compatibility-filter(string);
-    callback fetch-releases();
-    callback pin-release(string);
-    callback save-translation-profile(string, string, string, string, string, int, string);
-    callback grant-translation-consent();
-    callback test-translation-connection();
-    callback set-filter-preset(string);
-    in property <bool> metadata-busy;
-    in property <string> metadata-status;
-    callback search-metadata(string, string);
-    callback refresh-metadata(string);
-    callback accept-match(string);
-    callback unlink-identity(string);
-    callback set-metadata-consent(string, bool, string);
-    callback set-sensitive-cover-policy(string, bool);
-    callback update-bangumi-play-status(string, int, string);
-    // New callbacks
-    callback navigate(string);
-    callback toggle-theme();
-    callback set-theme-mode(string);
-    callback set-accent(string);
-    callback set-density(string);
-    callback set-view-mode(string);
-    callback save-input-config(bool, string);
-    callback set-gamepad-binding(string, string);
-    callback reset-gamepad-mapping();
-    callback save-per-game-input-mapping(bool, string);
-    callback clear-per-game-input-mapping();
-    callback set-grid-columns(int);
-    callback family-config-changed(string, string);
-    callback filter-config-changed(string, string);
-    callback save-family-config();
-    callback load-filter-source();
-    callback save-filter-config();
-    callback reset-family-config();
-    callback select-musica-key-file();
-    callback reset-filter-config();
-
-    // ===== Game view (overlays everything when active) =====
-    if root.game-active : GameViewPage {
+    if Session.active : GameViewPage {
         x: root.usable-x;
         y: root.usable-y;
         width: root.usable-width;
         height: root.usable-height;
         z: 10;
-
-        stage-frame: root.stage-frame;
-        stage-output-aspect: root.stage-output-aspect;
-        stage-native-width <=> root.stage-native-width;
-        stage-native-height <=> root.stage-native-height;
-        stage-raster-width <=> root.stage-raster-width;
-        stage-raster-height <=> root.stage-raster-height;
-        stage-content-x <=> root.stage-content-x;
-        stage-content-y <=> root.stage-content-y;
-        stage-content-width <=> root.stage-content-width;
-        stage-content-height <=> root.stage-content-height;
-        pointer-content-x <=> root.game-content-window-x;
-        pointer-content-y <=> root.game-content-window-y;
-        pointer-content-width <=> root.game-content-window-width;
-        pointer-content-height <=> root.game-content-window-height;
-        input-blocked: root.modal-active || root.fatal-error-active;
-        game-input(control, pressed, value) => {
-            if !root.modal-active && !root.fatal-error-active { root.game-input(control, pressed, value); }
-        }
-        leave-game => { root.leave-game(); }
-
-        translation-overlay-active <=> root.translation-overlay-active;
-        diagnostics-overlay-active <=> root.diagnostics-overlay-active;
-        filters-overlay-active <=> root.filters-overlay-active;
-        filter-preset <=> root.filter-preset;
-        diagnostics-summary: root.diagnostics-summary;
-        global-diagnostic: root.global-diagnostic;
-        set-filter-preset(preset) => { root.set-filter-preset(preset); }
-        filter-config-fields: root.filter-config-fields;
-        filter-config-changed(key, value) => { root.filter-config-changed(key, value); }
-        load-filter-source => { root.load-filter-source(); }
-        save-filter-config => { root.save-filter-config(); }
-        reset-filter-config => { root.reset-filter-config(); }
-
     }
 
-    // ===== Manager shell (hidden while game is active) =====
-    if !root.game-active : Rectangle {
-        x: root.usable-x;
-        y: root.usable-y;
-        width: root.usable-width;
-        height: root.usable-height;
-
-        // Desktop sidebar
-        if root.desktop-mode : Sidebar {
-            x: 0px;
-            y: 0px;
-            height: parent.height;
-            current-page: root.current-page;
-            dark-mode: Theme.effective-dark;
-            navigate(page) => { root.navigate(page); }
-            toggle-theme => { root.toggle-theme(); }
-        }
-
-        // Content column
-        VerticalLayout {
-            x: root.desktop-mode ? 200px : 0px;
-            y: 0px;
-            width: parent.width - self.x;
-            height: parent.height;
-            spacing: 0px;
-
-            // Page content
-            Rectangle {
-                vertical-stretch: 1;
-                clip: true;
-
-                if root.current-page == "library" : LibraryPage {
-                    games: root.games;
-                    cores-ready: root.cores-ready;
-                    core-refresh-enabled: root.core-refresh-enabled;
-                    startup-busy: root.startup-busy;
-                    startup-status: root.startup-status;
-                    cover-loading-enabled: root.cover-loading-enabled;
-                    selected-cover: root.selected-cover;
-                    cover-demand(row, id, needed, view) => { root.cover-demand(row, id, needed, view); }
-                    match-reviews: root.match-reviews;
-                    metadata-busy: root.metadata-busy;
-                    metadata-status: root.metadata-status;
-                    vndb-consent: root.vndb-consent;
-                    bangumi-consent: root.bangumi-consent;
-                    search-metadata(provider, query) => { root.search-metadata(provider, query); }
-                    accept-match(id) => { root.accept-match(id); }
-                    refresh-metadata(provider) => { root.refresh-metadata(provider); }
-                    unlink-identity(provider) => { root.unlink-identity(provider); }
-                    metadata-settings => { root.current-page = "settings"; root.settings-category = "metadata"; }
-                    selected-case-id <=> root.selected-case-id;
-                    search-query <=> root.search-query;
-                    endpoint-identity: root.endpoint-identity;
-                    model-identity: root.model-identity;
-                    selected-title: root.selected-title;
-                    selected-family: root.selected-family;
-                    selected-emulator: root.selected-emulator;
-                    selected-launchable: root.selected-launchable;
-                    selected-play-time: root.selected-play-time;
-                    selected-last-played: root.selected-last-played;
-                    play-history: root.play-history;
-                    library-sort <=> root.library-sort;
-                    compatibility-filter <=> root.compatibility-filter;
-                    compatibility-sync-summary: root.compatibility-sync-summary;
-                    selected-compatibility-status: root.selected-compatibility-status;
-                    selected-compatibility-notes: root.selected-compatibility-notes;
-                    selected-compatibility-updated: root.selected-compatibility-updated;
-                    selected-compatibility-vndb-id: root.selected-compatibility-vndb-id;
-                    releases: root.releases;
-                    bangumi-play-status <=> root.bangumi-play-status;
-                    bangumi-rating <=> root.bangumi-rating;
-                    bangumi-note <=> root.bangumi-note;
-                    bangumi-sync-summary: root.bangumi-sync-summary;
-                    grid-columns: root.grid-columns;
-                    desktop-mode: root.desktop-mode;
-                    view-mode <=> root.view-mode;
-                    density: root.density;
-                    common-engine-config-fields: root.common-engine-config-fields;
-                    family-config-fields: root.family-config-fields;
-                    musica-key-file-available: root.musica-key-file-available;
-                    select-musica-key-file => { root.select-musica-key-file(); }
-                    selected-developer: root.selected-developer;
-                    selected-release-date: root.selected-release-date;
-                    selected-platforms: root.selected-platforms;
-                    selected-engine: root.selected-engine;
-                    selected-cover-meta: root.selected-cover-meta;
-                    selected-description: root.selected-description;
-                    selected-tags: root.selected-tags;
-                    selected-aliases: root.selected-aliases;
-                    launch(id) => { root.launch(id); }
-                    select-case(id) => { root.select-case(id); }
-                    search(query) => { root.search(query); }
-                    rescan => { root.rescan(); }
-                    refresh-cores => { root.refresh-cores(); }
-                    add-game-directory => { root.add-game-directory(); }
-                    set-library-sort(mode) => { root.set-library-sort(mode); }
-                    refresh-compatibility => { root.refresh-compatibility(); }
-                    set-compatibility-filter(filter) => { root.set-compatibility-filter(filter); }
-                    fetch-releases => { root.fetch-releases(); }
-                    pin-release(release-id) => { root.pin-release(release-id); }
-                    update-bangumi-play-status(status, rating, note) => { root.update-bangumi-play-status(status, rating, note); }
-                    set-view-mode(mode) => { root.set-view-mode(mode); }
-                    family-config-changed(key, value) => { root.family-config-changed(key, value); }
-                    save-family-config => { root.save-family-config(); }
-                    reset-family-config => { root.reset-family-config(); }
-                }
-
-
-
-                if root.current-page == "settings" : SettingsPage {
-                    category <=> root.settings-category;
-                    desktop-mode: root.desktop-mode;
-                    has-selected-case: root.selected-case-id != "";
-
-                    // Translation
-                    endpoint-kind <=> root.translation-endpoint-kind;
-                    endpoint <=> root.translation-profile-endpoint;
-                    protocol <=> root.translation-profile-protocol;
-                    model <=> root.translation-profile-model;
-                    target-language <=> root.translation-target-language;
-                    timeout-ms <=> root.translation-timeout-ms;
-                    secret-input <=> root.translation-secret-input;
-                    consent-present: root.translation-consent-present;
-                    save-translation-profile(kind, endpoint, protocol, model, language, timeout, secret) => {
-                        root.save-translation-profile(kind, endpoint, protocol, model, language, timeout, secret);
-                    }
-                    test-translation-connection => { root.test-translation-connection(); }
-                    grant-translation-consent => { root.grant-translation-consent(); }
-
-                    // Metadata
-                    vndb-consent <=> root.vndb-consent;
-                    bangumi-consent <=> root.bangumi-consent;
-                    sensitive-covers <=> root.sensitive-covers;
-                    metadata-provider <=> root.metadata-provider;
-                    bangumi-token-input <=> root.bangumi-token-input;
-                    set-metadata-consent(provider, enabled, secret) => { root.set-metadata-consent(provider, enabled, secret); }
-                    set-sensitive-cover-policy(provider, enabled) => { root.set-sensitive-cover-policy(provider, enabled); }
-
-
-                    // Filters
-                    filter-preset <=> root.filter-preset;
-                    filter-config-fields: root.filter-config-fields;
-                    set-filter-preset(preset) => { root.set-filter-preset(preset); }
-                    filter-config-changed(key, value) => { root.filter-config-changed(key, value); }
-                    load-filter-source => { root.load-filter-source(); }
-                    save-filter-config => { root.save-filter-config(); }
-                    reset-filter-config => { root.reset-filter-config(); }
-
-                    // Compatibility
-                    compatibility-source-url: root.compatibility-source-url;
-                    compatibility-sync-summary: root.compatibility-sync-summary;
-                    refresh-compatibility => { root.refresh-compatibility(); }
-
-                    // Patches
-
-                    // Input
-                    gamepad-enabled <=> root.gamepad-enabled;
-                    gamepad-deadzone <=> root.gamepad-deadzone;
-                    gamepad-bindings: root.gamepad-bindings;
-                    save-input-config(gamepad, deadzone) => {
-                        root.save-input-config(gamepad, deadzone);
-                    }
-                    set-gamepad-binding(button, key) => { root.set-gamepad-binding(button, key); }
-                    reset-gamepad-mapping => { root.reset-gamepad-mapping(); }
-                    save-per-game-input-mapping(gamepad, deadzone) => { root.save-per-game-input-mapping(gamepad, deadzone); }
-                    clear-per-game-input-mapping => { root.clear-per-game-input-mapping(); }
-
-                    // Appearance
-                    dark-mode: Theme.effective-dark;
-                    theme-mode <=> root.theme-mode;
-                    accent <=> root.accent;
-                    grid-columns <=> root.grid-columns;
-                    density <=> root.density;
-                    view-mode <=> root.view-mode;
-                    toggle-theme => { root.toggle-theme(); }
-                    set-grid-columns(cols) => { root.set-grid-columns(cols); }
-                    set-theme-mode(mode) => { root.set-theme-mode(mode); }
-                    set-accent(ac) => { root.set-accent(ac); }
-                    set-density(d) => { root.set-density(d); }
-                    set-view-mode(m) => { root.set-view-mode(m); }
-                }
-
-                if root.current-page == "about" : AboutPage {
-                    version: root.version;
-                    build-identity: root.build-identity;
-                }
-            }
-
-            // Mobile bottom navigation
-            if !root.desktop-mode : BottomNav {
-                current-page: root.current-page;
-                navigate(page) => { root.navigate(page); }
-            }
-        }
-    }
-
-    // ===== Global diagnostic banner (M3 Snackbar / Banner) =====
-    if root.global-diagnostic != "" : Rectangle {
-        x: root.usable-x + 16px;
-        y: root.usable-y + root.usable-height - self.height - 16px;
-        width: root.usable-width - 32px;
-        height: min(root.usable-height / 3, max(48px, diagnostic-text.preferred-height + 24px));
-        clip: true;
-        background: Theme.error-container;
-        border-radius: Theme.shape-md;
-        border-width: 1px;
-        border-color: Theme.error;
-        z: 100;
-
-        TouchArea {}
-        ScrollView {
-            x: 16px;
-            y: 12px;
-            width: parent.width - 32px;
-            height: parent.height - 24px;
-            VerticalLayout {
-                alignment: start;
-                diagnostic-text := Text {
-                    text: root.global-diagnostic;
-                    color: Theme.on-error-container;
-                    font-size: Theme.font-body-sm;
-                    wrap: word-wrap;
-                }
-            }
-        }
-    }
-
-    // ===== Fatal error dialog (M3 Alert Dialog) =====
-    if root.fatal-error-active : Rectangle {
+    NoticeStack {
         x: 0px;
         y: 0px;
-        width: root.width;
-        height: root.height;
-        background: #88000000;
-        z: 1000;
-
-        TouchArea {}
-
-        Rectangle {
-            width: min(parent.width - 32px, 560px);
-            height: min(parent.height - 32px, 400px);
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            background: Theme.surface-container-high;
-            border-color: Theme.error;
-            border-width: 1px;
-            border-radius: Theme.shape-xl;
-
-            VerticalLayout {
-                padding: 24px;
-                spacing: 16px;
-
-                Text {
-                    text: "模拟器运行时异常终止";
-                    color: Theme.error;
-                    font-size: Theme.font-title-lg;
-                    font-weight: 700;
-                }
-                Text {
-                    text: root.fatal-error-message;
-                    color: Theme.on-surface;
-                    font-size: Theme.font-body-md;
-                    wrap: word-wrap;
-                    vertical-stretch: 1;
-                }
-                HorizontalLayout {
-                    alignment: end;
-                    if root.core-retryable : M3Button {
-                        text: "重试";
-                        clicked => { root.retry-core(); }
-                    }
-                    M3Button {
-                        text: root.game-active ? "结束游戏" : "知道了";
-                        primary: true;
-                        clicked => { if root.game-active { root.leave-game(); } root.core-retryable = false; root.fatal-error-active = false; }
-                    }
-                }
-            }
-        }
+        width: 100%;
+        height: 100%;
+        compact: root.compact;
+        z: 100;
     }
-    if root.modal-active : Rectangle {
-        z: 110;
-        background: #0008;
-        TouchArea {}
-        Rectangle {
-            width: min(640px, parent.width - 32px);
-            height: min(560px, parent.height - 32px);
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            border-radius: 16px;
-            background: Theme.surface;
-            VerticalLayout {
-                padding: 24px;
-                spacing: 16px;
-                Text {
-                    text: root.modal-caption;
-                    color: Theme.on-surface;
-                    font-size: 20px;
-                    wrap: word-wrap;
-                }
-                ScrollView {
-                    vertical-stretch: 1;
-                    VerticalLayout {
-                        alignment: start;
-                        Text {
-                            text: root.modal-message;
-                            color: Theme.on-surface;
-                            wrap: word-wrap;
-                        }
-                    }
-                }
-                if root.modal-has-input : LineEdit {
-                    text <=> root.modal-text;
-                }
-                ScrollView {
-                    height: min(180px, modal-actions.preferred-height);
-                    modal-actions := VerticalLayout {
-                        spacing: 8px;
-                        for label[index] in root.modal-buttons : M3Button {
-                            text: label;
-                            clicked => { root.modal-submit(index, root.modal-text); }
-                        }
-                    }
-                }
-                HorizontalLayout {
-                    spacing: 8px;
-                    M3Button {
-                        text: "取消";
-                        clicked => { root.modal-cancel(); }
-                    }
-                    M3Button {
-                        text: "退出会话";
-                        clicked => { root.leave-game(); }
-                    }
-                }
-            }
-        }
-    }
+    LogPanel { z: 105; }
+    ModalDialog { z: 110; }
+    FatalDialog { z: 1000; }
 }

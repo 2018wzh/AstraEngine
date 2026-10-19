@@ -169,26 +169,40 @@ pub(super) fn human_duration(ms: i64) -> String {
 pub(super) fn human_relative(timestamp: i64, now: i64) -> String {
     let seconds = ((now.saturating_sub(timestamp)) / 1000).max(0);
     if seconds >= 86_400 {
-        format!("{}d ago", seconds / 86_400)
+        format!("{} 天前", seconds / 86_400)
     } else if seconds >= 3600 {
-        format!("{}h ago", seconds / 3600)
+        format!("{} 小时前", seconds / 3600)
     } else if seconds >= 60 {
-        format!("{}m ago", seconds / 60)
+        format!("{} 分钟前", seconds / 60)
     } else {
-        "just now".into()
+        "刚刚".into()
     }
 }
-pub(super) fn compatibility_status_label(status: &str) -> String {
-    match status {
-        "perfect" => "Perfect",
-        "completable" => "Completable",
-        "flawed" => "Flawed",
-        "boot_only" => "Boot only",
-        "unplayable" => "Unplayable",
-        other => other,
-    }
-    .into()
+
+pub(super) fn local_time_label(unix_ms: i64) -> String {
+    let unix_s = unix_ms.div_euclid(1000);
+    let days = unix_s.div_euclid(86_400);
+    let secs = unix_s.rem_euclid(86_400);
+    let hour = secs / 3600;
+    let minute = (secs % 3600) / 60;
+    let (year, month, day) = civil_from_days(days);
+    format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02} UTC")
 }
+
+fn civil_from_days(mut z: i64) -> (i32, u32, u32) {
+    z += 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = (z - era * 146_097) as u32;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let year = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = year + if month <= 2 { 1 } else { 0 };
+    (year as i32, month, day)
+}
+
 pub(super) fn profile_kind(profile: Option<TranslationProfile>) -> String {
     profile
         .map(|profile| {
@@ -201,4 +215,21 @@ pub(super) fn profile_kind(profile: Option<TranslationProfile>) -> String {
             .to_owned()
         })
         .unwrap_or_else(|| "openai-compatible".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{human_relative, local_time_label};
+
+    #[test]
+    fn local_time_label_formats_unix_epoch_in_utc() {
+        assert_eq!(local_time_label(0), "1970-01-01 00:00 UTC");
+        assert_eq!(local_time_label(1_700_000_000_000), "2023-11-14 22:13 UTC");
+    }
+
+    #[test]
+    fn human_relative_uses_chinese_units() {
+        assert_eq!(human_relative(0, 3 * 86_400_000), "3 天前");
+        assert_eq!(human_relative(0, 30_000), "刚刚");
+    }
 }

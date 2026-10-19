@@ -15,6 +15,7 @@ pub mod diagnostic_bridge;
 mod lease;
 mod module_owner;
 mod services;
+mod session_menu;
 mod surface;
 pub use config::*;
 pub use core::*;
@@ -22,6 +23,7 @@ pub use d3d12::*;
 pub use lease::*;
 pub use module_owner::*;
 pub use services::*;
+pub use session_menu::*;
 pub use surface::*;
 
 use std::ffi::c_void;
@@ -73,6 +75,12 @@ impl Bytes {
         len: 0,
     };
     pub fn new(bytes: &[u8]) -> Self {
+        Self {
+            data: bytes.as_ptr(),
+            len: bytes.len(),
+        }
+    }
+    pub const fn from_static(bytes: &'static [u8]) -> Self {
         Self {
             data: bytes.as_ptr(),
             len: bytes.len(),

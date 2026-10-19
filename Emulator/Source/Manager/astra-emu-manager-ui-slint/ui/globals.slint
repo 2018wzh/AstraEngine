@@ -1,0 +1,304 @@
+export struct Appearance {
+    theme-mode: string,
+    density: string,
+    cover-size: string,
+    view-mode: string,
+    reduce-motion: bool,
+    cover-badges: bool,
+}
+
+export global App {
+    in-out property <string> page: "library";
+    in-out property <string> settings-category: "appearance";
+    in-out property <bool> system-dark: true;
+    in-out property <Appearance> appearance: {
+        theme-mode: "system",
+        density: "comfortable",
+        cover-size: "medium",
+        view-mode: "grid",
+        reduce-motion: false,
+        cover-badges: true,
+    };
+    out property <bool> dark: appearance.theme-mode == "system" ? system-dark : appearance.theme-mode == "dark";
+    in-out property <string> version;
+    in-out property <string> build;
+    callback appearance-changed(Appearance);
+}
+
+export struct GameCard {
+    id: string,
+    title: string,
+    family: string,
+    cover-uri: string,
+    cover: image,
+    tint: color,
+    problem: string,
+    play-time: string,
+    last-played: string,
+    compat: string,
+}
+
+export global Library {
+    in-out property <[GameCard]> games;
+    in-out property <string> query;
+    in-out property <string> sort: "title";
+    in-out property <string> compat-filter: "all";
+    in-out property <bool> cores-ready;
+    in-out property <bool> can-load-cores;
+    in-out property <bool> busy;
+    in-out property <string> status;
+    in-out property <bool> cover-loading;
+    in-out property <string> selected-id;
+    in-out property <bool> detail-open;
+    in-out property <int> detail-tab;
+    callback search(string);
+    callback set-sort(string);
+    callback set-compat-filter(string);
+    callback select(string);
+    callback launch(string);
+    callback rescan();
+    callback add-directory();
+    callback cover-demand(int, string, bool, string);
+}
+
+export struct SelectedGame {
+    id: string,
+    title: string,
+    family: string,
+    emulator: string,
+    launchable: bool,
+    problem: string,
+    play-time: string,
+    last-played: string,
+    developer: string,
+    release-date: string,
+    platforms: string,
+    engine: string,
+    description: string,
+    tags: string,
+    aliases: string,
+}
+
+export struct CompatInfo {
+    status: string,
+    notes: string,
+    updated: string,
+    vndb-id: string,
+}
+
+export struct ReleaseOption {
+    id: string,
+    label: string,
+}
+
+export struct PlaySession {
+    started: string,
+    duration: string,
+    ended-by: string,
+}
+
+export struct MatchReview {
+    id: string,
+    provider: string,
+    title: string,
+    aliases: string,
+    release-date: string,
+    developer: string,
+}
+
+export struct BangumiProgress {
+    status: string,
+    rating: int,
+    note: string,
+}
+
+export struct ConfigField {
+    options: [string],
+    key: string,
+    label: string,
+    description: string,
+    kind: string,
+    value: string,
+    required: bool,
+    min: int,
+    max: int,
+}
+
+export global Selection {
+    in-out property <SelectedGame> game;
+    in-out property <image> cover;
+    in-out property <color> tint;
+    in-out property <CompatInfo> compat;
+    in-out property <[ReleaseOption]> releases;
+    in-out property <[PlaySession]> history;
+    in-out property <[MatchReview]> matches;
+    in-out property <bool> metadata-busy;
+    in-out property <string> metadata-status;
+    in-out property <BangumiProgress> bangumi;
+    in-out property <string> bangumi-summary;
+    in-out property <[ConfigField]> engine-fields;
+    in-out property <[ConfigField]> family-fields;
+    in-out property <bool> musica-key-available;
+    callback fetch-releases();
+    callback pin-release(string);
+    callback refresh-compat();
+    callback search-metadata(string, string);
+    callback accept-match(string);
+    callback refresh-metadata(string);
+    callback unlink-metadata(string);
+    callback sync-bangumi(BangumiProgress);
+    callback config-changed(string, string);
+    callback save-config();
+    callback reset-config();
+    callback pick-musica-key();
+    callback save-game-input(bool, string);
+    callback clear-game-input();
+}
+
+export struct CoreInfo {
+    key: string,
+    name: string,
+    monogram: string,
+    version: string,
+    capabilities: [string],
+    state: string,
+    source: string,
+    file: string,
+    message: string,
+    removable: bool,
+}
+
+export global Cores {
+    in-out property <[CoreInfo]> items;
+    in-out property <bool> restart-required;
+    callback load();
+    callback install();
+    callback uninstall(string);
+    callback restart();
+}
+
+export global Logs {
+    in-out property <bool> open;
+    in-out property <string> core;
+    in-out property <string> scope: "core";
+    in-out property <string> text;
+    in-out property <int> count;
+    callback load(string);
+}
+
+export struct Notice {
+    id: string,
+    severity: string,
+    title: string,
+    detail: string,
+    code: string,
+    core: string,
+}
+
+export global Notices {
+    in-out property <[Notice]> items;
+    in-out property <bool> expanded;
+    callback dismiss(string);
+}
+
+export global Dialogs {
+    in-out property <bool> modal-active;
+    in-out property <string> modal-caption;
+    in-out property <string> modal-message;
+    in-out property <[string]> modal-buttons;
+    in-out property <bool> modal-has-input;
+    in-out property <string> modal-text;
+    callback modal-submit(int, string);
+    callback modal-cancel();
+    in-out property <bool> fatal-active;
+    in-out property <string> fatal-title;
+    in-out property <string> fatal-detail;
+    in-out property <string> fatal-code;
+    in-out property <bool> fatal-retryable;
+    callback retry();
+}
+
+export struct TranslationProfile {
+    kind: string,
+    endpoint: string,
+    protocol: string,
+    model: string,
+    language: string,
+    timeout-ms: int,
+}
+
+export struct GamepadBinding {
+    id: string,
+    label: string,
+    key: string,
+}
+
+export global Settings {
+    in-out property <TranslationProfile> translation;
+    in-out property <string> translation-secret;
+    in-out property <bool> translation-consent;
+    callback save-translation(TranslationProfile, string);
+    callback test-translation();
+    callback grant-translation-consent();
+    in-out property <bool> vndb-enabled;
+    in-out property <bool> bangumi-enabled;
+    in-out property <bool> sensitive-covers;
+    in-out property <string> metadata-provider: "vndb";
+    in-out property <string> bangumi-token;
+    callback set-metadata-consent(string, bool, string);
+    callback set-sensitive-covers(string, bool);
+    in-out property <bool> gamepad-enabled;
+    in-out property <string> deadzone: "medium";
+    in-out property <[GamepadBinding]> bindings;
+    callback save-input(bool, string);
+    callback bind(string, string);
+    callback reset-bindings();
+    in-out property <string> compat-source;
+    in-out property <string> compat-summary;
+}
+
+export global Filters {
+    in-out property <string> preset: "none";
+    in-out property <[ConfigField]> fields;
+    callback set-preset(string);
+    callback field-changed(string, string);
+    callback load-source();
+    callback save();
+    callback reset();
+}
+
+export struct EngineAction {
+    control: int,
+    label: string,
+    icon: string,
+}
+
+export global Session {
+    in-out property <bool> active;
+    in-out property <string> title;
+    in-out property <image> frame;
+    in-out property <float> output-aspect: 1.333333;
+    in-out property <float> native-width: 1024;
+    in-out property <float> native-height: 768;
+    in-out property <float> raster-width: 1024;
+    in-out property <float> raster-height: 768;
+    in-out property <float> content-x;
+    in-out property <float> content-y;
+    in-out property <float> content-width: 1024;
+    in-out property <float> content-height: 768;
+    in-out property <float> pointer-x;
+    in-out property <float> pointer-y;
+    in-out property <float> pointer-width;
+    in-out property <float> pointer-height;
+    in-out property <bool> menu-open;
+    in-out property <string> menu-page: "main";
+    in-out property <[EngineAction]> actions;
+    in-out property <string> action-message;
+    in-out property <int> action-serial;
+    in-out property <bool> fullscreen;
+    callback input(string, bool, float);
+    callback leave();
+    callback engine-action(int);
+    callback set-fullscreen(bool);
+    callback pointer-state-changed();
+}

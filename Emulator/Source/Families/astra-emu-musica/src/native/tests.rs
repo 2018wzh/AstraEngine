@@ -170,3 +170,28 @@ fn cancellation_preserves_failed_state_and_disables_retry() {
     );
     assert_eq!(unsafe { close(session, std::ptr::null_mut()) }, abi::OK);
 }
+
+#[test]
+fn quick_load_invalidates_text_context_before_worker_consumes_command() {
+    let session = handle_fixture();
+    let handle = unsafe { &mut *session.cast::<Handle>() };
+    let (commands, pending) = sync_channel(1);
+    handle.commands = commands;
+    handle
+        .shared
+        .services
+        .waiting
+        .store(true, Ordering::Release);
+    let previous = handle.shared.services.epoch.load(Ordering::Acquire);
+    assert_eq!(
+        unsafe { control(session, 0x1002, std::ptr::null_mut()) },
+        abi::OK
+    );
+    assert_eq!(
+        handle.shared.services.epoch.load(Ordering::Acquire),
+        previous + 1
+    );
+    assert!(!handle.shared.services.is_cancelled());
+    drop(pending.recv().unwrap());
+    assert_eq!(unsafe { close(session, std::ptr::null_mut()) }, abi::OK);
+}

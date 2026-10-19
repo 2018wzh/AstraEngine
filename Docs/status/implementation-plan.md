@@ -98,4 +98,11 @@ Sena/Ethornell 继承指定上游的实际支持范围；KrKr 继续使用既有
 
 本次主线整合保留 `master` 的开发流程修改，并合入 `astra@fa6c80a70`；三处冲突均为文档，运行逻辑未改，仅按工作区 Rust 2021 配置统一 Manager 格式。三个工作区实际 locked Cargo metadata 解析、文档及受影响包格式检查通过；同实现的 115 项既有回归可执行文件复跑和既有 Release `--help` 通过，属于缓存产物复核，不记为重新编译。六个引擎 fork 的 `astra` 与既定源码提交一致，音频依赖保留版本分支；本地已检出的 `master`、其未提交内容及 CMVS 工作树均不覆盖。
 
+2026-10-19 本轮离线补丁任务先保留并验证既有 Manager/UI/会话菜单源码。RFVP、Siglus 已按父仓 gitlink 恢复，并初始化固定 Kira 嵌套依赖；完整 `cargo metadata --locked` 解析 1166 个包。源码及索引已备份到仓库外，授权的私有逆向临时目录已移出并核对全部文件哈希，CMVS 未改动。
+
+该基线的 ABI、Manager/Core/Slint 共 139 项纯逻辑检查和 Musica 原生边界 4 项检查通过。补齐快速读档的文字上下文失效、核心更新失败保留旧文件、Bangumi 草稿隔离、旧外观数据迁移、key 选择卡片与搜索焦点；删除仅锁定界面文案/按键映射的测试。另以实际公开 API 程序创建并重开临时 SQLite，验证旧外观迁移且游戏记录不变。新增会话菜单 C 头已用固定 cbindgen 0.29.2 生成。尚未操作真实 Manager 界面或商业游戏，不能记为新增 UI/游戏人工通过；离线补丁转换库、13 款 recipe 及本地新 Release 尚未完成。
+
+受影响五个 crate 的全 target Clippy（`--no-deps -D warnings`）通过；按当前编译器建议调整等价的有界字节分块后，Musica 的 10 项 key/profile 纯回归通过。实际生成并运行 MSVC x64 C 消费程序，核对会话菜单结构布局；实际重建 Manager，`--help` 通过。文档链接与数据边界检查 181 项通过。这些检查未启动商业游戏或操作真实 Manager 窗口。
+
+
 操作入口：[开发手册](../manual/development.md)、[AstraEMU 客户端](../manual/astraemu-client.md)、[Editor](../../Editor/README.md)、[NativeVN 样例](../../Examples/NativeVN/README.md)、[终之空资料](../samples/tsuinosora-modernization/README.md)。

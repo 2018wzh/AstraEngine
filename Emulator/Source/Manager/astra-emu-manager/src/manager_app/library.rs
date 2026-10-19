@@ -49,6 +49,7 @@ impl AstraEmuManagerController {
             selected_case_id,
             search_query: String::new(),
             diagnostic: String::new(),
+            diagnostic_severity: "info",
             plugin_errors: BTreeMap::new(),
             data_dir,
             extensions: None,
@@ -68,7 +69,6 @@ impl AstraEmuManagerController {
             pinned_releases: BTreeMap::new(),
             filter_settings,
             input_mapping,
-            input_config: InputConfigViewModel::default(),
             appearance,
             family_options: BTreeMap::new(),
             filter_options: BTreeMap::new(),
@@ -94,6 +94,8 @@ impl AstraEmuManagerController {
                 super_key: false,
             },
             pointer_position: (0.0, 0.0),
+            action_message: String::new(),
+            action_serial: 0,
         };
         Ok(controller)
     }

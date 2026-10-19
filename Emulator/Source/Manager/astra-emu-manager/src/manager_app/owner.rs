@@ -2,6 +2,7 @@ use super::*;
 use astra_emu_manager_core::model::{
     ConfigEntry, ConfigField, FamilyPointerRequest, FamilyWindowIcon,
 };
+use astra_emu_manager_core::SessionMenuEntry;
 use crossbeam_channel::{Receiver, Sender, bounded, unbounded};
 use parking_lot::Mutex;
 use std::sync::{
@@ -14,7 +15,16 @@ const COMMAND_CAPACITY: usize = 8;
 
 #[cfg(test)]
 type RegistryJob = Box<dyn FnOnce(&mut FamilyProviderRegistry) -> Result<Metadata, String> + Send>;
-pub(super) type Metadata = BTreeMap<String, (FamilyPluginDescriptor, Vec<ConfigField>)>;
+#[derive(Clone)]
+pub(super) struct CoreMetadata {
+    pub(super) descriptor: FamilyPluginDescriptor,
+    pub(super) configuration: Vec<ConfigField>,
+    pub(super) menu: Vec<SessionMenuEntry>,
+    pub(super) file: String,
+    pub(super) bundled: bool,
+}
+
+pub(super) type Metadata = BTreeMap<String, CoreMetadata>;
 
 pub(super) enum BackgroundEvent {
     Ready(Result<(Metadata, BTreeMap<String, String>), String>),
@@ -33,6 +43,10 @@ pub(super) enum Command {
     Events {
         epoch: u64,
         events: Vec<FamilyEvent>,
+    },
+    Action {
+        epoch: u64,
+        control: u32,
     },
     Close {
         epoch: u64,
@@ -91,6 +105,7 @@ pub(super) struct Update {
     pub(super) closed: bool,
     pub(super) error: Option<String>,
     pub(super) failure: Option<super::session::NativeFailure>,
+    pub(super) action_error: Option<String>,
 }
 
 pub(super) struct FamilyOwner {
@@ -225,17 +240,21 @@ impl FamilyOwner {
     }
 
     pub(super) fn descriptor(&self, id: &str) -> Option<&FamilyPluginDescriptor> {
-        self.metadata.get(id).map(|(descriptor, _)| descriptor)
+        self.metadata.get(id).map(|meta| &meta.descriptor)
     }
 
     pub(super) fn descriptors(&self) -> impl Iterator<Item = &FamilyPluginDescriptor> {
-        self.metadata.values().map(|(descriptor, _)| descriptor)
+        self.metadata.values().map(|meta| &meta.descriptor)
+    }
+
+    pub(super) fn core_metadata(&self) -> impl Iterator<Item = &CoreMetadata> {
+        self.metadata.values()
     }
 
     pub(super) fn configuration(&self, id: &str) -> Result<Vec<ConfigField>, String> {
         self.metadata
             .get(id)
-            .map(|(_, schema)| schema.clone())
+            .map(|meta| meta.configuration.clone())
             .ok_or_else(|| "ASTRA_EMU_FAMILY_PROVIDER_MISSING".into())
     }
 
@@ -248,7 +267,7 @@ impl FamilyOwner {
             registry
                 .register_provider(factory())
                 .map_err(|error| error.to_string())?;
-            collect_metadata(registry)
+            collect_metadata(registry, None)
         })))
     }
 
@@ -290,6 +309,10 @@ impl FamilyOwner {
             return Err("ASTRA_EMU_INPUT_QUEUE_FULL".into());
         }
         self.send(Command::Events { epoch, events })
+    }
+
+    pub(super) fn action(&self, epoch: u64, control: u32) -> Result<(), String> {
+        self.send(Command::Action { epoch, control })
     }
 
     pub(super) fn close(&self, epoch: u64, events: Vec<FamilyEvent>) -> Result<(), String> {
@@ -336,6 +359,7 @@ impl FamilyOwner {
             closed: shared.closed,
             error: shared.error.take(),
             failure: shared.failure.clone(),
+            action_error: shared.action_error.take(),
         })
     }
 
@@ -426,14 +450,37 @@ impl Drop for FamilyOwner {
     }
 }
 
-pub(super) fn collect_metadata(registry: &FamilyProviderRegistry) -> Result<Metadata, String> {
+pub(super) fn collect_metadata(
+    registry: &FamilyProviderRegistry,
+    bundled_dir: Option<&Path>,
+) -> Result<Metadata, String> {
     registry
         .descriptors()
         .map(|descriptor| {
             let schema = registry
                 .configuration(&descriptor.plugin_id)
                 .map_err(|error| error.to_string())?;
-            Ok((descriptor.plugin_id.clone(), (descriptor.clone(), schema)))
+            let menu = registry.session_menu(&descriptor.plugin_id).to_vec();
+            let location = registry.location(&descriptor.plugin_id);
+            let file = location
+                .and_then(|path| path.file_name())
+                .and_then(|name| name.to_str())
+                .unwrap_or_default()
+                .to_owned();
+            let bundled = match (location, bundled_dir) {
+                (Some(path), Some(dir)) => path.starts_with(dir),
+                _ => false,
+            };
+            Ok((
+                descriptor.plugin_id.clone(),
+                CoreMetadata {
+                    descriptor: descriptor.clone(),
+                    configuration: schema,
+                    menu,
+                    file,
+                    bundled,
+                },
+            ))
         })
         .collect()
 }

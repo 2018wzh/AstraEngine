@@ -1,44 +1,31 @@
-// Icon system built on Font Awesome 6 Free — Solid (SIL OFL 1.1 license).
-//
-// The Solid font binary is embedded at compile time by importing the .ttf below;
-// slint-build generates the renderer font-registration call automatically, so no
-// runtime registration is needed in the Rust host. fontdb indexes the face under
-// its typographic family name "Font Awesome 6 Free" (nameID 16).
-//
-// Every glyph is referenced by codepoint through the `Icons` global so no
-// language-specific text is ever used as an icon, keeping the UI ready for
-// internationalization.
-
 import "../../assets/fonts/fa-solid-900.ttf";
 import { Theme } from "../theme.slint";
 
-// Font family under which the embedded icon font is registered.
-export global IconFont {
-    out property <string> family: "Font Awesome 6 Free";
-}
-
-// A standalone icon glyph. Inherits Text so font-size / color / alignment can be
-// set at the usage site exactly like the plain Text elements it replaces.
 export component Icon inherits Text {
     in property <string> glyph;
     text: root.glyph;
-    font-family: IconFont.family;
+    font-family: Icons.family;
     font-weight: 900;
+    font-size: 16px;
+    color: Theme.on-variant;
+    horizontal-alignment: center;
+    vertical-alignment: center;
 }
 
-// Font Awesome 6 Free — Solid codepoints used across the UI.
 export global Icons {
-    // Navigation / shell
+    out property <string> family: "Font Awesome 6 Free";
+
     out property <string> gamepad: "\u{f11b}";
     out property <string> folder: "\u{f07b}";
     out property <string> folder-open: "\u{f07c}";
     out property <string> file: "\u{f15b}";
+    out property <string> file-lines: "\u{f15c}";
     out property <string> gear: "\u{f013}";
+    out property <string> info: "\u{f05a}";
     out property <string> circle-info: "\u{f05a}";
     out property <string> sun: "\u{f185}";
     out property <string> moon: "\u{f186}";
 
-    // Settings categories
     out property <string> language: "\u{f1ab}";
     out property <string> database: "\u{f1c0}";
     out property <string> funnel: "\u{f0b0}";
@@ -46,24 +33,30 @@ export global Icons {
     out property <string> keyboard: "\u{f11c}";
     out property <string> palette: "\u{f53f}";
     out property <string> clipboard-check: "\u{f46d}";
+    out property <string> wand: "\u{f72b}";
+    out property <string> shield: "\u{f3ed}";
 
-    // Play record / compatibility
     out property <string> clock: "\u{f017}";
     out property <string> history: "\u{f1da}";
+    out property <string> calendar: "\u{f133}";
     out property <string> rotate-right: "\u{f2f9}";
 
-    // Actions / state
     out property <string> xmark: "\u{f00d}";
     out property <string> check: "\u{f00c}";
+    out property <string> plus: "\u{f067}";
     out property <string> arrow-up: "\u{f062}";
+    out property <string> arrow-left: "\u{f060}";
     out property <string> chevron-right: "\u{f054}";
     out property <string> chevron-down: "\u{f078}";
     out property <string> window-minimize: "\u{f2d1}";
-    out property <string> expand: "\u{f424}";
+    out property <string> expand: "\u{f065}";
+    out property <string> compress: "\u{f066}";
     out property <string> resize: "\u{f0b2}";
     out property <string> play: "\u{f04b}";
+    out property <string> forward: "\u{f04e}";
     out property <string> star: "\u{f005}";
     out property <string> tag: "\u{f02b}";
+    out property <string> tags: "\u{f02c}";
     out property <string> search: "\u{f002}";
     out property <string> layer-group: "\u{f5fd}";
     out property <string> sliders: "\u{f1de}";
@@ -71,85 +64,38 @@ export global Icons {
     out property <string> link-slash: "\u{f127}";
     out property <string> arrows-rotate: "\u{f021}";
     out property <string> rotate: "\u{f021}";
+    out property <string> refresh: "\u{f021}";
     out property <string> cloud-arrow-down: "\u{f0ed}";
     out property <string> cloud-arrow-up: "\u{f0ee}";
     out property <string> download: "\u{f019}";
+    out property <string> upload: "\u{f093}";
     out property <string> copy: "\u{f0c5}";
     out property <string> trash: "\u{f1f8}";
-    out property <string> shield: "\u{f3ed}";
-    out property <string> arrow-left: "\u{f060}";
     out property <string> folder-tree: "\u{f802}";
-}
+    out property <string> microchip: "\u{f2db}";
+    out property <string> more: "\u{f142}";
+    out property <string> gauge: "\u{f624}";
+    out property <string> triangle: "\u{f071}";
+    out property <string> circle-check: "\u{f058}";
+    out property <string> circle-xmark: "\u{f057}";
+    out property <string> volume: "\u{f028}";
+    out property <string> sort: "\u{f0dc}";
+    out property <string> image: "\u{f03e}";
+    out property <string> floppy: "\u{f0c7}";
+    out property <string> floppy-disk: "\u{f0c7}";
+    out property <string> cube: "\u{f1b2}";
+    out property <string> eye: "\u{f06e}";
+    out property <string> comment-dots: "\u{f4ad}";
+    out property <string> bars: "\u{f0c9}";
+    out property <string> power-off: "\u{f011}";
 
-// Icon-only square button (e.g. the VFS "navigate up" toolbar action).
-export component IconButton inherits Rectangle {
-    in property <string> glyph;
-    in property <bool> enabled: true;
-    callback clicked();
-
-    width: 40px;
-    height: 32px;
-    border-radius: Theme.radius-sm;
-    border-width: 1px;
-    border-color: Theme.border;
-    background: !root.enabled
-        ? Theme.surface-raised
-        : (area.pressed ? Theme.primary-muted : (area.has-hover ? Theme.card-hover : Theme.surface-raised));
-    opacity: root.enabled ? 1 : 0.45;
-
-    Icon {
-        glyph: root.glyph;
-        font-size: 14px;
-        color: Theme.text;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-    }
-
-    area := TouchArea {
-        enabled: root.enabled;
-        clicked => { root.clicked(); }
-    }
-}
-
-// Label button with a leading check glyph shown while `checked` is true.
-// Replaces the legacy "✓ Label" / "Label ✓" text pattern with a real icon.
-export component CheckButton inherits Rectangle {
-    in property <string> label;
-    in property <bool> checked: false;
-    in property <bool> enabled: true;
-    callback clicked();
-
-    width: content.preferred-width;
-    height: 32px;
-    border-radius: Theme.radius-sm;
-    background: !root.enabled
-        ? transparent
-        : (area.pressed ? Theme.primary-muted : (area.has-hover ? Theme.card-hover : transparent));
-    opacity: root.enabled ? 1 : 0.45;
-
-    content := HorizontalLayout {
-        padding-left: 12px;
-        padding-right: 12px;
-        spacing: 7px;
-        alignment: start;
-
-        if root.checked : Icon {
-            glyph: Icons.check;
-            font-size: 12px;
-            color: Theme.primary;
-            vertical-alignment: center;
-        }
-
-        Text {
-            text: root.label;
-            color: Theme.text;
-            font-size: 13px;
-            vertical-alignment: center;
-        }
-    }
-
-    area := TouchArea {
-        enabled: root.enabled;
-        clicked => { root.clicked(); }
+    public pure function action-glyph(icon: string) -> string {
+        return (icon == "quick-save" || icon == "save") ? "\u{f0c7}"
+            : (icon == "quick-load" || icon == "load") ? "\u{f07c}"
+            : icon == "auto" ? "\u{f04b}"
+            : icon == "skip" ? "\u{f04e}"
+            : icon == "backlog" ? "\u{f4ad}"
+            : icon == "settings" ? "\u{f013}"
+            : "\u{f0c9}";
     }
 }

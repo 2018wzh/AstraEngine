@@ -10,6 +10,7 @@ use crate::model::ProbeRequest;
 
 use crate::family::{
     FamilyPluginDescriptor, FamilyPluginRegistry, FamilyProbeReport, FamilyProbeSelection,
+    SessionMenuEntry,
 };
 use crate::family_loader::{FamilyLoadError, LoadedFamilyPlugin, NativeOpenRequest, NativeSession};
 
@@ -47,7 +48,7 @@ pub fn is_family_library_path(path: &Path) -> bool {
     name.starts_with("astra_emu_") || name.starts_with("libastra_emu_")
 }
 
-fn discover_family_libraries(directory: &Path) -> Result<Vec<PathBuf>, FamilyLoadError> {
+pub fn discover_family_libraries(directory: &Path) -> Result<Vec<PathBuf>, FamilyLoadError> {
     let entries = fs::read_dir(directory).map_err(|_| FamilyLoadError::Directory)?;
     let mut paths = Vec::new();
     for entry in entries {
@@ -146,6 +147,13 @@ impl FamilyProviderRegistry {
                 }
             }
         }
+        self.load_libraries(paths)
+    }
+
+    pub fn load_libraries(
+        &mut self,
+        mut paths: Vec<PathBuf>,
+    ) -> Result<FamilyDirectoryLoadReport, FamilyLoadError> {
         paths.sort();
         paths.dedup();
         let mut candidates = BTreeMap::<String, (PathBuf, LoadedFamilyPlugin)>::new();
@@ -244,6 +252,18 @@ impl FamilyProviderRegistry {
 
     pub fn descriptors(&self) -> impl Iterator<Item = &FamilyPluginDescriptor> {
         self.descriptors.descriptors()
+    }
+    pub fn location(&self, plugin_id: &str) -> Option<&Path> {
+        self.providers
+            .get(plugin_id)
+            .map(LoadedFamilyPlugin::location)
+    }
+
+    pub fn session_menu(&self, plugin_id: &str) -> &[SessionMenuEntry] {
+        self.providers
+            .get(plugin_id)
+            .map(LoadedFamilyPlugin::session_menu)
+            .unwrap_or(&[])
     }
 
     pub fn probe(

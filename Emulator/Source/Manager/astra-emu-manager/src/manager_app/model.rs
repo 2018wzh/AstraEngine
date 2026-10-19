@@ -1,5 +1,10 @@
 use super::*;
-
+use astra_emu_manager_ui_slint::{
+    describe_error, AboutViewModel, BangumiViewModel, CompatViewModel, EngineActionViewModel,
+    GameCardViewModel, LibraryViewModel, MatchViewModel, NoticeViewModel, PlaySessionViewModel,
+    ReleaseViewModel, SelectionViewModel, SessionViewModel, SettingsViewModel,
+    TranslationViewModel,
+};
 impl AstraEmuManagerController {
     pub(super) fn model(&self) -> Result<ManagerViewModel, String> {
         let now_ms = unix_time_ms()?;
@@ -105,35 +110,25 @@ impl AstraEmuManagerController {
             .into_iter()
             .map(
                 |(mut game, duration_ms, last_played_ms, cover_uri, compatibility_status)| {
-                    let launchable = self.launch_candidate_for_game(&game).is_some();
-                    let selection_required =
-                        self.probe_choices.contains_key(&game.game_id) && !launchable;
-                    let title = game.user_title.take().unwrap_or(game.title);
                     let family = game
                         .family_id
                         .as_deref()
                         .map(Self::engine_label)
                         .unwrap_or("未识别引擎")
                         .to_owned();
+                    let problem = self.game_problem(&game, startup_busy);
+                    let title = game.user_title.take().unwrap_or(game.title);
                     GameCardViewModel {
-                        case_id: game.game_id,
+                        id: game.game_id,
                         title,
                         family,
                         cover_uri,
-                        diagnostic: if launchable {
-                            String::new()
-                        } else if startup_busy {
-                            "正在加载核心或校验游戏".into()
-                        } else if selection_required {
-                            "provider selection required".into()
-                        } else {
-                            "family probe required".into()
-                        },
+                        problem,
                         play_time: human_duration(duration_ms),
                         last_played: last_played_ms
                             .map(|value| human_relative(value, now_ms))
                             .unwrap_or_default(),
-                        compatibility_status,
+                        compat: compatibility_status,
                     }
                 },
             )
@@ -150,12 +145,14 @@ impl AstraEmuManagerController {
                     .map_err(|error| error.to_string())?
                     .into_iter()
                     .map(|session| PlaySessionViewModel {
-                        start_time: session.start_unix_ms.to_string(),
+                        started: local_time_label(session.start_unix_ms),
                         duration: human_duration(session.duration_ms),
-                        ended_by: session
-                            .ended_by
-                            .map(|reason| format!("{reason:?}"))
-                            .unwrap_or_else(|| "active".into()),
+                        ended_by: match session.ended_by {
+                            Some(PlaySessionEndReason::Leave) => "返回游戏库".into(),
+                            Some(PlaySessionEndReason::Shutdown) => "关闭程序".into(),
+                            Some(_) => "异常结束".into(),
+                            None => "进行中".into(),
+                        },
                     })
                     .collect();
                 (
@@ -183,7 +180,7 @@ impl AstraEmuManagerController {
         });
         let selected_compatibility_status = selected_compatibility
             .as_ref()
-            .map(|entry| compatibility_status_label(entry.status.as_str()))
+            .map(|entry| entry.status.as_str().to_string())
             .unwrap_or_default();
         let selected_compatibility_notes = selected_compatibility
             .as_ref()
@@ -202,200 +199,280 @@ impl AstraEmuManagerController {
                 let fetched = self
                     .compatibility_fetched_at_unix_ms
                     .map(|value| human_relative(value, now_ms))
-                    .unwrap_or_else(|| "loaded".into());
+                    .unwrap_or_else(|| "本地缓存".into());
                 format!(
-                    "Compat DB · {} entries · fetched {fetched}",
-                    database.entries.len()
+                    "已收录 {} 条社区记录 · {}同步",
+                    database.entries.len(),
+                    fetched
                 )
             }
-            None => "Not synchronized".into(),
+            None => "尚未同步".into(),
         };
-        let selected_cover_meta = metadata
+        let (engine_fields, family_fields) = self.family_fields()?;
+        let selected_problem = selected
             .as_ref()
-            .and_then(|record| record.cover.as_ref())
-            .map(|cover| {
-                let dimensions = match (cover.width, cover.height) {
-                    (Some(width), Some(height)) => format!("{width}x{height}"),
-                    _ => "unknown-size".into(),
-                };
-                if metadata.as_ref().is_some_and(|record| record.sensitive) {
-                    format!("{dimensions}; sensitive")
-                } else {
-                    dimensions
-                }
-            })
+            .map(|game| self.game_problem(game, startup_busy))
             .unwrap_or_default();
-        let (common_engine_config_fields, family_config_fields) = self.family_fields()?;
+        let mut notices = Vec::new();
+        for (file, raw) in &self.plugin_errors {
+            let text = describe_error(raw);
+            notices.push(NoticeViewModel {
+                id: format!("core-load:{file}"),
+                severity: "error".into(),
+                title: text.title,
+                detail: text.detail,
+                code: text.code,
+                core: file.clone(),
+            });
+        }
+        if self.registry.is_ready() && self.registry.descriptors().next().is_none() {
+            notices.push(NoticeViewModel {
+                id: "no-cores".into(),
+                severity: "warning".into(),
+                title: "没有可用的核心".into(),
+                detail: "请在“核心”页安装核心，或使用包含 cores 目录的完整运行包。".into(),
+                code: String::new(),
+                core: String::new(),
+            });
+        }
+        if !self.diagnostic.is_empty() {
+            let text = describe_error(&self.diagnostic);
+            notices.push(NoticeViewModel {
+                id: format!("diagnostic:{}", &sha256_id(&self.diagnostic)[..12]),
+                severity: self.diagnostic_severity.into(),
+                title: text.title,
+                detail: text.detail,
+                code: text.code,
+                core: String::new(),
+            });
+        }
         Ok(ManagerViewModel {
-            games: cards,
-            startup_busy,
-            startup_status: self.startup_status(),
-            cores_ready: self.cores_ready(),
-            core_refresh_enabled: self.core_refresh_enabled(),
-            metadata_busy: self.pending_metadata.values().any(|pending| {
-                pending.game_id.is_some() && pending.game_id == self.selected_case_id
-            }),
-            metadata_status: self
-                .selected_case_id
-                .as_ref()
-                .and_then(|id| self.metadata_status.get(id))
-                .cloned()
-                .or_else(|| {
-                    metadata.as_ref().map(|record| {
-                        format!("已关联 {}：{}", record.provider.as_str(), record.title)
+            library: LibraryViewModel {
+                games: cards,
+                query: self.search_query.clone(),
+                sort: self.library_sort.clone(),
+                compat_filter: self.compatibility_filter.clone(),
+                cores_ready: self.cores_ready(),
+                can_load_cores: self.core_refresh_enabled(),
+                busy: startup_busy,
+                status: self.startup_status(),
+                selected_id: selected_id.clone().unwrap_or_default(),
+            },
+            selection: SelectionViewModel {
+                id: selected_id.clone().unwrap_or_default(),
+                title: selected
+                    .as_ref()
+                    .map(|game| game.display_title().into())
+                    .unwrap_or_default(),
+                family: selected
+                    .as_ref()
+                    .and_then(|game| game.family_id.as_deref())
+                    .map(Self::engine_label)
+                    .unwrap_or_default()
+                    .into(),
+                emulator: selected
+                    .as_ref()
+                    .and_then(|game| self.launch_candidate_for_game(game))
+                    .map(|candidate| Self::emulator_label(&candidate.descriptor))
+                    .unwrap_or_default(),
+                launchable: selected
+                    .as_ref()
+                    .is_some_and(|game| self.launch_candidate_for_game(game).is_some()),
+                problem: selected_problem,
+                play_time: selected_play_time,
+                last_played: selected_last_played,
+                developer: metadata
+                    .as_ref()
+                    .map(|record| record.developers.join(", "))
+                    .unwrap_or_default(),
+                release_date: metadata
+                    .as_ref()
+                    .and_then(|record| record.release_date.clone())
+                    .unwrap_or_default(),
+                platforms: metadata
+                    .as_ref()
+                    .map(|record| record.platforms.join(", "))
+                    .unwrap_or_default(),
+                engine: metadata
+                    .as_ref()
+                    .and_then(|record| record.engine.clone())
+                    .unwrap_or_default(),
+                description: metadata
+                    .as_ref()
+                    .and_then(|record| record.description.clone())
+                    .unwrap_or_default(),
+                tags: metadata
+                    .as_ref()
+                    .map(|record| record.tags.join(", "))
+                    .unwrap_or_default(),
+                aliases: metadata
+                    .as_ref()
+                    .map(|record| record.alternate_titles.join(", "))
+                    .unwrap_or_default(),
+                compat: CompatViewModel {
+                    status: selected_compatibility_status,
+                    notes: selected_compatibility_notes,
+                    updated: selected_compatibility_updated,
+                    vndb_id: selected_compatibility_vndb_id,
+                },
+                releases: selected_releases
+                    .into_iter()
+                    .map(|(id, label)| ReleaseViewModel { id, label })
+                    .collect(),
+                history,
+                matches: self
+                    .match_candidates
+                    .iter()
+                    .filter(|(_, (game_id, _))| {
+                        self.selected_case_id.as_deref() == Some(game_id.as_str())
                     })
-                })
-                .unwrap_or_default(),
-            match_reviews: self
-                .match_candidates
-                .iter()
-                .filter(|(_, (game_id, _))| {
-                    self.selected_case_id.as_deref() == Some(game_id.as_str())
-                })
-                .map(|(candidate_id, (game_id, record))| MatchReviewViewModel {
-                    candidate_id: candidate_id.clone(),
-                    case_id: game_id.clone(),
-                    provider: record.provider.as_str().into(),
-                    remote_id: record.remote_id.clone(),
-                    title: record.title.clone(),
-                    aliases: record.alternate_titles.join(" / "),
-                    release_date: record.release_date.clone().unwrap_or_default(),
-                    developer: record.developers.join(" / "),
-                    evidence: "Provider search result".into(),
-                    score_millis: 0,
-                    diagnostic: String::new(),
-                })
-                .collect(),
-            selected_case_id: selected_id.clone(),
-            search_query: self.search_query.clone(),
-            endpoint_identity: profile
-                .as_ref()
-                .map(TranslationProfile::provider_identity)
-                .unwrap_or_default(),
-            model_identity: profile
-                .as_ref()
-                .map(|profile| profile.model.clone())
-                .unwrap_or_default(),
-            global_diagnostic: self
-                .plugin_errors
-                .iter()
-                .map(|(id, error)| {
-                    format!("核心文件 {id} 未加载：{error}。修复运行包或用户数据目录的 cores 文件后重启 AstraEMU。")
-                })
-                .chain(
-                    (self.registry.descriptors().next().is_none()).then(|| {
-                        "没有可用核心。请使用含 cores 目录的完整 AstraEMU 运行包，然后重启客户端。".to_owned()
-                    }),
-                )
-                .chain(
-                    std::iter::once(self.diagnostic.clone()).filter(|message| !message.is_empty()),
-                )
-                .collect::<Vec<_>>()
-                .join("\n"),
-            translation_endpoint_kind: profile_kind(profile.clone()),
-            translation_endpoint: profile
-                .as_ref()
-                .map(|profile| profile.endpoint.clone())
-                .unwrap_or_default(),
-            translation_protocol: profile
-                .as_ref()
-                .map(|profile| match profile.protocol {
-                    TranslationProtocol::Responses => "responses".into(),
-                    TranslationProtocol::ChatCompletions => "chat_completions".into(),
-                })
-                .unwrap_or_else(|| "responses".into()),
-            translation_model: profile
-                .as_ref()
-                .map(|profile| profile.model.clone())
-                .unwrap_or_default(),
-            translation_target_language: profile
-                .as_ref()
-                .map(|profile| profile.target_language.clone())
-                .unwrap_or_else(|| "zh-CN".into()),
-            translation_timeout_ms: profile
-                .as_ref()
-                .map(|profile| profile.timeout_ms.min(i32::MAX as u64) as i32)
-                .unwrap_or(15_000),
-            translation_consent_present: self.translation_consent,
-            filter_preset: self.filter_preset_id().into(),
-            diagnostics_summary: self.diagnostic.clone(),
-            vndb_consent: self.metadata_consent.get("vndb").copied().unwrap_or(false),
-            bangumi_consent: self
-                .metadata_consent
-                .get("bangumi")
-                .copied()
-                .unwrap_or(false),
-            sensitive_covers: self.sensitive_covers,
-            bangumi_play_status: self.bangumi_play_status.clone(),
-            bangumi_rating: self.bangumi_rating,
-            bangumi_note: self.bangumi_note.clone(),
-            bangumi_sync_summary: "Synchronization is explicit.".into(),
-            selected_title: selected
-                .as_ref()
-                .map(|game| game.display_title().into())
-                .unwrap_or_default(),
-            selected_family: selected.as_ref()
-                .and_then(|game| game.family_id.as_deref())
-                .map(Self::engine_label).unwrap_or_default().into(),
-            selected_emulator: selected.as_ref()
-                .and_then(|game| self.launch_candidate_for_game(game))
-                .map(|candidate| Self::emulator_label(&candidate.descriptor))
-                .unwrap_or_default(),
-            selected_launchable: selected.as_ref()
-                .is_some_and(|game| self.launch_candidate_for_game(game).is_some()),
-            selected_play_time,
-            selected_last_played,
-            play_history: history,
-            library_sort: self.library_sort.clone(),
-            compatibility_filter: self.compatibility_filter.clone(),
-            compatibility_source_url: DEFAULT_COMPATIBILITY_SOURCE_URL.into(),
-            compatibility_sync_summary,
-            selected_compatibility_status,
-            selected_compatibility_notes,
-            selected_compatibility_updated,
-            selected_compatibility_vndb_id,
-            selected_releases,
-            current_page: String::new(),
-            input_config: self.input_view(),
+                    .map(|(candidate_id, (_, record))| MatchViewModel {
+                        id: candidate_id.clone(),
+                        provider: record.provider.as_str().into(),
+                        title: record.title.clone(),
+                        aliases: record.alternate_titles.join(" / "),
+                        release_date: record.release_date.clone().unwrap_or_default(),
+                        developer: record.developers.join(" / "),
+                    })
+                    .collect(),
+                metadata_busy: self.pending_metadata.values().any(|pending| {
+                    pending.game_id.is_some() && pending.game_id == self.selected_case_id
+                }),
+                metadata_status: self
+                    .selected_case_id
+                    .as_ref()
+                    .and_then(|id| self.metadata_status.get(id))
+                    .cloned()
+                    .or_else(|| {
+                        metadata.as_ref().map(|record| {
+                            format!("已关联 {}：{}", record.provider.as_str(), record.title)
+                        })
+                    })
+                    .unwrap_or_default(),
+                bangumi: BangumiViewModel {
+                    status: self.bangumi_play_status.clone(),
+                    rating: self.bangumi_rating,
+                    note: self.bangumi_note.clone(),
+                    summary: "同步需手动点击，不会自动上传。".into(),
+                },
+                engine_fields,
+                family_fields,
+                musica_key_available: self.musica_key_file_available(),
+            },
+            cores: self.cores_view()?,
+            settings: SettingsViewModel {
+                translation: TranslationViewModel {
+                    kind: profile_kind(profile.clone()),
+                    endpoint: profile
+                        .as_ref()
+                        .map(|profile| profile.endpoint.clone())
+                        .unwrap_or_default(),
+                    protocol: profile
+                        .as_ref()
+                        .map(|profile| match profile.protocol {
+                            TranslationProtocol::Responses => "responses".into(),
+                            TranslationProtocol::ChatCompletions => "chat_completions".into(),
+                        })
+                        .unwrap_or_else(|| "responses".into()),
+                    model: profile
+                        .as_ref()
+                        .map(|profile| profile.model.clone())
+                        .unwrap_or_default(),
+                    language: profile
+                        .as_ref()
+                        .map(|profile| profile.target_language.clone())
+                        .unwrap_or_else(|| "zh-CN".into()),
+                    timeout_ms: profile
+                        .as_ref()
+                        .map(|profile| profile.timeout_ms.min(i32::MAX as u64) as i32)
+                        .unwrap_or(15_000),
+                },
+                translation_consent: self.translation_consent,
+                vndb_enabled: self.metadata_consent.get("vndb").copied().unwrap_or(false),
+                bangumi_enabled: self
+                    .metadata_consent
+                    .get("bangumi")
+                    .copied()
+                    .unwrap_or(false),
+                sensitive_covers: self.sensitive_covers,
+                input: self.input_view(),
+                filter_preset: self.filter_preset_id().into(),
+                filter_fields: self.filter_fields()?,
+                compat_source: DEFAULT_COMPATIBILITY_SOURCE_URL.into(),
+                compat_summary: compatibility_sync_summary,
+            },
             appearance: self.appearance_view(),
-            common_engine_config_fields,
-            family_config_fields,
-            musica_key_file_available: self.musica_key_file_available(),
-            filter_config_fields: self.filter_fields()?,
-            version: env!("CARGO_PKG_VERSION").into(),
-            build_identity: option_env!("ASTRA_EMU_MANAGER_RUSTC_FINGERPRINT")
-                .unwrap_or("development")
-                .into(),
-            is_demo: false,
-            selected_developer: metadata
-                .as_ref()
-                .map(|record| record.developers.join(", "))
-                .unwrap_or_default(),
-            selected_release_date: metadata
-                .as_ref()
-                .and_then(|record| record.release_date.clone())
-                .unwrap_or_default(),
-            selected_platforms: metadata
-                .as_ref()
-                .map(|record| record.platforms.join(", "))
-                .unwrap_or_default(),
-            selected_engine: metadata
-                .as_ref()
-                .and_then(|record| record.engine.clone())
-                .unwrap_or_default(),
-            selected_cover_meta,
-            selected_description: metadata
-                .as_ref()
-                .and_then(|record| record.description.clone())
-                .unwrap_or_default(),
-            selected_tags: metadata
-                .as_ref()
-                .map(|record| record.tags.join(", "))
-                .unwrap_or_default(),
-            selected_aliases: metadata
-                .as_ref()
-                .map(|record| record.alternate_titles.join(", "))
-                .unwrap_or_default(),
+            notices,
+            about: AboutViewModel {
+                version: env!("CARGO_PKG_VERSION").into(),
+                build: option_env!("ASTRA_EMU_MANAGER_RUSTC_FINGERPRINT")
+                    .unwrap_or("development")
+                    .into(),
+            },
+            session: SessionViewModel {
+                actions: self.session_actions(),
+                action_message: self.action_message.clone(),
+                action_serial: self.action_serial,
+            },
         })
+    }
+
+    fn game_problem(&self, game: &GameRecord, startup_busy: bool) -> String {
+        let launchable = self.launch_candidate_for_game(game).is_some();
+        let selection_required = self.probe_choices.contains_key(&game.game_id) && !launchable;
+        if launchable {
+            String::new()
+        } else if startup_busy {
+            "正在加载核心或校验游戏".into()
+        } else if selection_required {
+            "需要选择模拟器".into()
+        } else {
+            "尚未识别，请重新扫描".into()
+        }
+    }
+
+    fn session_actions(&self) -> Vec<EngineActionViewModel> {
+        let Some(active) = self
+            .active
+            .as_ref()
+            .filter(|active| active.closing.is_none())
+        else {
+            return Vec::new();
+        };
+        let Some(plugin_id) = self
+            .candidates
+            .get(&active.game_id)
+            .map(|candidate| candidate.descriptor.plugin_id.as_str())
+        else {
+            return Vec::new();
+        };
+        self.registry
+            .core_metadata()
+            .find(|meta| meta.descriptor.plugin_id == plugin_id)
+            .map(|meta| {
+                meta.menu
+                    .iter()
+                    .map(|item| EngineActionViewModel {
+                        control: item.control as i32,
+                        label: item.label.clone(),
+                        icon: menu_icon_name(item.icon).into(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+}
+
+fn menu_icon_name(icon: u32) -> &'static str {
+    match icon {
+        astra_emu_abi::MENU_ICON_QUICK_SAVE => "quick-save",
+        astra_emu_abi::MENU_ICON_QUICK_LOAD => "quick-load",
+        astra_emu_abi::MENU_ICON_SAVE => "save",
+        astra_emu_abi::MENU_ICON_LOAD => "load",
+        astra_emu_abi::MENU_ICON_AUTO => "auto",
+        astra_emu_abi::MENU_ICON_SKIP => "skip",
+        astra_emu_abi::MENU_ICON_BACKLOG => "backlog",
+        astra_emu_abi::MENU_ICON_SETTINGS => "settings",
+        _ => "generic",
     }
 }

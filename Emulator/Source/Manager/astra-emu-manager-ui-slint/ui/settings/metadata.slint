@@ -1,62 +1,80 @@
-// Provider-wide metadata permissions and cover preferences.
-
-import { CheckBox, ComboBox, LineEdit, ScrollView } from "std-widgets.slint";
+import { LineEdit, ScrollView } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
-import { SettingsSectionHeader } from "../components/settings-card.slint";
+import { Settings } from "../globals.slint";
+import { Card, SwitchRow, SettingRow, Segmented } from "../components/controls.slint";
 
 export component MetadataSettingsPage inherits Rectangle {
-    in-out property <bool> vndb-consent;
-    in-out property <bool> bangumi-consent;
-    in-out property <bool> sensitive-covers;
-    in-out property <string> metadata-provider: "vndb";
-    in-out property <string> bangumi-token-input;
-    callback set-metadata-consent(string, bool, string);
-    callback set-sensitive-cover-policy(string, bool);
-
-    background: Theme.background;
+    background: Theme.surface;
 
     ScrollView {
         mouse-drag-pan-enabled: true;
-
         VerticalLayout {
-            padding: 20px;
-            spacing: 12px;
+            padding: 24px;
+            spacing: 16px;
             alignment: start;
 
-            SettingsSectionHeader { title: "元数据来源"; }
-            ComboBox {
-                height: 36px;
-                model: ["vndb", "bangumi"];
-                current-index: root.metadata-provider == "bangumi" ? 1 : 0;
-                selected(value) => { root.metadata-provider = value; }
-            }
-            Text { text: "作品搜索与关联位于游戏库的作品详情中。"; wrap: word-wrap; color: Theme.on-surface-variant; }
-
-            CheckBox {
-                checked <=> root.vndb-consent;
-                text: "允许访问 VNDB 元数据";
-                toggled => { root.set-metadata-consent("vndb", self.checked, ""); }
+            Text {
+                text: "作品资料与账号";
+                color: Theme.on-surface;
+                font-size: Theme.headline;
+                font-weight: 700;
             }
 
-            CheckBox {
-                checked <=> root.bangumi-consent;
-                text: "允许访问 Bangumi 元数据与收藏";
-                toggled => { root.set-metadata-consent("bangumi", self.checked, root.bangumi-token-input); root.bangumi-token-input = ""; }
+            Card {
+                VerticalLayout {
+                    SwitchRow {
+                        label: "允许联网获取 VNDB 资料";
+                        description: "";
+                        checked: Settings.vndb-enabled;
+                        toggled => {
+                            Settings.vndb-enabled = !Settings.vndb-enabled;
+                            Settings.set-metadata-consent("vndb", Settings.vndb-enabled, "");
+                        }
+                    }
+                    SwitchRow {
+                        label: "允许联网获取 Bangumi 资料与收藏";
+                        description: "";
+                        checked: Settings.bangumi-enabled;
+                        toggled => {
+                            Settings.bangumi-enabled = !Settings.bangumi-enabled;
+                            Settings.set-metadata-consent("bangumi", Settings.bangumi-enabled, Settings.bangumi-token);
+                            Settings.bangumi-token = "";
+                        }
+                    }
+                    SettingRow {
+                        title: "Bangumi 访问令牌";
+                        desc: "保存在系统凭据管理器";
+                        LineEdit {
+                            width: 260px;
+                            text <=> Settings.bangumi-token;
+                            input-type: password;
+                            placeholder-text: "Bangumi 访问令牌（保存在系统凭据管理器）";
+                        }
+                    }
+                    SettingRow {
+                        title: "资料来源";
+                        desc: "";
+                        HorizontalLayout {
+                            horizontal-stretch: 0;
+                            Segmented {
+                                items: ["VNDB", "Bangumi"];
+                                current: Settings.metadata-provider == "bangumi" ? 1 : 0;
+                                segment-width: 96px;
+                                selected(i) => { Settings.metadata-provider = i == 1 ? "bangumi" : "vndb"; }
+                            }
+                        }
+                    }
+                    SwitchRow {
+                        label: "下载敏感封面";
+                        description: "";
+                        checked: Settings.sensitive-covers;
+                        toggled => {
+                            Settings.sensitive-covers = !Settings.sensitive-covers;
+                            Settings.set-sensitive-covers(Settings.metadata-provider, Settings.sensitive-covers);
+                        }
+                    }
+                }
             }
-
-            LineEdit {
-                height: 36px;
-                text <=> root.bangumi-token-input;
-                input-type: password;
-                placeholder-text: "Bangumi access token（存入系统凭据管理器）";
-            }
-
-            CheckBox {
-                checked <=> root.sensitive-covers;
-                text: "允许下载敏感封面";
-                toggled => { root.set-sensitive-cover-policy(root.metadata-provider, self.checked); }
-            }
-
         }
     }
 }

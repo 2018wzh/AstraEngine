@@ -34,15 +34,15 @@ pub use family_diagnostics::{
 pub use appearance::AppearanceSettings;
 pub use family::{
     FamilyCapability, FamilyPluginDescriptor, FamilyPluginRegistry, FamilyPolicyError,
-    FamilyProbeCandidate, FamilyProbeReport, FamilyProbeSelection,
+    FamilyProbeCandidate, FamilyProbeReport, FamilyProbeSelection, SessionMenuEntry,
     INDEPENDENT_FAMILY_ABI_FINGERPRINT,
 };
 pub use family_loader::{
     no_host_services, FamilyLoadError, LoadedFamilyPlugin, NativeOpenRequest, NativeSession,
 };
 pub use family_registry::{
-    is_family_library_path, FamilyDirectoryLoadError, FamilyDirectoryLoadReport,
-    FamilyProviderRegistry,
+    discover_family_libraries, is_family_library_path, FamilyDirectoryLoadError,
+    FamilyDirectoryLoadReport, FamilyProviderRegistry,
 };
 pub use filter_settings::{FilterConfiguration, FilterPreset, FilterSettings};
 pub use input_mapping::{

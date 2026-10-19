@@ -1,106 +1,81 @@
-// About page - app info, third-party licenses, AboutSlint widget.
-
 import { AboutSlint, ScrollView } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
-import { Icon, Icons } from "../components/icons.slint";
-import { SettingsSectionHeader, SettingsDivider } from "../components/settings-card.slint";
+import { App } from "../globals.slint";
+import { BrandMark } from "../components/nav.slint";
+import { Card } from "../components/controls.slint";
 
 export component AboutPage inherits Rectangle {
-    in property <string> version: "";
-    in property <string> build-identity: "";
-
-    background: Theme.background;
+    background: Theme.surface;
 
     ScrollView {
         mouse-drag-pan-enabled: true;
 
         VerticalLayout {
-            padding: 24px;
+            padding: 32px;
             spacing: 16px;
+            alignment: start;
 
-            // App header
             VerticalLayout {
                 spacing: 8px;
                 alignment: center;
-
-                Rectangle {
-                    width: 64px;
-                    height: 64px;
-                    border-radius: Theme.shape-xl;
-                    background: Theme.primary-container;
-                    x: (parent.width - self.width) / 2;
-
-                    Icon {
-                        glyph: Icons.gamepad;
-                        font-size: 32px;
-                        color: Theme.on-primary-container;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                    }
+                BrandMark {
+                    size: 64px;
                 }
-
                 Text {
                     text: "AstraEMU";
                     color: Theme.on-surface;
-                    font-size: Theme.font-headline-md;
+                    font-size: Theme.headline;
                     font-weight: 700;
                     horizontal-alignment: center;
                 }
                 Text {
-                    text: "下一代旧引擎视觉小说运行时与通用管理器";
+                    text: "视觉小说运行与管理工具";
                     color: Theme.primary;
-                    font-size: Theme.font-title-sm;
+                    font-size: Theme.title-sm;
                     font-weight: 600;
                     horizontal-alignment: center;
                 }
-                if version != "" : Text {
-                    text: "版本 (Version) " + version;
-                    color: Theme.on-surface-variant;
-                    font-size: Theme.font-label-md;
+                Text {
+                    text: "版本 " + App.version;
+                    color: Theme.on-variant;
+                    font-size: Theme.body-sm;
                     horizontal-alignment: center;
                 }
-                if build-identity != "" : Text {
-                    text: build-identity;
-                    color: Theme.on-surface-variant;
-                    font-size: Theme.font-label-sm;
+                Text {
+                    text: "构建信息 " + App.build;
+                    color: Theme.on-variant;
+                    font-size: Theme.label;
                     horizontal-alignment: center;
                 }
             }
-
-            SettingsDivider {}
-
-            SettingsSectionHeader { title: "关于架构与项目定位"; }
 
             Text {
-                text: "AstraEMU 作为 AstraEngine 系列原生独立产品，提供多 Family 旧引擎（FVP、Musica、KrKr、BGI 等）的原生加载与探测、Trusted Luau 补丁沙盒、LLM 实时翻译与统一的视觉小说书架管理体验。遵循系列宪章 Migration 12，采用 Slint 1.17 + wgpu 29 同设备硬件单通道渲染合成。";
-                color: Theme.on-surface-variant;
+                text: "在现代系统上运行经典视觉小说，统一管理游戏库、画面效果与实时翻译。";
+                color: Theme.on-variant;
                 wrap: word-wrap;
-                font-size: Theme.font-body-sm;
+                font-size: Theme.body;
+                horizontal-alignment: center;
             }
 
-            SettingsDivider {}
-
-            SettingsSectionHeader { title: "Slint 跨平台 GUI 框架"; }
-
-            Rectangle {
-                background: Theme.surface-container-low;
-                border-radius: Theme.shape-lg;
-                border-width: 1px;
-                border-color: Theme.outline-variant;
+            Card {
                 min-height: 120px;
-
-                AboutSlint { }
+                VerticalLayout {
+                    padding: 16px;
+                    AboutSlint { }
+                }
             }
 
-            SettingsDivider {}
-
-            SettingsSectionHeader { title: "开源协议与第三方声明"; }
-
             Text {
-                text: "Slint 1.17.1 — Royalty-free Desktop, Mobile, and Web Applications License 2.0.\nwgpu 29.0.4 — MIT / Apache-2.0\nwinit 0.30 — Apache-2.0\nFont Awesome 6 Free (Solid) — SIL OFL 1.1 (内嵌矢量字元库)";
-                color: Theme.on-surface-variant;
+                text: "开源协议与第三方声明";
+                color: Theme.on-surface;
+                font-size: Theme.title-md;
+                font-weight: 650;
+            }
+            Text {
+                text: "Slint 1.17.1 — Royalty-free Desktop, Mobile, and Web Applications License 2.0.\nwgpu 29.0.4 — MIT / Apache-2.0\nwinit 0.30 — Apache-2.0\nFont Awesome 6 Free (Solid) — SIL OFL 1.1（内嵌矢量字元库）";
+                color: Theme.on-variant;
                 wrap: word-wrap;
-                font-size: Theme.font-label-md;
+                font-size: Theme.body-sm;
             }
         }
     }

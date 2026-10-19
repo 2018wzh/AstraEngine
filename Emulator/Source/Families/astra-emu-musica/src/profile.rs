@@ -323,7 +323,7 @@ fn validate_hex(
     max_bytes: usize,
     bound_code: &'static str,
 ) -> Result<(), CoreError> {
-    if hex.len() % 2 != 0 || !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+    if !hex.len().is_multiple_of(2) || !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err(invalid(
             "ASTRA_EMU_MUSICA_KEY_HEX",
             "Musica keys must contain even-length hexadecimal",
@@ -337,8 +337,10 @@ fn validate_hex(
 
 fn decode_hex(hex: &str) -> Vec<u8> {
     hex.as_bytes()
-        .chunks_exact(2)
-        .map(decode_hex_byte)
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|pair| decode_hex_byte(pair))
         .collect()
 }
 

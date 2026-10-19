@@ -39,8 +39,9 @@ fn damaged_core_keeps_manager_available_and_error_visible() {
     assert!(
         app.model()
             .unwrap()
-            .global_diagnostic
-            .contains("ASTRA_EMU_FAMILY_LOAD")
+            .notices
+            .iter()
+            .any(|notice| notice.code.contains("ASTRA_EMU_FAMILY_LOAD"))
     );
 }
 
@@ -88,9 +89,9 @@ fn metadata_candidates_cannot_link_another_selected_game() {
         MetadataPayload::Search(vec![record()]),
     )
     .unwrap();
-    let candidate = app.model().unwrap().match_reviews[0].candidate_id.clone();
+    let candidate = app.model().unwrap().selection.matches[0].id.clone();
     add_game(&mut app, "second");
-    assert!(app.model().unwrap().match_reviews.is_empty());
+    assert!(app.model().unwrap().selection.matches.is_empty());
     assert_eq!(
         app.accept_match(&candidate).unwrap_err(),
         "ASTRA_EMU_METADATA_MATCH_GAME_MISMATCH"
@@ -126,7 +127,7 @@ fn metadata_search_rejects_invalid_input_and_overlapping_requests() {
         app.unlink_identity("vndb").unwrap_err(),
         "ASTRA_EMU_METADATA_REQUEST_PENDING"
     );
-    assert!(app.model().unwrap().metadata_busy);
+    assert!(app.model().unwrap().selection.metadata_busy);
 }
 
 #[test]
@@ -144,21 +145,21 @@ fn metadata_linked_title_persists_and_unlink_hides_stale_snapshot() {
             },
         )
         .unwrap();
-        assert_eq!(app.model().unwrap().selected_title, "Search result");
-        assert_eq!(app.model().unwrap().games[0].title, "Search result");
+        assert_eq!(app.model().unwrap().selection.title, "Search result");
+        assert_eq!(app.model().unwrap().library.games[0].title, "Search result");
         app.search_query = "Search result".into();
-        assert_eq!(app.model().unwrap().games.len(), 1);
+        assert_eq!(app.model().unwrap().library.games.len(), 1);
     }
     let mut app = controller(root.path());
     app.selected_case_id = Some("first".into());
-    assert_eq!(app.model().unwrap().selected_title, "Search result");
+    assert_eq!(app.model().unwrap().selection.title, "Search result");
     app.library
         .set_game_user_title("first", Some("My title"))
         .unwrap();
-    assert_eq!(app.model().unwrap().selected_title, "My title");
+    assert_eq!(app.model().unwrap().selection.title, "My title");
     app.library.set_game_user_title("first", None).unwrap();
     app.unlink_identity("vndb").unwrap();
-    assert_eq!(app.model().unwrap().selected_title, "Imported folder");
+    assert_eq!(app.model().unwrap().selection.title, "Imported folder");
     assert!(
         app.metadata_record("first", MetadataProviderId::Vndb)
             .unwrap()
@@ -182,7 +183,7 @@ fn metadata_empty_search_displays_a_retriable_state() {
     )
     .unwrap();
     let model = app.model().unwrap();
-    assert!(!model.metadata_busy);
-    assert!(model.match_reviews.is_empty());
-    assert!(model.metadata_status.contains("没有找到作品"));
+    assert!(!model.selection.metadata_busy);
+    assert!(model.selection.matches.is_empty());
+    assert!(model.selection.metadata_status.contains("没有找到作品"));
 }

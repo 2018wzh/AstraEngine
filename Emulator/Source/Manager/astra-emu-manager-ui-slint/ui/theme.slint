@@ -1,104 +1,92 @@
-// AstraEMU unified Material Design 3 (M3) theme system.
-// Cross-platform, follow-system by default, WCAG AA 4.5:1 compliant.
+import { Palette } from "std-widgets.slint";
+import { App } from "./globals.slint";
+
+export struct Accent {
+    primary: color,
+    on-primary: color,
+    container: color,
+    on-container: color,
+    soft: color,
+}
 
 export global Theme {
-    // ===== Mode & Preferences =====
-    in-out property <string> theme-mode: "system";
-    in-out property <bool> dark-mode: true;
-    in-out property <string> accent: "blue";
-    in-out property <string> density: "comfortable";
-    out property <bool> effective-dark: theme-mode == "light" ? false : theme-mode == "dark" ? true : dark-mode;
+    out property <bool> dark: App.dark;
+    out property <color> system-accent: Palette.accent-background;
+    out property <float> hue: system-accent.to-oklch().hue;
+    out property <bool> compact-density: App.appearance.density == "compact";
+    out property <duration> motion-fast: App.appearance.reduce-motion ? 0ms : 120ms;
+    out property <duration> motion-medium: App.appearance.reduce-motion ? 0ms : 200ms;
 
-    // ===== M3 Tonal Surface Containers =====
-    out property <color> surface: effective-dark ? #111318 : #f9f9fe;
-    out property <color> surface-dim: effective-dark ? #111318 : #dad9e0;
-    out property <color> surface-bright: effective-dark ? #37393e : #f9f9fe;
-    out property <color> surface-container-lowest: effective-dark ? #0c0e13 : #ffffff;
-    out property <color> surface-container-low: effective-dark ? #181b20 : #f3f3f9;
-    out property <color> surface-container: effective-dark ? #1e2126 : #ededf3;
-    out property <color> surface-container-high: effective-dark ? #282b31 : #e7e8ee;
-    out property <color> surface-container-highest: effective-dark ? #33363c : #e1e2e8;
-    out property <color> surface-overlay: effective-dark ? #ee181b20 : #f2ffffff;
+    pure function t(l: float, c: float) -> color {
+        return oklch(l, c, hue);
+    }
 
-    out property <color> on-surface: effective-dark ? #e1e2e8 : #191c20;
-    out property <color> on-surface-variant: effective-dark ? #c4c6d0 : #44474f;
-    out property <color> outline: effective-dark ? #8e9099 : #74777f;
-    out property <color> outline-variant: effective-dark ? #44474f : #c4c6d0;
+    out property <color> surface: dark ? t(0.165, 0.008) : t(0.985, 0.004);
+    out property <color> surface-low: dark ? t(0.195, 0.010) : t(0.966, 0.006);
+    out property <color> surface-container: dark ? t(0.225, 0.012) : t(0.948, 0.008);
+    out property <color> surface-high: dark ? t(0.262, 0.014) : t(0.928, 0.010);
+    out property <color> surface-highest: dark ? t(0.300, 0.016) : t(0.905, 0.012);
+    out property <color> on-surface: dark ? t(0.935, 0.008) : t(0.205, 0.010);
+    out property <color> on-variant: dark ? t(0.775, 0.018) : t(0.430, 0.018);
+    out property <color> outline: dark ? t(0.580, 0.018) : t(0.600, 0.018);
+    out property <color> outline-variant: dark ? t(0.340, 0.018) : t(0.870, 0.012);
+    out property <color> scrim: #000000a0;
 
-    // ===== M3 Primary / Container Pairs =====
-    out property <color> primary: accent == "purple"
-        ? (effective-dark ? #d0bcff : #6750a4)
-        : (effective-dark ? #a8c8ff : #005fb0);
-    out property <color> on-primary: accent == "purple"
-        ? (effective-dark ? #381e72 : #ffffff)
-        : (effective-dark ? #00315f : #ffffff);
-    out property <color> primary-container: accent == "purple"
-        ? (effective-dark ? #4f378b : #eaddff)
-        : (effective-dark ? #004786 : #d6e3ff);
-    out property <color> on-primary-container: accent == "purple"
-        ? (effective-dark ? #eaddff : #21005d)
-        : (effective-dark ? #d6e3ff : #001b3c);
+    out property <color> primary: dark ? t(0.810, 0.110) : t(0.480, 0.150);
+    out property <color> on-primary: dark ? t(0.300, 0.090) : #ffffff;
+    out property <color> primary-container: dark ? t(0.360, 0.090) : t(0.925, 0.045);
+    out property <color> on-primary-container: dark ? t(0.925, 0.045) : t(0.290, 0.100);
 
-    // ===== M3 Functional & Feedback Tokens =====
-    out property <color> error: effective-dark ? #ffb4ab : #ba1a1a;
-    out property <color> on-error: effective-dark ? #690005 : #ffffff;
-    out property <color> error-container: effective-dark ? #93000a : #ffdad6;
-    out property <color> on-error-container: effective-dark ? #ffdad6 : #410002;
+    out property <color> error: dark ? oklch(0.80, 0.11, 25) : oklch(0.52, 0.19, 27);
+    out property <color> error-container: dark ? oklch(0.34, 0.09, 25) : oklch(0.93, 0.04, 25);
+    out property <color> on-error-container: dark ? oklch(0.93, 0.04, 25) : oklch(0.32, 0.10, 27);
 
-    out property <color> success-container: effective-dark ? #0f5223 : #d7f8db;
-    out property <color> on-success-container: effective-dark ? #a6f5b7 : #00210b;
+    public pure function accent(seed: color, is-dark: bool) -> Accent {
+        let o = seed.to-oklch();
+        let c = max(0.045, min(o.chroma, 0.14));
+        return {
+            primary: is-dark ? oklch(0.80, c, o.hue) : oklch(0.50, c + 0.01, o.hue),
+            on-primary: is-dark ? oklch(0.25, c * 0.7, o.hue) : #ffffff,
+            container: is-dark ? oklch(0.34, c * 0.7, o.hue) : oklch(0.92, c * 0.35, o.hue),
+            on-container: is-dark ? oklch(0.92, c * 0.35, o.hue) : oklch(0.30, c * 0.8, o.hue),
+            soft: is-dark ? oklch(0.26, c * 0.35, o.hue) : oklch(0.955, c * 0.18, o.hue),
+        };
+    }
 
-    // ===== Calibrated Compatibility Badges (WCAG AA 4.5:1 compliant) =====
-    out property <color> compat-perfect-bg: effective-dark ? #184423 : #cbf2d6;
-    out property <color> compat-perfect-fg: effective-dark ? #8ce2a3 : #0a4d20;
-    out property <color> compat-ok-bg: effective-dark ? #153963 : #d0e4ff;
-    out property <color> compat-ok-fg: effective-dark ? #9ecaff : #003264;
-    out property <color> compat-flawed-bg: effective-dark ? #4a3800 : #ffefa8;
-    out property <color> compat-flawed-fg: effective-dark ? #f5cd47 : #5c4300;
-    out property <color> compat-boot-bg: effective-dark ? #4e2500 : #ffe0cb;
-    out property <color> compat-boot-fg: effective-dark ? #ffb078 : #5f2800;
-    out property <color> compat-bad-bg: effective-dark ? #521212 : #ffdad6;
-    out property <color> compat-bad-fg: effective-dark ? #ffb4ab : #5c1414;
+    public pure function status-seed(status: string) -> color {
+        return status == "perfect" ? oklch(0.6, 0.14, 160)
+            : status == "completable" ? oklch(0.6, 0.12, 215)
+            : status == "flawed" ? oklch(0.7, 0.14, 85)
+            : status == "boot_only" ? oklch(0.65, 0.15, 50)
+            : status == "unplayable" ? oklch(0.6, 0.17, 25)
+            : oklch(0.6, 0.0, 0);
+    }
 
-    // ===== M3 Shape Scale Tokens =====
-    out property <length> shape-none: 0px;
-    out property <length> shape-xs: 4px;
-    out property <length> shape-sm: 8px;
-    out property <length> shape-md: 12px;
-    out property <length> shape-lg: 16px;
-    out property <length> shape-xl: 28px;
-    out property <length> shape-full: 20px;
+    public pure function status-label(status: string) -> string {
+        return status == "perfect" ? "完美"
+            : status == "completable" ? "可通关"
+            : status == "flawed" ? "有瑕疵"
+            : status == "boot_only" ? "仅能启动"
+            : status == "unplayable" ? "无法运行"
+            : "未评级";
+    }
 
-    // ===== M3 Typography Scale Tokens =====
-    out property <length> font-headline-md: 28px;
-    out property <length> font-title-lg: 20px;
-    out property <length> font-title-md: 16px;
-    out property <length> font-title-sm: 14px;
-    out property <length> font-body-lg: 15px;
-    out property <length> font-body-md: 13px;
-    out property <length> font-body-sm: 12px;
-    out property <length> font-label-lg: 13px;
-    out property <length> font-label-md: 11px;
-    out property <length> font-label-sm: 10px;
+    out property <length> r-xs: 4px;
+    out property <length> r-sm: 8px;
+    out property <length> r-md: 12px;
+    out property <length> r-lg: 16px;
+    out property <length> r-xl: 28px;
 
-    // ===== Backward Compatibility Aliases =====
-    out property <color> background: surface;
-    out property <color> surface-raised: surface-container;
-    out property <color> primary-muted: primary-container;
-    out property <color> text: on-surface;
-    out property <color> text-muted: on-surface-variant;
-    out property <color> danger: error;
-    out property <color> success: on-success-container;
-    out property <color> border: outline-variant;
-    out property <color> divider: outline-variant;
-    out property <color> sidebar-bg: surface-container-low;
-    out property <color> card-hover: surface-container-high;
-    out property <color> accent-color: primary;
-    out property <color> accent-strong: primary;
-    out property <length> radius: shape-md;
-    out property <length> radius-sm: shape-sm;
-    out property <length> spacing: density == "compact" ? 8px : 12px;
-    out property <length> spacing-lg: density == "compact" ? 12px : 16px;
-    out property <length> spacing-sm: density == "compact" ? 4px : 8px;
-    out property <length> sidebar-width: 232px;
+    out property <length> display: 32px;
+    out property <length> headline: 26px;
+    out property <length> title-lg: 20px;
+    out property <length> title-md: 16px;
+    out property <length> title-sm: 14px;
+    out property <length> body: 14px;
+    out property <length> body-sm: 13px;
+    out property <length> label: 12px;
+    out property <length> label-sm: 11px;
+
+    out property <color> shadow: dark ? #00000090 : #1a1a3030;
+    out property <color> shadow-strong: dark ? #000000c0 : #1a1a3050;
 }

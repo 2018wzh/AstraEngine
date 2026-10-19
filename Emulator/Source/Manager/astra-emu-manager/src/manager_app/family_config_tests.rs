@@ -132,8 +132,8 @@ fn typed_game_configuration_round_trips_after_controller_reopen() {
 
     let controller = configuration_controller(root.path());
     let model = controller.model().unwrap();
-    assert!(model.common_engine_config_fields.is_empty());
-    let fields = model.family_config_fields;
+    assert!(model.selection.engine_fields.is_empty());
+    let fields = model.selection.family_fields;
     let launch_mode = fields
         .iter()
         .find(|field| field.key == "config.launch_mode")
@@ -396,14 +396,15 @@ fn staged_emulator_hides_previous_fields_across_scope_changes_and_blocks_old_wri
             .family_config_changed("manager.config_scope", scope)
             .unwrap();
         let model = controller.model().unwrap();
-        assert!(model.common_engine_config_fields.is_empty());
+        assert!(model.selection.engine_fields.is_empty());
         assert!(
             model
-                .family_config_fields
+                .selection
+                .family_fields
                 .iter()
                 .all(|field| field.key == "manager.emulator_id")
         );
-        assert_eq!(model.family_config_fields[0].value, "other-emulator");
+        assert_eq!(model.selection.family_fields[0].value, "other-emulator");
         assert!(
             controller
                 .family_config_changed("config.launch_mode", "direct")
@@ -417,7 +418,8 @@ fn staged_emulator_hides_previous_fields_across_scope_changes_and_blocks_old_wri
     let model = controller.model().unwrap();
     assert_eq!(
         model
-            .family_config_fields
+            .selection
+            .family_fields
             .iter()
             .find(|field| field.key == "config.launch_mode")
             .unwrap()

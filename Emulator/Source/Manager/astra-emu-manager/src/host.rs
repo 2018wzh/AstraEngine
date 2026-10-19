@@ -1,6 +1,7 @@
 use astra_emu_manager_core::InputMapping;
 use astra_media_core::Viewport2D;
 use std::{
+    cell::Cell,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -8,7 +9,10 @@ use std::{
     time::Instant,
 };
 
-use astra_emu_manager_ui_slint::{ManagerViewModel, SlintManagerAdapter};
+pub(super) use astra_emu_manager_ui_slint::{
+    describe_error, report_error, App, Cores, Dialogs, Filters, Library, Logs, ManagerViewModel,
+    Selection, Session, Settings, SlintManagerAdapter,
+};
 use slint::ComponentHandle;
 use thiserror::Error;
 
@@ -181,14 +185,14 @@ pub trait ManagerController: 'static {
     fn runtime_deadline(&self) -> Option<Instant>;
     /// Drain owner results and enqueue input; never execute a native core on UI.
     fn advance_runtime(&mut self) -> Result<Option<ManagerViewModel>, String>;
-    /// Update the platform theme used by automatic appearance mode.
-    fn set_system_theme(&mut self, dark: bool);
-    fn set_theme(&mut self, _dark: bool) -> Result<(), String>;
-    fn set_grid_columns(&mut self, _columns: i32) -> Result<(), String>;
-    fn set_theme_mode(&mut self, _mode: &str) -> Result<(), String>;
-    fn set_accent(&mut self, _accent: &str) -> Result<(), String>;
-    fn set_density(&mut self, _density: &str) -> Result<(), String>;
-    fn set_view_mode(&mut self, _view_mode: &str) -> Result<(), String>;
+    fn set_appearance(
+        &mut self,
+        appearance: astra_emu_manager_core::AppearanceSettings,
+    ) -> Result<ManagerViewModel, String>;
+    fn install_core(&mut self, source: &std::path::Path) -> Result<ManagerViewModel, String>;
+    fn uninstall_core(&mut self, file: &str) -> Result<ManagerViewModel, String>;
+    fn log_text(&self, core: &str) -> Result<(String, usize), String>;
+    fn engine_action(&mut self, control: u32) -> Result<(), String>;
     fn family_config_changed(&mut self, _key: &str, _value: &str) -> Result<(), String>;
     fn save_family_config(&mut self) -> Result<ManagerViewModel, String>;
     fn reset_family_config(&mut self) -> Result<ManagerViewModel, String>;
@@ -238,6 +242,12 @@ fn fire_host_callback(slot: &HostCallbackSlot) {
     *slot.borrow_mut() = Some(callback);
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HostExit {
+    Quit,
+    Restart,
+}
+
 #[derive(Debug, Error)]
 pub enum HostError {
     #[error("ASTRA_EMU_HOST_BACKEND: {0}")]
@@ -249,7 +259,7 @@ pub enum HostError {
 pub fn run_manager<C: ManagerController, R: AstraUnderlayRenderer>(
     controller: C,
     renderer: R,
-) -> Result<(), HostError> {
+) -> Result<HostExit, HostError> {
     run_manager_with_initial_state(controller, renderer, false)
 }
 
@@ -257,7 +267,7 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
     controller: C,
     renderer: R,
     game_active: bool,
-) -> Result<(), HostError> {
+) -> Result<HostExit, HostError> {
     crate::startup::mark("ui_backend_begin");
     #[cfg(not(target_os = "android"))]
     {
@@ -278,12 +288,13 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
     crate::startup::mark("window_object_created");
     adapter.apply(&controller.model().map_err(HostError::Renderer)?);
     crate::startup::mark("initial_model_applied");
-    adapter.window().set_game_active(game_active);
+    adapter.set_session_active(game_active);
     let controller = std::rc::Rc::new(std::cell::RefCell::new(controller));
     let renderer = std::rc::Rc::new(std::cell::RefCell::new(renderer));
     let fatal_error = std::rc::Rc::new(std::cell::RefCell::new(None));
     let fatal_error_callback = fatal_error.clone();
     let window_weak = adapter.window().as_weak();
+    let host_exit = std::rc::Rc::new(Cell::new(HostExit::Quit));
     let gamepad = std::rc::Rc::new(std::cell::RefCell::new(
         GameInputPump::new(controller.borrow().input_mapping()).map_err(HostError::Renderer)?,
     ));
@@ -345,15 +356,12 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                         terminate_game(&controller, &adapter, &window, error);
                     }
                 }
-                window.set_game_active(controller.borrow().is_game_active());
-                let title = controller
-                    .borrow()
-                    .game_title()
-                    .map(slint::SharedString::from);
-                window.set_has_game_title(title.is_some());
-                let title = title.unwrap_or_default();
-                if window.get_game_title() != title {
-                    window.set_game_title(title);
+                let session = window.global::<Session>();
+                session.set_active(controller.borrow().is_game_active());
+                let title =
+                    slint::SharedString::from(controller.borrow().game_title().unwrap_or(""));
+                if session.get_title() != title {
+                    session.set_title(title);
                 }
                 let icon = controller.borrow_mut().take_game_icon();
                 if icon.is_some() || !controller.borrow().is_game_active() {
@@ -371,13 +379,11 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                 if let Some(request) = request {
                     let result = window_commands::execute(&window, &pointer, &request.command);
                     if let Err(error) = controller.borrow_mut().respond_window(&request, result) {
-                        window.set_global_diagnostic(error.into());
+                        report_error(&window, &error);
                     }
                 }
                 if let Some((failure, can_retry)) = controller.borrow().native_failure() {
-                    window.set_core_retryable(can_retry);
-                    window.set_fatal_error_message(failure.into());
-                    window.set_fatal_error_active(true);
+                    apply_fatal(&window, failure, can_retry);
                 }
                 window.window().request_redraw();
             }
@@ -396,6 +402,13 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
     );
     settings_callbacks::install(&adapter, &controller);
     library_callbacks::install(&adapter, &controller);
+    {
+        let host_exit = host_exit.clone();
+        adapter.window().global::<Cores>().on_restart(move || {
+            host_exit.set(HostExit::Restart);
+            let _ = slint::quit_event_loop();
+        });
+    }
     let modal_ui = modals::install(&adapter, &controller);
     let event_controller = controller.clone();
     let event_adapter = std::rc::Rc::downgrade(&adapter);
@@ -427,10 +440,8 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                             }
                         });
                     }
-                    if window.get_theme_mode() == "system" {
-                        let dark = window_events::system_theme(window.window())?;
-                        event_controller.borrow_mut().set_system_theme(dark);
-                        window.set_theme_dark(dark);
+                    if let Ok(dark) = window_events::system_theme(window.window()) {
+                        window.global::<App>().set_system_dark(dark);
                     }
                 }
                 filters::configure(&mut *renderer_callback.borrow_mut(), &event_controller.borrow().filter_settings())?;
@@ -445,12 +456,7 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
             slint::RenderingState::BeforeRendering => {
                 if let Some(window) = event_window.upgrade() {
                     modals::service(&window, &event_controller, &modal_ui);
-                    let input_blocked = !window.get_game_active()
-                        || window.get_fatal_error_active()
-                        || window.get_modal_active()
-                        || window.get_translation_overlay_active()
-                        || window.get_diagnostics_overlay_active()
-                        || window.get_filters_overlay_active();
+                    let input_blocked = !session_input_open(&window);
                     if input_blocked {
                         let release = event_controller.borrow_mut().release_inputs();
                         if let Err(error) = release {
@@ -466,7 +472,7 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                         }
                         match event_gamepad.borrow_mut().poll() {
                             Ok(events) => {
-                                if !input_blocked && window.get_game_active() {
+                                if !input_blocked && window.global::<Session>().get_active() {
                                     for event in events {
                                         let input = event_controller.borrow_mut().game_input(
                                             &event.control,
@@ -481,8 +487,8 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                                 }
                             }
                             Err(error) => {
-                                if window.get_game_active() { terminate_game(&event_controller, &event_adapter, &window, error); }
-                                else { window.set_global_diagnostic(error.into()); }
+                                if window.global::<Session>().get_active() { terminate_game(&event_controller, &event_adapter, &window, error); }
+                                else { report_error(&window, &error); }
                             }
                         }
                     }
@@ -501,7 +507,7 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                     let weak = event_window.clone();
                     slint::Timer::single_shot(std::time::Duration::ZERO, move || {
                         if let Some(window) = weak.upgrade() {
-                            window.set_cover_loading_enabled(true);
+                            window.global::<Library>().set_cover_loading(true);
                         }
                     });
                 }
@@ -535,7 +541,7 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
     if let Some(error) = fatal_error.borrow_mut().take() {
         return Err(HostError::Renderer(error));
     }
-    Ok(())
+    Ok(host_exit.get())
 }
 
 fn apply_stage_texture_update(
@@ -544,16 +550,17 @@ fn apply_stage_texture_update(
 ) -> Result<(), String> {
     let image = slint::Image::try_from(update.texture)
         .map_err(|_| "WGPU stage texture import failed".to_string())?;
-    window.set_stage_frame(image);
-    window.set_stage_output_aspect(update.raster_width as f32 / update.raster_height as f32);
-    window.set_stage_native_width(update.logical_width as f32);
-    window.set_stage_native_height(update.logical_height as f32);
-    window.set_stage_raster_width(update.raster_width as f32);
-    window.set_stage_raster_height(update.raster_height as f32);
-    window.set_stage_content_x(update.content.x as f32);
-    window.set_stage_content_y(update.content.y as f32);
-    window.set_stage_content_width(update.content.width as f32);
-    window.set_stage_content_height(update.content.height as f32);
+    let session = window.global::<Session>();
+    session.set_frame(image);
+    session.set_output_aspect(update.raster_width as f32 / update.raster_height as f32);
+    session.set_native_width(update.logical_width as f32);
+    session.set_native_height(update.logical_height as f32);
+    session.set_raster_width(update.raster_width as f32);
+    session.set_raster_height(update.raster_height as f32);
+    session.set_content_x(update.content.x as f32);
+    session.set_content_y(update.content.y as f32);
+    session.set_content_width(update.content.width as f32);
+    session.set_content_height(update.content.height as f32);
     Ok(())
 }
 
@@ -570,6 +577,22 @@ fn apply_model(adapter: &std::rc::Weak<SlintManagerAdapter>, model: &ManagerView
     }
 }
 
+fn session_input_open(window: &astra_emu_manager_ui_slint::ManagerWindow) -> bool {
+    let session = window.global::<Session>();
+    let dialogs = window.global::<Dialogs>();
+    session.get_active() && !dialogs.get_fatal_active() && !dialogs.get_modal_active()
+}
+
+fn apply_fatal(window: &astra_emu_manager_ui_slint::ManagerWindow, message: &str, retryable: bool) {
+    let text = describe_error(message);
+    let dialogs = window.global::<Dialogs>();
+    dialogs.set_fatal_title(text.title.into());
+    dialogs.set_fatal_detail(text.detail.into());
+    dialogs.set_fatal_code(text.code.into());
+    dialogs.set_fatal_retryable(retryable);
+    dialogs.set_fatal_active(true);
+}
+
 fn terminate_game<C: ManagerController>(
     controller: &std::cell::RefCell<C>,
     adapter: &std::rc::Weak<SlintManagerAdapter>,
@@ -578,7 +601,9 @@ fn terminate_game<C: ManagerController>(
 ) {
     let cleanup = controller.borrow_mut().leave_game();
     let icon_cleanup = window_commands::set_icon(window.window(), None);
-    window.set_game_active(false);
+    let session = window.global::<Session>();
+    session.set_active(false);
+    session.set_fullscreen(false);
     window.window().set_fullscreen(false);
     let message = match cleanup {
         Ok(model) => {
@@ -603,8 +628,6 @@ fn terminate_game<C: ManagerController>(
         })
         .unwrap_or("ASTRA_EMU_SESSION_FAILED");
     tracing::error!(event = "astra.emu.host.game_terminated", diagnostic_code, message = %message);
-    window.set_global_diagnostic(message.clone().into());
-    window.set_fatal_error_message(message.into());
-    window.set_core_retryable(false);
-    window.set_fatal_error_active(true);
+    report_error(window, &message);
+    apply_fatal(window, &message, false);
 }

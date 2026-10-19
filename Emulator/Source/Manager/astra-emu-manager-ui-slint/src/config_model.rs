@@ -2,12 +2,12 @@ use std::cell::RefCell;
 
 use slint::{Model, ModelRc, VecModel};
 
-use crate::{ConfigField, GenericConfigFieldViewModel};
+use crate::{ConfigField, ConfigFieldViewModel};
 
 pub(crate) fn update(
     model: &VecModel<ConfigField>,
-    previous: &RefCell<Vec<GenericConfigFieldViewModel>>,
-    fields: &[GenericConfigFieldViewModel],
+    previous: &RefCell<Vec<ConfigFieldViewModel>>,
+    fields: &[ConfigFieldViewModel],
 ) {
     let mut previous = previous.borrow_mut();
     if previous.as_slice() == fields {
@@ -29,7 +29,7 @@ pub(crate) fn update(
     fields.clone_into(&mut previous);
 }
 
-fn convert(field: &GenericConfigFieldViewModel) -> ConfigField {
+fn convert(field: &ConfigFieldViewModel) -> ConfigField {
     ConfigField {
         options: ModelRc::new(VecModel::from(
             field
@@ -57,7 +57,7 @@ mod tests {
     fn refresh_preserves_enum_model_and_applies_changed_values() {
         let model = VecModel::default();
         let previous = RefCell::default();
-        let mut fields = vec![GenericConfigFieldViewModel {
+        let mut fields = vec![ConfigFieldViewModel {
             key: "encoding".into(),
             label: "Encoding".into(),
             description: String::new(),

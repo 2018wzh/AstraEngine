@@ -74,12 +74,6 @@ impl ManagerController for AstraEmuManagerController {
         Ok(())
     }
 
-    fn set_system_theme(&mut self, dark: bool) {
-        if self.appearance.theme_mode == "system" {
-            self.appearance.theme_dark = dark;
-        }
-    }
-
     fn add_game_directory(&mut self, path: &Path) -> Result<ManagerViewModel, String> {
         AstraEmuManagerController::add_game_directory(self, path)
     }
@@ -256,30 +250,6 @@ impl ManagerController for AstraEmuManagerController {
             .and_then(|active| active.title.as_deref())
     }
 
-    fn set_theme(&mut self, dark: bool) -> Result<(), String> {
-        AstraEmuManagerController::set_theme(self, dark)
-    }
-
-    fn set_grid_columns(&mut self, columns: i32) -> Result<(), String> {
-        AstraEmuManagerController::set_grid_columns(self, columns)
-    }
-
-    fn set_theme_mode(&mut self, mode: &str) -> Result<(), String> {
-        AstraEmuManagerController::set_theme_mode(self, mode)
-    }
-
-    fn set_accent(&mut self, accent: &str) -> Result<(), String> {
-        AstraEmuManagerController::set_accent(self, accent)
-    }
-
-    fn set_density(&mut self, density: &str) -> Result<(), String> {
-        AstraEmuManagerController::set_density(self, density)
-    }
-
-    fn set_view_mode(&mut self, view_mode: &str) -> Result<(), String> {
-        AstraEmuManagerController::set_view_mode(self, view_mode)
-    }
-
     fn family_config_changed(&mut self, key: &str, value: &str) -> Result<(), String> {
         AstraEmuManagerController::family_config_changed(self, key, value)
     }
@@ -355,5 +325,28 @@ impl ManagerController for AstraEmuManagerController {
 
     fn clear_per_game_input_mapping(&mut self) -> Result<ManagerViewModel, String> {
         AstraEmuManagerController::clear_per_game_input_mapping(self)
+    }
+
+    fn set_appearance(
+        &mut self,
+        appearance: astra_emu_manager_core::AppearanceSettings,
+    ) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::set_appearance(self, appearance)
+    }
+
+    fn install_core(&mut self, source: &std::path::Path) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::install_core(self, source)
+    }
+
+    fn uninstall_core(&mut self, file: &str) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::uninstall_core(self, file)
+    }
+
+    fn log_text(&self, core: &str) -> Result<(String, usize), String> {
+        AstraEmuManagerController::log_text(self, core)
+    }
+
+    fn engine_action(&mut self, control: u32) -> Result<(), String> {
+        AstraEmuManagerController::engine_action(self, control)
     }
 }

@@ -127,14 +127,14 @@ fn core_loading_preserves_cached_library_bindings_until_an_explicit_scan() {
         AstraEmuManagerController::open_library(data.clone(), FrameMailbox::new(), vec![games])
             .unwrap();
     let initial = app.model().unwrap();
-    assert_eq!(initial.games.len(), 1);
-    assert_eq!(initial.games[0].title, "Saved title");
-    assert!(!initial.startup_busy);
-    assert!(!initial.cores_ready);
-    assert!(initial.core_refresh_enabled);
+    assert_eq!(initial.library.games.len(), 1);
+    assert_eq!(initial.library.games[0].title, "Saved title");
+    assert!(!initial.library.busy);
+    assert!(!initial.library.cores_ready);
+    assert!(initial.library.can_load_cores);
     assert!(app.poll_platform().unwrap().is_none());
     assert!(!data.join("cores").exists());
-    assert_eq!(app.search("Saved").unwrap().games.len(), 1);
+    assert_eq!(app.search("Saved").unwrap().library.games.len(), 1);
     app.search("").unwrap();
     assert_eq!(app.rescan().unwrap_err(), "ASTRA_EMU_CORES_NOT_READY");
     assert_eq!(
@@ -143,9 +143,9 @@ fn core_loading_preserves_cached_library_bindings_until_an_explicit_scan() {
     );
 
     let pending = app.refresh_cores().unwrap();
-    assert!(pending.startup_busy);
-    assert!(!pending.core_refresh_enabled);
-    assert_eq!(pending.games.len(), 1);
+    assert!(pending.library.busy);
+    assert!(!pending.library.can_load_cores);
+    assert_eq!(pending.library.games.len(), 1);
     assert!(app.refresh_cores().is_err());
     settle_background(&mut app);
     assert_eq!(
@@ -177,11 +177,11 @@ fn core_loading_preserves_cached_library_bindings_until_an_explicit_scan() {
         std::thread::yield_now();
     }
     let loaded = app.model().unwrap();
-    assert!(loaded.cores_ready);
-    assert!(!loaded.startup_busy);
-    assert!(!loaded.core_refresh_enabled);
-    assert_eq!(loaded.games.len(), 1);
-    assert!(!loaded.selected_launchable);
+    assert!(loaded.library.cores_ready);
+    assert!(!loaded.library.busy);
+    assert!(!loaded.library.can_load_cores);
+    assert_eq!(loaded.library.games.len(), 1);
+    assert!(!loaded.selection.launchable);
     assert_eq!(
         app.game(&id).unwrap().family_id.as_deref(),
         Some("saved-family")
@@ -202,8 +202,8 @@ fn core_loading_preserves_cached_library_bindings_until_an_explicit_scan() {
     app.rescan().unwrap();
     settle_background(&mut app);
     let scanned = app.model().unwrap();
-    assert_eq!(scanned.games.len(), 2);
-    assert!(scanned.selected_launchable);
+    assert_eq!(scanned.library.games.len(), 2);
+    assert!(scanned.selection.launchable);
     assert_eq!(app.game(&id).unwrap().family_id.as_deref(), Some("fixture"));
     assert_eq!(
         app.game(&id).unwrap().content_fingerprint.as_deref(),
@@ -235,7 +235,7 @@ fn imported_game_selection_loads_its_input_mapping() {
         .unwrap();
     app.input_mapping.deadzone = GamepadDeadzone::High;
     let model = import(&mut app, &path);
-    assert_eq!(model.selected_case_id, Some(path_id(&path)));
+    assert_eq!(model.library.selected_id, path_id(&path));
     assert_eq!(app.input_mapping.deadzone, default_vn_preset().deadzone);
 }
 
@@ -251,8 +251,8 @@ fn unsupported_import_preserves_the_existing_game_and_selection() {
     let unsupported = root.path().join("unsupported");
     std::fs::create_dir(&unsupported).unwrap();
     let model = import(&mut app, &unsupported);
-    assert_eq!(model.games.len(), 1);
-    assert_eq!(model.selected_case_id, Some(path_id(&path)));
+    assert_eq!(model.library.games.len(), 1);
+    assert_eq!(model.library.selected_id, path_id(&path));
 }
 
 #[test]
@@ -388,9 +388,9 @@ fn manual_full_scan_preserves_unavailable_game_metadata() {
     app.rescan().unwrap();
     settle_background(&mut app);
     let model = app.model().unwrap();
-    assert_eq!(model.games.len(), 1);
-    assert_eq!(model.games[0].title, "Saved title");
-    assert!(!model.games[0].diagnostic.is_empty());
+    assert_eq!(model.library.games.len(), 1);
+    assert_eq!(model.library.games[0].title, "Saved title");
+    assert!(!model.library.games[0].problem.is_empty());
     assert!(!app.candidates.contains_key(&id));
 }
 
@@ -437,8 +437,8 @@ fn selected_probe_is_cleared_on_no_match() {
     assert_eq!(record.content_fingerprint.as_deref(), Some("fingerprint"));
     assert_eq!(record.added_at_unix_ms, 7);
     let model = app.model().unwrap();
-    assert!(model.family_config_fields.is_empty());
-    assert!(!model.selected_launchable);
+    assert!(model.selection.family_fields.is_empty());
+    assert!(!model.selection.launchable);
     assert_eq!(
         app.library
             .game_settings(&id)
@@ -497,7 +497,7 @@ fn selected_emulator_survives_additional_same_engine_matches_and_reopening() {
     scan_once(&mut app, &game_path);
     assert_eq!(app.candidates[&id].report.plugin_id, "test-b");
     app.selected_case_id = Some(id);
-    assert!(app.model().unwrap().selected_launchable);
+    assert!(app.model().unwrap().selection.launchable);
 }
 
 #[test]
@@ -559,7 +559,7 @@ fn missing_saved_emulator_requires_an_explicit_replacement() {
 
     assert!(!app.candidates.contains_key(&id));
     assert_eq!(app.probe_choices[&id][0].report.plugin_id, "test-b");
-    assert!(!app.model().unwrap().selected_launchable);
+    assert!(!app.model().unwrap().selection.launchable);
     assert_eq!(
         app.library
             .game_settings(&id)
@@ -617,14 +617,14 @@ fn import_returns_while_owner_is_busy_and_publishes_only_after_native_work_finis
         .unwrap();
     receiver.recv_timeout(Duration::from_secs(5)).unwrap();
     let pending = app.add_game_directory(&path).unwrap();
-    assert!(pending.games.is_empty());
+    assert!(pending.library.games.is_empty());
     assert!(app.startup_busy());
     assert!(app.poll_platform().unwrap().is_none());
     release.0.take().unwrap().send(()).unwrap();
     settle_background(&mut app);
     let model = app.model().unwrap();
-    assert_eq!(model.games.len(), 1);
-    assert_eq!(model.selected_case_id, Some(path_id(&path)));
+    assert_eq!(model.library.games.len(), 1);
+    assert_eq!(model.library.selected_id, path_id(&path));
     assert!(app.candidates.contains_key(&path_id(&path)));
 }
 
@@ -638,9 +638,9 @@ fn manual_core_failure_requires_restart_and_shutdown_still_joins_the_owner() {
     )
     .unwrap();
     let initial = app.model().unwrap();
-    assert!(!initial.startup_busy);
-    assert!(!initial.cores_ready);
-    assert!(initial.core_refresh_enabled);
+    assert!(!initial.library.busy);
+    assert!(!initial.library.cores_ready);
+    assert!(initial.library.can_load_cores);
     assert_eq!(
         app.add_game_directory(root.path()).unwrap_err(),
         "ASTRA_EMU_CORES_NOT_READY"
@@ -651,9 +651,9 @@ fn manual_core_failure_requires_restart_and_shutdown_still_joins_the_owner() {
     assert!(app.poll_platform().unwrap().is_none());
     assert!(app.core_refresh_enabled());
     let pending = app.refresh_cores().unwrap();
-    assert!(pending.startup_busy);
-    assert!(!pending.core_refresh_enabled);
-    assert!(!pending.cores_ready);
+    assert!(pending.library.busy);
+    assert!(!pending.library.can_load_cores);
+    assert!(!pending.library.cores_ready);
     settle_background(&mut app);
     assert!(!app.startup_busy());
     assert!(

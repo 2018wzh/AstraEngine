@@ -12,6 +12,7 @@ impl AstraEmuManagerController {
             .ok_or("ASTRA_EMU_HOST_WAKE_REQUIRED")?;
         self.connection_test = Some(connection_test::ConnectionTest::start(profile, wake)?);
         self.diagnostic = "正在测试翻译服务连接…".into();
+        self.diagnostic_severity = "info";
         self.model()
     }
 
@@ -21,10 +22,16 @@ impl AstraEmuManagerController {
             return false;
         };
         self.connection_test.take();
-        self.diagnostic = match result {
-            Ok(ms) => format!("连接成功（{ms} ms）"),
-            Err(error) => format!("连接失败：{error}"),
-        };
+        match result {
+            Ok(ms) => {
+                self.diagnostic = format!("连接成功（{ms} ms）");
+                self.diagnostic_severity = "success";
+            }
+            Err(error) => {
+                self.diagnostic = format!("连接失败：{error}");
+                self.diagnostic_severity = "error";
+            }
+        }
         true
     }
     pub(super) fn profile(&self) -> Result<Option<TranslationProfile>, String> {

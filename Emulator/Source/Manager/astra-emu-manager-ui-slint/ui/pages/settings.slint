@@ -1,235 +1,175 @@
-// Settings center - M3 Styled Category Drawer (left) + Sub-page (right).
-
-import { ScrollView, ComboBox } from "std-widgets.slint";
+import { ScrollView } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
-import { Icons } from "../components/icons.slint";
-import { SettingsCategoryItem } from "../components/settings-card.slint";
-import { MetadataSettingsPage } from "../settings/metadata.slint";
-import { TranslationSettingsPage } from "../settings/translation.slint";
-import { FilterSettingsPage } from "../settings/filters.slint";
-import { CompatibilitySettingsPage } from "../settings/compatibility.slint";
-import { GamepadBinding, InputSettingsPage } from "../settings/input.slint";
+import { App } from "../globals.slint";
+import { Icon, Icons } from "../components/icons.slint";
+import { IconBtn } from "../components/controls.slint";
 import { AppearanceSettingsPage } from "../settings/appearance.slint";
-import { ConfigField } from "../components/generic-config.slint";
+import { InputSettingsPage } from "../settings/input.slint";
+import { FilterSettingsPage } from "../settings/filters.slint";
+import { TranslationSettingsPage } from "../settings/translation.slint";
+import { MetadataSettingsPage } from "../settings/metadata.slint";
+import { CompatibilitySettingsPage } from "../settings/compatibility.slint";
 
 struct SettingsDestination {
     id: string,
     title: string,
-    description: string,
-    icon: string,
+    glyph: string,
+}
+
+component CategoryRow inherits Rectangle {
+    in property <string> glyph;
+    in property <string> title;
+    in property <bool> active;
+    callback clicked();
+
+    height: 52px;
+    border-radius: Theme.r-md;
+    background: active ? Theme.primary-container : (area.has-hover ? Theme.surface-high : transparent);
+    accessible-role: button;
+    accessible-label: title;
+    accessible-action-default => { root.clicked(); }
+    animate background { duration: Theme.motion-fast; }
+
+    HorizontalLayout {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 12px;
+        Icon {
+            glyph: root.glyph;
+            font-size: 16px;
+            width: 24px;
+            color: root.active ? Theme.on-primary-container : Theme.on-variant;
+        }
+        Text {
+            text: root.title;
+            color: root.active ? Theme.on-primary-container : Theme.on-surface;
+            font-size: Theme.body;
+            font-weight: root.active ? 650 : 500;
+            vertical-alignment: center;
+        }
+    }
+
+    row-focus := FocusScope {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        key-pressed(event) => {
+            if event.text == Key.Return || event.text == " " {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+        area := TouchArea {
+            mouse-cursor: pointer;
+            clicked => {
+                row-focus.focus();
+                root.clicked();
+            }
+        }
+    }
 }
 
 export component SettingsPage inherits Rectangle {
-    // Navigation
-    in-out property <string> category: "appearance";
-    in property <bool> desktop-mode: true;
-    in property <bool> has-selected-case;
-
-    // Translation
-    in-out property <string> endpoint-kind;
-    in-out property <string> endpoint;
-    in-out property <string> protocol;
-    in-out property <string> model;
-    in-out property <string> target-language;
-    in-out property <int> timeout-ms;
-    in-out property <string> secret-input;
-    in property <bool> consent-present;
-    callback save-translation-profile(string, string, string, string, string, int, string);
-    callback grant-translation-consent();
-    callback test-translation-connection();
-
-    // Metadata
-    in-out property <bool> vndb-consent;
-    in-out property <bool> bangumi-consent;
-    in-out property <bool> sensitive-covers;
-    in-out property <string> metadata-provider;
-    in-out property <string> bangumi-token-input;
-    callback set-metadata-consent(string, bool, string);
-    callback set-sensitive-cover-policy(string, bool);
-
-    // Filters
-    in-out property <string> filter-preset;
-    in property <[ConfigField]> filter-config-fields;
-    callback set-filter-preset(string);
-    callback filter-config-changed(string, string);
-    callback load-filter-source();
-    callback save-filter-config();
-    callback reset-filter-config();
-
-    // Compatibility
-    in property <string> compatibility-source-url;
-    in property <string> compatibility-sync-summary;
-    callback refresh-compatibility();
-
-    // Patches
-
-    // Input
-    in-out property <bool> gamepad-enabled;
-    in-out property <string> gamepad-deadzone;
-    in property <[GamepadBinding]> gamepad-bindings;
-    callback save-input-config(bool, string);
-    callback set-gamepad-binding(string, string);
-    callback reset-gamepad-mapping();
-    callback save-per-game-input-mapping(bool, string);
-    callback clear-per-game-input-mapping();
-
-    // Appearance
-    in property <bool> dark-mode;
-    in-out property <string> theme-mode: "dark";
-    in-out property <string> accent: "blue";
-    in-out property <int> grid-columns;
-    in-out property <string> density: "comfortable";
-    in-out property <string> view-mode: "grid";
-    callback toggle-theme();
-    callback set-grid-columns(int);
-    callback set-theme-mode(string);
-    callback set-accent(string);
-    callback set-density(string);
-    callback set-view-mode(string);
+    in property <bool> compact: false;
+    private property <bool> show-detail: false;
+    property <bool> two-pane: root.width >= 760px;
     property <[SettingsDestination]> destinations: [
-        { id: "appearance", title: "界面外观", description: "主题、布局与游戏库", icon: Icons.palette },
-        { id: "filters", title: "画面滤镜", description: "缩放、锐化与外部效果", icon: Icons.funnel },
-        { id: "input", title: "输入控制", description: "手柄键位与游戏配置", icon: Icons.keyboard },
-        { id: "translation", title: "文本翻译", description: "服务、模型与授权", icon: Icons.language },
-        { id: "metadata", title: "作品资料", description: "VNDB 与 Bangumi", icon: Icons.database },
-        { id: "compatibility", title: "兼容性", description: "社区评级与版本", icon: Icons.clipboard-check },
+        { id: "appearance", title: "外观", glyph: Icons.palette },
+        { id: "input", title: "输入与手柄", glyph: Icons.keyboard },
+        { id: "filters", title: "画面滤镜", glyph: Icons.wand },
+        { id: "translation", title: "实时翻译", glyph: Icons.language },
+        { id: "metadata", title: "作品资料与账号", glyph: Icons.database },
+        { id: "compatibility", title: "兼容性数据", glyph: Icons.shield },
     ];
 
     background: Theme.surface;
 
-    if root.desktop-mode : Rectangle {
+    function open-category(id: string) {
+        App.settings-category = id;
+        root.show-detail = true;
+    }
+
+    if root.two-pane || !root.show-detail : Rectangle {
         x: 0px;
         y: 0px;
-        width: 224px;
+        width: root.two-pane ? 280px : parent.width;
         height: parent.height;
-        background: Theme.surface-container-low;
+        background: Theme.surface-low;
 
         VerticalLayout {
-            padding: 16px;
-            spacing: 16px;
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: parent.height;
+            padding: 20px;
+            spacing: 12px;
             Text {
                 text: "设置";
                 color: Theme.on-surface;
-                font-size: Theme.font-headline-md;
-                font-weight: 600;
+                font-size: Theme.headline;
+                font-weight: 700;
             }
             ScrollView {
+                mouse-drag-pan-enabled: true;
                 VerticalLayout {
                     spacing: 4px;
                     alignment: start;
-                    for destination in root.destinations : SettingsCategoryItem {
-                        label: destination.title;
-                        icon: destination.icon;
-                        description: destination.description;
-                        active: root.category == destination.id;
-                        clicked => { root.category = destination.id; }
+                    for destination in root.destinations : CategoryRow {
+                        glyph: destination.glyph;
+                        title: destination.title;
+                        active: App.settings-category == destination.id;
+                        clicked => { root.open-category(destination.id); }
                     }
                 }
             }
         }
     }
-    if !root.desktop-mode : Rectangle {
-        x: 0px;
+
+    if root.two-pane || root.show-detail : Rectangle {
+        x: root.two-pane ? 280px : 0px;
         y: 0px;
-        height: 72px;
-        width: parent.width;
-        background: Theme.surface-container-low;
-        HorizontalLayout {
-            padding: 16px;
-            spacing: 16px;
-            Text {
-                text: "设置";
-                color: Theme.on-surface;
-                font-size: Theme.font-title-lg;
-                font-weight: 600;
-                vertical-alignment: center;
+        width: parent.width - self.x;
+        height: parent.height;
+        clip: true;
+
+        if !root.two-pane : IconBtn {
+            x: 12px;
+            y: 12px;
+            z: 2;
+            glyph: Icons.arrow-left;
+            label: "返回";
+            clicked => { root.show-detail = false; }
+        }
+
+        Rectangle {
+            x: 0px;
+            y: !root.two-pane ? 52px : 0px;
+            width: parent.width;
+            height: parent.height - self.y;
+            if App.settings-category == "appearance" : AppearanceSettingsPage {
+                x: 0px; y: 0px; width: 100%; height: 100%;
             }
-            ComboBox {
-                horizontal-stretch: 1;
-                model: ["界面外观", "画面滤镜", "输入控制", "文本翻译", "作品资料", "兼容性"];
-                current-index: root.category == "filters" ? 1 : root.category == "input" ? 2 : root.category == "translation" ? 3 : root.category == "metadata" ? 4 : root.category == "compatibility" ? 5 : 0;
-                selected(value) => { root.category = root.destinations[self.current-index].id; }
+            if App.settings-category == "input" : InputSettingsPage {
+                x: 0px; y: 0px; width: 100%; height: 100%;
+            }
+            if App.settings-category == "filters" : FilterSettingsPage {
+                x: 0px; y: 0px; width: 100%; height: 100%;
+            }
+            if App.settings-category == "translation" : TranslationSettingsPage {
+                x: 0px; y: 0px; width: 100%; height: 100%;
+            }
+            if App.settings-category == "metadata" : MetadataSettingsPage {
+                x: 0px; y: 0px; width: 100%; height: 100%;
+            }
+            if App.settings-category == "compatibility" : CompatibilitySettingsPage {
+                x: 0px; y: 0px; width: 100%; height: 100%;
             }
         }
     }
-        Rectangle {
-            x: root.desktop-mode ? 224px : 0px;
-            y: root.desktop-mode ? 0px : 72px;
-            width: parent.width - self.x;
-            height: parent.height - self.y;
-            clip: true;
-
-
-            if root.category == "translation" : TranslationSettingsPage {
-                endpoint-kind <=> root.endpoint-kind;
-                endpoint <=> root.endpoint;
-                protocol <=> root.protocol;
-                model <=> root.model;
-                target-language <=> root.target-language;
-                timeout-ms <=> root.timeout-ms;
-                secret-input <=> root.secret-input;
-                consent-present: root.consent-present;
-                save(kind, endpoint, protocol, model, language, timeout, secret) => {
-                    root.save-translation-profile(kind, endpoint, protocol, model, language, timeout, secret);
-                }
-                test-connection => { root.test-translation-connection(); }
-                grant-consent => { root.grant-translation-consent(); }
-            }
-
-            if root.category == "metadata" : MetadataSettingsPage {
-                vndb-consent <=> root.vndb-consent;
-                bangumi-consent <=> root.bangumi-consent;
-                sensitive-covers <=> root.sensitive-covers;
-                metadata-provider <=> root.metadata-provider;
-                bangumi-token-input <=> root.bangumi-token-input;
-                set-metadata-consent(provider, enabled, secret) => { root.set-metadata-consent(provider, enabled, secret); }
-                set-sensitive-cover-policy(provider, enabled) => { root.set-sensitive-cover-policy(provider, enabled); }
-            }
-
-            if root.category == "filters" : FilterSettingsPage {
-                filter-preset <=> root.filter-preset;
-                filter-config-fields: root.filter-config-fields;
-                set-filter-preset(preset) => { root.set-filter-preset(preset); }
-                filter-config-changed(key, value) => { root.filter-config-changed(key, value); }
-                load-filter-source => { root.load-filter-source(); }
-                save-filter-config => { root.save-filter-config(); }
-                reset-filter-config => { root.reset-filter-config(); }
-            }
-
-            if root.category == "compatibility" : CompatibilitySettingsPage {
-                source-url: root.compatibility-source-url;
-                sync-summary: root.compatibility-sync-summary;
-                network-consent: root.vndb-consent;
-                refresh-compatibility => { root.refresh-compatibility(); }
-            }
-
-            if root.category == "input" : InputSettingsPage {
-                gamepad-enabled <=> root.gamepad-enabled;
-                gamepad-deadzone <=> root.gamepad-deadzone;
-                gamepad-bindings: root.gamepad-bindings;
-                save-input-config(gamepad, deadzone) => {
-                    root.save-input-config(gamepad, deadzone);
-                }
-                set-gamepad-binding(button, key) => { root.set-gamepad-binding(button, key); }
-                reset-gamepad-mapping => { root.reset-gamepad-mapping(); }
-                has-selected-case: root.has-selected-case;
-                save-per-game-input-mapping(gamepad, deadzone) => { root.save-per-game-input-mapping(gamepad, deadzone); }
-                clear-per-game-input-mapping => { root.clear-per-game-input-mapping(); }
-            }
-
-            if root.category == "appearance" : AppearanceSettingsPage {
-                dark-mode: root.dark-mode;
-                theme-mode <=> root.theme-mode;
-                accent <=> root.accent;
-                grid-columns <=> root.grid-columns;
-                density <=> root.density;
-                view-mode <=> root.view-mode;
-                toggle-theme => { root.toggle-theme(); }
-                set-grid-columns(cols) => { root.set-grid-columns(cols); }
-                set-theme-mode(mode) => { root.set-theme-mode(mode); }
-                set-accent(ac) => { root.set-accent(ac); }
-                set-density(d) => { root.set-density(d); }
-                set-view-mode(m) => { root.set-view-mode(m); }
-            }
-        }
 }

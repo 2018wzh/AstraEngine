@@ -52,8 +52,8 @@ impl AstraEmuManagerController {
 
     pub(super) fn append_typed_family_fields(
         &self,
-        common: &mut Vec<GenericConfigFieldViewModel>,
-        specific: &mut Vec<GenericConfigFieldViewModel>,
+        common: &mut Vec<ConfigFieldViewModel>,
+        specific: &mut Vec<ConfigFieldViewModel>,
     ) -> Result<(), String> {
         let (plugin, schema) = self.config_schema()?;
         let entries = self
@@ -66,7 +66,7 @@ impl AstraEmuManagerController {
             .and_then(|id| self.candidates.get(id))
             .ok_or("ASTRA_EMU_FAMILY_PROBE_REQUIRED")?
             .descriptor;
-        specific.push(GenericConfigFieldViewModel {
+        specific.push(ConfigFieldViewModel {
             key: "manager.config_scope".into(),
             label: "配置范围".into(),
             description: "core 为该模拟器默认值，game 为当前游戏覆盖；不同模拟器的配置相互独立，下次启动生效。".into(),
@@ -99,8 +99,8 @@ fn append_config_fields(
     schema: &[ConfigField],
     entries: &[ConfigEntry],
     drafts: &BTreeMap<String, String>,
-    common: &mut Vec<GenericConfigFieldViewModel>,
-    specific: &mut Vec<GenericConfigFieldViewModel>,
+    common: &mut Vec<ConfigFieldViewModel>,
+    specific: &mut Vec<ConfigFieldViewModel>,
 ) {
     let render_fields = native_render_fields(descriptor, schema);
     for (field, entry) in schema.iter().zip(entries) {
@@ -124,7 +124,7 @@ fn append_config_fields(
                 String::new(),
             ),
         };
-        let view = GenericConfigFieldViewModel {
+        let view = ConfigFieldViewModel {
             value: drafts
                 .get(&key)
                 .cloned()

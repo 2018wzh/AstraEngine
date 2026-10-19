@@ -26,12 +26,16 @@ pub(super) fn run(
         }
         let cores = data_dir.join("cores");
         fs::create_dir_all(&cores).map_err(|_| "ASTRA_EMU_CORES_DIRECTORY_CREATE")?;
+        let pending_failures = super::cores::apply_pending(&cores);
         #[cfg(not(target_os = "android"))]
         let directories = core_directories(&cores)?;
         #[cfg(target_os = "android")]
         let directories = Vec::new();
-        let errors = initialize(&mut registry, &directories)?;
-        let metadata = collect_metadata(&registry)?;
+        let mut errors = initialize(&mut registry, &directories)?;
+        for (file, error) in pending_failures {
+            errors.insert(file, error);
+        }
+        let metadata = collect_metadata(&registry, directories.get(1).map(PathBuf::as_path))?;
         Ok((directories, metadata, errors))
     })();
     let directories = match initialized {
@@ -143,6 +147,22 @@ pub(super) fn run(
                     }
                 }
             }
+            Ok(Command::Action { epoch, control }) => {
+                if let Some(session) = active.as_mut().filter(|session| session.epoch() == epoch) {
+                    if let Err(error) = session.control(control) {
+                        if session.poisoned() {
+                            finish(&mut active, Some(error), &shared);
+                        } else {
+                            let mut update = shared.lock();
+                            if update.epoch == epoch {
+                                update.action_error = Some(error);
+                                update.dirty = true;
+                            }
+                        }
+                        notify(&wake);
+                    }
+                }
+            }
             Ok(Command::Close { epoch, events }) => {
                 if let Some(session) = active.as_mut().filter(|session| session.epoch() == epoch) {
                     let result = if pending.is_empty() {
@@ -237,24 +257,52 @@ fn initialize(
         .map_err(|error| error.to_string())?;
     let mut errors = BTreeMap::new();
     #[cfg(not(target_os = "android"))]
-    for failure in registry
-        .load_directories(directories)
-        .map_err(|error| error.to_string())?
-        .errors
     {
-        let file = failure
-            .path
-            .file_name()
-            .and_then(|value| value.to_str())
-            .unwrap_or("<unknown-core>")
-            .to_owned();
-        let diagnostic = format!(
-            "{}: {}",
-            failure.error.diagnostic_code(),
-            failure.error.human_message()
-        );
-        tracing::error!(event = "astra.emu.plugin.discovery_failed", core = %file, diagnostic = %diagnostic);
-        errors.insert(file, diagnostic);
+        let Some(user_dir) = directories.first() else {
+            return Ok(errors);
+        };
+        let user = astra_emu_manager_core::discover_family_libraries(user_dir)
+            .map_err(|error| error.to_string())?;
+        let user_names: BTreeSet<String> = user
+            .iter()
+            .filter_map(|path| path.file_name()?.to_str())
+            .map(str::to_ascii_lowercase)
+            .collect();
+        let mut paths = user;
+        if let Some(bundled_dir) = directories.get(1) {
+            for path in astra_emu_manager_core::discover_family_libraries(bundled_dir)
+                .map_err(|error| error.to_string())?
+            {
+                let file = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or_default();
+                if user_names.contains(&file.to_ascii_lowercase()) {
+                    tracing::info!(event = "astra.emu.manager.core_overridden", core = %file);
+                } else {
+                    paths.push(path);
+                }
+            }
+        }
+        for failure in registry
+            .load_libraries(paths)
+            .map_err(|error| error.to_string())?
+            .errors
+        {
+            let file = failure
+                .path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or("<unknown-core>")
+                .to_owned();
+            let diagnostic = format!(
+                "{}: {}",
+                failure.error.diagnostic_code(),
+                failure.error.human_message()
+            );
+            tracing::error!(event = "astra.emu.plugin.discovery_failed", core = %file, diagnostic = %diagnostic);
+            errors.insert(file, diagnostic);
+        }
     }
     #[cfg(target_os = "android")]
     let _ = directories;
