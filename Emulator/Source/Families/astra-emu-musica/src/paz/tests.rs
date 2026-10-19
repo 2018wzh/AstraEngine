@@ -445,8 +445,15 @@ fn movie_type_password_is_used_across_cipher_and_volume_boundaries() {
 #[test]
 fn explicit_crc_skip_option_decrypts_both_native_v2_entry_variants() {
     let entry = ArchiveEntryDescriptor {
-        archive_role: "scr".into(), entry_id: "fixture".into(), name: "fixture.sc".into(),
-        offset: 0, unpacked_size: 8, stored_size: 8, aligned_size: 8, packed: false, video_key: None,
+        archive_role: "scr".into(),
+        entry_id: "fixture".into(),
+        name: "fixture.sc".into(),
+        offset: 0,
+        unpacked_size: 8,
+        stored_size: 8,
+        aligned_size: 8,
+        packed: false,
+        video_key: None,
     };
     let material = b"fixture.sc 00000008 public-password";
     let plaintext = b"public!!";
@@ -459,15 +466,29 @@ fn explicit_crc_skip_option_decrypts_both_native_v2_entry_variants() {
         let mut encrypted = plaintext.to_vec();
         cipher.apply_keystream(&mut encrypted);
         let encrypted = blowfish_encrypt(FIXTURE_KEY, &encrypted);
-        let roles = REQUIRED_ARCHIVE_ROLES.into_iter().map(|role| (
-            role.into(),
-            PazRoleScheme {
-                index_key: FIXTURE_KEY.to_vec(), data_key: FIXTURE_KEY.to_vec(), rc4_skip_crc,
-                type_passwords: BTreeMap::from([("sc".into(), "public-password".into())]),
-                archive_xor: None, video_key: None,
-            },
-        )).collect();
-        let provider = MusicaPazDecryptProvider::new(Hash256::from_sha256(b"fixture"), roles).unwrap();
-        assert_eq!(provider.decrypt_entry_chunk(2, &entry, 0, &encrypted).unwrap(), plaintext);
+        let roles = REQUIRED_ARCHIVE_ROLES
+            .into_iter()
+            .map(|role| {
+                (
+                    role.into(),
+                    PazRoleScheme {
+                        index_key: FIXTURE_KEY.to_vec(),
+                        data_key: FIXTURE_KEY.to_vec(),
+                        rc4_skip_crc,
+                        type_passwords: BTreeMap::from([("sc".into(), "public-password".into())]),
+                        archive_xor: None,
+                        video_key: None,
+                    },
+                )
+            })
+            .collect();
+        let provider =
+            MusicaPazDecryptProvider::new(Hash256::from_sha256(b"fixture"), roles).unwrap();
+        assert_eq!(
+            provider
+                .decrypt_entry_chunk(2, &entry, 0, &encrypted)
+                .unwrap(),
+            plaintext
+        );
     }
 }

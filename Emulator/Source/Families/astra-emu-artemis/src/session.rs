@@ -76,6 +76,7 @@ impl SessionOwner {
     pub(crate) fn open(
         path: PathBuf,
         archive: PathBuf,
+        extra_archive: String,
         epoch: u64,
         window: WindowState,
         platform: Platform,
@@ -106,7 +107,8 @@ impl SessionOwner {
                 let _lease = lease;
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     platform.check(epoch)?;
-                    let mut runtime = Runtime::boot(path, archive, stop.clone(), platform, epoch)?;
+                    let mut runtime =
+                        Runtime::boot(path, archive, extra_archive, stop.clone(), platform, epoch)?;
                     {
                         let mut state = shared.lock();
                         state.info = surface(runtime.rt.stage_width(), runtime.rt.stage_height());
@@ -245,31 +247,48 @@ struct Runtime {
     events: HostEvents,
     window: media::WindowRequests,
 }
+
+/// Mount native resources without starting a VM, graphics backend or save IO.
+pub(crate) fn project_resources(
+    archive: &std::path::Path,
+    extra_archive: &str,
+    mut check: impl FnMut() -> NativeResult<()>,
+) -> NativeResult<(HostResources, Vec<u8>)> {
+    let resources = HostResources::new();
+    let mut mount_error = None;
+    for encoding in provider::ENTRY_ENCODINGS {
+        check()?;
+        match resources.mount_pfs_with_extra(archive, encoding.name(), extra_archive) {
+            Ok(()) => {
+                if let Ok(ini) = resources.read_file(PROJECT_INI) {
+                    return Ok((resources, ini));
+                }
+            }
+            Err(error) => mount_error = Some(error),
+        }
+    }
+    if !extra_archive.is_empty() {
+        if let Some(error) = mount_error {
+            return Err(error::engine(error));
+        }
+    }
+    Err(error::invalid(
+        "ASTRA_EMU_ARTEMIS_PROJECT_INI",
+        "PFS has no readable system.ini",
+    ))
+}
+
 impl Runtime {
     fn boot(
         path: PathBuf,
         archive: PathBuf,
+        extra_archive: String,
         stop: Arc<AtomicBool>,
         platform: Platform,
         epoch: u64,
     ) -> NativeResult<Self> {
-        let resources = HostResources::new();
-        let mut ini = None;
-        for encoding in provider::ENTRY_ENCODINGS {
-            platform.check(epoch)?;
-            if resources.mount_pfs(&archive, encoding.name()).is_ok() {
-                if let Ok(bytes) = resources.read_file(PROJECT_INI) {
-                    ini = Some(bytes);
-                    break;
-                }
-            }
-        }
-        let ini = ini.ok_or_else(|| {
-            error::invalid(
-                "ASTRA_EMU_ARTEMIS_PROJECT_INI",
-                "PFS has no readable system.ini",
-            )
-        })?;
+        let (resources, ini) =
+            project_resources(&archive, &extra_archive, || platform.check(epoch))?;
         let save_dir = path.join("savedata");
         std::fs::create_dir_all(&save_dir)
             .map_err(|e| error::invalid("ASTRA_EMU_ARTEMIS_SAVE_DIR", e.to_string()))?;

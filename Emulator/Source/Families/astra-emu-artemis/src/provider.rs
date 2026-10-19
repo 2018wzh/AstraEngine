@@ -7,8 +7,9 @@ use art3m1s_core::archive as pfs_upk;
 use astra_emu_abi::*;
 use encoding_rs::{Encoding, GB18030, SHIFT_JIS, UTF_8};
 use std::path::{Path, PathBuf};
-pub(crate) fn fields() -> [ConfigField; 1] {
-    [ConfigField {
+pub(crate) const FIELD_COUNT: usize = 2;
+pub(crate) fn fields() -> [ConfigField; FIELD_COUNT] {
+    let archive = ConfigField {
         id: Bytes::new(b"archive"),
         label: Bytes::new(b"Base PFS archive (empty selects the only archive)"),
         group: Bytes::new(b"Files"),
@@ -27,7 +28,48 @@ pub(crate) fn fields() -> [ConfigField; 1] {
         reserved: 0,
         choices: std::ptr::null(),
         choice_count: 0,
-    }]
+    };
+    [
+        archive,
+        ConfigField {
+            id: Bytes::new(b"extra_archive"),
+            label: Bytes::new(b"Explicit extra PFS patch (root-relative, empty disables)"),
+            max_bytes: 4096,
+            ..archive
+        },
+    ]
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct Configuration {
+    pub archive: String,
+    pub extra_archive: String,
+}
+
+/// Parse validated named entries; field order is not an ABI contract.
+///
+/// SAFETY: every nested entry span must be readable for this call.
+pub(crate) unsafe fn parse_configuration(entries: &[ConfigEntry]) -> NativeResult<Configuration> {
+    unsafe { validate_config(&fields(), entries) }.map_err(|e| {
+        error::invalid(
+            "ASTRA_EMU_ARTEMIS_CONFIG",
+            format!("configuration entry {}: {}", e.index, e.reason),
+        )
+    })?;
+    let mut config = Configuration::default();
+    for entry in entries {
+        let id = unsafe { entry.id.text(128) }
+            .map_err(|_| error::invalid("ASTRA_EMU_ARTEMIS_CONFIG", "invalid field ID"))?;
+        let (target, maximum) = match id {
+            "archive" => (&mut config.archive, 255),
+            "extra_archive" => (&mut config.extra_archive, 4096),
+            _ => unreachable!("validated configuration field"),
+        };
+        let value = unsafe { entry.value.text.text(maximum) }
+            .map_err(|_| error::invalid("ASTRA_EMU_ARTEMIS_CONFIG", "invalid field text"))?;
+        target.push_str(value);
+    }
+    Ok(config)
 }
 pub(crate) fn probe(root: &Path) -> NativeResult<Option<String>> {
     if !root.is_dir() {
@@ -147,7 +189,7 @@ mod tests {
             id: Bytes::new(b"unknown"),
             value: fields[0].default_value,
         };
-        assert!(unsafe { validate_config(&fields, &[entry]) }.is_err());
+        assert!(unsafe { parse_configuration(&[entry]) }.is_err());
         let entry = ConfigEntry {
             id: fields[0].id,
             value: ConfigValue {
@@ -155,6 +197,130 @@ mod tests {
                 ..fields[0].default_value
             },
         };
-        assert!(unsafe { validate_config(&fields, &[entry]) }.is_err());
+        assert!(unsafe { parse_configuration(&[entry]) }.is_err());
+    }
+
+    fn string_entry<'a>(id: &'a [u8], value: &'a [u8]) -> ConfigEntry {
+        ConfigEntry {
+            id: Bytes::new(id),
+            value: ConfigValue {
+                kind: VALUE_STRING,
+                reserved: 0,
+                integer: 0,
+                number: 0.0,
+                text: Bytes::new(value),
+            },
+        }
+    }
+
+    #[test]
+    fn named_configuration_is_order_independent_and_defaults_are_unchanged() {
+        assert_eq!(
+            unsafe { parse_configuration(&[]) }.unwrap(),
+            Configuration::default()
+        );
+        let archive = string_entry(b"archive", b"base.pfs");
+        let extra = string_entry(b"extra_archive", "patches/中文.bak".as_bytes());
+        let expected = Configuration {
+            archive: "base.pfs".into(),
+            extra_archive: "patches/中文.bak".into(),
+        };
+        assert_eq!(
+            unsafe { parse_configuration(&[extra, archive]) }.unwrap(),
+            expected
+        );
+        assert_eq!(
+            unsafe { parse_configuration(&[archive, extra]) }.unwrap(),
+            expected
+        );
+        assert_eq!(
+            unsafe { parse_configuration(&[extra]) }.unwrap(),
+            Configuration {
+                archive: String::new(),
+                extra_archive: expected.extra_archive
+            }
+        );
+        assert!(unsafe { parse_configuration(&[archive, archive]) }.is_err());
+        let oversized = vec![b'a'; 4097];
+        assert!(
+            unsafe { parse_configuration(&[string_entry(b"extra_archive", &oversized)]) }.is_err()
+        );
+        let schema = fields();
+        assert_eq!(schema.len(), FIELD_COUNT);
+        assert_eq!(unsafe { schema[0].id.text(128) }.unwrap(), "archive");
+        assert_eq!(unsafe { schema[1].id.text(128) }.unwrap(), "extra_archive");
+        assert!(unsafe { schema[1].default_value.text.text(4096) }
+            .unwrap()
+            .is_empty());
+    }
+
+    /// Public standalone PF6 with exactly one system.ini resource.
+    fn ini_pfs(ini: &[u8]) -> Vec<u8> {
+        let name = b"system.ini";
+        let entry_size = 4 + name.len() + 12;
+        let index_size = 4 + entry_size + 4 + 16 + 4;
+        let mut bytes = b"pf6".to_vec();
+        bytes.extend_from_slice(&(index_size as u32).to_le_bytes());
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.extend_from_slice(&(name.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(name);
+        bytes.extend_from_slice(&[0; 4]);
+        bytes.extend_from_slice(&((7 + index_size) as u32).to_le_bytes());
+        bytes.extend_from_slice(&(ini.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&2u32.to_le_bytes());
+        bytes.extend_from_slice(&[0; 16]);
+        bytes.extend_from_slice(&((11 + entry_size) as u32).to_le_bytes());
+        bytes.extend_from_slice(ini);
+        bytes
+    }
+
+    #[test]
+    fn parsed_configuration_reaches_native_project_reader_without_source_writes() {
+        let root = tempfile::tempdir().unwrap();
+        let base_ini = b"[WINDOWS]\nWIDTH=800\nHEIGHT=600\nBOOT=boot.iet\nCHARSET=UTF-8\n";
+        let active_ini = b"[WINDOWS]\nWIDTH=960\nHEIGHT=540\nBOOT=boot.iet\nCHARSET=UTF-8\n";
+        let extra_ini = b"[WINDOWS]\nWIDTH=1280\nHEIGHT=720\nBOOT=boot.iet\nCHARSET=UTF-8\n";
+        let base = ini_pfs(base_ini);
+        let active = ini_pfs(active_ini);
+        let extra = ini_pfs(extra_ini);
+        std::fs::write(root.path().join("base.pfs"), &base).unwrap();
+        std::fs::write(root.path().join("base.pfs.999"), &active).unwrap();
+        std::fs::write(root.path().join("selection.bak"), &extra).unwrap();
+        std::fs::create_dir(root.path().join("savedata")).unwrap();
+        std::fs::write(root.path().join("savedata/system.dat"), b"save sentinel").unwrap();
+        let config = unsafe {
+            parse_configuration(&[
+                string_entry(b"extra_archive", b"selection.bak"),
+                string_entry(b"archive", b"base.pfs"),
+            ])
+        }
+        .unwrap();
+        let archive = find_base_archive(root.path(), &config.archive).unwrap();
+        let (resources, ini) =
+            session::project_resources(&archive, &config.extra_archive, || Ok(())).unwrap();
+        assert_eq!(ini, extra_ini);
+        let project = art3m1s_core::ProjectConfig::from_system_ini_bytes(&ini, "WINDOWS").unwrap();
+        assert_eq!((project.stage_width, project.stage_height), (1280, 720));
+        assert_eq!(project.charset, "UTF-8");
+        resources.clear();
+        let (resources, ini) = session::project_resources(&archive, "", || Ok(())).unwrap();
+        assert_eq!(ini, active_ini);
+        resources.clear();
+        for (name, expected) in [
+            ("base.pfs", base),
+            ("base.pfs.999", active),
+            ("selection.bak", extra),
+        ] {
+            assert_eq!(std::fs::read(root.path().join(name)).unwrap(), expected);
+        }
+        assert_eq!(
+            std::fs::read(root.path().join("savedata/system.dat")).unwrap(),
+            b"save sentinel"
+        );
+        assert!(session::project_resources(&archive, "../selection.bak", || Ok(())).is_err());
+        assert!(session::project_resources(&archive, "", || {
+            Err(error::invalid("TEST_CANCELLED", "cancelled"))
+        })
+        .is_err());
     }
 }

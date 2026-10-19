@@ -11,9 +11,10 @@ const FONT_ASSET_ID: &str = "asset:/font/emu/noto-sans-jp";
 
 pub struct MusicaTextRenderer {
     scene: TextScene,
-    encoding: crate::ScriptEncoding,
+    pub(crate) encoding: crate::ScriptEncoding,
     pub(crate) shadow: bool,
     raster_scale: f32,
+    custom_font: Option<std::sync::Arc<PackagedFont>>,
 }
 
 #[derive(Clone, Copy)]
@@ -29,40 +30,51 @@ struct Region {
 
 impl MusicaTextRenderer {
     pub fn new(encoding: crate::ScriptEncoding) -> Result<Self, String> {
-        let fonts = [
-            (
-                FONT_FAMILY,
-                FONT_ASSET_ID,
-                include_bytes!(
-                    "../../../../../Examples/NativeVN/Assets/Fonts/NotoSansJP-Variable.ttf"
-                )
-                .as_slice(),
-            ),
-            (
-                "Noto Sans SC",
-                "asset:/font/emu/noto-sans-sc",
-                include_bytes!(
-                    "../../../../../Examples/NativeVN/Assets/Fonts/NotoSansSC-Variable.ttf"
-                )
-                .as_slice(),
-            ),
-        ]
-        .into_iter()
-        .map(|(family, asset_id, bytes)| {
-            Ok(PackagedFont {
-                asset_id: asset_id.into(),
-                family: family.into(),
-                face_index: 0,
-                hash: Hash256::from_sha256(bytes),
-                license_id: "OFL-1.1".into(),
-                subset: None,
-                coverage: astra_text::font_unicode_coverage(bytes, 0).map_err(text_error)?,
-                targets: vec!["astra-emu-musica".into()],
-                profiles: vec!["musica.reference".into()],
-                bytes: bytes.to_vec(),
+        Self::with_font(encoding, None)
+    }
+
+    pub(crate) fn with_font(
+        encoding: crate::ScriptEncoding,
+        custom_font: Option<std::sync::Arc<PackagedFont>>,
+    ) -> Result<Self, String> {
+        let fonts = if let Some(font) = &custom_font {
+            vec![(**font).clone()]
+        } else {
+            [
+                (
+                    FONT_FAMILY,
+                    FONT_ASSET_ID,
+                    include_bytes!(
+                        "../../../../../Examples/NativeVN/Assets/Fonts/NotoSansJP-Variable.ttf"
+                    )
+                    .as_slice(),
+                ),
+                (
+                    "Noto Sans SC",
+                    "asset:/font/emu/noto-sans-sc",
+                    include_bytes!(
+                        "../../../../../Examples/NativeVN/Assets/Fonts/NotoSansSC-Variable.ttf"
+                    )
+                    .as_slice(),
+                ),
+            ]
+            .into_iter()
+            .map(|(family, asset_id, bytes)| {
+                Ok(PackagedFont {
+                    asset_id: asset_id.into(),
+                    family: family.into(),
+                    face_index: 0,
+                    hash: Hash256::from_sha256(bytes),
+                    license_id: "OFL-1.1".into(),
+                    subset: None,
+                    coverage: astra_text::font_unicode_coverage(bytes, 0).map_err(text_error)?,
+                    targets: vec!["astra-emu-musica".into()],
+                    profiles: vec!["musica.reference".into()],
+                    bytes: bytes.to_vec(),
+                })
             })
-        })
-        .collect::<Result<Vec<_>, String>>()?;
+            .collect::<Result<Vec<_>, String>>()?
+        };
         let provider = CosmicTextLayoutProvider::new(
             FontBindingContext {
                 target: "astra-emu-musica".into(),
@@ -78,6 +90,7 @@ impl MusicaTextRenderer {
             encoding,
             shadow: true,
             raster_scale: 1.0,
+            custom_font,
         })
     }
 
@@ -100,6 +113,27 @@ impl MusicaTextRenderer {
         };
         for region in regions.iter_mut() {
             region.request.font_families = families.into_iter().map(str::to_owned).collect();
+            if let Some(font) = &self.custom_font {
+                region.request.font_families = vec![font.family.clone()];
+                for run in &region.request.runs {
+                    if run
+                        .text
+                        .chars()
+                        .filter(|c| {
+                            !c.is_whitespace()
+                                && !matches!(*c, '\u{200c}' | '\u{200d}' | '\u{fe0e}' | '\u{fe0f}')
+                        })
+                        .any(|c| {
+                            !font
+                                .coverage
+                                .iter()
+                                .any(|range| (range.start..=range.end).contains(&(c as u32)))
+                        })
+                    {
+                        return Err("ASTRA_EMU_MUSICA_FONT_MISSING_GLYPH".into());
+                    }
+                }
+            }
             for run in &mut region.request.runs {
                 run.language = language.into();
                 run.script = Some(script.into());
@@ -108,6 +142,55 @@ impl MusicaTextRenderer {
         self.scene
             .frame_scaled(regions, self.raster_scale)
             .map_err(text_error)
+    }
+
+    pub(crate) fn overlay_commands(
+        &mut self,
+        text: Option<&str>,
+        width: u32,
+    ) -> Result<Vec<SceneCommand>, String> {
+        let margin = 24_u32.min(width / 4);
+        let mut regions = text
+            .map(|text| {
+                vec![layout_request(
+                    "musica.translation.overlay",
+                    text,
+                    Region {
+                        x: margin as i32,
+                        y: 24,
+                        width: width - margin * 2,
+                        height: 160,
+                        font_size: 26.0,
+                        line_height: 36.0,
+                        max_lines: 4,
+                    },
+                )]
+            })
+            .unwrap_or_default();
+        for region in &mut regions {
+            region.outline = Some(TextOutline {
+                radius: 2,
+                rgba: [0, 0, 0, 224],
+            });
+        }
+        let mut commands = self.frame(&mut regions)?;
+        // TextScene owners have independent residency. Namespace their glyph IDs
+        // so releasing an overlay can never release a base-message glyph.
+        for command in &mut commands {
+            match command {
+                SceneCommand::UploadGlyph { resource_id, .. }
+                | SceneCommand::ReleaseResource { resource_id } => {
+                    resource_id.insert_str(0, "musica.overlay/");
+                }
+                SceneCommand::GlyphRun { glyphs, .. } => {
+                    for glyph in std::sync::Arc::make_mut(glyphs) {
+                        glyph.resource_id.insert_str(0, "musica.overlay/");
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(commands)
     }
 
     pub(crate) fn save_cards(

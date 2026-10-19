@@ -9,9 +9,31 @@ fn snapshot(game: &[u8], message: &str) -> Snapshot {
         game: Hash256::from_sha256(game),
         vm: vec![],
         message: Some((message.into(), None)),
+        translation_visible: true,
+        translation_overlay: None,
         wait_ns: 0,
         sounds: vec![],
     }
+}
+
+#[test]
+fn translation_visibility_and_cached_overlay_round_trip_with_identity() {
+    let root = tempfile::tempdir().unwrap();
+    let storage = Storage::new(root.path()).unwrap();
+    let mut state = snapshot(b"table-and-mode-identity", "Original");
+    state.translation_visible = false;
+    state.translation_overlay = Some("Overlay".into());
+    storage.write(20, &state).unwrap();
+    let restored = storage.read(20).unwrap();
+    assert!(!restored.translation_visible);
+    assert_eq!(restored.translation_overlay.as_deref(), Some("Overlay"));
+    assert_eq!(restored.message.unwrap().0, "Original");
+    let mut foreign = snapshot(b"different-table-identity", "Original");
+    foreign.translation_visible = false;
+    assert_eq!(
+        storage.write(20, &foreign).unwrap_err().code(),
+        "ASTRA_EMU_MUSICA_SAVE_GAME"
+    );
 }
 
 #[test]
@@ -90,6 +112,8 @@ fn arbitrary_size_save_cards_round_trip_through_storage() {
             game,
             vm: vec![slot as u8],
             message: None,
+            translation_visible: true,
+            translation_overlay: None,
             wait_ns: 0,
             sounds: vec![],
         };

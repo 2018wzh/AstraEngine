@@ -35,6 +35,16 @@ pub(crate) fn install(lua: &Lua, ctx: &Table, cancelled: Arc<AtomicBool>) -> mlu
     )?;
     let flag = cancelled.clone();
     codec.set(
+        "inflate_prefix",
+        lua.create_function(move |lua, (bytes, expected): (Buffer, Value)| {
+            let expected = expected_size(expected)?;
+            let (result, consumed) =
+                buffer::input(lua, bytes, |bytes| inflate_prefix(bytes, expected, &flag))?;
+            Ok((buffer::output(lua, &result)?, consumed))
+        })?,
+    )?;
+    let flag = cancelled.clone();
+    codec.set(
         "deflate",
         lua.create_function(move |lua, bytes: Buffer| {
             let result = buffer::input(lua, bytes, |bytes| deflate(bytes, &flag))?;
@@ -94,6 +104,18 @@ fn codec_error(message: &'static str) -> PatchError {
 }
 
 fn inflate(bytes: &[u8], expected: usize, cancelled: &AtomicBool) -> Result<Vec<u8>, PatchError> {
+    let (output, consumed) = inflate_prefix(bytes, expected, cancelled)?;
+    if consumed != bytes.len() {
+        return Err(codec_error("zlib trailing input mismatch"));
+    }
+    Ok(output)
+}
+
+fn inflate_prefix(
+    bytes: &[u8],
+    expected: usize,
+    cancelled: &AtomicBool,
+) -> Result<(Vec<u8>, usize), PatchError> {
     check_cancelled(cancelled)?;
     buffer::bounded(bytes.len())?;
     buffer::bounded(expected)?;
@@ -124,11 +146,11 @@ fn inflate(bytes: &[u8], expected: usize, cancelled: &AtomicBool) -> Result<Vec<
             return Err(codec_error("zlib output exceeds declared length"));
         }
         if status == Status::StreamEnd {
-            if produced != expected || consumed != bytes.len() {
-                return Err(codec_error("zlib length or trailing input mismatch"));
+            if produced != expected {
+                return Err(codec_error("zlib output length mismatch"));
             }
             check_cancelled(cancelled)?;
-            return Ok(output);
+            return Ok((output, consumed));
         }
         if consumed == before_in && produced == before_out {
             return Err(codec_error("incomplete zlib stream"));
@@ -585,6 +607,26 @@ mod tests {
             assert(raw(ctx.codec.inflate(buf(hex('789c030000000001')), 0)) == '')
             assert(not pcall(ctx.codec.inflate, buf(hex('789ccb48cdc9c90700062c0214')), 5))
             assert(not pcall(ctx.codec.inflate, buf(hex('cb48cdc9c90700')), 5)) -- raw DEFLATE
+        "#,
+        )
+        .exec()
+        .unwrap();
+    }
+
+    #[test]
+    fn zlib_prefix_reports_exact_member_end_without_weakening_strict_inflate() {
+        vm().load(
+            r#"
+            local member = hex('789ccb48cdc9c90700062c0215')
+            local suffix = '\0\0\255NEXT'
+            local decoded, consumed = ctx.codec.inflate_prefix(buf(member .. suffix), 5)
+            assert(raw(decoded) == 'hello' and consumed == #member)
+            assert(not pcall(ctx.codec.inflate, buf(member .. suffix), 5))
+            assert(not pcall(ctx.codec.inflate_prefix, buf(member), 4))
+            assert(not pcall(ctx.codec.inflate_prefix, buf(member), 6))
+            for n = 0, #member - 1 do
+                assert(not pcall(ctx.codec.inflate_prefix, buf(member:sub(1, n)), 5))
+            end
         "#,
         )
         .exec()

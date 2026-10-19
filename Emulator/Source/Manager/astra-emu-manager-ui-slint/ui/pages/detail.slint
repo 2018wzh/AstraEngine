@@ -1,6 +1,6 @@
-import { ScrollView, SpinBox, TextEdit } from "std-widgets.slint";
+import { ScrollView, SpinBox, TextEdit, LineEdit, ComboBox, Spinner } from "std-widgets.slint";
 import { Theme, Accent } from "../theme.slint";
-import { App, Library, Selection, BangumiProgress } from "../globals.slint";
+import { App, Library, Selection, BangumiProgress, FilePatch } from "../globals.slint";
 import { Icon, Icons } from "../components/icons.slint";
 import { PillButton, IconBtn, Tabs, Tag, StatusBadge, StatTile, InfoRow, Card, Segmented, SectionTitle } from "../components/controls.slint";
 import { WorkAssociation } from "../components/work-association.slint";
@@ -370,6 +370,128 @@ export component DetailSheet inherits Rectangle {
                                 variant: "filled";
                                 enabled: Library.selected-id != "";
                                 clicked => { Selection.save-config(); }
+                            }
+                        }
+                        Card {
+                            init => { FilePatch.load-catalog(); }
+                            VerticalLayout {
+                                padding: 16px;
+                                spacing: 10px;
+                                Text {
+                                    text: "应用文件补丁（仅必要时）";
+                                    color: Theme.on-surface;
+                                    font-size: Theme.body;
+                                    font-weight: 600;
+                                }
+                                Text {
+                                    text: "优先使用模拟器的原生选项。仅在必要时运行可信本地脚本；原目录只读，结果写入新的独立目录。";
+                                    color: Theme.on-variant;
+                                    font-size: Theme.body-sm;
+                                    wrap: word-wrap;
+                                }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    catalog := ComboBox {
+                                        horizontal-stretch: 1;
+                                        model: FilePatch.recipe-titles;
+                                        current-index <=> FilePatch.catalog-index;
+                                        enabled: !FilePatch.running && FilePatch.recipe-titles.length > 0;
+                                        selected(value) => {
+                                            FilePatch.script = FilePatch.recipe-scripts[catalog.current-index];
+                                        }
+                                    }
+                                    PillButton {
+                                        text: "本地 Luau…";
+                                        variant: "tonal";
+                                        enabled: !FilePatch.running;
+                                        clicked => { FilePatch.pick-script(); }
+                                    }
+                                }
+                                Text {
+                                    text: FilePatch.script == "" ? "尚未选择脚本" : FilePatch.script;
+                                    color: Theme.on-variant;
+                                    font-size: Theme.body-sm;
+                                    wrap: word-wrap;
+                                }
+                                Text {
+                                    text: "补丁输入目录";
+                                    color: Theme.on-surface;
+                                    font-size: Theme.body-sm;
+                                }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    LineEdit {
+                                        horizontal-stretch: 1;
+                                        text <=> FilePatch.patch-directory;
+                                        placeholder-text: "留空使用所选游戏原目录";
+                                        enabled: !FilePatch.running;
+                                    }
+                                    PillButton {
+                                        text: "选择…";
+                                        variant: "outlined";
+                                        enabled: !FilePatch.running;
+                                        clicked => { FilePatch.pick-patch-directory(); }
+                                    }
+                                }
+                                Text {
+                                    text: "新输出目录（必须尚不存在）";
+                                    color: Theme.on-surface;
+                                    font-size: Theme.body-sm;
+                                }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    LineEdit {
+                                        horizontal-stretch: 1;
+                                        text <=> FilePatch.output-directory;
+                                        placeholder-text: "新的独立目录路径";
+                                        enabled: !FilePatch.running;
+                                    }
+                                    PillButton {
+                                        text: "选择…";
+                                        variant: "outlined";
+                                        enabled: !FilePatch.running;
+                                        clicked => { FilePatch.pick-output-directory(); }
+                                    }
+                                }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    PillButton {
+                                        text: "开始";
+                                        variant: "filled";
+                                        enabled: FilePatch.can-start && FilePatch.script != "" && FilePatch.output-directory != "";
+                                        clicked => {
+                                            FilePatch.start(FilePatch.script, FilePatch.patch-directory, FilePatch.output-directory);
+                                        }
+                                    }
+                                    if FilePatch.running : PillButton {
+                                        text: "取消";
+                                        variant: "outlined";
+                                        clicked => { FilePatch.cancel(); }
+                                    }
+                                    if FilePatch.running : Spinner {
+                                        width: 20px;
+                                        height: 20px;
+                                        indeterminate: true;
+                                    }
+                                }
+                                if FilePatch.phase != "" : Text {
+                                    text: FilePatch.phase + (FilePatch.running ? "\n" + FilePatch.completed + (FilePatch.total == "" ? "" : " / " + FilePatch.total) : "");
+                                    color: Theme.on-variant;
+                                    font-size: Theme.body-sm;
+                                    wrap: word-wrap;
+                                }
+                                if FilePatch.output != "" : Text {
+                                    text: "输出：" + FilePatch.output;
+                                    color: Theme.on-variant;
+                                    font-size: Theme.body-sm;
+                                    wrap: word-wrap;
+                                }
+                                if FilePatch.error != "" : Text {
+                                    text: FilePatch.error;
+                                    color: Theme.error;
+                                    font-size: Theme.body-sm;
+                                    wrap: word-wrap;
+                                }
                             }
                         }
                     }

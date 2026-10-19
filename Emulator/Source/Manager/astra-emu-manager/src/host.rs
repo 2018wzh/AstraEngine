@@ -10,8 +10,8 @@ use std::{
 };
 
 pub(super) use astra_emu_manager_ui_slint::{
-    describe_error, report_error, App, Cores, Dialogs, Filters, Library, Logs, ManagerViewModel,
-    Selection, Session, Settings, SlintManagerAdapter,
+    describe_error, report_error, App, Cores, Dialogs, FilePatch, Filters, Library, Logs,
+    ManagerViewModel, Selection, Session, Settings, SlintManagerAdapter,
 };
 use slint::ComponentHandle;
 use thiserror::Error;
@@ -145,6 +145,13 @@ pub trait ManagerController: 'static {
     fn grant_translation_consent(&mut self) -> Result<ManagerViewModel, String>;
     fn test_translation_connection(&mut self) -> Result<ManagerViewModel, String>;
     fn add_game_directory(&mut self, path: &std::path::Path) -> Result<ManagerViewModel, String>;
+    fn start_file_patch(
+        &mut self,
+        script: &std::path::Path,
+        patch: &std::path::Path,
+        output: &std::path::Path,
+    ) -> Result<ManagerViewModel, String>;
+    fn cancel_file_patch(&mut self) -> Result<ManagerViewModel, String>;
     fn filter_settings(&self) -> astra_emu_manager_core::FilterSettings;
     fn pending_filter_settings(&self) -> Result<astra_emu_manager_core::FilterSettings, String>;
     fn commit_filter_settings(

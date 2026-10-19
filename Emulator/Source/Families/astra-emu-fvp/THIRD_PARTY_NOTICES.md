@@ -2,11 +2,13 @@
 
 ## RFVP 完整覆盖源码
 
-`Emulator/ThirdParty/rfvp` 为 [`xmoezzz/rfvp`](https://github.com/xmoezzz/rfvp) 的完整 fork，当前 pin 为 `478448ed9d60778f78d5de911fa5717c48cb201c`，发布分支为 [`astra`](https://github.com/2018wzh/rfvp/tree/astra)。完整源码 tree 与本地 Release 构建的 `ac13a9ee80b495b02734808b92a7223aba06cc1c` 相同。上游基线为 `af557db750c7833274f22a6d82b0dc33cdea2f85`，通用基线为 `3359d8fbea3c53d6d262a9f71b6d4d79888c2368`，crate 版本 0.6.0；保留生产修复及普通逻辑测试。变更分类见 [MODIFICATIONS.md](MODIFICATIONS.md)。
+`Emulator/ThirdParty/rfvp` 为 [`xmoezzz/rfvp`](https://github.com/xmoezzz/rfvp) 的完整 fork，当前 pin 为 [`ea8b5964fd5b6cde8186eff6a5da1607a3eb6a41`](https://github.com/2018wzh/rfvp/commit/ea8b5964fd5b6cde8186eff6a5da1607a3eb6a41)，发布分支为 [`astra`](https://github.com/2018wzh/rfvp/tree/astra)。上游历史基线为 `af557db750c7833274f22a6d82b0dc33cdea2f85`，通用历史基线为 `3359d8fbea3c53d6d262a9f71b6d4d79888c2368`，crate 版本 0.6.0；保留生产修复及普通逻辑测试。旧适配 `478448ed9d60778f78d5de911fa5717c48cb201c` 与旧 Release 源码 `ac13a9ee80b495b02734808b92a7223aba06cc1c` 的 tree 等价仅为历史记录。变更分类见 [MODIFICATIONS.md](MODIFICATIONS.md)。
 
 完整 MPL-2.0 许可位于 `../../../ThirdParty/rfvp/LICENSE`。发行时须保留覆盖源码、许可与变更记录，不以旧已发布基线替代当前二进制实际使用的源码。
 
 Family 只提供注册和构建入口；C ABI、原生 owner、CPU lease 与 D3D12 交付均位于 fork 的薄嵌入层，复用原 App、VM、GPU、视频、设备音频和 V1/RFVS 保存。没有 Host advance 或 PCM sink。
+
+原生原偏移翻译表与 movie/BGM ASS 路径均包含在当前覆盖源码中。共享 `astra-subtitle` 的 manifest 和独立 lockfile 来源为 `2018wzh/AstraEngine@c27ac6e107328170deecac428bba7472d3ce2d6c`；libass 及其静态依赖的归因、许可与 FriBidi 重链接义务见 [主仓第三方说明](../../../THIRD_PARTY_NOTICES.md#静态-ass-字幕依赖)。字幕字体由显式资源提供，须保留各自许可，不改变下述内嵌游戏字体的分发阻塞。
 
 ## 系统字体
 

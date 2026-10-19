@@ -17,6 +17,7 @@ path = "src/bin_main.rs"
 astra-emu-manager-core = { path = "../astra-emu-manager-core" }
 astra-emu-manager-ui-slint = { path = "../astra-emu-manager-ui-slint" }
 astra-emu-abi = { path = "../../FamilyApi/astra-emu-abi" }
+astra-emu-patch = { path = "../../Tools/astra-emu-patch" }
 astra-emu-musica = { path = "../../Families/astra-emu-musica", default-features = false }
 mlua.workspace = true
 astra-emu-metadata = { path = "../../Providers/astra-emu-metadata" }

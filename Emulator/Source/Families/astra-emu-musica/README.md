@@ -12,6 +12,22 @@ Musica 提供独立 `FamilyProvider`、`FamilySession` 和可选 `abi_stable` �
 
 正文替换是可选服务；禁用时直接显示原文。启用时只暂停当前消息推进，效果和音频继续。请求具有 session/generation identity，加载和关闭取消旧请求。失败、15 秒 timeout、错误 response 或无法排版的替换保留原文，不自动重试。正文和错误 payload 不写日志。
 
+原生本地化通过 `translation_table`（游戏目录内 v2 JSON）和 `translation_mode=replace|overlay` 配置，默认无表、替换模式。表必须包含 `version:2`、`source_encoding:"gbk"|"cp932"`、`hash_collision_policy:"first_record"`，以及保留原顺序的 `names`、`dialogue` 数组；每条为 `{source_hash,source_sha256,text}`，目标为 UTF-8。名字查找先于正文，同一 31-bit hash 只使用第一条；SHA-256 只作审计，不消歧或丢弃重复记录。hash 来自解码前的实际 authored display 字节（含尚未处理的消息控制），采用 131 rolling、记录侧跳过 NUL、运行时 C 字符串在首个 NUL 结束；不会重哈希 UTF-8，也不改变 VM 变量、选择目标或文件名。原生结果先交给既有 text hook，重试保留同一请求 ID。
+
+`overlay` 保留原正文，名字仍按名字表替换；正文命中更新独立文字层，未命中保留已缓存字幕。Tab 松开切换该层可见性，按下和重复按键不切换。核心槽保存该层文本和可见性，身份包含表原始字节、显示模式、实际 loose SC 字节和配置字体。`font_path` 为空时沿用既有打包字体；配置时读取游戏目录内实际字体的首个 face、内部 family 和 Unicode coverage，交给同一个 Cosmic provider。缺失、损坏字体或缺字明确失败，不把系统同名字体当成替代文件。
+
+`scr_archive`、`sys_archive` 可给出游戏目录内物理 PAZ 别名，密钥 role 与 `musica:/scr/`、`musica:/sys/` URI 不变。`script_directory` 选择同目录内标准 loose SC，脚本与 include 均先 loose、再当前输出根的 PAZ；既有逐脚本编码探测保留未替换的 Title。PNG 替换继续使用 key.toml 的 `texture_overrides`。这些路径不需要 Lua parser 或运行时解包器。
+
+原生 `@stage` 使用与 `.stage` 相同的舞台语义，保留原始源字节；其他未知 `@` 命令不据此推断。选择对允许一个末尾分隔空格，显示与分支目标共用相同解析规则。背景层按原生 Opaque 复制 RGB，即使素材 A=0 也不改写像素；前景继续沿原混合语义。
+
+影片字幕由 `ffmpeg-vcpkg` 启用真实 SDK/共享 libass 消费器。`subtitle_map` 为空时不建立轨道；非空必须指向游戏目录内 `{"version":1,"tracks":[{"clock":"movie","resource":"op.avi","ass":"subtitles/op.ass","fonts":["fonts/actual.ttf"]}]}`。只接受已有原生 movie 时钟，BGM 映射明确拒绝。ASS 为 UTF-8（可保留 BOM），字体按文件实际 family 使用，不因未使用样式或零时长事件猜补系统字体。映射、ASS 和字体字节均参与存档身份，所有资源合计有界。
+
+字幕时间来自 `movie.position_us`，storage 来自实际解码视频，raster/偏移来自视频 viewport；颜色使用原生 swscale 实际转换的 matrix/range 和 BGRA8 的 SDR 呈现策略，不按分辨率补猜。显式 HDR、未支持转换仍报 `ASTRA_EMU_MUSICA_SUBTITLE_COLOR`。内容变化才上传 Alpha8 mask，位置变化不重传；mask revision 与轨道 serial 避免 ID 冲突，视频双槽 ID 保证单帧不同时释放/重传同一资源。暂停不推进时钟；读档、seek、换片、跳过和结束释放旧轨道。原生 handles 始终在 session 线程创建、使用和销毁。
+
+Yorino 的可选日文 overlay 目标按原始显示路径保留 `\a`、`\N` 和 ruby 花括号等字面字符，不把目标再次交给 VM 控制解析；原始脚本控制与选择/文件目标保持不变。十五个未完全映射的名字使用点不靠猜测改解码或删表，完整有序名字记录照常保留。
+
+
+
 ## 私有配置与存档
 
 `mount_musica(game_root, profile_path)` 只读取不超过 1 MiB 的 UTF-8 TOML，按原始文件字节 SHA-256 绑定私有配置身份。`MusicaKeyFile` 使用 `astra.emu.musica.keys.v2`，必须明确声明 `paz_version`、`index_size_xor`、`rc4_skip_crc` 和八个固定 role 的 `archive_keys`。`rc4_skip_crc` 控制 PAZ v2 的 entry CRC32 skip，缺失算法参数直接拒绝，不补默认值。配置包含私有解密信息，不进 Git、日志或报告；读取失败不写文件。
@@ -24,7 +40,7 @@ PAZ 探测只识别引擎，不能据此得出密钥已安装。Manager 只选�
 
 PAZ 的边界/重叠校验、分卷读取、Blowfish/RC4、XOR、解压和源文件变化校验保留。SDK 的 `ArchiveManifest` 是核心本地索引，不是 Host VFS 或产品 package。配置相对路径以游戏目录为基准，资源始终限于游戏目录内；公共读取错误使用 `ASTRA_EMU_PROFILE_*`。读取不运行 managed helper、BinaryFormatter 或 executable patch。
 
-核心自有 slot 位于游戏目录 `.astra-musica/saves/slot-000.asav`。容器 `AMUSSV05` 包含长度、SHA-256 与 postcard snapshot，保存 VM、当前文本、等待进度以及 sound resource/播放位置/volume/pan/repeat。它绑定同一 archive/profile identity；加载重建脚本、场景和声音后提交。临时文件 flush 后原子替换；损坏、异版本或外部格式文件拒绝覆盖。此格式不宣称兼容原版存档。加载恢复声音的当前参数、位置与尚未完成的音量渐变。渐变保存分贝起止值、总采样数、已推进采样数和结束停止意图；按剩余采样继续，暂停不推进渐变。新音量命令替换旧渐变。旧 AMUSSV04 及更早内部格式明确拒绝，不覆盖旧 slot。
+核心自有 slot 位于游戏目录 `.astra-musica/saves/slot-000.asav`。容器 `AMUSSV06` 包含长度、SHA-256 与 postcard snapshot，保存 VM、当前文本、翻译层文本/可见性、等待进度以及 sound resource/播放位置/volume/pan/repeat。它绑定同一 archive/profile/localization/font identity；加载重建脚本、场景和声音后提交。临时文件 flush 后原子替换；损坏、异版本或外部格式文件拒绝覆盖。此格式不宣称兼容原版存档。加载恢复声音的当前参数、位置与尚未完成的音量渐变。渐变保存分贝起止值、总采样数、已推进采样数和结束停止意图；按剩余采样继续，暂停不推进渐变。新音量命令替换旧渐变。旧 AMUSSV05 及更早内部格式明确拒绝，不覆盖旧 slot。
 
 ## eden 原版存档与检查点
 
@@ -78,7 +94,7 @@ cargo build --manifest-path Emulator/Cargo.toml -p astra-emu-musica --features d
 
 VM 的可序列化状态集中在 runtime/model.rs，演出命令在 runtime/effects.rs，音频命令在 runtime/audio_commands.rs，选择处理在 runtime/choices.rs。调度与存读档保留在 runtime.rs，共享演出序号仍由 VM 分配。运行错误通过 typed diagnostic_code() 返回稳定标识；未实现命令只向 Family/Manager 返回指令序号，不透传脚本文本。
 
-`export-eden-save` 从核心自有槽读取权威 VM 与音频快照，重建已知原版字段；只允许导入后仍可准确表示的普通消息检查点。选择、未知变量、动态演出、活动音频渐变等状态拒绝导出。输出必须为不存在的新文件，不覆盖原版槽。内部 VM 格式升级为 v26，保留具名历史状态而非未知原版字段；旧槽在外层 AMUSSV05 检查时拒绝，读取失败不覆盖文件。导出生成 SAV 与同名 128×80 PNG；缩略图来自该核心槽实际保存的 GPU 画面。两个目标都必须不存在，先发布 PNG、再发布 SAV；中途失败保留已产生的独立文件并报错，不覆盖既有文件。已在独立原版副本完成一个静态消息片段的导入、继续、保存、导出、读取继续；原版复存的剧情、变量、历史及媒体资源字段对齐。未验收可听音频与其他历史类型，不能据此声明全部存档兼容。
+`export-eden-save` 从核心自有槽读取权威 VM 与音频快照，重建已知原版字段；只允许导入后仍可准确表示的普通消息检查点。选择、未知变量、动态演出、活动音频渐变等状态拒绝导出。输出必须为不存在的新文件，不覆盖原版槽。内部 VM 格式升级为 v26，保留具名历史状态而非未知原版字段；旧槽在外层 AMUSSV06 检查时拒绝，读取失败不覆盖文件。导出生成 SAV 与同名 128×80 PNG；缩略图来自该核心槽实际保存的 GPU 画面。两个目标都必须不存在，先发布 PNG、再发布 SAV；中途失败保留已产生的独立文件并报错，不覆盖既有文件。已在独立原版副本完成一个静态消息片段的导入、继续、保存、导出、读取继续；原版复存的剧情、变量、历史及媒体资源字段对齐。未验收可听音频与其他历史类型，不能据此声明全部存档兼容。
 
 原版历史 `CT5` 保存面板切换参数，支持已经核对的 0 和 10；其他值明确拒绝。逻辑画布与 GPU 光栅尺寸分别配置，eden 原版导入要求 1024×640；核心槽保存逻辑画布身份，不同画布加载在修改活动状态前拒绝。
 

@@ -1,7 +1,7 @@
 use super::*;
 #[test]
 fn native_gpu_character_mirror_transition_wait_and_save_restore() {
-    let _session = PROVIDER_SESSION.lock().unwrap();
+    let _session = PROVIDER_SESSION.lock();
     let root = tempfile::tempdir().unwrap();
     fixture::game(root.path(), b".char load -1 Stand.png\r\n.char pos 1 16 0\r\n.char trans 1 100 0\r\n.wait 1000\r\n.end\r\n");
     let mut png = std::io::Cursor::new(Vec::new());

@@ -56,7 +56,47 @@ JSON profile、GARbro `Formats.dat` 和旧 `keys.v1` 只在[开发工具](../../
 
 Musica 默认 `launch_mode=title`，启动先显示标题菜单，选择开始后再执行 `entry_script`。`direct` 是显式直入脚本模式，原版 eden 存档导入仍须选择它。已有保存的 `direct` 不自动覆盖；需要改为菜单启动时，在游戏的模拟器专属设置中选择 `title` 并保存。更新核心后须手动重启 Manager，已运行的会话不会自动切换。
 
+## 本地化与原生选项
+
+日常使用先在该游戏的“模拟器配置”中选择核心已提供的原生选项，保存到 `game` 范围后重新启动游戏。语言、字体、原生归档和脚本能直接读取时无需转换。按样本的当前选择如下；完整 18 样本证据及阻塞见[实施计划](../status/implementation-plan.md#18-样本矩阵)。
+
+| 核心 / 样本 | 操作 |
+| --- | --- |
+| Artemis 终之空 2025 | `archive` 选择原基包；`extra_archive` 填已核实的独立 PFS 补丁相对路径（相对基包父目录，留空禁用）。多个 PFS 时明确选择基包，不重命名原文件，也不把备份自动当补丁 |
+| Sena Koikake | `text_language` 选 `cn`；`jp`/`tc` 分别为原生日文/繁体列。单字段记录沿原生规则处理，不凭编码生成译文 |
+| Siglus | `resource_language` 选 `chs`，原版选 `original`；`save_root` 可显式选择独立存档目录。使用配套 Gameexe/Scene 与原生 G01/影片选择；Rewrite 的未知机器码效果及缺失字体仍使完整迁移阻塞 |
+| Musica | `script_encoding` 选实际来源的 `shift_jis` 或 `gbk`；PAZ 索引与密钥不随此改编码。继续使用已确认的 `key.toml`；必要转换输出的字体、纹理、字幕及翻译表配置由收据导入，不靠运行时补丁 DLL |
+| Ethornell/BGI | 需要 GBK 时显式选择显示编码，并使用该 runtime 的实际字体配置；这不改变内部资源名/操作数。HD 的归档归属、`fcxzzd.arc`/字体接线与樱之诗的私有消费者仍未闭合 |
+| KrKr | 直接使用既有原生 XP3/TJS/PSB 等资源路径；LLJ 的运行分支/字体与千恋万花的 key、完整中文列及插件接口仍待解明，不能靠旁置 Win32 DLL 或 Steam 语言设置判为完成 |
+
+已安装的 Artemis 10th、BGI 春之雪、BGI 15th、ef latter、Anemoi 尚缺已确认译文。先确认与该版本匹配的译文来源；修改编码或复制别的版本补丁不能补出译文。既有 BGI 用户人工通过记录保留，但不充当新汉化迁移证明。
+
+### 高级：手动离线文件转换
+
+旧补丁的私有容器或 DLL 数据确实无法由核心直接消费时，才使用“应用文件补丁（仅必要时）”或 `astra-emu-patch`。转换输出为普通原生资源及 typed 配置，游戏启动不执行转换脚本，不加载旧补丁 DLL；也不为接入本地化新增运行时 Lua 格式或转换器依赖。Artemis 自身 Lua 与 Musica 文字 Hook 的 Luau 功能仍各用原有生命周期。没有每游戏一个 recipe 或 13 个脚本的要求。
+
+Manager 操作顺序：
+
+1. 结束运行中的游戏，点击“刷新核心”，选中来源游戏，等待加载/扫描结束。
+2. 在详情的“应用文件补丁（仅必要时）”中选可信目录记录，或点击“本地 Luau…”选择已审核入口。填写“补丁输入目录”（留空使用来源游戏目录）与尚不存在的“新输出目录”，点击“开始”；需要中止时点击“取消”。
+3. 成功后 Manager 导入新独立目录，校验收据、所选核心及 typed 字段，再以 SQLite 事务保存该输出游戏的核心绑定和配置。来源游戏绑定不改。若显示“文件转换完成，导入失败”，保留已完成输出并处理具体错误，再用“添加游戏”选择该输出目录；导入只读取收据，不重跑脚本。
+
+上述 Manager/CLI 逻辑及真实 SQLite 写入/重开已有检查证据；Manager GUI 操作尚待实际观察。目录登记 eden、ef first、樱花萌放、夏空四个必要转换入口；前奏诗尚缺 15 个姓名使用点，LLJ 分支及其他阻塞见实施计划。夏空随附字体只供 ASS，正文沿用 Musica 内置中文字体；不要因字符映射表完整就把字幕子集强制选为正文字体。复制、解析或构建成功均不代表完整本地化人工通过。
+
+`astra-emu-patch list` 只读取程序相邻 `patches/catalog.json` 的目录记录，不执行或探测脚本。没有随包目录时，可用 `list --scripts <可信目录>` 显式选择。应用命令为：
+
+```sh
+astra-emu-patch apply --script <可信入口.luau> --source <原游戏目录> \
+  --patch <补丁目录> --output <全新独立目录>
+```
+
+省略 `--patch` 时使用原游戏目录。CLI 可用 Ctrl+C 取消，取消返回码为 130，等待工作线程结束后退出；其他失败返回 1。只使用可信本地脚本，转换由用户显式发起。转换器只读打开输入/密钥/旧存档，不复制旧存档；输出为不依赖原安装回退读取的完整独立副本，目标存在即失败。成功时显示输出与 `astra-patch-result.json` 收据位置；用 Manager“添加游戏”选该输出目录即可校验并导入 typed profile。不要手改收据去绕过核心/字段错误。
+
+转换成功后仍须核对实际字体、脚本分支、资源优先级和媒体效果，再由用户手动验收游戏。私有输出、商业文本/图片、字体、密钥与旧存档不进入公开源码或运行包。本轮 90 个已知原文件哈希的匹配范围、缺失的任务前存档基线及既有隐私事故统一记录在[完整性、隐私与发布](../status/implementation-plan.md#完整性隐私与发布)，不据此宣称全部原安装/存档未变。
+
 ## 构建运行包
+
+本轮已构建七核心、Manager 和必要 CLI，并组装本机验证目录 `AstraEMU-native-first-checkpoint-20261019`；其 PE 依赖/导出及包内 CLI 公开转换已检查。该目录是原生优先的验证组合，尚有七个候选的静态消费者/素材阻塞，实际 Manager 界面和游戏仍待用户手动验收。已发布源码不等于可公开分发二进制；RFVP 字体、Ethornell 许可及下述静态 FriBidi LGPL 义务核验前，产物仅作本机私有使用。
 
 下面以 FVP 为例。先初始化主仓固定的完整 submodule；不要换回旧 revision 绕过失败。参与核心保留不同原生 Lua/音频依赖，分别构建，不将 Artemis Lua 5.1 和 Manager Luau 合并进同一次 Cargo 调用。
 
@@ -68,12 +108,13 @@ export TEMP="$work_dir/tmp" TMP="$work_dir/tmp"
 mkdir -p "$TEMP"
 git submodule update --init
 cargo build --manifest-path Emulator/Cargo.toml --locked --release -j 1 \
-  -p astra-emu-manager -p astra-emu-fvp \
+  -p astra-emu-manager -p astra-emu-patch-cli -p astra-emu-fvp \
   --features astra-emu-fvp/dynamic-plugin-export
 python Tools/Effects/fetch_dxc.py --output "$work_dir/dxc"
 python Tools/AstraEMU/package_client.py \
   --manager "$CARGO_TARGET_DIR/release/astra-emu-manager.exe" \
   --core "$CARGO_TARGET_DIR/release/astra_emu_fvp.dll" \
+  --patch-cli "$CARGO_TARGET_DIR/release/astra-emu-patch.exe" \
   --runtime-file "$work_dir/dxc/dxcompiler.dll" \
   --runtime-file "$work_dir/dxc/dxil.dll" \
   --runtime-file "$work_dir/dxc/LICENSE-MS.txt" \
@@ -82,6 +123,18 @@ python Tools/AstraEMU/package_client.py \
 ```
 
 Linux/macOS 分别使用无 `.exe` 的可执行文件以及 `libastra_emu_fvp.so` / `libastra_emu_fvp.dylib`；DXC 示例仅适用于 Windows。`--core` 可以重复传入多个已构建的 Family。`--runtime-file` 指定随包的依赖库或许可文件；Windows 分发还需要加入构建工具链对应的 VC runtime DLL。输出目录必须是新目录，避免上一版核心混入新运行包。该工具组装现有产物，不编译、不启动游戏、不发布。
+
+`--patch-cli` 是可选的实际构建产物；省略时保留原有 Manager/核心打包入口。打包器只复制文件，不运行二进制，也不替代最终 PE 架构、导入闭包、导出符号和 ZIP/hash 核验。
+
+仅在已有必要且审核通过的转换入口时指定 `--patches Emulator/Patches`。打包器只复制 `catalog.json` 及其列出的顶层 `.luau` 入口；每个确实需要的共享模块分别通过 `--patch-common common/<模块>.luau` 指定。不递归复制脚本目录，不自动包含未列出的脚本、模块、夹具、测试目录或游戏资产。目录是显式可信输入，发布者负责核对每个选中脚本的来源与内容；路径检查不能判断脚本是否夹带商业数据。缺失文件、目录逃逸、链接、测试脚手架路径和不区分大小写的名称冲突均拒绝打包。没有可用 recipe 时省略 `--patches`，不要为填满目录登记原生游戏。
+
+Manager 使用的 mlua MIT 许可从 `Emulator/ThirdParty/mlua/LICENSE` 复制。Luau 许可默认读取 `CARGO_HOME`（未设置时为 `~/.cargo`）下 `luau0-src-0.12.3+luau663/LICENSE`；可用 `--luau-license <该源码的LICENSE>` 显式指定。缺失则需先恢复锁定依赖源码，打包器不会下载或生成许可。
+
+包含原生 ASS 字幕能力的构建还须传入 `--subtitle-share <独立vcpkg安装>/x64-windows-static-md/share`。工具逐字复制 libass、FreeType、FriBidi、HarfBuzz、Brotli、bzip2、libpng、zlib 的实际 `copyright`，任一缺失即失败。静态 FriBidi 的 LGPL 对应源码、重链接等义务须另行核验；当前只组装本机私有包，不据此宣称可以公开分发。FVP 字体与 Ethornell 的既有许可限制仍然保留。
+
+`package(manager, cores, output, runtime_files)` 原有 Python 调用继续有效；可选的 `patch_cli`、`patches` 及关键字参数 `patch_common`、`luau_license`、`subtitle_share` 与上述选项对应。输出使用同父目录 staging，复制失败清理自身临时目录，发布不覆盖打包期间新出现的目标。
+
+公开行为测试：`python -m unittest Tools.tests.test_package_client`。测试使用临时合成输入验证实际输出与失败保护，不运行游戏、原生核心或补丁脚本。
 
 构建 Musica 前还需恢复其编译期嵌入的字体，避免把 LFS 指针编入核心。运行包会带上字体的 OFL 许可。
 

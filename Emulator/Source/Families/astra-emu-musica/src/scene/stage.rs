@@ -18,12 +18,14 @@ impl Scene {
             }
         };
         if let Some(background) = &stage.background {
-            self.layer(
+            // The native base background copies RGB without source-alpha weighting.
+            // Foreground and stand layers retain their separate blend semantics.
+            self.layer_with_blend(
                 commands,
                 &background.resource_uri,
-                background.x,
-                background.y,
+                [background.x, background.y],
                 1.0,
+                BlendMode::Opaque,
             )?;
         }
         for stand in &stage.stands {

@@ -4,7 +4,7 @@
 
 - 完整 fork：[Alphaly2K/art3m1s-core](https://github.com/Alphaly2K/art3m1s-core)，主仓 submodule：`Emulator/ThirdParty/art3m1s-core`。
 - 上游 HEAD（2026-10-17 核对，0.4.0）：`ad90a62cb192b119b7cf8589aa7f87a94bd747c8`。
-- 唯一适配提交：[`ae967d8446fe99b97f6e1df93fb1b61d8ada2040`](https://github.com/2018wzh/art3m1s-core/commit/ae967d8446fe99b97f6e1df93fb1b61d8ada2040)，直接父提交为上述 HEAD；统一适配分支 `astra` 已推送 GitHub，远端 SHA 与主仓 gitlink 一致。
+- 历史适配基线：[`ae967d8446fe99b97f6e1df93fb1b61d8ada2040`](https://github.com/2018wzh/art3m1s-core/commit/ae967d8446fe99b97f6e1df93fb1b61d8ada2040)，直接父提交为上述 HEAD。当前公开 `astra` 与主仓 gitlink 为 [`be82d5e0bbafcef55a530f69e5b9358094dbd671`](https://github.com/2018wzh/art3m1s-core/commit/be82d5e0bbafcef55a530f69e5b9358094dbd671)，包含原生额外 PFS 挂载能力；旧基线不代表当前构建源码。
 - 来源历史、Lua 5.1、NativeVulkan/NativeMetal、文字、FFmpeg 9 与许可证保留。
 
 ## 差异分类
@@ -32,7 +32,15 @@ Kira 保持 0.12.2，以发布来源 `e9cbb4608237bb339c3eaf498571000e6cce35ca` 
 
 上游窗口位只来自 `WINDOW_QUERY_STATE` 的真实结果：bit0 为全屏、bit1 为最小化。首次运行及一批 `WindowState` 通知处理完后查询，不逐 tick 查询，也不把 `focused` 或 `suspended` 转成这些位。Host 必须同时提供有效 `MODE` 和 `MINIMIZED`；无窗口、不支持查询或返回字段不完整时明确报 `window.query_state` 错误。查询在 snapshot 锁外进行，取消结果结束当前任务并正常关闭，不发布缺失状态。原有失焦、挂起和显式暂停策略保持不变。
 
-配置保留 `archive` 文件选择。CPU 捕获沿用原生完整 stage target，报告实际 L=R；窗口 drawable 变化不改原生尺寸。指针按正在显示帧的会话/输出代次校验，再执行一次 raster→logical 映射。读取成功的存档通知换代，旧输出不再接受输入，但旧租约可在 close 后任意线程释放。
+配置保留 `archive` 文件选择，并增加默认空的 `extra_archive`。配置按字段 ID 解析，顺序不构成 ABI 契约；描述符报告实际 schema 长度。`extra_archive` 是基包父目录内、最多 4096 字节的相对文件路径，由原生 `HostResources::mount_pfs_with_extra` 校验路径及独立 PFS 身份。保留原基包和活动数字卷排序，显式补丁在其后覆盖；散文件、内存 override 和存档优先级不变。不扫描备份、不重命名原文件、不启动转换、不复制旧存档。空值完全保留原行为。
+
+资源挂载与 `system.ini` 读取可通过公开合成 PF6 夹具单独验证，不创建 VM、GPU 或存档目录。测试覆盖配置顺序、默认值、类型/重复/超长拒绝、配置到原生 reader 的实际消费者及输入/已有存档字节不变；这些测试不构成游戏验收。
+
+终之空 2025 可显式选择已核验的停用独立 PFS 补丁，保留原基包、UTF-8 与原分支；不需要 Lua PFS 重写器。只读样本已核对额外 PFS 目录、UTF-8 AST 与所用字体字形覆盖；完整 AST 引用闭包、VM 流程与人工可玩性仍待验收。
+
+Demo 的 cn/en/tw 资源已由原生读取机制覆盖，当前不新增虚构语言 ABI。游戏读取 `conf.language`、Steam 语言及原默认值，现有持久化状态不等于新的引擎配置契约。`bt_trial` 的 `gamestart_trial` 目标及实际图片缺失，`init.trial_script` 没有已安装的生产者。尚无权威 Create2/缺图输入语义或合法目标/别名证据，故保留阻塞；不隐藏按钮、吞掉目标错误或全局禁用有效的透明热区。
+
+CPU 捕获沿用原生完整 stage target，报告实际 L=R；窗口 drawable 变化不改原生尺寸。指针按正在显示帧的会话/输出代次校验，再执行一次 raster→logical 映射。读取成功的存档通知换代，旧输出不再接受输入，但旧租约可在 close 后任意线程释放。
 
 鼠标适配保留原生 `hide`（零显示、非零显式隐藏）与 `autohide`（毫秒、零停用）的独立含义，`null` 不修改已有设置。显式隐藏不会被移动解除；空闲隐藏在指针活动后解除。上游对应实现见 [Art3m1s `applyMouseConfig` / `notifyMouseActivity`](https://github.com/Alphaly2K/Art3m1s/blob/2234686b9ccde9a4d6721ff0bfe8cf5364472bf7/lib/engine/backends/art3m1s_engine_runtime.dart#L456-L519)，核心继续只发送原生命令，不增加绘制或窗口旁路。
 

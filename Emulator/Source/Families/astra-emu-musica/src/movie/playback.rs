@@ -23,6 +23,7 @@ pub(crate) struct Movie {
     pending: bool,
     eof: bool,
     remainder_ns: u64,
+    presented: Option<VideoFramePacket>,
 }
 impl Movie {
     pub fn open(archive: &Arc<MusicaMountedVfs>, state: &MusicaMovieState) -> FamilyResult<Self> {
@@ -73,6 +74,7 @@ impl Movie {
             pending: true,
             eof: false,
             remainder_ns: 0,
+            presented: None,
         })
     }
     fn start_audio(&mut self, host: &Audio, generation: u64) -> FamilyResult<()> {
@@ -192,13 +194,18 @@ impl Movie {
             for pixel in rgba.as_chunks_mut::<4>().0 {
                 pixel.swap(0, 2);
             }
-            return Ok(Some(TextureFrame {
+            let frame = TextureFrame {
                 width: packet.width,
                 height: packet.height,
                 rgba8: rgba.into(),
-            }));
+            };
+            self.presented = Some(packet);
+            return Ok(Some(frame));
         }
         Ok(None)
+    }
+    pub fn presented_packet(&self) -> Option<&VideoFramePacket> {
+        self.presented.as_ref()
     }
     pub fn position_us(&self) -> u64 {
         self.position

@@ -51,6 +51,17 @@ impl PublicOverlay {
         let output = root.join("public-output");
         fs::create_dir(&source).unwrap();
         fs::create_dir(&patch).unwrap();
+        fs::create_dir(root.join("common")).unwrap();
+        fs::write(
+            root.join("common/binary.luau"),
+            include_str!("../../../../../Patches/common/binary.luau"),
+        )
+        .unwrap();
+        fs::write(
+            root.join("common/pe.luau"),
+            include_str!("../../../../../Patches/common/pe.luau"),
+        )
+        .unwrap();
         let mut original = b"PUBLIC_ASSETS_V1".to_vec();
         assert_eq!(original.len(), 16);
         let source_parts = [
@@ -152,18 +163,12 @@ return {{ id="public-pe-overlay", version=1, title="公开 PE overlay 夹具", a
     if source:sha256() ~= "{source_hash}" or patch:sha256() ~= "{patch_hash}" then
         ctx.fail("UNSUPPORTED_INPUT", "public input fingerprint mismatch")
     end
-    local pe = patch:read(0, 512)
-    assert(buffer.readstring(pe, 0, 2) == "MZ")
-    local peoff = buffer.readu32(pe, 0x3c)
-    assert(buffer.readstring(pe, peoff, 4) == "PE\0\0")
-    assert(buffer.readu16(pe, peoff + 4) == 0x8664)
-    local n = buffer.readu16(pe, peoff + 6)
-    local sec = peoff + 24 + buffer.readu16(pe, peoff + 20)
-    local overlay = buffer.readu32(pe, peoff + 24 + 60)
-    for i=0,n-1 do
-        local p = sec + i * 40
-        overlay = math.max(overlay, buffer.readu32(pe,p+20) + buffer.readu32(pe,p+16))
-    end
+    local pe = ctx.load("common/pe.luau")
+    local image = pe.parse(ctx, patch)
+    assert(image.machine == 0x8664 and image.base == 0x140000000)
+    assert(#image.sections == 1 and image.sections[1].name == ".data")
+    assert(#pe.resources(ctx, image) == 0 and image.overlay == 1024)
+    local overlay = image.overlay
     local index = patch:read(overlay, 8)
     assert(buffer.readstring(index,0,4) == "APFX" and buffer.readu32(index,4) == 4)
     ctx.copy("source", "assets.bin", "assets.bin")

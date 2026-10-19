@@ -172,7 +172,31 @@ impl MusicaVm {
     pub fn state(&self) -> &MusicaRuntimeState {
         &self.state
     }
+    pub(crate) fn message_display_hashes(&self) -> Option<(u32, Option<u32>)> {
+        self.display_command(self.state.message.as_ref()?.source)?
+            .message_display_hashes()
+    }
 
+    pub(crate) fn choice_display_hashes(&self) -> Vec<u32> {
+        self.state
+            .choice
+            .as_ref()
+            .and_then(|choice| self.display_command(choice.source))
+            .map(ScCommand::choice_display_hashes)
+            .unwrap_or_default()
+    }
+
+    fn display_command(&self, span: crate::SourceSpan) -> Option<&ScCommand> {
+        let index = self
+            .script
+            .lines
+            .binary_search_by_key(&span.offset, |line| line.span.offset)
+            .ok()?;
+        match &self.script.lines[index].kind {
+            ScLineKind::Command { command } if command.span == span => Some(command),
+            _ => None,
+        }
+    }
     pub fn encode_native_save(&self) -> Result<Vec<u8>, MusicaRuntimeError> {
         eden::validate_context(&self.state)?;
         save_pages::validate_state(&self.state)?;
@@ -467,7 +491,9 @@ fn execute_control(
         }
         "goto" => {
             let target = branch_target(&command.control_flow)?;
-            state.pc_line = *labels.get(target).ok_or(MusicaRuntimeError::Label)?;
+            if let Some(pc) = labels.get(target) {
+                state.pc_line = *pc;
+            }
             Ok(None)
         }
         "if" => {

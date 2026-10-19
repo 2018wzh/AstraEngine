@@ -1,5 +1,6 @@
 //! Explicit trusted Luau file conversion, separate from runtime text extensions.
 mod buffer;
+mod catalog;
 mod codecs;
 mod data;
 mod error;
@@ -8,7 +9,22 @@ mod receipt;
 mod storage;
 mod transaction;
 mod vm;
+pub use catalog::{list_recipes, RecipeListing};
 pub use error::{PatchError, PatchErrorKind};
+pub use receipt::read_output_profile;
+
+pub(crate) const STAGING_PREFIX: &str = ".astra-patch-staging-";
+
+/// The private transaction namespace is never a discoverable game/output root.
+pub fn is_staging_path(path: &std::path::Path) -> bool {
+    path.components().any(|component| {
+        component
+            .as_os_str()
+            .to_str()
+            .and_then(|name| name.get(..STAGING_PREFIX.len()))
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(STAGING_PREFIX))
+    })
+}
 
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, path::PathBuf};

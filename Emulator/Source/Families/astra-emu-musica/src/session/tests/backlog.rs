@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn native_gpu_backlog_navigation_voice_save_restore_and_return() {
-    let _session = PROVIDER_SESSION.lock().unwrap();
+    let _session = PROVIDER_SESSION.lock();
     let root = tempfile::tempdir().unwrap();
     fixture::game(
         root.path(),
@@ -72,7 +72,7 @@ fn native_gpu_backlog_navigation_voice_save_restore_and_return() {
 
 #[test]
 fn backlog_replay_does_not_replace_pending_message_voice_duration() {
-    let _session = PROVIDER_SESSION.lock().unwrap();
+    let _session = PROVIDER_SESSION.lock();
     let root = tempfile::tempdir().unwrap();
     fixture::game(
         root.path(),

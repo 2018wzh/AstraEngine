@@ -69,6 +69,8 @@ impl MusicaSession {
                 game: self.game,
                 vm,
                 message: self.message.clone(),
+                translation_visible: self.translation_visible,
+                translation_overlay: self.translation_overlay.clone(),
                 wait_ns: self.wait_ns,
                 sounds,
             },
@@ -134,7 +136,20 @@ impl MusicaSession {
             state.script_encoding,
         )?;
         scene.set_text_shadow(self.scene.text_shadow());
-        let choices = vm.choice_display().map_err(vm_error)?;
+        scene.set_configured_font(self.scene.configured_font())?;
+        scene.set_translation_overlay(saved.translation_overlay.clone(), saved.translation_visible);
+        #[cfg(feature = "ffmpeg-vcpkg")]
+        {
+            scene.set_subtitle_catalog(self.scene.subtitle_catalog());
+            if let Some(movie) = vm.state().movie.as_ref() {
+                scene.begin_movie(&movie.resource_uri)?;
+            }
+        }
+        let choices = Self::localized_choices_for(
+            &vm,
+            self.translation_table.as_deref(),
+            self.translation_mode,
+        )?;
         scene.render(
             vm.state(),
             saved.message.as_ref(),
@@ -175,6 +190,8 @@ impl MusicaSession {
         self.movie = movie;
         self.scene = scene;
         self.message = saved.message;
+        self.translation_visible = saved.translation_visible;
+        self.translation_overlay = saved.translation_overlay;
         self.wait_ns = saved.wait_ns;
         self.phase = 0;
         self.input_pending = false;

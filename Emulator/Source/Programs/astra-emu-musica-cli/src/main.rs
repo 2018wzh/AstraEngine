@@ -7,12 +7,13 @@ use std::{
 
 use astra_core::Hash256;
 use astra_emu_musica::{
-    MAX_ENTRY_BYTES, MusicaAniArchive, MusicaSqzArchive, ScCensus, ScLineKind, ScOpcodeCatalog,
-    ScOperand, ScScript, mount_musica, parse_audio_resource_spec, parse_sc,
+    mount_musica, parse_audio_resource_spec, parse_sc, MusicaAniArchive, MusicaSqzArchive,
+    ScCensus, ScLineKind, ScOpcodeCatalog, ScOperand, ScScript, MAX_ENTRY_BYTES,
 };
 use clap::{Parser, Subcommand};
 use serde::Serialize;
 
+mod diagnostics;
 mod eden_save;
 mod inventory;
 mod private_output;
@@ -32,6 +33,11 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Read-only native resource inspection (no VM, audio or GPU).
+    Data {
+        #[command(subcommand)]
+        command: diagnostics::Diagnostic,
+    },
     /// Export an eligible core-owned slot into a new native eden save file.
     ExportEdenSave {
         #[arg(long)]
@@ -124,6 +130,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _observability = astra_observability::init_host(observability)?;
     let command = Cli::parse().command;
     let action = match &command {
+        Command::Data { .. } => "data",
         Command::ExportEdenSave { .. } => "export_eden_save",
         Command::CheckEdenRestore { .. } => "check_eden_restore",
         Command::InspectEdenSave { .. } => "inspect_eden_save",
@@ -137,6 +144,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     tracing::info!(event = "astra.emu.musica_cli.start", action);
     let result = match command {
+        Command::Data { command } => diagnostics::run(command),
         Command::ExportEdenSave {
             game_dir,
             profile,

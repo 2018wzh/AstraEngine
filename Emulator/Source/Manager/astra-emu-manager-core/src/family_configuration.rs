@@ -59,9 +59,44 @@ impl Library {
         }
         resolve_config(schema, values).map_err(LibraryError::FamilyConfiguration)?;
         let raw = serde_json::to_string(values).map_err(|_| LibraryError::Serialization)?;
-        self.connection.execute("INSERT INTO family_configuration(plugin_id, game_id, values_json) VALUES(?1, ?2, ?3) ON CONFLICT(plugin_id, game_id) DO UPDATE SET values_json=excluded.values_json", params![plugin_id, game_id, raw])?;
+        write_configuration(&self.connection, plugin_id, game_id, &raw)?;
         Ok(())
     }
+
+    /// Apply a converted output's emulator selection and typed profile as one
+    /// transaction. The caller must identify the output game by canonical path.
+    pub fn apply_patch_profile(
+        &mut self,
+        game_id: &str,
+        engine_id: &str,
+        emulator_id: &str,
+        schema: &[ConfigField],
+        values: &[ConfigEntry],
+    ) -> Result<(), LibraryError> {
+        let settings = self.prepare_game_emulator(game_id, engine_id, emulator_id)?;
+        resolve_config(schema, values).map_err(LibraryError::FamilyConfiguration)?;
+        let configuration =
+            serde_json::to_string(values).map_err(|_| LibraryError::Serialization)?;
+        let transaction = self.connection.transaction()?;
+        crate::library::write_game_emulator(&transaction, game_id, engine_id, &settings)?;
+        write_configuration(&transaction, emulator_id, game_id, &configuration)?;
+        transaction.commit()?;
+        Ok(())
+    }
+}
+
+fn write_configuration(
+    connection: &rusqlite::Connection,
+    plugin_id: &str,
+    game_id: &str,
+    values_json: &str,
+) -> Result<(), LibraryError> {
+    connection.execute(
+        "INSERT INTO family_configuration(plugin_id, game_id, values_json) VALUES(?1, ?2, ?3)
+         ON CONFLICT(plugin_id, game_id) DO UPDATE SET values_json=excluded.values_json",
+        params![plugin_id, game_id, values_json],
+    )?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -151,5 +186,151 @@ mod tests {
                 .unwrap(),
             vec![entry(0.5)]
         );
+    }
+
+    fn patch_fixture(library: &mut Library) -> Vec<ConfigField> {
+        for id in ["source", "output"] {
+            library
+                .add_game(&crate::GameRecord {
+                    game_id: id.into(),
+                    title: id.into(),
+                    user_title: None,
+                    location: format!("public-{id}"),
+                    family_id: Some("old.engine".into()),
+                    content_fingerprint: None,
+                    added_at_unix_ms: 1,
+                })
+                .unwrap();
+            library
+                .set_game_settings(
+                    id,
+                    &crate::GameSettings {
+                        emulator_id: Some("old.emulator".into()),
+                        input_mapping: Some(crate::default_vn_preset()),
+                    },
+                )
+                .unwrap();
+        }
+        vec![ConfigField {
+            id: "script_encoding".into(),
+            label: "Encoding".into(),
+            group: "Script".into(),
+            kind: ConfigKind::Enum {
+                choices: vec!["cp932".into(), "gbk".into()],
+            },
+            default: ConfigValue::Enum("cp932".into()),
+        }]
+    }
+
+    #[test]
+    fn patch_profile_changes_only_independent_output_and_survives_reopen() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("patch.sqlite");
+        let (source, source_settings, output_mapping, schema);
+        {
+            let mut library = Library::open(&path).unwrap();
+            schema = patch_fixture(&mut library);
+            source = library.game("source").unwrap();
+            source_settings = library.game_settings("source").unwrap();
+            output_mapping = library
+                .game_settings("output")
+                .unwrap()
+                .unwrap()
+                .input_mapping;
+            library
+                .apply_patch_profile(
+                    "output",
+                    "new.engine",
+                    "new.emulator",
+                    &schema,
+                    &[ConfigEntry {
+                        id: "script_encoding".into(),
+                        value: ConfigValue::Enum("gbk".into()),
+                    }],
+                )
+                .unwrap();
+        }
+        let library = Library::open(path).unwrap();
+        assert_eq!(library.game("source").unwrap(), source);
+        assert_eq!(library.game_settings("source").unwrap(), source_settings);
+        assert_eq!(
+            library
+                .game("output")
+                .unwrap()
+                .unwrap()
+                .family_id
+                .as_deref(),
+            Some("new.engine")
+        );
+        let settings = library.game_settings("output").unwrap().unwrap();
+        assert_eq!(settings.emulator_id.as_deref(), Some("new.emulator"));
+        assert_eq!(settings.input_mapping, output_mapping);
+        assert_eq!(
+            library
+                .family_configuration("new.emulator", "output", &schema)
+                .unwrap(),
+            [ConfigEntry {
+                id: "script_encoding".into(),
+                value: ConfigValue::Enum("gbk".into())
+            }]
+        );
+    }
+
+    #[test]
+    fn patch_profile_validation_and_last_sql_write_failure_roll_back_selection() {
+        let mut library = Library::in_memory().unwrap();
+        let schema = patch_fixture(&mut library);
+        let original = library.game("output").unwrap();
+        let settings = library.game_settings("output").unwrap();
+        for values in [
+            vec![ConfigEntry {
+                id: "unknown".into(),
+                value: ConfigValue::Bool(true),
+            }],
+            vec![ConfigEntry {
+                id: "script_encoding".into(),
+                value: ConfigValue::Enum("utf8".into()),
+            }],
+            vec![ConfigEntry {
+                id: "script_encoding".into(),
+                value: ConfigValue::Bool(true),
+            }],
+        ] {
+            assert!(library
+                .apply_patch_profile("output", "new.engine", "new.emulator", &schema, &values)
+                .is_err());
+            assert_eq!(library.game("output").unwrap(), original);
+            assert_eq!(library.game_settings("output").unwrap(), settings);
+        }
+        library
+            .connection
+            .execute_batch(
+                "CREATE TRIGGER reject_patch_config BEFORE INSERT ON family_configuration
+             BEGIN SELECT RAISE(ABORT, 'public fixture rejects final write'); END;",
+            )
+            .unwrap();
+        assert!(library
+            .apply_patch_profile(
+                "output",
+                "new.engine",
+                "new.emulator",
+                &schema,
+                &[ConfigEntry {
+                    id: "script_encoding".into(),
+                    value: ConfigValue::Enum("gbk".into())
+                }]
+            )
+            .is_err());
+        assert_eq!(library.game("output").unwrap(), original);
+        assert_eq!(library.game_settings("output").unwrap(), settings);
+        let count: i64 = library
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM family_configuration WHERE plugin_id='new.emulator'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0);
     }
 }

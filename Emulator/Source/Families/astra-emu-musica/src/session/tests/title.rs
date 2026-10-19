@@ -132,7 +132,7 @@ fn single_pixel_sqz() -> Vec<u8> {
 
 #[test]
 fn native_gpu_title_without_texture_overrides_starts_loads_returns_and_exits() {
-    let _lock = PROVIDER_SESSION.lock().unwrap();
+    let _lock = PROVIDER_SESSION.lock();
     let root = tempfile::tempdir().unwrap();
     game(root.path());
     omit_texture_overrides(root.path());
@@ -211,7 +211,7 @@ fn native_gpu_title_without_texture_overrides_starts_loads_returns_and_exits() {
 
 #[test]
 fn native_gpu_lowercase_title_without_texture_overrides_starts_and_enters_story() {
-    let _lock = PROVIDER_SESSION.lock().unwrap();
+    let _lock = PROVIDER_SESSION.lock();
     let root = tempfile::tempdir().unwrap();
     game_with_lowercase_title(root.path());
     omit_texture_overrides(root.path());
@@ -233,7 +233,7 @@ fn native_gpu_lowercase_title_without_texture_overrides_starts_and_enters_story(
 
 #[test]
 fn native_gpu_session_container_images_without_texture_overrides_render() {
-    let _lock = PROVIDER_SESSION.lock().unwrap();
+    let _lock = PROVIDER_SESSION.lock();
     for (name, payload) in [
         ("BG.ANI", single_pixel_ani()),
         ("BG.SQZ", single_pixel_sqz()),
@@ -260,7 +260,7 @@ fn native_gpu_session_container_images_without_texture_overrides_render() {
 
 #[test]
 fn native_gpu_title_config_returns_and_missing_art_fails_explicitly() {
-    let _lock = PROVIDER_SESSION.lock().unwrap();
+    let _lock = PROVIDER_SESSION.lock();
     let root = tempfile::tempdir().unwrap();
     game(root.path());
     let mut provider = fixture::provider();
@@ -281,11 +281,9 @@ fn native_gpu_title_config_returns_and_missing_art_fails_explicitly() {
     Box::new(session).close().unwrap();
     let missing = tempfile::tempdir().unwrap();
     fixture::game(missing.path(), b".end\r\n");
-    assert!(
-        provider
-            .open_session(title_request(missing.path()))
-            .is_err()
-    );
+    assert!(provider
+        .open_session(title_request(missing.path()))
+        .is_err());
     let opened = provider
         .open(request(missing.path(), Sink::default()))
         .unwrap();
@@ -294,7 +292,7 @@ fn native_gpu_title_config_returns_and_missing_art_fails_explicitly() {
 
 #[test]
 fn native_gpu_config_preferences_survive_session_load_without_restoring_slot_settings() {
-    let _lock = PROVIDER_SESSION.lock().unwrap();
+    let _lock = PROVIDER_SESSION.lock();
     let root = tempfile::tempdir().unwrap();
     fixture::game(root.path(), b".message 1   First\r\n.end\r\n");
     let mut provider = fixture::provider();

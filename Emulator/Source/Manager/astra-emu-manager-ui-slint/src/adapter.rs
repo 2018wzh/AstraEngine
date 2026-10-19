@@ -4,7 +4,7 @@ use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 
 use crate::{
     covers, notices, App, Appearance, AppearanceViewModel, BangumiProgress, BangumiViewModel,
-    CompatInfo, ConfigFieldViewModel, CoreInfo, Cores, EngineAction, Filters, GameCard,
+    CompatInfo, ConfigFieldViewModel, CoreInfo, Cores, EngineAction, FilePatch, Filters, GameCard,
     GamepadBinding, Library, ManagerViewModel, ManagerWindow, MatchReview, Notices, PlaySession,
     ReleaseOption, SelectedGame, Selection, Session, Settings, TranslationProfile,
 };
@@ -152,6 +152,21 @@ impl SlintManagerAdapter {
         self.apply_selection(model);
         self.apply_cores(model);
         self.apply_settings(model);
+        let patch = self.window.global::<FilePatch>();
+        patch.set_running(model.patch.running);
+        patch.set_can_start(model.patch.can_start);
+        patch.set_phase(model.patch.phase.as_str().into());
+        patch.set_completed(model.patch.completed.to_string().into());
+        patch.set_total(
+            model
+                .patch
+                .total
+                .map(|total| total.to_string())
+                .unwrap_or_default()
+                .into(),
+        );
+        patch.set_output(model.patch.output.as_str().into());
+        patch.set_error(model.patch.error.as_str().into());
         self.notices.set_model(model.notices.clone());
 
         let session = self.window.global::<Session>();

@@ -22,6 +22,11 @@ SDK 提供移植核心共同使用的模块，当前替代 Musica 内部的文�
 
 `StageCanvas` 只包装公共 `Canvas2D` 的逻辑舞台到 raster 输出映射；`TextureAsset` 将物理 `TextureFrame` 与显式 logical extent、logical origin 分开。Family 可以用原资源的逻辑几何承载不同密度的替换像素，SDK 不定义具体归档、命名或替换策略，也不创建第二套纹理缓存。
 
+`subtitle` 是可选的共享 ASS 消费路径：`subtitle` 模块导出 `astra-subtitle` 的借用帧、颜色和字体接口，`AssScene` 在调用线程持有原生 renderer。调用方提供实际媒体时间（微秒）、视频 storage 尺寸、实际 viewport 和原生转换的 SDR `VideoColorSpace`。`update` 只产生资源变更：libass 原生 0 不分配/上传，1 只更新位置/颜色，2 才复制有界 Alpha8 mask；mask 使用内容 revision，避免同一帧释放并重传相同资源 ID。`append_draws` 保留原生 run 顺序。轨道替换、seek generation 更换或结束前调用 `release_resources`；新轨道使用该 renderer 内独立 namespace，随后在同一线程销毁。没有 unsafe Send、系统字体替代、全视频帧复制或逐帧 Lua。
+
+`video-ffmpeg` 的 `VideoFramePacket.color` 描述实际 BGRA8 呈现转换。AVFrame 的已知 matrix/range 配置 swscale，随后从 `sws_getColorspaceDetails` 读取实际使用的系数和范围；无标签 WMV/AVI 沿用现有解码器的 SDR 呈现策略，不按 raster 尺寸猜矩阵，也不把输出 BGRA 误报为输入 RGB。显式 HDR/未支持标签仍保留拒绝状态，这不宣称恢复了未标记源的原始色彩意图。storage 与 viewport 分开传递。公开 `subtitle_scene` fixture 覆盖驻留、position-only、暂停、回退、销毁重建和带偏移 viewport。
+
+
 SDK 不创建 EngineSession、VN session、PlatformHost 或 package，不拥有游戏存档与归档语义。Musica 直接使用 AstraEngine 的 `WgpuOffscreenRenderer`，SDK 无需再包一层渲染 provider。
 
 ```sh

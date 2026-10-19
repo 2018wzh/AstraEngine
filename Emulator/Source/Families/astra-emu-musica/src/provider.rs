@@ -1,19 +1,18 @@
 use crate::{
-    MUSICA_KEY_FILE, MusicaVm, ScriptEncoding,
     audio::Audio,
-    profile::mount_musica_with_texture_overrides,
-    scene::{Scene, core_error, error},
+    profile::mount_musica_with_resources,
+    scene::{core_error, error, Scene},
     session::MusicaSession,
     storage::Storage,
+    MusicaVm, ScriptEncoding, MUSICA_KEY_FILE,
 };
 use abi_stable::std_types::ROption;
-use astra_core::Hash256;
 use astra_emu_family_api::*;
 use std::{
     path::{Component, Path},
     sync::{
-        Arc,
         atomic::{AtomicBool, Ordering},
+        Arc,
     },
 };
 mod eden;
@@ -73,6 +72,34 @@ pub(crate) fn musica_descriptor() -> FamilyDescriptor {
             "",
         ),
     ];
+    for (id, label) in [
+        ("scr_archive", "Script PAZ path (empty: scr.paz)"),
+        ("sys_archive", "System PAZ path (empty: sys.paz)"),
+        ("script_directory", "Loose script directory (game-relative)"),
+        (
+            "translation_table",
+            "Native translation table v2 (game-relative)",
+        ),
+        ("subtitle_map", "Movie subtitle map (game-relative)"),
+        ("font_path", "Font file (game-relative)"),
+    ] {
+        configuration.push(ConfigField {
+            id: id.into(),
+            label: label.into(),
+            group: "Files".into(),
+            kind: ConfigKind::String { max_bytes: 4096 },
+            default: ConfigValue::String("".into()),
+        });
+    }
+    configuration.push(ConfigField {
+        id: "translation_mode".into(),
+        label: "Translation display".into(),
+        group: "Presentation".into(),
+        kind: ConfigKind::Enum {
+            choices: vec!["replace".into(), "overlay".into()].into(),
+        },
+        default: ConfigValue::Enum("replace".into()),
+    });
     configuration.push(eden::edition_field());
     configuration.push(ConfigField {
         id: "launch_mode".into(),
@@ -128,6 +155,13 @@ pub(crate) fn musica_descriptor() -> FamilyDescriptor {
                 | "script_encoding"
                 | "eden_import_file"
                 | "eden_import_edition"
+                | "scr_archive"
+                | "sys_archive"
+                | "script_directory"
+                | "translation_table"
+                | "translation_mode"
+                | "subtitle_map"
+                | "font_path"
         ) {
             field.group = format!("Initial {} defaults", field.group).into();
         }
@@ -319,8 +353,35 @@ impl MusicaProvider {
         let visible = request.initial_window.visible;
         let lease = SessionLease::acquire()?;
         let root = Path::new(request.game_path.as_str());
+        let resources = crate::MusicaResourcePaths {
+            scr_archive: get("scr_archive")?,
+            sys_archive: get("sys_archive")?,
+            script_directory: get("script_directory")?,
+        };
         let (archive, texture_overrides) =
-            mount_musica_with_texture_overrides(root, Path::new(&profile)).map_err(core_error)?;
+            mount_musica_with_resources(root, Path::new(&profile), &resources)
+                .map_err(core_error)?;
+        let table_path = get("translation_table")?;
+        let translation_table = if table_path.is_empty() {
+            None
+        } else {
+            Some(Arc::new(
+                crate::MusicaTranslationTable::load(root, &table_path).map_err(core_error)?,
+            ))
+        };
+        let translation_mode = match config
+            .iter()
+            .find(|entry| entry.id == "translation_mode")
+            .map(|entry| &entry.value)
+        {
+            Some(ConfigValue::Enum(value)) if value == "replace" => crate::TranslationMode::Replace,
+            Some(ConfigValue::Enum(value)) if value == "overlay" => crate::TranslationMode::Overlay,
+            _ => return Err(error("ASTRA_EMU_MUSICA_CONFIG", "invalid translation mode")),
+        };
+        let configured_font =
+            crate::resources::load_font(root, &get("font_path")?).map_err(core_error)?;
+        let subtitle_catalog = crate::subtitles::SubtitleCatalog::load(root, &get("subtitle_map")?)
+            .map_err(core_error)?;
         if let Some(service) = &replacement {
             service.check_cancelled()?;
         }
@@ -373,12 +434,14 @@ impl MusicaProvider {
                 .map_err(|_| error("ASTRA_EMU_MUSICA_CONFIG", "auto delay is out of bounds"))?,
         )
         .map_err(|_| error("ASTRA_EMU_MUSICA_CONFIG", "auto delay is out of bounds"))?;
-        let game = Hash256::from_sha256(&serde_json::to_vec(archive.manifest()).map_err(|_| {
-            error(
-                "ASTRA_EMU_MUSICA_IDENTITY",
-                "archive identity cannot be encoded",
-            )
-        })?);
+        let game = crate::resources::game_identity(
+            &archive,
+            translation_table.as_ref().map(|table| table.identity()),
+            translation_mode,
+            configured_font.as_ref().map(|font| font.hash),
+            subtitle_catalog.as_ref().map(|catalog| catalog.identity()),
+        )
+        .map_err(core_error)?;
         let storage = Storage::new(root)?;
         let mut settings = vm.config().clone();
         [
@@ -435,6 +498,9 @@ impl MusicaProvider {
             texture_overrides,
             encoding,
         )?;
+        scene.set_configured_font(configured_font)?;
+        #[cfg(feature = "ffmpeg-vcpkg")]
+        scene.set_subtitle_catalog(subtitle_catalog);
         if let Some(service) = &replacement {
             service.check_cancelled()?;
         }
@@ -500,6 +566,7 @@ impl MusicaProvider {
             primary_encoding,
             quick_cursor,
         );
+        session.install_localization(translation_table, translation_mode);
         if let Some((text, speaker)) = restored_message {
             session.install_imported_message(text, speaker)?;
         }

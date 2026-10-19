@@ -96,6 +96,10 @@ impl AstraEmuManagerController {
             pointer_position: (0.0, 0.0),
             action_message: String::new(),
             action_serial: 0,
+            patch_job: None,
+            patch_import: None,
+            patch_state: Default::default(),
+            patch_sequence: 0,
         };
         Ok(controller)
     }

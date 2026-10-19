@@ -24,6 +24,11 @@ fn options(command: &ScCommand) -> Result<Vec<(String, String)>, MusicaRuntimeEr
         return Err(MusicaRuntimeError::Operand);
     };
     let tokens = command.tokens().map_err(|_| MusicaRuntimeError::Operand)?;
+    let tokens = if tokens.last().is_some_and(String::is_empty) {
+        &tokens[..tokens.len() - 1]
+    } else {
+        &tokens
+    };
     if command.opcode != "select"
         || !(1..=4).contains(&targets.len())
         || tokens.len() != targets.len()

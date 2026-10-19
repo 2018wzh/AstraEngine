@@ -5,10 +5,10 @@ use crate::{
     vm::{Execution, InputRecord, ScriptRecord},
     OutputProfile, PatchError, PatchErrorKind, PatchProgress,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     fs::File,
-    io::{self, Write},
+    io::{self, BufReader, Read, Write},
     sync::{atomic::AtomicBool, Arc},
 };
 
@@ -122,4 +122,67 @@ pub(crate) fn write(
     })?;
     writer.file.sync_all()?;
     check_cancelled(&cancelled)
+}
+
+struct CancelledReader<'a> {
+    file: File,
+    cancelled: &'a AtomicBool,
+}
+
+impl Read for CancelledReader<'_> {
+    fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+        if self.cancelled.load(std::sync::atomic::Ordering::Acquire) {
+            return Err(io::Error::other("receipt read cancelled"));
+        }
+        let length = bytes.len().min(astra_byte_source::AUDIT_CHUNK_BYTES);
+        self.file.read(&mut bytes[..length])
+    }
+}
+
+/// Read import metadata only; unknown receipt data is streamed past without
+/// retaining resource manifests or loading any of the referenced scripts.
+pub fn read_output_profile(
+    output: &std::path::Path,
+    cancelled: &AtomicBool,
+) -> Result<Option<OutputProfile>, PatchError> {
+    check_cancelled(cancelled)?;
+    if crate::is_staging_path(output) {
+        return Err(PatchError::new(
+            PatchErrorKind::InvalidRequest,
+            "staging is not a published output",
+        ));
+    }
+    let root = AuthorizedRoot::open(output)?;
+    if !root.exists(RECEIPT_FILE)? {
+        return Ok(None);
+    }
+    #[derive(Deserialize)]
+    struct ImportMetadata {
+        schema: String,
+        profile: OutputProfile,
+    }
+    let reader = BufReader::new(CancelledReader {
+        file: root.open_read(RECEIPT_FILE)?,
+        cancelled,
+    });
+    let metadata = serde_json::from_reader::<_, ImportMetadata>(reader);
+    check_cancelled(cancelled)?;
+    let metadata = metadata.map_err(|cause| {
+        let detail = io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("JSON line {}, column {}", cause.line(), cause.column()),
+        );
+        PatchError::with_source(
+            PatchErrorKind::InvalidRequest,
+            "invalid output receipt",
+            detail,
+        )
+    })?;
+    if metadata.schema != "astra.emu.file_patch.v1" {
+        return Err(PatchError::new(
+            PatchErrorKind::UnsupportedInput,
+            "unsupported output receipt schema",
+        ));
+    }
+    Ok(Some(metadata.profile))
 }

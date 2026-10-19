@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn manager_voice_preferences_keep_history_and_authored_voice_wait() {
-    let _session = PROVIDER_SESSION.lock().unwrap();
+    let _session = PROVIDER_SESSION.lock();
     let root = tempfile::tempdir().unwrap();
     fixture::game(root.path(), b".message 1 aya-missing.ogg speaker First\r\n.message 2 aya-tone.ogg speaker Second\\v\r\n.end\r\n");
     fixture::asset(root.path(), "voice", "aya-tone.ogg", &fixture::wave());
@@ -85,7 +85,7 @@ fn voice_preferences_are_typed_and_resolved_from_descriptor() {
 
 #[test]
 fn current_manager_preferences_override_saved_voice_playback() {
-    let _session = PROVIDER_SESSION.lock().unwrap();
+    let _session = PROVIDER_SESSION.lock();
     let root = tempfile::tempdir().unwrap();
     fixture::game(
         root.path(),
@@ -157,7 +157,7 @@ fn backlog_voice_preference_does_not_remove_history() {
 
 #[test]
 fn manager_bus_mute_is_applied_before_first_pcm_and_survives_restore() {
-    let _session = PROVIDER_SESSION.lock().unwrap();
+    let _session = PROVIDER_SESSION.lock();
     let root = tempfile::tempdir().unwrap();
     fixture::game(
         root.path(),

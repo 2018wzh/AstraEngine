@@ -246,6 +246,17 @@ impl AstraEmuManagerController {
                 core: String::new(),
             });
         }
+        if !self.patch_state.error.is_empty() {
+            let text = describe_error(&self.patch_state.error);
+            notices.push(NoticeViewModel {
+                id: format!("file-patch:{}", self.patch_sequence),
+                severity: "error".into(),
+                title: text.title,
+                detail: text.detail,
+                code: text.code,
+                core: String::new(),
+            });
+        }
         Ok(ManagerViewModel {
             library: LibraryViewModel {
                 games: cards,
@@ -254,8 +265,12 @@ impl AstraEmuManagerController {
                 compat_filter: self.compatibility_filter.clone(),
                 cores_ready: self.cores_ready(),
                 can_load_cores: self.core_refresh_enabled(),
-                busy: startup_busy,
-                status: self.startup_status(),
+                busy: startup_busy || self.patch_job.is_some(),
+                status: if self.patch_job.is_some() {
+                    "正在应用文件补丁；可继续浏览或在详情中取消。".into()
+                } else {
+                    self.startup_status()
+                },
                 selected_id: selected_id.clone().unwrap_or_default(),
             },
             selection: SelectionViewModel {
@@ -275,9 +290,12 @@ impl AstraEmuManagerController {
                     .and_then(|game| self.launch_candidate_for_game(game))
                     .map(|candidate| Self::emulator_label(&candidate.descriptor))
                     .unwrap_or_default(),
-                launchable: selected
-                    .as_ref()
-                    .is_some_and(|game| self.launch_candidate_for_game(game).is_some()),
+                launchable: selected.as_ref().is_some_and(|game| {
+                    !self.patch_busy()
+                        && !startup_busy
+                        && !astra_emu_patch::is_staging_path(Path::new(&game.location))
+                        && self.launch_candidate_for_game(game).is_some()
+                }),
                 problem: selected_problem,
                 play_time: selected_play_time,
                 last_played: selected_last_played,
@@ -414,10 +432,17 @@ impl AstraEmuManagerController {
                 action_message: self.action_message.clone(),
                 action_serial: self.action_serial,
             },
+            patch: self.patch_view(),
         })
     }
 
     fn game_problem(&self, game: &GameRecord, startup_busy: bool) -> String {
+        if astra_emu_patch::is_staging_path(Path::new(&game.location)) {
+            return "这是尚未发布的临时目录，不能启动".into();
+        }
+        if self.patch_busy() {
+            return "文件补丁转换或导入尚未结束，暂不能启动游戏".into();
+        }
         let launchable = self.launch_candidate_for_game(game).is_some();
         let selection_required = self.probe_choices.contains_key(&game.game_id) && !launchable;
         if launchable {

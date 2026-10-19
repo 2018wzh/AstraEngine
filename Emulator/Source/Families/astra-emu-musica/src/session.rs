@@ -47,6 +47,10 @@ pub(crate) struct MusicaSession {
     game: Hash256,
     _lease: SessionLease,
     message: Option<(String, Option<String>)>,
+    translation_table: Option<Arc<crate::MusicaTranslationTable>>,
+    translation_mode: crate::TranslationMode,
+    translation_visible: bool,
+    translation_overlay: Option<String>,
     phase: u128,
     wait_ns: u64,
     input_pending: bool,
@@ -118,6 +122,10 @@ impl MusicaSession {
             voice_duration: None,
             generation: 0,
             message: None,
+            translation_table: None,
+            translation_mode: crate::TranslationMode::Replace,
+            translation_visible: true,
+            translation_overlay: None,
             phase: 0,
             wait_ns: 0,
             input_pending: false,
@@ -260,6 +268,20 @@ impl MusicaSession {
                 continue;
             }
             match event {
+                FamilyEvent::Key {
+                    code: KeyCode::Tab,
+                    state: KeyState::Released,
+                    ..
+                } if self.translation_mode == crate::TranslationMode::Overlay
+                    && self.translation_table.is_some() =>
+                {
+                    self.translation_visible = !self.translation_visible;
+                    self.scene.set_translation_overlay(
+                        self.translation_overlay.clone(),
+                        self.translation_visible,
+                    );
+                    choice_dirty = true;
+                }
                 FamilyEvent::PointerMove { x, y } => {
                     self.pointer = Some((*x, *y));
                     if let Some((labels, _)) = self.vm.choice_display().map_err(vm_error)? {

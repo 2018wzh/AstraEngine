@@ -97,10 +97,16 @@ impl AstraEmuManagerController {
 
     pub(super) fn poll_platform(&mut self) -> Result<Option<ManagerViewModel>, String> {
         let background_changed = self.poll_background()?;
+        let patch_changed = self.poll_file_patch()?;
         let owner_changed = self.poll_owner()?;
         let connection_changed = self.poll_connection_test();
         let metadata_changed = self.poll_metadata()?;
-        if background_changed || owner_changed || metadata_changed || connection_changed {
+        if background_changed
+            || patch_changed
+            || owner_changed
+            || metadata_changed
+            || connection_changed
+        {
             Ok(Some(self.model()?))
         } else {
             Ok(None)

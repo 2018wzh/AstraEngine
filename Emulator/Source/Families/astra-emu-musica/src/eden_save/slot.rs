@@ -1,5 +1,4 @@
 use super::*;
-use astra_core::Hash256;
 use std::path::Path;
 
 /// Native checkpoint and its preview captured by the same core save operation.
@@ -23,8 +22,14 @@ pub fn export_slot(
     let state =
         crate::MusicaVm::decode_native_save(&saved.vm).map_err(|_| checkpoint::unsupported())?;
     let archive = crate::mount_musica(game_root, profile)?;
-    let identity = serde_json::to_vec(archive.manifest()).map_err(|_| checkpoint::unsupported())?;
-    if Hash256::from_sha256(&identity) != saved.game {
+    let identity = crate::resources::game_identity(
+        &archive,
+        None,
+        crate::TranslationMode::Replace,
+        None,
+        None,
+    )?;
+    if identity != saved.game {
         return Err(checkpoint::unsupported());
     }
     let loaded =

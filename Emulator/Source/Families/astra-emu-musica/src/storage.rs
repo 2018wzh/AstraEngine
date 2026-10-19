@@ -13,7 +13,7 @@ mod progress;
 mod quick;
 pub(crate) use card::SaveCard;
 
-const MAGIC: &[u8; 8] = b"AMUSSV05";
+const MAGIC: &[u8; 8] = b"AMUSSV06";
 const MAX_SAVE: usize = 16 * 1024 * 1024;
 pub(crate) const SAVE_PAGE_WIDTH: u32 = 10;
 pub(crate) const SAVE_PAGE_COUNT: u32 = 10;
@@ -26,6 +26,8 @@ pub(crate) struct Snapshot {
     pub game: Hash256,
     pub vm: Vec<u8>,
     pub message: Option<(String, Option<String>)>,
+    pub translation_visible: bool,
+    pub translation_overlay: Option<String>,
     pub wait_ns: u64,
     pub sounds: Vec<SoundSnapshot>,
 }

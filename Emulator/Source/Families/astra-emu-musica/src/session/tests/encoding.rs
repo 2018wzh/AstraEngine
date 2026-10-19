@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn native_gpu_gbk_script_guards_chain_choices_and_restore() {
-    let _session = PROVIDER_SESSION.lock().unwrap();
+    let _session = PROVIDER_SESSION.lock();
     let root = tempfile::tempdir().unwrap();
     let first = b"[j].message 1   Wrong\r\n[e].chain next.sc\r\n.end\r\n";
     let (next, _, errors) = encoding_rs::GBK.encode(
@@ -54,7 +54,7 @@ fn native_gpu_gbk_script_guards_chain_choices_and_restore() {
 
 #[test]
 fn native_gpu_mixed_encoding_chain_keeps_primary_and_restores_another_encoding() {
-    let _session = PROVIDER_SESSION.lock().unwrap();
+    let _session = PROVIDER_SESSION.lock();
     let root = tempfile::tempdir().unwrap();
     let (first, _, _) = encoding_rs::SHIFT_JIS
         .encode("[e].message 1   Wrong\r\n[j].message 2   ｱ\r\n.chain next.sc\r\n");

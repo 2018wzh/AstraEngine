@@ -59,6 +59,12 @@ impl Transaction {
             .unwrap_or_else(|| Path::new("."));
         let parent = Dir::open_ambient_dir(parent_path, ambient_authority())
             .map_err(|e| path_error("cannot open existing output parent", e))?;
+        if crate::is_staging_path(&final_dir_path(&parent)?.join(name)) {
+            return Err(PatchError::new(
+                PatchErrorKind::InvalidRequest,
+                "output uses the reserved private staging namespace",
+            ));
+        }
         ensure_missing(&parent, Path::new(name))?;
 
         let source_file = source.try_clone()?.into_std_file();
@@ -249,7 +255,8 @@ fn create_staging(parent: &Dir) -> io::Result<(OsString, Dir)> {
     for _ in 0..128 {
         let serial = NEXT.fetch_add(1, Ordering::Relaxed);
         let name = OsString::from(format!(
-            ".astra-patch-staging-{:x}-{time:x}-{serial:x}",
+            "{}{:x}-{time:x}-{serial:x}",
+            crate::STAGING_PREFIX,
             std::process::id()
         ));
         match create_private_directory(parent, Path::new(&name)) {

@@ -39,3 +39,10 @@ pub use texture::TextureCache;
 
 #[cfg(feature = "video-ffmpeg")]
 pub mod video;
+
+#[cfg(feature = "subtitle")]
+pub use astra_subtitle as subtitle;
+#[cfg(feature = "subtitle")]
+mod subtitle_scene;
+#[cfg(feature = "subtitle")]
+pub use subtitle_scene::AssScene;

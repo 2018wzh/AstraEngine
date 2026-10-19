@@ -10,13 +10,21 @@ mod voice_preferences;
 
 mod archive;
 mod image_container;
+mod localization;
 mod message;
+mod subtitles;
+pub use localization::{
+    musica_display_cstr_hash, musica_display_hash, MusicaTranslationTable, TranslationMode,
+};
 mod paz;
 mod profile;
+mod resources;
+pub use resources::MusicaResourcePaths;
 mod runtime;
 pub use message::*;
 mod script;
 mod script_loader;
+pub use script_loader::{read_expanded_script, validate_musica_script, ScriptValidation};
 mod text_renderer;
 
 pub use archive::*;
@@ -37,7 +45,7 @@ mod native;
 pub use native::musica_query;
 
 #[cfg(test)]
-pub(crate) use provider::{MusicaProvider, musica_descriptor};
+pub(crate) use provider::{musica_descriptor, MusicaProvider};
 
 #[cfg(test)]
 mod test_fixture;

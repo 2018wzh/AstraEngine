@@ -15,7 +15,7 @@ fn click(x: f32, y: f32) -> [FamilyEvent; 3] {
 }
 #[test]
 fn native_gpu_config_applies_cancels_persists_tests_audio_and_preserves_gameplay_wait() {
-    let _lock = PROVIDER_SESSION.lock().unwrap();
+    let _lock = PROVIDER_SESSION.lock();
     let root = tempfile::tempdir().unwrap();
     title::game(root.path());
     let mut provider = fixture::provider();
@@ -115,7 +115,7 @@ fn native_gpu_config_applies_cancels_persists_tests_audio_and_preserves_gameplay
 
 #[test]
 fn native_gpu_disabled_animation_keeps_scroll_waits_bounded_and_finishes_at_target() {
-    let _lock = PROVIDER_SESSION.lock().unwrap();
+    let _lock = PROVIDER_SESSION.lock();
     for command in ["hscroll 8 1", "scroll 8 4 1"] {
         let root = tempfile::tempdir().unwrap();
         fixture::game(
@@ -154,7 +154,7 @@ fn native_gpu_disabled_animation_keeps_scroll_waits_bounded_and_finishes_at_targ
 
 #[test]
 fn native_gpu_config_requests_fullscreen_once_and_restores_on_cold_start() {
-    let _lock = PROVIDER_SESSION.lock().unwrap();
+    let _lock = PROVIDER_SESSION.lock();
     let root = tempfile::tempdir().unwrap();
     title::game(root.path());
     let mut provider = fixture::provider();

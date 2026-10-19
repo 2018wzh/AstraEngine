@@ -4,7 +4,8 @@ use crate::CoreError;
 use astra_media::FfmpegPlaybackDecoder;
 pub use astra_media::{
     AudioFramePacket, DecodedMediaPacket, FfmpegAudioOutputFormat, FfmpegStreamLimits,
-    MediaPlaybackConfig, VideoFramePacket,
+    MediaPlaybackConfig, VideoColorMatrix, VideoColorMetadata, VideoColorRange, VideoColorTransfer,
+    VideoFramePacket,
 };
 mod pcm;
 pub use pcm::{PcmMixResult, PcmQueue};

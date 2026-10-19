@@ -15,6 +15,8 @@ const MAX_IMAGE_BYTES: usize = 128 * 1024 * 1024;
 
 mod character;
 mod gallery;
+#[cfg(feature = "ffmpeg-vcpkg")]
+mod movie;
 mod particles;
 pub(crate) mod save_pages;
 mod stage;
@@ -57,6 +59,10 @@ pub(crate) struct Scene {
     renderer: WgpuOffscreenRenderer,
     sequence: u64,
     text: MusicaTextRenderer,
+    overlay_text: Option<String>,
+    overlay_visible: bool,
+    overlay_renderer: Option<MusicaTextRenderer>,
+    configured_font: Option<Arc<astra_text::PackagedFont>>,
     textures: TextureCache,
     texture_residency: SceneTextureResidency,
     texture_sources: lru::LruCache<String, texture::TextureSourceGeometry>,
@@ -68,6 +74,8 @@ pub(crate) struct Scene {
     raster_width: u32,
     raster_height: u32,
     canvas: StageCanvas,
+    #[cfg(feature = "ffmpeg-vcpkg")]
+    movies: movie::MovieScene,
     pub pixels: Arc<[u8]>,
 }
 
@@ -171,6 +179,12 @@ impl Scene {
             archive,
             renderer,
             text,
+            overlay_text: None,
+            overlay_visible: true,
+            overlay_renderer: None,
+            configured_font: None,
+            #[cfg(feature = "ffmpeg-vcpkg")]
+            movies: Default::default(),
             sequence: 0,
             textures: TextureCache::new(NonZeroUsize::new(32).unwrap(), MAX_IMAGE_BYTES, 8192)
                 .map_err(|_| {
@@ -191,6 +205,34 @@ impl Scene {
             stand_offsets: lru::LruCache::new(NonZeroUsize::new(32).unwrap()),
             pixels: vec![0; pixel_bytes].into(),
         })
+    }
+
+    pub(crate) fn configured_font(&self) -> Option<Arc<astra_text::PackagedFont>> {
+        self.configured_font.clone()
+    }
+    pub(crate) fn set_configured_font(
+        &mut self,
+        font: Option<Arc<astra_text::PackagedFont>>,
+    ) -> FamilyResult<()> {
+        if font.is_some() {
+            let mut text = MusicaTextRenderer::with_font(self.text.encoding, font.clone())
+                .map_err(|_| {
+                    error(
+                        "ASTRA_EMU_MUSICA_FONT",
+                        "configured font renderer cannot be created",
+                    )
+                })?;
+            text.set_raster_scale(self.canvas.scale())
+                .map_err(|_| error("ASTRA_EMU_MUSICA_TEXT_SCALE", "invalid text raster scale"))?;
+            text.shadow = self.text.shadow;
+            self.text = text;
+        }
+        self.configured_font = font;
+        Ok(())
+    }
+    pub(crate) fn set_translation_overlay(&mut self, text: Option<String>, visible: bool) {
+        self.overlay_text = text;
+        self.overlay_visible = visible;
     }
     pub(crate) fn texture_overrides(&self) -> MusicaTextureOverrides {
         self.texture_overrides.clone()
@@ -416,8 +458,44 @@ impl Scene {
             )
             .map_err(|code| error(&code, "message could not be rendered"))?;
         self.append_text_commands(&mut commands, text_commands);
+        if self.overlay_text.is_some() || self.overlay_renderer.is_some() {
+            if self.overlay_renderer.is_none() {
+                let mut renderer =
+                    MusicaTextRenderer::with_font(self.text.encoding, self.configured_font.clone())
+                        .map_err(|_| {
+                            error(
+                                "ASTRA_EMU_MUSICA_FONT",
+                                "overlay font renderer cannot be created",
+                            )
+                        })?;
+                renderer
+                    .set_raster_scale(self.canvas.scale())
+                    .map_err(|_| {
+                        error(
+                            "ASTRA_EMU_MUSICA_TEXT_SCALE",
+                            "invalid overlay raster scale",
+                        )
+                    })?;
+                self.overlay_renderer = Some(renderer);
+            }
+            let overlay = self
+                .overlay_renderer
+                .as_mut()
+                .unwrap()
+                .overlay_commands(
+                    self.overlay_text.as_deref().filter(|_| {
+                        self.overlay_visible
+                            && choices.is_none()
+                            && state.system_ui.page == crate::MusicaSystemPage::None
+                    }),
+                    self.width,
+                )
+                .map_err(|code| error(&code, "translation overlay cannot be rendered"))?;
+            self.append_text_commands(&mut commands, overlay);
+        }
         self.submit(commands)
     }
+    #[cfg(not(feature = "ffmpeg-vcpkg"))]
     pub fn render_movie(&mut self, frame: TextureFrame) -> FamilyResult<()> {
         self.submit(vec![SceneCommand::Texture {
             id: "musica.movie".into(),
@@ -433,6 +511,8 @@ impl Scene {
         }])
     }
     fn submit(&mut self, mut commands: Vec<SceneCommand>) -> FamilyResult<()> {
+        #[cfg(feature = "ffmpeg-vcpkg")]
+        self.append_movie_mutations(&mut commands);
         let sequence = self
             .sequence
             .checked_add(1)
@@ -473,7 +553,13 @@ impl Scene {
                     code = ?cause.code,
                     "GPU scene composition failed"
                 );
-                error("ASTRA_EMU_MUSICA_RENDER", "GPU scene composition failed")
+                error(
+                    "ASTRA_EMU_MUSICA_RENDER",
+                    &format!(
+                        "GPU scene composition failed ({:?} during {})",
+                        cause.code, cause.operation
+                    ),
+                )
             })?
             .rgba8;
         self.sequence = sequence;

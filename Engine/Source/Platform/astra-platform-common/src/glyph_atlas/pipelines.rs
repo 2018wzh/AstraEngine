@@ -78,7 +78,7 @@ pub(crate) fn create_blend_pipeline_set(
     target_format: wgpu::TextureFormat,
     compositing: &str,
 ) -> BlendPipelineSet {
-    let pipeline = |blend: wgpu::BlendState, blend_name: &str| {
+    let pipeline = |blend: wgpu::BlendState, blend_name: &str, fragment: &str| {
         let label = format!("astra-glyph-atlas-{compositing}-{blend_name}-pipeline");
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some(&label),
@@ -95,7 +95,7 @@ pub(crate) fn create_blend_pipeline_set(
             },
             fragment: Some(wgpu::FragmentState {
                 module: shader,
-                entry_point: Some("fs_main"),
+                entry_point: Some(fragment),
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: target_format,
@@ -111,8 +111,12 @@ pub(crate) fn create_blend_pipeline_set(
         })
     };
     BlendPipelineSet {
-        alpha: pipeline(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING, "alpha"),
-        opaque: pipeline(wgpu::BlendState::REPLACE, "opaque"),
+        alpha: pipeline(
+            wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING,
+            "alpha",
+            "fs_main",
+        ),
+        opaque: pipeline(wgpu::BlendState::REPLACE, "opaque", "fs_opaque"),
         add: pipeline(
             wgpu::BlendState {
                 color: wgpu::BlendComponent {
@@ -123,6 +127,7 @@ pub(crate) fn create_blend_pipeline_set(
                 alpha: wgpu::BlendComponent::OVER,
             },
             "add",
+            "fs_main",
         ),
         multiply: pipeline(
             wgpu::BlendState {
@@ -134,6 +139,7 @@ pub(crate) fn create_blend_pipeline_set(
                 alpha: wgpu::BlendComponent::OVER,
             },
             "multiply",
+            "fs_main",
         ),
         screen: pipeline(
             wgpu::BlendState {
@@ -145,6 +151,7 @@ pub(crate) fn create_blend_pipeline_set(
                 alpha: wgpu::BlendComponent::OVER,
             },
             "screen",
+            "fs_main",
         ),
     }
 }
@@ -187,14 +194,22 @@ struct VertexOutput {
     output.pixel_mask = input.pixel_mask;
     return output;
 }
-@fragment fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
+fn masked_sample(input: VertexOutput) -> vec4<f32> {
     let sample = textureSample(atlas, atlas_sampler, input.uv);
     let pixel = vec2<u32>(input.position.xy) % vec2<u32>(8u);
     let bit = 63u - (pixel.y * 8u + pixel.x);
     if ((input.pixel_mask[bit / 32u] >> (bit % 32u)) & 1u) == 0u {
         discard;
     }
+    return sample;
+}
+@fragment fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
+    let sample = masked_sample(input);
     let alpha = sample.a * input.color.a;
     return vec4<f32>(sample.rgb * input.color.rgb * sample.a, alpha);
+}
+@fragment fn fs_opaque(input: VertexOutput) -> @location(0) vec4<f32> {
+    let sample = masked_sample(input);
+    return vec4<f32>(sample.rgb * input.color.rgb, sample.a * input.color.a);
 }
 "#;

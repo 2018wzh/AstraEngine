@@ -63,6 +63,9 @@ impl AstraEmuManagerController {
     }
 
     pub(super) fn begin_scan(&mut self, kind: ScanKind, paths: Vec<PathBuf>) -> Result<(), String> {
+        if self.patch_job.is_some() {
+            return Err("ASTRA_EMU_PATCH_INVALID_REQUEST: 文件补丁转换期间不能扫描游戏".into());
+        }
         if self.startup_busy() {
             return Err("ASTRA_EMU_FAMILY_INITIALIZING".into());
         }
@@ -113,10 +116,53 @@ impl AstraEmuManagerController {
 
     fn background_failed(&mut self, error: String) {
         self.diagnostic.clone_from(&error);
+        self.diagnostic_severity = "error";
+        if self.patch_import.take().is_some() {
+            self.patch_import_failed(error.clone());
+        }
         self.startup_state = StartupState::Failed(error);
     }
 
-    fn apply_scan_report(&mut self, kind: ScanKind, report: ScanReport) -> Result<(), String> {
+    fn apply_scan_report(&mut self, kind: ScanKind, mut report: ScanReport) -> Result<(), String> {
+        let automatic = if kind == ScanKind::Import {
+            self.patch_import.take()
+        } else {
+            None
+        };
+        let result = (|| {
+            if let Some(expected) = &automatic {
+                let output = fs::canonicalize(&expected.output)
+                    .map_err(|_| "ASTRA_EMU_PATCH_PATH: completed output is no longer available")?;
+                // Never apply an automatic result to a nested/other game, nor
+                // let unrelated missing library paths mutate the source cache.
+                report.games.retain(|game| game.path == output);
+                if report.games.len() != 1 {
+                    return Err(
+                        "ASTRA_EMU_FAMILY_PROBE_REQUIRED: completed output root was not recognized"
+                            .into(),
+                    );
+                }
+                report.missing = 0;
+            }
+            self.apply_scan_report_inner(kind, report, automatic.as_ref())
+        })();
+        if automatic.is_some() {
+            match result {
+                Ok(()) => self.patch_import_succeeded(),
+                Err(error) => self.patch_import_failed(error),
+            }
+            Ok(())
+        } else {
+            result
+        }
+    }
+
+    fn apply_scan_report_inner(
+        &mut self,
+        kind: ScanKind,
+        report: ScanReport,
+        automatic: Option<&file_patch::PendingImport>,
+    ) -> Result<(), String> {
         tracing::info!(
             event = "astra.emu.manager.probe_refresh",
             games = report.games.len(),
@@ -129,7 +175,30 @@ impl AstraEmuManagerController {
         let mut imported = BTreeSet::new();
         for result in report.games {
             let mut ids = result.game_ids;
+            let profile = if kind == ScanKind::Import {
+                result.patch_profile.transpose()?
+            } else {
+                None
+            };
+            if let Some(expected) = automatic {
+                let profile = profile
+                    .as_ref()
+                    .ok_or("ASTRA_EMU_PATCH_INTEGRITY: completed output receipt is missing")?;
+                if expected.profile.plugin_id != profile.plugin_id
+                    || expected.profile.configuration != profile.configuration
+                {
+                    return Err(
+                        "ASTRA_EMU_PATCH_INTEGRITY: output receipt changed before import".into(),
+                    );
+                }
+            }
+            if profile.is_some() && ids.len() > 1 {
+                return Err("ASTRA_EMU_LIBRARY_INVALID_LOCATION: patch output has ambiguous library aliases".into());
+            }
             if result.candidates.is_empty() {
+                if profile.is_some() {
+                    return Err("ASTRA_EMU_EMULATOR_SELECTION_INVALID: patch output has no supported emulator".into());
+                }
                 for id in ids {
                     self.clear_probe_state(&id)?;
                 }
@@ -151,12 +220,22 @@ impl AstraEmuManagerController {
                     .map_err(|error| error.to_string())?;
                 ids.push(game.game_id);
             }
+            let mut choices = result.candidates;
             for id in ids {
-                self.set_probe_candidates(&id, result.candidates.clone())?;
+                if automatic.is_some_and(|expected| expected.source_game_id == id) {
+                    return Err(
+                        "ASTRA_EMU_PATCH_INTEGRITY: output import would modify source game".into(),
+                    );
+                }
+                if let Some(profile) = &profile {
+                    self.apply_import_profile(&id, std::mem::take(&mut choices), profile)?;
+                } else {
+                    self.set_probe_candidates(&id, choices.clone())?;
+                }
                 imported.insert(id);
             }
         }
-        if kind == ScanKind::Import {
+        if kind == ScanKind::Import && automatic.is_none() {
             if let Some(id) = imported.first() {
                 self.family_options.clear();
                 self.load_game_input_mapping(id)?;
@@ -174,7 +253,7 @@ impl AstraEmuManagerController {
             );
             self.diagnostic_severity = "warning";
         }
-        if self.selected_case_id.is_none() {
+        if self.selected_case_id.is_none() && automatic.is_none() {
             self.selected_case_id = self
                 .library
                 .list_games()

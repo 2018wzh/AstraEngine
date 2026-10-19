@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn native_gpu_auto_play_waits_restores_and_pauses_in_backlog() {
-    let _session = PROVIDER_SESSION.lock().unwrap();
+    let _session = PROVIDER_SESSION.lock();
     let root = tempfile::tempdir().unwrap();
     fixture::game(
         root.path(),
@@ -65,7 +65,7 @@ fn native_gpu_auto_play_waits_restores_and_pauses_in_backlog() {
 
 #[test]
 fn native_gpu_background_preference_gates_clocks_and_preserves_explicit_suspend() {
-    let _session = PROVIDER_SESSION.lock().unwrap();
+    let _session = PROVIDER_SESSION.lock();
     for background in [false, true] {
         let root = tempfile::tempdir().unwrap();
         fixture::game(root.path(), b".playbgm tone.ogg\r\n.wait 1000\r\n.end\r\n");
@@ -140,7 +140,7 @@ fn native_gpu_background_preference_gates_clocks_and_preserves_explicit_suspend(
 
 #[test]
 fn native_gpu_initial_unfocused_window_obeys_background_preference() {
-    let _session = PROVIDER_SESSION.lock().unwrap();
+    let _session = PROVIDER_SESSION.lock();
     for background in [false, true] {
         let root = tempfile::tempdir().unwrap();
         fixture::game(root.path(), b".wait 1000\r\n.end\r\n");
@@ -163,7 +163,7 @@ fn native_gpu_initial_unfocused_window_obeys_background_preference() {
 
 #[test]
 fn native_gpu_visibility_event_reaches_title_and_pauses_playback() {
-    let _session = PROVIDER_SESSION.lock().unwrap();
+    let _session = PROVIDER_SESSION.lock();
     for title_launch in [true, false] {
         let root = tempfile::tempdir().unwrap();
         let req = if title_launch {
@@ -200,7 +200,7 @@ fn native_gpu_visibility_event_reaches_title_and_pauses_playback() {
 
 #[test]
 fn native_gpu_lifecycle_precedes_elapsed_guard_and_drops_paused_wall_time() {
-    let _session = PROVIDER_SESSION.lock().unwrap();
+    let _session = PROVIDER_SESSION.lock();
     for (pause, resume) in [
         (
             FamilyEvent::WindowFocused { focused: false },
@@ -243,7 +243,7 @@ fn native_gpu_lifecycle_precedes_elapsed_guard_and_drops_paused_wall_time() {
 
 #[test]
 fn native_gpu_background_focus_remains_active_but_keeps_elapsed_guard() {
-    let _session = PROVIDER_SESSION.lock().unwrap();
+    let _session = PROVIDER_SESSION.lock();
     let root = tempfile::tempdir().unwrap();
     fixture::game(root.path(), b".wait 1000\r\n.end\r\n");
     let mut req = request(root.path(), Sink::default());
@@ -271,7 +271,7 @@ fn native_gpu_background_focus_remains_active_but_keeps_elapsed_guard() {
 
 #[test]
 fn native_gpu_active_elapsed_remains_bounded() {
-    let _session = PROVIDER_SESSION.lock().unwrap();
+    let _session = PROVIDER_SESSION.lock();
     let root = tempfile::tempdir().unwrap();
     fixture::game(root.path(), b".wait 1000\r\n.end\r\n");
     let request = request(root.path(), Sink::default());
@@ -283,7 +283,7 @@ fn native_gpu_active_elapsed_remains_bounded() {
 
 #[test]
 fn native_gpu_text_shadow_uses_current_manager_setting_after_load() {
-    let _session = PROVIDER_SESSION.lock().unwrap();
+    let _session = PROVIDER_SESSION.lock();
     let root = tempfile::tempdir().unwrap();
     fixture::game(
         root.path(),
@@ -336,7 +336,7 @@ fn native_gpu_text_shadow_uses_current_manager_setting_after_load() {
 
 #[test]
 fn native_gpu_manual_slots_restore_independent_story_positions() {
-    let _session = PROVIDER_SESSION.lock().unwrap();
+    let _session = PROVIDER_SESSION.lock();
     let root = tempfile::tempdir().unwrap();
     fixture::game(
         root.path(),

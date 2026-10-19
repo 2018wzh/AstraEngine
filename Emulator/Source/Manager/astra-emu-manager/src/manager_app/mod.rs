@@ -10,14 +10,14 @@ use std::{
 
 use astra_emu_manager::modal_service::ModalBridge;
 #[cfg(not(target_os = "android"))]
-use astra_emu_manager::{HostExit, HostWake, ManagerController, run_manager_with_initial_state};
+use astra_emu_manager::{run_manager_with_initial_state, HostExit, HostWake, ManagerController};
 use astra_emu_manager_core::model::{
     FamilyEvent, FamilyStatus, KeyCode, KeyModifiers, KeyState, ProbeRequest, WindowState,
 };
 use astra_emu_manager_core::{
-    FamilyPluginDescriptor, FamilyProbeCandidate, FamilyProbeSelection, FamilyProviderRegistry,
-    GameRecord, GamepadDeadzone, GamepadInput, Library, NativeOpenRequest, NativeSession,
-    PlaySessionEndReason, default_vn_preset, input_key_code as key_code,
+    default_vn_preset, input_key_code as key_code, FamilyPluginDescriptor, FamilyProbeCandidate,
+    FamilyProbeSelection, FamilyProviderRegistry, GameRecord, GamepadDeadzone, GamepadInput,
+    Library, NativeOpenRequest, NativeSession, PlaySessionEndReason,
 };
 use astra_emu_manager_ui_slint::{
     AppearanceViewModel, ConfigFieldViewModel, GamepadBindingViewModel, InputConfigViewModel,
@@ -25,8 +25,8 @@ use astra_emu_manager_ui_slint::{
 };
 use astra_emu_metadata::{
     BangumiPlayStatus, BangumiPlayUpdate, CompatibilityDatabase, CompatibilityEntry,
-    CompatibilityFetch, CoverAsset, DEFAULT_COMPATIBILITY_SOURCE_URL, MetadataProviderId,
-    MetadataRecord, MetadataSearchQuery,
+    CompatibilityFetch, CoverAsset, MetadataProviderId, MetadataRecord, MetadataSearchQuery,
+    DEFAULT_COMPATIBILITY_SOURCE_URL,
 };
 use astra_emu_translation_openai_compatible::{
     SecretResolver, TranslationEndpointKind, TranslationProfile, TranslationProtocol,
@@ -44,6 +44,7 @@ mod controller;
 mod cores;
 mod extensions;
 mod family_config;
+mod file_patch;
 mod filters;
 mod input;
 mod library;
@@ -127,10 +128,20 @@ struct AstraEmuManagerController {
     pointer_position: (f32, f32),
     action_message: String,
     action_serial: u32,
+    patch_job: Option<file_patch::PatchJob>,
+    patch_import: Option<file_patch::PendingImport>,
+    patch_state: astra_emu_manager_ui_slint::PatchViewModel,
+    patch_sequence: u64,
 }
 
 impl Drop for AstraEmuManagerController {
     fn drop(&mut self) {
+        if let Some(mut job) = self.patch_job.take() {
+            job.cancel();
+            if let Err(error) = job.join() {
+                tracing::error!(event = "astra.emu.manager.patch_shutdown_failed", diagnostic_code = %error);
+            }
+        }
         if let Err(error) = self.close_active(PlaySessionEndReason::Shutdown) {
             tracing::error!(event = "astra.emu.manager.shutdown_failed", diagnostic_code = %error);
         }
@@ -186,11 +197,8 @@ pub(super) fn run_application() -> Result<(), Box<dyn std::error::Error>> {
         let mailbox = FrameMailbox::new();
         let controller = AstraEmuManagerController::open(mailbox.clone())?;
         astra_emu_manager::startup::mark("cached_controller_ready");
-        let exit = run_manager_with_initial_state(
-            controller,
-            ManagerStageRenderer::new(mailbox),
-            false,
-        )?;
+        let exit =
+            run_manager_with_initial_state(controller, ManagerStageRenderer::new(mailbox), false)?;
         if matches!(exit, HostExit::Restart) {
             std::process::Command::new(std::env::current_exe()?)
                 .args(std::env::args_os().skip(1))

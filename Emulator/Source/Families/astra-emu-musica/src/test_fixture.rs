@@ -1,9 +1,9 @@
 use crate::{
-    MUSICA_KEY_FILE, MUSICA_KEY_SCHEMA, MusicaArchiveKey, MusicaKeyFile, REQUIRED_ARCHIVE_ROLES,
+    MusicaArchiveKey, MusicaKeyFile, MUSICA_KEY_FILE, MUSICA_KEY_SCHEMA, REQUIRED_ARCHIVE_ROLES,
 };
 use blowfish::{
-    Blowfish,
     cipher::{BlockCipherEncrypt, KeyInit},
+    Blowfish,
 };
 use std::{collections::BTreeMap, io::Cursor, path::Path};
 const KEY: &[u8] = b"public-fixture-key";

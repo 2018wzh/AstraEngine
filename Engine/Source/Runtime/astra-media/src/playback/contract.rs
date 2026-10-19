@@ -54,6 +54,43 @@ pub enum MediaPlaybackState {
     Cancelled,
 }
 
+/// Color used by the native BGRA8 presentation conversion, never inferred from raster size.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
+pub struct VideoColorMetadata {
+    pub matrix: VideoColorMatrix,
+    pub range: VideoColorRange,
+    pub transfer: VideoColorTransfer,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum VideoColorMatrix {
+    #[default]
+    Unknown,
+    Rgb,
+    Bt601,
+    Bt709,
+    Smpte240m,
+    Fcc,
+    Unsupported,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum VideoColorRange {
+    #[default]
+    Unknown,
+    Limited,
+    Full,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum VideoColorTransfer {
+    #[default]
+    Unknown,
+    Sdr,
+    Hdr,
+    Unsupported,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct VideoFramePacket {
     pub generation: u64,
@@ -63,6 +100,7 @@ pub struct VideoFramePacket {
     pub duration_us: u64,
     pub width: u32,
     pub height: u32,
+    pub color: VideoColorMetadata,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

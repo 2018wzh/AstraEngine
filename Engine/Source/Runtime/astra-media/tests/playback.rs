@@ -12,6 +12,7 @@ fn video(generation: u64, sequence: u64, pts_us: u64) -> VideoFramePacket {
         duration_us: 40_000,
         width: 320,
         height: 180,
+        color: Default::default(),
     }
 }
 

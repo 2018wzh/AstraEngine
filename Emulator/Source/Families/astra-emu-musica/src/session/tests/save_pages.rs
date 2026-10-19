@@ -50,7 +50,7 @@ fn click(x: f32, y: f32) -> [FamilyEvent; 2] {
 }
 #[test]
 fn native_gpu_save_pages_navigate_save_and_restore_gameplay() {
-    let _lock = PROVIDER_SESSION.lock().unwrap();
+    let _lock = PROVIDER_SESSION.lock();
     let root = tempfile::tempdir().unwrap();
     game(root.path());
     let mut provider = fixture::provider();
@@ -116,7 +116,7 @@ fn native_gpu_save_pages_navigate_save_and_restore_gameplay() {
 
 #[test]
 fn native_gpu_save_page_rejects_corrupt_cards_without_overwriting() {
-    let _lock = PROVIDER_SESSION.lock().unwrap();
+    let _lock = PROVIDER_SESSION.lock();
     let root = tempfile::tempdir().unwrap();
     game(root.path());
     let folder = root.path().join(".astra-musica/saves");
@@ -135,7 +135,7 @@ fn native_gpu_save_page_rejects_corrupt_cards_without_overwriting() {
 
 #[test]
 fn native_gpu_quick_save_rotates_skips_same_line_and_survives_restart() {
-    let _lock = PROVIDER_SESSION.lock().unwrap();
+    let _lock = PROVIDER_SESSION.lock();
     let root = tempfile::tempdir().unwrap();
     let script = (0..14)
         .map(|i| format!(".message {}   Line{}\r\n", i + 1, i))

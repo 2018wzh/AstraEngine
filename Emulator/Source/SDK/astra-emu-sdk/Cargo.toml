@@ -6,6 +6,7 @@ license.workspace = true
 
 [features]
 video-ffmpeg = ["dep:astra-media", "astra-media/ffmpeg-vcpkg", "dep:tempfile"]
+subtitle = ["dep:astra-subtitle"]
 audio = ["dep:kira", "dep:symphonia"]
 device-audio = ["dep:rubato"]
 default = ["text", "image", "archive", "cache"]
@@ -17,6 +18,7 @@ image = ["dep:image", "dep:lru"]
 [dependencies]
 tracing.workspace = true
 astra-media = { path = "../../../../Engine/Source/Runtime/astra-media", optional = true }
+astra-subtitle = { path = "../../../../Engine/Source/Runtime/astra-subtitle", optional = true }
 kira = { workspace = true, optional = true }
 symphonia = { workspace = true, optional = true }
 rubato = { workspace = true, optional = true }
@@ -53,3 +55,7 @@ required-features = ["video-ffmpeg"]
 [[test]]
 name = "video_pcm"
 required-features = ["video-ffmpeg"]
+
+[[test]]
+name = "subtitle_scene"
+required-features = ["subtitle"]

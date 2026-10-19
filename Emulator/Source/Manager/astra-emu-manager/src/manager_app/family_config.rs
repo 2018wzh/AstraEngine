@@ -165,14 +165,40 @@ fn save_config_draft(
     let mut entries = library
         .family_configuration(plugin, scope, schema)
         .map_err(|error| error.to_string())?;
-    for (field, entry) in schema.iter().zip(&mut entries) {
-        if let Some(raw) = drafts.get(&format!("config.{}", field.id)) {
-            entry.value = parse_config_value(field, raw)?;
-        }
+    let changes = parse_config_entries(
+        schema,
+        drafts
+            .iter()
+            .filter_map(|(key, value)| key.strip_prefix("config.").map(|id| (id, value.as_str()))),
+    )?;
+    for change in changes {
+        let entry = entries
+            .iter_mut()
+            .find(|entry| entry.id == change.id)
+            .ok_or("ASTRA_EMU_FAMILY_CONFIG: unknown field")?;
+        entry.value = change.value;
     }
     library
         .save_family_configuration(plugin, scope, schema, &entries)
         .map_err(|error| error.to_string())
+}
+
+pub(super) fn parse_config_entries<'a>(
+    schema: &[ConfigField],
+    values: impl IntoIterator<Item = (&'a str, &'a str)>,
+) -> Result<Vec<ConfigEntry>, String> {
+    let mut entries = Vec::new();
+    for (id, raw) in values {
+        let field = schema
+            .iter()
+            .find(|field| field.id == id)
+            .ok_or_else(|| format!("ASTRA_EMU_FAMILY_CONFIG: {id}: unknown field"))?;
+        entries.push(ConfigEntry {
+            id: field.id.clone(),
+            value: parse_config_value(field, raw)?,
+        });
+    }
+    Ok(entries)
 }
 
 // Only known native descriptor conventions expose R. A width/height pair is

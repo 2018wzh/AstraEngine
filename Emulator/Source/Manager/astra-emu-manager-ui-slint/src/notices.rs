@@ -125,6 +125,7 @@ fn fallback_title(code: &str) -> &'static str {
         "METADATA" | "VNDB" | "BANGUMI" => "作品资料服务出错",
         "COMPATIBILITY" => "兼容性数据出错",
         "FILTER" | "EFFECT" | "DXC" => "画面滤镜出错",
+        "PATCH" => "文件补丁处理失败",
         "INPUT" | "GAMEPAD" => "输入设备出错",
         "LIBRARY" | "GAME" | "CASE" | "SEARCH" | "DATA" | "EXECUTABLE" => "游戏库出错",
         "AUDIO" => "声音输出出错",

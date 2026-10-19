@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
-    MUSICA_KEY_FILE, MusicaVm, ScOpcodeCatalog, mount_musica, parse_sc,
-    profile::mount_musica_with_texture_overrides,
+    mount_musica, parse_sc, profile::mount_musica_with_texture_overrides, MusicaVm,
+    ScOpcodeCatalog, MUSICA_KEY_FILE,
 };
 use astra_core::Hash256;
 use std::io::{Cursor, Write};
@@ -438,4 +438,44 @@ fn native_container_allocation_respects_scene_budget() {
         );
     }
     validate_dimensions(8192, 4096).unwrap();
+}
+
+#[test]
+#[ignore = "requires a hardware GPU"]
+fn stage_base_background_copies_rgb_while_transparent_foreground_remains_transparent() {
+    let root = tempfile::tempdir().unwrap();
+    let source = b".stage FG.png BG.png 0 0\r\n.end\r\n";
+    crate::test_fixture::game(root.path(), source);
+    let background = png(16, 16, [224, 96, 32, 0]);
+    let foreground = png(1, 1, [32, 224, 96, 0]);
+    crate::test_fixture::assets(
+        root.path(),
+        "bg",
+        &[("BG.png", &background), ("FG.png", &foreground)],
+    );
+    let archive =
+        Arc::new(mount_musica(root.path(), std::path::Path::new(MUSICA_KEY_FILE)).unwrap());
+    let mut vm = MusicaVm::new(
+        "musica:/scr/test.sc".into(),
+        Hash256::from_sha256(source),
+        parse_sc(source, &ScOpcodeCatalog::observed_musica()).unwrap(),
+        1,
+    )
+    .unwrap();
+    vm.step(1).unwrap();
+    let mut scene = Scene::new(
+        crate::test_fixture::gpu_instance(),
+        archive,
+        16,
+        16,
+        crate::ScriptEncoding::ShiftJis,
+    )
+    .unwrap();
+    scene.render(vm.state(), None, None).unwrap();
+    for (x, y) in [(0, 0), (8, 8)] {
+        assert_eq!(
+            &sample_logical(&scene.pixels, 16, 16, x, y)[..3],
+            &[224, 96, 32]
+        );
+    }
 }

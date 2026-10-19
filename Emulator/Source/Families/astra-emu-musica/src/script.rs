@@ -393,6 +393,12 @@ fn validate_cfg(lines: &[ScLine]) -> Result<(), ScParseError> {
         }
     }
     for command in commands(lines) {
+        // Native CommandGoto accepts a script-local name even when absent.
+        // Its executor leaves the already-advanced PC unchanged on lookup miss.
+        // Conditional branches and choices retain their own strict contracts.
+        if command.opcode == "goto" {
+            continue;
+        }
         let targets: Vec<&String> = match &command.control_flow {
             ScControlFlow::Jump { target } | ScControlFlow::ConditionalJump { target } => {
                 vec![target]

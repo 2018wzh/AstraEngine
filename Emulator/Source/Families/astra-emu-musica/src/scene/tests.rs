@@ -1,5 +1,5 @@
 use super::*;
-use crate::{MUSICA_KEY_FILE, MusicaVm, ScOpcodeCatalog, mount_musica, parse_sc};
+use crate::{mount_musica, parse_sc, MusicaVm, ScOpcodeCatalog, MUSICA_KEY_FILE};
 use astra_core::Hash256;
 
 #[test]
@@ -323,14 +323,12 @@ fn scrollxf_gpu_crops_translates_and_accepts_empty_extent() {
     assert_eq!(scene.pixels, cropped);
     vm.step(3).unwrap();
     scene.render(vm.state(), None, None).unwrap();
-    assert!(
-        scene
-            .pixels
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .all(|pixel| pixel == &[0, 0, 0, 255])
-    );
+    assert!(scene
+        .pixels
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .all(|pixel| pixel == &[0, 0, 0, 255]));
 }
 
 #[test]
@@ -550,25 +548,21 @@ fn moving_shared_asset_reuses_gpu_pixels_and_reappears_after_release() {
         }
     }
     scene.submit(Vec::new()).unwrap();
-    assert!(
-        scene
-            .pixels
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .all(|pixel| *pixel == [0, 0, 0, 255])
-    );
+    assert!(scene
+        .pixels
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .all(|pixel| *pixel == [0, 0, 0, 255]));
     let mut commands = Vec::new();
     scene
         .layer(&mut commands, "musica:/bg/BG.png", 0, 0, 1.0)
         .unwrap();
     scene.submit(commands).unwrap();
-    assert!(
-        scene
-            .pixels
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .all(|pixel| *pixel == [255, 0, 0, 255])
-    );
+    assert!(scene
+        .pixels
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .all(|pixel| *pixel == [255, 0, 0, 255]));
 }

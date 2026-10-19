@@ -18,6 +18,54 @@ fn select_preserves_source_and_resolves_each_display_label_pair() {
 }
 
 #[test]
+fn select_terminal_separator_preserves_three_choices_and_runtime_transition() {
+    let source = b".select first:a second:b third:c \r\n.label a\r\n.end\r\n.label b\r\n.end\r\n.label c\r\n.end\r\n";
+    let script = parse_sc(source, &ScOpcodeCatalog::observed_musica()).unwrap();
+    assert_eq!(encode_sc(&script).unwrap(), source);
+    let mut vm = crate::MusicaVm::new(
+        "musica:/scr/public.sc".into(),
+        astra_core::Hash256::from_sha256(source),
+        script,
+        1,
+    )
+    .unwrap();
+    vm.step(1).unwrap();
+    assert_eq!(
+        vm.choice_display().unwrap(),
+        Some((vec!["first".into(), "second".into(), "third".into()], 0))
+    );
+    vm.focus_choice(2).unwrap();
+    assert_eq!(vm.choice_display().unwrap().unwrap().1, 2);
+    vm.commit_choice().unwrap();
+    assert!(vm.choice_display().unwrap().is_none());
+}
+
+#[test]
+fn native_alternate_stage_marker_keeps_source_and_executes_base_layer() {
+    let source = b"@stage * public.png 2 3\r\n.end\r\n";
+    let script = parse_sc(source, &ScOpcodeCatalog::observed_musica()).unwrap();
+    assert_eq!(encode_sc(&script).unwrap(), source);
+    let mut vm = crate::MusicaVm::new(
+        "musica:/scr/public.sc".into(),
+        astra_core::Hash256::from_sha256(source),
+        script,
+        1,
+    )
+    .unwrap();
+    vm.step(1).unwrap();
+    let background = vm
+        .state()
+        .stage
+        .as_ref()
+        .unwrap()
+        .background
+        .as_ref()
+        .unwrap();
+    assert_eq!(background.resource_uri, "musica:/bg/public.png");
+    assert_eq!([background.x, background.y], [2, 3]);
+}
+
+#[test]
 fn select_rejects_missing_labels_empty_options_and_excess_options() {
     for source in [
         ".select first:missing\r\n.end\r\n",
@@ -46,11 +94,33 @@ fn observed_cp932_source_round_trips_losslessly() {
 fn textual_cfg_is_validated() {
     let source = b".label start\r\n.if flag == 1 done\r\n.goto start\r\n.label done\r\n.end\r\n";
     parse_sc(source, &ScOpcodeCatalog::observed_musica()).unwrap();
-    let invalid = b".goto missing\r\n.end\r\n";
+    let invalid = b".if flag == 1 missing\r\n.end\r\n";
     assert_eq!(
         parse_sc(invalid, &ScOpcodeCatalog::observed_musica()).unwrap_err(),
         ScParseError::InvalidTarget("missing".into())
     );
+}
+
+#[test]
+fn absent_goto_is_native_script_local_fallthrough_not_a_filtered_command() {
+    let bytes = b".goto absent\r\n.message 1   Reached\r\n.end\r\n";
+    let script = parse_sc(bytes, &ScOpcodeCatalog::observed_musica()).unwrap();
+    assert_eq!(encode_sc(&script).unwrap(), bytes);
+    let mut vm = crate::MusicaVm::new(
+        "musica:/scr/public.sc".into(),
+        astra_core::Hash256::from_sha256(bytes),
+        script,
+        0,
+    )
+    .unwrap();
+    assert!(
+        matches!(vm.step(1).unwrap(), Some(crate::MusicaVmEvent::Message { text, .. }) if text == "Reached")
+    );
+    assert!(parse_sc(
+        b".select Text:absent\r\n.end\r\n",
+        &ScOpcodeCatalog::observed_musica()
+    )
+    .is_err());
 }
 
 #[test]

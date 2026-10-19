@@ -377,6 +377,21 @@ impl Library {
         Ok(())
     }
 
+    pub(crate) fn prepare_game_emulator(
+        &self,
+        game_id: &str,
+        engine_id: &str,
+        emulator_id: &str,
+    ) -> Result<String, LibraryError> {
+        validate_id(game_id)?;
+        validate_id(engine_id)?;
+        validate_id(emulator_id)?;
+        let mut settings = self.game_settings(game_id)?.unwrap_or_default();
+        settings.emulator_id = Some(emulator_id.to_owned());
+        settings.validate().map_err(|_| LibraryError::Settings)?;
+        serde_json::to_string(&settings).map_err(|_| LibraryError::Serialization)
+    }
+
     /// Bind the detected engine and selected emulator atomically, retaining other overrides.
     pub fn select_game_emulator(
         &mut self,
@@ -384,29 +399,33 @@ impl Library {
         engine_id: &str,
         emulator_id: &str,
     ) -> Result<(), LibraryError> {
-        validate_id(game_id)?;
-        validate_id(engine_id)?;
-        validate_id(emulator_id)?;
-        let mut settings = self.game_settings(game_id)?.unwrap_or_default();
-        settings.emulator_id = Some(emulator_id.to_owned());
-        settings.validate().map_err(|_| LibraryError::Settings)?;
-        let encoded = serde_json::to_string(&settings).map_err(|_| LibraryError::Serialization)?;
+        let encoded = self.prepare_game_emulator(game_id, engine_id, emulator_id)?;
         let transaction = self.connection.transaction()?;
-        if transaction.execute(
-            "UPDATE library_game SET family_id=?2 WHERE game_id=?1",
-            params![game_id, engine_id],
-        )? == 0
-        {
-            return Err(LibraryError::GameNotFound);
-        }
-        transaction.execute(
-            "INSERT INTO game_settings(game_id, settings_json) VALUES(?1, ?2)
-             ON CONFLICT(game_id) DO UPDATE SET settings_json=excluded.settings_json",
-            params![game_id, encoded],
-        )?;
+        write_game_emulator(&transaction, game_id, engine_id, &encoded)?;
         transaction.commit()?;
         Ok(())
     }
+}
+
+pub(crate) fn write_game_emulator(
+    transaction: &rusqlite::Transaction<'_>,
+    game_id: &str,
+    engine_id: &str,
+    encoded: &str,
+) -> Result<(), LibraryError> {
+    if transaction.execute(
+        "UPDATE library_game SET family_id=?2 WHERE game_id=?1",
+        params![game_id, engine_id],
+    )? == 0
+    {
+        return Err(LibraryError::GameNotFound);
+    }
+    transaction.execute(
+        "INSERT INTO game_settings(game_id, settings_json) VALUES(?1, ?2)
+         ON CONFLICT(game_id) DO UPDATE SET settings_json=excluded.settings_json",
+        params![game_id, encoded],
+    )?;
+    Ok(())
 }
 
 fn game_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<GameRecord> {

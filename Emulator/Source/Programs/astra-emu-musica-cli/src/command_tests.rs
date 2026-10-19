@@ -52,3 +52,45 @@ fn converters_require_missing_algorithm_metadata_explicitly() {
         }
     ));
 }
+
+#[test]
+fn native_data_diagnostics_require_explicit_encoding_and_bounded_private_output() {
+    let prefix = [
+        "astra-emu-musica-cli",
+        "data",
+        "validate",
+        "--game-dir",
+        "public",
+        "--profile",
+        "key.toml",
+    ];
+    assert!(Cli::try_parse_from(prefix).is_err());
+    let mut args = prefix.to_vec();
+    args.extend([
+        "--encoding",
+        "gbk",
+        "--scr-archive",
+        "cnscr.paz",
+        "--script-directory",
+        "scripts",
+    ]);
+    assert!(Cli::try_parse_from(args).is_ok());
+    let read = [
+        "astra-emu-musica-cli",
+        "data",
+        "read",
+        "--game-dir",
+        "public",
+        "--profile",
+        "key.toml",
+        "--uri",
+        "musica:/scr/public.sc",
+        "--offset",
+        "0",
+        "--length",
+        "16777217",
+        "--output",
+        "private.bin",
+    ];
+    assert!(Cli::try_parse_from(read).is_err());
+}

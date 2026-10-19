@@ -10,7 +10,7 @@ doctest = false
 
 [features]
 default = []
-ffmpeg-vcpkg = ["astra-emu-sdk/video-ffmpeg"]
+ffmpeg-vcpkg = ["astra-emu-sdk/video-ffmpeg", "astra-emu-sdk/subtitle"]
 dynamic-plugin-export = []
 
 [dependencies]
@@ -30,6 +30,7 @@ blowfish.workspace = true
 crc32fast = "1.5"
 encoding_rs.workspace = true
 flate2.workspace = true
+fontdb.workspace = true
 image.workspace = true
 lru.workspace = true
 png = "=0.18.1"

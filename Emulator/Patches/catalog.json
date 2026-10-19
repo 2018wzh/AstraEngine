@@ -1,0 +1,22 @@
+[
+  {
+    "id": "musica-eden-cn",
+    "title": "eden 中文姓名资源",
+    "script": "musica-eden-cn.luau"
+  },
+  {
+    "id": "musica-ef-first-cn",
+    "title": "ef first 中文姓名资源",
+    "script": "musica-ef-first-cn.luau"
+  },
+  {
+    "id": "fvp-sakura-cn",
+    "title": "樱花萌放旧补丁离线转换",
+    "script": "fvp-sakura-cn.luau"
+  },
+  {
+    "id": "musica-perseus-cn",
+    "title": "夏空的英仙座旧补丁离线转换",
+    "script": "musica-perseus-cn.luau"
+  }
+]

@@ -19,7 +19,7 @@ const MAX_TEXTURE_OVERRIDE_URI_BYTES: usize = 512;
 const MAX_TEXTURE_OVERRIDE_PATH_BYTES: usize = 512;
 const MAX_TEXTURE_OVERRIDE_BYTES: u64 = 64 * 1024 * 1024;
 
-pub(crate) type MusicaTextureOverrides = BTreeMap<String, PathBuf>;
+pub type MusicaTextureOverrides = BTreeMap<String, PathBuf>;
 
 /// Local-private keys. Never log this value or persist it in a public report.
 #[derive(Clone, Serialize, Deserialize)]
@@ -134,6 +134,19 @@ pub(crate) fn mount_musica_with_texture_overrides(
     game_root: &Path,
     profile_path: &Path,
 ) -> Result<(MusicaMountedVfs, MusicaTextureOverrides), CoreError> {
+    mount_musica_with_resources(
+        game_root,
+        profile_path,
+        &crate::MusicaResourcePaths::default(),
+    )
+}
+
+/// Mount standard PAZ readers with explicit physical script/system aliases.
+pub fn mount_musica_with_resources(
+    game_root: &Path,
+    profile_path: &Path,
+    resources: &crate::MusicaResourcePaths,
+) -> Result<(MusicaMountedVfs, MusicaTextureOverrides), CoreError> {
     let (bytes, hash, root) =
         astra_emu_sdk::read_configured_profile_bytes(game_root, profile_path, MAX_KEY_BYTES)
             .map_err(configured_key_error)?;
@@ -141,17 +154,31 @@ pub(crate) fn mount_musica_with_texture_overrides(
     let texture_overrides = key.resolve_texture_overrides(&root)?;
     let configs = REQUIRED_ARCHIVE_ROLES
         .iter()
-        .map(|role| PazArchiveConfig {
-            role: (*role).into(),
-            path: root.join(format!("{role}.paz")),
-            game_root: root.clone(),
-            version: key.paz_version,
-            index_size_xor: key.index_size_xor,
+        .map(|role| {
+            let alias = match *role {
+                "scr" => resources.scr_archive.as_str(),
+                "sys" => resources.sys_archive.as_str(),
+                _ => "",
+            };
+            let path = if alias.is_empty() {
+                root.join(format!("{role}.paz"))
+            } else {
+                crate::resources::resource_file(&root, alias)?
+            };
+            Ok(PazArchiveConfig {
+                role: (*role).into(),
+                path,
+                game_root: root.clone(),
+                version: key.paz_version,
+                index_size_xor: key.index_size_xor,
+            })
         })
-        .collect();
+        .collect::<Result<Vec<_>, CoreError>>()?;
     let decrypt = MusicaPazDecryptProvider::new(hash, key.into_schemes())?;
-    MusicaMountedVfs::mount("musica.local", "musica:/", configs, Arc::new(decrypt), hash)
-        .map(|archive| (archive, texture_overrides))
+    let mut archive =
+        MusicaMountedVfs::mount("musica.local", "musica:/", configs, Arc::new(decrypt), hash)?;
+    archive.set_script_directory(&root, &resources.script_directory)?;
+    Ok((archive, texture_overrides))
 }
 
 impl MusicaKeyFile {

@@ -3,7 +3,7 @@ use crate::{runtime::gallery, MusicaSystemPage as Page};
 
 #[test]
 fn native_gpu_gallery_pages_music_and_script_return_share_session_lifecycle() {
-    let _lock = PROVIDER_SESSION.lock().unwrap();
+    let _lock = PROVIDER_SESSION.lock();
     let root = tempfile::tempdir().unwrap();
     title::game(root.path());
     let mut assets = Vec::new();

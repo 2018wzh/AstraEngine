@@ -111,7 +111,7 @@ Manager 使用 Slint 与精炼 Material 3，保留游戏库、核心配置和管
 
 VM 内存上限 256MiB，文件读范围复用 `ByteRange` 的 16MiB 上限，单个原生编解码块上限 64MiB；原生解析器还按实际 scratch 分配预检。保留普通 Luau 与 GC、显式进度和取消，不设整任务时间/指令预算或总输出配额。长原生复制、hash、codec 与加密循环检查同一个取消标志；纯 Lua 循环由 VM interrupt 中断。
 
-宿主仅提供 source/patch 只读文件与枚举、staging 普通文件操作、入口目录内的模块加载，以及有界 codec/hash/encoding/crypto/JSON/TOML/BMP/PNG 原语；没有任意绝对路径、进程、网络或 FFI 入口。zlib 和 aPLib 必须满足声明长度、EOF 与 back-reference 边界；旧密码算法仅用于离线格式兼容，不作为安全验证。错误保留稳定 `ASTRA_EMU_PATCH_*` 类别、脚本相对文件/行号及可跨线程持有的原因链，不记录资源正文或密钥。
+宿主仅提供 source/patch 只读文件与枚举、staging 普通文件操作、入口目录内的模块加载，以及有界 codec/hash/encoding/crypto/JSON/TOML/BMP/PNG 原语；没有任意绝对路径、进程、网络或 FFI 入口。zlib 和 aPLib 必须满足声明长度、EOF 与 back-reference 边界。`codec.inflate` 仍拒绝尾随输入；必要旧容器可使用 `codec.inflate_prefix`，取得完整成员及精确消耗长度，再按容器规则检查有界对齐填充，不能把短流或长度不符当作成功。旧密码算法仅用于离线格式兼容，不作为安全验证。错误保留稳定 `ASTRA_EMU_PATCH_*` 类别、脚本相对文件/行号及可跨线程持有的原因链，不记录资源正文或密钥。
 
 完成前关闭输出句柄，校验脚本返回的 `OutputProfile`，生成 `astra-patch-result.json` 收据，再发布目录。收据 schema 为 `astra.emu.file_patch.v1`，记录 recipe id/version、入口及已加载模块和读取输入的 SHA256、所有成品文件的大小/SHA256及 typed 配置；只用相对路径，不含绝对输入路径、正文、密钥或原库 ID，也不包含收据自身。收据用于重现和显式导入，不做自动缓存命中、跳过转换或执行所引用的脚本。
 
@@ -120,6 +120,9 @@ VM 内存上限 256MiB，文件读范围复用 `ByteRange` 的 16MiB 上限，�
 `astra-subtitle` 是独立的 owner-thread 原生组件，固定 libass 0.17.4，不依赖 Luau、SDK 或游戏核心。Windows 使用独立 vcpkg manifest 和 `x64-windows-static-md`；`ASTRA_SUBTITLE_VCPKG_ROOT` 指向该安装，不更改既有 FFmpeg 根目录。只加载调用方提供的内存字体，禁用系统字体和默认字体回退；实际缺字、缺字体及原生失败返回安全的类别和阶段，不输出字幕正文。
 
 调用方传入实际媒体毫秒时钟、视频存储尺寸和显示 raster，暂停、跳转、替换与结束由媒体生命周期控制。帧借用有序 bitmap runs，区分内容变化、仅位置变化和未变化；mask 及描述符复用，不能跨下一次 render 保留借用。ASS 的矩阵声明与实际视频 SDR 矩阵/range 共同决定颜色，不按分辨率猜测；窗口 letterbox、裁剪和 HDR 策略由消费者显式处理。该组件不复制整张游戏帧，也不逐帧执行脚本。
+
+视频颜色描述实际呈现转换：FFmpeg 的已知源标签配置 swscale，无标签旧媒体从 `sws_getColorspaceDetails` 取得实际使用的矩阵/范围，沿用既有 BGRA8 SDR 呈现策略；不以输出尺寸猜测，也不宣称恢复未标记源的原始色彩意图。显式 HDR/未支持标签仍拒绝。SDK mask 内容 revision、核心轨道 serial 和视频双槽资源 ID 遵守单帧资源变更约束；所有消费者复用同一 native 媒体时钟。
+
 
 ### 共享实现与核心迁移
 

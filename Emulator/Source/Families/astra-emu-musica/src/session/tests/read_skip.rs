@@ -1,7 +1,7 @@
 use super::*;
 #[test]
 fn native_gpu_read_skip_stops_on_unread_and_restores_mode() {
-    let _session = PROVIDER_SESSION.lock().unwrap();
+    let _session = PROVIDER_SESSION.lock();
     let root = tempfile::tempdir().unwrap();
     fixture::game(
         root.path(),
@@ -42,7 +42,7 @@ fn native_gpu_read_skip_stops_on_unread_and_restores_mode() {
 
 #[test]
 fn native_gpu_gallery_progress_survives_old_slot_and_cold_restart() {
-    let _session = PROVIDER_SESSION.lock().unwrap();
+    let _session = PROVIDER_SESSION.lock();
     let root = tempfile::tempdir().unwrap();
     fixture::game(root.path(), b".message 1  speaker Before\r\n.setglobal REN_CLEAR = 1\r\n.message 2  speaker After\r\n.end\r\n");
     let mut provider = fixture::provider();

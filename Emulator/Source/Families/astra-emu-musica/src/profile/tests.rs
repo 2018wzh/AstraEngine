@@ -90,13 +90,12 @@ fn canonical_toml_defaults_only_optional_maps_and_options() {
     }
     let key = parse_key_file(toml::to_string_pretty(&table).unwrap().as_bytes()).unwrap();
     assert!(key.texture_overrides.is_empty());
-    assert!(
-        key.archive_keys
-            .values()
-            .all(|role| role.type_passwords.is_empty()
-                && role.archive_xor.is_none()
-                && role.video_key_hex.is_none())
-    );
+    assert!(key
+        .archive_keys
+        .values()
+        .all(|role| role.type_passwords.is_empty()
+            && role.archive_xor.is_none()
+            && role.video_key_hex.is_none()));
 }
 
 #[test]

@@ -77,6 +77,17 @@ impl ManagerController for AstraEmuManagerController {
     fn add_game_directory(&mut self, path: &Path) -> Result<ManagerViewModel, String> {
         AstraEmuManagerController::add_game_directory(self, path)
     }
+    fn start_file_patch(
+        &mut self,
+        script: &Path,
+        patch: &Path,
+        output: &Path,
+    ) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::start_file_patch(self, script, patch, output)
+    }
+    fn cancel_file_patch(&mut self) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::cancel_file_patch(self)
+    }
     fn test_translation_connection(&mut self) -> Result<ManagerViewModel, String> {
         AstraEmuManagerController::test_translation_connection(self)
     }

@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn native_gpu_wscroll2_family_input_restores_and_suspends_the_animation() {
-    let _session = PROVIDER_SESSION.lock().unwrap();
+    let _session = PROVIDER_SESSION.lock();
     let root = tempfile::tempdir().unwrap();
     fixture::game(root.path(), b".stage BG.png BG.png 0 0\r\n.effect WScroll2 sync:walk.txt 60 -8\r\n.wait 1000\r\n.effect end\r\n.end\r\n");
     let mut png = std::io::Cursor::new(Vec::new());

@@ -362,9 +362,111 @@ pub struct MusicaMountedVfs {
     entries: BTreeMap<String, MountedEntry>,
     decrypt_provider: Arc<MusicaPazDecryptProvider>,
     cache: Option<PlaintextCache>,
+    pub(crate) loose_scripts: BTreeMap<String, (PathBuf, String)>,
 }
 
 impl MusicaMountedVfs {
+    pub fn script_uris(&self) -> Vec<String> {
+        let mut names: BTreeMap<String, String> = self
+            .manifest
+            .entries
+            .iter()
+            .filter(|entry| {
+                entry.uri.starts_with("musica:/scr/")
+                    && entry.uri.to_ascii_lowercase().ends_with(".sc")
+            })
+            .map(|entry| (entry.uri.to_ascii_lowercase(), entry.uri.clone()))
+            .collect();
+        for uri in self.loose_scripts.keys() {
+            names.insert(uri.to_ascii_lowercase(), uri.clone());
+        }
+        names.into_values().collect()
+    }
+
+    pub(crate) fn set_script_directory(
+        &mut self,
+        root: &Path,
+        directory: &str,
+    ) -> Result<(), PazError> {
+        if directory.is_empty() {
+            return Ok(());
+        }
+        crate::resources::relative_resource(directory)?;
+        let root = root.canonicalize().map_err(|_| {
+            error(
+                "ASTRA_EMU_MUSICA_RESOURCE_PATH",
+                "game directory cannot be resolved",
+            )
+        })?;
+        let path = root.join(directory).canonicalize().map_err(|_| {
+            error(
+                "ASTRA_EMU_MUSICA_RESOURCE_PATH",
+                "script directory cannot be resolved",
+            )
+        })?;
+        if !path.starts_with(&root) || !path.is_dir() {
+            return Err(error(
+                "ASTRA_EMU_MUSICA_RESOURCE_PATH",
+                "script directory must remain inside the game directory",
+            ));
+        }
+        for entry in std::fs::read_dir(path).map_err(|_| {
+            error(
+                "ASTRA_EMU_MUSICA_RESOURCE_READ",
+                "script directory cannot be read",
+            )
+        })? {
+            let entry = entry.map_err(|_| {
+                error(
+                    "ASTRA_EMU_MUSICA_RESOURCE_READ",
+                    "script entry cannot be read",
+                )
+            })?;
+            let name = entry.file_name().into_string().map_err(|_| {
+                error(
+                    "ASTRA_EMU_MUSICA_RESOURCE_PATH",
+                    "script filename is not Unicode",
+                )
+            })?;
+            if !name.to_ascii_lowercase().ends_with(".sc") {
+                continue;
+            }
+            let relative = format!("{directory}/{name}");
+            crate::resources::resource_file(&root, &relative)?;
+            let uri = format!("musica:/scr/{name}");
+            if self
+                .loose_scripts
+                .keys()
+                .any(|key| key.eq_ignore_ascii_case(&uri))
+            {
+                return Err(error(
+                    "ASTRA_EMU_MUSICA_SCRIPT_AMBIGUOUS",
+                    "loose script names collide under native case rules",
+                ));
+            }
+            self.loose_scripts.insert(uri, (root.clone(), relative));
+        }
+        Ok(())
+    }
+
+    /// Stable save identity includes actual loose source bytes, not just PAZ metadata.
+    pub fn script_source_identity(&self) -> Result<Hash256, PazError> {
+        let mut hash = Sha256::new();
+        for (uri, (root, relative)) in &self.loose_scripts {
+            hash.update((uri.len() as u64).to_le_bytes());
+            hash.update(uri.as_bytes());
+            hash.update(
+                Hash256::from_sha256(&crate::resources::read_resource(
+                    root,
+                    relative,
+                    16 * 1024 * 1024,
+                )?)
+                .as_bytes(),
+            );
+        }
+        Ok(Hash256::from_bytes(hash.finalize().into()))
+    }
+
     pub fn mount(
         mount_id: impl Into<String>,
         prefix: impl Into<String>,
@@ -530,6 +632,7 @@ impl MusicaMountedVfs {
             entries,
             decrypt_provider,
             cache,
+            loose_scripts: BTreeMap::new(),
         })
     }
 
@@ -640,6 +743,11 @@ impl MusicaMountedVfs {
     }
     pub fn manifest(&self) -> &ArchiveManifest {
         &self.manifest
+    }
+
+    /// Physical reader metadata for explicit offline inspection; no payload read.
+    pub fn entry_descriptor(&self, uri: &str) -> Result<&ArchiveEntryDescriptor, PazError> {
+        Ok(&self.entry(uri)?.descriptor)
     }
 
     pub fn read_dir(&self, uri: &str) -> Result<Vec<ArchiveNode>, PazError> {
@@ -779,17 +887,6 @@ fn validate_role_set(configs: &[PazArchiveConfig]) -> Result<(), PazError> {
             return Err(error(
                 "ASTRA_EMU_MUSICA_ARCHIVE_ROLE",
                 "archive role is unknown or duplicated",
-            ));
-        }
-        let expected = format!("{}.paz", config.role);
-        if !config
-            .path
-            .file_name()
-            .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case(&expected))
-        {
-            return Err(error(
-                "ASTRA_EMU_MUSICA_ARCHIVE_NAME",
-                "archive file name does not match its declared role",
             ));
         }
     }

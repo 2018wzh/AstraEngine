@@ -6,8 +6,9 @@
 - 原生生命周期修复为 `7e2016a0e0ef1c0b102185914cc7a8459bb2c9e1`；原生音频 worker 所有权接入为 `3359d8fbea3c53d6d262a9f71b6d4d79888c2368`，与适配分开。
 - 原始适配为 `02b66d779f7c4ff6da5f4bc82d935a1088a834e0`；CPU 路径的 ABI 2 硬件验证增量为 [`40fe7c7b11a5c830303c33a975b1f4f7af333837`](https://github.com/2018wzh/rfvp/commit/40fe7c7b11a5c830303c33a975b1f4f7af333837)。Windows GPU 增量从兼容 flate2 提交 `3700dc093424d5948c39cd237d34a79ee0d33913` 继续，保留已发布历史。
 - C ABI 2 固定共享实现 `3c7762ad533c8641af51b8aff81794dc377e23a9`，D3D12 extension 单独使用 v1。`SessionState.flags=0`；RFVP 无 module-owner 扩展，OpenRequest 的该字段须为 null。包元数据沿用现有 `hosted_fork_*` 字段记录来源，不代表保留 Hosted 运行链。
-- 当前单适配提交为 `478448ed9d60778f78d5de911fa5717c48cb201c`，已发布到 fork 的 `astra`，直接父提交为通用基线 `3359d8fbea3c53d6d262a9f71b6d4d79888c2368`。完整源码 tree 与 Release 构建使用的 `ac13a9ee80b495b02734808b92a7223aba06cc1c` 相同；生产读档 epoch/错误传播修复保留，自动验收驱动已移除。本轮临时分支已清理，强推切换由用户明确批准，旧引用备份在本地 Git bundle。
+- 历史单适配提交为 `478448ed9d60778f78d5de911fa5717c48cb201c`，直接父提交为通用基线 `3359d8fbea3c53d6d262a9f71b6d4d79888c2368`；它与当时 Release 源码 `ac13a9ee80b495b02734808b92a7223aba06cc1c` 的 tree 相同。当前公开 `astra` 与主仓 gitlink 为 [`ea8b5964fd5b6cde8186eff6a5da1607a3eb6a41`](https://github.com/2018wzh/rfvp/commit/ea8b5964fd5b6cde8186eff6a5da1607a3eb6a41)，包含原生原偏移翻译表及 ASS 消费路径；旧 tree 等价记录不代表当前构建源码。生产读档 epoch/错误传播修复保留，旧自动验收驱动已移除。
 - Kira 运行层保持 0.10.8，固定 [`d2f10db15d9c451c7b2fd33043ae7732e75bee5d`](https://github.com/2018wzh/kira/commit/d2f10db15d9c451c7b2fd33043ae7732e75bee5d)；设备回归记录增量为 `bb64ffe37f1fa46e7e55c011e102ab28e344fbd3`，不改 mixer 运行实现。独立 workspace 的 CPAL 0.15.3 仍固定 `65ac8a6ac1a635cc26bfc5af331295b052044908`；主仓统一 patch 的 ALSA 0.11 兼容版本 `ecfda841a9140d60bbec1630d47ca91f1a77b8f3` 由主线程验证。
+- 原生 `rfvp` 的 `astra-subtitle` 依赖与独立 `Cargo.lock` 均固定 `2018wzh/AstraEngine@c27ac6e107328170deecac428bba7472d3ce2d6c`；这是共享 ASS 实现来源，不替换上述独立嵌入 manifest 的 ABI pin 或 Kira pin。
 
 ## 所有权与完整帧
 
@@ -16,6 +17,8 @@
 `App::render_frame` 仍先绘制原场景 RenderTarget，再将场景、`legacy_save_load_ui` 和 `exit_confirm_ui` 合成到独立最终离屏目标。CPU 回读只读取这个完整目标；SaveCreate 缩略图和遮罩转场仍在原时点读取原场景目标，不能借用 Host 输出 lease。
 
 窗口外部尺寸 O 不改变 L/R，也不推进 VM。`render_scale` 为启动配置，范围 0.25–4，输出报告实际取整后的 R，并校验设备尺寸上限；未声明在线重配置。输入携带当前会话/输出代次和帧像素坐标，再复用原生窗口到逻辑/UI 映射。保留 `astra.emu.fvp`、文件 stem 游戏身份和 `script_encoding=shift_jis/gbk/utf8`，不丢已有配置关联。
+
+原生 typed 配置增加默认空的 `translation_table` 与 `subtitle_map`，均读取游戏根内的显式相对资源。`AFVPTR1` 翻译表按原 HCB 字符串偏移保存 UTF-8，核对最终 HCB 哈希与真实指令边界；未命中保留原编码，不改写 VM 地址或原脚本。字幕映射按 movie/BGM 资源关联 UTF-8 ASS 和显式字体，由原生媒体时钟驱动并绘入原场景目标；暂停、换曲、结束、seek/读档与输出尺寸变化沿原生命周期更新。该能力不补充游戏字体授权，也不构成实际游戏人工验收。
 
 原生 owner 使用独立 8 MiB 栈线程；平台线程只入队输入/控制及取得完成帧。三槽不可变 CPU 池满时跳过显示发布，VM、音频和存档继续执行。Ready/Pending/Unchanged 不以像素 hash 判断；已交付 lease 可跨关闭持有，归还只销毁纯 CPU owner。
 
@@ -56,7 +59,7 @@ Kira 的 DecoderOwner 独立于播放 handle；handle Drop 语义不变，Sound 
 cargo build --manifest-path Emulator/ThirdParty/rfvp/Cargo.toml -p rfvp-astra-embedded --locked --release --features native-dylib-export --lib --target-dir .work/target-rfvp-release -j 4
 ```
 
-构建输出为 `release [optimized]`。原产物位于 `.work/target-rfvp-release/release/rfvp_astra_embedded.dll`；供 Manager 手动安装的同一 DLL 复制为 `.work/release-fvp/astra_emu_fvp.dll`，导出 `astra_emu_query`。仅完成构建和静态导入/导出检查，没有加载 DLL 或运行验收。
+历史构建记录：旧源码曾输出 `release [optimized]` 的 `.work/target-rfvp-release/release/rfvp_astra_embedded.dll`，并复制为 `.work/release-fvp/astra_emu_fvp.dll`，导出 `astra_emu_query`；当时仅做构建和静态导入/导出检查。当前原生核心已从上述 `ea8b5964fd5b6cde8186eff6a5da1607a3eb6a41` 重新构建，旧路径与旧 tree 记录不作为当前发布包或人工验收凭据。
 
 运行需要兼容 C ABI 2 的 Release Manager、x64 Windows 系统组件、VC++ 运行库及可用 GPU/音频驱动。静态导入包括 `VCRUNTIME140.dll`、UCRT、`mfplat.dll`（Media Foundation）和 `d3dcompiler_47.dll`；原生媒体实现没有额外 FFmpeg DLL 依赖。Vulkan 需驱动提供 loader，D3D12 交付仍要求 Host 扩展协商成功，不静默回退 CPU。
 

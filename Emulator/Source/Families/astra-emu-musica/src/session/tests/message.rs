@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn native_gpu_message_inline_load_restores_mid_crossfade() {
-    let _session = PROVIDER_SESSION.lock().unwrap();
+    let _session = PROVIDER_SESSION.lock();
     let root = tempfile::tempdir().unwrap();
     fixture::game(root.path(), b".char load 1 A.png\r\n.char pos 1 16 0\r\n.message 1   Body\\x{load,30,1,B.png,100,255}\r\n.end\r\n");
     let png = |color| {
@@ -61,7 +61,7 @@ fn native_gpu_message_inline_load_restores_mid_crossfade() {
 
 #[test]
 fn native_gpu_message_voice_wait_queries_existing_decoded_audio() {
-    let _session = PROVIDER_SESSION.lock().unwrap();
+    let _session = PROVIDER_SESSION.lock();
     let root = tempfile::tempdir().unwrap();
     fixture::game(root.path(), b".message 1 tone.ogg  Body\\v\r\n.end\r\n");
     fixture::asset(root.path(), "voice", "tone.ogg", &fixture::wave());

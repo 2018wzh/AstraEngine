@@ -18,6 +18,18 @@ pub struct ManagerViewModel {
     pub notices: Vec<NoticeViewModel>,
     pub about: AboutViewModel,
     pub session: SessionViewModel,
+    pub patch: PatchViewModel,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PatchViewModel {
+    pub running: bool,
+    pub phase: String,
+    pub completed: u64,
+    pub total: Option<u64>,
+    pub output: String,
+    pub error: String,
+    pub can_start: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]

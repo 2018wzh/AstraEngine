@@ -149,7 +149,7 @@ fn parse_wscroll2_sync(bytes: &[u8]) -> FamilyResult<Vec<i32>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{MUSICA_KEY_FILE, MusicaVm, ScOpcodeCatalog, mount_musica, parse_sc};
+    use crate::{mount_musica, parse_sc, MusicaVm, ScOpcodeCatalog, MUSICA_KEY_FILE};
     use astra_core::Hash256;
     #[test]
     fn wscroll2_sync_rejects_invalid_and_excessive_rows() {

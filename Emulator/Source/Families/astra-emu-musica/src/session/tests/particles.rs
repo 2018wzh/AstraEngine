@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn native_gpu_particle_family_save_restore_and_pause() {
-    let _session = PROVIDER_SESSION.lock().unwrap();
+    let _session = PROVIDER_SESSION.lock();
     let root = tempfile::tempdir().unwrap();
     fixture::game(root.path(), b".effect Firefly glow 20 1000\r\n.effect2 Snow\r\n.wait 1000\r\n.effect end\r\n.effect2 fadeout\r\n.end\r\n");
     let mut png = std::io::Cursor::new(Vec::new());

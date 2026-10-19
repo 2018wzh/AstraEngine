@@ -302,3 +302,25 @@ export global Session {
     callback set-fullscreen(bool);
     callback pointer-state-changed();
 }
+
+export global FilePatch {
+    in-out property <bool> running;
+    in-out property <bool> can-start;
+    in-out property <string> phase;
+    in-out property <string> completed: "0";
+    in-out property <string> total;
+    in-out property <string> output;
+    in-out property <string> error;
+    in-out property <[string]> recipe-titles;
+    in-out property <[string]> recipe-scripts;
+    in-out property <int> catalog-index: -1;
+    in-out property <string> script;
+    in-out property <string> patch-directory;
+    in-out property <string> output-directory;
+    callback load-catalog();
+    callback pick-script();
+    callback pick-patch-directory();
+    callback pick-output-directory();
+    callback start(string, string, string);
+    callback cancel();
+}

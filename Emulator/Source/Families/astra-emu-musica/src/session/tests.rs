@@ -1,16 +1,16 @@
 use crate::test_fixture as fixture;
-use crate::{MUSICA_KEY_FILE, MusicaVm, audio::Audio, mount_musica, scene::core_error};
+use crate::{audio::Audio, mount_musica, scene::core_error, MusicaVm, MUSICA_KEY_FILE};
 use abi_stable::{std_types::ROption, type_level::downcasting::TD_Opaque};
 use astra_emu_family_api::*;
 use std::{
     sync::{
-        Arc,
         atomic::{AtomicBool, AtomicUsize, Ordering},
+        Arc,
     },
     time::{Duration, Instant},
 };
 // The provider intentionally permits one live session per process.
-static PROVIDER_SESSION: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static PROVIDER_SESSION: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 #[cfg(feature = "ffmpeg-vcpkg")]
 #[path = "tests/movie.rs"]
 mod movie;
@@ -20,7 +20,7 @@ mod translation;
 #[cfg(not(feature = "ffmpeg-vcpkg"))]
 #[test]
 fn movie_without_ffmpeg_is_an_explicit_feature_error() {
-    let _session = PROVIDER_SESSION.lock().unwrap();
+    let _session = PROVIDER_SESSION.lock();
     let root = tempfile::tempdir().unwrap();
     fixture::game(root.path(), b".movie 1 sample.mp4 1280 720 t\r\n.end\r\n");
     let mut provider = fixture::provider();
@@ -148,7 +148,7 @@ fn until(test: impl Fn() -> bool) {
 
 #[test]
 fn native_gpu_choice_focus_save_restore_and_confirm_follow_the_selected_branch() {
-    let _session = PROVIDER_SESSION.lock().unwrap();
+    let _session = PROVIDER_SESSION.lock();
     let root = tempfile::tempdir().unwrap();
     fixture::game(root.path(), b".select First:left Second:right\r\n.label left\r\n.message 1   Wrong\r\n.end\r\n.label right\r\n.message 2   Selected\r\n.end\r\n");
     let mut provider = fixture::provider();
@@ -201,7 +201,7 @@ fn native_gpu_choice_focus_save_restore_and_confirm_follow_the_selected_branch()
 
 #[test]
 fn native_gpu_choice_pointer_ignores_blank_clicks_and_selects_hovered_branch() {
-    let _session = PROVIDER_SESSION.lock().unwrap();
+    let _session = PROVIDER_SESSION.lock();
     let root = tempfile::tempdir().unwrap();
     fixture::game(root.path(), b".select First:left Second:right\r\n.label left\r\n.message 1   Wrong\r\n.end\r\n.label right\r\n.end\r\n");
     let mut provider = fixture::provider();
@@ -263,7 +263,7 @@ fn native_gpu_choice_pointer_ignores_blank_clicks_and_selects_hovered_branch() {
 
 #[test]
 fn native_gpu_crossfade_clear_removes_the_previous_effect_frame() {
-    let _session = PROVIDER_SESSION.lock().unwrap();
+    let _session = PROVIDER_SESSION.lock();
     let root = tempfile::tempdir().unwrap();
     fixture::game(
         root.path(),
@@ -283,33 +283,29 @@ fn native_gpu_crossfade_clear_removes_the_previous_effect_frame() {
     frame
         .read(opened.session.acquire_frame(None).unwrap())
         .unwrap();
-    assert!(
-        frame
-            .0
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .all(|pixel| *pixel == [0, 0, 0, 255])
-    );
+    assert!(frame
+        .0
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .all(|pixel| *pixel == [0, 0, 0, 255]));
     opened.session.close().unwrap();
 }
 #[test]
 fn native_family_advances_real_archive_scene_audio_input_save_restore_and_close() {
-    let _session = PROVIDER_SESSION.lock().unwrap();
+    let _session = PROVIDER_SESSION.lock();
     let root = tempfile::tempdir().unwrap();
     fixture::game(
         root.path(),
         b".stage * BG.png 0 0\r\n.playBGM tone.ogg[50,-100]\r\n.message 1   Hello\r\n.end\r\n",
     );
     let mut provider = fixture::provider();
-    assert!(
-        provider
-            .probe(ProbeRequest {
-                game_path: root.path().to_str().unwrap().into()
-            })
-            .unwrap()
-            .is_some()
-    );
+    assert!(provider
+        .probe(ProbeRequest {
+            game_path: root.path().to_str().unwrap().into()
+        })
+        .unwrap()
+        .is_some());
     let sink = Sink::default();
     let mut opened = provider.open(request(root.path(), sink.clone())).unwrap();
     assert_eq!(
@@ -338,14 +334,12 @@ fn native_family_advances_real_archive_scene_audio_input_save_restore_and_close(
         .read(opened.session.acquire_frame(None).unwrap())
         .unwrap();
     let dialogue = frame.0.clone();
-    assert!(
-        dialogue
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .skip(528 * 1280)
-            .any(|p| p[0] > 0)
-    );
+    assert!(dialogue
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .skip(528 * 1280)
+        .any(|p| p[0] > 0));
     opened.session.advance(0, &[key(KeyCode::F5)]).unwrap();
     assert_eq!(
         opened
@@ -508,6 +502,8 @@ fn corrupt_or_foreign_slot_is_never_overwritten() {
         game: astra_core::Hash256::from_sha256(b"game"),
         vm: vec![],
         message: None,
+        translation_visible: true,
+        translation_overlay: None,
         wait_ns: 0,
         sounds: vec![],
     };
@@ -531,7 +527,7 @@ fn non_yielding_variable_loop_is_bounded() {
 
 #[test]
 fn native_gpu_control_keys_respect_release_focus_and_choice_boundaries() {
-    let _session = PROVIDER_SESSION.lock().unwrap();
+    let _session = PROVIDER_SESSION.lock();
     let root = tempfile::tempdir().unwrap();
     fixture::game(root.path(), b".pragma enable_control\r\n.message 1   First\r\n.message 2   Second\r\n.select Confirm:done\r\n.label done\r\n.end\r\n");
     let mut provider = fixture::provider();
@@ -627,7 +623,7 @@ fn native_gpu_control_keys_respect_release_focus_and_choice_boundaries() {
 
 #[test]
 fn native_gpu_screen_shake_advances_during_wait_and_restores_through_family_input() {
-    let _session = PROVIDER_SESSION.lock().unwrap();
+    let _session = PROVIDER_SESSION.lock();
     let root = tempfile::tempdir().unwrap();
     fixture::game(
         root.path(),
@@ -692,7 +688,7 @@ fn native_gpu_screen_shake_advances_during_wait_and_restores_through_family_inpu
 }
 
 fn assert_scroll_restores_background_position(command: &str, middle_pixel: usize) {
-    let _session = PROVIDER_SESSION.lock().unwrap();
+    let _session = PROVIDER_SESSION.lock();
     let root = tempfile::tempdir().unwrap();
     fixture::game(
         root.path(),

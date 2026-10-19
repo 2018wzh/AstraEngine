@@ -14,3 +14,11 @@ crate-type = ["rlib"]
 astra-emu-abi = { git = "https://github.com/2018wzh/AstraEngine.git", rev = "15a39a626b1316cb6137a75e17e14a2ff2d1ba88" }
 
 [workspace]
+
+[package.metadata.astra]
+upstream = "https://github.com/fenghengzhi/kirikiroid2-web"
+upstream_revision = "7105b50822097d11b7b1f5894bf541509fd51350"
+hosted_fork = "https://github.com/2018wzh/kirikiroid2-web"
+hosted_fork_branch = "astra"
+hosted_fork_revision = "5b2eccd0a51b6b47bb845f48acfd12bd2167c477"
+license_notice = "../../../THIRD_PARTY_NOTICES.md"

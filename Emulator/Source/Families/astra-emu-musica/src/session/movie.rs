@@ -4,7 +4,15 @@ impl MusicaSession {
         let paused =
             self.paused() || self.vm.state().system_ui.page != crate::MusicaSystemPage::None;
         if let Some(movie) = &mut self.movie {
-            if let Some(frame) = movie.advance(&self.audio, elapsed_ns, paused)? {
+            let frame = movie.advance(&self.audio, elapsed_ns, paused)?;
+            #[cfg(feature = "ffmpeg-vcpkg")]
+            self.scene.render_movie_with_subtitles(
+                frame,
+                movie.position_us(),
+                movie.presented_packet(),
+            )?;
+            #[cfg(not(feature = "ffmpeg-vcpkg"))]
+            if let Some(frame) = frame {
                 self.scene.render_movie(frame)?;
             }
             let state = self
@@ -24,6 +32,8 @@ impl MusicaSession {
                 .map_err(vm_error)?;
             if movie.ended() || (state.skippable && self.control_keys != 0) || self.finished {
                 self.movie.take().unwrap().close(&self.audio)?;
+                #[cfg(feature = "ffmpeg-vcpkg")]
+                self.scene.end_movie();
                 self.vm.resolve_wait(&state.fence_id).map_err(vm_error)?;
                 return Ok(true);
             }

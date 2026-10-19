@@ -50,11 +50,17 @@ impl AstraEmuManagerController {
         let result = self.try_launch(case_id);
         if let Err(error) = &result {
             self.diagnostic.clone_from(error);
+            self.diagnostic_severity = "error";
         }
         result
     }
 
     fn try_launch(&mut self, case_id: &str) -> Result<ManagerViewModel, String> {
+        if self.patch_busy() {
+            return Err(
+                "ASTRA_EMU_PATCH_INVALID_REQUEST: 文件补丁转换或导入期间不能启动游戏".into(),
+            );
+        }
         tracing::info!(event = "astra.emu.manager.launch.opening");
         if self.active.is_some() {
             return Err("ASTRA_EMU_FAMILY_SESSION_ALREADY_ACTIVE".into());
@@ -63,6 +69,11 @@ impl AstraEmuManagerController {
             return Err("ASTRA_EMU_FAMILY_INITIALIZING".into());
         }
         let game = self.game(case_id)?;
+        if astra_emu_patch::is_staging_path(Path::new(&game.location)) {
+            return Err(
+                "ASTRA_EMU_PATCH_INVALID_REQUEST: private staging is not a published game".into(),
+            );
+        }
         self.load_game_input_mapping(case_id)?;
         if self.probe_choices.contains_key(case_id) && !self.candidates.contains_key(case_id) {
             return Err("ASTRA_EMU_FAMILY_PROVIDER_SELECTION_REQUIRED".to_owned());

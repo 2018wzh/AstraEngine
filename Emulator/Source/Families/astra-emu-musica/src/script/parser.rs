@@ -40,7 +40,8 @@ pub(super) fn parse_line(
     if trimmed.starts_with(b";") || trimmed.starts_with(b"#") || trimmed.starts_with(b"//") {
         return Ok((ScLineKind::Comment, language_guard));
     }
-    if !trimmed.starts_with(b".") {
+    let alternate_stage = trimmed.starts_with(b"@");
+    if !trimmed.starts_with(b".") && !alternate_stage {
         return Ok((ScLineKind::Unknown, language_guard));
     }
     let token_end = trimmed[1..]
@@ -51,6 +52,9 @@ pub(super) fn parse_line(
         return Ok((ScLineKind::Unknown, language_guard));
     }
     let opcode_bytes = &trimmed[1..token_end];
+    if alternate_stage && !opcode_bytes.eq_ignore_ascii_case(b"stage") {
+        return Ok((ScLineKind::Unknown, language_guard));
+    }
     if !opcode_bytes[0].is_ascii_alphabetic() && opcode_bytes[0] != b'_' {
         return Ok((ScLineKind::Unknown, language_guard));
     }
@@ -159,6 +163,11 @@ fn decode_control_flow(
                 .collect::<Result<_, _>>()?,
         },
         ScControlFlowKind::ChoicePairs => {
+            let tokens = if tokens.last().is_some_and(String::is_empty) {
+                &tokens[..tokens.len() - 1]
+            } else {
+                &tokens
+            };
             if tokens.is_empty() || tokens.len() > 4 {
                 return Err(ScParseError::OperandSchema(offset));
             }

@@ -16,7 +16,7 @@ use std::{
 };
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
 struct Metadata {
-    fields: [ConfigField; 1],
+    fields: [ConfigField; provider::FIELD_COUNT],
     formats: [Bytes; 1],
 }
 // SAFETY: spans point only at static byte literals; metadata never changes.
@@ -119,7 +119,7 @@ unsafe extern "C" fn describe(out: *mut Descriptor, error: *mut Error) -> Status
                 formats: METADATA.formats.as_ptr(),
                 format_count: 1,
                 configuration: METADATA.fields.as_ptr(),
-                configuration_count: 1,
+                configuration_count: METADATA.fields.len(),
             };
         }
         Ok(())
@@ -221,23 +221,12 @@ unsafe extern "C" fn open(
         .map_err(|_| {
             crate::error::invalid("ASTRA_EMU_ARTEMIS_CONFIG", "invalid configuration array")
         })?;
-        unsafe { validate_config(&METADATA.fields, entries) }.map_err(|e| {
-            crate::error::invalid(
-                "ASTRA_EMU_ARTEMIS_CONFIG",
-                format!("configuration entry {}: {}", e.index, e.reason),
-            )
-        })?;
-        let archive = if let Some(entry) = entries.first() {
-            unsafe { entry.value.text.text(255) }.map_err(|_| {
-                crate::error::invalid("ASTRA_EMU_ARTEMIS_CONFIG", "invalid archive filename")
-            })?
-        } else {
-            ""
-        };
-        let archive = provider::find_base_archive(Path::new(path), archive)?;
+        let configuration = unsafe { provider::parse_configuration(entries) }?;
+        let archive = provider::find_base_archive(Path::new(path), &configuration.archive)?;
         let owner = SessionOwner::open(
             Path::new(path).to_owned(),
             archive,
+            configuration.extra_archive,
             request.session_epoch,
             request.window,
             Platform(request.host.window, request.host.cancellation),

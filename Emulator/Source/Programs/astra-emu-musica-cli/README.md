@@ -28,6 +28,20 @@ GARbro reader 先收集 object/metadata/library，再解析有符号 object ID �
 
 所有挂载归档的 census/eden 操作都通过运行时 `mount_musica` 读取 keys.v2 `key.toml`。`--profile` 保留为配置路径参数：绝对路径可指向游戏外文件，相对路径以 `--game-dir` 为基准并限制在游戏目录内。生产 key 文件最多 1 MiB，归档和纹理资源仍限制在游戏目录内。转换时不要求存在游戏或替换 PNG；运行时挂载再检查实际资源。
 
+`data` 是只读原生 reader 诊断入口，不运行 VM、音频或 GPU：
+
+```text
+astra-emu-musica-cli data list --game-dir GAME --profile key.toml --offset 0 --limit 256
+astra-emu-musica-cli data read --game-dir GAME --profile key.toml --uri musica:/scr/public.sc --offset 0 --length 4096 --output NEW_PRIVATE_FILE
+astra-emu-musica-cli data validate --game-dir GAME --profile key.toml --scr-archive cnscr.paz --sys-archive cnsys.paz --encoding gbk
+astra-emu-musica-cli data validate --game-dir GAME --profile key.toml --script-directory scripts --encoding cp932 --uri musica:/scr/Title.sc
+```
+
+三个入口都支持 `--scr-archive`、`--sys-archive` 和 `--script-directory`，路径限制在 GAME 内；物理别名保留 `scr/sys` key 和逻辑 URI。松散 SC 优先于同名 PAZ 成员，include 同样按此顺序解析，缺项仅回退当前 GAME 的 PAZ。原版 Title 可继续来自 PAZ，不需重打归档。
+
+`list` 每页最多 4096 项，只列 URI/尺寸/媒体类型；`read` 每次最多 16 MiB，只发布新的私有文件，不向 stdout 输出字节。`validate` 必须显式选择主编码，复用原生逐脚本探测、include 展开和完整 parser，遍历所有脚本后汇总退出；JSON 只含 URI、行/偏移和分支目标等安全元数据。原生 `.goto` 在当前脚本找不到标签时继续执行下一条；`.if` 和 `.select` 仍严格校验目标。解析日志不包含源行或私有错误上下文。
+
+
 游戏源、key、正文和私有转换产物不得提交；stdout 只输出命令定义的标题列表、census/hash/diagnostic，不输出 scheme 内容。纯 Rust 回归测试使用公开 synthetic fixture，覆盖转换、坏输入、禁止覆盖和权限，不需要游戏/GPU/GUI。整合后执行：
 
 ```bash

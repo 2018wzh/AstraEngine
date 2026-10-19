@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn native_gpu_includes_execute_on_open_chain_and_restore() {
-    let _session = PROVIDER_SESSION.lock().unwrap();
+    let _session = PROVIDER_SESSION.lock();
     let root = tempfile::tempdir().unwrap();
     let entry = b".include first.sc\r\n.chain next.sc\r\n";
     let first = b".message 1   Included";
@@ -44,7 +44,7 @@ fn native_gpu_includes_execute_on_open_chain_and_restore() {
 
 #[test]
 fn include_cycle_fails_before_creating_a_family_session() {
-    let _session = PROVIDER_SESSION.lock().unwrap();
+    let _session = PROVIDER_SESSION.lock();
     let root = tempfile::tempdir().unwrap();
     fixture::game(root.path(), b".include test.sc\r\n");
     assert_eq!(

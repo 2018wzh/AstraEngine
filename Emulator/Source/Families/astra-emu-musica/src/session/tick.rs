@@ -152,6 +152,8 @@ impl MusicaSession {
                     ));
                 }
                 self.movie = Some(crate::movie::Movie::open(&self.archive, &state)?);
+                #[cfg(feature = "ffmpeg-vcpkg")]
+                self.scene.begin_movie(&state.resource_uri)?;
                 Ok(false)
             }
             Some(MusicaVmEvent::Choice) => {

@@ -17,6 +17,7 @@ pub(super) struct GameProbe {
     pub(super) path: PathBuf,
     pub(super) game_ids: Vec<String>,
     pub(super) candidates: Vec<FamilyProbeCandidate>,
+    pub(super) patch_profile: Option<Result<astra_emu_patch::OutputProfile, String>>,
 }
 
 #[derive(Default)]
@@ -40,13 +41,17 @@ pub(super) fn scan(
             return Err("ASTRA_EMU_OWNER_CANCELLED".into());
         }
         match fs::canonicalize(&game.location) {
-            Ok(path) if path.is_dir() => known.entry(path).or_default().push(game.game_id.clone()),
+            Ok(path) if path.is_dir() && !astra_emu_patch::is_staging_path(&path) => {
+                known.entry(path).or_default().push(game.game_id.clone())
+            }
+            Ok(path) if astra_emu_patch::is_staging_path(&path) => continue,
             _ => {
                 report.missing += 1;
                 report.games.push(GameProbe {
                     path: PathBuf::from(&game.location),
                     game_ids: vec![game.game_id.clone()],
                     candidates: Vec::new(),
+                    patch_profile: None,
                 });
             }
         }
@@ -58,6 +63,14 @@ pub(super) fn scan(
     }
     for root in request.paths {
         let path = match fs::canonicalize(root) {
+            Ok(path) if astra_emu_patch::is_staging_path(&path) => {
+                if request.kind == ScanKind::Full {
+                    continue;
+                }
+                return Err(
+                    "ASTRA_EMU_PATCH_INVALID_REQUEST: private staging cannot be imported".into(),
+                );
+            }
             Ok(path) if path.is_dir() => path,
             _ if request.kind == ScanKind::Full => {
                 report.missing += 1;
@@ -87,14 +100,25 @@ pub(super) fn scan(
             let (candidates, hit) = cache.probe(&path, registry, allow_hint)?;
             report.cache_hits += usize::from(hit);
             let matched = !candidates.is_empty();
-            if matched || known.contains_key(&path) {
+            let patch_profile = if request.kind == ScanKind::Import {
+                match astra_emu_patch::read_output_profile(&path, cancelled) {
+                    Ok(Some(profile)) => Some(Ok(profile)),
+                    Ok(None) => None,
+                    Err(error) => Some(Err(error.to_string())),
+                }
+            } else {
+                None
+            };
+            let has_receipt = patch_profile.is_some();
+            if matched || known.contains_key(&path) || has_receipt {
                 report.games.push(GameProbe {
                     path: path.clone(),
                     game_ids: known.get(&path).cloned().unwrap_or_default(),
                     candidates,
+                    patch_profile,
                 });
             }
-            if matched {
+            if matched || has_receipt {
                 recognized.push(path);
             } else if depth < MAX_SCAN_DEPTH {
                 let mut children = Vec::new();
@@ -105,8 +129,12 @@ pub(super) fn scan(
                     let kind = entry
                         .file_type()
                         .map_err(|_| "ASTRA_EMU_GAME_DIRECTORY_ENUMERATION")?;
-                    if kind.is_dir() && !kind.is_symlink() {
-                        children.push(entry.path());
+                    let child = entry.path();
+                    if kind.is_dir()
+                        && !kind.is_symlink()
+                        && !astra_emu_patch::is_staging_path(&child)
+                    {
+                        children.push(child);
                         if children.len() + queue.len() + visited.len() > MAX_SCAN_DIRECTORIES {
                             return Err("ASTRA_EMU_GAME_DIRECTORY_BOUNDS".into());
                         }

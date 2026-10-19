@@ -11,6 +11,7 @@ members = [
     "Source/Families/astra-emu-musica",
     "Source/Programs/astra-emu-musica-cli",
     "Source/Tools/astra-emu-patch",
+    "Source/Programs/astra-emu-patch-cli",
     "Source/Manager/astra-emu-manager-core",
     "Source/Providers/astra-emu-translation-openai-compatible",
     "Source/Providers/astra-emu-metadata",
@@ -184,6 +185,7 @@ astra-byte-source = { path = "../Engine/Source/Runtime/astra-byte-source" }
 astra-core = { path = "../Engine/Source/Runtime/astra-core" }
 astra-emu-family-api = { path = "Source/FamilyApi/astra-emu-family-api" }
 astra-emu-abi = { path = "Source/FamilyApi/astra-emu-abi" }
+astra-subtitle = { path = "../Engine/Source/Runtime/astra-subtitle" }
 
 [patch.crates-io]
 kira = { git = "https://github.com/2018wzh/kira.git", rev = "7d8961b20bce2ab8fd43b4bb34150d7e2898785c" }
