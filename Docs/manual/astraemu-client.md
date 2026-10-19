@@ -1,6 +1,6 @@
 # AstraEMU 客户端
 
-完整运行包包含 `astra-emu-manager`（Windows 为 `.exe`）、`cores/`、许可说明和本手册。解压后直接启动 Manager，不需要设置环境变量或手工复制核心到用户数据目录。只移动可执行文件会丢失随包核心。
+完整运行包包含唯一客户端可执行文件 `astra-emu-manager`（Windows 为 `.exe`）、`cores/`、许可说明和本手册。无参数启动 Manager GUI；同一程序提供扩展管理及 `patch list` / `patch apply` CLI，CLI 不启动 GUI、核心或游戏。不再构建或随包提供独立补丁可执行文件。解压后直接启动 Manager，不需要设置环境变量或手工复制核心到用户数据目录。只移动可执行文件会丢失随包核心。
 
 资料库出现后，点击“刷新核心”手动加载核心，再点击“扫描游戏”刷新已有资料库，或点击“添加游戏”选择原生游戏目录；也可选择包含多个游戏的父目录。扫描完成后选择游戏，点击“启动”。多个模拟器能识别同一目录时，在“模拟器配置”中选择并保存。游戏不需要转换为 AstraVN package。
 
@@ -74,7 +74,7 @@ Musica 默认 `launch_mode=title`，启动先显示标题菜单，选择开始�
 
 ### 高级：手动离线文件转换
 
-旧补丁的私有容器或 DLL 数据确实无法由核心直接消费时，才使用“应用文件补丁（仅必要时）”或 `astra-emu-patch`。转换输出为普通原生资源及 typed 配置，游戏启动不执行转换脚本，不加载旧补丁 DLL；也不为接入本地化新增运行时 Lua 格式或转换器依赖。Artemis 自身 Lua 与 Musica 文字 Hook 的 Luau 功能仍各用原有生命周期。没有每游戏一个 recipe 或 13 个脚本的要求。
+旧补丁的私有容器或 DLL 数据确实无法由核心直接消费时，才使用“应用文件补丁（仅必要时）”或 `astra-emu-manager patch`。GUI 直接调用共享 `astra-emu-patch` 库，与同一可执行文件内的 CLI 复用转换实现，不派生补丁子程序。转换输出为普通原生资源及 typed 配置，游戏启动不执行转换脚本，不加载旧补丁 DLL；也不为接入本地化新增运行时 Lua 格式或转换器依赖。Artemis 自身 Lua 与 Musica 文字 Hook 的 Luau 功能仍各用原有生命周期。没有每游戏一个 recipe 或 13 个脚本的要求。
 
 Manager 操作顺序：
 
@@ -82,30 +82,36 @@ Manager 操作顺序：
 2. 在详情的“应用文件补丁（仅必要时）”中选可信目录记录，或点击“本地 Luau…”选择已审核入口。填写“补丁输入目录”（留空使用来源游戏目录）与尚不存在的“新输出目录”，点击“开始”；需要中止时点击“取消”。
 3. 成功后 Manager 导入新独立目录，校验收据、所选核心及 typed 字段，再以 SQLite 事务保存该输出游戏的核心绑定和配置。来源游戏绑定不改。若显示“文件转换完成，导入失败”，保留已完成输出并处理具体错误，再用“添加游戏”选择该输出目录；导入只读取收据，不重跑脚本。
 
-上述 Manager/CLI 逻辑及真实 SQLite 写入/重开已有检查证据；Manager GUI 操作尚待实际观察。目录登记 eden、ef first、樱花萌放、夏空四个必要转换入口；前奏诗已定位回看页标题的原生查找链缺口，仍未登记，LLJ 分支及其他阻塞见实施计划。夏空随附字体只供 ASS，正文沿用 Musica 内置中文字体；不要因字符映射表完整就把字幕子集强制选为正文字体。复制、解析或构建成功均不代表完整本地化人工通过。
+统一入口迁移前的 Manager/CLI 逻辑及真实 SQLite 写入/重开已有检查证据；这些历史结果不替代 Beta2 的实际进程检查，Manager GUI 操作仍待实际观察。目录登记 eden、ef first、樱花萌放、夏空四个必要转换入口；前奏诗已定位回看页标题的原生查找链缺口，仍未登记，LLJ 分支及其他阻塞见实施计划。夏空随附字体只供 ASS，正文沿用 Musica 内置中文字体；不要因字符映射表完整就把字幕子集强制选为正文字体。复制、解析或构建成功均不代表完整本地化人工通过。
 
-`astra-emu-patch list` 只读取程序相邻 `patches/catalog.json` 的目录记录，不执行或探测脚本。没有随包目录时，可用 `list --scripts <可信目录>` 显式选择。应用命令为：
+`astra-emu-manager patch list` 只读取程序相邻 `patches/catalog.json` 的目录记录，逐行输出 JSON（NDJSON），不执行或探测脚本。没有随包目录时，可用 `astra-emu-manager patch list --scripts <可信目录>` 显式选择。应用命令为：
 
 ```sh
-astra-emu-patch apply --script <可信入口.luau> --source <原游戏目录> \
+astra-emu-manager patch apply --script <可信入口.luau> --source <原游戏目录> \
   --patch <补丁目录> --output <全新独立目录>
 ```
 
-省略 `--patch` 时使用原游戏目录。CLI 可用 Ctrl+C 取消，取消返回码为 130，等待工作线程结束后退出；其他失败返回 1。只使用可信本地脚本，转换由用户显式发起。转换器只读打开输入/密钥/旧存档，不复制旧存档；输出为不依赖原安装回退读取的完整独立副本，目标存在即失败。成功时显示输出与 `astra-patch-result.json` 收据位置；用 Manager“添加游戏”选该输出目录即可校验并导入 typed profile。不要手改收据去绕过核心/字段错误。
+省略 `--patch` 时使用原游戏目录。CLI 可用 Ctrl+C 取消，原生取消通道与 VM 中断使用同一取消标志；取消返回码为 130，等待工作线程结束后退出，其他失败返回 1。CLI 不自动启动 GUI、核心或游戏，也不自动导入或启动转换产物。只使用可信本地脚本，转换由用户显式发起。转换器只读打开输入/密钥/旧存档，不复制旧存档；输出为不依赖原安装回退读取的完整独立副本，目标存在即失败。成功时显示输出与 `astra-patch-result.json` 收据位置；用 Manager“添加游戏”选该输出目录即可校验并导入 typed profile。不要手改收据去绕过核心/字段错误。
+
+Windows 使用同一个 GUI 子系统程序 `astra-emu-manager.exe`。CLI 连接现有父控制台并保留重定向的标准输入输出，不另开控制台窗口；交互式 `cmd.exe` 若立即返回提示符，可用 `start /wait "" astra-emu-manager.exe patch list` 等待命令结束，`patch apply` 同理。
 
 转换成功后仍须核对实际字体、脚本分支、资源优先级和媒体效果，再由用户手动验收游戏。私有输出、商业文本/图片、字体、密钥与旧存档不进入公开源码或运行包。本轮 90 个已知原文件哈希的匹配范围、缺失的任务前存档基线及既有隐私事故统一记录在[完整性、隐私与发布](../status/implementation-plan.md#完整性隐私与发布)，不据此宣称全部原安装/存档未变。
 
-## 0.1.0-beta.1 私测
+## 0.1.0-beta.2 私测
 
-Beta 使用 Release 优化构建；Manager“关于”和两个程序的 `--version` 显示 `0.1.0-beta.1`。核心沿用本轮已核验的精确原生 revision，版本号不代表七个阻塞样本已经完成。
+Beta2 将 GUI 与补丁 CLI 统一到 `astra-emu-manager`。Manager 已使用 Release 优化重新构建，`--version` 为 `0.1.0-beta.2`；统一命令的真实进程、公开转换和 Ctrl-C 检查分开记录，整包证据见同目录 `release-manifest.json` 与 `SHA256SUMS`，不沿用 Beta1 的通过数。七核心复用冻结 Beta1 中已核验的相同哈希 Release DLL；版本号不代表七个阻塞样本已经完成。
 
 解压到独立新目录，保留整个 `cores/`、Resources、依赖与许可文件。使用隔离游戏副本和新存档槽，不覆盖原版存档；必要转换仍输出全新独立目录。人工检查字体/双语切换、标题与剧情、影片字幕、暂停恢复、基本菜单与存读档、退出重开，并记录程序版本、核心 revision、操作步骤和错误码。不要提交剧情正文、密钥、商业资源或私人路径。
 
 本批只作本机私测，许可限制及逐样本状态见[实施计划](../status/implementation-plan.md#本地化原生优先的当前状态)。不自动启动游戏、输入、截图或关闭窗口，BGI 既有人工验收不重复。
 
+### 0.1.0-beta.1 私测（历史冻结包）
+
+Beta1 使用 Release 优化构建；Manager“关于”及当时 Manager、独立转换 CLI 两个程序的 `--version` 实际显示 `0.1.0-beta.1`。该包固定在提交 `455c94284519ce4121deedc8767cc66a9badfe4f`，不原地替换。两个可执行文件是冻结历史产物，不是当前构建或打包方式；新包使用上述 Beta2 单一入口。
+
 ## 构建运行包
 
-本轮已构建七核心、Manager 和必要 CLI，并组装本机验证目录 `AstraEMU-native-first-checkpoint-20261019`；其 PE 依赖/导出及包内 CLI 公开转换已检查。该目录是原生优先的验证组合，尚有七个候选的静态消费者/素材阻塞，实际 Manager 界面和游戏仍待用户手动验收。已发布源码不等于可公开分发二进制；RFVP 字体、Ethornell 许可及下述静态 FriBidi LGPL 义务核验前，产物仅作本机私有使用。
+历史 checkpoint 已构建七核心、Manager 和当时的独立转换 CLI，并组装本机验证目录 `AstraEMU-native-first-checkpoint-20261019`；其 PE 依赖/导出及包内 CLI 公开转换已检查。这些是统一入口迁移前的历史证据，不代表 Beta2 已构建或通过核验。该目录是原生优先的验证组合，尚有七个候选的静态消费者/素材阻塞，实际 Manager 界面和游戏仍待用户手动验收。已发布源码不等于可公开分发二进制；RFVP 字体、Ethornell 许可及下述静态 FriBidi LGPL 义务核验前，产物仅作本机私有使用。
 
 下面以 FVP 为例。先初始化主仓固定的完整 submodule；不要换回旧 revision 绕过失败。参与核心保留不同原生 Lua/音频依赖，分别构建，不将 Artemis Lua 5.1 和 Manager Luau 合并进同一次 Cargo 调用。
 
@@ -117,13 +123,12 @@ export TEMP="$work_dir/tmp" TMP="$work_dir/tmp"
 mkdir -p "$TEMP"
 git submodule update --init
 cargo build --manifest-path Emulator/Cargo.toml --locked --release -j 1 \
-  -p astra-emu-manager -p astra-emu-patch-cli -p astra-emu-fvp \
+  -p astra-emu-manager -p astra-emu-fvp \
   --features astra-emu-fvp/dynamic-plugin-export
 python Tools/Effects/fetch_dxc.py --output "$work_dir/dxc"
 python Tools/AstraEMU/package_client.py \
   --manager "$CARGO_TARGET_DIR/release/astra-emu-manager.exe" \
   --core "$CARGO_TARGET_DIR/release/astra_emu_fvp.dll" \
-  --patch-cli "$CARGO_TARGET_DIR/release/astra-emu-patch.exe" \
   --runtime-file "$work_dir/dxc/dxcompiler.dll" \
   --runtime-file "$work_dir/dxc/dxil.dll" \
   --runtime-file "$work_dir/dxc/LICENSE-MS.txt" \
@@ -133,7 +138,7 @@ python Tools/AstraEMU/package_client.py \
 
 Linux/macOS 分别使用无 `.exe` 的可执行文件以及 `libastra_emu_fvp.so` / `libastra_emu_fvp.dylib`；DXC 示例仅适用于 Windows。`--core` 可以重复传入多个已构建的 Family。`--runtime-file` 指定随包的依赖库或许可文件；Windows 分发还需要加入构建工具链对应的 VC runtime DLL。输出目录必须是新目录，避免上一版核心混入新运行包。该工具组装现有产物，不编译、不启动游戏、不发布。
 
-`--patch-cli` 是可选的实际构建产物；省略时保留原有 Manager/核心打包入口。打包器只复制文件，不运行二进制，也不替代最终 PE 架构、导入闭包、导出符号和 ZIP/hash 核验。
+运行包只包含一个 `astra-emu-manager` 客户端可执行文件；补丁命令随 Manager 一起构建，无独立程序参数或兼容别名。打包器拒绝已移除的 `--patch-cli`，也拒绝用 `--runtime-file` 夹带旧 `astra-emu-patch` 可执行文件。打包器只复制文件，不运行二进制，也不替代最终 PE 架构、导入闭包、导出符号和 ZIP/hash 核验。
 
 仅在已有必要且审核通过的转换入口时指定 `--patches Emulator/Patches`。打包器只复制 `catalog.json` 及其列出的顶层 `.luau` 入口；每个确实需要的共享模块分别通过 `--patch-common common/<模块>.luau` 指定。不递归复制脚本目录，不自动包含未列出的脚本、模块、夹具、测试目录或游戏资产。目录是显式可信输入，发布者负责核对每个选中脚本的来源与内容；路径检查不能判断脚本是否夹带商业数据。缺失文件、目录逃逸、链接、测试脚手架路径和不区分大小写的名称冲突均拒绝打包。没有可用 recipe 时省略 `--patches`，不要为填满目录登记原生游戏。
 
@@ -141,7 +146,7 @@ Manager 使用的 mlua MIT 许可从 `Emulator/ThirdParty/mlua/LICENSE` 复制�
 
 包含原生 ASS 字幕能力的构建还须传入 `--subtitle-share <独立vcpkg安装>/x64-windows-static-md/share`。工具逐字复制 libass、FreeType、FriBidi、HarfBuzz、Brotli、bzip2、libpng、zlib 的实际 `copyright`，任一缺失即失败。静态 FriBidi 的 LGPL 对应源码、重链接等义务须另行核验；当前只组装本机私有包，不据此宣称可以公开分发。FVP 字体与 Ethornell 的既有许可限制仍然保留。
 
-`package(manager, cores, output, runtime_files)` 原有 Python 调用继续有效；可选的 `patch_cli`、`patches` 及关键字参数 `patch_common`、`luau_license`、`subtitle_share` 与上述选项对应。输出使用同父目录 staging，复制失败清理自身临时目录，发布不覆盖打包期间新出现的目标。
+Python API 为 `package(manager, cores, output, runtime_files, patches=None, *, patch_common=None, luau_license=None, subtitle_share=None)`；原有四参数调用继续有效，`patches` 可作第五个位置参数，其余可选项为关键字参数，与上述选项对应。不再接受 `patch_cli` 参数。输出使用同父目录 staging，复制失败清理自身临时目录，发布不覆盖打包期间新出现的目标。
 
 公开行为测试：`python -m unittest Tools.tests.test_package_client`。测试使用临时合成输入验证实际输出与失败保护，不运行游戏、原生核心或补丁脚本。
 

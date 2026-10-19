@@ -19,7 +19,6 @@ class PackageClientTests(unittest.TestCase):
         self.manager = self.file("build/astra-emu-manager.exe", b"public Manager artifact")
         self.core = self.file("build/astra_emu_example.dll", b"public Family artifact")
         self.runtime = self.file("build/runtime.dll", b"public runtime artifact")
-        self.cli = self.file("build/astra-emu-patch.exe", b"public converter artifact")
         self.output = self.root / "client"
         # Synthetic inputs exercise byte-preserving packaging, not PE or legal validation.
         self.license = self.file("cargo/registry/src/public/luau0-src-0.12.3+luau663/LICENSE",
@@ -68,14 +67,23 @@ class PackageClientTests(unittest.TestCase):
                                  ("licenses/mlua/LICENSE", repo / "Emulator/ThirdParty/mlua/LICENSE")):
             self.assertEqual(source.read_bytes(), (self.output / relative).read_bytes())
         self.assertFalse((self.output / "patches").exists())
-        self.assertFalse((self.output / self.cli.name).exists())
+        self.assertEqual({self.manager.name}, {p.name for p in self.output.glob("*.exe")})
 
-    def test_explicit_assets_copy_only_catalog_entries_and_selected_common_modules(self):
+    def test_package_contains_one_manager_selected_cores_and_only_trusted_assets(self):
         for name in ("fixtures/secret.dat", "test.luau", "private/key.toml", "game.exe",
                      "unlisted.luau", "common/unused.luau", "common/fixture.luau"):
             self.file("public-patches/" + name, b"must not ship")
-        self.package(patch_cli=self.cli, patches=self.patches, patch_common=["common/binary.luau"])
-        self.assertEqual(self.cli.read_bytes(), (self.output / self.cli.name).read_bytes())
+        selected = self.file("build/astra_emu_second.dll", b"second selected Family artifact")
+        self.file("build/astra_emu_unselected.dll", b"must not ship")
+        package_client.package(
+            self.manager, [self.core, selected], self.output, [self.runtime], self.patches,
+            patch_common=["common/binary.luau"],
+        )
+        self.assertEqual({self.manager.name}, {p.name for p in self.output.glob("*.exe")})
+        self.assertEqual({self.core.name, selected.name},
+                         {p.name for p in (self.output / "cores").iterdir()})
+        for core in (self.core, selected):
+            self.assertEqual(core.read_bytes(), (self.output / "cores" / core.name).read_bytes())
         shipped = {p.relative_to(self.output / "patches").as_posix()
                    for p in (self.output / "patches").rglob("*") if p.is_file()}
         self.assertEqual({"catalog.json", "legacy-normalizer.luau", "common/binary.luau"}, shipped)
@@ -83,11 +91,6 @@ class PackageClientTests(unittest.TestCase):
         self.assertEqual(self.module.read_bytes(), (self.output / "patches/common/binary.luau").read_bytes())
         self.assertEqual((self.patches / "catalog.json").read_bytes(),
                          (self.output / "patches/catalog.json").read_bytes())
-
-    def test_cli_can_ship_without_any_recipes(self):
-        self.package(patch_cli=self.cli)
-        self.assertEqual(self.cli.read_bytes(), (self.output / self.cli.name).read_bytes())
-        self.assertFalse((self.output / "patches").exists())
 
     def test_empty_catalog_does_not_invent_recipes(self):
         self.catalog([])
@@ -122,7 +125,7 @@ class PackageClientTests(unittest.TestCase):
 
     def test_copy_failure_cleans_staging_and_preserves_sources(self):
         with patch.object(package_client.shutil, "copy2", side_effect=OSError("public injected failure")):
-            self.assert_rejected(patch_cli=self.cli, patches=self.patches)
+            self.assert_rejected(patches=self.patches)
         self.assertEqual(b"public Manager artifact", self.manager.read_bytes())
         self.assertEqual(b"public Family artifact", self.core.read_bytes())
 
@@ -140,7 +143,7 @@ class PackageClientTests(unittest.TestCase):
     def test_existing_output_and_its_contents_are_untouched(self):
         sentinel = self.file("client/user.dat", b"user data")
         with self.assertRaises(ValueError):
-            self.package(patch_cli=self.cli, patches=self.patches)
+            self.package(patches=self.patches)
         self.assertEqual(b"user data", sentinel.read_bytes())
         self.assertEqual([sentinel], list(self.output.iterdir()))
 
@@ -158,12 +161,23 @@ class PackageClientTests(unittest.TestCase):
 
     def test_case_insensitive_runtime_and_source_basename_collisions(self):
         for filename in ("ASTRA-EMU-MANAGER.EXE", "ASTRA_EMU_EXAMPLE.DLL", "README.md",
-                         "licenses", "patches", "astra-emu-patch.exe"):
+                         "licenses", "patches"):
             with self.subTest(filename=filename):
                 duplicate = self.file("other/" + filename, b"collision")
                 with self.assertRaises(ValueError):
-                    package_client.package(self.manager, [self.core], self.output, [duplicate], self.cli)
+                    package_client.package(self.manager, [self.core], self.output, [duplicate])
                 self.assertFalse(self.output.exists())
+
+    def test_retired_patch_executable_names_are_reserved_for_runtime_files(self):
+        for filename in ("astra-emu-patch", "astra-emu-patch.exe",
+                         "ASTRA-EMU-PATCH", "ASTRA-EMU-PATCH.EXE"):
+            with self.subTest(filename=filename):
+                retired = self.file("other/" + filename, b"retired executable")
+                with self.assertRaises(ValueError):
+                    package_client.package(self.manager, [self.core], self.output, [retired])
+                self.assertFalse(self.output.exists())
+                self.assertEqual(b"retired executable", retired.read_bytes())
+                self.assertEqual([], list(self.root.glob(".astraemu-client-*")))
 
     def test_manager_cannot_overwrite_reserved_document(self):
         self.manager = self.file("other/README.md", b"Manager")
@@ -206,13 +220,11 @@ class PackageClientTests(unittest.TestCase):
                 self.assert_rejected(patches=self.patches, patch_common=common)
         self.assert_rejected(patch_common=["common/binary.luau"])
 
-    def test_missing_catalog_entry_module_or_cli_is_rejected(self):
+    def test_missing_catalog_entry_or_module_is_rejected(self):
         self.assert_rejected(patches=self.root / "missing-patches")
         self.assert_rejected(patches=self.patches, patch_common=["common/missing.luau"])
         self.entry.unlink()
         self.assert_rejected(patches=self.patches)
-        self.assert_rejected(patch_cli=self.root / "missing.exe")
-        self.assert_rejected(patch_cli=self.manager)
 
     def test_malformed_catalog_is_rejected(self):
         for records in ({"recipes": []}, [None], [{"id": "public", "title": "Public"}],
@@ -259,15 +271,32 @@ class PackageClientTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual(self.runtime.read_bytes(), (self.output / self.runtime.name).read_bytes())
         shutil.rmtree(self.output)
-        result = subprocess.run(command + ["--patch-cli", str(self.cli), "--patches", str(self.patches),
+        result = subprocess.run(command + ["--patches", str(self.patches),
                                           "--patch-common", "common/binary.luau",
                                           "--luau-license", str(self.license)], capture_output=True)
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual(self.entry.read_bytes(), (self.output / "patches" / self.entry.name).read_bytes())
+        self.assertEqual({self.manager.name}, {p.name for p in self.output.glob("*.exe")})
+        self.assertEqual({self.core.name}, {p.name for p in (self.output / "cores").iterdir()})
+        self.assertEqual({"catalog.json", "legacy-normalizer.luau", "common/binary.luau"},
+                         {p.relative_to(self.output / "patches").as_posix()
+                          for p in (self.output / "patches").rglob("*") if p.is_file()})
         before = (self.output / self.manager.name).read_bytes()
         result = subprocess.run(command, capture_output=True)
         self.assertEqual(1, result.returncode)
         self.assertEqual(before, (self.output / self.manager.name).read_bytes())
+
+    def test_cli_rejects_retired_patch_executable_as_a_runtime_file(self):
+        retired = self.file("build/ASTRA-EMU-PATCH.EXE", b"retired executable")
+        command = [sys.executable, str(Path(package_client.__file__).resolve()),
+                   "--manager", str(self.manager), "--core", str(self.core),
+                   "--runtime-file", str(retired), "--output", str(self.output),
+                   "--luau-license", str(self.license)]
+        result = subprocess.run(command, capture_output=True)
+        self.assertEqual(1, result.returncode)
+        self.assertFalse(self.output.exists())
+        self.assertEqual([], list(self.root.glob(".astraemu-client-*")))
+        self.assertEqual(b"retired executable", retired.read_bytes())
 
 
 if __name__ == "__main__":

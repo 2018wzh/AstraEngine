@@ -1,7 +1,7 @@
 mod worker;
 
 use astra_emu_patch::{list_recipes, PatchError, PatchErrorKind, PatchProgress, PatchRequest};
-use clap::{Parser, Subcommand};
+use clap::Subcommand;
 use std::{
     error::Error,
     io::{self, Write},
@@ -13,19 +13,8 @@ use std::{
     },
 };
 
-#[derive(Parser)]
-#[command(
-    name = "astra-emu-patch",
-    version,
-    about = "Apply trusted offline Luau file patches"
-)]
-struct Arguments {
-    #[command(subcommand)]
-    command: Command,
-}
-
 #[derive(Subcommand)]
-enum Command {
+pub(super) enum Command {
     /// List catalog records without opening or executing recipes.
     List {
         /// Catalog directory (defaults to patches/ beside this executable).
@@ -46,19 +35,9 @@ enum Command {
     },
 }
 
-fn main() -> ExitCode {
-    // clap's exit helper calls process::exit; return normally even for help and
-    // argument failures so all owned resources follow their ordinary lifetime.
-    let arguments = match Arguments::try_parse() {
-        Ok(arguments) => arguments,
-        Err(error) => {
-            let success = !error.use_stderr();
-            let _ = error.print();
-            return ExitCode::from(if success { 0 } else { 1 });
-        }
-    };
+pub(super) fn run(command: Command) -> ExitCode {
     worker::install_panic_hook();
-    match run(arguments.command) {
+    match execute(command) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             report_error(&error, &mut io::stderr().lock());
@@ -71,7 +50,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(command: Command) -> Result<(), PatchError> {
+fn execute(command: Command) -> Result<(), PatchError> {
     match command {
         Command::List { scripts } => {
             let scripts = match scripts {
@@ -80,16 +59,13 @@ fn run(command: Command) -> Result<(), PatchError> {
                     .map_err(|cause| {
                         PatchError::with_source(
                             PatchErrorKind::Io,
-                            "cannot locate patch executable",
+                            "cannot locate executable",
                             cause,
                         )
                     })?
                     .parent()
                     .ok_or_else(|| {
-                        PatchError::new(
-                            PatchErrorKind::Path,
-                            "patch executable has no parent directory",
-                        )
+                        PatchError::new(PatchErrorKind::Path, "executable has no parent directory")
                     })?
                     .join("patches"),
             };

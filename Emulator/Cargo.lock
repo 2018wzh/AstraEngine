@@ -743,7 +743,7 @@ dependencies = [
 
 [[package]]
 name = "astra-emu-manager"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "astra-emu-abi",
  "astra-emu-fvp",
@@ -756,8 +756,11 @@ dependencies = [
  "astra-media-core",
  "astra-observability",
  "clap",
+ "crc32fast",
  "crossbeam-channel",
+ "ctrlc",
  "directories",
+ "flate2",
  "gilrs",
  "hassle-rs 0.12.0",
  "mlua",
@@ -915,21 +918,6 @@ dependencies = [
  "toml",
  "toml_parser",
  "windows 0.62.2",
-]
-
-[[package]]
-name = "astra-emu-patch-cli"
-version = "0.1.0-beta.1"
-dependencies = [
- "astra-emu-patch",
- "clap",
- "crc32fast",
- "crossbeam-channel",
- "ctrlc",
- "flate2",
- "serde_json",
- "sha2",
- "tempfile",
 ]
 
 [[package]]

@@ -116,7 +116,7 @@ def _publish(stage: Path, output: Path) -> None:
 
 def package(
     manager: Path, cores: list[Path], output: Path, runtime_files: list[Path],
-    patch_cli: Path | None = None, patches: Path | None = None, *,
+    patches: Path | None = None, *,
     patch_common: list[str] | None = None, luau_license: Path | None = None,
     subtitle_share: Path | None = None,
 ) -> None:
@@ -128,17 +128,11 @@ def package(
     if output.exists() or output.is_symlink():
         raise ValueError("output must be a new directory")
     output = output.resolve()
-    names = {"readme.md", "third_party_notices.md", "cores", "licenses", "patches"}
+    names = {"readme.md", "third_party_notices.md", "cores", "licenses", "patches",
+             "astra-emu-patch", "astra-emu-patch.exe"}
     if manager.name.casefold() in names:
         raise ValueError("Manager filename collides with package contents")
     names.add(manager.name.casefold())
-    if patch_cli is not None:
-        patch_cli = _plain_file(patch_cli)
-        if patch_cli.name not in ("astra-emu-patch", "astra-emu-patch.exe"):
-            raise ValueError("patch CLI must be the built astra-emu-patch executable")
-        if patch_cli.name.casefold() in names:
-            raise ValueError("duplicate runtime filename")
-        names.add(patch_cli.name.casefold())
     if patches is None and patch_common:
         raise ValueError("shared patch modules require --patches")
     assets = _patch_files(patches, patch_common or []) if patches is not None else []
@@ -164,8 +158,6 @@ def package(
         names.add(runtime.name.casefold())
     sources = [manager, *cores, *runtime_files, *(source for source, _ in assets),
                *(source for source, _ in license_files)]
-    if patch_cli is not None:
-        sources.append(patch_cli)
     if any(source.is_relative_to(output) for source in sources):
         raise ValueError("output overlaps package inputs")
     if patches is not None and output.is_relative_to(patches.resolve()):
@@ -177,8 +169,6 @@ def package(
         shutil.copy2(manager, stage / manager.name)
         for runtime in runtime_files:
             shutil.copy2(runtime, stage / runtime.name)
-        if patch_cli is not None:
-            shutil.copy2(patch_cli, stage / patch_cli.name)
         for source, relative in assets:
             destination = stage / "patches" / relative
             destination.parent.mkdir(parents=True, exist_ok=True)
@@ -227,7 +217,6 @@ def main() -> int:
     parser.add_argument("--core", type=Path, action="append", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--runtime-file", type=Path, action="append", default=[])
-    parser.add_argument("--patch-cli", type=Path, help="built offline converter (optional)")
     parser.add_argument("--patches", type=Path, help="explicit trusted public patch catalog directory")
     parser.add_argument("--patch-common", action="append", default=[], help="required common/<module>.luau only")
     parser.add_argument("--luau-license", type=Path, help="LICENSE from the locked luau0-src source")
@@ -236,7 +225,7 @@ def main() -> int:
     try:
         package(
             args.manager, args.core, args.output, args.runtime_file,
-            args.patch_cli, args.patches, patch_common=args.patch_common,
+            args.patches, patch_common=args.patch_common,
             luau_license=args.luau_license, subtitle_share=args.subtitle_share,
         )
     except (OSError, ValueError, AttributeError):

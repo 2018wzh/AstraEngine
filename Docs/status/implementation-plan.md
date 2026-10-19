@@ -11,6 +11,7 @@
 - 用户最新决定：验收只要求可玩，由用户在 Release 版本中人工手动执行；停止所有自动输入、截图、重开、关闭及性能采样，移除为自动验收增加的入口、驱动和测试钩子。编译成功不冒记人工通过。
 - Manager 已提供“引擎公共设置”，分离滤镜前原生渲染分辨率与模拟器专属选项，映射 RFVP/Musica/Sena 现有参数，其余核心明确显示当前不可调整。Musica 默认 `title` 菜单启动，显式 `direct` 保留；运行时仍只读取 `keys.v2` 的 `key.toml`，其他格式转换只在开发 CLI。引擎/模拟器分离、按游戏选择、光标与输入适配修复保留，产品仍由用户人工 Release 验收。
 - 启动优化改为手动刷新：先显示缓存资料库，不自动加载核心或识别游戏；“刷新核心”只异步加载核心，“扫描游戏”与“添加游戏”才刷新资料库，核心就绪不隐式变更游戏绑定。手动扫描按变化复用有效识别提示，每次启动重新校验所选核心。按需封面、批量元数据/统计及惰性扩展/滤镜资源保留；只向既有日志添加阶段标记，不恢复自动验收或性能采样。实窗效果待用户手动观察。
+- 当前 Beta2 将文件转换收口到唯一 `astra-emu-manager` 可执行文件：无参数为 GUI，命令行为 `patch list` / `patch apply`；GUI 直接使用共享 `astra-emu-patch` 库。转换仍由用户显式发起，CLI 不启动 GUI、核心或游戏；原生取消清理并 join 后返回 130。Beta1 双程序包保持历史冻结，新构建和打包不再提供独立补丁 EXE。
 - 既有 RFVP、Siglus、Artemis R01–R08、Hosted R09 数据和已发布 astra 分支是旧架构基线，不能算新架构验收。原生功能 PR 的未合并状态及 Sandbox 故障记录保留在审计，不再驱动本批实施顺序。
 
 ## 产品状态
@@ -104,7 +105,7 @@ Sena/Ethornell 继承指定上游的实际支持范围；KrKr 继续使用既有
 
 受影响五个 crate 的全 target Clippy（`--no-deps -D warnings`）通过；按当前编译器建议调整等价的有界字节分块后，Musica 的 10 项 key/profile 纯回归通过。实际生成并运行 MSVC x64 C 消费程序，核对会话菜单结构布局；实际重建 Manager，`--help` 通过。文档链接与数据边界检查 181 项通过。这些检查未启动商业游戏或操作真实 Manager 窗口。
 
-独立 `astra-emu-patch` 已实现只读输入、私有目录事务、新 VM 的 Luau API 和 SHA256 收据。52 项公开行为检查及该 crate 的全 target Clippy 通过；另运行真实 API 程序，读取合成 x64 PE overlay 的四个 zlib/CRC 块，修补两段文本和两张 BMP，逐字节匹配独立期望、验证完整副本及收据/profile，原始输入不变。取消、既有输出、链接逃逸、解压边界和小数偏移均有回归。当前 mlua 0.10.5 的 epsilon 数值分类会误写极小数和负零，已以保留许可的源码固定依赖回补；其既有 23 项生命周期写法警告仍是第三方警告，没有通过关闭产品检查隐藏。
+独立共享库 `astra-emu-patch` 已实现只读输入、私有目录事务、新 VM 的 Luau API 和 SHA256 收据。52 项公开行为检查及该 crate 的全 target Clippy 通过；另运行真实 API 程序，读取合成 x64 PE overlay 的四个 zlib/CRC 块，修补两段文本和两张 BMP，逐字节匹配独立期望、验证完整副本及收据/profile，原始输入不变。取消、既有输出、链接逃逸、解压边界和小数偏移均有回归。当前 mlua 0.10.5 的 epsilon 数值分类会误写极小数和负零，已以保留许可的源码固定依赖回补；其既有 23 项生命周期写法警告仍是第三方警告，没有通过关闭产品检查隐藏。
 
 固定 mlua 回补后重新编译并执行 Manager/Core/Slint 的 128 项消费者检查，全部通过；转换库最终 52 项检查和独立 API 烟测也再次通过。未启用 Artemis Lua 5.1 的合并构建，未改变文字 Hook 的生命周期或串行队列。
 
@@ -139,19 +140,25 @@ Sena/Ethornell 继承指定上游的实际支持范围；KrKr 继续使用既有
 
 ### 工具、构建与验收边界
 
-Manager 与 `astra-emu-patch` 的显式转换、取消、独立输出导入及 typed profile 保存逻辑已经实现。CLI 12 项真实二进制检查通过；Windows Ctrl+C 实际子进程返回 130、已 join，且无输出/残留 staging。Manager 134 项检查（库 20、应用 57、Core 45、UI 12）通过，真实临时 SQLite 的事务配置写入与重开验证通过。实际 Manager GUI 尚未观察，逻辑与 SQLite 结果不替代按钮操作、进度显示或实窗导入验收。
+统一入口迁移前，Manager 与共享库 `astra-emu-patch` 的显式转换、取消、独立输出导入及 typed profile 保存逻辑已经实现。当时独立 CLI 的 12 项真实二进制检查通过；Windows Ctrl+C 实际子进程返回 130、已 join，且无输出/残留 staging。Manager 134 项检查（库 20、应用 57、Core 45、UI 12）通过，真实临时 SQLite 的事务配置写入与重开验证通过。这些是迁移前证据，不作为 Beta2 统一入口的检查结果。实际 Manager GUI 尚未观察，逻辑与 SQLite 结果不替代按钮操作、进度显示或实窗导入验收。
 
 共享 ASS 使用实际 libass `0.17.4#1`、static-MD，11 项单元/集成/编译失败检查及 Clippy 通过；公开中文字体的暂停、结束、seek、resize 路径和 SDK 3 项原生字幕生命周期检查已验证。Musica 背景 Opaque 保留 A=0 时的 RGB，前景语义不变；末尾选择分隔符与 `@stage` 已有原生回归。最终已知 90 个原输入哈希仍匹配；5 个必要转换输出的 10/10/101/55/126 项逐文件收据哈希均通过。字体字符映射不能代替轮廓：夏空两份字幕子集不再误用作正文，正文走已验证的内置中文字体。
 
 整合回归曾定位两个真实缺陷：Eden 导出仍校验旧游戏身份，已与原生会话共用包含本地化/loose/font/subtitle 的身份计算；影片在一帧内释放并重传同一纹理 ID，已改为双槽，字幕 mask/轨道另用内容 revision/serial。修复后的 41 项公开 GPU 回归通过（1 项既有忽略）；增加实际 ASS 红/绿像素切换的影片回归也通过暂停、存读档和结束。两项原生色彩检查及夏空五部实际影片首帧确认 swscale 使用 BT.601 limited 的既有 SDR 呈现，未按分辨率猜测源标签；商业 VM、游戏 GUI 和设备声音未执行。
 
-七个核心、Manager 和必要 CLI 均已完成本轮独立 Windows x64 Release 构建：Artemis 保留 Vulkan/FFmpeg；KrKr 保留 FFmpeg 3.3.9、插件及 layerExImage；RFVP 使用 `native-dylib-export` 导出原生 query。本机验证目录 `AstraEMU-native-first-checkpoint-20261019` 包含 61 个 x64 PE、52 个运行 DLL、7 个 query 导出，799 条静态导入边无缺项；仅保留四个已登记必要转换及其共享模块。包内 Manager `--help`、CLI 跨工作目录列举及真实公开 PE 转换均通过，转换字节与独立期望一致、公开输入哈希未变。打包器 23 项检查通过。这是本机验证包，不是 13 款本地化全部完成或人工通过的发布。
+### 历史 checkpoint 与冻结 Beta1
 
-`0.1.0-beta.1` 已按提交 `455c94284519ce4121deedc8767cc66a9badfe4f` 构建本机 Windows x64 私测包。Manager 与转换 CLI 为本次重新编译，`--version` 均实际返回 Beta 版本；七个核心复用上一验证包的相同哈希 Release DLL，未冒记为重新编译。包内 61 个 PE、7 个 query 导出、799 条导入边、真实公开转换及 324 个 ZIP 文件的逐项哈希通过。ZIP 名为 `AstraEMU-0.1.0-beta.1-win64.zip`，SHA-256 为 `8b6b63529ee43c94e169f2cc73602769ad0d859689259f1dd4fda069e150c97e`。测试步骤见[Beta 私测说明](../manual/astraemu-client.md#010-beta1-私测)；原游戏、旧存档及七个候选的阻塞不因 Beta 名称而改变。
+统一入口迁移前，七个核心、Manager 和当时的独立转换 CLI 均已完成该轮独立 Windows x64 Release 构建：Artemis 保留 Vulkan/FFmpeg；KrKr 保留 FFmpeg 3.3.9、插件及 layerExImage；RFVP 使用 `native-dylib-export` 导出原生 query。本机验证目录 `AstraEMU-native-first-checkpoint-20261019` 包含 61 个 x64 PE、52 个运行 DLL、7 个 query 导出，799 条静态导入边无缺项；仅保留四个已登记必要转换及其共享模块。包内 Manager `--help`、CLI 跨工作目录列举及真实公开 PE 转换均通过，转换字节与独立期望一致、公开输入哈希未变。打包器 23 项检查通过。这是历史本机验证包，不是当前双程序打包建议，也不是 13 款本地化全部完成或人工通过的发布。
 
-Beta 的 Manager/CLI 全 target Clippy（`--no-deps -D warnings`）及 CLI 12 项实际进程回归通过；仅改产品 prerelease 版本和标准 `--version`，没有修改核心 ABI、原生读取或资料库 schema。Beta 文件固定为上述提交；后续只读分析结果另行记录，不原地替换测试包。
+冻结历史包 `0.1.0-beta.1` 已按提交 `455c94284519ce4121deedc8767cc66a9badfe4f` 构建为本机 Windows x64 私测包。Manager 与当时独立转换 CLI 均重新编译，`--version` 均实际返回 Beta1 版本；七个核心复用上一验证包的相同哈希 Release DLL，未冒记为重新编译。包内 61 个 PE、7 个 query 导出、799 条导入边、真实公开转换及 324 个 ZIP 文件的逐项哈希通过。ZIP 名为 `AstraEMU-0.1.0-beta.1-win64.zip`，SHA-256 为 `8b6b63529ee43c94e169f2cc73602769ad0d859689259f1dd4fda069e150c97e`。该双程序包和原目录不原地替换；当前单程序用法见[Beta2 私测说明](../manual/astraemu-client.md#010-beta2-私测)。原游戏、旧存档及七个候选的阻塞不因 Beta 名称而改变。
 
-### Beta 后的只读分析
+Beta1 的 Manager/独立 CLI 全 target Clippy（`--no-deps -D warnings`）及 CLI 12 项实际进程回归通过；当时仅改产品 prerelease 版本和标准 `--version`，没有修改核心 ABI、原生读取或资料库 schema。Beta1 文件固定为上述提交；后续只读分析结果另行记录，不原地替换测试包。
+
+### 0.1.0-beta.2 统一入口
+
+Beta2 使用唯一的 `astra-emu-manager`：补丁 CLI 已迁入 `patch` 子命令，GUI 直接调用共享 `astra-emu-patch` 库；独立程序 crate、打包参数及旧命令 shim 均已移除。Manager 已完成实际 Release 重建，根版本输出为 `0.1.0-beta.2`，原 `extension-*` 命令名保留；迁移后的 12 项真实进程回归、Manager 库/应用 77 项回归、Release 全 target Clippy 及打包器 24 项行为检查通过。在独立隐藏测试控制台发送真实 Ctrl-C，纯 Luau 循环和 2 GiB 原生复制的子进程均在非空 staging 后返回 130，工作线程回收且无输出/残留，公开源哈希不变；未操作用户控制台或游戏窗口。七核心沿用冻结 Beta1 的相同哈希 DLL，仅重建 Manager；整包结果以本批 `release-manifest.json` 与 `SHA256SUMS` 为准。字体、Ethornell 和静态 FriBidi 许可限制仍禁止公开二进制发布，实际 GUI/游戏验收仍由用户手动执行。
+
+### Beta1 后的只读分析
 
 前奏诗的十五条姓名（零基行 28–42）已通过原版拷贝的生产者与绘制调用链定位：`0x4A1140` 从原始 CLog 说话人构造独立回看标题，全部生成字节与有序 ACR 身份匹配；34/35 保留原有重复与 first-record 语义。27/43 也分别定位到隐藏姓名的条件生产者。原生 `runtime/message.rs` 在会话替换之前保存回看文本，`scene.rs` 的回看分支直接拼接计数与旧说话人，未走该标题身份和 names-first 查找。后续应在引擎中保留原始身份、生产并翻译回看/隐藏姓名，不增加旧封装脚本或删除记录；本轮只分析，Beta 及目录登记保持不变。
 

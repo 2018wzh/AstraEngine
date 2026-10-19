@@ -1,5 +1,6 @@
 mod manager_app;
 mod metadata_runtime;
+mod patch_cli;
 mod platform_secret;
 mod stage_renderer;
 #[cfg(test)]
@@ -17,7 +18,18 @@ const FAMILY_OWNER_STACK_BYTES: usize = 8 * 1024 * 1024;
 #[command(version)]
 struct Arguments {
     #[command(subcommand)]
-    extension: Option<ExtensionCommand>,
+    command: Option<Command>,
+}
+
+#[derive(clap::Subcommand)]
+enum Command {
+    /// Apply trusted offline file patches without starting the GUI or a core.
+    Patch {
+        #[command(subcommand)]
+        command: patch_cli::Command,
+    },
+    #[command(flatten)]
+    Extension(ExtensionCommand),
 }
 
 #[derive(clap::Subcommand)]
@@ -44,14 +56,28 @@ pub(crate) enum ExtensionCommand {
 }
 
 fn main() -> ExitCode {
-    let arguments = Arguments::parse();
-    if let Some(command) = arguments.extension {
-        return match manager_app::run_extension_command(command) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(error) => {
-                eprintln!("{error}");
-                ExitCode::FAILURE
-            }
+    let arguments = match Arguments::try_parse() {
+        Ok(arguments) => arguments,
+        Err(error) => {
+            #[cfg(target_os = "windows")]
+            attach_cli_console();
+            let success = !error.use_stderr();
+            let _ = error.print();
+            return ExitCode::from(if success { 0 } else { 1 });
+        }
+    };
+    if let Some(command) = arguments.command {
+        #[cfg(target_os = "windows")]
+        attach_cli_console();
+        return match command {
+            Command::Patch { command } => patch_cli::run(command),
+            Command::Extension(command) => match manager_app::run_extension_command(command) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => {
+                    eprintln!("{error}");
+                    ExitCode::FAILURE
+                }
+            },
         };
     }
     match manager_app::run_application() {
@@ -66,4 +92,15 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+#[cfg(target_os = "windows")]
+fn attach_cli_console() {
+    // The GUI subsystem does not inherit a console. Attach only for CLI paths,
+    // never allocate a window; redirected standard handles remain redirected.
+    let _ = unsafe {
+        windows::Win32::System::Console::AttachConsole(
+            windows::Win32::System::Console::ATTACH_PARENT_PROCESS,
+        )
+    };
 }

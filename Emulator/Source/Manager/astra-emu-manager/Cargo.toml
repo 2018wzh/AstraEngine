@@ -1,6 +1,6 @@
 [package]
 name = "astra-emu-manager"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 edition.workspace = true
 license.workspace = true
 build = "build.rs"
@@ -27,6 +27,7 @@ astra-media-core = { path = "../../../../Engine/Source/Runtime/astra-media-core"
 clap.workspace = true
 serde.workspace = true
 crossbeam-channel.workspace = true
+ctrlc.workspace = true
 naga.workspace = true
 tokio.workspace = true
 directories.workspace = true
@@ -43,7 +44,7 @@ hassle-rs = "=0.12.0"
 wgpu.workspace = true
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Direct3D12", "Win32_Graphics_Dxgi_Common"] }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Direct3D12", "Win32_Graphics_Dxgi_Common", "Win32_System_Console"] }
 
 [target.'cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))'.dependencies]
 gilrs = { workspace = true, features = ["wgi"] }
@@ -54,3 +55,7 @@ astra-emu-fvp = { path = "../../Families/astra-emu-fvp" }
 
 [build-dependencies]
 sha2.workspace = true
+
+[dev-dependencies]
+crc32fast = "1.5"
+flate2.workspace = true

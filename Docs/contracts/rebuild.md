@@ -105,7 +105,9 @@ Manager 使用 Slint 与精炼 Material 3，保留游戏库、核心配置和管
 
 ### 显式离线文件转换
 
-[`astra-emu-patch`](../../Emulator/Source/Tools/astra-emu-patch/src/lib.rs) 是同步、独立的可信 Luau 文件转换库，不依赖 Manager、游戏核心或 GPU。优先复用或补齐引擎原生的格式、语言、字体与资源机制，不用脚本重写已有 reader/writer。仅在旧补丁封装不能直接消费时显式转换，产物收敛为标准原生资源与 typed 配置；播放时不依赖转换脚本。每次任务独占新 VM，不复用文字 Hook 的 VM、队列或配置；输入只读，必要转换的版本/指纹判断和旧封装恢复属于脚本。CLI 与 Manager 必须复用此实现，均不在应用或游戏启动时自动转换。
+[`astra-emu-patch`](../../Emulator/Source/Tools/astra-emu-patch/src/lib.rs) 是同步、独立的可信 Luau 文件转换库，不依赖 Manager、游戏核心或 GPU。优先复用或补齐引擎原生的格式、语言、字体与资源机制，不用脚本重写已有 reader/writer。仅在旧补丁封装不能直接消费时显式转换，产物收敛为标准原生资源与 typed 配置；播放时不依赖转换脚本。每次任务独占新 VM，不复用文字 Hook 的 VM、队列或配置；输入只读，必要转换的版本/指纹判断和旧封装恢复属于脚本。Manager GUI 直接调用此库，CLI 在同一 `astra-emu-manager` 可执行文件内复用此实现，不通过补丁子进程或在应用、游戏启动时自动转换。
+
+客户端只有一个 `astra-emu-manager` 可执行文件：无参数启动 GUI，现有 `extension-install`、`extension-enable`、`extension-configure`、`extension-list` 命令名保持不变；文件转换使用 `patch list [--scripts DIR]` 和 `patch apply --script FILE --source DIR [--patch DIR] --output NEW-DIR`。`patch list` 默认读取程序相邻的 `patches/catalog.json`，输出 NDJSON，不执行脚本。CLI 不启动 GUI、核心或游戏，不自动导入转换产物。`patch apply` 拥有并 join 工作线程，合并进度更新；Ctrl+C 通过原生取消通道及同一标志中断长原生操作和 VM，清理完成并等待线程退出后返回 130，其他转换失败返回 1。不构建、打包或保留独立补丁 EXE、旧命令兼容别名；GUI 不改为调用 CLI。
 
 输出必须是与 source/patch 输入树均不重叠的新目录。先校验授权目录句柄和路径，再在同父目录建立 owner-only staging；所有写入只发生在此树。路径按规范相对分量校验，拒绝穿越、设备名、ADS 和输出链接/重解析点；枚举不隐式跟随链接。输出完整独立，不硬链接原文件或回退读取原安装，不复制旧存档。异常或发布前取消删除本次 staging；原目录和既有输出不变。原子发布不覆盖目标，发布后到达的取消不撤销成品。
 

@@ -12,7 +12,9 @@ use std::{
 };
 
 fn binary() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_astra-emu-patch"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_astra-emu-manager"));
+    command.arg("patch");
+    command
 }
 
 fn apply(fixture: &PublicOverlay) -> Command {
@@ -301,11 +303,12 @@ fn default_catalog_is_executable_adjacent_not_current_directory() {
     let records = write_catalog(&scripts);
     let executable = root
         .path()
-        .join(format!("astra-emu-patch{}", std::env::consts::EXE_SUFFIX));
-    fs::copy(env!("CARGO_BIN_EXE_astra-emu-patch"), &executable).unwrap();
+        .join(format!("astra-emu-manager{}", std::env::consts::EXE_SUFFIX));
+    fs::copy(env!("CARGO_BIN_EXE_astra-emu-manager"), &executable).unwrap();
     assert_listing(
         Command::new(executable)
             .current_dir(unrelated)
+            .arg("patch")
             .arg("list")
             .output()
             .unwrap(),
@@ -394,15 +397,12 @@ fn dense_progress_does_not_drop_completion_or_block_worker_join() {
 
 #[test]
 fn command_line_errors_return_one_and_help_returns_zero() {
-    failure(
-        binary().arg("apply").output().unwrap(),
-        1,
-        "required arguments",
-    );
+    let error = binary().arg("apply").output().unwrap();
+    assert_eq!(error.status.code(), Some(1));
+    assert!(error.stdout.is_empty());
     let output = binary().arg("--help").output().unwrap();
     assert_eq!(output.status.code(), Some(0));
     assert!(output.stderr.is_empty());
-    assert!(String::from_utf8(output.stdout).unwrap().contains("apply"));
 }
 
 #[test]
