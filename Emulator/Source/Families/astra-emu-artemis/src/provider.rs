@@ -11,8 +11,8 @@ pub(crate) const FIELD_COUNT: usize = 2;
 pub(crate) fn fields() -> [ConfigField; FIELD_COUNT] {
     let archive = ConfigField {
         id: Bytes::new(b"archive"),
-        label: Bytes::new(b"Base PFS archive (empty selects the only archive)"),
-        group: Bytes::new(b"Files"),
+        label: Bytes::new("基础 PFS 归档".as_bytes()),
+        group: Bytes::new("文件".as_bytes()),
         default_value: ConfigValue {
             kind: VALUE_STRING,
             reserved: 0,
@@ -25,16 +25,26 @@ pub(crate) fn fields() -> [ConfigField; FIELD_COUNT] {
         number_min: 0.0,
         number_max: 0.0,
         max_bytes: 255,
-        reserved: 0,
+        flags: CONFIG_FLAG_FILE_PATH | CONFIG_FLAG_GAME_RELATIVE,
         choices: std::ptr::null(),
         choice_count: 0,
+        description: Bytes::new(
+            "作为基础资源的 PFS 文件，须直接位于游戏目录下；留空时自动选用目录中唯一的 PFS 文件。"
+                .as_bytes(),
+        ),
+        choice_labels: std::ptr::null(),
+        step: 0.0,
+        unit: Bytes::EMPTY,
     };
     [
         archive,
         ConfigField {
             id: Bytes::new(b"extra_archive"),
-            label: Bytes::new(b"Explicit extra PFS patch (root-relative, empty disables)"),
+            label: Bytes::new("额外 PFS 补丁".as_bytes()),
             max_bytes: 4096,
+            description: Bytes::new(
+                "叠加在基础归档之上的补丁文件，路径相对游戏目录；留空则不加载额外补丁。".as_bytes(),
+            ),
             ..archive
         },
     ]

@@ -44,6 +44,7 @@ fn open<'a>(
     epoch: u64,
     error: &'a mut Error,
     window_host: WindowService,
+    render_extent: Extent,
 ) -> Result<OpenResult, &'a Error> {
     let path = root.to_str().unwrap();
     let request = OpenRequest {
@@ -74,6 +75,7 @@ fn open<'a>(
             },
         },
         module_owner: ptr::null_mut(),
+        render_extent,
     };
     let mut output = std::mem::MaybeUninit::<OpenResult>::uninit();
     let status = unsafe { api.open.unwrap()(&request, output.as_mut_ptr(), error) };
@@ -102,6 +104,7 @@ fn malformed_archive_releases_native_session_lease() {
                 request: Some(unavailable),
                 invalidate: Some(invalidate),
             },
+            Extent::default(),
         )
         .unwrap_err();
         assert_eq!(
@@ -109,4 +112,53 @@ fn malformed_archive_releases_native_session_lease() {
             b"ASTRA_EMU_ARTEMIS_PROJECT_INI"
         );
     }
+}
+#[test]
+fn descriptor_declares_v3_names_and_file_fields() {
+    let api = api();
+    let mut descriptor = std::mem::MaybeUninit::<Descriptor>::uninit();
+    assert_eq!(
+        unsafe { api.describe.unwrap()(descriptor.as_mut_ptr(), &mut Error::default()) },
+        OK
+    );
+    let descriptor = unsafe { descriptor.assume_init() };
+    unsafe { descriptor.validate() }.unwrap();
+    assert_eq!(unsafe { descriptor.display_name.text(64) }.unwrap(), "Art3m1s");
+    assert_eq!(unsafe { descriptor.family_name.text(64) }.unwrap(), "Artemis");
+    assert_eq!(descriptor.capabilities & CAP_RENDER_EXTENT, 0);
+    let fields = unsafe {
+        std::slice::from_raw_parts(descriptor.configuration, descriptor.configuration_count)
+    };
+    unsafe { validate_config(fields, &[]) }.unwrap();
+    for field in fields {
+        assert_eq!(field.flags, CONFIG_FLAG_FILE_PATH | CONFIG_FLAG_GAME_RELATIVE);
+        assert_eq!(unsafe { field.group.text(64) }.unwrap(), "文件");
+        assert!(!unsafe { field.description.text(512) }.unwrap().is_empty());
+    }
+}
+#[test]
+fn non_default_render_extent_is_rejected() {
+    let api = api();
+    let root = tempfile::tempdir().unwrap();
+    let mut error = Error::default();
+    let failure = open(
+        api,
+        root.path(),
+        1,
+        &mut error,
+        WindowService {
+            context: ptr::null_mut(),
+            request: Some(unavailable),
+            invalidate: Some(invalidate),
+        },
+        Extent {
+            width: 1920,
+            height: 1080,
+        },
+    )
+    .unwrap_err();
+    assert_eq!(
+        &failure.code[..failure.code_len as usize],
+        b"ASTRA_EMU_ARTEMIS_RENDER_EXTENT"
+    );
 }

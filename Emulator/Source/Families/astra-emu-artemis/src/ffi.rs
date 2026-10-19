@@ -14,6 +14,7 @@ use std::{
         Arc, LazyLock,
     },
 };
+const CAPABILITIES: u64 = CAP_CPU_SURFACE;
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
 struct Metadata {
     fields: [ConfigField; provider::FIELD_COUNT],
@@ -115,11 +116,14 @@ unsafe extern "C" fn describe(out: *mut Descriptor, error: *mut Error) -> Status
                 family_id: Bytes::new(b"artemis"),
                 plugin_id: Bytes::new(b"astra.emu.artemis"),
                 version: Bytes::new(env!("CARGO_PKG_VERSION").as_bytes()),
-                capabilities: CAP_CPU_SURFACE,
+                capabilities: CAPABILITIES,
                 formats: METADATA.formats.as_ptr(),
                 format_count: 1,
                 configuration: METADATA.fields.as_ptr(),
                 configuration_count: METADATA.fields.len(),
+                display_name: Bytes::new(b"Art3m1s"),
+                family_name: Bytes::new(b"Artemis"),
+                render: RenderExtentSupport::default(),
             };
         }
         Ok(())
@@ -188,6 +192,19 @@ unsafe extern "C" fn open(
             INVALID_ARGUMENT,
             "ASTRA_EMU_ARTEMIS_ARGUMENT",
             "null open request",
+        );
+    }
+    let header = unsafe { (*request).header };
+    if header.accepts::<OpenRequest>()
+        && RenderExtentSupport::default()
+            .validate_request(CAPABILITIES, unsafe { (*request).render_extent })
+            .is_err()
+    {
+        return failure(
+            error,
+            INVALID_ARGUMENT,
+            "ASTRA_EMU_ARTEMIS_RENDER_EXTENT",
+            "render extent is not configurable for Artemis",
         );
     }
     boundary(error, || {

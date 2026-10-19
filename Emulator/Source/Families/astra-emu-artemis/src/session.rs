@@ -596,7 +596,6 @@ pub(crate) fn surface(width: u32, height: u32) -> SurfaceInfo {
         color: COLOR_SRGB,
         alpha: ALPHA_IGNORED,
         rows: ROWS_TOP_DOWN,
-        backend: 0,
         logical: Extent { width, height },
         raster: Extent { width, height },
         stride: u64::from(width) * 4,

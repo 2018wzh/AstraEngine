@@ -34,6 +34,8 @@ Kira 保持 0.12.2，以发布来源 `e9cbb4608237bb339c3eaf498571000e6cce35ca` 
 
 配置保留 `archive` 文件选择，并增加默认空的 `extra_archive`。配置按字段 ID 解析，顺序不构成 ABI 契约；描述符报告实际 schema 长度。`extra_archive` 是基包父目录内、最多 4096 字节的相对文件路径，由原生 `HostResources::mount_pfs_with_extra` 校验路径及独立 PFS 身份。保留原基包和活动数字卷排序，显式补丁在其后覆盖；散文件、内存 override 和存档优先级不变。不扫描备份、不重命名原文件、不启动转换、不复制旧存档。空值完全保留原行为。
 
+C ABI v3 描述符声明显示名 `Art3m1s`、引擎名 `Artemis`，只声明 `CAP_CPU_SURFACE`，不声明可调渲染分辨率；`open` 收到非 0×0 的 `render_extent` 时返回 `ASTRA_EMU_ARTEMIS_RENDER_EXTENT`。两个配置字段使用中文标签、说明和分组“文件”，并带 `CONFIG_FLAG_FILE_PATH | CONFIG_FLAG_GAME_RELATIVE`；解析与挂载规则不变。
+
 资源挂载与 `system.ini` 读取可通过公开合成 PF6 夹具单独验证，不创建 VM、GPU 或存档目录。测试覆盖配置顺序、默认值、类型/重复/超长拒绝、配置到原生 reader 的实际消费者及输入/已有存档字节不变；这些测试不构成游戏验收。
 
 终之空 2025 可显式选择已核验的停用独立 PFS 补丁，保留原基包、UTF-8 与原分支；不需要 Lua PFS 重写器。只读样本已核对额外 PFS 目录、UTF-8 AST 与所用字体字形覆盖；完整 AST 引用闭包、VM 流程与人工可玩性仍待验收。
