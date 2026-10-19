@@ -1,0 +1,335 @@
+name: emu-release
+
+on:
+  push:
+    tags: ['emu-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: emu-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # microsoft/vcpkg commit V: descends from the astra-subtitle builtin-baseline
+  # 664933b8d385dfc01f4e0cdff4c7c74e71f6a740 and its latest ffmpeg is 9.0.2#1.
+  VCPKG_COMMIT: 664933b8d385dfc01f4e0cdff4c7c74e71f6a740
+  VCPKG_DISABLE_METRICS: '1'
+  CARGO_INCREMENTAL: '0'
+  CARGO_TERM_COLOR: always
+  ASTRA_SUBTITLE_VCPKG_ROOT: ${{ github.workspace }}\.work\vcpkg-subtitle
+  LIBCLANG_PATH: C:\Program Files\LLVM\bin
+  SUBTITLE_TRIPLET: x64-windows-static-md-dynbidi
+  METADATA_REPOSITORY: 2018wzh/AstraEMU-metadata
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          lfs: true
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Host tools
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          choco install winflexbison3 ninja -y --no-progress
+          python -m pip install --disable-pip-version-check jsonschema
+          $bison = Get-ChildItem C:\ProgramData\chocolatey\lib\winflexbison3 -Recurse -Filter win_bison.exe | Select-Object -First 1
+          if (-not $bison) { throw 'win_bison.exe not found after installing winflexbison3' }
+          "BISON_EXECUTABLE=$($bison.FullName)" >> $env:GITHUB_ENV
+
+      - name: Release version
+        id: version
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $version = $env:GITHUB_REF_NAME -replace '^emu-v', ''
+          } else {
+            $version = "0.0.0-dev.$($env:GITHUB_SHA.Substring(0, 9))"
+          }
+          if ($version -notmatch '^[0-9A-Za-z][0-9A-Za-z.+-]*$') { throw "invalid release version $version" }
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: vcpkg checkout
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          git clone https://github.com/microsoft/vcpkg.git .work/vcpkg
+          git -C .work/vcpkg checkout --detach $env:VCPKG_COMMIT
+          git -C .work/vcpkg merge-base --is-ancestor 664933b8d385dfc01f4e0cdff4c7c74e71f6a740 HEAD
+          .work/vcpkg/bootstrap-vcpkg.bat -disableMetrics
+
+      - name: Subtitle vcpkg tree
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          .work/vcpkg/vcpkg.exe install `
+            --x-manifest-root=Engine/Source/Runtime/astra-subtitle `
+            --overlay-triplets=Engine/Source/Runtime/astra-subtitle/triplets `
+            --triplet $env:SUBTITLE_TRIPLET `
+            "--x-install-root=$env:ASTRA_SUBTITLE_VCPKG_ROOT/installed" `
+            --clean-buildtrees-after-build --clean-packages-after-build
+          Copy-Item .work/vcpkg/.vcpkg-root $env:ASTRA_SUBTITLE_VCPKG_ROOT/
+
+      - name: FFmpeg vcpkg tree
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          .work/vcpkg/vcpkg.exe install `
+            --x-manifest-root=Tools/AstraEMU/vcpkg/ffmpeg `
+            --x-install-root=.work/vcpkg-ffmpeg/installed `
+            --triplet x64-windows --clean-buildtrees-after-build --clean-packages-after-build
+          Copy-Item .work/vcpkg/.vcpkg-root .work/vcpkg-ffmpeg/
+
+      - name: DXC runtime
+        run: python Tools/Effects/fetch_dxc.py --output .work/dxc
+
+      - name: Build Manager
+        run: cargo build --manifest-path Emulator/Cargo.toml --locked --release -p astra-emu-manager --target-dir .work/target-manager
+
+      - name: Build Musica
+        env:
+          VCPKG_ROOT: ${{ github.workspace }}\.work\vcpkg-ffmpeg
+        run: cargo build --manifest-path Emulator/Cargo.toml --locked --release -p astra-emu-musica --features dynamic-plugin-export,ffmpeg-vcpkg --target-dir .work/target-musica
+
+      - name: Build FVP
+        run: cargo build --manifest-path Emulator/Cargo.toml --locked --release -p astra-emu-fvp --features dynamic-plugin-export --target-dir .work/target-fvp
+
+      - name: Build Siglus
+        run: cargo build --manifest-path Emulator/Cargo.toml --locked --release -p astra-emu-siglus --features dynamic --target-dir .work/target-siglus
+
+      - name: Build Artemis
+        env:
+          VCPKG_ROOT: ${{ github.workspace }}\.work\vcpkg-ffmpeg
+        run: cargo build --manifest-path Emulator/Cargo.toml --locked --release -p astra-emu-artemis --target-dir .work/target-artemis
+
+      - name: Build Sena
+        run: cargo build --manifest-path Emulator/ThirdParty/sena-rs/Cargo.toml --locked --release -p astra-emu-sena --features diagnostic-bridge --target-dir .work/target-sena
+
+      - name: Build Ethornell
+        run: cargo build --manifest-path Emulator/ThirdParty/ethornell-rs/Cargo.toml --locked --release -p astra-emu-ethornell --features diagnostic-bridge --target-dir .work/target-ethornell
+
+      - name: Build KrKr
+        env:
+          VCPKG_ROOT: ${{ github.workspace }}\.work\vcpkg
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $root = (Get-Location).Path
+          $native = "$root/Emulator/Source/Families/astra-emu-krkr/native"
+          cmake -S Emulator/ThirdParty/kirikiri2 -B .work/krkr-msvc -G Ninja `
+            -DWINDOWS=ON -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTS=OFF -DBUILD_TOOLS=OFF `
+            -DKRKR2_USE_STUB_SPDLOG=OFF -DKRKR2_EMBEDDED_ADAPTER_DIR="$native" `
+            -DCMAKE_C_COMPILER="$env:VCToolsInstallDir/bin/Hostx64/x64/cl.exe" `
+            -DCMAKE_CXX_COMPILER="$env:VCToolsInstallDir/bin/Hostx64/x64/cl.exe" `
+            -DBISON_EXECUTABLE="$env:BISON_EXECUTABLE" -DVCPKG_TARGET_TRIPLET=x64-windows `
+            -DVCPKG_INSTALLED_DIR="$root/.work/krkr-native/vcpkg_installed" `
+            "-DVCPKG_INSTALL_OPTIONS=--x-buildtrees-root=$root/.work/krkr-buildtrees;--x-packages-root=$root/.work/krkr-packages;--downloads-root=$root/.work/krkr-downloads"
+          cmake --build .work/krkr-msvc --target astra_krkr_native
+
+      - name: Stage cores
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $subtitle = "$env:ASTRA_SUBTITLE_VCPKG_ROOT/installed/$env:SUBTITLE_TRIPLET"
+          $ffmpeg = '.work/vcpkg-ffmpeg/installed/x64-windows'
+          $krkrVcpkg = '.work/krkr-native/vcpkg_installed/x64-windows'
+          $openmp = Get-ChildItem "$env:VCToolsRedistDir/x64" -Directory -Filter 'Microsoft.VC*.OpenMP' | Select-Object -First 1
+          if (-not $openmp) { throw 'MSVC OpenMP redistributable directory not found' }
+          function Stage-Core {
+            param([string]$Name, [string]$Library, [string]$PluginId, [string]$Manifest,
+                  [string[]]$Search = @(), [string[]]$Licenses = @(), [string]$Resources = '',
+                  [string[]]$Extra = @())
+            $version = python Tools/AstraEMU/release_catalog.py crate-version --manifest $Manifest
+            $libraryName = (Split-Path $Library -Leaf).ToLowerInvariant()
+            $dependencies = [ordered]@{}
+            foreach ($dependency in $Extra) { $dependencies[(Split-Path $dependency -Leaf).ToLowerInvariant()] = $dependency }
+            foreach ($root in @($Library) + $Extra) {
+              $closure = @('closure', '--library', $root)
+              foreach ($directory in $Search) { $closure += @('--search-dir', $directory) }
+              foreach ($dependency in @(python Tools/AstraEMU/check_core_deps.py @closure)) {
+                $key = (Split-Path $dependency -Leaf).ToLowerInvariant()
+                if ($dependency -and $key -ne $libraryName -and -not $dependencies.Contains($key)) { $dependencies[$key] = $dependency }
+              }
+            }
+            $arguments = @('--library', $Library, '--plugin-id', $PluginId, '--version', $version,
+                           '--output', ".work/stage/$Name")
+            foreach ($dependency in $dependencies.Values) { $arguments += @('--dependency', $dependency) }
+            foreach ($license in $Licenses) { $arguments += @('--license', $license) }
+            if ($Resources) { $arguments += @('--resources', $Resources) }
+            python Tools/AstraEMU/stage_core.py @arguments
+          }
+          Stage-Core fvp .work/target-fvp/release/astra_emu_fvp.dll astra.emu.fvp `
+            Emulator/ThirdParty/rfvp/crates/astra-embedded/Cargo.toml `
+            -Search @('.work/target-fvp/release', "$subtitle/bin") `
+            -Licenses @('rfvp/LICENSE=Emulator/ThirdParty/rfvp/LICENSE',
+                        'astra-emu-fvp/THIRD_PARTY_NOTICES.md=Emulator/Source/Families/astra-emu-fvp/THIRD_PARTY_NOTICES.md',
+                        'astra-emu-fvp/MODIFICATIONS.md=Emulator/Source/Families/astra-emu-fvp/MODIFICATIONS.md',
+                        "fribidi/copyright=$subtitle/share/fribidi/copyright")
+          Stage-Core musica .work/target-musica/release/astra_emu_musica.dll astra.emu.musica `
+            Emulator/Source/Families/astra-emu-musica/Cargo.toml `
+            -Search @('.work/target-musica/release', "$ffmpeg/bin", "$subtitle/bin") `
+            -Licenses @('noto/OFL.txt=Examples/NativeVN/Assets/Fonts/OFL-NotoSansJP.txt',
+                        "ffmpeg/copyright=$ffmpeg/share/ffmpeg/copyright",
+                        "fribidi/copyright=$subtitle/share/fribidi/copyright")
+          Stage-Core siglus .work/target-siglus/release/astra_emu_siglus.dll astra.emu.siglus `
+            Emulator/ThirdParty/siglus_rs/astra/embedded/Cargo.toml `
+            -Search @('.work/target-siglus/release') `
+            -Licenses @('siglus_rs/LICENSE-MPL-2.0=Emulator/ThirdParty/siglus_rs/LICENSE-MPL-2.0',
+                        'astra-emu-siglus/THIRD_PARTY_NOTICES.md=Emulator/Source/Families/astra-emu-siglus/THIRD_PARTY_NOTICES.md',
+                        'astra-emu-siglus/MODIFICATIONS.md=Emulator/Source/Families/astra-emu-siglus/MODIFICATIONS.md')
+          Stage-Core artemis .work/target-artemis/release/astra_emu_artemis.dll astra.emu.artemis `
+            Emulator/Source/Families/astra-emu-artemis/Cargo.toml `
+            -Search @('.work/target-artemis/release', "$ffmpeg/bin") `
+            -Licenses @('art3m1s-core/LICENSE=Emulator/ThirdParty/art3m1s-core/LICENSE',
+                        'astra-emu-artemis/THIRD_PARTY_NOTICES.md=Emulator/Source/Families/astra-emu-artemis/THIRD_PARTY_NOTICES.md',
+                        'astra-emu-artemis/MODIFICATIONS.md=Emulator/Source/Families/astra-emu-artemis/MODIFICATIONS.md',
+                        "ffmpeg/copyright=$ffmpeg/share/ffmpeg/copyright")
+          Stage-Core sena .work/target-sena/release/astra_emu_sena.dll sena-native-koikake `
+            Emulator/ThirdParty/sena-rs/crates/astra-emu-sena/Cargo.toml `
+            -Search @('.work/target-sena/release') `
+            -Licenses @('sena-rs/LICENSE-MPL-2.0=Emulator/ThirdParty/sena-rs/LICENSE-MPL-2.0')
+          Stage-Core ethornell .work/target-ethornell/release/astra_emu_ethornell.dll astra-emu-ethornell `
+            Emulator/ThirdParty/ethornell-rs/crates/astra-emu-ethornell/Cargo.toml `
+            -Search @('.work/target-ethornell/release') `
+            -Licenses @('ethornell-rs/LICENSE-MPL-2.0=Emulator/ThirdParty/sena-rs/LICENSE-MPL-2.0',
+                        'ethornell-rs/MODIFICATIONS.md=Emulator/ThirdParty/ethornell-rs/MODIFICATIONS.md')
+          $krkrLicenses = @('kirikiri2/LICENSE=Emulator/ThirdParty/kirikiri2/LICENSE')
+          foreach ($copyright in Get-ChildItem "$krkrVcpkg/share/*/copyright" | Sort-Object FullName) {
+            $krkrLicenses += "vcpkg/$($copyright.Directory.Name)/copyright=$($copyright.FullName)"
+          }
+          $krkrDlls = @((Get-ChildItem .work/krkr-msvc/embedded-adapter -File -Filter *.dll |
+            Where-Object Name -ne 'astra_emu_krkr.dll' | Sort-Object Name).FullName)
+          Stage-Core krkr .work/krkr-msvc/embedded-adapter/astra_emu_krkr.dll astra-emu-krkr `
+            Emulator/Source/Families/astra-emu-krkr/Cargo.toml `
+            -Search @('.work/krkr-msvc/embedded-adapter', "$krkrVcpkg/bin", $openmp.FullName) `
+            -Licenses $krkrLicenses -Resources .work/krkr-msvc/embedded-adapter/Resources -Extra $krkrDlls
+          $cores = Get-ChildItem .work/stage -Directory | ForEach-Object { Get-ChildItem $_.FullName -Directory }
+          if ($cores.Count -ne 7) { throw "expected 7 staged cores, found $($cores.Count)" }
+          "CORE_DIRS=$(($cores.FullName) -join ';')" >> $env:GITHUB_ENV
+
+      - name: Verify core dependencies
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $arguments = @('check')
+          foreach ($directory in $env:CORE_DIRS -split ';') { $arguments += @('--core-dir', $directory) }
+          python Tools/AstraEMU/check_core_deps.py @arguments
+
+      - name: Metadata snapshot
+        run: python Emulator/Metadata/tools/build_index.py --output .work/metadata-dist
+
+      - name: Package
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $crt = Get-ChildItem "$env:VCToolsRedistDir/x64" -Directory -Filter 'Microsoft.VC*.CRT' | Select-Object -First 1
+          if (-not $crt) { throw 'MSVC CRT redistributable directory not found' }
+          $name = "AstraEMU-$env:VERSION-windows-x86_64"
+          $arguments = @('--manager', '.work/target-manager/release/astra-emu-manager.exe',
+                         '--output', ".work/package/$name",
+                         '--metadata-dist', '.work/metadata-dist/v1',
+                         '--subtitle-share', "$env:ASTRA_SUBTITLE_VCPKG_ROOT/installed/$env:SUBTITLE_TRIPLET/share")
+          foreach ($directory in $env:CORE_DIRS -split ';') { $arguments += @('--core-dir', $directory) }
+          foreach ($runtime in 'msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll') {
+            $arguments += @('--runtime-file', (Join-Path $crt.FullName $runtime))
+          }
+          foreach ($file in 'dxcompiler.dll', 'dxil.dll', 'LICENSE-MS.txt', 'LICENSE-LLVM.txt') {
+            $arguments += @('--runtime-file', ".work/dxc/$file")
+          }
+          python Tools/AstraEMU/package_client.py @arguments
+          & ".work/package/$name/astra-emu-manager.exe" --help
+          New-Item -ItemType Directory .work/release | Out-Null
+          python -c "import shutil, sys; shutil.make_archive(sys.argv[1], 'zip', root_dir='.work/package', base_dir=sys.argv[2])" ".work/release/$name" $name
+          $archive = @('archive', '--version', $env:VERSION, '--output-dir', '.work/release')
+          foreach ($directory in $env:CORE_DIRS -split ';') { $archive += @('--core-dir', $directory) }
+          python Tools/AstraEMU/release_catalog.py @archive
+
+      - name: LGPL corresponding source
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          python Tools/AstraEMU/bundle_sources.py --downloads .work/vcpkg/downloads `
+            --archive 'fribidi-fribidi-v*.tar.gz' --port .work/vcpkg/ports/fribidi `
+            --output ".work/release/astra-emu-$env:VERSION-source-fribidi.zip"
+          python Tools/AstraEMU/bundle_sources.py --downloads .work/vcpkg/downloads `
+            --archive 'ffmpeg-ffmpeg-n9.0.2.tar.gz' --port .work/vcpkg/ports/ffmpeg `
+            --output ".work/release/astra-emu-$env:VERSION-source-ffmpeg-9.0.2.zip"
+          python Tools/AstraEMU/bundle_sources.py --downloads .work/krkr-downloads `
+            --archive 'ffmpeg-ffmpeg-n3.3.9.tar.gz' --port Emulator/ThirdParty/kirikiri2/vcpkg/ports/ffmpeg `
+            --output ".work/release/astra-emu-$env:VERSION-source-ffmpeg-3.3.9.zip"
+          python -c "import tarfile, sys; archive = tarfile.open(sys.argv[1]); member = next(m for m in archive.getmembers() if m.isfile() and m.name.count('/') == 1 and m.name.endswith('/COPYING.LGPLv2.1')); open(sys.argv[2], 'wb').write(archive.extractfile(member).read())" `
+            .work/vcpkg/downloads/ffmpeg-ffmpeg-n9.0.2.tar.gz .work/release/LGPL-2.1.txt
+
+      - name: Checksums and catalog
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $lines = Get-ChildItem .work/release -File | Sort-Object Name | ForEach-Object {
+            "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())  $($_.Name)"
+          }
+          [System.IO.File]::WriteAllText("$PWD/.work/release/SHA256SUMS.txt", (($lines -join "`n") + "`n"))
+          $tag = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME } else { "emu-v$env:VERSION" }
+          $catalog = @('catalog', '--table', 'Tools/AstraEMU/release-cores.json',
+                       '--base-url', "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/releases/download/$tag/",
+                       '--tag', $tag, '--output-dir', '.work/catalog/entries', '--notes', '.work/catalog/notes.md')
+          foreach ($core in Get-ChildItem .work/release -Filter 'astra-emu-core-*.zip') { $catalog += @('--archive', $core.FullName) }
+          python Tools/AstraEMU/release_catalog.py @catalog
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AstraEMU-${{ steps.version.outputs.version }}-windows-x86_64
+          path: |
+            .work/release/
+            .work/catalog/
+          if-no-files-found: error
+
+      - name: GitHub Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $assets = (Get-ChildItem .work/release -File | Sort-Object Name).FullName
+          gh release create $env:GITHUB_REF_NAME @assets --title "AstraEMU $env:VERSION" --notes-file .work/catalog/notes.md
+
+      - name: Metadata core catalog PR
+        if: github.ref_type == 'tag'
+        env:
+          METADATA_TOKEN: ${{ secrets.ASTRA_METADATA_TOKEN }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          if (-not $env:METADATA_TOKEN) { throw '需要配置 ASTRA_METADATA_TOKEN' }
+          $env:GH_TOKEN = $env:METADATA_TOKEN
+          $tag = $env:GITHUB_REF_NAME
+          $branch = "cores/$tag"
+          git clone "https://x-access-token:$env:METADATA_TOKEN@github.com/$env:METADATA_REPOSITORY.git" .work/metadata-pr
+          New-Item -ItemType Directory -Force .work/metadata-pr/engines/cores | Out-Null
+          Copy-Item .work/catalog/entries/*.json .work/metadata-pr/engines/cores/
+          Push-Location .work/metadata-pr
+          python tools/validate.py
+          git switch -c $branch
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add engines/cores
+          git commit -m "cores: $tag"
+          git push origin $branch
+          gh pr create --repo $env:METADATA_REPOSITORY --base main --head $branch --title "cores: $tag" `
+            --body "由 $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/releases/tag/$tag 自动生成的核心目录更新。"
+          Pop-Location

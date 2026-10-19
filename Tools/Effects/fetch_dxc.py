@@ -7,6 +7,7 @@ caller cannot accidentally overwrite a system DLL or another worktree.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import shutil
 import sys
@@ -28,6 +29,12 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="astra_dxc_", dir=args.output.parent) as temp:
         archive = Path(temp) / lock["asset"]
         urllib.request.urlretrieve(lock["url"], archive)
+        digest = hashlib.sha256()
+        with archive.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        if digest.hexdigest() != str(lock.get("sha256", "")).lower():
+            raise SystemExit("ASTRA_EMU_DXC_LOCK_HASH")
         with zipfile.ZipFile(archive) as source:
             members = [lock["library"], "bin/x64/dxil.dll", "LICENSE-MS.txt", "LICENSE-LLVM.txt"]
             for member in members:

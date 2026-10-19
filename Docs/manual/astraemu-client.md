@@ -113,7 +113,7 @@ Beta1 使用 Release 优化构建；Manager“关于”及当时 Manager、独�
 
 历史 checkpoint 已构建七核心、Manager 和当时的独立转换 CLI，并组装本机验证目录 `AstraEMU-native-first-checkpoint-20261019`；其 PE 依赖/导出及包内 CLI 公开转换已检查。这些是统一入口迁移前的历史证据，不代表 Beta2 已构建或通过核验。该目录是原生优先的验证组合，尚有七个候选的静态消费者/素材阻塞，实际 Manager 界面和游戏仍待用户手动验收。已发布源码不等于可公开分发二进制；RFVP 字体、Ethornell 许可及下述静态 FriBidi LGPL 义务核验前，产物仅作本机私有使用。
 
-下面以 FVP 为例。先初始化主仓固定的完整 submodule；不要换回旧 revision 绕过失败。参与核心保留不同原生 Lua/音频依赖，分别构建，不将 Artemis Lua 5.1 和 Manager Luau 合并进同一次 Cargo 调用。
+下面以 FVP 为例。先初始化主仓固定的完整 submodule；不要换回旧 revision 绕过失败。参与核心保留不同原生 Lua/音频依赖，分别构建，不将 Artemis Lua 5.1 和 Manager Luau 合并进同一次 Cargo 调用。公开 Release 由 `.github/workflows/emu-release.yml` 按同样步骤构建全部七个核心，见下文“发布工作流”。
 
 ```sh
 # 替换为数据盘上的专用工作目录；构建、运行包和临时文件放在其中。
@@ -126,9 +126,15 @@ cargo build --manifest-path Emulator/Cargo.toml --locked --release -j 1 \
   -p astra-emu-manager -p astra-emu-fvp \
   --features astra-emu-fvp/dynamic-plugin-export
 python Tools/Effects/fetch_dxc.py --output "$work_dir/dxc"
+python Tools/AstraEMU/stage_core.py \
+  --library "$CARGO_TARGET_DIR/release/astra_emu_fvp.dll" \
+  --plugin-id astra.emu.fvp --version 0.6.0 \
+  --dependency "$ASTRA_SUBTITLE_VCPKG_ROOT/installed/x64-windows-static-md-dynbidi/bin/fribidi-0.dll" \
+  --license rfvp/LICENSE=Emulator/ThirdParty/rfvp/LICENSE \
+  --output "$work_dir/stage-fvp"
 python Tools/AstraEMU/package_client.py \
   --manager "$CARGO_TARGET_DIR/release/astra-emu-manager.exe" \
-  --core "$CARGO_TARGET_DIR/release/astra_emu_fvp.dll" \
+  --core-dir "$work_dir/stage-fvp/astra_emu_fvp" \
   --runtime-file "$work_dir/dxc/dxcompiler.dll" \
   --runtime-file "$work_dir/dxc/dxil.dll" \
   --runtime-file "$work_dir/dxc/LICENSE-MS.txt" \
@@ -136,19 +142,33 @@ python Tools/AstraEMU/package_client.py \
   --output "$work_dir/client"
 ```
 
-Linux/macOS 分别使用无 `.exe` 的可执行文件以及 `libastra_emu_fvp.so` / `libastra_emu_fvp.dylib`；DXC 示例仅适用于 Windows。`--core` 可以重复传入多个已构建的 Family。`--runtime-file` 指定随包的依赖库或许可文件；Windows 分发还需要加入构建工具链对应的 VC runtime DLL。输出目录必须是新目录，避免上一版核心混入新运行包。该工具组装现有产物，不编译、不启动游戏、不发布。
+`fetch_dxc.py` 校验下载的 zip 与 `Emulator/Assets/Effects/dxc.lock.json` 的 sha256 一致，不符时以 `ASTRA_EMU_DXC_LOCK_HASH` 失败。
 
-运行包只包含一个 `astra-emu-manager` 客户端可执行文件；补丁命令随 Manager 一起构建，无独立程序参数或兼容别名。打包器拒绝已移除的 `--patch-cli`，也拒绝用 `--runtime-file` 夹带旧 `astra-emu-patch` 可执行文件。打包器只复制文件，不运行二进制，也不替代最终 PE 架构、导入闭包、导出符号和 ZIP/hash 核验。
+`stage_core.py` 把一个已构建的核心整理成核心目录 `<output>/<stem>/`（`<stem>` 为库文件名去掉扩展名）：库文件、`--dependency` 指定的依赖 DLL、可选 `--resources` 目录（复制为 `Resources/`）、`--license` 指定的许可（`<文件>` 或 `<包内相对路径>=<文件>`，放入 `licenses/`），以及 `core.json`（`schema` 为 `astra.emu.core_package.v1`，含 `plugin_id`、`library`、`version`、`abi = astra.emu.native.c.v3` 和每个文件的 sha256）。`--plugin-id` 与 `--version` 必须与核心描述符一致。一个核心目录只能有一个 `astra_emu_*` 库；输出必须是新目录。依赖 DLL 的闭包可用 `python Tools/AstraEMU/check_core_deps.py closure --library <dll> --search-dir <目录>` 列出，整理后用 `check_core_deps.py check --core-dir <目录>` 核对：每个 `dumpbin /dependents` 依赖须在同一核心目录、是包根的 `msvcp140.dll`/`vcruntime140.dll`/`vcruntime140_1.dll`、以 `api-ms-win-` 开头，或是 System32 中非 MSVC 可再发行运行时的系统 DLL。两者都需在 MSVC 开发者环境中运行。
 
-仅在已有必要且审核通过的转换入口时指定 `--patches Emulator/Patches`。打包器只复制 `catalog.json` 及其列出的顶层 `.luau` 入口；每个确实需要的共享模块分别通过 `--patch-common common/<模块>.luau` 指定。不递归复制脚本目录，不自动包含未列出的脚本、模块、夹具、测试目录或游戏资产。目录是显式可信输入，发布者负责核对每个选中脚本的来源与内容；路径检查不能判断脚本是否夹带商业数据。缺失文件、目录逃逸、链接、测试脚手架路径和不区分大小写的名称冲突均拒绝打包。没有可用 recipe 时省略 `--patches`，不要为填满目录登记原生游戏。
+`package_client.py` 的 `--core-dir` 可以重复传入，每个都是 `stage_core.py` 的产物，原样复制到 `cores/<stem>/`；打包器核对 `core.json` 中每个文件的 sha256，目录内有未列出的文件、目录名与库名不符或含多个家族库时拒绝打包。`--runtime-file` 指定随包根目录的依赖库或许可文件；Windows 分发需要加入构建工具链对应的 VC runtime DLL（`msvcp140.dll`、`vcruntime140.dll`、`vcruntime140_1.dll`）。输出目录必须是新目录，避免上一版核心混入新运行包。该工具组装现有产物，不编译、不启动游戏、不发布。
 
-Manager 使用的 mlua MIT 许可从 `Emulator/ThirdParty/mlua/LICENSE` 复制。Luau 许可默认读取 `CARGO_HOME`（未设置时为 `~/.cargo`）下 `luau0-src-0.12.3+luau663/LICENSE`；可用 `--luau-license <该源码的LICENSE>` 显式指定。缺失则需先恢复锁定依赖源码，打包器不会下载或生成许可。
+运行包只包含一个 `astra-emu-manager` 客户端可执行文件；补丁命令随 Manager 一起构建，无独立程序参数或兼容别名。打包器拒绝已移除的 `--core`、`--patches`、`--patch-common` 与 `--patch-cli`，也拒绝用 `--runtime-file` 夹带旧 `astra-emu-patch` 可执行文件。打包器只复制文件，不运行二进制。
 
-包含原生 ASS 字幕能力的构建还须传入 `--subtitle-share <独立vcpkg安装>/x64-windows-static-md/share`。工具逐字复制 libass、FreeType、FriBidi、HarfBuzz、Brotli、bzip2、libpng、zlib 的实际 `copyright`，任一缺失即失败。静态 FriBidi 的 LGPL 对应源码、重链接等义务须另行核验；当前只组装本机私有包，不据此宣称可以公开分发。FVP 字体与 Ethornell 的既有许可限制仍然保留。
+兼容性、推荐配置、核心目录与补丁目录随包快照通过 `--metadata-dist <目录>` 指定，该目录是 AstraEMU-metadata 仓库 `python Emulator/Metadata/tools/build_index.py --output <dist>` 产出的 `<dist>/v1/`，必须含 `index.json`。打包器只复制 `index.json` 及其列出的文件到包内 `metadata/`，逐个核对 size 与 sha256；路径只允许 `[a-z0-9._/-]`，单文件不超过 8 MiB，总计不超过 64 MiB。省略该选项时运行包不含元数据快照，Manager 显示“未同步”。
 
-Python API 为 `package(manager, cores, output, runtime_files, patches=None, *, patch_common=None, luau_license=None, subtitle_share=None)`；原有四参数调用继续有效，`patches` 可作第五个位置参数，其余可选项为关键字参数，与上述选项对应。不再接受 `patch_cli` 参数。输出使用同父目录 staging，复制失败清理自身临时目录，发布不覆盖打包期间新出现的目标。
+Manager 使用的 mlua MIT 许可从 `Emulator/ThirdParty/mlua/LICENSE` 复制。Luau 许可默认读取 `CARGO_HOME`（未设置时为 `~/.cargo`）下 `luau0-src-0.12.3+luau663/LICENSE`；可用 `--luau-license <该源码的LICENSE>` 显式指定。Material Components for Slint 的许可默认取 `Emulator/Source/Manager/astra-emu-manager-ui-slint/material-1.1.0/LICENSE.md`，复制为 `licenses/slint-material/LICENSE.md`；Material Symbols 的许可默认取同一 crate 的 `ui/icons/LICENSE`，复制为 `licenses/material-symbols/LICENSE`；可分别用 `--material-license`、`--symbols-license` 指定。任一许可缺失则打包失败，打包器不会下载或生成许可。
 
-公开行为测试：`python -m unittest Tools.tests.test_package_client`。测试使用临时合成输入验证实际输出与失败保护，不运行游戏、原生核心或补丁脚本。
+包含原生 ASS 字幕能力的构建还须传入 `--subtitle-share <独立vcpkg安装>/installed/x64-windows-static-md-dynbidi/share`。工具逐字复制 libass、FreeType、FriBidi、HarfBuzz、Brotli、bzip2、libpng、zlib 的实际 `copyright`，任一缺失即失败。FriBidi 以 DLL 形式随使用字幕的核心目录分发（`fribidi-0.dll`），其余字幕依赖静态链接。
+
+Python API 为 `package(manager, core_dirs, output, runtime_files, *, metadata_dist=None, luau_license=None, subtitle_share=None, material_license=..., symbols_license=...)`，可选项均为关键字参数，与上述选项对应。输出使用同父目录 staging，复制失败清理自身临时目录，发布不覆盖打包期间新出现的目标。
+
+公开行为测试：`python -m unittest Tools.tests.test_package_client Tools.tests.test_stage_core Tools.tests.test_check_core_deps Tools.tests.test_release_catalog Tools.tests.test_bundle_sources`。测试使用临时合成输入和模拟的 `dumpbin` 输出验证实际输出与失败保护，不运行游戏、原生核心或补丁脚本。
+
+### 发布工作流
+
+`.github/workflows/emu-release.yml` 在推送 `emu-v*` tag 时构建并发布 GitHub Release；手动 `workflow_dispatch` 只产出 artifact，不建 Release。工作流在 `windows-latest` 上：
+
+- 完整克隆 `microsoft/vcpkg` 并检出固定提交 `664933b8d385dfc01f4e0cdff4c7c74e71f6a740`（即 `astra-subtitle` 的 builtin-baseline，其 FFmpeg 最新版本为 9.0.2#1）；用它安装字幕树（`x64-windows-static-md-dynbidi`）和 `Tools/AstraEMU/vcpkg/ffmpeg/vcpkg.json` 固定的 FFmpeg 9.0.2#1（`x64-windows`，供 Musica 与 Artemis），KrKr 的 CMake 也使用这份检出。
+- 每个核心用独立 `--target-dir .work/target-<name>` 构建（`--locked --release`），Sena 与 Ethornell 在各自工作区构建，KrKr 按上文 KrKr README 的 CMake 流程构建。
+- 用 `check_core_deps.py closure` 收集依赖，`stage_core.py` 整理七个核心目录，`check_core_deps.py check` 核对依赖闭包；核心版本取自核心 crate 的 Cargo 版本（`release_catalog.py crate-version`）。
+- 用 `Emulator/Metadata/tools/build_index.py` 生成元数据快照，`package_client.py` 组装 `AstraEMU-<version>-windows-x86_64.zip`（包根附 VC runtime 与 DXC），`release_catalog.py archive` 为每个核心目录生成 `astra-emu-core-<stem>-<version>-windows-x86_64.zip`（zip 根即核心目录内容），`bundle_sources.py` 生成 FriBidi、FFmpeg 9.0.2、KrKr FFmpeg 3.3.9 的对应源码包（vcpkg 下载的原始归档加 port 目录），并附 `LGPL-2.1.txt` 与 `SHA256SUMS.txt`。
+- tag 触发时 `gh release create` 上传全部资产，发布说明为自动生成的核心版本列表；随后用 secret `ASTRA_METADATA_TOKEN` 向 `2018wzh/AstraEMU-metadata` 提交 `engines/cores/<plugin_id>.json` 并开 PR `cores: <tag>`。secret 缺失时该步失败并提示“需要配置 ASTRA_METADATA_TOKEN”，已上传的 Release 资产保留。核心显示名、引擎名与许可登记在 `Tools/AstraEMU/release-cores.json`。
 
 构建 Musica 前还需恢复其编译期嵌入的字体，避免把 LFS 指针编入核心。运行包会带上字体的 OFL 许可。
 
@@ -156,6 +176,6 @@ Python API 为 `package(manager, cores, output, runtime_files, patches=None, *, 
 git lfs pull --include="Examples/NativeVN/Assets/Fonts/NotoSansJP-Variable.ttf,Examples/NativeVN/Assets/Fonts/NotoSansSC-Variable.ttf" --exclude=""
 ```
 
-Musica 动态核心须同时启用 `dynamic-plugin-export,ffmpeg-vcpkg`，并配置 FFmpeg vcpkg 环境。构建完成后立即把该 DLL 及匹配的 FFmpeg 依赖复制到独立运行目录，再启动 Manager；之后对同一 target 的 CLI/静态依赖构建可能覆盖未启用导出的同名 DLL。`astra_emu_query` 必须能协商 ABI v2，不能把普通 rlib 依赖构建产生的 DLL 当作产品核心。
+Musica 动态核心须同时启用 `dynamic-plugin-export,ffmpeg-vcpkg`，并配置 FFmpeg vcpkg 环境。构建完成后立即用 `stage_core.py` 把该 DLL 及匹配的 FFmpeg 与 FriBidi DLL 整理到新的核心目录，再交给打包器；之后对同一 target 的 CLI/静态依赖构建可能覆盖未启用导出的同名 DLL。`astra_emu_query` 必须能协商 ABI v2，不能把普通 rlib 依赖构建产生的 DLL 当作产品核心。
 
-KrKr 原生运行目录用 `Tools/AstraEMU/package_krkr_runtime.py --native-runtime <目录> --output <新目录>` 组装，包含实际 DLL、Resources 和运行依赖；不再接收旧 Rust child 产物。该工具不代替商业流程和许可证核验。
+KrKr 核心目录同样用 `stage_core.py` 整理：`--library` 为 CMake 输出的 `astra_emu_krkr.dll`，`--resources` 为同目录的 `Resources/`，`--dependency` 为 `check_core_deps.py closure` 在该输出目录、KrKr vcpkg `installed/x64-windows/bin`（FFmpeg 3.3.9 DLL）和 MSVC OpenMP redist 目录（`vcomp140.dll`）中找到的全部 DLL。不再接收旧 Rust child 产物，该工具不代替商业流程和许可证核验。

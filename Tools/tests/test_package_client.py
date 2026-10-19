@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -8,7 +9,7 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from Tools.AstraEMU import package_client
+from Tools.AstraEMU import package_client, stage_core
 
 
 class PackageClientTests(unittest.TestCase):
@@ -17,20 +18,26 @@ class PackageClientTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.manager = self.file("build/astra-emu-manager.exe", b"public Manager artifact")
-        self.core = self.file("build/astra_emu_example.dll", b"public Family artifact")
         self.runtime = self.file("build/runtime.dll", b"public runtime artifact")
         self.output = self.root / "client"
         # Synthetic inputs exercise byte-preserving packaging, not PE or legal validation.
         self.license = self.file("cargo/registry/src/public/luau0-src-0.12.3+luau663/LICENSE",
                                  b"public synthetic license fixture\n")
+        self.material = self.file("ui/material-1.1.0/LICENSE.md", b"public material license\n")
+        self.symbols = self.file("ui/icons/LICENSE", b"public symbols license\n")
         self.addCleanup(patch.stopall)
         patch.dict(os.environ, {"CARGO_HOME": str(self.root / "cargo")}).start()
-        self.patches = self.root / "public-patches"
-        self.catalog([{"id": "legacy-normalizer", "title": "Public legacy resource normalizer",
-                       "script": "legacy-normalizer.luau"}])
-        # Deliberately invalid script: packaging and catalog handling never execute it.
-        self.entry = self.file("public-patches/legacy-normalizer.luau", b"not executable Luau !\n")
-        self.module = self.file("public-patches/common/binary.luau", b"return {}\n")
+        self.core = self.stage_core("astra_emu_example", b"public Family artifact",
+                                    {"avcodec-62.dll": b"public dependency"})
+        self.metadata = self.root / "metadata-dist/v1"
+        self.metadata_files = {
+            "compatibility.json": b'{"schema":"astra.emu.compatibility.v3","entries":[]}',
+            "presets.json": b'{"schema":"astra.emu.presets.v1","entries":[]}',
+            "cores.json": b'{"schema":"astra.emu.cores.v1","entries":[]}',
+            "patches/catalog.json": b"[]",
+            "patches/common/binary.luau": b"return {}\n",
+        }
+        self.write_metadata()
 
     def file(self, relative, content):
         path = self.root / relative
@@ -38,11 +45,30 @@ class PackageClientTests(unittest.TestCase):
         path.write_bytes(content)
         return path
 
-    def catalog(self, records):
-        return self.file("public-patches/catalog.json", json.dumps(records).encode("utf-8"))
+    def stage_core(self, stem, content, dependencies=None):
+        library = self.file(f"build/{stem}/{stem}.dll", content)
+        extra = [self.file(f"build/{stem}/{name}", data) for name, data in (dependencies or {}).items()]
+        return stage_core.stage(library, "astra.emu." + stem, "0.2.0", self.root / "staged" / stem,
+                                dependencies=extra)
 
-    def package(self, **options):
-        return package_client.package(self.manager, [self.core], self.output, [self.runtime], **options)
+    def write_metadata(self, records=None):
+        for relative, content in self.metadata_files.items():
+            path = self.metadata / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(content)
+        if records is None:
+            records = [{"path": relative, "sha256": hashlib.sha256(content).hexdigest(), "size": len(content)}
+                       for relative, content in sorted(self.metadata_files.items())]
+        index = {"schema": "astra.emu.metadata.index.v1", "generated_at_unix_ms": 1,
+                 "source_commit": "0" * 40, "files": records}
+        (self.metadata / "index.json").write_text(json.dumps(index), encoding="utf-8")
+
+    def package(self, cores=None, runtimes=None, **options):
+        options.setdefault("material_license", self.material)
+        options.setdefault("symbols_license", self.symbols)
+        return package_client.package(
+            self.manager, [self.core] if cores is None else cores, self.output,
+            [self.runtime] if runtimes is None else runtimes, **options)
 
     def assert_rejected(self, **options):
         with self.assertRaises((ValueError, OSError)):
@@ -50,55 +76,74 @@ class PackageClientTests(unittest.TestCase):
         self.assertFalse(self.output.exists())
         self.assertEqual([], list(self.root.glob(".astraemu-client-*")))
 
-    def test_original_four_argument_call_preserves_files_and_layout(self):
+    def test_core_directories_and_licenses_are_preserved(self):
         expected = {
             self.manager: (self.manager.name, b"public Manager artifact"),
             self.runtime: (self.runtime.name, b"public runtime artifact"),
-            self.core: ("cores/" + self.core.name, b"public Family artifact"),
             self.license: ("licenses/luau/LICENSE", b"public synthetic license fixture\n"),
+            self.material: ("licenses/slint-material/LICENSE.md", b"public material license\n"),
+            self.symbols: ("licenses/material-symbols/LICENSE", b"public symbols license\n"),
         }
         self.package()
         for source, (relative, content) in expected.items():
             self.assertEqual(content, source.read_bytes())
             self.assertEqual(content, (self.output / relative).read_bytes())
+        shipped = {p.relative_to(self.output / "cores").as_posix()
+                   for p in (self.output / "cores").rglob("*") if p.is_file()}
+        self.assertEqual({"astra_emu_example/astra_emu_example.dll", "astra_emu_example/avcodec-62.dll",
+                          "astra_emu_example/core.json"}, shipped)
+        for name in ("astra_emu_example.dll", "avcodec-62.dll", "core.json"):
+            self.assertEqual((self.core / name).read_bytes(),
+                             (self.output / "cores/astra_emu_example" / name).read_bytes())
         repo = Path(package_client.__file__).resolve().parents[2]
         for relative, source in (("README.md", repo / "Docs/manual/astraemu-client.md"),
                                  ("THIRD_PARTY_NOTICES.md", repo / "Emulator/THIRD_PARTY_NOTICES.md"),
                                  ("licenses/mlua/LICENSE", repo / "Emulator/ThirdParty/mlua/LICENSE")):
             self.assertEqual(source.read_bytes(), (self.output / relative).read_bytes())
+        self.assertFalse((self.output / "metadata").exists())
         self.assertFalse((self.output / "patches").exists())
         self.assertEqual({self.manager.name}, {p.name for p in self.output.glob("*.exe")})
 
-    def test_package_contains_one_manager_selected_cores_and_only_trusted_assets(self):
-        for name in ("fixtures/secret.dat", "test.luau", "private/key.toml", "game.exe",
-                     "unlisted.luau", "common/unused.luau", "common/fixture.luau"):
-            self.file("public-patches/" + name, b"must not ship")
-        selected = self.file("build/astra_emu_second.dll", b"second selected Family artifact")
-        self.file("build/astra_emu_unselected.dll", b"must not ship")
-        package_client.package(
-            self.manager, [self.core, selected], self.output, [self.runtime], self.patches,
-            patch_common=["common/binary.luau"],
-        )
-        self.assertEqual({self.manager.name}, {p.name for p in self.output.glob("*.exe")})
-        self.assertEqual({self.core.name, selected.name},
+    def test_multiple_cores_each_keep_their_directory(self):
+        second = self.stage_core("astra_emu_second", b"second Family artifact")
+        self.package(cores=[self.core, second])
+        self.assertEqual({"astra_emu_example", "astra_emu_second"},
                          {p.name for p in (self.output / "cores").iterdir()})
-        for core in (self.core, selected):
-            self.assertEqual(core.read_bytes(), (self.output / "cores" / core.name).read_bytes())
-        shipped = {p.relative_to(self.output / "patches").as_posix()
-                   for p in (self.output / "patches").rglob("*") if p.is_file()}
-        self.assertEqual({"catalog.json", "legacy-normalizer.luau", "common/binary.luau"}, shipped)
-        self.assertEqual(self.entry.read_bytes(), (self.output / "patches" / self.entry.name).read_bytes())
-        self.assertEqual(self.module.read_bytes(), (self.output / "patches/common/binary.luau").read_bytes())
-        self.assertEqual((self.patches / "catalog.json").read_bytes(),
-                         (self.output / "patches/catalog.json").read_bytes())
+        self.assertEqual(b"second Family artifact",
+                         (self.output / "cores/astra_emu_second/astra_emu_second.dll").read_bytes())
 
-    def test_empty_catalog_does_not_invent_recipes(self):
-        self.catalog([])
-        self.package(patches=self.patches)
-        self.assertEqual(b"[]", (self.output / "patches/catalog.json").read_bytes())
-        self.assertEqual(["catalog.json"], [p.name for p in (self.output / "patches").iterdir()])
+    def test_metadata_dist_copies_indexed_files_only(self):
+        (self.metadata / "unlisted.json").write_bytes(b"must not ship")
+        self.package(metadata_dist=self.metadata)
+        shipped = {p.relative_to(self.output / "metadata").as_posix()
+                   for p in (self.output / "metadata").rglob("*") if p.is_file()}
+        self.assertEqual(set(self.metadata_files) | {"index.json"}, shipped)
+        for relative, content in self.metadata_files.items():
+            self.assertEqual(content, (self.output / "metadata" / relative).read_bytes())
+        self.assertEqual((self.metadata / "index.json").read_bytes(),
+                         (self.output / "metadata/index.json").read_bytes())
 
-    def test_subtitle_static_license_closure_copies_exact_public_inputs(self):
+    def test_metadata_without_index_or_with_bad_records_is_rejected(self):
+        (self.metadata / "index.json").unlink()
+        self.assert_rejected(metadata_dist=self.metadata)
+        good = [{"path": relative, "sha256": hashlib.sha256(content).hexdigest(), "size": len(content)}
+                for relative, content in sorted(self.metadata_files.items())]
+        for records in (
+            [{**good[0], "sha256": "0" * 64}],
+            [{**good[0], "size": good[0]["size"] + 1}],
+            [{**good[0], "path": "../outside.json"}],
+            [{**good[0], "path": "Upper.json"}],
+            [good[0], good[0]],
+            [{"path": "missing.json", "sha256": "0" * 64, "size": 0}],
+            [{**good[0], "size": 9 * 1024 * 1024}],
+        ):
+            with self.subTest(records=records):
+                self.write_metadata(records)
+                self.assert_rejected(metadata_dist=self.metadata)
+        (self.metadata / "index.json").write_text('{"schema":"other","files":[]}', encoding="utf-8")
+        self.assert_rejected(metadata_dist=self.metadata)
+
+    def test_subtitle_license_closure_copies_exact_public_inputs(self):
         share = self.root / "subtitle/share"
         ports = ("libass", "freetype", "fribidi", "harfbuzz", "brotli", "bzip2", "libpng", "zlib")
         for port in ports:
@@ -117,17 +162,48 @@ class PackageClientTests(unittest.TestCase):
             self.file(f"subtitle/share/{port}/copyright", b"public notice")
         self.assert_rejected(subtitle_share=self.root / "subtitle/share")
 
+    def test_missing_material_licenses_fail_without_output(self):
+        self.assert_rejected(material_license=self.root / "missing/LICENSE.md")
+        self.assert_rejected(symbols_license=self.root / "missing/LICENSE")
+
     def test_missing_luau_source_requires_explicit_license(self):
         with patch.dict(os.environ, {"CARGO_HOME": str(self.root / "empty-cargo")}):
             self.assert_rejected()
             self.package(luau_license=self.license)
         self.assertEqual(self.license.read_bytes(), (self.output / "licenses/luau/LICENSE").read_bytes())
 
+    def test_core_directory_must_match_its_manifest(self):
+        cases = []
+        tampered = self.stage_core("astra_emu_tampered", b"original")
+        (tampered / "astra_emu_tampered.dll").write_bytes(b"tampered")
+        cases.append(tampered)
+        extra = self.stage_core("astra_emu_extra", b"core")
+        (extra / "unlisted.dll").write_bytes(b"unlisted")
+        cases.append(extra)
+        renamed = self.stage_core("astra_emu_renamed", b"core")
+        cases.append(renamed.rename(renamed.parent / "astra_emu_other"))
+        bare = self.root / "bare/astra_emu_bare"
+        bare.mkdir(parents=True)
+        (bare / "astra_emu_bare.dll").write_bytes(b"no manifest")
+        cases.append(bare)
+        second = self.stage_core("astra_emu_two", b"core")
+        manifest = json.loads((second / "core.json").read_text(encoding="utf-8"))
+        (second / "astra_emu_three.dll").write_bytes(b"second library")
+        manifest["files"].append({"path": "astra_emu_three.dll",
+                                  "sha256": hashlib.sha256(b"second library").hexdigest()})
+        (second / "core.json").write_text(json.dumps(manifest), encoding="utf-8")
+        cases.append(second)
+        for directory in cases:
+            with self.subTest(directory=directory.name):
+                self.assert_rejected(cores=[directory])
+        self.assert_rejected(cores=[])
+        self.assert_rejected(cores=[self.core, self.core])
+
     def test_copy_failure_cleans_staging_and_preserves_sources(self):
         with patch.object(package_client.shutil, "copy2", side_effect=OSError("public injected failure")):
-            self.assert_rejected(patches=self.patches)
+            self.assert_rejected(metadata_dist=self.metadata)
         self.assertEqual(b"public Manager artifact", self.manager.read_bytes())
-        self.assertEqual(b"public Family artifact", self.core.read_bytes())
+        self.assertEqual(b"public Family artifact", (self.core / "astra_emu_example.dll").read_bytes())
 
     def test_dangling_output_link_is_not_followed(self):
         missing = self.root / "missing-target"
@@ -143,7 +219,7 @@ class PackageClientTests(unittest.TestCase):
     def test_existing_output_and_its_contents_are_untouched(self):
         sentinel = self.file("client/user.dat", b"user data")
         with self.assertRaises(ValueError):
-            self.package(patches=self.patches)
+            self.package(metadata_dist=self.metadata)
         self.assertEqual(b"user data", sentinel.read_bytes())
         self.assertEqual([sentinel], list(self.output.iterdir()))
 
@@ -159,144 +235,66 @@ class PackageClientTests(unittest.TestCase):
         self.assertEqual([], list(self.output.iterdir()))
         self.assertEqual([], list(self.root.glob(".astraemu-client-*")))
 
-    def test_case_insensitive_runtime_and_source_basename_collisions(self):
-        for filename in ("ASTRA-EMU-MANAGER.EXE", "ASTRA_EMU_EXAMPLE.DLL", "README.md",
-                         "licenses", "patches"):
+    def test_output_inside_an_input_directory_is_rejected(self):
+        self.output = self.metadata / "client"
+        self.assert_rejected(metadata_dist=self.metadata)
+        self.output = self.core / "client"
+        self.assert_rejected()
+
+    def test_case_insensitive_runtime_and_reserved_name_collisions(self):
+        for filename in ("ASTRA-EMU-MANAGER.EXE", "README.md", "licenses", "metadata", "cores",
+                         "astra-emu-patch", "ASTRA-EMU-PATCH.EXE"):
             with self.subTest(filename=filename):
                 duplicate = self.file("other/" + filename, b"collision")
                 with self.assertRaises(ValueError):
-                    package_client.package(self.manager, [self.core], self.output, [duplicate])
+                    self.package(runtimes=[duplicate])
                 self.assertFalse(self.output.exists())
-
-    def test_retired_patch_executable_names_are_reserved_for_runtime_files(self):
-        for filename in ("astra-emu-patch", "astra-emu-patch.exe",
-                         "ASTRA-EMU-PATCH", "ASTRA-EMU-PATCH.EXE"):
-            with self.subTest(filename=filename):
-                retired = self.file("other/" + filename, b"retired executable")
-                with self.assertRaises(ValueError):
-                    package_client.package(self.manager, [self.core], self.output, [retired])
-                self.assertFalse(self.output.exists())
-                self.assertEqual(b"retired executable", retired.read_bytes())
-                self.assertEqual([], list(self.root.glob(".astraemu-client-*")))
+                self.assertEqual(b"collision", duplicate.read_bytes())
+        duplicate = self.file("other/RUNTIME.DLL", b"other runtime")
+        with self.assertRaises(ValueError):
+            self.package(runtimes=[self.runtime, duplicate])
+        self.assertFalse(self.output.exists())
 
     def test_manager_cannot_overwrite_reserved_document(self):
         self.manager = self.file("other/README.md", b"Manager")
         self.assert_rejected()
 
-    def test_duplicate_core_and_runtime_basenames_are_rejected(self):
-        duplicate = self.file("other/astra_emu_example.dll", b"other core")
-        with self.assertRaises(ValueError):
-            package_client.package(self.manager, [self.core, duplicate], self.output, [])
-        duplicate = self.file("other/RUNTIME.DLL", b"other runtime")
-        with self.assertRaises(ValueError):
-            package_client.package(self.manager, [self.core], self.output, [self.runtime, duplicate])
-        self.assertFalse(self.output.exists())
+    def test_missing_manager_and_runtime_fail_without_output(self):
+        self.manager = self.root / "missing"
+        self.assert_rejected()
+        self.manager = self.file("build/astra-emu-manager.exe", b"public Manager artifact")
+        self.assert_rejected(runtimes=[self.root / "missing"])
 
-    def test_catalog_escapes_devices_non_scripts_and_scaffolds_are_rejected(self):
-        for name in ("../outside.luau", "/absolute.luau", "C:/outside.luau", "sub/entry.luau",
-                     "..\\outside.luau", "entry.luau:stream", "NUL.luau", "COM1.luau",
-                     "fixture.luau", "entry.exe", "entry.luau."):
-            with self.subTest(name=name):
-                self.catalog([{"id": "public", "title": "Public", "script": name}])
-                if name == "fixture.luau":
-                    self.file("public-patches/fixture.luau", b"return {}")
-                self.assert_rejected(patches=self.patches)
-
-    def test_duplicate_catalog_ids_and_casefold_paths_are_rejected(self):
-        for records in (
-            [{"id": "same", "title": "One", "script": "legacy-normalizer.luau"}] * 2,
-            [{"id": "one", "title": "One", "script": "legacy-normalizer.luau"},
-             {"id": "two", "title": "Two", "script": "LEGACY-normalizer.luau"}],
-        ):
-            self.catalog(records)
-            self.file("public-patches/LEGACY-normalizer.luau", b"invalid Luau")
-            self.assert_rejected(patches=self.patches)
-
-    def test_common_paths_are_explicit_and_cannot_escape(self):
-        for common in (["../outside.luau"], ["common/../outside.luau"], ["common/key.toml"],
-                       ["common/test.luau"], ["common/binary.luau", "common/binary.luau"]):
-            with self.subTest(common=common):
-                self.file("public-patches/common/test.luau", b"return {}")
-                self.assert_rejected(patches=self.patches, patch_common=common)
-        self.assert_rejected(patch_common=["common/binary.luau"])
-
-    def test_missing_catalog_entry_or_module_is_rejected(self):
-        self.assert_rejected(patches=self.root / "missing-patches")
-        self.assert_rejected(patches=self.patches, patch_common=["common/missing.luau"])
-        self.entry.unlink()
-        self.assert_rejected(patches=self.patches)
-
-    def test_malformed_catalog_is_rejected(self):
-        for records in ({"recipes": []}, [None], [{"id": "public", "title": "Public"}],
-                        [{"id": "public", "title": "Public", "script": 42}],
-                        [{"id": "", "title": "Public", "script": "legacy-normalizer.luau"}]):
-            with self.subTest(records=records):
-                self.catalog(records)
-                self.assert_rejected(patches=self.patches)
-        self.file("public-patches/catalog.json", b"{not json}")
-        self.assert_rejected(patches=self.patches)
-
-    def test_missing_manager_runtime_and_invalid_core_fail_without_output(self):
-        for manager, cores, runtimes in (
-            (self.root / "missing", [self.core], []),
-            (self.manager, [], []),
-            (self.manager, [self.runtime], []),
-            (self.manager, [self.core], [self.root / "missing"]),
-            (self.manager, [self.root / "build"], []),
-        ):
-            with self.subTest(manager=manager, cores=cores, runtimes=runtimes):
-                with self.assertRaises((ValueError, OSError)):
-                    package_client.package(manager, cores, self.output, runtimes)
-                self.assertFalse(self.output.exists())
-
-    def test_patch_output_overlap_is_rejected(self):
-        self.output = self.patches / "client"
-        self.assert_rejected(patches=self.patches)
-
-    def test_linked_patch_asset_is_rejected_and_target_unchanged(self):
-        outside = self.file("outside.luau", b"outside input")
-        self.entry.unlink()
-        try:
-            self.entry.symlink_to(outside)
-        except OSError:
-            self.skipTest("symlink creation requires platform permission")
-        self.assert_rejected(patches=self.patches)
-        self.assertEqual(b"outside input", outside.read_bytes())
-
-    def test_cli_optional_arguments_and_original_invocation_produce_real_files(self):
+    def test_cli_invocation_produces_real_files_and_refuses_existing_output(self):
         command = [sys.executable, str(Path(package_client.__file__).resolve()),
-                   "--manager", str(self.manager), "--core", str(self.core),
-                   "--runtime-file", str(self.runtime), "--output", str(self.output)]
+                   "--manager", str(self.manager), "--core-dir", str(self.core),
+                   "--runtime-file", str(self.runtime), "--output", str(self.output),
+                   "--material-license", str(self.material), "--symbols-license", str(self.symbols)]
         result = subprocess.run(command, capture_output=True)
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual(self.runtime.read_bytes(), (self.output / self.runtime.name).read_bytes())
         shutil.rmtree(self.output)
-        result = subprocess.run(command + ["--patches", str(self.patches),
-                                          "--patch-common", "common/binary.luau",
+        result = subprocess.run(command + ["--metadata-dist", str(self.metadata),
                                           "--luau-license", str(self.license)], capture_output=True)
         self.assertEqual(0, result.returncode, result.stderr)
-        self.assertEqual(self.entry.read_bytes(), (self.output / "patches" / self.entry.name).read_bytes())
-        self.assertEqual({self.manager.name}, {p.name for p in self.output.glob("*.exe")})
-        self.assertEqual({self.core.name}, {p.name for p in (self.output / "cores").iterdir()})
-        self.assertEqual({"catalog.json", "legacy-normalizer.luau", "common/binary.luau"},
-                         {p.relative_to(self.output / "patches").as_posix()
-                          for p in (self.output / "patches").rglob("*") if p.is_file()})
+        self.assertEqual(self.metadata_files["patches/common/binary.luau"],
+                         (self.output / "metadata/patches/common/binary.luau").read_bytes())
+        self.assertEqual({"astra_emu_example"}, {p.name for p in (self.output / "cores").iterdir()})
         before = (self.output / self.manager.name).read_bytes()
         result = subprocess.run(command, capture_output=True)
         self.assertEqual(1, result.returncode)
         self.assertEqual(before, (self.output / self.manager.name).read_bytes())
 
-    def test_cli_rejects_retired_patch_executable_as_a_runtime_file(self):
-        retired = self.file("build/ASTRA-EMU-PATCH.EXE", b"retired executable")
-        command = [sys.executable, str(Path(package_client.__file__).resolve()),
-                   "--manager", str(self.manager), "--core", str(self.core),
-                   "--runtime-file", str(retired), "--output", str(self.output),
-                   "--luau-license", str(self.license)]
-        result = subprocess.run(command, capture_output=True)
-        self.assertEqual(1, result.returncode)
-        self.assertFalse(self.output.exists())
-        self.assertEqual([], list(self.root.glob(".astraemu-client-*")))
-        self.assertEqual(b"retired executable", retired.read_bytes())
+    def test_cli_rejects_retired_arguments(self):
+        for retired in (["--core", str(self.core / "astra_emu_example.dll")],
+                        ["--patches", str(self.metadata)], ["--patch-common", "common/binary.luau"]):
+            with self.subTest(retired=retired[0]):
+                command = [sys.executable, str(Path(package_client.__file__).resolve()),
+                           "--manager", str(self.manager), "--core-dir", str(self.core),
+                           "--output", str(self.output), *retired]
+                result = subprocess.run(command, capture_output=True)
+                self.assertNotEqual(0, result.returncode)
+                self.assertFalse(self.output.exists())
 
 
 if __name__ == "__main__":

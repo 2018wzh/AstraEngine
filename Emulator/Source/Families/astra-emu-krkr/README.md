@@ -118,18 +118,32 @@ cmake -S Emulator/ThirdParty/kirikiri2 -B .work/krkr-msvc -G Ninja `
 cmake --build .work/krkr-msvc --target astra_krkr_native
 ```
 
-The native target copies app-local dependencies and `Resources/`. Supply the
-matching MSVC C++/OpenMP runtime DLLs beside `astra_emu_krkr.dll` (or install
-that runtime). For linked Manager builds set `ASTRA_KRKR_NATIVE_LIB_DIR` to the
-directory containing `astra_emu_krkr.lib`; no child executable is packaged.
-The native DLL itself is the dynamic core module.
+The native target copies app-local dependencies and `Resources/` into
+`.work/krkr-msvc/embedded-adapter/`. For linked Manager builds set
+`ASTRA_KRKR_NATIVE_LIB_DIR` to the directory containing `astra_emu_krkr.lib`;
+no child executable is packaged. The native DLL itself is the dynamic core module.
+
+Stage it as a core directory (`<output>/astra_emu_krkr/` with `core.json`). Pass
+every app-local DLL of the output directory plus the closure that
+`check_core_deps.py` finds in the vcpkg `bin/` (the FFmpeg 3.3.9 DLLs and their
+`iconv-2`, `liblzma`, `bz2`, `zlib1` dependencies) and the MSVC OpenMP redist
+directory (`vcomp140.dll`). `msvcp140.dll`, `vcruntime140.dll` and
+`vcruntime140_1.dll` ship at the package root, not in the core directory:
 
 ```powershell
-python Tools/AstraEMU/package_krkr_runtime.py --native-runtime "$nativeRuntime" --output "$runtimeBundle"
+$adapter = ".work/krkr-msvc/embedded-adapter"
+$openmp = (Get-ChildItem "$env:VCToolsRedistDir/x64" -Directory -Filter 'Microsoft.VC*.OpenMP' | Select-Object -First 1).FullName
+python Tools/AstraEMU/check_core_deps.py closure --library "$adapter/astra_emu_krkr.dll" `
+  --search-dir $adapter --search-dir .work/krkr-native/vcpkg_installed/x64-windows/bin --search-dir $openmp
+python Tools/AstraEMU/stage_core.py --library "$adapter/astra_emu_krkr.dll" `
+  --plugin-id astra-emu-krkr --version 0.1.0 --resources "$adapter/Resources" `
+  --dependency <each DLL listed above> `
+  --license kirikiri2/LICENSE=Emulator/ThirdParty/kirikiri2/LICENSE --output "$stageRoot"
+python Tools/AstraEMU/check_core_deps.py check --core-dir "$stageRoot/astra_emu_krkr"
 ```
 
-`$nativeRuntime` is the actual new native output directory, not a renamed legacy
-DLL. Add `--runtime-file <DLL>` for app-local redistributables when needed.
+`$stageRoot` must be a new directory. The release workflow
+(`.github/workflows/emu-release.yml`) runs the same staging and check.
 
 ## Manual Release acceptance
 
