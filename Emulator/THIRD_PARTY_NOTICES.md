@@ -10,6 +10,18 @@
 - AstraEMU 的顶层 About 页面直接显示 Slint 官方 `AboutSlint` widget。不得从 shipping UI 删除该页面或把它放到无法从顶层导航到达的位置。
 - Slint 同时提供其他许可证；AstraEngine workspace 不因本产品选择 Royalty-free 2.0 而改为 GPL。
 
+## mlua 0.10.5
+
+- Upstream: <https://github.com/mlua-rs/mlua/tree/v0.10.5>，MIT；完整许可和源码保存在 `ThirdParty/mlua`。
+- 本地回补仅修改 `src/state/raw.rs` 的数字分类：要求浮点数与整数精确相等，并保留 IEEE 负零；不以 epsilon 将极小非零值转成 `0`。修复同时用于严格文件范围和 JSON/TOML 数值转换，Luau 运行时版本、API 与执行队列不变。
+- Luau 不区分整数和同值的整值浮点字面量；数据编码保留数值，不保证保留原 TOML 数字字面量的类型拼写。
+- 本地包须包含此 MIT 许可；固定依赖由 Emulator lockfile 和源码路径复现。
+
+## aPLib 通用解码
+
+离线补丁库的有界 Rust aPLib 解码按 [apultra 的 expand.c](https://github.com/emmanuel-marty/apultra/blob/master/src/expand.c) token 协议改写，保留 Emmanuel Marty（2019）的 zlib 许可及修改归属，完整文本在 `astra-emu-patch/src/codecs.rs` 中。该通用算法不包含商业游戏资源、密钥或文件偏移；运行包须保留许可文本。
+
+
 ## rfvp derivative used by astra-emu-fvp
 
 - Upstream: <https://github.com/xmoezzz/rfvp>
