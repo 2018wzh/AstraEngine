@@ -63,12 +63,9 @@ fn surface_info(surface: &abi::SurfaceInfo) -> FamilyResult<FrameInfo> {
         height: surface.raster.height,
         logical_width: surface.logical.width,
         logical_height: surface.logical.height,
-        stride: u32::try_from(if surface.kind == abi::SURFACE_GPU {
-            u64::from(surface.raster.width) * 4
-        } else {
-            surface.stride
-        })
-        .map_err(|_| FamilyError::invalid("ASTRA_EMU_FRAME_STRIDE", "stride exceeds host limit"))?,
+        stride: u32::try_from(surface.stride).map_err(|_| {
+            FamilyError::invalid("ASTRA_EMU_FRAME_STRIDE", "stride exceeds host limit")
+        })?,
         format,
         rows: if surface.rows == abi::ROWS_TOP_DOWN {
             FrameRowOrder::TopToBottom
@@ -77,36 +74,4 @@ fn surface_info(surface: &abi::SurfaceInfo) -> FamilyResult<FrameInfo> {
         },
     };
     Ok(info)
-}
-
-pub(super) unsafe fn take_d3d12(
-    frame: abi::D3D12Frame,
-    host: &abi::D3D12Host,
-    epoch: u64,
-    after: Option<FrameIdentity>,
-) -> FamilyResult<FramePoll> {
-    let validation = frame.validate(host, epoch).map_err(|_| {
-        FamilyError::invalid("ASTRA_EMU_D3D12_SURFACE", "invalid negotiated GPU surface")
-    });
-    let identity = frame.identity.into();
-    if frame.state != abi::FRAME_READY {
-        if let Some(release) = frame.lease.release {
-            unsafe {
-                release(frame.lease.owner, abi::D3D12_NOT_SUBMITTED);
-            }
-        }
-        validation?;
-        return match frame.state {
-            abi::FRAME_PENDING => Ok(FramePoll::Pending(identity)),
-            abi::FRAME_UNCHANGED if after == Some(identity) => Ok(FramePoll::Unchanged(identity)),
-            _ => Err(FamilyError::invalid(
-                "ASTRA_EMU_FRAME_BASELINE",
-                "unchanged GPU surface has no matching baseline",
-            )),
-        };
-    }
-    let owner = unsafe { D3D12FrameOwner::adopt(frame, epoch) }?;
-    validation?;
-    let info = surface_info(&owner.descriptor().info)?;
-    Ok(FramePoll::Ready(FrameLease::from_d3d12(owner, info)?))
 }

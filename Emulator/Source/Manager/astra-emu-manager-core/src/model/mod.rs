@@ -2,7 +2,6 @@
 mod config;
 mod descriptor;
 mod frame;
-mod gpu;
 mod input;
 mod key_names;
 mod modal;
@@ -10,7 +9,6 @@ mod window;
 pub use config::*;
 pub use descriptor::*;
 pub use frame::*;
-pub use gpu::*;
 pub use input::*;
 pub use modal::*;
 pub use window::*;

@@ -35,6 +35,7 @@ pub struct Fixture {
     formats: Box<[abi::Bytes]>,
     fields: Box<[abi::ConfigField]>,
     choices: Box<[abi::Bytes]>,
+    choice_labels: Box<[abi::Bytes]>,
 }
 impl Fixture {
     pub fn new(plugin: &'static str, family: &'static str, format: &'static str) -> Self {
@@ -56,6 +57,7 @@ impl Fixture {
             formats: Box::new([]),
             fields: Box::new([]),
             choices: Box::new([]),
+            choice_labels: Box::new([]),
         }
     }
 }
@@ -81,6 +83,11 @@ pub fn try_install(
     if value.config {
         value.choices =
             vec![abi::Bytes::new(b"direct"), abi::Bytes::new(b"title")].into_boxed_slice();
+        value.choice_labels = vec![
+            abi::Bytes::new("直接进入脚本".as_bytes()),
+            abi::Bytes::new("标题菜单启动".as_bytes()),
+        ]
+        .into_boxed_slice();
         value.fields = vec![abi::ConfigField {
             id: abi::Bytes::new(b"launch_mode"),
             label: abi::Bytes::new(b"Launch mode"),
@@ -97,9 +104,13 @@ pub fn try_install(
             number_min: 0.0,
             number_max: 0.0,
             max_bytes: 0,
-            reserved: 0,
+            flags: 0,
             choices: value.choices.as_ptr(),
             choice_count: value.choices.len(),
+            description: abi::Bytes::EMPTY,
+            choice_labels: value.choice_labels.as_ptr(),
+            step: 0.0,
+            unit: abi::Bytes::EMPTY,
         }]
         .into_boxed_slice();
     }
@@ -153,6 +164,9 @@ unsafe extern "C" fn describe<const N: usize>(
                 format_count: v.formats.len(),
                 configuration: v.fields.as_ptr(),
                 configuration_count: v.fields.len(),
+                display_name: abi::Bytes::new(v.plugin.as_bytes()),
+                family_name: abi::Bytes::new(v.family.as_bytes()),
+                render: abi::RenderExtentSupport::default(),
             });
         }
     });
@@ -189,7 +203,6 @@ fn info() -> abi::SurfaceInfo {
         color: abi::COLOR_SRGB,
         alpha: abi::ALPHA_OPAQUE,
         rows: abi::ROWS_TOP_DOWN,
-        backend: 0,
         logical: abi::Extent {
             width: 1,
             height: 1,
@@ -240,6 +253,18 @@ unsafe extern "C" fn open<const N: usize>(
                 (*error).set(
                     "ASTRA_TEST_MODULE_OWNER",
                     "module owner presence does not match the extension",
+                );
+            }
+            return abi::INVALID_ARGUMENT;
+        }
+        if abi::RenderExtentSupport::default()
+            .validate_request(abi::CAP_CPU_SURFACE, raw.render_extent)
+            .is_err()
+        {
+            unsafe {
+                (*error).set(
+                    "ASTRA_TEST_RENDER_EXTENT",
+                    "render extent requested from a core without render support",
                 );
             }
             return abi::INVALID_ARGUMENT;

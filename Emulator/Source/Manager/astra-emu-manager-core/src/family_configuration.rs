@@ -102,7 +102,7 @@ fn write_configuration(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{ConfigKind, ConfigValue};
+    use crate::model::{ConfigFlags, ConfigKind, ConfigValue};
 
     #[test]
     fn persistence_defaults_overrides_reset_and_failed_write_preservation() {
@@ -126,6 +126,11 @@ mod tests {
             group: "Audio".into(),
             kind: ConfigKind::Number { min: 0.0, max: 1.0 },
             default: ConfigValue::Number(0.5),
+            description: String::new(),
+            choice_labels: Vec::new(),
+            flags: ConfigFlags::default(),
+            step: None,
+            unit: String::new(),
         }];
         let entry = |value| ConfigEntry {
             id: "gain".into(),
@@ -219,6 +224,11 @@ mod tests {
                 choices: vec!["cp932".into(), "gbk".into()],
             },
             default: ConfigValue::Enum("cp932".into()),
+            description: String::new(),
+            choice_labels: Vec::new(),
+            flags: ConfigFlags::default(),
+            step: None,
+            unit: String::new(),
         }]
     }
 

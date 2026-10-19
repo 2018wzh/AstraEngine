@@ -291,7 +291,7 @@ fn cached_selection_is_freshly_rejected_before_open_without_probing_alternatives
             },
             host: astra_emu_manager_core::no_host_services(&cancellation),
             cancellation,
-            d3d12: None,
+            render_extent: None,
         },
     );
     assert!(

@@ -34,7 +34,7 @@ pub use family_diagnostics::{
 pub use appearance::AppearanceSettings;
 pub use family::{
     FamilyCapability, FamilyPluginDescriptor, FamilyPluginRegistry, FamilyPolicyError,
-    FamilyProbeCandidate, FamilyProbeReport, FamilyProbeSelection, SessionMenuEntry,
+    FamilyProbeCandidate, FamilyProbeReport, FamilyProbeSelection, RenderSupport, SessionMenuEntry,
     INDEPENDENT_FAMILY_ABI_FINGERPRINT,
 };
 pub use family_loader::{

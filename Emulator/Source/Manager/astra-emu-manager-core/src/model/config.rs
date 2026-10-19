@@ -5,6 +5,9 @@ use serde::{Deserialize, Serialize};
 pub const MAX_CONFIG_FIELDS: usize = 128;
 pub const MAX_CONFIG_TEXT_BYTES: usize = 4096;
 pub const MAX_CONFIG_CHOICES: usize = 128;
+pub const MAX_CONFIG_DESCRIPTION_BYTES: usize = 512;
+pub const MAX_CHOICE_LABEL_BYTES: usize = 64;
+pub const MAX_CONFIG_UNIT_BYTES: usize = 16;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ConfigValue {
@@ -24,6 +27,15 @@ pub enum ConfigKind {
     Enum { choices: Vec<String> },
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConfigFlags {
+    pub file_path: bool,
+    pub directory_path: bool,
+    pub advanced: bool,
+    pub game_relative: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConfigField {
@@ -33,6 +45,12 @@ pub struct ConfigField {
     pub group: String,
     pub kind: ConfigKind,
     pub default: ConfigValue,
+    pub description: String,
+    /// Empty, or one display label per enum choice in the same order.
+    pub choice_labels: Vec<String>,
+    pub flags: ConfigFlags,
+    pub step: Option<f64>,
+    pub unit: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -96,6 +114,9 @@ pub fn validate_config_schema(fields: &[ConfigField]) -> FamilyResult<()> {
         {
             return Err(error(index, "invalid label or group"));
         }
+        if !presentation_valid(field) {
+            return Err(error(index, "invalid presentation metadata"));
+        }
         let valid = match &field.kind {
             ConfigKind::Bool => true,
             ConfigKind::Integer { min, max } => min <= max,
@@ -115,6 +136,37 @@ pub fn validate_config_schema(fields: &[ConfigField]) -> FamilyResult<()> {
         }
     }
     Ok(())
+}
+
+fn presentation_valid(field: &ConfigField) -> bool {
+    let flags = field.flags;
+    let text_valid =
+        |value: &str, max: usize| value.len() <= max && !value.chars().any(char::is_control);
+    let choice_count = match &field.kind {
+        ConfigKind::Enum { choices } => choices.len(),
+        _ => 0,
+    };
+    let labels_valid = field.choice_labels.is_empty()
+        || (field.choice_labels.len() == choice_count
+            && field
+                .choice_labels
+                .iter()
+                .all(|label| !label.is_empty() && text_valid(label, MAX_CHOICE_LABEL_BYTES)));
+    let path = flags.file_path || flags.directory_path;
+    let flags_valid = !(flags.file_path && flags.directory_path)
+        && (!path || matches!(field.kind, ConfigKind::String { .. }))
+        && (!flags.game_relative || path);
+    let step_valid = match (&field.kind, field.step) {
+        (_, None) => true,
+        (ConfigKind::Number { .. }, Some(step)) => step.is_finite() && step > 0.0,
+        (ConfigKind::Integer { .. }, Some(step)) => step >= 1.0 && step.fract() == 0.0,
+        _ => false,
+    };
+    labels_valid
+        && flags_valid
+        && step_valid
+        && text_valid(&field.description, MAX_CONFIG_DESCRIPTION_BYTES)
+        && text_valid(&field.unit, MAX_CONFIG_UNIT_BYTES)
 }
 
 /// Validate explicit entries and materialize omitted defaults in schema order.

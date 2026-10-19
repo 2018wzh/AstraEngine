@@ -13,9 +13,11 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Host metadata identity for the versioned native C protocol.
-pub const INDEPENDENT_FAMILY_ABI_FINGERPRINT: &str = "astra.emu.native.c.v2";
+pub const INDEPENDENT_FAMILY_ABI_FINGERPRINT: &str = "astra.emu.native.c.v3";
 pub const MAX_FAMILY_ID_BYTES: usize = crate::model::MAX_SYMBOL_BYTES;
 pub const MAX_GAME_ID_BYTES: usize = 256;
+pub const MAX_DISPLAY_NAME_BYTES: usize = 64;
+pub const MAX_RENDER_EXTENT: u32 = 16384;
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
@@ -23,7 +25,7 @@ pub const MAX_GAME_ID_BYTES: usize = 256;
 #[serde(rename_all = "snake_case")]
 pub enum FamilyCapability {
     CpuFrame,
-    GpuFrame,
+    RenderExtent,
     TextReplacement,
 }
 
@@ -32,6 +34,15 @@ pub struct SessionMenuEntry {
     pub control: u32,
     pub icon: u32,
     pub label: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RenderSupport {
+    pub min: (u32, u32),
+    pub max: (u32, u32),
+    pub default: Option<(u32, u32)>,
+    pub preserve_aspect: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -43,6 +54,9 @@ pub struct FamilyPluginDescriptor {
     pub version: String,
     pub capabilities: Vec<FamilyCapability>,
     pub supported_formats: Vec<String>,
+    pub display_name: String,
+    pub family_name: String,
+    pub render: Option<RenderSupport>,
 }
 
 impl FamilyPluginDescriptor {
@@ -53,12 +67,7 @@ impl FamilyPluginDescriptor {
         if self.abi_fingerprint != INDEPENDENT_FAMILY_ABI_FINGERPRINT {
             return Err(FamilyPolicyError::AbiFingerprint);
         }
-        if !self.capabilities.iter().any(|capability| {
-            matches!(
-                capability,
-                FamilyCapability::CpuFrame | FamilyCapability::GpuFrame
-            )
-        }) {
+        if !self.capabilities.contains(&FamilyCapability::CpuFrame) {
             return Err(FamilyPolicyError::MissingCpuFrame);
         }
         for (index, capability) in self.capabilities.iter().enumerate() {
@@ -70,11 +79,40 @@ impl FamilyPluginDescriptor {
         if self.supported_formats.is_empty() {
             return Err(FamilyPolicyError::NoSupportedFormats);
         }
+        for (name, value) in [
+            ("display_name", &self.display_name),
+            ("family_name", &self.family_name),
+        ] {
+            if value.is_empty()
+                || value.len() > MAX_DISPLAY_NAME_BYTES
+                || value.chars().any(char::is_control)
+            {
+                return Err(FamilyPolicyError::InvalidSymbol(name));
+            }
+        }
+        if self.has_capability(FamilyCapability::RenderExtent) != self.render.is_some()
+            || self.render.is_some_and(|render| !render.is_valid())
+        {
+            return Err(FamilyPolicyError::InvalidRender);
+        }
         Ok(())
     }
 
     pub fn has_capability(&self, capability: FamilyCapability) -> bool {
         self.capabilities.contains(&capability)
+    }
+}
+
+impl RenderSupport {
+    pub fn contains(&self, (width, height): (u32, u32)) -> bool {
+        (self.min.0..=self.max.0).contains(&width) && (self.min.1..=self.max.1).contains(&height)
+    }
+
+    fn is_valid(&self) -> bool {
+        let axis = |min: u32, max: u32| 1 <= min && min <= max && max <= MAX_RENDER_EXTENT;
+        axis(self.min.0, self.max.0)
+            && axis(self.min.1, self.max.1)
+            && self.default.is_none_or(|default| self.contains(default))
     }
 }
 
@@ -160,6 +198,8 @@ pub enum FamilyPolicyError {
     InvalidPreference,
     #[error("ASTRA_EMU_FAMILY_POLICY_CANDIDATE_NOT_FOUND")]
     CandidateNotFound,
+    #[error("ASTRA_EMU_FAMILY_POLICY_INVALID_RENDER")]
+    InvalidRender,
 }
 
 /// Registered descriptors in deterministic ID order.
@@ -349,6 +389,9 @@ mod tests {
             version: "1.0.0".into(),
             capabilities: vec![FamilyCapability::CpuFrame],
             supported_formats: vec!["fvp.hcb".into()],
+            display_name: plugin_id.into(),
+            family_name: family_id.into(),
+            render: None,
         }
     }
 
@@ -375,6 +418,52 @@ mod tests {
         value.abi_fingerprint = INDEPENDENT_FAMILY_ABI_FINGERPRINT.into();
         value.capabilities.clear();
         assert_eq!(value.validate(), Err(FamilyPolicyError::MissingCpuFrame));
+    }
+
+    #[test]
+    fn render_support_matches_capability_and_bounds() {
+        let mut value = descriptor("musica", "musica");
+        let support = RenderSupport {
+            min: (320, 180),
+            max: (16384, 16384),
+            default: None,
+            preserve_aspect: false,
+        };
+        value.render = Some(support);
+        assert_eq!(value.validate(), Err(FamilyPolicyError::InvalidRender));
+        value.capabilities.push(FamilyCapability::RenderExtent);
+        assert_eq!(value.validate(), Ok(()));
+        value.render = Some(RenderSupport {
+            default: Some((160, 90)),
+            ..support
+        });
+        assert_eq!(value.validate(), Err(FamilyPolicyError::InvalidRender));
+        value.render = Some(RenderSupport {
+            min: (320, 180),
+            max: (160, 90),
+            ..support
+        });
+        assert_eq!(value.validate(), Err(FamilyPolicyError::InvalidRender));
+        value.render = None;
+        assert_eq!(value.validate(), Err(FamilyPolicyError::InvalidRender));
+    }
+
+    #[test]
+    fn display_names_are_required_bounded_text() {
+        let mut value = descriptor("fvp", "fvp");
+        value.display_name.clear();
+        assert_eq!(
+            value.validate(),
+            Err(FamilyPolicyError::InvalidSymbol("display_name"))
+        );
+        value.display_name = "RFVP".into();
+        value.family_name = "引".repeat(22);
+        assert_eq!(
+            value.validate(),
+            Err(FamilyPolicyError::InvalidSymbol("family_name"))
+        );
+        value.family_name = "Ethornell / BGI".into();
+        assert_eq!(value.validate(), Ok(()));
     }
 
     #[test]

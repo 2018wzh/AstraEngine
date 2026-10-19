@@ -1,6 +1,7 @@
 use super::family_loader::text;
 use crate::{
-    model::*, FamilyCapability, FamilyPluginDescriptor, INDEPENDENT_FAMILY_ABI_FINGERPRINT,
+    model::*, FamilyCapability, FamilyPluginDescriptor, RenderSupport,
+    INDEPENDENT_FAMILY_ABI_FINGERPRINT,
 };
 use astra_emu_abi as abi;
 
@@ -8,9 +9,7 @@ pub(super) unsafe fn descriptor(
     raw: abi::Descriptor,
 ) -> FamilyResult<(FamilyPluginDescriptor, Vec<ConfigField>)> {
     let invalid = || FamilyError::invalid("ASTRA_EMU_CORE_DESCRIPTOR", "invalid core descriptor");
-    if !raw.header.accepts::<abi::Descriptor>()
-        || raw.capabilities & (abi::CAP_CPU_SURFACE | abi::CAP_GPU_SURFACE) == 0
-    {
+    if unsafe { raw.validate() }.is_err() {
         return Err(invalid());
     }
     let formats = unsafe { abi::borrowed_array(raw.formats, raw.format_count, 128) }
@@ -40,19 +39,21 @@ pub(super) unsafe fn descriptor(
             abi::VALUE_STRING => ConfigKind::String {
                 max_bytes: field.max_bytes,
             },
-            abi::VALUE_ENUM => {
-                let choices = unsafe {
-                    abi::borrowed_array(field.choices, field.choice_count, abi::MAX_CONFIG_FIELDS)
-                }
-                .map_err(|_| invalid())?;
-                ConfigKind::Enum {
-                    choices: choices
-                        .iter()
-                        .map(|&v| unsafe { text(v, 128) })
-                        .collect::<FamilyResult<_>>()?,
-                }
-            }
+            abi::VALUE_ENUM => ConfigKind::Enum {
+                choices: unsafe { texts(field.choices, field.choice_count, 128) }?,
+            },
             _ => return Err(invalid()),
+        };
+        let choice_labels = if field.choice_count == 0 {
+            Vec::new()
+        } else {
+            unsafe {
+                texts(
+                    field.choice_labels,
+                    field.choice_count,
+                    abi::MAX_CHOICE_LABEL,
+                )
+            }?
         };
         configuration.push(ConfigField {
             id: unsafe { text(field.id, 128) }?,
@@ -60,14 +61,24 @@ pub(super) unsafe fn descriptor(
             group: unsafe { text(field.group, 256) }?,
             kind,
             default,
+            description: unsafe { text(field.description, abi::MAX_CONFIG_DESCRIPTION) }?,
+            choice_labels,
+            flags: ConfigFlags {
+                file_path: field.flags & abi::CONFIG_FLAG_FILE_PATH != 0,
+                directory_path: field.flags & abi::CONFIG_FLAG_DIRECTORY_PATH != 0,
+                advanced: field.flags & abi::CONFIG_FLAG_ADVANCED != 0,
+                game_relative: field.flags & abi::CONFIG_FLAG_GAME_RELATIVE != 0,
+            },
+            step: (field.step != 0.0).then_some(field.step),
+            unit: unsafe { text(field.unit, abi::MAX_CONFIG_UNIT) }?,
         });
     }
     let mut capabilities = Vec::new();
     if raw.capabilities & abi::CAP_CPU_SURFACE != 0 {
         capabilities.push(FamilyCapability::CpuFrame);
     }
-    if raw.capabilities & abi::CAP_GPU_SURFACE != 0 {
-        capabilities.push(FamilyCapability::GpuFrame);
+    if raw.capabilities & abi::CAP_RENDER_EXTENT != 0 {
+        capabilities.push(FamilyCapability::RenderExtent);
     }
     if raw.capabilities & abi::CAP_TEXT_HOOK != 0 {
         capabilities.push(FamilyCapability::TextReplacement);
@@ -82,10 +93,29 @@ pub(super) unsafe fn descriptor(
             .iter()
             .map(|&v| unsafe { text(v, 256) })
             .collect::<FamilyResult<_>>()?,
+        display_name: unsafe { text(raw.display_name, abi::MAX_DISPLAY_NAME_BYTES) }?,
+        family_name: unsafe { text(raw.family_name, abi::MAX_DISPLAY_NAME_BYTES) }?,
+        render: (raw.capabilities & abi::CAP_RENDER_EXTENT != 0).then(|| {
+            let extent = |value: abi::Extent| (value.width, value.height);
+            RenderSupport {
+                min: extent(raw.render.min),
+                max: extent(raw.render.max),
+                default: (raw.render.default != abi::Extent::default())
+                    .then(|| extent(raw.render.default)),
+                preserve_aspect: raw.render.flags & abi::RENDER_PRESERVE_ASPECT != 0,
+            }
+        }),
     };
     descriptor.validate().map_err(|_| invalid())?;
     validate_config_schema(&configuration)?;
     Ok((descriptor, configuration))
+}
+unsafe fn texts(items: *const abi::Bytes, count: usize, limit: usize) -> FamilyResult<Vec<String>> {
+    unsafe { abi::borrowed_array(items, count, abi::MAX_CONFIG_FIELDS) }
+        .map_err(|_| FamilyError::invalid("ASTRA_EMU_CORE_DESCRIPTOR", "invalid core descriptor"))?
+        .iter()
+        .map(|&value| unsafe { text(value, limit) })
+        .collect()
 }
 unsafe fn value(value: abi::ConfigValue) -> FamilyResult<ConfigValue> {
     Ok(match value.kind {

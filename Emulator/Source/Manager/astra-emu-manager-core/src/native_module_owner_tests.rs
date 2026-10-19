@@ -22,7 +22,7 @@ fn request() -> NativeOpenRequest {
         },
         host: no_host_services(&cancellation),
         cancellation,
-        d3d12: None,
+        render_extent: None,
     }
 }
 

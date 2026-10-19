@@ -118,7 +118,6 @@ pub(crate) unsafe fn text(bytes: abi::Bytes, limit: usize) -> FamilyResult<Strin
 struct NativeModule {
     api: abi::CoreApi,
     resources: Option<crate::native_module_owner::ModuleResources>,
-    d3d12: Option<abi::D3D12Api>,
     closed: bool,
 }
 pub struct LoadedFamilyPlugin {
@@ -199,33 +198,6 @@ impl LoadedFamilyPlugin {
         let mut extension = std::ptr::null();
         let status = unsafe {
             api.extension.unwrap()(
-                abi::Bytes::new(abi::D3D12_EXTENSION),
-                abi::D3D12_EXTENSION_VERSION,
-                &mut extension,
-            )
-        };
-        let d3d12 = if status == abi::UNSUPPORTED && extension.is_null() {
-            None
-        } else {
-            if status != abi::OK
-                || extension.is_null()
-                || !extension.cast::<abi::D3D12Api>().is_aligned()
-            {
-                return Err(FamilyLoadError::AbiLayout);
-            }
-            let header = unsafe { *extension.cast::<abi::Header>() };
-            if header.version != abi::D3D12_EXTENSION_VERSION
-                || header.size < abi::D3D12Api::HEADER.size
-            {
-                return Err(FamilyLoadError::AbiLayout);
-            }
-            let table = unsafe { *extension.cast::<abi::D3D12Api>() };
-            table.validate().map_err(|_| FamilyLoadError::AbiLayout)?;
-            Some(table)
-        };
-        let mut extension = std::ptr::null();
-        let status = unsafe {
-            api.extension.unwrap()(
                 abi::Bytes::new(abi::SESSION_MENU_EXTENSION),
                 abi::SESSION_MENU_VERSION,
                 &mut extension,
@@ -281,7 +253,6 @@ impl LoadedFamilyPlugin {
             inner: Rc::new(NativeModule {
                 api,
                 resources,
-                d3d12,
                 closed: false,
             }),
             descriptor,
@@ -289,9 +260,6 @@ impl LoadedFamilyPlugin {
             location: PathBuf::new(),
             menu,
         })
-    }
-    pub fn supports_d3d12(&self) -> bool {
-        self.inner.d3d12.is_some()
     }
     pub fn location(&self) -> &Path {
         &self.location
@@ -395,21 +363,14 @@ impl LoadedFamilyPlugin {
                 .resources
                 .as_ref()
                 .map_or(std::ptr::null_mut(), |resources| resources.handle()),
+            render_extent: request.render_extent.map_or(
+                abi::Extent::default(),
+                |(width, height)| abi::Extent { width, height },
+            ),
         };
         let mut output = MaybeUninit::<abi::OpenResult>::zeroed();
         let mut error = abi::Error::default();
-        let status = unsafe {
-            if let Some(gpu) = self.inner.d3d12 {
-                gpu.open.unwrap()(
-                    &raw,
-                    request.d3d12.as_ref().map_or(std::ptr::null(), |host| host),
-                    output.as_mut_ptr(),
-                    &mut error,
-                )
-            } else {
-                self.inner.api.open.unwrap()(&raw, output.as_mut_ptr(), &mut error)
-            }
-        };
+        let status = unsafe { self.inner.api.open.unwrap()(&raw, output.as_mut_ptr(), &mut error) };
         let output = unsafe { output.assume_init() };
         if status != abi::OK {
             if !output.session.is_null() {
@@ -428,11 +389,6 @@ impl LoadedFamilyPlugin {
             pointer: (0.0, 0.0),
             poisoned: false,
             cancellation: request.cancellation,
-            d3d12: if output.surface.kind == abi::SURFACE_GPU {
-                self.inner.d3d12.zip(request.d3d12)
-            } else {
-                None
-            },
         };
         if !session.cancellation.publish() {
             drop(session);
@@ -445,8 +401,6 @@ impl LoadedFamilyPlugin {
             || output.context_epoch == 0
             || output.output_epoch == 0
             || output.surface.validate().is_err()
-            || (output.surface.kind == abi::SURFACE_GPU
-                && (output.surface.backend != abi::BACKEND_D3D12 || session.d3d12.is_none()))
         {
             drop(session);
             return Err(FamilyError::invalid(
@@ -464,7 +418,7 @@ pub struct NativeOpenRequest {
     pub initial_window: WindowState,
     pub host: abi::HostServices,
     pub cancellation: crate::NativeCancellation,
-    pub d3d12: Option<abi::D3D12Host>,
+    pub render_extent: Option<(u32, u32)>,
 }
 pub fn no_host_services(cancellation: &crate::NativeCancellation) -> abi::HostServices {
     abi::HostServices {
@@ -501,7 +455,6 @@ pub struct NativeSession {
     pointer: (f64, f64),
     poisoned: bool,
     cancellation: crate::NativeCancellation,
-    d3d12: Option<(abi::D3D12Api, abi::D3D12Host)>,
 }
 impl NativeSession {
     fn call(
@@ -667,29 +620,6 @@ impl NativeSession {
         self.poisoned
     }
     pub fn acquire_frame(&mut self, after: Option<FrameIdentity>) -> FamilyResult<FramePoll> {
-        if let Some((api, host)) = self.d3d12 {
-            let mut frame = MaybeUninit::<abi::D3D12Frame>::zeroed();
-            let result = self.call("d3d12.acquire", |_, handle, error| unsafe {
-                api.acquire.unwrap()(
-                    handle,
-                    after.map(Into::into).unwrap_or_default(),
-                    frame.as_mut_ptr(),
-                    error,
-                )
-            });
-            let frame = unsafe { frame.assume_init() };
-            if let Err(error) = result {
-                if let Some(release) = frame.lease.release {
-                    unsafe {
-                        release(frame.lease.owner, abi::D3D12_NOT_SUBMITTED);
-                    }
-                }
-                return Err(error);
-            }
-            return unsafe {
-                super::native_frame::take_d3d12(frame, &host, self.session_epoch, after)
-            };
-        }
         let mut surface = MaybeUninit::<abi::FrameSurface>::zeroed();
         let result = self.call("frame", |api, handle, error| unsafe {
             api.frame.unwrap()(

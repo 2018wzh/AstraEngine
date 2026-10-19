@@ -115,3 +115,26 @@ fn session_menu_is_copied_from_core_extension() {
         }]
     );
 }
+
+#[test]
+fn v3_descriptor_names_and_choice_labels_are_decoded() {
+    let mut registry = FamilyProviderRegistry::new();
+    let mut fixture = Fixture::new("a", "fvp", "fvp.hcb");
+    fixture.config = true;
+    registry
+        .register_provider(test_native::install(0, fixture))
+        .unwrap();
+    let descriptor = registry.descriptor("a").unwrap();
+    assert_eq!(
+        (
+            descriptor.display_name.as_str(),
+            descriptor.family_name.as_str()
+        ),
+        ("a", "fvp")
+    );
+    assert_eq!(descriptor.render, None);
+    let fields = registry.configuration("a").unwrap();
+    assert_eq!(fields[0].choice_labels, ["直接进入脚本", "标题菜单启动"]);
+    assert_eq!(fields[0].flags, crate::model::ConfigFlags::default());
+    assert_eq!(fields[0].step, None);
+}
