@@ -23,6 +23,7 @@ exclude = [
     "ThirdParty/rfvp",
     "ThirdParty/siglus_rs",
     "ThirdParty/sena-rs",
+    "ThirdParty/ethornell-rs",
     "ThirdParty/cpal",
     "ThirdParty/mlua",
     "Source/FamilyApi/astra-emu-extension-api",
