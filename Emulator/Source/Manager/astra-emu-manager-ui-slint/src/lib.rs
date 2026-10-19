@@ -97,7 +97,6 @@ pub struct SelectionViewModel {
     pub metadata_busy: bool,
     pub metadata_status: String,
     pub bangumi: BangumiViewModel,
-    pub engine_fields: Vec<ConfigFieldViewModel>,
     pub family_fields: Vec<ConfigFieldViewModel>,
     pub musica_key_available: bool,
 }
@@ -176,10 +175,11 @@ pub struct CoreViewModel {
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SettingsViewModel {
-    pub translation: TranslationViewModel,
-    pub translation_consent: bool,
-    pub vndb_enabled: bool,
-    pub bangumi_enabled: bool,
+    pub translation: TranslationProfileForm,
+    pub translation_enabled: bool,
+    pub translation_status: String,
+    pub translation_models: Vec<String>,
+    pub network_allowed: bool,
     pub sensitive_covers: bool,
     pub input: InputConfigViewModel,
     pub filter_preset: String,
@@ -189,13 +189,16 @@ pub struct SettingsViewModel {
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct TranslationViewModel {
-    pub kind: String,
-    pub endpoint: String,
-    pub protocol: String,
+pub struct TranslationProfileForm {
+    pub provider: String,
+    pub base_url: String,
+    pub openai_api: String,
     pub model: String,
     pub language: String,
     pub timeout_ms: i32,
+    pub custom_prompt: String,
+    pub context_segments: i32,
+    pub context_chars: i32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -296,7 +299,7 @@ mod tests {
         assert_contract_is_send_sync::<CoresViewModel>();
         assert_contract_is_send_sync::<CoreViewModel>();
         assert_contract_is_send_sync::<SettingsViewModel>();
-        assert_contract_is_send_sync::<TranslationViewModel>();
+        assert_contract_is_send_sync::<TranslationProfileForm>();
         assert_contract_is_send_sync::<InputConfigViewModel>();
         assert_contract_is_send_sync::<GamepadBindingViewModel>();
         assert_contract_is_send_sync::<AppearanceViewModel>();

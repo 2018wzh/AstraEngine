@@ -40,6 +40,27 @@ impl AstraEmuManagerController {
         let appearance = library.appearance_settings().map_err(|e| e.to_string())?;
         let games = library.list_games().map_err(|error| error.to_string())?;
         let selected_case_id = games.first().map(|game| game.game_id.clone());
+        let mut pinned_releases = BTreeMap::new();
+        for game in &games {
+            if let Some(release) = library
+                .game_release(&game.game_id)
+                .map_err(|error| error.to_string())?
+            {
+                pinned_releases.insert(game.game_id.clone(), release);
+            }
+        }
+        let network_allowed = library
+            .app_state::<bool>(NETWORK_ALLOWED_KEY)
+            .map_err(|error| error.to_string())?
+            .unwrap_or(false);
+        let translation_enabled = library
+            .app_state::<bool>(TRANSLATION_ENABLED_KEY)
+            .map_err(|error| error.to_string())?
+            .unwrap_or(false);
+        let sensitive_covers = library
+            .app_state::<bool>(SENSITIVE_COVERS_KEY)
+            .map_err(|error| error.to_string())?
+            .unwrap_or(false);
         let controller = Self {
             library,
             registry,
@@ -66,7 +87,7 @@ impl AstraEmuManagerController {
             compatibility_database,
             compatibility_hash,
             compatibility_fetched_at_unix_ms: None,
-            pinned_releases: BTreeMap::new(),
+            pinned_releases,
             filter_settings,
             input_mapping,
             appearance,
@@ -77,14 +98,17 @@ impl AstraEmuManagerController {
             metadata_status: BTreeMap::new(),
             pending_metadata: BTreeMap::new(),
             match_candidates: BTreeMap::new(),
-            metadata_consent: BTreeMap::new(),
+            network_allowed,
             metadata_tokens: BTreeMap::new(),
-            sensitive_covers: false,
+            metadata_tokens_loaded: false,
+            sensitive_covers,
             bangumi_play_status: "wish".into(),
             bangumi_rating: 0,
             bangumi_note: String::new(),
             releases: BTreeMap::new(),
-            translation_consent: false,
+            translation_enabled,
+            translation_models: Vec::new(),
+            translation_status: String::new(),
             connection_test: None,
             held_controls: BTreeSet::new(),
             key_modifiers: KeyModifiers {

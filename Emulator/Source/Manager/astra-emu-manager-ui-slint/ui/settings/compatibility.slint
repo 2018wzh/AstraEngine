@@ -49,11 +49,11 @@ export component CompatibilitySettingsPage inherits Rectangle {
                         PillButton {
                             text: "刷新兼容性数据";
                             variant: "filled";
-                            enabled: Settings.vndb-enabled || Settings.bangumi-enabled;
+                            enabled: Settings.network-allowed;
                             clicked => { Selection.refresh-compat(); }
                         }
                     }
-                    if !(Settings.vndb-enabled || Settings.bangumi-enabled) : Text {
+                    if !Settings.network-allowed : Text {
                         text: "请先在“作品资料与账号”中开启联网。";
                         color: Theme.error;
                         wrap: word-wrap;

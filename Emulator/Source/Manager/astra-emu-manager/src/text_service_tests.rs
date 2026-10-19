@@ -237,7 +237,7 @@ fn native_cancel_stops_tls_wait_and_releases_the_shared_luau_queue() {
         closed
     });
     let profile = TranslationProfile {
-        endpoint: format!("https://{address}"),
+        base_url: format!("https://{address}"),
         model: "fixture-model".into(),
         timeout_ms: 30_000,
         ..TranslationProfile::default()

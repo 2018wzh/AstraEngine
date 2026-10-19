@@ -88,8 +88,12 @@ impl ManagerController for AstraEmuManagerController {
     fn cancel_file_patch(&mut self) -> Result<ManagerViewModel, String> {
         AstraEmuManagerController::cancel_file_patch(self)
     }
-    fn test_translation_connection(&mut self) -> Result<ManagerViewModel, String> {
-        AstraEmuManagerController::test_translation_connection(self)
+    fn test_translation_connection(
+        &mut self,
+        form: &astra_emu_manager_ui_slint::TranslationProfileForm,
+        secret: &str,
+    ) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::test_translation_connection(self, form, secret)
     }
     fn set_window_state(&mut self, state: WindowState) -> Result<(), String> {
         self.update_window_state(state)
@@ -114,33 +118,32 @@ impl ManagerController for AstraEmuManagerController {
         AstraEmuManagerController::search(self, query)
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn save_translation_profile(
         &mut self,
-        endpoint_kind: &str,
-        endpoint: &str,
-        protocol: &str,
-        model: &str,
-        target_language: &str,
-
-        timeout_ms: i32,
-
+        form: &astra_emu_manager_ui_slint::TranslationProfileForm,
         secret: &str,
     ) -> Result<ManagerViewModel, String> {
-        AstraEmuManagerController::save_translation_profile(
-            self,
-            endpoint_kind,
-            endpoint,
-            protocol,
-            model,
-            target_language,
-            timeout_ms,
-            secret,
-        )
+        AstraEmuManagerController::save_translation_profile(self, form, secret)
     }
 
-    fn grant_translation_consent(&mut self) -> Result<ManagerViewModel, String> {
-        AstraEmuManagerController::grant_translation_consent(self)
+    fn set_translation_enabled(&mut self, enabled: bool) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::set_translation_enabled(self, enabled)
+    }
+
+    fn set_network_allowed(&mut self, enabled: bool) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::set_network_allowed(self, enabled)
+    }
+
+    fn set_sensitive_covers(&mut self, enabled: bool) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::set_sensitive_covers(self, enabled)
+    }
+
+    fn save_bangumi_token(&mut self, token: &str) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::save_bangumi_token(self, token)
+    }
+
+    fn clear_bangumi_token(&mut self) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::clear_bangumi_token(self)
     }
 
     fn filter_settings(&self) -> astra_emu_manager_core::FilterSettings {
@@ -190,23 +193,6 @@ impl ManagerController for AstraEmuManagerController {
 
     fn unlink_identity(&mut self, provider: &str) -> Result<ManagerViewModel, String> {
         AstraEmuManagerController::unlink_identity(self, provider)
-    }
-
-    fn set_metadata_consent(
-        &mut self,
-        provider: &str,
-        enabled: bool,
-        secret: &str,
-    ) -> Result<ManagerViewModel, String> {
-        AstraEmuManagerController::set_metadata_consent(self, provider, enabled, secret)
-    }
-
-    fn set_sensitive_cover_policy(
-        &mut self,
-        provider: &str,
-        enabled: bool,
-    ) -> Result<ManagerViewModel, String> {
-        AstraEmuManagerController::set_sensitive_cover_policy(self, provider, enabled)
     }
 
     fn update_bangumi_play_status(

@@ -3,7 +3,6 @@ use astra_emu_manager_ui_slint::{
     describe_error, AboutViewModel, BangumiViewModel, CompatViewModel, EngineActionViewModel,
     GameCardViewModel, LibraryViewModel, MatchViewModel, NoticeViewModel, PlaySessionViewModel,
     ReleaseViewModel, SelectionViewModel, SessionViewModel, SettingsViewModel,
-    TranslationViewModel,
 };
 impl AstraEmuManagerController {
     pub(super) fn model(&self) -> Result<ManagerViewModel, String> {
@@ -113,9 +112,8 @@ impl AstraEmuManagerController {
                     let family = game
                         .family_id
                         .as_deref()
-                        .map(Self::engine_label)
-                        .unwrap_or("未识别引擎")
-                        .to_owned();
+                        .map(|id| self.engine_label(id))
+                        .unwrap_or_else(|| "未识别引擎".to_owned());
                     let problem = self.game_problem(&game, startup_busy);
                     let title = game.user_title.take().unwrap_or(game.title);
                     GameCardViewModel {
@@ -208,7 +206,7 @@ impl AstraEmuManagerController {
             }
             None => "尚未同步".into(),
         };
-        let (engine_fields, family_fields) = self.family_fields()?;
+        let family_fields = self.family_fields()?;
         let selected_problem = selected
             .as_ref()
             .map(|game| self.game_problem(game, startup_busy))
@@ -282,9 +280,8 @@ impl AstraEmuManagerController {
                 family: selected
                     .as_ref()
                     .and_then(|game| game.family_id.as_deref())
-                    .map(Self::engine_label)
-                    .unwrap_or_default()
-                    .into(),
+                    .map(|id| self.engine_label(id))
+                    .unwrap_or_default(),
                 emulator: selected
                     .as_ref()
                     .and_then(|game| self.launch_candidate_for_game(game))
@@ -373,45 +370,16 @@ impl AstraEmuManagerController {
                     note: self.bangumi_note.clone(),
                     summary: "同步需手动点击，不会自动上传。".into(),
                 },
-                engine_fields,
                 family_fields,
                 musica_key_available: self.musica_key_file_available(),
             },
             cores: self.cores_view()?,
             settings: SettingsViewModel {
-                translation: TranslationViewModel {
-                    kind: profile_kind(profile.clone()),
-                    endpoint: profile
-                        .as_ref()
-                        .map(|profile| profile.endpoint.clone())
-                        .unwrap_or_default(),
-                    protocol: profile
-                        .as_ref()
-                        .map(|profile| match profile.protocol {
-                            TranslationProtocol::Responses => "responses".into(),
-                            TranslationProtocol::ChatCompletions => "chat_completions".into(),
-                        })
-                        .unwrap_or_else(|| "responses".into()),
-                    model: profile
-                        .as_ref()
-                        .map(|profile| profile.model.clone())
-                        .unwrap_or_default(),
-                    language: profile
-                        .as_ref()
-                        .map(|profile| profile.target_language.clone())
-                        .unwrap_or_else(|| "zh-CN".into()),
-                    timeout_ms: profile
-                        .as_ref()
-                        .map(|profile| profile.timeout_ms.min(i32::MAX as u64) as i32)
-                        .unwrap_or(15_000),
-                },
-                translation_consent: self.translation_consent,
-                vndb_enabled: self.metadata_consent.get("vndb").copied().unwrap_or(false),
-                bangumi_enabled: self
-                    .metadata_consent
-                    .get("bangumi")
-                    .copied()
-                    .unwrap_or(false),
+                translation: translation::profile_form(profile.as_ref()),
+                translation_enabled: self.translation_enabled,
+                translation_status: self.translation_status.clone(),
+                translation_models: self.translation_models.clone(),
+                network_allowed: self.network_allowed,
                 sensitive_covers: self.sensitive_covers,
                 input: self.input_view(),
                 filter_preset: self.filter_preset_id().into(),

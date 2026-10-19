@@ -23,6 +23,9 @@ fn configuration_candidate() -> FamilyProbeCandidate {
             version: "1.0.0".into(),
             capabilities: vec![astra_emu_manager_core::FamilyCapability::CpuFrame],
             supported_formats: vec!["config.test".into()],
+            display_name: "config-test-plugin".into(),
+            family_name: "config-test-family".into(),
+            render: None,
         },
     }
 }
@@ -87,6 +90,11 @@ fn form_parses_full_width_numeric_values_and_rejects_non_finite_or_wrong_enum() 
             max: i64::MAX,
         },
         default: ConfigValue::Integer(0),
+        description: String::new(),
+        choice_labels: Vec::new(),
+        flags: Default::default(),
+        step: None,
+        unit: String::new(),
     };
     assert_eq!(
         parse_config_value(&field, &i64::MAX.to_string()).unwrap(),
@@ -103,10 +111,26 @@ fn form_parses_full_width_numeric_values_and_rejects_non_finite_or_wrong_enum() 
     );
     assert!(parse_config_value(&field, "NaN").is_err());
     field.kind = ConfigKind::Enum {
-        choices: vec!["shift_jis".into()],
+        choices: vec!["shift_jis".into(), "gbk".into()],
     };
     assert!(parse_config_value(&field, "utf8").is_err());
-    assert_eq!(display_config_value(&ConfigValue::Bool(false)), "false");
+    field.choice_labels = vec!["Shift-JIS（日文原版）".into(), "GBK（简体中文）".into()];
+    assert_eq!(
+        parse_config_value(&field, "GBK（简体中文）").unwrap(),
+        ConfigValue::Enum("gbk".into())
+    );
+    assert_eq!(
+        parse_config_value(&field, "gbk").unwrap(),
+        ConfigValue::Enum("gbk".into())
+    );
+    assert_eq!(
+        display_config_value(&field, &ConfigValue::Enum("shift_jis".into())),
+        "Shift-JIS（日文原版）"
+    );
+    assert_eq!(
+        display_config_value(&field, &ConfigValue::Bool(false)),
+        "false"
+    );
 }
 
 #[test]
@@ -132,115 +156,37 @@ fn typed_game_configuration_round_trips_after_controller_reopen() {
 
     let controller = configuration_controller(root.path());
     let model = controller.model().unwrap();
-    assert!(model.selection.engine_fields.is_empty());
     let fields = model.selection.family_fields;
     let launch_mode = fields
         .iter()
         .find(|field| field.key == "config.launch_mode")
         .unwrap();
-    assert_eq!(launch_mode.value, "title");
+    assert_eq!(launch_mode.label, "Launch mode");
+    assert_eq!(launch_mode.value, "标题菜单启动");
+    assert_eq!(launch_mode.enum_values, ["直接进入脚本", "标题菜单启动"]);
 }
 
-fn musica_schema() -> (FamilyPluginDescriptor, Vec<ConfigField>) {
-    let mut descriptor = configuration_candidate().descriptor;
-    descriptor.family_id = "musica".into();
-    descriptor.plugin_id = "astra.emu.musica".into();
+fn logical_schema() -> Vec<ConfigField> {
     let extent = |id: &str, default| ConfigField {
         id: id.into(),
         label: id.into(),
-        group: "Presentation".into(),
+        group: "高级".into(),
         kind: ConfigKind::Integer { min: 1, max: 16384 },
         default: ConfigValue::Integer(default),
+        description: "逻辑舞台尺寸".into(),
+        choice_labels: Vec::new(),
+        flags: Default::default(),
+        step: Some(1.0),
+        unit: "px".into(),
     };
-    (
-        descriptor,
-        vec![
-            extent("render_width", 1280),
-            extent("render_height", 720),
-            extent("logical_width", 1280),
-            extent("logical_height", 720),
-        ],
-    )
+    vec![extent("logical_width", 1280), extent("logical_height", 720)]
 }
 
 #[test]
-fn native_render_capability_requires_a_recognized_complete_typed_schema() {
-    let (mut descriptor, mut schema) = musica_schema();
-    let common = native_render_fields(&descriptor, &schema);
-    assert_eq!(
-        common.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
-        ["render_width", "render_height"]
-    );
-    assert!(native_render_fields(&descriptor, &schema[1..]).is_empty());
-    schema[1].kind = ConfigKind::Number {
-        min: 1.0,
-        max: 16384.0,
-    };
-    schema[1].default = ConfigValue::Number(720.0);
-    assert!(native_render_fields(&descriptor, &schema).is_empty());
-    schema[1].kind = ConfigKind::Integer { min: 1, max: 16384 };
-    schema[1].default = ConfigValue::Integer(0);
-    assert!(native_render_fields(&descriptor, &schema).is_empty());
-    schema[1].default = ConfigValue::Integer(720);
-    schema.push(schema[0].clone());
-    assert!(native_render_fields(&descriptor, &schema).is_empty());
-    schema.pop();
-    schema[0].kind = ConfigKind::Integer { min: 64, max: 8192 };
-    schema[1].kind = ConfigKind::Integer { min: 64, max: 8192 };
-    assert_eq!(native_render_fields(&descriptor, &schema).len(), 2);
-    assert!(parse_config_value(&schema[0], "8193").is_err());
-    descriptor.plugin_id = "unknown.musica".into();
-    assert!(native_render_fields(&descriptor, &schema).is_empty());
-    descriptor.plugin_id = "astra.emu.musica".into();
-    descriptor.family_id = "unknown".into();
-    assert!(native_render_fields(&descriptor, &schema).is_empty());
-
-    descriptor.family_id = "fvp".into();
-    descriptor.plugin_id = "astra.emu.fvp".into();
-    let scale = ConfigField {
-        id: "render_scale".into(),
-        label: "Render scale".into(),
-        group: "Presentation".into(),
-        kind: ConfigKind::Number {
-            min: 0.25,
-            max: 4.0,
-        },
-        default: ConfigValue::Number(1.0),
-    };
-    assert_eq!(
-        native_render_fields(&descriptor, std::slice::from_ref(&scale)).len(),
-        1
-    );
-    assert_eq!(
-        parse_config_value(&scale, "1.5").unwrap(),
-        ConfigValue::Number(1.5)
-    );
-    for raw in ["0.24", "4.01", "NaN"] {
-        assert!(parse_config_value(&scale, raw).is_err());
-    }
-
-    descriptor.family_id = "softpal".into();
-    descriptor.plugin_id = "sena-native-koikake".into();
-    schema.truncate(2);
-    for (field, id) in schema.iter_mut().zip(["raster_width", "raster_height"]) {
-        field.id = id.into();
-        field.kind = ConfigKind::Integer {
-            min: 320,
-            max: 3840,
-        };
-        for raw in ["319", "3841"] {
-            assert!(parse_config_value(field, raw).is_err());
-        }
-    }
-    assert_eq!(native_render_fields(&descriptor, &schema).len(), 2);
-    assert!(native_render_fields(&descriptor, &schema[..1]).is_empty());
-}
-
-#[test]
-fn common_and_specific_drafts_save_together_with_native_scope_precedence() {
+fn drafts_save_with_native_scope_precedence() {
     let root = tempfile::tempdir().unwrap();
-    let (descriptor, schema) = musica_schema();
-    let plugin = descriptor.plugin_id.as_str();
+    let schema = logical_schema();
+    let plugin = "astra.emu.musica";
     {
         let mut controller = configuration_controller(root.path());
         save_config_draft(
@@ -249,8 +195,6 @@ fn common_and_specific_drafts_save_together_with_native_scope_precedence() {
             "",
             &schema,
             &BTreeMap::from([
-                ("config.render_width".into(), "1920".into()),
-                ("config.render_height".into(), "1080".into()),
                 ("config.logical_width".into(), "1024".into()),
                 ("config.logical_height".into(), "640".into()),
             ]),
@@ -260,25 +204,17 @@ fn common_and_specific_drafts_save_together_with_native_scope_precedence() {
             .library
             .family_configuration(plugin, "game", &schema)
             .unwrap();
-        let (mut common, mut specific) = (Vec::new(), Vec::new());
-        append_config_fields(
-            &descriptor,
-            &schema,
-            &inherited,
-            &BTreeMap::new(),
-            &mut common,
-            &mut specific,
+        let mut fields = Vec::new();
+        append_config_fields(&schema, &inherited, &BTreeMap::new(), &mut fields);
+        assert_eq!(
+            fields
+                .iter()
+                .map(|field| field.value.as_str())
+                .collect::<Vec<_>>(),
+            ["1024", "640"]
         );
-        let mut drafts: BTreeMap<_, _> = common
-            .into_iter()
-            .zip(["2560", "1440"])
-            .map(|(field, value)| (field.key, value.into()))
-            .collect();
-        let logical_width = specific
-            .iter()
-            .find(|field| field.key == "config.logical_width")
-            .unwrap();
-        drafts.insert(logical_width.key.clone(), "1280".into());
+        assert_eq!(fields[0].description, "逻辑舞台尺寸（范围：1 … 16384 px）");
+        let drafts = BTreeMap::from([(fields[0].key.clone(), "1280".into())]);
         save_config_draft(&mut controller.library, plugin, "game", &schema, &drafts).unwrap();
     }
     let mut controller = configuration_controller(root.path());
@@ -286,51 +222,22 @@ fn common_and_specific_drafts_save_together_with_native_scope_precedence() {
         .library
         .family_configuration(plugin, "game", &schema)
         .unwrap();
-    let (mut common, mut specific) = (Vec::new(), Vec::new());
-    append_config_fields(
-        &descriptor,
-        &schema,
-        &startup,
-        &BTreeMap::new(),
-        &mut common,
-        &mut specific,
-    );
-    assert_eq!(
-        common
-            .iter()
-            .map(|field| field.value.as_str())
-            .collect::<Vec<_>>(),
-        ["2560", "1440"]
-    );
-    assert!(
-        specific
-            .iter()
-            .all(|field| field.key.starts_with("config.logical_"))
-    );
     assert_eq!(
         startup.iter().map(|entry| &entry.value).collect::<Vec<_>>(),
-        [
-            &ConfigValue::Integer(2560),
-            &ConfigValue::Integer(1440),
-            &ConfigValue::Integer(1280),
-            &ConfigValue::Integer(640),
-        ]
+        [&ConfigValue::Integer(1280), &ConfigValue::Integer(640)]
     );
     for raw in ["0", "16385"] {
-        assert!(
-            save_config_draft(
-                &mut controller.library,
-                plugin,
-                "game",
-                &schema,
-                &BTreeMap::from([
-                    ("config.render_width".into(), "3840".into()),
-                    ("config.render_height".into(), raw.into()),
-                    ("config.logical_width".into(), "800".into()),
-                ]),
-            )
-            .is_err()
-        );
+        assert!(save_config_draft(
+            &mut controller.library,
+            plugin,
+            "game",
+            &schema,
+            &BTreeMap::from([
+                ("config.logical_width".into(), "800".into()),
+                ("config.logical_height".into(), raw.into()),
+            ]),
+        )
+        .is_err());
         assert_eq!(
             controller
                 .library
@@ -349,14 +256,6 @@ fn common_and_specific_drafts_save_together_with_native_scope_precedence() {
             .family_configuration(plugin, "game", &schema)
             .unwrap(),
         vec![
-            ConfigEntry {
-                id: "render_width".into(),
-                value: ConfigValue::Integer(1920),
-            },
-            ConfigEntry {
-                id: "render_height".into(),
-                value: ConfigValue::Integer(1080),
-            },
             ConfigEntry {
                 id: "logical_width".into(),
                 value: ConfigValue::Integer(1024),
@@ -396,20 +295,15 @@ fn staged_emulator_hides_previous_fields_across_scope_changes_and_blocks_old_wri
             .family_config_changed("manager.config_scope", scope)
             .unwrap();
         let model = controller.model().unwrap();
-        assert!(model.selection.engine_fields.is_empty());
-        assert!(
-            model
-                .selection
-                .family_fields
-                .iter()
-                .all(|field| field.key == "manager.emulator_id")
-        );
+        assert!(model
+            .selection
+            .family_fields
+            .iter()
+            .all(|field| field.key == "manager.emulator_id"));
         assert_eq!(model.selection.family_fields[0].value, "other-emulator");
-        assert!(
-            controller
-                .family_config_changed("config.launch_mode", "direct")
-                .is_err()
-        );
+        assert!(controller
+            .family_config_changed("config.launch_mode", "direct")
+            .is_err());
         assert!(controller.reset_family_config().is_err());
     }
     controller
@@ -424,6 +318,6 @@ fn staged_emulator_hides_previous_fields_across_scope_changes_and_blocks_old_wri
             .find(|field| field.key == "config.launch_mode")
             .unwrap()
             .value,
-        "title"
+        "标题菜单启动"
     );
 }

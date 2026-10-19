@@ -107,9 +107,9 @@ fn metadata_search_rejects_invalid_input_and_overlapping_requests() {
     add_game(&mut app, "first");
     assert_eq!(
         app.search_metadata("vndb", "Title").unwrap_err(),
-        "ASTRA_EMU_METADATA_CONSENT_REQUIRED"
+        "ASTRA_EMU_NETWORK_PERMISSION_REQUIRED"
     );
-    app.metadata_consent.insert("vndb".into(), true);
+    app.network_allowed = true;
     assert!(app.search_metadata("vndb", "   ").is_err());
     assert!(app.search_metadata("vndb", &"x".repeat(257)).is_err());
     assert!(app.pending_metadata.is_empty());
@@ -186,4 +186,40 @@ fn metadata_empty_search_displays_a_retriable_state() {
     assert!(!model.selection.metadata_busy);
     assert!(model.selection.matches.is_empty());
     assert!(model.selection.metadata_status.contains("没有找到作品"));
+}
+
+#[test]
+fn network_permission_gates_metadata_and_translation_and_persists() {
+    let root = tempfile::tempdir().unwrap();
+    {
+        let mut app = controller(root.path());
+        add_game(&mut app, "first");
+        assert!(!app.network_allowed);
+        assert_eq!(
+            app.search_metadata("bangumi", "Title").unwrap_err(),
+            "ASTRA_EMU_NETWORK_PERMISSION_REQUIRED"
+        );
+        assert!(app.pending_metadata.is_empty());
+        let profile = TranslationProfile {
+            model: "model".into(),
+            ..TranslationProfile::default()
+        };
+        app.library.set_translation_profile(&profile).unwrap();
+        app.library
+            .set_app_state(TRANSLATION_ENABLED_KEY, &true)
+            .unwrap();
+    }
+    let mut app = controller(root.path());
+    assert!(app.translation_enabled);
+    assert!(app.launch_translation_profile().unwrap().is_none());
+    assert_eq!(
+        app.set_translation_enabled(true).unwrap_err(),
+        "ASTRA_EMU_NETWORK_PERMISSION_REQUIRED"
+    );
+    app.set_network_allowed(true).unwrap();
+    assert!(app.launch_translation_profile().unwrap().is_some());
+    drop(app);
+    let app = controller(root.path());
+    assert!(app.network_allowed);
+    assert!(app.model().unwrap().settings.network_allowed);
 }

@@ -1,33 +1,21 @@
 use super::*;
 
 impl AstraEmuManagerController {
-    pub(super) fn engine_label(id: &str) -> &str {
-        match id {
-            "fvp" => "FVP",
-            "siglus" => "SiglusEngine",
-            "artemis" => "Artemis",
-            "musica" => "Musica",
-            "softpal" => "SoftPAL",
-            "ethornell" => "Ethornell / BGI",
-            "krkr" => "KiriKiri",
-            _ => id,
-        }
-    }
-
-    pub(super) fn core_display_name(descriptor: &FamilyPluginDescriptor) -> String {
-        match descriptor.plugin_id.as_str() {
-            "astra.emu.fvp" => "RFVP".into(),
-            "astra.emu.siglus" => "siglus-rs".into(),
-            "astra.emu.artemis" => "Art3m1s".into(),
-            "astra.emu.musica" => "Astra Musica".into(),
-            "sena-native-koikake" => "Sena".into(),
-            "ethornell-native" => "ethornell-rs".into(),
-            _ => descriptor.plugin_id.clone(),
-        }
+    pub(super) fn engine_label(&self, family_id: &str) -> String {
+        self.registry
+            .descriptors()
+            .chain(
+                self.probe_choices
+                    .values()
+                    .flatten()
+                    .map(|choice| &choice.descriptor),
+            )
+            .find(|descriptor| descriptor.family_id == family_id)
+            .map_or_else(|| family_id.to_owned(), |descriptor| descriptor.family_name.clone())
     }
 
     pub(super) fn emulator_label(descriptor: &FamilyPluginDescriptor) -> String {
-        format!("{} · {}", Self::core_display_name(descriptor), descriptor.version)
+        format!("{} · {}", descriptor.display_name, descriptor.version)
     }
 
     pub(super) fn appearance_view(&self) -> AppearanceViewModel {
@@ -41,20 +29,12 @@ impl AstraEmuManagerController {
         }
     }
 
-    pub(super) fn family_fields(
-        &self,
-    ) -> Result<
-        (
-            Vec<ConfigFieldViewModel>,
-            Vec<ConfigFieldViewModel>,
-        ),
-        String,
-    > {
+    pub(super) fn family_fields(&self) -> Result<Vec<ConfigFieldViewModel>, String> {
         let Some(game_id) = self.selected_case_id.as_deref() else {
-            return Ok((Vec::new(), Vec::new()));
+            return Ok(Vec::new());
         };
         let Some(choices) = self.probe_selection_for_game(game_id) else {
-            return Ok((Vec::new(), Vec::new()));
+            return Ok(Vec::new());
         };
         let installed = self
             .candidates
@@ -72,7 +52,7 @@ impl AstraEmuManagerController {
                 .map(|choice| {
                     format!(
                         "{} / {} ({})",
-                        Self::engine_label(&choice.report.family_id),
+                        choice.descriptor.family_name,
                         Self::emulator_label(&choice.descriptor),
                         choice.report.plugin_id,
                     )
@@ -90,11 +70,10 @@ impl AstraEmuManagerController {
             min: 0,
             max: 0,
         }];
-        let mut common = Vec::new();
         if installed.is_some() && draft.is_none_or(|id| Some(id) == installed) {
-            self.append_typed_family_fields(&mut common, &mut fields)?;
+            self.append_typed_family_fields(&mut fields)?;
         }
-        Ok((common, fields))
+        Ok(fields)
     }
 
     pub(super) fn input_view(&self) -> InputConfigViewModel {

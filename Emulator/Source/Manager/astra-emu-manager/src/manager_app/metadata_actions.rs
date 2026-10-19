@@ -94,33 +94,57 @@ impl AstraEmuManagerController {
         self.model()
     }
 
-    pub(super) fn set_metadata_consent(
+    pub(super) fn set_network_allowed(
         &mut self,
-        provider: &str,
         enabled: bool,
-        secret: &str,
     ) -> Result<ManagerViewModel, String> {
-        let provider = Self::metadata_provider(provider)?;
-        if provider == MetadataProviderId::Bangumi && !secret.is_empty() {
-            ManagerSecretStore::open()
-                .map_err(|error| error.to_string())?
-                .store("metadata.bangumi", secret)
-                .map_err(|error| error.to_string())?;
-            self.metadata_tokens
-                .insert(provider.as_str().into(), secret.into());
+        self.library
+            .set_app_state(NETWORK_ALLOWED_KEY, &enabled)
+            .map_err(|error| error.to_string())?;
+        let enabling = enabled && !self.network_allowed;
+        self.network_allowed = enabled;
+        if enabling {
+            return self.refresh_compatibility();
         }
-        self.metadata_consent
-            .insert(provider.as_str().into(), enabled);
         self.model()
     }
 
-    pub(super) fn set_sensitive_cover_policy(
+    pub(super) fn set_sensitive_covers(
         &mut self,
-        provider: &str,
         enabled: bool,
     ) -> Result<ManagerViewModel, String> {
-        let _ = Self::metadata_provider(provider)?;
+        self.library
+            .set_app_state(SENSITIVE_COVERS_KEY, &enabled)
+            .map_err(|error| error.to_string())?;
         self.sensitive_covers = enabled;
+        self.model()
+    }
+
+    pub(super) fn save_bangumi_token(&mut self, token: &str) -> Result<ManagerViewModel, String> {
+        let token = token.trim();
+        if token.is_empty() {
+            return Err("ASTRA_EMU_BANGUMI_TOKEN_REQUIRED".into());
+        }
+        ManagerSecretStore::open()
+            .map_err(|error| error.to_string())?
+            .store(BANGUMI_SECRET_REFERENCE, token)
+            .map_err(|error| error.to_string())?;
+        self.metadata_tokens
+            .insert(MetadataProviderId::Bangumi.as_str().into(), token.into());
+        self.metadata_tokens_loaded = true;
+        self.model()
+    }
+
+    pub(super) fn clear_bangumi_token(&mut self) -> Result<ManagerViewModel, String> {
+        let store = ManagerSecretStore::open().map_err(|error| error.to_string())?;
+        if store.resolve(BANGUMI_SECRET_REFERENCE).is_ok() {
+            store
+                .delete(BANGUMI_SECRET_REFERENCE)
+                .map_err(|error| error.to_string())?;
+        }
+        self.metadata_tokens
+            .remove(MetadataProviderId::Bangumi.as_str());
+        self.metadata_tokens_loaded = true;
         self.model()
     }
 
@@ -176,7 +200,7 @@ impl AstraEmuManagerController {
     }
 
     pub(super) fn refresh_compatibility(&mut self) -> Result<ManagerViewModel, String> {
-        self.metadata_allowed(MetadataProviderId::Vndb)?;
+        self.require_network()?;
         let request_id = self.next_metadata_id("compatibility")?;
         self.metadata.submit(MetadataCommand {
             request_id: request_id.clone(),
@@ -191,7 +215,7 @@ impl AstraEmuManagerController {
         })?;
         self.pending_metadata
             .insert(request_id, PendingMetadata { game_id: None });
-        self.diagnostic = "Compatibility refresh queued".into();
+        self.diagnostic = "已开始同步兼容性数据".into();
         self.diagnostic_severity = "info";
         self.model()
     }
@@ -216,6 +240,14 @@ impl AstraEmuManagerController {
 
     pub(super) fn pin_release(&mut self, release_id: &str) -> Result<ManagerViewModel, String> {
         let game = self.selected_game()?;
+        if release_id.is_empty() {
+            self.library
+                .set_game_release(&game.game_id, None)
+                .map_err(|error| error.to_string())?;
+            self.pinned_releases.remove(&game.game_id);
+            self.diagnostic.clear();
+            return self.model();
+        }
         if !self
             .releases
             .get(&game.game_id)
@@ -223,6 +255,9 @@ impl AstraEmuManagerController {
         {
             return Err("ASTRA_EMU_VNDB_RELEASE_INVALID".into());
         }
+        self.library
+            .set_game_release(&game.game_id, Some(release_id))
+            .map_err(|error| error.to_string())?;
         self.pinned_releases.insert(game.game_id, release_id.into());
         self.diagnostic.clear();
         self.model()

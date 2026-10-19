@@ -15,9 +15,6 @@ use wgpu::{Extent3d, TextureUsages};
 const DEFAULT_STAGE_WIDTH: u32 = 800;
 const DEFAULT_STAGE_HEIGHT: u32 = 600;
 
-#[cfg(windows)]
-#[path = "stage_d3d12.rs"]
-mod d3d12;
 #[path = "stage_filter.rs"]
 mod filter;
 #[path = "stage_frame.rs"]
@@ -47,8 +44,6 @@ pub(crate) struct ManagerStageRenderer {
     filter_configuration: FilterConfiguration,
     filter_dirty: bool,
     filter_activation: filter::FilterActivation,
-    #[cfg(windows)]
-    d3d12: Option<d3d12::Importer>,
 }
 
 impl ManagerStageRenderer {
@@ -81,8 +76,6 @@ impl ManagerStageRenderer {
             filter_configuration: FilterConfiguration::default(),
             filter_dirty: false,
             filter_activation: filter::FilterActivation::default(),
-            #[cfg(windows)]
-            d3d12: None,
         }
     }
 
@@ -252,39 +245,26 @@ impl ManagerStageRenderer {
             .as_ref()
             .ok_or_else(|| "ASTRA_EMU_HOST_RENDERER_NOT_SETUP".to_owned())?;
         if Some(frame.identity) != self.uploaded_identity {
-            if let Some(pixels) = frame.pixels() {
-                let required = info
-                    .required_bytes()
-                    .ok_or_else(|| "ASTRA_EMU_HOST_FRAME_SIZE".to_owned())?;
-                context.queue.write_texture(
-                    input.as_image_copy(),
-                    &pixels[..required],
-                    wgpu::TexelCopyBufferLayout {
-                        offset: 0,
-                        bytes_per_row: Some(info.stride),
-                        rows_per_image: Some(info.height),
-                    },
-                    Extent3d {
-                        width: info.width,
-                        height: info.height,
-                        depth_or_array_layers: 1,
-                    },
-                );
-                // write_texture consumes CPU bytes before returning.
-            } else {
-                #[cfg(windows)]
-                self.d3d12
-                    .as_mut()
-                    .ok_or("ASTRA_EMU_D3D12_HOST_UNSUPPORTED")?
-                    .copy(
-                        context.device,
-                        context.queue,
-                        frame.d3d12().ok_or("ASTRA_EMU_GPU_BACKEND_UNSUPPORTED")?,
-                        input,
-                    )?;
-                #[cfg(not(windows))]
-                return Err("ASTRA_EMU_GPU_BACKEND_UNSUPPORTED".into());
-            }
+            let pixels = frame
+                .pixels()
+                .ok_or_else(|| "ASTRA_EMU_HOST_FRAME_PIXELS".to_owned())?;
+            let required = info
+                .required_bytes()
+                .ok_or_else(|| "ASTRA_EMU_HOST_FRAME_SIZE".to_owned())?;
+            context.queue.write_texture(
+                input.as_image_copy(),
+                &pixels[..required],
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(info.stride),
+                    rows_per_image: Some(info.height),
+                },
+                Extent3d {
+                    width: info.width,
+                    height: info.height,
+                    depth_or_array_layers: 1,
+                },
+            );
             self.presented_input =
                 Some(
                     self.pixel_presentation
@@ -356,13 +336,6 @@ impl AstraUnderlayRenderer for ManagerStageRenderer {
             device_id = adapter.device,
             driver = %adapter.driver,
         );
-        #[cfg(windows)]
-        {
-            let importer = d3d12::Importer::new(context.device)?;
-            self.mailbox
-                .set_d3d12(importer.as_ref().map(|importer| importer.host))?;
-            self.d3d12 = importer;
-        }
         self.device = Some(context.device.clone());
         self.filter_dirty = false;
         Ok(())
@@ -396,15 +369,7 @@ impl AstraUnderlayRenderer for ManagerStageRenderer {
     }
 
     fn render(&mut self, context: WgpuFrameContext<'_>) -> Result<(), String> {
-        #[cfg(windows)]
-        if let Some(importer) = &mut self.d3d12 {
-            importer.reap()?;
-        }
         let Some(frame) = self.mailbox.snapshot()? else {
-            #[cfg(windows)]
-            if let Some(importer) = &mut self.d3d12 {
-                importer.drain()?;
-            }
             if self.uploaded_identity.is_some() {
                 if let Some(output) = &self.output_texture {
                     let view = output.create_view(&Default::default());
@@ -443,18 +408,6 @@ impl AstraUnderlayRenderer for ManagerStageRenderer {
     }
 
     fn teardown(&mut self) -> Result<(), String> {
-        #[cfg(windows)]
-        let gpu_result = self
-            .d3d12
-            .as_mut()
-            .map_or(Ok(()), |importer| importer.drain());
-        #[cfg(not(windows))]
-        let gpu_result = Ok(());
-        #[cfg(windows)]
-        if gpu_result.is_ok() {
-            self.d3d12 = None;
-        }
-        let mailbox_result = self.mailbox.set_d3d12(None);
         self.input_texture = None;
         self.output_texture = None;
         self.filtered_texture = None;
@@ -473,7 +426,7 @@ impl AstraUnderlayRenderer for ManagerStageRenderer {
         self.filter_configuration = FilterConfiguration::default();
         self.filter_dirty = false;
         self.filter_activation = filter::FilterActivation::default();
-        gpu_result.and(mailbox_result)
+        Ok(())
     }
 }
 

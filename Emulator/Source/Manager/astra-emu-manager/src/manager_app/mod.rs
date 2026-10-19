@@ -29,7 +29,7 @@ use astra_emu_metadata::{
     DEFAULT_COMPATIBILITY_SOURCE_URL,
 };
 use astra_emu_translation::{
-    SecretResolver, TranslationEndpointKind, TranslationProfile, TranslationProtocol,
+    OpenAiApi, SecretResolver, TranslationProfile, TranslationProvider,
 };
 use metadata_runtime::{MetadataCommand, MetadataCommandKind, MetadataPayload, MetadataRuntime};
 use platform_secret::ManagerSecretStore;
@@ -114,14 +114,17 @@ struct AstraEmuManagerController {
     metadata_status: BTreeMap<String, String>,
     pending_metadata: BTreeMap<String, PendingMetadata>,
     match_candidates: BTreeMap<String, (String, MetadataRecord)>,
-    metadata_consent: BTreeMap<String, bool>,
+    network_allowed: bool,
     metadata_tokens: BTreeMap<String, String>,
+    metadata_tokens_loaded: bool,
     sensitive_covers: bool,
     bangumi_play_status: String,
     bangumi_rating: i32,
     bangumi_note: String,
     releases: BTreeMap<String, Vec<(String, String)>>,
-    translation_consent: bool,
+    translation_enabled: bool,
+    translation_models: Vec<String>,
+    translation_status: String,
     connection_test: Option<connection_test::ConnectionTest>,
     held_controls: BTreeSet<String>,
     key_modifiers: KeyModifiers,

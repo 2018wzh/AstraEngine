@@ -54,6 +54,7 @@ struct State {
     provider: Option<Arc<TranslationSession<dyn SecretResolver>>>,
     extensions: Vec<LocalExtension>,
     recent: Mutex<std::collections::VecDeque<TranslationSegment>>,
+    context_limit: (usize, usize),
     queue: Sender<Job>,
 }
 enum Job {
@@ -139,6 +140,12 @@ impl TextReplacementBridge {
         secrets: Arc<dyn SecretResolver>,
         mut extensions: Vec<LocalExtension>,
     ) -> FamilyResult<Self> {
+        let context_limit = profile.as_ref().map_or((0, 0), |profile| {
+            (
+                profile.context_segments as usize,
+                profile.context_chars as usize,
+            )
+        });
         let provider = if let Some(profile) = profile {
             profile
                 .validate()
@@ -172,6 +179,7 @@ impl TextReplacementBridge {
                 provider,
                 extensions,
                 recent: Mutex::new(std::collections::VecDeque::new()),
+                context_limit,
                 queue: worker.sender.clone(),
             }),
             _worker: worker,
@@ -259,8 +267,8 @@ fn execute(
             let mut recent = state.recent.lock();
             if cancelled(state, key) { return Err(mlua::Error::RuntimeError("ASTRA_EMU_TEXT_CANCELLED".into())); }
             recent.push_back(request.current);
-            while recent.len() > astra_emu_translation::MAX_CONTEXT_SEGMENTS
-                || recent.iter().map(|segment| segment.text.chars().count() + segment.speaker.as_deref().map_or(0, |speaker| speaker.chars().count() + 8)).sum::<usize>() > astra_emu_translation::MAX_CONTEXT_CHARS {
+            while recent.len() > state.context_limit.0
+                || recent.iter().map(|segment| segment.text.chars().count() + segment.speaker.as_deref().map_or(0, |speaker| speaker.chars().count() + 8)).sum::<usize>() > state.context_limit.1 {
                 recent.pop_front();
             }
             Ok(translated.translated)

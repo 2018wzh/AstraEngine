@@ -17,13 +17,33 @@ impl AstraEmuManagerController {
         }
     }
 
-    pub(super) fn metadata_allowed(&self, provider: MetadataProviderId) -> Result<(), String> {
-        self.metadata_consent
-            .get(provider.as_str())
-            .copied()
-            .filter(|allowed| *allowed)
-            .map(|_| ())
-            .ok_or_else(|| "ASTRA_EMU_METADATA_CONSENT_REQUIRED".into())
+    pub(super) fn require_network(&self) -> Result<(), String> {
+        if self.network_allowed {
+            Ok(())
+        } else {
+            Err("ASTRA_EMU_NETWORK_PERMISSION_REQUIRED".into())
+        }
+    }
+
+    pub(super) fn bangumi_token(&mut self) -> Result<Option<String>, String> {
+        if !self.metadata_tokens_loaded {
+            match ManagerSecretStore::open()
+                .map_err(|error| error.to_string())?
+                .resolve(BANGUMI_SECRET_REFERENCE)
+            {
+                Ok(token) => {
+                    self.metadata_tokens
+                        .insert(MetadataProviderId::Bangumi.as_str().into(), token);
+                }
+                Err(astra_emu_translation::TranslationError::SecretUnavailable) => {}
+                Err(error) => return Err(error.to_string()),
+            }
+            self.metadata_tokens_loaded = true;
+        }
+        Ok(self
+            .metadata_tokens
+            .get(MetadataProviderId::Bangumi.as_str())
+            .cloned())
     }
 
     pub(super) fn queue_metadata(
@@ -33,7 +53,7 @@ impl AstraEmuManagerController {
         kind: MetadataCommandKind,
         prefix: &str,
     ) -> Result<(), String> {
-        self.metadata_allowed(provider)?;
+        self.require_network()?;
         if self
             .pending_metadata
             .values()
@@ -45,11 +65,15 @@ impl AstraEmuManagerController {
             query.validate().map_err(|error| error.to_string())?;
         }
         let request_id = self.next_metadata_id(prefix)?;
+        let access_token = match provider {
+            MetadataProviderId::Bangumi => self.bangumi_token()?,
+            _ => None,
+        };
         self.metadata.submit(MetadataCommand {
             request_id: request_id.clone(),
             case_identity: game.game_id.clone(),
             provider,
-            access_token: self.metadata_tokens.get(provider.as_str()).cloned(),
+            access_token,
             allow_sensitive_cover: self.sensitive_covers,
             kind,
         })?;

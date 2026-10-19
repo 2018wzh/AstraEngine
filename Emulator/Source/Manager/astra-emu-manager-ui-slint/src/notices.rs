@@ -106,6 +106,10 @@ fn exact_text(code: &str) -> Option<(&'static str, &'static str)> {
         "ASTRA_EMU_TRANSLATION_PROFILE_REQUIRED" => {
             ("尚未配置翻译服务", "请在 设置 › 实时翻译 中填写。")
         }
+        "ASTRA_EMU_NETWORK_PERMISSION_REQUIRED" => {
+            ("尚未允许联网", "需要先在 设置→联网与资料 中允许联网")
+        }
+        "ASTRA_EMU_BANGUMI_TOKEN_REQUIRED" => ("请填写 Bangumi 访问令牌", "令牌为空时无法保存。"),
         "ASTRA_EMU_CORE_INSTALL_NAME" => (
             "不是有效的核心文件",
             "核心文件名需以 astra_emu_ 开头，并且是本系统的动态库。",
@@ -126,9 +130,7 @@ fn fallback_title(code: &str) -> &'static str {
     match rest.split('_').next().unwrap_or("") {
         "FAMILY" | "CORE" | "CORES" | "MODULE" | "OWNER" | "PROBE" | "EMULATOR" | "STATIC"
         | "MUSICA" | "FVP" | "SESSION" => "模拟器核心出错",
-        "HOST" | "WINDOW" | "GPU" | "D3D12" | "FRAME" | "SLINT" | "SYSTEM" | "OUT" => {
-            "窗口或显示出错"
-        }
+        "HOST" | "WINDOW" | "GPU" | "FRAME" | "SLINT" | "SYSTEM" | "OUT" => "窗口或显示出错",
         "TEXT" | "TRANSLATION" | "EXTENSION" => "实时翻译出错",
         "METADATA" | "VNDB" | "BANGUMI" => "作品资料服务出错",
         "COMPATIBILITY" => "兼容性数据出错",

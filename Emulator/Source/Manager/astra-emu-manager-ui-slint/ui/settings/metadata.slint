@@ -1,7 +1,7 @@
 import { LineEdit, ScrollView } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
 import { Settings } from "../globals.slint";
-import { Card, SwitchRow, SettingRow, Segmented } from "../components/controls.slint";
+import { Card, PillButton, SwitchRow, SettingRow, Segmented } from "../components/controls.slint";
 
 export component MetadataSettingsPage inherits Rectangle {
     background: Theme.surface;
@@ -23,32 +23,37 @@ export component MetadataSettingsPage inherits Rectangle {
             Card {
                 VerticalLayout {
                     SwitchRow {
-                        label: "允许联网获取 VNDB 资料";
-                        description: "";
-                        checked: Settings.vndb-enabled;
+                        label: "允许联网";
+                        description: "包括 VNDB 资料与封面、Bangumi、AstraEMU 元数据与核心更新、实时翻译";
+                        checked: Settings.network-allowed;
                         toggled => {
-                            Settings.vndb-enabled = !Settings.vndb-enabled;
-                            Settings.set-metadata-consent("vndb", Settings.vndb-enabled, "");
-                        }
-                    }
-                    SwitchRow {
-                        label: "允许联网获取 Bangumi 资料与收藏";
-                        description: "";
-                        checked: Settings.bangumi-enabled;
-                        toggled => {
-                            Settings.bangumi-enabled = !Settings.bangumi-enabled;
-                            Settings.set-metadata-consent("bangumi", Settings.bangumi-enabled, Settings.bangumi-token);
-                            Settings.bangumi-token = "";
+                            Settings.set-network-allowed(!Settings.network-allowed);
                         }
                     }
                     SettingRow {
                         title: "Bangumi 访问令牌";
                         desc: "保存在系统凭据管理器";
-                        LineEdit {
-                            width: 260px;
-                            text <=> Settings.bangumi-token;
-                            input-type: password;
-                            placeholder-text: "Bangumi 访问令牌（保存在系统凭据管理器）";
+                        HorizontalLayout {
+                            spacing: 8px;
+                            LineEdit {
+                                width: 220px;
+                                text <=> Settings.bangumi-token;
+                                input-type: password;
+                                placeholder-text: "Bangumi 访问令牌";
+                            }
+                            PillButton {
+                                text: "保存";
+                                variant: "tonal";
+                                clicked => {
+                                    Settings.save-bangumi-token(Settings.bangumi-token);
+                                    Settings.bangumi-token = "";
+                                }
+                            }
+                            PillButton {
+                                text: "清除";
+                                variant: "outlined";
+                                clicked => { Settings.clear-bangumi-token(); }
+                            }
                         }
                     }
                     SettingRow {
@@ -69,8 +74,7 @@ export component MetadataSettingsPage inherits Rectangle {
                         description: "";
                         checked: Settings.sensitive-covers;
                         toggled => {
-                            Settings.sensitive-covers = !Settings.sensitive-covers;
-                            Settings.set-sensitive-covers(Settings.metadata-provider, Settings.sensitive-covers);
+                            Settings.set-sensitive-covers(!Settings.sensitive-covers);
                         }
                     }
                 }

@@ -328,12 +328,6 @@ export component DetailSheet inherits Rectangle {
                         spacing: 14px;
                         alignment: start;
                         GenericConfigForm {
-                            fields: Selection.engine-fields;
-                            form-title: "运行设置";
-                            show-actions: false;
-                            field-changed(key, value) => { Selection.config-changed(key, value); }
-                        }
-                        GenericConfigForm {
                             fields: Selection.family-fields;
                             form-title: "模拟器设置";
                             show-actions: false;

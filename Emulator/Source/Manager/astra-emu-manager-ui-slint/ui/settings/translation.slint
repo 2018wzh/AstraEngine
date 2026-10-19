@@ -6,14 +6,18 @@ import { Card, PillButton, SwitchRow, Segmented, SettingRow } from "../component
 export component TranslationSettingsPage inherits Rectangle {
     background: Theme.surface;
     private property <bool> advanced: false;
-    property <[string]> kind-labels: ["OpenAI 兼容服务", "OpenAI 官方", "ECNU 服务", "其他第三方服务"];
-    property <[string]> kind-values: ["openai-compatible", "openai", "ecnu", "third_party"];
+    property <[string]> provider-labels: ["OpenAI", "Anthropic", "Google"];
 
-    pure function kind-index(kind: string) -> int {
-        return kind == "openai" ? 1 : kind == "ecnu" ? 2 : kind == "third_party" ? 3 : 0;
+    pure function provider-index(provider: string) -> int {
+        return provider == "anthropic" ? 1 : provider == "google" ? 2 : 0;
     }
-    pure function kind-from-label(label: string) -> string {
-        return label == "OpenAI 官方" ? "openai" : label == "ECNU 服务" ? "ecnu" : label == "其他第三方服务" ? "third_party" : "openai-compatible";
+    pure function provider-from-index(index: int) -> string {
+        return index == 1 ? "anthropic" : index == 2 ? "google" : "openai";
+    }
+    pure function default-base-url(provider: string) -> string {
+        return provider == "anthropic" ? "https://api.anthropic.com/v1"
+            : provider == "google" ? "https://generativelanguage.googleapis.com/v1beta"
+            : "https://api.openai.com/v1";
     }
 
     ScrollView {
@@ -32,23 +36,26 @@ export component TranslationSettingsPage inherits Rectangle {
 
             Card {
                 VerticalLayout {
+                    SwitchRow {
+                        label: "启用实时翻译";
+                        description: Settings.network-allowed
+                            ? "启用后会将当前游戏台词及上下文发送至指定的接口与模型。"
+                            : "需要先在“作品资料与账号”中允许联网。";
+                        checked: Settings.translation-enabled;
+                        toggled => {
+                            Settings.set-translation-enabled(!Settings.translation-enabled);
+                        }
+                    }
                     SettingRow {
-                        title: "服务类型";
+                        title: "服务商";
                         desc: "";
-                        divider: false;
                         ComboBox {
                             width: 200px;
-                            model: root.kind-labels;
-                            current-index: root.kind-index(Settings.translation.kind);
+                            model: root.provider-labels;
+                            current-index: root.provider-index(Settings.translation.provider);
                             selected(value) => {
-                                Settings.translation = {
-                                    kind: root.kind-from-label(value),
-                                    endpoint: Settings.translation.endpoint,
-                                    protocol: Settings.translation.protocol,
-                                    model: Settings.translation.model,
-                                    language: Settings.translation.language,
-                                    timeout-ms: Settings.translation.timeout-ms,
-                                };
+                                Settings.translation.provider = root.provider-from-index(self.current-index);
+                                Settings.translation.base-url = root.default-base-url(Settings.translation.provider);
                             }
                         }
                     }
@@ -57,17 +64,10 @@ export component TranslationSettingsPage inherits Rectangle {
                         desc: "";
                         LineEdit {
                             width: 280px;
-                            text: Settings.translation.endpoint;
+                            text: Settings.translation.base-url;
                             placeholder-text: "https://…/v1";
                             edited(value) => {
-                                Settings.translation = {
-                                    kind: Settings.translation.kind,
-                                    endpoint: value,
-                                    protocol: Settings.translation.protocol,
-                                    model: Settings.translation.model,
-                                    language: Settings.translation.language,
-                                    timeout-ms: Settings.translation.timeout-ms,
-                                };
+                                Settings.translation.base-url = value;
                             }
                         }
                     }
@@ -79,14 +79,18 @@ export component TranslationSettingsPage inherits Rectangle {
                             text: Settings.translation.model;
                             placeholder-text: "必填";
                             edited(value) => {
-                                Settings.translation = {
-                                    kind: Settings.translation.kind,
-                                    endpoint: Settings.translation.endpoint,
-                                    protocol: Settings.translation.protocol,
-                                    model: value,
-                                    language: Settings.translation.language,
-                                    timeout-ms: Settings.translation.timeout-ms,
-                                };
+                                Settings.translation.model = value;
+                            }
+                        }
+                    }
+                    if Settings.models.length > 0 : SettingRow {
+                        title: "可用模型";
+                        desc: "来自上次测试连接";
+                        ComboBox {
+                            width: 220px;
+                            model: Settings.models;
+                            selected(value) => {
+                                Settings.translation.model = value;
                             }
                         }
                     }
@@ -98,14 +102,7 @@ export component TranslationSettingsPage inherits Rectangle {
                             text: Settings.translation.language;
                             placeholder-text: "例如 zh-CN";
                             edited(value) => {
-                                Settings.translation = {
-                                    kind: Settings.translation.kind,
-                                    endpoint: Settings.translation.endpoint,
-                                    protocol: Settings.translation.protocol,
-                                    model: Settings.translation.model,
-                                    language: value,
-                                    timeout-ms: Settings.translation.timeout-ms,
-                                };
+                                Settings.translation.language = value;
                             }
                         }
                     }
@@ -119,14 +116,7 @@ export component TranslationSettingsPage inherits Rectangle {
                             maximum: 120000;
                             step-size: 1000;
                             edited(value) => {
-                                Settings.translation = {
-                                    kind: Settings.translation.kind,
-                                    endpoint: Settings.translation.endpoint,
-                                    protocol: Settings.translation.protocol,
-                                    model: Settings.translation.model,
-                                    language: Settings.translation.language,
-                                    timeout-ms: value,
-                                };
+                                Settings.translation.timeout-ms = value;
                             }
                         }
                     }
@@ -145,24 +135,17 @@ export component TranslationSettingsPage inherits Rectangle {
                         description: "";
                         checked <=> root.advanced;
                     }
-                    if root.advanced : SettingRow {
-                        title: "协议";
+                    if root.advanced && Settings.translation.provider == "openai" : SettingRow {
+                        title: "接口格式";
                         desc: "";
                         HorizontalLayout {
                             horizontal-stretch: 0;
                             Segmented {
-                                items: ["Responses 接口", "Chat Completions 接口"];
-                                current: Settings.translation.protocol == "chat_completions" ? 1 : 0;
+                                items: ["Responses", "Chat Completions"];
+                                current: Settings.translation.openai-api == "chat_completions" ? 1 : 0;
                                 segment-width: 160px;
                                 selected(i) => {
-                                    Settings.translation = {
-                                        kind: Settings.translation.kind,
-                                        endpoint: Settings.translation.endpoint,
-                                        protocol: i == 1 ? "chat_completions" : "responses",
-                                        model: Settings.translation.model,
-                                        language: Settings.translation.language,
-                                        timeout-ms: Settings.translation.timeout-ms,
-                                    };
+                                    Settings.translation.openai-api = i == 1 ? "chat_completions" : "responses";
                                 }
                             }
                         }
@@ -184,28 +167,15 @@ export component TranslationSettingsPage inherits Rectangle {
                 PillButton {
                     text: "测试连接";
                     variant: "outlined";
-                    clicked => { Settings.test-translation(); }
+                    clicked => { Settings.test-translation(Settings.translation, Settings.translation-secret); }
                 }
             }
 
-            Card {
-                VerticalLayout {
-                    padding: 16px;
-                    spacing: 12px;
-                    Text {
-                        text: Settings.translation-consent
-                            ? "已授权当前翻译服务。更改配置后需重新授权。"
-                            : "翻译服务会将当前游戏台词及上下文发送至指定的接口与模型。授权为全局生效。";
-                        color: Theme.on-variant;
-                        wrap: word-wrap;
-                        font-size: Theme.body-sm;
-                    }
-                    if !Settings.translation-consent : PillButton {
-                        text: "授予联网权限";
-                        variant: "tonal";
-                        clicked => { Settings.grant-translation-consent(); }
-                    }
-                }
+            if Settings.translation-status != "" : Text {
+                text: Settings.translation-status;
+                color: Theme.on-variant;
+                wrap: word-wrap;
+                font-size: Theme.body-sm;
             }
         }
     }

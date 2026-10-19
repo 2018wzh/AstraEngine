@@ -1,5 +1,10 @@
 use super::*;
 
+pub(super) const NETWORK_ALLOWED_KEY: &str = "network.allowed";
+pub(super) const TRANSLATION_ENABLED_KEY: &str = "translation.enabled";
+pub(super) const SENSITIVE_COVERS_KEY: &str = "covers.sensitive";
+pub(super) const BANGUMI_SECRET_REFERENCE: &str = "metadata.bangumi";
+
 pub(super) fn unix_time_ms() -> Result<i64, String> {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -201,20 +206,6 @@ fn civil_from_days(mut z: i64) -> (i32, u32, u32) {
     let month = if mp < 10 { mp + 3 } else { mp - 9 };
     let year = year + if month <= 2 { 1 } else { 0 };
     (year as i32, month, day)
-}
-
-pub(super) fn profile_kind(profile: Option<TranslationProfile>) -> String {
-    profile
-        .map(|profile| {
-            match profile.endpoint_kind {
-                TranslationEndpointKind::OpenAiCompatible => "openai-compatible",
-                TranslationEndpointKind::OpenAi => "openai",
-                TranslationEndpointKind::Ecnu => "ecnu",
-                TranslationEndpointKind::ThirdParty => "third_party",
-            }
-            .to_owned()
-        })
-        .unwrap_or_else(|| "openai-compatible".into())
 }
 
 #[cfg(test)]

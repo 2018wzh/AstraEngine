@@ -191,15 +191,7 @@ pub(super) fn install<C: ManagerController, R: AstraUnderlayRenderer>(
         .on_save_translation(move |profile, secret| {
             let result = save_translation_controller
                 .borrow_mut()
-                .save_translation_profile(
-                    profile.kind.as_str(),
-                    profile.endpoint.as_str(),
-                    profile.protocol.as_str(),
-                    profile.model.as_str(),
-                    profile.language.as_str(),
-                    profile.timeout_ms,
-                    secret.as_str(),
-                );
+                .save_translation_profile(&translation_form(&profile), secret.as_str());
             if let Some(window) = save_translation_weak.upgrade() {
                 match result {
                     Ok(model) => apply_model(&save_translation_adapter, &model),
@@ -213,8 +205,10 @@ pub(super) fn install<C: ManagerController, R: AstraUnderlayRenderer>(
     adapter
         .window()
         .global::<Settings>()
-        .on_test_translation(move || {
-            let result = test_controller.borrow_mut().test_translation_connection();
+        .on_test_translation(move |profile, secret| {
+            let result = test_controller
+                .borrow_mut()
+                .test_translation_connection(&translation_form(&profile), secret.as_str());
             if let Some(window) = test_weak.upgrade() {
                 match result {
                     Ok(model) => apply_model(&test_adapter, &model),
@@ -228,8 +222,10 @@ pub(super) fn install<C: ManagerController, R: AstraUnderlayRenderer>(
     adapter
         .window()
         .global::<Settings>()
-        .on_grant_translation_consent(move || {
-            let result = consent_controller.borrow_mut().grant_translation_consent();
+        .on_set_translation_enabled(move |enabled| {
+            let result = consent_controller
+                .borrow_mut()
+                .set_translation_enabled(enabled);
             if let Some(window) = consent_weak.upgrade() {
                 match result {
                     Ok(model) => apply_model(&consent_adapter, &model),
@@ -258,4 +254,20 @@ pub(super) fn install<C: ManagerController, R: AstraUnderlayRenderer>(
             });
     }
     filters::install(adapter, controller, renderer);
+}
+
+fn translation_form(
+    profile: &astra_emu_manager_ui_slint::TranslationProfile,
+) -> astra_emu_manager_ui_slint::TranslationProfileForm {
+    astra_emu_manager_ui_slint::TranslationProfileForm {
+        provider: profile.provider.to_string(),
+        base_url: profile.base_url.to_string(),
+        openai_api: profile.openai_api.to_string(),
+        model: profile.model.to_string(),
+        language: profile.language.to_string(),
+        timeout_ms: profile.timeout_ms,
+        custom_prompt: profile.custom_prompt.to_string(),
+        context_segments: profile.context_segments,
+        context_chars: profile.context_chars,
+    }
 }

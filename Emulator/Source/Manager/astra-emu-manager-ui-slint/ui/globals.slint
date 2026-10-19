@@ -136,7 +136,6 @@ export global Selection {
     in-out property <string> metadata-status;
     in-out property <BangumiProgress> bangumi;
     in-out property <string> bangumi-summary;
-    in-out property <[ConfigField]> engine-fields;
     in-out property <[ConfigField]> family-fields;
     in-out property <bool> musica-key-available;
     callback fetch-releases();
@@ -219,12 +218,15 @@ export global Dialogs {
 }
 
 export struct TranslationProfile {
-    kind: string,
-    endpoint: string,
-    protocol: string,
+    provider: string,
+    base-url: string,
+    openai-api: string,
     model: string,
     language: string,
     timeout-ms: int,
+    custom-prompt: string,
+    context-segments: int,
+    context-chars: int,
 }
 
 export struct GamepadBinding {
@@ -236,17 +238,20 @@ export struct GamepadBinding {
 export global Settings {
     in-out property <TranslationProfile> translation;
     in-out property <string> translation-secret;
-    in-out property <bool> translation-consent;
+    in-out property <bool> translation-enabled;
+    in-out property <string> translation-status;
+    in-out property <[string]> models;
     callback save-translation(TranslationProfile, string);
-    callback test-translation();
-    callback grant-translation-consent();
-    in-out property <bool> vndb-enabled;
-    in-out property <bool> bangumi-enabled;
+    callback test-translation(TranslationProfile, string);
+    callback set-translation-enabled(bool);
+    in-out property <bool> network-allowed;
+    callback set-network-allowed(bool);
     in-out property <bool> sensitive-covers;
     in-out property <string> metadata-provider: "vndb";
     in-out property <string> bangumi-token;
-    callback set-metadata-consent(string, bool, string);
-    callback set-sensitive-covers(string, bool);
+    callback save-bangumi-token(string);
+    callback clear-bangumi-token();
+    callback set-sensitive-covers(bool);
     in-out property <bool> gamepad-enabled;
     in-out property <string> deadzone: "medium";
     in-out property <[GamepadBinding]> bindings;

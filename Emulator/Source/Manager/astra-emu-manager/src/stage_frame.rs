@@ -1,7 +1,7 @@
 use super::*;
 use astra_emu_manager_core::model::{FamilyResult, FrameIdentity, FrameLease};
 
-/// Latest complete immutable CPU or GPU lease. No pixel copying.
+/// Latest complete immutable CPU lease. No pixel copying.
 #[derive(Clone, Default)]
 pub(crate) struct FrameMailbox {
     state: Arc<Mutex<FrameMailboxState>>,
@@ -12,29 +12,11 @@ struct FrameMailboxState {
     session_epoch: Option<u64>,
     frame: Option<FrameLease>,
     displayed: Option<(FrameIdentity, astra_emu_manager_core::model::FrameInfo)>,
-    d3d12: Option<astra_emu_abi::D3D12Host>,
 }
 
 impl FrameMailbox {
     pub(crate) fn new() -> Self {
         Self::default()
-    }
-
-    pub(crate) fn set_d3d12(&self, host: Option<astra_emu_abi::D3D12Host>) -> Result<(), String> {
-        self.state
-            .lock()
-            .map_err(|_| "ASTRA_EMU_HOST_FRAME_LOCK")?
-            .d3d12 = host;
-        Ok(())
-    }
-    pub(crate) fn d3d12(&self) -> Result<Option<astra_emu_abi::D3D12Host>, String> {
-        #[cfg(windows)]
-        super::d3d12::graphics_ready()?;
-        Ok(self
-            .state
-            .lock()
-            .map_err(|_| "ASTRA_EMU_HOST_FRAME_LOCK")?
-            .d3d12)
     }
 
     pub(crate) fn activate(&self, session_epoch: u64) -> FamilyResult<()> {

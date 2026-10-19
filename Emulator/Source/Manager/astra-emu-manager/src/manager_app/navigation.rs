@@ -88,14 +88,7 @@ impl AstraEmuManagerController {
             .descriptor
             .has_capability(astra_emu_manager_core::FamilyCapability::TextReplacement)
         {
-            let profile = if self.translation_consent {
-                Some(
-                    self.profile()?
-                        .ok_or("ASTRA_EMU_TRANSLATION_PROFILE_REQUIRED")?,
-                )
-            } else {
-                None
-            };
+            let profile = self.launch_translation_profile()?;
             let extensions =
                 astra_emu_manager_core::extensions::ExtensionStore::new(&self.data_dir).list()?;
             if profile.is_some() || extensions.iter().any(|extension| extension.enabled) {

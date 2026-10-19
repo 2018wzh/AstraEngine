@@ -107,7 +107,7 @@ pub(super) fn apply_pending(cores: &Path) -> Vec<(String, String)> {
 fn capability_label(capability: FamilyCapability) -> &'static str {
     match capability {
         FamilyCapability::CpuFrame => "软件渲染",
-        FamilyCapability::GpuFrame => "硬件加速渲染",
+        FamilyCapability::RenderExtent => "可调渲染分辨率",
         FamilyCapability::TextReplacement => "支持实时翻译",
     }
 }
@@ -130,7 +130,7 @@ impl AstraEmuManagerController {
             };
             loaded.push(CoreViewModel {
                 key: meta.descriptor.plugin_id.clone(),
-                name: Self::core_display_name(&meta.descriptor),
+                name: meta.descriptor.display_name.clone(),
                 monogram: monogram(&meta.descriptor.family_id),
                 version: meta.descriptor.version.clone(),
                 capabilities: meta

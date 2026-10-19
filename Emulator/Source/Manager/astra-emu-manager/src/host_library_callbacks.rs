@@ -90,40 +90,32 @@ pub(super) fn install<C: ManagerController>(
     metadata_callback!(on_refresh_metadata, refresh_metadata, |provider|);
     metadata_callback!(on_accept_match, accept_match, |candidate_id|);
     metadata_callback!(on_unlink_metadata, unlink_identity, |provider|);
-    let consent_weak = adapter.window().as_weak();
-    let metadata_consent_controller = controller.clone();
-    let metadata_consent_adapter = std::rc::Rc::downgrade(adapter);
-    adapter
-        .window()
-        .global::<Settings>()
-        .on_set_metadata_consent(move |provider, enabled, secret| {
-            let result = metadata_consent_controller
-                .borrow_mut()
-                .set_metadata_consent(provider.as_str(), enabled, secret.as_str());
-            if let Some(window) = consent_weak.upgrade() {
-                match result {
-                    Ok(model) => apply_model(&metadata_consent_adapter, &model),
-                    Err(error) => report_error(&window, &error),
+    macro_rules! settings_callback {
+        ($callback:ident, |$controller:ident $(, $arg:ident)*| $call:expr) => {{
+            let weak = adapter.window().as_weak();
+            let callback_controller = controller.clone();
+            let callback_adapter = std::rc::Rc::downgrade(adapter);
+            adapter.window().global::<Settings>().$callback(move |$($arg),*| {
+                let result = {
+                    let mut $controller = callback_controller.borrow_mut();
+                    $call
+                };
+                if let Some(window) = weak.upgrade() {
+                    match result {
+                        Ok(model) => apply_model(&callback_adapter, &model),
+                        Err(error) => report_error(&window, &error),
+                    }
                 }
-            }
-        });
-    let cover_weak = adapter.window().as_weak();
-    let cover_controller = controller.clone();
-    let cover_adapter = std::rc::Rc::downgrade(adapter);
-    adapter
-        .window()
-        .global::<Settings>()
-        .on_set_sensitive_covers(move |provider, enabled| {
-            let result = cover_controller
-                .borrow_mut()
-                .set_sensitive_cover_policy(provider.as_str(), enabled);
-            if let Some(window) = cover_weak.upgrade() {
-                match result {
-                    Ok(model) => apply_model(&cover_adapter, &model),
-                    Err(error) => report_error(&window, &error),
-                }
-            }
-        });
+            });
+        }};
+    }
+    settings_callback!(on_set_network_allowed, |c, enabled| c
+        .set_network_allowed(enabled));
+    settings_callback!(on_set_sensitive_covers, |c, enabled| c
+        .set_sensitive_covers(enabled));
+    settings_callback!(on_save_bangumi_token, |c, token| c
+        .save_bangumi_token(token.as_str()));
+    settings_callback!(on_clear_bangumi_token, |c| c.clear_bangumi_token());
     let play_weak = adapter.window().as_weak();
     let play_controller = controller.clone();
     let play_adapter = std::rc::Rc::downgrade(adapter);

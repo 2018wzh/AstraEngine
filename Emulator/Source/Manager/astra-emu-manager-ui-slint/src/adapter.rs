@@ -27,14 +27,12 @@ pub struct SlintManagerAdapter {
     releases: Rc<VecModel<ReleaseOption>>,
     history: Rc<VecModel<PlaySession>>,
     matches: Rc<VecModel<MatchReview>>,
-    engine_fields: Rc<VecModel<crate::ConfigField>>,
     family_fields: Rc<VecModel<crate::ConfigField>>,
     cores: Rc<VecModel<CoreInfo>>,
     bindings: Rc<VecModel<GamepadBinding>>,
     filter_fields: Rc<VecModel<crate::ConfigField>>,
     actions: Rc<VecModel<EngineAction>>,
     cached_games_signature: RefCell<Vec<GameCardSignature>>,
-    cached_engine_fields: RefCell<Vec<ConfigFieldViewModel>>,
     cached_family_fields: RefCell<Vec<ConfigFieldViewModel>>,
     cached_filter_fields: RefCell<Vec<ConfigFieldViewModel>>,
     cached_bangumi: RefCell<Option<(String, String, i32, String)>>,
@@ -48,7 +46,6 @@ impl SlintManagerAdapter {
         let releases = Rc::new(VecModel::default());
         let history = Rc::new(VecModel::default());
         let matches = Rc::new(VecModel::default());
-        let engine_fields = Rc::new(VecModel::default());
         let family_fields = Rc::new(VecModel::default());
         let cores = Rc::new(VecModel::default());
         let bindings = Rc::new(VecModel::default());
@@ -70,9 +67,6 @@ impl SlintManagerAdapter {
         window
             .global::<Selection>()
             .set_matches(ModelRc::from(matches.clone()));
-        window
-            .global::<Selection>()
-            .set_engine_fields(ModelRc::from(engine_fields.clone()));
         window
             .global::<Selection>()
             .set_family_fields(ModelRc::from(family_fields.clone()));
@@ -118,14 +112,12 @@ impl SlintManagerAdapter {
             releases,
             history,
             matches,
-            engine_fields,
             family_fields,
             cores,
             bindings,
             filter_fields,
             actions,
             cached_games_signature: RefCell::new(Vec::new()),
-            cached_engine_fields: RefCell::default(),
             cached_family_fields: RefCell::default(),
             cached_filter_fields: RefCell::default(),
             cached_bangumi: RefCell::new(None),
@@ -302,11 +294,6 @@ impl SlintManagerAdapter {
         selection.set_bangumi_summary(game.bangumi.summary.as_str().into());
         selection.set_musica_key_available(game.musica_key_available);
         crate::config_model::update(
-            &self.engine_fields,
-            &self.cached_engine_fields,
-            &game.engine_fields,
-        );
-        crate::config_model::update(
             &self.family_fields,
             &self.cached_family_fields,
             &game.family_fields,
@@ -347,16 +334,35 @@ impl SlintManagerAdapter {
         let settings = self.window.global::<Settings>();
         let translation = &model.settings.translation;
         settings.set_translation(TranslationProfile {
-            kind: translation.kind.as_str().into(),
-            endpoint: translation.endpoint.as_str().into(),
-            protocol: translation.protocol.as_str().into(),
+            provider: translation.provider.as_str().into(),
+            base_url: translation.base_url.as_str().into(),
+            openai_api: translation.openai_api.as_str().into(),
             model: translation.model.as_str().into(),
             language: translation.language.as_str().into(),
             timeout_ms: translation.timeout_ms,
+            custom_prompt: translation.custom_prompt.as_str().into(),
+            context_segments: translation.context_segments,
+            context_chars: translation.context_chars,
         });
-        settings.set_translation_consent(model.settings.translation_consent);
-        settings.set_vndb_enabled(model.settings.vndb_enabled);
-        settings.set_bangumi_enabled(model.settings.bangumi_enabled);
+        settings.set_translation_enabled(model.settings.translation_enabled);
+        settings.set_translation_status(model.settings.translation_status.as_str().into());
+        let models = settings.get_models();
+        if !models.iter().map(|value| value.to_string()).eq(model
+            .settings
+            .translation_models
+            .iter()
+            .cloned())
+        {
+            settings.set_models(ModelRc::new(VecModel::from(
+                model
+                    .settings
+                    .translation_models
+                    .iter()
+                    .map(|value| SharedString::from(value.as_str()))
+                    .collect::<Vec<_>>(),
+            )));
+        }
+        settings.set_network_allowed(model.settings.network_allowed);
         settings.set_sensitive_covers(model.settings.sensitive_covers);
         settings.set_gamepad_enabled(model.settings.input.gamepad_enabled);
         settings.set_deadzone(model.settings.input.deadzone.as_str().into());

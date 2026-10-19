@@ -129,21 +129,23 @@ pub trait ManagerController: 'static {
     fn model(&self) -> Result<ManagerViewModel, String>;
     fn select_case(&mut self, case_id: &str) -> Result<ManagerViewModel, String>;
     fn search(&mut self, query: &str) -> Result<ManagerViewModel, String>;
-    #[allow(clippy::too_many_arguments)]
     fn save_translation_profile(
         &mut self,
-        endpoint_kind: &str,
-        endpoint: &str,
-        protocol: &str,
-        model: &str,
-        target_language: &str,
-
-        timeout_ms: i32,
-
+        form: &astra_emu_manager_ui_slint::TranslationProfileForm,
         secret: &str,
     ) -> Result<ManagerViewModel, String>;
-    fn grant_translation_consent(&mut self) -> Result<ManagerViewModel, String>;
-    fn test_translation_connection(&mut self) -> Result<ManagerViewModel, String>;
+    /// Test the form values; an empty secret falls back to the stored one.
+    fn test_translation_connection(
+        &mut self,
+        form: &astra_emu_manager_ui_slint::TranslationProfileForm,
+        secret: &str,
+    ) -> Result<ManagerViewModel, String>;
+    fn set_translation_enabled(&mut self, enabled: bool) -> Result<ManagerViewModel, String>;
+    /// One persisted switch for VNDB, Bangumi, metadata sync, core downloads and translation.
+    fn set_network_allowed(&mut self, enabled: bool) -> Result<ManagerViewModel, String>;
+    fn set_sensitive_covers(&mut self, enabled: bool) -> Result<ManagerViewModel, String>;
+    fn save_bangumi_token(&mut self, token: &str) -> Result<ManagerViewModel, String>;
+    fn clear_bangumi_token(&mut self) -> Result<ManagerViewModel, String>;
     fn add_game_directory(&mut self, path: &std::path::Path) -> Result<ManagerViewModel, String>;
     fn start_file_patch(
         &mut self,
@@ -169,17 +171,6 @@ pub trait ManagerController: 'static {
     fn refresh_metadata(&mut self, _provider: &str) -> Result<ManagerViewModel, String>;
     fn accept_match(&mut self, _candidate_id: &str) -> Result<ManagerViewModel, String>;
     fn unlink_identity(&mut self, _provider: &str) -> Result<ManagerViewModel, String>;
-    fn set_metadata_consent(
-        &mut self,
-        _provider: &str,
-        _enabled: bool,
-        _secret: &str,
-    ) -> Result<ManagerViewModel, String>;
-    fn set_sensitive_cover_policy(
-        &mut self,
-        _provider: &str,
-        _enabled: bool,
-    ) -> Result<ManagerViewModel, String>;
     fn update_bangumi_play_status(
         &mut self,
         _status: &str,

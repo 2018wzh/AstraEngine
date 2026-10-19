@@ -67,7 +67,7 @@ impl ActiveFamilySession {
                         initial_window,
                         host,
                         cancellation: services.cancellation,
-                        d3d12: mailbox.d3d12()?,
+                        render_extent: None,
                     },
                 )
                 .map_err(|error| error.to_string())

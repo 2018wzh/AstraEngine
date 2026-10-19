@@ -8,7 +8,7 @@ export component WorkAssociation inherits Rectangle {
     private property <string> provider: provider-index == 1 ? "bangumi" : "vndb";
     private property <string> query;
     private property <bool> expanded: false;
-    private property <bool> consented: provider == "bangumi" ? Settings.bangumi-enabled : Settings.vndb-enabled;
+    private property <bool> consented: Settings.network-allowed;
 
     changed work-watch => {
         root.query = "";
