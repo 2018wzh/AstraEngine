@@ -1,0 +1,160 @@
+import { MaterialPalette } from "@material";
+
+export component RangeSlider {
+    in property <float> minimum: 0;
+    in property <float> maximum: 100;
+    in property <float> step: 0;
+    in property <bool> enabled: true;
+    in-out property <float> value;
+    callback value-changed(value: float);
+    callback released(value: float);
+
+    property <float> span: max(root.maximum - root.minimum, 0);
+    property <float> ratio: root.span > 0 ? clamp((root.value - root.minimum) / root.span, 0, 1) : 0;
+    property <length> track-x: 10px;
+    property <length> track-width: max(root.width - 2 * root.track-x, 1px);
+    property <length> thumb-x: root.track-x + root.track-width * root.ratio;
+    property <int> stop-count: root.step > 0 && root.span / root.step <= 40 ? round(root.span / root.step) + 1 : 0;
+
+    min-width: 120px;
+    min-height: 44px;
+    horizontal-stretch: 1;
+    vertical-stretch: 0;
+    forward-focus: focus;
+    accessible-role: slider;
+    accessible-enabled: root.enabled;
+    accessible-value: root.value;
+    accessible-value-minimum: root.minimum;
+    accessible-value-maximum: root.maximum;
+    accessible-value-step: root.step > 0 ? root.step : root.span / 100;
+    accessible-action-increment => { root.nudge(1); }
+    accessible-action-decrement => { root.nudge(-1); }
+    accessible-action-set-value(v) => {
+        if v.is-float() {
+            root.assign(v.to-float());
+            root.released(root.value);
+        }
+    }
+
+    pure function snap(v: float) -> float {
+        let c = clamp(v, root.minimum, root.maximum);
+        if root.step > 0 {
+            return clamp(root.minimum + round((c - root.minimum) / root.step) * root.step, root.minimum, root.maximum);
+        }
+        return c;
+    }
+
+    function assign(v: float) {
+        let next = root.snap(v);
+        if next != root.value {
+            root.value = next;
+            root.value-changed(next);
+        }
+    }
+
+    function assign-x(x: length) {
+        root.assign(root.minimum + (x - root.track-x) / root.track-width * root.span);
+    }
+
+    function nudge(direction: int) {
+        root.assign(root.value + direction * (root.step > 0 ? root.step : root.span / 100));
+    }
+
+    Rectangle {
+        x: root.track-x;
+        y: (root.height - self.height) / 2;
+        width: root.track-width;
+        height: 16px;
+        border-radius: 8px;
+        background: MaterialPalette.surface-container-highest;
+        opacity: root.enabled ? 1 : 0.38;
+    }
+
+    Rectangle {
+        x: root.track-x;
+        y: (root.height - self.height) / 2;
+        width: max(root.thumb-x - root.track-x - 6px, 0px);
+        height: 16px;
+        border-top-left-radius: 8px;
+        border-bottom-left-radius: 8px;
+        border-top-right-radius: 2px;
+        border-bottom-right-radius: 2px;
+        background: root.enabled ? MaterialPalette.primary : MaterialPalette.on-surface.with-alpha(0.38);
+    }
+
+    for i in root.stop-count : Rectangle {
+        x: root.track-x + root.track-width * (root.stop-count > 1 ? i / (root.stop-count - 1) : 0) - 2px;
+        y: (root.height - self.height) / 2;
+        width: 4px;
+        height: 4px;
+        border-radius: 2px;
+        visible: abs(self.x + 2px - root.thumb-x) > 8px;
+        background: (self.x + 2px) < root.thumb-x ? MaterialPalette.on-primary : MaterialPalette.on-surface-variant;
+    }
+
+    Rectangle {
+        x: root.thumb-x - 20px;
+        y: (root.height - self.height) / 2;
+        width: 40px;
+        height: 40px;
+        border-radius: 20px;
+        background: MaterialPalette.primary.with-alpha(touch.pressed ? MaterialPalette.state-layer-opacity-press : focus.has-focus ? MaterialPalette.state-layer-opacity-focus : touch.has-hover ? MaterialPalette.state-layer-opacity-hover : 0);
+        visible: root.enabled;
+    }
+
+    Rectangle {
+        x: root.thumb-x - 2px;
+        y: (root.height - self.height) / 2;
+        width: 4px;
+        height: 44px;
+        border-radius: 2px;
+        background: root.enabled ? MaterialPalette.primary : MaterialPalette.on-surface.with-alpha(0.38);
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                focus.focus();
+                root.assign-x(self.mouse-x);
+            }
+            if event.kind == PointerEventKind.up && event.button == PointerEventButton.left {
+                root.released(root.value);
+            }
+        }
+        moved => {
+            if self.pressed {
+                root.assign-x(self.mouse-x);
+            }
+        }
+    }
+
+    focus := FocusScope {
+        x: 0;
+        width: 0px;
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if event.text == Key.LeftArrow || event.text == Key.DownArrow {
+                root.nudge(-1);
+                root.released(root.value);
+                return accept;
+            }
+            if event.text == Key.RightArrow || event.text == Key.UpArrow {
+                root.nudge(1);
+                root.released(root.value);
+                return accept;
+            }
+            if event.text == Key.Home {
+                root.assign(root.minimum);
+                root.released(root.value);
+                return accept;
+            }
+            if event.text == Key.End {
+                root.assign(root.maximum);
+                root.released(root.value);
+                return accept;
+            }
+            reject
+        }
+    }
+}

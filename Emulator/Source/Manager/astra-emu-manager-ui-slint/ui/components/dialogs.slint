@@ -1,196 +1,285 @@
-import { LineEdit, ScrollView } from "std-widgets.slint";
-import { Theme } from "../theme.slint";
-import { Dialogs, Session } from "../globals.slint";
-import { PillButton } from "./controls.slint";
+import { MaterialPalette, MaterialText, MaterialTypography, TextButton, FilledButton, TonalButton, IconButton, SegmentedButton, ScrollView, TextField } from "@material";
+import { TextEdit } from "std-widgets.slint";
+import { Logs, Dialogs, Session } from "../globals.slint";
+import { Icons } from "../icons.slint";
 
-export component ModalDialog inherits Rectangle {
-    z: 110;
-    visible: Dialogs.modal-active;
-    x: 0px;
-    y: 0px;
-    width: 100%;
-    height: 100%;
-    background: Theme.scrim;
+export component Scrim inherits Rectangle {
+    callback dismiss();
+    background: MaterialPalette.scrim.with-alpha(0.4);
 
     TouchArea {
-        x: 0px;
-        y: 0px;
-        width: parent.width;
-        height: parent.height;
-    }
-
-    Rectangle {
-        width: min(640px, parent.width - 32px);
-        height: min(560px, parent.height - 32px);
-        x: (parent.width - self.width) / 2;
-        y: (parent.height - self.height) / 2;
-        border-radius: Theme.r-xl;
-        background: Theme.surface-high;
-        drop-shadow-blur: 24px;
-        drop-shadow-offset-y: 8px;
-        drop-shadow-color: Theme.shadow-strong;
-
-        TouchArea {
-            x: 0px;
-            y: 0px;
-            width: parent.width;
-            height: parent.height;
-        }
-
-        VerticalLayout {
-            x: 0px;
-            y: 0px;
-            width: parent.width;
-            height: parent.height;
-            padding: 24px;
-            spacing: 16px;
-
-            Text {
-                text: Dialogs.modal-caption;
-                color: Theme.on-surface;
-                font-size: Theme.title-lg;
-                font-weight: 700;
-                wrap: word-wrap;
-            }
-
-            ScrollView {
-                vertical-stretch: 1;
-                mouse-drag-pan-enabled: true;
-                VerticalLayout {
-                    alignment: start;
-                    Text {
-                        text: Dialogs.modal-message;
-                        color: Theme.on-surface;
-                        font-size: Theme.body;
-                        wrap: word-wrap;
-                    }
-                }
-            }
-
-            if Dialogs.modal-has-input : LineEdit {
-                text <=> Dialogs.modal-text;
-            }
-
-            ScrollView {
-                height: min(180px, modal-actions.preferred-height);
-                mouse-drag-pan-enabled: true;
-                modal-actions := VerticalLayout {
-                    spacing: 8px;
-                    for label[index] in Dialogs.modal-buttons : PillButton {
-                        text: label;
-                        variant: "tonal";
-                        clicked => { Dialogs.modal-submit(index, Dialogs.modal-text); }
-                    }
-                }
-            }
-
-            HorizontalLayout {
-                spacing: 8px;
-                PillButton {
-                    text: "取消";
-                    variant: "text";
-                    clicked => { Dialogs.modal-cancel(); }
-                }
-                PillButton {
-                    text: "退出游戏";
-                    variant: "danger";
-                    clicked => { Session.leave(); }
-                }
-            }
-        }
+        clicked => { root.dismiss(); }
     }
 }
 
-export component FatalDialog inherits Rectangle {
-    z: 1000;
-    visible: Dialogs.fatal-active;
-    x: 0px;
-    y: 0px;
-    width: 100%;
-    height: 100%;
-    background: Theme.scrim;
+export component DialogSurface inherits Rectangle {
+    in property <string> title;
+    in property <image> icon;
+    in property <color> accent: MaterialPalette.on-surface;
+    in property <length> surface-max-width: 560px;
+    in property <length> surface-max-height: 560px;
+    callback escape();
 
-    TouchArea {
-        x: 0px;
-        y: 0px;
-        width: parent.width;
-        height: parent.height;
+    property <bool> has-icon: root.icon.width > 0;
+
+    width: min(root.surface-max-width, root.width-limit);
+    height: min(max(layout.min-height, layout.preferred-height), root.surface-max-height, root.height-limit);
+    in property <length> width-limit: 560px;
+    in property <length> height-limit: 560px;
+    border-radius: 28px;
+    background: MaterialPalette.surface-container-high;
+    drop-shadow-blur: 24px;
+    drop-shadow-offset-y: 8px;
+    drop-shadow-color: MaterialPalette.shadow-30;
+    clip: true;
+    forward-focus: keys;
+
+    TouchArea { }
+
+    keys := FocusScope {
+        key-pressed(event) => {
+            if event.text == Key.Escape {
+                root.escape();
+                return accept;
+            }
+            reject
+        }
     }
 
-    Rectangle {
-        width: min(parent.width - 32px, 560px);
-        height: min(parent.height - 32px, 400px);
-        x: (parent.width - self.width) / 2;
-        y: (parent.height - self.height) / 2;
-        background: Theme.surface-high;
-        border-color: Theme.error;
-        border-width: 1px;
-        border-radius: Theme.r-xl;
-        drop-shadow-blur: 24px;
-        drop-shadow-offset-y: 8px;
-        drop-shadow-color: Theme.shadow-strong;
+    layout := VerticalLayout {
+        padding: 24px;
+        spacing: 16px;
 
-        TouchArea {
-            x: 0px;
-            y: 0px;
-            width: parent.width;
-            height: parent.height;
+        if root.has-icon : HorizontalLayout {
+            alignment: center;
+            Image {
+                width: 24px;
+                height: 24px;
+                source: root.icon;
+                colorize: root.accent;
+            }
+        }
+
+        if root.title != "" : MaterialText {
+            text: root.title;
+            style: MaterialTypography.headline-small;
+            color: root.accent;
+            horizontal-alignment: root.has-icon ? center : left;
+            wrap: word-wrap;
+        }
+
+        @children
+    }
+}
+
+export component LogsOverlay {
+    property <bool> wide: root.width >= 760px;
+
+    Scrim {
+        width: 100%;
+        height: 100%;
+        dismiss => { Logs.open = false; }
+    }
+
+    panel := Rectangle {
+        x: root.wide ? (root.width - self.width) / 2 : 0px;
+        y: root.wide ? (root.height - self.height) / 2 : 0px;
+        width: root.wide ? min(900px, root.width - 64px) : root.width;
+        height: root.wide ? min(680px, root.height - 64px) : root.height;
+        border-radius: root.wide ? 28px : 0px;
+        background: MaterialPalette.surface;
+        drop-shadow-blur: 24px;
+        drop-shadow-color: MaterialPalette.shadow-30;
+        clip: true;
+        forward-focus: keys;
+
+        TouchArea { }
+
+        keys := FocusScope {
+            key-pressed(event) => {
+                if event.text == Key.Escape {
+                    Logs.open = false;
+                    return accept;
+                }
+                reject
+            }
         }
 
         VerticalLayout {
-            x: 0px;
-            y: 0px;
-            width: parent.width;
-            height: parent.height;
-            padding: 24px;
-            spacing: 16px;
-
-            Text {
-                text: Dialogs.fatal-title;
-                color: Theme.error;
-                font-size: Theme.title-lg;
-                font-weight: 700;
-                wrap: word-wrap;
-            }
-
-            ScrollView {
-                vertical-stretch: 1;
-                mouse-drag-pan-enabled: true;
-                VerticalLayout {
-                    alignment: start;
-                    spacing: 8px;
-                    Text {
-                        text: Dialogs.fatal-detail;
-                        color: Theme.on-surface;
-                        font-size: Theme.body;
-                        wrap: word-wrap;
-                    }
-                    if Dialogs.fatal-code != "" : Text {
-                        text: "错误代码 " + Dialogs.fatal-code;
-                        color: Theme.on-variant;
-                        font-size: Theme.label-sm;
-                    }
-                }
-            }
+            padding: 16px;
+            spacing: 12px;
 
             HorizontalLayout {
-                alignment: end;
-                spacing: 8px;
-                if Dialogs.fatal-retryable : PillButton {
-                    text: "重试";
-                    variant: "tonal";
-                    clicked => { Dialogs.retry(); }
+                spacing: 12px;
+                IconButton {
+                    icon: Icons.close;
+                    tooltip: "关闭";
+                    clicked => { Logs.open = false; }
                 }
-                PillButton {
-                    text: Session.active ? "结束游戏" : "知道了";
-                    variant: "filled";
-                    clicked => {
-                        if Session.active { Session.leave(); }
-                        Dialogs.fatal-retryable = false;
-                        Dialogs.fatal-active = false;
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    alignment: center;
+                    MaterialText {
+                        text: "日志";
+                        style: MaterialTypography.title-large;
+                        color: MaterialPalette.on-surface;
                     }
+                    MaterialText {
+                        text: Logs.scope == "core" && Logs.core != "" ? "核心：" + Logs.core : "全部记录";
+                        style: MaterialTypography.body-small;
+                        color: MaterialPalette.on-surface-variant;
+                        overflow: elide;
+                    }
+                }
+                if Logs.core != "" : VerticalLayout {
+                    alignment: center;
+                    SegmentedButton {
+                        items: [{ text: "仅此核心" }, { text: "全部" }];
+                        current-index: Logs.scope == "core" ? 0 : 1;
+                        index-changed(index) => {
+                            if index == 0 {
+                                Logs.scope = "core";
+                                Logs.load(Logs.core);
+                            } else {
+                                Logs.scope = "all";
+                                Logs.load("");
+                            }
+                        }
+                    }
+                }
+            }
+
+            TextEdit {
+                vertical-stretch: 1;
+                read-only: true;
+                font-family: "Consolas";
+                font-size: 12px;
+                text: Logs.text;
+            }
+
+            MaterialText {
+                text: "共 " + Logs.count + " 条（最近 200 条）";
+                style: MaterialTypography.body-small;
+                color: MaterialPalette.on-surface-variant;
+            }
+        }
+    }
+
+    init => { keys.focus(); }
+}
+
+export component EngineModal {
+    Scrim {
+        width: 100%;
+        height: 100%;
+    }
+
+    surface := DialogSurface {
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2;
+        width-limit: root.width - 32px;
+        height-limit: root.height - 32px;
+        surface-max-width: 560px;
+        surface-max-height: 600px;
+        title: Dialogs.modal-caption;
+        escape => { Dialogs.modal-cancel(); }
+
+        MaterialText {
+            vertical-stretch: 1;
+            text: Dialogs.modal-message;
+            style: MaterialTypography.body-medium;
+            color: MaterialPalette.on-surface-variant;
+            wrap: word-wrap;
+            overflow: elide;
+        }
+
+        if Dialogs.modal-has-input : TextField {
+            text <=> Dialogs.modal-text;
+            accepted(text) => { Dialogs.modal-submit(0, text); }
+        }
+
+        if Dialogs.modal-buttons.length > 0 : ScrollView {
+            vertical-stretch: 0;
+            height: min(220px, Dialogs.modal-buttons.length * 48px);
+            choices := VerticalLayout {
+                spacing: 8px;
+                for label[index] in Dialogs.modal-buttons : TonalButton {
+                    text: label;
+                    clicked => { Dialogs.modal-submit(index, Dialogs.modal-text); }
+                }
+            }
+        }
+
+        HorizontalLayout {
+            alignment: end;
+            spacing: 8px;
+            TextButton {
+                text: "取消";
+                clicked => { Dialogs.modal-cancel(); }
+            }
+            TextButton {
+                text: "退出游戏";
+                clicked => { Session.leave(); }
+            }
+        }
+    }
+
+    init => { surface.focus(); }
+}
+
+export component FatalOverlay {
+    Scrim {
+        width: 100%;
+        height: 100%;
+    }
+
+    surface := DialogSurface {
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2;
+        width-limit: root.width - 32px;
+        height-limit: root.height - 32px;
+        surface-max-width: 560px;
+        surface-max-height: 480px;
+        icon: Icons.error;
+        accent: MaterialPalette.error;
+        title: Dialogs.fatal-title;
+
+        VerticalLayout {
+            vertical-stretch: 1;
+            spacing: 8px;
+            MaterialText {
+                text: Dialogs.fatal-detail;
+                style: MaterialTypography.body-medium;
+                color: MaterialPalette.on-surface-variant;
+                wrap: word-wrap;
+                overflow: elide;
+            }
+            if Dialogs.fatal-code != "" : MaterialText {
+                text: "错误代码 " + Dialogs.fatal-code;
+                style: MaterialTypography.label-small;
+                color: MaterialPalette.on-surface-variant;
+            }
+        }
+
+        HorizontalLayout {
+            alignment: end;
+            spacing: 8px;
+            if Dialogs.fatal-retryable : TextButton {
+                text: "重试";
+                clicked => { Dialogs.retry(); }
+            }
+            FilledButton {
+                text: Session.active ? "结束游戏" : "知道了";
+                clicked => {
+                    if Session.active {
+                        Session.leave();
+                    }
+                    Dialogs.fatal-retryable = false;
+                    Dialogs.fatal-active = false;
                 }
             }
         }
     }
+
+    init => { surface.focus(); }
 }

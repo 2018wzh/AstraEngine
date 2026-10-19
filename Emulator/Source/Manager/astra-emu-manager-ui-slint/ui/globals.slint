@@ -7,10 +7,14 @@ export struct Appearance {
     cover-badges: bool,
 }
 
+export struct Choice {
+    id: string,
+    label: string,
+}
+
 export global App {
     in-out property <string> page: "library";
     in-out property <string> settings-category: "appearance";
-    in-out property <bool> system-dark: true;
     in-out property <Appearance> appearance: {
         theme-mode: "system",
         density: "comfortable",
@@ -19,19 +23,32 @@ export global App {
         reduce-motion: false,
         cover-badges: true,
     };
+    in-out property <bool> system-dark: true;
     out property <bool> dark: appearance.theme-mode == "system" ? system-dark : appearance.theme-mode == "dark";
     in-out property <string> version;
     in-out property <string> build;
     callback appearance-changed(Appearance);
+    // "data" | "logs" | "third-party-notices"
+    callback open-path(string);
+    callback restart();
+}
+
+export global Network {
+    in-out property <bool> allowed;
+    in-out property <bool> syncing;
+    in-out property <string> sync-status;
+    in-out property <string> source;
+    callback set-allowed(bool);
+    callback sync-now();
 }
 
 export struct GameCard {
     id: string,
     title: string,
-    family: string,
-    cover-uri: string,
+    subtitle: string,
     cover: image,
     tint: color,
+    ready: bool,
     problem: string,
     play-time: string,
     last-played: string,
@@ -43,29 +60,34 @@ export global Library {
     in-out property <string> query;
     in-out property <string> sort: "title";
     in-out property <string> compat-filter: "all";
-    in-out property <bool> cores-ready;
-    in-out property <bool> can-load-cores;
-    in-out property <bool> busy;
-    in-out property <string> status;
-    in-out property <bool> cover-loading;
+    in-out property <string> prepare-state: "unprepared";
+    in-out property <string> prepare-label: "准备";
+    in-out property <string> prepare-detail;
+    in-out property <float> prepare-progress: -1;
+    in-out property <bool> can-cancel-prepare;
     in-out property <string> selected-id;
     in-out property <bool> detail-open;
-    in-out property <int> detail-tab;
+    in-out property <bool> cover-loading;
+    callback prepare();
+    callback cancel-prepare();
+    callback add-directory();
     callback search(string);
     callback set-sort(string);
     callback set-compat-filter(string);
     callback select(string);
     callback launch(string);
-    callback rescan();
-    callback add-directory();
+    callback open-game-settings(string);
+    callback open-folder(string);
+    callback remove(string);
     callback cover-demand(int, string, bool, string);
 }
 
 export struct SelectedGame {
     id: string,
     title: string,
-    family: string,
+    engine: string,
     emulator: string,
+    emulator-id: string,
     launchable: bool,
     problem: string,
     play-time: string,
@@ -73,7 +95,6 @@ export struct SelectedGame {
     developer: string,
     release-date: string,
     platforms: string,
-    engine: string,
     description: string,
     tags: string,
     aliases: string,
@@ -83,12 +104,10 @@ export struct CompatInfo {
     status: string,
     notes: string,
     updated: string,
-    vndb-id: string,
-}
-
-export struct ReleaseOption {
-    id: string,
-    label: string,
+    release-id: string,
+    emulator-label: string,
+    report-url: string,
+    hint: string,
 }
 
 export struct PlaySession {
@@ -112,69 +131,221 @@ export struct BangumiProgress {
     note: string,
 }
 
-export struct ConfigField {
-    options: [string],
-    key: string,
-    label: string,
-    description: string,
-    kind: string,
-    value: string,
-    required: bool,
-    min: int,
-    max: int,
-}
-
 export global Selection {
     in-out property <SelectedGame> game;
     in-out property <image> cover;
     in-out property <color> tint;
+    in-out property <[Choice]> emulator-choices;
     in-out property <CompatInfo> compat;
-    in-out property <[ReleaseOption]> releases;
+    in-out property <[Choice]> releases;
+    in-out property <string> pinned-release;
     in-out property <[PlaySession]> history;
-    in-out property <[MatchReview]> matches;
-    in-out property <bool> metadata-busy;
-    in-out property <string> metadata-status;
     in-out property <BangumiProgress> bangumi;
     in-out property <string> bangumi-summary;
-    in-out property <[ConfigField]> engine-fields;
-    in-out property <[ConfigField]> family-fields;
-    in-out property <bool> musica-key-available;
-    callback fetch-releases();
+    in-out property <bool> metadata-busy;
+    in-out property <string> metadata-status;
+    in-out property <[MatchReview]> matches;
+    callback choose-emulator(string);
     callback pin-release(string);
-    callback refresh-compat();
+    callback fetch-releases();
+    callback sync-bangumi(BangumiProgress);
     callback search-metadata(string, string);
     callback accept-match(string);
     callback refresh-metadata(string);
     callback unlink-metadata(string);
-    callback sync-bangumi(BangumiProgress);
-    callback config-changed(string, string);
-    callback save-config();
-    callback reset-config();
-    callback pick-musica-key();
-    callback save-game-input(bool, string);
-    callback clear-game-input();
+}
+
+export struct ConfigField {
+    key: string,
+    label: string,
+    description: string,
+    group: string,
+    kind: string,
+    value: string,
+    display-value: string,
+    options: [string],
+    option-values: [string],
+    min: float,
+    max: float,
+    step: float,
+    unit: string,
+    advanced: bool,
+    overridden: bool,
+    error: string,
+}
+
+export struct GamepadBinding {
+    id: string,
+    label: string,
+    key: string,
+}
+
+export struct Recipe {
+    id: string,
+    title: string,
+    recommended: bool,
+}
+
+export struct PatchState {
+    step: int,
+    running: bool,
+    phase: string,
+    completed: float,
+    total: float,
+    output: string,
+    error: string,
+    can-start: bool,
+    script: string,
+    patch-directory: string,
+    output-directory: string,
+}
+
+export struct RenderState {
+    supported: bool,
+    options: [Choice],
+    mode: string,
+    custom-width: int,
+    custom-height: int,
+    min: string,
+    max: string,
+    note: string,
+    error: string,
+}
+
+export struct TranslationForm {
+    provider: string,
+    base-url: string,
+    openai-api: string,
+    model: string,
+    language: string,
+    timeout-s: int,
+    custom-prompt: string,
+    context-segments: int,
+    context-chars: int,
+}
+
+export struct Excluded {
+    id: string,
+    title: string,
+    location: string,
+}
+
+export global Settings {
+    in-out property <TranslationForm> translation;
+    in-out property <bool> translation-enabled;
+    in-out property <bool> secret-saved;
+    in-out property <[string]> models;
+    in-out property <string> translation-status;
+    callback save-translation(TranslationForm, string);
+    callback test-translation(TranslationForm, string);
+    callback set-translation-enabled(bool);
+
+    in-out property <bool> sensitive-covers;
+    in-out property <bool> bangumi-token-saved;
+    in-out property <string> compat-summary;
+    callback set-sensitive-covers(bool);
+    callback save-bangumi-token(string);
+    callback clear-bangumi-token();
+
+    in-out property <bool> gamepad-enabled: true;
+    in-out property <string> deadzone: "medium";
+    in-out property <[GamepadBinding]> bindings;
+    in-out property <string> capture-button;
+    in-out property <string> capture-hint;
+    in-out property <[string]> pad-state;
+    callback set-gamepad-enabled(bool);
+    callback set-deadzone(string);
+    callback reset-bindings();
+
+    in-out property <[string]> roots;
+    in-out property <[Excluded]> excluded;
+    callback add-root();
+    callback remove-root(string);
+    callback restore-game(string);
+
+    public function begin-capture(button: string) {
+        self.capture-button = button;
+        self.capture-hint = "";
+        GameSettings.capture-button = "";
+        GameSettings.capture-hint = "";
+    }
+
+    public function cancel-capture() {
+        self.capture-button = "";
+        self.capture-hint = "";
+    }
+}
+
+export global GameSettings {
+    in-out property <string> game-id;
+    in-out property <string> title;
+    in-out property <string> section: "emulator";
+    in-out property <[Choice]> emulator-choices;
+    in-out property <string> emulator-id;
+
+    in-out property <bool> render-supported;
+    in-out property <[Choice]> render-options;
+    in-out property <string> render-mode: "default";
+    in-out property <int> custom-width;
+    in-out property <int> custom-height;
+    in-out property <string> render-min;
+    in-out property <string> render-max;
+    in-out property <string> render-note;
+    in-out property <string> render-error;
+
+    in-out property <[ConfigField]> fields;
+
+    in-out property <bool> recommended-available;
+    in-out property <string> recommended-summary;
+
+    in-out property <bool> input-override;
+    in-out property <[GamepadBinding]> bindings;
+    in-out property <string> capture-button;
+    in-out property <string> capture-hint;
+
+    in-out property <[Recipe]> recipes;
+    in-out property <PatchState> patch;
+
+    callback close();
+    callback set-emulator(string);
+    callback set-render(string, int, int);
+    callback field-changed(string, string);
+    callback reset-field(string);
+    callback pick-path(string);
+    callback apply-recommended();
+    callback set-input-override(bool);
+    callback patch-pick-script();
+    callback patch-select-recipe(string);
+    // "patch" | "output"
+    callback patch-pick-directory(string);
+    callback patch-start();
+    callback patch-cancel();
+    callback patch-open-output();
+
+    public function begin-capture(button: string) {
+        self.capture-button = button;
+        self.capture-hint = "";
+        Settings.capture-button = "";
+        Settings.capture-hint = "";
+    }
+
+    public function cancel-capture() {
+        self.capture-button = "";
+        self.capture-hint = "";
+    }
 }
 
 export struct CoreInfo {
-    key: string,
+    id: string,
     name: string,
-    monogram: string,
+    engine: string,
     version: string,
-    capabilities: [string],
     state: string,
     source: string,
-    file: string,
     message: string,
+    capabilities: [string],
     removable: bool,
-}
-
-export global Cores {
-    in-out property <[CoreInfo]> items;
-    in-out property <bool> restart-required;
-    callback load();
-    callback install();
-    callback uninstall(string);
-    callback restart();
+    update-version: string,
 }
 
 export global Logs {
@@ -184,6 +355,31 @@ export global Logs {
     in-out property <string> text;
     in-out property <int> count;
     callback load(string);
+}
+
+export global Cores {
+    in-out property <[CoreInfo]> items;
+    in-out property <bool> restart-required;
+    in-out property <int> updates-available;
+    in-out property <[ConfigField]> default-fields;
+    in-out property <string> default-plugin;
+    in-out property <RenderState> default-render;
+    callback install-local();
+    callback install-online(string);
+    callback uninstall(string);
+    callback restart();
+    callback view-logs(string);
+    callback select-defaults(string);
+    callback default-field-changed(string, string);
+    callback reset-default-field(string);
+    callback set-default-render(string, int, int);
+
+    view-logs(core) => {
+        Logs.core = core;
+        Logs.scope = "core";
+        Logs.open = true;
+        Logs.load(core);
+    }
 }
 
 export struct Notice {
@@ -197,8 +393,19 @@ export struct Notice {
 
 export global Notices {
     in-out property <[Notice]> items;
-    in-out property <bool> expanded;
+    in-out property <string> snackbar-text;
+    in-out property <string> snackbar-action;
+    in-out property <int> snackbar-serial;
     callback dismiss(string);
+    callback snackbar-action-clicked();
+    callback view-logs(string);
+
+    view-logs(core) => {
+        Logs.core = core;
+        Logs.scope = core == "" ? "all" : "core";
+        Logs.open = true;
+        Logs.load(core);
+    }
 }
 
 export global Dialogs {
@@ -218,53 +425,13 @@ export global Dialogs {
     callback retry();
 }
 
-export struct TranslationProfile {
-    kind: string,
-    endpoint: string,
-    protocol: string,
-    model: string,
-    language: string,
-    timeout-ms: int,
-}
-
-export struct GamepadBinding {
-    id: string,
-    label: string,
-    key: string,
-}
-
-export global Settings {
-    in-out property <TranslationProfile> translation;
-    in-out property <string> translation-secret;
-    in-out property <bool> translation-consent;
-    callback save-translation(TranslationProfile, string);
-    callback test-translation();
-    callback grant-translation-consent();
-    in-out property <bool> vndb-enabled;
-    in-out property <bool> bangumi-enabled;
-    in-out property <bool> sensitive-covers;
-    in-out property <string> metadata-provider: "vndb";
-    in-out property <string> bangumi-token;
-    callback set-metadata-consent(string, bool, string);
-    callback set-sensitive-covers(string, bool);
-    in-out property <bool> gamepad-enabled;
-    in-out property <string> deadzone: "medium";
-    in-out property <[GamepadBinding]> bindings;
-    callback save-input(bool, string);
-    callback bind(string, string);
-    callback reset-bindings();
-    in-out property <string> compat-source;
-    in-out property <string> compat-summary;
-}
-
 export global Filters {
     in-out property <string> preset: "none";
     in-out property <[ConfigField]> fields;
     callback set-preset(string);
     callback field-changed(string, string);
+    callback reset-parameters();
     callback load-source();
-    callback save();
-    callback reset();
 }
 
 export struct EngineAction {
@@ -275,7 +442,10 @@ export struct EngineAction {
 
 export global Session {
     in-out property <bool> active;
+    in-out property <string> phase: "opening";
     in-out property <string> title;
+    in-out property <string> launch-title;
+    in-out property <image> launch-cover;
     in-out property <image> frame;
     in-out property <float> output-aspect: 1.333333;
     in-out property <float> native-width: 1024;
@@ -303,24 +473,10 @@ export global Session {
     callback pointer-state-changed();
 }
 
-export global FilePatch {
-    in-out property <bool> running;
-    in-out property <bool> can-start;
-    in-out property <string> phase;
-    in-out property <string> completed: "0";
-    in-out property <string> total;
-    in-out property <string> output;
-    in-out property <string> error;
-    in-out property <[string]> recipe-titles;
-    in-out property <[string]> recipe-scripts;
-    in-out property <int> catalog-index: -1;
-    in-out property <string> script;
-    in-out property <string> patch-directory;
-    in-out property <string> output-directory;
-    callback load-catalog();
-    callback pick-script();
-    callback pick-patch-directory();
-    callback pick-output-directory();
-    callback start(string, string, string);
-    callback cancel();
+export global Onboarding {
+    in-out property <int> step;
+    in-out property <[string]> roots;
+    callback add-root();
+    callback remove-root(string);
+    callback finish();
 }

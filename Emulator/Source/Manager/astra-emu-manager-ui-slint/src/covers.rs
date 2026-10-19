@@ -119,12 +119,10 @@ impl Demand {
         }
     }
 
-    fn accepts(&self, request: &Request, card: Option<&GameCard>) -> bool {
+    fn accepts(&self, request: &Request, card: Option<(&str, &str)>) -> bool {
         request.revision == self.revision
             && self.desired.contains(&request.row)
-            && card.is_some_and(|card| {
-                card.id.as_str() == request.case_id && card.cover_uri.as_str() == request.locator
-            })
+            && card.is_some_and(|(id, locator)| id == request.case_id && locator == request.locator)
     }
 
     fn next_rows(&self) -> impl Iterator<Item = usize> + '_ {
@@ -150,6 +148,7 @@ impl Demand {
 /// event-loop completion reach this owner without sending Rc or Image across threads.
 pub(crate) struct CoverModel {
     rows: VecModel<GameCard>,
+    locators: RefCell<Vec<String>>,
     indices: RefCell<HashMap<String, usize>>,
     demand: RefCell<Demand>,
     shared: Arc<Shared>,
@@ -196,6 +195,7 @@ impl CoverModel {
         }).map_err(|_| slint::PlatformError::Other("Cannot start cover decoder".into()))?;
         Ok(Self {
             rows: VecModel::default(),
+            locators: RefCell::default(),
             indices: RefCell::default(),
             demand: RefCell::default(),
             shared,
@@ -203,13 +203,15 @@ impl CoverModel {
         })
     }
 
-    pub(crate) fn replace(&self, cards: Vec<GameCard>, window: &ManagerWindow) {
+    pub(crate) fn replace(&self, cards: Vec<(GameCard, String)>, window: &ManagerWindow) {
         self.reset();
         *self.indices.borrow_mut() = cards
             .iter()
             .enumerate()
-            .map(|(row, card)| (card.id.to_string(), row))
+            .map(|(row, (card, _))| (card.id.to_string(), row))
             .collect();
+        let (cards, locators): (Vec<_>, Vec<_>) = cards.into_iter().unzip();
+        *self.locators.borrow_mut() = locators;
         self.rows.set_vec(cards);
         self.demand
             .borrow_mut()
@@ -323,20 +325,21 @@ impl CoverModel {
             let Some(card) = self.rows.row_data(row) else {
                 break;
             };
-            if card.cover_uri.is_empty() {
+            let locator = self.locators.borrow().get(row).cloned().unwrap_or_default();
+            if locator.is_empty() {
                 demand.completed.insert(row);
                 continue;
             }
             let previous = demand
                 .cache
                 .iter()
-                .find(|entry| entry.locator == card.cover_uri.as_str())
+                .find(|entry| entry.locator == locator)
                 .map(|entry| entry.stamp.clone());
             self.shared.push(Request {
                 revision: demand.revision,
                 row,
                 case_id: card.id.to_string(),
-                locator: card.cover_uri.to_string(),
+                locator,
                 previous,
             });
             demand.in_flight.insert(row);
@@ -353,7 +356,14 @@ impl CoverModel {
                 return;
             }
             demand.in_flight.remove(&request.row);
-            if !demand.accepts(&request, Some(&card)) {
+            let accepted = demand.accepts(
+                &request,
+                self.locators
+                    .borrow()
+                    .get(request.row)
+                    .map(|locator| (card.id.as_str(), locator.as_str())),
+            );
+            if !accepted {
                 drop(demand);
                 self.pump();
                 return;
@@ -413,18 +423,14 @@ impl CoverModel {
         self.pump();
     }
 
+    pub(crate) fn cover_of(&self, id: &str) -> Option<(slint::Image, slint::Color)> {
+        let row = *self.indices.borrow().get(id)?;
+        self.rows.row_data(row).map(|card| (card.cover, card.tint))
+    }
+
     fn update_inspector(&self, window: &ManagerWindow) {
         let selected = window.global::<Library>().get_selected_id();
-        let card = self
-            .indices
-            .borrow()
-            .get(selected.as_str())
-            .and_then(|row| self.rows.row_data(*row));
-        let cover = card
-            .as_ref()
-            .map(|card| card.cover.clone())
-            .unwrap_or_default();
-        let tint = card.map(|card| card.tint).unwrap_or_default();
+        let (cover, tint) = self.cover_of(selected.as_str()).unwrap_or_default();
         window.global::<Selection>().set_cover(cover);
         window.global::<Selection>().set_tint(tint);
     }
@@ -679,34 +685,21 @@ mod tests {
             desired: [0].into(),
             ..Demand::default()
         };
-        let mut card = GameCard {
-            id: "game-0".into(),
-            cover_uri: "cover-0".into(),
-            ..GameCard::default()
-        };
-        assert!(demand.accepts(&request, Some(&card)));
+        assert!(demand.accepts(&request, Some(("game-0", "cover-0"))));
         assert!(!demand.accepts(&request, None));
-        card.id = "game-1".into();
-        assert!(!demand.accepts(&request, Some(&card)));
-        card.id = "game-0".into();
-        card.cover_uri = "replacement".into();
-        assert!(!demand.accepts(&request, Some(&card)));
-        card.cover_uri = "cover-0".into();
+        assert!(!demand.accepts(&request, Some(("game-1", "cover-0"))));
+        assert!(!demand.accepts(&request, Some(("game-0", "replacement"))));
         demand.revision += 1;
-        assert!(!demand.accepts(&request, Some(&card)));
+        assert!(!demand.accepts(&request, Some(("game-0", "cover-0"))));
         demand.revision = 3;
         demand.desired.clear();
-        assert!(!demand.accepts(&request, Some(&card)));
+        assert!(!demand.accepts(&request, Some(("game-0", "cover-0"))));
     }
 
     #[test]
     fn refresh_during_decode_revalidates_after_the_current_batch() {
         let old = request(0, 3);
-        let card = GameCard {
-            id: "game-0".into(),
-            cover_uri: "cover-0".into(),
-            ..GameCard::default()
-        };
+        let card = Some(("game-0", "cover-0"));
         let mut demand = Demand {
             revision: 3,
             desired: [0, 1].into(),
@@ -721,8 +714,8 @@ mod tests {
         demand.completed.insert(1);
         let revision = demand.take_revalidation().unwrap();
         assert_eq!(demand.next_rows().collect::<Vec<_>>(), [0, 1]);
-        assert!(!demand.accepts(&old, Some(&card)));
-        assert!(demand.accepts(&Request { revision, ..old }, Some(&card)));
+        assert!(!demand.accepts(&old, card));
+        assert!(demand.accepts(&Request { revision, ..old }, card));
         assert!(demand.take_revalidation().is_none());
     }
 

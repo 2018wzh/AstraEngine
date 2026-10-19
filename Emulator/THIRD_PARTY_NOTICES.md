@@ -2,13 +2,23 @@
 
 本文件随 AstraEMU Windows 应用分发。发布包还需包含活动依赖的完整许可证文本；以下条目记录需要单独保留的来源与归因。
 
-## Slint 1.17.1
+## Slint 1.18.1
 
 - Copyright © SixtyFPS GmbH.
 - License mode: Slint Royalty-free Desktop, Mobile, and Web Applications License 2.0.
 - License: <https://slint.dev/terms-and-conditions>
-- AstraEMU 的顶层 About 页面直接显示 Slint 官方 `AboutSlint` widget。不得从 shipping UI 删除该页面或把它放到无法从顶层导航到达的位置。
+- AstraEMU 在 设置→关于 中直接显示 Slint 官方 `AboutSlint` widget，该位置可从一级导航“设置”到达。不得从 shipping UI 删除它或把它放到无法从一级导航到达的位置。
 - Slint 同时提供其他许可证；AstraEngine workspace 不因本产品选择 Royalty-free 2.0 而改为 GPL。
+
+## Material Components for Slint 1.1.0
+
+- Upstream: <https://material.slint.dev/zip/material-1.1.0.zip>（SHA-256 `83c57b6f1b8799ddacd94b7e8b140f3f2112c36407b6df31883da0ba4e2dd425`），原样保存在 `Source/Manager/astra-emu-manager-ui-slint/material-1.1.0/`，未作修改。
+- License: MIT。Copyright (c) 2026 SixtyFPS GmbH。完整文本见 `material-1.1.0/LICENSE.md`，运行包复制为 `licenses/slint-material/LICENSE.md`。
+
+## Material Symbols
+
+- Upstream: <https://github.com/google/material-design-icons>（`49d4db35df873165d6bd6ba09b063c7dafbac2f4`），`symbols/web/<name>/materialsymbolsrounded/<name>_24px.svg`，原样保存在 `Source/Manager/astra-emu-manager-ui-slint/ui/icons/`。
+- License: Apache-2.0。上游 `LICENSE` 为 Apache License 2.0 原文，未填写单独的版权行；完整文本见 `ui/icons/LICENSE`，运行包复制为 `licenses/material-symbols/LICENSE`。
 
 ## mlua 0.10.5
 

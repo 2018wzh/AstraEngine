@@ -1,31 +1,31 @@
 import { Palette } from "std-widgets.slint";
+import { MaterialWindow, MaterialWindowAdapter, MaterialPalette, NavigationRail, SmallAppBar } from "@material";
 import { Theme } from "./theme.slint";
+import { Icons } from "./icons.slint";
 import {
-    App, Library, Selection, Cores, Logs, Notices, Dialogs, Settings, Filters, Session, FilePatch,
-    GameCard, CoreInfo, Notice, EngineAction, Appearance, SelectedGame, CompatInfo,
-    ReleaseOption, PlaySession, MatchReview, BangumiProgress, ConfigField,
-    TranslationProfile, GamepadBinding,
+    Appearance, Choice, App, Network, GameCard, Library, SelectedGame, CompatInfo, PlaySession,
+    MatchReview, BangumiProgress, Selection, ConfigField, GamepadBinding, Recipe, PatchState,
+    RenderState, TranslationForm, Excluded, Settings, GameSettings, CoreInfo, Logs, Cores, Notice,
+    Notices, Dialogs, Filters, EngineAction, Session, Onboarding,
 } from "./globals.slint";
-import { NavRail, BottomNav } from "./components/nav.slint";
-import { NoticeStack } from "./components/notices.slint";
-import { LogPanel } from "./components/logs.slint";
-import { ModalDialog, FatalDialog } from "./components/dialogs.slint";
+import { NoticeStack, SnackbarHost } from "./components/notices.slint";
+import { LogsOverlay, EngineModal, FatalOverlay } from "./components/dialogs.slint";
 import { LibraryPage } from "./pages/library.slint";
-import { CoresPage } from "./pages/cores.slint";
+import { GameSettingsPage } from "./pages/game-settings.slint";
 import { SettingsPage } from "./pages/settings.slint";
-import { AboutPage } from "./pages/about.slint";
-import { GameViewPage } from "./pages/game-view.slint";
+import { OnboardingPage } from "./pages/onboarding.slint";
+import { GameView } from "./pages/game-view.slint";
 
 export {
-    App, Library, Selection, Cores, Logs, Notices, Dialogs, Settings, Filters, Session, FilePatch,
-    GameCard, CoreInfo, Notice, EngineAction, Appearance, SelectedGame, CompatInfo,
-    ReleaseOption, PlaySession, MatchReview, BangumiProgress, ConfigField,
-    TranslationProfile, GamepadBinding,
+    MaterialWindowAdapter,
+    Appearance, Choice, App, Network, GameCard, Library, SelectedGame, CompatInfo, PlaySession,
+    MatchReview, BangumiProgress, Selection, ConfigField, GamepadBinding, Recipe, PatchState,
+    RenderState, TranslationForm, Excluded, Settings, GameSettings, CoreInfo, Logs, Cores, Notice,
+    Notices, Dialogs, Filters, EngineAction, Session, Onboarding,
 }
 
-export component ManagerWindow inherits Window {
+export component ManagerWindow inherits MaterialWindow {
     title: Session.active && Session.title != "" ? Session.title : "AstraEMU";
-    background: Theme.surface;
     min-width: 360px;
     min-height: 640px;
     preferred-width: 1280px;
@@ -35,11 +35,26 @@ export component ManagerWindow inherits Window {
     property <length> usable-y: root.safe-area-insets.top;
     property <length> usable-width: root.width - root.safe-area-insets.left - root.safe-area-insets.right;
     property <length> usable-height: root.height - root.safe-area-insets.top - root.safe-area-insets.bottom;
-    property <bool> compact: usable-width < 600px;
+    property <bool> compact: root.usable-width < 600px;
+    property <bool> onboarding: App.page == "onboarding";
+    property <bool> show-rail: !root.compact && !root.onboarding;
+    property <bool> show-library-bar: root.compact && App.page == "library";
+    property <length> rail-width: 80px;
+    property <length> bar-height: 64px;
 
-    init => { Palette.color-scheme = App.dark ? ColorScheme.dark : ColorScheme.light; }
+    function apply-theme() {
+        Palette.color-scheme = App.dark ? ColorScheme.dark : ColorScheme.light;
+        MaterialPalette.schemes = {
+            light: Theme.scheme(Theme.seed, false),
+            dark: Theme.scheme(Theme.seed, true),
+        };
+    }
+
+    init => { root.apply-theme(); }
     property <bool> watch-dark: App.dark;
-    changed watch-dark => { Palette.color-scheme = App.dark ? ColorScheme.dark : ColorScheme.light; }
+    changed watch-dark => { root.apply-theme(); }
+    property <color> watch-seed: Theme.seed;
+    changed watch-seed => { root.apply-theme(); }
 
     property <bool> watch-session-active: Session.active;
     changed watch-session-active => {
@@ -56,6 +71,8 @@ export component ManagerWindow inherits Window {
     changed watch-modal => { Session.pointer-state-changed(); }
     property <bool> watch-fatal: Dialogs.fatal-active;
     changed watch-fatal => { Session.pointer-state-changed(); }
+    property <bool> watch-logs: Logs.open;
+    changed watch-logs => { Session.pointer-state-changed(); }
     property <float> watch-pointer-x: Session.pointer-x;
     changed watch-pointer-x => { Session.pointer-state-changed(); }
     property <float> watch-pointer-y: Session.pointer-y;
@@ -68,76 +85,120 @@ export component ManagerWindow inherits Window {
     property <string> watch-selected: Library.selected-id;
     changed watch-selected => { Library.cover-demand(-1, "", false, ""); }
     property <string> watch-page: App.page;
-    changed watch-page => { Library.cover-demand(-1, "", false, ""); }
+    changed watch-page => {
+        rail.current-index = App.page == "settings" ? 1 : 0;
+        Settings.cancel-capture();
+        GameSettings.cancel-capture();
+        Library.cover-demand(-1, "", false, "");
+    }
     property <string> watch-view: App.appearance.view-mode;
     changed watch-view => { Library.cover-demand(-1, "", false, ""); }
     property <bool> watch-cover-loading: Library.cover-loading;
     changed watch-cover-loading => { Library.cover-demand(-1, "", false, ""); }
 
-    if !root.compact : NavRail {
+    rail := NavigationRail {
         x: root.usable-x;
         y: root.usable-y;
+        width: root.rail-width;
         height: root.usable-height;
+        visible: root.show-rail;
+        alignment: start;
+        current-index: App.page == "settings" ? 1 : 0;
+        items: [
+            { icon: Icons.library-books, text: "游戏库" },
+            { icon: Icons.settings, text: "设置" },
+        ];
+        index-changed(index) => {
+            App.page = index == 1 ? "settings" : "library";
+        }
+    }
+
+    if root.show-library-bar : SmallAppBar {
+        x: root.usable-x;
+        y: root.usable-y;
+        width: root.usable-width;
+        height: root.bar-height;
+        title: "游戏库";
+        trailing-buttons: [{ icon: Icons.settings, tooltip: "设置", enabled: true }];
+        trailing-button-clicked(index) => { App.page = "settings"; }
     }
 
     pages := Rectangle {
-        x: root.usable-x + (root.compact ? 0px : 88px);
-        y: root.usable-y;
-        width: root.usable-width - (root.compact ? 0px : 88px);
-        height: root.usable-height - (root.compact ? 80px : 0px);
+        x: root.usable-x + (root.show-rail ? root.rail-width : 0px);
+        y: root.usable-y + (root.show-library-bar ? root.bar-height : 0px);
+        width: root.usable-width - (root.show-rail ? root.rail-width : 0px);
+        height: root.usable-height - (root.show-library-bar ? root.bar-height : 0px);
         clip: true;
 
         if App.page == "library" : LibraryPage {
             x: 0px;
             y: 0px;
-            width: parent.width;
-            height: parent.height;
+            width: pages.width;
+            height: pages.height;
             compact: root.compact;
         }
-        if App.page == "cores" : CoresPage {
+        if App.page == "game-settings" : GameSettingsPage {
             x: 0px;
             y: 0px;
-            width: parent.width;
-            height: parent.height;
+            width: pages.width;
+            height: pages.height;
+            compact: root.compact;
         }
         if App.page == "settings" : SettingsPage {
             x: 0px;
             y: 0px;
-            width: parent.width;
-            height: parent.height;
+            width: pages.width;
+            height: pages.height;
             compact: root.compact;
         }
-        if App.page == "about" : AboutPage {
+        if App.page == "onboarding" : OnboardingPage {
             x: 0px;
             y: 0px;
-            width: parent.width;
-            height: parent.height;
+            width: pages.width;
+            height: pages.height;
         }
     }
 
-    if root.compact : BottomNav {
-        x: root.usable-x;
-        y: root.usable-y + root.usable-height - 80px;
-        width: root.usable-width;
-    }
-
-    if Session.active : GameViewPage {
+    if Session.active : GameView {
         x: root.usable-x;
         y: root.usable-y;
         width: root.usable-width;
         height: root.usable-height;
-        z: 10;
+    }
+
+    SnackbarHost {
+        x: root.usable-x;
+        y: root.usable-y;
+        width: root.usable-width;
+        height: root.usable-height;
     }
 
     NoticeStack {
-        x: 0px;
-        y: 0px;
-        width: 100%;
-        height: 100%;
-        compact: root.compact;
-        z: 100;
+        x: root.usable-x;
+        y: root.usable-y;
+        width: root.usable-width;
+        height: root.usable-height;
+        bottom-inset: root.compact && Notices.snackbar-text != "" ? 88px : 16px;
     }
-    LogPanel { z: 105; }
-    ModalDialog { z: 110; }
-    FatalDialog { z: 1000; }
+
+    if Logs.open : LogsOverlay {
+        x: root.usable-x;
+        y: root.usable-y;
+        width: root.usable-width;
+        height: root.usable-height;
+    }
+
+    if Dialogs.modal-active : EngineModal {
+        x: root.usable-x;
+        y: root.usable-y;
+        width: root.usable-width;
+        height: root.usable-height;
+    }
+
+    if Dialogs.fatal-active : FatalOverlay {
+        x: root.usable-x;
+        y: root.usable-y;
+        width: root.usable-width;
+        height: root.usable-height;
+    }
 }

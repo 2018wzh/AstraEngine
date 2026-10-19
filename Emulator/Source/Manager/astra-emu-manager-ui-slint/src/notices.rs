@@ -65,17 +65,17 @@ fn is_error_code(token: &str) -> bool {
 
 fn exact_text(code: &str) -> Option<(&'static str, &'static str)> {
     Some(match code {
-        "ASTRA_EMU_CORES_NOT_READY" => ("模拟器核心尚未加载", "请先在“核心”页加载核心。"),
-        "ASTRA_EMU_FAMILY_INITIALIZING" => ("核心仍在加载或扫描中", "请稍候再试。"),
+        "ASTRA_EMU_CORES_NOT_READY" => ("资料库尚未准备", "请先在游戏库中点「准备」。"),
+        "ASTRA_EMU_FAMILY_INITIALIZING" => ("正在准备资料库", "请稍候再试。"),
         "ASTRA_EMU_FAMILY_SESSION_ALREADY_ACTIVE" => {
             ("已有游戏正在运行", "请先返回游戏库结束当前游戏。")
         }
         "ASTRA_EMU_FAMILY_PROBE_REQUIRED" => ("这部作品尚未识别", "请重新扫描游戏目录。"),
         "ASTRA_EMU_FAMILY_PROVIDER_SELECTION_REQUIRED" => (
             "需要选择模拟器",
-            "有多个核心可以运行这部作品，请在作品详情的“选项”中选择一个。",
+            "有多个模拟器可以运行这部作品，请在作品详情中选择一个。",
         ),
-        "ASTRA_EMU_GAME_NOT_FOUND" => ("找不到这部作品", "它可能已被移除，请重新扫描。"),
+        "ASTRA_EMU_GAME_NOT_FOUND" => ("找不到这部作品", "它可能已被移除，请刷新资料库。"),
         "ASTRA_EMU_OWNER_ALREADY_STARTED" => ("核心已加载", "更换核心后需要重启 AstraEMU。"),
         "ASTRA_EMU_OWNER_PANICKED" => ("核心后台意外退出", "请重启 AstraEMU 并查看日志。"),
         "ASTRA_EMU_FAMILY_LOAD_LIBRARY" => {
@@ -94,9 +94,52 @@ fn exact_text(code: &str) -> Option<(&'static str, &'static str)> {
         "ASTRA_EMU_FAMILY_DIAGNOSTIC_INIT" => ("核心诊断初始化失败", "请查看日志。"),
         "ASTRA_EMU_FAMILY_SCAN_DIRECTORY" => ("无法读取核心目录", "请检查目录权限。"),
         "ASTRA_EMU_CORE_RETRY_UNAVAILABLE" => ("无法重试", "这个错误不支持重试，请结束游戏。"),
-        "ASTRA_EMU_INPUT_QUEUE_FULL" => ("输入过多", "游戏未能及时处理输入，已停止运行。"),
+        "ASTRA_EMU_INPUT_QUEUE_FULL" => ("输入过多", "游戏未能及时处理，部分按键已被忽略。"),
+        "ASTRA_EMU_RENDER_PREFERENCE_INVALID" => (
+            "渲染分辨率设置无效",
+            "预设只能选 720p、1080p、1440p 或 2160p，自定义宽高须在 1 到 16384 之间。",
+        ),
+        "ASTRA_EMU_RELEASE_ID_INVALID" => (
+            "发行版本编号无效",
+            "VNDB 发行版本编号应为 r 加数字，例如 r12345，且不超过 64 个字符。",
+        ),
+        "ASTRA_EMU_RENDER_EXTENT_UNSUPPORTED" => (
+            "自定义分辨率超出该模拟器支持范围",
+            "请改用该模拟器支持范围内的宽高。",
+        ),
+        "ASTRA_EMU_NETWORK_PERMISSION_REQUIRED" => {
+            ("需要先允许联网", "需要先在 设置→联网与资料 中允许联网。")
+        }
+        "ASTRA_EMU_PREPARE_BUSY" => ("资料库正在准备中", "当前准备完成后再试。"),
+        "ASTRA_EMU_PREPARE_RESTART_REQUIRED" => (
+            "准备失败，需要重启",
+            "核心加载失败，请查看核心诊断后重启 AstraEMU。",
+        ),
+        "ASTRA_EMU_SCAN_CANCELLED" => ("已取消扫描", "资料库保持不变。"),
+        "ASTRA_EMU_OPEN_PATH_FAILED" => ("无法打开目录", "请确认该位置仍然存在。"),
+        "ASTRA_EMU_BANGUMI_TOKEN_REQUIRED" => ("请填写 Bangumi 令牌", "令牌为空，未作修改。"),
+        "ASTRA_EMU_METADATA_HASH_MISMATCH" => (
+            "元数据校验失败",
+            "下载的文件与索引不符，已保留原有数据。请稍后重新同步。",
+        ),
+        "ASTRA_EMU_METADATA_CACHE_WRITE" => (
+            "无法保存元数据",
+            "写入数据目录失败，已保留原有数据。请检查磁盘空间和目录权限。",
+        ),
+        "ASTRA_EMU_COMPATIBILITY_DUPLICATE" => (
+            "兼容性数据有重复条目",
+            "同一发行版本和模拟器出现了多条记录，本次更新未采用。",
+        ),
+        "ASTRA_EMU_PRESET_INVALID" => (
+            "推荐配置无法套用",
+            "其中有字段不存在或取值无效，已恢复原来的设置。",
+        ),
+        "ASTRA_EMU_CORE_LAYOUT" => (
+            "核心目录结构不正确",
+            "每个核心目录内必须恰好有一个核心文件。请重新安装该核心。",
+        ),
         "ASTRA_EMU_TRANSLATION_PROFILE_REQUIRED" => {
-            ("尚未配置翻译服务", "请在 设置 › 实时翻译 中填写。")
+            ("尚未配置翻译服务", "请在 设置→实时翻译 中填写并保存。")
         }
         "ASTRA_EMU_CORE_INSTALL_NAME" => (
             "不是有效的核心文件",
@@ -118,16 +161,18 @@ fn fallback_title(code: &str) -> &'static str {
     match rest.split('_').next().unwrap_or("") {
         "FAMILY" | "CORE" | "CORES" | "MODULE" | "OWNER" | "PROBE" | "EMULATOR" | "STATIC"
         | "MUSICA" | "FVP" | "SESSION" => "模拟器核心出错",
-        "HOST" | "WINDOW" | "GPU" | "D3D12" | "FRAME" | "SLINT" | "SYSTEM" | "OUT" => {
+        "HOST" | "WINDOW" | "GPU" | "FRAME" | "SLINT" | "SYSTEM" | "OUT" | "RENDER" => {
             "窗口或显示出错"
         }
         "TEXT" | "TRANSLATION" | "EXTENSION" => "实时翻译出错",
-        "METADATA" | "VNDB" | "BANGUMI" => "作品资料服务出错",
+        "METADATA" | "VNDB" | "BANGUMI" | "NETWORK" | "RELEASE" => "作品资料服务出错",
         "COMPATIBILITY" => "兼容性数据出错",
         "FILTER" | "EFFECT" | "DXC" => "画面滤镜出错",
         "PATCH" => "文件补丁处理失败",
         "INPUT" | "GAMEPAD" => "输入设备出错",
-        "LIBRARY" | "GAME" | "CASE" | "SEARCH" | "DATA" | "EXECUTABLE" => "游戏库出错",
+        "LIBRARY" | "GAME" | "CASE" | "SEARCH" | "DATA" | "EXECUTABLE" | "PREPARE" | "SCAN"
+        | "OPEN" => "游戏库出错",
+        "PRESET" => "推荐配置出错",
         "AUDIO" => "声音输出出错",
         "MODAL" | "MANAGER" => "管理器出错",
         _ => "发生错误",
