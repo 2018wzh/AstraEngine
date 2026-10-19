@@ -176,4 +176,8 @@ pub enum MetadataError {
     CoverBlocked(&'static str),
     #[error("ASTRA_EMU_METADATA_UPSTREAM: {0}")]
     Upstream(String),
+    #[error("ASTRA_EMU_METADATA_DUPLICATE: {0}")]
+    Duplicate(String),
+    #[error("ASTRA_EMU_METADATA_HASH_MISMATCH: {0}")]
+    HashMismatch(String),
 }

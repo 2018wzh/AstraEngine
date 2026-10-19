@@ -1,8 +1,13 @@
 mod compatibility;
+mod cores;
 mod cover;
+mod fields;
+mod index;
 mod license;
 mod matcher;
 mod model;
+mod presets;
+mod sync;
 mod vndb;
 
 #[cfg(not(target_os = "android"))]
@@ -11,14 +16,25 @@ mod bangumi;
 #[cfg(not(target_os = "android"))]
 pub use bangumi::{BangumiProvider, BangumiProviderConfig};
 pub use compatibility::{
-    compatibility_json_schema, parse_compatibility_response, CompatibilityClient,
-    CompatibilityDatabase, CompatibilityEntry, CompatibilityError, CompatibilityFetch,
-    CompatibilityStatus, COMPATIBILITY_SCHEMA_VERSION, DEFAULT_COMPATIBILITY_SOURCE_URL,
+    compatibility_json_schema, parse_compatibility_database, parse_compatibility_response,
+    CompatibilityClient, CompatibilityDatabase, CompatibilityEntry, CompatibilityError,
+    CompatibilityFetch, CompatibilityStatus, COMPATIBILITY_SCHEMA_VERSION,
+    DEFAULT_COMPATIBILITY_SOURCE_URL,
+};
+pub use cores::{
+    parse_core_catalog, CoreCatalog, CoreCatalogEntry, CORE_CATALOG_SCHEMA_VERSION,
+    CORE_RELEASE_URL_PREFIX, MAX_CORE_PACKAGE_BYTES,
 };
 pub use cover::{CoverFetcher, CoverPolicy};
+pub use index::{
+    parse_metadata_index, IndexedFile, MetadataIndex, MAX_METADATA_FILE_BYTES,
+    MAX_METADATA_TOTAL_BYTES, METADATA_INDEX_FILE, METADATA_INDEX_SCHEMA_VERSION,
+};
 pub use license::{MetadataLicenseManifest, ReleaseUse};
 pub use matcher::{match_metadata, normalize_title, MatchInput, MATCHER_VERSION};
 pub use model::*;
+pub use presets::{parse_preset_database, Preset, PresetDatabase, PRESET_DATABASE_SCHEMA_VERSION};
+pub use sync::{MetadataSyncClient, SyncOutcome, DEFAULT_METADATA_BASE_URL};
 pub use vndb::{VndbProvider, VndbProviderConfig};
 
 #[allow(async_fn_in_trait)]

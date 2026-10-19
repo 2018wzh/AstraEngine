@@ -86,9 +86,18 @@ the Host still refuses unavailable window/modal operations without answering the
 
 Windows x64, MSVC 14.51 (or a compatible verified toolset), CMake >=3.28, Ninja,
 WinFlexBison 2.5.25/Bison 3.8.2, native OpenGL and an OpenAL playback device.
-Use the retained original vcpkg manifest/overlays: static FFmpeg 3.3.9 with Yasm,
+Use the retained original vcpkg manifest/overlays: FFmpeg 3.3.9 with Yasm,
 Cocos 3.17.2, SevenZip 26.04, UnRAR and all original plugins. Do not substitute
 SDK FFmpeg, skip layerExImage, or use the Artemis renderer.
+
+FFmpeg is dynamically linked (LGPL-2.1): the `x64-windows` triplet builds
+`avcodec-57.dll`, `avformat-57.dll`, `avutil-55.dll` and the other FFmpeg DLLs,
+and the core imports them. libbpg selects the HEVC decoder through the public
+`avcodec_find_decoder_by_name("hevc")`, and `NativeSession` calls
+`TVPInitLibAVCodec()` during single-threaded startup so the decoders are
+registered before any BPG image loads. Ship every FFmpeg DLL that
+`dumpbin /dependents astra_emu_krkr.dll` lists (from
+`.work/krkr-native/vcpkg_installed/x64-windows/bin/`) in the core directory.
 
 Run from the exclusive checkout in a captured `vcvars64.bat` environment. Set
 `VCPKG_ROOT` to the tool checkout and `BISON_EXECUTABLE` to the installed

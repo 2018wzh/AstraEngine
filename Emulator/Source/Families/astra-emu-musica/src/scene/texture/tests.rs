@@ -1,9 +1,9 @@
 use super::*;
 use crate::{
-    mount_musica, parse_sc, profile::mount_musica_with_texture_overrides, MusicaVm,
-    ScOpcodeCatalog, MUSICA_KEY_FILE,
+    mount_musica, parse_sc, profile::mount_musica_with_texture_overrides, MusicaVm, ScOpcodeCatalog,
 };
 use astra_core::Hash256;
+use astra_emu_musica_keys::MUSICA_KEY_FILE;
 use std::io::{Cursor, Write};
 
 fn ani() -> Vec<u8> {
@@ -111,7 +111,7 @@ fn profile_texture_overrides_preserve_native_geometry_and_ani_origin() {
     std::fs::write(root.path().join("hd/static.png"), replacement_png).unwrap();
     std::fs::write(root.path().join("hd/ani.png"), replacement_ani).unwrap();
     let profile_path = root.path().join(MUSICA_KEY_FILE);
-    let mut key = crate::load_musica_key_file(&profile_path).unwrap();
+    let mut key = astra_emu_musica_keys::load_musica_key_file(&profile_path).unwrap();
     key.texture_overrides = std::collections::BTreeMap::from([
         ("musica:/bg/BG.png".into(), "hd/static.png".into()),
         ("musica:/bg/BG.ANI".into(), "hd/ani.png".into()),
@@ -167,8 +167,8 @@ fn texture_override_profile_rejects_unsupported_archive_sources() {
     )
     .unwrap();
     let profile_path = root.path().join(MUSICA_KEY_FILE);
-    let mut profile = crate::load_musica_key_file(&profile_path).unwrap();
-    let set_override = |key: &mut crate::MusicaKeyFile, source: &str| {
+    let mut profile = astra_emu_musica_keys::load_musica_key_file(&profile_path).unwrap();
+    let set_override = |key: &mut astra_emu_musica_keys::MusicaKeyFile, source: &str| {
         key.texture_overrides =
             std::collections::BTreeMap::from([(source.into(), "hd/replacement.png".into())]);
         std::fs::write(&profile_path, toml::to_string_pretty(key).unwrap()).unwrap();
@@ -226,7 +226,7 @@ fn profile_texture_overrides_render_gpu_at_all_scales_with_crop_and_offset() {
     )
     .unwrap();
     let profile_path = root.path().join(MUSICA_KEY_FILE);
-    let mut key = crate::load_musica_key_file(&profile_path).unwrap();
+    let mut key = astra_emu_musica_keys::load_musica_key_file(&profile_path).unwrap();
     key.texture_overrides = std::collections::BTreeMap::from([
         ("musica:/bg/BG.png".into(), "hd/static.png".into()),
         ("musica:/bg/BG.ANI".into(), "hd/ani.png".into()),

@@ -278,7 +278,7 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
     crate::startup::mark("ui_backend_begin");
     #[cfg(not(target_os = "android"))]
     {
-        let mut settings = slint::wgpu_29::WGPUSettings::default();
+        let mut settings = slint::wgpu_30::WGPUSettings::default();
         settings.power_preference = wgpu::PowerPreference::HighPerformance;
         settings.device_memory_hints = wgpu::MemoryHints::Performance;
         // The final-frame effects use compute and storage textures; Slint's UI-only
@@ -287,7 +287,7 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
         settings.device_required_features |= crate::effects::FilterEngine::required_features();
         slint::BackendSelector::new()
             .backend_name("winit".into())
-            .require_wgpu_29(slint::wgpu_29::WGPUConfiguration::Automatic(settings))
+            .require_wgpu_30(slint::wgpu_30::WGPUConfiguration::Automatic(settings))
             .select()?;
     }
     crate::startup::mark("ui_backend_selected");
@@ -426,8 +426,8 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
     let initial_window_pending = std::cell::Cell::new(true);
     let first_ui_frame_pending = std::cell::Cell::new(true);
     adapter.window().window().set_rendering_notifier(move |state, api| {
-        let slint::GraphicsAPI::WGPU29 { device, queue, .. } = api else {
-            record_fatal(&fatal_error_callback, "rendering notifier did not provide WGPU 29".into());
+        let slint::GraphicsAPI::WGPU30 { device, queue, .. } = api else {
+            record_fatal(&fatal_error_callback, "rendering notifier did not provide WGPU 30".into());
             let _ = slint::quit_event_loop();
             return;
         };

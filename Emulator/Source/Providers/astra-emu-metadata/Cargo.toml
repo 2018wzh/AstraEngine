@@ -13,6 +13,7 @@ image.workspace = true
 reqwest.workspace = true
 reqwest12 = { package = "reqwest", version = "0.12.22", default-features = false, features = ["json", "rustls-tls"] }
 schemars.workspace = true
+semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
@@ -29,3 +30,9 @@ vn.workspace = true
 # compiled out there and the manager reports a typed diagnostic instead.
 [target.'cfg(not(target_os = "android"))'.dependencies]
 bangumi-api.workspace = true
+
+[dev-dependencies]
+parking_lot = "0.12"
+rcgen.workspace = true
+tokio = { workspace = true, features = ["io-util", "net"] }
+tokio-rustls.workspace = true

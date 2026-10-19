@@ -83,14 +83,14 @@ fn native_gpu_eden_import_continues_saves_and_exports_authoritative_message() {
     assert_eq!(session.message.as_ref().unwrap().0, "continued");
     assert!(crate::eden_save::export_slot(
         root.path(),
-        std::path::Path::new(crate::MUSICA_KEY_FILE),
+        std::path::Path::new(astra_emu_musica_keys::MUSICA_KEY_FILE),
         11,
     )
     .is_err());
     Box::new(session).close().unwrap();
     let exported = crate::eden_save::export_slot(
         root.path(),
-        std::path::Path::new(crate::MUSICA_KEY_FILE),
+        std::path::Path::new(astra_emu_musica_keys::MUSICA_KEY_FILE),
         10,
     )
     .unwrap();

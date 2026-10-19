@@ -4,8 +4,11 @@ use crate::test_fixture as fixture;
 fn setup() -> (tempfile::TempDir, MusicaMountedVfs, Mixer) {
     let root = tempfile::tempdir().unwrap();
     fixture::game(root.path(), &[0]);
-    let archive =
-        crate::mount_musica(root.path(), &root.path().join(crate::MUSICA_KEY_FILE)).unwrap();
+    let archive = crate::mount_musica(
+        root.path(),
+        &root.path().join(astra_emu_musica_keys::MUSICA_KEY_FILE),
+    )
+    .unwrap();
     let mut mixer = Mixer::new().unwrap();
     mixer
         .load(1, "musica:/bgm/tone.ogg", &archive, &AtomicBool::new(false))

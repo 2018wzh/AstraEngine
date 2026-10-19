@@ -11,6 +11,7 @@ path = "src/main.rs"
 [dependencies]
 astra-core = { path = "../../../../Engine/Source/Runtime/astra-core" }
 astra-emu-musica = { path = "../../Families/astra-emu-musica" }
+astra-emu-musica-keys = { path = "../../Families/astra-emu-musica-keys" }
 astra-observability = { path = "../../../../Engine/Source/Developer/astra-observability" }
 clap.workspace = true
 encoding_rs.workspace = true

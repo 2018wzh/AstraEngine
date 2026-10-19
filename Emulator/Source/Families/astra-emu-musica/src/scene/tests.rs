@@ -1,6 +1,7 @@
 use super::*;
-use crate::{mount_musica, parse_sc, MusicaVm, ScOpcodeCatalog, MUSICA_KEY_FILE};
+use crate::{mount_musica, parse_sc, MusicaVm, ScOpcodeCatalog};
 use astra_core::Hash256;
+use astra_emu_musica_keys::MUSICA_KEY_FILE;
 
 #[test]
 #[ignore = "requires a hardware GPU"]

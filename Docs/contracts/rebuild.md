@@ -119,7 +119,13 @@ VM 内存上限 256MiB，文件读范围复用 `ByteRange` 的 16MiB 上限，�
 
 ### 原生 ASS 字幕
 
-`astra-subtitle` 是独立的 owner-thread 原生组件，固定 libass 0.17.4，不依赖 Luau、SDK 或游戏核心。Windows 使用独立 vcpkg manifest 和 `x64-windows-static-md`；`ASTRA_SUBTITLE_VCPKG_ROOT` 指向该安装，不更改既有 FFmpeg 根目录。只加载调用方提供的内存字体，禁用系统字体和默认字体回退；实际缺字、缺字体及原生失败返回安全的类别和阶段，不输出字幕正文。
+`astra-subtitle` 是独立的 owner-thread 原生组件，固定 libass 0.17.4，不依赖 Luau、SDK 或游戏核心。Windows 使用独立 vcpkg manifest 和 overlay triplet `x64-windows-static-md-dynbidi`（`Engine/Source/Runtime/astra-subtitle/triplets/`）：libass、FreeType、HarfBuzz 等静态链接，只有 LGPL 的 FriBidi 为 DLL，随使用字幕的核心放在同一核心目录。`ASTRA_SUBTITLE_VCPKG_ROOT` 指向该安装，不更改既有 FFmpeg 根目录。安装命令：
+
+```text
+vcpkg install --x-manifest-root=Engine/Source/Runtime/astra-subtitle --overlay-triplets=Engine/Source/Runtime/astra-subtitle/triplets --triplet x64-windows-static-md-dynbidi --x-install-root=<ASTRA_SUBTITLE_VCPKG_ROOT>/installed
+```
+
+`<ASTRA_SUBTITLE_VCPKG_ROOT>` 须含 `.vcpkg-root`，所用 vcpkg 检出须包含 manifest 的 `builtin-baseline`。只加载调用方提供的内存字体，禁用系统字体和默认字体回退；实际缺字、缺字体及原生失败返回安全的类别和阶段，不输出字幕正文。
 
 调用方传入实际媒体毫秒时钟、视频存储尺寸和显示 raster，暂停、跳转、替换与结束由媒体生命周期控制。帧借用有序 bitmap runs，区分内容变化、仅位置变化和未变化；mask 及描述符复用，不能跨下一次 render 保留借用。ASS 的矩阵声明与实际视频 SDR 矩阵/range 共同决定颜色，不按分辨率猜测；窗口 letterbox、裁剪和 HDR 策略由消费者显式处理。该组件不复制整张游戏帧，也不逐帧执行脚本。
 

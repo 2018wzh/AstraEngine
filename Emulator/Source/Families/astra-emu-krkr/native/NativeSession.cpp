@@ -11,6 +11,7 @@
 #include "environ/Application.h"
 #include "environ/ConfigManager/GlobalConfigManager.h"
 #include "base/SysInitIntf.h"
+#include "movie/ffmpeg/krffmpeg.h"
 #include "visual/RenderManager.h"
 #include "visual/impl/WindowImpl.h"
 #include "platform/CCApplication.h"
@@ -148,6 +149,7 @@ void NativeSession::boot(const AstraKrkrBootOptions &options) {
     if(!::Application) ::Application = new tTVPApplication();
     cocos2d::FileUtils::getInstance()->setDefaultResourceRootPath(resources);
     cocos2d::FileUtils::getInstance()->setWritablePath(writable);
+    TVPInitLibAVCodec();
     GlobalConfigManager::GetInstance()->Reload();
     app_ = std::make_unique<TVPAppDelegate>();
     auto application = static_cast<cocos2d::ApplicationProtocol *>(app_.get());

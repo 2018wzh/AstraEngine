@@ -126,7 +126,7 @@ fn imports_valid_nrbf_into_canonical_toml_without_executable_patch() {
     assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
     let output = directory.path().join("key.toml");
     import(&formats_path, "Public Fixture", 123, false, &output).unwrap();
-    let profile = astra_emu_musica::load_musica_key_file(&output).unwrap();
+    let profile = astra_emu_musica_keys::load_musica_key_file(&output).unwrap();
     assert_eq!(profile.schema, MUSICA_KEY_SCHEMA);
     assert_eq!(profile.paz_version, 0);
     assert_eq!(profile.index_size_xor, 123);
