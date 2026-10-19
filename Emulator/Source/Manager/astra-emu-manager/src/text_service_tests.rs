@@ -4,8 +4,8 @@ impl SecretResolver for NoSecrets {
     fn resolve(
         &self,
         _: &str,
-    ) -> Result<String, astra_emu_translation_openai_compatible::TranslationError> {
-        Err(astra_emu_translation_openai_compatible::TranslationError::SecretUnavailable)
+    ) -> Result<String, astra_emu_translation::TranslationError> {
+        Err(astra_emu_translation::TranslationError::SecretUnavailable)
     }
 }
 fn bridge(source: &str, epoch: u64) -> TextReplacementBridge {
@@ -185,7 +185,7 @@ fn native_cancel_stops_tls_wait_and_releases_the_shared_luau_queue() {
         fn resolve(
             &self,
             _: &str,
-        ) -> Result<String, astra_emu_translation_openai_compatible::TranslationError> {
+        ) -> Result<String, astra_emu_translation::TranslationError> {
             Ok("public-fixture-token".into())
         }
     }

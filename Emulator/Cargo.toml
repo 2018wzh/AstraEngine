@@ -12,7 +12,7 @@ members = [
     "Source/Programs/astra-emu-musica-cli",
     "Source/Tools/astra-emu-patch",
     "Source/Manager/astra-emu-manager-core",
-    "Source/Providers/astra-emu-translation-openai-compatible",
+    "Source/Providers/astra-emu-translation",
     "Source/Providers/astra-emu-metadata",
     "Source/Manager/astra-emu-manager-ui-slint",
     "Source/Manager/astra-emu-manager",

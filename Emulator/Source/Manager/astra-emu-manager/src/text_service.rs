@@ -3,8 +3,8 @@ use astra_emu_manager_core::{
     extensions::LocalExtension,
     model::{FamilyError, FamilyResult},
 };
-use astra_emu_translation_openai_compatible::{
-    OpenAiCompatibleTranslationProvider, SecretResolver, TranslationProfile, TranslationRequest,
+use astra_emu_translation::{
+    TranslationClient, SecretResolver, TranslationProfile, TranslationRequest,
     TranslationSegment, TranslationSession,
 };
 use crossbeam_channel::{Sender, bounded};
@@ -153,7 +153,7 @@ impl TextReplacementBridge {
                 },
             );
             Some(Arc::new(TranslationSession::new(Arc::new(
-                OpenAiCompatibleTranslationProvider::new(profile, secrets)
+                TranslationClient::new(profile, secrets)
                     .map_err(|_| error("ASTRA_EMU_TEXT_PROVIDER"))?,
             ))))
         } else {
@@ -259,8 +259,8 @@ fn execute(
             let mut recent = state.recent.lock();
             if cancelled(state, key) { return Err(mlua::Error::RuntimeError("ASTRA_EMU_TEXT_CANCELLED".into())); }
             recent.push_back(request.current);
-            while recent.len() > astra_emu_translation_openai_compatible::MAX_CONTEXT_SEGMENTS
-                || recent.iter().map(|segment| segment.text.chars().count() + segment.speaker.as_deref().map_or(0, |speaker| speaker.chars().count() + 8)).sum::<usize>() > astra_emu_translation_openai_compatible::MAX_CONTEXT_CHARS {
+            while recent.len() > astra_emu_translation::MAX_CONTEXT_SEGMENTS
+                || recent.iter().map(|segment| segment.text.chars().count() + segment.speaker.as_deref().map_or(0, |speaker| speaker.chars().count() + 8)).sum::<usize>() > astra_emu_translation::MAX_CONTEXT_CHARS {
                 recent.pop_front();
             }
             Ok(translated.translated)
@@ -527,9 +527,9 @@ fn error(code: &str) -> FamilyError {
     FamilyError::new(code, "text extension operation failed")
 }
 fn translation_error(
-    value: astra_emu_translation_openai_compatible::TranslationError,
+    value: astra_emu_translation::TranslationError,
 ) -> FamilyError {
-    use astra_emu_translation_openai_compatible::TranslationError as E;
+    use astra_emu_translation::TranslationError as E;
     error(match value {
         E::InvalidProfile(_) => "ASTRA_EMU_TEXT_PROFILE",
         E::InvalidRequest(_) => "ASTRA_EMU_TEXT_REQUEST",

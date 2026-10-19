@@ -11,7 +11,7 @@ impl ConnectionTest {
     pub(super) fn start(profile: TranslationProfile, wake: HostWake) -> Result<Self, String> {
         let secrets = Arc::new(ManagerSecretStore::open().map_err(|e| e.to_string())?);
         let provider =
-            astra_emu_translation_openai_compatible::OpenAiCompatibleTranslationProvider::new(
+            astra_emu_translation::TranslationClient::new(
                 profile, secrets,
             )
             .map_err(|e| e.to_string())?;

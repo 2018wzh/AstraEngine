@@ -1,5 +1,5 @@
 [package]
-name = "astra-emu-translation-openai-compatible"
+name = "astra-emu-translation"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

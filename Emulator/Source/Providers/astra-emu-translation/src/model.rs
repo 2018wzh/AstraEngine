@@ -2,20 +2,42 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{DEFAULT_TIMEOUT_MS, MAX_CONTEXT_CHARS};
+use crate::{
+    DEFAULT_CONTEXT_CHARS, DEFAULT_CONTEXT_SEGMENTS, DEFAULT_TIMEOUT_MS, MAX_CONTEXT_CHARS,
+    MAX_CONTEXT_SEGMENTS, MAX_CUSTOM_PROMPT_CHARS, MIN_CONTEXT_CHARS,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum TranslationEndpointKind {
-    OpenAiCompatible,
+pub enum TranslationProvider {
+    #[serde(rename = "openai")]
     OpenAi,
-    Ecnu,
-    ThirdParty,
+    #[serde(rename = "anthropic")]
+    Anthropic,
+    #[serde(rename = "google")]
+    Google,
+}
+
+impl TranslationProvider {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::OpenAi => "openai",
+            Self::Anthropic => "anthropic",
+            Self::Google => "google",
+        }
+    }
+
+    pub fn default_base_url(self) -> &'static str {
+        match self {
+            Self::OpenAi => "https://api.openai.com/v1",
+            Self::Anthropic => "https://api.anthropic.com/v1",
+            Self::Google => "https://generativelanguage.googleapis.com/v1beta",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum TranslationProtocol {
+pub enum OpenAiApi {
     Responses,
     ChatCompletions,
 }
@@ -24,26 +46,32 @@ pub enum TranslationProtocol {
 #[serde(deny_unknown_fields)]
 pub struct TranslationProfile {
     pub profile_id: String,
-    pub endpoint_kind: TranslationEndpointKind,
-    pub endpoint: String,
-    pub protocol: TranslationProtocol,
+    pub provider: TranslationProvider,
+    pub base_url: String,
+    pub openai_api: OpenAiApi,
     pub model: String,
     pub target_language: String,
     pub timeout_ms: u64,
     pub secret_reference: String,
+    pub custom_prompt: String,
+    pub context_segments: u32,
+    pub context_chars: u32,
 }
 
 impl Default for TranslationProfile {
     fn default() -> Self {
         Self {
             profile_id: "translation.default".into(),
-            endpoint_kind: TranslationEndpointKind::OpenAiCompatible,
-            endpoint: crate::OPENAI_BASE_URL.into(),
-            protocol: TranslationProtocol::Responses,
+            provider: TranslationProvider::OpenAi,
+            base_url: TranslationProvider::OpenAi.default_base_url().into(),
+            openai_api: OpenAiApi::Responses,
             model: String::new(),
             target_language: "zh-CN".into(),
             timeout_ms: DEFAULT_TIMEOUT_MS,
             secret_reference: "translation.default".into(),
+            custom_prompt: String::new(),
+            context_segments: DEFAULT_CONTEXT_SEGMENTS,
+            context_chars: DEFAULT_CONTEXT_CHARS,
         }
     }
 }
@@ -52,24 +80,11 @@ impl TranslationProfile {
     pub fn validate(&self) -> Result<(), TranslationError> {
         validate_identifier("profile_id", &self.profile_id)?;
         validate_secret_reference(&self.secret_reference)?;
-
-        let endpoint = self.endpoint.trim_end_matches('/');
-        let parsed = reqwest::Url::parse(endpoint)
-            .map_err(|_| TranslationError::InvalidProfile("endpoint is not a URL"))?;
-        if parsed.scheme() != "https"
-            || !parsed.username().is_empty()
-            || parsed.password().is_some()
-            || parsed.query().is_some()
-            || parsed.fragment().is_some()
+        validate_base_url(&self.base_url)?;
+        if self.model.trim().is_empty()
+            || self.model.chars().count() > 256
+            || self.model.chars().any(char::is_control)
         {
-            return Err(TranslationError::InvalidProfile(
-                "endpoint must be an HTTPS base URL without credentials, query, or fragment",
-            ));
-        }
-        if endpoint.len() > 1_024 {
-            return Err(TranslationError::InvalidProfile("endpoint is too long"));
-        }
-        if self.model.trim().is_empty() || self.model.chars().count() > 256 {
             return Err(TranslationError::InvalidProfile(
                 "model must contain 1..=256 characters",
             ));
@@ -84,18 +99,54 @@ impl TranslationProfile {
                 "timeout_ms must be within 1000..=120000",
             ));
         }
+        if self.custom_prompt.chars().count() > MAX_CUSTOM_PROMPT_CHARS {
+            return Err(TranslationError::InvalidProfile(
+                "custom_prompt must contain at most 2000 characters",
+            ));
+        }
+        if self.context_segments as usize > MAX_CONTEXT_SEGMENTS {
+            return Err(TranslationError::InvalidProfile(
+                "context_segments must be within 0..=16",
+            ));
+        }
+        if !(MIN_CONTEXT_CHARS..=MAX_CONTEXT_CHARS).contains(&(self.context_chars as usize)) {
+            return Err(TranslationError::InvalidProfile(
+                "context_chars must be within 1000..=12000",
+            ));
+        }
         Ok(())
     }
 
     pub fn provider_identity(&self) -> String {
-        let kind = match self.endpoint_kind {
-            TranslationEndpointKind::OpenAiCompatible => "openai-compatible",
-            TranslationEndpointKind::OpenAi => "openai",
-            TranslationEndpointKind::Ecnu => "ecnu",
-            TranslationEndpointKind::ThirdParty => "third-party",
-        };
-        format!("{kind}:{}", self.profile_id)
+        format!("{}:{}", self.provider.as_str(), self.profile_id)
     }
+}
+
+fn validate_base_url(base_url: &str) -> Result<(), TranslationError> {
+    let trimmed = base_url.trim_end_matches('/');
+    if trimmed.len() > 1_024 {
+        return Err(TranslationError::InvalidProfile("base_url is too long"));
+    }
+    let parsed = reqwest::Url::parse(trimmed)
+        .map_err(|_| TranslationError::InvalidProfile("base_url is not a URL"))?;
+    let loopback = matches!(parsed.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
+    let scheme_allowed = match parsed.scheme() {
+        "https" => true,
+        "http" => loopback,
+        _ => false,
+    };
+    if !scheme_allowed
+        || parsed.host_str().is_none()
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+    {
+        return Err(TranslationError::InvalidProfile(
+            "base_url must be HTTPS (or HTTP on loopback) without credentials, query, or fragment",
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -192,6 +243,7 @@ pub struct TranslationResult {
 pub struct ConnectionTestResult {
     pub provider_identity: String,
     pub latency_ms: u64,
+    pub models: Vec<String>,
 }
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]

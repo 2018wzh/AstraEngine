@@ -21,7 +21,7 @@ astra-emu-patch = { path = "../../Tools/astra-emu-patch" }
 astra-emu-musica = { path = "../../Families/astra-emu-musica", default-features = false }
 mlua.workspace = true
 astra-emu-metadata = { path = "../../Providers/astra-emu-metadata" }
-astra-emu-translation-openai-compatible = { path = "../../Providers/astra-emu-translation-openai-compatible" }
+astra-emu-translation = { path = "../../Providers/astra-emu-translation" }
 astra-observability = { path = "../../../../Engine/Source/Developer/astra-observability" }
 astra-media-core = { path = "../../../../Engine/Source/Runtime/astra-media-core" }
 clap.workspace = true

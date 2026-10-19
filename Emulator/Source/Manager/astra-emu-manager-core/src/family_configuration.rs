@@ -63,6 +63,64 @@ impl Library {
         Ok(())
     }
 
+    /// Stored entries of one layer without defaults, marking what is set there.
+    pub fn family_overrides(
+        &self,
+        plugin_id: &str,
+        game_id: &str,
+    ) -> Result<Vec<ConfigEntry>, LibraryError> {
+        crate::library::validate_id(plugin_id)?;
+        self.read_family_configuration(plugin_id, game_id)
+    }
+
+    /// Validate and store one entry in a layer, replacing a previous value.
+    pub fn set_family_override(
+        &mut self,
+        plugin_id: &str,
+        game_id: &str,
+        schema: &[ConfigField],
+        entry: ConfigEntry,
+    ) -> Result<(), LibraryError> {
+        crate::library::validate_id(plugin_id)?;
+        if !game_id.is_empty() && self.game(game_id)?.is_none() {
+            return Err(LibraryError::GameNotFound);
+        }
+        let mut values = self.read_family_configuration(plugin_id, game_id)?;
+        match values.iter_mut().find(|value| value.id == entry.id) {
+            Some(value) => *value = entry,
+            None => values.push(entry),
+        }
+        resolve_config(schema, &values).map_err(LibraryError::FamilyConfiguration)?;
+        let raw = serde_json::to_string(&values).map_err(|_| LibraryError::Serialization)?;
+        write_configuration(&self.connection, plugin_id, game_id, &raw)
+    }
+
+    /// Remove one entry from a layer. Returns whether the entry was stored.
+    pub fn remove_family_override(
+        &mut self,
+        plugin_id: &str,
+        game_id: &str,
+        field_id: &str,
+    ) -> Result<bool, LibraryError> {
+        crate::library::validate_id(plugin_id)?;
+        let mut values = self.read_family_configuration(plugin_id, game_id)?;
+        let before = values.len();
+        values.retain(|value| value.id != field_id);
+        if values.len() == before {
+            return Ok(false);
+        }
+        if values.is_empty() {
+            self.connection.execute(
+                "DELETE FROM family_configuration WHERE plugin_id=?1 AND game_id=?2",
+                params![plugin_id, game_id],
+            )?;
+        } else {
+            let raw = serde_json::to_string(&values).map_err(|_| LibraryError::Serialization)?;
+            write_configuration(&self.connection, plugin_id, game_id, &raw)?;
+        }
+        Ok(true)
+    }
+
     /// Apply a converted output's emulator selection and typed profile as one
     /// transaction. The caller must identify the output game by canonical path.
     pub fn apply_patch_profile(
@@ -212,6 +270,7 @@ mod tests {
                     &crate::GameSettings {
                         emulator_id: Some("old.emulator".into()),
                         input_mapping: Some(crate::default_vn_preset()),
+                        ..Default::default()
                     },
                 )
                 .unwrap();
@@ -342,5 +401,69 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn single_field_overrides_layer_and_reject_invalid_values() {
+        let mut library = Library::in_memory().unwrap();
+        let schema = patch_fixture(&mut library);
+        let encoding = |value: &str| ConfigEntry {
+            id: "script_encoding".into(),
+            value: ConfigValue::Enum(value.into()),
+        };
+        library
+            .set_family_override("new.emulator", "", &schema, encoding("cp932"))
+            .unwrap();
+        library
+            .set_family_override("new.emulator", "output", &schema, encoding("gbk"))
+            .unwrap();
+        assert_eq!(
+            library.family_overrides("new.emulator", "output").unwrap(),
+            [encoding("gbk")]
+        );
+        assert_eq!(
+            library
+                .family_configuration("new.emulator", "output", &schema)
+                .unwrap(),
+            [encoding("gbk")]
+        );
+
+        for invalid in [
+            encoding("utf16"),
+            ConfigEntry {
+                id: "unknown".into(),
+                value: ConfigValue::Bool(true),
+            },
+        ] {
+            assert!(matches!(
+                library.set_family_override("new.emulator", "output", &schema, invalid),
+                Err(LibraryError::FamilyConfiguration(_))
+            ));
+            assert_eq!(
+                library.family_overrides("new.emulator", "output").unwrap(),
+                [encoding("gbk")]
+            );
+        }
+        assert!(matches!(
+            library.set_family_override("new.emulator", "absent", &schema, encoding("gbk")),
+            Err(LibraryError::GameNotFound)
+        ));
+
+        assert!(library
+            .remove_family_override("new.emulator", "output", "script_encoding")
+            .unwrap());
+        assert!(!library
+            .remove_family_override("new.emulator", "output", "script_encoding")
+            .unwrap());
+        assert!(library
+            .family_overrides("new.emulator", "output")
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            library
+                .family_configuration("new.emulator", "output", &schema)
+                .unwrap(),
+            [encoding("cp932")]
+        );
     }
 }

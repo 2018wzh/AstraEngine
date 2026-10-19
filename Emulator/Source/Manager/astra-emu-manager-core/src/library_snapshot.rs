@@ -12,7 +12,8 @@ use crate::{
 /// Library records read from one database snapshot, without provider JSON parsing.
 #[derive(Debug)]
 pub struct LibrarySnapshot {
-    /// All games in the same order as [`Library::list_games`].
+    /// Games not removed from the library, in [`Library::list_games`] order.
+    /// Removed games are read through [`Library::excluded_games`].
     pub games: Vec<GameRecord>,
     /// Completed-session totals for every game, including games with no sessions.
     pub play_stats: BTreeMap<String, PlayStats>,
@@ -34,7 +35,9 @@ impl Library {
             let mut statement = transaction.prepare(
                 "SELECT game_id, title, user_title, location, family_id,
                         content_fingerprint, added_at_unix_ms
-                 FROM library_game ORDER BY title COLLATE NOCASE, game_id",
+                 FROM library_game
+                 WHERE game_id NOT IN (SELECT game_id FROM excluded_game)
+                 ORDER BY title COLLATE NOCASE, game_id",
             )?;
             let games = statement
                 .query_map([], game_from_row)?

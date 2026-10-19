@@ -11,7 +11,7 @@ doctest = false
 astra-emu-abi = { path = "../../FamilyApi/astra-emu-abi" }
 libloading.workspace = true
 parking_lot = "0.12.5"
-astra-emu-translation-openai-compatible = { path = "../../Providers/astra-emu-translation-openai-compatible" }
+astra-emu-translation = { path = "../../Providers/astra-emu-translation" }
 rusqlite.workspace = true
 schemars.workspace = true
 serde.workspace = true

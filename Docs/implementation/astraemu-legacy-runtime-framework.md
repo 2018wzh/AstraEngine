@@ -11,7 +11,7 @@
 | astra-emu-manager-core | 资料库、新 schema、配置、插件安装与选择、session 管理 |
 | astra-emu-manager-ui-slint | 资料库布局、只读 ViewModel、用户操作回调 |
 | astra-emu-manager | 窗口/event loop、输入、音频设备、wgpu 最终帧与 HLSL 效果链 |
-| astra-emu-translation-openai-compatible | 异步连接/翻译、timeout/cancel、有限上下文与 session cache |
+| astra-emu-translation | OpenAI/Anthropic/Google 异步连接/翻译、timeout/cancel、有限上下文与 session cache |
 | astra-emu-metadata | 现有 VNDB/Bangumi 元数据和游玩状态服务 |
 
 ## 执行与退出

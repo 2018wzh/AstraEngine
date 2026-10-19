@@ -1,12 +1,12 @@
 //! Durable Manager data for games, play records, metadata, and settings.
 //!
-//! This database is independent from a running emulator. Schema 4 upgrades
-//! in place; older unsupported schemas rebuild only Manager tables. Native
-//! game save files are never touched by this code.
+//! This database is independent from a running emulator. Schemas 4 and 5
+//! upgrade in place; older unsupported schemas rebuild only Manager tables.
+//! Native game save files are never touched by this code.
 
 use std::{path::Path, time::Duration};
 
-use astra_emu_translation_openai_compatible::TranslationProfile;
+use astra_emu_translation::TranslationProfile;
 use rusqlite::{params, Connection, OptionalExtension};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -20,14 +20,21 @@ mod settings;
 #[path = "library_snapshot.rs"]
 mod snapshot;
 
-pub use snapshot::LibrarySnapshot;
+#[path = "library_state.rs"]
+mod state;
 
-const SCHEMA_VERSION: i64 = 5;
+#[path = "library_migration.rs"]
+mod migration;
+
+pub use snapshot::LibrarySnapshot;
+pub use state::{ExcludedGame, LibraryRoot};
+
+const SCHEMA_VERSION: i64 = 6;
 const MAX_TITLE_CHARS: usize = 1_024;
 const MAX_LOCATION_BYTES: usize = 4_096;
 const MAX_METADATA_BYTES: usize = 1_048_576;
 
-const REQUIRED_TABLES: [&str; 10] = [
+const REQUIRED_TABLES: [&str; 13] = [
     "family_configuration",
     "appearance_settings",
     "library_game",
@@ -37,9 +44,10 @@ const REQUIRED_TABLES: [&str; 10] = [
     "manager_settings",
     "game_settings",
     "translation_profile",
-    // Kept so an existing schema-4 database remains intact; core discovery
-    // never reads or writes this legacy table.
-    "plugin_installation",
+    "library_root",
+    "excluded_game",
+    "game_release",
+    "app_state",
 ];
 
 const SCHEMA_SQL: &str = r#"
@@ -105,17 +113,25 @@ CREATE TABLE translation_profile (
     singleton INTEGER PRIMARY KEY NOT NULL CHECK(singleton = 1),
     profile_json TEXT NOT NULL
 );
--- Legacy schema-4 table retained for in-place database compatibility. The
--- Manager core scanner deliberately has no consumer for this table.
-CREATE TABLE plugin_installation (
-    plugin_id TEXT PRIMARY KEY NOT NULL,
-    family_id TEXT NOT NULL,
-    location TEXT NOT NULL UNIQUE,
-    abi_fingerprint TEXT NOT NULL,
-    version TEXT NOT NULL,
-    capabilities_json TEXT NOT NULL,
-    supported_formats_json TEXT NOT NULL,
-    installed_at_unix_ms INTEGER NOT NULL
+"#;
+
+/// Tables introduced by schema 6; also applied by the schema-5 upgrade.
+const STATE_SCHEMA_SQL: &str = r#"
+CREATE TABLE library_root (
+    path TEXT PRIMARY KEY NOT NULL,
+    added_at_unix_ms INTEGER NOT NULL
+);
+CREATE TABLE excluded_game (
+    game_id TEXT PRIMARY KEY NOT NULL REFERENCES library_game(game_id) ON DELETE CASCADE,
+    excluded_at_unix_ms INTEGER NOT NULL
+);
+CREATE TABLE game_release (
+    game_id TEXT PRIMARY KEY NOT NULL REFERENCES library_game(game_id) ON DELETE CASCADE,
+    release_id TEXT NOT NULL
+);
+CREATE TABLE app_state (
+    key TEXT PRIMARY KEY NOT NULL,
+    value_json TEXT NOT NULL
 );
 "#;
 
@@ -155,6 +171,8 @@ pub enum LibraryError {
     InvalidMetadata,
     #[error("ASTRA_EMU_LIBRARY_GAME_NOT_FOUND")]
     GameNotFound,
+    #[error("ASTRA_EMU_RELEASE_ID_INVALID")]
+    InvalidReleaseId,
     #[error("ASTRA_EMU_LIBRARY_ACTIVE_SESSION")]
     ActiveSession,
     #[error("ASTRA_EMU_LIBRARY_SERIALIZATION")]
@@ -191,20 +209,25 @@ impl Library {
             .pragma_query_value(None, "user_version", |row| row.get(0))?;
         let table_count = self.user_table_count()?;
         if version == SCHEMA_VERSION {
-            if table_count != REQUIRED_TABLES.len() || !self.required_tables_present()? {
+            if table_count != REQUIRED_TABLES.len() || !self.tables_present(&REQUIRED_TABLES)? {
                 return Err(LibraryError::SchemaCorrupt);
             }
             return Ok(());
         }
-        if version == 4 {
-            if table_count != REQUIRED_TABLES.len() || !self.required_tables_present()? {
+        if version == 4 || version == 5 {
+            if table_count != migration::SCHEMA_5_TABLES.len()
+                || !self.tables_present(&migration::SCHEMA_5_TABLES)?
+            {
                 return Err(LibraryError::SchemaCorrupt);
             }
             let transaction = self.connection.transaction()?;
-            transaction.execute(
-                "UPDATE library_game SET family_id='softpal' WHERE family_id='sena'",
-                [],
-            )?;
+            if version == 4 {
+                transaction.execute(
+                    "UPDATE library_game SET family_id='softpal' WHERE family_id='sena'",
+                    [],
+                )?;
+            }
+            migration::upgrade_schema_5(&transaction)?;
             transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             transaction.commit()?;
             return Ok(());
@@ -218,6 +241,7 @@ impl Library {
             );
         }
         self.connection.execute_batch(SCHEMA_SQL)?;
+        self.connection.execute_batch(STATE_SCHEMA_SQL)?;
         self.connection
             .pragma_update(None, "user_version", SCHEMA_VERSION)?;
         Ok(())
@@ -232,8 +256,8 @@ impl Library {
         usize::try_from(count).map_err(|_| LibraryError::SchemaCorrupt)
     }
 
-    fn required_tables_present(&self) -> Result<bool, LibraryError> {
-        for table in REQUIRED_TABLES {
+    fn tables_present(&self, tables: &[&str]) -> Result<bool, LibraryError> {
+        for table in tables {
             let present: bool = self.connection.query_row(
                 "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
                 [table],
@@ -568,10 +592,7 @@ mod tests {
 
     #[test]
     fn schema_four_renames_engine_without_losing_library_or_settings() {
-        let connection = Connection::open_in_memory().unwrap();
-        connection.execute_batch(SCHEMA_SQL).unwrap();
-        connection.pragma_update(None, "user_version", 4).unwrap();
-        let mut old = Library { connection };
+        let mut old = migration::tests::schema_5_library(4);
         let mut record = game("softpal-game", "existing-installation");
         record.family_id = Some("sena".into());
         record.user_title = Some("My title".into());

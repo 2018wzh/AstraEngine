@@ -28,7 +28,7 @@ use astra_emu_metadata::{
     CompatibilityFetch, CoverAsset, MetadataProviderId, MetadataRecord, MetadataSearchQuery,
     DEFAULT_COMPATIBILITY_SOURCE_URL,
 };
-use astra_emu_translation_openai_compatible::{
+use astra_emu_translation::{
     SecretResolver, TranslationEndpointKind, TranslationProfile, TranslationProtocol,
 };
 use metadata_runtime::{MetadataCommand, MetadataCommandKind, MetadataPayload, MetadataRuntime};

@@ -95,6 +95,14 @@ fn exact_text(code: &str) -> Option<(&'static str, &'static str)> {
         "ASTRA_EMU_FAMILY_SCAN_DIRECTORY" => ("无法读取核心目录", "请检查目录权限。"),
         "ASTRA_EMU_CORE_RETRY_UNAVAILABLE" => ("无法重试", "这个错误不支持重试，请结束游戏。"),
         "ASTRA_EMU_INPUT_QUEUE_FULL" => ("输入过多", "游戏未能及时处理输入，已停止运行。"),
+        "ASTRA_EMU_RENDER_PREFERENCE_INVALID" => (
+            "渲染分辨率设置无效",
+            "预设只能选 720p、1080p、1440p 或 2160p，自定义宽高须在 1 到 16384 之间。",
+        ),
+        "ASTRA_EMU_RELEASE_ID_INVALID" => (
+            "发行版本编号无效",
+            "VNDB 发行版本编号应为 r 加数字，例如 r12345，且不超过 64 个字符。",
+        ),
         "ASTRA_EMU_TRANSLATION_PROFILE_REQUIRED" => {
             ("尚未配置翻译服务", "请在 设置 › 实时翻译 中填写。")
         }

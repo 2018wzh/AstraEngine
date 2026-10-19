@@ -752,7 +752,7 @@ dependencies = [
  "astra-emu-metadata",
  "astra-emu-musica",
  "astra-emu-patch",
- "astra-emu-translation-openai-compatible",
+ "astra-emu-translation",
  "astra-media-core",
  "astra-observability",
  "clap",
@@ -786,7 +786,7 @@ name = "astra-emu-manager-core"
 version = "0.1.0"
 dependencies = [
  "astra-emu-abi",
- "astra-emu-translation-openai-compatible",
+ "astra-emu-translation",
  "libloading 0.8.9",
  "parking_lot",
  "rusqlite",
@@ -954,7 +954,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "astra-emu-translation-openai-compatible"
+name = "astra-emu-translation"
 version = "0.1.0"
 dependencies = [
  "futures-util",

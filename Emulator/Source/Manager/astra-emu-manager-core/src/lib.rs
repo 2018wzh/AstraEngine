@@ -48,13 +48,15 @@ pub use filter_settings::{FilterConfiguration, FilterPreset, FilterSettings};
 pub use input_mapping::{
     default_vn_preset, input_key_code, GamepadDeadzone, GamepadInput, InputMapping,
 };
-pub use library::{GameRecord, Library, LibraryError, LibrarySnapshot};
+pub use library::{ExcludedGame, GameRecord, Library, LibraryError, LibraryRoot, LibrarySnapshot};
 pub use metadata::{
     DisplayTitle, DisplayTitleSource, ExternalIdentityRecord, MetadataSnapshotRecord,
     MetadataSnapshotState,
 };
 pub use play::{PlaySessionEndReason, PlaySessionRecord, PlayStats, RecentGameRecord};
-pub use work_settings::GameSettings;
+pub use work_settings::{
+    GameSettings, RenderPreference, SurfaceRecord, MAX_RENDER_EXTENT, RENDER_PRESET_HEIGHTS,
+};
 
 mod family_configuration;
 

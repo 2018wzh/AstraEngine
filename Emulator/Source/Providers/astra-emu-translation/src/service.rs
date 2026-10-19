@@ -8,7 +8,7 @@ use tokio::task::AbortHandle;
 
 use crate::{
     model::{TranslationError, TranslationRequest, TranslationResult, TranslationSegment},
-    TranslationSession, MAX_CONTEXT_CHARS, MAX_CONTEXT_SEGMENTS,
+    TranslationSession,
 };
 
 const MAX_INFLIGHT_REQUESTS: usize = 8;
@@ -104,7 +104,13 @@ impl<R: crate::SecretResolver + ?Sized + 'static> AsyncTranslationService<R> {
         request
             .validate()
             .map_err(TranslationServiceError::InvalidRequest)?;
-        append_context(&mut state, current);
+        let profile = self.session.profile();
+        append_context(
+            &mut state,
+            current,
+            profile.context_segments as usize,
+            profile.context_chars as usize,
+        );
         let service_generation = state.generation;
         let cache_generation = self.session.generation();
         state.requests.insert(
@@ -235,11 +241,16 @@ fn validate_request_id(request_id: &str) -> Result<(), TranslationServiceError> 
     Ok(())
 }
 
-fn append_context(state: &mut ServiceState, segment: TranslationSegment) {
+fn append_context(
+    state: &mut ServiceState,
+    segment: TranslationSegment,
+    max_segments: usize,
+    max_chars: usize,
+) {
     let chars = segment.rendered().chars().count();
     state.context.push_back(segment);
     state.context_chars = state.context_chars.saturating_add(chars);
-    while state.context.len() > MAX_CONTEXT_SEGMENTS || state.context_chars > MAX_CONTEXT_CHARS {
+    while state.context.len() > max_segments || state.context_chars > max_chars {
         let Some(old) = state.context.pop_front() else {
             break;
         };
@@ -254,10 +265,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::{
-        OpenAiCompatibleTranslationProvider, SecretResolver, TranslationEndpointKind,
-        TranslationProfile, TranslationProtocol,
-    };
+    use crate::{SecretResolver, TranslationClient, TranslationProfile};
 
     struct TestSecrets;
 
@@ -274,17 +282,13 @@ mod tests {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let profile = TranslationProfile {
             profile_id: "test".into(),
-            endpoint_kind: TranslationEndpointKind::OpenAiCompatible,
-            endpoint: "https://example.com/v1".into(),
-            protocol: TranslationProtocol::Responses,
+            base_url: "https://example.com/v1".into(),
             model: "model".into(),
-            target_language: "zh-CN".into(),
             timeout_ms: 1_000,
             secret_reference: "test.secret".into(),
+            ..Default::default()
         };
-        let provider = Arc::new(
-            OpenAiCompatibleTranslationProvider::new(profile, Arc::new(TestSecrets)).unwrap(),
-        );
+        let provider = Arc::new(TranslationClient::new(profile, Arc::new(TestSecrets)).unwrap());
         let session = Arc::new(TranslationSession::new(provider));
         let service = AsyncTranslationService::new(session, runtime.handle().clone());
         (runtime, service)

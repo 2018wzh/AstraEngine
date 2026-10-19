@@ -52,6 +52,7 @@ fn controller(root: &Path) -> (AstraEmuManagerController, PathBuf, String) {
             &astra_emu_manager_core::GameSettings {
                 emulator_id: Some("patch-fixture".into()),
                 input_mapping: Some(input),
+                ..Default::default()
             },
         )
         .unwrap();

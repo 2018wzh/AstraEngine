@@ -4,9 +4,11 @@ use std::{
 };
 
 use crate::{
-    model::{SecretResolver, TranslationError, TranslationRequest, TranslationResult},
+    model::{
+        SecretResolver, TranslationError, TranslationProfile, TranslationRequest, TranslationResult,
+    },
     prompt::prompt_segment_count,
-    transport::OpenAiCompatibleTranslationProvider,
+    transport::TranslationClient,
     DEFAULT_CACHE_CHARS, DEFAULT_CACHE_ENTRIES,
 };
 
@@ -107,12 +109,12 @@ struct SessionCacheState {
 
 /// Provider plus bounded, non-persistent cache for one active game.
 pub struct TranslationSession<R: ?Sized> {
-    provider: Arc<OpenAiCompatibleTranslationProvider<R>>,
+    provider: Arc<TranslationClient<R>>,
     state: Mutex<SessionCacheState>,
 }
 
 impl<R: SecretResolver + ?Sized> TranslationSession<R> {
-    pub fn new(provider: Arc<OpenAiCompatibleTranslationProvider<R>>) -> Self {
+    pub fn new(provider: Arc<TranslationClient<R>>) -> Self {
         Self {
             provider,
             state: Mutex::new(SessionCacheState {
@@ -132,6 +134,10 @@ impl<R: SecretResolver + ?Sized> TranslationSession<R> {
         };
         self.translate_at_generation(request, expected_generation)
             .await
+    }
+
+    pub(crate) fn profile(&self) -> &TranslationProfile {
+        self.provider.profile()
     }
 
     pub(crate) fn generation(&self) -> u64 {
@@ -161,7 +167,7 @@ impl<R: SecretResolver + ?Sized> TranslationSession<R> {
                     translated: translated.to_owned(),
                     provider_identity: self.provider.provider_identity(),
                     latency_ms: 0,
-                    sent_segment_count: prompt_segment_count(request),
+                    sent_segment_count: prompt_segment_count(self.provider.profile(), request),
                     cache_hit: true,
                 });
             }

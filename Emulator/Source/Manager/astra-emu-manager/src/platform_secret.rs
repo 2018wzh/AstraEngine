@@ -1,5 +1,5 @@
-use astra_emu_translation_openai_compatible::PlatformSecretStore;
-use astra_emu_translation_openai_compatible::{SecretResolver, TranslationError};
+use astra_emu_translation::PlatformSecretStore;
+use astra_emu_translation::{SecretResolver, TranslationError};
 
 #[derive(Clone)]
 pub struct ManagerSecretStore {

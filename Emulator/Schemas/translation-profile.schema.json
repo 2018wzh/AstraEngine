@@ -3,42 +3,46 @@
   "title": "TranslationProfile",
   "type": "object",
   "required": [
-    "body_limit_bytes",
-    "context_sentences",
-    "endpoint",
-    "endpoint_kind",
+    "base_url",
+    "context_chars",
+    "context_segments",
+    "custom_prompt",
     "model",
+    "openai_api",
     "profile_id",
-    "protocol",
+    "provider",
     "secret_reference",
     "target_language",
     "timeout_ms"
   ],
   "properties": {
-    "body_limit_bytes": {
+    "base_url": {
+      "type": "string"
+    },
+    "context_chars": {
       "type": "integer",
       "format": "uint32",
       "minimum": 0.0
     },
-    "context_sentences": {
+    "context_segments": {
       "type": "integer",
-      "format": "uint8",
+      "format": "uint32",
       "minimum": 0.0
     },
-    "endpoint": {
+    "custom_prompt": {
       "type": "string"
-    },
-    "endpoint_kind": {
-      "$ref": "#/definitions/TranslationEndpointKind"
     },
     "model": {
       "type": "string"
     },
+    "openai_api": {
+      "$ref": "#/definitions/OpenAiApi"
+    },
     "profile_id": {
       "type": "string"
     },
-    "protocol": {
-      "$ref": "#/definitions/TranslationProtocol"
+    "provider": {
+      "$ref": "#/definitions/TranslationProvider"
     },
     "secret_reference": {
       "type": "string"
@@ -52,20 +56,21 @@
       "minimum": 0.0
     }
   },
+  "additionalProperties": false,
   "definitions": {
-    "TranslationEndpointKind": {
-      "type": "string",
-      "enum": [
-        "ecnu",
-        "open_ai",
-        "third_party"
-      ]
-    },
-    "TranslationProtocol": {
+    "OpenAiApi": {
       "type": "string",
       "enum": [
         "responses",
         "chat_completions"
+      ]
+    },
+    "TranslationProvider": {
+      "type": "string",
+      "enum": [
+        "openai",
+        "anthropic",
+        "google"
       ]
     }
   }
