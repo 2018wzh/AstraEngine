@@ -504,7 +504,7 @@ export component GameView inherits Rectangle {
                 color: MaterialPalette.on-surface;
                 horizontal-alignment: center;
                 wrap: word-wrap;
-                overflow: elide;
+                overflow: clip;
                 max-height: 64px;
             }
 
@@ -871,6 +871,7 @@ export component GameView inherits Rectangle {
                                 style: MaterialTypography.body-medium;
                                 color: MaterialPalette.on-surface-variant;
                                 wrap: word-wrap;
+                                overflow: clip;
                             }
                             ConfigFieldList {
                                 fields: Filters.fields;
