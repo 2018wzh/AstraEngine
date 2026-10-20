@@ -45,6 +45,7 @@ component NoticeCard {
                 style: MaterialTypography.title-small;
                 color: MaterialPalette.on-surface;
                 wrap: word-wrap;
+                overflow: clip;
             }
             if root.notice.detail != "" : MaterialText {
                 text: root.notice.detail;
@@ -52,7 +53,7 @@ component NoticeCard {
                 color: MaterialPalette.on-surface-variant;
                 wrap: word-wrap;
                 max-height: 60px;
-                overflow: elide;
+                overflow: clip;
             }
             if root.notice.code != "" : MaterialText {
                 text: "错误代码 " + root.notice.code;
@@ -168,6 +169,7 @@ export component SnackbarHost {
                 color: MaterialPalette.inverse-on-surface;
                 vertical-alignment: center;
                 wrap: word-wrap;
+                overflow: clip;
             }
 
             if root.action != "" : TextButton {

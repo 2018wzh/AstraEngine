@@ -1,244 +1,318 @@
-// 从 Source/Manager/astra-emu-manager-ui-slint 渲染：
-// ~/.cargo/bin/slint-viewer.exe --style material --component <Name> --size <WxH> --screenshot ../../../../.tmp/emu-manager-design/<Name>.png design/screens.slint
+// Design review states for the Manager UI (plan 7.4). Not compiled into the product.
+// Render from the worktree root (phone states 360x640, others 1280x800):
+// slint-viewer --style material -L material=Emulator/Source/Manager/astra-emu-manager-ui-slint/material-1.1.0/material.slint --component <Name> --size <WxH> --screenshot .tmp/emu-manager-design/<Name>.png Emulator/Source/Manager/astra-emu-manager-ui-slint/design/screens.slint
+//
+// Every state sets the globals in `init` unconditionally: slint-viewer does not
+// compile in preview mode, so `Platform.uses-mock-data` would stay false here.
 
 import {
-    ManagerWindow, App, Library, Selection, Cores, Logs, Notices, Dialogs, Settings, Filters, Session,
-    GameCard, CoreInfo, Notice, EngineAction,
+    ManagerWindow, App, Network, Library, Selection, GameSettings, Settings, Cores, Notices, Dialogs,
+    Filters, Session, Onboarding, GameCard, CoreInfo, ConfigField, EngineAction,
 } from "../ui/main.slint";
 
-global Data {
-    out property <image> no-cover;
+global Mock {
     out property <[GameCard]> games: [
-        { id: "g0", title: "星屑のメモリア", family: "FVP", cover-uri: "", cover: Data.no-cover, tint: #3b4cca, problem: "", play-time: "12.5 小时", last-played: "2 天前", compat: "completable" },
-        { id: "g1", title: "夏影ノスタルジア", family: "FVP", cover-uri: "", cover: Data.no-cover, tint: #f4a259, problem: "", play-time: "31 小时", last-played: "昨天", compat: "perfect" },
-        { id: "g2", title: "雨音ラプソディ", family: "Musica", cover-uri: "", cover: Data.no-cover, tint: #2a9d8f, problem: "", play-time: "4.2 小时", last-played: "5 天前", compat: "flawed" },
-        { id: "g3", title: "硝子の鳥籠", family: "FVP", cover-uri: "", cover: Data.no-cover, tint: #8ecae6, problem: "", play-time: "", last-played: "", compat: "completable" },
-        { id: "g4", title: "月下の約束", family: "Musica", cover-uri: "", cover: Data.no-cover, tint: #4a4e69, problem: "需要选择模拟器", play-time: "18 小时", last-played: "1 周前", compat: "perfect" },
-        { id: "g5", title: "白昼夢の少女", family: "FVP", cover-uri: "", cover: Data.no-cover, tint: #ffafcc, problem: "", play-time: "2.1 小时", last-played: "3 天前", compat: "boot_only" },
-        { id: "g6", title: "蒼穹のリフレイン", family: "FVP", cover-uri: "", cover: Data.no-cover, tint: #00b4d8, problem: "", play-time: "46 小时", last-played: "今天", compat: "perfect" },
-        { id: "g7", title: "夜明けのソネット", family: "Musica", cover-uri: "", cover: Data.no-cover, tint: #e56b6f, problem: "", play-time: "", last-played: "", compat: "" },
-        { id: "g8", title: "ひだまり日和", family: "FVP", cover-uri: "", cover: Data.no-cover, tint: #f6bd60, problem: "", play-time: "9 小时", last-played: "4 天前", compat: "completable" },
-        { id: "g9", title: "紅月のエチュード", family: "FVP", cover-uri: "", cover: Data.no-cover, tint: #d00000, problem: "", play-time: "0.5 小时", last-played: "刚刚", compat: "unplayable" },
-        { id: "g10", title: "春風アンサンブル", family: "Musica", cover-uri: "", cover: Data.no-cover, tint: #95d5b2, problem: "", play-time: "22 小时", last-played: "6 天前", compat: "flawed" },
-        { id: "g11", title: "星降る街の灯台", family: "FVP", cover-uri: "", cover: Data.no-cover, tint: #fca311, problem: "", play-time: "", last-played: "", compat: "completable" },
-        { id: "g12", title: "Afterglow Days", family: "FVP", cover-uri: "", cover: Data.no-cover, tint: #ff7b54, problem: "", play-time: "7 小时", last-played: "8 天前", compat: "perfect" },
-        { id: "g13", title: "水彩のアトリエ", family: "Musica", cover-uri: "", cover: Data.no-cover, tint: #a2d2ff, problem: "", play-time: "", last-played: "", compat: "" },
-        { id: "g14", title: "千年桜の夢", family: "FVP", cover-uri: "", cover: Data.no-cover, tint: #ff8fab, problem: "", play-time: "15 小时", last-played: "2 周前", compat: "completable" },
-        { id: "g15", title: "銀河鉄道の残響", family: "FVP", cover-uri: "", cover: Data.no-cover, tint: #415a77, problem: "", play-time: "3 小时", last-played: "10 天前", compat: "flawed" },
-        { id: "g16", title: "潮騒のカノン", family: "FVP", cover-uri: "", cover: Data.no-cover, tint: #48cae4, problem: "", play-time: "11 小时", last-played: "昨天", compat: "completable" },
-        { id: "g17", title: "黄昏のアリア", family: "Musica", cover-uri: "", cover: Data.no-cover, tint: #ffb703, problem: "", play-time: "", last-played: "", compat: "perfect" },
+        { id: "g1", title: "星之终途", subtitle: "FVP · RFVP", cover: @image-url("cover.svg"), tint: #6a4cff, ready: true, play-time: "12 小时", last-played: "昨天", compat: "perfect" },
+        { id: "g2", title: "樱之刻 —在樱之森下漫步—", subtitle: "Musica · Astra Musica", tint: #c06080, ready: true, play-time: "3 小时", last-played: "3 天前", compat: "completable" },
+        { id: "g3", title: "Summer Pockets", subtitle: "SiglusEngine · siglus-rs", tint: #3a8fd0, ready: false, problem: "需要选择模拟器", compat: "" },
+        { id: "g4", title: "月に寄りそう乙女の作法", subtitle: "SoftPAL · Sena", tint: #d0a040, ready: true, play-time: "40 分钟", last-played: "上周", compat: "flawed" },
+        { id: "g5", title: "白色相簿2", subtitle: "Artemis · Art3m1s", tint: #8090b0, ready: true, compat: "boot_only" },
+        { id: "g6", title: "千恋＊万花", subtitle: "KiriKiri · KiriKiri2", tint: #e07060, ready: true, compat: "unplayable" },
+        { id: "g7", title: "魔女的夜宴", subtitle: "KiriKiri · KiriKiri2", tint: #7050a0, ready: true, compat: "unknown" },
+        { id: "g8", title: "灰色的果实", subtitle: "Ethornell / BGI · ethornell-rs", tint: #50a080, ready: true, compat: "perfect" },
+        { id: "g9", title: "Rewrite", subtitle: "SiglusEngine · siglus-rs", tint: #40a0c0, ready: true, play-time: "26 小时", last-played: "2 周前", compat: "completable" },
+        { id: "g10", title: "サクラノ詩 －櫻の森の上を舞う－", subtitle: "Musica · Astra Musica", tint: #d07090, ready: true, play-time: "54 小时", last-played: "1 个月前", compat: "perfect" },
     ];
+
     out property <[CoreInfo]> cores: [
-        { key: "fvp", name: "FVP", monogram: "FVP", version: "1.2.0", capabilities: ["软件渲染", "支持实时翻译"], state: "loaded", source: "bundled", file: "astra_emu_fvp.dll", message: "", removable: false },
-        { key: "musica", name: "Musica", monogram: "MUS", version: "0.9.0", capabilities: ["硬件加速渲染"], state: "pending-update", source: "user", file: "astra_emu_musica.dll", message: "", removable: true },
-        { key: "legacy", name: "astra_emu_legacy.dll", monogram: "LEG", version: "", capabilities: [], state: "failed", source: "user", file: "astra_emu_legacy.dll", message: "核心版本与 AstraEMU 不兼容", removable: true },
-        { key: "cmvs", name: "astra_emu_cmvs.dll", monogram: "CMV", version: "", capabilities: [], state: "pending-install", source: "user", file: "astra_emu_cmvs.dll", message: "", removable: true },
+        { id: "astra.emu.musica", name: "Astra Musica", engine: "Musica", version: "0.2.0", state: "loaded", source: "bundled", capabilities: ["CPU 画面", "可调渲染分辨率", "文本钩子"], removable: false, update-version: "0.2.1" },
+        { id: "astra.emu.fvp", name: "RFVP", engine: "FVP", version: "0.2.0", state: "loaded", source: "user", capabilities: ["CPU 画面"], removable: true },
+        { id: "astra-emu-krkr", name: "KiriKiri2", engine: "KiriKiri", version: "0.1.9", state: "failed", source: "bundled", message: "无法加载核心文件：缺少 avcodec-57.dll", removable: false },
+        { id: "sena-native-koikake", name: "Sena", engine: "SoftPAL", version: "0.2.0", state: "pending-update", source: "user", message: "重启后更新到 0.2.1" },
+        { id: "ethornell-native", name: "ethornell-rs", engine: "Ethornell / BGI", version: "0.2.0", state: "available", source: "online" },
     ];
-    out property <[Notice]> notices: [
-        { id: "core-load:astra_emu_legacy.dll", severity: "error", title: "核心版本与 AstraEMU 不兼容", detail: "请安装与当前版本匹配的核心。", code: "ASTRA_EMU_FAMILY_LOAD_ABI", core: "astra_emu_legacy.dll" },
-        { id: "warn-no-extra", severity: "warning", title: "没有可用的核心", detail: "请在“核心”页安装核心，或使用包含 cores 目录的完整运行包。", code: "", core: "" },
+
+    out property <[ConfigField]> game-fields: [
+        { key: "script_encoding", label: "脚本编码", description: "读取脚本时使用的文字编码。汉化版通常为 GBK，日文原版为 Shift-JIS；选错会导致对话乱码或脚本无法解析，修改后需要重新启动游戏才会生效。", group: "脚本", kind: "enum", value: "gbk", display-value: "GBK（简体中文）", options: ["Shift-JIS（日文原版）", "GBK（简体中文）"], option-values: ["shift_jis", "gbk"], overridden: true },
+        { key: "launch_mode", label: "启动方式", group: "脚本", kind: "enum", value: "title", display-value: "标题菜单启动", options: ["直接进入脚本", "标题菜单启动"], option-values: ["direct", "title"] },
+        { key: "bgm_volume", label: "背景音乐音量", description: "初始音量。", group: "初始音量设置", kind: "integer", value: "80", min: 0, max: 100, step: 1, unit: "%" },
+        { key: "voice", label: "播放语音", group: "初始语音设置", kind: "bool", value: "true" },
+        { key: "profile_file", label: "密钥文件（key.toml）", description: "相对游戏目录的路径。", group: "文件", kind: "file", value: "key.toml", error: "密钥文件格式不正确" },
+        { key: "entry_script", label: "入口脚本", group: "高级", kind: "string", value: "start.sc", advanced: true },
     ];
+
     out property <[EngineAction]> actions: [
-        { control: 4097, label: "快速存档", icon: "quick-save" },
-        { control: 4098, label: "快速读档", icon: "quick-load" },
-        { control: 4099, label: "存档…", icon: "save" },
-        { control: 4100, label: "读档…", icon: "load" },
-        { control: 4101, label: "自动播放", icon: "auto" },
-        { control: 4102, label: "快进", icon: "skip" },
-        { control: 4103, label: "回想", icon: "backlog" },
-        { control: 4104, label: "游戏设置", icon: "settings" },
+        { control: 1, label: "快速存档", icon: "quick-save" },
+        { control: 2, label: "快速读档", icon: "quick-load" },
+        { control: 3, label: "自动播放", icon: "auto" },
+        { control: 4, label: "快进", icon: "skip" },
+        { control: 5, label: "历史记录", icon: "backlog" },
     ];
-}
 
-export component LibraryDesktopDark inherits ManagerWindow {
-    init => {
-        App.appearance = { theme-mode: "dark", density: "comfortable", cover-size: "medium", view-mode: "grid", reduce-motion: false, cover-badges: true };
+    public function base(dark: bool) {
+        App.appearance.theme-mode = dark ? "dark" : "light";
+        App.version = "0.2.0";
+        App.build = "a8de46595";
         App.page = "library";
-        App.version = "0.1.0";
-        App.build = "harness";
-        Library.cores-ready = true;
-        Library.games = Data.games;
+        Network.allowed = true;
+        Network.sync-status = "已同步 · 3 分钟前";
+        Network.source = "https://2018wzh.github.io/AstraEMU-metadata/v1/";
+        Settings.roots = ["D:\\Games\\VN", "E:\\Galgame\\Collection 2024"];
     }
-}
 
-export component ListDesktopLight inherits ManagerWindow {
-    init => {
-        App.appearance = { theme-mode: "light", density: "comfortable", cover-size: "medium", view-mode: "list", reduce-motion: false, cover-badges: true };
-        App.page = "library";
-        Library.cores-ready = true;
-        Library.games = Data.games;
-        Library.sort = "play_time";
-        Library.selected-id = "g3";
+    public function library(dark: bool) {
+        self.base(dark);
+        Library.games = self.games;
+        Library.prepare-state = "ready";
+        Library.prepare-label = "刷新资料库";
+        Library.prepare-progress = -1;
     }
-}
 
-export component DetailDesktopLight inherits ManagerWindow {
-    init => {
-        App.appearance = { theme-mode: "light", density: "comfortable", cover-size: "medium", view-mode: "grid", reduce-motion: false, cover-badges: true };
-        App.page = "library";
-        Library.cores-ready = true;
-        Library.games = Data.games;
-        Library.selected-id = "g1";
-        Library.detail-open = true;
-        Library.detail-tab = 0;
-        Selection.tint = #f4a259;
+    public function selection() {
         Selection.game = {
-            id: "g1", title: "夏影ノスタルジア", family: "FVP", emulator: "FVP", launchable: true, problem: "",
-            play-time: "31 小时", last-played: "昨天", developer: "Natsukage", release-date: "2014 年 7 月 25 日",
-            platforms: "Windows", engine: "FVP", description: "海边小镇的夏天，一封寄错的信让四个许久不见的人重新相遇。多视角叙事，共 5 条路线与 2 个结局。",
-            tags: "恋爱 · 夏日 · 多结局", aliases: "Natsukage Nostalgia",
+            id: "g2", title: "樱之刻 —在樱之森下漫步—", engine: "Musica", emulator: "Astra Musica · 0.2.0",
+            emulator-id: "astra.emu.musica", launchable: true, play-time: "3 小时", last-played: "3 天前",
+            developer: "枕", release-date: "2015-04-24", platforms: "Windows",
+            description: "以樱花为主题的视觉小说，讲述画家草薙直哉与周围人们的故事。剧情从主人公回到故乡的美术学校开始，围绕一幅未完成的壁画，几代人的过去与约定逐渐浮现。",
+            tags: "剧情, 艺术", aliases: "Sakura no Toki",
         };
-        Selection.compat = { status: "perfect", notes: "", updated: "2026 年 10 月 3 日", vndb-id: "v20317" };
-        Selection.bangumi-summary = "同步需手动点击，不会自动上传。";
-    }
-}
-
-export component CompatDesktopDark inherits ManagerWindow {
-    init => {
-        App.appearance = { theme-mode: "dark", density: "comfortable", cover-size: "medium", view-mode: "grid", reduce-motion: false, cover-badges: true };
-        App.page = "library";
-        Library.cores-ready = true;
-        Library.games = Data.games;
+        Selection.tint = #c06080;
+        Selection.emulator-choices = [{ id: "astra.emu.musica", label: "Astra Musica" }, { id: "other", label: "其他实现" }];
+        Selection.compat = { status: "completable", notes: "全程可通关，个别视频音画不同步。", updated: "2026-10-01", release-id: "r12345", emulator-label: "Astra Musica 0.2.0", report-url: "https://github.com/2018wzh/AstraEMU-metadata/issues/new", hint: "" };
+        Selection.releases = [{ id: "r12345", label: "r12345 · 初回限定版" }, { id: "r12346", label: "r12346 · 通常版" }];
+        Selection.pinned-release = "r12345";
+        Selection.history = [{ started: "2026-10-17 21:30", duration: "1 小时 20 分钟", ended-by: "正常退出" }, { started: "2026-10-15 20:00", duration: "1 小时 40 分钟", ended-by: "" }];
+        Selection.bangumi = { status: "doing", rating: 8, note: "" };
         Library.selected-id = "g2";
         Library.detail-open = true;
-        Library.detail-tab = 1;
-        Selection.tint = #2a9d8f;
-        Selection.game = {
-            id: "g2", title: "雨音ラプソディ", family: "Musica", emulator: "Musica", launchable: true, problem: "",
-            play-time: "4.2 小时", last-played: "5 天前", developer: "Amane Works", release-date: "2016 年 3 月 18 日",
-            platforms: "Windows", engine: "Musica", description: "", tags: "", aliases: "",
+    }
+
+    public function game-settings(dark: bool, section: string) {
+        self.base(dark);
+        App.page = "game-settings";
+        GameSettings.game-id = "g10";
+        GameSettings.title = "サクラノ詩 －櫻の森の上を舞う－";
+        GameSettings.section = section;
+        GameSettings.emulator-choices = [{ id: "astra.emu.musica", label: "Astra Musica · 0.2.0" }, { id: "astra.emu.fvp", label: "RFVP · 0.2.0" }];
+        GameSettings.emulator-id = "astra.emu.musica";
+        GameSettings.render-supported = true;
+        GameSettings.render-options = [{ id: "default", label: "跟随模拟器默认" }, { id: "adaptive", label: "适应窗口" }, { id: "preset-1080", label: "1080p · 1920×1080" }, { id: "custom", label: "自定义…" }];
+        GameSettings.render-mode = "preset-1080";
+        GameSettings.render-min = "320×180";
+        GameSettings.render-max = "16384×16384";
+        GameSettings.render-note = "上次实际生效 1920×1080";
+        GameSettings.recommended-available = true;
+        GameSettings.recommended-summary = "简体中文汉化版：GBK 脚本编码，叠加显示翻译。";
+        GameSettings.fields = self.game-fields;
+        GameSettings.recipes = [{ id: "r1", title: "サクラノ詩 简体中文补丁 v1.2", recommended: true }, { id: "r2", title: "サクラノ詩 繁體中文補丁", recommended: false }];
+    }
+
+    public function settings(dark: bool, category: string) {
+        self.base(dark);
+        App.page = "settings";
+        App.settings-category = category;
+        Settings.compat-summary = "共 128 条兼容性记录，涉及 96 个发行版本";
+        Settings.bangumi-token-saved = true;
+        Settings.excluded = [{ id: "g9", title: "サクラノ詩 -櫻の森の上を舞う-", location: "D:\\Games\\VN\\SakuraNoUta" }];
+        Settings.translation = { provider: "openai", base-url: "https://api.openai.com/v1", openai-api: "responses", model: "gpt-4.1-mini", language: "zh-CN", timeout-s: 15, custom-prompt: "", context-segments: 8, context-chars: 6000 };
+        Settings.secret-saved = true;
+        Settings.translation-enabled = true;
+        Settings.models = ["gpt-4.1", "gpt-4.1-mini", "gpt-4o-mini"];
+        Settings.translation-status = "连接正常 · 312 ms · 3 个模型";
+        Cores.items = self.cores;
+        Cores.restart-required = true;
+        Cores.updates-available = 1;
+        Cores.default-plugin = "astra.emu.musica";
+        Cores.default-render = {
+            supported: true,
+            options: [{ id: "default", label: "核心默认" }, { id: "adaptive", label: "适应窗口" }, { id: "preset-1080", label: "1080p · 1920×1080" }, { id: "custom", label: "自定义…" }],
+            mode: "preset-1080",
+            min: "320×180",
+            max: "16384×16384",
         };
-        Selection.compat = { status: "flawed", notes: "可以通关。第 3 章片头动画音画不同步，不影响进度。", updated: "2026 年 10 月 3 日", vndb-id: "v18820" };
-        Selection.releases = [
-            { id: "r1", label: "通常版" },
-            { id: "r2", label: "初回限定版" },
-            { id: "r3", label: "下载版" },
+        Cores.default-fields = [
+            { key: "script_encoding", label: "脚本编码", description: "汉化版通常为 GBK。", group: "脚本", kind: "enum", value: "shift_jis", display-value: "Shift-JIS（日文原版）", options: ["Shift-JIS（日文原版）", "GBK（简体中文）"], option-values: ["shift_jis", "gbk"], overridden: true },
+            { key: "voice_volume", label: "语音音量", group: "播放", kind: "integer", value: "80", min: 0, max: 100, step: 1, unit: "%" },
         ];
     }
-}
 
-export component EmptyDesktopLight inherits ManagerWindow {
-    init => {
-        App.appearance = { theme-mode: "light", density: "comfortable", cover-size: "medium", view-mode: "grid", reduce-motion: false, cover-badges: true };
-        App.page = "library";
-        Library.cores-ready = true;
-        Library.games = [];
-    }
-}
-
-export component StartupDesktopLight inherits ManagerWindow {
-    init => {
-        App.appearance = { theme-mode: "light", density: "comfortable", cover-size: "medium", view-mode: "grid", reduce-motion: false, cover-badges: true };
-        App.page = "library";
-        Library.games = [];
-        Library.cores-ready = false;
-        Library.can-load-cores = true;
-        Library.status = "正在等待加载模拟器核心…";
-    }
-}
-
-export component CoresDesktopLight inherits ManagerWindow {
-    init => {
-        App.appearance = { theme-mode: "light", density: "comfortable", cover-size: "medium", view-mode: "grid", reduce-motion: false, cover-badges: true };
-        App.page = "cores";
-        Library.cores-ready = true;
-        Cores.items = Data.cores;
-        Cores.restart-required = true;
-        Notices.items = Data.notices;
-    }
-}
-
-export component LogsDesktopDark inherits ManagerWindow {
-    init => {
-        App.appearance = { theme-mode: "dark", density: "comfortable", cover-size: "medium", view-mode: "grid", reduce-motion: false, cover-badges: true };
-        App.page = "cores";
-        Library.cores-ready = true;
-        Cores.items = Data.cores;
-        Cores.restart-required = true;
-        Notices.items = Data.notices;
-        Logs.open = true;
-        Logs.core = "astra_emu_legacy.dll";
-        Logs.scope = "core";
-        Logs.count = 6;
-        Logs.text = "10-03 12:01:02 ERROR astra.emu.family.load core=astra_emu_legacy.dll\n10-03 12:01:02 WARN  astra.emu.family.abi version mismatch\n10-03 12:01:03 INFO  astra.emu.manager.core_overridden core=astra_emu_musica.dll\n10-03 12:01:04 INFO  astra.emu.family.init plugin=fvp\n10-03 12:01:05 ERROR ASTRA_EMU_FAMILY_LOAD_ABI unsupported header\n10-03 12:01:06 INFO  astra.emu.manager.ready";
-    }
-}
-
-export component SettingsDesktopDark inherits ManagerWindow {
-    init => {
-        App.appearance = { theme-mode: "dark", density: "comfortable", cover-size: "medium", view-mode: "grid", reduce-motion: false, cover-badges: true };
-        App.page = "settings";
-        App.settings-category = "appearance";
-        Library.cores-ready = true;
-        Library.games = Data.games;
-    }
-}
-
-export component SettingsPhoneDark inherits ManagerWindow {
-    init => {
-        App.appearance = { theme-mode: "dark", density: "comfortable", cover-size: "medium", view-mode: "grid", reduce-motion: false, cover-badges: true };
-        App.page = "settings";
-        App.settings-category = "appearance";
-        Library.cores-ready = true;
-        Library.games = Data.games;
-    }
-}
-
-export component GameMenuDesktop inherits ManagerWindow {
-    init => {
-        App.appearance = { theme-mode: "dark", density: "comfortable", cover-size: "medium", view-mode: "grid", reduce-motion: false, cover-badges: true };
-        Library.cores-ready = true;
-        Library.games = Data.games;
-        Selection.game = { id: "g0", title: "星尘之誓", family: "Musica", emulator: "Musica", launchable: true, problem: "", play-time: "", last-played: "", developer: "", release-date: "", platforms: "", engine: "", description: "", tags: "", aliases: "" };
+    public function session(phase: string) {
+        self.library(true);
+        Session.title = "樱之刻 —在樱之森下漫步—";
+        Session.launch-title = "樱之刻 —在樱之森下漫步—";
+        Session.launch-cover = @image-url("cover.svg");
+        Session.frame = @image-url("frame.svg");
+        Session.output-aspect = 1.7777;
+        Session.native-width = 1280;
+        Session.native-height = 720;
+        Session.raster-width = 1280;
+        Session.raster-height = 720;
+        Session.content-width = 1280;
+        Session.content-height = 720;
+        Session.actions = self.actions;
+        Selection.game.engine = "Musica";
+        Selection.game.emulator = "Astra Musica · 0.2.0";
+        Filters.preset = "sharpen";
+        Session.phase = phase;
         Session.active = true;
-        Session.menu-open = true;
-        Session.menu-page = "main";
-        Session.actions = Data.actions;
-        Session.title = "星尘之誓";
-    }
-    Timer {
-        interval: 16ms;
-        running: true;
-        triggered => {
-            Session.menu-open = true;
-            self.running = false;
-        }
     }
 }
 
-export component LibraryTabletLight inherits ManagerWindow {
+// ---- Library ----
+
+export component LibraryUnprepared inherits ManagerWindow {
     init => {
-        App.appearance = { theme-mode: "light", density: "comfortable", cover-size: "medium", view-mode: "grid", reduce-motion: false, cover-badges: true };
-        App.page = "library";
-        Library.cores-ready = true;
-        Library.games = Data.games;
+        Mock.base(false);
+        Library.prepare-state = "unprepared";
+        Library.prepare-label = "准备";
     }
 }
 
-export component LibraryPhoneDark inherits ManagerWindow {
+export component LibraryPreparing inherits ManagerWindow {
     init => {
-        App.appearance = { theme-mode: "dark", density: "comfortable", cover-size: "medium", view-mode: "grid", reduce-motion: false, cover-badges: true };
-        App.page = "library";
-        Library.cores-ready = true;
-        Library.games = Data.games;
+        Mock.library(false);
+        Library.prepare-state = "scanning";
+        Library.prepare-progress = 0.62;
+        Library.prepare-detail = "已扫描 128 个目录，发现 10 部作品";
+        Library.can-cancel-prepare = true;
     }
 }
 
-export component DetailPhoneLight inherits ManagerWindow {
+export component LibraryGridDark inherits ManagerWindow {
+    init => { Mock.library(true); }
+}
+
+export component LibraryListLight inherits ManagerWindow {
     init => {
-        App.appearance = { theme-mode: "light", density: "comfortable", cover-size: "medium", view-mode: "grid", reduce-motion: false, cover-badges: true };
-        App.page = "library";
-        Library.cores-ready = true;
-        Library.games = Data.games;
-        Library.selected-id = "g6";
-        Library.detail-open = true;
-        Selection.tint = #00b4d8;
-        Selection.game = {
-            id: "g6", title: "蒼穹のリフレイン", family: "FVP", emulator: "FVP", launchable: true, problem: "",
-            play-time: "46 小时", last-played: "今天", developer: "Soukyu", release-date: "2018 年 8 月 31 日",
-            platforms: "Windows", engine: "FVP", description: "天空与海平面交汇的港口，一次无法回头的航行。",
-            tags: "冒险", aliases: "",
+        Mock.library(false);
+        App.appearance.view-mode = "list";
+        Library.sort = "recent";
+    }
+}
+
+export component LibraryEmpty inherits ManagerWindow {
+    init => {
+        Mock.base(false);
+        Settings.roots = [];
+        Library.prepare-state = "ready";
+        Library.prepare-label = "刷新资料库";
+    }
+}
+
+// ---- Detail ----
+
+export component DetailDocked inherits ManagerWindow {
+    init => {
+        Mock.library(false);
+        Mock.selection();
+    }
+}
+
+export component DetailPhoneSheet inherits ManagerWindow {
+    init => {
+        Mock.library(true);
+        Mock.selection();
+    }
+}
+
+// ---- Game settings ----
+
+export component GameSettingsEmulator inherits ManagerWindow {
+    init => { Mock.game-settings(false, "emulator"); }
+}
+
+export component GameSettingsPatch inherits ManagerWindow {
+    init => {
+        Mock.game-settings(true, "patch");
+        GameSettings.patch = {
+            step: 4,
+            running: true,
+            phase: "正在转换 data02.paz…",
+            completed: 42,
+            total: 100,
+            output: "D:\\Games\\サクラノ詩-汉化",
+            can-start: true,
+            script: "r1",
+            output-directory: "D:\\Games\\サクラノ詩-汉化",
         };
-        Selection.compat = { status: "perfect", notes: "", updated: "", vndb-id: "" };
+    }
+}
+
+// ---- Settings ----
+
+export component SettingsNetwork inherits ManagerWindow {
+    init => { Mock.settings(true, "network"); }
+}
+
+export component SettingsTranslation inherits ManagerWindow {
+    init => { Mock.settings(false, "translation"); }
+}
+
+export component SettingsCores inherits ManagerWindow {
+    init => { Mock.settings(false, "cores"); }
+}
+
+// Deep link into one category: single-pane content with a back arrow.
+export component SettingsPhone inherits ManagerWindow {
+    init => { Mock.settings(true, "translation"); }
+}
+
+// ---- Onboarding ----
+
+export component OnboardingRoots inherits ManagerWindow {
+    init => {
+        Mock.base(false);
+        App.page = "onboarding";
+        Onboarding.step = 0;
+        Onboarding.roots = ["D:\\Games\\VN"];
+    }
+}
+
+export component OnboardingPrepare inherits ManagerWindow {
+    init => {
+        Mock.base(true);
+        App.page = "onboarding";
+        Onboarding.step = 3;
+        Library.prepare-state = "scanning";
+        Library.prepare-progress = -1;
+        Library.prepare-detail = "已扫描 1,280 个目录，发现 12 部作品";
+        Library.can-cancel-prepare = true;
+    }
+}
+
+// ---- Game view ----
+
+export component GameLaunching inherits ManagerWindow {
+    init => { Mock.session("opening"); }
+}
+
+export component GameMenuFocused inherits ManagerWindow {
+    init => {
+        Mock.session("running");
+        Session.menu-page = "main";
+        Session.menu-open = true;
+    }
+}
+
+// ---- Overlays ----
+
+export component FatalDialog inherits ManagerWindow {
+    init => {
+        Mock.library(false);
+        Dialogs.fatal-title = "模拟器核心意外停止";
+        Dialogs.fatal-detail = "Astra Musica 在读取 data02.paz 时崩溃。存档不受影响；可以重试，或在 设置→核心 查看日志。";
+        Dialogs.fatal-code = "ASTRA_EMU_CORE_PANIC";
+        Dialogs.fatal-retryable = true;
+        Dialogs.fatal-active = true;
+    }
+}
+
+export component SnackbarUndo inherits ManagerWindow {
+    init => {
+        Mock.library(false);
+        App.appearance.reduce-motion = true;
+        Notices.snackbar-text = "已从资料库移除《魔女的夜宴》";
+        Notices.snackbar-action = "撤销";
+        Notices.snackbar-serial += 1;
     }
 }

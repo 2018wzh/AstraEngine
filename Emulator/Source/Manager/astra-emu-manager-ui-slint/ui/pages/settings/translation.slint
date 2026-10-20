@@ -4,7 +4,7 @@ import { Network, Settings, TranslationForm, Choice } from "../../globals.slint"
 import { Icons } from "../../icons.slint";
 import { ChoiceSelect } from "../../components/select.slint";
 import { PageScroll, SettingGroup, SwitchRow, FieldBlock, FormField, SliderField, RowText } from "./common.slint";
-import { Segments } from "./appearance.slint";
+import { Segments } from "../../components/segments.slint";
 import { ListSelect } from "./list-select.slint";
 
 export component TranslationSection {
@@ -106,7 +106,7 @@ export component TranslationSection {
                 label: "服务商";
                 Segments {
                     label: "服务商";
-                    items: [{ text: "OpenAI" }, { text: "Anthropic" }, { text: "Google" }];
+                    items: ["OpenAI", "Anthropic", "Google"];
                     index: root.provider == "anthropic" ? 1 : root.provider == "google" ? 2 : 0;
                     selected(i) => {
                         root.provider = i == 1 ? "anthropic" : i == 2 ? "google" : "openai";
@@ -146,7 +146,7 @@ export component TranslationSection {
                 label: "接口格式";
                 Segments {
                     label: "接口格式";
-                    items: [{ text: "Responses" }, { text: "Chat Completions" }];
+                    items: ["Responses", "Chat Completions"];
                     index: root.openai-api == "chat_completions" ? 1 : 0;
                     selected(i) => { root.openai-api = i == 1 ? "chat_completions" : "responses"; }
                 }

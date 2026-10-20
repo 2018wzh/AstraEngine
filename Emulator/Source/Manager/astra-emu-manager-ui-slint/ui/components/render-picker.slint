@@ -71,6 +71,7 @@ export component RenderPicker {
             style: MaterialTypography.body-medium;
             color: MaterialPalette.on-surface-variant;
             wrap: word-wrap;
+            overflow: clip;
         }
 
         if root.supported : ChoiceSelect {
@@ -129,6 +130,7 @@ export component RenderPicker {
             style: MaterialTypography.body-small;
             color: root.error != "" ? MaterialPalette.error : MaterialPalette.on-surface-variant;
             wrap: word-wrap;
+            overflow: clip;
         }
 
         if root.supported && root.note != "" : MaterialText {
@@ -136,6 +138,7 @@ export component RenderPicker {
             style: MaterialTypography.body-small;
             color: MaterialPalette.on-surface-variant;
             wrap: word-wrap;
+            overflow: clip;
         }
     }
 }

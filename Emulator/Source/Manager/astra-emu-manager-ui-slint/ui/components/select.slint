@@ -2,6 +2,30 @@ import { MaterialPalette, MaterialText, MaterialTypography, Icon, ScrollView } f
 import { Icons } from "../icons.slint";
 import { Choice } from "../globals.slint";
 
+// Wrapped helper/error line under a field, indented like Material's supporting
+// text. The Rectangle root forwards its layout's size: a conditional layout
+// element would measure the wrapped text without its padding and cut the last
+// line.
+export component SupportingText inherits Rectangle {
+    in property <string> text;
+    in property <bool> error;
+
+    min-height: layout.min-height;
+    preferred-height: layout.preferred-height;
+
+    layout := HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        MaterialText {
+            text: root.text;
+            style: MaterialTypography.body-small;
+            color: root.error ? MaterialPalette.error : MaterialPalette.on-surface-variant;
+            wrap: word-wrap;
+            overflow: clip;
+        }
+    }
+}
+
 component SelectFrame {
     in property <string> label;
     in property <bool> enabled: true;
@@ -108,15 +132,9 @@ component SelectFrame {
             }
         }
 
-        if root.supporting-text != "" : HorizontalLayout {
-            padding-left: 16px;
-            padding-right: 16px;
-            MaterialText {
-                text: root.supporting-text;
-                style: MaterialTypography.body-small;
-                color: root.has-error ? MaterialPalette.error : MaterialPalette.on-surface-variant;
-                wrap: word-wrap;
-            }
+        if root.supporting-text != "" : SupportingText {
+            text: root.supporting-text;
+            error: root.has-error;
         }
     }
 }

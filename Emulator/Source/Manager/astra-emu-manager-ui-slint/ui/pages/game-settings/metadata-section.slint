@@ -1,10 +1,11 @@
 import {
-    MaterialPalette, MaterialText, MaterialTypography, SegmentedButton, TextField, FilledButton, TextButton,
+    MaterialPalette, MaterialText, MaterialTypography, TextField, FilledButton, TextButton,
     OutlineButton, LinearProgressIndicator, HorizontalDivider,
 } from "@material";
 import { App, Network, Selection } from "../../globals.slint";
 import { Icons } from "../../icons.slint";
 import { Theme } from "../../theme.slint";
+import { Segments } from "../../components/segments.slint";
 import { SectionTitle, Panel, InfoRow, SelectableTile } from "./parts.slint";
 
 export component MetadataSection {
@@ -83,9 +84,12 @@ export component MetadataSection {
             }
             HorizontalLayout {
                 alignment: start;
-                SegmentedButton {
-                    items: [{ text: "VNDB" }, { text: "Bangumi" }];
-                    current-index <=> root.provider-index;
+                Segments {
+                    width: 208px;
+                    label: "资料来源";
+                    items: ["VNDB", "Bangumi"];
+                    index: root.provider-index;
+                    selected(index) => { root.provider-index = index; }
                 }
             }
             if !root.narrow : HorizontalLayout {

@@ -3,7 +3,7 @@ import { Settings } from "../../globals.slint";
 import { Icons } from "../../icons.slint";
 import { BindingTable } from "../../components/binding-table.slint";
 import { PageScroll, SettingGroup, SwitchRow, FieldBlock, RowText } from "./common.slint";
-import { Segments } from "./appearance.slint";
+import { Segments } from "../../components/segments.slint";
 
 export component InputSection inherits PageScroll {
     title: "输入与手柄";
@@ -24,7 +24,7 @@ export component InputSection inherits PageScroll {
             enabled: Settings.gamepad-enabled;
             Segments {
                 label: "摇杆死区";
-                items: [{ text: "低" }, { text: "中" }, { text: "高" }];
+                items: ["低", "中", "高"];
                 index: Settings.deadzone == "low" ? 0 : Settings.deadzone == "high" ? 2 : 1;
                 selected(i) => { Settings.set-deadzone(i == 0 ? "low" : i == 2 ? "high" : "medium"); }
             }

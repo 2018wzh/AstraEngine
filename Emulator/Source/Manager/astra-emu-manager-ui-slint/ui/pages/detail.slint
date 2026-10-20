@@ -1,5 +1,5 @@
 import {
-    MaterialPalette, MaterialText, MaterialTypography, ScrollView, TabBar, SegmentedButton, TextField,
+    MaterialPalette, MaterialText, MaterialTypography, ScrollView, TabBar, TextField,
     FilledButton, TonalButton, OutlineButton, TextButton, IconButton, OutlinedCard, HorizontalDivider, Icon,
 } from "@material";
 import { App, Library, Selection, BangumiProgress } from "../globals.slint";
@@ -7,6 +7,7 @@ import { Icons } from "../icons.slint";
 import { Theme, Accent } from "../theme.slint";
 import { ChoiceSelect } from "../components/select.slint";
 import { RangeSlider } from "../components/range-slider.slint";
+import { Segments } from "../components/segments.slint";
 import { GameMenu, GameNav, CompatPill } from "../components/cover-card.slint";
 
 component InfoRow {
@@ -88,14 +89,6 @@ export component DetailPanel {
         border-bottom-left-radius: root.mode == "overlay" ? 16px : 0px;
         drop-shadow-blur: root.mode == "docked" ? 0px : 16px;
         drop-shadow-color: MaterialPalette.shadow-30;
-    }
-
-    if root.mode == "docked" : Rectangle {
-        x: 0px;
-        y: 0px;
-        width: 1px;
-        height: root.height;
-        background: MaterialPalette.outline-variant;
     }
 
     keys := FocusScope {
@@ -459,20 +452,21 @@ export component DetailPanel {
                         Card {
                             SectionTitle { text: "Bangumi"; }
                             // Five segments do not fit a narrow panel; scroll them horizontally there.
-                            Flickable {
+                            status-flick := Flickable {
                                 height: 40px;
                                 content-width: max(self.width, status-seg.min-width);
                                 content-height: 40px;
                                 interactive: status-seg.min-width > self.width;
 
-                                status-seg := SegmentedButton {
+                                status-seg := Segments {
                                     x: 0px;
                                     y: 0px;
-                                    width: self.min-width;
+                                    width: max(self.min-width, min(status-flick.width, self.preferred-width));
                                     height: 40px;
-                                    items: [{ text: "想玩" }, { text: "在玩" }, { text: "玩过" }, { text: "搁置" }, { text: "抛弃" }];
-                                    current-index: root.bangumi-index(Selection.bangumi.status);
-                                    index-changed(index) => {
+                                    label: "Bangumi 状态";
+                                    items: ["想玩", "在玩", "玩过", "搁置", "抛弃"];
+                                    index: root.bangumi-index(Selection.bangumi.status);
+                                    selected(index) => {
                                         root.update-bangumi(root.bangumi-id(index), Selection.bangumi.rating, Selection.bangumi.note);
                                     }
                                 }
@@ -532,6 +526,15 @@ export component DetailPanel {
                 }
             }
         }
+    }
+
+    // Drawn above the content so the tab bar's background does not cover it.
+    if root.mode == "docked" : Rectangle {
+        x: 0px;
+        y: 0px;
+        width: 1px;
+        height: root.height;
+        background: MaterialPalette.outline-variant;
     }
 
     menu := GameMenu {

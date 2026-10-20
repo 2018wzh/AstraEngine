@@ -1,11 +1,12 @@
 import {
-    MaterialPalette, MaterialText, MaterialTypography, ScrollView, TextField, SegmentedButton, FilterChip,
+    MaterialPalette, MaterialText, MaterialTypography, ScrollView, TextField, FilterChip,
     FilledButton, TonalButton, OutlineButton, TextButton, FilledCard, LinearProgressIndicator, Icon,
 } from "@material";
 import { App, Library, Settings, Choice } from "../globals.slint";
 import { Icons } from "../icons.slint";
 import { Theme } from "../theme.slint";
 import { ChoiceSelect } from "../components/select.slint";
+import { Segments } from "../components/segments.slint";
 import { Scrim } from "../components/dialogs.slint";
 import { CoverCard, GameListRow, SortHeader, GameMenu, GameNav } from "../components/cover-card.slint";
 import { DetailPanel } from "./detail.slint";
@@ -330,11 +331,12 @@ export component LibraryPage {
                     if !root.narrow : VerticalLayout {
                         horizontal-stretch: 0;
                         alignment: center;
-                        SegmentedButton {
-                            width: self.min-width;
-                            items: [{ text: "网格" }, { text: "列表" }];
-                            current-index: root.grid-mode ? 0 : 1;
-                            index-changed(index) => { root.set-view(index == 1 ? "list" : "grid"); }
+                        Segments {
+                            width: 208px;
+                            label: "视图";
+                            items: ["网格", "列表"];
+                            index: root.grid-mode ? 0 : 1;
+                            selected(index) => { root.set-view(index == 1 ? "list" : "grid"); }
                         }
                     }
                 }
@@ -356,11 +358,12 @@ export component LibraryPage {
                     VerticalLayout {
                         horizontal-stretch: 0;
                         alignment: center;
-                        SegmentedButton {
-                            width: self.min-width;
-                            items: [{ text: "网格" }, { text: "列表" }];
-                            current-index: root.grid-mode ? 0 : 1;
-                            index-changed(index) => { root.set-view(index == 1 ? "list" : "grid"); }
+                        Segments {
+                            width: 208px;
+                            label: "视图";
+                            items: ["网格", "列表"];
+                            index: root.grid-mode ? 0 : 1;
+                            selected(index) => { root.set-view(index == 1 ? "list" : "grid"); }
                         }
                     }
                 }

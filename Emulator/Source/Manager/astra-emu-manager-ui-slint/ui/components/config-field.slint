@@ -1,7 +1,7 @@
 import { MaterialPalette, MaterialText, MaterialTypography, Switch, TextField, TextButton } from "@material";
 import { ConfigField } from "../globals.slint";
 import { Icons } from "../icons.slint";
-import { OptionSelect } from "./select.slint";
+import { OptionSelect, SupportingText } from "./select.slint";
 import { RangeSlider } from "./range-slider.slint";
 
 component FieldText {
@@ -20,6 +20,7 @@ component FieldText {
                 style: MaterialTypography.body-large;
                 color: MaterialPalette.on-surface;
                 wrap: word-wrap;
+                overflow: clip;
             }
             if root.trailing != "" : MaterialText {
                 horizontal-stretch: 0;
@@ -34,6 +35,7 @@ component FieldText {
             style: MaterialTypography.body-small;
             color: root.error != "" ? MaterialPalette.error : MaterialPalette.on-surface-variant;
             wrap: word-wrap;
+            overflow: clip;
         }
     }
 }
@@ -76,26 +78,32 @@ export component ConfigFieldRow {
             alignment: center;
             spacing: 4px;
 
-            if root.field.kind == "bool" : HorizontalLayout {
-                spacing: 16px;
-                FieldText {
-                    horizontal-stretch: 1;
-                    label: root.field.label;
-                    description: root.field.description;
-                    error: root.field.error;
-                }
-                VerticalLayout {
-                    horizontal-stretch: 0;
-                    alignment: center;
-                    switch := Switch {
-                        property <bool> stored: root.field.value == "true";
-                        checked: self.stored;
-                        enabled: root.enabled;
-                        changed stored => { self.checked = self.stored; }
-                        checked-state-changed(value) => {
-                            if value != self.stored {
-                                root.changed(root.field.key, value ? "true" : "false");
-                                self.checked = self.stored;
+            // Rectangle root: a conditional layout would measure the wrapped
+            // description at the full row width and cut its last line.
+            if root.field.kind == "bool" : Rectangle {
+                min-height: bool-row.min-height;
+                preferred-height: bool-row.preferred-height;
+                bool-row := HorizontalLayout {
+                    spacing: 16px;
+                    FieldText {
+                        horizontal-stretch: 1;
+                        label: root.field.label;
+                        description: root.field.description;
+                        error: root.field.error;
+                    }
+                    VerticalLayout {
+                        horizontal-stretch: 0;
+                        alignment: center;
+                        switch := Switch {
+                            property <bool> stored: root.field.value == "true";
+                            checked: self.stored;
+                            enabled: root.enabled;
+                            changed stored => { self.checked = self.stored; }
+                            checked-state-changed(value) => {
+                                if value != self.stored {
+                                    root.changed(root.field.key, value ? "true" : "false");
+                                    self.checked = self.stored;
+                                }
                             }
                         }
                     }
@@ -147,7 +155,6 @@ export component ConfigFieldRow {
                     input-type: root.numeric ? InputType.decimal : InputType.text;
                     enabled: root.enabled;
                     has-error: root.field.error != "";
-                    supporting-text: root.field.error != "" ? root.field.error : root.field.description;
                     accepted(text) => {
                         root.commit(text);
                         self.text = root.field.value;
@@ -176,7 +183,6 @@ export component ConfigFieldRow {
                     read-only: true;
                     enabled: root.enabled;
                     has-error: root.field.error != "";
-                    supporting-text: root.field.error != "" ? root.field.error : root.field.description;
                 }
                 VerticalLayout {
                     alignment: start;
@@ -195,6 +201,12 @@ export component ConfigFieldRow {
                         }
                     }
                 }
+            }
+
+            // Material's TextField elides its supporting text to one line.
+            if (root.use-text || root.is-path) && (root.field.error != "" || root.field.description != "") : SupportingText {
+                text: root.field.error != "" ? root.field.error : root.field.description;
+                error: root.field.error != "";
             }
         }
 

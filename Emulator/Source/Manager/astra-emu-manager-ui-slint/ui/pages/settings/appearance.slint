@@ -1,126 +1,6 @@
-import { MaterialPalette, MaterialText, MaterialTypography, Icon } from "@material";
-import { SegmentedItem } from "../../../material-1.1.0/ui/components/segmented_button.slint";
 import { App, Appearance } from "../../globals.slint";
-import { Icons } from "../../icons.slint";
+import { Segments } from "../../components/segments.slint";
 import { PageScroll, SettingGroup, SwitchRow, FieldBlock } from "./common.slint";
-
-// Material 3 segmented button that always shows the stored index; a click is
-// reported via `selected`. Drawn here because Material 1.1.0's
-// SegmentedButton cannot be held at the stored value and lets the selected
-// first segment's fill spill past its rounded border. The check icon is
-// dropped when the space is too narrow.
-export component Segments {
-    in property <[SegmentedItem]> items;
-    in property <int> index;
-    in property <string> label;
-    callback selected(index: int);
-
-    property <length> natural-width: root.items.length * 136px;
-    property <bool> show-check: root.width >= root.items.length * 104px;
-
-    min-width: root.items.length * 64px;
-    preferred-width: root.natural-width;
-    min-height: 40px;
-    max-height: 40px;
-    horizontal-stretch: 0;
-    accessible-role: list;
-    accessible-label: root.label;
-    accessible-item-count: root.items.length;
-
-    Rectangle {
-        x: 0px;
-        y: 0px;
-        width: min(root.width, root.natural-width);
-        height: root.height;
-
-        HorizontalLayout {
-            for item[i] in root.items : cell := Rectangle {
-                property <bool> first: i == 0;
-                property <bool> last: i == root.items.length - 1;
-                property <bool> on: i == root.index;
-                property <length> r: self.height / 2;
-
-                horizontal-stretch: 1;
-                forward-focus: cell-keys;
-                accessible-role: list-item;
-                accessible-label: item.text;
-                accessible-item-selectable: true;
-                accessible-item-selected: self.on;
-                accessible-item-index: i;
-                accessible-action-default => { if i != root.index { root.selected(i); } }
-
-                border-top-left-radius: self.first ? self.r : 0px;
-                border-bottom-left-radius: self.first ? self.r : 0px;
-                border-top-right-radius: self.last ? self.r : 0px;
-                border-bottom-right-radius: self.last ? self.r : 0px;
-                background: self.on ? MaterialPalette.secondary-container : transparent;
-
-                Rectangle {
-                    border-top-left-radius: parent.border-top-left-radius;
-                    border-bottom-left-radius: parent.border-bottom-left-radius;
-                    border-top-right-radius: parent.border-top-right-radius;
-                    border-bottom-right-radius: parent.border-bottom-right-radius;
-                    background: cell-touch.pressed ? MaterialPalette.on-surface.with-alpha(MaterialPalette.state-layer-opacity-press)
-                        : cell-keys.has-focus ? MaterialPalette.on-surface.with-alpha(MaterialPalette.state-layer-opacity-focus)
-                        : cell-touch.has-hover ? MaterialPalette.on-surface.with-alpha(MaterialPalette.state-layer-opacity-hover)
-                        : transparent;
-                }
-
-                HorizontalLayout {
-                    padding-left: 8px;
-                    padding-right: 8px;
-                    spacing: 6px;
-                    alignment: center;
-                    if cell.on && root.show-check : Icon {
-                        width: 18px;
-                        height: 18px;
-                        y: (parent.height - self.height) / 2;
-                        source: Icons.check;
-                        colorize: MaterialPalette.on-secondary-container;
-                    }
-                    MaterialText {
-                        text: item.text;
-                        style: MaterialTypography.label-large;
-                        color: cell.on ? MaterialPalette.on-secondary-container : MaterialPalette.on-surface;
-                        vertical-alignment: center;
-                    }
-                }
-
-                if !self.first : Rectangle {
-                    x: 0px;
-                    y: 0px;
-                    width: 1px;
-                    height: parent.height;
-                    background: MaterialPalette.outline;
-                }
-
-                cell-touch := TouchArea {
-                    clicked => {
-                        cell-keys.focus();
-                        if i != root.index { root.selected(i); }
-                    }
-                }
-                cell-keys := FocusScope {
-                    x: 0px;
-                    width: 0px;
-                    key-pressed(event) => {
-                        if event.text == " " || event.text == "\n" {
-                            if i != root.index { root.selected(i); }
-                            return accept;
-                        }
-                        reject
-                    }
-                }
-            }
-        }
-
-        Rectangle {
-            border-radius: self.height / 2;
-            border-width: 1px;
-            border-color: MaterialPalette.outline;
-        }
-    }
-}
 
 export global AppearanceEdit {
     public function commit(next: Appearance) {
@@ -163,7 +43,7 @@ export component ThemeChooser inherits FieldBlock {
     label: "主题";
     Segments {
         label: "主题";
-        items: [{ text: "跟随系统" }, { text: "浅色" }, { text: "深色" }];
+        items: ["跟随系统", "浅色", "深色"];
         index: App.appearance.theme-mode == "light" ? 1 : App.appearance.theme-mode == "dark" ? 2 : 0;
         selected(i) => { AppearanceEdit.set-theme(i == 1 ? "light" : i == 2 ? "dark" : "system"); }
     }
@@ -173,7 +53,7 @@ export component CoverSizeChooser inherits FieldBlock {
     label: "封面大小";
     Segments {
         label: "封面大小";
-        items: [{ text: "大" }, { text: "中" }, { text: "小" }];
+        items: ["大", "中", "小"];
         index: App.appearance.cover-size == "large" ? 0 : App.appearance.cover-size == "small" ? 2 : 1;
         selected(i) => { AppearanceEdit.set-cover-size(i == 0 ? "large" : i == 2 ? "small" : "medium"); }
     }
@@ -192,7 +72,7 @@ export component AppearanceSection inherits PageScroll {
             description: "紧凑模式会缩小间距和封面。";
             Segments {
                 label: "密度";
-                items: [{ text: "舒适" }, { text: "紧凑" }];
+                items: ["舒适", "紧凑"];
                 index: App.appearance.density == "compact" ? 1 : 0;
                 selected(i) => { AppearanceEdit.set-density(i == 1 ? "compact" : "comfortable"); }
             }
@@ -204,7 +84,7 @@ export component AppearanceSection inherits PageScroll {
             label: "游戏库视图";
             Segments {
                 label: "游戏库视图";
-                items: [{ text: "网格" }, { text: "列表" }];
+                items: ["网格", "列表"];
                 index: App.appearance.view-mode == "list" ? 1 : 0;
                 selected(i) => { AppearanceEdit.set-view-mode(i == 1 ? "list" : "grid"); }
             }

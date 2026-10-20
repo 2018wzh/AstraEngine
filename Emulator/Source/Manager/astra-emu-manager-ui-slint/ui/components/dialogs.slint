@@ -1,7 +1,8 @@
-import { MaterialPalette, MaterialText, MaterialTypography, TextButton, FilledButton, TonalButton, IconButton, SegmentedButton, ScrollView, TextField } from "@material";
+import { MaterialPalette, MaterialText, MaterialTypography, TextButton, FilledButton, TonalButton, IconButton, ScrollView, TextField } from "@material";
 import { TextEdit } from "std-widgets.slint";
 import { Logs, Dialogs, Session } from "../globals.slint";
 import { Icons } from "../icons.slint";
+import { Segments } from "./segments.slint";
 
 export component Scrim inherits Rectangle {
     callback dismiss();
@@ -66,6 +67,7 @@ export component DialogSurface inherits Rectangle {
             color: root.accent;
             horizontal-alignment: root.has-icon ? center : left;
             wrap: word-wrap;
+            overflow: clip;
         }
 
         @children
@@ -133,10 +135,12 @@ export component LogsOverlay {
                 }
                 if Logs.core != "" : VerticalLayout {
                     alignment: center;
-                    SegmentedButton {
-                        items: [{ text: "仅此核心" }, { text: "全部" }];
-                        current-index: Logs.scope == "core" ? 0 : 1;
-                        index-changed(index) => {
+                    Segments {
+                        width: 208px;
+                        label: "日志范围";
+                        items: ["仅此核心", "全部"];
+                        index: Logs.scope == "core" ? 0 : 1;
+                        selected(index) => {
                             if index == 0 {
                                 Logs.scope = "core";
                                 Logs.load(Logs.core);
@@ -190,7 +194,7 @@ export component EngineModal {
             style: MaterialTypography.body-medium;
             color: MaterialPalette.on-surface-variant;
             wrap: word-wrap;
-            overflow: elide;
+            overflow: clip;
         }
 
         if Dialogs.modal-has-input : TextField {
@@ -252,7 +256,7 @@ export component FatalOverlay {
                 style: MaterialTypography.body-medium;
                 color: MaterialPalette.on-surface-variant;
                 wrap: word-wrap;
-                overflow: elide;
+                overflow: clip;
             }
             if Dialogs.fatal-code != "" : MaterialText {
                 text: "错误代码 " + Dialogs.fatal-code;
