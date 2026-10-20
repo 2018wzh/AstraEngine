@@ -7,8 +7,8 @@ use std::{
     sync::{atomic::AtomicBool, Arc},
 };
 
-const MODULE: &str = include_str!("../../../../Patches/common/molebox.luau");
-const BINARY: &str = include_str!("../../../../Patches/common/binary.luau");
+const MODULE: &str = include_str!("../../../../Metadata/patches/common/molebox.luau");
+const BINARY: &str = include_str!("../../../../Metadata/patches/common/binary.luau");
 const SEED: &[u8; 16] = b"public-seed-1234";
 const SCHEDULE: [usize; 60] = [
     11, 12, 13, 14, 8, 9, 10, 4, 5, 6, 7, 1, 2, 3, 12, 13, 14, 0, 9, 10, 11, 5, 6, 7, 8, 2, 3, 4,

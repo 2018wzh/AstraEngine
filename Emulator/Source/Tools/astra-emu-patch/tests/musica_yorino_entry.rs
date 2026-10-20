@@ -6,9 +6,9 @@ use std::{
     sync::{atomic::AtomicBool, Arc},
 };
 
-const HELPER: &str = include_str!("../../../../Patches/common/yorino_entry.luau");
-const ACR: &str = include_str!("../../../../Patches/common/musica_acr.luau");
-const COPY: &str = include_str!("../../../../Patches/common/copy.luau");
+const HELPER: &str = include_str!("../../../../Metadata/patches/common/yorino_entry.luau");
+const ACR: &str = include_str!("../../../../Metadata/patches/common/musica_acr.luau");
+const COPY: &str = include_str!("../../../../Metadata/patches/common/copy.luau");
 const ROLES: [(&str, &str); 8] = [
     ("bg.paz", "bg"),
     ("bgm.paz", "bgm"),

@@ -54,12 +54,12 @@ impl PublicOverlay {
         fs::create_dir(root.join("common")).unwrap();
         fs::write(
             root.join("common/binary.luau"),
-            include_str!("../../../../../Patches/common/binary.luau"),
+            include_str!("../../../../../Metadata/patches/common/binary.luau"),
         )
         .unwrap();
         fs::write(
             root.join("common/pe.luau"),
-            include_str!("../../../../../Patches/common/pe.luau"),
+            include_str!("../../../../../Metadata/patches/common/pe.luau"),
         )
         .unwrap();
         let mut original = b"PUBLIC_ASSETS_V1".to_vec();

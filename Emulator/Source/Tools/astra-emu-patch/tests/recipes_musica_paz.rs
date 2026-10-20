@@ -63,17 +63,17 @@ fn request(root: &Path, original: &[u8], patch: &[u8]) -> PatchRequest {
     fs::create_dir(&common).unwrap();
     fs::write(
         common.join("musica.luau"),
-        include_str!("../../../../Patches/common/musica.luau"),
+        include_str!("../../../../Metadata/patches/common/musica.luau"),
     )
     .unwrap();
     fs::write(
         common.join("pe.luau"),
-        include_str!("../../../../Patches/common/pe.luau"),
+        include_str!("../../../../Metadata/patches/common/pe.luau"),
     )
     .unwrap();
     fs::write(
         common.join("binary.luau"),
-        include_str!("../../../../Patches/common/binary.luau"),
+        include_str!("../../../../Metadata/patches/common/binary.luau"),
     )
     .unwrap();
     let script = root.join("names.luau");
