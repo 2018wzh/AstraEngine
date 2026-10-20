@@ -585,10 +585,6 @@ impl NativeSession {
                     self.window.suspended = *suspended;
                     raw.kind = abi::INPUT_WINDOW;
                 }
-                FamilyEvent::WindowCloseRequested => {
-                    self.cancel();
-                    continue;
-                }
             }
             raw.window = native_window(self.window);
             self.call("input", |api, handle, error| unsafe {

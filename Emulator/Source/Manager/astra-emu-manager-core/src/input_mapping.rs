@@ -312,6 +312,72 @@ pub fn input_key_code(control: &str) -> Option<crate::model::KeyCode> {
     })
 }
 
+/// Canonical name of a bindable key; the inverse of [`input_key_code`].
+pub fn input_key_name(code: crate::model::KeyCode) -> Option<&'static str> {
+    use crate::model::KeyCode;
+    Some(match code {
+        KeyCode::A => "a",
+        KeyCode::B => "b",
+        KeyCode::C => "c",
+        KeyCode::D => "d",
+        KeyCode::E => "e",
+        KeyCode::F => "f",
+        KeyCode::G => "g",
+        KeyCode::H => "h",
+        KeyCode::I => "i",
+        KeyCode::J => "j",
+        KeyCode::K => "k",
+        KeyCode::L => "l",
+        KeyCode::M => "m",
+        KeyCode::N => "n",
+        KeyCode::O => "o",
+        KeyCode::P => "p",
+        KeyCode::Q => "q",
+        KeyCode::R => "r",
+        KeyCode::S => "s",
+        KeyCode::T => "t",
+        KeyCode::U => "u",
+        KeyCode::V => "v",
+        KeyCode::W => "w",
+        KeyCode::X => "x",
+        KeyCode::Y => "y",
+        KeyCode::Z => "z",
+        KeyCode::Enter => "enter",
+        KeyCode::Escape => "escape",
+        KeyCode::Space => "space",
+        KeyCode::Tab => "tab",
+        KeyCode::Backspace => "backspace",
+        KeyCode::ArrowLeft => "arrow_left",
+        KeyCode::ArrowRight => "arrow_right",
+        KeyCode::ArrowUp => "arrow_up",
+        KeyCode::ArrowDown => "arrow_down",
+        KeyCode::PageUp => "page_up",
+        KeyCode::PageDown => "page_down",
+        KeyCode::Delete => "delete",
+        KeyCode::Home => "home",
+        KeyCode::End => "end",
+        KeyCode::ControlLeft => "control_left",
+        KeyCode::ControlRight => "control_right",
+        KeyCode::ShiftLeft => "shift_left",
+        KeyCode::ShiftRight => "shift_right",
+        KeyCode::AltLeft => "alt_left",
+        KeyCode::AltRight => "alt_right",
+        KeyCode::F1 => "f1",
+        KeyCode::F2 => "f2",
+        KeyCode::F3 => "f3",
+        KeyCode::F4 => "f4",
+        KeyCode::F5 => "f5",
+        KeyCode::F6 => "f6",
+        KeyCode::F7 => "f7",
+        KeyCode::F8 => "f8",
+        KeyCode::F9 => "f9",
+        KeyCode::F10 => "f10",
+        KeyCode::F11 => "f11",
+        KeyCode::F12 => "f12",
+        _ => return None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -360,5 +426,45 @@ mod tests {
         assert!(parsed.is_err());
         let missing: Result<InputMapping, _> = serde_json::from_str(r#"{"gamepad_enabled":true}"#);
         assert!(missing.is_err());
+    }
+
+    macro_rules! every_key_code {
+        ($($variant:ident),* $(,)?) => {{
+            fn exhaustive(code: crate::model::KeyCode) {
+                match code {
+                    $(crate::model::KeyCode::$variant)|* => {}
+                }
+            }
+            let _ = exhaustive;
+            [$(crate::model::KeyCode::$variant),*]
+        }};
+    }
+
+    #[test]
+    fn key_names_round_trip_through_key_codes() {
+        let all = every_key_code![
+            Unknown, A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y,
+            Z, Digit0, Digit1, Digit2, Digit3, Digit4, Digit5, Digit6, Digit7, Digit8, Digit9,
+            Escape, Enter, Tab, Backspace, Space, Insert, Delete, Home, End, PageUp, PageDown,
+            ArrowLeft, ArrowRight, ArrowUp, ArrowDown, ControlLeft, ControlRight, ShiftLeft,
+            ShiftRight, AltLeft, AltRight, F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12,
+            Numpad0, Numpad1, Numpad2, Numpad3, Numpad4, Numpad5, Numpad6, Numpad7, Numpad8,
+            Numpad9, NumpadEnter, NumpadAdd, NumpadSubtract, NumpadMultiply, NumpadDivide, Minus,
+            Equals, Comma, Period, Slash, Semicolon, Apostrophe, BracketLeft, BracketRight,
+            Backslash, Grave,
+        ];
+        let mut named = 0;
+        for code in all {
+            if let Some(name) = input_key_name(code) {
+                named += 1;
+                assert_eq!(input_key_code(name), Some(code), "{name}");
+            }
+        }
+        assert_eq!(named, 58);
+        for name in default_vn_preset().gamepad.values() {
+            assert_eq!(input_key_name(input_key_code(name).unwrap()), Some(name.as_str()));
+        }
+        assert_eq!(input_key_name(crate::model::KeyCode::Digit1), None);
+        assert_eq!(input_key_name(crate::model::KeyCode::Insert), None);
     }
 }

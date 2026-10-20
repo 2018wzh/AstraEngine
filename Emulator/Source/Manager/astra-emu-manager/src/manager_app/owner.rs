@@ -26,8 +26,15 @@ pub(super) struct CoreMetadata {
 
 pub(super) type Metadata = BTreeMap<String, CoreMetadata>;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum PrepareProgress {
+    Cores { loaded: usize, total: usize },
+    Scan { directories: usize, games: usize },
+}
+
 pub(super) enum BackgroundEvent {
     Ready(Result<(Metadata, BTreeMap<String, String>), String>),
+    Progress(PrepareProgress),
     Scanned(
         super::probe_worker::ScanKind,
         Result<super::probe_worker::ScanReport, String>,

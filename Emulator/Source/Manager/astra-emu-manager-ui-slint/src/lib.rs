@@ -16,9 +16,18 @@ pub struct ManagerViewModel {
     pub settings: SettingsViewModel,
     pub appearance: AppearanceViewModel,
     pub notices: Vec<NoticeViewModel>,
+    pub snackbar: SnackbarViewModel,
     pub about: AboutViewModel,
     pub session: SessionViewModel,
     pub patch: PatchViewModel,
+}
+
+/// A new `serial` shows `text` again even when it repeats.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SnackbarViewModel {
+    pub serial: u32,
+    pub text: String,
+    pub action: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]

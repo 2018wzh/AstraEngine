@@ -147,21 +147,26 @@ impl FamilyProviderRegistry {
                 }
             }
         }
-        self.load_libraries(paths)
+        self.load_libraries(paths, |_, _| {})
     }
 
+    /// `progress(loaded, total)` runs after each library file is opened.
     pub fn load_libraries(
         &mut self,
         mut paths: Vec<PathBuf>,
+        mut progress: impl FnMut(usize, usize),
     ) -> Result<FamilyDirectoryLoadReport, FamilyLoadError> {
         paths.sort();
         paths.dedup();
+        let total = paths.len();
         let mut candidates = BTreeMap::<String, (PathBuf, LoadedFamilyPlugin)>::new();
         let mut duplicate_ids = BTreeSet::new();
         let mut report = FamilyDirectoryLoadReport::default();
 
-        for path in paths {
-            let plugin = match LoadedFamilyPlugin::load(&path) {
+        for (index, path) in paths.into_iter().enumerate() {
+            let loaded = LoadedFamilyPlugin::load(&path);
+            progress(index + 1, total);
+            let plugin = match loaded {
                 Ok(plugin) => plugin,
                 Err(error) => {
                     report.errors.push(FamilyDirectoryLoadError { path, error });
