@@ -1,7 +1,543 @@
-import { MaterialPalette } from "@material";
+import {
+    MaterialPalette, MaterialText, MaterialTypography, ScrollView, TabBar, SegmentedButton, TextField,
+    FilledButton, TonalButton, OutlineButton, TextButton, IconButton, OutlinedCard, HorizontalDivider, Icon,
+} from "@material";
+import { App, Library, Selection, BangumiProgress } from "../globals.slint";
+import { Icons } from "../icons.slint";
+import { Theme, Accent } from "../theme.slint";
+import { ChoiceSelect } from "../components/select.slint";
+import { RangeSlider } from "../components/range-slider.slint";
+import { GameMenu, GameNav, CompatPill } from "../components/cover-card.slint";
 
+component InfoRow {
+    in property <string> label;
+    in property <string> value;
+
+    HorizontalLayout {
+        spacing: 12px;
+        MaterialText {
+            width: 72px;
+            text: root.label;
+            style: MaterialTypography.body-medium;
+            color: MaterialPalette.on-surface-variant;
+        }
+        MaterialText {
+            horizontal-stretch: 1;
+            text: root.value;
+            style: MaterialTypography.body-medium;
+            color: MaterialPalette.on-surface;
+            wrap: word-wrap;
+            overflow: clip;
+        }
+    }
+}
+
+component SectionTitle inherits MaterialText {
+    style: MaterialTypography.title-small;
+    color: MaterialPalette.on-surface;
+}
+
+component Card {
+    min-height: body.min-height;
+    preferred-height: body.preferred-height;
+
+    OutlinedCard {
+        width: 100%;
+        height: 100%;
+    }
+
+    body := VerticalLayout {
+        padding: 16px;
+        spacing: 12px;
+        @children
+    }
+}
+
+// Selected-game panel. `mode`: "docked" (right column), "overlay" (right sheet over a scrim) or "sheet" (bottom sheet).
 export component DetailPanel {
+    in property <string> mode: "docked";
+    callback close();
+
+    property <bool> sheet: root.mode == "sheet";
+    property <Accent> accent: Theme.accent(Selection.tint.alpha > 0 ? Selection.tint : MaterialPalette.primary, App.dark);
+    in-out property <int> tab;
+    property <length> pad: 20px;
+    property <bool> has-cover: Selection.cover.width > 0;
+
+    function update-bangumi(status: string, rating: int, note: string) {
+        Selection.bangumi = { status: status, rating: rating, note: note };
+    }
+
+    pure function bangumi-index(status: string) -> int {
+        return status == "wish" ? 0 : status == "doing" ? 1 : status == "collect" ? 2 : status == "on_hold" ? 3 : status == "dropped" ? 4 : -1;
+    }
+
+    pure function bangumi-id(index: int) -> string {
+        return index == 0 ? "wish" : index == 1 ? "doing" : index == 2 ? "collect" : index == 3 ? "on_hold" : "dropped";
+    }
+
+    init => { keys.focus(); }
+
+    // Swallow pointer events so the scrim under the panel never sees them.
+    TouchArea { }
+
     Rectangle {
-        background: MaterialPalette.surface-container-low;
+        background: MaterialPalette.surface;
+        border-top-left-radius: root.mode == "docked" ? 0px : 16px;
+        border-top-right-radius: root.sheet ? 16px : 0px;
+        border-bottom-left-radius: root.mode == "overlay" ? 16px : 0px;
+        drop-shadow-blur: root.mode == "docked" ? 0px : 16px;
+        drop-shadow-color: MaterialPalette.shadow-30;
+    }
+
+    if root.mode == "docked" : Rectangle {
+        x: 0px;
+        y: 0px;
+        width: 1px;
+        height: root.height;
+        background: MaterialPalette.outline-variant;
+    }
+
+    keys := FocusScope {
+        width: 100%;
+        height: 100%;
+        key-pressed(event) => {
+            if event.text == Key.Escape {
+                root.close();
+                return accept;
+            }
+            reject
+        }
+
+        Rectangle {
+            clip: true;
+            border-top-left-radius: root.mode == "docked" ? 0px : 16px;
+            border-top-right-radius: root.sheet ? 16px : 0px;
+            border-bottom-left-radius: root.mode == "overlay" ? 16px : 0px;
+
+            scroll := ScrollView {
+                width: 100%;
+                height: 100%;
+
+                VerticalLayout {
+                    width: scroll.visible-width;
+                    alignment: start;
+
+                    // Header with cover tint.
+                    header := Rectangle {
+                        height: head.preferred-height;
+                        background: @linear-gradient(180deg, root.accent.container 0%, MaterialPalette.surface 100%);
+
+                        head := VerticalLayout {
+                            padding-left: root.pad;
+                            padding-right: 8px;
+                            padding-top: root.sheet ? 4px : 12px;
+                            padding-bottom: 16px;
+                            spacing: 8px;
+
+                            HorizontalLayout {
+                                height: 40px;
+                                if root.sheet : Rectangle {
+                                    horizontal-stretch: 1;
+                                    Rectangle {
+                                        y: 8px;
+                                        width: 32px;
+                                        height: 4px;
+                                        border-radius: 2px;
+                                        background: MaterialPalette.outline;
+                                    }
+                                }
+                                if !root.sheet : Rectangle { horizontal-stretch: 1; }
+                                IconButton {
+                                    icon: Icons.close;
+                                    tooltip: "关闭";
+                                    clicked => { root.close(); }
+                                }
+                            }
+
+                            HorizontalLayout {
+                                padding-right: 12px;
+                                spacing: 16px;
+
+                                Rectangle {
+                                    width: 104px;
+                                    height: 138px;
+                                    border-radius: 12px;
+                                    clip: true;
+                                    background: MaterialPalette.surface-container-highest;
+                                    drop-shadow-blur: 12px;
+                                    drop-shadow-offset-y: 4px;
+                                    drop-shadow-color: MaterialPalette.shadow-30;
+
+                                    if root.has-cover : Image {
+                                        width: 100%;
+                                        height: 100%;
+                                        source: Selection.cover;
+                                        image-fit: cover;
+                                    }
+                                    if !root.has-cover : Icon {
+                                        width: 32px;
+                                        source: Icons.image;
+                                        colorize: MaterialPalette.on-surface-variant;
+                                        opacity: 0.5;
+                                    }
+                                }
+
+                                VerticalLayout {
+                                    horizontal-stretch: 1;
+                                    alignment: end;
+                                    spacing: 6px;
+
+                                    MaterialText {
+                                        text: Selection.game.title;
+                                        style: MaterialTypography.title-large;
+                                        color: MaterialPalette.on-surface;
+                                        wrap: word-wrap;
+                                        overflow: clip;
+                                    }
+                                    MaterialText {
+                                        text: Selection.game.engine + (Selection.game.emulator != "" ? " · " + Selection.game.emulator : "");
+                                        style: MaterialTypography.body-medium;
+                                        color: MaterialPalette.on-surface-variant;
+                                        wrap: word-wrap;
+                                        overflow: clip;
+                                    }
+                                    HorizontalLayout {
+                                        alignment: start;
+                                        CompatPill { status: Selection.compat.status; }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    VerticalLayout {
+                        padding-left: root.pad;
+                        padding-right: root.pad;
+                        padding-bottom: 8px;
+                        spacing: 12px;
+
+                        if Selection.emulator-choices.length > 0 : ChoiceSelect {
+                            label: "模拟器";
+                            choices: Selection.emulator-choices;
+                            value: Selection.game.emulator-id;
+                            selected(id) => { Selection.choose-emulator(id); }
+                        }
+
+                        HorizontalLayout {
+                            spacing: 8px;
+                            FilledButton {
+                                horizontal-stretch: 1;
+                                icon: Icons.play-arrow;
+                                text: "开始游戏";
+                                enabled: Selection.game.launchable;
+                                clicked => { Library.launch(Selection.game.id); }
+                            }
+                            TonalButton {
+                                horizontal-stretch: 0;
+                                icon: Icons.tune;
+                                text: "游戏设置";
+                                clicked => { GameNav.open-settings(Selection.game.id, "emulator"); }
+                            }
+                            more := IconButton {
+                                icon: Icons.more-vert;
+                                tooltip: "更多操作";
+                                clicked => {
+                                    menu.open(Selection.game.id, Selection.game.launchable,
+                                        self.absolute-position.x - root.absolute-position.x - 168px,
+                                        self.absolute-position.y - root.absolute-position.y + self.height);
+                                }
+                            }
+                        }
+
+                        if !Selection.game.launchable : HorizontalLayout {
+                            spacing: 8px;
+                            VerticalLayout {
+                                alignment: start;
+                                padding-top: 1px;
+                                Icon {
+                                    width: 18px;
+                                    source: Icons.warning;
+                                    colorize: MaterialPalette.error;
+                                }
+                            }
+                            MaterialText {
+                                horizontal-stretch: 1;
+                                text: Selection.game.problem != "" ? Selection.game.problem : "暂时无法启动";
+                                style: MaterialTypography.body-medium;
+                                color: MaterialPalette.error;
+                                wrap: word-wrap;
+                                overflow: clip;
+                            }
+                        }
+                    }
+
+                    TabBar {
+                        items: [{ text: "概览" }, { text: "兼容性" }, { text: "记录" }];
+                        current-index <=> root.tab;
+                    }
+                    HorizontalDivider { }
+
+                    // 概览
+                    if root.tab == 0 : VerticalLayout {
+                        padding: root.pad;
+                        spacing: 12px;
+
+                        if Selection.game.description != "" : MaterialText {
+                            text: Selection.game.description;
+                            style: MaterialTypography.body-medium;
+                            color: MaterialPalette.on-surface;
+                            wrap: word-wrap;
+                            overflow: clip;
+                        }
+                        InfoRow { label: "游玩时长"; value: Selection.game.play-time != "" ? Selection.game.play-time : "未开始"; }
+                        InfoRow { label: "上次游玩"; value: Selection.game.last-played != "" ? Selection.game.last-played : "从未"; }
+                        if Selection.game.developer != "" : InfoRow { label: "开发商"; value: Selection.game.developer; }
+                        if Selection.game.release-date != "" : InfoRow { label: "发售日"; value: Selection.game.release-date; }
+                        if Selection.game.platforms != "" : InfoRow { label: "平台"; value: Selection.game.platforms; }
+                        if Selection.game.aliases != "" : InfoRow { label: "别名"; value: Selection.game.aliases; }
+                        if Selection.game.tags != "" : InfoRow { label: "标签"; value: Selection.game.tags; }
+
+                        Card {
+                            SectionTitle { text: "作品资料"; }
+                            MaterialText {
+                                text: Selection.metadata-status != "" ? Selection.metadata-status : "尚未关联 VNDB 或 Bangumi 作品资料。";
+                                style: MaterialTypography.body-medium;
+                                color: MaterialPalette.on-surface-variant;
+                                wrap: word-wrap;
+                                overflow: clip;
+                            }
+                            HorizontalLayout {
+                                alignment: start;
+                                OutlineButton {
+                                    text: "关联作品资料…";
+                                    clicked => { GameNav.open-settings(Selection.game.id, "metadata"); }
+                                }
+                            }
+                        }
+                    }
+
+                    // 兼容性
+                    if root.tab == 1 : VerticalLayout {
+                        padding: root.pad;
+                        spacing: 12px;
+
+                        Rectangle {
+                            height: status-body.preferred-height;
+                            border-radius: 12px;
+                            background: Theme.status-color(Selection.compat.status).with-alpha(0.14);
+
+                            status-body := VerticalLayout {
+                                padding: 16px;
+                                spacing: 6px;
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    VerticalLayout {
+                                        alignment: center;
+                                        Rectangle {
+                                            width: 12px;
+                                            height: 12px;
+                                            border-radius: 6px;
+                                            background: Theme.status-color(Selection.compat.status);
+                                        }
+                                    }
+                                    MaterialText {
+                                        horizontal-stretch: 1;
+                                        text: Theme.status-label(Selection.compat.status);
+                                        style: MaterialTypography.title-medium;
+                                        color: MaterialPalette.on-surface;
+                                    }
+                                }
+                                if Selection.compat.release-id != "" || Selection.compat.emulator-label != "" : MaterialText {
+                                    text: (Selection.compat.release-id != "" ? "发行版本 " + Selection.compat.release-id : "")
+                                        + (Selection.compat.release-id != "" && Selection.compat.emulator-label != "" ? " · " : "")
+                                        + Selection.compat.emulator-label;
+                                    style: MaterialTypography.body-medium;
+                                    color: MaterialPalette.on-surface-variant;
+                                    wrap: word-wrap;
+                                    overflow: clip;
+                                }
+                                if Selection.compat.notes != "" : MaterialText {
+                                    text: Selection.compat.notes;
+                                    style: MaterialTypography.body-medium;
+                                    color: MaterialPalette.on-surface;
+                                    wrap: word-wrap;
+                                    overflow: clip;
+                                }
+                                if Selection.compat.hint != "" : MaterialText {
+                                    text: Selection.compat.hint;
+                                    style: MaterialTypography.body-medium;
+                                    color: MaterialPalette.on-surface-variant;
+                                    wrap: word-wrap;
+                                    overflow: clip;
+                                }
+                                if Selection.compat.updated != "" : MaterialText {
+                                    text: "更新于 " + Selection.compat.updated;
+                                    style: MaterialTypography.label-small;
+                                    color: MaterialPalette.on-surface-variant;
+                                }
+                            }
+                        }
+
+                        SectionTitle { text: "发行版本"; }
+                        if Selection.releases.length > 0 : ChoiceSelect {
+                            label: "发行版本";
+                            choices: Selection.releases;
+                            value: Selection.pinned-release;
+                            supporting-text: Selection.pinned-release == "" ? "选择你的发行版本以匹配兼容性记录" : "";
+                            selected(id) => { Selection.pin-release(id); }
+                        }
+                        HorizontalLayout {
+                            alignment: start;
+                            spacing: 8px;
+                            if Selection.releases.length == 0 : TonalButton {
+                                icon: Icons.download;
+                                text: "获取版本列表";
+                                enabled: !Selection.metadata-busy;
+                                clicked => { Selection.fetch-releases(); }
+                            }
+                            if Selection.releases.length > 0 && Selection.pinned-release != "" : TextButton {
+                                text: "取消指定版本";
+                                clicked => { Selection.pin-release(""); }
+                            }
+                        }
+
+                        HorizontalDivider { }
+                        HorizontalLayout {
+                            alignment: start;
+                            OutlineButton {
+                                icon: Icons.public;
+                                text: "报告兼容性";
+                                enabled: Selection.compat.report-url != "";
+                                clicked => { Platform.open-url(Selection.compat.report-url); }
+                            }
+                        }
+                        if Selection.compat.report-url == "" : MaterialText {
+                            text: "先关联 VNDB 作品";
+                            style: MaterialTypography.body-small;
+                            color: MaterialPalette.on-surface-variant;
+                        }
+                    }
+
+                    // 记录
+                    if root.tab == 2 : VerticalLayout {
+                        padding: root.pad;
+                        spacing: 12px;
+
+                        SectionTitle { text: "游玩记录"; }
+                        if Selection.history.length == 0 : MaterialText {
+                            text: "还没有游玩记录";
+                            style: MaterialTypography.body-medium;
+                            color: MaterialPalette.on-surface-variant;
+                        }
+                        for entry in Selection.history : HorizontalLayout {
+                            spacing: 12px;
+                            VerticalLayout {
+                                alignment: center;
+                                Icon {
+                                    width: 18px;
+                                    source: Icons.history;
+                                    colorize: MaterialPalette.on-surface-variant;
+                                }
+                            }
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                spacing: 2px;
+                                MaterialText {
+                                    text: entry.started;
+                                    style: MaterialTypography.body-medium;
+                                    color: MaterialPalette.on-surface;
+                                }
+                                MaterialText {
+                                    text: entry.duration + (entry.ended-by != "" ? " · " + entry.ended-by : "");
+                                    style: MaterialTypography.body-small;
+                                    color: MaterialPalette.on-surface-variant;
+                                }
+                            }
+                        }
+
+                        Card {
+                            SectionTitle { text: "Bangumi"; }
+                            // Five segments do not fit a narrow panel; scroll them horizontally there.
+                            Flickable {
+                                height: 40px;
+                                content-width: max(self.width, status-seg.min-width);
+                                content-height: 40px;
+                                interactive: status-seg.min-width > self.width;
+
+                                status-seg := SegmentedButton {
+                                    x: 0px;
+                                    y: 0px;
+                                    width: self.min-width;
+                                    height: 40px;
+                                    items: [{ text: "想玩" }, { text: "在玩" }, { text: "玩过" }, { text: "搁置" }, { text: "抛弃" }];
+                                    current-index: root.bangumi-index(Selection.bangumi.status);
+                                    index-changed(index) => {
+                                        root.update-bangumi(root.bangumi-id(index), Selection.bangumi.rating, Selection.bangumi.note);
+                                    }
+                                }
+                            }
+                            HorizontalLayout {
+                                spacing: 12px;
+                                MaterialText {
+                                    horizontal-stretch: 0;
+                                    text: "评分";
+                                    style: MaterialTypography.body-medium;
+                                    color: MaterialPalette.on-surface-variant;
+                                    vertical-alignment: center;
+                                }
+                                RangeSlider {
+                                    minimum: 1;
+                                    maximum: 10;
+                                    step: 1;
+                                    value: max(1, Selection.bangumi.rating);
+                                    accessible-label: "评分";
+                                    released(value) => {
+                                        root.update-bangumi(Selection.bangumi.status, round(value), Selection.bangumi.note);
+                                    }
+                                }
+                                MaterialText {
+                                    width: 48px;
+                                    text: Selection.bangumi.rating > 0 ? Selection.bangumi.rating + " 分" : "未评分";
+                                    style: MaterialTypography.label-large;
+                                    color: MaterialPalette.on-surface;
+                                    vertical-alignment: center;
+                                    horizontal-alignment: right;
+                                }
+                            }
+                            TextField {
+                                label: "备注";
+                                text: Selection.bangumi.note;
+                                edited(text) => {
+                                    root.update-bangumi(Selection.bangumi.status, Selection.bangumi.rating, text);
+                                }
+                            }
+                            HorizontalLayout {
+                                alignment: start;
+                                FilledButton {
+                                    text: "同步到 Bangumi";
+                                    enabled: !Selection.metadata-busy && root.bangumi-index(Selection.bangumi.status) >= 0;
+                                    clicked => { Selection.sync-bangumi(Selection.bangumi); }
+                                }
+                            }
+                            if Selection.bangumi-summary != "" : MaterialText {
+                                text: Selection.bangumi-summary;
+                                style: MaterialTypography.body-small;
+                                color: MaterialPalette.on-surface-variant;
+                                wrap: word-wrap;
+                                overflow: clip;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    menu := GameMenu {
+        x: 0px;
+        y: 0px;
+        bound-width: root.width;
+        bound-height: root.height;
     }
 }

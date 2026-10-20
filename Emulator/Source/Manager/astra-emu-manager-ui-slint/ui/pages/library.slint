@@ -1,9 +1,704 @@
-import { MaterialPalette } from "@material";
+import {
+    MaterialPalette, MaterialText, MaterialTypography, ScrollView, TextField, SegmentedButton, FilterChip,
+    FilledButton, TonalButton, OutlineButton, TextButton, FilledCard, LinearProgressIndicator, Icon,
+} from "@material";
+import { App, Library, Settings, Choice } from "../globals.slint";
+import { Icons } from "../icons.slint";
+import { Theme } from "../theme.slint";
+import { ChoiceSelect } from "../components/select.slint";
+import { Scrim } from "../components/dialogs.slint";
+import { CoverCard, GameListRow, SortHeader, GameMenu, GameNav } from "../components/cover-card.slint";
+import { DetailPanel } from "./detail.slint";
+
+// Linear progress that also animates while the total is unknown (Material's indicator stays static).
+component PrepareProgress {
+    in property <float> progress;
+
+    property <bool> indeterminate: root.progress < 0;
+    property <float> phase: Theme.motion-short == 0ms ? 0.35 : mod(animation-tick() / 1ms, 1600) / 1600;
+
+    height: 4px;
+    accessible-role: progress-indicator;
+    accessible-value: root.indeterminate ? "" : round(root.progress * 100) + "%";
+
+    if !root.indeterminate : LinearProgressIndicator {
+        width: root.width;
+        height: root.height;
+        progress: clamp(root.progress, 0, 1);
+    }
+
+    if root.indeterminate : Rectangle {
+        width: root.width;
+        height: root.height;
+        clip: true;
+        border-radius: 2px;
+        background: MaterialPalette.primary-container;
+
+        Rectangle {
+            x: (root.phase * 1.4 - 0.4) * root.width;
+            y: 0px;
+            width: root.width * 0.4;
+            height: root.height;
+            border-radius: 2px;
+            background: MaterialPalette.primary;
+        }
+    }
+}
+
+// Single-select wrapper around Material's self-toggling FilterChip.
+component CompatChip {
+    in property <string> id;
+    in property <string> text;
+    in property <string> current;
+    callback chosen(id: string);
+
+    property <bool> is-checked: chip.checked;
+
+    changed is-checked => {
+        if root.is-checked && root.current != root.id {
+            root.chosen(root.id);
+        } else if !root.is-checked && root.current == root.id {
+            chip.checked = true;
+        }
+    }
+    changed current => { chip.checked = root.current == root.id; }
+
+    chip := FilterChip {
+        text: root.text;
+        checked: root.current == root.id;
+    }
+}
+
+component EmptyState {
+    in property <string> title;
+    in property <string> body;
+
+    VerticalLayout {
+        alignment: center;
+        spacing: 12px;
+
+        HorizontalLayout {
+            alignment: center;
+            Rectangle {
+                width: 136px;
+                height: 104px;
+
+                for i in 3 : Rectangle {
+                    x: i * 32px;
+                    y: 12px - i * 6px;
+                    width: 72px;
+                    height: 96px;
+                    border-radius: 8px;
+                    background: @linear-gradient(160deg, MaterialPalette.primary-container 0%, MaterialPalette.surface-container-highest 100%);
+                    border-width: 1px;
+                    border-color: MaterialPalette.surface;
+                    drop-shadow-blur: 6px;
+                    drop-shadow-color: MaterialPalette.shadow-15;
+
+                    Image {
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                        width: 24px;
+                        height: 24px;
+                        visible: i == 2;
+                        source: Icons.image;
+                        colorize: MaterialPalette.on-primary-container;
+                        opacity: 0.5;
+                    }
+                }
+            }
+        }
+
+        MaterialText {
+            text: root.title;
+            style: MaterialTypography.title-large;
+            color: MaterialPalette.on-surface;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+            overflow: clip;
+        }
+
+        if root.body != "" : MaterialText {
+            text: root.body;
+            style: MaterialTypography.body-medium;
+            color: MaterialPalette.on-surface-variant;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+            overflow: clip;
+        }
+
+        HorizontalLayout {
+            alignment: center;
+            spacing: 8px;
+            @children
+        }
+    }
+}
 
 export component LibraryPage {
     in property <bool> compact;
 
-    Rectangle {
-        background: MaterialPalette.surface;
+    property <length> pad: root.compact ? 16px : 24px;
+    property <string> panel-mode: root.width >= 1100px ? "docked" : root.width >= 600px ? "overlay" : "sheet";
+    property <bool> detail-shown: Library.detail-open && Library.selected-id != "";
+    property <length> docked-width: 400px;
+    property <length> content-w: root.detail-shown && root.panel-mode == "docked" ? root.width - root.docked-width : root.width;
+    property <bool> narrow: root.content-w < 720px;
+    property <bool> grid-mode: App.appearance.view-mode != "list";
+    property <length> gap: root.compact ? 16px : Theme.space-xl;
+    property <length> avail: max(1px, root.content-w - 2 * root.pad);
+    // Phones keep two columns by shrinking the card below the configured cover size.
+    property <length> card-width: root.compact ? max(112px, min(Theme.cover-width, (root.avail - 8px - root.gap) / 2)) : Theme.cover-width;
+    property <int> cols: max(1, floor((root.avail - 8px + root.gap) / (root.card-width + root.gap)));
+    property <int> focus-index: -1;
+    property <string> local-filter: Library.compat-filter;
+    property <bool> preparing: Library.prepare-state == "loading-cores" || Library.prepare-state == "scanning";
+    property <bool> banner-shown: root.preparing || Library.prepare-state == "failed";
+    property <bool> list-columns: !root.narrow && !root.compact;
+
+    animate content-w {
+        duration: Theme.motion-medium;
+        easing: Theme.motion-easing;
+    }
+
+    function set-view(mode: string) {
+        App.appearance.view-mode = mode;
+        App.appearance-changed(App.appearance);
+    }
+
+    function choose-filter(id: string) {
+        root.local-filter = id;
+        Library.compat-filter = id;
+        Library.set-compat-filter(id);
+    }
+
+    function choose-sort(id: string) {
+        Library.sort = id;
+        Library.set-sort(id);
+    }
+
+    function open-detail(id: string) {
+        Library.selected-id = id;
+        Library.select(id);
+        Library.detail-open = true;
+    }
+
+    function launch-or-open(id: string, ready: bool) {
+        if ready {
+            Library.launch(id);
+        } else {
+            root.open-detail(id);
+        }
+    }
+
+    function move-focus(index: int, dx: int, dy: int) {
+        let step = root.grid-mode ? dx + dy * root.cols : dy;
+        let next = clamp(index + step, 0, Library.games.length - 1);
+        if step != 0 {
+            root.focus-index = next;
+        }
+    }
+
+    function ensure-visible(top: length, h: length) {
+        let view = root.grid-mode ? grid.visible-height : list.visible-height;
+        let offset = root.grid-mode ? -grid.content-y : -list.content-y;
+        let target = top < offset ? top : top + h > offset + view ? top + h - view : offset;
+        if root.grid-mode {
+            grid.content-y = -target;
+        } else {
+            list.content-y = -target;
+        }
+    }
+
+    function clear-search() {
+        debounce.running = false;
+        Library.query = "";
+        Library.search("");
+    }
+
+    init => { keys.focus(); }
+
+    debounce := Timer {
+        interval: 300ms;
+        running: false;
+        triggered => {
+            self.running = false;
+            Library.search(Library.query);
+        }
+    }
+
+    keys := FocusScope {
+        width: 100%;
+        height: 100%;
+        key-pressed(event) => {
+            if event.modifiers.control && (event.text == "f" || event.text == "F") {
+                search.focus();
+                search.select-all();
+                return accept;
+            }
+            if event.text == Key.Escape && root.detail-shown {
+                Library.detail-open = false;
+                return accept;
+            }
+            reject
+        }
+
+        Rectangle {
+            x: 0px;
+            y: 0px;
+            width: root.content-w;
+            height: root.height;
+            background: MaterialPalette.surface;
+            clip: true;
+
+            VerticalLayout {
+                padding-left: root.pad;
+                padding-right: root.pad;
+                padding-top: root.compact ? 8px : root.pad;
+                spacing: Theme.space-md;
+
+                // Title, count and library actions.
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: stretch;
+
+                    if !root.compact : MaterialText {
+                        horizontal-stretch: 0;
+                        text: "游戏库";
+                        style: MaterialTypography.headline-small;
+                        color: MaterialPalette.on-surface;
+                        vertical-alignment: center;
+                    }
+                    MaterialText {
+                        horizontal-stretch: 1;
+                        min-width: 48px;
+                        text: Library.games.length + " 部作品";
+                        style: MaterialTypography.body-medium;
+                        color: MaterialPalette.on-surface-variant;
+                        vertical-alignment: center;
+                    }
+                    if Library.prepare-state == "unprepared" || Library.prepare-state == "failed" : FilledButton {
+                        horizontal-stretch: 0;
+                        icon: root.narrow ? @image-url("") : Icons.refresh;
+                        text: Library.prepare-label;
+                        clicked => { Library.prepare(); }
+                    }
+                    if Library.prepare-state != "unprepared" && Library.prepare-state != "failed" : TonalButton {
+                        horizontal-stretch: 0;
+                        icon: root.narrow ? @image-url("") : Icons.refresh;
+                        text: Library.prepare-label;
+                        enabled: !root.preparing;
+                        clicked => { Library.prepare(); }
+                    }
+                    OutlineButton {
+                        horizontal-stretch: 0;
+                        icon: root.narrow ? @image-url("") : Icons.add;
+                        text: "添加游戏";
+                        clicked => { Library.add-directory(); }
+                    }
+                }
+
+                // Search, sort and view mode.
+                HorizontalLayout {
+                    spacing: 8px;
+
+                    search := TextField {
+                        horizontal-stretch: 1;
+                        min-width: 160px;
+                        label: "搜索标题、别名或开发商";
+                        leading-icon: Icons.search;
+                        trailing-icon: Library.query != "" ? Icons.close : @image-url("");
+                        text <=> Library.query;
+                        edited(text) => { debounce.restart(); }
+                        accepted(text) => {
+                            debounce.running = false;
+                            Library.search(Library.query);
+                        }
+                        trailing-icon-clicked => { root.clear-search(); }
+                    }
+                    if !root.narrow : ChoiceSelect {
+                        width: 168px;
+                        label: "排序";
+                        value: Library.sort;
+                        choices: [
+                            { id: "title", label: "标题" },
+                            { id: "recent", label: "最近游玩" },
+                            { id: "play_time", label: "游玩时长" },
+                        ];
+                        selected(id) => { root.choose-sort(id); }
+                    }
+                    if !root.narrow : VerticalLayout {
+                        horizontal-stretch: 0;
+                        alignment: center;
+                        SegmentedButton {
+                            width: self.min-width;
+                            items: [{ text: "网格" }, { text: "列表" }];
+                            current-index: root.grid-mode ? 0 : 1;
+                            index-changed(index) => { root.set-view(index == 1 ? "list" : "grid"); }
+                        }
+                    }
+                }
+
+                if root.narrow : HorizontalLayout {
+                    spacing: 8px;
+                    ChoiceSelect {
+                        horizontal-stretch: 1;
+                        min-width: 100px;
+                        label: "排序";
+                        value: Library.sort;
+                        choices: [
+                            { id: "title", label: "标题" },
+                            { id: "recent", label: "最近游玩" },
+                            { id: "play_time", label: "游玩时长" },
+                        ];
+                        selected(id) => { root.choose-sort(id); }
+                    }
+                    VerticalLayout {
+                        horizontal-stretch: 0;
+                        alignment: center;
+                        SegmentedButton {
+                            width: self.min-width;
+                            items: [{ text: "网格" }, { text: "列表" }];
+                            current-index: root.grid-mode ? 0 : 1;
+                            index-changed(index) => { root.set-view(index == 1 ? "list" : "grid"); }
+                        }
+                    }
+                }
+
+                // Compatibility filter chips (single select).
+                chips-flick := Flickable {
+                    height: 32px;
+                    content-width: chips.preferred-width;
+                    content-height: 32px;
+                    interactive: chips.preferred-width > self.width;
+
+                    chips := HorizontalLayout {
+                        spacing: 8px;
+                        CompatChip { id: "all"; text: "全部"; current: root.local-filter; chosen(id) => { root.choose-filter(id); } }
+                        CompatChip { id: "perfect"; text: "完美"; current: root.local-filter; chosen(id) => { root.choose-filter(id); } }
+                        CompatChip { id: "completable"; text: "可通关"; current: root.local-filter; chosen(id) => { root.choose-filter(id); } }
+                        CompatChip { id: "flawed"; text: "有瑕疵"; current: root.local-filter; chosen(id) => { root.choose-filter(id); } }
+                        CompatChip { id: "boot_only"; text: "仅能启动"; current: root.local-filter; chosen(id) => { root.choose-filter(id); } }
+                        CompatChip { id: "unplayable"; text: "无法运行"; current: root.local-filter; chosen(id) => { root.choose-filter(id); } }
+                        CompatChip { id: "unknown"; text: "未评级"; current: root.local-filter; chosen(id) => { root.choose-filter(id); } }
+                    }
+                }
+
+                // Prepare banner.
+                if root.banner-shown : Rectangle {
+                    height: banner.preferred-height;
+
+                    FilledCard {
+                        width: 100%;
+                        height: 100%;
+                    }
+
+                    banner := VerticalLayout {
+                        padding: 16px;
+                        spacing: 12px;
+
+                        HorizontalLayout {
+                            spacing: 12px;
+
+                            if Library.prepare-state == "failed" : VerticalLayout {
+                                alignment: center;
+                                Icon {
+                                    width: 24px;
+                                    source: Icons.error;
+                                    colorize: MaterialPalette.error;
+                                }
+                            }
+
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                alignment: center;
+                                spacing: 4px;
+
+                                MaterialText {
+                                    text: Library.prepare-state == "failed" ? "准备失败"
+                                        : Library.prepare-state == "loading-cores" ? "正在加载模拟器核心"
+                                        : "正在扫描游戏目录";
+                                    style: MaterialTypography.title-small;
+                                    color: Library.prepare-state == "failed" ? MaterialPalette.error : MaterialPalette.on-surface;
+                                }
+                                if Library.prepare-detail != "" : MaterialText {
+                                    text: Library.prepare-detail;
+                                    style: MaterialTypography.body-medium;
+                                    color: MaterialPalette.on-surface-variant;
+                                    wrap: word-wrap;
+                                    overflow: clip;
+                                }
+                            }
+
+                            if root.preparing && !root.narrow : VerticalLayout {
+                                alignment: center;
+                                TextButton {
+                                    text: "取消";
+                                    enabled: Library.can-cancel-prepare;
+                                    clicked => { Library.cancel-prepare(); }
+                                }
+                            }
+                        }
+
+                        if root.preparing : PrepareProgress {
+                            progress: Library.prepare-progress;
+                        }
+
+                        if root.preparing && root.narrow : HorizontalLayout {
+                            alignment: end;
+                            TextButton {
+                                text: "取消";
+                                enabled: Library.can-cancel-prepare;
+                                clicked => { Library.cancel-prepare(); }
+                            }
+                        }
+
+                        if Library.prepare-state == "failed" : HorizontalLayout {
+                            alignment: end;
+                            spacing: 8px;
+                            TextButton {
+                                text: "查看核心";
+                                clicked => {
+                                    App.settings-category = "cores";
+                                    App.page = "settings";
+                                }
+                            }
+                            TonalButton {
+                                icon: Icons.restart-alt;
+                                text: "重启 AstraEMU";
+                                clicked => { App.restart(); }
+                            }
+                        }
+                    }
+                }
+
+                // Results.
+                Rectangle {
+                    vertical-stretch: 1;
+
+                    grid := ScrollView {
+                        x: 0px;
+                        y: 0px;
+                        width: parent.width + root.pad;
+                        height: parent.height;
+                        visible: root.grid-mode && Library.games.length > 0;
+
+                        flex := FlexboxLayout {
+                            width: grid.visible-width;
+                            padding-top: 8px;
+                            padding-left: 4px;
+                            padding-bottom: 24px;
+                            spacing: root.gap;
+                            alignment: start;
+
+                            for game[index] in Library.games : CoverCard {
+                                width: root.card-width;
+                                height: root.card-width * 4 / 3 + 52px;
+                                game: game;
+                                selected: game.id == Library.selected-id;
+                                focus-wanted: index == root.focus-index;
+                                cover-needed: Library.cover-loading && root.grid-mode
+                                    && self.y + self.height >= -grid.content-y - self.height
+                                    && self.y <= -grid.content-y + grid.visible-height + self.height;
+                                cover-demand(id, needed) => { Library.cover-demand(index, id, needed, "grid"); }
+                                activated => {
+                                    root.focus-index = index;
+                                    root.open-detail(game.id);
+                                }
+                                launch => { root.launch-or-open(game.id, game.ready); }
+                                navigate(dx, dy) => { root.move-focus(index, dx, dy); }
+                                focused => {
+                                    root.focus-index = index;
+                                    root.ensure-visible(self.y - 8px, self.height + 16px);
+                                }
+                                context-menu(x, y) => {
+                                    menu.open(game.id, game.ready,
+                                        self.absolute-position.x - root.absolute-position.x + x,
+                                        self.absolute-position.y - root.absolute-position.y + y);
+                                }
+                            }
+                        }
+                    }
+
+                    if !root.grid-mode && Library.games.length > 0 && root.list-columns : HorizontalLayout {
+                        x: 0px;
+                        y: 0px;
+                        width: parent.width;
+                        height: 40px;
+                        padding-left: 12px;
+                        padding-right: 8px;
+                        spacing: 12px;
+
+                        Rectangle { width: 36px; }
+                        SortHeader {
+                            horizontal-stretch: 1;
+                            label: "标题";
+                            active: Library.sort == "title";
+                            clicked => { root.choose-sort("title"); }
+                        }
+                        MaterialText {
+                            width: 160px;
+                            text: "引擎 · 模拟器";
+                            style: MaterialTypography.label-large;
+                            color: MaterialPalette.on-surface-variant;
+                            vertical-alignment: center;
+                        }
+                        MaterialText {
+                            width: 112px;
+                            text: "兼容性";
+                            style: MaterialTypography.label-large;
+                            color: MaterialPalette.on-surface-variant;
+                            vertical-alignment: center;
+                        }
+                        SortHeader {
+                            width: 96px;
+                            label: "游玩时长";
+                            active: Library.sort == "play_time";
+                            clicked => { root.choose-sort("play_time"); }
+                        }
+                        SortHeader {
+                            width: 112px;
+                            label: "上次游玩";
+                            active: Library.sort == "recent";
+                            clicked => { root.choose-sort("recent"); }
+                        }
+                        Rectangle { width: 40px; }
+                    }
+
+                    list := ScrollView {
+                        x: 0px;
+                        y: root.list-columns ? 41px : 0px;
+                        width: parent.width;
+                        height: parent.height - self.y;
+                        visible: !root.grid-mode && Library.games.length > 0;
+
+                        VerticalLayout {
+                            width: list.visible-width;
+                            padding-bottom: 24px;
+                            spacing: 2px;
+
+                            for game[index] in Library.games : GameListRow {
+                                game: game;
+                                selected: game.id == Library.selected-id;
+                                compact-row: !root.list-columns;
+                                engine-width: root.list-columns ? 160px : 0px;
+                                compat-width: root.list-columns ? 112px : 0px;
+                                time-width: root.list-columns ? 96px : 0px;
+                                last-width: root.list-columns ? 112px : 0px;
+                                focus-wanted: index == root.focus-index;
+                                cover-needed: Library.cover-loading && !root.grid-mode
+                                    && self.y + self.height >= -list.content-y - self.height
+                                    && self.y <= -list.content-y + list.visible-height + self.height;
+                                cover-demand(id, needed) => { Library.cover-demand(index, id, needed, "list"); }
+                                activated => {
+                                    root.focus-index = index;
+                                    root.open-detail(game.id);
+                                }
+                                launch => { root.launch-or-open(game.id, game.ready); }
+                                navigate(dx, dy) => { root.move-focus(index, dx, dy); }
+                                focused => {
+                                    root.focus-index = index;
+                                    root.ensure-visible(self.y, self.height);
+                                }
+                                context-menu(x, y) => {
+                                    menu.open(game.id, game.ready,
+                                        self.absolute-position.x - root.absolute-position.x + x,
+                                        self.absolute-position.y - root.absolute-position.y + y);
+                                }
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        x: 0px;
+                        y: 40px;
+                        width: parent.width;
+                        height: 1px;
+                        visible: !root.grid-mode && Library.games.length > 0 && root.list-columns;
+                        background: MaterialPalette.outline-variant;
+                    }
+
+                    if Library.games.length == 0 : VerticalLayout {
+                        x: 0px;
+                        y: 0px;
+                        width: parent.width;
+                        height: parent.height;
+                        padding-bottom: 48px;
+                        alignment: center;
+
+                        if Library.prepare-state == "unprepared" : EmptyState {
+                            title: "先准备资料库";
+                            body: "AstraEMU 会加载模拟器核心，再扫描你的游戏目录。";
+                            FilledButton {
+                                text: Library.prepare-label;
+                                clicked => { Library.prepare(); }
+                            }
+                        }
+                        if Library.prepare-state != "unprepared" && Library.query != "" : EmptyState {
+                            title: "没有找到“" + Library.query + "”";
+                            body: "换个关键词试试。";
+                            OutlineButton {
+                                text: "清除搜索";
+                                clicked => { root.clear-search(); }
+                            }
+                        }
+                        if Library.prepare-state != "unprepared" && Library.query == "" && Settings.roots.length == 0 && !root.preparing : EmptyState {
+                            title: "添加第一个游戏目录";
+                            body: "选择存放游戏的文件夹，AstraEMU 会识别其中的作品。";
+                            FilledButton {
+                                icon: Icons.add;
+                                text: "添加游戏";
+                                clicked => { Library.add-directory(); }
+                            }
+                        }
+                        if Library.prepare-state != "unprepared" && Library.query == "" && Settings.roots.length > 0 && root.local-filter != "all" && !root.preparing : EmptyState {
+                            title: "没有符合筛选条件的作品";
+                            body: "";
+                            OutlineButton {
+                                text: "显示全部";
+                                clicked => { root.choose-filter("all"); }
+                            }
+                        }
+                        if Library.prepare-state == "ready" && Library.query == "" && Settings.roots.length > 0 && root.local-filter == "all" : EmptyState {
+                            title: "这些目录里还没有识别到作品";
+                            body: "可以添加其他目录，或在 设置→库目录 中管理已有目录。";
+                            OutlineButton {
+                                icon: Icons.add;
+                                text: "添加游戏";
+                                clicked => { Library.add-directory(); }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+    }
+
+    if root.detail-shown && root.panel-mode != "docked" : Scrim {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        dismiss => { Library.detail-open = false; }
+    }
+
+    if root.detail-shown : DetailPanel {
+        x: root.panel-mode == "sheet" ? 0px : root.width - self.width;
+        y: root.panel-mode == "sheet" ? max(24px, root.height * 0.12) : 0px;
+        width: root.panel-mode == "docked" ? root.docked-width : root.panel-mode == "overlay" ? min(440px, root.width - 56px) : root.width;
+        height: root.height - self.y;
+        mode: root.panel-mode;
+        close => {
+            Library.detail-open = false;
+            keys.focus();
+        }
+    }
+
+    menu := GameMenu {
+        x: 0px;
+        y: 0px;
+        bound-width: root.width;
+        bound-height: root.height;
     }
 }
