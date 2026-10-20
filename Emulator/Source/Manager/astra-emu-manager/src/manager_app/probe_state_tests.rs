@@ -727,7 +727,7 @@ fn removed_games_stay_hidden_across_scans_until_undone() {
     settle_provider(&mut app);
 
     let first = prepared(&mut app);
-    assert_eq!(first.snackbar.text, "发现 2 部新作品");
+    assert_eq!(first.notices.snackbar.text, "发现 2 部新作品");
     let mut ids = visible_games(&app);
     ids.sort();
     let mut expected = vec![g1.clone(), g2.clone()];
@@ -743,14 +743,14 @@ fn removed_games_stay_hidden_across_scans_until_undone() {
     let removed = app.remove_from_library(&g1).unwrap();
     assert_eq!(visible_games(&app), vec![g2.clone()]);
     assert_eq!(removed.library.selected_id, "");
-    assert_eq!(removed.snackbar.action, "撤销");
-    assert!(removed.snackbar.text.contains("已从资料库移除"));
-    assert_eq!(removed.library.excluded.len(), 1);
-    assert_eq!(removed.library.excluded[0].id, g1);
+    assert_eq!(removed.notices.snackbar.action, "撤销");
+    assert!(removed.notices.snackbar.text.contains("已从资料库移除"));
+    assert_eq!(removed.settings.excluded.len(), 1);
+    assert_eq!(removed.settings.excluded[0].id, g1);
 
     let rescanned = prepared(&mut app);
     assert_eq!(visible_games(&app), vec![g2.clone()]);
-    assert_eq!(rescanned.snackbar.text, "资料库已是最新");
+    assert_eq!(rescanned.notices.snackbar.text, "资料库已是最新");
 
     app.undo_remove().unwrap();
     let mut ids = visible_games(&app);
@@ -760,7 +760,7 @@ fn removed_games_stay_hidden_across_scans_until_undone() {
         app.library.library_snapshot().unwrap().play_stats[&g1],
         stats
     );
-    assert!(app.model().unwrap().library.excluded.is_empty());
+    assert!(app.model().unwrap().settings.excluded.is_empty());
     assert_eq!(app.undo_remove().unwrap_err(), "ASTRA_EMU_UNDO_UNAVAILABLE");
 
     app.remove_from_library(&g2).unwrap();
@@ -787,7 +787,7 @@ fn added_directory_is_persisted_as_a_library_root() {
     app.add_game_directory(&library_root.join("g1")).unwrap();
     settle_background(&mut app);
     let model = app.model().unwrap();
-    assert_eq!(model.library.roots, vec![g1.to_str().unwrap().to_owned()]);
+    assert_eq!(model.settings.roots, vec![g1.to_str().unwrap().to_owned()]);
     assert_eq!(model.library.selected_id, path_id(&g1));
     assert_eq!(app.scan_roots().unwrap(), vec![g1]);
 }
@@ -833,7 +833,7 @@ fn prepare_loads_cores_then_scans_every_root_automatically() {
     let ready = app.model().unwrap();
     assert_eq!(ready.library.prepare_state, "ready");
     assert_eq!(ready.library.prepare_label, "刷新资料库");
-    assert_eq!(ready.snackbar.text, "发现 2 部新作品");
+    assert_eq!(ready.notices.snackbar.text, "发现 2 部新作品");
     let mut ids = visible_games(&app);
     ids.sort();
     let mut expected = vec![path_id(&g1), path_id(&g2)];
@@ -884,8 +884,8 @@ fn cancelling_a_scan_restores_ready_without_touching_the_library() {
     assert!(matches!(app.startup_state, background::StartupState::Ready));
     assert_eq!(visible_games(&app), before);
     let model = app.model().unwrap();
-    assert_eq!(model.snackbar.text, "已取消扫描");
-    assert_eq!(model.snackbar.action, "");
+    assert_eq!(model.notices.snackbar.text, "已取消扫描");
+    assert_eq!(model.notices.snackbar.action, "");
     assert!(app.diagnostic.is_empty());
     assert_eq!(
         app.cancel_prepare().unwrap_err(),

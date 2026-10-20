@@ -34,7 +34,9 @@ fn wire<C: ManagerController, R: AstraUnderlayRenderer>(
     let renderer = renderer.clone();
     move |field, change| {
         let action = |c: &mut C| {
-            change(c, &mut |settings| configure(&mut *renderer.borrow_mut(), settings))
+            change(c, &mut |settings| {
+                configure(&mut *renderer.borrow_mut(), settings)
+            })
         };
         match field {
             Some(key) => wiring.run_field(FieldScope::Filter, key, action),
@@ -57,7 +59,9 @@ pub(super) fn install<C: ManagerController, R: AstraUnderlayRenderer>(
     let run = wire(wiring, renderer);
     let set_preset = run.clone();
     filters.on_set_preset(move |preset| {
-        set_preset(None, &|c, apply| c.set_filter_preset(preset.as_str(), apply));
+        set_preset(None, &|c, apply| {
+            c.set_filter_preset(preset.as_str(), apply)
+        });
     });
     let set_parameter = run.clone();
     filters.on_field_changed(move |key, value| {

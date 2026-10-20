@@ -179,7 +179,9 @@ fn exact_text(code: &str) -> Option<(&'static str, &'static str)> {
             "元数据中没有适用于当前平台和接口版本的发布，请先同步元数据。",
         ),
         "ASTRA_EMU_CORE_DOWNLOAD_PENDING" => ("核心正在下载", "请等待当前下载完成。"),
-        "ASTRA_EMU_CORE_DOWNLOAD_URL" => ("核心下载地址无效", "只允许从 GitHub Releases 下载核心。"),
+        "ASTRA_EMU_CORE_DOWNLOAD_URL" => {
+            ("核心下载地址无效", "只允许从 GitHub Releases 下载核心。")
+        }
         "ASTRA_EMU_CORE_DOWNLOAD_REDIRECT" => (
             "核心下载被重定向到未知地址",
             "只允许跳转到 GitHub 的发布文件服务器，已停止下载。",
@@ -203,18 +205,14 @@ fn exact_text(code: &str) -> Option<(&'static str, &'static str)> {
             "写入数据目录失败，已保留原有数据。请检查磁盘空间和目录权限。",
         ),
         "ASTRA_EMU_METADATA_CACHE_READ" => ("无法读取元数据缓存", "请检查数据目录权限。"),
-        "ASTRA_EMU_METADATA_CACHE_INVALID" => (
-            "元数据内容无效",
-            "同步到的数据无法解析，已保留原有数据。",
-        ),
+        "ASTRA_EMU_METADATA_CACHE_INVALID" => {
+            ("元数据内容无效", "同步到的数据无法解析，已保留原有数据。")
+        }
         "ASTRA_EMU_PRESET_INVALID" => (
             "推荐配置无法套用",
             "其中有当前模拟器不支持的设置项或取值，已恢复原来的设置。",
         ),
-        "ASTRA_EMU_PRESET_UNAVAILABLE" => (
-            "没有推荐配置",
-            "当前发行版本和模拟器没有推荐配置。",
-        ),
+        "ASTRA_EMU_PRESET_UNAVAILABLE" => ("没有推荐配置", "当前发行版本和模拟器没有推荐配置。"),
         "ASTRA_EMU_LOG_READ" => ("无法读取日志", "请检查数据目录权限。"),
         "ASTRA_EMU_ENGINE_ACTION_UNAVAILABLE" => {
             ("当前无法执行这个操作", "请在游戏画面中稍后再试。")

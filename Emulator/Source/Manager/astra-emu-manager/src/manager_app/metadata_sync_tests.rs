@@ -177,10 +177,6 @@ fn recommended_patch_is_marked_in_the_recipe_list() {
     assert_eq!(recipes.len(), 1);
     assert!(recipes[0].recommended);
     assert!(!app.recipe_views(None).unwrap()[0].recommended);
-    assert_eq!(
-        app.patch_catalog_directory().unwrap(),
-        root.path().join("catalog").join("patches")
-    );
 }
 
 #[test]

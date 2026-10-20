@@ -102,7 +102,8 @@ fn install_settings<C: ManagerController>(
         w.run(|c| c.test_translation_connection(&translation_form(&form), secret.as_str()))
     });
     let w = wiring.clone();
-    settings.on_set_translation_enabled(move |enabled| w.run(|c| c.set_translation_enabled(enabled)));
+    settings
+        .on_set_translation_enabled(move |enabled| w.run(|c| c.set_translation_enabled(enabled)));
     let w = wiring.clone();
     settings.on_set_sensitive_covers(move |enabled| w.run(|c| c.set_sensitive_covers(enabled)));
     let w = wiring.clone();
@@ -110,7 +111,8 @@ fn install_settings<C: ManagerController>(
     let w = wiring.clone();
     settings.on_clear_bangumi_token(move || w.run(|c| c.clear_bangumi_token()));
     let w = wiring.clone();
-    settings.on_set_gamepad_enabled(move |enabled| w.run_mapping(|c| c.set_gamepad_enabled(enabled)));
+    settings
+        .on_set_gamepad_enabled(move |enabled| w.run_mapping(|c| c.set_gamepad_enabled(enabled)));
     let w = wiring.clone();
     settings.on_set_deadzone(move |deadzone| {
         w.run_mapping(|c| c.set_gamepad_deadzone(deadzone.as_str()))
@@ -119,10 +121,7 @@ fn install_settings<C: ManagerController>(
     settings.on_reset_bindings(move || w.run_mapping(|c| c.reset_gamepad_bindings()));
     let w = wiring.clone();
     settings.on_add_root(move || {
-        if let Some(path) = rfd::FileDialog::new()
-            .set_title("添加库目录")
-            .pick_folder()
-        {
+        if let Some(path) = rfd::FileDialog::new().set_title("添加库目录").pick_folder() {
             w.run(|c| c.add_game_directory(&path));
         }
     });
@@ -142,7 +141,10 @@ fn install_cores<C: ManagerController>(
     cores.on_install_local(move || {
         if let Some(path) = rfd::FileDialog::new()
             .set_title("从本地安装核心")
-            .add_filter("核心包或核心文件", &["zip", std::env::consts::DLL_EXTENSION])
+            .add_filter(
+                "核心包或核心文件",
+                &["zip", std::env::consts::DLL_EXTENSION],
+            )
             .pick_file()
         {
             w.run(|c| c.install_core(&path));
@@ -199,10 +201,7 @@ fn install_onboarding<C: ManagerController>(
     let onboarding = window.global::<Onboarding>();
     let w = wiring.clone();
     onboarding.on_add_root(move || {
-        if let Some(path) = rfd::FileDialog::new()
-            .set_title("添加库目录")
-            .pick_folder()
-        {
+        if let Some(path) = rfd::FileDialog::new().set_title("添加库目录").pick_folder() {
             w.run(|c| c.add_library_root(&path));
         }
     });

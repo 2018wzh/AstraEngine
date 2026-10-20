@@ -50,9 +50,8 @@ fn install_library<C: ManagerController>(
     let w = wiring.clone();
     library.on_set_sort(move |mode| w.run(|c| c.set_library_sort(mode.as_str())));
     let w = wiring.clone();
-    library.on_set_compat_filter(move |filter| {
-        w.run(|c| c.set_compatibility_filter(filter.as_str()))
-    });
+    library
+        .on_set_compat_filter(move |filter| w.run(|c| c.set_compatibility_filter(filter.as_str())));
     let w = wiring.clone();
     library.on_select(move |game_id| w.run(|c| c.select_case(game_id.as_str())));
     let w = wiring.clone();
@@ -114,7 +113,9 @@ fn install_selection<C: ManagerController>(
     selection.on_unlink_metadata(move |provider| w.run(|c| c.unlink_identity(provider.as_str())));
 }
 
-fn game_id(window: &slint::Weak<astra_emu_manager_ui_slint::ManagerWindow>) -> Option<slint::SharedString> {
+fn game_id(
+    window: &slint::Weak<astra_emu_manager_ui_slint::ManagerWindow>,
+) -> Option<slint::SharedString> {
     window
         .upgrade()
         .map(|window| window.global::<GameSettings>().get_game_id())

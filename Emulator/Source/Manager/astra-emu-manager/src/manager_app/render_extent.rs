@@ -396,7 +396,7 @@ mod tests {
         assert_eq!(view.options[3].label, "1080p · 1920×1080");
         assert_eq!(view.mode, "custom");
         assert_eq!((view.custom_width, view.custom_height), (1600, 900));
-        assert_eq!(view.range, "320×180 – 1920×1080");
+        assert_eq!((view.min.as_str(), view.max.as_str()), ("320×180", "1920×1080"));
         assert_eq!(view.note, "上次实际生效 1600×900");
     }
 }

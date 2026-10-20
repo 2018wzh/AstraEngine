@@ -444,7 +444,10 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
         .onboarding_completed()
         .map_err(HostError::Renderer)?
     {
-        adapter.window().global::<App>().set_page("onboarding".into());
+        adapter
+            .window()
+            .global::<App>()
+            .set_page("onboarding".into());
     }
     crate::startup::mark("initial_model_applied");
     adapter.set_session_active(game_active);

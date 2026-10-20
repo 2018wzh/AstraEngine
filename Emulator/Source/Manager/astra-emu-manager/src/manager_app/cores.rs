@@ -42,9 +42,9 @@ impl AstraEmuManagerController {
         )
     }
 
-    /// Loaded, failed, pending and online-available cores in one list, each
-    /// paired with its core directory stem (empty for online-only entries).
-    fn core_items(&self) -> Result<(Vec<(CoreViewModel, String)>, bool, usize), String> {
+    /// Loaded, failed, pending and online-available cores in one list, plus each
+    /// item's core directory stem (empty for online-only entries).
+    fn core_items(&self) -> Result<(CoresViewModel, Vec<String>), String> {
         let cores = self.cores_dir();
         let pending = core_package::pending_entries(&cores)?;
         let mut items = Vec::new();
@@ -156,18 +156,20 @@ impl AstraEmuManagerController {
                 ));
             }
         }
-        let restart_required = !pending.is_empty() && self.cores_started();
-        Ok((items, restart_required, updates_available))
+        let (items, stems) = items.into_iter().unzip();
+        Ok((
+            CoresViewModel {
+                items,
+                restart_required: !pending.is_empty() && self.cores_started(),
+                updates_available: i32::try_from(updates_available).unwrap_or(i32::MAX),
+                ..CoresViewModel::default()
+            },
+            stems,
+        ))
     }
 
     pub(super) fn cores_view(&self) -> Result<CoresViewModel, String> {
-        let (items, restart_required, updates_available) = self.core_items()?;
-        Ok(CoresViewModel {
-            items: items.into_iter().map(|(item, _)| item).collect(),
-            restart_required,
-            updates_available: i32::try_from(updates_available).unwrap_or(i32::MAX),
-            ..CoresViewModel::default()
-        })
+        self.core_items().map(|(view, _)| view)
     }
 
     /// Stage a local `.zip` core package or a single core library.
@@ -234,10 +236,11 @@ impl AstraEmuManagerController {
 
     /// Core directory stem of a core list entry (plugin id or stem).
     fn core_stem(&self, core_id: &str) -> Result<Option<String>, String> {
-        Ok(self
-            .core_items()?
-            .0
-            .into_iter()
+        let (view, stems) = self.core_items()?;
+        Ok(view
+            .items
+            .iter()
+            .zip(stems)
             .find(|(item, stem)| item.id == core_id && !stem.is_empty())
             .map(|(_, stem)| stem))
     }

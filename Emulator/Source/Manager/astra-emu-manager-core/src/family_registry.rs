@@ -66,7 +66,10 @@ pub fn discover_family_libraries(directory: &Path) -> Result<FamilyDiscovery, Fa
     for entry in entries {
         let entry = entry.map_err(|_| FamilyLoadError::Directory)?;
         let file_type = entry.file_type().map_err(|_| FamilyLoadError::Directory)?;
-        let hidden = entry.file_name().to_str().is_none_or(|name| name.starts_with('.'));
+        let hidden = entry
+            .file_name()
+            .to_str()
+            .is_none_or(|name| name.starts_with('.'));
         if file_type.is_dir() && !hidden {
             subdirectories.push(entry.path());
         }

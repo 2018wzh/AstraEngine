@@ -148,7 +148,11 @@ fn user_core_overrides_bundled_core_with_same_stem() {
 fn repeated_core_directory_is_discovered_once() {
     let root = tempfile::tempdir().unwrap();
     let directory = core_directory(root.path(), "astra_emu_broken");
-    std::fs::write(library_path(&directory, "astra_emu_broken"), b"not a library").unwrap();
+    std::fs::write(
+        library_path(&directory, "astra_emu_broken"),
+        b"not a library",
+    )
+    .unwrap();
     let mut registry = FamilyProviderRegistry::new();
     let report = registry
         .load_directories(&[root.path().into(), root.path().into()])
