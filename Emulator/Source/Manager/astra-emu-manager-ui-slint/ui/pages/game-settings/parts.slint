@@ -1,0 +1,135 @@
+import { MaterialPalette, MaterialText, MaterialTypography, ListTile } from "@material";
+import { Theme } from "../../theme.slint";
+
+export component SectionTitle {
+    in property <string> text;
+    in property <string> description;
+
+    VerticalLayout {
+        spacing: 4px;
+        MaterialText {
+            text: root.text;
+            style: MaterialTypography.title-medium;
+            color: MaterialPalette.on-surface;
+            wrap: word-wrap;
+            overflow: clip;
+        }
+        if root.description != "" : MaterialText {
+            text: root.description;
+            style: MaterialTypography.body-medium;
+            color: MaterialPalette.on-surface-variant;
+            wrap: word-wrap;
+            overflow: clip;
+        }
+    }
+}
+
+// Outlined surface that sizes to its content (Material cards do not).
+export component Panel {
+    in property <length> inset: Theme.space-lg;
+
+    min-height: body.min-height;
+    preferred-height: body.preferred-height;
+
+    Rectangle {
+        border-radius: 12px;
+        background: MaterialPalette.surface-container-low;
+        border-width: 1px;
+        border-color: MaterialPalette.outline-variant;
+    }
+
+    body := VerticalLayout {
+        padding: root.inset;
+        spacing: Theme.space-md;
+        @children
+    }
+}
+
+export component Pill {
+    in property <string> text;
+    in property <color> background: MaterialPalette.tertiary-container;
+    in property <color> foreground: MaterialPalette.on-tertiary-container;
+
+    horizontal-stretch: 0;
+    vertical-stretch: 0;
+    width: label.preferred-width + 16px;
+    height: 24px;
+
+    Rectangle {
+        border-radius: 8px;
+        background: root.background;
+    }
+
+    label := MaterialText {
+        x: 8px;
+        y: 0px;
+        width: root.width - 16px;
+        height: root.height;
+        text: root.text;
+        style: MaterialTypography.label-medium;
+        color: root.foreground;
+        vertical-alignment: center;
+        horizontal-alignment: center;
+    }
+}
+
+// ListTile with a persistent selected state; keyboard activation comes from ListTile's focus area.
+export component SelectableTile {
+    in property <string> text;
+    in property <string> supporting-text;
+    in property <bool> selected;
+    in property <bool> enabled: true;
+    in property <length> radius: 12px;
+    callback clicked();
+
+    min-height: tile.min-height;
+    preferred-height: tile.preferred-height;
+    accessible-role: list-item;
+    accessible-label: root.supporting-text != "" ? root.text + "，" + root.supporting-text : root.text;
+    accessible-enabled: root.enabled;
+    accessible-item-selectable: true;
+    accessible-item-selected: root.selected;
+    accessible-action-default => { if root.enabled { root.clicked(); } }
+
+    Rectangle {
+        border-radius: root.radius;
+        background: root.selected ? MaterialPalette.secondary-container : transparent;
+        clip: true;
+
+        tile := ListTile {
+            width: 100%;
+            height: 100%;
+            text: root.text;
+            supporting-text: root.supporting-text;
+            enabled: root.enabled;
+            clicked => { root.clicked(); }
+            @children
+        }
+    }
+}
+
+export component InfoRow {
+    in property <string> label;
+    in property <string> value;
+
+    visible: root.value != "";
+    height: root.value != "" ? self.preferred-height : 0px;
+
+    HorizontalLayout {
+        spacing: Theme.space-md;
+        MaterialText {
+            width: 72px;
+            text: root.label;
+            style: MaterialTypography.body-medium;
+            color: MaterialPalette.on-surface-variant;
+        }
+        MaterialText {
+            horizontal-stretch: 1;
+            text: root.value;
+            style: MaterialTypography.body-medium;
+            color: MaterialPalette.on-surface;
+            wrap: word-wrap;
+            overflow: clip;
+        }
+    }
+}

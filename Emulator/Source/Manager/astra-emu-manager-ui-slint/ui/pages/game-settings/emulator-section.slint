@@ -1,0 +1,132 @@
+import { MaterialPalette, MaterialText, MaterialTypography, FilledCard, TonalButton, Icon } from "@material";
+import { App, GameSettings } from "../../globals.slint";
+import { Icons } from "../../icons.slint";
+import { Theme } from "../../theme.slint";
+import { ChoiceSelect } from "../../components/select.slint";
+import { RenderPicker } from "../../components/render-picker.slint";
+import { ConfigFieldList } from "../../components/config-field.slint";
+import { SectionTitle, Panel } from "./parts.slint";
+
+component RecommendedBanner {
+    in property <string> summary;
+    callback apply();
+
+    min-height: body.min-height;
+    preferred-height: body.preferred-height;
+
+    FilledCard {
+        width: 100%;
+        height: 100%;
+    }
+
+    body := HorizontalLayout {
+        padding: Theme.space-lg;
+        spacing: Theme.space-md;
+
+        VerticalLayout {
+            horizontal-stretch: 0;
+            alignment: start;
+            Icon {
+                width: 24px;
+                source: Icons.tune;
+                colorize: MaterialPalette.primary;
+            }
+        }
+
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 2px;
+            alignment: center;
+            MaterialText {
+                text: "有推荐配置";
+                style: MaterialTypography.title-small;
+                color: MaterialPalette.on-surface;
+            }
+            MaterialText {
+                text: root.summary != "" ? root.summary : "AstraEMU 元数据为这部作品和当前模拟器提供了推荐参数。";
+                style: MaterialTypography.body-medium;
+                color: MaterialPalette.on-surface-variant;
+                wrap: word-wrap;
+                overflow: clip;
+            }
+        }
+
+        VerticalLayout {
+            horizontal-stretch: 0;
+            alignment: center;
+            TonalButton {
+                text: "套用";
+                clicked => { root.apply(); }
+            }
+        }
+    }
+}
+
+export component EmulatorSection {
+    in-out property <bool> advanced-open;
+
+    VerticalLayout {
+        spacing: Theme.space-xl;
+
+        Panel {
+            SectionTitle {
+                text: "模拟器";
+                description: "选择用哪个模拟器运行这部作品。更换后，下方参数会切换到该模拟器的设置。";
+            }
+            if GameSettings.emulator-choices.length > 0 : ChoiceSelect {
+                label: "模拟器";
+                choices: GameSettings.emulator-choices;
+                value: GameSettings.emulator-id;
+                selected(id) => { GameSettings.set-emulator(id); }
+            }
+            if GameSettings.emulator-choices.length == 0 : MaterialText {
+                text: "未识别到可用的模拟器。先在游戏库中准备资料库，或到 设置→核心 安装对应核心。";
+                style: MaterialTypography.body-medium;
+                color: MaterialPalette.on-surface-variant;
+                wrap: word-wrap;
+                overflow: clip;
+            }
+        }
+
+        if GameSettings.recommended-available : RecommendedBanner {
+            summary: GameSettings.recommended-summary;
+            apply => { GameSettings.apply-recommended(); }
+        }
+
+        Panel {
+            SectionTitle {
+                text: "渲染";
+                description: "核心内部绘制画面时使用的分辨率，与窗口大小和画面滤镜无关。";
+            }
+            RenderPicker {
+                supported: GameSettings.render-supported;
+                options: GameSettings.render-options;
+                mode: GameSettings.render-mode;
+                custom-width: GameSettings.custom-width;
+                custom-height: GameSettings.custom-height;
+                min: GameSettings.render-min;
+                max: GameSettings.render-max;
+                note: GameSettings.render-note;
+                error: GameSettings.render-error;
+                enabled: GameSettings.emulator-id != "";
+                set-render(mode, width, height) => { GameSettings.set-render(mode, width, height); }
+            }
+        }
+
+        Panel {
+            SectionTitle {
+                text: "模拟器参数";
+                description: GameSettings.fields.length > 0
+                    ? "改动立即保存，只对这部作品生效；标有「恢复默认」的项目已单独设置。"
+                    : GameSettings.emulator-id != "" ? "这个模拟器没有可调整的参数。" : "选择模拟器后可调整它的参数。";
+            }
+            if GameSettings.fields.length > 0 : ConfigFieldList {
+                fields: GameSettings.fields;
+                advanced-open <=> root.advanced-open;
+                changed(key, value) => { GameSettings.field-changed(key, value); }
+                reset(key) => { GameSettings.reset-field(key); }
+                pick(key) => { GameSettings.pick-path(key); }
+            }
+        }
+    }
+}

@@ -1,0 +1,64 @@
+import { MaterialPalette, MaterialText, MaterialTypography, Switch } from "@material";
+import { GameSettings, Settings } from "../../globals.slint";
+import { Theme } from "../../theme.slint";
+import { BindingTable } from "../../components/binding-table.slint";
+import { SectionTitle, Panel } from "./parts.slint";
+
+export component InputSection {
+    VerticalLayout {
+        spacing: Theme.space-xl;
+
+        Panel {
+            HorizontalLayout {
+                spacing: Theme.space-lg;
+                SectionTitle {
+                    horizontal-stretch: 1;
+                    text: "为这部作品单独设置按键";
+                    description: GameSettings.input-override
+                        ? "这部作品使用下方的按键映射，不受全局设置影响。"
+                        : "关闭时沿用 设置→输入与手柄 中的全局映射。开启时会先复制一份全局映射。";
+                }
+                VerticalLayout {
+                    horizontal-stretch: 0;
+                    alignment: center;
+                    Switch {
+                        property <bool> stored: GameSettings.input-override;
+                        checked: self.stored;
+                        accessible-label: "为这部作品单独设置按键";
+                        changed stored => { self.checked = self.stored; }
+                        checked-state-changed(value) => {
+                            if value != self.stored {
+                                GameSettings.cancel-capture();
+                                GameSettings.set-input-override(value);
+                                self.checked = self.stored;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if GameSettings.input-override : Panel {
+            inset: 0px;
+            VerticalLayout {
+                padding: Theme.space-lg;
+                padding-bottom: 0px;
+                SectionTitle {
+                    text: "手柄按钮 → 键盘键";
+                    description: "点击一行后按下想绑定的键盘按键，Esc 也可以绑定。点「取消」放弃修改。";
+                }
+            }
+            VerticalLayout {
+                padding-bottom: Theme.space-sm;
+                BindingTable {
+                    bindings: GameSettings.bindings;
+                    capture-button: GameSettings.capture-button;
+                    capture-hint: GameSettings.capture-hint;
+                    pressed: Settings.pad-state;
+                    begin-capture(button) => { GameSettings.begin-capture(button); }
+                    cancel-capture => { GameSettings.cancel-capture(); }
+                }
+            }
+        }
+    }
+}
