@@ -6,7 +6,7 @@
 | --- | --- | --- |
 | `art3m1s-core/` | `be82d5e0bbafcef55a530f69e5b9358094dbd671` | [Artemis 修改说明](../Source/Families/astra-emu-artemis/MODIFICATIONS.md)，完整 MPL-2.0 |
 | `rfvp/` | `1e947a5ccbd2c7a698bd30d48347454ef1b908a9` | [FVP 修改说明](../Source/Families/astra-emu-fvp/MODIFICATIONS.md)，C ABI v3 移植并删除 D3D12 交付，完整 MPL-2.0 |
-| `siglus_rs/` | `c0f7e7bbdf51a098288fd2c634d5ba8912786d6f` | [Siglus 修改说明](../Source/Families/astra-emu-siglus/MODIFICATIONS.md)，C ABI v3 移植，保留原生文字/键盘输入语义，完整 MPL-2.0 与嵌套 Kira |
+| `siglus_rs/` | `85c3a389577e61e3ccccde3d1c84de8bc19b7678` | [Siglus 修改说明](../Source/Families/astra-emu-siglus/MODIFICATIONS.md)，C ABI v3 移植，保留原生文字/键盘输入语义，完整 MPL-2.0 与嵌套 Kira |
 | `sena-rs/` | `e4e708be94ddecf99741a1177bede5ed296d21f5` | 通用基线 `5fd1a8e3` 上的 C ABI v3 适配；引擎标识为 SoftPAL、模拟器为 Sena，支持范围不变，完整 MPL-2.0 |
 | `ethornell-rs/` | `44801f7901199af208410131db757204981519ce` | fork 内 `MODIFICATIONS.md`，C ABI v3 适配；workspace 声明 MPL-2.0，Release 附 MPL-2.0 全文 |
 | `kirikiri2/` | `2532a699b260488db32b32739f9648858c00a9a4` | 完整 Kirikiroid2-web，保留原组件许可、独立生命周期、WindowEx owner 初始化修复，FFmpeg 3.3.9 改为动态链接 |
