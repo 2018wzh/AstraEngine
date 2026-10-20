@@ -5,7 +5,7 @@ version = 4
 [[package]]
 name = "astra-emu-abi"
 version = "0.1.0"
-source = "git+https://github.com/2018wzh/AstraEngine.git?rev=15a39a626b1316cb6137a75e17e14a2ff2d1ba88#15a39a626b1316cb6137a75e17e14a2ff2d1ba88"
+source = "git+https://github.com/2018wzh/AstraEngine.git?rev=6799938dc33b25bcca4d9a11ddbea1366bf7d93c#6799938dc33b25bcca4d9a11ddbea1366bf7d93c"
 
 [[package]]
 name = "astra-emu-krkr"
