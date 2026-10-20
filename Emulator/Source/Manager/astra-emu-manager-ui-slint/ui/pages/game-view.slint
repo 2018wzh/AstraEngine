@@ -1,13 +1,895 @@
-import { Session } from "../globals.slint";
+import {
+    MaterialPalette, MaterialText, MaterialTypography, Icon, IconButton, TextButton, OutlineButton,
+    CircularProgressIndicator, HorizontalDivider, ScrollView,
+} from "@material";
+import { Session, Selection, Dialogs, Filters, Notices } from "../globals.slint";
+import { Icons } from "../icons.slint";
+import { ConfigFieldList } from "../components/config-field.slint";
 
-export component GameView {
-    Rectangle {
-        background: #000000;
-        Image {
-            width: 100%;
-            height: 100%;
-            source: Session.frame;
-            image-fit: contain;
+// One row of the quick menu or of the filter preset list. Focus is driven by
+// the owner through `wanted`, so arrow keys can move between repeated rows.
+component MenuRow {
+    in property <image> icon;
+    in property <string> label;
+    in property <string> supporting;
+    in property <bool> danger;
+    in property <bool> wanted;
+    in property <bool> checkable;
+    in property <bool> selected;
+    // Main menu rows keep Tab inside the menu; preset rows let Tab continue
+    // to the parameter controls below them.
+    in property <bool> trap-tab: true;
+    // Short windows (phones in portrait) use 48px rows so every entry fits.
+    in property <bool> dense;
+    callback activated();
+    callback step(delta: int);
+    callback focused(y: length, height: length);
+
+    property <bool> ring: fs.has-focus;
+    property <color> fg: root.danger ? MaterialPalette.error : root.selected ? MaterialPalette.on-secondary-container : MaterialPalette.on-surface;
+
+    height: (root.supporting != "" ? 64px : 56px) - (root.dense ? 8px : 0px);
+    forward-focus: fs;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-description: root.supporting;
+    accessible-checkable: root.checkable;
+    accessible-checked: root.selected;
+    accessible-action-default => { root.activated(); }
+
+    changed wanted => {
+        if root.wanted && !fs.has-focus {
+            fs.focus();
+        }
+    }
+    init => {
+        if root.wanted {
+            fs.focus();
+        }
+    }
+
+    pill := Rectangle {
+        x: 12px;
+        y: 0px;
+        width: root.width - 24px;
+        height: root.height;
+        border-radius: self.height / 2;
+        background: root.selected ? MaterialPalette.secondary-container : transparent;
+        border-width: root.ring ? 2px : 0px;
+        border-color: root.danger ? MaterialPalette.error : MaterialPalette.secondary;
+
+        Rectangle {
+            border-radius: parent.border-radius;
+            background: (root.danger ? MaterialPalette.error : MaterialPalette.on-surface).with-alpha(
+                touch.pressed ? MaterialPalette.state-layer-opacity-press
+                : root.ring ? MaterialPalette.state-layer-opacity-focus
+                : touch.has-hover ? MaterialPalette.state-layer-opacity-hover : 0);
+        }
+
+        HorizontalLayout {
+            padding-left: 16px;
+            padding-right: 20px;
+            spacing: 12px;
+
+            VerticalLayout {
+                alignment: center;
+                horizontal-stretch: 0;
+                Icon {
+                    width: 24px;
+                    source: root.icon;
+                    colorize: root.danger ? MaterialPalette.error : root.selected ? MaterialPalette.on-secondary-container : MaterialPalette.on-surface-variant;
+                }
+            }
+
+            VerticalLayout {
+                alignment: center;
+                horizontal-stretch: 1;
+                spacing: 2px;
+                MaterialText {
+                    text: root.label;
+                    style: MaterialTypography.label-large;
+                    color: root.fg;
+                }
+                if root.supporting != "" : MaterialText {
+                    text: root.supporting;
+                    style: MaterialTypography.body-small;
+                    color: root.selected ? MaterialPalette.on-secondary-container : MaterialPalette.on-surface-variant;
+                }
+            }
+
+            if root.selected : VerticalLayout {
+                alignment: center;
+                horizontal-stretch: 0;
+                Icon {
+                    width: 20px;
+                    source: Icons.check;
+                    colorize: MaterialPalette.on-secondary-container;
+                }
+            }
+        }
+    }
+
+    fs := FocusScope {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        key-pressed(event) => {
+            if event.text == Key.UpArrow {
+                root.step(-1);
+                return accept;
+            }
+            if event.text == Key.DownArrow {
+                root.step(1);
+                return accept;
+            }
+            if root.trap-tab && event.text == Key.Backtab {
+                root.step(-1);
+                return accept;
+            }
+            if root.trap-tab && event.text == Key.Tab {
+                root.step(event.modifiers.shift ? -1 : 1);
+                return accept;
+            }
+            if event.text == Key.Return || event.text == " " {
+                root.activated();
+                return accept;
+            }
+            reject
+        }
+        focus-gained(reason) => { root.focused(root.y, root.height); }
+
+        touch := TouchArea {
+            mouse-cursor: pointer;
+            clicked => {
+                fs.focus();
+                root.activated();
+            }
+        }
+    }
+}
+
+component MenuDivider {
+    height: 17px;
+    HorizontalDivider {
+        x: 28px;
+        y: 8px;
+        width: max(root.width - 56px, 0px);
+    }
+}
+
+export component GameView inherits Rectangle {
+    background: #000000;
+
+    // Stage geometry: the frame keeps the output aspect inside the view, the
+    // content rectangle maps the core's native coordinate space.
+    property <float> stage-aspect: Session.output-aspect;
+    property <length> stage-width: root.width / root.height > root.stage-aspect ? root.height * root.stage-aspect : root.width;
+    property <length> stage-height: root.width / root.height > root.stage-aspect ? root.height : root.width / root.stage-aspect;
+    property <length> stage-x: (root.width - root.stage-width) / 2;
+    property <length> stage-y: (root.height - root.stage-height) / 2;
+    property <length> content-stage-x: Session.raster-width > 0 ? root.stage-x + Session.content-x / Session.raster-width * root.stage-width : root.stage-x;
+    property <length> content-stage-y: Session.raster-height > 0 ? root.stage-y + Session.content-y / Session.raster-height * root.stage-height : root.stage-y;
+    property <length> content-stage-width: Session.raster-width > 0 ? Session.content-width / Session.raster-width * root.stage-width : 0px;
+    property <length> content-stage-height: Session.raster-height > 0 ? Session.content-height / Session.raster-height * root.stage-height : 0px;
+
+    property <float> computed-px: (root.absolute-position.x + root.content-stage-x) / 1px;
+    property <float> computed-py: (root.absolute-position.y + root.content-stage-y) / 1px;
+    property <float> computed-pw: root.content-stage-width / 1px;
+    property <float> computed-ph: root.content-stage-height / 1px;
+
+    property <bool> opening: Session.phase == "opening";
+    property <bool> input-blocked: root.opening || Session.menu-open || Dialogs.modal-active || Dialogs.fatal-active;
+
+    // Menu trigger: shown only after recent mouse movement.
+    property <bool> pointer-recent: false;
+    property <bool> trigger-shown: !root.opening && !Session.menu-open && (root.pointer-recent || trigger-hover.has-hover);
+
+    // Edge swipe (touch only): withheld press from the right edge.
+    property <length> edge-width: 24px;
+    property <length> swipe-distance: 48px;
+    property <int> swipe-finger: 0;
+    property <bool> swipe-tracking: false;
+    property <bool> swipe-opened: false;
+    property <length> swipe-x;
+    property <length> swipe-y;
+
+    // Keyboard focus inside the menu.
+    property <int> action-count: Session.actions.length;
+    property <int> filters-index: root.action-count + 1;
+    property <int> fullscreen-index: root.action-count + 2;
+    property <int> leave-index: root.action-count + 3;
+    property <int> menu-count: root.action-count + 4;
+    property <int> menu-focus: 0;
+    property <int> filter-focus: 0;
+    property <length> menu-w: min(360px, root.width);
+    property <bool> dense-menu: root.height < 720px;
+
+    pure function inside-content(x: length, y: length) -> bool {
+        return root.content-stage-width > 0px && root.content-stage-height > 0px
+            && x >= root.content-stage-x && x < root.content-stage-x + root.content-stage-width
+            && y >= root.content-stage-y && y < root.content-stage-y + root.content-stage-height;
+    }
+
+    function forward-position(x: length, y: length) {
+        Session.input("pointer.x", true, (x - root.content-stage-x) / root.content-stage-width * Session.native-width);
+        Session.input("pointer.y", true, (y - root.content-stage-y) / root.content-stage-height * Session.native-height);
+    }
+
+    function push-pointer() {
+        Session.pointer-x = root.computed-px;
+        Session.pointer-y = root.computed-py;
+        Session.pointer-width = root.computed-pw;
+        Session.pointer-height = root.computed-ph;
+    }
+
+    function ping-pointer() {
+        root.pointer-recent = true;
+        idle-timer.restart();
+    }
+
+    pure function preset-index() -> int {
+        return Filters.preset == "scale" ? 1
+            : Filters.preset == "sharpen" ? 2
+            : Filters.preset == "anime4k" ? 3
+            : Filters.preset == "external" ? 4 : 0;
+    }
+
+    function open-menu() {
+        Session.menu-page = "main";
+        Session.menu-open = true;
+    }
+
+    function close-menu() {
+        Session.menu-open = false;
+        Session.menu-page = "main";
+    }
+
+    function show-filters() {
+        root.filter-focus = root.preset-index();
+        Session.menu-page = "filters";
+    }
+
+    function show-main() {
+        root.menu-focus = root.filters-index;
+        Session.menu-page = "main";
+    }
+
+    function move-menu-focus(delta: int) {
+        let next = root.menu-focus + delta;
+        root.menu-focus = next < 0 ? root.menu-count - 1 : next >= root.menu-count ? 0 : next;
+    }
+
+    function move-filter-focus(delta: int) {
+        let next = root.filter-focus + delta;
+        root.filter-focus = next < 0 ? 4 : next > 4 ? 0 : next;
+    }
+
+    init => {
+        root.push-pointer();
+        root.filter-focus = root.preset-index();
+        if !Session.menu-open && !root.opening {
+            game-focus.focus();
+        }
+    }
+    changed computed-px => { root.push-pointer(); }
+    changed computed-py => { root.push-pointer(); }
+    changed computed-pw => { root.push-pointer(); }
+    changed computed-ph => { root.push-pointer(); }
+    changed opening => {
+        if !root.opening && !Session.menu-open {
+            game-focus.focus();
+        }
+    }
+    // The host may open or close the menu too; focus always starts on
+    // 继续游戏 (or the active preset) and returns to the game on close.
+    property <bool> menu-open: Session.menu-open;
+    changed menu-open => {
+        if root.menu-open {
+            root.menu-focus = 0;
+            root.filter-focus = root.preset-index();
+        } else if !root.opening {
+            game-focus.focus();
+        }
+    }
+
+    // Engine action failures arrive while the menu is already closed; show
+    // them through the shell snackbar, which stays above the game view.
+    property <int> action-serial: Session.action-serial;
+    changed action-serial => {
+        if Session.action-message != "" {
+            Notices.snackbar-text = Session.action-message;
+            Notices.snackbar-action = "";
+            Notices.snackbar-serial += 1;
+        }
+    }
+
+    idle-timer := Timer {
+        interval: 3s;
+        running: false;
+        triggered => {
+            self.running = false;
+            root.pointer-recent = false;
+        }
+    }
+
+    Image {
+        source: Session.frame;
+        x: root.stage-x;
+        y: root.stage-y;
+        width: root.stage-width;
+        height: root.stage-height;
+        image-fit: fill;
+        accessible-role: image;
+        accessible-label: "游戏画面";
+    }
+
+    game-focus := FocusScope {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        focus-on-tab-navigation: false;
+
+        game-area := TouchArea {
+            moved => {
+                if root.input-blocked || root.swipe-tracking || root.swipe-opened {
+                    return;
+                }
+                if root.inside-content(self.mouse-x, self.mouse-y) {
+                    root.forward-position(self.mouse-x, self.mouse-y);
+                }
+            }
+            pointer-event(event) => {
+                if event.touch-finger-id == 0 && (event.kind == PointerEventKind.move || event.kind == PointerEventKind.down) {
+                    root.ping-pointer();
+                }
+                // Touch edge swipe: hold back the press until it is either a
+                // leftward swipe (opens the menu) or a plain tap (replayed).
+                // Runs before the blocked check: the menu opens mid-gesture and
+                // the release still has to clear the state.
+                if (root.swipe-tracking || root.swipe-opened) && event.touch-finger-id == root.swipe-finger {
+                    if event.kind == PointerEventKind.move && root.swipe-tracking && !root.input-blocked && root.swipe-x - self.mouse-x >= root.swipe-distance {
+                        root.swipe-tracking = false;
+                        root.swipe-opened = true;
+                        root.open-menu();
+                    } else if event.kind == PointerEventKind.cancel {
+                        root.swipe-tracking = false;
+                        root.swipe-opened = false;
+                    } else if event.kind == PointerEventKind.up {
+                        if root.swipe-tracking && !root.input-blocked && root.inside-content(root.swipe-x, root.swipe-y) {
+                            root.forward-position(root.swipe-x, root.swipe-y);
+                            Session.input("pointer.primary", true, 1);
+                            Session.input("pointer.primary", false, 1);
+                        }
+                        root.swipe-tracking = false;
+                        root.swipe-opened = false;
+                    }
+                    return;
+                }
+                if root.input-blocked {
+                    return;
+                }
+                if event.touch-finger-id != 0 && event.kind == PointerEventKind.down && event.button == PointerEventButton.left && self.mouse-x >= root.width - root.edge-width {
+                    root.swipe-finger = event.touch-finger-id;
+                    root.swipe-x = self.mouse-x;
+                    root.swipe-y = self.mouse-y;
+                    root.swipe-tracking = true;
+                    root.swipe-opened = false;
+                    game-focus.focus();
+                    return;
+                }
+
+                if event.kind == PointerEventKind.cancel {
+                    Session.input("pointer.primary", false, 0);
+                    Session.input("pointer.secondary", false, 0);
+                    Session.input("pointer.middle", false, 0);
+                    return;
+                }
+                if event.kind != PointerEventKind.down && event.kind != PointerEventKind.up {
+                    return;
+                }
+                if !root.inside-content(self.mouse-x, self.mouse-y) {
+                    if event.kind == PointerEventKind.up {
+                        if event.button == PointerEventButton.left { Session.input("pointer.primary", false, 0); }
+                        if event.button == PointerEventButton.right { Session.input("pointer.secondary", false, 0); }
+                        if event.button == PointerEventButton.middle { Session.input("pointer.middle", false, 0); }
+                    }
+                    return;
+                }
+                if event.kind == PointerEventKind.down {
+                    game-focus.focus();
+                }
+                root.forward-position(self.mouse-x, self.mouse-y);
+                if event.button == PointerEventButton.left { Session.input("pointer.primary", event.kind == PointerEventKind.down, 1); }
+                if event.button == PointerEventButton.right { Session.input("pointer.secondary", event.kind == PointerEventKind.down, 1); }
+                if event.button == PointerEventButton.middle { Session.input("pointer.middle", event.kind == PointerEventKind.down, 1); }
+            }
+            scroll-event(event) => {
+                if root.input-blocked || !root.inside-content(self.mouse-x, self.mouse-y) {
+                    return reject;
+                }
+                Session.input("wheel", false, event.delta-y / 60px);
+                return accept;
+            }
+        }
+    }
+
+    trigger-hover := TouchArea {
+        x: root.width - 56px;
+        y: 16px;
+        width: 40px;
+        height: 40px;
+        visible: root.trigger-shown;
+
+        Rectangle {
+            border-radius: 20px;
+            background: MaterialPalette.surface-container-high.with-alpha(0.9);
+            drop-shadow-blur: 6px;
+            drop-shadow-offset-y: 1px;
+            drop-shadow-color: MaterialPalette.shadow-30;
+        }
+
+        IconButton {
+            x: 0px;
+            y: 0px;
+            width: 40px;
+            height: 40px;
+            icon: Icons.menu;
+            tooltip: "打开游戏菜单";
+            clicked => { root.open-menu(); }
+        }
+    }
+
+    if root.opening : opening-focus := FocusScope {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        init => {
+            if !Session.menu-open {
+                self.focus();
+            }
+        }
+        key-pressed(event) => {
+            if event.text == Key.Escape {
+                Session.leave();
+                return accept;
+            }
+            reject
+        }
+
+        Rectangle {
+            background: MaterialPalette.surface;
+        }
+
+        TouchArea { }
+
+        VerticalLayout {
+            alignment: center;
+            padding: 24px;
+            spacing: 16px;
+
+            HorizontalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 160px;
+                    height: 213px;
+                    border-radius: 12px;
+                    clip: true;
+                    background: MaterialPalette.surface-container-highest;
+                    drop-shadow-blur: 12px;
+                    drop-shadow-offset-y: 4px;
+                    drop-shadow-color: MaterialPalette.shadow-15;
+
+                    if Session.launch-cover.width == 0 : Icon {
+                        width: 48px;
+                        source: Icons.image;
+                        colorize: MaterialPalette.on-surface-variant;
+                    }
+                    Image {
+                        width: parent.width;
+                        height: parent.height;
+                        source: Session.launch-cover;
+                        image-fit: cover;
+                        accessible-role: image;
+                        accessible-label: "封面";
+                    }
+                }
+            }
+
+            MaterialText {
+                text: Session.launch-title != "" ? Session.launch-title : Session.title;
+                style: MaterialTypography.title-large;
+                color: MaterialPalette.on-surface;
+                horizontal-alignment: center;
+                wrap: word-wrap;
+                overflow: elide;
+                max-height: 64px;
+            }
+
+            HorizontalLayout {
+                alignment: center;
+                spacing: 12px;
+                CircularProgressIndicator {
+                    height: 40px;
+                    indeterminate: true;
+                    accessible-label: "正在启动";
+                }
+                MaterialText {
+                    text: "正在启动…";
+                    style: MaterialTypography.body-large;
+                    color: MaterialPalette.on-surface-variant;
+                    vertical-alignment: center;
+                }
+            }
+
+            HorizontalLayout {
+                alignment: center;
+                OutlineButton {
+                    text: "取消";
+                    clicked => { Session.leave(); }
+                }
+            }
+        }
+    }
+
+    if Session.menu-open : menu-layer := FocusScope {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        key-pressed(event) => {
+            if event.text == Key.Escape {
+                if Session.menu-page == "filters" {
+                    root.show-main();
+                } else {
+                    root.close-menu();
+                }
+                return accept;
+            }
+            reject
+        }
+
+        Rectangle {
+            background: MaterialPalette.scrim.with-alpha(0.32);
+            TouchArea {
+                clicked => { root.close-menu(); }
+            }
+        }
+
+        panel := Rectangle {
+            x: root.width - root.menu-w;
+            y: 0px;
+            width: root.menu-w;
+            height: root.height;
+            background: MaterialPalette.surface-container-low;
+            border-top-left-radius: root.menu-w < root.width ? 16px : 0px;
+            border-bottom-left-radius: self.border-top-left-radius;
+            drop-shadow-blur: 16px;
+            drop-shadow-offset-x: -4px;
+            drop-shadow-color: MaterialPalette.shadow-30;
+            accessible-role: groupbox;
+            accessible-label: "游戏菜单";
+
+            TouchArea { }
+
+            if Session.menu-page != "filters" : VerticalLayout {
+                x: 0px;
+                y: 0px;
+                width: panel.width;
+                height: panel.height;
+                padding-top: 12px;
+                padding-bottom: 12px;
+                spacing: 0px;
+
+                VerticalLayout {
+                    padding-left: 28px;
+                    padding-right: 28px;
+                    padding-top: 8px;
+                    padding-bottom: 12px;
+                    spacing: 2px;
+                    MaterialText {
+                        text: Session.title != "" ? Session.title : Session.launch-title;
+                        style: MaterialTypography.title-large;
+                        color: MaterialPalette.on-surface;
+                    }
+                    if Selection.game.engine != "" : MaterialText {
+                        text: Selection.game.engine + (Selection.game.emulator != "" ? " · " + Selection.game.emulator : "");
+                        style: MaterialTypography.body-medium;
+                        color: MaterialPalette.on-surface-variant;
+                    }
+                }
+
+                main-scroll := ScrollView {
+                    vertical-stretch: 1;
+
+                    function reveal(top: length, size: length) {
+                        if top < -self.content-y {
+                            self.content-y = -top;
+                        } else if top + size > -self.content-y + self.visible-height {
+                            self.content-y = self.visible-height - top - size;
+                        }
+                    }
+
+                    VerticalLayout {
+                        width: main-scroll.visible-width;
+                        spacing: 0px;
+                        alignment: start;
+
+                        MenuRow {
+                            dense: root.dense-menu;
+                            icon: Icons.play-arrow;
+                            label: "继续游戏";
+                            wanted: root.menu-focus == 0;
+                            activated => { root.close-menu(); }
+                            step(delta) => { root.move-menu-focus(delta); }
+                            focused(top, size) => {
+                                root.menu-focus = 0;
+                                main-scroll.reveal(top, size);
+                            }
+                        }
+
+                        if root.action-count > 0 : MenuDivider { }
+
+                        for action[index] in Session.actions : MenuRow {
+                            dense: root.dense-menu;
+                            icon: Icons.session-icon(action.icon);
+                            label: action.label;
+                            wanted: root.menu-focus == index + 1;
+                            activated => {
+                                Session.engine-action(action.control);
+                                root.close-menu();
+                            }
+                            step(delta) => { root.move-menu-focus(delta); }
+                            focused(top, size) => {
+                                root.menu-focus = index + 1;
+                                main-scroll.reveal(top, size);
+                            }
+                        }
+
+                        MenuDivider { }
+
+                        MenuRow {
+                            dense: root.dense-menu;
+                            icon: Icons.filter-vintage;
+                            label: "画面滤镜";
+                            wanted: root.menu-focus == root.filters-index;
+                            activated => { root.show-filters(); }
+                            step(delta) => { root.move-menu-focus(delta); }
+                            focused(top, size) => {
+                                root.menu-focus = root.filters-index;
+                                main-scroll.reveal(top, size);
+                            }
+                        }
+
+                        MenuRow {
+                            dense: root.dense-menu;
+                            icon: Session.fullscreen ? Icons.fullscreen-exit : Icons.fullscreen;
+                            label: Session.fullscreen ? "退出全屏" : "全屏";
+                            wanted: root.menu-focus == root.fullscreen-index;
+                            activated => { Session.set-fullscreen(!Session.fullscreen); }
+                            step(delta) => { root.move-menu-focus(delta); }
+                            focused(top, size) => {
+                                root.menu-focus = root.fullscreen-index;
+                                main-scroll.reveal(top, size);
+                            }
+                        }
+
+                        MenuDivider { }
+
+                        MenuRow {
+                            dense: root.dense-menu;
+                            icon: Icons.arrow-back;
+                            label: "返回游戏库";
+                            danger: true;
+                            wanted: root.menu-focus == root.leave-index;
+                            activated => { Session.leave(); }
+                            step(delta) => { root.move-menu-focus(delta); }
+                            focused(top, size) => {
+                                root.menu-focus = root.leave-index;
+                                main-scroll.reveal(top, size);
+                            }
+                        }
+                    }
+                }
+
+                MaterialText {
+                    text: "↑↓ 选择 · Enter 确认 · Esc 关闭";
+                    style: MaterialTypography.label-small;
+                    color: MaterialPalette.on-surface-variant;
+                    horizontal-alignment: center;
+                    height: 28px;
+                    vertical-alignment: bottom;
+                }
+            }
+
+            if Session.menu-page == "filters" : VerticalLayout {
+                x: 0px;
+                y: 0px;
+                width: panel.width;
+                height: panel.height;
+                padding-top: 12px;
+                padding-bottom: 12px;
+                spacing: 0px;
+
+                HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 24px;
+                    padding-bottom: 8px;
+                    spacing: 8px;
+
+                    VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 0;
+                        IconButton {
+                            icon: Icons.arrow-back;
+                            tooltip: "返回";
+                            clicked => { root.show-main(); }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 1;
+                        spacing: 2px;
+                        MaterialText {
+                            text: "画面滤镜";
+                            style: MaterialTypography.title-large;
+                            color: MaterialPalette.on-surface;
+                        }
+                        MaterialText {
+                            text: "改动立即生效";
+                            style: MaterialTypography.body-small;
+                            color: MaterialPalette.on-surface-variant;
+                        }
+                    }
+                }
+
+                filter-scroll := ScrollView {
+
+                    function reveal(top: length, size: length) {
+                        if top < -self.content-y {
+                            self.content-y = -top;
+                        } else if top + size > -self.content-y + self.visible-height {
+                            self.content-y = self.visible-height - top - size;
+                        }
+                    }
+                    vertical-stretch: 1;
+
+                    VerticalLayout {
+                        width: filter-scroll.visible-width;
+                        spacing: 0px;
+                        alignment: start;
+
+                        HorizontalLayout {
+                            padding-left: 28px;
+                            padding-right: 28px;
+                            MaterialText {
+                                text: "预设";
+                                style: MaterialTypography.title-small;
+                                color: MaterialPalette.primary;
+                                height: 32px;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        MenuRow {
+                            dense: root.dense-menu;
+                            icon: Icons.image;
+                            label: "原画";
+                            supporting: "不做处理";
+                            checkable: true;
+                            selected: Filters.preset == "none";
+                            trap-tab: false;
+                            wanted: root.filter-focus == 0;
+                            activated => { Filters.set-preset("none"); }
+                            step(delta) => { root.move-filter-focus(delta); }
+                            focused(top, size) => {
+                                root.filter-focus = 0;
+                                filter-scroll.reveal(top, size);
+                            }
+                        }
+                        MenuRow {
+                            dense: root.dense-menu;
+                            icon: Icons.fullscreen;
+                            label: "平滑放大";
+                            supporting: "按倍率放大画面";
+                            checkable: true;
+                            selected: Filters.preset == "scale";
+                            trap-tab: false;
+                            wanted: root.filter-focus == 1;
+                            activated => { Filters.set-preset("scale"); }
+                            step(delta) => { root.move-filter-focus(delta); }
+                            focused(top, size) => {
+                                root.filter-focus = 1;
+                                filter-scroll.reveal(top, size);
+                            }
+                        }
+                        MenuRow {
+                            dense: root.dense-menu;
+                            icon: Icons.tune;
+                            label: "锐化";
+                            supporting: "增强线条边缘";
+                            checkable: true;
+                            selected: Filters.preset == "sharpen";
+                            trap-tab: false;
+                            wanted: root.filter-focus == 2;
+                            activated => { Filters.set-preset("sharpen"); }
+                            step(delta) => { root.move-filter-focus(delta); }
+                            focused(top, size) => {
+                                root.filter-focus = 2;
+                                filter-scroll.reveal(top, size);
+                            }
+                        }
+                        MenuRow {
+                            dense: root.dense-menu;
+                            icon: Icons.filter-vintage;
+                            label: "Anime4K 2×";
+                            supporting: "修复线条并放大 2 倍";
+                            checkable: true;
+                            selected: Filters.preset == "anime4k";
+                            trap-tab: false;
+                            wanted: root.filter-focus == 3;
+                            activated => { Filters.set-preset("anime4k"); }
+                            step(delta) => { root.move-filter-focus(delta); }
+                            focused(top, size) => {
+                                root.filter-focus = 3;
+                                filter-scroll.reveal(top, size);
+                            }
+                        }
+                        MenuRow {
+                            dense: root.dense-menu;
+                            icon: Icons.upload-file;
+                            label: "外部效果…";
+                            supporting: "从文件加载 HLSL 效果";
+                            checkable: true;
+                            selected: Filters.preset == "external";
+                            trap-tab: false;
+                            wanted: root.filter-focus == 4;
+                            activated => { Filters.load-source(); }
+                            step(delta) => { root.move-filter-focus(delta); }
+                            focused(top, size) => {
+                                root.filter-focus = 4;
+                                filter-scroll.reveal(top, size);
+                            }
+                        }
+
+                        MenuDivider { }
+
+                        VerticalLayout {
+                            padding-left: 28px;
+                            padding-right: 28px;
+                            spacing: 8px;
+
+                            MaterialText {
+                                text: "效果参数";
+                                style: MaterialTypography.title-small;
+                                color: MaterialPalette.primary;
+                            }
+                            if Filters.fields.length == 0 : MaterialText {
+                                text: "当前预设没有可调参数";
+                                style: MaterialTypography.body-medium;
+                                color: MaterialPalette.on-surface-variant;
+                                wrap: word-wrap;
+                            }
+                            ConfigFieldList {
+                                fields: Filters.fields;
+                                show-groups: false;
+                                changed(key, value) => { Filters.field-changed(key, value); }
+                            }
+                            HorizontalLayout {
+                                alignment: start;
+                                TextButton {
+                                    text: "恢复默认参数";
+                                    icon: Icons.restart-alt;
+                                    enabled: Filters.fields.length > 0;
+                                    clicked => { Filters.reset-parameters(); }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
