@@ -155,10 +155,28 @@ pub trait ManagerController: 'static {
     ) -> Result<ManagerViewModel, String>;
     fn cancel_file_patch(&mut self) -> Result<ManagerViewModel, String>;
     fn filter_settings(&self) -> astra_emu_manager_core::FilterSettings;
-    fn pending_filter_settings(&self) -> Result<astra_emu_manager_core::FilterSettings, String>;
-    fn commit_filter_settings(
+    /// Filter changes are applied through `apply` (the renderer), then saved;
+    /// on failure the previous settings are re-applied and stay persisted.
+    fn set_filter_preset(
         &mut self,
-        settings: astra_emu_manager_core::FilterSettings,
+        id: &str,
+        apply: FilterApply<'_>,
+    ) -> Result<ManagerViewModel, String>;
+    fn set_filter_parameter(
+        &mut self,
+        key: &str,
+        value: &str,
+        apply: FilterApply<'_>,
+    ) -> Result<ManagerViewModel, String>;
+    fn reset_filter_parameters(
+        &mut self,
+        apply: FilterApply<'_>,
+    ) -> Result<ManagerViewModel, String>;
+    /// Load an external HLSL effect (at most 1 MiB).
+    fn load_filter_source(
+        &mut self,
+        path: &std::path::Path,
+        apply: FilterApply<'_>,
     ) -> Result<ManagerViewModel, String>;
     fn game_input(&mut self, control: &str, pressed: bool, value: f32) -> Result<(), String>;
     /// Clear physical keys and modifiers when focus leaves the game surface
@@ -191,12 +209,55 @@ pub trait ManagerController: 'static {
     fn uninstall_core(&mut self, file: &str) -> Result<ManagerViewModel, String>;
     fn log_text(&self, core: &str) -> Result<(String, usize), String>;
     fn engine_action(&mut self, control: u32) -> Result<(), String>;
-    fn family_config_changed(&mut self, _key: &str, _value: &str) -> Result<(), String>;
-    fn save_family_config(&mut self) -> Result<ManagerViewModel, String>;
-    fn reset_family_config(&mut self) -> Result<ManagerViewModel, String>;
-    fn select_musica_key_file(&mut self) -> Result<ManagerViewModel, String>;
-    fn filter_config_changed(&mut self, _key: &str, _value: &str) -> Result<(), String>;
-    fn reset_filter_config(&mut self) -> Result<ManagerViewModel, String>;
+    /// Every configuration setter below persists immediately and fails with
+    /// `ASTRA_EMU_FAMILY_SESSION_ALREADY_ACTIVE` while a game runs.
+    fn set_game_emulator(
+        &mut self,
+        game_id: &str,
+        plugin_id: &str,
+    ) -> Result<ManagerViewModel, String>;
+    /// `raw` is an option value or its label; invalid values leave storage unchanged.
+    fn set_game_config(
+        &mut self,
+        game_id: &str,
+        field_id: &str,
+        raw: &str,
+    ) -> Result<ManagerViewModel, String>;
+    fn reset_game_config(
+        &mut self,
+        game_id: &str,
+        field_id: &str,
+    ) -> Result<ManagerViewModel, String>;
+    fn set_emulator_default(
+        &mut self,
+        plugin_id: &str,
+        field_id: &str,
+        raw: &str,
+    ) -> Result<ManagerViewModel, String>;
+    fn reset_emulator_default(
+        &mut self,
+        plugin_id: &str,
+        field_id: &str,
+    ) -> Result<ManagerViewModel, String>;
+    /// Choose the emulator whose defaults the cores page edits; empty clears it.
+    fn select_emulator_defaults(&mut self, plugin_id: &str) -> Result<ManagerViewModel, String>;
+    /// Open a file or folder dialog per the field's path flags and store the pick.
+    fn pick_config_path(
+        &mut self,
+        game_id: &str,
+        field_id: &str,
+    ) -> Result<ManagerViewModel, String>;
+    /// `None` follows the emulator default.
+    fn set_render_preference(
+        &mut self,
+        game_id: &str,
+        preference: Option<astra_emu_manager_core::RenderPreference>,
+    ) -> Result<ManagerViewModel, String>;
+    fn set_emulator_render_default(
+        &mut self,
+        plugin_id: &str,
+        preference: astra_emu_manager_core::RenderPreference,
+    ) -> Result<ManagerViewModel, String>;
     /// Library sort mode: "title" | "recent" | "play_time".
     fn set_library_sort(&mut self, _mode: &str) -> Result<ManagerViewModel, String>;
     /// Compatibility filter: "all" | "perfect" | "completable" | "flawed" |
@@ -209,28 +270,31 @@ pub trait ManagerController: 'static {
     fn fetch_releases(&mut self) -> Result<ManagerViewModel, String>;
     /// Pin the selected installation to a specific VNDB release (rID).
     fn pin_release(&mut self, _release_id: &str) -> Result<ManagerViewModel, String>;
-    fn save_input_config(
-        &mut self,
-
-        _gamepad_enabled: bool,
-        _gamepad_deadzone: &str,
-    ) -> Result<(), String>;
-    /// The active device-to-key mapping, used to (re)configure the gamepad pump.
+    /// The pump mapping: the running game's mapping, otherwise the global one.
+    /// Push it to `GameInputPump::set_mapping` after every mapping change.
     fn input_mapping(&self) -> InputMapping;
-    /// Rebind a single gamepad input to a new key name.
-    fn set_gamepad_binding(&mut self, _button_id: &str, _key_name: &str) -> Result<(), String>;
-    /// Reset the gamepad button mapping to the general-purpose VN preset.
-    fn reset_gamepad_mapping(&mut self) -> Result<(), String>;
-    /// Save the current global input mapping as a per-game override for the
-    /// selected work.
-    fn save_per_game_input_mapping(
+    fn set_gamepad_enabled(&mut self, enabled: bool) -> Result<ManagerViewModel, String>;
+    fn set_gamepad_deadzone(&mut self, deadzone: &str) -> Result<ManagerViewModel, String>;
+    /// Bind a global gamepad input to a key name; an empty key removes the binding.
+    fn set_gamepad_binding(&mut self, button: &str, key: &str) -> Result<ManagerViewModel, String>;
+    /// Restore the recommended VN button bindings.
+    fn reset_gamepad_bindings(&mut self) -> Result<ManagerViewModel, String>;
+    /// Enabling copies the global mapping to the game; disabling removes the override.
+    fn set_game_input_override(
         &mut self,
-        gamepad_enabled: bool,
-        deadzone: &str,
+        game_id: &str,
+        enabled: bool,
     ) -> Result<ManagerViewModel, String>;
-    /// Clear the per-game input mapping override for the selected work.
-    fn clear_per_game_input_mapping(&mut self) -> Result<ManagerViewModel, String>;
+    fn set_game_gamepad_binding(
+        &mut self,
+        game_id: &str,
+        button: &str,
+        key: &str,
+    ) -> Result<ManagerViewModel, String>;
 }
+
+pub type FilterApply<'a> =
+    &'a mut dyn FnMut(&astra_emu_manager_core::FilterSettings) -> Result<(), String>;
 
 fn fire_host_callback(slot: &HostCallbackSlot) {
     let Some(mut callback) = slot.borrow_mut().take() else {
@@ -398,7 +462,7 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
         &renderer,
         &runtime_schedule,
     );
-    settings_callbacks::install(&adapter, &controller);
+    settings_callbacks::install(&adapter, &controller, &gamepad);
     library_callbacks::install(&adapter, &controller);
     {
         let host_exit = host_exit.clone();

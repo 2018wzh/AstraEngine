@@ -23,6 +23,7 @@ pub(super) struct ActiveFamilySession {
     pub(super) status: FamilyStatus,
     next_poll: Instant,
     pub(super) failure: Option<NativeFailure>,
+    pub(super) surface: astra_emu_manager_core::SurfaceRecord,
 }
 impl ActiveFamilySession {
     pub(super) fn open(
@@ -35,6 +36,7 @@ impl ActiveFamilySession {
         registry: &mut FamilyProviderRegistry,
         mailbox: FrameMailbox,
         initial_window: WindowState,
+        render_extent: Option<(u32, u32)>,
         services: SessionServices,
     ) -> Result<Self, String> {
         let (game, configuration, epoch) = game_config;
@@ -67,7 +69,7 @@ impl ActiveFamilySession {
                         initial_window,
                         host,
                         cancellation: services.cancellation,
-                        render_extent: None,
+                        render_extent,
                     },
                 )
                 .map_err(|error| error.to_string())
@@ -87,7 +89,9 @@ impl ActiveFamilySession {
                 return Err(error);
             }
         };
+        let surface = session.surface();
         let mut active = Self {
+            surface,
             session_epoch: epoch,
             session: Some(session),
             text: services.text,

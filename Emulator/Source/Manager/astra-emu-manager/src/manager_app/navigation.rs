@@ -19,12 +19,10 @@ impl AstraEmuManagerController {
         if self.active.is_some() {
             return Err("ASTRA_EMU_FAMILY_SESSION_ALREADY_ACTIVE".into());
         }
-        self.family_options.clear();
         if case_id.is_empty() {
             self.selected_case_id = None;
         } else {
             self.game(case_id)?;
-            self.load_game_input_mapping(case_id)?;
             self.selected_case_id = Some(case_id.into());
         }
         self.model()
@@ -74,7 +72,7 @@ impl AstraEmuManagerController {
                 "ASTRA_EMU_PATCH_INVALID_REQUEST: private staging is not a published game".into(),
             );
         }
-        self.load_game_input_mapping(case_id)?;
+        let session_mapping = self.game_input_mapping(case_id)?;
         if self.probe_choices.contains_key(case_id) && !self.candidates.contains_key(case_id) {
             return Err("ASTRA_EMU_FAMILY_PROVIDER_SELECTION_REQUIRED".to_owned());
         }
@@ -123,6 +121,22 @@ impl AstraEmuManagerController {
             .library
             .family_configuration(&candidate.descriptor.plugin_id, case_id, &schema)
             .map_err(|error| error.to_string())?;
+        let window = self.window_state.ok_or("ASTRA_EMU_WINDOW_STATE_REQUIRED")?;
+        let settings = self
+            .library
+            .game_settings(case_id)
+            .map_err(|error| error.to_string())?
+            .unwrap_or_default();
+        let preference =
+            self.effective_render_preference(&candidate.descriptor.plugin_id, &settings)?;
+        let render_extent = render_extent::resolve_render_extent(
+            candidate.descriptor.render.as_ref(),
+            &preference,
+            (window.width, window.height),
+            settings
+                .last_surface
+                .map(|surface| (surface.logical_width, surface.logical_height)),
+        )?;
         self.mailbox
             .activate(epoch)
             .map_err(|error| error.to_string())?;
@@ -131,7 +145,8 @@ impl AstraEmuManagerController {
             game,
             candidate,
             configuration,
-            window: self.window_state.ok_or("ASTRA_EMU_WINDOW_STATE_REQUIRED")?,
+            window,
+            render_extent,
             text,
             wake,
             modal: None,
@@ -139,6 +154,7 @@ impl AstraEmuManagerController {
             cancellation: astra_emu_manager_core::NativeCancellation::new(epoch),
         })?;
         self.selected_case_id = Some(case_id.into());
+        self.session_mapping = Some(session_mapping);
         self.pending_events.clear();
         self.active = Some(owner::ActiveSessionView::opening(epoch, case_id.into()));
         self.diagnostic.clear();

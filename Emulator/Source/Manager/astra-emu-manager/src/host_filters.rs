@@ -23,71 +23,21 @@ pub(super) fn configure(
     renderer.configure_filter(&config, settings.source.as_deref())
 }
 
-fn apply(
-    controller: &mut dyn ManagerController,
-    renderer: &mut dyn AstraUnderlayRenderer,
-) -> Result<ManagerViewModel, String> {
-    let previous = controller.filter_settings();
-    let candidate = controller.pending_filter_settings()?;
-    configure(renderer, &candidate)?;
-    match controller.commit_filter_settings(candidate) {
-        Ok(model) => Ok(model),
-        Err(error) => {
-            configure(renderer, &previous).map_err(|rollback| format!("{error}; {rollback}"))?;
-            Err(error)
-        }
-    }
-}
+type FilterChange<'a, C> = dyn Fn(&mut C, FilterApply<'_>) -> Result<ManagerViewModel, String> + 'a;
 
-pub(super) fn install<C: ManagerController, R: AstraUnderlayRenderer>(
+fn wire<C: ManagerController, R: AstraUnderlayRenderer>(
     adapter: &std::rc::Rc<SlintManagerAdapter>,
     controller: &std::rc::Rc<std::cell::RefCell<C>>,
     renderer: &std::rc::Rc<std::cell::RefCell<R>>,
-) {
+) -> impl Fn(&FilterChange<'_, C>) + Clone {
     let c = controller.clone();
     let r = renderer.clone();
     let a = std::rc::Rc::downgrade(adapter);
     let w = adapter.window().as_weak();
-    adapter
-        .window()
-        .global::<Filters>()
-        .on_set_preset(move |preset| {
-            let result = (|| {
-                c.borrow_mut()
-                    .filter_config_changed("filter.preset", preset.as_str())?;
-                apply(&mut *c.borrow_mut(), &mut *r.borrow_mut())
-            })();
-            if let Some(window) = w.upgrade() {
-                match result {
-                    Ok(model) => {
-                        apply_model(&a, &model);
-                        window.window().request_redraw();
-                    }
-                    Err(error) => report_error(&window, &error),
-                }
-            }
+    move |change| {
+        let result = change(&mut *c.borrow_mut(), &mut |settings| {
+            configure(&mut *r.borrow_mut(), settings)
         });
-    let c = controller.clone();
-    let w = adapter.window().as_weak();
-    adapter
-        .window()
-        .global::<Filters>()
-        .on_field_changed(move |key, value| {
-            if let Err(error) = c
-                .borrow_mut()
-                .filter_config_changed(key.as_str(), value.as_str())
-            {
-                if let Some(window) = w.upgrade() {
-                    report_error(&window, &error);
-                }
-            }
-        });
-    let c = controller.clone();
-    let r = renderer.clone();
-    let a = std::rc::Rc::downgrade(adapter);
-    let w = adapter.window().as_weak();
-    adapter.window().global::<Filters>().on_save(move || {
-        let result = apply(&mut *c.borrow_mut(), &mut *r.borrow_mut());
         if let Some(window) = w.upgrade() {
             match result {
                 Ok(model) => {
@@ -97,53 +47,33 @@ pub(super) fn install<C: ManagerController, R: AstraUnderlayRenderer>(
                 Err(error) => report_error(&window, &error),
             }
         }
+    }
+}
+
+pub(super) fn install<C: ManagerController, R: AstraUnderlayRenderer>(
+    adapter: &std::rc::Rc<SlintManagerAdapter>,
+    controller: &std::rc::Rc<std::cell::RefCell<C>>,
+    renderer: &std::rc::Rc<std::cell::RefCell<R>>,
+) {
+    let filters = adapter.window().global::<Filters>();
+    let run = wire(adapter, controller, renderer);
+    let set_preset = run.clone();
+    filters.on_set_preset(move |preset| {
+        set_preset(&|c, apply| c.set_filter_preset(preset.as_str(), apply));
     });
-    let c = controller.clone();
-    let a = std::rc::Rc::downgrade(adapter);
-    let w = adapter.window().as_weak();
-    adapter.window().global::<Filters>().on_reset(move || {
-        let result = c.borrow_mut().reset_filter_config();
-        if let Some(window) = w.upgrade() {
-            match result {
-                Ok(model) => apply_model(&a, &model),
-                Err(error) => report_error(&window, &error),
-            }
-        }
+    let set_parameter = run.clone();
+    filters.on_field_changed(move |key, value| {
+        set_parameter(&|c, apply| c.set_filter_parameter(key.as_str(), value.as_str(), apply));
     });
-    let c = controller.clone();
-    let a = std::rc::Rc::downgrade(adapter);
-    let w = adapter.window().as_weak();
-    adapter
-        .window()
-        .global::<Filters>()
-        .on_load_source(move || {
-            let Some(path) = rfd::FileDialog::new()
-                .add_filter("HLSL", &["hlsl"])
-                .pick_file()
-            else {
-                return;
-            };
-            let result = (|| {
-                use std::io::Read;
-                let file = std::fs::File::open(path).map_err(|_| "ASTRA_EMU_FILTER_SOURCE_OPEN")?;
-                let mut bytes = Vec::new();
-                file.take(1_048_577)
-                    .read_to_end(&mut bytes)
-                    .map_err(|_| "ASTRA_EMU_FILTER_SOURCE_READ")?;
-                if bytes.len() > 1_048_576 {
-                    return Err("ASTRA_EMU_FILTER_SOURCE_SIZE".into());
-                }
-                let source =
-                    String::from_utf8(bytes).map_err(|_| "ASTRA_EMU_FILTER_SOURCE_UTF8")?;
-                c.borrow_mut()
-                    .filter_config_changed("filter.source", &source)?;
-                c.borrow().model()
-            })();
-            if let Some(window) = w.upgrade() {
-                match result {
-                    Ok(model) => apply_model(&a, &model),
-                    Err(error) => report_error(&window, &error),
-                }
-            }
-        });
+    let reset = run.clone();
+    filters.on_reset(move || reset(&|c, apply| c.reset_filter_parameters(apply)));
+    filters.on_load_source(move || {
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("HLSL", &["hlsl"])
+            .pick_file()
+        else {
+            return;
+        };
+        run(&|c, apply| c.load_filter_source(&path, apply));
+    });
 }

@@ -53,7 +53,6 @@ mod metadata_actions;
 #[cfg(test)]
 mod metadata_tests;
 mod model;
-mod musica_keys;
 mod navigation;
 mod owner;
 mod owner_worker;
@@ -62,6 +61,7 @@ mod probe_cache;
 #[cfg(test)]
 mod probe_state_tests;
 mod probe_worker;
+mod render_extent;
 mod runtime;
 mod session;
 mod support;
@@ -107,8 +107,8 @@ struct AstraEmuManagerController {
     filter_settings: astra_emu_manager_core::FilterSettings,
     input_mapping: astra_emu_manager_core::InputMapping,
     appearance: astra_emu_manager_core::AppearanceSettings,
-    family_options: BTreeMap<String, String>,
-    filter_options: BTreeMap<String, String>,
+    session_mapping: Option<astra_emu_manager_core::InputMapping>,
+    defaults_plugin: Option<String>,
     metadata: MetadataRuntime,
     metadata_sequence: u64,
     metadata_status: BTreeMap<String, String>,

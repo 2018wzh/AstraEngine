@@ -99,6 +99,20 @@ fn exact_text(code: &str) -> Option<(&'static str, &'static str)> {
             "渲染分辨率设置无效",
             "预设只能选 720p、1080p、1440p 或 2160p，自定义宽高须在 1 到 16384 之间。",
         ),
+        "ASTRA_EMU_RENDER_EXTENT_UNSUPPORTED" => (
+            "自定义分辨率超出该模拟器支持范围",
+            "请在游戏设置中查看该模拟器支持的分辨率范围。",
+        ),
+        "ASTRA_EMU_EMULATOR_SELECTION_REQUIRED" => (
+            "需要先选择模拟器",
+            "选定模拟器后才能修改这部作品的模拟器设置。",
+        ),
+        "ASTRA_EMU_CONFIG_PATH_INVALID" => ("无法使用所选路径", "文件或目录不存在或无法访问。"),
+        "ASTRA_EMU_CONFIG_PATH_UTF8" => (
+            "所选路径包含无法保存的字符",
+            "请把文件放到路径只含常规字符的位置后重新选择。",
+        ),
+        "ASTRA_EMU_FAMILY_CONFIG" => ("设置值无效", "取值不在允许范围内，已保留原来的设置。"),
         "ASTRA_EMU_RELEASE_ID_INVALID" => (
             "发行版本编号无效",
             "VNDB 发行版本编号应为 r 加数字，例如 r12345，且不超过 64 个字符。",

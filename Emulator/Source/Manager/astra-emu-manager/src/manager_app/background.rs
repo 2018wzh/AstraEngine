@@ -237,8 +237,6 @@ impl AstraEmuManagerController {
         }
         if kind == ScanKind::Import && automatic.is_none() {
             if let Some(id) = imported.first() {
-                self.family_options.clear();
-                self.load_game_input_mapping(id)?;
                 self.selected_case_id = Some(id.clone());
             }
             if imported.is_empty() {

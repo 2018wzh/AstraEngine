@@ -18,6 +18,24 @@ pub enum RenderPreference {
 }
 
 impl RenderPreference {
+    /// Parse a UI choice id (`default`, `adaptive`, `preset-<height>`, `custom`).
+    /// `default` yields `None`: follow the next layer.
+    pub fn from_choice(id: &str, width: u32, height: u32) -> Result<Option<Self>, String> {
+        let preference = match id {
+            "default" => return Ok(None),
+            "adaptive" => Self::Adaptive,
+            "custom" => Self::Custom { width, height },
+            _ => Self::Preset {
+                height: id
+                    .strip_prefix("preset-")
+                    .and_then(|value| value.parse().ok())
+                    .ok_or("ASTRA_EMU_RENDER_PREFERENCE_INVALID")?,
+            },
+        };
+        preference.validate()?;
+        Ok(Some(preference))
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         let valid = match *self {
             Self::Default | Self::Adaptive => true,
@@ -92,6 +110,28 @@ mod tests {
             serde_json::from_str::<GameSettings>(&encoded).unwrap(),
             settings
         );
+    }
+
+    #[test]
+    fn choice_ids_parse_to_preferences() {
+        assert_eq!(RenderPreference::from_choice("default", 0, 0), Ok(None));
+        assert_eq!(
+            RenderPreference::from_choice("preset-1440", 0, 0),
+            Ok(Some(RenderPreference::Preset { height: 1440 }))
+        );
+        assert_eq!(
+            RenderPreference::from_choice("custom", 1600, 900),
+            Ok(Some(RenderPreference::Custom {
+                width: 1600,
+                height: 900
+            }))
+        );
+        for (id, width) in [("preset-900", 0), ("custom", 0), ("native", 0)] {
+            assert_eq!(
+                RenderPreference::from_choice(id, width, 900),
+                Err("ASTRA_EMU_RENDER_PREFERENCE_INVALID".to_owned())
+            );
+        }
     }
 
     #[test]

@@ -8,6 +8,6 @@ pub mod window_service;
 extern crate self as astra_emu_manager;
 
 pub use host::{
-    run_manager, run_manager_with_initial_state, AstraUnderlayRenderer, HostError, HostExit,
-    HostWake, ManagerController, StageTextureUpdate, WgpuFrameContext,
+    run_manager, run_manager_with_initial_state, AstraUnderlayRenderer, FilterApply, HostError,
+    HostExit, HostWake, ManagerController, StageTextureUpdate, WgpuFrameContext,
 };

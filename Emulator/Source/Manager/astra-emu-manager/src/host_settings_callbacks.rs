@@ -3,6 +3,7 @@ use super::*;
 pub(super) fn install<C: ManagerController>(
     adapter: &std::rc::Rc<SlintManagerAdapter>,
     controller: &std::rc::Rc<std::cell::RefCell<C>>,
+    gamepad: &std::rc::Rc<std::cell::RefCell<GameInputPump>>,
 ) {
     let c = controller.clone();
     let a = std::rc::Rc::downgrade(adapter);
@@ -35,78 +36,20 @@ pub(super) fn install<C: ManagerController>(
             .window()
             .global::<Selection>()
             .on_config_changed(move |key, value| {
-                let result = {
-                    let mut controller = c.borrow_mut();
-                    controller
-                        .family_config_changed(key.as_str(), value.as_str())
-                        .and_then(|()| {
-                            if matches!(
-                                key.as_str(),
-                                "manager.emulator_id" | "manager.config_scope"
-                            ) {
-                                controller.model().map(Some)
-                            } else {
-                                Ok(None)
-                            }
-                        })
+                let Some(window) = w.upgrade() else {
+                    return;
                 };
-                if let Some(window) = w.upgrade() {
-                    match result {
-                        Ok(Some(model)) => apply_model(&a, &model),
-                        Ok(None) => {}
-                        Err(error) => report_error(&window, &error),
-                    }
-                }
-            });
-    }
-    {
-        let c = controller.clone();
-        let a = std::rc::Rc::downgrade(adapter);
-        let w = adapter.window().as_weak();
-        adapter
-            .window()
-            .global::<Selection>()
-            .on_save_config(move || {
-                let result = c.borrow_mut().save_family_config();
-                if let Some(window) = w.upgrade() {
-                    match result {
-                        Ok(model) => apply_model(&a, &model),
-                        Err(error) => report_error(&window, &error),
-                    }
-                }
-            });
-    }
-    {
-        let c = controller.clone();
-        let a = std::rc::Rc::downgrade(adapter);
-        let w = adapter.window().as_weak();
-        adapter
-            .window()
-            .global::<Selection>()
-            .on_reset_config(move || {
-                let result = c.borrow_mut().reset_family_config();
-                if let Some(window) = w.upgrade() {
-                    match result {
-                        Ok(model) => apply_model(&a, &model),
-                        Err(error) => report_error(&window, &error),
-                    }
-                }
-            });
-    }
-    {
-        let c = controller.clone();
-        let a = std::rc::Rc::downgrade(adapter);
-        let w = adapter.window().as_weak();
-        adapter
-            .window()
-            .global::<Selection>()
-            .on_pick_musica_key(move || {
-                let result = c.borrow_mut().select_musica_key_file();
-                if let Some(window) = w.upgrade() {
-                    match result {
-                        Ok(model) => apply_model(&a, &model),
-                        Err(error) => report_error(&window, &error),
-                    }
+                let game_id = window.global::<Selection>().get_game().id;
+                let result = if key == "manager.emulator_id" {
+                    c.borrow_mut()
+                        .set_game_emulator(game_id.as_str(), value.as_str())
+                } else {
+                    c.borrow_mut()
+                        .set_game_config(game_id.as_str(), key.as_str(), value.as_str())
+                };
+                match result {
+                    Ok(model) => apply_model(&a, &model),
+                    Err(error) => report_error(&window, &error),
                 }
             });
     }
@@ -194,95 +137,54 @@ pub(super) fn install<C: ManagerController>(
                 Err(error) => report_error(&window, &error),
             }
         });
-    let input_config_weak = adapter.window().as_weak();
-    let input_config_controller = controller.clone();
-    adapter.window().global::<Settings>().on_save_input(
-        move |gamepad_enabled, gamepad_deadzone| {
-            let result = input_config_controller
-                .borrow_mut()
-                .save_input_config(gamepad_enabled, gamepad_deadzone.as_str());
-            match result {
-                Ok(()) => {}
-                Err(error) => {
-                    if let Some(window) = input_config_weak.upgrade() {
-                        report_error(&window, &error);
-                    }
-                }
-            }
-        },
-    );
-    let binding_weak = adapter.window().as_weak();
-    let binding_controller = controller.clone();
-    adapter
-        .window()
-        .global::<Settings>()
-        .on_bind(move |button_id, key_name| {
-            let result = binding_controller
-                .borrow_mut()
-                .set_gamepad_binding(button_id.as_str(), key_name.as_str());
-            match result {
-                Ok(()) => {}
-                Err(error) => {
-                    if let Some(window) = binding_weak.upgrade() {
-                        report_error(&window, &error);
-                    }
-                }
-            }
-        });
-    let reset_mapping_weak = adapter.window().as_weak();
-    let reset_mapping_controller = controller.clone();
-    let reset_mapping_adapter = std::rc::Rc::downgrade(adapter);
-    adapter
-        .window()
-        .global::<Settings>()
-        .on_reset_bindings(move || {
+    let mapping_change = {
+        let c = controller.clone();
+        let g = gamepad.clone();
+        let a = std::rc::Rc::downgrade(adapter);
+        let w = adapter.window().as_weak();
+        move |change: &dyn Fn(&mut C) -> Result<ManagerViewModel, String>| {
             let result = {
-                let mut controller = reset_mapping_controller.borrow_mut();
-                controller
-                    .reset_gamepad_mapping()
-                    .and_then(|()| controller.model())
+                let mut controller = c.borrow_mut();
+                change(&mut controller).and_then(|model| {
+                    g.borrow_mut().set_mapping(controller.input_mapping())?;
+                    Ok(model)
+                })
             };
-            if let Some(window) = reset_mapping_weak.upgrade() {
+            if let Some(window) = w.upgrade() {
                 match result {
-                    Ok(model) => apply_model(&reset_mapping_adapter, &model),
+                    Ok(model) => apply_model(&a, &model),
                     Err(error) => report_error(&window, &error),
                 }
             }
+        }
+    };
+    let settings = adapter.window().global::<Settings>();
+    let save_input = mapping_change.clone();
+    settings.on_save_input(move |enabled, deadzone| {
+        save_input(&|c| {
+            c.set_gamepad_enabled(enabled)?;
+            c.set_gamepad_deadzone(deadzone.as_str())
         });
-    let save_per_game_weak = adapter.window().as_weak();
-    let save_per_game_controller = controller.clone();
-    let save_per_game_adapter = std::rc::Rc::downgrade(adapter);
-    adapter
-        .window()
-        .global::<Selection>()
-        .on_save_game_input(move |gamepad_enabled, deadzone| {
-            let Some(window) = save_per_game_weak.upgrade() else {
+    });
+    let bind = mapping_change.clone();
+    settings.on_bind(move |button, key| {
+        bind(&|c| c.set_gamepad_binding(button.as_str(), key.as_str()));
+    });
+    let reset_bindings = mapping_change.clone();
+    settings.on_reset_bindings(move || reset_bindings(&|c| c.reset_gamepad_bindings()));
+    let selection = adapter.window().global::<Selection>();
+    let game_override = |enabled: bool| {
+        let change = mapping_change.clone();
+        let w = adapter.window().as_weak();
+        move || {
+            let Some(window) = w.upgrade() else {
                 return;
             };
-            match save_per_game_controller
-                .borrow_mut()
-                .save_per_game_input_mapping(gamepad_enabled, deadzone.as_str())
-            {
-                Ok(model) => apply_model(&save_per_game_adapter, &model),
-                Err(error) => report_error(&window, &error),
-            }
-        });
-    let clear_per_game_weak = adapter.window().as_weak();
-    let clear_per_game_controller = controller.clone();
-    let clear_per_game_adapter = std::rc::Rc::downgrade(adapter);
-    adapter
-        .window()
-        .global::<Selection>()
-        .on_clear_game_input(move || {
-            let Some(window) = clear_per_game_weak.upgrade() else {
-                return;
-            };
-            match clear_per_game_controller
-                .borrow_mut()
-                .clear_per_game_input_mapping()
-            {
-                Ok(model) => apply_model(&clear_per_game_adapter, &model),
-                Err(error) => report_error(&window, &error),
-            }
-        });
+            let game_id = window.global::<Selection>().get_game().id;
+            change(&|c| c.set_game_input_override(game_id.as_str(), enabled));
+        }
+    };
+    let save_game_input = game_override(true);
+    selection.on_save_game_input(move |_, _| save_game_input());
+    selection.on_clear_game_input(game_override(false));
 }

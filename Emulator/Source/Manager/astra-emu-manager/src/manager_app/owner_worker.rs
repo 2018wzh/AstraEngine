@@ -119,6 +119,7 @@ pub(super) fn run(
                     &mut registry,
                     mailbox.clone(),
                     request.window,
+                    request.render_extent,
                     super::session::SessionServices {
                         text: request.text,
                         window: request.window_service,
@@ -325,6 +326,7 @@ fn publish(session: &mut ActiveFamilySession, shared: &Mutex<Update>) {
     }
     if !update.opened {
         update.opened = true;
+        update.surface = Some(session.surface);
         update.dirty = true;
     }
     if update.failure != session.failure {

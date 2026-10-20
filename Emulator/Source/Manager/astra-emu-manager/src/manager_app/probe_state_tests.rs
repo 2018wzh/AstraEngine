@@ -226,17 +226,15 @@ fn core_loading_preserves_cached_library_bindings_until_an_explicit_scan() {
 }
 
 #[test]
-fn imported_game_selection_loads_its_input_mapping() {
+fn import_selects_the_imported_game() {
     let root = tempfile::tempdir().unwrap();
     let path = game(root.path());
     let mut app = controller(root.path());
     app.registry
         .register_provider(move || provider("test-a", 9_000))
         .unwrap();
-    app.input_mapping.deadzone = GamepadDeadzone::High;
     let model = import(&mut app, &path);
     assert_eq!(model.library.selected_id, path_id(&path));
-    assert_eq!(app.input_mapping.deadzone, default_vn_preset().deadzone);
 }
 
 #[test]
@@ -472,11 +470,9 @@ fn selected_emulator_survives_additional_same_engine_matches_and_reopening() {
         scan_once(&mut app, &game_path);
         assert_eq!(app.candidates[&id].report.plugin_id, "test-a");
         assert_eq!(app.probe_choices[&id].len(), 2);
-        app.family_config_changed("manager.emulator_id", "test-b")
-            .unwrap();
-        app.save_family_config().unwrap();
+        app.set_game_emulator(&id, "test-b").unwrap();
         assert_eq!(app.candidates[&id].report.plugin_id, "test-b");
-        app.clear_per_game_input_mapping().unwrap();
+        app.set_game_input_override(&id, false).unwrap();
         assert_eq!(
             app.library
                 .game_settings(&id)
@@ -551,8 +547,6 @@ fn missing_saved_emulator_requires_an_explicit_replacement() {
     std::fs::write(game_path.join("marker-b"), b"marker-b").unwrap();
     scan_once(&mut app, &game_path);
     assert_eq!(app.probe_choices.get(&id).unwrap().len(), 2);
-    app.family_config_changed("manager.emulator_id", "test-a")
-        .unwrap();
 
     std::fs::remove_file(game_path.join("marker-a")).unwrap();
     scan_once(&mut app, &game_path);
@@ -569,13 +563,8 @@ fn missing_saved_emulator_requires_an_explicit_replacement() {
             .as_deref(),
         Some("test-a")
     );
-    assert!(
-        app.family_config_changed("manager.emulator_id", "test-a")
-            .is_err()
-    );
-    app.family_config_changed("manager.emulator_id", "test-b")
-        .unwrap();
-    app.save_family_config().unwrap();
+    assert!(app.set_game_emulator(&id, "test-a").is_err());
+    app.set_game_emulator(&id, "test-b").unwrap();
     assert_eq!(app.candidates[&id].report.plugin_id, "test-b");
     assert_eq!(
         app.library

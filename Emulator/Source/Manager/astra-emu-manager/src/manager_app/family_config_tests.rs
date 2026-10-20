@@ -133,191 +133,298 @@ fn form_parses_full_width_numeric_values_and_rejects_non_finite_or_wrong_enum() 
     );
 }
 
+const PLUGIN: &str = "config-test-plugin";
+
+fn overrides(controller: &AstraEmuManagerController, game_id: &str) -> Vec<ConfigEntry> {
+    controller.library.family_overrides(PLUGIN, game_id).unwrap()
+}
+
+fn field<'a>(fields: &'a [ConfigFieldViewModel], key: &str) -> &'a ConfigFieldViewModel {
+    fields.iter().find(|field| field.key == key).unwrap()
+}
+
+#[test]
+fn game_config_stores_only_the_changed_override_and_reset_removes_it() {
+    let root = tempfile::tempdir().unwrap();
+    let mut controller = configuration_controller(root.path());
+    let model = controller.set_game_config("game", "launch_mode", "title").unwrap();
+    assert_eq!(
+        overrides(&controller, "game"),
+        [ConfigEntry {
+            id: "launch_mode".into(),
+            value: ConfigValue::Enum("title".into()),
+        }]
+    );
+    assert!(overrides(&controller, "").is_empty());
+    let launch_mode = field(&model.selection.family_fields, "launch_mode");
+    assert!(launch_mode.overridden);
+    assert_eq!(launch_mode.value, "title");
+    assert_eq!(launch_mode.display_value, "标题菜单启动");
+    assert_eq!(launch_mode.option_values, ["direct", "title"]);
+    assert_eq!(launch_mode.options, ["直接进入脚本", "标题菜单启动"]);
+    assert_eq!(launch_mode.kind, "enum");
+
+    let model = controller.reset_game_config("game", "launch_mode").unwrap();
+    assert!(overrides(&controller, "game").is_empty());
+    let launch_mode = field(&model.selection.family_fields, "launch_mode");
+    assert!(!launch_mode.overridden);
+    assert_eq!(launch_mode.value, "direct");
+}
+
+#[test]
+fn invalid_or_unknown_values_leave_storage_unchanged() {
+    let root = tempfile::tempdir().unwrap();
+    let mut controller = configuration_controller(root.path());
+    controller.set_game_config("game", "launch_mode", "title").unwrap();
+    let before = overrides(&controller, "game");
+    assert_eq!(
+        controller
+            .set_game_config("game", "launch_mode", "menu")
+            .unwrap_err(),
+        "ASTRA_EMU_FAMILY_CONFIG: launch_mode: invalid value"
+    );
+    assert!(controller.set_game_config("game", "missing", "1").is_err());
+    assert_eq!(overrides(&controller, "game"), before);
+}
+
+#[test]
+fn emulator_defaults_are_inherited_by_games_without_marking_them_overridden() {
+    let root = tempfile::tempdir().unwrap();
+    let mut controller = configuration_controller(root.path());
+    controller.select_emulator_defaults(PLUGIN).unwrap();
+    let model = controller
+        .set_emulator_default(PLUGIN, "launch_mode", "标题菜单启动")
+        .unwrap();
+    assert!(field(&model.cores.defaults.fields, "launch_mode").overridden);
+    assert_eq!(model.cores.defaults.plugin, PLUGIN);
+    let inherited = field(&model.selection.family_fields, "launch_mode");
+    assert_eq!(inherited.value, "title");
+    assert!(!inherited.overridden);
+    assert!(overrides(&controller, "game").is_empty());
+
+    controller.reset_emulator_default(PLUGIN, "launch_mode").unwrap();
+    assert!(overrides(&controller, "").is_empty());
+}
+
+#[test]
+fn configuration_changes_are_rejected_while_a_game_runs() {
+    let root = tempfile::tempdir().unwrap();
+    let mut controller = configuration_controller(root.path());
+    controller.active = Some(owner::ActiveSessionView::opening(1, "game".into()));
+    let results = [
+        controller.set_game_config("game", "launch_mode", "title"),
+        controller.reset_game_config("game", "launch_mode"),
+        controller.set_emulator_default(PLUGIN, "launch_mode", "title"),
+        controller.set_game_emulator("game", PLUGIN),
+        controller.set_render_preference("game", None),
+        controller.set_gamepad_binding("south", "enter"),
+        controller.set_game_gamepad_binding("game", "south", "enter"),
+        controller.set_game_input_override("game", true),
+        controller.reset_gamepad_bindings(),
+    ];
+    controller.active = None;
+    for result in results {
+        assert_eq!(result.unwrap_err(), "ASTRA_EMU_FAMILY_SESSION_ALREADY_ACTIVE");
+    }
+    assert!(overrides(&controller, "game").is_empty());
+}
+
+#[test]
+fn custom_render_outside_the_emulator_range_is_rejected_without_storing() {
+    use astra_emu_manager_core::{RenderPreference, RenderSupport};
+    let root = tempfile::tempdir().unwrap();
+    let mut controller = configuration_controller(root.path());
+    controller.candidates.get_mut("game").unwrap().descriptor.render = Some(RenderSupport {
+        min: (320, 180),
+        max: (3840, 2160),
+        default: None,
+        preserve_aspect: false,
+    });
+    controller
+        .set_render_preference("game", Some(RenderPreference::Preset { height: 1440 }))
+        .unwrap();
+    assert_eq!(
+        controller
+            .set_render_preference(
+                "game",
+                Some(RenderPreference::Custom {
+                    width: 5000,
+                    height: 5000,
+                }),
+            )
+            .unwrap_err(),
+        "ASTRA_EMU_RENDER_EXTENT_UNSUPPORTED"
+    );
+    let stored = controller.library.game_settings("game").unwrap().unwrap();
+    assert_eq!(stored.render, Some(RenderPreference::Preset { height: 1440 }));
+    let model = controller
+        .set_render_preference(
+            "game",
+            Some(RenderPreference::Custom {
+                width: 2560,
+                height: 1440,
+            }),
+        )
+        .unwrap();
+    assert!(model.selection.render.supported);
+    assert_eq!(model.selection.render.mode, "custom");
+    assert_eq!(model.selection.render.range, "320×180 – 3840×2160");
+    controller.set_render_preference("game", None).unwrap();
+    assert_eq!(
+        controller.library.game_settings("game").unwrap().unwrap().render,
+        None
+    );
+}
+
+#[test]
+fn emulator_render_default_is_validated_and_followed_by_games() {
+    use astra_emu_manager_core::RenderPreference;
+    let root = tempfile::tempdir().unwrap();
+    let mut controller = configuration_controller(root.path());
+    assert_eq!(
+        controller
+            .set_emulator_render_default(
+                PLUGIN,
+                RenderPreference::Custom {
+                    width: 1280,
+                    height: 720,
+                },
+            )
+            .unwrap_err(),
+        "ASTRA_EMU_RENDER_EXTENT_UNSUPPORTED"
+    );
+    controller
+        .set_emulator_render_default(PLUGIN, RenderPreference::Adaptive)
+        .unwrap();
+    let settings = astra_emu_manager_core::GameSettings::default();
+    assert_eq!(
+        controller
+            .effective_render_preference(PLUGIN, &settings)
+            .unwrap(),
+        RenderPreference::Adaptive
+    );
+    let pinned = astra_emu_manager_core::GameSettings {
+        render: Some(RenderPreference::Default),
+        ..settings
+    };
+    assert_eq!(
+        controller.effective_render_preference(PLUGIN, &pinned).unwrap(),
+        RenderPreference::Default
+    );
+}
+
+#[test]
+fn game_relative_paths_are_stored_relative_only_inside_the_game_directory() {
+    let root = tempfile::tempdir().unwrap();
+    let game = root.path().join("game");
+    std::fs::create_dir_all(game.join("data")).unwrap();
+    std::fs::write(game.join("data").join("key.toml"), b"").unwrap();
+    std::fs::write(root.path().join("outside.toml"), b"").unwrap();
+    let inside = game.join("data").join("key.toml");
+    assert_eq!(
+        config_path_value(&inside, &game, true).unwrap(),
+        Path::new("data").join("key.toml").to_str().unwrap()
+    );
+    let absolute = config_path_value(&inside, &game, false).unwrap();
+    assert!(Path::new(&absolute).is_absolute());
+    let outside = config_path_value(&root.path().join("outside.toml"), &game, true).unwrap();
+    assert!(Path::new(&outside).is_absolute());
+}
+
+#[test]
+fn gamepad_changes_persist_and_game_overrides_copy_the_global_mapping() {
+    let root = tempfile::tempdir().unwrap();
+    {
+        let mut controller = configuration_controller(root.path());
+        controller.set_gamepad_binding("south", "space").unwrap();
+        controller.set_gamepad_deadzone("high").unwrap();
+        assert!(controller.set_gamepad_binding("south", "not-a-key").is_err());
+        assert!(controller.set_gamepad_deadzone("huge").is_err());
+        let model = controller.set_game_input_override("game", true).unwrap();
+        assert!(model.selection.input_override);
+        let model = controller
+            .set_game_gamepad_binding("game", "south", "enter")
+            .unwrap();
+        let south = |bindings: &[astra_emu_manager_ui_slint::GamepadBindingViewModel]| {
+            bindings
+                .iter()
+                .find(|binding| binding.id == "south")
+                .unwrap()
+                .key
+                .clone()
+        };
+        assert_eq!(south(&model.selection.game_bindings), "enter");
+        assert_eq!(south(&model.settings.input.bindings), "space");
+    }
+    let mut controller = configuration_controller(root.path());
+    let global = controller.input_mapping();
+    assert_eq!(global.deadzone, GamepadDeadzone::High);
+    assert_eq!(global.gamepad[&GamepadInput::South], "space");
+    let game = controller.game_input_mapping("game").unwrap();
+    assert_eq!(game.gamepad[&GamepadInput::South], "enter");
+    controller.reset_gamepad_bindings().unwrap();
+    assert_eq!(controller.input_mapping().gamepad, default_vn_preset().gamepad);
+    controller.set_game_input_override("game", false).unwrap();
+    assert_eq!(
+        controller.game_input_mapping("game").unwrap(),
+        controller.input_mapping()
+    );
+}
+
+#[test]
+fn filter_changes_roll_back_when_the_renderer_rejects_them() {
+    let root = tempfile::tempdir().unwrap();
+    let mut controller = configuration_controller(root.path());
+    let mut applied = Vec::new();
+    controller
+        .set_filter_preset("sharpen", &mut |settings| {
+            applied.push(settings.clone());
+            Ok(())
+        })
+        .unwrap();
+    let saved = controller.library.filter_settings().unwrap().unwrap();
+    assert_eq!(saved, controller.filter_settings);
+    let mut calls = 0;
+    let error = controller
+        .set_filter_parameter("filter.strength", "0.8", &mut |settings| {
+            calls += 1;
+            if settings.configuration.strength == 0.8 {
+                Err("ASTRA_EMU_FILTER_COMPILE: rejected".into())
+            } else {
+                Ok(())
+            }
+        })
+        .unwrap_err();
+    assert_eq!(error, "ASTRA_EMU_FILTER_COMPILE: rejected");
+    assert_eq!(calls, 2);
+    assert_eq!(controller.filter_settings, saved);
+    assert_eq!(controller.library.filter_settings().unwrap().unwrap(), saved);
+    assert!(controller
+        .set_filter_parameter("filter.scale", "9", &mut |_| Ok(()))
+        .is_err());
+    controller
+        .set_filter_preset("anime4k", &mut |_| Ok(()))
+        .unwrap();
+    assert_eq!(controller.filter_settings.configuration.scale, 2.0);
+    controller.reset_filter_parameters(&mut |_| Ok(())).unwrap();
+    assert_eq!(
+        controller.library.filter_settings().unwrap().unwrap().configuration.strength,
+        astra_emu_manager_core::FilterConfiguration::default().strength
+    );
+    assert_eq!(applied.len(), 1);
+}
+
 #[test]
 fn typed_game_configuration_round_trips_after_controller_reopen() {
     let root = tempfile::tempdir().unwrap();
     {
         let mut controller = configuration_controller(root.path());
-        controller
-            .family_config_changed("config.launch_mode", "title")
-            .unwrap();
-        controller.save_family_config().unwrap();
-
-        let schema = controller
-            .registry
-            .configuration("config-test-plugin")
-            .unwrap();
-        let entries = controller
-            .library
-            .family_configuration("config-test-plugin", "game", &schema)
-            .unwrap();
-        assert_eq!(entries[0].value, ConfigValue::Enum("title".into()));
+        controller.set_game_config("game", "launch_mode", "title").unwrap();
     }
-
     let controller = configuration_controller(root.path());
     let model = controller.model().unwrap();
-    let fields = model.selection.family_fields;
-    let launch_mode = fields
-        .iter()
-        .find(|field| field.key == "config.launch_mode")
-        .unwrap();
+    let launch_mode = field(&model.selection.family_fields, "launch_mode");
     assert_eq!(launch_mode.label, "Launch mode");
-    assert_eq!(launch_mode.value, "标题菜单启动");
-    assert_eq!(launch_mode.enum_values, ["直接进入脚本", "标题菜单启动"]);
-}
-
-fn logical_schema() -> Vec<ConfigField> {
-    let extent = |id: &str, default| ConfigField {
-        id: id.into(),
-        label: id.into(),
-        group: "高级".into(),
-        kind: ConfigKind::Integer { min: 1, max: 16384 },
-        default: ConfigValue::Integer(default),
-        description: "逻辑舞台尺寸".into(),
-        choice_labels: Vec::new(),
-        flags: Default::default(),
-        step: Some(1.0),
-        unit: "px".into(),
-    };
-    vec![extent("logical_width", 1280), extent("logical_height", 720)]
-}
-
-#[test]
-fn drafts_save_with_native_scope_precedence() {
-    let root = tempfile::tempdir().unwrap();
-    let schema = logical_schema();
-    let plugin = "astra.emu.musica";
-    {
-        let mut controller = configuration_controller(root.path());
-        save_config_draft(
-            &mut controller.library,
-            plugin,
-            "",
-            &schema,
-            &BTreeMap::from([
-                ("config.logical_width".into(), "1024".into()),
-                ("config.logical_height".into(), "640".into()),
-            ]),
-        )
-        .unwrap();
-        let inherited = controller
-            .library
-            .family_configuration(plugin, "game", &schema)
-            .unwrap();
-        let mut fields = Vec::new();
-        append_config_fields(&schema, &inherited, &BTreeMap::new(), &mut fields);
-        assert_eq!(
-            fields
-                .iter()
-                .map(|field| field.value.as_str())
-                .collect::<Vec<_>>(),
-            ["1024", "640"]
-        );
-        assert_eq!(fields[0].description, "逻辑舞台尺寸（范围：1 … 16384 px）");
-        let drafts = BTreeMap::from([(fields[0].key.clone(), "1280".into())]);
-        save_config_draft(&mut controller.library, plugin, "game", &schema, &drafts).unwrap();
-    }
-    let mut controller = configuration_controller(root.path());
-    let startup = controller
-        .library
-        .family_configuration(plugin, "game", &schema)
-        .unwrap();
-    assert_eq!(
-        startup.iter().map(|entry| &entry.value).collect::<Vec<_>>(),
-        [&ConfigValue::Integer(1280), &ConfigValue::Integer(640)]
-    );
-    for raw in ["0", "16385"] {
-        assert!(save_config_draft(
-            &mut controller.library,
-            plugin,
-            "game",
-            &schema,
-            &BTreeMap::from([
-                ("config.logical_width".into(), "800".into()),
-                ("config.logical_height".into(), raw.into()),
-            ]),
-        )
-        .is_err());
-        assert_eq!(
-            controller
-                .library
-                .family_configuration(plugin, "game", &schema)
-                .unwrap(),
-            startup
-        );
-    }
-    controller
-        .library
-        .save_family_configuration(plugin, "game", &schema, &[])
-        .unwrap();
-    assert_eq!(
-        controller
-            .library
-            .family_configuration(plugin, "game", &schema)
-            .unwrap(),
-        vec![
-            ConfigEntry {
-                id: "logical_width".into(),
-                value: ConfigValue::Integer(1024),
-            },
-            ConfigEntry {
-                id: "logical_height".into(),
-                value: ConfigValue::Integer(640),
-            },
-        ]
-    );
-}
-
-#[test]
-fn staged_emulator_hides_previous_fields_across_scope_changes_and_blocks_old_writes() {
-    let root = tempfile::tempdir().unwrap();
-    let mut controller = configuration_controller(root.path());
-    controller
-        .family_config_changed("manager.config_scope", "core")
-        .unwrap();
-    controller
-        .family_config_changed("config.launch_mode", "title")
-        .unwrap();
-    controller.save_family_config().unwrap();
-    let mut other = configuration_candidate();
-    other.report.plugin_id = "other-emulator".into();
-    other.descriptor.plugin_id = "other-emulator".into();
-    controller
-        .probe_choices
-        .get_mut("game")
-        .unwrap()
-        .push(other);
-    controller
-        .family_config_changed("manager.emulator_id", "other-emulator")
-        .unwrap();
-    for scope in ["game", "core"] {
-        controller
-            .family_config_changed("manager.config_scope", scope)
-            .unwrap();
-        let model = controller.model().unwrap();
-        assert!(model
-            .selection
-            .family_fields
-            .iter()
-            .all(|field| field.key == "manager.emulator_id"));
-        assert_eq!(model.selection.family_fields[0].value, "other-emulator");
-        assert!(controller
-            .family_config_changed("config.launch_mode", "direct")
-            .is_err());
-        assert!(controller.reset_family_config().is_err());
-    }
-    controller
-        .family_config_changed("manager.emulator_id", "config-test-plugin")
-        .unwrap();
-    let model = controller.model().unwrap();
-    assert_eq!(
-        model
-            .selection
-            .family_fields
-            .iter()
-            .find(|field| field.key == "config.launch_mode")
-            .unwrap()
-            .value,
-        "标题菜单启动"
-    );
+    assert_eq!(launch_mode.display_value, "标题菜单启动");
+    assert!(launch_mode.overridden);
 }
