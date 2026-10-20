@@ -1,7 +1,9 @@
 use std::{cell::RefCell, rc::Rc};
 
 use astra_emu_manager_core::model::{FamilyEvent, KeyCode, KeyModifiers, KeyState, WindowState};
-use astra_emu_manager_ui_slint::{report_error, App, SlintManagerAdapter};
+use astra_emu_manager_ui_slint::{
+    report_error, App, GameSettings, ManagerViewModel, ManagerWindow, Settings, SlintManagerAdapter,
+};
 use slint::{
     winit_030::{EventResult, WinitWindowAccessor},
     ComponentHandle,
@@ -59,28 +61,47 @@ pub(super) fn install<C: ManagerController>(
             let Some(window) = weak.upgrade() else {
                 return EventResult::Propagate;
             };
-            if let WindowEvent::KeyboardInput { event, .. } = event {
-                if controller.borrow().key_capture_active() {
-                    if event.state == ElementState::Pressed && !event.repeat {
-                        let code = match event.physical_key {
-                            winit::keyboard::PhysicalKey::Code(code) => family_key(code),
-                            winit::keyboard::PhysicalKey::Unidentified(_) => None,
-                        };
-                        let result = controller
-                            .borrow_mut()
-                            .capture_key(code.unwrap_or(KeyCode::Unknown))
-                            .and_then(|model| {
-                                let mapping = controller.borrow().input_mapping();
-                                gamepad.borrow_mut().set_mapping(mapping)?;
-                                Ok(model)
-                            });
-                        match result {
-                            Ok(model) => super::apply_model(&weak_adapter, &model),
-                            Err(error) => report_error(&window, &error),
-                        }
-                    }
-                    return EventResult::PreventDefault;
+            let target = capture_target(&window);
+            match sync_capture(&controller, target.as_ref()) {
+                Ok(Some(model)) => super::apply_model(&weak_adapter, &model),
+                Ok(None) => {}
+                Err(error) => {
+                    clear_capture(&window);
+                    report_error(&window, &error);
                 }
+            }
+            if let (Some(target), WindowEvent::KeyboardInput { event, .. }) = (&target, event) {
+                if event.state == ElementState::Pressed && !event.repeat {
+                    let code = match event.physical_key {
+                        winit::keyboard::PhysicalKey::Code(code) => family_key(code),
+                        winit::keyboard::PhysicalKey::Unidentified(_) => None,
+                    };
+                    let result = controller
+                        .borrow_mut()
+                        .capture_key(code.unwrap_or(KeyCode::Unknown))
+                        .and_then(|model| {
+                            let mapping = controller.borrow().input_mapping();
+                            gamepad.borrow_mut().set_mapping(mapping)?;
+                            Ok(model)
+                        });
+                    match result {
+                        Ok(model) => super::apply_model(&weak_adapter, &model),
+                        Err(error) => report_error(&window, &error),
+                    }
+                    let hint = controller
+                        .borrow()
+                        .key_capture()
+                        .map(|state| slint::SharedString::from(state.hint));
+                    match hint {
+                        Some(hint) if target.game_id.is_some() => {
+                            window.global::<GameSettings>().set_capture_hint(hint)
+                        }
+                        Some(hint) => window.global::<Settings>().set_capture_hint(hint),
+                        None => clear_capture(&window),
+                    }
+                }
+                // Every key, Esc included, is a binding candidate rather than a UI shortcut.
+                return EventResult::PreventDefault;
             }
             let input_active = super::session_input_open(&window);
             super::pointer::HostPointer::observe(&pointer, &window, event);
@@ -263,4 +284,61 @@ fn family_key(code: winit::keyboard::KeyCode) -> Option<KeyCode> {
         W::Backquote => KeyCode::Grave,
         _ => return None,
     })
+}
+
+/// The binding row Slint is capturing for; per-game when the game settings page owns it.
+struct CaptureTarget {
+    button: slint::SharedString,
+    game_id: Option<slint::SharedString>,
+}
+
+fn capture_target(window: &ManagerWindow) -> Option<CaptureTarget> {
+    let game = window.global::<GameSettings>();
+    let button = game.get_capture_button();
+    if !button.is_empty() {
+        return Some(CaptureTarget {
+            button,
+            game_id: Some(game.get_game_id()),
+        });
+    }
+    let button = window.global::<Settings>().get_capture_button();
+    (!button.is_empty()).then_some(CaptureTarget {
+        button,
+        game_id: None,
+    })
+}
+
+/// Mirror Slint's capture row (started, moved or cancelled by the UI) into the controller.
+fn sync_capture<C: ManagerController>(
+    controller: &RefCell<C>,
+    target: Option<&CaptureTarget>,
+) -> Result<Option<ManagerViewModel>, String> {
+    let current = controller.borrow();
+    let same = match (current.key_capture(), target) {
+        (None, None) => true,
+        (Some(state), Some(target)) => {
+            state.button == target.button.as_str() && state.game_id == target.game_id.as_deref()
+        }
+        _ => false,
+    };
+    drop(current);
+    if same {
+        return Ok(None);
+    }
+    let mut controller = controller.borrow_mut();
+    match target {
+        Some(target) => controller
+            .begin_key_capture(target.button.as_str(), target.game_id.as_deref())
+            .map(Some),
+        None => controller.cancel_key_capture().map(Some),
+    }
+}
+
+fn clear_capture(window: &ManagerWindow) {
+    let game = window.global::<GameSettings>();
+    game.set_capture_button("".into());
+    game.set_capture_hint("".into());
+    let settings = window.global::<Settings>();
+    settings.set_capture_button("".into());
+    settings.set_capture_hint("".into());
 }

@@ -252,6 +252,7 @@ pub(super) fn config_field_views(
                 step: field.step.unwrap_or(0.0),
                 unit: field.unit.clone(),
                 advanced: field.flags.advanced,
+                error: String::new(),
                 overridden: overrides.iter().any(|stored| stored.id == field.id),
             }
         })

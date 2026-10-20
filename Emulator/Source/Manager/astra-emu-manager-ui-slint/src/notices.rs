@@ -75,9 +75,12 @@ fn exact_text(code: &str) -> Option<(&'static str, &'static str)> {
         "ASTRA_EMU_SCAN_CANCELLED" => ("已取消扫描", "资料库保持不变。"),
         "ASTRA_EMU_GAME_DIRECTORY_INVALID" => ("无法使用这个目录", "目录不存在或无法访问。"),
         "ASTRA_EMU_UNDO_UNAVAILABLE" => ("没有可撤销的移除", "作品可以在 设置→库目录 中恢复。"),
-        "ASTRA_EMU_SNACKBAR_ACTION_UNAVAILABLE" => ("这个操作已失效", "请重新执行一次。"),
         "ASTRA_EMU_OPEN_PATH_FAILED" => ("无法打开所在目录", "系统文件管理器未能启动。"),
         "ASTRA_EMU_KEY_CAPTURE_INACTIVE" => ("没有正在设置的按键", "请先点选要绑定的手柄按钮。"),
+        "ASTRA_EMU_PATCH_RECIPE_UNKNOWN" => (
+            "补丁目录中没有这个补丁",
+            "补丁列表可能已随元数据同步更新，请重新选择。",
+        ),
         "ASTRA_EMU_GAMEPAD_BUTTON_INVALID" => ("无法识别的手柄按钮", "请从按键列表中选择。"),
         "ASTRA_EMU_FAMILY_SESSION_ALREADY_ACTIVE" => {
             ("已有游戏正在运行", "请先返回游戏库结束当前游戏。")
@@ -129,25 +132,9 @@ fn exact_text(code: &str) -> Option<(&'static str, &'static str)> {
             "发行版本编号无效",
             "VNDB 发行版本编号应为 r 加数字，例如 r12345，且不超过 64 个字符。",
         ),
-        "ASTRA_EMU_METADATA_HASH_MISMATCH" => (
-            "元数据校验失败",
-            "下载的文件与索引不符，已保留原有数据。请稍后重新同步。",
-        ),
-        "ASTRA_EMU_METADATA_CACHE_WRITE" => (
-            "无法保存元数据",
-            "写入数据目录失败，已保留原有数据。请检查磁盘空间和目录权限。",
-        ),
         "ASTRA_EMU_COMPATIBILITY_DUPLICATE" => (
             "兼容性数据有重复条目",
             "同一发行版本和模拟器出现了多条记录，本次更新未采用。",
-        ),
-        "ASTRA_EMU_PRESET_INVALID" => (
-            "推荐配置无法套用",
-            "其中有字段不存在或取值无效，已恢复原来的设置。",
-        ),
-        "ASTRA_EMU_CORE_LAYOUT" => (
-            "核心目录结构不正确",
-            "每个核心目录内必须恰好有一个核心文件。请重新安装该核心。",
         ),
         "ASTRA_EMU_TRANSLATION_PROFILE_REQUIRED" => {
             ("尚未配置翻译服务", "请在 设置→实时翻译 中填写并保存。")

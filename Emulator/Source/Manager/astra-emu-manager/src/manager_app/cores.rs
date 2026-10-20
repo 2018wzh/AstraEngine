@@ -28,10 +28,6 @@ fn capability_label(capability: FamilyCapability) -> &'static str {
     }
 }
 
-fn monogram(family_id: &str) -> String {
-    family_id.chars().take(3).collect::<String>().to_uppercase()
-}
-
 impl AstraEmuManagerController {
     fn cores_dir(&self) -> PathBuf {
         self.data_dir.join("cores")
@@ -46,8 +42,9 @@ impl AstraEmuManagerController {
         )
     }
 
-    /// Loaded, failed, pending and online-available cores in one list.
-    pub(super) fn cores_view(&self) -> Result<CoresViewModel, String> {
+    /// Loaded, failed, pending and online-available cores in one list, each
+    /// paired with its core directory stem (empty for online-only entries).
+    fn core_items(&self) -> Result<(Vec<(CoreViewModel, String)>, bool, usize), String> {
         let cores = self.cores_dir();
         let pending = core_package::pending_entries(&cores)?;
         let mut items = Vec::new();
@@ -66,44 +63,48 @@ impl AstraEmuManagerController {
                 .filter(|entry| is_newer(&entry.version, &meta.descriptor.version))
                 .map(|entry| entry.version.clone())
                 .unwrap_or_default();
-            items.push(CoreViewModel {
-                key: meta.descriptor.plugin_id.clone(),
-                name: meta.descriptor.display_name.clone(),
-                monogram: monogram(&meta.descriptor.family_id),
-                version: meta.descriptor.version.clone(),
-                capabilities: meta
-                    .descriptor
-                    .capabilities
-                    .iter()
-                    .copied()
-                    .map(capability_label)
-                    .map(str::to_owned)
-                    .collect(),
-                state: state.into(),
-                source: if meta.bundled { "bundled" } else { "user" }.into(),
-                file: meta.stem.clone(),
-                message: String::new(),
-                removable: !meta.bundled,
-                update_version,
-            });
+            items.push((
+                CoreViewModel {
+                    id: meta.descriptor.plugin_id.clone(),
+                    name: meta.descriptor.display_name.clone(),
+                    engine: meta.descriptor.family_name.clone(),
+                    version: meta.descriptor.version.clone(),
+                    capabilities: meta
+                        .descriptor
+                        .capabilities
+                        .iter()
+                        .copied()
+                        .map(capability_label)
+                        .map(str::to_owned)
+                        .collect(),
+                    state: state.into(),
+                    source: if meta.bundled { "bundled" } else { "user" }.into(),
+                    message: String::new(),
+                    removable: !meta.bundled,
+                    update_version,
+                },
+                meta.stem.clone(),
+            ));
         }
-        items.sort_by(|left, right| left.name.cmp(&right.name));
+        items.sort_by(|left, right| left.0.name.cmp(&right.0.name));
         let updates_available = items
             .iter()
-            .filter(|item| !item.update_version.is_empty())
+            .filter(|(item, _)| !item.update_version.is_empty())
             .count();
         for (stem, raw) in &self.plugin_errors {
             let described = describe_error(raw);
-            items.push(CoreViewModel {
-                key: stem.clone(),
-                name: stem.clone(),
-                state: "failed".into(),
-                source: "user".into(),
-                file: stem.clone(),
-                message: described.title,
-                removable: cores.join(stem).is_dir(),
-                ..CoreViewModel::default()
-            });
+            items.push((
+                CoreViewModel {
+                    id: stem.clone(),
+                    name: stem.clone(),
+                    state: "failed".into(),
+                    source: "user".into(),
+                    message: described.title,
+                    removable: cores.join(stem).is_dir(),
+                    ..CoreViewModel::default()
+                },
+                stem.clone(),
+            ));
         }
         for (stem, kind) in &pending {
             if *kind != PendingKind::Install || loaded_stems.contains(stem) {
@@ -112,21 +113,25 @@ impl AstraEmuManagerController {
             let manifest =
                 core_package::read_manifest(&cores.join(core_package::PENDING).join(stem));
             let plugin_id = manifest.as_ref().map(|manifest| manifest.plugin_id.clone());
-            let name = plugin_id
-                .as_deref()
-                .and_then(|id| self.online_core(id))
-                .map_or_else(|| stem.clone(), |entry| entry.display_name.clone());
+            let online = plugin_id.as_deref().and_then(|id| self.online_core(id));
+            let name = online.map_or_else(|| stem.clone(), |entry| entry.display_name.clone());
+            let engine = online
+                .map(|entry| entry.family_name.clone())
+                .unwrap_or_default();
             listed_plugins.extend(plugin_id.clone());
-            items.push(CoreViewModel {
-                key: plugin_id.unwrap_or_else(|| stem.clone()),
-                name,
-                version: manifest.map(|manifest| manifest.version).unwrap_or_default(),
-                state: "pending-install".into(),
-                source: "user".into(),
-                file: stem.clone(),
-                removable: true,
-                ..CoreViewModel::default()
-            });
+            items.push((
+                CoreViewModel {
+                    id: plugin_id.unwrap_or_else(|| stem.clone()),
+                    name,
+                    engine,
+                    version: manifest.map(|manifest| manifest.version).unwrap_or_default(),
+                    state: "pending-install".into(),
+                    source: "user".into(),
+                    removable: true,
+                    ..CoreViewModel::default()
+                },
+                stem.clone(),
+            ));
         }
         if let Some(catalog) = &self.metadata_catalog {
             let available: BTreeSet<&str> = catalog
@@ -137,22 +142,31 @@ impl AstraEmuManagerController {
                 .filter(|plugin_id| !listed_plugins.contains(*plugin_id))
                 .collect();
             for entry in available.into_iter().filter_map(|id| self.online_core(id)) {
-                items.push(CoreViewModel {
-                    key: entry.plugin_id.clone(),
-                    name: entry.display_name.clone(),
-                    version: entry.version.clone(),
-                    state: "available".into(),
-                    source: "online".into(),
-                    message: entry.family_name.clone(),
-                    ..CoreViewModel::default()
-                });
+                items.push((
+                    CoreViewModel {
+                        id: entry.plugin_id.clone(),
+                        name: entry.display_name.clone(),
+                        engine: entry.family_name.clone(),
+                        version: entry.version.clone(),
+                        state: "available".into(),
+                        source: "online".into(),
+                        ..CoreViewModel::default()
+                    },
+                    String::new(),
+                ));
             }
         }
+        let restart_required = !pending.is_empty() && self.cores_started();
+        Ok((items, restart_required, updates_available))
+    }
+
+    pub(super) fn cores_view(&self) -> Result<CoresViewModel, String> {
+        let (items, restart_required, updates_available) = self.core_items()?;
         Ok(CoresViewModel {
-            items,
-            restart_required: !pending.is_empty() && self.cores_started(),
+            items: items.into_iter().map(|(item, _)| item).collect(),
+            restart_required,
             updates_available: i32::try_from(updates_available).unwrap_or(i32::MAX),
-            defaults: Default::default(),
+            ..CoresViewModel::default()
         })
     }
 
@@ -218,8 +232,22 @@ impl AstraEmuManagerController {
         );
     }
 
+    /// Core directory stem of a core list entry (plugin id or stem).
+    fn core_stem(&self, core_id: &str) -> Result<Option<String>, String> {
+        Ok(self
+            .core_items()?
+            .0
+            .into_iter()
+            .find(|(item, stem)| item.id == core_id && !stem.is_empty())
+            .map(|(_, stem)| stem))
+    }
+
     /// Cancel a pending install, or mark an installed user core for removal.
-    pub(super) fn uninstall_core(&mut self, stem: &str) -> Result<ManagerViewModel, String> {
+    pub(super) fn uninstall_core(&mut self, core_id: &str) -> Result<ManagerViewModel, String> {
+        let stem = self
+            .core_stem(core_id)?
+            .ok_or("ASTRA_EMU_CORE_UNINSTALL_BUNDLED")?;
+        let stem = stem.as_str();
         let cores = self.cores_dir();
         let staged = cores.join(core_package::PENDING).join(stem);
         let installed = cores.join(stem);
@@ -233,7 +261,14 @@ impl AstraEmuManagerController {
         self.model()
     }
 
+    /// Diagnostics mentioning a core, addressed by plugin id or directory stem.
     pub(super) fn log_text(&self, core: &str) -> Result<(String, usize), String> {
+        let stem = if core.is_empty() {
+            None
+        } else {
+            self.core_stem(core)?
+        };
+        let core = stem.as_deref().unwrap_or(core);
         let path = self.data_dir.join("diagnostics").join("astra.jsonl");
         let mut file = match fs::File::open(&path) {
             Ok(file) => file,

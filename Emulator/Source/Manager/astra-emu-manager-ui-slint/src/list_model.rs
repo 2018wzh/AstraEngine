@@ -42,17 +42,19 @@ impl<V: PartialEq + Clone, T: Clone + 'static> ListModel<V, T> {
     }
 }
 
+impl ListModel<String, slint::SharedString> {
+    pub(crate) fn strings() -> Self {
+        Self::new(|value| value.as_str().into())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn text(value: &String) -> slint::SharedString {
-        value.as_str().into()
-    }
-
     #[test]
     fn unchanged_rows_are_not_rewritten() {
-        let list = ListModel::new(text);
+        let list = ListModel::strings();
         list.update(&["a".to_string(), "b".to_string()]);
         let model = list.model();
         list.update(&["a".to_string(), "c".to_string()]);

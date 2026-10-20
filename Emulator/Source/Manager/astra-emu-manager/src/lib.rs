@@ -9,6 +9,6 @@ extern crate self as astra_emu_manager;
 
 pub use host::{
     close_requested, open_path, run_manager, run_manager_with_initial_state, AstraUnderlayRenderer,
-    CloseDecision, FilterApply, HostError, HostExit, HostWake, ManagerController, SnackbarOutcome,
-    StageTextureUpdate, WgpuFrameContext,
+    CloseDecision, FilterApply, HostError, HostExit, HostWake, KeyCaptureState, ManagerController,
+    SnackbarOutcome, StageTextureUpdate, WgpuFrameContext,
 };

@@ -218,13 +218,6 @@ impl AstraEmuManagerController {
             .collect())
     }
 
-    /// Patch catalog directory inside the active metadata cache.
-    pub(super) fn patch_catalog_directory(&self) -> Option<PathBuf> {
-        self.metadata_catalog
-            .as_ref()
-            .map(MetadataCatalog::patch_directory)
-    }
-
     /// Write every preset entry as a game override. Any invalid entry restores
     /// the overrides stored before the call.
     pub(super) fn apply_recommended_config(

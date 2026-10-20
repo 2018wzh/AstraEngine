@@ -360,7 +360,6 @@ pub struct SettingsViewModel {
     pub gamepad_enabled: bool,
     pub deadzone: String,
     pub bindings: Vec<GamepadBindingViewModel>,
-    pub pad_state: Vec<String>,
     pub roots: Vec<String>,
     pub excluded: Vec<ExcludedViewModel>,
 }
@@ -379,7 +378,6 @@ impl Default for SettingsViewModel {
             gamepad_enabled: true,
             deadzone: "medium".into(),
             bindings: Vec::new(),
-            pad_state: Vec::new(),
             roots: Vec::new(),
             excluded: Vec::new(),
         }

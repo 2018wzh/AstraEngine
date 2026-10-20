@@ -1,54 +1,18 @@
 use super::*;
 
-pub(super) fn install<C: ManagerController>(
-    adapter: &std::rc::Rc<SlintManagerAdapter>,
-    controller: &std::rc::Rc<std::cell::RefCell<C>>,
-) {
-    let install_weak = adapter.window().as_weak();
-    let install_controller = controller.clone();
-    let install_adapter = std::rc::Rc::downgrade(adapter);
-    adapter.window().global::<Cores>().on_install(move || {
-        let Some(path) = rfd::FileDialog::new()
-            .add_filter(
-                "核心包或核心文件",
-                &["zip", std::env::consts::DLL_EXTENSION],
-            )
-            .pick_file()
-        else {
+pub(super) fn install<C: ManagerController>(wiring: &Wiring<C>) {
+    let Some(window) = wiring.window.upgrade() else {
+        return;
+    };
+    install_library(wiring, &window);
+    install_selection(wiring, &window);
+    install_game_settings(wiring, &window);
+    let w = wiring.clone();
+    window.global::<Logs>().on_load(move |core| {
+        let Some(window) = w.window.upgrade() else {
             return;
         };
-        let result = install_controller.borrow_mut().install_core(&path);
-        if let Some(window) = install_weak.upgrade() {
-            match result {
-                Ok(model) => apply_model(&install_adapter, &model),
-                Err(error) => report_error(&window, &error),
-            }
-        }
-    });
-    let uninstall_weak = adapter.window().as_weak();
-    let uninstall_controller = controller.clone();
-    let uninstall_adapter = std::rc::Rc::downgrade(adapter);
-    adapter
-        .window()
-        .global::<Cores>()
-        .on_uninstall(move |file| {
-            let result = uninstall_controller
-                .borrow_mut()
-                .uninstall_core(file.as_str());
-            if let Some(window) = uninstall_weak.upgrade() {
-                match result {
-                    Ok(model) => apply_model(&uninstall_adapter, &model),
-                    Err(error) => report_error(&window, &error),
-                }
-            }
-        });
-    let logs_weak = adapter.window().as_weak();
-    let logs_controller = controller.clone();
-    adapter.window().global::<Logs>().on_load(move |core| {
-        let Some(window) = logs_weak.upgrade() else {
-            return;
-        };
-        match logs_controller.borrow().log_text(core.as_str()) {
+        match w.controller.borrow().log_text(core.as_str()) {
             Ok((text, count)) => {
                 let logs = window.global::<Logs>();
                 logs.set_text(if count == 0 {
@@ -61,210 +25,214 @@ pub(super) fn install<C: ManagerController>(
             Err(error) => report_error(&window, &error),
         }
     });
-    macro_rules! metadata_callback {
-        ($callback:ident, $method:ident, |$($arg:ident),*|) => {{
-            let weak = adapter.window().as_weak();
-            let callback_controller = controller.clone();
-            let callback_adapter = std::rc::Rc::downgrade(adapter);
-            adapter.window().global::<Selection>().$callback(move |$($arg),*| {
-                let result = callback_controller.borrow_mut().$method($($arg.as_str()),*);
-                if let Some(window) = weak.upgrade() {
-                    match result {
-                        Ok(model) => apply_model(&callback_adapter, &model),
-                        Err(error) => report_error(&window, &error),
-                    }
-                }
-            });
-        }};
-    }
-    metadata_callback!(on_search_metadata, search_metadata, |provider, query|);
-    metadata_callback!(on_refresh_metadata, refresh_metadata, |provider|);
-    metadata_callback!(on_accept_match, accept_match, |candidate_id|);
-    metadata_callback!(on_unlink_metadata, unlink_identity, |provider|);
-    macro_rules! settings_callback {
-        ($callback:ident, |$controller:ident $(, $arg:ident)*| $call:expr) => {{
-            let weak = adapter.window().as_weak();
-            let callback_controller = controller.clone();
-            let callback_adapter = std::rc::Rc::downgrade(adapter);
-            adapter.window().global::<Settings>().$callback(move |$($arg),*| {
-                let result = {
-                    let mut $controller = callback_controller.borrow_mut();
-                    $call
-                };
-                if let Some(window) = weak.upgrade() {
-                    match result {
-                        Ok(model) => apply_model(&callback_adapter, &model),
-                        Err(error) => report_error(&window, &error),
-                    }
-                }
-            });
-        }};
-    }
-    settings_callback!(on_set_network_allowed, |c, enabled| c
-        .set_network_allowed(enabled));
-    settings_callback!(on_set_sensitive_covers, |c, enabled| c
-        .set_sensitive_covers(enabled));
-    settings_callback!(on_save_bangumi_token, |c, token| c
-        .save_bangumi_token(token.as_str()));
-    settings_callback!(on_clear_bangumi_token, |c| c.clear_bangumi_token());
-    let play_weak = adapter.window().as_weak();
-    let play_controller = controller.clone();
-    let play_adapter = std::rc::Rc::downgrade(adapter);
-    adapter
-        .window()
-        .global::<Selection>()
-        .on_sync_bangumi(move |progress| {
-            let result = play_controller.borrow_mut().update_bangumi_play_status(
+}
+
+fn install_library<C: ManagerController>(
+    wiring: &Wiring<C>,
+    window: &astra_emu_manager_ui_slint::ManagerWindow,
+) {
+    let library = window.global::<Library>();
+    let w = wiring.clone();
+    library.on_prepare(move || w.run(|c| c.prepare_library()));
+    let w = wiring.clone();
+    library.on_cancel_prepare(move || w.run(|c| c.cancel_prepare()));
+    let w = wiring.clone();
+    library.on_add_directory(move || {
+        if let Some(path) = rfd::FileDialog::new()
+            .set_title("选择游戏目录")
+            .pick_folder()
+        {
+            w.run(|c| c.add_game_directory(&path));
+        }
+    });
+    let w = wiring.clone();
+    library.on_search(move |query| w.run(|c| c.search(query.as_str())));
+    let w = wiring.clone();
+    library.on_set_sort(move |mode| w.run(|c| c.set_library_sort(mode.as_str())));
+    let w = wiring.clone();
+    library.on_set_compat_filter(move |filter| {
+        w.run(|c| c.set_compatibility_filter(filter.as_str()))
+    });
+    let w = wiring.clone();
+    library.on_select(move |game_id| w.run(|c| c.select_case(game_id.as_str())));
+    let w = wiring.clone();
+    library.on_open_game_settings(move |game_id| w.run(|c| c.select_case(game_id.as_str())));
+    let w = wiring.clone();
+    library.on_open_folder(move |game_id| {
+        let Some(window) = w.window.upgrade() else {
+            return;
+        };
+        let result = w
+            .controller
+            .borrow()
+            .game_location(game_id.as_str())
+            .and_then(|location| open_path(&location));
+        if let Err(error) = result {
+            report_error(&window, &error);
+        }
+    });
+    let w = wiring.clone();
+    library.on_remove(move |game_id| w.run(|c| c.remove_from_library(game_id.as_str())));
+}
+
+fn install_selection<C: ManagerController>(
+    wiring: &Wiring<C>,
+    window: &astra_emu_manager_ui_slint::ManagerWindow,
+) {
+    let selection = window.global::<Selection>();
+    let w = wiring.clone();
+    selection.on_choose_emulator(move |plugin_id| {
+        let Some(window) = w.window.upgrade() else {
+            return;
+        };
+        let game_id = window.global::<Selection>().get_game().id;
+        w.run(|c| c.set_game_emulator(game_id.as_str(), plugin_id.as_str()));
+    });
+    let w = wiring.clone();
+    selection.on_pin_release(move |release_id| w.run(|c| c.pin_release(release_id.as_str())));
+    let w = wiring.clone();
+    selection.on_fetch_releases(move || w.run(|c| c.fetch_releases()));
+    let w = wiring.clone();
+    selection.on_sync_bangumi(move |progress| {
+        w.run(|c| {
+            c.update_bangumi_play_status(
                 progress.status.as_str(),
                 progress.rating,
                 progress.note.as_str(),
-            );
-            if let Some(window) = play_weak.upgrade() {
-                match result {
-                    Ok(model) => apply_model(&play_adapter, &model),
-                    Err(error) => report_error(&window, &error),
-                }
-            }
+            )
+        })
+    });
+    let w = wiring.clone();
+    selection.on_search_metadata(move |provider, query| {
+        w.run(|c| c.search_metadata(provider.as_str(), query.as_str()))
+    });
+    let w = wiring.clone();
+    selection.on_accept_match(move |candidate| w.run(|c| c.accept_match(candidate.as_str())));
+    let w = wiring.clone();
+    selection.on_refresh_metadata(move |provider| w.run(|c| c.refresh_metadata(provider.as_str())));
+    let w = wiring.clone();
+    selection.on_unlink_metadata(move |provider| w.run(|c| c.unlink_identity(provider.as_str())));
+}
+
+fn game_id(window: &slint::Weak<astra_emu_manager_ui_slint::ManagerWindow>) -> Option<slint::SharedString> {
+    window
+        .upgrade()
+        .map(|window| window.global::<GameSettings>().get_game_id())
+}
+
+fn install_game_settings<C: ManagerController>(
+    wiring: &Wiring<C>,
+    window: &astra_emu_manager_ui_slint::ManagerWindow,
+) {
+    let settings = window.global::<GameSettings>();
+    let w = wiring.clone();
+    settings.on_close(move || w.run(|c| c.cancel_key_capture()));
+    let w = wiring.clone();
+    settings.on_set_emulator(move |plugin_id| {
+        if let Some(game) = game_id(&w.window) {
+            w.run(|c| c.set_game_emulator(game.as_str(), plugin_id.as_str()));
+        }
+    });
+    let w = wiring.clone();
+    settings.on_set_render(move |mode, width, height| {
+        let Some(game) = game_id(&w.window) else {
+            return;
+        };
+        w.run_field(FieldScope::GameRender, "", |c| {
+            let preference = render_choice(mode.as_str(), width, height)?;
+            c.set_render_preference(game.as_str(), preference)
         });
-    let catalog_weak = adapter.window().as_weak();
-    let catalog_controller = controller.clone();
-    adapter
-        .window()
-        .global::<FilePatch>()
-        .on_load_catalog(move || {
-            let Some(window) = catalog_weak.upgrade() else {
-                return;
-            };
-            let result = (|| -> Result<_, String> {
-                let Some(directory) = catalog_controller.borrow().patch_catalog_directory() else {
-                    return Ok((Vec::new(), Vec::new()));
-                };
-                let catalog =
-                    astra_emu_patch::list_recipes(&directory).map_err(|error| error.to_string())?;
-                let mut titles = Vec::<slint::SharedString>::with_capacity(catalog.len());
-                let mut scripts = Vec::<slint::SharedString>::with_capacity(catalog.len());
-                for recipe in catalog {
-                    let path = directory.join(recipe.script);
-                    let path = path
-                        .to_str()
-                        .ok_or("ASTRA_EMU_PATCH_PATH: script path must be Unicode")?;
-                    titles.push(recipe.title.into());
-                    scripts.push(path.into());
-                }
-                Ok((titles, scripts))
-            })();
-            match result {
-                Ok((titles, scripts)) => {
-                    let patch = window.global::<FilePatch>();
-                    if patch.get_script().is_empty() && !scripts.is_empty() {
-                        patch.set_script(scripts[0].clone());
-                        patch.set_catalog_index(0);
-                    }
-                    patch.set_recipe_titles(slint::ModelRc::new(slint::VecModel::from(titles)));
-                    patch.set_recipe_scripts(slint::ModelRc::new(slint::VecModel::from(scripts)));
-                }
-                Err(error) => report_error(&window, &error),
-            }
-        });
-    let script_weak = adapter.window().as_weak();
-    adapter
-        .window()
-        .global::<FilePatch>()
-        .on_pick_script(move || {
-            let Some(path) = rfd::FileDialog::new()
-                .set_title("选择可信的本地 Luau 补丁脚本")
-                .add_filter("Luau 脚本", &["luau"])
-                .pick_file()
-            else {
-                return;
-            };
-            if let Some(window) = script_weak.upgrade() {
-                if let Some(path) = path.to_str() {
-                    let patch = window.global::<FilePatch>();
-                    patch.set_script(path.into());
-                    patch.set_catalog_index(-1);
-                } else {
-                    report_error(&window, "ASTRA_EMU_PATCH_PATH: script path must be Unicode");
-                }
-            }
-        });
-    let patch_weak = adapter.window().as_weak();
-    adapter
-        .window()
-        .global::<FilePatch>()
-        .on_pick_patch_directory(move || {
-            let Some(path) = rfd::FileDialog::new()
-                .set_title("选择补丁输入目录（取消则保留原选择）")
-                .pick_folder()
-            else {
-                return;
-            };
-            if let Some(window) = patch_weak.upgrade() {
-                if let Some(path) = path.to_str() {
-                    window
-                        .global::<FilePatch>()
-                        .set_patch_directory(path.into());
-                } else {
-                    report_error(&window, "ASTRA_EMU_PATCH_PATH: patch path must be Unicode");
-                }
-            }
-        });
-    let output_weak = adapter.window().as_weak();
-    adapter
-        .window()
-        .global::<FilePatch>()
-        .on_pick_output_directory(move || {
-            // A folder picker only returns existing directories. Save-file selection
-            // chooses a new directory name without creating it; apply creates the tree.
-            let Some(path) = rfd::FileDialog::new()
+    });
+    let w = wiring.clone();
+    settings.on_field_changed(move |key, value| {
+        if let Some(game) = game_id(&w.window) {
+            w.run_field(FieldScope::Game, key.as_str(), |c| {
+                c.set_game_config(game.as_str(), key.as_str(), value.as_str())
+            });
+        }
+    });
+    let w = wiring.clone();
+    settings.on_reset_field(move |key| {
+        if let Some(game) = game_id(&w.window) {
+            w.run_field(FieldScope::Game, key.as_str(), |c| {
+                c.reset_game_config(game.as_str(), key.as_str())
+            });
+        }
+    });
+    let w = wiring.clone();
+    settings.on_pick_path(move |key| {
+        if let Some(game) = game_id(&w.window) {
+            w.run_field(FieldScope::Game, key.as_str(), |c| {
+                c.pick_config_path(game.as_str(), key.as_str())
+            });
+        }
+    });
+    let w = wiring.clone();
+    settings.on_apply_recommended(move || {
+        if let Some(game) = game_id(&w.window) {
+            w.run(|c| c.apply_recommended_config(game.as_str()));
+        }
+    });
+    let w = wiring.clone();
+    settings.on_set_input_override(move |enabled| {
+        if let Some(game) = game_id(&w.window) {
+            w.run_mapping(|c| c.set_game_input_override(game.as_str(), enabled));
+        }
+    });
+    let w = wiring.clone();
+    settings.on_patch_pick_script(move || {
+        if let Some(path) = rfd::FileDialog::new()
+            .set_title("选择可信的本地 Luau 补丁脚本")
+            .add_filter("Luau 脚本", &["luau"])
+            .pick_file()
+        {
+            w.run(|c| c.set_patch_script(&path));
+        }
+    });
+    let w = wiring.clone();
+    settings.on_patch_select_recipe(move |id| w.run(|c| c.select_patch_recipe(id.as_str())));
+    let w = wiring.clone();
+    settings.on_patch_pick_directory(move |kind| {
+        let picked = if kind == "output" {
+            // A folder picker only returns existing directories; the save dialog names
+            // a new one, which the conversion creates.
+            rfd::FileDialog::new()
                 .set_title("选择尚不存在的新输出目录名称")
                 .set_file_name("localized-output")
                 .save_file()
-            else {
-                return;
-            };
-            if let Some(window) = output_weak.upgrade() {
-                if let Some(path) = path.to_str() {
-                    window
-                        .global::<FilePatch>()
-                        .set_output_directory(path.into());
-                } else {
-                    report_error(&window, "ASTRA_EMU_PATCH_PATH: output path must be Unicode");
-                }
-            }
-        });
-    let patch_start_weak = adapter.window().as_weak();
-    let patch_start_controller = controller.clone();
-    let patch_start_adapter = std::rc::Rc::downgrade(adapter);
-    adapter
-        .window()
-        .global::<FilePatch>()
-        .on_start(move |script, patch, output| {
-            let result = patch_start_controller.borrow_mut().start_file_patch(
-                std::path::Path::new(script.as_str()),
-                std::path::Path::new(patch.as_str()),
-                std::path::Path::new(output.as_str()),
-            );
-            if let Some(window) = patch_start_weak.upgrade() {
-                match result {
-                    Ok(model) => apply_model(&patch_start_adapter, &model),
-                    Err(error) => report_error(&window, &error),
-                }
-            }
-        });
-    let patch_cancel_weak = adapter.window().as_weak();
-    let patch_cancel_controller = controller.clone();
-    let patch_cancel_adapter = std::rc::Rc::downgrade(adapter);
-    adapter.window().global::<FilePatch>().on_cancel(move || {
-        let result = patch_cancel_controller.borrow_mut().cancel_file_patch();
-        if let Some(window) = patch_cancel_weak.upgrade() {
-            match result {
-                Ok(model) => apply_model(&patch_cancel_adapter, &model),
-                Err(error) => report_error(&window, &error),
-            }
+        } else {
+            rfd::FileDialog::new()
+                .set_title("选择补丁输入目录")
+                .pick_folder()
+        };
+        if let Some(path) = picked {
+            w.run(|c| c.set_patch_directory(kind.as_str(), &path));
         }
     });
-    // Worker completions and gamepad edges only wake the Slint event loop. The
-    // actual drain is performed here on the UI thread immediately before the
-    // underlay render, so no controller/UI object crosses a worker boundary.
+    let w = wiring.clone();
+    settings.on_patch_start(move || w.run(|c| c.start_patch()));
+    let w = wiring.clone();
+    settings.on_patch_cancel(move || w.run(|c| c.cancel_file_patch()));
+    let w = wiring.clone();
+    settings.on_patch_open_output(move || {
+        let result = w.controller.borrow_mut().open_patch_output();
+        let opened = result.is_ok();
+        w.show(result);
+        if let (true, Some(window)) = (opened, w.window.upgrade()) {
+            window.global::<App>().set_page("library".into());
+            window.global::<Library>().set_detail_open(true);
+        }
+    });
+}
+
+/// `RenderPicker` choice plus custom size; negative sizes are invalid.
+pub(super) fn render_choice(
+    mode: &str,
+    width: i32,
+    height: i32,
+) -> Result<Option<astra_emu_manager_core::RenderPreference>, String> {
+    let size = |value: i32| {
+        u32::try_from(value).map_err(|_| "ASTRA_EMU_RENDER_PREFERENCE_INVALID".to_owned())
+    };
+    astra_emu_manager_core::RenderPreference::from_choice(mode, size(width)?, size(height)?)
 }

@@ -156,7 +156,7 @@ fn game_config_stores_only_the_changed_override_and_reset_removes_it() {
         }]
     );
     assert!(overrides(&controller, "").is_empty());
-    let launch_mode = field(&model.selection.family_fields, "launch_mode");
+    let launch_mode = field(&model.game_settings.fields, "launch_mode");
     assert!(launch_mode.overridden);
     assert_eq!(launch_mode.value, "title");
     assert_eq!(launch_mode.display_value, "标题菜单启动");
@@ -166,7 +166,7 @@ fn game_config_stores_only_the_changed_override_and_reset_removes_it() {
 
     let model = controller.reset_game_config("game", "launch_mode").unwrap();
     assert!(overrides(&controller, "game").is_empty());
-    let launch_mode = field(&model.selection.family_fields, "launch_mode");
+    let launch_mode = field(&model.game_settings.fields, "launch_mode");
     assert!(!launch_mode.overridden);
     assert_eq!(launch_mode.value, "direct");
 }
@@ -195,9 +195,9 @@ fn emulator_defaults_are_inherited_by_games_without_marking_them_overridden() {
     let model = controller
         .set_emulator_default(PLUGIN, "launch_mode", "标题菜单启动")
         .unwrap();
-    assert!(field(&model.cores.defaults.fields, "launch_mode").overridden);
-    assert_eq!(model.cores.defaults.plugin, PLUGIN);
-    let inherited = field(&model.selection.family_fields, "launch_mode");
+    assert!(field(&model.cores.default_fields, "launch_mode").overridden);
+    assert_eq!(model.cores.default_plugin, PLUGIN);
+    let inherited = field(&model.game_settings.fields, "launch_mode");
     assert_eq!(inherited.value, "title");
     assert!(!inherited.overridden);
     assert!(overrides(&controller, "game").is_empty());
@@ -266,9 +266,10 @@ fn custom_render_outside_the_emulator_range_is_rejected_without_storing() {
             }),
         )
         .unwrap();
-    assert!(model.selection.render.supported);
-    assert_eq!(model.selection.render.mode, "custom");
-    assert_eq!(model.selection.render.range, "320×180 – 3840×2160");
+    assert!(model.game_settings.render.supported);
+    assert_eq!(model.game_settings.render.mode, "custom");
+    assert_eq!(model.game_settings.render.min, "320×180");
+    assert_eq!(model.game_settings.render.max, "3840×2160");
     controller.set_render_preference("game", None).unwrap();
     assert_eq!(
         controller.library.game_settings("game").unwrap().unwrap().render,
@@ -341,7 +342,7 @@ fn gamepad_changes_persist_and_game_overrides_copy_the_global_mapping() {
         assert!(controller.set_gamepad_binding("south", "not-a-key").is_err());
         assert!(controller.set_gamepad_deadzone("huge").is_err());
         let model = controller.set_game_input_override("game", true).unwrap();
-        assert!(model.selection.input_override);
+        assert!(model.game_settings.input_override);
         let model = controller
             .set_game_gamepad_binding("game", "south", "enter")
             .unwrap();
@@ -353,8 +354,8 @@ fn gamepad_changes_persist_and_game_overrides_copy_the_global_mapping() {
                 .key
                 .clone()
         };
-        assert_eq!(south(&model.selection.game_bindings), "enter");
-        assert_eq!(south(&model.settings.input.bindings), "space");
+        assert_eq!(south(&model.game_settings.bindings), "enter");
+        assert_eq!(south(&model.settings.bindings), "space");
     }
     let mut controller = configuration_controller(root.path());
     let global = controller.input_mapping();
@@ -423,7 +424,7 @@ fn typed_game_configuration_round_trips_after_controller_reopen() {
     }
     let controller = configuration_controller(root.path());
     let model = controller.model().unwrap();
-    let launch_mode = field(&model.selection.family_fields, "launch_mode");
+    let launch_mode = field(&model.game_settings.fields, "launch_mode");
     assert_eq!(launch_mode.label, "Launch mode");
     assert_eq!(launch_mode.display_value, "标题菜单启动");
     assert!(launch_mode.overridden);
@@ -465,8 +466,8 @@ fn recommended_configuration_is_written_as_game_overrides() {
     let mut controller = configuration_controller(root.path());
     install_preset(&mut controller, r#"{"launch_mode":"title"}"#);
     let model = controller.apply_recommended_config("game").unwrap();
-    assert!(model.selection.recommended_available);
-    assert_eq!(model.selection.recommended_summary, "推荐");
+    assert!(model.game_settings.recommended_available);
+    assert_eq!(model.game_settings.recommended_summary, "推荐");
     assert_eq!(
         overrides(&controller, "game"),
         [ConfigEntry {

@@ -10,13 +10,15 @@ use std::{
 };
 
 pub(super) use astra_emu_manager_ui_slint::{
-    describe_error, report_error, App, Cores, Dialogs, FilePatch, Filters, Library, Logs,
-    ManagerViewModel, Selection, Session, Settings, SlintManagerAdapter,
+    describe_error, report_error, App, Cores, Dialogs, Filters, GameSettings, Library, Logs,
+    ManagerViewModel, Network, Notices, Onboarding, Selection, Session, Settings,
+    SlintManagerAdapter,
 };
 use slint::ComponentHandle;
 use thiserror::Error;
 
 use crate::gamepad::GameInputPump;
+use wiring::{FieldScope, Wiring};
 
 #[path = "host_filters.rs"]
 mod filters;
@@ -34,6 +36,8 @@ mod settings_callbacks;
 mod window_commands;
 #[path = "host_events.rs"]
 mod window_events;
+#[path = "host_wiring.rs"]
+mod wiring;
 
 type HostCallback = Box<dyn FnMut()>;
 type HostCallbackSlot = std::rc::Rc<std::cell::RefCell<Option<HostCallback>>>;
@@ -141,7 +145,7 @@ pub trait ManagerController: 'static {
         game_id: Option<&str>,
     ) -> Result<ManagerViewModel, String>;
     fn cancel_key_capture(&mut self) -> Result<ManagerViewModel, String>;
-    fn key_capture_active(&self) -> bool;
+    fn key_capture(&self) -> Option<KeyCaptureState<'_>>;
     /// Bind the captured key; keys without a mapping name keep the capture
     /// waiting and set the hint to “这个键不能用于映射”.
     fn capture_key(
@@ -150,18 +154,25 @@ pub trait ManagerController: 'static {
     ) -> Result<ManagerViewModel, String>;
     /// Whether the persisted network permission is granted.
     fn network_allowed(&self) -> bool;
+    /// Persist a library root without loading cores or scanning.
+    fn add_library_root(&mut self, path: &std::path::Path) -> Result<ManagerViewModel, String>;
+    fn remove_library_root(&mut self, path: &str) -> Result<ManagerViewModel, String>;
+    fn onboarding_completed(&self) -> Result<bool, String>;
+    fn finish_onboarding(&mut self) -> Result<ManagerViewModel, String>;
+    fn game_location(&self, game_id: &str) -> Result<std::path::PathBuf, String>;
+    fn data_dir(&self) -> &std::path::Path;
     fn model(&self) -> Result<ManagerViewModel, String>;
     fn select_case(&mut self, case_id: &str) -> Result<ManagerViewModel, String>;
     fn search(&mut self, query: &str) -> Result<ManagerViewModel, String>;
     fn save_translation_profile(
         &mut self,
-        form: &astra_emu_manager_ui_slint::TranslationProfileForm,
+        form: &astra_emu_manager_ui_slint::TranslationFormViewModel,
         secret: &str,
     ) -> Result<ManagerViewModel, String>;
     /// Test the form values; an empty secret falls back to the stored one.
     fn test_translation_connection(
         &mut self,
-        form: &astra_emu_manager_ui_slint::TranslationProfileForm,
+        form: &astra_emu_manager_ui_slint::TranslationFormViewModel,
         secret: &str,
     ) -> Result<ManagerViewModel, String>;
     fn set_translation_enabled(&mut self, enabled: bool) -> Result<ManagerViewModel, String>;
@@ -171,13 +182,20 @@ pub trait ManagerController: 'static {
     fn save_bangumi_token(&mut self, token: &str) -> Result<ManagerViewModel, String>;
     fn clear_bangumi_token(&mut self) -> Result<ManagerViewModel, String>;
     fn add_game_directory(&mut self, path: &std::path::Path) -> Result<ManagerViewModel, String>;
-    fn start_file_patch(
+    /// Patch recipe id from the metadata catalog.
+    fn select_patch_recipe(&mut self, id: &str) -> Result<ManagerViewModel, String>;
+    fn set_patch_script(&mut self, path: &std::path::Path) -> Result<ManagerViewModel, String>;
+    /// `kind` is `patch` or `output`.
+    fn set_patch_directory(
         &mut self,
-        script: &std::path::Path,
-        patch: &std::path::Path,
-        output: &std::path::Path,
+        kind: &str,
+        path: &std::path::Path,
     ) -> Result<ManagerViewModel, String>;
+    /// Convert the selected game with the chosen script and directories.
+    fn start_patch(&mut self) -> Result<ManagerViewModel, String>;
     fn cancel_file_patch(&mut self) -> Result<ManagerViewModel, String>;
+    /// Select the game imported from the finished conversion.
+    fn open_patch_output(&mut self) -> Result<ManagerViewModel, String>;
     fn filter_settings(&self) -> astra_emu_manager_core::FilterSettings;
     /// Filter changes are applied through `apply` (the renderer), then saved;
     /// on failure the previous settings are re-applied and stay persisted.
@@ -232,8 +250,8 @@ pub trait ManagerController: 'static {
     fn install_core(&mut self, source: &std::path::Path) -> Result<ManagerViewModel, String>;
     /// Download the newest catalog release of a core; needs network permission.
     fn install_online_core(&mut self, plugin_id: &str) -> Result<ManagerViewModel, String>;
-    /// `stem` is the core directory name, e.g. `astra_emu_musica`.
-    fn uninstall_core(&mut self, stem: &str) -> Result<ManagerViewModel, String>;
+    /// `core_id` is a `Cores.items` id (plugin id, or directory stem for failed cores).
+    fn uninstall_core(&mut self, core_id: &str) -> Result<ManagerViewModel, String>;
     fn log_text(&self, core: &str) -> Result<(String, usize), String>;
     fn engine_action(&mut self, control: u32) -> Result<(), String>;
     /// Every configuration setter below persists immediately and fails with
@@ -294,8 +312,6 @@ pub trait ManagerController: 'static {
     fn sync_metadata(&mut self) -> Result<ManagerViewModel, String>;
     /// Write the selected release's recommended configuration as game overrides.
     fn apply_recommended_config(&mut self, game_id: &str) -> Result<ManagerViewModel, String>;
-    /// Patch catalog directory of the active metadata cache.
-    fn patch_catalog_directory(&self) -> Option<std::path::PathBuf>;
     /// Fetch the VNDB releases (rIDs) of the selected work so its local
     /// installation can be pinned to a specific game version.
     fn fetch_releases(&mut self) -> Result<ManagerViewModel, String>;
@@ -327,6 +343,14 @@ pub trait ManagerController: 'static {
 pub enum SnackbarOutcome {
     Model(Box<ManagerViewModel>),
     Restart,
+}
+
+/// The controller's pending key capture.
+pub struct KeyCaptureState<'a> {
+    pub button: &'a str,
+    pub game_id: Option<&'a str>,
+    /// Non-empty after an unmappable key; the capture keeps waiting.
+    pub hint: &'a str,
 }
 
 /// What the host does with a window close request.
@@ -416,6 +440,12 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
     let adapter = std::rc::Rc::new(SlintManagerAdapter::new()?);
     crate::startup::mark("window_object_created");
     adapter.apply(&controller.model().map_err(HostError::Renderer)?);
+    if !controller
+        .onboarding_completed()
+        .map_err(HostError::Renderer)?
+    {
+        adapter.window().global::<App>().set_page("onboarding".into());
+    }
     crate::startup::mark("initial_model_applied");
     adapter.set_session_active(game_active);
     let controller = std::rc::Rc::new(std::cell::RefCell::new(controller));
@@ -527,22 +557,17 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
         });
     }));
     fire_host_callback(&runtime_schedule);
-    game_callbacks::install(
-        &adapter,
-        &controller,
-        &gamepad,
-        &renderer,
-        &runtime_schedule,
-    );
-    settings_callbacks::install(&adapter, &controller, &gamepad);
-    library_callbacks::install(&adapter, &controller);
-    {
+    let restart: std::rc::Rc<dyn Fn()> = {
         let host_exit = host_exit.clone();
-        adapter.window().global::<Cores>().on_restart(move || {
+        std::rc::Rc::new(move || {
             host_exit.set(HostExit::Restart);
             let _ = slint::quit_event_loop();
-        });
-    }
+        })
+    };
+    let wiring = Wiring::new(&adapter, &controller, &gamepad);
+    game_callbacks::install(&wiring, &renderer, &runtime_schedule);
+    settings_callbacks::install(&wiring, &restart);
+    library_callbacks::install(&wiring);
     {
         let close_controller = controller.clone();
         let close_adapter = std::rc::Rc::downgrade(&adapter);
@@ -571,6 +596,7 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
     let renderer_callback = renderer.clone();
     let initial_window_pending = std::cell::Cell::new(true);
     let first_ui_frame_pending = std::cell::Cell::new(true);
+    let pad_pressed = std::cell::RefCell::new(Vec::<String>::new());
     adapter.window().window().set_rendering_notifier(move |state, api| {
         let slint::GraphicsAPI::WGPU30 { device, queue, .. } = api else {
             record_fatal(&fatal_error_callback, "rendering notifier did not provide WGPU 30".into());
@@ -626,6 +652,11 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                         match event_gamepad.borrow_mut().poll() {
                             Ok(events) => {
                                 let session = window.global::<Session>();
+                                if !session.get_active() && update_pad_state(&mut pad_pressed.borrow_mut(), &events) {
+                                    if let Some(adapter) = event_adapter.upgrade() {
+                                        adapter.set_pad_state(&pad_pressed.borrow());
+                                    }
+                                }
                                 if session.get_active() && session.get_menu_open() {
                                     let keys: Vec<_> = events
                                         .iter()
@@ -761,6 +792,27 @@ fn apply_model(adapter: &std::rc::Weak<SlintManagerAdapter>, model: &ManagerView
     if let Some(adapter) = adapter.upgrade() {
         adapter.apply(model);
     }
+}
+
+/// Track held gamepad buttons by binding id; true when the set changed.
+fn update_pad_state(pressed: &mut Vec<String>, events: &[crate::gamepad::GameInput]) -> bool {
+    let mut changed = false;
+    for event in events {
+        let Some(button) = event.button else {
+            continue;
+        };
+        let id = button.as_str();
+        let held = pressed.iter().position(|value| value == id);
+        match (event.pressed, held) {
+            (true, None) => pressed.push(id.to_owned()),
+            (false, Some(index)) => {
+                pressed.remove(index);
+            }
+            _ => continue,
+        }
+        changed = true;
+    }
+    changed
 }
 
 fn session_input_open(window: &astra_emu_manager_ui_slint::ManagerWindow) -> bool {

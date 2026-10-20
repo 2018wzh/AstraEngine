@@ -21,8 +21,7 @@ use astra_emu_manager_core::{
     Library, NativeOpenRequest, NativeSession, PlaySessionEndReason,
 };
 use astra_emu_manager_ui_slint::{
-    AppearanceViewModel, ConfigFieldViewModel, GamepadBindingViewModel, InputConfigViewModel,
-    ManagerViewModel,
+    AppearanceViewModel, ConfigFieldViewModel, GamepadBindingViewModel, ManagerViewModel,
 };
 use astra_emu_metadata::{
     BangumiPlayStatus, BangumiPlayUpdate, CompatibilityEntry, CoverAsset, MetadataProviderId,

@@ -65,14 +65,14 @@ impl SlintManagerAdapter {
             cores: ListModel::new(core_info),
             default_fields: Rc::new(VecModel::default()),
             default_render_options: ListModel::new(choice),
-            models: ListModel::new(text),
+            models: ListModel::strings(),
             bindings: ListModel::new(binding),
-            pad_state: ListModel::new(text),
-            roots: ListModel::new(text),
+            pad_state: ListModel::strings(),
+            roots: ListModel::strings(),
             excluded: ListModel::new(excluded),
             filter_fields: Rc::new(VecModel::default()),
             actions: ListModel::new(engine_action),
-            onboarding_roots: ListModel::new(text),
+            onboarding_roots: ListModel::strings(),
             cached_games: RefCell::default(),
             cached_game_fields: RefCell::default(),
             cached_default_fields: RefCell::default(),
@@ -160,6 +160,11 @@ impl SlintManagerAdapter {
 
     pub fn set_session_active(&self, active: bool) {
         self.window.global::<Session>().set_active(active);
+    }
+
+    /// Gamepad buttons held right now, by binding id; owned by the host's input pump.
+    pub fn set_pad_state(&self, pressed: &[String]) {
+        self.pad_state.update(pressed);
     }
 
     pub fn apply(&self, model: &ManagerViewModel) {
@@ -335,7 +340,6 @@ impl SlintManagerAdapter {
         settings.set_gamepad_enabled(view.gamepad_enabled);
         settings.set_deadzone(view.deadzone.as_str().into());
         self.bindings.update(&view.bindings);
-        self.pad_state.update(&view.pad_state);
         self.roots.update(&view.roots);
         self.excluded.update(&view.excluded);
     }
@@ -371,12 +375,13 @@ impl SlintManagerAdapter {
     }
 }
 
-fn text(value: &String) -> SharedString {
-    value.as_str().into()
-}
-
 fn strings(values: &[String]) -> ModelRc<SharedString> {
-    ModelRc::new(VecModel::from(values.iter().map(text).collect::<Vec<_>>()))
+    ModelRc::new(VecModel::from(
+        values
+            .iter()
+            .map(|value| SharedString::from(value.as_str()))
+            .collect::<Vec<_>>(),
+    ))
 }
 
 fn choice(value: &ChoiceViewModel) -> Choice {

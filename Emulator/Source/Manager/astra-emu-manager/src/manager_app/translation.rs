@@ -1,5 +1,5 @@
 use super::*;
-use astra_emu_manager_ui_slint::TranslationProfileForm;
+use astra_emu_manager_ui_slint::TranslationFormViewModel;
 use astra_emu_translation::TranslationError;
 use std::sync::Arc;
 
@@ -16,7 +16,7 @@ impl SecretResolver for FormSecret {
 impl AstraEmuManagerController {
     pub(super) fn test_translation_connection(
         &mut self,
-        form: &TranslationProfileForm,
+        form: &TranslationFormViewModel,
         secret: &str,
     ) -> Result<ManagerViewModel, String> {
         self.require_network()?;
@@ -73,7 +73,7 @@ impl AstraEmuManagerController {
 
     pub(super) fn save_translation_profile(
         &mut self,
-        form: &TranslationProfileForm,
+        form: &TranslationFormViewModel,
         secret: &str,
     ) -> Result<ManagerViewModel, String> {
         if self.active.is_some() {
@@ -151,7 +151,7 @@ impl AstraEmuManagerController {
 }
 
 pub(super) fn profile_from_form(
-    form: &TranslationProfileForm,
+    form: &TranslationFormViewModel,
 ) -> Result<TranslationProfile, String> {
     let provider = match form.provider.as_str() {
         "openai" => TranslationProvider::OpenAi,
@@ -171,8 +171,10 @@ pub(super) fn profile_from_form(
         openai_api,
         model: form.model.trim().into(),
         target_language: form.language.trim().into(),
-        timeout_ms: u64::try_from(form.timeout_ms)
-            .map_err(|_| "ASTRA_EMU_TRANSLATION_TIMEOUT_INVALID")?,
+        timeout_ms: u64::try_from(form.timeout_s)
+            .ok()
+            .and_then(|seconds| seconds.checked_mul(1000))
+            .ok_or("ASTRA_EMU_TRANSLATION_TIMEOUT_INVALID")?,
         secret_reference: "translation.default".into(),
         custom_prompt: form.custom_prompt.clone(),
         context_segments: u32::try_from(form.context_segments)
@@ -184,10 +186,10 @@ pub(super) fn profile_from_form(
     Ok(profile)
 }
 
-pub(super) fn profile_form(profile: Option<&TranslationProfile>) -> TranslationProfileForm {
+pub(super) fn profile_form(profile: Option<&TranslationProfile>) -> TranslationFormViewModel {
     let defaults = TranslationProfile::default();
     let profile = profile.unwrap_or(&defaults);
-    TranslationProfileForm {
+    TranslationFormViewModel {
         provider: profile.provider.as_str().into(),
         base_url: profile.base_url.clone(),
         openai_api: match profile.openai_api {
@@ -196,7 +198,7 @@ pub(super) fn profile_form(profile: Option<&TranslationProfile>) -> TranslationP
         },
         model: profile.model.clone(),
         language: profile.target_language.clone(),
-        timeout_ms: i32::try_from(profile.timeout_ms).unwrap_or(i32::MAX),
+        timeout_s: i32::try_from(profile.timeout_ms / 1000).unwrap_or(i32::MAX),
         custom_prompt: profile.custom_prompt.clone(),
         context_segments: i32::try_from(profile.context_segments).unwrap_or(i32::MAX),
         context_chars: i32::try_from(profile.context_chars).unwrap_or(i32::MAX),

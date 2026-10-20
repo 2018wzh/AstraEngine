@@ -129,8 +129,6 @@ fn core_loading_preserves_cached_library_bindings_until_an_explicit_scan() {
     let initial = app.model().unwrap();
     assert_eq!(initial.library.games.len(), 1);
     assert_eq!(initial.library.games[0].title, "Saved title");
-    assert!(!initial.library.busy);
-    assert!(!initial.library.cores_ready);
     assert_eq!(initial.library.prepare_state, "unprepared");
     assert_eq!(initial.library.games[0].problem, "需要先准备资料库");
     assert!(app.poll_platform().unwrap().is_none());
@@ -139,7 +137,6 @@ fn core_loading_preserves_cached_library_bindings_until_an_explicit_scan() {
     app.search("").unwrap();
 
     let pending = app.prepare_library().unwrap();
-    assert!(pending.library.busy);
     assert_eq!(pending.library.prepare_state, "loading-cores");
     assert_eq!(pending.library.games.len(), 1);
     assert_eq!(pending.library.games[0].problem, "正在准备资料库");
@@ -174,11 +171,9 @@ fn core_loading_preserves_cached_library_bindings_until_an_explicit_scan() {
         std::thread::yield_now();
     }
     let loaded = app.model().unwrap();
-    assert!(loaded.library.cores_ready);
-    assert!(!loaded.library.busy);
     assert_eq!(loaded.library.prepare_state, "ready");
     assert_eq!(loaded.library.games.len(), 1);
-    assert!(!loaded.selection.launchable);
+    assert!(!loaded.selection.game.launchable);
     assert_eq!(
         app.game(&id).unwrap().family_id.as_deref(),
         Some("saved-family")
@@ -200,7 +195,7 @@ fn core_loading_preserves_cached_library_bindings_until_an_explicit_scan() {
     settle_background(&mut app);
     let scanned = app.model().unwrap();
     assert_eq!(scanned.library.games.len(), 2);
-    assert!(scanned.selection.launchable);
+    assert!(scanned.selection.game.launchable);
     assert_eq!(app.game(&id).unwrap().family_id.as_deref(), Some("fixture"));
     assert_eq!(
         app.game(&id).unwrap().content_fingerprint.as_deref(),
@@ -432,8 +427,8 @@ fn selected_probe_is_cleared_on_no_match() {
     assert_eq!(record.content_fingerprint.as_deref(), Some("fingerprint"));
     assert_eq!(record.added_at_unix_ms, 7);
     let model = app.model().unwrap();
-    assert!(model.selection.family_fields.is_empty());
-    assert!(!model.selection.launchable);
+    assert!(model.game_settings.fields.is_empty());
+    assert!(!model.selection.game.launchable);
     assert_eq!(
         app.library
             .game_settings(&id)
@@ -490,7 +485,7 @@ fn selected_emulator_survives_additional_same_engine_matches_and_reopening() {
     scan_once(&mut app, &game_path);
     assert_eq!(app.candidates[&id].report.plugin_id, "test-b");
     app.selected_case_id = Some(id);
-    assert!(app.model().unwrap().selection.launchable);
+    assert!(app.model().unwrap().selection.game.launchable);
 }
 
 #[test]
@@ -550,7 +545,7 @@ fn missing_saved_emulator_requires_an_explicit_replacement() {
 
     assert!(!app.candidates.contains_key(&id));
     assert_eq!(app.probe_choices[&id][0].report.plugin_id, "test-b");
-    assert!(!app.model().unwrap().selection.launchable);
+    assert!(!app.model().unwrap().selection.game.launchable);
     assert_eq!(
         app.library
             .game_settings(&id)
@@ -624,15 +619,12 @@ fn manual_core_failure_requires_restart_and_shutdown_still_joins_the_owner() {
     )
     .unwrap();
     let initial = app.model().unwrap();
-    assert!(!initial.library.busy);
-    assert!(!initial.library.cores_ready);
     assert_eq!(initial.library.prepare_state, "unprepared");
     // The core installation is untouched until the explicit action.
     fs::write(root.path().join("cores"), b"not a directory").unwrap();
     assert!(app.poll_platform().unwrap().is_none());
     assert!(!app.cores_started());
     let pending = app.prepare_library().unwrap();
-    assert!(pending.library.busy);
     assert_eq!(pending.library.prepare_state, "loading-cores");
     assert!(!pending.library.can_cancel_prepare);
     assert_eq!(
@@ -961,18 +953,17 @@ fn key_capture_binds_named_keys_and_waits_on_unmappable_ones() {
     scan_once(&mut app, &path);
     let id = path_id(&path);
 
-    let waiting = app.begin_key_capture("south", None).unwrap();
-    assert_eq!(waiting.settings.input.capture_button, "south");
-    let hint = app.capture_key(KeyCode::Digit1).unwrap();
-    assert_eq!(hint.settings.input.capture_hint, input::UNMAPPABLE_KEY_HINT);
-    assert!(app.key_capture_active());
+    app.begin_key_capture("south", None).unwrap();
+    assert_eq!(app.key_capture().unwrap().button, "south");
+    app.capture_key(KeyCode::Digit1).unwrap();
+    assert_eq!(app.key_capture().unwrap().hint, input::UNMAPPABLE_KEY_HINT);
     app.capture_key(KeyCode::Escape).unwrap();
-    assert!(!app.key_capture_active());
+    assert!(app.key_capture().is_none());
     assert_eq!(app.input_mapping.gamepad[&GamepadInput::South], "escape");
 
     app.begin_key_capture("west", Some(&id)).unwrap();
-    let bound = app.capture_key(KeyCode::F5).unwrap();
-    assert_eq!(bound.settings.input.capture_button, "");
+    app.capture_key(KeyCode::F5).unwrap();
+    assert!(app.key_capture().is_none());
     let game_mapping = app
         .library
         .game_settings(&id)
@@ -990,4 +981,52 @@ fn key_capture_binds_named_keys_and_waits_on_unmappable_ones() {
         "ASTRA_EMU_KEY_CAPTURE_INACTIVE"
     );
     assert!(app.begin_key_capture("bogus", None).is_err());
+}
+
+#[test]
+fn onboarding_roots_persist_without_loading_cores() {
+    let root = tempfile::tempdir().unwrap();
+    let path = game(root.path());
+    let open = || {
+        AstraEmuManagerController::open_library(root.path().into(), FrameMailbox::new(), Vec::new())
+            .unwrap()
+    };
+    let mut app = open();
+    assert!(!app.onboarding_completed().unwrap());
+    let model = app.add_library_root(&path).unwrap();
+    assert_eq!(model.onboarding.roots, [path.to_str().unwrap()]);
+    assert_eq!(model.settings.roots, model.onboarding.roots);
+    assert!(!app.cores_started());
+    assert!(app.library.list_games().unwrap().is_empty());
+    app.finish_onboarding().unwrap();
+    drop(app);
+    let mut app = open();
+    assert!(app.onboarding_completed().unwrap());
+    let model = app.remove_library_root(path.to_str().unwrap()).unwrap();
+    assert!(model.onboarding.roots.is_empty());
+}
+
+#[test]
+fn patch_selection_keeps_choices_and_reports_steps() {
+    let root = tempfile::tempdir().unwrap();
+    let mut app = controller(root.path());
+    assert_eq!(
+        app.select_patch_recipe("missing").unwrap_err(),
+        "ASTRA_EMU_PATCH_RECIPE_UNKNOWN"
+    );
+    let script = root.path().join("local.luau");
+    app.set_patch_script(&script).unwrap();
+    let model = app
+        .set_patch_directory("output", &root.path().join("out"))
+        .unwrap();
+    let patch = &model.game_settings.patch;
+    assert_eq!(patch.step, 0);
+    assert_eq!(patch.script, script.to_str().unwrap());
+    assert!(patch.output_directory.ends_with("out"));
+    assert!(app.set_patch_directory("elsewhere", root.path()).is_err());
+    app.patch_state.error = "ASTRA_EMU_PATCH_SCRIPT: failed".into();
+    assert_eq!(app.patch_view().step, 4);
+    app.patch_state.error.clear();
+    app.patch_import_succeeded();
+    assert_eq!(app.patch_view().step, 5);
 }

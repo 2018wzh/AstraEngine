@@ -3,6 +3,7 @@ use super::*;
 pub(super) const NETWORK_ALLOWED_KEY: &str = "network.allowed";
 pub(super) const TRANSLATION_ENABLED_KEY: &str = "translation.enabled";
 pub(super) const SENSITIVE_COVERS_KEY: &str = "covers.sensitive";
+pub(super) const ONBOARDING_COMPLETED_KEY: &str = "onboarding.completed";
 pub(super) const BANGUMI_SECRET_REFERENCE: &str = "metadata.bangumi";
 
 pub(super) fn unix_time_ms() -> Result<i64, String> {

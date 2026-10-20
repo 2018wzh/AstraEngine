@@ -1,5 +1,5 @@
 use super::*;
-use astra_emu_manager_ui_slint::{ChoiceViewModel, EmulatorDefaultsViewModel};
+use astra_emu_manager_ui_slint::ChoiceViewModel;
 
 impl AstraEmuManagerController {
     pub(super) fn engine_label(&self, family_id: &str) -> String {
@@ -30,6 +30,7 @@ impl AstraEmuManagerController {
         }
     }
 
+    /// Emulator picker for the library detail: empty unless there is a real choice.
     pub(super) fn emulator_choices(&self, game_id: &str) -> Vec<ChoiceViewModel> {
         match self.probe_selection_for_game(game_id) {
             Some(choices) if choices.len() > 1 => choices
@@ -41,33 +42,6 @@ impl AstraEmuManagerController {
                 .collect(),
             _ => Vec::new(),
         }
-    }
-
-    pub(super) fn input_view(&self) -> InputConfigViewModel {
-        let (capture_button, capture_game_id, capture_hint) = self.key_capture_view();
-        InputConfigViewModel {
-            gamepad_enabled: self.input_mapping.gamepad_enabled,
-            deadzone: self.input_mapping.deadzone.as_str().into(),
-            bindings: binding_views(&self.input_mapping),
-            capture_button,
-            capture_game_id,
-            capture_hint,
-        }
-    }
-
-    pub(super) fn emulator_defaults_view(&self) -> Result<EmulatorDefaultsViewModel, String> {
-        let Some(plugin) = self
-            .defaults_plugin
-            .as_deref()
-            .filter(|plugin| self.registry.descriptor(plugin).is_some())
-        else {
-            return Ok(EmulatorDefaultsViewModel::default());
-        };
-        Ok(EmulatorDefaultsViewModel {
-            plugin: plugin.into(),
-            fields: self.emulator_default_fields(plugin)?,
-            render: self.emulator_render_view(plugin)?,
-        })
     }
 }
 

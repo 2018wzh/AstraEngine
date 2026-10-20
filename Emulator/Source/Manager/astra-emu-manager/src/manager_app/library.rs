@@ -37,6 +37,45 @@ impl AstraEmuManagerController {
         }
     }
 
+    /// Persist a library root without loading cores or scanning.
+    pub(super) fn add_library_root(&mut self, path: &Path) -> Result<ManagerViewModel, String> {
+        let root = fs::canonicalize(path)
+            .ok()
+            .filter(|root| root.is_dir())
+            .ok_or("ASTRA_EMU_GAME_DIRECTORY_INVALID")?;
+        self.library
+            .add_library_root(root.to_str().ok_or("ASTRA_EMU_GAME_PATH_UTF8")?)
+            .map_err(|error| error.to_string())?;
+        self.model()
+    }
+
+    /// Stop scanning a root; its games stay in the library.
+    pub(super) fn remove_library_root(&mut self, path: &str) -> Result<ManagerViewModel, String> {
+        self.library
+            .remove_library_root(path)
+            .map_err(|error| error.to_string())?;
+        self.model()
+    }
+
+    pub(super) fn onboarding_completed(&self) -> Result<bool, String> {
+        Ok(self
+            .library
+            .app_state::<bool>(ONBOARDING_COMPLETED_KEY)
+            .map_err(|error| error.to_string())?
+            .unwrap_or(false))
+    }
+
+    pub(super) fn finish_onboarding(&mut self) -> Result<ManagerViewModel, String> {
+        self.library
+            .set_app_state(ONBOARDING_COMPLETED_KEY, &true)
+            .map_err(|error| error.to_string())?;
+        self.model()
+    }
+
+    pub(super) fn game_location(&self, game_id: &str) -> Result<PathBuf, String> {
+        Ok(PathBuf::from(self.game(game_id)?.location))
+    }
+
     pub(super) fn remove_from_library(&mut self, game_id: &str) -> Result<ManagerViewModel, String> {
         if self
             .active

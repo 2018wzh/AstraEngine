@@ -33,8 +33,8 @@ impl ManagerController for AstraEmuManagerController {
         AstraEmuManagerController::cancel_key_capture(self)
     }
 
-    fn key_capture_active(&self) -> bool {
-        AstraEmuManagerController::key_capture_active(self)
+    fn key_capture(&self) -> Option<astra_emu_manager::KeyCaptureState<'_>> {
+        AstraEmuManagerController::key_capture(self)
     }
 
     fn capture_key(&mut self, code: KeyCode) -> Result<ManagerViewModel, String> {
@@ -113,20 +113,45 @@ impl ManagerController for AstraEmuManagerController {
     fn add_game_directory(&mut self, path: &Path) -> Result<ManagerViewModel, String> {
         AstraEmuManagerController::add_game_directory(self, path)
     }
-    fn start_file_patch(
-        &mut self,
-        script: &Path,
-        patch: &Path,
-        output: &Path,
-    ) -> Result<ManagerViewModel, String> {
-        AstraEmuManagerController::start_file_patch(self, script, patch, output)
+    fn add_library_root(&mut self, path: &Path) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::add_library_root(self, path)
+    }
+    fn remove_library_root(&mut self, path: &str) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::remove_library_root(self, path)
+    }
+    fn onboarding_completed(&self) -> Result<bool, String> {
+        AstraEmuManagerController::onboarding_completed(self)
+    }
+    fn finish_onboarding(&mut self) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::finish_onboarding(self)
+    }
+    fn game_location(&self, game_id: &str) -> Result<PathBuf, String> {
+        AstraEmuManagerController::game_location(self, game_id)
+    }
+    fn data_dir(&self) -> &Path {
+        &self.data_dir
+    }
+    fn select_patch_recipe(&mut self, id: &str) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::select_patch_recipe(self, id)
+    }
+    fn set_patch_script(&mut self, path: &Path) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::set_patch_script(self, path)
+    }
+    fn set_patch_directory(&mut self, kind: &str, path: &Path) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::set_patch_directory(self, kind, path)
+    }
+    fn start_patch(&mut self) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::start_patch(self)
     }
     fn cancel_file_patch(&mut self) -> Result<ManagerViewModel, String> {
         AstraEmuManagerController::cancel_file_patch(self)
     }
+    fn open_patch_output(&mut self) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::open_patch_output(self)
+    }
     fn test_translation_connection(
         &mut self,
-        form: &astra_emu_manager_ui_slint::TranslationProfileForm,
+        form: &astra_emu_manager_ui_slint::TranslationFormViewModel,
         secret: &str,
     ) -> Result<ManagerViewModel, String> {
         AstraEmuManagerController::test_translation_connection(self, form, secret)
@@ -156,7 +181,7 @@ impl ManagerController for AstraEmuManagerController {
 
     fn save_translation_profile(
         &mut self,
-        form: &astra_emu_manager_ui_slint::TranslationProfileForm,
+        form: &astra_emu_manager_ui_slint::TranslationFormViewModel,
         secret: &str,
     ) -> Result<ManagerViewModel, String> {
         AstraEmuManagerController::save_translation_profile(self, form, secret)
@@ -384,10 +409,6 @@ impl ManagerController for AstraEmuManagerController {
         AstraEmuManagerController::apply_recommended_config(self, game_id)
     }
 
-    fn patch_catalog_directory(&self) -> Option<std::path::PathBuf> {
-        AstraEmuManagerController::patch_catalog_directory(self)
-    }
-
     fn network_allowed(&self) -> bool {
         self.network_allowed
     }
@@ -452,8 +473,8 @@ impl ManagerController for AstraEmuManagerController {
         AstraEmuManagerController::install_online_core(self, plugin_id)
     }
 
-    fn uninstall_core(&mut self, stem: &str) -> Result<ManagerViewModel, String> {
-        AstraEmuManagerController::uninstall_core(self, stem)
+    fn uninstall_core(&mut self, core_id: &str) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::uninstall_core(self, core_id)
     }
 
     fn log_text(&self, core: &str) -> Result<(String, usize), String> {
@@ -462,9 +483,5 @@ impl ManagerController for AstraEmuManagerController {
 
     fn engine_action(&mut self, control: u32) -> Result<(), String> {
         AstraEmuManagerController::engine_action(self, control)
-    }
-
-    fn snackbar_action(&mut self) -> Result<astra_emu_manager::SnackbarOutcome, String> {
-        AstraEmuManagerController::snackbar_action(self)
     }
 }

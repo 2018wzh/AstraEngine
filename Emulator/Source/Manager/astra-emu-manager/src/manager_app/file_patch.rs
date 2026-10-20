@@ -106,9 +106,13 @@ impl AstraEmuManagerController {
         self.patch_job.is_some() || self.patch_import.is_some()
     }
 
+    /// `step`: 0 not started, 4 running or failed, 5 imported.
     pub(super) fn patch_view(&self) -> PatchViewModel {
         let mut view = self.patch_state.clone();
         view.running = self.patch_job.is_some();
+        if view.running || !view.error.is_empty() {
+            view.step = 4;
+        }
         view.can_start = !self.patch_busy()
             && self.active.is_none()
             && !self.startup_busy()
@@ -126,6 +130,92 @@ impl AstraEmuManagerController {
             };
         }
         view
+    }
+
+    /// Choose a recipe from the metadata patch catalog by id.
+    pub(super) fn select_patch_recipe(&mut self, id: &str) -> Result<ManagerViewModel, String> {
+        self.recipe_script(id)?;
+        self.set_patch_selection(|state| state.script = id.into())
+    }
+
+    /// Choose a trusted local Luau script.
+    pub(super) fn set_patch_script(&mut self, path: &Path) -> Result<ManagerViewModel, String> {
+        let path = path
+            .to_str()
+            .ok_or("ASTRA_EMU_PATCH_PATH: script path must be Unicode")?
+            .to_owned();
+        self.set_patch_selection(|state| state.script = path)
+    }
+
+    /// `kind` is `patch` (input directory; empty uses the game directory) or `output`.
+    pub(super) fn set_patch_directory(
+        &mut self,
+        kind: &str,
+        path: &Path,
+    ) -> Result<ManagerViewModel, String> {
+        let path = path
+            .to_str()
+            .ok_or("ASTRA_EMU_PATCH_PATH: directory path must be Unicode")?
+            .to_owned();
+        match kind {
+            "patch" => self.set_patch_selection(|state| state.patch_directory = path),
+            "output" => self.set_patch_selection(|state| state.output_directory = path),
+            _ => Err("ASTRA_EMU_PATCH_INVALID_REQUEST: unknown directory kind".into()),
+        }
+    }
+
+    fn set_patch_selection(
+        &mut self,
+        change: impl FnOnce(&mut PatchViewModel),
+    ) -> Result<ManagerViewModel, String> {
+        if self.patch_busy() {
+            return Err("ASTRA_EMU_PATCH_INVALID_REQUEST: 已有文件补丁任务或导入正在进行".into());
+        }
+        change(&mut self.patch_state);
+        self.patch_state.step = 0;
+        self.model()
+    }
+
+    fn recipe_script(&self, id: &str) -> Result<PathBuf, String> {
+        let catalog = self
+            .metadata_catalog
+            .as_ref()
+            .ok_or("ASTRA_EMU_PATCH_RECIPE_UNKNOWN")?;
+        catalog
+            .recipes
+            .iter()
+            .find(|recipe| recipe.id == id)
+            .map(|recipe| catalog.patch_directory().join(&recipe.script))
+            .ok_or_else(|| "ASTRA_EMU_PATCH_RECIPE_UNKNOWN".into())
+    }
+
+    /// Start the selected recipe or local script on the selected game.
+    pub(super) fn start_patch(&mut self) -> Result<ManagerViewModel, String> {
+        let state = &self.patch_state;
+        let script = if state.script.is_empty() {
+            PathBuf::new()
+        } else {
+            self.recipe_script(&state.script)
+                .unwrap_or_else(|_| PathBuf::from(&state.script))
+        };
+        let patch = PathBuf::from(&state.patch_directory);
+        let output = PathBuf::from(&state.output_directory);
+        self.start_file_patch(&script, &patch, &output)
+    }
+
+    /// Select the game imported from the finished conversion.
+    pub(super) fn open_patch_output(&mut self) -> Result<ManagerViewModel, String> {
+        let output = fs::canonicalize(&self.patch_state.output)
+            .map_err(|_| "ASTRA_EMU_PATCH_PATH: completed output is no longer available")?;
+        let location = output.to_str().ok_or("ASTRA_EMU_GAME_PATH_UTF8")?;
+        let game = self
+            .library
+            .list_games()
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .find(|game| game.location == location)
+            .ok_or("ASTRA_EMU_GAME_NOT_FOUND")?;
+        self.select_case(&game.game_id)
     }
 
     pub(super) fn start_file_patch(
@@ -175,6 +265,9 @@ impl AstraEmuManagerController {
         self.patch_state = PatchViewModel {
             phase: "准备文件补丁任务…".into(),
             output: output.to_string_lossy().into_owned(),
+            script: std::mem::take(&mut self.patch_state.script),
+            patch_directory: std::mem::take(&mut self.patch_state.patch_directory),
+            output_directory: std::mem::take(&mut self.patch_state.output_directory),
             ..Default::default()
         };
         self.model()
@@ -267,6 +360,7 @@ impl AstraEmuManagerController {
     pub(super) fn patch_import_succeeded(&mut self) {
         self.patch_state.phase = "文件转换完成，已加入独立库条目".into();
         self.patch_state.error.clear();
+        self.patch_state.step = 5;
     }
 
     pub(super) fn apply_import_profile(

@@ -169,7 +169,7 @@ fn running_patch_blocks_launch_scan_and_second_job_but_cancel_joins_and_allows_r
     app.start_file_patch(&script, Path::new(""), &output)
         .unwrap();
     settle(&mut app, |app| app.patch_state.phase == "public waiting");
-    assert!(!app.model().unwrap().selection.launchable);
+    assert!(!app.model().unwrap().selection.game.launchable);
     assert!(app
         .start_file_patch(&script, Path::new(""), &output)
         .is_err());

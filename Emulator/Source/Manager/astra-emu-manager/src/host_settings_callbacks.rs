@@ -1,187 +1,213 @@
 use super::*;
 
-pub(super) fn install<C: ManagerController>(
-    adapter: &std::rc::Rc<SlintManagerAdapter>,
-    controller: &std::rc::Rc<std::cell::RefCell<C>>,
-    gamepad: &std::rc::Rc<std::cell::RefCell<GameInputPump>>,
+pub(super) fn install<C: ManagerController>(wiring: &Wiring<C>, restart: &std::rc::Rc<dyn Fn()>) {
+    let Some(window) = wiring.window.upgrade() else {
+        return;
+    };
+    install_app(wiring, &window, restart);
+    install_settings(wiring, &window);
+    install_cores(wiring, &window, restart);
+    install_onboarding(wiring, &window);
+}
+
+fn install_app<C: ManagerController>(
+    wiring: &Wiring<C>,
+    window: &astra_emu_manager_ui_slint::ManagerWindow,
+    restart: &std::rc::Rc<dyn Fn()>,
 ) {
-    let c = controller.clone();
-    let a = std::rc::Rc::downgrade(adapter);
-    let w = adapter.window().as_weak();
-    adapter
-        .window()
-        .global::<App>()
-        .on_appearance_changed(move |appearance| {
-            let settings = astra_emu_manager_core::AppearanceSettings {
-                theme_mode: appearance.theme_mode.to_string(),
-                density: appearance.density.to_string(),
-                cover_size: appearance.cover_size.to_string(),
-                view_mode: appearance.view_mode.to_string(),
-                reduce_motion: appearance.reduce_motion,
-                cover_badges: appearance.cover_badges,
-            };
-            let result = c.borrow_mut().set_appearance(settings);
-            if let Some(window) = w.upgrade() {
-                match result {
-                    Ok(model) => apply_model(&a, &model),
-                    Err(error) => report_error(&window, &error),
-                }
+    let app = window.global::<App>();
+    let w = wiring.clone();
+    app.on_appearance_changed(move |appearance| {
+        let settings = astra_emu_manager_core::AppearanceSettings {
+            theme_mode: appearance.theme_mode.to_string(),
+            density: appearance.density.to_string(),
+            cover_size: appearance.cover_size.to_string(),
+            view_mode: appearance.view_mode.to_string(),
+            reduce_motion: appearance.reduce_motion,
+            cover_badges: appearance.cover_badges,
+        };
+        w.run(|c| c.set_appearance(settings));
+    });
+    let w = wiring.clone();
+    app.on_open_path(move |key| {
+        let Some(window) = w.window.upgrade() else {
+            return;
+        };
+        let path = match key.as_str() {
+            "data" => Ok(w.controller.borrow().data_dir().to_owned()),
+            "logs" => Ok(w.controller.borrow().data_dir().join("diagnostics")),
+            "third-party-notices" => std::env::current_exe()
+                .map_err(|error| format!("ASTRA_EMU_OPEN_PATH_FAILED: {error}"))
+                .and_then(|exe| {
+                    exe.parent()
+                        .map(|dir| dir.join("THIRD_PARTY_NOTICES.md"))
+                        .ok_or_else(|| "ASTRA_EMU_OPEN_PATH_FAILED".to_owned())
+                }),
+            _ => Err("ASTRA_EMU_OPEN_PATH_FAILED: unknown location".to_owned()),
+        };
+        if let Err(error) = path.and_then(|path| open_path(&path)) {
+            report_error(&window, &error);
+        }
+    });
+    let restart_app = restart.clone();
+    app.on_restart(move || restart_app());
+
+    let network = window.global::<Network>();
+    let w = wiring.clone();
+    network.on_set_allowed(move |allowed| w.run(|c| c.set_network_allowed(allowed)));
+    let w = wiring.clone();
+    network.on_sync_now(move || w.run(|c| c.sync_metadata()));
+
+    let w = wiring.clone();
+    let restart_app = restart.clone();
+    window
+        .global::<Notices>()
+        .on_snackbar_action_clicked(move || {
+            let result = w.controller.borrow_mut().snackbar_action();
+            match result {
+                Ok(SnackbarOutcome::Model(model)) => w.show(Ok(*model)),
+                Ok(SnackbarOutcome::Restart) => restart_app(),
+                Err(error) => w.show(Err(error)),
             }
         });
-    {
-        let c = controller.clone();
-        let a = std::rc::Rc::downgrade(adapter);
-        let w = adapter.window().as_weak();
-        adapter
-            .window()
-            .global::<Selection>()
-            .on_config_changed(move |key, value| {
-                let Some(window) = w.upgrade() else {
-                    return;
-                };
-                let game_id = window.global::<Selection>().get_game().id;
-                let result = if key == "manager.emulator_id" {
-                    c.borrow_mut()
-                        .set_game_emulator(game_id.as_str(), value.as_str())
-                } else {
-                    c.borrow_mut()
-                        .set_game_config(game_id.as_str(), key.as_str(), value.as_str())
-                };
-                match result {
-                    Ok(model) => apply_model(&a, &model),
-                    Err(error) => report_error(&window, &error),
-                }
-            });
+}
+
+fn translation_form(
+    form: &astra_emu_manager_ui_slint::TranslationForm,
+) -> astra_emu_manager_ui_slint::TranslationFormViewModel {
+    astra_emu_manager_ui_slint::TranslationFormViewModel {
+        provider: form.provider.to_string(),
+        base_url: form.base_url.to_string(),
+        openai_api: form.openai_api.to_string(),
+        model: form.model.to_string(),
+        language: form.language.to_string(),
+        timeout_s: form.timeout_s,
+        custom_prompt: form.custom_prompt.to_string(),
+        context_segments: form.context_segments,
+        context_chars: form.context_chars,
     }
-    let sort_weak = adapter.window().as_weak();
-    let sort_controller = controller.clone();
-    let sort_adapter = std::rc::Rc::downgrade(adapter);
-    adapter
-        .window()
-        .global::<Library>()
-        .on_set_sort(move |mode| {
-            let Some(window) = sort_weak.upgrade() else {
-                return;
-            };
-            match sort_controller.borrow_mut().set_library_sort(mode.as_str()) {
-                Ok(model) => apply_model(&sort_adapter, &model),
-                Err(error) => report_error(&window, &error),
-            }
-        });
-    let compat_filter_weak = adapter.window().as_weak();
-    let compat_filter_controller = controller.clone();
-    let compat_filter_adapter = std::rc::Rc::downgrade(adapter);
-    adapter
-        .window()
-        .global::<Library>()
-        .on_set_compat_filter(move |filter| {
-            let Some(window) = compat_filter_weak.upgrade() else {
-                return;
-            };
-            match compat_filter_controller
-                .borrow_mut()
-                .set_compatibility_filter(filter.as_str())
-            {
-                Ok(model) => apply_model(&compat_filter_adapter, &model),
-                Err(error) => report_error(&window, &error),
-            }
-        });
-    let compat_refresh_weak = adapter.window().as_weak();
-    let compat_refresh_controller = controller.clone();
-    let compat_refresh_adapter = std::rc::Rc::downgrade(adapter);
-    adapter
-        .window()
-        .global::<Selection>()
-        .on_refresh_compat(move || {
-            let Some(window) = compat_refresh_weak.upgrade() else {
-                return;
-            };
-            match compat_refresh_controller.borrow_mut().sync_metadata() {
-                Ok(model) => apply_model(&compat_refresh_adapter, &model),
-                Err(error) => report_error(&window, &error),
-            }
-        });
-    let release_fetch_weak = adapter.window().as_weak();
-    let release_fetch_controller = controller.clone();
-    let release_fetch_adapter = std::rc::Rc::downgrade(adapter);
-    adapter
-        .window()
-        .global::<Selection>()
-        .on_fetch_releases(move || {
-            let Some(window) = release_fetch_weak.upgrade() else {
-                return;
-            };
-            match release_fetch_controller.borrow_mut().fetch_releases() {
-                Ok(model) => apply_model(&release_fetch_adapter, &model),
-                Err(error) => report_error(&window, &error),
-            }
-        });
-    let release_pin_weak = adapter.window().as_weak();
-    let release_pin_controller = controller.clone();
-    let release_pin_adapter = std::rc::Rc::downgrade(adapter);
-    adapter
-        .window()
-        .global::<Selection>()
-        .on_pin_release(move |release_id| {
-            let Some(window) = release_pin_weak.upgrade() else {
-                return;
-            };
-            match release_pin_controller
-                .borrow_mut()
-                .pin_release(release_id.as_str())
-            {
-                Ok(model) => apply_model(&release_pin_adapter, &model),
-                Err(error) => report_error(&window, &error),
-            }
-        });
-    let mapping_change = {
-        let c = controller.clone();
-        let g = gamepad.clone();
-        let a = std::rc::Rc::downgrade(adapter);
-        let w = adapter.window().as_weak();
-        move |change: &dyn Fn(&mut C) -> Result<ManagerViewModel, String>| {
-            let result = {
-                let mut controller = c.borrow_mut();
-                change(&mut controller).and_then(|model| {
-                    g.borrow_mut().set_mapping(controller.input_mapping())?;
-                    Ok(model)
-                })
-            };
-            if let Some(window) = w.upgrade() {
-                match result {
-                    Ok(model) => apply_model(&a, &model),
-                    Err(error) => report_error(&window, &error),
-                }
-            }
+}
+
+fn install_settings<C: ManagerController>(
+    wiring: &Wiring<C>,
+    window: &astra_emu_manager_ui_slint::ManagerWindow,
+) {
+    let settings = window.global::<Settings>();
+    let w = wiring.clone();
+    settings.on_save_translation(move |form, secret| {
+        w.run(|c| c.save_translation_profile(&translation_form(&form), secret.as_str()))
+    });
+    let w = wiring.clone();
+    settings.on_test_translation(move |form, secret| {
+        w.run(|c| c.test_translation_connection(&translation_form(&form), secret.as_str()))
+    });
+    let w = wiring.clone();
+    settings.on_set_translation_enabled(move |enabled| w.run(|c| c.set_translation_enabled(enabled)));
+    let w = wiring.clone();
+    settings.on_set_sensitive_covers(move |enabled| w.run(|c| c.set_sensitive_covers(enabled)));
+    let w = wiring.clone();
+    settings.on_save_bangumi_token(move |token| w.run(|c| c.save_bangumi_token(token.as_str())));
+    let w = wiring.clone();
+    settings.on_clear_bangumi_token(move || w.run(|c| c.clear_bangumi_token()));
+    let w = wiring.clone();
+    settings.on_set_gamepad_enabled(move |enabled| w.run_mapping(|c| c.set_gamepad_enabled(enabled)));
+    let w = wiring.clone();
+    settings.on_set_deadzone(move |deadzone| {
+        w.run_mapping(|c| c.set_gamepad_deadzone(deadzone.as_str()))
+    });
+    let w = wiring.clone();
+    settings.on_reset_bindings(move || w.run_mapping(|c| c.reset_gamepad_bindings()));
+    let w = wiring.clone();
+    settings.on_add_root(move || {
+        if let Some(path) = rfd::FileDialog::new()
+            .set_title("添加库目录")
+            .pick_folder()
+        {
+            w.run(|c| c.add_game_directory(&path));
         }
+    });
+    let w = wiring.clone();
+    settings.on_remove_root(move |path| w.run(|c| c.remove_library_root(path.as_str())));
+    let w = wiring.clone();
+    settings.on_restore_game(move |game_id| w.run(|c| c.restore_game(game_id.as_str())));
+}
+
+fn install_cores<C: ManagerController>(
+    wiring: &Wiring<C>,
+    window: &astra_emu_manager_ui_slint::ManagerWindow,
+    restart: &std::rc::Rc<dyn Fn()>,
+) {
+    let cores = window.global::<Cores>();
+    let w = wiring.clone();
+    cores.on_install_local(move || {
+        if let Some(path) = rfd::FileDialog::new()
+            .set_title("从本地安装核心")
+            .add_filter("核心包或核心文件", &["zip", std::env::consts::DLL_EXTENSION])
+            .pick_file()
+        {
+            w.run(|c| c.install_core(&path));
+        }
+    });
+    let w = wiring.clone();
+    cores.on_install_online(move |plugin_id| w.run(|c| c.install_online_core(plugin_id.as_str())));
+    let w = wiring.clone();
+    cores.on_uninstall(move |core_id| w.run(|c| c.uninstall_core(core_id.as_str())));
+    let restart_app = restart.clone();
+    cores.on_restart(move || restart_app());
+    let w = wiring.clone();
+    cores.on_select_defaults(move |plugin_id| {
+        w.run(|c| c.select_emulator_defaults(plugin_id.as_str()))
+    });
+    let default_plugin = |w: &Wiring<C>| {
+        w.window
+            .upgrade()
+            .map(|window| window.global::<Cores>().get_default_plugin())
     };
-    let settings = adapter.window().global::<Settings>();
-    let save_input = mapping_change.clone();
-    settings.on_save_input(move |enabled, deadzone| {
-        save_input(&|c| {
-            c.set_gamepad_enabled(enabled)?;
-            c.set_gamepad_deadzone(deadzone.as_str())
+    let w = wiring.clone();
+    cores.on_default_field_changed(move |key, value| {
+        if let Some(plugin) = default_plugin(&w) {
+            w.run_field(FieldScope::EmulatorDefault, key.as_str(), |c| {
+                c.set_emulator_default(plugin.as_str(), key.as_str(), value.as_str())
+            });
+        }
+    });
+    let w = wiring.clone();
+    cores.on_reset_default_field(move |key| {
+        if let Some(plugin) = default_plugin(&w) {
+            w.run_field(FieldScope::EmulatorDefault, key.as_str(), |c| {
+                c.reset_emulator_default(plugin.as_str(), key.as_str())
+            });
+        }
+    });
+    let w = wiring.clone();
+    cores.on_set_default_render(move |mode, width, height| {
+        let Some(plugin) = default_plugin(&w) else {
+            return;
+        };
+        w.run_field(FieldScope::DefaultRender, "", |c| {
+            let preference = library_callbacks::render_choice(mode.as_str(), width, height)?
+                .unwrap_or(astra_emu_manager_core::RenderPreference::Default);
+            c.set_emulator_render_default(plugin.as_str(), preference)
         });
     });
-    let bind = mapping_change.clone();
-    settings.on_bind(move |button, key| {
-        bind(&|c| c.set_gamepad_binding(button.as_str(), key.as_str()));
-    });
-    let reset_bindings = mapping_change.clone();
-    settings.on_reset_bindings(move || reset_bindings(&|c| c.reset_gamepad_bindings()));
-    let selection = adapter.window().global::<Selection>();
-    let game_override = |enabled: bool| {
-        let change = mapping_change.clone();
-        let w = adapter.window().as_weak();
-        move || {
-            let Some(window) = w.upgrade() else {
-                return;
-            };
-            let game_id = window.global::<Selection>().get_game().id;
-            change(&|c| c.set_game_input_override(game_id.as_str(), enabled));
+}
+
+fn install_onboarding<C: ManagerController>(
+    wiring: &Wiring<C>,
+    window: &astra_emu_manager_ui_slint::ManagerWindow,
+) {
+    let onboarding = window.global::<Onboarding>();
+    let w = wiring.clone();
+    onboarding.on_add_root(move || {
+        if let Some(path) = rfd::FileDialog::new()
+            .set_title("添加库目录")
+            .pick_folder()
+        {
+            w.run(|c| c.add_library_root(&path));
         }
-    };
-    let save_game_input = game_override(true);
-    selection.on_save_game_input(move |_, _| save_game_input());
-    selection.on_clear_game_input(game_override(false));
+    });
+    let w = wiring.clone();
+    onboarding.on_remove_root(move |path| w.run(|c| c.remove_library_root(path.as_str())));
+    let w = wiring.clone();
+    onboarding.on_finish(move || w.run(|c| c.finish_onboarding()));
 }

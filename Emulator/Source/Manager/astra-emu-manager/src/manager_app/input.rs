@@ -414,8 +414,14 @@ impl AstraEmuManagerController {
         self.model()
     }
 
-    pub(super) fn key_capture_active(&self) -> bool {
-        self.key_capture.is_some()
+    pub(super) fn key_capture(&self) -> Option<astra_emu_manager::KeyCaptureState<'_>> {
+        self.key_capture
+            .as_ref()
+            .map(|capture| astra_emu_manager::KeyCaptureState {
+                button: &capture.button,
+                game_id: capture.game_id.as_deref(),
+                hint: &capture.hint,
+            })
     }
 
     /// Bind the captured key; keys without a mapping name keep the capture waiting.
@@ -435,19 +441,6 @@ impl AstraEmuManagerController {
             Some(game_id) => self.set_game_gamepad_binding(&game_id, &button, key),
             None => self.set_gamepad_binding(&button, key),
         }
-    }
-
-    pub(super) fn key_capture_view(&self) -> (String, String, String) {
-        self.key_capture
-            .as_ref()
-            .map(|capture| {
-                (
-                    capture.button.clone(),
-                    capture.game_id.clone().unwrap_or_default(),
-                    capture.hint.clone(),
-                )
-            })
-            .unwrap_or_default()
     }
 }
 

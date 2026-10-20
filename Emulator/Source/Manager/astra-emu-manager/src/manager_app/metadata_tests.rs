@@ -34,6 +34,7 @@ fn damaged_core_keeps_manager_available_and_error_visible() {
         app.model()
             .unwrap()
             .notices
+            .items
             .iter()
             .any(|notice| notice.code.contains("ASTRA_EMU_FAMILY_LOAD"))
     );
@@ -140,21 +141,21 @@ fn metadata_linked_title_persists_and_unlink_hides_stale_snapshot() {
             },
         )
         .unwrap();
-        assert_eq!(app.model().unwrap().selection.title, "Search result");
+        assert_eq!(app.model().unwrap().selection.game.title, "Search result");
         assert_eq!(app.model().unwrap().library.games[0].title, "Search result");
         app.search_query = "Search result".into();
         assert_eq!(app.model().unwrap().library.games.len(), 1);
     }
     let mut app = controller(root.path());
     app.selected_case_id = Some("first".into());
-    assert_eq!(app.model().unwrap().selection.title, "Search result");
+    assert_eq!(app.model().unwrap().selection.game.title, "Search result");
     app.library
         .set_game_user_title("first", Some("My title"))
         .unwrap();
-    assert_eq!(app.model().unwrap().selection.title, "My title");
+    assert_eq!(app.model().unwrap().selection.game.title, "My title");
     app.library.set_game_user_title("first", None).unwrap();
     app.unlink_identity("vndb").unwrap();
-    assert_eq!(app.model().unwrap().selection.title, "Imported folder");
+    assert_eq!(app.model().unwrap().selection.game.title, "Imported folder");
     assert!(
         app.metadata_record("first", MetadataProviderId::Vndb)
             .unwrap()
@@ -216,5 +217,5 @@ fn network_permission_gates_metadata_and_translation_and_persists() {
     drop(app);
     let app = controller(root.path());
     assert!(app.network_allowed);
-    assert!(app.model().unwrap().settings.network_allowed);
+    assert!(app.model().unwrap().network.allowed);
 }

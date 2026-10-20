@@ -154,11 +154,10 @@ pub(super) fn render_view(
         mode: render_mode(pref),
         custom_width,
         custom_height,
-        range: format!(
-            "{}×{} – {}×{}",
-            support.min.0, support.min.1, support.max.0, support.max.1
-        ),
+        min: format!("{}×{}", support.min.0, support.min.1),
+        max: format!("{}×{}", support.max.0, support.max.1),
         note,
+        error: String::new(),
     }
 }
 
