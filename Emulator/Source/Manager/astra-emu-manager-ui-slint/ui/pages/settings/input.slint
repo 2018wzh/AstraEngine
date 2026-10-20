@@ -1,0 +1,92 @@
+import { MaterialPalette, MaterialText, MaterialTypography, TextButton, Icon } from "@material";
+import { Settings } from "../../globals.slint";
+import { Icons } from "../../icons.slint";
+import { BindingTable } from "../../components/binding-table.slint";
+import { PageScroll, SettingGroup, SwitchRow, FieldBlock, RowText } from "./common.slint";
+import { Segments } from "../../components/segments.slint";
+
+export component InputSection inherits PageScroll {
+    title: "输入与手柄";
+
+    SettingGroup {
+        title: "手柄";
+
+        SwitchRow {
+            label: "启用手柄";
+            description: "把手柄按键映射为游戏的键盘输入。";
+            value: Settings.gamepad-enabled;
+            toggled(on) => { Settings.set-gamepad-enabled(on); }
+        }
+
+        FieldBlock {
+            label: "摇杆死区";
+            description: "摇杆偏移小于死区时不产生输入；摇杆漂移明显时调高。";
+            enabled: Settings.gamepad-enabled;
+            Segments {
+                label: "摇杆死区";
+                items: ["低", "中", "高"];
+                index: Settings.deadzone == "low" ? 0 : Settings.deadzone == "high" ? 2 : 1;
+                selected(i) => { Settings.set-deadzone(i == 0 ? "low" : i == 2 ? "high" : "medium"); }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 12px;
+            VerticalLayout {
+                alignment: center;
+                horizontal-stretch: 0;
+                Icon {
+                    width: 24px;
+                    height: 24px;
+                    source: Icons.sports-esports;
+                    colorize: Settings.pad-state.length > 0 ? MaterialPalette.primary : MaterialPalette.on-surface-variant;
+                }
+            }
+            RowText {
+                horizontal-stretch: 1;
+                label: "手柄状态";
+                description: Settings.pad-state.length > 0 ? "正在按下的按钮会在下方高亮" : "按下手柄按钮即可在下方查看对应的按键";
+            }
+        }
+    }
+
+    SettingGroup {
+        title: "按键映射";
+        description: "点击一行后按下键盘按键完成绑定。Esc 也可以绑定。";
+        flush: true;
+
+        BindingTable {
+            bindings: Settings.bindings;
+            capture-button: Settings.capture-button;
+            capture-hint: Settings.capture-hint;
+            pressed: Settings.pad-state;
+            enabled: Settings.gamepad-enabled;
+            begin-capture(button) => { Settings.begin-capture(button); }
+            cancel-capture => { Settings.cancel-capture(); }
+        }
+
+        if Settings.bindings.length == 0 : HorizontalLayout {
+            padding: 16px;
+            MaterialText {
+                text: "没有可用的按键映射。";
+                style: MaterialTypography.body-medium;
+                color: MaterialPalette.on-surface-variant;
+            }
+        }
+
+        HorizontalLayout {
+            padding-left: 8px;
+            padding-right: 8px;
+            padding-top: 4px;
+            alignment: start;
+            TextButton {
+                text: "恢复推荐按键";
+                icon: Icons.restart-alt;
+                clicked => {
+                    Settings.cancel-capture();
+                    Settings.reset-bindings();
+                }
+            }
+        }
+    }
+}

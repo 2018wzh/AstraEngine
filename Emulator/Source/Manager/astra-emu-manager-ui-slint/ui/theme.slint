@@ -1,4 +1,5 @@
 import { Palette } from "std-widgets.slint";
+import { MaterialScheme } from "@material";
 import { App } from "./globals.slint";
 
 export struct Accent {
@@ -10,40 +11,148 @@ export struct Accent {
 }
 
 export global Theme {
+    out property <color> seed: Palette.accent-background;
     out property <bool> dark: App.dark;
-    out property <color> system-accent: Palette.accent-background;
-    out property <float> hue: system-accent.to-oklch().hue;
     out property <bool> compact-density: App.appearance.density == "compact";
-    out property <duration> motion-fast: App.appearance.reduce-motion ? 0ms : 120ms;
-    out property <duration> motion-medium: App.appearance.reduce-motion ? 0ms : 200ms;
 
-    pure function t(l: float, c: float) -> color {
-        return oklch(l, c, hue);
+    out property <length> space-xs: 4px;
+    out property <length> space-sm: compact-density ? 4px : 8px;
+    out property <length> space-md: compact-density ? 8px : 12px;
+    out property <length> space-lg: compact-density ? 12px : 16px;
+    out property <length> space-xl: compact-density ? 20px : 24px;
+    out property <length> space-xxl: compact-density ? 28px : 32px;
+
+    out property <duration> motion-short: App.appearance.reduce-motion ? 0ms : 150ms;
+    out property <duration> motion-medium: App.appearance.reduce-motion ? 0ms : 250ms;
+    out property <easing> motion-easing: spring(0.0);
+
+    out property <length> cover-width: (App.appearance.cover-size == "large" ? 208px : App.appearance.cover-size == "small" ? 136px : 168px) - (compact-density ? 12px : 0px);
+    out property <length> cover-height: cover-width * 4 / 3 + 52px;
+
+    pure function tone(t: float, c: float, h: float) -> color {
+        return oklch(t / 100, c, h);
     }
 
-    out property <color> surface: dark ? t(0.165, 0.008) : t(0.985, 0.004);
-    out property <color> surface-low: dark ? t(0.195, 0.010) : t(0.966, 0.006);
-    out property <color> surface-container: dark ? t(0.225, 0.012) : t(0.948, 0.008);
-    out property <color> surface-high: dark ? t(0.262, 0.014) : t(0.928, 0.010);
-    out property <color> surface-highest: dark ? t(0.300, 0.016) : t(0.905, 0.012);
-    out property <color> on-surface: dark ? t(0.935, 0.008) : t(0.205, 0.010);
-    out property <color> on-variant: dark ? t(0.775, 0.018) : t(0.430, 0.018);
-    out property <color> outline: dark ? t(0.580, 0.018) : t(0.600, 0.018);
-    out property <color> outline-variant: dark ? t(0.340, 0.018) : t(0.870, 0.012);
-    out property <color> scrim: #000000a0;
-
-    out property <color> primary: dark ? t(0.810, 0.110) : t(0.480, 0.150);
-    out property <color> on-primary: dark ? t(0.300, 0.090) : #ffffff;
-    out property <color> primary-container: dark ? t(0.360, 0.090) : t(0.925, 0.045);
-    out property <color> on-primary-container: dark ? t(0.925, 0.045) : t(0.290, 0.100);
-
-    out property <color> error: dark ? oklch(0.80, 0.11, 25) : oklch(0.52, 0.19, 27);
-    out property <color> error-container: dark ? oklch(0.34, 0.09, 25) : oklch(0.93, 0.04, 25);
-    out property <color> on-error-container: dark ? oklch(0.93, 0.04, 25) : oklch(0.32, 0.10, 27);
+    public pure function scheme(seed: color, dark: bool) -> MaterialScheme {
+        let o = seed.to-oklch();
+        let ph = o.hue;
+        let pc = clamp(o.chroma, 0.04, 0.12);
+        let sc = pc / 3;
+        let th = mod(ph + 60, 360);
+        let tc = pc * 0.6;
+        let nc = 0.01;
+        let vc = 0.02;
+        let eh = 27;
+        let ec = 0.17;
+        if dark {
+            return {
+                primary: tone(80, pc, ph),
+                surfaceTint: tone(80, pc, ph),
+                onPrimary: tone(20, pc, ph),
+                primaryContainer: tone(30, pc, ph),
+                onPrimaryContainer: tone(90, pc, ph),
+                secondary: tone(80, sc, ph),
+                onSecondary: tone(20, sc, ph),
+                secondaryContainer: tone(30, sc, ph),
+                onSecondaryContainer: tone(90, sc, ph),
+                tertiary: tone(80, tc, th),
+                onTertiary: tone(20, tc, th),
+                tertiaryContainer: tone(30, tc, th),
+                onTertiaryContainer: tone(90, tc, th),
+                error: tone(80, ec, eh),
+                onError: tone(20, ec, eh),
+                errorContainer: tone(30, ec, eh),
+                onErrorContainer: tone(90, ec, eh),
+                background: tone(6, nc, ph),
+                onBackground: tone(90, nc, ph),
+                surface: tone(6, nc, ph),
+                onSurface: tone(90, nc, ph),
+                surfaceVariant: tone(30, vc, ph),
+                onSurfaceVariant: tone(80, vc, ph),
+                outline: tone(60, vc, ph),
+                outlineVariant: tone(30, vc, ph),
+                shadow: #000000,
+                scrim: #000000,
+                inverseSurface: tone(90, nc, ph),
+                inverseOnSurface: tone(20, nc, ph),
+                inversePrimary: tone(40, pc, ph),
+                primaryFixed: tone(90, pc, ph),
+                onPrimaryFixed: tone(10, pc, ph),
+                primaryFixedDim: tone(80, pc, ph),
+                onPrimaryFixedVariant: tone(30, pc, ph),
+                secondaryFixed: tone(90, sc, ph),
+                onSecondaryFixed: tone(10, sc, ph),
+                secondaryFixedDim: tone(80, sc, ph),
+                onSecondaryFixedVariant: tone(30, sc, ph),
+                tertiaryFixed: tone(90, tc, th),
+                onTertiaryFixed: tone(10, tc, th),
+                tertiaryFixedDim: tone(80, tc, th),
+                onTertiaryFixedVariant: tone(30, tc, th),
+                surfaceDim: tone(6, nc, ph),
+                surfaceBright: tone(24, nc, ph),
+                surfaceContainerLowest: tone(4, nc, ph),
+                surfaceContainerLow: tone(10, nc, ph),
+                surfaceContainer: tone(12, nc, ph),
+                surfaceContainerHigh: tone(17, nc, ph),
+                surfaceContainerHighest: tone(22, nc, ph),
+            };
+        }
+        return {
+            primary: tone(40, pc, ph),
+            surfaceTint: tone(40, pc, ph),
+            onPrimary: tone(100, pc, ph),
+            primaryContainer: tone(90, pc, ph),
+            onPrimaryContainer: tone(10, pc, ph),
+            secondary: tone(40, sc, ph),
+            onSecondary: tone(100, sc, ph),
+            secondaryContainer: tone(90, sc, ph),
+            onSecondaryContainer: tone(10, sc, ph),
+            tertiary: tone(40, tc, th),
+            onTertiary: tone(100, tc, th),
+            tertiaryContainer: tone(90, tc, th),
+            onTertiaryContainer: tone(10, tc, th),
+            error: tone(40, ec, eh),
+            onError: tone(100, ec, eh),
+            errorContainer: tone(90, ec, eh),
+            onErrorContainer: tone(10, ec, eh),
+            background: tone(98, nc, ph),
+            onBackground: tone(10, nc, ph),
+            surface: tone(98, nc, ph),
+            onSurface: tone(10, nc, ph),
+            surfaceVariant: tone(90, vc, ph),
+            onSurfaceVariant: tone(30, vc, ph),
+            outline: tone(50, vc, ph),
+            outlineVariant: tone(80, vc, ph),
+            shadow: #000000,
+            scrim: #000000,
+            inverseSurface: tone(20, nc, ph),
+            inverseOnSurface: tone(95, nc, ph),
+            inversePrimary: tone(80, pc, ph),
+            primaryFixed: tone(90, pc, ph),
+            onPrimaryFixed: tone(10, pc, ph),
+            primaryFixedDim: tone(80, pc, ph),
+            onPrimaryFixedVariant: tone(30, pc, ph),
+            secondaryFixed: tone(90, sc, ph),
+            onSecondaryFixed: tone(10, sc, ph),
+            secondaryFixedDim: tone(80, sc, ph),
+            onSecondaryFixedVariant: tone(30, sc, ph),
+            tertiaryFixed: tone(90, tc, th),
+            onTertiaryFixed: tone(10, tc, th),
+            tertiaryFixedDim: tone(80, tc, th),
+            onTertiaryFixedVariant: tone(30, tc, th),
+            surfaceDim: tone(87, nc, ph),
+            surfaceBright: tone(98, nc, ph),
+            surfaceContainerLowest: tone(100, nc, ph),
+            surfaceContainerLow: tone(96, nc, ph),
+            surfaceContainer: tone(94, nc, ph),
+            surfaceContainerHigh: tone(92, nc, ph),
+            surfaceContainerHighest: tone(90, nc, ph),
+        };
+    }
 
     public pure function accent(seed: color, is-dark: bool) -> Accent {
         let o = seed.to-oklch();
-        let c = max(0.045, min(o.chroma, 0.14));
+        let c = clamp(o.chroma, 0.045, 0.14);
         return {
             primary: is-dark ? oklch(0.80, c, o.hue) : oklch(0.50, c + 0.01, o.hue),
             on-primary: is-dark ? oklch(0.25, c * 0.7, o.hue) : #ffffff,
@@ -53,7 +162,7 @@ export global Theme {
         };
     }
 
-    public pure function status-seed(status: string) -> color {
+    public pure function status-color(status: string) -> color {
         return status == "perfect" ? oklch(0.6, 0.14, 160)
             : status == "completable" ? oklch(0.6, 0.12, 215)
             : status == "flawed" ? oklch(0.7, 0.14, 85)
@@ -70,23 +179,4 @@ export global Theme {
             : status == "unplayable" ? "无法运行"
             : "未评级";
     }
-
-    out property <length> r-xs: 4px;
-    out property <length> r-sm: 8px;
-    out property <length> r-md: 12px;
-    out property <length> r-lg: 16px;
-    out property <length> r-xl: 28px;
-
-    out property <length> display: 32px;
-    out property <length> headline: 26px;
-    out property <length> title-lg: 20px;
-    out property <length> title-md: 16px;
-    out property <length> title-sm: 14px;
-    out property <length> body: 14px;
-    out property <length> body-sm: 13px;
-    out property <length> label: 12px;
-    out property <length> label-sm: 11px;
-
-    out property <color> shadow: dark ? #00000090 : #1a1a3030;
-    out property <color> shadow-strong: dark ? #000000c0 : #1a1a3050;
 }

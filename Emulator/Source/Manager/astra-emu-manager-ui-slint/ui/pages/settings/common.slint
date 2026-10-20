@@ -1,0 +1,316 @@
+import { MaterialPalette, MaterialText, MaterialTypography, Switch, ScrollView, TextField } from "@material";
+import { RangeSlider } from "../../components/range-slider.slint";
+
+// Scrollable settings content: one column, at most 760px wide, optional page title.
+export component PageScroll {
+    in property <string> title;
+    in property <bool> show-title;
+    property <length> pad: root.width < 600px ? 16px : 24px;
+
+    sv := ScrollView {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+
+        HorizontalLayout {
+            width: sv.visible-width;
+            padding-left: root.pad;
+            padding-right: root.pad;
+            padding-top: root.pad;
+            padding-bottom: 32px;
+            alignment: start;
+
+            VerticalLayout {
+                width: min(760px, sv.visible-width - 2 * root.pad);
+                spacing: 24px;
+                alignment: start;
+
+                if root.show-title : MaterialText {
+                    text: root.title;
+                    style: MaterialTypography.headline-small;
+                    color: MaterialPalette.on-surface;
+                }
+
+                @children
+            }
+        }
+    }
+}
+
+// A titled block of related settings drawn on a tonal surface.
+export component SettingGroup {
+    in property <string> title;
+    in property <string> description;
+    in property <bool> flush;
+
+    min-height: l.min-height;
+    preferred-height: l.preferred-height;
+
+    l := VerticalLayout {
+        spacing: 8px;
+
+        if root.title != "" || root.description != "" : VerticalLayout {
+            spacing: 4px;
+            padding-left: 4px;
+            padding-right: 4px;
+            if root.title != "" : MaterialText {
+                text: root.title;
+                style: MaterialTypography.title-small;
+                color: MaterialPalette.primary;
+            }
+            if root.description != "" : MaterialText {
+                text: root.description;
+                style: MaterialTypography.body-medium;
+                color: MaterialPalette.on-surface-variant;
+                wrap: word-wrap;
+                overflow: clip;
+            }
+        }
+
+        Rectangle {
+            border-radius: 16px;
+            background: MaterialPalette.surface-container-low;
+            border-width: 1px;
+            border-color: MaterialPalette.outline-variant;
+            clip: true;
+
+            VerticalLayout {
+                padding: root.flush ? 0px : 16px;
+                padding-top: root.flush ? 8px : 16px;
+                padding-bottom: root.flush ? 8px : 16px;
+                spacing: root.flush ? 0px : 20px;
+                @children
+            }
+        }
+    }
+}
+
+export component RowText {
+    in property <string> label;
+    in property <string> description;
+    in property <bool> enabled: true;
+    in property <bool> error;
+
+    min-height: l.min-height;
+    preferred-height: l.preferred-height;
+
+    l := VerticalLayout {
+        spacing: 2px;
+        alignment: center;
+        MaterialText {
+            text: root.label;
+            style: MaterialTypography.body-large;
+            color: root.enabled ? MaterialPalette.on-surface : MaterialPalette.on-surface.with-alpha(0.38);
+            wrap: word-wrap;
+            overflow: clip;
+        }
+        if root.description != "" : MaterialText {
+            text: root.description;
+            style: MaterialTypography.body-medium;
+            color: root.error ? MaterialPalette.error : MaterialPalette.on-surface-variant;
+            wrap: word-wrap;
+            overflow: clip;
+        }
+    }
+}
+
+// Label + description on the left, a Switch on the right. The switch always
+// shows `value`; a toggle is reported through `toggled` and then snaps back to
+// whatever the store holds.
+export component SwitchRow {
+    in property <string> label;
+    in property <string> description;
+    in property <bool> value;
+    in property <bool> enabled: true;
+    callback toggled(value: bool);
+
+    min-height: l.min-height;
+    preferred-height: l.preferred-height;
+
+    l := HorizontalLayout {
+        spacing: 16px;
+
+        RowText {
+            horizontal-stretch: 1;
+            label: root.label;
+            description: root.description;
+            enabled: root.enabled;
+        }
+
+        VerticalLayout {
+            horizontal-stretch: 0;
+            alignment: center;
+            Switch {
+                property <bool> stored: root.value;
+                checked: self.stored;
+                enabled: root.enabled;
+                accessible-label: root.label;
+                accessible-description: root.description;
+                changed stored => { self.checked = self.stored; }
+                checked-state-changed(value) => {
+                    if value != self.stored {
+                        root.toggled(value);
+                        self.checked = self.stored;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Label above a control (segmented buttons, sliders, selects).
+export component FieldBlock {
+    in property <string> label;
+    in property <string> description;
+    in property <string> trailing;
+    in property <bool> enabled: true;
+
+    min-height: l.min-height;
+    preferred-height: l.preferred-height;
+
+    l := VerticalLayout {
+        spacing: 8px;
+
+        HorizontalLayout {
+            spacing: 8px;
+            RowText {
+                horizontal-stretch: 1;
+                label: root.label;
+                description: root.description;
+                enabled: root.enabled;
+            }
+            if root.trailing != "" : MaterialText {
+                horizontal-stretch: 0;
+                text: root.trailing;
+                style: MaterialTypography.label-large;
+                color: MaterialPalette.primary;
+                vertical-alignment: center;
+            }
+        }
+
+        @children
+    }
+}
+
+// TextField whose text follows `value` whenever the store changes it.
+export component FormField {
+    in property <string> label;
+    in property <string> value;
+    in property <string> supporting-text;
+    in property <bool> has-error;
+    in property <bool> enabled: true;
+    in property <InputType> input-type: InputType.text;
+    out property <string> text: field.text;
+    out property <bool> has-focus: field.has-focus;
+    callback edited(text: string);
+    callback accepted(text: string);
+
+    min-width: field.min-width;
+    min-height: field.min-height;
+    preferred-height: field.preferred-height;
+    forward-focus: field;
+
+    public function clear() {
+        field.text = "";
+    }
+
+    field := TextField {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        label: root.label;
+        text: root.value;
+        supporting-text: root.supporting-text;
+        has-error: root.has-error;
+        enabled: root.enabled;
+        input-type: root.input-type;
+        edited(text) => { root.edited(text); }
+        accepted(text) => { root.accepted(text); }
+    }
+
+    changed value => {
+        if field.text != root.value {
+            field.text = root.value;
+        }
+    }
+}
+
+// Slider with label and current value; reports only on release.
+export component SliderField {
+    in property <string> label;
+    in property <string> description;
+    in property <string> suffix;
+    in property <float> minimum;
+    in property <float> maximum;
+    in property <float> step: 1;
+    in property <float> value;
+    in property <bool> enabled: true;
+    callback released(value: float);
+
+    min-height: l.min-height;
+    preferred-height: l.preferred-height;
+
+    l := VerticalLayout {
+        spacing: 0px;
+        HorizontalLayout {
+            spacing: 8px;
+            RowText {
+                horizontal-stretch: 1;
+                label: root.label;
+                description: root.description;
+                enabled: root.enabled;
+            }
+            MaterialText {
+                horizontal-stretch: 0;
+                text: round(slider.value) + root.suffix;
+                style: MaterialTypography.label-large;
+                color: MaterialPalette.primary;
+                vertical-alignment: center;
+            }
+        }
+        slider := RangeSlider {
+            minimum: root.minimum;
+            maximum: root.maximum;
+            step: root.step;
+            value: root.value;
+            enabled: root.enabled;
+            accessible-label: root.label;
+            released(value) => {
+                root.released(value);
+                self.value = root.value;
+            }
+        }
+    }
+
+    changed value => { slider.value = root.value; }
+}
+
+// Small tonal status label.
+export component StatusChip {
+    in property <string> text;
+    in property <color> background: MaterialPalette.secondary-container;
+    in property <color> foreground: MaterialPalette.on-secondary-container;
+
+    horizontal-stretch: 0;
+    min-width: label.preferred-width + 16px;
+    height: 24px;
+
+    Rectangle {
+        border-radius: 8px;
+        background: root.background;
+    }
+
+    label := MaterialText {
+        x: 8px;
+        y: 0px;
+        width: root.width - 16px;
+        height: root.height;
+        text: root.text;
+        style: MaterialTypography.label-medium;
+        color: root.foreground;
+        vertical-alignment: center;
+        horizontal-alignment: center;
+    }
+}

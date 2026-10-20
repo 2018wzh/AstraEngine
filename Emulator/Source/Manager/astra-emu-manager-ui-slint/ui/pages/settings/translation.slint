@@ -1,0 +1,310 @@
+import { MaterialPalette, MaterialText, MaterialTypography, TextField, TextButton, FilledButton, TonalButton } from "@material";
+import { TextEdit } from "std-widgets.slint";
+import { Network, Settings, TranslationForm, Choice } from "../../globals.slint";
+import { Icons } from "../../icons.slint";
+import { ChoiceSelect } from "../../components/select.slint";
+import { PageScroll, SettingGroup, SwitchRow, FieldBlock, FormField, SliderField, RowText } from "./common.slint";
+import { Segments } from "../../components/segments.slint";
+import { ListSelect } from "./list-select.slint";
+
+export component TranslationSection {
+    in property <bool> show-title;
+
+    // Draft of the endpoint form; only 「保存」 persists it.
+    property <TranslationForm> stored: Settings.translation;
+    property <string> provider: Settings.translation.provider != "" ? Settings.translation.provider : "openai";
+    property <string> base-url: Settings.translation.base-url != "" ? Settings.translation.base-url : root.default-url(root.provider);
+    property <string> openai-api: Settings.translation.openai-api != "" ? Settings.translation.openai-api : "responses";
+    property <string> model: Settings.translation.model;
+    property <string> language: Settings.translation.language != "" ? Settings.translation.language : "zh-CN";
+    property <int> timeout-s: Settings.translation.timeout-s > 0 ? Settings.translation.timeout-s : 15;
+    property <string> custom-prompt: Settings.translation.custom-prompt;
+    property <int> context-segments: Settings.translation.context-segments;
+    property <int> context-chars: Settings.translation.context-chars >= 1000 ? Settings.translation.context-chars : 6000;
+    property <bool> model-manual-chosen;
+    property <bool> language-manual-chosen;
+    property <bool> advanced-open;
+
+    property <bool> profile-saved: Settings.translation.model != "";
+    property <int> prompt-length: root.custom-prompt.character-count;
+    property <int> model-matches: round(model-counter.preferred-height / 1px);
+    property <bool> model-manual: root.model-manual-chosen || Settings.models.length == 0 || (root.model != "" && root.model-matches == 0);
+    property <bool> language-known: root.language == "zh-CN" || root.language == "zh-TW" || root.language == "en" || root.language == "ja" || root.language == "ko";
+    property <bool> language-manual: root.language-manual-chosen || !root.language-known;
+    property <bool> form-valid: root.base-url != "" && root.model != "" && root.language != "" && root.prompt-length <= 2000;
+    property <TranslationForm> form: {
+        provider: root.provider,
+        base-url: root.base-url,
+        openai-api: root.openai-api,
+        model: root.model,
+        language: root.language,
+        timeout-s: root.timeout-s,
+        custom-prompt: root.custom-prompt,
+        context-segments: root.context-segments,
+        context-chars: root.context-chars,
+    };
+    property <bool> dirty: root.form != root.stored || key.text != "";
+
+    pure function default-url(provider: string) -> string {
+        return provider == "anthropic" ? "https://api.anthropic.com/v1"
+            : provider == "google" ? "https://generativelanguage.googleapis.com/v1beta"
+            : "https://api.openai.com/v1";
+    }
+
+    function reload() {
+        self.provider = Settings.translation.provider != "" ? Settings.translation.provider : "openai";
+        self.base-url = Settings.translation.base-url != "" ? Settings.translation.base-url : self.default-url(self.provider);
+        self.openai-api = Settings.translation.openai-api != "" ? Settings.translation.openai-api : "responses";
+        self.model = Settings.translation.model;
+        self.language = Settings.translation.language != "" ? Settings.translation.language : "zh-CN";
+        self.timeout-s = Settings.translation.timeout-s > 0 ? Settings.translation.timeout-s : 15;
+        self.custom-prompt = Settings.translation.custom-prompt;
+        self.context-segments = Settings.translation.context-segments;
+        self.context-chars = Settings.translation.context-chars >= 1000 ? Settings.translation.context-chars : 6000;
+        self.model-manual-chosen = false;
+        self.language-manual-chosen = false;
+    }
+
+    changed stored => { root.reload(); }
+
+    model-counter := VerticalLayout {
+        x: 0px;
+        y: 0px;
+        width: 0px;
+        height: 0px;
+        visible: false;
+        for m in Settings.models : Rectangle {
+            height: m == root.model ? 1px : 0px;
+        }
+    }
+
+    PageScroll {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        title: "实时翻译";
+        show-title: root.show-title;
+
+        SettingGroup {
+            SwitchRow {
+                label: "启用实时翻译";
+                description: !Network.allowed ? "需要先在 联网与资料 中允许联网"
+                    : !root.profile-saved ? "需要先填写并保存下方的接口配置"
+                    : "游戏运行时把对白发送到翻译服务，并显示译文。";
+                value: Settings.translation-enabled && Network.allowed && root.profile-saved;
+                enabled: Network.allowed && root.profile-saved;
+                toggled(on) => { Settings.set-translation-enabled(on); }
+            }
+        }
+
+        SettingGroup {
+            title: "翻译接口";
+            description: "修改后点「保存」才会生效。";
+
+            FieldBlock {
+                label: "服务商";
+                Segments {
+                    label: "服务商";
+                    items: ["OpenAI", "Anthropic", "Google"];
+                    index: root.provider == "anthropic" ? 1 : root.provider == "google" ? 2 : 0;
+                    selected(i) => {
+                        root.provider = i == 1 ? "anthropic" : i == 2 ? "google" : "openai";
+                        root.base-url = root.default-url(root.provider);
+                    }
+                }
+            }
+
+            VerticalLayout {
+                spacing: 4px;
+                FormField {
+                    label: "Base URL";
+                    value: root.base-url;
+                    input-type: InputType.text;
+                    has-error: root.base-url == "";
+                    supporting-text: root.base-url == "" ? "请填写接口地址" : "需要 HTTPS；本机服务（localhost / 127.0.0.1）可以用 HTTP。";
+                    edited(text) => { root.base-url = text; }
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    TextButton {
+                        text: "恢复默认地址";
+                        icon: Icons.restart-alt;
+                        enabled: root.base-url != root.default-url(root.provider);
+                        clicked => { root.base-url = root.default-url(root.provider); }
+                    }
+                }
+            }
+
+            key := TextField {
+                label: Settings.secret-saved ? "API 密钥（已保存，留空沿用）" : "API 密钥";
+                input-type: InputType.password;
+                supporting-text: "密钥保存在系统凭据库中，不会写入配置文件。";
+            }
+
+            if root.provider == "openai" : FieldBlock {
+                label: "接口格式";
+                Segments {
+                    label: "接口格式";
+                    items: ["Responses", "Chat Completions"];
+                    index: root.openai-api == "chat_completions" ? 1 : 0;
+                    selected(i) => { root.openai-api = i == 1 ? "chat_completions" : "responses"; }
+                }
+            }
+
+            ListSelect {
+                label: "模型";
+                items: Settings.models;
+                value: root.model-manual ? "" : root.model;
+                placeholder: "先「测试连接」获取模型列表";
+                extra-label: "手动输入…";
+                extra-active: root.model-manual;
+                supporting-text: Settings.models.length == 0 ? "测试连接成功后可以从列表中选择模型。" : "";
+                selected(value) => {
+                    root.model = value;
+                    root.model-manual-chosen = false;
+                }
+                extra => { root.model-manual-chosen = true; }
+            }
+
+            if root.model-manual : FormField {
+                label: "模型名称";
+                value: root.model;
+                has-error: root.model == "";
+                supporting-text: root.model == "" ? "请填写模型名称" : "";
+                edited(text) => { root.model = text; }
+            }
+
+            ChoiceSelect {
+                label: "目标语言";
+                choices: [
+                    { id: "zh-CN", label: "简体中文（zh-CN）" },
+                    { id: "zh-TW", label: "繁體中文（zh-TW）" },
+                    { id: "en", label: "English（en）" },
+                    { id: "ja", label: "日本語（ja）" },
+                    { id: "ko", label: "한국어（ko）" },
+                    { id: "manual", label: "手动输入…" },
+                ];
+                value: root.language-manual ? "manual" : root.language;
+                selected(id) => {
+                    if id == "manual" {
+                        root.language-manual-chosen = true;
+                    } else {
+                        root.language = id;
+                        root.language-manual-chosen = false;
+                    }
+                }
+            }
+
+            if root.language-manual : FormField {
+                label: "语言代码";
+                value: root.language;
+                has-error: root.language == "";
+                supporting-text: "BCP 47 语言代码，例如 zh-CN、fr、de。";
+                edited(text) => { root.language = text; }
+            }
+
+            SliderField {
+                label: "超时";
+                suffix: " 秒";
+                minimum: 5;
+                maximum: 120;
+                step: 1;
+                value: root.timeout-s;
+                released(v) => { root.timeout-s = round(v); }
+            }
+
+            HorizontalLayout {
+                alignment: start;
+                TextButton {
+                    text: root.advanced-open ? "收起高级设置" : "高级设置";
+                    icon: root.advanced-open ? Icons.expand-less : Icons.expand-more;
+                    accessible-expandable: true;
+                    accessible-expanded: root.advanced-open;
+                    clicked => { root.advanced-open = !root.advanced-open; }
+                }
+            }
+
+            if root.advanced-open : VerticalLayout {
+                spacing: 20px;
+
+                FieldBlock {
+                    label: "追加提示词";
+                    description: "附加在翻译指令后的风格要求，例如人名译法或语气。";
+                    trailing: root.prompt-length + " / 2000";
+                    TextEdit {
+                        height: 120px;
+                        text: root.custom-prompt;
+                        wrap: word-wrap;
+                        accessible-label: "追加提示词";
+                        edited(text) => { root.custom-prompt = text; }
+                    }
+                    if root.prompt-length > 2000 : MaterialText {
+                        text: "不能超过 2000 字";
+                        style: MaterialTypography.body-small;
+                        color: MaterialPalette.error;
+                    }
+                }
+
+                SliderField {
+                    label: "上下文段数";
+                    description: "随请求附带的前文对白条数，0 表示不带上下文。";
+                    minimum: 0;
+                    maximum: 16;
+                    step: 1;
+                    value: root.context-segments;
+                    released(v) => { root.context-segments = round(v); }
+                }
+
+                SliderField {
+                    label: "上下文字符上限";
+                    minimum: 1000;
+                    maximum: 12000;
+                    step: 500;
+                    value: root.context-chars;
+                    released(v) => { root.context-chars = round(v); }
+                }
+            }
+
+            if Settings.translation-status != "" : RowText {
+                label: "连接状态";
+                description: Settings.translation-status;
+            }
+
+            HorizontalLayout {
+                alignment: end;
+                spacing: 8px;
+
+                if root.dirty : MaterialText {
+                    horizontal-stretch: 1;
+                    text: "有未保存的修改";
+                    style: MaterialTypography.body-small;
+                    color: MaterialPalette.on-surface-variant;
+                    vertical-alignment: center;
+                }
+
+                TonalButton {
+                    text: "测试连接";
+                    enabled: Network.allowed && root.base-url != "" && root.prompt-length <= 2000;
+                    clicked => { Settings.test-translation(root.form, key.text); }
+                }
+                FilledButton {
+                    text: "保存";
+                    icon: Icons.save;
+                    enabled: root.form-valid && root.dirty;
+                    clicked => {
+                        Settings.save-translation(root.form, key.text);
+                        key.text = "";
+                    }
+                }
+            }
+
+            if !Network.allowed : MaterialText {
+                text: "测试连接需要先允许联网。";
+                style: MaterialTypography.body-small;
+                color: MaterialPalette.on-surface-variant;
+                horizontal-alignment: right;
+            }
+        }
+    }
+}

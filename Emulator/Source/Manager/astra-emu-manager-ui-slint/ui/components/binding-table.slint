@@ -1,0 +1,79 @@
+import { MaterialPalette, MaterialText, MaterialTypography, TextButton, HorizontalDivider } from "@material";
+import { GamepadBinding } from "../globals.slint";
+
+export component BindingTable {
+    in property <[GamepadBinding]> bindings;
+    in property <string> capture-button;
+    in property <string> capture-hint;
+    in property <[string]> pressed;
+    in property <bool> enabled: true;
+    callback begin-capture(button: string);
+    callback cancel-capture();
+
+    VerticalLayout {
+        spacing: 0px;
+
+        for binding[index] in root.bindings : VerticalLayout {
+            property <bool> capturing: binding.id == root.capture-button;
+
+            Rectangle {
+                min-height: 52px;
+                background: capturing ? MaterialPalette.secondary-container
+                    : touch.has-hover ? MaterialPalette.on-surface.with-alpha(MaterialPalette.state-layer-opacity-hover)
+                    : transparent;
+                accessible-role: button;
+                accessible-label: binding.label + " → " + (binding.key == "" ? "未绑定" : binding.key);
+                accessible-action-default => { root.begin-capture(binding.id); }
+
+                for pad in root.pressed : Rectangle {
+                    visible: pad == binding.id && !capturing;
+                    background: MaterialPalette.primary-container;
+                }
+
+                touch := TouchArea {
+                    enabled: root.enabled && !capturing;
+                    clicked => { root.begin-capture(binding.id); }
+                }
+
+                HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 8px;
+                    spacing: 12px;
+
+                    MaterialText {
+                        horizontal-stretch: 1;
+                        text: binding.label;
+                        style: MaterialTypography.body-large;
+                        color: MaterialPalette.on-surface;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+
+                    if !capturing : MaterialText {
+                        horizontal-stretch: 0;
+                        text: binding.key == "" ? "未绑定" : binding.key;
+                        style: MaterialTypography.label-large;
+                        color: binding.key == "" ? MaterialPalette.on-surface-variant : MaterialPalette.primary;
+                        vertical-alignment: center;
+                    }
+
+                    if capturing : MaterialText {
+                        horizontal-stretch: 0;
+                        text: root.capture-hint != "" ? root.capture-hint : "请按下键盘按键…";
+                        style: MaterialTypography.label-large;
+                        color: root.capture-hint != "" ? MaterialPalette.error : MaterialPalette.on-secondary-container;
+                        vertical-alignment: center;
+                    }
+
+                    if capturing : TextButton {
+                        horizontal-stretch: 0;
+                        text: "取消";
+                        clicked => { root.cancel-capture(); }
+                    }
+                }
+            }
+
+            if index < root.bindings.length - 1 : HorizontalDivider { }
+        }
+    }
+}

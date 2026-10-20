@@ -1,126 +1,196 @@
-import { ScrollView } from "std-widgets.slint";
+import { MaterialPalette, MaterialText, MaterialTypography, OutlinedCard, IconButton, TextButton, Icon } from "@material";
+import { Notices, Notice } from "../globals.slint";
+import { Icons } from "../icons.slint";
 import { Theme } from "../theme.slint";
-import { Notice, Notices, Logs, Session } from "../globals.slint";
-import { Icon, Icons } from "./icons.slint";
-import { PillButton, IconBtn } from "./controls.slint";
 
-component NoticeCard inherits Rectangle {
+component NoticeCard {
     in property <Notice> notice;
-    in property <bool> show-toggle: false;
-    border-radius: Theme.r-lg;
-    height: body.preferred-height;
-    background: notice.severity == "error" ? Theme.error-container : Theme.surface-high;
-    drop-shadow-blur: 16px;
-    drop-shadow-offset-y: 4px;
-    drop-shadow-color: Theme.shadow;
+    property <bool> error: root.notice.severity == "error";
 
-    property <color> title-color: notice.severity == "error" ? Theme.on-error-container : Theme.on-surface;
-    property <color> body-color: notice.severity == "error" ? Theme.on-error-container : Theme.on-variant;
+    min-height: body.min-height;
+    preferred-height: body.preferred-height;
 
-    body := VerticalLayout {
-        x: 0px;
-        y: 0px;
-        width: parent.width;
-        padding: 14px;
-        spacing: 8px;
+    OutlinedCard {
+        width: 100%;
+        height: 100%;
+    }
 
-        HorizontalLayout {
-            spacing: 10px;
+    Rectangle {
+        border-radius: 12px;
+        background: root.error ? MaterialPalette.error-container.with-alpha(0.55) : transparent;
+    }
+
+    body := HorizontalLayout {
+        padding-left: 16px;
+        padding-top: 12px;
+        padding-bottom: 8px;
+        padding-right: 4px;
+        spacing: 12px;
+
+        VerticalLayout {
+            alignment: start;
+            padding-top: 2px;
             Icon {
-                glyph: root.notice.severity == "error" ? Icons.triangle : Icons.circle-info;
-                font-size: 16px;
                 width: 20px;
-                height: 20px;
-                color: root.notice.severity == "error" ? Theme.error : Theme.primary;
+                source: root.error ? Icons.error : root.notice.severity == "warning" ? Icons.warning : Icons.info;
+                colorize: root.error ? MaterialPalette.error : MaterialPalette.primary;
             }
-            VerticalLayout {
-                horizontal-stretch: 1;
-                spacing: 4px;
-                Text {
-                    text: root.notice.title;
-                    color: root.title-color;
-                    font-size: Theme.title-sm;
-                    font-weight: 600;
-                    wrap: word-wrap;
-                }
-                if root.notice.detail != "" : Text {
-                    text: root.notice.detail;
-                    color: root.body-color;
-                    font-size: Theme.body-sm;
-                    wrap: word-wrap;
-                    overflow: elide;
-                    height: 42px;
-                }
-                if root.notice.code != "" : Text {
-                    text: "错误代码 " + root.notice.code;
-                    color: Theme.on-variant;
-                    font-size: Theme.label-sm;
+        }
+
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 4px;
+            MaterialText {
+                text: root.notice.title;
+                style: MaterialTypography.title-small;
+                color: MaterialPalette.on-surface;
+                wrap: word-wrap;
+                overflow: clip;
+            }
+            if root.notice.detail != "" : MaterialText {
+                text: root.notice.detail;
+                style: MaterialTypography.body-medium;
+                color: MaterialPalette.on-surface-variant;
+                wrap: word-wrap;
+                max-height: 60px;
+                overflow: clip;
+            }
+            if root.notice.code != "" : MaterialText {
+                text: "错误代码 " + root.notice.code;
+                style: MaterialTypography.label-small;
+                color: MaterialPalette.on-surface-variant;
+            }
+            HorizontalLayout {
+                alignment: start;
+                TextButton {
+                    text: "查看日志";
+                    clicked => { Notices.view-logs(root.notice.core); }
                 }
             }
         }
 
-        HorizontalLayout {
-            spacing: 8px;
+        VerticalLayout {
             alignment: start;
-            if root.notice.core != "" : PillButton {
-                text: "查看日志";
-                variant: "text";
-                h: 32px;
-                clicked => {
-                    Logs.core = root.notice.core;
-                    Logs.scope = "core";
-                    Logs.open = true;
-                    Logs.load(root.notice.core);
-                }
-            }
-            if root.show-toggle && Notices.items.length > 1 : PillButton {
-                text: "全部 (" + Notices.items.length + ")";
-                variant: "text";
-                h: 32px;
-                clicked => { Notices.expanded = !Notices.expanded; }
-            }
-            Rectangle { horizontal-stretch: 1; }
-            IconBtn {
-                glyph: Icons.xmark;
-                label: "关闭";
-                size: 32px;
+            IconButton {
+                icon: Icons.close;
+                tooltip: "关闭";
                 clicked => { Notices.dismiss(root.notice.id); }
             }
         }
     }
 }
 
-export component NoticeStack inherits Rectangle {
-    in property <bool> compact: false;
-    z: 100;
-    x: 0px;
-    y: 0px;
-    width: 100%;
-    height: 100%;
-    background: transparent;
-    visible: !(Session.active && Session.menu-open) && Notices.items.length > 0;
+export component NoticeStack {
+    in property <length> bottom-inset: 16px;
+
+    property <length> card-width: min(420px, root.width - 32px);
 
     stack := VerticalLayout {
         x: 16px;
-        y: root.height - self.preferred-height - (root.compact ? 96px : 16px);
-        width: min(560px, root.width - 32px);
+        y: root.height - root.bottom-inset - self.preferred-height;
+        width: root.card-width;
+        height: self.preferred-height;
         spacing: 8px;
+        alignment: end;
 
-        if !Notices.expanded && Notices.items.length > 0 : NoticeCard {
-            notice: Notices.items[0];
-            show-toggle: true;
+        for notice[index] in Notices.items : NoticeCard {
+            visible: index < 3;
+            height: index < 3 ? self.preferred-height : 0px;
+            notice: notice;
         }
 
-        if Notices.expanded : ScrollView {
-            height: min(360px, list.preferred-height);
-            mouse-drag-pan-enabled: true;
-            list := VerticalLayout {
-                padding: 0px;
-                spacing: 8px;
-                alignment: start;
-                for n[i] in Notices.items : NoticeCard {
-                    notice: n;
-                    show-toggle: i == 0;
+        if Notices.items.length > 3 : MaterialText {
+            text: "另有 " + (Notices.items.length - 3) + " 条通知";
+            style: MaterialTypography.label-medium;
+            color: MaterialPalette.on-surface-variant;
+        }
+    }
+}
+
+export component SnackbarHost {
+    in property <length> bottom-inset: 16px;
+
+    property <int> serial: Notices.snackbar-serial;
+    property <bool> shown;
+    property <string> text;
+    property <string> action;
+
+    changed serial => {
+        if Notices.snackbar-text != "" {
+            root.text = Notices.snackbar-text;
+            root.action = Notices.snackbar-action;
+            root.shown = true;
+            timer.restart();
+        }
+    }
+
+    timer := Timer {
+        interval: 4s;
+        running: false;
+        triggered => {
+            self.running = false;
+            root.shown = false;
+        }
+    }
+
+    bar := Rectangle {
+        width: min(560px, max(344px, layout.preferred-width), root.width - 32px);
+        height: layout.preferred-height;
+        x: (root.width - self.width) / 2;
+        y: root.shown ? root.height - root.bottom-inset - self.height : root.height + 8px;
+        visible: root.shown || self.y < root.height;
+        border-radius: 4px;
+        background: MaterialPalette.inverse-surface;
+        drop-shadow-blur: 8px;
+        drop-shadow-offset-y: 3px;
+        drop-shadow-color: MaterialPalette.shadow-30;
+        accessible-role: AccessibleRole.text;
+        accessible-label: root.text;
+
+        animate y {
+            duration: Theme.motion-medium;
+            easing: Theme.motion-easing;
+        }
+
+        TouchArea { }
+
+        layout := HorizontalLayout {
+            padding-left: 16px;
+            padding-right: 8px;
+            padding-top: 6px;
+            padding-bottom: 6px;
+            spacing: 4px;
+
+            MaterialText {
+                horizontal-stretch: 1;
+                min-height: 36px;
+                text: root.text;
+                style: MaterialTypography.body-medium;
+                color: MaterialPalette.inverse-on-surface;
+                vertical-alignment: center;
+                wrap: word-wrap;
+                overflow: clip;
+            }
+
+            if root.action != "" : TextButton {
+                horizontal-stretch: 0;
+                text: root.action;
+                inverse: true;
+                clicked => {
+                    root.shown = false;
+                    timer.running = false;
+                    Notices.snackbar-action-clicked();
+                }
+            }
+
+            IconButton {
+                horizontal-stretch: 0;
+                icon: Icons.close;
+                inverse: true;
+                tooltip: "关闭";
+                clicked => {
+                    root.shown = false;
+                    timer.running = false;
                 }
             }
         }

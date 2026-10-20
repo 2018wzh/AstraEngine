@@ -1,0 +1,111 @@
+import { App, Appearance } from "../../globals.slint";
+import { Segments } from "../../components/segments.slint";
+import { PageScroll, SettingGroup, SwitchRow, FieldBlock } from "./common.slint";
+
+export global AppearanceEdit {
+    public function commit(next: Appearance) {
+        App.appearance = next;
+        App.appearance-changed(next);
+    }
+
+    public function set-theme(mode: string) {
+        let a = App.appearance;
+        self.commit({ theme-mode: mode, density: a.density, cover-size: a.cover-size, view-mode: a.view-mode, reduce-motion: a.reduce-motion, cover-badges: a.cover-badges });
+    }
+
+    public function set-density(density: string) {
+        let a = App.appearance;
+        self.commit({ theme-mode: a.theme-mode, density: density, cover-size: a.cover-size, view-mode: a.view-mode, reduce-motion: a.reduce-motion, cover-badges: a.cover-badges });
+    }
+
+    public function set-cover-size(size: string) {
+        let a = App.appearance;
+        self.commit({ theme-mode: a.theme-mode, density: a.density, cover-size: size, view-mode: a.view-mode, reduce-motion: a.reduce-motion, cover-badges: a.cover-badges });
+    }
+
+    public function set-view-mode(mode: string) {
+        let a = App.appearance;
+        self.commit({ theme-mode: a.theme-mode, density: a.density, cover-size: a.cover-size, view-mode: mode, reduce-motion: a.reduce-motion, cover-badges: a.cover-badges });
+    }
+
+    public function set-reduce-motion(on: bool) {
+        let a = App.appearance;
+        self.commit({ theme-mode: a.theme-mode, density: a.density, cover-size: a.cover-size, view-mode: a.view-mode, reduce-motion: on, cover-badges: a.cover-badges });
+    }
+
+    public function set-cover-badges(on: bool) {
+        let a = App.appearance;
+        self.commit({ theme-mode: a.theme-mode, density: a.density, cover-size: a.cover-size, view-mode: a.view-mode, reduce-motion: a.reduce-motion, cover-badges: on });
+    }
+}
+
+export component ThemeChooser inherits FieldBlock {
+    label: "主题";
+    Segments {
+        label: "主题";
+        items: ["跟随系统", "浅色", "深色"];
+        index: App.appearance.theme-mode == "light" ? 1 : App.appearance.theme-mode == "dark" ? 2 : 0;
+        selected(i) => { AppearanceEdit.set-theme(i == 1 ? "light" : i == 2 ? "dark" : "system"); }
+    }
+}
+
+export component CoverSizeChooser inherits FieldBlock {
+    label: "封面大小";
+    Segments {
+        label: "封面大小";
+        items: ["大", "中", "小"];
+        index: App.appearance.cover-size == "large" ? 0 : App.appearance.cover-size == "small" ? 2 : 1;
+        selected(i) => { AppearanceEdit.set-cover-size(i == 0 ? "large" : i == 2 ? "small" : "medium"); }
+    }
+}
+
+export component AppearanceSection inherits PageScroll {
+    title: "外观";
+
+    SettingGroup {
+        title: "显示";
+
+        ThemeChooser { }
+
+        FieldBlock {
+            label: "密度";
+            description: "紧凑模式会缩小间距和封面。";
+            Segments {
+                label: "密度";
+                items: ["舒适", "紧凑"];
+                index: App.appearance.density == "compact" ? 1 : 0;
+                selected(i) => { AppearanceEdit.set-density(i == 1 ? "compact" : "comfortable"); }
+            }
+        }
+
+        CoverSizeChooser { }
+
+        FieldBlock {
+            label: "游戏库视图";
+            Segments {
+                label: "游戏库视图";
+                items: ["网格", "列表"];
+                index: App.appearance.view-mode == "list" ? 1 : 0;
+                selected(i) => { AppearanceEdit.set-view-mode(i == 1 ? "list" : "grid"); }
+            }
+        }
+    }
+
+    SettingGroup {
+        title: "细节";
+
+        SwitchRow {
+            label: "减少动态效果";
+            description: "关闭界面过渡动画。";
+            value: App.appearance.reduce-motion;
+            toggled(on) => { AppearanceEdit.set-reduce-motion(on); }
+        }
+
+        SwitchRow {
+            label: "封面兼容性徽章";
+            description: "在游戏封面上显示兼容性状态。";
+            value: App.appearance.cover-badges;
+            toggled(on) => { AppearanceEdit.set-cover-badges(on); }
+        }
+    }
+}

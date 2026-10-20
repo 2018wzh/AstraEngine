@@ -1,0 +1,291 @@
+import { MaterialPalette, MaterialText, MaterialTypography, Switch, TextField, TextButton } from "@material";
+import { ConfigField } from "../globals.slint";
+import { Icons } from "../icons.slint";
+import { OptionSelect, SupportingText } from "./select.slint";
+import { RangeSlider } from "./range-slider.slint";
+
+component FieldText {
+    in property <string> label;
+    in property <string> description;
+    in property <string> error;
+    in property <string> trailing;
+
+    VerticalLayout {
+        spacing: 2px;
+        HorizontalLayout {
+            spacing: 8px;
+            MaterialText {
+                horizontal-stretch: 1;
+                text: root.label;
+                style: MaterialTypography.body-large;
+                color: MaterialPalette.on-surface;
+                wrap: word-wrap;
+                overflow: clip;
+            }
+            if root.trailing != "" : MaterialText {
+                horizontal-stretch: 0;
+                text: root.trailing;
+                style: MaterialTypography.label-large;
+                color: MaterialPalette.primary;
+                vertical-alignment: center;
+            }
+        }
+        if root.error != "" || root.description != "" : MaterialText {
+            text: root.error != "" ? root.error : root.description;
+            style: MaterialTypography.body-small;
+            color: root.error != "" ? MaterialPalette.error : MaterialPalette.on-surface-variant;
+            wrap: word-wrap;
+            overflow: clip;
+        }
+    }
+}
+
+export component ConfigFieldRow {
+    in property <ConfigField> field;
+    in property <bool> enabled: true;
+    callback changed(key: string, value: string);
+    callback reset(key: string);
+    callback pick(key: string);
+
+    property <bool> numeric: root.field.kind == "integer" || root.field.kind == "float";
+    property <float> effective-step: root.field.kind == "integer" ? max(root.field.step, 1) : root.field.step;
+    property <bool> use-slider: root.numeric && root.effective-step > 0 && root.field.max > root.field.min && (root.field.max - root.field.min) / root.effective-step <= 200;
+    property <bool> is-path: root.field.kind == "file" || root.field.kind == "directory";
+    property <bool> use-text: (root.numeric && !root.use-slider) || root.field.kind == "string";
+    property <string> shown: root.field.display-value != "" ? root.field.display-value : root.field.value;
+
+    pure function format(v: float) -> string {
+        if root.field.kind == "integer" {
+            return round(v);
+        }
+        return round(v * 10000) / 10000;
+    }
+
+    function commit(text: string) {
+        if text != root.field.value {
+            root.changed(root.field.key, text);
+        }
+    }
+
+    min-height: layout.min-height;
+    preferred-height: layout.preferred-height;
+
+    layout := HorizontalLayout {
+        spacing: 8px;
+
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            spacing: 4px;
+
+            // Rectangle root: a conditional layout would measure the wrapped
+            // description at the full row width and cut its last line.
+            if root.field.kind == "bool" : Rectangle {
+                min-height: bool-row.min-height;
+                preferred-height: bool-row.preferred-height;
+                bool-row := HorizontalLayout {
+                    spacing: 16px;
+                    FieldText {
+                        horizontal-stretch: 1;
+                        label: root.field.label;
+                        description: root.field.description;
+                        error: root.field.error;
+                    }
+                    VerticalLayout {
+                        horizontal-stretch: 0;
+                        alignment: center;
+                        switch := Switch {
+                            property <bool> stored: root.field.value == "true";
+                            checked: self.stored;
+                            enabled: root.enabled;
+                            changed stored => { self.checked = self.stored; }
+                            checked-state-changed(value) => {
+                                if value != self.stored {
+                                    root.changed(root.field.key, value ? "true" : "false");
+                                    self.checked = self.stored;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if root.field.kind == "enum" : OptionSelect {
+                label: root.field.label;
+                labels: root.field.options;
+                values: root.field.option-values;
+                value: root.field.value;
+                display: root.shown;
+                enabled: root.enabled;
+                has-error: root.field.error != "";
+                supporting-text: root.field.error != "" ? root.field.error : root.field.description;
+                selected(value) => { root.changed(root.field.key, value); }
+            }
+
+            if root.use-slider : VerticalLayout {
+                spacing: 0px;
+                property <float> stored: root.field.value.is-float() ? root.field.value.to-float() : root.field.min;
+                FieldText {
+                    label: root.field.label;
+                    description: root.field.description;
+                    error: root.field.error;
+                    trailing: root.format(slider.value) + (root.field.unit != "" ? " " + root.field.unit : "");
+                }
+                slider := RangeSlider {
+                    minimum: root.field.min;
+                    maximum: root.field.max;
+                    step: root.effective-step;
+                    value: parent.stored;
+                    enabled: root.enabled;
+                    released(value) => {
+                        root.commit(root.format(value));
+                        self.value = parent.stored;
+                    }
+                }
+                changed stored => { slider.value = self.stored; }
+            }
+
+            if root.use-text : HorizontalLayout {
+                spacing: 8px;
+                input := TextField {
+                    property <bool> focused: self.has-focus;
+                    horizontal-stretch: 1;
+                    label: root.field.label + (root.field.unit != "" ? "（" + root.field.unit + "）" : "");
+                    text: root.field.value;
+                    input-type: root.numeric ? InputType.decimal : InputType.text;
+                    enabled: root.enabled;
+                    has-error: root.field.error != "";
+                    accepted(text) => {
+                        root.commit(text);
+                        self.text = root.field.value;
+                    }
+                    changed focused => {
+                        if !self.focused {
+                            root.commit(self.text);
+                            self.text = root.field.value;
+                        }
+                    }
+                }
+                property <string> stored: root.field.value;
+                changed stored => {
+                    if !input.has-focus {
+                        input.text = self.stored;
+                    }
+                }
+            }
+
+            if root.is-path : HorizontalLayout {
+                spacing: 8px;
+                TextField {
+                    horizontal-stretch: 1;
+                    label: root.field.label;
+                    text: root.shown;
+                    read-only: true;
+                    enabled: root.enabled;
+                    has-error: root.field.error != "";
+                }
+                VerticalLayout {
+                    alignment: start;
+                    padding-top: 8px;
+                    HorizontalLayout {
+                        spacing: 4px;
+                        TextButton {
+                            text: "选择…";
+                            enabled: root.enabled;
+                            clicked => { root.pick(root.field.key); }
+                        }
+                        TextButton {
+                            text: "清除";
+                            enabled: root.enabled && root.field.value != "";
+                            clicked => { root.changed(root.field.key, ""); }
+                        }
+                    }
+                }
+            }
+
+            // Material's TextField elides its supporting text to one line.
+            if (root.use-text || root.is-path) && (root.field.error != "" || root.field.description != "") : SupportingText {
+                text: root.field.error != "" ? root.field.error : root.field.description;
+                error: root.field.error != "";
+            }
+        }
+
+        if root.field.overridden : VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 0;
+            TextButton {
+                text: "恢复默认";
+                enabled: root.enabled;
+                clicked => { root.reset(root.field.key); }
+            }
+        }
+    }
+}
+
+export component ConfigFieldList {
+    in property <[ConfigField]> fields;
+    in property <bool> enabled: true;
+    in property <bool> show-groups: true;
+    in-out property <bool> advanced-open;
+    callback changed(key: string, value: string);
+    callback reset(key: string);
+    callback pick(key: string);
+
+    property <int> advanced-count: round(counter.preferred-height / 1px);
+
+    counter := VerticalLayout {
+        x: 0px;
+        y: 0px;
+        width: 0px;
+        height: 0px;
+        visible: false;
+        for field in root.fields : Rectangle {
+            height: field.advanced ? 1px : 0px;
+        }
+    }
+
+    VerticalLayout {
+        spacing: 0px;
+
+        for field[index] in root.fields : VerticalLayout {
+            spacing: 8px;
+            padding-bottom: field.advanced ? 0px : 12px;
+            if !field.advanced && root.show-groups && field.group != "" && (index == 0 || root.fields[index - 1].group != field.group) : MaterialText {
+                text: field.group;
+                style: MaterialTypography.title-small;
+                color: MaterialPalette.primary;
+            }
+            if !field.advanced : ConfigFieldRow {
+                field: field;
+                enabled: root.enabled;
+                changed(key, value) => { root.changed(key, value); }
+                reset(key) => { root.reset(key); }
+                pick(key) => { root.pick(key); }
+            }
+        }
+
+        if root.advanced-count > 0 : HorizontalLayout {
+            alignment: start;
+            padding-bottom: 12px;
+            TextButton {
+                text: root.advanced-open ? "收起高级设置" : "高级设置（" + root.advanced-count + "）";
+                icon: root.advanced-open ? Icons.expand-less : Icons.expand-more;
+                clicked => { root.advanced-open = !root.advanced-open; }
+            }
+        }
+
+        if root.advanced-open : VerticalLayout {
+            spacing: 0px;
+            for field in root.fields : VerticalLayout {
+                padding-bottom: field.advanced ? 12px : 0px;
+                if field.advanced : ConfigFieldRow {
+                    field: field;
+                    enabled: root.enabled;
+                    changed(key, value) => { root.changed(key, value); }
+                    reset(key) => { root.reset(key); }
+                    pick(key) => { root.pick(key); }
+                }
+            }
+        }
+    }
+}

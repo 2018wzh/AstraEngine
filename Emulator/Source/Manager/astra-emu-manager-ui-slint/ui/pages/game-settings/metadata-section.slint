@@ -1,0 +1,166 @@
+import {
+    MaterialPalette, MaterialText, MaterialTypography, TextField, FilledButton, TextButton,
+    OutlineButton, LinearProgressIndicator, HorizontalDivider,
+} from "@material";
+import { App, Network, Selection } from "../../globals.slint";
+import { Icons } from "../../icons.slint";
+import { Theme } from "../../theme.slint";
+import { Segments } from "../../components/segments.slint";
+import { SectionTitle, Panel, InfoRow, SelectableTile } from "./parts.slint";
+
+export component MetadataSection {
+    in property <bool> narrow;
+    in-out property <int> provider-index: 0;
+    in-out property <string> query: Selection.game.title;
+    property <string> provider: root.provider-index == 1 ? "bangumi" : "vndb";
+    property <string> provider-label: root.provider-index == 1 ? "Bangumi" : "VNDB";
+    property <bool> can-search: Network.allowed && !Selection.metadata-busy && root.query != "";
+
+    function search() {
+        if root.can-search {
+            Selection.search-metadata(root.provider, root.query);
+        }
+    }
+
+    pure function provider-name(id: string) -> string {
+        return id == "bangumi" ? "Bangumi" : id == "vndb" ? "VNDB" : id;
+    }
+
+    VerticalLayout {
+        spacing: Theme.space-xl;
+
+        if !Network.allowed : Panel {
+            HorizontalLayout {
+                spacing: Theme.space-md;
+                SectionTitle {
+                    horizontal-stretch: 1;
+                    text: "需要允许联网";
+                    description: "搜索和刷新作品资料需要先在 设置→联网与资料 中允许联网。解除关联不需要联网。";
+                }
+                VerticalLayout {
+                    horizontal-stretch: 0;
+                    alignment: center;
+                    TextButton {
+                        text: "前往设置";
+                        clicked => {
+                            App.settings-category = "network";
+                            App.page = "settings";
+                        }
+                    }
+                }
+            }
+        }
+
+        Panel {
+            SectionTitle {
+                text: "当前资料";
+                description: Selection.metadata-status != "" ? Selection.metadata-status : "还没有关联作品资料。";
+            }
+            InfoRow { label: "开发商"; value: Selection.game.developer; }
+            InfoRow { label: "发行日期"; value: Selection.game.release-date; }
+            InfoRow { label: "别名"; value: Selection.game.aliases; }
+            HorizontalLayout {
+                alignment: end;
+                spacing: Theme.space-sm;
+                TextButton {
+                    text: "解除 " + root.provider-label + " 关联";
+                    icon: Icons.close;
+                    enabled: !Selection.metadata-busy;
+                    clicked => { Selection.unlink-metadata(root.provider); }
+                }
+                OutlineButton {
+                    text: "刷新";
+                    icon: Icons.refresh;
+                    enabled: Network.allowed && !Selection.metadata-busy;
+                    clicked => { Selection.refresh-metadata(root.provider); }
+                }
+            }
+        }
+
+        Panel {
+            SectionTitle {
+                text: "关联作品资料";
+                description: "按标题搜索，在结果中选择对应的作品后点「关联」。";
+            }
+            HorizontalLayout {
+                alignment: start;
+                Segments {
+                    width: 208px;
+                    label: "资料来源";
+                    items: ["VNDB", "Bangumi"];
+                    index: root.provider-index;
+                    selected(index) => { root.provider-index = index; }
+                }
+            }
+            if !root.narrow : HorizontalLayout {
+                spacing: Theme.space-sm;
+                search-field := TextField {
+                    horizontal-stretch: 1;
+                    label: "在 " + root.provider-label + " 中搜索";
+                    leading-icon: Icons.search;
+                    text <=> root.query;
+                    enabled: Network.allowed;
+                    accepted => { root.search(); }
+                }
+                VerticalLayout {
+                    horizontal-stretch: 0;
+                    alignment: start;
+                    padding-top: 8px;
+                    FilledButton {
+                        text: "搜索";
+                        enabled: root.can-search;
+                        clicked => { root.search(); }
+                    }
+                }
+            }
+            if root.narrow : VerticalLayout {
+                spacing: Theme.space-sm;
+                TextField {
+                    label: "在 " + root.provider-label + " 中搜索";
+                    leading-icon: Icons.search;
+                    text <=> root.query;
+                    enabled: Network.allowed;
+                    accepted => { root.search(); }
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    FilledButton {
+                        text: "搜索";
+                        enabled: root.can-search;
+                        clicked => { root.search(); }
+                    }
+                }
+            }
+
+            if Selection.metadata-busy : LinearProgressIndicator {
+                indeterminate: true;
+                progress: 0.3;
+            }
+
+            if Selection.matches.length > 0 : VerticalLayout {
+                spacing: 0px;
+                for match[index] in Selection.matches : VerticalLayout {
+                    if index > 0 : HorizontalDivider { }
+                    SelectableTile {
+                        radius: 0px;
+                        text: match.title;
+                        supporting-text: root.provider-name(match.provider)
+                            + (match.release-date != "" ? " · " + match.release-date : "")
+                            + (match.developer != "" ? " · " + match.developer : "")
+                            + (match.aliases != "" ? " · " + match.aliases : "");
+                        enabled: !Selection.metadata-busy;
+                        clicked => { Selection.accept-match(match.id); }
+                        VerticalLayout {
+                            alignment: center;
+                            TextButton {
+                                text: "关联";
+                                enabled: !Selection.metadata-busy;
+                                clicked => { Selection.accept-match(match.id); }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

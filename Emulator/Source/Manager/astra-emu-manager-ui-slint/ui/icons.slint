@@ -1,0 +1,50 @@
+export global Icons {
+    out property <image> add: @image-url("icons/add.svg");
+    out property <image> arrow-back: @image-url("icons/arrow_back.svg");
+    out property <image> arrow-drop-down: @image-url("icons/arrow_drop_down.svg");
+    out property <image> check: @image-url("icons/check.svg");
+    out property <image> chevron-right: @image-url("icons/chevron_right.svg");
+    out property <image> close: @image-url("icons/close.svg");
+    out property <image> delete: @image-url("icons/delete.svg");
+    out property <image> download: @image-url("icons/download.svg");
+    out property <image> error: @image-url("icons/error.svg");
+    out property <image> expand-less: @image-url("icons/expand_less.svg");
+    out property <image> expand-more: @image-url("icons/expand_more.svg");
+    out property <image> fast-forward: @image-url("icons/fast_forward.svg");
+    out property <image> filter-vintage: @image-url("icons/filter_vintage.svg");
+    out property <image> folder-open: @image-url("icons/folder_open.svg");
+    out property <image> fullscreen: @image-url("icons/fullscreen.svg");
+    out property <image> fullscreen-exit: @image-url("icons/fullscreen_exit.svg");
+    out property <image> history: @image-url("icons/history.svg");
+    out property <image> image: @image-url("icons/image.svg");
+    out property <image> info: @image-url("icons/info.svg");
+    out property <image> library-books: @image-url("icons/library_books.svg");
+    out property <image> memory: @image-url("icons/memory.svg");
+    out property <image> menu: @image-url("icons/menu.svg");
+    out property <image> more-vert: @image-url("icons/more_vert.svg");
+    out property <image> palette: @image-url("icons/palette.svg");
+    out property <image> play-arrow: @image-url("icons/play_arrow.svg");
+    out property <image> public: @image-url("icons/public.svg");
+    out property <image> refresh: @image-url("icons/refresh.svg");
+    out property <image> restart-alt: @image-url("icons/restart_alt.svg");
+    out property <image> save: @image-url("icons/save.svg");
+    out property <image> schedule: @image-url("icons/schedule.svg");
+    out property <image> search: @image-url("icons/search.svg");
+    out property <image> settings: @image-url("icons/settings.svg");
+    out property <image> smart-display: @image-url("icons/smart_display.svg");
+    out property <image> sports-esports: @image-url("icons/sports_esports.svg");
+    out property <image> translate: @image-url("icons/translate.svg");
+    out property <image> tune: @image-url("icons/tune.svg");
+    out property <image> upload-file: @image-url("icons/upload_file.svg");
+    out property <image> warning: @image-url("icons/warning.svg");
+
+    public pure function session-icon(name: string) -> image {
+        return (name == "quick-save" || name == "save") ? self.save
+            : (name == "quick-load" || name == "load") ? self.history
+            : name == "auto" ? self.smart-display
+            : name == "skip" ? self.fast-forward
+            : name == "backlog" ? self.schedule
+            : name == "settings" ? self.settings
+            : self.tune;
+    }
+}
