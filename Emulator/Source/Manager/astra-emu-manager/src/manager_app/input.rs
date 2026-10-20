@@ -82,11 +82,8 @@ impl AstraEmuManagerController {
                 | FamilyEvent::WindowVisibility { .. }
                 | FamilyEvent::WindowSuspended { .. }
         );
-        let closing = matches!(event, FamilyEvent::WindowCloseRequested);
         self.pending_events.push(event);
-        if closing {
-            self.close_active(PlaySessionEndReason::Shutdown)?;
-        } else if lifecycle {
+        if lifecycle {
             self.flush_owner_events()?;
         }
         Ok(())
@@ -392,6 +389,74 @@ impl AstraEmuManagerController {
             bind(settings.input_mapping.get_or_insert(global), button, key)
         })
     }
+
+    /// Wait for the next keyboard key to bind to `button`, globally or for one game.
+    pub(super) fn begin_key_capture(
+        &mut self,
+        button: &str,
+        game_id: Option<&str>,
+    ) -> Result<ManagerViewModel, String> {
+        self.ensure_no_session()?;
+        GamepadInput::parse(button).ok_or("ASTRA_EMU_GAMEPAD_BUTTON_INVALID")?;
+        if let Some(game_id) = game_id {
+            self.game(game_id)?;
+        }
+        self.key_capture = Some(KeyCapture {
+            button: button.to_owned(),
+            game_id: game_id.map(str::to_owned),
+            hint: String::new(),
+        });
+        self.model()
+    }
+
+    pub(super) fn cancel_key_capture(&mut self) -> Result<ManagerViewModel, String> {
+        self.key_capture = None;
+        self.model()
+    }
+
+    pub(super) fn key_capture_active(&self) -> bool {
+        self.key_capture.is_some()
+    }
+
+    /// Bind the captured key; keys without a mapping name keep the capture waiting.
+    pub(super) fn capture_key(&mut self, code: KeyCode) -> Result<ManagerViewModel, String> {
+        let capture = self
+            .key_capture
+            .as_mut()
+            .ok_or("ASTRA_EMU_KEY_CAPTURE_INACTIVE")?;
+        let Some(key) = astra_emu_manager_core::input_key_name(code) else {
+            capture.hint = UNMAPPABLE_KEY_HINT.into();
+            return self.model();
+        };
+        let KeyCapture {
+            button, game_id, ..
+        } = self.key_capture.take().expect("capture checked above");
+        match game_id {
+            Some(game_id) => self.set_game_gamepad_binding(&game_id, &button, key),
+            None => self.set_gamepad_binding(&button, key),
+        }
+    }
+
+    pub(super) fn key_capture_view(&self) -> (String, String, String) {
+        self.key_capture
+            .as_ref()
+            .map(|capture| {
+                (
+                    capture.button.clone(),
+                    capture.game_id.clone().unwrap_or_default(),
+                    capture.hint.clone(),
+                )
+            })
+            .unwrap_or_default()
+    }
+}
+
+pub(super) const UNMAPPABLE_KEY_HINT: &str = "这个键不能用于映射";
+
+pub(super) struct KeyCapture {
+    button: String,
+    game_id: Option<String>,
+    hint: String,
 }
 
 fn bind(

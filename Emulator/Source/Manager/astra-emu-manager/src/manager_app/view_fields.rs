@@ -44,10 +44,14 @@ impl AstraEmuManagerController {
     }
 
     pub(super) fn input_view(&self) -> InputConfigViewModel {
+        let (capture_button, capture_game_id, capture_hint) = self.key_capture_view();
         InputConfigViewModel {
             gamepad_enabled: self.input_mapping.gamepad_enabled,
             deadzone: self.input_mapping.deadzone.as_str().into(),
             bindings: binding_views(&self.input_mapping),
+            capture_button,
+            capture_game_id,
+            capture_hint,
         }
     }
 

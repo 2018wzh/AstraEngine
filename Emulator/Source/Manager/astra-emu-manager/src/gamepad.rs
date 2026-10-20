@@ -18,6 +18,8 @@ pub(crate) struct GameInput {
     pub(crate) control: String,
     pub(crate) pressed: bool,
     pub(crate) value: f32,
+    /// Physical button; `None` for stick directions.
+    pub(crate) button: Option<astra_emu_manager_core::GamepadInput>,
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
@@ -210,23 +212,18 @@ fn process_gamepad_event(
 ) {
     use gilrs::{Axis, EventType};
     match event.event {
-        EventType::ButtonPressed(button, _) => {
-            if let Some(control) = map_button(mapping, button) {
-                output.push(GameInput {
-                    control,
-                    pressed: true,
-                    value: 1.0,
-                });
-            }
-        }
-        EventType::ButtonReleased(button, _) => {
-            if let Some(control) = map_button(mapping, button) {
-                output.push(GameInput {
-                    control,
-                    pressed: false,
-                    value: 0.0,
-                });
-            }
+        EventType::ButtonPressed(button, _) | EventType::ButtonReleased(button, _) => {
+            let Some(input) = pad_button(button) else {
+                return;
+            };
+            let pressed = matches!(event.event, EventType::ButtonPressed(..));
+            // Unbound buttons still reach the session menu; an empty control skips the game.
+            output.push(GameInput {
+                control: mapping.gamepad.get(&input).cloned().unwrap_or_default(),
+                pressed,
+                value: if pressed { 1.0 } else { 0.0 },
+                button: Some(input),
+            });
         }
         EventType::AxisChanged(Axis::LeftStickX, value, _) => {
             let negative = mapping.gamepad.get(&GamepadInput::LeftStickLeft).cloned();
@@ -243,9 +240,9 @@ fn process_gamepad_event(
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
-fn map_button(mapping: &InputMapping, button: gilrs::Button) -> Option<String> {
+fn pad_button(button: gilrs::Button) -> Option<GamepadInput> {
     use gilrs::Button;
-    let input = match button {
+    Some(match button {
         Button::South => GamepadInput::South,
         Button::East => GamepadInput::East,
         Button::North => GamepadInput::North,
@@ -263,8 +260,7 @@ fn map_button(mapping: &InputMapping, button: gilrs::Button) -> Option<String> {
         Button::LeftThumb => GamepadInput::LeftThumb,
         Button::RightThumb => GamepadInput::RightThumb,
         _ => return None,
-    };
-    mapping.gamepad.get(&input).cloned()
+    })
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
@@ -342,6 +338,7 @@ fn update_button(
             control,
             pressed: next,
             value: if next { 1.0 } else { 0.0 },
+            button: None,
         });
     }
 }
@@ -415,27 +412,32 @@ mod tests {
                 GameInput {
                     control: "arrow_left".into(),
                     pressed: true,
-                    value: 1.0
+                    value: 1.0,
+                    button: None,
                 },
                 GameInput {
                     control: "arrow_left".into(),
                     pressed: false,
-                    value: 0.0
+                    value: 0.0,
+                    button: None,
                 },
                 GameInput {
                     control: "arrow_right".into(),
                     pressed: true,
-                    value: 1.0
+                    value: 1.0,
+                    button: None,
                 },
                 GameInput {
                     control: "arrow_left".into(),
                     pressed: true,
-                    value: 1.0
+                    value: 1.0,
+                    button: None,
                 },
                 GameInput {
                     control: "arrow_right".into(),
                     pressed: false,
-                    value: 0.0
+                    value: 0.0,
+                    button: None,
                 },
             ]
         );

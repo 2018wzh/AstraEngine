@@ -46,8 +46,7 @@ pub use family_registry::{
 };
 pub use filter_settings::{FilterConfiguration, FilterPreset, FilterSettings};
 pub use input_mapping::{
-    default_vn_preset, input_key_code, input_key_name, GamepadDeadzone, GamepadInput,
-    InputMapping,
+    default_vn_preset, input_key_code, input_key_name, GamepadDeadzone, GamepadInput, InputMapping,
 };
 pub use library::{ExcludedGame, GameRecord, Library, LibraryError, LibraryRoot, LibrarySnapshot};
 pub use metadata::{

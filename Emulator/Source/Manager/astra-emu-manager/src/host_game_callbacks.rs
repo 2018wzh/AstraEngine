@@ -74,27 +74,8 @@ pub(super) fn install<C: ManagerController, R: AstraUnderlayRenderer>(
             return;
         };
         let result = leave_controller.borrow_mut().leave_game();
-        let icon_result = window_commands::set_icon(window.window(), None);
-        let result = match (result, icon_result) {
-            (Ok(model), Ok(())) => Ok(model),
-            (Err(error), Ok(())) | (Ok(_), Err(error)) => Err(error),
-            (Err(error), Err(cleanup)) => Err(format!("{error}; {cleanup}")),
-        };
-        let session = window.global::<Session>();
-        session.set_active(false);
-        session.set_fullscreen(false);
-        let dialogs = window.global::<Dialogs>();
-        dialogs.set_fatal_active(false);
-        dialogs.set_fatal_retryable(false);
-        window.window().set_fullscreen(false);
-        match result {
-            Ok(model) => {
-                apply_model(&leave_adapter, &model);
-                window.global::<Session>().set_active(false);
-                fire_host_callback(&leave_runtime_schedule);
-            }
-            Err(error) => report_error(&window, &error),
-        }
+        finish_leave(&window, &leave_adapter, result);
+        fire_host_callback(&leave_runtime_schedule);
     });
     let select_weak = adapter.window().as_weak();
     let select_controller = controller.clone();
@@ -129,21 +110,20 @@ pub(super) fn install<C: ManagerController, R: AstraUnderlayRenderer>(
                 Err(error) => report_error(&window, &error),
             }
         });
-    let rescan_weak = adapter.window().as_weak();
-    let rescan_controller = controller.clone();
-    let rescan_adapter = std::rc::Rc::downgrade(adapter);
+    let prepare_weak = adapter.window().as_weak();
+    let prepare_controller = controller.clone();
+    let prepare_adapter = std::rc::Rc::downgrade(adapter);
     adapter.window().global::<Library>().on_rescan(move || {
-        let Some(window) = rescan_weak.upgrade() else {
+        let Some(window) = prepare_weak.upgrade() else {
             return;
         };
-        match rescan_controller.borrow_mut().rescan() {
-            Ok(model) => apply_model(&rescan_adapter, &model),
+        match prepare_controller.borrow_mut().prepare_library() {
+            Ok(model) => apply_model(&prepare_adapter, &model),
             Err(error) => report_error(&window, &error),
         }
     });
     let input_weak = adapter.window().as_weak();
     let input_controller = controller.clone();
-    let input_adapter = std::rc::Rc::downgrade(adapter);
     adapter
         .window()
         .global::<Session>()
@@ -153,7 +133,7 @@ pub(super) fn install<C: ManagerController, R: AstraUnderlayRenderer>(
                 .game_input(control.as_str(), pressed, value);
             if let Err(error) = result {
                 if let Some(window) = input_weak.upgrade() {
-                    terminate_game(&input_controller, &input_adapter, &window, error);
+                    report_input_error(&window, &error);
                 }
             }
         });

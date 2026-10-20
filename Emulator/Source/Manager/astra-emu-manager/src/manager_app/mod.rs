@@ -64,6 +64,7 @@ mod probe_worker;
 mod render_extent;
 mod runtime;
 mod session;
+mod snackbar;
 mod support;
 mod translation;
 mod view_fields;
@@ -135,6 +136,12 @@ struct AstraEmuManagerController {
     patch_import: Option<file_patch::PendingImport>,
     patch_state: astra_emu_manager_ui_slint::PatchViewModel,
     patch_sequence: u64,
+    snackbar: snackbar::Snackbar,
+    prepare_scan_pending: Option<background::PendingScan>,
+    prepare_progress: Option<owner::PrepareProgress>,
+    scan_cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    last_excluded: Option<String>,
+    key_capture: Option<input::KeyCapture>,
 }
 
 impl Drop for AstraEmuManagerController {

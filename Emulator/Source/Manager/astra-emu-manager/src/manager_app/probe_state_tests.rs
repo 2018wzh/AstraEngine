@@ -23,7 +23,7 @@ fn controller(root: &Path) -> AstraEmuManagerController {
     let mut app =
         AstraEmuManagerController::open_library(root.into(), FrameMailbox::new(), Vec::new())
             .unwrap();
-    app.refresh_cores().unwrap();
+    app.prepare_library().unwrap();
     settle_background(&mut app);
     app
 }
@@ -131,22 +131,19 @@ fn core_loading_preserves_cached_library_bindings_until_an_explicit_scan() {
     assert_eq!(initial.library.games[0].title, "Saved title");
     assert!(!initial.library.busy);
     assert!(!initial.library.cores_ready);
-    assert!(initial.library.can_load_cores);
+    assert_eq!(initial.library.prepare_state, "unprepared");
+    assert_eq!(initial.library.games[0].problem, "需要先准备资料库");
     assert!(app.poll_platform().unwrap().is_none());
     assert!(!data.join("cores").exists());
     assert_eq!(app.search("Saved").unwrap().library.games.len(), 1);
     app.search("").unwrap();
-    assert_eq!(app.rescan().unwrap_err(), "ASTRA_EMU_CORES_NOT_READY");
-    assert_eq!(
-        app.add_game_directory(&path).unwrap_err(),
-        "ASTRA_EMU_CORES_NOT_READY"
-    );
 
-    let pending = app.refresh_cores().unwrap();
+    let pending = app.prepare_library().unwrap();
     assert!(pending.library.busy);
-    assert!(!pending.library.can_load_cores);
+    assert_eq!(pending.library.prepare_state, "loading-cores");
     assert_eq!(pending.library.games.len(), 1);
-    assert!(app.refresh_cores().is_err());
+    assert_eq!(pending.library.games[0].problem, "正在准备资料库");
+    assert_eq!(app.prepare_library().unwrap_err(), "ASTRA_EMU_PREPARE_BUSY");
     settle_background(&mut app);
     assert_eq!(
         app.game(&id).unwrap().family_id.as_deref(),
@@ -155,7 +152,7 @@ fn core_loading_preserves_cached_library_bindings_until_an_explicit_scan() {
     assert_eq!(app.library.list_games().unwrap().len(), 1);
     assert!(app.candidates.is_empty());
     assert!(app.probe_choices.is_empty());
-    assert!(!app.core_refresh_enabled());
+    assert!(app.cores_started());
 
     let calls = std::sync::Arc::new(parking_lot::Mutex::new(Vec::new()));
     let sink = calls.clone();
@@ -179,7 +176,7 @@ fn core_loading_preserves_cached_library_bindings_until_an_explicit_scan() {
     let loaded = app.model().unwrap();
     assert!(loaded.library.cores_ready);
     assert!(!loaded.library.busy);
-    assert!(!loaded.library.can_load_cores);
+    assert_eq!(loaded.library.prepare_state, "ready");
     assert_eq!(loaded.library.games.len(), 1);
     assert!(!loaded.selection.launchable);
     assert_eq!(
@@ -197,9 +194,9 @@ fn core_loading_preserves_cached_library_bindings_until_an_explicit_scan() {
     );
     assert!(app.candidates.is_empty());
     assert!(!calls.lock().iter().any(|call| call.name == "probe"));
-    assert!(app.refresh_cores().is_err());
+    assert_eq!(loaded.library.games[0].problem, "未识别到可用的模拟器");
 
-    app.rescan().unwrap();
+    app.prepare_library().unwrap();
     settle_background(&mut app);
     let scanned = app.model().unwrap();
     assert_eq!(scanned.library.games.len(), 2);
@@ -344,7 +341,7 @@ fn scanning_existing_path_aliases_keeps_both_records_without_a_location_conflict
             .unwrap();
     }
     settle_provider(&mut app);
-    app.rescan().unwrap();
+    app.prepare_library().unwrap();
     settle_background(&mut app);
     assert_eq!(app.library.list_games().unwrap().len(), 2);
     assert_eq!(
@@ -358,7 +355,7 @@ fn scanning_existing_path_aliases_keeps_both_records_without_a_location_conflict
     assert!(app.candidates.contains_key("canonical"));
     assert!(app.candidates.contains_key("original"));
     std::fs::remove_file(path.join("match")).unwrap();
-    app.rescan().unwrap();
+    app.prepare_library().unwrap();
     settle_background(&mut app);
     assert!(app.candidates.is_empty());
     for id in ["original", "canonical"] {
@@ -383,7 +380,7 @@ fn manual_full_scan_preserves_unavailable_game_metadata() {
         .set_game_user_title(&id, Some("Saved title"))
         .unwrap();
     std::fs::remove_dir_all(&path).unwrap();
-    app.rescan().unwrap();
+    app.prepare_library().unwrap();
     settle_background(&mut app);
     let model = app.model().unwrap();
     assert_eq!(model.library.games.len(), 1);
@@ -629,20 +626,19 @@ fn manual_core_failure_requires_restart_and_shutdown_still_joins_the_owner() {
     let initial = app.model().unwrap();
     assert!(!initial.library.busy);
     assert!(!initial.library.cores_ready);
-    assert!(initial.library.can_load_cores);
-    assert_eq!(
-        app.add_game_directory(root.path()).unwrap_err(),
-        "ASTRA_EMU_CORES_NOT_READY"
-    );
-    assert_eq!(app.rescan().unwrap_err(), "ASTRA_EMU_CORES_NOT_READY");
+    assert_eq!(initial.library.prepare_state, "unprepared");
     // The core installation is untouched until the explicit action.
     fs::write(root.path().join("cores"), b"not a directory").unwrap();
     assert!(app.poll_platform().unwrap().is_none());
-    assert!(app.core_refresh_enabled());
-    let pending = app.refresh_cores().unwrap();
+    assert!(!app.cores_started());
+    let pending = app.prepare_library().unwrap();
     assert!(pending.library.busy);
-    assert!(!pending.library.can_load_cores);
-    assert!(!pending.library.cores_ready);
+    assert_eq!(pending.library.prepare_state, "loading-cores");
+    assert!(!pending.library.can_cancel_prepare);
+    assert_eq!(
+        app.cancel_prepare().unwrap_err(),
+        "ASTRA_EMU_PREPARE_NOT_CANCELLABLE"
+    );
     settle_background(&mut app);
     assert!(!app.startup_busy());
     assert!(
@@ -652,10 +648,18 @@ fn manual_core_failure_requires_restart_and_shutdown_still_joins_the_owner() {
     assert!(app.diagnostic.contains("ASTRA_EMU_CORES_DIRECTORY_CREATE"));
     assert!(app.startup_status().contains("重启"));
     assert!(!app.cores_ready());
-    assert!(!app.core_refresh_enabled());
+    let failed = app.model().unwrap();
+    assert_eq!(failed.library.prepare_state, "failed");
+    assert_eq!(
+        app.prepare_library().unwrap_err(),
+        "ASTRA_EMU_PREPARE_RESTART_REQUIRED"
+    );
+    assert_eq!(
+        app.add_game_directory(root.path()).unwrap_err(),
+        "ASTRA_EMU_PREPARE_RESTART_REQUIRED"
+    );
     app.registry.shutdown().unwrap();
     app.registry.shutdown().unwrap();
-    assert!(app.refresh_cores().is_err());
 }
 
 #[test]
@@ -683,4 +687,307 @@ fn failed_idle_owner_wakes_the_host_and_preserves_its_join_error() {
             .unwrap_err()
             .contains("ASTRA_EMU_OWNER_PANICKED")
     );
+}
+
+fn root_with_games(root: &Path) -> (PathBuf, PathBuf, PathBuf) {
+    let library_root = root.join("library");
+    for name in ["g1", "g2"] {
+        let game = library_root.join(name);
+        fs::create_dir_all(&game).unwrap();
+        fs::write(game.join("match"), b"match").unwrap();
+    }
+    let library_root = fs::canonicalize(library_root).unwrap();
+    (
+        library_root.clone(),
+        library_root.join("g1"),
+        library_root.join("g2"),
+    )
+}
+
+fn visible_games(app: &AstraEmuManagerController) -> Vec<String> {
+    app.library
+        .library_snapshot()
+        .unwrap()
+        .games
+        .into_iter()
+        .map(|game| game.game_id)
+        .collect()
+}
+
+fn prepared(app: &mut AstraEmuManagerController) -> ManagerViewModel {
+    app.prepare_library().unwrap();
+    settle_background(app);
+    app.model().unwrap()
+}
+
+#[test]
+fn removed_games_stay_hidden_across_scans_until_undone() {
+    let root = tempfile::tempdir().unwrap();
+    let (library_root, g1, g2) = root_with_games(root.path());
+    let (g1, g2) = (path_id(&g1), path_id(&g2));
+    let mut app = controller(&root.path().join("manager"));
+    app.library
+        .add_library_root(library_root.to_str().unwrap())
+        .unwrap();
+    app.registry
+        .register_provider(move || provider("test-a", 9_000))
+        .unwrap();
+    settle_provider(&mut app);
+
+    let first = prepared(&mut app);
+    assert_eq!(first.snackbar.text, "发现 2 部新作品");
+    let mut ids = visible_games(&app);
+    ids.sort();
+    let mut expected = vec![g1.clone(), g2.clone()];
+    expected.sort();
+    assert_eq!(ids, expected);
+    let session = app.library.start_play_session(&g1, 1_000).unwrap();
+    app.library
+        .end_play_session(&session, 61_000, PlaySessionEndReason::Leave)
+        .unwrap();
+    let stats = app.library.library_snapshot().unwrap().play_stats[&g1].clone();
+
+    app.selected_case_id = Some(g1.clone());
+    let removed = app.remove_from_library(&g1).unwrap();
+    assert_eq!(visible_games(&app), vec![g2.clone()]);
+    assert_eq!(removed.library.selected_id, "");
+    assert_eq!(removed.snackbar.action, "撤销");
+    assert!(removed.snackbar.text.contains("已从资料库移除"));
+    assert_eq!(removed.library.excluded.len(), 1);
+    assert_eq!(removed.library.excluded[0].id, g1);
+
+    let rescanned = prepared(&mut app);
+    assert_eq!(visible_games(&app), vec![g2.clone()]);
+    assert_eq!(rescanned.snackbar.text, "资料库已是最新");
+
+    app.undo_remove().unwrap();
+    let mut ids = visible_games(&app);
+    ids.sort();
+    assert_eq!(ids, expected);
+    assert_eq!(
+        app.library.library_snapshot().unwrap().play_stats[&g1],
+        stats
+    );
+    assert!(app.model().unwrap().library.excluded.is_empty());
+    assert_eq!(app.undo_remove().unwrap_err(), "ASTRA_EMU_UNDO_UNAVAILABLE");
+
+    app.remove_from_library(&g2).unwrap();
+    match app.snackbar_action().unwrap() {
+        astra_emu_manager::SnackbarOutcome::Model(model) => {
+            assert!(model.library.games.iter().any(|game| game.id == g2));
+        }
+        astra_emu_manager::SnackbarOutcome::Restart => panic!("undo must not restart"),
+    }
+    app.remove_from_library(&g2).unwrap();
+    app.restore_game(&g2).unwrap();
+    assert!(visible_games(&app).contains(&g2));
+}
+
+#[test]
+fn added_directory_is_persisted_as_a_library_root() {
+    let root = tempfile::tempdir().unwrap();
+    let (library_root, g1, _) = root_with_games(root.path());
+    let mut app = controller(&root.path().join("manager"));
+    app.registry
+        .register_provider(move || provider("test-a", 9_000))
+        .unwrap();
+    settle_provider(&mut app);
+    app.add_game_directory(&library_root.join("g1")).unwrap();
+    settle_background(&mut app);
+    let model = app.model().unwrap();
+    assert_eq!(model.library.roots, vec![g1.to_str().unwrap().to_owned()]);
+    assert_eq!(model.library.selected_id, path_id(&g1));
+    assert_eq!(app.scan_roots().unwrap(), vec![g1]);
+}
+
+#[test]
+fn prepare_loads_cores_then_scans_every_root_automatically() {
+    let root = tempfile::tempdir().unwrap();
+    let (library_root, g1, g2) = root_with_games(root.path());
+    let mut app = AstraEmuManagerController::open_library(
+        root.path().join("manager"),
+        FrameMailbox::new(),
+        Vec::new(),
+    )
+    .unwrap();
+    app.library
+        .add_library_root(library_root.to_str().unwrap())
+        .unwrap();
+    let (sender, wakes) = crossbeam_channel::unbounded();
+    app.set_host_wake(std::sync::Arc::new(move || {
+        let _ = sender.send(());
+    }));
+    while wakes.try_recv().is_ok() {}
+    let pending = app.prepare_library().unwrap();
+    assert_eq!(pending.library.prepare_state, "loading-cores");
+    assert!(matches!(app.startup_state, background::StartupState::Loading));
+    app.registry
+        .register_provider(move || provider("test-a", 9_000))
+        .unwrap();
+    // Core initialization and the provider registration each wake the host once.
+    for _ in 0..2 {
+        wakes.recv_timeout(Duration::from_secs(5)).unwrap();
+    }
+    app.poll_platform().unwrap();
+    assert!(matches!(
+        app.startup_state,
+        background::StartupState::Scanning(probe_worker::ScanKind::Full)
+    ));
+    let scanning = app.model().unwrap();
+    assert_eq!(scanning.library.prepare_state, "scanning");
+    assert!(scanning.library.can_cancel_prepare);
+    settle_background(&mut app);
+    assert!(matches!(app.startup_state, background::StartupState::Ready));
+    let ready = app.model().unwrap();
+    assert_eq!(ready.library.prepare_state, "ready");
+    assert_eq!(ready.library.prepare_label, "刷新资料库");
+    assert_eq!(ready.snackbar.text, "发现 2 部新作品");
+    let mut ids = visible_games(&app);
+    ids.sort();
+    let mut expected = vec![path_id(&g1), path_id(&g2)];
+    expected.sort();
+    assert_eq!(ids, expected);
+}
+
+#[test]
+fn cancelling_a_scan_restores_ready_without_touching_the_library() {
+    struct Release(Option<std::sync::mpsc::Sender<()>>);
+    impl Drop for Release {
+        fn drop(&mut self) {
+            if let Some(sender) = self.0.take() {
+                let _ = sender.send(());
+            }
+        }
+    }
+    let root = tempfile::tempdir().unwrap();
+    let (library_root, g1, _) = root_with_games(root.path());
+    let mut app = controller(&root.path().join("manager"));
+    app.registry
+        .register_provider(|| provider("test-a", 9_000))
+        .unwrap();
+    scan_once(&mut app, &g1);
+    let before = visible_games(&app);
+    app.library
+        .add_library_root(library_root.to_str().unwrap())
+        .unwrap();
+    let (sender, gate) = std::sync::mpsc::channel();
+    let mut release = Release(Some(sender));
+    let (entered, receiver) = std::sync::mpsc::channel();
+    app.registry
+        .register_provider(move || {
+            entered.send(()).unwrap();
+            gate.recv().unwrap();
+            provider_with_marker("test-b", 8_000, "absent-marker")
+        })
+        .unwrap();
+    receiver.recv_timeout(Duration::from_secs(5)).unwrap();
+    app.prepare_library().unwrap();
+    assert!(matches!(
+        app.startup_state,
+        background::StartupState::Scanning(probe_worker::ScanKind::Full)
+    ));
+    app.cancel_prepare().unwrap();
+    release.0.take().unwrap().send(()).unwrap();
+    settle_background(&mut app);
+    assert!(matches!(app.startup_state, background::StartupState::Ready));
+    assert_eq!(visible_games(&app), before);
+    let model = app.model().unwrap();
+    assert_eq!(model.snackbar.text, "已取消扫描");
+    assert_eq!(model.snackbar.action, "");
+    assert!(app.diagnostic.is_empty());
+    assert_eq!(
+        app.cancel_prepare().unwrap_err(),
+        "ASTRA_EMU_PREPARE_NOT_CANCELLABLE"
+    );
+}
+
+fn fake_session(app: &mut AstraEmuManagerController, game_id: &str) {
+    let epoch = astra_emu_manager_core::model::allocate_session_epoch().unwrap();
+    app.active = Some(owner::ActiveSessionView::opening(epoch, game_id.into()));
+}
+
+#[test]
+fn closing_the_window_leaves_a_running_game_and_keeps_the_manager_open() {
+    let root = tempfile::tempdir().unwrap();
+    let mut app = controller(root.path());
+    assert!(matches!(
+        astra_emu_manager::close_requested(&mut app),
+        astra_emu_manager::CloseDecision::HideWindow
+    ));
+    fake_session(&mut app, "game");
+    assert!(ManagerController::is_game_active(&app));
+    match astra_emu_manager::close_requested(&mut app) {
+        astra_emu_manager::CloseDecision::KeepWindow(result) => {
+            result.unwrap();
+        }
+        astra_emu_manager::CloseDecision::HideWindow => panic!("running game must keep window"),
+    }
+    assert!(!ManagerController::is_game_active(&app));
+    assert_eq!(
+        app.active.as_ref().unwrap().closing,
+        Some(PlaySessionEndReason::Leave)
+    );
+}
+
+#[test]
+fn a_full_input_queue_drops_input_without_ending_the_session() {
+    let root = tempfile::tempdir().unwrap();
+    let mut app = controller(root.path());
+    fake_session(&mut app, "game");
+    let mut pressed = true;
+    let error = loop {
+        match app.game_input("a", pressed, 1.0) {
+            Ok(()) => pressed = !pressed,
+            Err(error) => break error,
+        }
+    };
+    assert_eq!(error, "ASTRA_EMU_INPUT_QUEUE_FULL");
+    assert_eq!(
+        app.pending_events.len(),
+        astra_emu_manager_core::model::MAX_INPUT_EVENTS
+    );
+    assert!(ManagerController::is_game_active(&app));
+    assert!(app.active.as_ref().unwrap().closing.is_none());
+}
+
+#[test]
+fn key_capture_binds_named_keys_and_waits_on_unmappable_ones() {
+    let root = tempfile::tempdir().unwrap();
+    let path = game(root.path());
+    let mut app = controller(root.path());
+    app.registry
+        .register_provider(move || provider("test-a", 9_000))
+        .unwrap();
+    scan_once(&mut app, &path);
+    let id = path_id(&path);
+
+    let waiting = app.begin_key_capture("south", None).unwrap();
+    assert_eq!(waiting.settings.input.capture_button, "south");
+    let hint = app.capture_key(KeyCode::Digit1).unwrap();
+    assert_eq!(hint.settings.input.capture_hint, input::UNMAPPABLE_KEY_HINT);
+    assert!(app.key_capture_active());
+    app.capture_key(KeyCode::Escape).unwrap();
+    assert!(!app.key_capture_active());
+    assert_eq!(app.input_mapping.gamepad[&GamepadInput::South], "escape");
+
+    app.begin_key_capture("west", Some(&id)).unwrap();
+    let bound = app.capture_key(KeyCode::F5).unwrap();
+    assert_eq!(bound.settings.input.capture_button, "");
+    let game_mapping = app
+        .library
+        .game_settings(&id)
+        .unwrap()
+        .unwrap()
+        .input_mapping
+        .unwrap();
+    assert_eq!(game_mapping.gamepad[&GamepadInput::West], "f5");
+    assert!(!app.input_mapping.gamepad.contains_key(&GamepadInput::West));
+
+    app.begin_key_capture("north", None).unwrap();
+    app.cancel_key_capture().unwrap();
+    assert_eq!(
+        app.capture_key(KeyCode::A).unwrap_err(),
+        "ASTRA_EMU_KEY_CAPTURE_INACTIVE"
+    );
+    assert!(app.begin_key_capture("bogus", None).is_err());
 }

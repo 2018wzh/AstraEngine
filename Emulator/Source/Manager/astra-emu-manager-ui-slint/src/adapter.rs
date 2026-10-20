@@ -135,7 +135,6 @@ impl SlintManagerAdapter {
         library.set_sort(model.library.sort.as_str().into());
         library.set_compat_filter(model.library.compat_filter.as_str().into());
         library.set_cores_ready(model.library.cores_ready);
-        library.set_can_load_cores(model.library.can_load_cores);
         library.set_busy(model.library.busy);
         library.set_status(model.library.status.as_str().into());
         library.set_selected_id(model.library.selected_id.as_str().into());

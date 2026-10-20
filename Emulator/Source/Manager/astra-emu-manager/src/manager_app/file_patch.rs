@@ -118,9 +118,9 @@ impl AstraEmuManagerController {
             view.phase = if self.active.is_some() {
                 "结束游戏后才能应用文件补丁".into()
             } else if self.startup_busy() {
-                "请等待核心加载或扫描完成".into()
+                "请等待资料库准备完成".into()
             } else if !self.cores_ready() {
-                "请先手动加载核心".into()
+                "请先准备资料库".into()
             } else {
                 "请先选择来源游戏".into()
             };

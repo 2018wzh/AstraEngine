@@ -36,14 +36,6 @@ impl AstraEmuManagerController {
         self.model()
     }
 
-    pub(super) fn rescan(&mut self) -> Result<ManagerViewModel, String> {
-        if self.active.is_some() {
-            return Err("ASTRA_EMU_FAMILY_SESSION_ALREADY_ACTIVE".into());
-        }
-        self.begin_scan(probe_worker::ScanKind::Full, self.game_roots.clone())?;
-        self.model()
-    }
-
     pub(super) fn launch(&mut self, case_id: &str) -> Result<ManagerViewModel, String> {
         let result = self.try_launch(case_id);
         if let Err(error) = &result {

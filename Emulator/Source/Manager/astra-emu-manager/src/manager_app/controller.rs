@@ -1,8 +1,44 @@
 use super::*;
 
 impl ManagerController for AstraEmuManagerController {
-    fn refresh_cores(&mut self) -> Result<ManagerViewModel, String> {
-        AstraEmuManagerController::refresh_cores(self)
+    fn prepare_library(&mut self) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::prepare_library(self)
+    }
+
+    fn cancel_prepare(&mut self) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::cancel_prepare(self)
+    }
+
+    fn remove_from_library(&mut self, game_id: &str) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::remove_from_library(self, game_id)
+    }
+
+    fn restore_game(&mut self, game_id: &str) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::restore_game(self, game_id)
+    }
+
+    fn snackbar_action(&mut self) -> Result<astra_emu_manager::SnackbarOutcome, String> {
+        AstraEmuManagerController::snackbar_action(self)
+    }
+
+    fn begin_key_capture(
+        &mut self,
+        button: &str,
+        game_id: Option<&str>,
+    ) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::begin_key_capture(self, button, game_id)
+    }
+
+    fn cancel_key_capture(&mut self) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::cancel_key_capture(self)
+    }
+
+    fn key_capture_active(&self) -> bool {
+        AstraEmuManagerController::key_capture_active(self)
+    }
+
+    fn capture_key(&mut self, code: KeyCode) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::capture_key(self, code)
     }
 
     fn take_modal_update(&mut self) -> Option<astra_emu_manager::modal_service::ModalUiUpdate> {
@@ -184,10 +220,6 @@ impl ManagerController for AstraEmuManagerController {
 
     fn release_inputs(&mut self) -> Result<(), String> {
         AstraEmuManagerController::release_inputs(self)
-    }
-
-    fn rescan(&mut self) -> Result<ManagerViewModel, String> {
-        AstraEmuManagerController::rescan(self)
     }
 
     fn launch(&mut self, case_id: &str) -> Result<ManagerViewModel, String> {

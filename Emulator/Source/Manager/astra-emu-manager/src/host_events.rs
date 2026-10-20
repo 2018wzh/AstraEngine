@@ -9,6 +9,7 @@ use slint::{
 use winit::event::{ElementState, WindowEvent};
 
 use super::ManagerController;
+use crate::gamepad::GameInputPump;
 
 pub(super) fn system_theme(window: &slint::Window) -> Result<bool, String> {
     window
@@ -40,6 +41,7 @@ pub(super) fn install<C: ManagerController>(
     adapter: &Rc<SlintManagerAdapter>,
     controller: Rc<RefCell<C>>,
     pointer: Rc<RefCell<super::pointer::HostPointer>>,
+    gamepad: Rc<RefCell<GameInputPump>>,
 ) {
     let weak = adapter.window().as_weak();
     let weak_adapter = Rc::downgrade(adapter);
@@ -57,9 +59,33 @@ pub(super) fn install<C: ManagerController>(
             let Some(window) = weak.upgrade() else {
                 return EventResult::Propagate;
             };
+            if let WindowEvent::KeyboardInput { event, .. } = event {
+                if controller.borrow().key_capture_active() {
+                    if event.state == ElementState::Pressed && !event.repeat {
+                        let code = match event.physical_key {
+                            winit::keyboard::PhysicalKey::Code(code) => family_key(code),
+                            winit::keyboard::PhysicalKey::Unidentified(_) => None,
+                        };
+                        let result = controller
+                            .borrow_mut()
+                            .capture_key(code.unwrap_or(KeyCode::Unknown))
+                            .and_then(|model| {
+                                let mapping = controller.borrow().input_mapping();
+                                gamepad.borrow_mut().set_mapping(mapping)?;
+                                Ok(model)
+                            });
+                        match result {
+                            Ok(model) => super::apply_model(&weak_adapter, &model),
+                            Err(error) => report_error(&window, &error),
+                        }
+                    }
+                    return EventResult::PreventDefault;
+                }
+            }
             let input_active = super::session_input_open(&window);
             super::pointer::HostPointer::observe(&pointer, &window, event);
             let mut consumed = false;
+            let keyboard = matches!(event, WindowEvent::KeyboardInput { .. });
             let result = match event {
                 WindowEvent::ThemeChanged(_) => {
                     if let Ok(dark) = system_theme(native_window) {
@@ -118,13 +144,12 @@ pub(super) fn install<C: ManagerController>(
                         Ok(())
                     }
                 }
-                WindowEvent::CloseRequested => controller
-                    .borrow_mut()
-                    .physical_event(FamilyEvent::WindowCloseRequested),
                 _ => Ok(()),
             };
             if let Err(error) = result {
-                if controller.borrow().is_game_active() {
+                if keyboard {
+                    super::report_input_error(&window, &error);
+                } else if controller.borrow().is_game_active() {
                     super::terminate_game(&controller, &weak_adapter, &window, error);
                 } else {
                     report_error(&window, &error);

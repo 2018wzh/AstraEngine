@@ -25,7 +25,7 @@ fn damaged_core_keeps_manager_available_and_error_visible() {
     .unwrap();
 
     let mut app = controller(root.path());
-    app.refresh_cores().unwrap();
+    app.prepare_library().unwrap();
     super::probe_state_tests::settle_background(&mut app);
     assert!(app.plugin_errors.contains_key(&format!(
         "astra_emu_broken.{}",

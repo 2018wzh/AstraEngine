@@ -48,10 +48,18 @@ pub struct LibraryViewModel {
     pub sort: String,
     pub compat_filter: String,
     pub cores_ready: bool,
-    pub can_load_cores: bool,
     pub busy: bool,
     pub status: String,
+    /// `unprepared | loading-cores | scanning | ready | failed`
+    pub prepare_state: String,
+    pub prepare_label: String,
+    pub prepare_detail: String,
+    /// `None` means indeterminate progress.
+    pub prepare_progress: Option<f32>,
+    pub can_cancel_prepare: bool,
     pub selected_id: String,
+    pub roots: Vec<String>,
+    pub excluded: Vec<ExcludedViewModel>,
 }
 
 impl Default for LibraryViewModel {
@@ -62,12 +70,25 @@ impl Default for LibraryViewModel {
             sort: "title".into(),
             compat_filter: "all".into(),
             cores_ready: false,
-            can_load_cores: false,
             busy: false,
             status: String::new(),
+            prepare_state: "unprepared".into(),
+            prepare_label: "准备".into(),
+            prepare_detail: String::new(),
+            prepare_progress: None,
+            can_cancel_prepare: false,
             selected_id: String::new(),
+            roots: Vec::new(),
+            excluded: Vec::new(),
         }
     }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ExcludedViewModel {
+    pub id: String,
+    pub title: String,
+    pub location: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -251,6 +272,11 @@ pub struct InputConfigViewModel {
     pub gamepad_enabled: bool,
     pub deadzone: String,
     pub bindings: Vec<GamepadBindingViewModel>,
+    /// Button waiting for a key; empty when no capture is active.
+    pub capture_button: String,
+    /// Game whose binding is captured; empty for the global mapping.
+    pub capture_game_id: String,
+    pub capture_hint: String,
 }
 
 impl Default for InputConfigViewModel {
@@ -259,6 +285,9 @@ impl Default for InputConfigViewModel {
             gamepad_enabled: true,
             deadzone: "medium".into(),
             bindings: Vec::new(),
+            capture_button: String::new(),
+            capture_game_id: String::new(),
+            capture_hint: String::new(),
         }
     }
 }

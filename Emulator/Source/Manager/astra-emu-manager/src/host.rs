@@ -124,8 +124,30 @@ pub trait ManagerController: 'static {
         event: astra_emu_manager_core::model::FamilyEvent,
     ) -> Result<(), String>;
     fn is_game_active(&self) -> bool;
-    /// Starts core discovery only after a user action; never waits or scans games.
-    fn refresh_cores(&mut self) -> Result<ManagerViewModel, String>;
+    /// Load cores on first use (never at startup), then scan every library root.
+    /// `ASTRA_EMU_PREPARE_BUSY` while loading/scanning, `ASTRA_EMU_PREPARE_RESTART_REQUIRED` after failure.
+    fn prepare_library(&mut self) -> Result<ManagerViewModel, String>;
+    /// Cancel a running scan; core loading cannot be cancelled.
+    fn cancel_prepare(&mut self) -> Result<ManagerViewModel, String>;
+    /// Hide a game from the library and later scans; the snackbar offers undo.
+    fn remove_from_library(&mut self, game_id: &str) -> Result<ManagerViewModel, String>;
+    fn restore_game(&mut self, game_id: &str) -> Result<ManagerViewModel, String>;
+    /// Run the current snackbar action (undo removal or request a restart).
+    fn snackbar_action(&mut self) -> Result<SnackbarOutcome, String>;
+    /// Start capturing the next keyboard key for `button`; `game_id` targets a per-game mapping.
+    fn begin_key_capture(
+        &mut self,
+        button: &str,
+        game_id: Option<&str>,
+    ) -> Result<ManagerViewModel, String>;
+    fn cancel_key_capture(&mut self) -> Result<ManagerViewModel, String>;
+    fn key_capture_active(&self) -> bool;
+    /// Bind the captured key; keys without a mapping name keep the capture
+    /// waiting and set the hint to “这个键不能用于映射”.
+    fn capture_key(
+        &mut self,
+        code: astra_emu_manager_core::model::KeyCode,
+    ) -> Result<ManagerViewModel, String>;
     fn model(&self) -> Result<ManagerViewModel, String>;
     fn select_case(&mut self, case_id: &str) -> Result<ManagerViewModel, String>;
     fn search(&mut self, query: &str) -> Result<ManagerViewModel, String>;
@@ -182,7 +204,6 @@ pub trait ManagerController: 'static {
     /// Clear physical keys and modifiers when focus leaves the game surface
     /// so a later focus cannot inherit a stuck input state.
     fn release_inputs(&mut self) -> Result<(), String>;
-    fn rescan(&mut self) -> Result<ManagerViewModel, String>;
     fn launch(&mut self, case_id: &str) -> Result<ManagerViewModel, String>;
     fn leave_game(&mut self) -> Result<ManagerViewModel, String>;
     fn search_metadata(&mut self, provider: &str, query: &str) -> Result<ManagerViewModel, String>;
@@ -293,6 +314,43 @@ pub trait ManagerController: 'static {
     ) -> Result<ManagerViewModel, String>;
 }
 
+pub enum SnackbarOutcome {
+    Model(Box<ManagerViewModel>),
+    Restart,
+}
+
+/// What the host does with a window close request.
+#[derive(Debug)]
+pub enum CloseDecision {
+    /// A game was running and has been left; the Manager window stays open.
+    KeepWindow(Result<Box<ManagerViewModel>, String>),
+    HideWindow,
+}
+
+/// Closing the window while a game runs only leaves the game.
+pub fn close_requested<C: ManagerController>(controller: &mut C) -> CloseDecision {
+    if controller.is_game_active() {
+        CloseDecision::KeepWindow(controller.leave_game().map(Box::new))
+    } else {
+        CloseDecision::HideWindow
+    }
+}
+
+/// Open a file or directory in the platform file manager without a shell.
+pub fn open_path(path: &std::path::Path) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    let program = "explorer.exe";
+    #[cfg(target_os = "macos")]
+    let program = "open";
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    let program = "xdg-open";
+    std::process::Command::new(program)
+        .arg(path)
+        .spawn()
+        .map(drop)
+        .map_err(|error| format!("ASTRA_EMU_OPEN_PATH_FAILED: {error}"))
+}
+
 pub type FilterApply<'a> =
     &'a mut dyn FnMut(&astra_emu_manager_core::FilterSettings) -> Result<(), String>;
 
@@ -383,7 +441,12 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
     });
     controller.borrow_mut().set_host_wake(host_wake.clone());
     let pointer = pointer::HostPointer::install(&adapter);
-    window_events::install(&adapter, controller.clone(), pointer.clone());
+    window_events::install(
+        &adapter,
+        controller.clone(),
+        pointer.clone(),
+        gamepad.clone(),
+    );
     gamepad
         .borrow_mut()
         .set_wake(host_wake)
@@ -471,6 +534,25 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
             let _ = slint::quit_event_loop();
         });
     }
+    {
+        let close_controller = controller.clone();
+        let close_adapter = std::rc::Rc::downgrade(&adapter);
+        let close_window = adapter.window().as_weak();
+        let close_schedule = runtime_schedule.clone();
+        adapter.window().window().on_close_requested(move || {
+            let decision = close_requested(&mut *close_controller.borrow_mut());
+            match decision {
+                CloseDecision::KeepWindow(result) => {
+                    if let Some(window) = close_window.upgrade() {
+                        finish_leave(&window, &close_adapter, result.map(|model| *model));
+                    }
+                    fire_host_callback(&close_schedule);
+                    slint::CloseRequestResponse::KeepWindowShown
+                }
+                CloseDecision::HideWindow => slint::CloseRequestResponse::HideWindow,
+            }
+        });
+    }
     let modal_ui = modals::install(&adapter, &controller);
     let event_controller = controller.clone();
     let event_adapter = std::rc::Rc::downgrade(&adapter);
@@ -534,15 +616,32 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                         }
                         match event_gamepad.borrow_mut().poll() {
                             Ok(events) => {
-                                if !input_blocked && window.global::<Session>().get_active() {
-                                    for event in events {
+                                let session = window.global::<Session>();
+                                if session.get_active() && session.get_menu_open() {
+                                    let keys: Vec<_> = events
+                                        .iter()
+                                        .filter_map(|event| {
+                                            menu_key(event.button?).map(|key| (key, event.pressed))
+                                        })
+                                        .collect();
+                                    if !keys.is_empty() {
+                                        // Dispatching from inside the rendering notifier would re-enter Slint.
+                                        let weak = window.as_weak();
+                                        slint::Timer::single_shot(std::time::Duration::ZERO, move || {
+                                            if let Some(window) = weak.upgrade() {
+                                                dispatch_menu_keys(&window, &keys);
+                                            }
+                                        });
+                                    }
+                                } else if !input_blocked && session.get_active() {
+                                    for event in events.into_iter().filter(|event| !event.control.is_empty()) {
                                         let input = event_controller.borrow_mut().game_input(
                                             &event.control,
                                             event.pressed,
                                             event.value,
                                         );
                                         if let Err(error) = input {
-                                            terminate_game(&event_controller, &event_adapter, &window, error);
+                                            report_input_error(&window, &error);
                                             break;
                                         }
                                     }
@@ -642,7 +741,92 @@ fn apply_model(adapter: &std::rc::Weak<SlintManagerAdapter>, model: &ManagerView
 fn session_input_open(window: &astra_emu_manager_ui_slint::ManagerWindow) -> bool {
     let session = window.global::<Session>();
     let dialogs = window.global::<Dialogs>();
-    session.get_active() && !dialogs.get_fatal_active() && !dialogs.get_modal_active()
+    session.get_active()
+        && !session.get_menu_open()
+        && !dialogs.get_fatal_active()
+        && !dialogs.get_modal_active()
+}
+
+/// Drop a stale frame and its geometry so the next session never shows it.
+fn clear_session_frame(session: &Session<'_>) {
+    session.set_frame(slint::Image::default());
+    session.set_output_aspect(0.0);
+    session.set_native_width(0.0);
+    session.set_native_height(0.0);
+    session.set_raster_width(0.0);
+    session.set_raster_height(0.0);
+    session.set_content_x(0.0);
+    session.set_content_y(0.0);
+    session.set_content_width(0.0);
+    session.set_content_height(0.0);
+}
+
+/// Shared UI side of leaving a game: Session.leave, window close, and terminate.
+fn finish_leave(
+    window: &astra_emu_manager_ui_slint::ManagerWindow,
+    adapter: &std::rc::Weak<SlintManagerAdapter>,
+    result: Result<ManagerViewModel, String>,
+) {
+    let icon_result = window_commands::set_icon(window.window(), None);
+    let session = window.global::<Session>();
+    session.set_active(false);
+    session.set_fullscreen(false);
+    session.set_menu_open(false);
+    clear_session_frame(&session);
+    let dialogs = window.global::<Dialogs>();
+    dialogs.set_fatal_active(false);
+    dialogs.set_fatal_retryable(false);
+    window.window().set_fullscreen(false);
+    match (result, icon_result) {
+        (Ok(model), Ok(())) => apply_model(adapter, &model),
+        (Err(error), Ok(())) | (Ok(_), Err(error)) => report_error(window, &error),
+        (Err(error), Err(cleanup)) => report_error(window, &format!("{error}; {cleanup}")),
+    }
+}
+
+/// Input never ends a session: a full queue drops the event, other errors are reported.
+fn report_input_error(window: &astra_emu_manager_ui_slint::ManagerWindow, error: &str) {
+    if is_input_queue_full(error) {
+        tracing::warn!(
+            event = "astra.emu.host.input_dropped",
+            diagnostic_code = "ASTRA_EMU_INPUT_QUEUE_FULL"
+        );
+    } else {
+        report_error(window, error);
+    }
+}
+
+fn is_input_queue_full(error: &str) -> bool {
+    error.starts_with("ASTRA_EMU_INPUT_QUEUE_FULL")
+}
+
+/// Session-menu navigation key for a gamepad button.
+fn menu_key(button: astra_emu_manager_core::GamepadInput) -> Option<slint::platform::Key> {
+    use astra_emu_manager_core::GamepadInput as Pad;
+    use slint::platform::Key;
+    Some(match button {
+        Pad::DpadUp => Key::UpArrow,
+        Pad::DpadDown => Key::DownArrow,
+        Pad::DpadLeft => Key::LeftArrow,
+        Pad::DpadRight => Key::RightArrow,
+        Pad::South => Key::Return,
+        Pad::East => Key::Escape,
+        _ => return None,
+    })
+}
+
+fn dispatch_menu_keys(
+    window: &astra_emu_manager_ui_slint::ManagerWindow,
+    keys: &[(slint::platform::Key, bool)],
+) {
+    for &(key, pressed) in keys {
+        let text = slint::SharedString::from(key);
+        window.window().dispatch_event(if pressed {
+            slint::platform::WindowEvent::KeyPressed { text }
+        } else {
+            slint::platform::WindowEvent::KeyReleased { text }
+        });
+    }
 }
 
 fn apply_fatal(window: &astra_emu_manager_ui_slint::ManagerWindow, message: &str, retryable: bool) {
@@ -666,6 +850,8 @@ fn terminate_game<C: ManagerController>(
     let session = window.global::<Session>();
     session.set_active(false);
     session.set_fullscreen(false);
+    session.set_menu_open(false);
+    clear_session_frame(&session);
     window.window().set_fullscreen(false);
     let message = match cleanup {
         Ok(model) => {

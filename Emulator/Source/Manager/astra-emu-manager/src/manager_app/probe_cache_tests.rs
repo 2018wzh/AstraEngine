@@ -1,6 +1,30 @@
 use super::*;
 use crate::test_native::{self, Fixture};
-use std::sync::atomic::AtomicBool;
+use super::super::probe_worker::{ScanKind, ScanReport, ScanRequest};
+use std::sync::{atomic::AtomicBool, Arc};
+
+fn run_scan(
+    registry: &FamilyProviderRegistry,
+    cache: &mut ProbeCache,
+    kind: ScanKind,
+    paths: Vec<PathBuf>,
+    games: Vec<GameRecord>,
+) -> ScanReport {
+    super::super::probe_worker::scan(
+        registry,
+        cache,
+        ScanRequest {
+            kind,
+            paths,
+            games,
+            excluded: BTreeSet::new(),
+            cancel: Arc::new(AtomicBool::new(false)),
+        },
+        &AtomicBool::new(false),
+        &mut |_| {},
+    )
+    .unwrap()
+}
 
 fn registry() -> FamilyProviderRegistry {
     let mut registry = FamilyProviderRegistry::new();
@@ -28,18 +52,8 @@ fn refresh(
     registry: &FamilyProviderRegistry,
     cache: &mut ProbeCache,
     path: &Path,
-) -> super::super::probe_worker::ScanReport {
-    super::super::probe_worker::scan(
-        registry,
-        cache,
-        super::super::probe_worker::ScanRequest {
-            kind: super::super::probe_worker::ScanKind::Full,
-            paths: Vec::new(),
-            games: vec![game(path)],
-        },
-        &AtomicBool::new(false),
-    )
-    .unwrap()
+) -> ScanReport {
+    run_scan(registry, cache, ScanKind::Full, Vec::new(), vec![game(path)])
 }
 
 #[test]
@@ -157,17 +171,13 @@ fn manual_full_scan_discovers_unregistered_children_with_fresh_probes() {
         .iter()
         .filter(|call| call.name == "probe")
         .count();
-    let report = super::super::probe_worker::scan(
+    let report = run_scan(
         &registry,
         &mut cache,
-        super::super::probe_worker::ScanRequest {
-            kind: super::super::probe_worker::ScanKind::Full,
-            paths: vec![root.path().into()],
-            games: Vec::new(),
-        },
-        &AtomicBool::new(false),
-    )
-    .unwrap();
+        ScanKind::Full,
+        vec![root.path().into()],
+        Vec::new(),
+    );
     assert_eq!(report.cache_hits, 0);
     assert_eq!(report.games.len(), 1);
     assert_eq!(report.games[0].path, fs::canonicalize(&child).unwrap());
@@ -204,17 +214,13 @@ fn explicit_import_always_probes_registered_paths_freshly() {
         .iter()
         .filter(|call| call.name == "probe")
         .count();
-    let report = super::super::probe_worker::scan(
+    let report = run_scan(
         &registry,
         &mut cache,
-        super::super::probe_worker::ScanRequest {
-            kind: super::super::probe_worker::ScanKind::Import,
-            paths: vec![path.clone()],
-            games: vec![game(&path)],
-        },
-        &AtomicBool::new(false),
-    )
-    .unwrap();
+        ScanKind::Import,
+        vec![path.clone()],
+        vec![game(&path)],
+    );
     assert_eq!(report.cache_hits, 0);
     assert_eq!(report.games[0].game_ids, ["registered"]);
     assert_eq!(report.games[0].candidates.len(), 1);
@@ -378,20 +384,66 @@ fn already_registered_nested_games_are_independently_refreshed() {
     let mut cache = ProbeCache::load(root.path(), Inventory::read(&[], &registry));
     let mut nested = game(&child);
     nested.game_id = "nested".into();
-    let report = super::super::probe_worker::scan(
+    let report = run_scan(
         &registry,
         &mut cache,
-        super::super::probe_worker::ScanRequest {
-            kind: super::super::probe_worker::ScanKind::Full,
-            paths: Vec::new(),
-            games: vec![game(&path), nested],
-        },
-        &AtomicBool::new(false),
-    )
-    .unwrap();
+        ScanKind::Full,
+        Vec::new(),
+        vec![game(&path), nested],
+    );
     assert_eq!(report.games.len(), 2);
     for (index, expected) in ["registered", "nested"].iter().enumerate() {
         assert_eq!(report.games[index].game_ids, [*expected]);
         assert_eq!(report.games[index].candidates.len(), 1);
     }
+}
+
+#[test]
+fn scan_reports_progress_and_skips_excluded_and_cancelled_paths() {
+    let root = tempfile::tempdir().unwrap();
+    for index in 0..70 {
+        fs::create_dir(root.path().join(format!("empty-{index:02}"))).unwrap();
+    }
+    let hidden = root.path().join("hidden");
+    fs::create_dir(&hidden).unwrap();
+    fs::write(hidden.join("boot"), b"boot").unwrap();
+    let registry = registry();
+    let mut cache = ProbeCache::load(root.path(), Inventory::read(&[], &registry));
+    let mut progress = Vec::new();
+    let report = super::super::probe_worker::scan(
+        &registry,
+        &mut cache,
+        ScanRequest {
+            kind: ScanKind::Full,
+            paths: vec![root.path().into()],
+            games: Vec::new(),
+            excluded: BTreeSet::from([hidden.clone()]),
+            cancel: Arc::new(AtomicBool::new(false)),
+        },
+        &AtomicBool::new(false),
+        &mut |event| progress.push(event),
+    )
+    .unwrap();
+    assert!(report.games.is_empty());
+    assert_eq!(
+        progress,
+        [super::super::owner::PrepareProgress::Scan {
+            directories: 64,
+            games: 0
+        }]
+    );
+    let cancelled = super::super::probe_worker::scan(
+        &registry,
+        &mut cache,
+        ScanRequest {
+            kind: ScanKind::Full,
+            paths: vec![root.path().into()],
+            games: Vec::new(),
+            excluded: BTreeSet::new(),
+            cancel: Arc::new(AtomicBool::new(true)),
+        },
+        &AtomicBool::new(false),
+        &mut |_| {},
+    );
+    assert_eq!(cancelled.err().as_deref(), Some("ASTRA_EMU_SCAN_CANCELLED"));
 }
