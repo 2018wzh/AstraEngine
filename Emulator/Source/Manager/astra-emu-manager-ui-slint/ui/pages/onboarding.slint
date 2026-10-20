@@ -1,7 +1,348 @@
-import { MaterialPalette } from "@material";
+import { MaterialPalette, MaterialText, MaterialTypography, FilledButton, TonalButton, OutlineButton, TextButton, LinearProgressIndicator, HorizontalDivider, Icon, ScrollView } from "@material";
+import { App, Library, Network, Onboarding } from "../globals.slint";
+import { Icons } from "../icons.slint";
+import { SettingGroup, SwitchRow } from "./settings/common.slint";
+import { PathRow, EmptyLine } from "./settings/roots.slint";
+import { ThemeChooser, CoverSizeChooser } from "./settings/appearance.slint";
+
+component StepDots {
+    in property <int> step;
+    in property <int> count: 4;
+
+    height: 12px;
+    accessible-role: progress-indicator;
+    accessible-label: "第 " + (root.step + 1) + " 步，共 " + root.count + " 步";
+    accessible-value: root.step + 1;
+    accessible-value-minimum: 1;
+    accessible-value-maximum: root.count;
+
+    HorizontalLayout {
+        alignment: center;
+        spacing: 8px;
+        for i in root.count : Rectangle {
+            width: i == root.step ? 24px : 8px;
+            height: 8px;
+            y: 2px;
+            border-radius: 4px;
+            background: i <= root.step ? MaterialPalette.primary : MaterialPalette.outline-variant;
+            animate width { duration: App.appearance.reduce-motion ? 0ms : 200ms; }
+        }
+    }
+}
+
+component StepHeader {
+    in property <image> icon;
+    in property <string> title;
+    in property <string> description;
+
+    min-height: l.min-height;
+    preferred-height: l.preferred-height;
+
+    l := VerticalLayout {
+        spacing: 12px;
+        Rectangle {
+            width: 56px;
+            height: 56px;
+            border-radius: 16px;
+            background: MaterialPalette.primary-container;
+            Icon {
+                width: 28px;
+                height: 28px;
+                source: root.icon;
+                colorize: MaterialPalette.on-primary-container;
+            }
+        }
+        MaterialText {
+            text: root.title;
+            style: MaterialTypography.headline-small;
+            color: MaterialPalette.on-surface;
+            wrap: word-wrap;
+            overflow: clip;
+        }
+        MaterialText {
+            text: root.description;
+            style: MaterialTypography.body-large;
+            color: MaterialPalette.on-surface-variant;
+            wrap: word-wrap;
+            overflow: clip;
+        }
+    }
+}
+
+component RootsStep {
+    min-height: l.min-height;
+    preferred-height: l.preferred-height;
+
+    l := VerticalLayout {
+        spacing: 24px;
+        StepHeader {
+            icon: Icons.folder-open;
+            title: "添加库目录";
+            description: "选择存放游戏的文件夹，AstraEMU 会在其中识别作品。以后也可以在 设置→库目录 修改，这一步可以跳过。";
+        }
+        SettingGroup {
+            flush: true;
+            if Onboarding.roots.length == 0 : HorizontalLayout {
+                padding: 16px;
+                EmptyLine { text: "还没有添加目录。"; }
+            }
+            for path[index] in Onboarding.roots : VerticalLayout {
+                if index > 0 : HorizontalDivider { }
+                PathRow {
+                    path: path;
+                    remove => { Onboarding.remove-root(path); }
+                }
+            }
+            HorizontalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                padding-top: 8px;
+                padding-bottom: 8px;
+                alignment: start;
+                OutlineButton {
+                    text: "添加目录";
+                    icon: Icons.add;
+                    clicked => { Onboarding.add-root(); }
+                }
+            }
+        }
+    }
+}
+
+component NetworkStep {
+    min-height: l.min-height;
+    preferred-height: l.preferred-height;
+
+    l := VerticalLayout {
+        spacing: 24px;
+        StepHeader {
+            icon: Icons.public;
+            title: "联网服务";
+            description: "AstraEMU 默认不联网。开启后可以使用以下服务，随时可以在 设置→联网与资料 关闭。";
+        }
+        SettingGroup {
+            SwitchRow {
+                label: "允许联网";
+                description: "涵盖 VNDB 资料与封面、Bangumi 同步、AstraEMU 元数据（兼容性、推荐配置、汉化补丁）与核心更新，以及实时翻译。";
+                value: Network.allowed;
+                toggled(on) => { Network.set-allowed(on); }
+            }
+        }
+    }
+}
+
+component AppearanceStep {
+    min-height: l.min-height;
+    preferred-height: l.preferred-height;
+
+    l := VerticalLayout {
+        spacing: 24px;
+        StepHeader {
+            icon: Icons.palette;
+            title: "外观";
+            description: "选择界面主题和游戏库封面大小。更多选项在 设置→外观。";
+        }
+        SettingGroup {
+            ThemeChooser { }
+            CoverSizeChooser { }
+        }
+    }
+}
+
+component PrepareStep {
+    property <bool> busy: Library.prepare-state == "loading-cores" || Library.prepare-state == "scanning";
+    property <bool> done: Library.prepare-state == "ready";
+    property <bool> failed: Library.prepare-state == "failed";
+
+    min-height: l.min-height;
+    preferred-height: l.preferred-height;
+
+    l := VerticalLayout {
+        spacing: 24px;
+        StepHeader {
+            icon: Icons.library-books;
+            title: "准备资料库";
+            description: "加载模拟器核心并扫描库目录。作品较多时可能需要一些时间，可以先完成引导，在游戏库中查看进度。";
+        }
+        SettingGroup {
+            if !root.busy : HorizontalLayout {
+                alignment: start;
+                FilledButton {
+                    text: root.done ? "重新扫描" : root.failed ? "重试" : "开始准备";
+                    icon: root.done ? Icons.refresh : Icons.play-arrow;
+                    clicked => { Library.prepare(); }
+                }
+            }
+            if root.busy : VerticalLayout {
+                spacing: 12px;
+                LinearProgressIndicator {
+                    indeterminate: Library.prepare-progress < 0;
+                    progress: max(Library.prepare-progress, 0);
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    MaterialText {
+                        horizontal-stretch: 1;
+                        text: Library.prepare-detail != "" ? Library.prepare-detail : Library.prepare-state == "loading-cores" ? "正在加载核心…" : "正在扫描…";
+                        style: MaterialTypography.body-medium;
+                        color: MaterialPalette.on-surface-variant;
+                        vertical-alignment: center;
+                        wrap: word-wrap;
+                        overflow: clip;
+                    }
+                    if Library.can-cancel-prepare : TextButton {
+                        text: "取消";
+                        clicked => { Library.cancel-prepare(); }
+                    }
+                }
+            }
+            if !root.busy && (root.done || root.failed) : HorizontalLayout {
+                spacing: 8px;
+                Icon {
+                    width: 20px;
+                    height: 20px;
+                    source: root.failed ? Icons.error : Icons.check;
+                    colorize: root.failed ? MaterialPalette.error : MaterialPalette.primary;
+                }
+                MaterialText {
+                    horizontal-stretch: 1;
+                    text: root.failed ? (Library.prepare-detail != "" ? Library.prepare-detail : "准备失败，请查看核心诊断")
+                        : Library.prepare-detail != "" ? Library.prepare-detail : "资料库已准备好，共 " + Library.games.length + " 部作品";
+                    style: MaterialTypography.body-medium;
+                    color: root.failed ? MaterialPalette.error : MaterialPalette.on-surface;
+                    vertical-alignment: center;
+                    wrap: word-wrap;
+                    overflow: clip;
+                }
+            }
+        }
+    }
+}
 
 export component OnboardingPage {
+    property <int> step: clamp(Onboarding.step, 0, 3);
+    property <bool> phone: root.width < 600px;
+    property <length> pad: root.phone ? 16px : 32px;
+    property <length> footer-height: 80px;
+
+    function go(next: int) {
+        Onboarding.step = clamp(next, 0, 3);
+    }
+
+    function finish() {
+        Onboarding.finish();
+        App.page = "library";
+    }
+
+    forward-focus: keys;
+
+    keys := FocusScope {
+        key-pressed(event) => {
+            if event.text == Key.Escape {
+                root.finish();
+                return accept;
+            }
+            reject
+        }
+    }
+
     Rectangle {
         background: MaterialPalette.surface;
+    }
+
+    sv := ScrollView {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height - root.footer-height;
+
+        HorizontalLayout {
+            width: sv.visible-width;
+            padding: root.pad;
+            alignment: center;
+
+            VerticalLayout {
+                width: min(600px, sv.visible-width - 2 * root.pad);
+                spacing: 32px;
+                alignment: start;
+
+                HorizontalLayout {
+                    spacing: 12px;
+                    MaterialText {
+                        horizontal-stretch: 1;
+                        text: "欢迎使用 AstraEMU";
+                        style: MaterialTypography.title-medium;
+                        color: MaterialPalette.primary;
+                        vertical-alignment: center;
+                    }
+                    VerticalLayout {
+                        horizontal-stretch: 0;
+                        alignment: center;
+                        StepDots { step: root.step; }
+                    }
+                }
+
+                if root.step == 0 : RootsStep { }
+                if root.step == 1 : NetworkStep { }
+                if root.step == 2 : AppearanceStep { }
+                if root.step == 3 : PrepareStep { }
+            }
+        }
+    }
+
+    Rectangle {
+        x: 0px;
+        y: root.height - root.footer-height;
+        width: root.width;
+        height: root.footer-height;
+        background: MaterialPalette.surface-container;
+
+        HorizontalLayout {
+            padding-left: root.pad;
+            padding-right: root.pad;
+            spacing: 8px;
+            alignment: center;
+
+            HorizontalLayout {
+                width: min(600px, root.width - 2 * root.pad);
+                spacing: 8px;
+
+                VerticalLayout {
+                    alignment: center;
+                    horizontal-stretch: 0;
+                    TextButton {
+                        text: "跳过引导";
+                        clicked => { root.finish(); }
+                    }
+                }
+
+                Rectangle { horizontal-stretch: 1; }
+
+                if root.step > 0 : VerticalLayout {
+                    alignment: center;
+                    horizontal-stretch: 0;
+                    OutlineButton {
+                        text: "上一步";
+                        clicked => { root.go(root.step - 1); }
+                    }
+                }
+
+                VerticalLayout {
+                    alignment: center;
+                    horizontal-stretch: 0;
+                    FilledButton {
+                        text: root.step == 3 ? "完成" : "下一步";
+                        icon: root.step == 3 ? Icons.check : @image-url("");
+                        clicked => {
+                            if root.step == 3 {
+                                root.finish();
+                            } else {
+                                root.go(root.step + 1);
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }

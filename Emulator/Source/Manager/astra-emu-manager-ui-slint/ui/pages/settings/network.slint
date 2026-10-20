@@ -1,0 +1,107 @@
+import { MaterialPalette, MaterialText, MaterialTypography, TonalButton, TextButton, FilledButton, TextField, LinearProgressIndicator } from "@material";
+import { Network, Settings } from "../../globals.slint";
+import { Icons } from "../../icons.slint";
+import { PageScroll, SettingGroup, SwitchRow, RowText } from "./common.slint";
+
+export component NetworkSection inherits PageScroll {
+    title: "联网与资料";
+
+    SettingGroup {
+        title: "联网";
+
+        SwitchRow {
+            label: "允许联网";
+            description: "开启后才会访问 VNDB 资料与封面、Bangumi、AstraEMU 元数据与核心更新，以及实时翻译服务。关闭时 AstraEMU 不发出任何网络请求。";
+            value: Network.allowed;
+            toggled(on) => { Network.set-allowed(on); }
+        }
+    }
+
+    SettingGroup {
+        title: "AstraEMU 元数据";
+        description: "兼容性记录、推荐配置、汉化补丁目录和在线核心列表来自元数据仓库。";
+
+        HorizontalLayout {
+            spacing: 16px;
+            RowText {
+                horizontal-stretch: 1;
+                label: Network.syncing ? "正在同步…" : Network.sync-status != "" ? Network.sync-status : "未同步";
+                description: Network.allowed ? "" : "需要先允许联网";
+                enabled: Network.allowed;
+            }
+            VerticalLayout {
+                horizontal-stretch: 0;
+                alignment: center;
+                TonalButton {
+                    text: "立即同步";
+                    icon: Icons.refresh;
+                    enabled: Network.allowed && !Network.syncing;
+                    clicked => { Network.sync-now(); }
+                }
+            }
+        }
+
+        if Network.syncing : LinearProgressIndicator {
+            indeterminate: true;
+        }
+
+        if Network.source != "" : RowText {
+            label: "数据来源";
+            description: Network.source;
+        }
+
+        if Settings.compat-summary != "" : RowText {
+            label: "兼容性数据";
+            description: Settings.compat-summary;
+        }
+    }
+
+    SettingGroup {
+        title: "作品资料";
+
+        SwitchRow {
+            label: "下载敏感封面";
+            description: "关闭时，VNDB 标记为敏感的封面不会下载，以占位图代替。";
+            value: Settings.sensitive-covers;
+            toggled(on) => { Settings.set-sensitive-covers(on); }
+        }
+
+        VerticalLayout {
+            spacing: 8px;
+            RowText {
+                label: "Bangumi 访问令牌";
+                description: "用于同步收藏状态与评分。令牌保存在系统凭据库中。";
+            }
+            token := TextField {
+                label: Settings.bangumi-token-saved ? "已保存（输入新令牌可替换）" : "访问令牌";
+                input-type: InputType.password;
+                accepted(text) => {
+                    if text != "" {
+                        Settings.save-bangumi-token(text);
+                        self.text = "";
+                    }
+                }
+            }
+            HorizontalLayout {
+                alignment: end;
+                spacing: 8px;
+                TextButton {
+                    text: "清除";
+                    enabled: Settings.bangumi-token-saved;
+                    clicked => {
+                        Settings.clear-bangumi-token();
+                        token.text = "";
+                    }
+                }
+                FilledButton {
+                    text: "保存";
+                    enabled: token.text != "";
+                    clicked => {
+                        Settings.save-bangumi-token(token.text);
+                        token.text = "";
+                    }
+                }
+            }
+        }
+    }
+}

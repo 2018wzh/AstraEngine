@@ -1,0 +1,194 @@
+import { MaterialPalette, MaterialText, MaterialTypography, Icon, ScrollView } from "@material";
+import { Icons } from "../../icons.slint";
+
+component Row {
+    in property <string> text;
+    in property <bool> selected;
+    callback clicked();
+
+    height: 48px;
+    accessible-role: list-item;
+    accessible-label: root.text;
+    accessible-item-selectable: true;
+    accessible-item-selected: root.selected;
+    accessible-action-default => { root.clicked(); }
+
+    Rectangle {
+        background: root.selected ? MaterialPalette.secondary-container : touch.has-hover ? MaterialPalette.on-surface.with-alpha(MaterialPalette.state-layer-opacity-hover) : transparent;
+    }
+
+    MaterialText {
+        x: 12px;
+        y: 0px;
+        width: root.width - 24px;
+        height: root.height;
+        text: root.text;
+        style: MaterialTypography.body-large;
+        color: root.selected ? MaterialPalette.on-secondary-container : MaterialPalette.on-surface;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+// Select over a plain string list plus one trailing extra entry (e.g. “手动输入…”).
+export component ListSelect {
+    in property <string> label;
+    in property <[string]> items;
+    in property <string> value;
+    in property <string> placeholder;
+    in property <string> extra-label;
+    in property <bool> extra-active;
+    in property <bool> enabled: true;
+    in property <string> supporting-text;
+    callback selected(value: string);
+    callback extra();
+
+    property <bool> open;
+    property <color> highlight: focus.has-focus ? MaterialPalette.primary : MaterialPalette.on-surface-variant;
+    property <int> count: root.items.length + (root.extra-label != "" ? 1 : 0);
+
+    min-width: 120px;
+    min-height: layout.min-height;
+    preferred-height: layout.preferred-height;
+    forward-focus: focus;
+    accessible-role: combobox;
+    accessible-label: root.label;
+    accessible-value: root.extra-active ? root.extra-label : root.value;
+    accessible-enabled: root.enabled;
+    accessible-expandable: true;
+    accessible-action-expand => { menu.show(); }
+
+    focus := FocusScope {
+        x: 0;
+        width: 0px;
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if event.text == " " || event.text == "\n" || event.text == Key.DownArrow {
+                menu.show();
+                return accept;
+            }
+            reject
+        }
+    }
+
+    layout := VerticalLayout {
+        spacing: 4px;
+
+        field := Rectangle {
+            min-height: 56px;
+            border-top-left-radius: 4px;
+            border-top-right-radius: 4px;
+            background: MaterialPalette.surface-container-highest;
+            opacity: root.enabled ? 1 : 0.38;
+
+            Rectangle {
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+                background: touch.has-hover ? MaterialPalette.on-surface.with-alpha(MaterialPalette.state-layer-opacity-hover) : transparent;
+            }
+
+            HorizontalLayout {
+                padding-left: 16px;
+                padding-right: 12px;
+                spacing: 8px;
+
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    alignment: center;
+                    spacing: 2px;
+                    MaterialText {
+                        text: root.label;
+                        style: MaterialTypography.body-small;
+                        color: root.highlight;
+                        overflow: elide;
+                    }
+                    MaterialText {
+                        text: root.extra-active ? root.extra-label : root.value != "" ? root.value : root.placeholder;
+                        style: MaterialTypography.body-large;
+                        color: root.value != "" || root.extra-active ? MaterialPalette.on-surface : MaterialPalette.on-surface-variant;
+                        overflow: elide;
+                    }
+                }
+
+                VerticalLayout {
+                    alignment: center;
+                    Icon {
+                        width: 24px;
+                        source: Icons.arrow-drop-down;
+                        colorize: MaterialPalette.on-surface-variant;
+                    }
+                }
+            }
+
+            Rectangle {
+                y: parent.height - self.height;
+                height: focus.has-focus ? 2px : 1px;
+                background: root.highlight;
+            }
+
+            touch := TouchArea {
+                enabled: root.enabled;
+                clicked => {
+                    focus.focus();
+                    menu.show();
+                }
+            }
+        }
+
+        if root.supporting-text != "" : HorizontalLayout {
+            padding-left: 16px;
+            padding-right: 16px;
+            MaterialText {
+                text: root.supporting-text;
+                style: MaterialTypography.body-small;
+                color: MaterialPalette.on-surface-variant;
+                wrap: word-wrap;
+                overflow: clip;
+            }
+        }
+    }
+
+    menu := PopupWindow {
+        x: 0px;
+        y: field.height;
+        width: root.width;
+        height: min(root.count * 48px + 16px, 6 * 48px + 16px);
+        close-policy: close-on-click-outside;
+
+        Rectangle {
+            border-radius: 4px;
+            background: MaterialPalette.surface-container;
+            drop-shadow-blur: 8px;
+            drop-shadow-offset-y: 2px;
+            drop-shadow-color: MaterialPalette.shadow-30;
+            clip: true;
+
+            ScrollView {
+                VerticalLayout {
+                    padding-top: 8px;
+                    padding-bottom: 8px;
+                    for item in root.items : Row {
+                        text: item;
+                        selected: !root.extra-active && item == root.value;
+                        clicked => {
+                            menu.close();
+                            root.selected(item);
+                        }
+                    }
+                    if root.extra-label != "" : Row {
+                        text: root.extra-label;
+                        selected: root.extra-active;
+                        clicked => {
+                            menu.close();
+                            root.extra();
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

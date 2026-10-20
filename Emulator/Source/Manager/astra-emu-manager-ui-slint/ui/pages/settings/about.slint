@@ -1,0 +1,154 @@
+import { MaterialPalette, MaterialText, MaterialTypography, Icon, HorizontalDivider, StateLayerArea } from "@material";
+import { AboutSlint } from "std-widgets.slint";
+import { App, Onboarding } from "../../globals.slint";
+import { Icons } from "../../icons.slint";
+import { PageScroll, SettingGroup } from "./common.slint";
+
+component LinkRow {
+    in property <string> text;
+    in property <string> supporting-text;
+    in property <image> icon;
+    callback clicked();
+
+    min-height: 64px;
+    preferred-height: 64px;
+    forward-focus: area;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-description: root.supporting-text;
+    accessible-action-default => { root.clicked(); }
+
+    // StateLayerArea maps Enter/Space to clicked and draws hover/focus/press layers.
+    area := StateLayerArea {
+        width: root.width;
+        height: root.height;
+        color: MaterialPalette.on-surface;
+        clicked => { root.clicked(); }
+
+        HorizontalLayout {
+            padding-left: 16px;
+            padding-right: 16px;
+            spacing: 16px;
+
+            VerticalLayout {
+                alignment: center;
+                horizontal-stretch: 0;
+                Icon {
+                    width: 24px;
+                    height: 24px;
+                    source: root.icon;
+                    colorize: MaterialPalette.on-surface-variant;
+                }
+            }
+            VerticalLayout {
+                horizontal-stretch: 1;
+                alignment: center;
+                spacing: 2px;
+                MaterialText {
+                    text: root.text;
+                    style: MaterialTypography.body-large;
+                    color: MaterialPalette.on-surface;
+                }
+                MaterialText {
+                    text: root.supporting-text;
+                    style: MaterialTypography.body-medium;
+                    color: MaterialPalette.on-surface-variant;
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                horizontal-stretch: 0;
+                Icon {
+                    width: 24px;
+                    height: 24px;
+                    source: Icons.chevron-right;
+                    colorize: MaterialPalette.on-surface-variant;
+                }
+            }
+        }
+    }
+}
+
+export component AboutSection inherits PageScroll {
+    title: "关于";
+
+    SettingGroup {
+        HorizontalLayout {
+            spacing: 16px;
+            Rectangle {
+                width: 56px;
+                height: 56px;
+                border-radius: 16px;
+                background: MaterialPalette.primary-container;
+                Icon {
+                    width: 32px;
+                    height: 32px;
+                    source: Icons.sports-esports;
+                    colorize: MaterialPalette.on-primary-container;
+                }
+            }
+            VerticalLayout {
+                horizontal-stretch: 1;
+                alignment: center;
+                spacing: 2px;
+                MaterialText {
+                    text: "AstraEMU";
+                    style: MaterialTypography.title-large;
+                    color: MaterialPalette.on-surface;
+                }
+                MaterialText {
+                    text: "版本 " + (App.version != "" ? App.version : "未知") + (App.build != "" ? " · 构建 " + App.build : "");
+                    style: MaterialTypography.body-medium;
+                    color: MaterialPalette.on-surface-variant;
+                    wrap: word-wrap;
+                    overflow: clip;
+                }
+            }
+        }
+    }
+
+    SettingGroup {
+        flush: true;
+
+        LinkRow {
+            text: "第三方许可";
+            supporting-text: "AstraEMU 使用的开源组件及其许可证";
+            icon: Icons.info;
+            clicked => { App.open-path("third-party-notices"); }
+        }
+        HorizontalDivider { }
+        LinkRow {
+            text: "打开数据目录";
+            supporting-text: "资料库、设置、封面缓存和用户安装的核心";
+            icon: Icons.folder-open;
+            clicked => { App.open-path("data"); }
+        }
+        HorizontalDivider { }
+        LinkRow {
+            text: "打开日志目录";
+            supporting-text: "报告问题时请附上日志";
+            icon: Icons.history;
+            clicked => { App.open-path("logs"); }
+        }
+        HorizontalDivider { }
+        LinkRow {
+            text: "重新运行首次设置";
+            supporting-text: "重新选择库目录、联网与外观";
+            icon: Icons.restart-alt;
+            clicked => {
+                Onboarding.step = 0;
+                App.page = "onboarding";
+            }
+        }
+    }
+
+    SettingGroup {
+        title: "界面框架";
+        HorizontalLayout {
+            alignment: center;
+            AboutSlint {
+                preferred-width: 360px;
+            }
+        }
+    }
+}

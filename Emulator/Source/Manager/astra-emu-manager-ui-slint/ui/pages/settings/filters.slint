@@ -1,0 +1,177 @@
+import { MaterialPalette, MaterialText, MaterialTypography, TextButton, Icon } from "@material";
+import { Filters } from "../../globals.slint";
+import { Icons } from "../../icons.slint";
+import { ConfigFieldList } from "../../components/config-field.slint";
+import { PageScroll, SettingGroup } from "./common.slint";
+
+component PresetCard {
+    in property <string> title;
+    in property <string> description;
+    in property <image> icon;
+    in property <bool> active;
+    callback activate();
+
+    min-width: 150px;
+    min-height: 96px;
+    preferred-width: 180px;
+    horizontal-stretch: 1;
+    forward-focus: keys;
+    accessible-role: radio-button;
+    accessible-label: root.title;
+    accessible-description: root.description;
+    accessible-checkable: true;
+    accessible-checked: root.active;
+    accessible-action-default => { root.activate(); }
+
+    Rectangle {
+        border-radius: 12px;
+        background: root.active ? MaterialPalette.secondary-container : MaterialPalette.surface-container-high;
+        border-width: root.active ? 2px : keys.has-focus ? 2px : 1px;
+        border-color: root.active ? MaterialPalette.primary : keys.has-focus ? MaterialPalette.secondary : MaterialPalette.outline-variant;
+    }
+
+    Rectangle {
+        border-radius: 12px;
+        background: touch.pressed ? MaterialPalette.on-surface.with-alpha(MaterialPalette.state-layer-opacity-press)
+            : touch.has-hover ? MaterialPalette.on-surface.with-alpha(MaterialPalette.state-layer-opacity-hover)
+            : transparent;
+    }
+
+    VerticalLayout {
+        padding: 12px;
+        spacing: 6px;
+        alignment: start;
+
+        HorizontalLayout {
+            spacing: 8px;
+            Icon {
+                width: 20px;
+                height: 20px;
+                source: root.icon;
+                colorize: root.active ? MaterialPalette.on-secondary-container : MaterialPalette.primary;
+            }
+            MaterialText {
+                horizontal-stretch: 1;
+                text: root.title;
+                style: MaterialTypography.title-small;
+                color: root.active ? MaterialPalette.on-secondary-container : MaterialPalette.on-surface;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            if root.active : Icon {
+                width: 20px;
+                height: 20px;
+                source: Icons.check;
+                colorize: MaterialPalette.primary;
+            }
+        }
+        MaterialText {
+            text: root.description;
+            style: MaterialTypography.body-small;
+            color: root.active ? MaterialPalette.on-secondary-container : MaterialPalette.on-surface-variant;
+            wrap: word-wrap;
+            overflow: clip;
+        }
+    }
+
+    touch := TouchArea {
+        clicked => {
+            keys.focus();
+            root.activate();
+        }
+    }
+
+    keys := FocusScope {
+        x: 0px;
+        width: 0px;
+        key-pressed(event) => {
+            if event.text == " " || event.text == "\n" {
+                root.activate();
+                return accept;
+            }
+            reject
+        }
+    }
+}
+
+export component FiltersSection inherits PageScroll {
+    title: "画面滤镜";
+
+    SettingGroup {
+        title: "预设";
+        description: "滤镜作用于模拟器输出的画面，游戏中可在菜单里调整。";
+
+        FlexboxLayout {
+            spacing: 12px;
+            alignment: stretch;
+
+            PresetCard {
+                title: "原画";
+                description: "不做处理";
+                icon: Icons.image;
+                active: Filters.preset == "none";
+                activate => { Filters.set-preset("none"); }
+            }
+            PresetCard {
+                title: "缩放";
+                description: "平滑放大到窗口大小";
+                icon: Icons.fullscreen;
+                active: Filters.preset == "scale";
+                activate => { Filters.set-preset("scale"); }
+            }
+            PresetCard {
+                title: "锐化";
+                description: "增强线条边缘";
+                icon: Icons.tune;
+                active: Filters.preset == "sharpen";
+                activate => { Filters.set-preset("sharpen"); }
+            }
+            PresetCard {
+                title: "Anime4K 2×";
+                description: "修复线条并 2 倍放大";
+                icon: Icons.filter-vintage;
+                active: Filters.preset == "anime4k";
+                activate => { Filters.set-preset("anime4k"); }
+            }
+            PresetCard {
+                title: "外部效果…";
+                description: "加载 HLSL 效果文件";
+                icon: Icons.upload-file;
+                active: Filters.preset == "external";
+                activate => { Filters.load-source(); }
+            }
+        }
+    }
+
+    SettingGroup {
+        title: "参数";
+
+        if Filters.fields.length == 0 : MaterialText {
+            text: "当前预设没有可调参数。";
+            style: MaterialTypography.body-medium;
+            color: MaterialPalette.on-surface-variant;
+        }
+
+        if Filters.fields.length > 0 : ConfigFieldList {
+            fields: Filters.fields;
+            show-groups: false;
+            changed(key, value) => { Filters.field-changed(key, value); }
+        }
+
+        HorizontalLayout {
+            alignment: start;
+            spacing: 8px;
+            TextButton {
+                text: "恢复默认参数";
+                icon: Icons.restart-alt;
+                enabled: Filters.fields.length > 0;
+                clicked => { Filters.reset-parameters(); }
+            }
+            TextButton {
+                text: "选择文件…";
+                icon: Icons.upload-file;
+                clicked => { Filters.load-source(); }
+            }
+        }
+    }
+}

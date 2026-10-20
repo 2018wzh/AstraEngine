@@ -1,0 +1,378 @@
+import { MaterialPalette, MaterialText, MaterialTypography, TextButton, FilledButton, OutlineButton, TonalButton, HorizontalDivider, Icon } from "@material";
+import { Cores, CoreInfo, Network } from "../../globals.slint";
+import { Icons } from "../../icons.slint";
+import { ConfigFieldList } from "../../components/config-field.slint";
+import { RenderPicker } from "../../components/render-picker.slint";
+import { PageScroll, SettingGroup, StatusChip } from "./common.slint";
+
+export global CoreText {
+    public pure function state-label(core: CoreInfo) -> string {
+        return core.state == "loaded" ? (core.update-version != "" ? "可更新" : "已加载")
+            : core.state == "failed" ? "加载失败"
+            : core.state == "pending-install" ? "重启后安装"
+            : core.state == "pending-update" ? "重启后更新"
+            : core.state == "pending-removal" ? "重启后移除"
+            : core.state == "available" ? "可安装"
+            : core.state;
+    }
+
+    public pure function source-label(source: string) -> string {
+        return source == "bundled" ? "随附" : source == "user" ? "用户安装" : source == "online" ? "在线" : source;
+    }
+
+    public pure function is-pending(state: string) -> bool {
+        return state == "pending-install" || state == "pending-update" || state == "pending-removal";
+    }
+}
+
+component CoreRow {
+    in property <CoreInfo> core;
+    in property <bool> editing;
+    callback edit-defaults();
+
+    property <bool> failed: root.core.state == "failed";
+    property <bool> update: root.core.state == "loaded" && root.core.update-version != "";
+
+    min-height: l.min-height;
+    preferred-height: l.preferred-height;
+
+    l := VerticalLayout {
+        padding-left: 16px;
+        padding-right: 8px;
+        padding-top: 12px;
+        padding-bottom: 4px;
+        spacing: 4px;
+
+        HorizontalLayout {
+            padding-right: 8px;
+            spacing: 12px;
+
+            VerticalLayout {
+                alignment: start;
+                horizontal-stretch: 0;
+                padding-top: 2px;
+                Icon {
+                    width: 24px;
+                    height: 24px;
+                    source: root.failed ? Icons.error : Icons.memory;
+                    colorize: root.failed ? MaterialPalette.error : MaterialPalette.primary;
+                }
+            }
+
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 2px;
+                MaterialText {
+                    text: root.core.name != "" ? root.core.name : root.core.id;
+                    style: MaterialTypography.title-medium;
+                    color: MaterialPalette.on-surface;
+                    overflow: elide;
+                }
+                MaterialText {
+                    text: (root.core.engine != "" ? root.core.engine + " · " : "")
+                        + (root.core.version != "" ? root.core.version : "版本未知")
+                        + (root.update ? " → " + root.core.update-version : "")
+                        + (root.core.source != "" ? " · " + CoreText.source-label(root.core.source) : "");
+                    style: MaterialTypography.body-medium;
+                    color: MaterialPalette.on-surface-variant;
+                    wrap: word-wrap;
+                    overflow: clip;
+                }
+            }
+
+            VerticalLayout {
+                alignment: start;
+                horizontal-stretch: 0;
+                padding-top: 2px;
+                StatusChip {
+                    text: CoreText.state-label(root.core);
+                    background: root.failed ? MaterialPalette.error-container
+                        : root.update ? MaterialPalette.tertiary-container
+                        : CoreText.is-pending(root.core.state) ? MaterialPalette.secondary-container
+                        : root.core.state == "available" ? MaterialPalette.surface-container-highest
+                        : MaterialPalette.primary-container;
+                    foreground: root.failed ? MaterialPalette.on-error-container
+                        : root.update ? MaterialPalette.on-tertiary-container
+                        : CoreText.is-pending(root.core.state) ? MaterialPalette.on-secondary-container
+                        : root.core.state == "available" ? MaterialPalette.on-surface-variant
+                        : MaterialPalette.on-primary-container;
+                }
+            }
+        }
+
+        if root.core.message != "" : HorizontalLayout {
+            padding-left: 36px;
+            padding-right: 8px;
+            MaterialText {
+                text: root.core.message;
+                style: MaterialTypography.body-small;
+                color: root.failed ? MaterialPalette.error : MaterialPalette.on-surface-variant;
+                wrap: word-wrap;
+                overflow: clip;
+            }
+        }
+
+        if root.core.capabilities.length > 0 : HorizontalLayout {
+            padding-left: 36px;
+            padding-top: 4px;
+            FlexboxLayout {
+                spacing: 6px;
+                for cap in root.core.capabilities : StatusChip {
+                    text: cap;
+                    background: MaterialPalette.surface-container-highest;
+                    foreground: MaterialPalette.on-surface-variant;
+                }
+            }
+        }
+
+        HorizontalLayout {
+            padding-left: 28px;
+            FlexboxLayout {
+                horizontal-stretch: 1;
+                spacing: 0px;
+
+                if root.update : TextButton {
+                    text: "更新到 " + root.core.update-version;
+                    icon: Icons.download;
+                    enabled: Network.allowed;
+                    clicked => { Cores.install-online(root.core.id); }
+                }
+                if root.core.state == "available" : TextButton {
+                    text: "安装";
+                    icon: Icons.download;
+                    enabled: Network.allowed;
+                    clicked => { Cores.install-online(root.core.id); }
+                }
+                if root.core.state == "loaded" : TextButton {
+                    text: root.editing ? "收起默认设置" : "默认设置";
+                    icon: root.editing ? Icons.expand-less : Icons.tune;
+                    accessible-expandable: true;
+                    accessible-expanded: root.editing;
+                    clicked => { root.edit-defaults(); }
+                }
+                if root.core.state == "loaded" || root.failed : TextButton {
+                    text: "查看日志";
+                    clicked => { Cores.view-logs(root.core.id); }
+                }
+                if root.core.removable && (root.core.state == "loaded" || root.failed) : TextButton {
+                    text: "卸载";
+                    icon: Icons.delete;
+                    clicked => { Cores.uninstall(root.core.id); }
+                }
+            }
+        }
+    }
+}
+
+component DefaultsEditor {
+    min-height: l.min-height;
+    preferred-height: l.preferred-height;
+
+    l := VerticalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        padding-top: 8px;
+        padding-bottom: 16px;
+
+        Rectangle {
+            border-radius: 12px;
+            background: MaterialPalette.surface-container;
+
+            VerticalLayout {
+                padding: 16px;
+                spacing: 16px;
+
+                VerticalLayout {
+                    spacing: 4px;
+                    MaterialText {
+                        text: "模拟器默认设置";
+                        style: MaterialTypography.title-small;
+                        color: MaterialPalette.primary;
+                    }
+                    MaterialText {
+                        text: "没有单独设置的游戏使用这里的值；修改立即保存。";
+                        style: MaterialTypography.body-small;
+                        color: MaterialPalette.on-surface-variant;
+                        wrap: word-wrap;
+                        overflow: clip;
+                    }
+                }
+
+                RenderPicker {
+                    supported: Cores.default-render.supported;
+                    options: Cores.default-render.options;
+                    mode: Cores.default-render.mode;
+                    custom-width: Cores.default-render.custom-width;
+                    custom-height: Cores.default-render.custom-height;
+                    min: Cores.default-render.min;
+                    max: Cores.default-render.max;
+                    note: Cores.default-render.note;
+                    error: Cores.default-render.error;
+                    set-render(mode, w, h) => { Cores.set-default-render(mode, w, h); }
+                }
+
+                if Cores.default-fields.length == 0 : MaterialText {
+                    text: "这个模拟器没有其他可调参数。";
+                    style: MaterialTypography.body-medium;
+                    color: MaterialPalette.on-surface-variant;
+                }
+
+                if Cores.default-fields.length > 0 : ConfigFieldList {
+                    fields: Cores.default-fields;
+                    changed(key, value) => { Cores.default-field-changed(key, value); }
+                    reset(key) => { Cores.reset-default-field(key); }
+                }
+            }
+        }
+    }
+}
+
+component GroupCounter {
+    in property <string> group;
+    out property <int> count: round(l.preferred-height / 1px);
+
+    x: 0px;
+    y: 0px;
+    width: 0px;
+    height: 0px;
+    visible: false;
+
+    l := VerticalLayout {
+        for core in Cores.items : Rectangle {
+            height: (root.group == "installed" && core.state == "loaded")
+                || (root.group == "available" && core.state == "available")
+                || (root.group == "failed" && core.state == "failed")
+                || (root.group == "pending" && CoreText.is-pending(core.state)) ? 1px : 0px;
+        }
+    }
+}
+
+component CoreGroup inherits SettingGroup {
+    in property <string> group;
+    flush: true;
+
+    for core in Cores.items : VerticalLayout {
+        if (root.group == "installed" && core.state == "loaded")
+            || (root.group == "available" && core.state == "available")
+            || (root.group == "failed" && core.state == "failed")
+            || (root.group == "pending" && CoreText.is-pending(core.state)) : VerticalLayout {
+            CoreRow {
+                core: core;
+                editing: Cores.default-plugin == core.id;
+                edit-defaults => {
+                    if Cores.default-plugin == core.id {
+                        Cores.default-plugin = "";
+                        Cores.select-defaults("");
+                    } else {
+                        Cores.select-defaults(core.id);
+                    }
+                }
+            }
+            if Cores.default-plugin == core.id && core.state == "loaded" : DefaultsEditor { }
+        }
+    }
+}
+
+export component CoresSection {
+    in property <bool> show-title;
+
+    installed := GroupCounter { group: "installed"; }
+    available := GroupCounter { group: "available"; }
+    failed := GroupCounter { group: "failed"; }
+    pending := GroupCounter { group: "pending"; }
+
+    PageScroll {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        title: "核心";
+        show-title: root.show-title;
+
+        if Cores.restart-required : Rectangle {
+            border-radius: 16px;
+            background: MaterialPalette.tertiary-container;
+
+            HorizontalLayout {
+                padding: 16px;
+                spacing: 16px;
+                VerticalLayout {
+                    alignment: center;
+                    horizontal-stretch: 0;
+                    Icon {
+                        width: 24px;
+                        height: 24px;
+                        source: Icons.restart-alt;
+                        colorize: MaterialPalette.on-tertiary-container;
+                    }
+                }
+                MaterialText {
+                    horizontal-stretch: 1;
+                    text: "核心有变更，重启 AstraEMU 后生效。";
+                    style: MaterialTypography.body-large;
+                    color: MaterialPalette.on-tertiary-container;
+                    vertical-alignment: center;
+                    wrap: word-wrap;
+                    overflow: clip;
+                }
+                VerticalLayout {
+                    alignment: center;
+                    horizontal-stretch: 0;
+                    FilledButton {
+                        text: "立即重启";
+                        clicked => { Cores.restart(); }
+                    }
+                }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 12px;
+            MaterialText {
+                horizontal-stretch: 1;
+                text: Network.allowed ? "在线核心列表来自 AstraEMU 元数据，下载后重启生效。" : "允许联网后可以在线安装和更新核心。";
+                style: MaterialTypography.body-medium;
+                color: MaterialPalette.on-surface-variant;
+                vertical-alignment: center;
+                wrap: word-wrap;
+                overflow: clip;
+            }
+            VerticalLayout {
+                alignment: center;
+                horizontal-stretch: 0;
+                OutlineButton {
+                    text: "从本地安装…";
+                    icon: Icons.upload-file;
+                    clicked => { Cores.install-local(); }
+                }
+            }
+        }
+
+        if Cores.items.length == 0 : SettingGroup {
+            MaterialText {
+                text: "没有找到核心。可以从本地安装核心包，或允许联网后在线安装。";
+                style: MaterialTypography.body-medium;
+                color: MaterialPalette.on-surface-variant;
+                wrap: word-wrap;
+                overflow: clip;
+            }
+        }
+
+        if pending.count > 0 : CoreGroup {
+            title: "待重启（" + pending.count + "）";
+            group: "pending";
+        }
+        if failed.count > 0 : CoreGroup {
+            title: "加载失败（" + failed.count + "）";
+            group: "failed";
+        }
+        if installed.count > 0 : CoreGroup {
+            title: "已安装（" + installed.count + "）";
+            group: "installed";
+        }
+        if available.count > 0 : CoreGroup {
+            title: "可安装（" + available.count + "）";
+            group: "available";
+        }
+    }
+}
