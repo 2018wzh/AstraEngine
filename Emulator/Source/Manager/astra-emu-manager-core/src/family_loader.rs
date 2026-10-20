@@ -17,6 +17,8 @@ pub enum FamilyLoadError {
     Diagnostics,
     #[error("ASTRA_EMU_FAMILY_SCAN_DIRECTORY")]
     Directory,
+    #[error("ASTRA_EMU_CORE_LAYOUT")]
+    Layout,
     #[error("ASTRA_EMU_FAMILY_LOAD_PATH")]
     InvalidPath,
     #[error("ASTRA_EMU_FAMILY_LOAD_LIBRARY")]
@@ -47,6 +49,7 @@ impl FamilyLoadError {
         match self {
             Self::Diagnostics => "ASTRA_EMU_FAMILY_DIAGNOSTIC_INIT",
             Self::Directory => "ASTRA_EMU_FAMILY_SCAN_DIRECTORY",
+            Self::Layout => "ASTRA_EMU_CORE_LAYOUT",
             Self::InvalidPath => "ASTRA_EMU_FAMILY_LOAD_PATH",
             Self::Library => "ASTRA_EMU_FAMILY_LOAD_LIBRARY",
             Self::AbiLayout => "ASTRA_EMU_FAMILY_LOAD_ABI",

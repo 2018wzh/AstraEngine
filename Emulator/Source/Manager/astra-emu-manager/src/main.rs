@@ -1,4 +1,6 @@
+mod core_package;
 mod manager_app;
+mod metadata_cache;
 mod metadata_runtime;
 mod patch_cli;
 mod platform_secret;

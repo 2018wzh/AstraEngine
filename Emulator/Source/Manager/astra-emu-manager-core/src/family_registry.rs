@@ -48,19 +48,83 @@ pub fn is_family_library_path(path: &Path) -> bool {
     name.starts_with("astra_emu_") || name.starts_with("libastra_emu_")
 }
 
-pub fn discover_family_libraries(directory: &Path) -> Result<Vec<PathBuf>, FamilyLoadError> {
+/// Libraries found under `cores/<stem>/` plus the subdirectories rejected by
+/// the layout rule.
+#[derive(Debug, Default)]
+pub struct FamilyDiscovery {
+    pub libraries: Vec<PathBuf>,
+    pub errors: Vec<FamilyDirectoryLoadError>,
+}
+
+/// Scan the one-level subdirectories of a `cores` directory. Each subdirectory
+/// must hold exactly one Family library; dot-directories (the pending area)
+/// and top-level files are not cores.
+pub fn discover_family_libraries(directory: &Path) -> Result<FamilyDiscovery, FamilyLoadError> {
     let entries = fs::read_dir(directory).map_err(|_| FamilyLoadError::Directory)?;
-    let mut paths = Vec::new();
+    let mut discovery = FamilyDiscovery::default();
+    let mut subdirectories = Vec::new();
     for entry in entries {
         let entry = entry.map_err(|_| FamilyLoadError::Directory)?;
         let file_type = entry.file_type().map_err(|_| FamilyLoadError::Directory)?;
-        if file_type.is_file() && is_family_library_path(&entry.path()) {
-            paths.push(entry.path());
+        let hidden = entry.file_name().to_str().is_none_or(|name| name.starts_with('.'));
+        if file_type.is_dir() && !hidden {
+            subdirectories.push(entry.path());
         }
     }
-    paths.sort();
-    paths.dedup();
-    Ok(paths)
+    subdirectories.sort();
+    for subdirectory in subdirectories {
+        let mut libraries = Vec::new();
+        for entry in fs::read_dir(&subdirectory).map_err(|_| FamilyLoadError::Directory)? {
+            let entry = entry.map_err(|_| FamilyLoadError::Directory)?;
+            let file_type = entry.file_type().map_err(|_| FamilyLoadError::Directory)?;
+            if file_type.is_file() && is_family_library_path(&entry.path()) {
+                libraries.push(entry.path());
+            }
+        }
+        match <[PathBuf; 1]>::try_from(libraries) {
+            Ok([library]) => discovery.libraries.push(library),
+            Err(_) => discovery.errors.push(FamilyDirectoryLoadError {
+                path: subdirectory,
+                error: FamilyLoadError::Layout,
+            }),
+        }
+    }
+    Ok(discovery)
+}
+
+/// Discover cores across directories in priority order: a library whose stem
+/// appears in an earlier directory overrides the same stem in later ones.
+pub fn discover_core_directories(
+    directories: &[PathBuf],
+) -> Result<FamilyDiscovery, FamilyLoadError> {
+    let mut merged = FamilyDiscovery::default();
+    let mut stems = BTreeSet::new();
+    let mut identities = BTreeSet::new();
+    for directory in directories {
+        let discovery = discover_family_libraries(directory)?;
+        for library in discovery.libraries {
+            let stem = library_stem(&library);
+            let identity = fs::canonicalize(&library).map_err(|_| FamilyLoadError::InvalidPath)?;
+            if !identities.insert(identity) {
+                continue;
+            }
+            if stems.insert(stem.clone()) {
+                merged.libraries.push(library);
+            } else {
+                tracing::info!(event = "astra.emu.manager.core_overridden", core = %stem);
+            }
+        }
+        merged.errors.extend(discovery.errors);
+    }
+    Ok(merged)
+}
+
+/// Lowercase file stem identifying a core across user and bundled directories.
+pub fn library_stem(path: &Path) -> String {
+    path.file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase()
 }
 
 /// Runtime registry used by Manager and CLI. Static and dynamic providers are
@@ -137,17 +201,10 @@ impl FamilyProviderRegistry {
         &mut self,
         directories: &[PathBuf],
     ) -> Result<FamilyDirectoryLoadReport, FamilyLoadError> {
-        let mut paths = Vec::new();
-        let mut identities = BTreeSet::new();
-        for directory in directories {
-            for path in discover_family_libraries(directory)? {
-                let identity = fs::canonicalize(&path).map_err(|_| FamilyLoadError::InvalidPath)?;
-                if identities.insert(identity) {
-                    paths.push(path);
-                }
-            }
-        }
-        self.load_libraries(paths)
+        let discovery = discover_core_directories(directories)?;
+        let mut report = self.load_libraries(discovery.libraries)?;
+        report.errors.extend(discovery.errors);
+        Ok(report)
     }
 
     pub fn load_libraries(

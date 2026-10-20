@@ -245,7 +245,11 @@ impl SlintManagerAdapter {
             status: game.compat.status.as_str().into(),
             notes: game.compat.notes.as_str().into(),
             updated: game.compat.updated.as_str().into(),
-            vndb_id: game.compat.vndb_id.as_str().into(),
+            vndb_id: if game.compat.release_id.is_empty() {
+                game.compat.hint.as_str().into()
+            } else {
+                game.compat.release_id.as_str().into()
+            },
         });
         self.releases.set_vec(
             game.releases

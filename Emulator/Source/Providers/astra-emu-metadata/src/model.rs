@@ -154,8 +154,6 @@ impl BangumiPlayUpdate {
 pub enum MetadataError {
     #[error("ASTRA_EMU_METADATA_INVALID_REQUEST: {0}")]
     InvalidRequest(&'static str),
-    #[error("ASTRA_EMU_METADATA_CONSENT_REQUIRED: {0}")]
-    ConsentRequired(&'static str),
     #[error("ASTRA_EMU_METADATA_LICENSE_BLOCKED: {0}")]
     LicenseBlocked(&'static str),
     #[error("ASTRA_EMU_METADATA_REMOTE_ID: {0}")]

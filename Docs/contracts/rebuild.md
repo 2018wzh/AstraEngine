@@ -250,7 +250,7 @@ Musica 原生启动模式使用 `MusicaLaunchMode::Direct/Title`。Title 会话�
 
 
 
-核心文件缺失、加载失败、descriptor/capability 不匹配或重复 `plugin_id` 时，Manager 按 `data/cores/` 中的文件显示诊断并继续加载其他唯一核心；冲突 ID 的全部文件禁用。SQLite 不记录插件路径，更新核心需替换文件并重启 Manager。不能因单个核心失败关闭管理界面。
+核心目录缺失、子目录结构错误（`ASTRA_EMU_CORE_LAYOUT`）、加载失败、descriptor/capability 不匹配或重复 `plugin_id` 时，Manager 按 `cores/<stem>/` 显示诊断并继续加载其他唯一核心；冲突 ID 的全部核心禁用。SQLite 不记录插件路径，安装、更新与卸载经 `cores/.pending/` 在重启后生效。不能因单个核心失败关闭管理界面。
 
 
 ### Player 显式静音测试输出

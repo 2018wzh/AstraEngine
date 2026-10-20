@@ -81,6 +81,7 @@ impl AstraEmuManagerController {
             request_id,
             PendingMetadata {
                 game_id: Some(game.game_id.clone()),
+                core: None,
             },
         );
         Ok(())
@@ -98,6 +99,9 @@ impl AstraEmuManagerController {
                 return Err("ASTRA_EMU_METADATA_RESPONSE_IDENTITY_MISMATCH".into());
             }
             let game_id = pending.game_id;
+            if self.metadata_sync.request.as_deref() == Some(completion.request_id.as_str()) {
+                self.metadata_sync.request = None;
+            }
             match completion.result {
                 Ok(payload) => {
                     self.apply_metadata_payload(game_id.as_deref(), completion.provider, payload)?
@@ -194,33 +198,14 @@ impl AstraEmuManagerController {
                 );
             }
             MetadataPayload::BangumiPlaySynced => self.diagnostic.clear(),
-            MetadataPayload::Compatibility(fetch) => self.apply_compatibility_payload(fetch)?,
-        }
-        Ok(())
-    }
-
-    pub(super) fn apply_compatibility_payload(
-        &mut self,
-        fetch: CompatibilityFetch,
-    ) -> Result<(), String> {
-        match fetch {
-            CompatibilityFetch::NotModified => {
-                self.compatibility_fetched_at_unix_ms = Some(unix_time_ms()?);
-                self.diagnostic.clear();
-            }
-            CompatibilityFetch::Updated {
-                database,
-                response_hash,
-            } => {
-                let hash = save_compatibility_cache(&self.data_dir, &database)?;
-                if hash != response_hash {
-                    return Err("ASTRA_EMU_COMPATIBILITY_CACHE_HASH_MISMATCH".into());
+            MetadataPayload::Synced(outcome) => {
+                if let Err(error) = self.apply_sync_outcome(*outcome) {
+                    tracing::warn!(event = "astra.emu.metadata.sync_rejected", diagnostic_code = %error);
+                    self.diagnostic = error;
+                    self.diagnostic_severity = "error";
                 }
-                self.compatibility_database = Some(database);
-                self.compatibility_hash = Some(response_hash);
-                self.compatibility_fetched_at_unix_ms = Some(unix_time_ms()?);
-                self.diagnostic.clear();
             }
+            MetadataPayload::CoreStaged { stem, version } => self.core_staged(&stem, &version),
         }
         Ok(())
     }
@@ -280,29 +265,5 @@ impl AstraEmuManagerController {
                     .map_err(|_| "ASTRA_EMU_METADATA_SNAPSHOT_INVALID".to_owned())
             })
             .transpose()
-    }
-
-    pub(super) fn compatibility_for_identities(
-        &self,
-        game_id: &str,
-        identities: &[astra_emu_manager_core::ExternalIdentityRecord],
-    ) -> Option<&CompatibilityEntry> {
-        let database = self.compatibility_database.as_ref()?;
-        let vndb_id = identities
-            .iter()
-            .find(|identity| identity.provider == MetadataProviderId::Vndb.as_str())?
-            .remote_id
-            .as_str();
-        let pinned = self.pinned_releases.get(game_id);
-        let mut matches = database
-            .entries
-            .iter()
-            .filter(|entry| entry.vn_id == vndb_id)
-            .filter(|entry| pinned.is_none_or(|release| entry.release_id == *release));
-        let first = matches.next();
-        if pinned.is_none() && matches.next().is_some() {
-            return None;
-        }
-        first
     }
 }

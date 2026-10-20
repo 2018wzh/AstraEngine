@@ -104,7 +104,7 @@ impl AstraEmuManagerController {
         let enabling = enabled && !self.network_allowed;
         self.network_allowed = enabled;
         if enabling {
-            return self.refresh_compatibility();
+            return self.sync_metadata();
         }
         self.model()
     }
@@ -196,27 +196,6 @@ impl AstraEmuManagerController {
         self.bangumi_play_status = status.into();
         self.bangumi_rating = i32::from(rating.unwrap_or_default());
         self.bangumi_note = note.into();
-        self.model()
-    }
-
-    pub(super) fn refresh_compatibility(&mut self) -> Result<ManagerViewModel, String> {
-        self.require_network()?;
-        let request_id = self.next_metadata_id("compatibility")?;
-        self.metadata.submit(MetadataCommand {
-            request_id: request_id.clone(),
-            case_identity: String::new(),
-            provider: MetadataProviderId::Vndb,
-            access_token: None,
-            allow_sensitive_cover: false,
-            kind: MetadataCommandKind::RefreshCompatibility {
-                source_url: DEFAULT_COMPATIBILITY_SOURCE_URL.into(),
-                cached_hash: self.compatibility_hash.clone(),
-            },
-        })?;
-        self.pending_metadata
-            .insert(request_id, PendingMetadata { game_id: None });
-        self.diagnostic = "已开始同步兼容性数据".into();
-        self.diagnostic_severity = "info";
         self.model()
     }
 

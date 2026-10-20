@@ -8,10 +8,8 @@
 
 use std::collections::BTreeSet;
 
-use reqwest::header::IF_NONE_MATCH;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::fields::{
@@ -20,10 +18,6 @@ use crate::fields::{
 };
 
 pub const COMPATIBILITY_SCHEMA_VERSION: &str = "astra.emu.compatibility.v3";
-
-pub const DEFAULT_COMPATIBILITY_SOURCE_URL: &str =
-    "https://astraengine.github.io/astra-emu-compatibility/compatibility.json";
-
 const MAX_PAYLOAD_BYTES: usize = 8 * 1024 * 1024;
 const MAX_NOTES_CHARS: usize = 1024;
 const MAX_VERSION_CHARS: usize = 64;
@@ -164,121 +158,14 @@ pub fn parse_compatibility_database(
     Ok(database)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CompatibilityFetch {
-    NotModified,
-    Updated {
-        database: CompatibilityDatabase,
-        response_hash: String,
-    },
-}
-
 #[derive(Debug, Error)]
 pub enum CompatibilityError {
-    #[error("ASTRA_EMU_COMPATIBILITY_CONSENT_REQUIRED")]
-    ConsentRequired,
-    #[error("ASTRA_EMU_COMPATIBILITY_SOURCE_URL")]
-    InvalidSourceUrl,
-    #[error("ASTRA_EMU_COMPATIBILITY_NETWORK: {0}")]
-    Network(String),
     #[error("ASTRA_EMU_COMPATIBILITY_SCHEMA_MISMATCH: {0}")]
     SchemaMismatch(&'static str),
     #[error("ASTRA_EMU_COMPATIBILITY_RESPONSE_BOUNDS: {0}")]
     ResponseBounds(&'static str),
     #[error("ASTRA_EMU_COMPATIBILITY_DUPLICATE: {0}")]
     Duplicate(String),
-}
-
-pub fn parse_compatibility_response(
-    bytes: &[u8],
-    cached_hash: Option<&str>,
-) -> Result<CompatibilityFetch, CompatibilityError> {
-    if bytes.len() > MAX_PAYLOAD_BYTES {
-        return Err(CompatibilityError::ResponseBounds("payload"));
-    }
-    let response_hash = hex::encode(Sha256::digest(bytes));
-    if cached_hash == Some(response_hash.as_str()) {
-        return Ok(CompatibilityFetch::NotModified);
-    }
-    let database = parse_compatibility_database(bytes)?;
-    Ok(CompatibilityFetch::Updated {
-        database,
-        response_hash,
-    })
-}
-
-#[derive(Debug, Clone)]
-pub struct CompatibilityClient {
-    client: reqwest::Client,
-    source_url: String,
-}
-
-impl CompatibilityClient {
-    pub fn new(source_url: &str, timeout: std::time::Duration) -> Result<Self, CompatibilityError> {
-        let parsed =
-            url::Url::parse(source_url).map_err(|_| CompatibilityError::InvalidSourceUrl)?;
-        if parsed.scheme() != "https" {
-            return Err(CompatibilityError::InvalidSourceUrl);
-        }
-        let client = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .timeout(timeout)
-            .build()
-            .map_err(|error| CompatibilityError::Network(error.to_string()))?;
-        Ok(Self {
-            client,
-            source_url: source_url.to_owned(),
-        })
-    }
-
-    pub fn source_url(&self) -> &str {
-        &self.source_url
-    }
-
-    pub async fn fetch(
-        &self,
-        network_consent: bool,
-        cached_hash: Option<&str>,
-        cached_etag: Option<&str>,
-    ) -> Result<CompatibilityFetch, CompatibilityError> {
-        if !network_consent {
-            return Err(CompatibilityError::ConsentRequired);
-        }
-        let mut request = self.client.get(&self.source_url);
-        if let Some(etag) = cached_etag {
-            request = request.header(IF_NONE_MATCH, etag);
-        }
-        let response = request
-            .send()
-            .await
-            .map_err(|error| CompatibilityError::Network(error.to_string()))?;
-        if response.status() == reqwest::StatusCode::NOT_MODIFIED {
-            return Ok(CompatibilityFetch::NotModified);
-        }
-        if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            return Err(CompatibilityError::Network("rate-limited".into()));
-        }
-        if response.status().is_redirection() {
-            return Err(CompatibilityError::Network("redirect".into()));
-        }
-        if !response.status().is_success() {
-            return Err(CompatibilityError::Network(format!(
-                "http-{}",
-                response.status().as_u16()
-            )));
-        }
-        let bytes = response
-            .bytes()
-            .await
-            .map_err(|error| CompatibilityError::Network(error.to_string()))?;
-        tracing::info!(
-            target: "astra_emu_metadata::compatibility",
-            event = "emu.compatibility.fetch",
-            bytes = bytes.len(),
-            "fetched compatibility database"
-        );
-        parse_compatibility_response(&bytes, cached_hash)
-    }
 }
 
 pub fn compatibility_json_schema() -> serde_json::Value {
@@ -411,32 +298,10 @@ mod tests {
     }
 
     #[test]
-    fn parse_response_reports_not_modified_for_cached_hash() {
-        let bytes = serde_json::to_vec(&sample_database()).unwrap();
-        let hash = match parse_compatibility_response(&bytes, None).unwrap() {
-            CompatibilityFetch::Updated { response_hash, .. } => response_hash,
-            CompatibilityFetch::NotModified => panic!("expected Updated"),
-        };
-        assert_eq!(
-            parse_compatibility_response(&bytes, Some(&hash)).unwrap(),
-            CompatibilityFetch::NotModified
-        );
-    }
-
-    #[test]
     fn json_schema_export_names_entry_fields() {
         let text = compatibility_json_schema().to_string();
         assert!(text.contains("CompatibilityEntry"));
         assert!(text.contains("emulator_version"));
         assert!(text.contains("^r[0-9]{1,63}$"));
-    }
-
-    #[test]
-    fn client_requires_https() {
-        assert!(CompatibilityClient::new(
-            "http://example.com/compatibility.json",
-            std::time::Duration::from_secs(3)
-        )
-        .is_err());
     }
 }

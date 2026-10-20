@@ -11,9 +11,9 @@
 FVP 当前原生 App 路径嵌入上游四个 MS 命名字体文件，按上游原样随核心发布。来源与许可见 [第三方声明](../../Emulator/THIRD_PARTY_NOTICES.md)。
 
 
-点击“刷新核心”后，客户端从程序相邻的 `cores/` 和用户数据目录的 `cores/` 同时发现核心。核心文件损坏、ABI 不符和重复 plugin ID 都会显示诊断；重复核心不会按目录顺序覆盖。本次运行只加载一次核心，替换核心或修复加载失败后需要重启客户端，不做热替换。
+点击“刷新核心”后，客户端从程序相邻的 `cores/` 和用户数据目录的 `cores/` 同时发现核心。每个核心是一个子目录 `cores/<stem>/`，内含恰好一个 `astra_emu_*` 核心库、依赖、`Resources/`、`licenses/` 与 `core.json`；同名子目录以用户数据目录为准，子目录内核心库数量不对时显示 `ASTRA_EMU_CORE_LAYOUT`。旧版放在 `cores/` 顶层的核心库会在下次加载前自动迁入各自子目录。核心损坏、ABI 不符和重复 plugin ID 都会显示诊断；重复核心不会按目录顺序覆盖。本次运行只加载一次核心，安装、更新或修复加载失败后需要重启客户端，不做热替换。
 
-“核心”页可安装本地核心或移除用户安装的核心。安装先完成独立副本，再登记为待安装；已加载后更新须重启。复制或替换失败不会删除已安装核心，随包核心不能从此入口移除。
+“核心”页合并显示已加载、加载失败、待处理和可在线安装的核心。“从本地安装”接受 `.zip` 核心包或单个核心库；允许联网后可按元数据核心目录在线安装或更新（显示“可更新”）。核心包先校验路径、`core.json` 与每个文件的 sha256，再放入 `cores/.pending/<stem>/`，卸载写入 `cores/.pending/<stem>.remove`；下次加载核心前应用，替换失败恢复原目录。随包核心不能从此入口移除。
 
 游戏视图的会话菜单按核心实际声明显示。Musica 提供快速存读档、存读档页、自动播放、快进、回看及设置入口，操作沿原生输入处理；不支持的操作不会伪装为成功。
 
@@ -84,7 +84,7 @@ Manager 操作顺序：
 
 统一入口迁移前的 Manager/CLI 逻辑及真实 SQLite 写入/重开已有检查证据；这些历史结果不替代 Beta2 的实际进程检查，Manager GUI 操作仍待实际观察。目录登记 eden、ef first、樱花萌放、夏空四个必要转换入口；前奏诗已定位回看页标题的原生查找链缺口，仍未登记，LLJ 分支及其他阻塞见实施计划。夏空随附字体只供 ASS，正文沿用 Musica 内置中文字体；不要因字符映射表完整就把字幕子集强制选为正文字体。复制、解析或构建成功均不代表完整本地化人工通过。
 
-`astra-emu-manager patch list` 只读取程序相邻 `patches/catalog.json` 的目录记录，逐行输出 JSON（NDJSON），不执行或探测脚本。没有随包目录时，可用 `astra-emu-manager patch list --scripts <可信目录>` 显式选择。应用命令为：
+`astra-emu-manager patch list` 只读取程序相邻 `metadata/patches/catalog.json`（随包元数据快照）的目录记录，逐行输出 JSON（NDJSON），不执行或探测脚本。没有随包快照时，可用 `astra-emu-manager patch list --scripts <可信目录>` 显式选择。Manager 中的补丁目录来自当前使用的元数据（同步缓存或随包快照）的 `patches/`。应用命令为：
 
 ```sh
 astra-emu-manager patch apply --script <可信入口.luau> --source <原游戏目录> \

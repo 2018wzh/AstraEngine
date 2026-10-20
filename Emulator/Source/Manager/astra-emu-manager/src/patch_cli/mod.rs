@@ -17,7 +17,7 @@ use std::{
 pub(super) enum Command {
     /// List catalog records without opening or executing recipes.
     List {
-        /// Catalog directory (defaults to patches/ beside this executable).
+        /// Catalog directory (defaults to metadata/patches/ beside this executable).
         #[arg(long, value_name = "DIR")]
         scripts: Option<PathBuf>,
     },
@@ -67,6 +67,7 @@ fn execute(command: Command) -> Result<(), PatchError> {
                     .ok_or_else(|| {
                         PatchError::new(PatchErrorKind::Path, "executable has no parent directory")
                     })?
+                    .join("metadata")
                     .join("patches"),
             };
             let recipes = list_recipes(&scripts)?;

@@ -1,5 +1,6 @@
 use crate::{
-    metadata_runtime, platform_secret, stage_renderer, text_service::TextReplacementBridge,
+    core_package, metadata_cache, metadata_runtime, platform_secret, stage_renderer,
+    text_service::TextReplacementBridge,
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -24,9 +25,8 @@ use astra_emu_manager_ui_slint::{
     ManagerViewModel,
 };
 use astra_emu_metadata::{
-    BangumiPlayStatus, BangumiPlayUpdate, CompatibilityDatabase, CompatibilityEntry,
-    CompatibilityFetch, CoverAsset, MetadataProviderId, MetadataRecord, MetadataSearchQuery,
-    DEFAULT_COMPATIBILITY_SOURCE_URL,
+    BangumiPlayStatus, BangumiPlayUpdate, CompatibilityEntry, CoverAsset, MetadataProviderId,
+    MetadataRecord, MetadataSearchQuery, DEFAULT_METADATA_BASE_URL,
 };
 use astra_emu_translation::{
     OpenAiApi, SecretResolver, TranslationProfile, TranslationProvider,
@@ -50,6 +50,7 @@ mod input;
 mod library;
 mod metadata;
 mod metadata_actions;
+mod metadata_sync;
 #[cfg(test)]
 mod metadata_tests;
 mod model;
@@ -64,6 +65,7 @@ mod probe_worker;
 mod render_extent;
 mod runtime;
 mod session;
+mod snackbar;
 mod support;
 mod translation;
 mod view_fields;
@@ -75,6 +77,7 @@ use support::*;
 
 struct PendingMetadata {
     game_id: Option<String>,
+    core: Option<String>,
 }
 
 struct AstraEmuManagerController {
@@ -100,9 +103,8 @@ struct AstraEmuManagerController {
     physical_keys: Vec<KeyCode>,
     library_sort: String,
     compatibility_filter: String,
-    compatibility_database: Option<CompatibilityDatabase>,
-    compatibility_hash: Option<String>,
-    compatibility_fetched_at_unix_ms: Option<i64>,
+    metadata_catalog: Option<metadata_cache::MetadataCatalog>,
+    metadata_sync: metadata_sync::SyncState,
     pinned_releases: BTreeMap<String, String>,
     filter_settings: astra_emu_manager_core::FilterSettings,
     input_mapping: astra_emu_manager_core::InputMapping,
@@ -135,6 +137,7 @@ struct AstraEmuManagerController {
     patch_import: Option<file_patch::PendingImport>,
     patch_state: astra_emu_manager_ui_slint::PatchViewModel,
     patch_sequence: u64,
+    snackbar: snackbar::Snackbar,
 }
 
 impl Drop for AstraEmuManagerController {

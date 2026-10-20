@@ -13,7 +13,6 @@ const ASTRA_EMU_USER_AGENT: &str =
 
 #[derive(Debug, Clone)]
 pub struct VndbProviderConfig {
-    pub network_consent: bool,
     pub license: MetadataLicenseManifest,
     pub timeout: std::time::Duration,
     pub minimum_request_delay: std::time::Duration,
@@ -32,7 +31,6 @@ impl VndbProvider {
             target: "astra_emu_metadata::vndb",
             event = "emu.metadata.provider.create",
             provider_id = "vndb",
-            network_consent = config.network_consent,
             timeout_ms = config.timeout.as_millis(),
             minimum_request_delay_ms = config.minimum_request_delay.as_millis(),
             "metadata provider created"
@@ -51,9 +49,6 @@ impl VndbProvider {
     }
 
     fn authorize(&self) -> Result<(), MetadataError> {
-        if !self.config.network_consent {
-            return Err(MetadataError::ConsentRequired("vndb"));
-        }
         self.config.license.permit_vndb()
     }
 
@@ -282,30 +277,11 @@ fn map_vndb_error(error: vn::error::Error) -> MetadataError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ReleaseUse;
 
     #[test]
     fn validates_remote_ids_without_network() {
         assert!(is_vndb_id("v17"));
         assert!(!is_vndb_id("17"));
         assert!(!is_vndb_id("v17/path"));
-    }
-
-    #[test]
-    fn consent_is_checked_before_network() {
-        let provider = VndbProvider::new(VndbProviderConfig {
-            network_consent: false,
-            license: MetadataLicenseManifest {
-                release_use: ReleaseUse::NonCommercial,
-                vndb_commercial_license_id: None,
-            },
-            timeout: std::time::Duration::from_secs(3),
-            minimum_request_delay: std::time::Duration::from_secs(1),
-        })
-        .unwrap();
-        assert!(matches!(
-            provider.authorize(),
-            Err(MetadataError::ConsentRequired("vndb"))
-        ));
     }
 }

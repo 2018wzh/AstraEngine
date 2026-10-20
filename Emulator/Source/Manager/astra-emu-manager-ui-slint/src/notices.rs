@@ -126,11 +126,76 @@ fn exact_text(code: &str) -> Option<(&'static str, &'static str)> {
         "ASTRA_EMU_BANGUMI_TOKEN_REQUIRED" => ("请填写 Bangumi 访问令牌", "令牌为空时无法保存。"),
         "ASTRA_EMU_CORE_INSTALL_NAME" => (
             "不是有效的核心文件",
-            "核心文件名需以 astra_emu_ 开头，并且是本系统的动态库。",
+            "请选择核心包（.zip）或文件名以 astra_emu_ 开头的本系统动态库。",
         ),
         "ASTRA_EMU_CORE_INSTALL_COPY" => ("复制核心文件失败", "请检查磁盘空间和目录权限。"),
-        "ASTRA_EMU_CORE_UNINSTALL_BUNDLED" => ("随包核心不能卸载", "可以安装同名文件来覆盖它。"),
+        "ASTRA_EMU_CORE_UNINSTALL_BUNDLED" => ("随包核心不能卸载", "可以安装同名核心来覆盖它。"),
         "ASTRA_EMU_CORE_PENDING_APPLY" => ("应用待安装的核心失败", "请查看日志后重试。"),
+        "ASTRA_EMU_CORE_LAYOUT" => (
+            "核心目录结构不正确",
+            "cores 下每个核心目录必须恰好包含一个 astra_emu_ 核心库，请重新安装该核心。",
+        ),
+        "ASTRA_EMU_CORE_PACKAGE_READ" => ("无法读取核心包", "请检查文件是否存在且可以访问。"),
+        "ASTRA_EMU_CORE_PACKAGE_FORMAT" => ("核心包已损坏", "文件不是有效的 zip 核心包。"),
+        "ASTRA_EMU_CORE_PACKAGE_BOUNDS" => ("核心包过大", "核心包的文件数或解压后大小超出上限。"),
+        "ASTRA_EMU_CORE_PACKAGE_PATH" => (
+            "核心包包含不安全的路径",
+            "包内有绝对路径、上级目录或符号链接，已拒绝安装。",
+        ),
+        "ASTRA_EMU_CORE_PACKAGE_DUPLICATE" => ("核心包包含重复文件", "已拒绝安装这个核心包。"),
+        "ASTRA_EMU_CORE_PACKAGE_MANIFEST" => (
+            "核心包的文件清单无效",
+            "core.json 缺失、格式错误、ABI 不匹配或与包内文件不一致。",
+        ),
+        "ASTRA_EMU_CORE_PACKAGE_PLUGIN_MISMATCH" => (
+            "核心包与所选核心不符",
+            "下载的核心包声明了另一个模拟器，已拒绝安装。",
+        ),
+        "ASTRA_EMU_CORE_PACKAGE_HASH_MISMATCH" => (
+            "核心包文件校验失败",
+            "包内文件的 SHA-256 与 core.json 不一致，已拒绝安装。",
+        ),
+        "ASTRA_EMU_CORE_NOT_AVAILABLE" => (
+            "没有可安装的核心版本",
+            "元数据中没有适用于当前平台和接口版本的发布，请先同步元数据。",
+        ),
+        "ASTRA_EMU_CORE_DOWNLOAD_PENDING" => ("核心正在下载", "请等待当前下载完成。"),
+        "ASTRA_EMU_CORE_DOWNLOAD_URL" => ("核心下载地址无效", "只允许从 GitHub Releases 下载核心。"),
+        "ASTRA_EMU_CORE_DOWNLOAD_REDIRECT" => (
+            "核心下载被重定向到未知地址",
+            "只允许跳转到 GitHub 的发布文件服务器，已停止下载。",
+        ),
+        "ASTRA_EMU_CORE_DOWNLOAD_NETWORK" => ("核心下载失败", "请检查网络连接后重试。"),
+        "ASTRA_EMU_CORE_DOWNLOAD_SIZE" => (
+            "核心包大小不符",
+            "下载的文件大小与元数据记录不一致，已丢弃。",
+        ),
+        "ASTRA_EMU_CORE_DOWNLOAD_HASH_MISMATCH" => (
+            "核心包校验失败",
+            "下载文件的 SHA-256 与元数据记录不一致，已丢弃。",
+        ),
+        "ASTRA_EMU_SNACKBAR_ACTION_UNAVAILABLE" => ("这个操作已失效", "提示已过期，请重新操作。"),
+        "ASTRA_EMU_METADATA_HASH_MISMATCH" => (
+            "元数据校验失败",
+            "下载的文件与索引记录不一致，已保留原有数据。",
+        ),
+        "ASTRA_EMU_METADATA_CACHE_WRITE" => (
+            "无法保存元数据",
+            "写入数据目录失败，已保留原有数据。请检查磁盘空间和目录权限。",
+        ),
+        "ASTRA_EMU_METADATA_CACHE_READ" => ("无法读取元数据缓存", "请检查数据目录权限。"),
+        "ASTRA_EMU_METADATA_CACHE_INVALID" => (
+            "元数据内容无效",
+            "同步到的数据无法解析，已保留原有数据。",
+        ),
+        "ASTRA_EMU_PRESET_INVALID" => (
+            "推荐配置无法套用",
+            "其中有当前模拟器不支持的设置项或取值，已恢复原来的设置。",
+        ),
+        "ASTRA_EMU_PRESET_UNAVAILABLE" => (
+            "没有推荐配置",
+            "当前发行版本和模拟器没有推荐配置。",
+        ),
         "ASTRA_EMU_LOG_READ" => ("无法读取日志", "请检查数据目录权限。"),
         "ASTRA_EMU_ENGINE_ACTION_UNAVAILABLE" => {
             ("当前无法执行这个操作", "请在游戏画面中稍后再试。")

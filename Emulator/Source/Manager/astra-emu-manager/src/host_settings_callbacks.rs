@@ -96,10 +96,7 @@ pub(super) fn install<C: ManagerController>(
             let Some(window) = compat_refresh_weak.upgrade() else {
                 return;
             };
-            match compat_refresh_controller
-                .borrow_mut()
-                .refresh_compatibility()
-            {
+            match compat_refresh_controller.borrow_mut().sync_metadata() {
                 Ok(model) => apply_model(&compat_refresh_adapter, &model),
                 Err(error) => report_error(&window, &error),
             }

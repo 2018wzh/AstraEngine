@@ -21,7 +21,10 @@ pub(super) fn install<C: ManagerController>(
     let install_adapter = std::rc::Rc::downgrade(adapter);
     adapter.window().global::<Cores>().on_install(move || {
         let Some(path) = rfd::FileDialog::new()
-            .add_filter("核心文件", &[std::env::consts::DLL_EXTENSION])
+            .add_filter(
+                "核心包或核心文件",
+                &["zip", std::env::consts::DLL_EXTENSION],
+            )
             .pick_file()
         else {
             return;
@@ -136,6 +139,7 @@ pub(super) fn install<C: ManagerController>(
             }
         });
     let catalog_weak = adapter.window().as_weak();
+    let catalog_controller = controller.clone();
     adapter
         .window()
         .global::<FilePatch>()
@@ -144,12 +148,9 @@ pub(super) fn install<C: ManagerController>(
                 return;
             };
             let result = (|| -> Result<_, String> {
-                let executable = std::env::current_exe()
-                    .map_err(|error| format!("ASTRA_EMU_PATCH_PATH: {error}"))?;
-                let directory = executable
-                    .parent()
-                    .ok_or("ASTRA_EMU_PATCH_PATH: executable has no parent")?
-                    .join("patches");
+                let Some(directory) = catalog_controller.borrow().patch_catalog_directory() else {
+                    return Ok((Vec::new(), Vec::new()));
+                };
                 let catalog =
                     astra_emu_patch::list_recipes(&directory).map_err(|error| error.to_string())?;
                 let mut titles = Vec::<slint::SharedString>::with_capacity(catalog.len());

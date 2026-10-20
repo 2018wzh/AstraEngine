@@ -12,13 +12,31 @@ pub use notices::{describe_error, report_error, ErrorText};
 pub struct ManagerViewModel {
     pub library: LibraryViewModel,
     pub selection: SelectionViewModel,
+    pub network: NetworkViewModel,
     pub cores: CoresViewModel,
     pub settings: SettingsViewModel,
     pub appearance: AppearanceViewModel,
     pub notices: Vec<NoticeViewModel>,
+    pub snackbar: SnackbarViewModel,
     pub about: AboutViewModel,
     pub session: SessionViewModel,
     pub patch: PatchViewModel,
+}
+
+/// A new `serial` shows `text` again even when it repeats.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SnackbarViewModel {
+    pub serial: u32,
+    pub text: String,
+    pub action: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct NetworkViewModel {
+    pub allowed: bool,
+    pub syncing: bool,
+    pub sync_status: String,
+    pub source: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -103,6 +121,16 @@ pub struct SelectionViewModel {
     pub render: RenderViewModel,
     pub input_override: bool,
     pub game_bindings: Vec<GamepadBindingViewModel>,
+    pub recommended_available: bool,
+    pub recommended_summary: String,
+    pub recipes: Vec<RecipeViewModel>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RecipeViewModel {
+    pub id: String,
+    pub title: String,
+    pub recommended: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -122,12 +150,15 @@ pub struct RenderViewModel {
     pub note: String,
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CompatViewModel {
     pub status: String,
     pub notes: String,
     pub updated: String,
-    pub vndb_id: String,
+    pub release_id: String,
+    pub emulator_label: String,
+    pub report_url: String,
+    pub hint: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -185,6 +216,7 @@ pub struct ConfigFieldViewModel {
 pub struct CoresViewModel {
     pub items: Vec<CoreViewModel>,
     pub restart_required: bool,
+    pub updates_available: i32,
     pub defaults: EmulatorDefaultsViewModel,
 }
 
@@ -207,6 +239,7 @@ pub struct CoreViewModel {
     pub file: String,
     pub message: String,
     pub removable: bool,
+    pub update_version: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]

@@ -124,17 +124,19 @@ Windows 字形视觉回归由 `astra.windows_gpu_glyph_golden.v1` 绑定字体 r
 
 AstraEMU 首轮提供 Windows、Slint Manager 与 FVP。构建、插件加载和游戏运行不再使用 Engine product package、签名 Family manifest、旧 CLI、Headless report 或 RuntimeWorld。旧 Android/iOS 发布流程暂不适用于本轮。
 
-Manager 启动时从数据目录 `cores/` 自动发现 Family 动态库。桌面扫描当前平台动态库扩展，并只尝试 `astra_emu_` 前缀（Unix 也接受 `libastra_emu_`）的文件，因此发布目录中的 FFmpeg、音频和运行库依赖不会被误当作核心。每个文件复用独立 Family ABI 的 layout、descriptor 和 capability 校验；坏文件写入文件名诊断，其他核心继续可用，重复 plugin ID 的冲突文件全部禁用。更新核心需替换 `cores/` 文件并重启 Manager，运行期间不热加载。游戏由 Family 直接读取原生文件和管理存档；SQLite 不再保存或读取插件路径，旧 `plugin_installation` 表若存在也不参与注册。资料库与设置使用新 schema，原生存档不由 Host 改写。
+Manager 从用户数据目录与程序目录的 `cores/` 加载核心，目录布局为每个核心一个子目录 `cores/<stem>/`（`<stem>` 是核心库文件名去掉扩展名，如 `astra_emu_musica`），子目录内恰好一个 `astra_emu_` 前缀（Unix 也接受 `libastra_emu_`）的核心库，加上它的依赖 DLL、`Resources/`、`licenses/` 和 `core.json`（`astra.emu.core_package.v1`，列出每个文件的 sha256）。子目录内核心库数量不是一个时记 `ASTRA_EMU_CORE_LAYOUT`；顶层文件不再被发现，旧版放在 `cores/` 顶层的 `astra_emu_*.dll` 在下次加载前自动迁入各自子目录。用户目录与程序目录有同名 `<stem>` 时用户目录优先。每个核心复用独立 Family ABI 的 layout、descriptor 和 capability 校验；坏核心写入诊断，其他核心继续可用，重复 plugin ID 的冲突核心全部禁用。
+
+安装、更新与卸载先写入 `cores/.pending/`：`.pending/<stem>/` 是待安装的完整目录，`.pending/<stem>.remove` 是移除标记。下次加载核心前先处理移除，再把旧目录改名为 `.pending/<stem>.old`、移入新目录并删除旧目录，失败时恢复旧目录并显示诊断。“从本地安装”接受 `.zip` 核心包或单个核心库（自动生成 `core.json`）；“在线安装/更新”需要允许联网，从元数据 `cores.json` 选取 `windows-x86_64`、ABI 匹配且版本最高的条目，只允许从 GitHub Releases 及其资产服务器下载（≤ 512 MiB），校验 sha256 后解压。核心包拒绝绝对路径、`..`、符号链接、重复项、plugin_id 不符和文件 sha256 不符。运行期间不热加载，安装后重启 Manager 生效。游戏由 Family 直接读取原生文件和管理存档；SQLite 不保存插件路径，原生存档不由 Host 改写。
 
 独立 Host 实现仍在本次重构中；具体命令与 Windows 游戏验证结果在集成完成后更新。本轮计划与边界见 [独立 Host 重构](../migrations/astraemu-independent-host.md)，当前进度见 [实施状态](../status/implementation-plan.md)。不生成或保留新的 EMU evidence/report 体系。
 
-## AstraEMU 兼容性数据仓
+## AstraEMU 元数据仓库
 
-AstraEMU 社区兼容性库是独立维护的只读数据仓，经 GitHub Pages 托管为静态 JSON（schema `astra.emu.compatibility.v2`），不进入本仓 workspace、依赖图或 release gate。数据仓 CI 用 `astra-emu-metadata` 的 `compatibility_json_schema()` 导出的 JSON Schema 校验文档；Rust 类型是 schema 真源，修改分级或字段必须先改 `compatibility.rs` 再重新导出。格式与边界见 [Data Formats](../contracts/data-formats.md) 的社区兼容性库节。
+兼容性、推荐配置、核心目录与汉化补丁由公开仓库 `2018wzh/AstraEMU-metadata` 维护，主仓以 submodule `Emulator/Metadata` 引用，发布在 `https://2018wzh.github.io/AstraEMU-metadata/v1/`。数据格式以 `astra-emu-metadata` 的 Rust 类型为准（compatibility v3、index/presets/cores v1），修改字段先改 Rust 类型，再用 `examples/export_schemas.rs` 重新导出 schema。格式与边界见 [Data Formats](../contracts/data-formats.md) 的 AstraEMU 元数据节。
 
-v2 让兼容性由 **VNDB 一键控**：游戏用 vID（`v<decimal>`，游戏名标识）键控，具体版本用 rID（`r<decimal>`，版本标识）键控，因此一条记录精确到某个游戏版本；同一 vID 的不同 rID 可携带不同分级。社区贡献者通过本仓 `.github/ISSUE_TEMPLATE/vndb-game-compatibility.yml` 提交结构化报告（vID、rID、分级、引擎、平台），维护者运行验证脚本把通过的条目落成 v2 记录并合并进数据仓。Bangumi 只用于游玩进度记录，不再参与兼容性库。
+兼容性记录按 VNDB rID 与模拟器 plugin_id 键控，每个 `(rID, 模拟器)` 一个条目。报告者从 Manager 详情页的“报告兼容性”打开预填的 issue 表单（vID、rID、模拟器、平台与版本），维护者加 `compat:accepted` 标签后由 `issue-intake` 工作流生成条目 PR，合并后 `publish` 工作流重建并发布索引。
 
-Manager 默认源由常量 `DEFAULT_COMPATIBILITY_SOURCE_URL` 给出，可经设置覆盖。拉取复用 metadata network-consent gate（启用 VNDB 网络访问后才允许），只接受 HTTPS、拒绝重定向，并以 SHA-256 content hash 做增量同步。相关 observability 事件为 `emu.compatibility.fetch`、`astra.emu.compatibility.cache`/`match`/`diagnostic` 与 `astra.emu.play.session_start`/`session_end`，字段只含 work_id、vID/rID、hash、status、diagnostic code 和计数，不含商业文本或本地路径。数据仓本身不在本计划交付范围，由用户单独创建维护。
+Manager 的所有联网请求（VNDB、Bangumi、元数据同步、核心下载、实时翻译）共用设置中的“允许联网”开关，关闭时返回 `ASTRA_EMU_NETWORK_PERMISSION_REQUIRED`。允许联网时，Manager 在首帧渲染后后台同步一次元数据，也可在设置中手动同步或在开启联网时立即同步。同步只接受 HTTPS、不跟随重定向，按 `index.json` 的 ETag 与 sha256 增量下载，先写入 `metadata.staging/` 并整体校验，再替换数据目录下的 `metadata/`；失败时保留旧缓存。随包快照 `<exe_dir>/metadata/` 更新时优先使用随包快照。相关事件为 `astra.emu.metadata.sync`、`astra.emu.metadata.cache_rejected`、`astra.emu.metadata.sync_rejected` 与 `astra.emu.manager.core_downloaded`，字段只含路径计数、版本、plugin_id 与诊断码。
 
 ## 日志命令
 

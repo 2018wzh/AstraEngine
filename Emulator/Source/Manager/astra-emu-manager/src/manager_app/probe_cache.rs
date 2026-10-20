@@ -88,13 +88,20 @@ impl Inventory {
         for directory in directories {
             let root = fs::canonicalize(directory).ok()?;
             files.push(stamp(&root, root.clone())?);
-            for entry in fs::read_dir(&root).ok()? {
-                let entry = entry.ok()?;
-                let path = entry.path();
-                // Dependencies affect native probes as well as the query library.
-                files.push(stamp(&path, path.clone())?);
-                if files.len() > MAX_FILES {
-                    return None;
+            // Core directories hold the library and its dependencies; both
+            // affect native probes.
+            let mut pending = vec![(root, 0)];
+            while let Some((directory, depth)) = pending.pop() {
+                for entry in fs::read_dir(&directory).ok()? {
+                    let path = entry.ok()?.path();
+                    let value = stamp(&path, path.clone())?;
+                    if value.directory && depth == 0 {
+                        pending.push((path, depth + 1));
+                    }
+                    files.push(value);
+                    if files.len() > MAX_FILES {
+                        return None;
+                    }
                 }
             }
         }

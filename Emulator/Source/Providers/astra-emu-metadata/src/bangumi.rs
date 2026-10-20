@@ -20,7 +20,6 @@ const ASTRA_EMU_USER_AGENT: &str =
 
 #[derive(Debug, Clone)]
 pub struct BangumiProviderConfig {
-    pub network_consent: bool,
     pub access_token: Option<String>,
     pub timeout: std::time::Duration,
 }
@@ -28,7 +27,6 @@ pub struct BangumiProviderConfig {
 pub struct BangumiProvider {
     client: BangumiClient,
     cover_fetcher: CoverFetcher,
-    network_consent: bool,
 }
 
 impl BangumiProvider {
@@ -48,23 +46,13 @@ impl BangumiProvider {
         Ok(Self {
             client,
             cover_fetcher: CoverFetcher::new(CoverPolicy::default())?,
-            network_consent: config.network_consent,
         })
     }
 
-    fn authorize(&self) -> Result<(), MetadataError> {
-        if self.network_consent {
-            Ok(())
-        } else {
-            Err(MetadataError::ConsentRequired("bangumi"))
-        }
-    }
-
     pub async fn sync_play_status(&self, update: &BangumiPlayUpdate) -> Result<(), MetadataError> {
-        self.authorize()?;
         update.validate()?;
         if self.client.access_token.is_none() {
-            return Err(MetadataError::ConsentRequired("bangumi-token"));
+            return Err(MetadataError::Unauthorized);
         }
         let status = match update.status {
             BangumiPlayStatus::Wish => CollectionType::Wish,
@@ -100,7 +88,6 @@ impl MetadataProvider for BangumiProvider {
         &self,
         query: &MetadataSearchQuery,
     ) -> Result<Vec<MetadataRecord>, MetadataError> {
-        self.authorize()?;
         query.validate()?;
         let response = self
             .client
@@ -133,7 +120,6 @@ impl MetadataProvider for BangumiProvider {
     }
 
     async fn fetch_by_id(&self, remote_id: &str) -> Result<MetadataRecord, MetadataError> {
-        self.authorize()?;
         let subject_id = remote_id
             .parse::<u32>()
             .ok()
@@ -155,7 +141,6 @@ impl MetadataProvider for BangumiProvider {
         record: &MetadataRecord,
         allow_sensitive: bool,
     ) -> Result<CoverAsset, MetadataError> {
-        self.authorize()?;
         if record.provider != MetadataProviderId::Bangumi {
             return Err(MetadataError::InvalidRequest("provider"));
         }

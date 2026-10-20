@@ -344,8 +344,20 @@ impl ManagerController for AstraEmuManagerController {
         AstraEmuManagerController::set_compatibility_filter(self, filter)
     }
 
-    fn refresh_compatibility(&mut self) -> Result<ManagerViewModel, String> {
-        AstraEmuManagerController::refresh_compatibility(self)
+    fn sync_metadata(&mut self) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::sync_metadata(self)
+    }
+
+    fn apply_recommended_config(&mut self, game_id: &str) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::apply_recommended_config(self, game_id)
+    }
+
+    fn patch_catalog_directory(&self) -> Option<std::path::PathBuf> {
+        AstraEmuManagerController::patch_catalog_directory(self)
+    }
+
+    fn network_allowed(&self) -> bool {
+        self.network_allowed
     }
 
     fn fetch_releases(&mut self) -> Result<ManagerViewModel, String> {
@@ -404,8 +416,12 @@ impl ManagerController for AstraEmuManagerController {
         AstraEmuManagerController::install_core(self, source)
     }
 
-    fn uninstall_core(&mut self, file: &str) -> Result<ManagerViewModel, String> {
-        AstraEmuManagerController::uninstall_core(self, file)
+    fn install_online_core(&mut self, plugin_id: &str) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::install_online_core(self, plugin_id)
+    }
+
+    fn uninstall_core(&mut self, stem: &str) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::uninstall_core(self, stem)
     }
 
     fn log_text(&self, core: &str) -> Result<(String, usize), String> {
@@ -414,5 +430,9 @@ impl ManagerController for AstraEmuManagerController {
 
     fn engine_action(&mut self, control: u32) -> Result<(), String> {
         AstraEmuManagerController::engine_action(self, control)
+    }
+
+    fn snackbar_action(&mut self) -> Result<astra_emu_manager::SnackbarOutcome, String> {
+        AstraEmuManagerController::snackbar_action(self)
     }
 }

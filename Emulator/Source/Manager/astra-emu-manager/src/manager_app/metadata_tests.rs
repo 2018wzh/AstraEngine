@@ -8,10 +8,10 @@ fn controller(root: &Path) -> AstraEmuManagerController {
 #[cfg(not(target_os = "android"))]
 fn damaged_core_keeps_manager_available_and_error_visible() {
     let root = tempfile::tempdir().unwrap();
-    let cores = root.path().join("cores");
-    std::fs::create_dir_all(&cores).unwrap();
+    let core = root.path().join("cores").join("astra_emu_broken");
+    std::fs::create_dir_all(&core).unwrap();
     std::fs::write(
-        cores.join(format!(
+        core.join(format!(
             "astra_emu_broken.{}",
             std::env::consts::DLL_EXTENSION
         )),
@@ -19,7 +19,7 @@ fn damaged_core_keeps_manager_available_and_error_visible() {
     )
     .unwrap();
     std::fs::write(
-        cores.join(format!("avcodec-62.{}", std::env::consts::DLL_EXTENSION)),
+        core.join(format!("avcodec-62.{}", std::env::consts::DLL_EXTENSION)),
         b"dependency bytes",
     )
     .unwrap();
@@ -27,14 +27,8 @@ fn damaged_core_keeps_manager_available_and_error_visible() {
     let mut app = controller(root.path());
     app.refresh_cores().unwrap();
     super::probe_state_tests::settle_background(&mut app);
-    assert!(app.plugin_errors.contains_key(&format!(
-        "astra_emu_broken.{}",
-        std::env::consts::DLL_EXTENSION
-    )));
-    assert!(
-        !app.plugin_errors
-            .contains_key(&format!("avcodec-62.{}", std::env::consts::DLL_EXTENSION))
-    );
+    assert!(app.plugin_errors.contains_key("astra_emu_broken"));
+    assert!(!app.plugin_errors.contains_key("avcodec-62"));
     assert!(app.registry.descriptor("astra.emu.missing").is_none());
     assert!(
         app.model()
@@ -117,6 +111,7 @@ fn metadata_search_rejects_invalid_input_and_overlapping_requests() {
         "existing".into(),
         PendingMetadata {
             game_id: Some("first".into()),
+            core: None,
         },
     );
     assert_eq!(

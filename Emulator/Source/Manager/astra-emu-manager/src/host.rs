@@ -124,6 +124,10 @@ pub trait ManagerController: 'static {
         event: astra_emu_manager_core::model::FamilyEvent,
     ) -> Result<(), String>;
     fn is_game_active(&self) -> bool;
+    /// Run the current snackbar action (undo removal or request a restart).
+    fn snackbar_action(&mut self) -> Result<SnackbarOutcome, String>;
+    /// Whether the persisted network permission is granted.
+    fn network_allowed(&self) -> bool;
     /// Starts core discovery only after a user action; never waits or scans games.
     fn refresh_cores(&mut self) -> Result<ManagerViewModel, String>;
     fn model(&self) -> Result<ManagerViewModel, String>;
@@ -205,8 +209,12 @@ pub trait ManagerController: 'static {
         &mut self,
         appearance: astra_emu_manager_core::AppearanceSettings,
     ) -> Result<ManagerViewModel, String>;
+    /// Stage a local `.zip` core package or single core library; applied on restart.
     fn install_core(&mut self, source: &std::path::Path) -> Result<ManagerViewModel, String>;
-    fn uninstall_core(&mut self, file: &str) -> Result<ManagerViewModel, String>;
+    /// Download the newest catalog release of a core; needs network permission.
+    fn install_online_core(&mut self, plugin_id: &str) -> Result<ManagerViewModel, String>;
+    /// `stem` is the core directory name, e.g. `astra_emu_musica`.
+    fn uninstall_core(&mut self, stem: &str) -> Result<ManagerViewModel, String>;
     fn log_text(&self, core: &str) -> Result<(String, usize), String>;
     fn engine_action(&mut self, control: u32) -> Result<(), String>;
     /// Every configuration setter below persists immediately and fails with
@@ -263,8 +271,12 @@ pub trait ManagerController: 'static {
     /// Compatibility filter: "all" | "perfect" | "completable" | "flawed" |
     /// "boot_only" | "unplayable" | "unknown".
     fn set_compatibility_filter(&mut self, _filter: &str) -> Result<ManagerViewModel, String>;
-    /// Queue a compatibility database refresh.
-    fn refresh_compatibility(&mut self) -> Result<ManagerViewModel, String>;
+    /// Queue an AstraEMU-metadata synchronization.
+    fn sync_metadata(&mut self) -> Result<ManagerViewModel, String>;
+    /// Write the selected release's recommended configuration as game overrides.
+    fn apply_recommended_config(&mut self, game_id: &str) -> Result<ManagerViewModel, String>;
+    /// Patch catalog directory of the active metadata cache.
+    fn patch_catalog_directory(&self) -> Option<std::path::PathBuf>;
     /// Fetch the VNDB releases (rIDs) of the selected work so its local
     /// installation can be pinned to a specific game version.
     fn fetch_releases(&mut self) -> Result<ManagerViewModel, String>;
@@ -291,6 +303,11 @@ pub trait ManagerController: 'static {
         button: &str,
         key: &str,
     ) -> Result<ManagerViewModel, String>;
+}
+
+pub enum SnackbarOutcome {
+    Model(Box<ManagerViewModel>),
+    Restart,
 }
 
 pub type FilterApply<'a> =
@@ -572,6 +589,22 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                             window.global::<Library>().set_cover_loading(true);
                         }
                     });
+                    if event_controller.borrow().network_allowed() {
+                        let controller = event_controller.clone();
+                        let adapter = event_adapter.clone();
+                        let weak = event_window.clone();
+                        slint::Timer::single_shot(std::time::Duration::ZERO, move || {
+                            let result = controller.borrow_mut().sync_metadata();
+                            match result {
+                                Ok(model) => apply_model(&adapter, &model),
+                                Err(error) => {
+                                    if let Some(window) = weak.upgrade() {
+                                        report_error(&window, &error);
+                                    }
+                                }
+                            }
+                        });
+                    }
                 }
                 Ok(())
             },
