@@ -34,7 +34,7 @@ Host 独占 OS 光标显隐，Slint 不另行隐藏游戏光标；原生指针�
 
 同进程、单活动游戏，Dynamic/Static 共用 C 兼容结构、明确长度、不透明句柄和稳定错误码。动态入口 `astra_emu_query` 与静态注册的 `Query` 返回相同 `CoreApi`；查询只协商版本，不启动线程或安装日志。函数表含 initialize、describe、probe、open、input、control、state、frame、cancel、close 和 extension，不含 advance。普通调用串行，cancel 可并发唤醒阻塞服务；close 无论成功失败都消费句柄，返回前结束全部 worker 和回调。失败 open 不交付会话且完成清理。此为本轮实现版本，尚未完成七核心产品验收，不宣称已发布稳定 ABI。
 
-C ABI v2 在 OpenRequest 中携带可选 module owner。`astra.module_owner` v1 扩展只为真实跨会话资源提供 create/destroy；Host 模块实例持有 owner，全部会话关闭后在所属线程销毁，动态库仍驻留。Musica 用它持有显式 provider/graphics Instance，删除全局 graphics 缓存；不需要该能力的核心明确返回 Unsupported，不创建空 owner。
+C ABI v3 在 OpenRequest 中携带可选 module owner。`astra.module_owner` v1 扩展只为真实跨会话资源提供 create/destroy；Host 模块实例持有 owner，全部会话关闭后在所属线程销毁，动态库仍驻留。Musica 用它持有显式 provider/graphics Instance，删除全局 graphics 缓存；不需要该能力的核心明确返回 Unsupported，不创建空 owner。
 
 Manager 首窗只依赖资料库缓存与必要 UI 状态，不等待核心 DLL 注册、全库识别、封面解码、扩展 VM 或游戏滤镜编译。启动和首帧均不自动加载核心或刷新游戏库；核心发现/加载、游戏识别/扫描只由用户手动操作触发，并在固定 owner 线程异步执行，UI 不同步等待 registry RPC。核心加载完成不隐式 probe 游戏或变更既有绑定。本次运行只加载一次核心，替换 DLL 后须重启，不做运行中热替换；加载失败不得显示为就绪。手动完整扫描可复用已登记目录的有效识别提示，新目录和变化项重新 probe；缓存按核心和游戏文件元数据失效，只作提示，每次打开仍由当前所选核心重新验证。缺失、重复 ID、真实错误和已保存模拟器偏好不能被缓存隐藏或替换。
 
@@ -54,7 +54,7 @@ Manager 首窗只依赖资料库缓存与必要 UI 状态，不等待核心 DLL 
 
 Host 始终返回窗口操作的真实结果。若固定原生前端已证明某个 void/best-effort 操作在执行失败时仅警告继续，薄适配应保留同等策略，而不是擅自升级为整会话终止；警告保留操作、状态码与原错误，失败不得更新成功状态。该边界不扩展到其他窗口/模态操作，取消、旧上下文及协议错误仍按原有控制流处理。
 
-`WINDOW_QUERY_STATE=10` 在窗口线程只读实际状态，通过已有 `WindowResult.valid_fields` 标记可观测字段；flags 必须为零，不修改窗口。焦点和挂起不能代替 fullscreen/minimized。需要这些原生位的核心在启动及窗口状态变化后读取真实结果；Host 不支持查询或缺少所需字段时明确失败，不猜测默认状态。该请求不改变 ABI v2 的结构布局。
+`WINDOW_QUERY_STATE=10` 在窗口线程只读实际状态，通过已有 `WindowResult.valid_fields` 标记可观测字段；flags 必须为零，不修改窗口。焦点和挂起不能代替 fullscreen/minimized。需要这些原生位的核心在启动及窗口状态变化后读取真实结果；Host 不支持查询或缺少所需字段时明确失败，不猜测默认状态。该请求不改变 ABI 的结构布局。
 
 Manager 分别保存 OS 可见性和平台挂起状态；最小化、遮挡及零 drawable extent 请求挂起，不能依赖 Win32 `is_visible()` 判断最小化。原生 ABI 的 `suspended` 取隐藏或挂起，恢复其中一个条件不清除另一个。失焦仍单独交给核心策略；进入挂起释放已按下输入，恢复沿用最后有效尺寸。
 
@@ -69,7 +69,7 @@ Manager 分别保存 OS 可见性和平台挂起状态；最小化、遮挡及�
 
 核心声明配置 schema、支持范围、默认值及实际生效的逻辑尺寸和渲染尺寸；不强迫所有核心使用同名 render_scale/宽高字段。Manager 按核心和游戏保存并传入，核心负责校验。默认启动时应用；只有核心明确声明在线重配置能力时才允许运行中切换。不支持的请求明确拒绝，或按声明策略报告实际结果，不能默默替换尺寸而仍报告请求值。
 
-Manager 在模拟器配置中提供“引擎公共设置”，分辨率字段控制核心送入滤镜之前的真实原生渲染尺寸 R，不改逻辑舞台 L，也不在 Host 增加重采样来冒充原生渲染。公共界面映射核心已声明的 typed 参数：RFVP 的等比例 `render_scale`、Musica 的 `render_width/render_height`、Sena 的 `raster_width/raster_height`。尚未声明相关参数的模拟器明确显示当前不可调整，保持自身输出；不捏造公共宽高或向核心发送未知配置。公共与专属参数共用按模拟器/游戏保存的配置范围，统一保存与重置，下次游戏启动生效。
+C ABI v3 以类型化渲染尺寸取代各核心的专用宽高字段：声明 `CAP_RENDER_EXTENT` 的核心在 descriptor 的 `render` 中给出 min/max/default 与是否保持宽高比，Manager 通过 `OpenRequest.render_extent` 请求完整帧渲染尺寸 R（0×0 为核心默认），越界由核心以 `INVALID_ARGUMENT` 拒绝。R 控制送入滤镜之前的真实原生渲染尺寸，不改逻辑舞台 L，也不在 Host 增加重采样来冒充原生渲染。当前 RFVP、Musica、Sena 声明该能力；其余核心 `render` 全零，保持自身输出，Manager 明确显示不可调整。按游戏保存的渲染偏好在下次游戏启动生效。
 
 区分 L（逻辑舞台）、R（完整帧渲染尺寸）、O（窗口 drawable 物理尺寸）和 V（内容区域），资产物理像素另行保留。窗口 O 改变只需重算 V 并重绘，不额外推进 VM，也不暗改 R。R 更新在核心安全点完成，以新输出配置代次发布；旧帧与资源在消费完成前有效。Host 将指针从窗口映射到正在显示的帧像素空间，适配层沿用核心帧到游戏逻辑/UI 的映射，携带一致几何和代次，避免双重缩放。
 
@@ -77,13 +77,9 @@ Manager 在模拟器配置中提供“引擎公共设置”，分辨率字段控
 
 CPU Surface 提供只读像素与 stride，复用不可变 lease、有界帧池、异步完成和 Ready/Pending/Unchanged 区分。`CpuFrame` 仅接管 owner，不复制或扫描像素；无效帧也归还租约。release 可在任意线程执行，且不依赖已关闭的会话、GPU、窗口或 Host 回调；Host 按真实上传 API 的源数据生命周期释放 lease，不机械等同于调用返回或最终显示完成。生产者不得覆写已交付内存，池满时采用明确背压或显示帧丢弃规则。
 
-GPU Surface 保留核心自己的 Device 和 renderer，通过版本化图形扩展协商后端、设备兼容性、格式、共享句柄、导入与同步，不跨 ABI 传 wgpu::Texture 等 Rust 对象，也不把同一显卡当作同一 Device。核心完成写入后 Host 才能采样；Host 提交消费完成依赖后核心才能复用目标。先固定扩展发现机制和帧身份，具体后端协议随真实实现验收，不预先冻结虚构的跨后端 GPU 结构。
+C ABI v3 删除 GPU Surface 与 `astra.emu.surface.d3d12` 扩展，帧只经 CPU lease 交付；RFVP 此前的 D3D12 交付随之删除。核心继续保留自己的 Device 和 renderer，Host 不跨 ABI 接收 wgpu::Texture 等 Rust 对象。今后若重新引入 GPU 共享，须作为新的版本化扩展随真实实现验收，不能用类型编译或 CPU 结果宣称 GPU 验收。
 
-Windows 首个后端使用 `astra.emu.surface.d3d12` v1：协商实际 adapter LUID、格式与尺寸上限，核心和 Host 各持自己的 Device。三槽导出资源与 ready/done shared fence 通过 NT handle 交接，GPU 资源回到 COMMON 后才排队 ready；Host 等待、复制到自己的滤镜输入、回到 COMMON 并排队 done。每个 generation 只发放一个独立租约；归还与 done 完成共同决定复用。未提交使用可显式放弃，不得伪造消费完成。原生最终目标→共享目标、共享目标→Host 私有输入各有一次 GPU copy，不称零拷贝。该协议随 RFVP/Presenter 实现验证，不能用类型编译或 CPU 结果宣称 GPU 验收。
-
-关闭先停止生产并排空原生写入，导出资源的租约不再依赖 VM 或 Host 回调。Host 保留 imported resource/fence 到实际 done 完成；不遗留 detached 退役线程。驱动未完成时保留有界资源并返回关闭错误、禁止重开，不能为了超时成功而提前释放 GPU 仍在使用的对象。
-
-每个核心在目标平台至少提供一种实际可用交付方式，不要求 CPU/GPU 双实现。未声明 CPU 回退的 GPU 核心遇到不支持的共享组合明确报错。Presenter 可丢弃未显示旧帧，但不能丢输入、逻辑步骤、声音或存档操作；原生转场历史、缩略图和内部捕获不得与 Host 持有的可写输出目标混用。CPU 交付不能标为 GPU 共享或无回读路径。
+每个核心在目标平台提供 CPU 交付。Presenter 可丢弃未显示旧帧，但不能丢输入、逻辑步骤、声音或存档操作；原生转场历史、缩略图和内部捕获不得与 Host 持有的输出租约混用。
 
 ### RFVP 与 Manager
 

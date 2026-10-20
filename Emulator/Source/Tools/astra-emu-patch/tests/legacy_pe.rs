@@ -22,12 +22,12 @@ fn exercise(bytes: &[u8], body: &str, expected: Option<PatchErrorKind>, cancel: 
     fs::write(source.join("keep.bin"), b"public independent output").unwrap();
     fs::write(
         scripts.join("common/binary.luau"),
-        include_str!("../../../../Patches/common/binary.luau"),
+        include_str!("../../../../Metadata/patches/common/binary.luau"),
     )
     .unwrap();
     fs::write(
         scripts.join("common/pe.luau"),
-        include_str!("../../../../Patches/common/pe.luau"),
+        include_str!("../../../../Metadata/patches/common/pe.luau"),
     )
     .unwrap();
     let script = scripts.join("entry.luau");

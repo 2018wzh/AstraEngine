@@ -5,7 +5,7 @@ use std::{
     sync::{atomic::AtomicBool, Arc},
 };
 
-const ACR_MODULE: &str = include_str!("../../../../Patches/common/musica_acr.luau");
+const ACR_MODULE: &str = include_str!("../../../../Metadata/patches/common/musica_acr.luau");
 
 fn run(
     root: &Path,

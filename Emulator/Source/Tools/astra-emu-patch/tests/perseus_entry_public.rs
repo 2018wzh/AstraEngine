@@ -17,10 +17,10 @@ use std::{
     },
 };
 
-const PIPELINE: &str = include_str!("../../../../Patches/common/perseus.luau");
-const MOLEBOX: &str = include_str!("../../../../Patches/common/molebox.luau");
-const BINARY: &str = include_str!("../../../../Patches/common/binary.luau");
-const COPY: &str = include_str!("../../../../Patches/common/copy.luau");
+const PIPELINE: &str = include_str!("../../../../Metadata/patches/common/perseus.luau");
+const MOLEBOX: &str = include_str!("../../../../Metadata/patches/common/molebox.luau");
+const BINARY: &str = include_str!("../../../../Metadata/patches/common/binary.luau");
+const COPY: &str = include_str!("../../../../Metadata/patches/common/copy.luau");
 const SCHEDULE: [usize; 60] = [
     11, 12, 13, 14, 8, 9, 10, 4, 5, 6, 7, 1, 2, 3, 12, 13, 14, 0, 9, 10, 11, 5, 6, 7, 8, 2, 3, 4,
     13, 14, 0, 1, 10, 11, 12, 6, 7, 8, 9, 3, 4, 5, 14, 0, 1, 2, 11, 12, 13, 7, 8, 9, 10, 4, 5, 6,

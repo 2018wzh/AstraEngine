@@ -48,7 +48,7 @@ fn fixture(root: &std::path::Path, dat: &[u8]) -> PatchRequest {
     fs::write(patch.join("patch.dat"), dat).unwrap();
     fs::write(
         scripts.join("common/fvp.luau"),
-        include_str!("../../../../Patches/common/fvp.luau"),
+        include_str!("../../../../Metadata/patches/common/fvp.luau"),
     )
     .unwrap();
     let script = scripts.join("fixture.luau");

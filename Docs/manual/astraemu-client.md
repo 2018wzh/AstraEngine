@@ -8,7 +8,7 @@
 
 核心自行打开真实音频设备；设备不可用或格式不支持时显示原生错误，不自动切换 NullAudio。Manager 不再驱动核心 Tick 或接收核心 PCM。
 
-FVP 当前原生 App 路径仍嵌入上游四个 MS 命名字体文件，分发授权尚未核验。完整说明见 [第三方声明](../../Emulator/THIRD_PARTY_NOTICES.md)，当前开发产物不能直接当作可分发 Release。
+FVP 当前原生 App 路径嵌入上游四个 MS 命名字体文件，按上游原样随核心发布。来源与许可见 [第三方声明](../../Emulator/THIRD_PARTY_NOTICES.md)。
 
 
 点击“刷新核心”后，客户端从程序相邻的 `cores/` 和用户数据目录的 `cores/` 同时发现核心。核心文件损坏、ABI 不符和重复 plugin ID 都会显示诊断；重复核心不会按目录顺序覆盖。本次运行只加载一次核心，替换核心或修复加载失败后需要重启客户端，不做热替换。
@@ -18,9 +18,9 @@ FVP 当前原生 App 路径仍嵌入上游四个 MS 命名字体文件，分发�
 游戏视图的会话菜单按核心实际声明显示。Musica 提供快速存读档、存读档页、自动播放、快进、回看及设置入口，操作沿原生输入处理；不支持的操作不会伪装为成功。
 
 
-新 Manager 只加载 C ABI v2 核心，旧 Family vtable 不兼容。核心自行运行 VM、原生菜单、渲染、音视频与保存；Manager 接收包含文字和游戏 UI 的完整帧。CPU lease 与 RFVP 的 D3D12 扩展共用呈现滤镜链。D3D12 使用独立 Device、共享图像及双向 fence，包含两次 GPU copy，不称零拷贝。
+新 Manager 只加载 C ABI v3 核心，旧 Family vtable 与 ABI v2 核心不兼容。核心自行运行 VM、原生菜单、渲染、音视频与保存；Manager 接收包含文字和游戏 UI 的完整帧，帧只经 CPU lease 交付并进入呈现滤镜链。声明 `CAP_RENDER_EXTENT` 的核心（RFVP、Musica、Sena）按 `render_extent` 请求的光栅尺寸渲染。
 
-当前 RFVP 已验证原生剧情、选择、菜单/缩略图、存读档和关闭重开，以及 D3D12 导入、滤镜、resize、旧租约和设备丢失。Siglus 已通过新 ABI 的标题、影片、正文、存读档和同 DLL 重开代表流程。KrKr 已删除 child/IPC，公开 TJS/PNG/OpenAL 与重开验证通过。七核心可玩范围及已知阻塞统一见[实施计划](../status/implementation-plan.md)；本轮不要求每核心通关，旧 Hosted/Sandbox 结果不代替本次验收。
+当前 RFVP 已验证原生剧情、选择、菜单/缩略图、存读档和关闭重开；此前的 D3D12 交付已在 C ABI v3 中删除。Siglus 已通过新 ABI 的标题、影片、正文、存读档和同 DLL 重开代表流程。KrKr 已删除 child/IPC，公开 TJS/PNG/OpenAL 与重开验证通过。七核心可玩范围及已知阻塞统一见[实施计划](../status/implementation-plan.md)；本轮不要求每核心通关，旧 Hosted/Sandbox 结果不代替本次验收。
 
 Musica 提供同步文字 Hook；共享串行 Luau VM 执行已启用扩展。原生取消不排在 Luau 队列后。可安全重试的错误显示重试和结束，其他失败只允许结束。只安装可信本地扩展；CLI 为 `extension-install <id> <source.luau>`、`extension-enable <id> <true|false>`、`extension-configure <id> <configuration.json>`、`extension-list`。本批不提供在线扩展市场。
 
@@ -111,7 +111,7 @@ Beta1 使用 Release 优化构建；Manager“关于”及当时 Manager、独�
 
 ## 构建运行包
 
-历史 checkpoint 已构建七核心、Manager 和当时的独立转换 CLI，并组装本机验证目录 `AstraEMU-native-first-checkpoint-20261019`；其 PE 依赖/导出及包内 CLI 公开转换已检查。这些是统一入口迁移前的历史证据，不代表 Beta2 已构建或通过核验。该目录是原生优先的验证组合，尚有七个候选的静态消费者/素材阻塞，实际 Manager 界面和游戏仍待用户手动验收。已发布源码不等于可公开分发二进制；RFVP 字体、Ethornell 许可及下述静态 FriBidi LGPL 义务核验前，产物仅作本机私有使用。
+历史 checkpoint 已构建七核心、Manager 和当时的独立转换 CLI，并组装本机验证目录 `AstraEMU-native-first-checkpoint-20261019`；其 PE 依赖/导出及包内 CLI 公开转换已检查。这些是统一入口迁移前的历史证据，不代表 Beta2 已构建或通过核验。该目录是原生优先的验证组合，尚有七个候选的静态消费者/素材阻塞，实际 Manager 界面和游戏仍待用户手动验收。公开 Release 由下文的发布工作流构建：FriBidi 与两组 FFmpeg 以 DLL 随各自核心目录分发，并附 LGPL-2.1 文本与对应源码包。
 
 下面以 FVP 为例。先初始化主仓固定的完整 submodule；不要换回旧 revision 绕过失败。参与核心保留不同原生 Lua/音频依赖，分别构建，不将 Artemis Lua 5.1 和 Manager Luau 合并进同一次 Cargo 调用。公开 Release 由 `.github/workflows/emu-release.yml` 按同样步骤构建全部七个核心，见下文“发布工作流”。
 
@@ -176,6 +176,6 @@ Python API 为 `package(manager, core_dirs, output, runtime_files, *, metadata_d
 git lfs pull --include="Examples/NativeVN/Assets/Fonts/NotoSansJP-Variable.ttf,Examples/NativeVN/Assets/Fonts/NotoSansSC-Variable.ttf" --exclude=""
 ```
 
-Musica 动态核心须同时启用 `dynamic-plugin-export,ffmpeg-vcpkg`，并配置 FFmpeg vcpkg 环境。构建完成后立即用 `stage_core.py` 把该 DLL 及匹配的 FFmpeg 与 FriBidi DLL 整理到新的核心目录，再交给打包器；之后对同一 target 的 CLI/静态依赖构建可能覆盖未启用导出的同名 DLL。`astra_emu_query` 必须能协商 ABI v2，不能把普通 rlib 依赖构建产生的 DLL 当作产品核心。
+Musica 动态核心须同时启用 `dynamic-plugin-export,ffmpeg-vcpkg`，并配置 FFmpeg vcpkg 环境。构建完成后立即用 `stage_core.py` 把该 DLL 及匹配的 FFmpeg 与 FriBidi DLL 整理到新的核心目录，再交给打包器；之后对同一 target 的 CLI/静态依赖构建可能覆盖未启用导出的同名 DLL。`astra_emu_query` 必须能协商 C ABI v3，不能把普通 rlib 依赖构建产生的 DLL 当作产品核心。
 
 KrKr 核心目录同样用 `stage_core.py` 整理：`--library` 为 CMake 输出的 `astra_emu_krkr.dll`，`--resources` 为同目录的 `Resources/`，`--dependency` 为 `check_core_deps.py closure` 在该输出目录、KrKr vcpkg `installed/x64-windows/bin`（FFmpeg 3.3.9 DLL）和 MSVC OpenMP redist 目录（`vcomp140.dll`）中找到的全部 DLL。不再接收旧 Rust child 产物，该工具不代替商业流程和许可证核验。

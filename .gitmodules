@@ -26,3 +26,7 @@
 	path = Emulator/ThirdParty/ethornell-rs
 	url = https://github.com/2018wzh/ethornell-rs
 	branch = astra
+[submodule "Emulator/Metadata"]
+	path = Emulator/Metadata
+	url = https://github.com/2018wzh/AstraEMU-metadata
+	branch = main

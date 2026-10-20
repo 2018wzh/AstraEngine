@@ -144,13 +144,13 @@ impl Fixture {
         fs::write(source.join("container.bin"), input).unwrap();
         fs::write(
             scripts.join("common/enigma_vfs.luau"),
-            include_str!("../../../../Patches/common/enigma_vfs.luau"),
+            include_str!("../../../../Metadata/patches/common/enigma_vfs.luau"),
         )
         .unwrap();
         // Main owns the shared bounded reader. Use its production implementation,
         // never a test-only replacement of the binary or codec APIs.
         fs::copy(
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../Patches/common/binary.luau"),
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../Metadata/patches/common/binary.luau"),
             scripts.join("common/binary.luau"),
         )
         .unwrap();
