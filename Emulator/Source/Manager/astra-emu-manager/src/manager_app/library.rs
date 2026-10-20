@@ -91,8 +91,8 @@ impl AstraEmuManagerController {
             filter_settings,
             input_mapping,
             appearance,
-            family_options: BTreeMap::new(),
-            filter_options: BTreeMap::new(),
+            session_mapping: None,
+            defaults_plugin: None,
             metadata,
             metadata_sequence: 0,
             metadata_status: BTreeMap::new(),
@@ -213,9 +213,6 @@ impl AstraEmuManagerController {
     pub(super) fn clear_probe_state(&mut self, game_id: &str) -> Result<(), String> {
         self.candidates.remove(game_id);
         self.probe_choices.remove(game_id);
-        if self.selected_case_id.as_deref() == Some(game_id) {
-            self.family_options.remove("manager.emulator_id");
-        }
         Ok(())
     }
 }

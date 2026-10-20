@@ -97,8 +97,29 @@ pub struct SelectionViewModel {
     pub metadata_busy: bool,
     pub metadata_status: String,
     pub bangumi: BangumiViewModel,
+    pub emulator_choices: Vec<ChoiceViewModel>,
+    pub emulator_id: String,
     pub family_fields: Vec<ConfigFieldViewModel>,
-    pub musica_key_available: bool,
+    pub render: RenderViewModel,
+    pub input_override: bool,
+    pub game_bindings: Vec<GamepadBindingViewModel>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ChoiceViewModel {
+    pub id: String,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RenderViewModel {
+    pub supported: bool,
+    pub options: Vec<ChoiceViewModel>,
+    pub mode: String,
+    pub custom_width: i32,
+    pub custom_height: i32,
+    pub range: String,
+    pub note: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -140,23 +161,38 @@ pub struct BangumiViewModel {
     pub summary: String,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct ConfigFieldViewModel {
     pub key: String,
     pub label: String,
     pub description: String,
+    pub group: String,
+    /// `bool|integer|float|string|enum|file|directory`.
     pub kind: String,
     pub value: String,
-    pub enum_values: Vec<String>,
-    pub required: bool,
-    pub min: i32,
-    pub max: i32,
+    pub display_value: String,
+    pub options: Vec<String>,
+    pub option_values: Vec<String>,
+    pub min: f64,
+    pub max: f64,
+    pub step: f64,
+    pub unit: String,
+    pub advanced: bool,
+    pub overridden: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct CoresViewModel {
     pub items: Vec<CoreViewModel>,
     pub restart_required: bool,
+    pub defaults: EmulatorDefaultsViewModel,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct EmulatorDefaultsViewModel {
+    pub plugin: String,
+    pub fields: Vec<ConfigFieldViewModel>,
+    pub render: RenderViewModel,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]

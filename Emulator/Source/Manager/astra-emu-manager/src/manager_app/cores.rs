@@ -184,6 +184,7 @@ impl AstraEmuManagerController {
         Ok(CoresViewModel {
             items,
             restart_required: !pending.is_empty() && !self.core_refresh_enabled(),
+            defaults: Default::default(),
         })
     }
 

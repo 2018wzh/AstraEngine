@@ -206,7 +206,29 @@ impl AstraEmuManagerController {
             }
             None => "尚未同步".into(),
         };
-        let family_fields = self.family_fields()?;
+        let (emulator_choices, emulator_id, family_fields, render, game_mapping) =
+            match selected_id.as_deref() {
+                Some(game_id) => {
+                    let override_mapping = self
+                        .library
+                        .game_settings(game_id)
+                        .map_err(|error| error.to_string())?
+                        .and_then(|settings| settings.input_mapping);
+                    (
+                        self.emulator_choices(game_id),
+                        self.candidates
+                            .get(game_id)
+                            .map(|candidate| candidate.report.plugin_id.clone())
+                            .unwrap_or_default(),
+                        self.game_config_fields(game_id)?,
+                        self.game_render_view(game_id)?,
+                        override_mapping,
+                    )
+                }
+                None => Default::default(),
+            };
+        let mut cores = self.cores_view()?;
+        cores.defaults = self.emulator_defaults_view()?;
         let selected_problem = selected
             .as_ref()
             .map(|game| self.game_problem(game, startup_busy))
@@ -370,10 +392,17 @@ impl AstraEmuManagerController {
                     note: self.bangumi_note.clone(),
                     summary: "同步需手动点击，不会自动上传。".into(),
                 },
+                emulator_choices,
+                emulator_id,
                 family_fields,
-                musica_key_available: self.musica_key_file_available(),
+                render,
+                input_override: game_mapping.is_some(),
+                game_bindings: game_mapping
+                    .as_ref()
+                    .map(view_fields::binding_views)
+                    .unwrap_or_default(),
             },
-            cores: self.cores_view()?,
+            cores,
             settings: SettingsViewModel {
                 translation: translation::profile_form(profile.as_ref()),
                 translation_enabled: self.translation_enabled,

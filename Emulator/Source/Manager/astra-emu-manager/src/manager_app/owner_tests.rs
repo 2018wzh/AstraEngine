@@ -104,6 +104,7 @@ impl Harness {
             },
             candidate: self.candidate.clone(),
             configuration: Vec::new(),
+            render_extent: None,
             window: WindowState {
                 width: 1,
                 height: 1,

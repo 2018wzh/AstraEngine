@@ -1,63 +1,48 @@
 use super::*;
 use astra_emu_manager::effects::format4::EffectSource;
-use astra_emu_manager_core::{FilterPreset, FilterSettings};
+use astra_emu_manager_core::{FilterConfiguration, FilterPreset, FilterSettings};
+
+const MAX_FILTER_SOURCE_BYTES: usize = 1_048_576;
+
+use astra_emu_manager::FilterApply;
 
 impl AstraEmuManagerController {
     pub(super) fn filter_fields(&self) -> Result<Vec<ConfigFieldViewModel>, String> {
         let config = &self.filter_settings.configuration;
-        let field = |key: &str, label: &str, value: String, description: String| {
+        let field = |key: &str, label: &str, value: f32, range: (f32, f32, f32)| {
             ConfigFieldViewModel {
                 key: key.into(),
                 label: label.into(),
-                description,
                 kind: "float".into(),
-                value: self.filter_options.get(key).cloned().unwrap_or(value),
-                enum_values: vec![],
-                required: true,
-                min: 0,
-                max: 0,
+                value: value.to_string(),
+                display_value: value.to_string(),
+                min: range.0.into(),
+                max: range.1.into(),
+                step: range.2.into(),
+                ..ConfigFieldViewModel::default()
             }
         };
-        let mut fields = vec![
-            field(
-                "filter.scale",
-                "缩放倍率",
-                config.scale.to_string(),
-                "1–4；Anime4K 固定为 2".into(),
-            ),
-            field(
-                "filter.strength",
-                "锐化强度",
-                config.strength.to_string(),
-                "0–1".into(),
-            ),
-        ];
-        let source = self
-            .filter_options
-            .get("filter.source")
-            .map(String::as_str)
-            .or(self.filter_settings.source.as_deref());
-        if let Some(source) = source.filter(|source| !source.is_empty()) {
+        let mut fields = vec![field("filter.scale", "缩放倍率", config.scale, (1.0, 4.0, 0.25))];
+        fields[0].description = "Anime4K 固定为 2 倍".into();
+        fields.push(field(
+            "filter.strength",
+            "锐化强度",
+            config.strength,
+            (0.0, 1.0, 0.05),
+        ));
+        if let Some(source) = &self.filter_settings.source {
             let effect = EffectSource::parse(source).map_err(|e| e.to_string())?;
             for parameter in effect.parameters {
-                let key = format!("parameter.{}", parameter.name);
-                let value = if self.filter_options.contains_key("filter.source") {
-                    parameter.default
-                } else {
-                    config
-                        .parameters
-                        .get(&parameter.name)
-                        .copied()
-                        .unwrap_or(parameter.default)
-                };
+                let value = config
+                    .parameters
+                    .get(&parameter.name)
+                    .copied()
+                    .unwrap_or(parameter.default);
                 fields.push(field(
-                    &key,
+                    &format!("parameter.{}", parameter.name),
                     &parameter.label,
-                    value.to_string(),
-                    format!(
-                        "{}–{}，步长 {}",
-                        parameter.min, parameter.max, parameter.step
-                    ),
+                    value,
+                    (parameter.min, parameter.max, parameter.step),
                 ));
             }
         }
@@ -76,111 +61,145 @@ impl AstraEmuManagerController {
         }
     }
 
-    pub(super) fn pending_filter(&self) -> Result<FilterSettings, String> {
-        let mut settings = self.filter_settings.clone();
-        if self.filter_options.contains_key("filter.source")
-            || self.filter_options.contains_key("filter.preset")
-        {
-            settings.configuration.parameters.clear();
-        }
-        for (key, value) in &self.filter_options {
-            match key.as_str() {
-                "filter.preset" => {
-                    settings.configuration.preset = match value.as_str() {
-                        "none" => FilterPreset::None,
-                        "scale" => FilterPreset::Scale,
-                        "sharpen" => FilterPreset::Sharpen,
-                        "anime4k" => FilterPreset::Anime4kRestoreUpscale,
-                        _ => return Err("ASTRA_EMU_FILTER_PRESET_UNSUPPORTED".into()),
-                    };
-                }
-                "filter.scale" => {
-                    settings.configuration.scale =
-                        value.parse().map_err(|_| "ASTRA_EMU_FILTER_SCALE")?
-                }
-                "filter.strength" => {
-                    settings.configuration.strength =
-                        value.parse().map_err(|_| "ASTRA_EMU_FILTER_STRENGTH")?
-                }
-                "filter.source" => settings.source = (!value.is_empty()).then(|| value.clone()),
-                _ => {
-                    let name = key
-                        .strip_prefix("parameter.")
-                        .ok_or("ASTRA_EMU_FILTER_CONFIG_FIELD_UNKNOWN")?;
-                    settings.configuration.parameters.insert(
-                        name.into(),
-                        value.parse().map_err(|_| "ASTRA_EMU_FILTER_PARAMETER")?,
-                    );
-                }
-            }
-        }
-        if settings.configuration.preset == FilterPreset::Anime4kRestoreUpscale {
-            settings.configuration.scale = 2.0;
-        }
-        settings.validate()?;
-        if let Some(source) = &settings.source {
-            let effect = EffectSource::parse(source).map_err(|e| e.to_string())?;
-            for (name, value) in &settings.configuration.parameters {
-                let parameter = effect
-                    .parameters
-                    .iter()
-                    .find(|p| p.name == *name)
-                    .ok_or("ASTRA_EMU_FILTER_PARAMETER_UNKNOWN")?;
-                if *value < parameter.min || *value > parameter.max {
-                    return Err("ASTRA_EMU_FILTER_PARAMETER_RANGE".into());
-                }
-            }
-        }
-        Ok(settings)
-    }
-
-    pub(super) fn commit_filter(
+    /// Apply a candidate to the renderer, persist it, and restore the previous
+    /// renderer state if either step fails.
+    fn update_filter(
         &mut self,
-        settings: FilterSettings,
+        change: impl FnOnce(&mut FilterSettings) -> Result<(), String>,
+        apply: FilterApply<'_>,
     ) -> Result<ManagerViewModel, String> {
-        let previous = std::mem::replace(&mut self.filter_settings, settings);
-        let pending = std::mem::take(&mut self.filter_options);
-        let result = self.model().and_then(|model| {
+        let mut candidate = self.filter_settings.clone();
+        change(&mut candidate)?;
+        if candidate.configuration.preset == FilterPreset::Anime4kRestoreUpscale {
+            candidate.configuration.scale = 2.0;
+        }
+        validate_filter(&candidate)?;
+        let result = apply(&candidate).and_then(|()| {
             self.library
-                .save_filter_settings(&self.filter_settings)
-                .map_err(|e| e.to_string())?;
-            Ok(model)
+                .save_filter_settings(&candidate)
+                .map_err(|error| error.to_string())
         });
-        if result.is_err() {
-            self.filter_settings = previous;
-            self.filter_options = pending;
+        if let Err(error) = result {
+            return Err(match apply(&self.filter_settings) {
+                Ok(()) => error,
+                Err(rollback) => format!("{error}; {rollback}"),
+            });
         }
-        result
-    }
-
-    pub(super) fn filter_config_changed(&mut self, key: &str, value: &str) -> Result<(), String> {
-        if !matches!(
-            key,
-            "filter.preset" | "filter.scale" | "filter.strength" | "filter.source"
-        ) && !key.starts_with("parameter.")
-        {
-            return Err("ASTRA_EMU_FILTER_CONFIG_FIELD_UNKNOWN".into());
-        }
-        if key == "filter.source" && !value.is_empty() {
-            if value.len() > 1_048_576 {
-                return Err("ASTRA_EMU_FILTER_SOURCE_SIZE".into());
-            }
-            EffectSource::parse(value).map_err(|e| e.to_string())?;
-        }
-        if matches!(key, "filter.source" | "filter.preset") {
-            self.filter_options
-                .retain(|key, _| !key.starts_with("parameter."));
-            if key == "filter.preset" {
-                self.filter_options
-                    .insert("filter.source".into(), String::new());
-            }
-        }
-        self.filter_options.insert(key.into(), value.into());
-        Ok(())
-    }
-
-    pub(super) fn reset_filter_config(&mut self) -> Result<ManagerViewModel, String> {
-        self.filter_options.clear();
+        self.filter_settings = candidate;
         self.model()
     }
+
+    pub(super) fn set_filter_preset(
+        &mut self,
+        id: &str,
+        apply: FilterApply<'_>,
+    ) -> Result<ManagerViewModel, String> {
+        let preset = match id {
+            "none" => FilterPreset::None,
+            "scale" => FilterPreset::Scale,
+            "sharpen" => FilterPreset::Sharpen,
+            "anime4k" => FilterPreset::Anime4kRestoreUpscale,
+            _ => return Err("ASTRA_EMU_FILTER_PRESET_UNSUPPORTED".into()),
+        };
+        self.update_filter(
+            |settings| {
+                if settings.configuration.preset == FilterPreset::Anime4kRestoreUpscale {
+                    settings.configuration.scale = FilterConfiguration::default().scale;
+                }
+                settings.configuration.preset = preset;
+                settings.configuration.parameters.clear();
+                settings.source = None;
+                Ok(())
+            },
+            apply,
+        )
+    }
+
+    pub(super) fn set_filter_parameter(
+        &mut self,
+        key: &str,
+        value: &str,
+        apply: FilterApply<'_>,
+    ) -> Result<ManagerViewModel, String> {
+        let value: f32 = value
+            .trim()
+            .parse()
+            .map_err(|_| "ASTRA_EMU_FILTER_PARAMETER")?;
+        self.update_filter(
+            |settings| {
+                match key {
+                    "filter.scale" => settings.configuration.scale = value,
+                    "filter.strength" => settings.configuration.strength = value,
+                    _ => {
+                        let name = key
+                            .strip_prefix("parameter.")
+                            .ok_or("ASTRA_EMU_FILTER_CONFIG_FIELD_UNKNOWN")?;
+                        settings.configuration.parameters.insert(name.into(), value);
+                    }
+                }
+                Ok(())
+            },
+            apply,
+        )
+    }
+
+    pub(super) fn reset_filter_parameters(
+        &mut self,
+        apply: FilterApply<'_>,
+    ) -> Result<ManagerViewModel, String> {
+        self.update_filter(
+            |settings| {
+                let defaults = FilterConfiguration::default();
+                settings.configuration.scale = defaults.scale;
+                settings.configuration.strength = defaults.strength;
+                settings.configuration.parameters.clear();
+                Ok(())
+            },
+            apply,
+        )
+    }
+
+    pub(super) fn load_filter_source(
+        &mut self,
+        path: &Path,
+        apply: FilterApply<'_>,
+    ) -> Result<ManagerViewModel, String> {
+        use std::io::Read;
+        let file = fs::File::open(path).map_err(|_| "ASTRA_EMU_FILTER_SOURCE_OPEN")?;
+        let mut bytes = Vec::new();
+        file.take(MAX_FILTER_SOURCE_BYTES as u64 + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|_| "ASTRA_EMU_FILTER_SOURCE_READ")?;
+        if bytes.len() > MAX_FILTER_SOURCE_BYTES {
+            return Err("ASTRA_EMU_FILTER_SOURCE_SIZE".into());
+        }
+        let source = String::from_utf8(bytes).map_err(|_| "ASTRA_EMU_FILTER_SOURCE_UTF8")?;
+        self.update_filter(
+            |settings| {
+                settings.configuration.parameters.clear();
+                settings.source = Some(source);
+                Ok(())
+            },
+            apply,
+        )
+    }
+}
+
+fn validate_filter(settings: &FilterSettings) -> Result<(), String> {
+    settings.validate()?;
+    let Some(source) = &settings.source else {
+        return Ok(());
+    };
+    let effect = EffectSource::parse(source).map_err(|e| e.to_string())?;
+    for (name, value) in &settings.configuration.parameters {
+        let parameter = effect
+            .parameters
+            .iter()
+            .find(|parameter| parameter.name == *name)
+            .ok_or("ASTRA_EMU_FILTER_PARAMETER_UNKNOWN")?;
+        if *value < parameter.min || *value > parameter.max {
+            return Err("ASTRA_EMU_FILTER_PARAMETER_RANGE".into());
+        }
+    }
+    Ok(())
 }
