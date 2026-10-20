@@ -57,10 +57,7 @@ impl AstraEmuManagerController {
             } else {
                 String::new()
             };
-            let compatibility_status = self
-                .compatibility_for_identities(&game.game_id, linked)
-                .map(|entry| entry.status.as_str().to_owned())
-                .unwrap_or_default();
+            let compatibility_status = self.compatibility_status(&game.game_id, linked);
             if self.compatibility_filter != "all"
                 && (self.compatibility_filter == "unknown" && !compatibility_status.is_empty()
                     || self.compatibility_filter != "unknown"
@@ -170,43 +167,21 @@ impl AstraEmuManagerController {
             .as_deref()
             .and_then(|id| self.releases.get(id).cloned())
             .unwrap_or_default();
-        let selected_compatibility = selected.as_ref().and_then(|game| {
-            let linked = identities
-                .get(&game.game_id)
-                .map(Vec::as_slice)
-                .unwrap_or(&[]);
-            self.compatibility_for_identities(&game.game_id, linked)
-        });
-        let selected_compatibility_status = selected_compatibility
+        let selected_compatibility = selected
             .as_ref()
-            .map(|entry| entry.status.as_str().to_string())
+            .map(|game| {
+                let linked = identities
+                    .get(&game.game_id)
+                    .map(Vec::as_slice)
+                    .unwrap_or(&[]);
+                self.compat_view(&game.game_id, linked, now_ms)
+            })
             .unwrap_or_default();
-        let selected_compatibility_notes = selected_compatibility
-            .as_ref()
-            .and_then(|entry| entry.notes.clone())
-            .unwrap_or_default();
-        let selected_compatibility_updated = selected_compatibility
-            .as_ref()
-            .map(|entry| human_relative(entry.updated_at_unix_ms, now_ms))
-            .unwrap_or_default();
-        let selected_compatibility_vndb_id = selected_compatibility
-            .as_ref()
-            .map(|entry| format!("{} / {}", entry.vn_id, entry.release_id))
-            .unwrap_or_default();
-        let compatibility_sync_summary = match self.compatibility_database.as_ref() {
-            Some(database) => {
-                let fetched = self
-                    .compatibility_fetched_at_unix_ms
-                    .map(|value| human_relative(value, now_ms))
-                    .unwrap_or_else(|| "本地缓存".into());
-                format!(
-                    "已收录 {} 条社区记录 · {}同步",
-                    database.entries.len(),
-                    fetched
-                )
-            }
-            None => "尚未同步".into(),
+        let recommended = match selected_id.as_deref() {
+            Some(game_id) => self.recommended_preset(game_id)?.map(|preset| preset.summary.clone()),
+            None => None,
         };
+        let recipes = self.recipe_views(selected_id.as_deref())?;
         let (emulator_choices, emulator_id, family_fields, render, game_mapping) =
             match selected_id.as_deref() {
                 Some(game_id) => {
@@ -372,12 +347,7 @@ impl AstraEmuManagerController {
                     .as_ref()
                     .map(|record| record.alternate_titles.join(", "))
                     .unwrap_or_default(),
-                compat: CompatViewModel {
-                    status: selected_compatibility_status,
-                    notes: selected_compatibility_notes,
-                    updated: selected_compatibility_updated,
-                    vndb_id: selected_compatibility_vndb_id,
-                },
+                compat: selected_compatibility,
                 releases: selected_releases
                     .into_iter()
                     .map(|(id, label)| ReleaseViewModel { id, label })
@@ -427,7 +397,11 @@ impl AstraEmuManagerController {
                     .as_ref()
                     .map(view_fields::binding_views)
                     .unwrap_or_default(),
+                recommended_available: recommended.is_some(),
+                recommended_summary: recommended.unwrap_or_default(),
+                recipes,
             },
+            network: self.network_view(now_ms),
             cores,
             settings: SettingsViewModel {
                 translation: translation::profile_form(profile.as_ref()),
@@ -439,8 +413,8 @@ impl AstraEmuManagerController {
                 input: self.input_view(),
                 filter_preset: self.filter_preset_id().into(),
                 filter_fields: self.filter_fields()?,
-                compat_source: DEFAULT_COMPATIBILITY_SOURCE_URL.into(),
-                compat_summary: compatibility_sync_summary,
+                compat_source: DEFAULT_METADATA_BASE_URL.into(),
+                compat_summary: self.compatibility_summary(),
             },
             appearance: self.appearance_view(),
             notices,

@@ -47,18 +47,6 @@ pub(super) fn sha256_id(value: &str) -> String {
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-pub(super) fn sha256_bytes_id(value: &[u8]) -> String {
-    use sha2::{Digest, Sha256};
-    Sha256::digest(value)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
-}
-
-pub(super) fn compatibility_cache_path(data_dir: &Path) -> PathBuf {
-    data_dir.join("compatibility.json")
-}
-
 pub(super) fn cover_extension(media_type: &str) -> Result<&'static str, String> {
     match media_type {
         "image/png" => Ok("png"),
@@ -91,50 +79,6 @@ pub(super) fn store_cover(
         &cover.bytes,
     )
     .map_err(|_| "ASTRA_EMU_METADATA_COVER_WRITE".into())
-}
-
-pub(super) fn load_compatibility_cache(
-    data_dir: &Path,
-) -> Result<(Option<CompatibilityDatabase>, Option<String>), String> {
-    let path = compatibility_cache_path(data_dir);
-    let bytes = match fs::read(path) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok((None, None)),
-        Err(_) => return Err("ASTRA_EMU_COMPATIBILITY_CACHE_READ".into()),
-    };
-    let database: CompatibilityDatabase =
-        serde_json::from_slice(&bytes).map_err(|_| "ASTRA_EMU_COMPATIBILITY_CACHE_INVALID")?;
-    database
-        .validate()
-        .map_err(|_| "ASTRA_EMU_COMPATIBILITY_CACHE_INVALID")?;
-    let hash = sha256_bytes_id(&bytes);
-    Ok((Some(database), Some(hash)))
-}
-
-pub(super) fn save_compatibility_cache(
-    data_dir: &Path,
-    database: &CompatibilityDatabase,
-) -> Result<String, String> {
-    database
-        .validate()
-        .map_err(|_| "ASTRA_EMU_COMPATIBILITY_CACHE_INVALID")?;
-    let bytes =
-        serde_json::to_vec(database).map_err(|_| "ASTRA_EMU_COMPATIBILITY_CACHE_SERIALIZATION")?;
-    let path = compatibility_cache_path(data_dir);
-    use std::io::Write;
-    let mut temporary = tempfile::NamedTempFile::new_in(data_dir)
-        .map_err(|_| "ASTRA_EMU_COMPATIBILITY_CACHE_CREATE")?;
-    temporary
-        .write_all(&bytes)
-        .map_err(|_| "ASTRA_EMU_COMPATIBILITY_CACHE_WRITE")?;
-    temporary
-        .as_file()
-        .sync_all()
-        .map_err(|_| "ASTRA_EMU_COMPATIBILITY_CACHE_SYNC")?;
-    temporary
-        .persist(&path)
-        .map_err(|_| "ASTRA_EMU_COMPATIBILITY_CACHE_REPLACE")?;
-    Ok(sha256_bytes_id(&bytes))
 }
 
 pub(super) fn path_id(path: &Path) -> String {

@@ -41,8 +41,8 @@ pub use family_loader::{
     no_host_services, FamilyLoadError, LoadedFamilyPlugin, NativeOpenRequest, NativeSession,
 };
 pub use family_registry::{
-    discover_family_libraries, is_family_library_path, FamilyDirectoryLoadError,
-    FamilyDirectoryLoadReport, FamilyProviderRegistry,
+    discover_core_directories, discover_family_libraries, is_family_library_path, library_stem,
+    FamilyDirectoryLoadError, FamilyDirectoryLoadReport, FamilyDiscovery, FamilyProviderRegistry,
 };
 pub use filter_settings::{FilterConfiguration, FilterPreset, FilterSettings};
 pub use input_mapping::{

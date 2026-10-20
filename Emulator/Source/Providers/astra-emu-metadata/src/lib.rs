@@ -16,10 +16,8 @@ mod bangumi;
 #[cfg(not(target_os = "android"))]
 pub use bangumi::{BangumiProvider, BangumiProviderConfig};
 pub use compatibility::{
-    compatibility_json_schema, parse_compatibility_database, parse_compatibility_response,
-    CompatibilityClient, CompatibilityDatabase, CompatibilityEntry, CompatibilityError,
-    CompatibilityFetch, CompatibilityStatus, COMPATIBILITY_SCHEMA_VERSION,
-    DEFAULT_COMPATIBILITY_SOURCE_URL,
+    compatibility_json_schema, parse_compatibility_database, CompatibilityDatabase,
+    CompatibilityEntry, CompatibilityError, CompatibilityStatus, COMPATIBILITY_SCHEMA_VERSION,
 };
 pub use cores::{
     parse_core_catalog, CoreCatalog, CoreCatalogEntry, CORE_CATALOG_SCHEMA_VERSION,

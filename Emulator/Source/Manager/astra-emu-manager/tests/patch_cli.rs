@@ -294,11 +294,11 @@ fn catalog_list_does_not_open_compile_execute_or_probe_scripts() {
 }
 
 #[test]
-fn default_catalog_is_executable_adjacent_not_current_directory() {
+fn default_catalog_is_bundled_metadata_not_current_directory() {
     let root = tempfile::tempdir().unwrap();
-    let scripts = root.path().join("patches");
+    let scripts = root.path().join("metadata").join("patches");
     let unrelated = root.path().join("unrelated-current-directory");
-    fs::create_dir(&scripts).unwrap();
+    fs::create_dir_all(&scripts).unwrap();
     fs::create_dir(&unrelated).unwrap();
     let records = write_catalog(&scripts);
     let executable = root

@@ -5,12 +5,14 @@ use astra_emu_manager_ui_slint::SnackbarViewModel;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum SnackbarAction {
     Undo,
+    Restart,
 }
 
 impl SnackbarAction {
     fn label(&self) -> &'static str {
         match self {
             Self::Undo => "撤销",
+            Self::Restart => "立即重启",
         }
     }
 }
@@ -53,6 +55,7 @@ impl AstraEmuManagerController {
             Some(SnackbarAction::Undo) => self
                 .undo_remove()
                 .map(|model| SnackbarOutcome::Model(Box::new(model))),
+            Some(SnackbarAction::Restart) => Ok(SnackbarOutcome::Restart),
             None => Err("ASTRA_EMU_SNACKBAR_ACTION_UNAVAILABLE".into()),
         }
     }

@@ -10,7 +10,7 @@ use std::{
     sync::{atomic::AtomicBool, Arc},
 };
 
-#[derive(Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RecipeListing {
     pub id: String,

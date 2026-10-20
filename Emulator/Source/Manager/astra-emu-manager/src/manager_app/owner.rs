@@ -20,7 +20,7 @@ pub(super) struct CoreMetadata {
     pub(super) descriptor: FamilyPluginDescriptor,
     pub(super) configuration: Vec<ConfigField>,
     pub(super) menu: Vec<SessionMenuEntry>,
-    pub(super) file: String,
+    pub(super) stem: String,
     pub(super) bundled: bool,
 }
 
@@ -472,11 +472,9 @@ pub(super) fn collect_metadata(
                 .map_err(|error| error.to_string())?;
             let menu = registry.session_menu(&descriptor.plugin_id).to_vec();
             let location = registry.location(&descriptor.plugin_id);
-            let file = location
-                .and_then(|path| path.file_name())
-                .and_then(|name| name.to_str())
-                .unwrap_or_default()
-                .to_owned();
+            let stem = location
+                .map(astra_emu_manager_core::library_stem)
+                .unwrap_or_default();
             let bundled = match (location, bundled_dir) {
                 (Some(path), Some(dir)) => path.starts_with(dir),
                 _ => false,
@@ -487,7 +485,7 @@ pub(super) fn collect_metadata(
                     descriptor: descriptor.clone(),
                     configuration: schema,
                     menu,
-                    file,
+                    stem,
                     bundled,
                 },
             ))

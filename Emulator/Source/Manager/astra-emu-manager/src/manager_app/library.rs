@@ -125,7 +125,14 @@ impl AstraEmuManagerController {
             .filter_settings()
             .map_err(|error| error.to_string())?
             .unwrap_or_default();
-        let (compatibility_database, compatibility_hash) = load_compatibility_cache(&data_dir)?;
+        let metadata_catalog = metadata_cache::select_catalog(
+            &data_dir,
+            metadata_cache::bundled_directory().as_deref(),
+        );
+        let metadata_sync_record = library
+            .app_state::<metadata_sync::SyncRecord>(metadata_sync::METADATA_SYNC_KEY)
+            .map_err(|error| error.to_string())?
+            .unwrap_or_default();
         let metadata = MetadataRuntime::start()?;
         let appearance = library.appearance_settings().map_err(|e| e.to_string())?;
         let games = library.list_games().map_err(|error| error.to_string())?;
@@ -173,9 +180,11 @@ impl AstraEmuManagerController {
             physical_keys: Vec::new(),
             library_sort: "title".into(),
             compatibility_filter: "all".into(),
-            compatibility_database,
-            compatibility_hash,
-            compatibility_fetched_at_unix_ms: None,
+            metadata_catalog,
+            metadata_sync: metadata_sync::SyncState {
+                record: metadata_sync_record,
+                request: None,
+            },
             pinned_releases,
             filter_settings,
             input_mapping,

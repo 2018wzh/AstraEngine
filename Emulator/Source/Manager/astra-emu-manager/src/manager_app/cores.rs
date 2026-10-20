@@ -1,107 +1,23 @@
 use super::*;
-use astra_emu_manager_core::{is_family_library_path, FamilyCapability};
+use crate::core_package::{self, PendingKind};
+use astra_emu_manager_core::{FamilyCapability, INDEPENDENT_FAMILY_ABI_FINGERPRINT};
 use astra_emu_manager_ui_slint::{describe_error, CoreViewModel, CoresViewModel};
+use astra_emu_metadata::CoreCatalogEntry;
 use std::io::{self, BufRead, Seek, SeekFrom};
 
-const PENDING: &str = ".pending";
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PendingKind {
-    Install,
-    Remove,
+/// Release platform of this Manager build, e.g. `windows-x86_64`.
+pub(super) fn core_platform() -> String {
+    format!("{}-{}", env::consts::OS, env::consts::ARCH)
 }
 
-fn pending_dir(data_dir: &Path) -> PathBuf {
-    data_dir.join("cores").join(PENDING)
-}
-
-fn pending_entries(data_dir: &Path) -> Result<BTreeMap<String, PendingKind>, String> {
-    let directory = pending_dir(data_dir);
-    let entries = match fs::read_dir(&directory) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
-        Err(error) => return Err(format!("ASTRA_EMU_CORE_PENDING_APPLY: {}", error.kind())),
-    };
-    let mut pending = BTreeMap::new();
-    for entry in entries {
-        let entry = entry.map_err(|error| format!("ASTRA_EMU_CORE_PENDING_APPLY: {}", error.kind()))?;
-        let name = entry.file_name();
-        let Some(name) = name.to_str() else {
-            continue;
-        };
-        if let Some(file) = name.strip_suffix(".remove") {
-            if is_family_library_path(Path::new(file)) {
-                pending.insert(file.to_owned(), PendingKind::Remove);
-            }
-        } else if is_family_library_path(Path::new(name)) {
-            pending.entry(name.to_owned()).or_insert(PendingKind::Install);
-        }
+fn is_newer(candidate: &str, installed: &str) -> bool {
+    match (
+        semver::Version::parse(candidate),
+        semver::Version::parse(installed),
+    ) {
+        (Ok(candidate), Ok(installed)) => candidate > installed,
+        _ => false,
     }
-    Ok(pending)
-}
-
-fn pending_apply_error(file: &str, error: &io::Error) -> (String, String) {
-    tracing::error!(
-        event = "astra.emu.manager.core_pending_failed",
-        core = %file,
-        error = %error
-    );
-    (
-        file.to_owned(),
-        format!("ASTRA_EMU_CORE_PENDING_APPLY: {}", error.kind()),
-    )
-}
-
-pub(super) fn apply_pending(cores: &Path) -> Vec<(String, String)> {
-    let pending = cores.join(PENDING);
-    let entries = match fs::read_dir(&pending) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Vec::new(),
-        Err(error) => {
-            return vec![pending_apply_error("<pending>", &error)];
-        }
-    };
-    let mut removes = Vec::new();
-    let mut installs = Vec::new();
-    for entry in entries {
-        let Ok(entry) = entry else {
-            continue;
-        };
-        let name = entry.file_name();
-        let Some(name) = name.to_str() else {
-            continue;
-        };
-        if let Some(file) = name.strip_suffix(".remove") {
-            if is_family_library_path(Path::new(file)) {
-                removes.push((file.to_owned(), pending.join(name)));
-            }
-        } else if is_family_library_path(Path::new(name)) {
-            installs.push((name.to_owned(), pending.join(name)));
-        }
-    }
-    let mut failures = Vec::new();
-    for (file, marker) in removes {
-        let target = cores.join(&file);
-        match fs::remove_file(&target) {
-            Ok(()) => {}
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => {
-                failures.push(pending_apply_error(&file, &error));
-                continue;
-            }
-        }
-        if let Err(error) = fs::remove_file(&marker) {
-            failures.push(pending_apply_error(&file, &error));
-        }
-    }
-    for (file, source) in installs {
-        let target = cores.join(&file);
-        match fs::rename(&source, &target) {
-            Ok(()) => {}
-            Err(error) => failures.push(pending_apply_error(&file, &error)),
-        }
-    }
-    failures
 }
 
 fn capability_label(capability: FamilyCapability) -> &'static str {
@@ -117,18 +33,40 @@ fn monogram(family_id: &str) -> String {
 }
 
 impl AstraEmuManagerController {
+    fn cores_dir(&self) -> PathBuf {
+        self.data_dir.join("cores")
+    }
+
+    /// Highest released version of a core for this platform and ABI.
+    pub(super) fn online_core(&self, plugin_id: &str) -> Option<&CoreCatalogEntry> {
+        self.metadata_catalog.as_ref()?.cores.latest(
+            plugin_id,
+            &core_platform(),
+            INDEPENDENT_FAMILY_ABI_FINGERPRINT,
+        )
+    }
+
+    /// Loaded, failed, pending and online-available cores in one list.
     pub(super) fn cores_view(&self) -> Result<CoresViewModel, String> {
-        let pending = pending_entries(&self.data_dir)?;
-        let mut loaded = Vec::new();
-        let mut loaded_files = BTreeSet::new();
+        let cores = self.cores_dir();
+        let pending = core_package::pending_entries(&cores)?;
+        let mut items = Vec::new();
+        let mut listed_plugins = BTreeSet::new();
+        let mut loaded_stems = BTreeSet::new();
         for meta in self.registry.core_metadata() {
-            loaded_files.insert(meta.file.clone());
-            let state = match pending.get(&meta.file) {
+            loaded_stems.insert(meta.stem.clone());
+            listed_plugins.insert(meta.descriptor.plugin_id.clone());
+            let state = match pending.get(&meta.stem) {
                 Some(PendingKind::Remove) => "pending-removal",
                 Some(PendingKind::Install) => "pending-update",
                 None => "loaded",
             };
-            loaded.push(CoreViewModel {
+            let update_version = self
+                .online_core(&meta.descriptor.plugin_id)
+                .filter(|entry| is_newer(&entry.version, &meta.descriptor.version))
+                .map(|entry| entry.version.clone())
+                .unwrap_or_default();
+            items.push(CoreViewModel {
                 key: meta.descriptor.plugin_id.clone(),
                 name: meta.descriptor.display_name.clone(),
                 monogram: monogram(&meta.descriptor.family_id),
@@ -143,104 +81,156 @@ impl AstraEmuManagerController {
                     .collect(),
                 state: state.into(),
                 source: if meta.bundled { "bundled" } else { "user" }.into(),
-                file: meta.file.clone(),
+                file: meta.stem.clone(),
                 message: String::new(),
                 removable: !meta.bundled,
+                update_version,
             });
         }
-        loaded.sort_by(|left, right| left.name.cmp(&right.name));
-        let mut items = loaded;
-        for (file, raw) in &self.plugin_errors {
+        items.sort_by(|left, right| left.name.cmp(&right.name));
+        let updates_available = items
+            .iter()
+            .filter(|item| !item.update_version.is_empty())
+            .count();
+        for (stem, raw) in &self.plugin_errors {
             let described = describe_error(raw);
             items.push(CoreViewModel {
-                key: file.clone(),
-                name: file.clone(),
-                monogram: String::new(),
-                version: String::new(),
-                capabilities: Vec::new(),
+                key: stem.clone(),
+                name: stem.clone(),
                 state: "failed".into(),
                 source: "user".into(),
-                file: file.clone(),
+                file: stem.clone(),
                 message: described.title,
-                removable: self.data_dir.join("cores").join(file).is_file(),
+                removable: cores.join(stem).is_dir(),
+                ..CoreViewModel::default()
             });
         }
-        for (file, kind) in &pending {
-            if *kind == PendingKind::Install && !loaded_files.contains(file) {
+        for (stem, kind) in &pending {
+            if *kind != PendingKind::Install || loaded_stems.contains(stem) {
+                continue;
+            }
+            let manifest =
+                core_package::read_manifest(&cores.join(core_package::PENDING).join(stem));
+            let plugin_id = manifest.as_ref().map(|manifest| manifest.plugin_id.clone());
+            let name = plugin_id
+                .as_deref()
+                .and_then(|id| self.online_core(id))
+                .map_or_else(|| stem.clone(), |entry| entry.display_name.clone());
+            listed_plugins.extend(plugin_id.clone());
+            items.push(CoreViewModel {
+                key: plugin_id.unwrap_or_else(|| stem.clone()),
+                name,
+                version: manifest.map(|manifest| manifest.version).unwrap_or_default(),
+                state: "pending-install".into(),
+                source: "user".into(),
+                file: stem.clone(),
+                removable: true,
+                ..CoreViewModel::default()
+            });
+        }
+        if let Some(catalog) = &self.metadata_catalog {
+            let available: BTreeSet<&str> = catalog
+                .cores
+                .entries
+                .iter()
+                .map(|entry| entry.plugin_id.as_str())
+                .filter(|plugin_id| !listed_plugins.contains(*plugin_id))
+                .collect();
+            for entry in available.into_iter().filter_map(|id| self.online_core(id)) {
                 items.push(CoreViewModel {
-                    key: file.clone(),
-                    name: file.clone(),
-                    monogram: String::new(),
-                    version: String::new(),
-                    capabilities: Vec::new(),
-                    state: "pending-install".into(),
-                    source: "user".into(),
-                    file: file.clone(),
-                    message: String::new(),
-                    removable: true,
+                    key: entry.plugin_id.clone(),
+                    name: entry.display_name.clone(),
+                    version: entry.version.clone(),
+                    state: "available".into(),
+                    source: "online".into(),
+                    message: entry.family_name.clone(),
+                    ..CoreViewModel::default()
                 });
             }
         }
         Ok(CoresViewModel {
             items,
             restart_required: !pending.is_empty() && self.cores_started(),
+            updates_available: i32::try_from(updates_available).unwrap_or(i32::MAX),
             defaults: Default::default(),
         })
     }
 
+    /// Stage a local `.zip` core package or a single core library.
     pub(super) fn install_core(&mut self, source: &Path) -> Result<ManagerViewModel, String> {
-        if !is_family_library_path(source) {
-            return Err("ASTRA_EMU_CORE_INSTALL_NAME".into());
-        }
-        let file = source
-            .file_name()
-            .and_then(|name| name.to_str())
-            .ok_or_else(|| "ASTRA_EMU_CORE_INSTALL_NAME".to_owned())?;
-        let pending = pending_dir(&self.data_dir);
-        fs::create_dir_all(&pending).map_err(|_| "ASTRA_EMU_CORE_INSTALL_COPY")?;
-        let mut input = fs::File::open(source).map_err(|_| "ASTRA_EMU_CORE_INSTALL_COPY")?;
-        let mut staged = tempfile::NamedTempFile::new_in(&pending)
-            .map_err(|_| "ASTRA_EMU_CORE_INSTALL_COPY")?;
-        io::copy(&mut input, staged.as_file_mut()).map_err(|_| "ASTRA_EMU_CORE_INSTALL_COPY")?;
-        staged.as_file().sync_all().map_err(|_| "ASTRA_EMU_CORE_INSTALL_COPY")?;
-        staged.persist(pending.join(file)).map_err(|_| "ASTRA_EMU_CORE_INSTALL_COPY")?;
-        match fs::remove_file(pending.join(format!("{file}.remove"))) {
-            Ok(()) => {}
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(_) => return Err("ASTRA_EMU_CORE_INSTALL_COPY".into()),
+        let pending = self.cores_dir().join(core_package::PENDING);
+        let package = source
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("zip"));
+        if package {
+            core_package::stage_package(source, None, &pending)?;
+        } else {
+            core_package::stage_library(source, &pending)?;
         }
         self.model()
     }
 
-    pub(super) fn uninstall_core(&mut self, file: &str) -> Result<ManagerViewModel, String> {
-        if file.is_empty()
-            || file.contains(['/', '\\'])
-            || file.split(['/', '\\']).any(|part| part == "..")
-            || file.contains("..")
+    /// Download the newest released package of a core into the pending area.
+    pub(super) fn install_online_core(
+        &mut self,
+        plugin_id: &str,
+    ) -> Result<ManagerViewModel, String> {
+        self.require_network()?;
+        let entry = self
+            .online_core(plugin_id)
+            .cloned()
+            .ok_or_else(|| "ASTRA_EMU_CORE_NOT_AVAILABLE".to_owned())?;
+        if self
+            .pending_metadata
+            .values()
+            .any(|pending| pending.core.as_deref() == Some(plugin_id))
         {
-            return Err("ASTRA_EMU_CORE_INSTALL_NAME".into());
+            return Err("ASTRA_EMU_CORE_DOWNLOAD_PENDING".into());
         }
-        let pending = pending_dir(&self.data_dir);
-        let cores = self.data_dir.join("cores");
-        let pending_file = pending.join(file);
-        let installed = cores.join(file);
-        if pending_file.exists() && !installed.exists() {
-            fs::remove_file(&pending_file).map_err(|_| "ASTRA_EMU_CORE_INSTALL_COPY")?;
-            return self.model();
+        let request_id = self.next_metadata_id("core")?;
+        self.metadata.submit(MetadataCommand {
+            request_id: request_id.clone(),
+            case_identity: String::new(),
+            provider: MetadataProviderId::Vndb,
+            access_token: None,
+            allow_sensitive_cover: false,
+            kind: MetadataCommandKind::InstallCore {
+                entry: Box::new(entry),
+                pending: self.cores_dir().join(core_package::PENDING),
+            },
+        })?;
+        self.pending_metadata.insert(
+            request_id,
+            PendingMetadata {
+                game_id: None,
+                core: Some(plugin_id.into()),
+            },
+        );
+        self.model()
+    }
+
+    pub(super) fn core_staged(&mut self, stem: &str, version: &str) {
+        tracing::info!(event = "astra.emu.manager.core_staged", core = %stem, version = %version);
+        self.show_snackbar(
+            "核心已下载，重启后生效",
+            Some(snackbar::SnackbarAction::Restart),
+        );
+    }
+
+    /// Cancel a pending install, or mark an installed user core for removal.
+    pub(super) fn uninstall_core(&mut self, stem: &str) -> Result<ManagerViewModel, String> {
+        let cores = self.cores_dir();
+        let staged = cores.join(core_package::PENDING).join(stem);
+        let installed = cores.join(stem);
+        if staged.is_dir() && !installed.is_dir() {
+            core_package::cancel_pending_install(&cores, stem)?;
+        } else if installed.is_dir() {
+            core_package::mark_removal(&cores, stem)?;
+        } else {
+            return Err("ASTRA_EMU_CORE_UNINSTALL_BUNDLED".into());
         }
-        if installed.exists() {
-            fs::create_dir_all(&pending).map_err(|_| "ASTRA_EMU_CORE_INSTALL_COPY")?;
-            match fs::remove_file(&pending_file) {
-                Ok(()) => {}
-                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                Err(_) => return Err("ASTRA_EMU_CORE_INSTALL_COPY".into()),
-            }
-            fs::write(pending.join(format!("{file}.remove")), []).map_err(|_| {
-                "ASTRA_EMU_CORE_INSTALL_COPY"
-            })?;
-            return self.model();
-        }
-        Err("ASTRA_EMU_CORE_UNINSTALL_BUNDLED".into())
+        self.model()
     }
 
     pub(super) fn log_text(&self, core: &str) -> Result<(String, usize), String> {
@@ -383,47 +373,55 @@ fn render_log_line(value: &serde_json::Value) -> String {
     }
 }
 
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn apply_pending_renames_installs_and_honors_remove_markers() {
+    fn cores_view_lists_online_cores_and_gates_downloads() {
         let root = tempfile::tempdir().unwrap();
-        let cores = root.path().join("cores");
-        fs::create_dir_all(cores.join(PENDING)).unwrap();
-        fs::write(cores.join("astra_emu_y.dll"), b"old").unwrap();
-        fs::write(cores.join(PENDING).join("astra_emu_x.dll"), b"new").unwrap();
-        fs::write(cores.join(PENDING).join("astra_emu_y.dll.remove"), b"").unwrap();
-        let failures = apply_pending(&cores);
-        assert!(failures.is_empty(), "{failures:?}");
-        assert_eq!(fs::read(cores.join("astra_emu_x.dll")).unwrap(), b"new");
-        assert!(!cores.join("astra_emu_y.dll").exists());
-        assert!(!cores.join(PENDING).join("astra_emu_x.dll").exists());
-        assert!(!cores.join(PENDING).join("astra_emu_y.dll.remove").exists());
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn failed_update_preserves_installed_core_and_pending_bytes() {
-        use std::os::windows::fs::OpenOptionsExt;
-        let root = tempfile::tempdir().unwrap();
-        let cores = root.path().join("cores");
-        let pending = cores.join(PENDING);
-        fs::create_dir_all(&pending).unwrap();
-        let name = "astra_emu_fixture.dll";
-        fs::write(cores.join(name), b"installed").unwrap();
-        fs::write(pending.join(name), b"replacement").unwrap();
-        fs::write(pending.join(".interrupted-copy"), b"partial").unwrap();
-        let locked = fs::OpenOptions::new().read(true).share_mode(0)
-            .open(pending.join(name)).unwrap();
-        assert_eq!(apply_pending(&cores).len(), 1);
-        assert_eq!(fs::read(cores.join(name)).unwrap(), b"installed");
-        drop(locked);
-        assert_eq!(fs::read(pending.join(name)).unwrap(), b"replacement");
-        assert!(apply_pending(&cores).is_empty());
-        assert_eq!(fs::read(cores.join(name)).unwrap(), b"replacement");
-        assert!(!cores.join(".interrupted-copy").exists());
+        let mut app = AstraEmuManagerController::open_library(
+            root.path().into(),
+            FrameMailbox::new(),
+            Vec::new(),
+        )
+        .unwrap();
+        let entry = |version: &str| CoreCatalogEntry {
+            plugin_id: "astra.emu.musica".into(),
+            display_name: "Astra Musica".into(),
+            family_name: "Musica".into(),
+            version: version.into(),
+            abi: INDEPENDENT_FAMILY_ABI_FINGERPRINT.into(),
+            platform: core_platform(),
+            url: format!(
+                "https://github.com/2018wzh/AstraEngine/releases/download/emu-v{version}/core.zip"
+            ),
+            sha256: "a".repeat(64),
+            size: 1,
+            license: "MIT".into(),
+            release_tag: format!("emu-v{version}"),
+        };
+        let mut catalog = crate::metadata_cache::tests::sample_catalog(root.path());
+        catalog.cores.entries = vec![entry("0.2.0"), entry("0.3.0")];
+        app.metadata_catalog = Some(catalog);
+        let view = app.cores_view().unwrap();
+        assert_eq!(view.items.len(), 1);
+        assert_eq!(view.items[0].state, "available");
+        assert_eq!(view.items[0].source, "online");
+        assert_eq!(view.items[0].version, "0.3.0");
+        assert_eq!(view.updates_available, 0);
+        assert_eq!(
+            app.install_online_core("astra.emu.musica").unwrap_err(),
+            "ASTRA_EMU_NETWORK_PERMISSION_REQUIRED"
+        );
+        app.network_allowed = true;
+        assert_eq!(
+            app.install_online_core("astra.emu.other").unwrap_err(),
+            "ASTRA_EMU_CORE_NOT_AVAILABLE"
+        );
+        assert!(is_newer("0.10.0", "0.9.1"));
+        assert!(!is_newer("0.2.0", "0.2.0"));
     }
 
     #[test]

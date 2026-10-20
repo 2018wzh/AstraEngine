@@ -111,41 +111,39 @@ NativeVN 当前使用 `CompiledVnProject` 与静态产品契约，旧 `vn.compil
 
 保存与 checkpoint 可以物化完整语义视图；普通 step 不因此全量克隆或编码历史。源码、Graph 和 Timeline 共用 `.astra`，布局仅为作者元数据。策略 source cache 是包内执行输入，报告只输出身份与诊断，不复制脚本 payload。相关行为与限制见 [AstraVN](../modules/astra-vn.md) 和 [Luau 实现](../implementation/luau-policy.md)。
 
-## AstraEMU Manager 社区兼容性库与本地记录
+## AstraEMU 元数据与 Manager 本地记录
 
-AstraEMU Manager 的作品级数据分两类：社区维护的只读兼容性库（网络 JSON）和 Manager 本地 SQLite 记录。两者都不进入 package/save/release report，也不携带商业 payload、正文或本地绝对路径。**VNDB 是游戏与版本标识的唯一权威源，Bangumi 仅用于游玩进度记录**，因此兼容性库完全由 VNDB 标识键控。
+AstraEMU Manager 的作品级数据分两类：公开仓库 `2018wzh/AstraEMU-metadata` 发布的只读元数据，以及 Manager 本地 SQLite 记录。两者都不进入 package/save/release report，也不携带商业 payload、正文或本地绝对路径。VNDB 是游戏与版本标识的唯一权威源，Bangumi 只用于游玩进度记录。
 
-### 社区兼容性库 `astra.emu.compatibility.v2`
+### AstraEMU-metadata 发布格式
 
-中央兼容性库是一份静态 JSON 文档，由社区在独立数据仓维护并经 GitHub Pages 托管，Manager 只读拉取。Rust 类型是 schema 真源，经 `schemars` 导出 JSON Schema。贡献者通过仓库的 ISSUE_TEMPLATE 提交 vID/rID 结构化报告，维护者运行验证/生成器把通过校验的报告合并进该文档：
+元数据仓库经 GitHub Pages 发布到 `https://2018wzh.github.io/AstraEMU-metadata/v1/`（常量 `DEFAULT_METADATA_BASE_URL`），主仓以 submodule `Emulator/Metadata` 引用同一仓库。Rust 类型（`astra-emu-metadata`）是 schema 真源，`examples/export_schemas.rs` 导出四份 JSON Schema 供数据仓校验：
 
-| Rust 类型 | 角色 |
-| --- | --- |
-| `CompatibilityDatabase` | 文档根，`schema` 必须等于 `astra.emu.compatibility.v2`，含 `generated_at_unix_ms` 与 `entries` |
-| `CompatibilityEntry` | 单条记录，按 VNDB `(vn_id, release_id)` 键控；`vn_id` 是 vID（游戏名标识，`v<decimal>`），`release_id` 是 rID（版本标识，`r<decimal>`） |
-| `CompatibilityStatus` | 五级适配分级 `perfect`/`completable`/`flawed`/`boot_only`/`unplayable`（完美运行/可通关/有瑕疵/仅能启动/无法运行） |
+| 文件 | Rust 类型 | 内容 |
+| --- | --- | --- |
+| `index.json` | `MetadataIndex`（`astra.emu.metadata.index.v1`） | `generated_at_unix_ms`、`source_commit` 与 `files[]`（相对路径、sha256、size）；路径只允许 `[a-z0-9._/-]`，不含 `..`，单文件 ≤ 8 MiB，合计 ≤ 64 MiB |
+| `compatibility.json` | `CompatibilityDatabase`（`astra.emu.compatibility.v3`） | `CompatibilityEntry { vn_id, release_id, emulator, status, notes, emulator_version, manager_version, platform, issue, updated_at_unix_ms }`，`(release_id, emulator)` 唯一，重复为 `ASTRA_EMU_COMPATIBILITY_DUPLICATE` |
+| `presets.json` | `PresetDatabase`（`astra.emu.presets.v1`） | `Preset { vn_id, release_id, emulator, summary, configuration, patch }`，`(release_id, emulator)` 唯一 |
+| `cores.json` | `CoreCatalog`（`astra.emu.cores.v1`） | `CoreCatalogEntry`：plugin_id、显示名、版本、ABI、平台、GitHub Releases 资产 URL、sha256、size（≤ 512 MiB）、许可与 release tag |
+| `patches/` | `astra_emu_patch::list_recipes` | `catalog.json` 与 Luau recipe、`common/` 模块 |
 
-v2 让兼容性精确到特定游戏版本：同一款游戏（同一 vID）的不同发布（不同 rID）可以携带不同的分级。`provider`/Bangumi 维度已从兼容性库移除。
+`emulator` 是核心的 plugin_id；`status` 为五级 `perfect`/`completable`/`flawed`/`boot_only`/`unplayable`。兼容性报告经元数据仓库的 issue 表单提交，维护者打上 `compat:accepted` 后由工作流生成条目 PR。
 
-校验边界：`entries` 不超过 100,000 条，payload 不超过 8 MiB，`vn_id`/`release_id` 必须分别是合法 vID/rID 且不超过 64 字符，`notes` 不超过 1024 字符，`reporter` 不超过 128 字符；schema 版本、vID/rID 或边界不符必须 blocking。拉取受 metadata network-consent gate 约束，只接受 HTTPS、拒绝重定向，并以 SHA-256 content hash 做增量同步，命中缓存或 HTTP 304 返回 `NotModified`。
+### 同步与本地缓存
 
-JSON Schema 由 `astra-emu-metadata` 的 `compatibility_json_schema()` 从 Rust 类型导出，供数据仓在 CI 中校验文档；默认源由常量 `DEFAULT_COMPATIBILITY_SOURCE_URL` 给出，可经设置覆盖；数据仓由用户单独创建维护。匹配脚本先把 ISSUE 模板的 vID/rID 落成兼容 v2 的记录，再合并进文档。
+同步由统一联网许可（`app_state["network.allowed"]`）控制；未允许时返回 `ASTRA_EMU_NETWORK_PERMISSION_REQUIRED`。`MetadataSyncClient` 只接受 HTTPS、不跟随重定向，带 `If-None-Match` 请求 `index.json`，304 视为未变化；其余文件只下载 sha256 与缓存不同的项，逐个校验 size 与 sha256，不符为 `ASTRA_EMU_METADATA_HASH_MISMATCH`。
 
-### Manager 本地 SQLite 记录（Library v10）
+Manager 把整个索引写到 `<data_dir>/metadata.staging/`，复用未变化的缓存文件，重新校验全部文件并解析 compatibility、presets、cores 与 `patches/` 后，才把它整体换为 `<data_dir>/metadata/`。任一步失败都丢弃 staging，旧缓存不变；替换失败为 `ASTRA_EMU_METADATA_CACHE_WRITE`。ETag 与同步时间存于 `app_state["metadata.sync"]`（`{ "etag", "synced_at_unix_ms" }`）。
 
-Library v7 迁移在 Manager 本地库新增三张表，只记录计时与兼容性缓存；v8/v9/v10 迁移在此之上补充输入映射、逐游戏设置与逐版本兼容性/发布缓存：
+启动时比较 `<data_dir>/metadata/` 与随包 `<exe_dir>/metadata/` 的 `index.generated_at_unix_ms`，前者不早于后者时使用前者；无效目录被忽略。两者都没有时兼容性、推荐配置、核心目录与补丁目录为空，界面显示“未同步”。
 
-| 表 | 用途 |
-| --- | --- |
-| `play_session` | 游玩会话，记录 work_id、case_identity、start/end_unix_ms、duration_ms 与 ended_by（`active`/`leave`/`shutdown`/`crash`）；崩溃残留会话在恢复时按上次已知时间结算 |
-| `compatibility_entry_cache` | 兼容性库本地只读缓存，按 VNDB `(vn_id, release_id)` 主键，`vn_id` 为 vID、`release_id` 为 rID |
-| `compatibility_sync_state` | 单例同步状态，记录 source_url、response_hash、last_fetched_unix_ms 与 diagnostic_code |
-| `vn_release` | 从 VNDB 拉取的某 work 的发布（rID）列表，用于把本地安装钉到具体版本；按 `(work_id, release_id)` 主键 |
-| `case_release` | 某个安装实例（case）钉到的 rID，按 case_identity 主键 |
-| `input_settings` | 单例全局设备→键名输入映射（`InputMapping` 的 JSON 序列化） |
-| `work_settings` | 逐游戏设置覆盖，按 work_id 主键（`WorkSettings` 的 JSON 序列化），`None` 字段沿用全局值，随 work 级联删除 |
+### 兼容性匹配
 
-版本精确匹配：先取 work 的 VNDB vID（`external_identity(provider='vndb')`），再看该安装 case 钉到的 rID（`case_release`），以 v2 缓存 `(vID, rID)` 返回对应分级；未钉 rID 时回退到该 vID 最近更新的记录。Bangumi 的 external identity 只用于进度同步，不参与兼容性匹配。
+作品先取 VNDB vID（`external_identity(provider='vndb')`）。发行版本 rID 取 `game_release` 中钉住的值；未钉住时，若该 vID 在兼容性库与推荐配置中只出现一个 rID 就用它，出现多个则为未定，界面提示“选择发行版本以查看兼容性”。随后按 `(rID, 当前所选模拟器 plugin_id)` 查找记录；模拟器未定或没有记录时显示为无记录。推荐配置按同一键查找。没有 vID 时不生成兼容性报告链接，界面提示“先关联 VNDB 作品”。
+
+### Manager 本地 SQLite 记录（schema 6）
+
+schema 6 共 13 张表：`family_configuration`、`appearance_settings`、`library_game`、`external_identity`、`metadata_snapshot`、`play_session`、`manager_settings`、`game_settings`、`translation_profile`、`library_root`、`excluded_game`、`game_release`、`app_state`。与元数据相关的是 `external_identity`/`metadata_snapshot`（VNDB 与 Bangumi 关联及快照）、`game_release`（作品钉住的 rID）和 `app_state`（`network.allowed`、`metadata.sync` 等键）。兼容性数据只保存在上述文件缓存中，不写入 SQLite。
 
 游玩统计经 SQL 聚合派生（`SUM(duration_ms)`/`MAX(start_unix_ms)`/`COUNT`），不另存冗余汇总字段。
 

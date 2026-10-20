@@ -428,3 +428,76 @@ fn typed_game_configuration_round_trips_after_controller_reopen() {
     assert_eq!(launch_mode.display_value, "标题菜单启动");
     assert!(launch_mode.overridden);
 }
+
+fn install_preset(controller: &mut AstraEmuManagerController, configuration: &str) {
+    let directory = controller.data_dir.join("preset-catalog");
+    let preset = format!(
+        r#"{{"vn_id":"v17","release_id":"r1","emulator":"{PLUGIN}","summary":"推荐","configuration":{configuration}}}"#
+    );
+    let tree = crate::metadata_cache::tests::files(
+        crate::metadata_cache::tests::compatibility_json(""),
+        &preset,
+    );
+    let _ = fs::remove_dir_all(&directory);
+    crate::metadata_cache::tests::write_tree(&directory, 1, &tree);
+    controller.metadata_catalog = Some(
+        crate::metadata_cache::MetadataCatalog::load(
+            &directory,
+            crate::metadata_cache::MetadataSource::Bundled,
+        )
+        .unwrap(),
+    );
+    controller
+        .library
+        .set_external_identity(&astra_emu_manager_core::ExternalIdentityRecord {
+            game_id: "game".into(),
+            provider: "vndb".into(),
+            remote_id: "v17".into(),
+            provenance: "test".into(),
+            linked_at_unix_ms: 1,
+        })
+        .unwrap();
+}
+
+#[test]
+fn recommended_configuration_is_written_as_game_overrides() {
+    let root = tempfile::tempdir().unwrap();
+    let mut controller = configuration_controller(root.path());
+    install_preset(&mut controller, r#"{"launch_mode":"title"}"#);
+    let model = controller.apply_recommended_config("game").unwrap();
+    assert!(model.selection.recommended_available);
+    assert_eq!(model.selection.recommended_summary, "推荐");
+    assert_eq!(
+        overrides(&controller, "game"),
+        [ConfigEntry {
+            id: "launch_mode".into(),
+            value: ConfigValue::Enum("title".into()),
+        }]
+    );
+}
+
+#[test]
+fn recommended_configuration_with_unknown_field_restores_overrides() {
+    let root = tempfile::tempdir().unwrap();
+    let mut controller = configuration_controller(root.path());
+    install_preset(
+        &mut controller,
+        r#"{"launch_mode":"direct","zz_unknown_field":"1"}"#,
+    );
+    assert_eq!(
+        controller.apply_recommended_config("game").unwrap_err(),
+        "ASTRA_EMU_PRESET_INVALID"
+    );
+    assert!(overrides(&controller, "game").is_empty());
+
+    controller
+        .set_game_config("game", "launch_mode", "title")
+        .unwrap();
+    let before = overrides(&controller, "game");
+    install_preset(&mut controller, r#"{"launch_mode":"direct","zz_unknown_field":"1"}"#);
+    assert_eq!(
+        controller.apply_recommended_config("game").unwrap_err(),
+        "ASTRA_EMU_PRESET_INVALID"
+    );
+    assert_eq!(overrides(&controller, "game"), before);
+}

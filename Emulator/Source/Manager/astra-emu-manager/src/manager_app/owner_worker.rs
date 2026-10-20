@@ -27,7 +27,7 @@ pub(super) fn run(
         }
         let cores = data_dir.join("cores");
         fs::create_dir_all(&cores).map_err(|_| "ASTRA_EMU_CORES_DIRECTORY_CREATE")?;
-        let pending_failures = super::cores::apply_pending(&cores);
+        let pending_failures = core_package::apply_pending(&cores);
         #[cfg(not(target_os = "android"))]
         let directories = core_directories(&cores)?;
         #[cfg(target_os = "android")]
@@ -268,50 +268,20 @@ fn initialize(
     let mut errors = BTreeMap::new();
     #[cfg(not(target_os = "android"))]
     {
-        let Some(user_dir) = directories.first() else {
-            return Ok(errors);
-        };
-        let user = astra_emu_manager_core::discover_family_libraries(user_dir)
+        let discovery = astra_emu_manager_core::discover_core_directories(directories)
             .map_err(|error| error.to_string())?;
-        let user_names: BTreeSet<String> = user
-            .iter()
-            .filter_map(|path| path.file_name()?.to_str())
-            .map(str::to_ascii_lowercase)
-            .collect();
-        let mut paths = user;
-        if let Some(bundled_dir) = directories.get(1) {
-            for path in astra_emu_manager_core::discover_family_libraries(bundled_dir)
-                .map_err(|error| error.to_string())?
-            {
-                let file = path
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or_default();
-                if user_names.contains(&file.to_ascii_lowercase()) {
-                    tracing::info!(event = "astra.emu.manager.core_overridden", core = %file);
-                } else {
-                    paths.push(path);
-                }
-            }
-        }
-        for failure in registry
-            .load_libraries(paths, progress)
-            .map_err(|error| error.to_string())?
-            .errors
-        {
-            let file = failure
-                .path
-                .file_name()
-                .and_then(|value| value.to_str())
-                .unwrap_or("<unknown-core>")
-                .to_owned();
+        let report = registry
+            .load_libraries(discovery.libraries, progress)
+            .map_err(|error| error.to_string())?;
+        for failure in report.errors.into_iter().chain(discovery.errors) {
+            let stem = astra_emu_manager_core::library_stem(&failure.path);
             let diagnostic = format!(
                 "{}: {}",
                 failure.error.diagnostic_code(),
                 failure.error.human_message()
             );
-            tracing::error!(event = "astra.emu.plugin.discovery_failed", core = %file, diagnostic = %diagnostic);
-            errors.insert(file, diagnostic);
+            tracing::error!(event = "astra.emu.plugin.discovery_failed", core = %stem, diagnostic = %diagnostic);
+            errors.insert(stem, diagnostic);
         }
     }
     #[cfg(target_os = "android")]
