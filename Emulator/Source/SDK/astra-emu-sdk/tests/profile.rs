@@ -86,11 +86,15 @@ fn explicit_external_profile_keeps_game_root_and_exact_source_identity() {
     assert!(resolve_game_file(&root, "../profile.json").is_err());
     assert_eq!(
         read_configured_profile_bytes(game.path(), Path::new("../profile.json"), 64)
-            .unwrap_err().code(),
+            .unwrap_err()
+            .code(),
         "ASTRA_EMU_PROFILE_PATH"
     );
-    let error = read_configured_profile_bytes(game.path(), Path::new("missing.json"), 64).unwrap_err();
+    let error =
+        read_configured_profile_bytes(game.path(), Path::new("missing.json"), 64).unwrap_err();
     assert_eq!(error.code(), "ASTRA_EMU_PROFILE_MISSING");
     assert!(error.to_string().contains("configure"));
-    assert!(!error.to_string().contains(&source.to_string_lossy().to_string()));
+    assert!(!error
+        .to_string()
+        .contains(&source.to_string_lossy().to_string()));
 }

@@ -150,7 +150,8 @@ impl Fixture {
         // Main owns the shared bounded reader. Use its production implementation,
         // never a test-only replacement of the binary or codec APIs.
         fs::copy(
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../Metadata/patches/common/binary.luau"),
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../../Metadata/patches/common/binary.luau"),
             scripts.join("common/binary.luau"),
         )
         .unwrap();

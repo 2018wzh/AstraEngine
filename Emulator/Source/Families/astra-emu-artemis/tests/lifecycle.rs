@@ -123,15 +123,24 @@ fn descriptor_declares_v3_names_and_file_fields() {
     );
     let descriptor = unsafe { descriptor.assume_init() };
     unsafe { descriptor.validate() }.unwrap();
-    assert_eq!(unsafe { descriptor.display_name.text(64) }.unwrap(), "Art3m1s");
-    assert_eq!(unsafe { descriptor.family_name.text(64) }.unwrap(), "Artemis");
+    assert_eq!(
+        unsafe { descriptor.display_name.text(64) }.unwrap(),
+        "Art3m1s"
+    );
+    assert_eq!(
+        unsafe { descriptor.family_name.text(64) }.unwrap(),
+        "Artemis"
+    );
     assert_eq!(descriptor.capabilities & CAP_RENDER_EXTENT, 0);
     let fields = unsafe {
         std::slice::from_raw_parts(descriptor.configuration, descriptor.configuration_count)
     };
     unsafe { validate_config(fields, &[]) }.unwrap();
     for field in fields {
-        assert_eq!(field.flags, CONFIG_FLAG_FILE_PATH | CONFIG_FLAG_GAME_RELATIVE);
+        assert_eq!(
+            field.flags,
+            CONFIG_FLAG_FILE_PATH | CONFIG_FLAG_GAME_RELATIVE
+        );
         assert_eq!(unsafe { field.group.text(64) }.unwrap(), "文件");
         assert!(!unsafe { field.description.text(512) }.unwrap().is_empty());
     }

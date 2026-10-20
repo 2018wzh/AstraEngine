@@ -37,35 +37,64 @@ fn read_profile_bytes(
     max_bytes: u64,
     confined: bool,
 ) -> Result<(Vec<u8>, Hash256, PathBuf), CoreError> {
-    let limit = max_bytes.checked_add(1).filter(|_| max_bytes > 0).ok_or_else(|| {
-        CoreError::invalid("ASTRA_EMU_PROFILE_BOUND", "profile size limit is invalid")
-    })?;
+    let limit = max_bytes
+        .checked_add(1)
+        .filter(|_| max_bytes > 0)
+        .ok_or_else(|| {
+            CoreError::invalid("ASTRA_EMU_PROFILE_BOUND", "profile size limit is invalid")
+        })?;
     let root = game_root.canonicalize().map_err(|_| {
-        CoreError::invalid("ASTRA_EMU_PROFILE_ROOT", "game directory is unavailable; select an existing readable game directory")
+        CoreError::invalid(
+            "ASTRA_EMU_PROFILE_ROOT",
+            "game directory is unavailable; select an existing readable game directory",
+        )
     })?;
     if profile_path.as_os_str().is_empty()
         || (!profile_path.is_absolute()
-            && (profile_path.components().any(|part| !matches!(part, Component::Normal(_)))
+            && (profile_path
+                .components()
+                .any(|part| !matches!(part, Component::Normal(_)))
                 || profile_path.to_str().is_none_or(|text| {
                     text.contains(['\\', ':', '\0'])
-                        || text.split('/').any(|part| part.is_empty() || part == "." || part == "..")
+                        || text
+                            .split('/')
+                            .any(|part| part.is_empty() || part == "." || part == "..")
                 })))
     {
-        return Err(CoreError::invalid("ASTRA_EMU_PROFILE_PATH", "profile path must be absolute or a safe path relative to the game directory"));
+        return Err(CoreError::invalid(
+            "ASTRA_EMU_PROFILE_PATH",
+            "profile path must be absolute or a safe path relative to the game directory",
+        ));
     }
-    let path = if profile_path.is_absolute() { profile_path.to_path_buf() } else { root.join(profile_path) };
+    let path = if profile_path.is_absolute() {
+        profile_path.to_path_buf()
+    } else {
+        root.join(profile_path)
+    };
     let path = path.canonicalize().map_err(profile_io_error)?;
     if (confined || !profile_path.is_absolute()) && !path.starts_with(&root) {
         return Err(CoreError::invalid("ASTRA_EMU_PROFILE_PATH", "relative profile paths must stay inside the game directory; select an absolute private profile path explicitly"));
     }
-    if !std::fs::metadata(&path).map_err(profile_io_error)?.is_file() {
-        return Err(CoreError::invalid("ASTRA_EMU_PROFILE_FILE", "profile selection is not a regular file; select the private profile file"));
+    if !std::fs::metadata(&path)
+        .map_err(profile_io_error)?
+        .is_file()
+    {
+        return Err(CoreError::invalid(
+            "ASTRA_EMU_PROFILE_FILE",
+            "profile selection is not a regular file; select the private profile file",
+        ));
     }
     let mut file = File::open(path).map_err(profile_io_error)?;
     let mut bytes = Vec::new();
-    file.by_ref().take(limit).read_to_end(&mut bytes).map_err(|_| {
-        CoreError::invalid("ASTRA_EMU_PROFILE_READ", "profile read failed; check file access and storage availability")
-    })?;
+    file.by_ref()
+        .take(limit)
+        .read_to_end(&mut bytes)
+        .map_err(|_| {
+            CoreError::invalid(
+                "ASTRA_EMU_PROFILE_READ",
+                "profile read failed; check file access and storage availability",
+            )
+        })?;
     if bytes.len() as u64 > max_bytes {
         return Err(CoreError::invalid("ASTRA_EMU_PROFILE_BOUND", "profile exceeds the core's size limit; select the private profile rather than an archive or scheme database"));
     }
@@ -88,8 +117,12 @@ pub fn resolve_game_file(root: &Path, relative: &str) -> Result<PathBuf, CoreErr
     if relative.is_empty()
         || relative.contains(['\\', ':', '\0'])
         || path.is_absolute()
-        || relative.split('/').any(|part| part.is_empty() || part == "." || part == "..")
-        || path.components().any(|part| !matches!(part, Component::Normal(_)))
+        || relative
+            .split('/')
+            .any(|part| part.is_empty() || part == "." || part == "..")
+        || path
+            .components()
+            .any(|part| !matches!(part, Component::Normal(_)))
     {
         return Err(fail());
     }
