@@ -28,7 +28,7 @@ fn controller(root: &Path) -> (AstraEmuManagerController, PathBuf, String) {
     )
     .unwrap();
     app.set_host_wake(Arc::new(|| {}));
-    app.refresh_cores().unwrap();
+    app.prepare_library().unwrap();
     settle(&mut app, |app| !app.startup_busy());
     app.registry
         .register_provider(|| {
@@ -173,7 +173,7 @@ fn running_patch_blocks_launch_scan_and_second_job_but_cancel_joins_and_allows_r
     assert!(app
         .start_file_patch(&script, Path::new(""), &output)
         .is_err());
-    assert!(app.rescan().is_err());
+    assert!(app.prepare_library().is_err());
     assert!(app.add_game_directory(&source).is_err());
     assert!(app.launch(&source_id).is_err());
     assert!(app.active.is_none());

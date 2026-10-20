@@ -1,8 +1,44 @@
 use super::*;
 
 impl ManagerController for AstraEmuManagerController {
-    fn refresh_cores(&mut self) -> Result<ManagerViewModel, String> {
-        AstraEmuManagerController::refresh_cores(self)
+    fn prepare_library(&mut self) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::prepare_library(self)
+    }
+
+    fn cancel_prepare(&mut self) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::cancel_prepare(self)
+    }
+
+    fn remove_from_library(&mut self, game_id: &str) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::remove_from_library(self, game_id)
+    }
+
+    fn restore_game(&mut self, game_id: &str) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::restore_game(self, game_id)
+    }
+
+    fn snackbar_action(&mut self) -> Result<astra_emu_manager::SnackbarOutcome, String> {
+        AstraEmuManagerController::snackbar_action(self)
+    }
+
+    fn begin_key_capture(
+        &mut self,
+        button: &str,
+        game_id: Option<&str>,
+    ) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::begin_key_capture(self, button, game_id)
+    }
+
+    fn cancel_key_capture(&mut self) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::cancel_key_capture(self)
+    }
+
+    fn key_capture_active(&self) -> bool {
+        AstraEmuManagerController::key_capture_active(self)
+    }
+
+    fn capture_key(&mut self, code: KeyCode) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::capture_key(self, code)
     }
 
     fn take_modal_update(&mut self) -> Option<astra_emu_manager::modal_service::ModalUiUpdate> {
@@ -149,14 +185,33 @@ impl ManagerController for AstraEmuManagerController {
     fn filter_settings(&self) -> astra_emu_manager_core::FilterSettings {
         self.filter_settings.clone()
     }
-    fn pending_filter_settings(&self) -> Result<astra_emu_manager_core::FilterSettings, String> {
-        self.pending_filter()
-    }
-    fn commit_filter_settings(
+    fn set_filter_preset(
         &mut self,
-        settings: astra_emu_manager_core::FilterSettings,
+        id: &str,
+        apply: astra_emu_manager::FilterApply<'_>,
     ) -> Result<ManagerViewModel, String> {
-        self.commit_filter(settings)
+        AstraEmuManagerController::set_filter_preset(self, id, apply)
+    }
+    fn set_filter_parameter(
+        &mut self,
+        key: &str,
+        value: &str,
+        apply: astra_emu_manager::FilterApply<'_>,
+    ) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::set_filter_parameter(self, key, value, apply)
+    }
+    fn reset_filter_parameters(
+        &mut self,
+        apply: astra_emu_manager::FilterApply<'_>,
+    ) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::reset_filter_parameters(self, apply)
+    }
+    fn load_filter_source(
+        &mut self,
+        path: &Path,
+        apply: astra_emu_manager::FilterApply<'_>,
+    ) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::load_filter_source(self, path, apply)
     }
 
     fn game_input(&mut self, control: &str, pressed: bool, value: f32) -> Result<(), String> {
@@ -165,10 +220,6 @@ impl ManagerController for AstraEmuManagerController {
 
     fn release_inputs(&mut self) -> Result<(), String> {
         AstraEmuManagerController::release_inputs(self)
-    }
-
-    fn rescan(&mut self) -> Result<ManagerViewModel, String> {
-        AstraEmuManagerController::rescan(self)
     }
 
     fn launch(&mut self, case_id: &str) -> Result<ManagerViewModel, String> {
@@ -247,28 +298,74 @@ impl ManagerController for AstraEmuManagerController {
             .and_then(|active| active.title.as_deref())
     }
 
-    fn family_config_changed(&mut self, key: &str, value: &str) -> Result<(), String> {
-        AstraEmuManagerController::family_config_changed(self, key, value)
+    fn set_game_emulator(
+        &mut self,
+        game_id: &str,
+        plugin_id: &str,
+    ) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::set_game_emulator(self, game_id, plugin_id)
     }
 
-    fn save_family_config(&mut self) -> Result<ManagerViewModel, String> {
-        AstraEmuManagerController::save_family_config(self)
+    fn set_game_config(
+        &mut self,
+        game_id: &str,
+        field_id: &str,
+        raw: &str,
+    ) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::set_game_config(self, game_id, field_id, raw)
     }
 
-    fn reset_family_config(&mut self) -> Result<ManagerViewModel, String> {
-        AstraEmuManagerController::reset_family_config(self)
+    fn reset_game_config(
+        &mut self,
+        game_id: &str,
+        field_id: &str,
+    ) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::reset_game_config(self, game_id, field_id)
     }
 
-    fn select_musica_key_file(&mut self) -> Result<ManagerViewModel, String> {
-        AstraEmuManagerController::select_musica_key_file(self)
+    fn set_emulator_default(
+        &mut self,
+        plugin_id: &str,
+        field_id: &str,
+        raw: &str,
+    ) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::set_emulator_default(self, plugin_id, field_id, raw)
     }
 
-    fn filter_config_changed(&mut self, key: &str, value: &str) -> Result<(), String> {
-        AstraEmuManagerController::filter_config_changed(self, key, value)
+    fn reset_emulator_default(
+        &mut self,
+        plugin_id: &str,
+        field_id: &str,
+    ) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::reset_emulator_default(self, plugin_id, field_id)
     }
 
-    fn reset_filter_config(&mut self) -> Result<ManagerViewModel, String> {
-        AstraEmuManagerController::reset_filter_config(self)
+    fn select_emulator_defaults(&mut self, plugin_id: &str) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::select_emulator_defaults(self, plugin_id)
+    }
+
+    fn pick_config_path(
+        &mut self,
+        game_id: &str,
+        field_id: &str,
+    ) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::pick_config_path(self, game_id, field_id)
+    }
+
+    fn set_render_preference(
+        &mut self,
+        game_id: &str,
+        preference: Option<astra_emu_manager_core::RenderPreference>,
+    ) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::set_render_preference(self, game_id, preference)
+    }
+
+    fn set_emulator_render_default(
+        &mut self,
+        plugin_id: &str,
+        preference: astra_emu_manager_core::RenderPreference,
+    ) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::set_emulator_render_default(self, plugin_id, preference)
     }
 
     fn set_library_sort(&mut self, mode: &str) -> Result<ManagerViewModel, String> {
@@ -291,37 +388,41 @@ impl ManagerController for AstraEmuManagerController {
         AstraEmuManagerController::pin_release(self, release_id)
     }
 
-    fn save_input_config(
-        &mut self,
-
-        gamepad_enabled: bool,
-        gamepad_deadzone: &str,
-    ) -> Result<(), String> {
-        AstraEmuManagerController::save_input_config(self, gamepad_enabled, gamepad_deadzone)
-    }
-
     fn input_mapping(&self) -> astra_emu_manager_core::InputMapping {
         AstraEmuManagerController::input_mapping(self)
     }
 
-    fn set_gamepad_binding(&mut self, button_id: &str, key_name: &str) -> Result<(), String> {
-        AstraEmuManagerController::set_gamepad_binding(self, button_id, key_name)
+    fn set_gamepad_enabled(&mut self, enabled: bool) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::set_gamepad_enabled(self, enabled)
     }
 
-    fn reset_gamepad_mapping(&mut self) -> Result<(), String> {
-        AstraEmuManagerController::reset_gamepad_mapping(self)
+    fn set_gamepad_deadzone(&mut self, deadzone: &str) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::set_gamepad_deadzone(self, deadzone)
     }
 
-    fn save_per_game_input_mapping(
+    fn set_gamepad_binding(&mut self, button: &str, key: &str) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::set_gamepad_binding(self, button, key)
+    }
+
+    fn reset_gamepad_bindings(&mut self) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::reset_gamepad_bindings(self)
+    }
+
+    fn set_game_input_override(
         &mut self,
-        gamepad_enabled: bool,
-        deadzone: &str,
+        game_id: &str,
+        enabled: bool,
     ) -> Result<ManagerViewModel, String> {
-        AstraEmuManagerController::save_per_game_input_mapping(self, gamepad_enabled, deadzone)
+        AstraEmuManagerController::set_game_input_override(self, game_id, enabled)
     }
 
-    fn clear_per_game_input_mapping(&mut self) -> Result<ManagerViewModel, String> {
-        AstraEmuManagerController::clear_per_game_input_mapping(self)
+    fn set_game_gamepad_binding(
+        &mut self,
+        game_id: &str,
+        button: &str,
+        key: &str,
+    ) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::set_game_gamepad_binding(self, game_id, button, key)
     }
 
     fn set_appearance(

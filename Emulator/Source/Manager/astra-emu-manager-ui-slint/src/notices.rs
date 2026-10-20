@@ -65,8 +65,20 @@ fn is_error_code(token: &str) -> bool {
 
 fn exact_text(code: &str) -> Option<(&'static str, &'static str)> {
     Some(match code {
-        "ASTRA_EMU_CORES_NOT_READY" => ("模拟器核心尚未加载", "请先在“核心”页加载核心。"),
+        "ASTRA_EMU_CORES_NOT_READY" => ("模拟器核心尚未加载", "请先在游戏库点击“准备”。"),
         "ASTRA_EMU_FAMILY_INITIALIZING" => ("核心仍在加载或扫描中", "请稍候再试。"),
+        "ASTRA_EMU_PREPARE_BUSY" => ("正在准备资料库", "请等待当前的核心加载或扫描结束。"),
+        "ASTRA_EMU_PREPARE_NOT_CANCELLABLE" => ("当前没有可取消的扫描", "核心加载阶段不能取消。"),
+        "ASTRA_EMU_PREPARE_RESTART_REQUIRED" => {
+            ("资料库准备失败", "请查看核心诊断，修复后重启 AstraEMU。")
+        }
+        "ASTRA_EMU_SCAN_CANCELLED" => ("已取消扫描", "资料库保持不变。"),
+        "ASTRA_EMU_GAME_DIRECTORY_INVALID" => ("无法使用这个目录", "目录不存在或无法访问。"),
+        "ASTRA_EMU_UNDO_UNAVAILABLE" => ("没有可撤销的移除", "作品可以在 设置→库目录 中恢复。"),
+        "ASTRA_EMU_SNACKBAR_ACTION_UNAVAILABLE" => ("这个操作已失效", "请重新执行一次。"),
+        "ASTRA_EMU_OPEN_PATH_FAILED" => ("无法打开所在目录", "系统文件管理器未能启动。"),
+        "ASTRA_EMU_KEY_CAPTURE_INACTIVE" => ("没有正在设置的按键", "请先点选要绑定的手柄按钮。"),
+        "ASTRA_EMU_GAMEPAD_BUTTON_INVALID" => ("无法识别的手柄按钮", "请从按键列表中选择。"),
         "ASTRA_EMU_FAMILY_SESSION_ALREADY_ACTIVE" => {
             ("已有游戏正在运行", "请先返回游戏库结束当前游戏。")
         }
@@ -94,11 +106,25 @@ fn exact_text(code: &str) -> Option<(&'static str, &'static str)> {
         "ASTRA_EMU_FAMILY_DIAGNOSTIC_INIT" => ("核心诊断初始化失败", "请查看日志。"),
         "ASTRA_EMU_FAMILY_SCAN_DIRECTORY" => ("无法读取核心目录", "请检查目录权限。"),
         "ASTRA_EMU_CORE_RETRY_UNAVAILABLE" => ("无法重试", "这个错误不支持重试，请结束游戏。"),
-        "ASTRA_EMU_INPUT_QUEUE_FULL" => ("输入过多", "游戏未能及时处理输入，已停止运行。"),
+        "ASTRA_EMU_INPUT_QUEUE_FULL" => ("输入过多", "游戏未能及时处理输入，多余的输入已丢弃。"),
         "ASTRA_EMU_RENDER_PREFERENCE_INVALID" => (
             "渲染分辨率设置无效",
             "预设只能选 720p、1080p、1440p 或 2160p，自定义宽高须在 1 到 16384 之间。",
         ),
+        "ASTRA_EMU_RENDER_EXTENT_UNSUPPORTED" => (
+            "自定义分辨率超出该模拟器支持范围",
+            "请在游戏设置中查看该模拟器支持的分辨率范围。",
+        ),
+        "ASTRA_EMU_EMULATOR_SELECTION_REQUIRED" => (
+            "需要先选择模拟器",
+            "选定模拟器后才能修改这部作品的模拟器设置。",
+        ),
+        "ASTRA_EMU_CONFIG_PATH_INVALID" => ("无法使用所选路径", "文件或目录不存在或无法访问。"),
+        "ASTRA_EMU_CONFIG_PATH_UTF8" => (
+            "所选路径包含无法保存的字符",
+            "请把文件放到路径只含常规字符的位置后重新选择。",
+        ),
+        "ASTRA_EMU_FAMILY_CONFIG" => ("设置值无效", "取值不在允许范围内，已保留原来的设置。"),
         "ASTRA_EMU_RELEASE_ID_INVALID" => (
             "发行版本编号无效",
             "VNDB 发行版本编号应为 r 加数字，例如 r12345，且不超过 64 个字符。",

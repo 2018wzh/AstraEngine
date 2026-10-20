@@ -53,7 +53,6 @@ mod metadata_actions;
 #[cfg(test)]
 mod metadata_tests;
 mod model;
-mod musica_keys;
 mod navigation;
 mod owner;
 mod owner_worker;
@@ -62,8 +61,10 @@ mod probe_cache;
 #[cfg(test)]
 mod probe_state_tests;
 mod probe_worker;
+mod render_extent;
 mod runtime;
 mod session;
+mod snackbar;
 mod support;
 mod translation;
 mod view_fields;
@@ -107,8 +108,8 @@ struct AstraEmuManagerController {
     filter_settings: astra_emu_manager_core::FilterSettings,
     input_mapping: astra_emu_manager_core::InputMapping,
     appearance: astra_emu_manager_core::AppearanceSettings,
-    family_options: BTreeMap<String, String>,
-    filter_options: BTreeMap<String, String>,
+    session_mapping: Option<astra_emu_manager_core::InputMapping>,
+    defaults_plugin: Option<String>,
     metadata: MetadataRuntime,
     metadata_sequence: u64,
     metadata_status: BTreeMap<String, String>,
@@ -135,6 +136,12 @@ struct AstraEmuManagerController {
     patch_import: Option<file_patch::PendingImport>,
     patch_state: astra_emu_manager_ui_slint::PatchViewModel,
     patch_sequence: u64,
+    snackbar: snackbar::Snackbar,
+    prepare_scan_pending: Option<background::PendingScan>,
+    prepare_progress: Option<owner::PrepareProgress>,
+    scan_cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    last_excluded: Option<String>,
+    key_capture: Option<input::KeyCapture>,
 }
 
 impl Drop for AstraEmuManagerController {

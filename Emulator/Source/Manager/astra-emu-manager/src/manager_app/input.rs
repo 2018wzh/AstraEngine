@@ -82,11 +82,8 @@ impl AstraEmuManagerController {
                 | FamilyEvent::WindowVisibility { .. }
                 | FamilyEvent::WindowSuspended { .. }
         );
-        let closing = matches!(event, FamilyEvent::WindowCloseRequested);
         self.pending_events.push(event);
-        if closing {
-            self.close_active(PlaySessionEndReason::Shutdown)?;
-        } else if lifecycle {
+        if lifecycle {
             self.flush_owner_events()?;
         }
         Ok(())
@@ -283,113 +280,200 @@ impl AstraEmuManagerController {
         Ok(())
     }
 
-    fn configure_gamepad(&mut self, enabled: bool, deadzone: &str) -> Result<(), String> {
-        if self.active.is_some() {
-            return Err("ASTRA_EMU_INPUT_CLOSE_GAME_BEFORE_CONFIGURATION".into());
+    /// Mapping for the gamepad pump: the running game's mapping, else the global one.
+    pub(super) fn input_mapping(&self) -> astra_emu_manager_core::InputMapping {
+        match (&self.active, &self.session_mapping) {
+            (Some(_), Some(mapping)) => mapping.clone(),
+            _ => self.input_mapping.clone(),
         }
-        let deadzone =
-            GamepadDeadzone::parse(deadzone).ok_or("ASTRA_EMU_INPUT_DEADZONE_INVALID")?;
-        self.input_mapping.gamepad_enabled = enabled;
-        self.input_mapping.deadzone = deadzone;
-        Ok(())
     }
 
-    pub(super) fn load_game_input_mapping(&mut self, game_id: &str) -> Result<(), String> {
-        let settings = self
+    pub(super) fn game_input_mapping(
+        &self,
+        game_id: &str,
+    ) -> Result<astra_emu_manager_core::InputMapping, String> {
+        Ok(self
             .library
             .game_settings(game_id)
-            .map_err(|e| e.to_string())?;
-        self.input_mapping = match settings.and_then(|s| s.input_mapping) {
-            Some(mapping) => mapping,
-            None => self
-                .library
-                .load_input_mapping()
-                .map_err(|e| e.to_string())?
-                .unwrap_or_else(default_vn_preset),
-        };
-        Ok(())
+            .map_err(|e| e.to_string())?
+            .and_then(|settings| settings.input_mapping)
+            .unwrap_or_else(|| self.input_mapping.clone()))
     }
 
-    pub(super) fn save_input_config(
+    fn update_global_mapping(
         &mut self,
-        enabled: bool,
-        deadzone: &str,
-    ) -> Result<(), String> {
-        self.configure_gamepad(enabled, deadzone)?;
+        change: impl FnOnce(&mut astra_emu_manager_core::InputMapping) -> Result<(), String>,
+    ) -> Result<ManagerViewModel, String> {
+        self.ensure_no_session()?;
+        let mut mapping = self.input_mapping.clone();
+        change(&mut mapping)?;
         self.library
-            .save_input_mapping(&self.input_mapping)
-            .map_err(|e| e.to_string())
+            .save_input_mapping(&mapping)
+            .map_err(|e| e.to_string())?;
+        self.input_mapping = mapping;
+        self.model()
     }
 
-    pub(super) fn input_mapping(&self) -> astra_emu_manager_core::InputMapping {
-        self.input_mapping.clone()
+    fn update_game_settings(
+        &mut self,
+        game_id: &str,
+        change: impl FnOnce(&mut astra_emu_manager_core::GameSettings) -> Result<(), String>,
+    ) -> Result<ManagerViewModel, String> {
+        self.ensure_no_session()?;
+        let mut settings = self
+            .library
+            .game_settings(game_id)
+            .map_err(|e| e.to_string())?
+            .unwrap_or_default();
+        change(&mut settings)?;
+        self.library
+            .set_game_settings(game_id, &settings)
+            .map_err(|e| e.to_string())?;
+        self.model()
+    }
+
+    pub(super) fn set_gamepad_enabled(&mut self, enabled: bool) -> Result<ManagerViewModel, String> {
+        self.update_global_mapping(|mapping| {
+            mapping.gamepad_enabled = enabled;
+            Ok(())
+        })
+    }
+
+    pub(super) fn set_gamepad_deadzone(
+        &mut self,
+        deadzone: &str,
+    ) -> Result<ManagerViewModel, String> {
+        let deadzone =
+            GamepadDeadzone::parse(deadzone).ok_or("ASTRA_EMU_INPUT_DEADZONE_INVALID")?;
+        self.update_global_mapping(|mapping| {
+            mapping.deadzone = deadzone;
+            Ok(())
+        })
     }
 
     pub(super) fn set_gamepad_binding(
         &mut self,
-        button_id: &str,
-        key_name: &str,
-    ) -> Result<(), String> {
-        let button = GamepadInput::parse(button_id)
-            .ok_or_else(|| "ASTRA_EMU_GAMEPAD_BUTTON_INVALID".to_owned())?;
-        if !key_name.is_empty() && key_code(key_name).is_none() {
-            return Err("ASTRA_EMU_INPUT_KEY_INVALID".into());
-        }
-        if self.active.is_some() {
-            return Err("ASTRA_EMU_INPUT_CLOSE_GAME_BEFORE_CONFIGURATION".into());
-        }
-        if key_name.is_empty() {
-            self.input_mapping.gamepad.remove(&button);
-        } else {
-            self.input_mapping.gamepad.insert(button, key_name.into());
-        }
-        Ok(())
-    }
-
-    pub(super) fn reset_gamepad_mapping(&mut self) -> Result<(), String> {
-        if self.active.is_some() {
-            return Err("ASTRA_EMU_INPUT_CLOSE_GAME_BEFORE_CONFIGURATION".into());
-        }
-        self.input_mapping = default_vn_preset();
-        Ok(())
-    }
-
-    pub(super) fn save_per_game_input_mapping(
-        &mut self,
-        enabled: bool,
-        deadzone: &str,
+        button: &str,
+        key: &str,
     ) -> Result<ManagerViewModel, String> {
-        self.configure_gamepad(enabled, deadzone)?;
-        let game = self.selected_game()?;
-        let mut settings = self
-            .library
-            .game_settings(&game.game_id)
-            .map_err(|error| error.to_string())?
-            .unwrap_or_default();
-        settings.input_mapping = Some(self.input_mapping.clone());
-        self.library
-            .set_game_settings(&game.game_id, &settings)
-            .map_err(|error| error.to_string())?;
+        self.update_global_mapping(|mapping| bind(mapping, button, key))
+    }
+
+    pub(super) fn reset_gamepad_bindings(&mut self) -> Result<ManagerViewModel, String> {
+        self.update_global_mapping(|mapping| {
+            mapping.gamepad = default_vn_preset().gamepad;
+            Ok(())
+        })
+    }
+
+    pub(super) fn set_game_input_override(
+        &mut self,
+        game_id: &str,
+        enabled: bool,
+    ) -> Result<ManagerViewModel, String> {
+        let global = self.input_mapping.clone();
+        self.update_game_settings(game_id, |settings| {
+            settings.input_mapping = enabled.then_some(global);
+            Ok(())
+        })
+    }
+
+    pub(super) fn set_game_gamepad_binding(
+        &mut self,
+        game_id: &str,
+        button: &str,
+        key: &str,
+    ) -> Result<ManagerViewModel, String> {
+        let global = self.input_mapping.clone();
+        self.update_game_settings(game_id, |settings| {
+            bind(settings.input_mapping.get_or_insert(global), button, key)
+        })
+    }
+
+    /// Wait for the next keyboard key to bind to `button`, globally or for one game.
+    pub(super) fn begin_key_capture(
+        &mut self,
+        button: &str,
+        game_id: Option<&str>,
+    ) -> Result<ManagerViewModel, String> {
+        self.ensure_no_session()?;
+        GamepadInput::parse(button).ok_or("ASTRA_EMU_GAMEPAD_BUTTON_INVALID")?;
+        if let Some(game_id) = game_id {
+            self.game(game_id)?;
+        }
+        self.key_capture = Some(KeyCapture {
+            button: button.to_owned(),
+            game_id: game_id.map(str::to_owned),
+            hint: String::new(),
+        });
         self.model()
     }
 
-    pub(super) fn clear_per_game_input_mapping(&mut self) -> Result<ManagerViewModel, String> {
-        if self.active.is_some() {
-            return Err("ASTRA_EMU_INPUT_CLOSE_GAME_BEFORE_CONFIGURATION".into());
-        }
-        let game = self.selected_game()?;
-        let mut settings = self
-            .library
-            .game_settings(&game.game_id)
-            .map_err(|error| error.to_string())?
-            .unwrap_or_default();
-        settings.input_mapping = None;
-        self.library
-            .set_game_settings(&game.game_id, &settings)
-            .map_err(|error| error.to_string())?;
-        self.load_game_input_mapping(&game.game_id)?;
+    pub(super) fn cancel_key_capture(&mut self) -> Result<ManagerViewModel, String> {
+        self.key_capture = None;
         self.model()
     }
+
+    pub(super) fn key_capture_active(&self) -> bool {
+        self.key_capture.is_some()
+    }
+
+    /// Bind the captured key; keys without a mapping name keep the capture waiting.
+    pub(super) fn capture_key(&mut self, code: KeyCode) -> Result<ManagerViewModel, String> {
+        let capture = self
+            .key_capture
+            .as_mut()
+            .ok_or("ASTRA_EMU_KEY_CAPTURE_INACTIVE")?;
+        let Some(key) = astra_emu_manager_core::input_key_name(code) else {
+            capture.hint = UNMAPPABLE_KEY_HINT.into();
+            return self.model();
+        };
+        let KeyCapture {
+            button, game_id, ..
+        } = self.key_capture.take().expect("capture checked above");
+        match game_id {
+            Some(game_id) => self.set_game_gamepad_binding(&game_id, &button, key),
+            None => self.set_gamepad_binding(&button, key),
+        }
+    }
+
+    pub(super) fn key_capture_view(&self) -> (String, String, String) {
+        self.key_capture
+            .as_ref()
+            .map(|capture| {
+                (
+                    capture.button.clone(),
+                    capture.game_id.clone().unwrap_or_default(),
+                    capture.hint.clone(),
+                )
+            })
+            .unwrap_or_default()
+    }
+}
+
+pub(super) const UNMAPPABLE_KEY_HINT: &str = "这个键不能用于映射";
+
+pub(super) struct KeyCapture {
+    button: String,
+    game_id: Option<String>,
+    hint: String,
+}
+
+fn bind(
+    mapping: &mut astra_emu_manager_core::InputMapping,
+    button: &str,
+    key: &str,
+) -> Result<(), String> {
+    let button =
+        GamepadInput::parse(button).ok_or_else(|| "ASTRA_EMU_GAMEPAD_BUTTON_INVALID".to_owned())?;
+    if key.is_empty() {
+        mapping.gamepad.remove(&button);
+    } else if key_code(key).is_some() {
+        mapping.gamepad.insert(button, key.into());
+    } else {
+        return Err("ASTRA_EMU_INPUT_KEY_INVALID".into());
+    }
+    Ok(())
 }
 
 fn pointer_button(control: &str) -> Option<astra_emu_manager_core::model::PointerButton> {

@@ -198,7 +198,6 @@ pub enum FamilyEvent {
     WindowSuspended {
         suspended: bool,
     },
-    WindowCloseRequested,
 }
 
 impl FamilyEvent {

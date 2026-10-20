@@ -16,9 +16,18 @@ pub struct ManagerViewModel {
     pub settings: SettingsViewModel,
     pub appearance: AppearanceViewModel,
     pub notices: Vec<NoticeViewModel>,
+    pub snackbar: SnackbarViewModel,
     pub about: AboutViewModel,
     pub session: SessionViewModel,
     pub patch: PatchViewModel,
+}
+
+/// A new `serial` shows `text` again even when it repeats.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SnackbarViewModel {
+    pub serial: u32,
+    pub text: String,
+    pub action: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -39,10 +48,18 @@ pub struct LibraryViewModel {
     pub sort: String,
     pub compat_filter: String,
     pub cores_ready: bool,
-    pub can_load_cores: bool,
     pub busy: bool,
     pub status: String,
+    /// `unprepared | loading-cores | scanning | ready | failed`
+    pub prepare_state: String,
+    pub prepare_label: String,
+    pub prepare_detail: String,
+    /// `None` means indeterminate progress.
+    pub prepare_progress: Option<f32>,
+    pub can_cancel_prepare: bool,
     pub selected_id: String,
+    pub roots: Vec<String>,
+    pub excluded: Vec<ExcludedViewModel>,
 }
 
 impl Default for LibraryViewModel {
@@ -53,12 +70,25 @@ impl Default for LibraryViewModel {
             sort: "title".into(),
             compat_filter: "all".into(),
             cores_ready: false,
-            can_load_cores: false,
             busy: false,
             status: String::new(),
+            prepare_state: "unprepared".into(),
+            prepare_label: "准备".into(),
+            prepare_detail: String::new(),
+            prepare_progress: None,
+            can_cancel_prepare: false,
             selected_id: String::new(),
+            roots: Vec::new(),
+            excluded: Vec::new(),
         }
     }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ExcludedViewModel {
+    pub id: String,
+    pub title: String,
+    pub location: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -97,8 +127,29 @@ pub struct SelectionViewModel {
     pub metadata_busy: bool,
     pub metadata_status: String,
     pub bangumi: BangumiViewModel,
+    pub emulator_choices: Vec<ChoiceViewModel>,
+    pub emulator_id: String,
     pub family_fields: Vec<ConfigFieldViewModel>,
-    pub musica_key_available: bool,
+    pub render: RenderViewModel,
+    pub input_override: bool,
+    pub game_bindings: Vec<GamepadBindingViewModel>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ChoiceViewModel {
+    pub id: String,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RenderViewModel {
+    pub supported: bool,
+    pub options: Vec<ChoiceViewModel>,
+    pub mode: String,
+    pub custom_width: i32,
+    pub custom_height: i32,
+    pub range: String,
+    pub note: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -140,23 +191,38 @@ pub struct BangumiViewModel {
     pub summary: String,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct ConfigFieldViewModel {
     pub key: String,
     pub label: String,
     pub description: String,
+    pub group: String,
+    /// `bool|integer|float|string|enum|file|directory`.
     pub kind: String,
     pub value: String,
-    pub enum_values: Vec<String>,
-    pub required: bool,
-    pub min: i32,
-    pub max: i32,
+    pub display_value: String,
+    pub options: Vec<String>,
+    pub option_values: Vec<String>,
+    pub min: f64,
+    pub max: f64,
+    pub step: f64,
+    pub unit: String,
+    pub advanced: bool,
+    pub overridden: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct CoresViewModel {
     pub items: Vec<CoreViewModel>,
     pub restart_required: bool,
+    pub defaults: EmulatorDefaultsViewModel,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct EmulatorDefaultsViewModel {
+    pub plugin: String,
+    pub fields: Vec<ConfigFieldViewModel>,
+    pub render: RenderViewModel,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -206,6 +272,11 @@ pub struct InputConfigViewModel {
     pub gamepad_enabled: bool,
     pub deadzone: String,
     pub bindings: Vec<GamepadBindingViewModel>,
+    /// Button waiting for a key; empty when no capture is active.
+    pub capture_button: String,
+    /// Game whose binding is captured; empty for the global mapping.
+    pub capture_game_id: String,
+    pub capture_hint: String,
 }
 
 impl Default for InputConfigViewModel {
@@ -214,6 +285,9 @@ impl Default for InputConfigViewModel {
             gamepad_enabled: true,
             deadzone: "medium".into(),
             bindings: Vec::new(),
+            capture_button: String::new(),
+            capture_game_id: String::new(),
+            capture_hint: String::new(),
         }
     }
 }

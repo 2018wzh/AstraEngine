@@ -1,5 +1,6 @@
 use super::owner::{
-    BackgroundEvent, BackgroundSender, Command, Commands, Update, collect_metadata,
+    BackgroundEvent, BackgroundSender, Command, Commands, PrepareProgress, Update,
+    collect_metadata,
 };
 use super::*;
 use crossbeam_channel::RecvTimeoutError;
@@ -31,7 +32,13 @@ pub(super) fn run(
         let directories = core_directories(&cores)?;
         #[cfg(target_os = "android")]
         let directories = Vec::new();
-        let mut errors = initialize(&mut registry, &directories)?;
+        let mut errors = initialize(&mut registry, &directories, &mut |loaded, total| {
+            let _ = results.send(BackgroundEvent::Progress(PrepareProgress::Cores {
+                loaded,
+                total,
+            }));
+            notify(&wake);
+        })?;
         for (file, error) in pending_failures {
             errors.insert(file, error);
         }
@@ -95,7 +102,10 @@ pub(super) fn run(
                 let result = if active.is_some() {
                     Err("ASTRA_EMU_FAMILY_SESSION_ALREADY_ACTIVE".into())
                 } else {
-                    probe_worker::scan(&registry, &mut cache, request, &cancelled)
+                    probe_worker::scan(&registry, &mut cache, request, &cancelled, &mut |progress| {
+                        let _ = results.send(BackgroundEvent::Progress(progress));
+                        notify(&wake);
+                    })
                 };
                 let _ = results.send(BackgroundEvent::Scanned(kind, result));
                 notify(&wake);
@@ -109,6 +119,7 @@ pub(super) fn run(
                     &mut registry,
                     mailbox.clone(),
                     request.window,
+                    request.render_extent,
                     super::session::SessionServices {
                         text: request.text,
                         window: request.window_service,
@@ -129,13 +140,11 @@ pub(super) fn run(
                     if pending.len() + events.len()
                         > astra_emu_manager_core::model::MAX_INPUT_EVENTS
                     {
-                        finish(
-                            &mut active,
-                            Some("ASTRA_EMU_INPUT_QUEUE_FULL".into()),
-                            &shared,
+                        tracing::warn!(
+                            event = "astra.emu.host.input_dropped",
+                            diagnostic_code = "ASTRA_EMU_INPUT_QUEUE_FULL",
+                            dropped = events.len()
                         );
-                        pending.clear();
-                        notify(&wake);
                     } else {
                         pending.extend(events);
                         let result = session.input(&pending);
@@ -251,6 +260,7 @@ pub(super) fn service_due(
 fn initialize(
     registry: &mut FamilyProviderRegistry,
     directories: &[PathBuf],
+    progress: &mut dyn FnMut(usize, usize),
 ) -> Result<BTreeMap<String, String>, String> {
     #[cfg(target_os = "android")]
     unsafe { registry.register_static(astra_emu_fvp::astra_emu_query) }
@@ -285,7 +295,7 @@ fn initialize(
             }
         }
         for failure in registry
-            .load_libraries(paths)
+            .load_libraries(paths, progress)
             .map_err(|error| error.to_string())?
             .errors
         {
@@ -316,6 +326,7 @@ fn publish(session: &mut ActiveFamilySession, shared: &Mutex<Update>) {
     }
     if !update.opened {
         update.opened = true;
+        update.surface = Some(session.surface);
         update.dirty = true;
     }
     if update.failure != session.failure {

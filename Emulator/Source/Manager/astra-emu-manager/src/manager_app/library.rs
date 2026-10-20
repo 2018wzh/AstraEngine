@@ -1,12 +1,102 @@
 use super::*;
 
 impl AstraEmuManagerController {
+    /// Persist the directory as a library root, then import it (loading cores first if needed).
     pub(super) fn add_game_directory(&mut self, path: &Path) -> Result<ManagerViewModel, String> {
         if self.active.is_some() {
             return Err("ASTRA_EMU_FAMILY_SESSION_ALREADY_ACTIVE".into());
         }
-        self.begin_scan(probe_worker::ScanKind::Import, vec![path.to_owned()])?;
+        if self.startup_busy() {
+            return Err("ASTRA_EMU_PREPARE_BUSY".into());
+        }
+        if let background::StartupState::Failed(_) = self.startup_state {
+            return Err("ASTRA_EMU_PREPARE_RESTART_REQUIRED".into());
+        }
+        if self.patch_job.is_some() {
+            return Err("ASTRA_EMU_PATCH_INVALID_REQUEST: 文件补丁转换期间不能扫描游戏".into());
+        }
+        let root = fs::canonicalize(path)
+            .ok()
+            .filter(|root| root.is_dir())
+            .ok_or("ASTRA_EMU_GAME_DIRECTORY_INVALID")?;
+        if astra_emu_patch::is_staging_path(&root) {
+            return Err(
+                "ASTRA_EMU_PATCH_INVALID_REQUEST: private staging cannot be imported".into(),
+            );
+        }
+        self.library
+            .add_library_root(root.to_str().ok_or("ASTRA_EMU_GAME_PATH_UTF8")?)
+            .map_err(|error| error.to_string())?;
+        if self.cores_started() {
+            self.begin_scan(probe_worker::ScanKind::Import, vec![root])?;
+            self.model()
+        } else {
+            let model = self.prepare_library()?;
+            self.prepare_scan_pending = Some(background::PendingScan::Import(root));
+            Ok(model)
+        }
+    }
+
+    pub(super) fn remove_from_library(&mut self, game_id: &str) -> Result<ManagerViewModel, String> {
+        if self
+            .active
+            .as_ref()
+            .is_some_and(|active| active.game_id == game_id)
+        {
+            return Err("ASTRA_EMU_FAMILY_SESSION_ALREADY_ACTIVE".into());
+        }
+        let game = self.game(game_id)?;
+        self.library
+            .exclude_game(game_id)
+            .map_err(|error| error.to_string())?;
+        if self.selected_case_id.as_deref() == Some(game_id) {
+            self.selected_case_id = None;
+        }
+        self.last_excluded = Some(game_id.to_owned());
+        self.show_snackbar(
+            format!("已从资料库移除《{}》", game.display_title()),
+            Some(snackbar::SnackbarAction::Undo),
+        );
         self.model()
+    }
+
+    pub(super) fn undo_remove(&mut self) -> Result<ManagerViewModel, String> {
+        let game_id = self
+            .last_excluded
+            .clone()
+            .ok_or("ASTRA_EMU_UNDO_UNAVAILABLE")?;
+        self.restore_game(&game_id)
+    }
+
+    pub(super) fn restore_game(&mut self, game_id: &str) -> Result<ManagerViewModel, String> {
+        if !self
+            .library
+            .restore_game(game_id)
+            .map_err(|error| error.to_string())?
+        {
+            return Err("ASTRA_EMU_GAME_NOT_FOUND".into());
+        }
+        if self.last_excluded.as_deref() == Some(game_id) {
+            self.last_excluded = None;
+        }
+        self.model()
+    }
+
+    pub(super) fn first_visible_game(&self) -> Result<Option<String>, String> {
+        let excluded: BTreeSet<String> = self
+            .library
+            .excluded_games()
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .map(|game| game.game_id)
+            .collect();
+        Ok(self
+            .library
+            .list_games()
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .map(|game| game.game_id)
+            .find(|id| !excluded.contains(id)))
     }
 
     pub(super) fn open(mailbox: FrameMailbox) -> Result<Self, String> {
@@ -39,7 +129,6 @@ impl AstraEmuManagerController {
         let metadata = MetadataRuntime::start()?;
         let appearance = library.appearance_settings().map_err(|e| e.to_string())?;
         let games = library.list_games().map_err(|error| error.to_string())?;
-        let selected_case_id = games.first().map(|game| game.game_id.clone());
         let mut pinned_releases = BTreeMap::new();
         for game in &games {
             if let Some(release) = library
@@ -61,13 +150,13 @@ impl AstraEmuManagerController {
             .app_state::<bool>(SENSITIVE_COVERS_KEY)
             .map_err(|error| error.to_string())?
             .unwrap_or(false);
-        let controller = Self {
+        let mut controller = Self {
             library,
             registry,
             candidates: BTreeMap::new(),
             startup_state: background::StartupState::Waiting,
             probe_choices: BTreeMap::new(),
-            selected_case_id,
+            selected_case_id: None,
             search_query: String::new(),
             diagnostic: String::new(),
             diagnostic_severity: "info",
@@ -91,8 +180,8 @@ impl AstraEmuManagerController {
             filter_settings,
             input_mapping,
             appearance,
-            family_options: BTreeMap::new(),
-            filter_options: BTreeMap::new(),
+            session_mapping: None,
+            defaults_plugin: None,
             metadata,
             metadata_sequence: 0,
             metadata_status: BTreeMap::new(),
@@ -124,7 +213,14 @@ impl AstraEmuManagerController {
             patch_import: None,
             patch_state: Default::default(),
             patch_sequence: 0,
+            snackbar: snackbar::Snackbar::default(),
+            prepare_scan_pending: None,
+            prepare_progress: None,
+            scan_cancel: None,
+            last_excluded: None,
+            key_capture: None,
         };
+        controller.selected_case_id = controller.first_visible_game()?;
         Ok(controller)
     }
 
@@ -213,9 +309,6 @@ impl AstraEmuManagerController {
     pub(super) fn clear_probe_state(&mut self, game_id: &str) -> Result<(), String> {
         self.candidates.remove(game_id);
         self.probe_choices.remove(game_id);
-        if self.selected_case_id.as_deref() == Some(game_id) {
-            self.family_options.remove("manager.emulator_id");
-        }
         Ok(())
     }
 }

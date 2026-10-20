@@ -28,12 +28,17 @@ impl Harness {
         let root = tempfile::tempdir().unwrap();
         let mut owner = FamilyOwner::new(root.path().to_owned(), mailbox.clone());
         owner.start().unwrap();
-        match background(&mut owner) {
-            BackgroundEvent::Ready(result) => {
-                result.unwrap();
+        loop {
+            match background(&mut owner) {
+                BackgroundEvent::Ready(result) => {
+                    result.unwrap();
+                    break;
+                }
+                BackgroundEvent::Progress(PrepareProgress::Cores { .. }) => {}
+                BackgroundEvent::Progress(PrepareProgress::Scan { .. })
+                | BackgroundEvent::Scanned(_, _) => panic!("core loading must not scan games"),
+                BackgroundEvent::Exited(error) => panic!("owner exited during startup: {error}"),
             }
-            BackgroundEvent::Scanned(_, _) => panic!("core loading must not scan games"),
-            BackgroundEvent::Exited(error) => panic!("owner exited during startup: {error}"),
         }
         let calls = Arc::new(Mutex::new(Vec::new()));
         let sink = calls.clone();
@@ -65,6 +70,8 @@ impl Harness {
                 kind: super::super::probe_worker::ScanKind::Import,
                 paths: vec![PathBuf::from(".")],
                 games: Vec::new(),
+                excluded: BTreeSet::new(),
+                cancel: Arc::new(AtomicBool::new(false)),
             })
             .unwrap();
         let candidate = loop {
@@ -104,6 +111,7 @@ impl Harness {
             },
             candidate: self.candidate.clone(),
             configuration: Vec::new(),
+            render_extent: None,
             window: WindowState {
                 width: 1,
                 height: 1,

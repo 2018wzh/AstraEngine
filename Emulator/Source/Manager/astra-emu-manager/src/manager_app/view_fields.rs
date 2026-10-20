@@ -1,4 +1,5 @@
 use super::*;
+use astra_emu_manager_ui_slint::{ChoiceViewModel, EmulatorDefaultsViewModel};
 
 impl AstraEmuManagerController {
     pub(super) fn engine_label(&self, family_id: &str) -> String {
@@ -29,70 +30,56 @@ impl AstraEmuManagerController {
         }
     }
 
-    pub(super) fn family_fields(&self) -> Result<Vec<ConfigFieldViewModel>, String> {
-        let Some(game_id) = self.selected_case_id.as_deref() else {
-            return Ok(Vec::new());
-        };
-        let Some(choices) = self.probe_selection_for_game(game_id) else {
-            return Ok(Vec::new());
-        };
-        let installed = self
-            .candidates
-            .get(game_id)
-            .map(|candidate| candidate.report.plugin_id.as_str());
-        let draft = self
-            .family_options
-            .get("manager.emulator_id")
-            .map(String::as_str);
-        let mut fields = vec![ConfigFieldViewModel {
-            key: "manager.emulator_id".into(),
-            label: "模拟器".into(),
-            description: choices
+    pub(super) fn emulator_choices(&self, game_id: &str) -> Vec<ChoiceViewModel> {
+        match self.probe_selection_for_game(game_id) {
+            Some(choices) if choices.len() > 1 => choices
                 .iter()
-                .map(|choice| {
-                    format!(
-                        "{} / {} ({})",
-                        choice.descriptor.family_name,
-                        Self::emulator_label(&choice.descriptor),
-                        choice.report.plugin_id,
-                    )
+                .map(|choice| ChoiceViewModel {
+                    id: choice.report.plugin_id.clone(),
+                    label: Self::emulator_label(&choice.descriptor),
                 })
-                .collect::<Vec<_>>()
-                .join("\n")
-                + "\n更换模拟器后保存以加载其配置；选择按游戏保存。",
-            kind: "enum".into(),
-            value: draft.or(installed).unwrap_or_default().into(),
-            enum_values: choices
-                .iter()
-                .map(|choice| choice.report.plugin_id.clone())
                 .collect(),
-            required: true,
-            min: 0,
-            max: 0,
-        }];
-        if installed.is_some() && draft.is_none_or(|id| Some(id) == installed) {
-            self.append_typed_family_fields(&mut fields)?;
+            _ => Vec::new(),
         }
-        Ok(fields)
     }
 
     pub(super) fn input_view(&self) -> InputConfigViewModel {
+        let (capture_button, capture_game_id, capture_hint) = self.key_capture_view();
         InputConfigViewModel {
             gamepad_enabled: self.input_mapping.gamepad_enabled,
             deadzone: self.input_mapping.deadzone.as_str().into(),
-            bindings: GamepadInput::DISPLAY_ORDER
-                .iter()
-                .map(|button| GamepadBindingViewModel {
-                    id: button.as_str().into(),
-                    label: button.label().into(),
-                    key: self
-                        .input_mapping
-                        .gamepad
-                        .get(button)
-                        .cloned()
-                        .unwrap_or_default(),
-                })
-                .collect(),
+            bindings: binding_views(&self.input_mapping),
+            capture_button,
+            capture_game_id,
+            capture_hint,
         }
     }
+
+    pub(super) fn emulator_defaults_view(&self) -> Result<EmulatorDefaultsViewModel, String> {
+        let Some(plugin) = self
+            .defaults_plugin
+            .as_deref()
+            .filter(|plugin| self.registry.descriptor(plugin).is_some())
+        else {
+            return Ok(EmulatorDefaultsViewModel::default());
+        };
+        Ok(EmulatorDefaultsViewModel {
+            plugin: plugin.into(),
+            fields: self.emulator_default_fields(plugin)?,
+            render: self.emulator_render_view(plugin)?,
+        })
+    }
+}
+
+pub(super) fn binding_views(
+    mapping: &astra_emu_manager_core::InputMapping,
+) -> Vec<GamepadBindingViewModel> {
+    GamepadInput::DISPLAY_ORDER
+        .iter()
+        .map(|button| GamepadBindingViewModel {
+            id: button.as_str().into(),
+            label: button.label().into(),
+            key: mapping.gamepad.get(button).cloned().unwrap_or_default(),
+        })
+        .collect()
 }

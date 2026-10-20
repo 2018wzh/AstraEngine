@@ -382,6 +382,12 @@ impl LoadedFamilyPlugin {
             return checked("open", status, error).and_then(|_| unreachable!());
         }
         let session = NativeSession {
+            surface: crate::SurfaceRecord {
+                logical_width: output.surface.logical.width,
+                logical_height: output.surface.logical.height,
+                raster_width: output.surface.raster.width,
+                raster_height: output.surface.raster.height,
+            },
             inner: Some(Rc::clone(&self.inner)),
             handle: output.session,
             session_epoch: request.session_epoch,
@@ -455,8 +461,13 @@ pub struct NativeSession {
     pointer: (f64, f64),
     poisoned: bool,
     cancellation: crate::NativeCancellation,
+    surface: crate::SurfaceRecord,
 }
 impl NativeSession {
+    /// Logical and raster extents the core reported when it opened.
+    pub fn surface(&self) -> crate::SurfaceRecord {
+        self.surface
+    }
     fn call(
         &mut self,
         operation: &'static str,
@@ -584,10 +595,6 @@ impl NativeSession {
                 FamilyEvent::WindowSuspended { suspended } => {
                     self.window.suspended = *suspended;
                     raw.kind = abi::INPUT_WINDOW;
-                }
-                FamilyEvent::WindowCloseRequested => {
-                    self.cancel();
-                    continue;
                 }
             }
             raw.window = native_window(self.window);

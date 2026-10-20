@@ -62,6 +62,13 @@ impl AstraEmuManagerController {
                     return Err(error.to_string());
                 }
             }
+            if let Some(surface) = update.surface {
+                let game_id = active.game_id.clone();
+                if let Err(error) = self.record_last_surface(&game_id, surface) {
+                    self.diagnostic = error;
+                    self.diagnostic_severity = "warning";
+                }
+            }
         }
         if update.closed {
             let active = self.active.take().expect("active view checked above");

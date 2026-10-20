@@ -135,7 +135,6 @@ impl SlintManagerAdapter {
         library.set_sort(model.library.sort.as_str().into());
         library.set_compat_filter(model.library.compat_filter.as_str().into());
         library.set_cores_ready(model.library.cores_ready);
-        library.set_can_load_cores(model.library.can_load_cores);
         library.set_busy(model.library.busy);
         library.set_status(model.library.status.as_str().into());
         library.set_selected_id(model.library.selected_id.as_str().into());
@@ -292,12 +291,28 @@ impl SlintManagerAdapter {
             *self.cached_bangumi.borrow_mut() = Some(bangumi_key);
         }
         selection.set_bangumi_summary(game.bangumi.summary.as_str().into());
-        selection.set_musica_key_available(game.musica_key_available);
-        crate::config_model::update(
-            &self.family_fields,
-            &self.cached_family_fields,
-            &game.family_fields,
-        );
+        let mut fields = Vec::with_capacity(game.family_fields.len() + 1);
+        if !game.emulator_choices.is_empty() {
+            let ids: Vec<String> = game.emulator_choices.iter().map(|c| c.id.clone()).collect();
+            fields.push(ConfigFieldViewModel {
+                key: "manager.emulator_id".into(),
+                label: "模拟器".into(),
+                description: game
+                    .emulator_choices
+                    .iter()
+                    .map(|choice| format!("{}：{}", choice.id, choice.label))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+                kind: "enum".into(),
+                value: game.emulator_id.clone(),
+                display_value: game.emulator_id.clone(),
+                options: ids.clone(),
+                option_values: ids,
+                ..ConfigFieldViewModel::default()
+            });
+        }
+        fields.extend(game.family_fields.iter().cloned());
+        crate::config_model::update(&self.family_fields, &self.cached_family_fields, &fields);
     }
 
     fn apply_cores(&self, model: &ManagerViewModel) {

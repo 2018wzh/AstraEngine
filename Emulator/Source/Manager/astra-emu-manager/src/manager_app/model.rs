@@ -1,8 +1,9 @@
 use super::*;
 use astra_emu_manager_ui_slint::{
     describe_error, AboutViewModel, BangumiViewModel, CompatViewModel, EngineActionViewModel,
-    GameCardViewModel, LibraryViewModel, MatchViewModel, NoticeViewModel, PlaySessionViewModel,
-    ReleaseViewModel, SelectionViewModel, SessionViewModel, SettingsViewModel,
+    ExcludedViewModel, GameCardViewModel, LibraryViewModel, MatchViewModel, NoticeViewModel,
+    PlaySessionViewModel, ReleaseViewModel, SelectionViewModel, SessionViewModel,
+    SettingsViewModel,
 };
 impl AstraEmuManagerController {
     pub(super) fn model(&self) -> Result<ManagerViewModel, String> {
@@ -114,7 +115,7 @@ impl AstraEmuManagerController {
                         .as_deref()
                         .map(|id| self.engine_label(id))
                         .unwrap_or_else(|| "未识别引擎".to_owned());
-                    let problem = self.game_problem(&game, startup_busy);
+                    let problem = self.game_problem(&game);
                     let title = game.user_title.take().unwrap_or(game.title);
                     GameCardViewModel {
                         id: game.game_id,
@@ -206,10 +207,32 @@ impl AstraEmuManagerController {
             }
             None => "尚未同步".into(),
         };
-        let family_fields = self.family_fields()?;
+        let (emulator_choices, emulator_id, family_fields, render, game_mapping) =
+            match selected_id.as_deref() {
+                Some(game_id) => {
+                    let override_mapping = self
+                        .library
+                        .game_settings(game_id)
+                        .map_err(|error| error.to_string())?
+                        .and_then(|settings| settings.input_mapping);
+                    (
+                        self.emulator_choices(game_id),
+                        self.candidates
+                            .get(game_id)
+                            .map(|candidate| candidate.report.plugin_id.clone())
+                            .unwrap_or_default(),
+                        self.game_config_fields(game_id)?,
+                        self.game_render_view(game_id)?,
+                        override_mapping,
+                    )
+                }
+                None => Default::default(),
+            };
+        let mut cores = self.cores_view()?;
+        cores.defaults = self.emulator_defaults_view()?;
         let selected_problem = selected
             .as_ref()
-            .map(|game| self.game_problem(game, startup_busy))
+            .map(|game| self.game_problem(game))
             .unwrap_or_default();
         let mut notices = Vec::new();
         for (file, raw) in &self.plugin_errors {
@@ -255,6 +278,9 @@ impl AstraEmuManagerController {
                 core: String::new(),
             });
         }
+        let (prepare_state, prepare_label, prepare_progress, can_cancel_prepare) =
+            self.prepare_view();
+        let startup_status = self.startup_status();
         Ok(ManagerViewModel {
             library: LibraryViewModel {
                 games: cards,
@@ -262,14 +288,36 @@ impl AstraEmuManagerController {
                 sort: self.library_sort.clone(),
                 compat_filter: self.compatibility_filter.clone(),
                 cores_ready: self.cores_ready(),
-                can_load_cores: self.core_refresh_enabled(),
                 busy: startup_busy || self.patch_job.is_some(),
                 status: if self.patch_job.is_some() {
                     "正在应用文件补丁；可继续浏览或在详情中取消。".into()
                 } else {
-                    self.startup_status()
+                    startup_status.clone()
                 },
+                prepare_state: prepare_state.into(),
+                prepare_label: prepare_label.into(),
+                prepare_detail: startup_status,
+                prepare_progress,
+                can_cancel_prepare,
                 selected_id: selected_id.clone().unwrap_or_default(),
+                roots: self
+                    .library
+                    .library_roots()
+                    .map_err(|error| error.to_string())?
+                    .into_iter()
+                    .map(|root| root.path)
+                    .collect(),
+                excluded: self
+                    .library
+                    .excluded_games()
+                    .map_err(|error| error.to_string())?
+                    .into_iter()
+                    .map(|game| ExcludedViewModel {
+                        id: game.game_id,
+                        title: game.title,
+                        location: game.location,
+                    })
+                    .collect(),
             },
             selection: SelectionViewModel {
                 id: selected_id.clone().unwrap_or_default(),
@@ -370,10 +418,17 @@ impl AstraEmuManagerController {
                     note: self.bangumi_note.clone(),
                     summary: "同步需手动点击，不会自动上传。".into(),
                 },
+                emulator_choices,
+                emulator_id,
                 family_fields,
-                musica_key_available: self.musica_key_file_available(),
+                render,
+                input_override: game_mapping.is_some(),
+                game_bindings: game_mapping
+                    .as_ref()
+                    .map(view_fields::binding_views)
+                    .unwrap_or_default(),
             },
-            cores: self.cores_view()?,
+            cores,
             settings: SettingsViewModel {
                 translation: translation::profile_form(profile.as_ref()),
                 translation_enabled: self.translation_enabled,
@@ -389,6 +444,7 @@ impl AstraEmuManagerController {
             },
             appearance: self.appearance_view(),
             notices,
+            snackbar: self.snackbar.view(),
             about: AboutViewModel {
                 version: env!("CARGO_PKG_VERSION").into(),
                 build: option_env!("ASTRA_EMU_MANAGER_RUSTC_FINGERPRINT")
@@ -404,23 +460,26 @@ impl AstraEmuManagerController {
         })
     }
 
-    fn game_problem(&self, game: &GameRecord, startup_busy: bool) -> String {
+    fn game_problem(&self, game: &GameRecord) -> String {
         if astra_emu_patch::is_staging_path(Path::new(&game.location)) {
             return "这是尚未发布的临时目录，不能启动".into();
         }
         if self.patch_busy() {
             return "文件补丁转换或导入尚未结束，暂不能启动游戏".into();
         }
-        let launchable = self.launch_candidate_for_game(game).is_some();
-        let selection_required = self.probe_choices.contains_key(&game.game_id) && !launchable;
-        if launchable {
-            String::new()
-        } else if startup_busy {
-            "正在加载核心或校验游戏".into()
-        } else if selection_required {
-            "需要选择模拟器".into()
-        } else {
-            "尚未识别，请重新扫描".into()
+        if self.launch_candidate_for_game(game).is_some() {
+            return String::new();
+        }
+        match self.startup_state {
+            background::StartupState::Waiting => "需要先准备资料库".into(),
+            background::StartupState::Loading | background::StartupState::Scanning(_) => {
+                "正在准备资料库".into()
+            }
+            background::StartupState::Failed(_) => "准备失败，请查看核心诊断".into(),
+            background::StartupState::Ready if self.probe_choices.contains_key(&game.game_id) => {
+                "需要选择模拟器".into()
+            }
+            background::StartupState::Ready => "未识别到可用的模拟器".into(),
         }
     }
 
