@@ -12,7 +12,9 @@ or second application event loop. Audio uses the original OpenAL playback device
 - Full retained repository: `fenghengzhi/kirikiroid2-web`, base
   `7105b50822097d11b7b1f5894bf541509fd51350`.
 - Owned fork: `https://github.com/2018wzh/kirikiroid2-web`, pinned at
-  `5b2eccd0a51b6b47bb845f48acfd12bd2167c477`.
+  `2532a699b260488db32b32739f9648858c00a9a4` (FFmpeg 3.3.9 dynamic linking:
+  libbpg uses the public HEVC decoder lookup and the Windows FFmpeg port is no
+  longer static-only), on top of `5b2eccd0a51b6b47bb845f48acfd12bd2167c477`.
   The publication branch is `astra`; temporary integration branches are retired.
   The retained Windows patch is separate commit
   `cae1bd8b98a817505f5a973ac00e6b925fbe35e3`; lifecycle fixes follow it.

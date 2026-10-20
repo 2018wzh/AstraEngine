@@ -4,7 +4,7 @@
 
 ## 当前结论
 
-- 已实现 C ABI v2、显式 module owner、typed 配置、CPU lease 与取消/重试边界，Manager 使用原生运行路径。RFVP 的 D3D12 交付已整合并通过独立硬件验证；本轮按最新决定收口到七核心的可玩代表流程。
+- 已实现 C ABI v3（类型化渲染尺寸 `render_extent`、核心中文显示名与配置展示元数据）、显式 module owner、typed 配置、CPU lease 与取消/重试边界，Manager 使用原生运行路径。RFVP 的 D3D12 交付已在 ABI v3 中删除，帧只经 CPU lease 交付；本轮按最新决定收口到七核心的可玩代表流程。
 - 本次 Windows 交付覆盖 RFVP/FVP、Siglus、Artemis、Musica、Sena、Ethornell 和 KrKr。Musica/CMVS 属于自有引擎，可直接嵌入适配能力并与 SDK 深度集成；其余外部核心保持薄适配、最大化复用原生实现。CMVS 仍由独立任务开发，本批不触碰其工作树。
 - RFVP 先完成 CPU 完整路径，再独立实现并验收首个 GPU 交付后端；只有 Musica 实现并验证文字 Hook。资源替换 Hook 暂不做，其他核心不新增文字 Hook。
 - Slint Manager 重做精炼 Material 3 界面，同窗口切换管理与游戏；迁移全部既有滤镜，提供内置 Luau 翻译扩展和本地扩展管理。
@@ -21,13 +21,13 @@
 | Engine/Runtime | 独立 EngineSession、typed 任务/保存、有界诊断与 worker/access plan 复用 | 完整产品的作用域、媒体、恢复、性能与平台组合验收 |
 | AstraVN/Player | VnSession、Yakui、公共 Canvas、媒体流、typed 输入/存读档与 Luau 显式 IO | 实际授权 IO、设备音频、跨平台输入/媒体/挂起恢复及长流程 |
 | Editor/Agent | GPUI、版本化事务、增量撤销、后台诊断、真实 Player 预览与 ACP/MCP | `--mcp` 持有 stdin 的关闭挂起；图/时间线/Agent 工作流、片段 seek 与三桌面验收 |
-| Manager | 同窗口原生会话、CPU/D3D12、Luau 与既有滤镜；公共渲染配置与按游戏模拟器选择；缓存资料库首窗、异步核心/扫描、持久识别提示、按需封面与批量快照、惰性扩展及滤镜资源；Host 统一光标与有界错误 | 启动、惰性资源、新分组、渲染配置与窗口行为仍待用户在 Release 中人工验证，不以逻辑检查代替实窗 |
-| FVP | 历史开发已覆盖连续正文、三次选择、菜单存读档、OP、最小化恢复与重开；自动驱动已移除，Release DLL 已构建 | Release 人工验收待用户执行；Debug 低帧率未完成归因，停止自动采样。字体分发授权未核验 |
+| Manager | 同窗口原生会话、CPU lease、Luau 与既有滤镜；公共渲染配置与按游戏模拟器选择；缓存资料库首窗、异步核心/扫描、持久识别提示、按需封面与批量快照、惰性扩展及滤镜资源；Host 统一光标与有界错误 | 启动、惰性资源、新分组、渲染配置与窗口行为仍待用户在 Release 中人工验证，不以逻辑检查代替实窗 |
+| FVP | 历史开发已覆盖连续正文、三次选择、菜单存读档、OP、最小化恢复与重开；自动驱动已移除，Release DLL 已构建 | Release 人工验收待用户执行；Debug 低帧率未完成归因，停止自动采样 |
 | Siglus | 正常提交文本、翻页/标点/数字小键盘沿用原生输入路径，保留错误 cause chain；9 项纯回归通过、Release DLL 已构建；既有长流程见审计 | 旧日志只保留 `ASTRA_EMU_SIGLUS_ARGUMENT`，不能确定当次触发输入；本轮人工 Release 复测、听音及其他平台未完成 |
 | Artemis | 原 Vulkan/FFmpeg 与既有生命周期修复保留；Host 独占光标显隐并在 Slint 分发后同步；18 项核心纯回归通过、Release DLL 已构建 | 光标修复的人工 Release 验收待用户执行；不再自动重开复现旧通用失败 |
 | Musica/SDK | 默认从原生 Title 菜单启动；运行时只读完整 `key.toml`，旧格式转换仅在开发 CLI；既有 key/PAZ 与 CLI 纯回归保留，新的核心 Release 已构建且实际 descriptor 默认值已核对 | 默认 Title 与渲染配置的人工复测待用户执行；OP 后复合图像参数、选择项 Hook 实玩与逻辑尺寸收敛的既有缺口保留，不猜测脚本语义 |
 | SoftPAL / Sena | 引擎标识为 `softpal`，模拟器标识保持 `sena-native-koikake`；既有 Koikake 范围不变；5 项纯回归通过、Release DLL 已构建 | 既有目的地 `0xCDFF8 → 0xCD6E4` 循环及 EV417/MIX 问题保留，不外推完整 SoftPAL 兼容 |
-| Ethornell/BGI | 用户明确确认人工验收完毕；原生等价 cursor 策略修复保留，Release DLL 已构建；源码已按本次授权发布到 fork 的 astra | 不再重复自动验收；许可覆盖仍待澄清，二进制只作本地交付 |
+| Ethornell/BGI | 用户明确确认人工验收完毕；原生等价 cursor 策略修复保留，Release DLL 已构建；源码发布于 fork 的 astra 并以 submodule 固定 | 不再重复自动验收；workspace 声明 MPL-2.0，Release 附 MPL-2.0 全文 |
 | KrKr | 原生 C ABI、完整画布 Alpha、首错保留与 WindowEx overlay owner 初始化修复保留 | 自动验收驱动及钩子已移除；清理后 Release 产物供用户人工验收，不把历史开发结果冒充本次人工通过 |
 | CMVS | 独立开发中的原格式/VM/归档与 SDK 接入 | 本批不修改、整合或验收，保留来源成果 |
 | 终之空转换 | Story IR、37 路线输入生成、Classic/Modern 私有包与部分硬件运行 | Classic/Modern 全部 37 路线及系统/演出/视听验收 |
@@ -175,7 +175,7 @@ BGI 既有用户人工验收结论保持不变，不重复操作用户窗口；�
 
 18 个安装均已确认。14 个样本有 90 个已知原文件哈希基线，当前 90 匹配、0 不匹配、0 缺失；另 4 个样本没有该基线。全部 18 个样本都缺任务开始前的完整目录及逐文件存档基线，因此不能据此声称全部输入/存档未变或最初零写入。原路径曾生成 IDA sidecar，后来移至私有位置；事故后的 EXE 分析改用副本，这不构成事故前的零写入证明。此前子代理 keymap、父线程私有帮助文本检索，以及本轮文档检索中的私有安装路径曾进入工具输出；相关私有路径/正文未写入 Git 或运行包，本文只记录事故类型。
 
-本轮外部核心的已完成原生改动已发布到各自 fork 的 `astra`，主仓固定精确源码；Ethornell 仍依既有许可边界保留外部源码，不因此新增 submodule。源码发布、私有本机二进制与公开二进制分发是不同交付：RFVP 内嵌字体、Ethornell 许可仍待核验，静态 FriBidi 的 LGPL 对应源码及重链接义务也未完成核验，当前不能公开发布二进制 Release。转换输出、商业资源/译文、字体、密钥及旧存档不进入 Git 或公开包。操作方式见[客户端本地化说明](../manual/astraemu-client.md#本地化与原生选项)。
+本轮外部核心的已完成原生改动已发布到各自 fork 的 `astra`，主仓以 submodule 固定精确源码（含 Ethornell），嵌入 manifest 统一固定 C ABI v3 提交 `6799938dc33b25bcca4d9a11ddbea1366bf7d93c`。RFVP 内嵌字体按上游原样发布；Ethornell 随 Release 附 MPL-2.0 全文；FriBidi 与两组 FFmpeg 动态链接并随各自核心目录分发，Release 附 LGPL-2.1 文本与对应源码包。转换输出、商业资源/译文、字体、密钥及旧存档不进入 Git 或公开包。操作方式见[客户端本地化说明](../manual/astraemu-client.md#本地化与原生选项)。
 
 
 操作入口：[开发手册](../manual/development.md)、[AstraEMU 客户端](../manual/astraemu-client.md)、[Editor](../../Editor/README.md)、[NativeVN 样例](../../Examples/NativeVN/README.md)、[终之空资料](../samples/tsuinosora-modernization/README.md)。

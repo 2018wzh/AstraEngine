@@ -5,10 +5,10 @@
 - 上游 `xmoezzz/siglus_rs`：`5f358ef1360b0439e92aed2b749e8f25d8721954`（1.0.0）。
 - 通用原生基线：`13b55b47484faf8dfe03deb6ffd56ca0ec4ba3f2`，保留于 `astra` 的历史；在原生生命周期和空栈后回标题修复之上移除商业硬件验收驱动。
 - 历史嵌入适配：`a94565cccd4f6d5e0a341e5732c5d98e9de2c71f`，直接父提交为上述通用基线，包含输入边界修复。旧发布引用已保存为本地 Git bundle。
-- 历史 Release 构建与 9 项纯逻辑回归的源码为 `a67786e80e663e982605e69164ac6bc7d0b148ee`，当时整理后的 tree 为 `4c20acad370f7eaddb0eed52e2947734b5b4e6ec`。上一公开 `astra` 为 [`23d082a76dfcb071224056858c49abd53f63cbc3`](https://github.com/2018wzh/siglus_rs/commit/23d082a76dfcb071224056858c49abd53f63cbc3)，包含原生语言资源选择和独立保存根；当前 `astra` 与主仓 gitlink 为其子提交 `aed3cbc5a9e5029b2ecbe33c2b114537f94ef5b3`（ABI 3 移植，尚未推送）。旧 tree 不代表当前构建源码。
+- 历史 Release 构建与 9 项纯逻辑回归的源码为 `a67786e80e663e982605e69164ac6bc7d0b148ee`，当时整理后的 tree 为 `4c20acad370f7eaddb0eed52e2947734b5b4e6ec`。上一公开 `astra` 为 [`23d082a76dfcb071224056858c49abd53f63cbc3`](https://github.com/2018wzh/siglus_rs/commit/23d082a76dfcb071224056858c49abd53f63cbc3)，包含原生语言资源选择和独立保存根；当前 `astra` 与主仓 gitlink 为 [`c0f7e7bbdf51a098288fd2c634d5ba8912786d6f`](https://github.com/2018wzh/siglus_rs/commit/c0f7e7bbdf51a098288fd2c634d5ba8912786d6f)，包含 ABI 3 移植 `aed3cbc5a9e5029b2ecbe33c2b114537f94ef5b3` 及其后的 ABI pin 提交。旧 tree 不代表当前构建源码。
 - Kira 保留完整嵌套 submodule `vendor/kira`：0.9.6 上游 `dfb08d08d065930e9b257203bf11c6d34742f542`，`2018wzh/kira` 修复 `a299b42690094a71885f6ed97dc504c4038da9a7`。
 - Kira 固定 CPAL 0.15.3 的 WASAPI 关闭修复 `65ac8a6ac1a635cc26bfc5af331295b052044908`（`2018wzh/cpal`）；Windows 宿主验证通过 workspace patch 使用兼容 ALSA 依赖的同版本 `ecfda841a9140d60bbec1630d47ca91f1a77b8f3`，不升级原 Kira 或替换设备后端。
-- 嵌入 manifest `astra/embedded/Cargo.toml` 的 `astra-emu-abi` git rev 仍为 ABI 2 的 `2018wzh/AstraEngine@15a39a626b1316cb6137a75e17e14a2ff2d1ba88`，待 ABI 3 提交推送后统一更新；Emulator 工作区经 `[patch]` 使用本地 ABI 3。许可证及完整来源保留，见 `THIRD_PARTY_NOTICES.md`。
+- 嵌入 manifest `astra/embedded/Cargo.toml` 的 `astra-emu-abi` 固定 C ABI v3 的 `2018wzh/AstraEngine@6799938dc33b25bcca4d9a11ddbea1366bf7d93c`；Emulator 工作区经 `[patch]` 使用同一份本地源码。许可证及完整来源保留，见 `THIRD_PARTY_NOTICES.md`。
 
 ## 通用原生修复
 
@@ -44,7 +44,7 @@
 
 ## Release 构建与人工验收
 
-当前原生核心从上述 `aed3cbc5a9e5029b2ecbe33c2b114537f94ef5b3` 构建；Family 交付入口为 `cargo build --manifest-path Emulator/Cargo.toml -p astra-emu-siglus --release --features dynamic`，生成 `astra_emu_siglus.dll`。历史 MSVC x64 构建使用 `VCPKG_ROOT=D:/vcpkg-ffmpeg7` 和 `LIBCLANG_PATH=D:/LLVM/bin`，当时 PE 导入表没有 FFmpeg 或其他 app-local 媒体 DLL；原 MPEG/WMV 解码 crate 静态链接进 Family DLL。运行保留原 GPU 与 Kira/CPAL 音频，需 Windows 系统库、GPU 驱动及 VC Runtime；旧导入检查不替代当前产物核验。
+当前原生核心从上述 `c0f7e7bbdf51a098288fd2c634d5ba8912786d6f` 构建；Family 交付入口为 `cargo build --manifest-path Emulator/Cargo.toml -p astra-emu-siglus --release --features dynamic`，生成 `astra_emu_siglus.dll`。历史 MSVC x64 构建使用 `VCPKG_ROOT=D:/vcpkg-ffmpeg7` 和 `LIBCLANG_PATH=D:/LLVM/bin`，当时 PE 导入表没有 FFmpeg 或其他 app-local 媒体 DLL；原 MPEG/WMV 解码 crate 静态链接进 Family DLL。运行保留原 GPU 与 Kira/CPAL 音频，需 Windows 系统库、GPU 驱动及 VC Runtime；旧导入检查不替代当前产物核验。
 
 历史适配清理已移除 native ABI 验收入口、受控 stdin 路线、自动输入/截图 helper、adapter GPU 硬件用例及 Host 游戏硬件回归；对应的 `libloading`、`tempfile` dev-dependencies 一并删除。上游既有普通逻辑测试、原生生产修复及诊断接口保留。
 

@@ -5,8 +5,8 @@
 - 上游基线为 `af557db750c7833274f22a6d82b0dc33cdea2f85`；本批从主仓原 pin `dcd39c23ca59b38a9a96b6f301aeb05121aa3e18` 继续，保留完整来源历史。
 - 原生生命周期修复为 `7e2016a0e0ef1c0b102185914cc7a8459bb2c9e1`；原生音频 worker 所有权接入为 `3359d8fbea3c53d6d262a9f71b6d4d79888c2368`，与适配分开。
 - 原始适配为 `02b66d779f7c4ff6da5f4bc82d935a1088a834e0`；CPU 路径的 ABI 2 硬件验证增量为 [`40fe7c7b11a5c830303c33a975b1f4f7af333837`](https://github.com/2018wzh/rfvp/commit/40fe7c7b11a5c830303c33a975b1f4f7af333837)。曾有的 Windows D3D12 交付增量（自 `3700dc093424d5948c39cd237d34a79ee0d33913` 起）已在 C ABI v3 中整体删除。
-- 使用 C ABI v3（`astra-emu-abi` 位于 AstraEngine `emu/abi-v3` 分支；fork manifest 的 git rev 待该提交推送后更新）。描述符声明 `display_name=RFVP`、`family_name=FVP`、`CAP_CPU_SURFACE | CAP_RENDER_EXTENT`。`SessionState.flags=0`；RFVP 无 module-owner 扩展，OpenRequest 的该字段须为 null。包元数据沿用现有 `hosted_fork_*` 字段记录来源，不代表保留 Hosted 运行链。
-- 历史单适配提交为 `478448ed9d60778f78d5de911fa5717c48cb201c`，直接父提交为通用基线 `3359d8fbea3c53d6d262a9f71b6d4d79888c2368`；它与当时 Release 源码 `ac13a9ee80b495b02734808b92a7223aba06cc1c` 的 tree 相同。上一公开 `astra` 为 [`ea8b5964fd5b6cde8186eff6a5da1607a3eb6a41`](https://github.com/2018wzh/rfvp/commit/ea8b5964fd5b6cde8186eff6a5da1607a3eb6a41)，包含原生原偏移翻译表及 ASS 消费路径；当前主仓 gitlink 为本地 `astra` 分支的 C ABI v3 提交 `00536b823986a8d9c267b9b1d3e0528b370cc13f`（待推送）；旧 tree 等价记录不代表当前构建源码。生产读档 epoch/错误传播修复保留，旧自动验收驱动已移除。
+- 使用 C ABI v3：fork manifest 的 `astra-emu-abi` 固定 `2018wzh/AstraEngine@6799938dc33b25bcca4d9a11ddbea1366bf7d93c`。描述符声明 `display_name=RFVP`、`family_name=FVP`、`CAP_CPU_SURFACE | CAP_RENDER_EXTENT`。`SessionState.flags=0`；RFVP 无 module-owner 扩展，OpenRequest 的该字段须为 null。包元数据沿用现有 `hosted_fork_*` 字段记录来源，不代表保留 Hosted 运行链。
+- 历史单适配提交为 `478448ed9d60778f78d5de911fa5717c48cb201c`，直接父提交为通用基线 `3359d8fbea3c53d6d262a9f71b6d4d79888c2368`；它与当时 Release 源码 `ac13a9ee80b495b02734808b92a7223aba06cc1c` 的 tree 相同。上一公开 `astra` 为 [`ea8b5964fd5b6cde8186eff6a5da1607a3eb6a41`](https://github.com/2018wzh/rfvp/commit/ea8b5964fd5b6cde8186eff6a5da1607a3eb6a41)，包含原生原偏移翻译表及 ASS 消费路径；当前 `astra` 与主仓 gitlink 为 [`1e947a5ccbd2c7a698bd30d48347454ef1b908a9`](https://github.com/2018wzh/rfvp/commit/1e947a5ccbd2c7a698bd30d48347454ef1b908a9)，包含 C ABI v3 移植 `00536b823986a8d9c267b9b1d3e0528b370cc13f` 及其后的 ABI pin 提交；旧 tree 等价记录不代表当前构建源码。生产读档 epoch/错误传播修复保留，旧自动验收驱动已移除。
 - Kira 运行层保持 0.10.8，固定 [`d2f10db15d9c451c7b2fd33043ae7732e75bee5d`](https://github.com/2018wzh/kira/commit/d2f10db15d9c451c7b2fd33043ae7732e75bee5d)；设备回归记录增量为 `bb64ffe37f1fa46e7e55c011e102ab28e344fbd3`，不改 mixer 运行实现。独立 workspace 的 CPAL 0.15.3 仍固定 `65ac8a6ac1a635cc26bfc5af331295b052044908`；主仓统一 patch 的 ALSA 0.11 兼容版本 `ecfda841a9140d60bbec1630d47ca91f1a77b8f3` 由主线程验证。
 - 原生 `rfvp` 的 `astra-subtitle` 依赖与独立 `Cargo.lock` 均固定 `2018wzh/AstraEngine@c27ac6e107328170deecac428bba7472d3ce2d6c`；这是共享 ASS 实现来源，不替换上述独立嵌入 manifest 的 ABI pin 或 Kira pin。
 
@@ -46,8 +46,8 @@ Kira 的 DecoderOwner 独立于播放 handle；handle Drop 语义不变，Sound 
 cargo build --manifest-path Emulator/ThirdParty/rfvp/Cargo.toml -p rfvp-astra-embedded --locked --release --features native-dylib-export --lib --target-dir .work/target-rfvp-release -j 4
 ```
 
-历史构建记录：旧源码曾输出 `release [optimized]` 的 `.work/target-rfvp-release/release/rfvp_astra_embedded.dll`，并复制为 `.work/release-fvp/astra_emu_fvp.dll`，导出 `astra_emu_query`；当时仅做构建和静态导入/导出检查。当前原生核心从 `00536b823986a8d9c267b9b1d3e0528b370cc13f` 构建，旧路径与旧 tree 记录不作为当前发布包或人工验收凭据。
+历史构建记录：旧源码曾输出 `release [optimized]` 的 `.work/target-rfvp-release/release/rfvp_astra_embedded.dll`，并复制为 `.work/release-fvp/astra_emu_fvp.dll`，导出 `astra_emu_query`；当时仅做构建和静态导入/导出检查。当前原生核心从 `1e947a5ccbd2c7a698bd30d48347454ef1b908a9` 构建，旧路径与旧 tree 记录不作为当前发布包或人工验收凭据。
 
-运行需要兼容 C ABI v3 的 Release Manager、x64 Windows 系统组件、VC++ 运行库及可用 GPU/音频驱动。静态导入包括 `VCRUNTIME140.dll`、UCRT、`mfplat.dll`（Media Foundation）和 `d3dcompiler_47.dll`；原生媒体实现没有额外 FFmpeg DLL 依赖。Vulkan 需驱动提供 loader；帧只经 CPU lease 交付。
+运行需要兼容 C ABI v3 的 Release Manager、x64 Windows 系统组件、VC++ 运行库及可用 GPU/音频驱动。静态导入包括 `VCRUNTIME140.dll`、UCRT、`mfplat.dll`（Media Foundation）和 `d3dcompiler_47.dll`，以及随核心目录分发的 FriBidi `fribidi-0.dll`；原生媒体实现没有额外 FFmpeg DLL 依赖。Vulkan 需驱动提供 loader；帧只经 CPU lease 交付。
 
 资源目录仍须与旧存档隔离，原生保存写入游戏目录下的 `save/`。字体与媒体来源见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
