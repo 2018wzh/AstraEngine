@@ -23,6 +23,7 @@ env:
   LIBCLANG_PATH: C:\Program Files\LLVM\bin
   SUBTITLE_TRIPLET: x64-windows-static-md-dynbidi
   METADATA_REPOSITORY: 2018wzh/AstraEMU-metadata
+  PYTHONUTF8: '1'
 
 defaults:
   run:
