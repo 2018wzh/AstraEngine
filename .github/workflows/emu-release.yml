@@ -55,11 +55,19 @@ jobs:
       - name: Host tools
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
-          choco install winflexbison3 ninja -y --no-progress
+          choco install ninja -y --no-progress
           python -m pip install --disable-pip-version-check jsonschema
-          $bison = Get-ChildItem C:\ProgramData\chocolatey\lib\winflexbison3 -Recurse -Filter win_bison.exe | Select-Object -First 1
-          if (-not $bison) { throw 'win_bison.exe not found after installing winflexbison3' }
-          "BISON_EXECUTABLE=$($bison.FullName)" >> $env:GITHUB_ENV
+          $wfb = Join-Path $env:RUNNER_TEMP 'winflexbison'
+          $zip = Join-Path $env:RUNNER_TEMP 'win_flex_bison-2.5.25.zip'
+          Invoke-WebRequest -Uri 'https://github.com/lexxmark/winflexbison/releases/download/v2.5.25/win_flex_bison-2.5.25.zip' -OutFile $zip
+          $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
+          if ($hash -ne '8d324b62be33604b2c45ad1dd34ab93d722534448f55a16ca7292de32b6ac135') { throw "win_flex_bison-2.5.25.zip sha256 mismatch: $hash" }
+          Expand-Archive -Path $zip -DestinationPath $wfb
+          $bison = Join-Path $wfb 'win_bison.exe'
+          $version = (& $bison --version | Select-Object -First 1)
+          if ($version -notmatch '3\.8\.2') { throw "KrKr grammars require Bison 3.8.2, got: $version" }
+          "BISON_EXECUTABLE=$bison" >> $env:GITHUB_ENV
+          $wfb >> $env:GITHUB_PATH
 
       - name: Release version
         id: version
