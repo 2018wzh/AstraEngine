@@ -26,10 +26,10 @@ global Mock {
 
     out property <[CoreInfo]> cores: [
         { id: "astra.emu.musica", name: "Astra Musica", engine: "Musica", version: "0.2.0", state: "loaded", source: "bundled", capabilities: ["CPU 画面", "可调渲染分辨率", "文本钩子"], removable: false, update-version: "0.2.1" },
-        { id: "astra.emu.fvp", name: "RFVP", engine: "FVP", version: "0.2.0", state: "loaded", source: "user", capabilities: ["CPU 画面"], removable: true },
-        { id: "astra-emu-krkr", name: "KiriKiri2", engine: "KiriKiri", version: "0.1.9", state: "failed", source: "bundled", message: "无法加载核心文件：缺少 avcodec-57.dll", removable: false },
-        { id: "sena-native-koikake", name: "Sena", engine: "SoftPAL", version: "0.2.0", state: "pending-update", source: "user", message: "重启后更新到 0.2.1" },
-        { id: "astra-emu-ethornell", name: "ethornell-rs", engine: "Ethornell / BGI", version: "0.2.0", state: "available", source: "online" },
+        { id: "rfvp", name: "RFVP", engine: "FVP", version: "0.2.0", state: "loaded", source: "user", capabilities: ["CPU 画面"], removable: true },
+        { id: "kirikiroid2-web", name: "KiriKiri2", engine: "KiriKiri", version: "0.1.9", state: "failed", source: "bundled", message: "无法加载核心文件：缺少 avcodec-57.dll", removable: false },
+        { id: "sena-rs", name: "Sena", engine: "SoftPAL", version: "0.2.0", state: "pending-update", source: "user", message: "重启后更新到 0.2.1" },
+        { id: "ethornell-rs", name: "ethornell-rs", engine: "Ethornell / BGI", version: "0.2.0", state: "available", source: "online" },
     ];
 
     out property <[ConfigField]> game-fields: [
@@ -93,7 +93,7 @@ global Mock {
         GameSettings.game-id = "g10";
         GameSettings.title = "サクラノ詩 －櫻の森の上を舞う－";
         GameSettings.section = section;
-        GameSettings.emulator-choices = [{ id: "astra.emu.musica", label: "Astra Musica · 0.2.0" }, { id: "astra.emu.fvp", label: "RFVP · 0.2.0" }];
+        GameSettings.emulator-choices = [{ id: "astra.emu.musica", label: "Astra Musica · 0.2.0" }, { id: "rfvp", label: "RFVP · 0.2.0" }];
         GameSettings.emulator-id = "astra.emu.musica";
         GameSettings.render-supported = true;
         GameSettings.render-options = [{ id: "default", label: "跟随模拟器默认" }, { id: "adaptive", label: "适应窗口" }, { id: "preset-1080", label: "1080p · 1920×1080" }, { id: "custom", label: "自定义…" }];

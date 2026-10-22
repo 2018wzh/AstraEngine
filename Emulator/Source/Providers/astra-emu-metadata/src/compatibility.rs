@@ -197,7 +197,7 @@ mod tests {
             generated_at_unix_ms: 1_700_000_000_000,
             entries: vec![
                 entry("r123", "astra.emu.musica", CompatibilityStatus::Perfect),
-                entry("r123", "sena-native-koikake", CompatibilityStatus::Flawed),
+                entry("r123", "sena-rs", CompatibilityStatus::Flawed),
                 entry("r456", "astra.emu.musica", CompatibilityStatus::BootOnly),
             ],
         }
@@ -210,7 +210,7 @@ mod tests {
         let parsed = parse_compatibility_database(json.as_bytes()).unwrap();
         assert_eq!(parsed, database);
         assert_eq!(
-            parsed.entry("r123", "sena-native-koikake").unwrap().status,
+            parsed.entry("r123", "sena-rs").unwrap().status,
             CompatibilityStatus::Flawed
         );
     }
@@ -218,7 +218,7 @@ mod tests {
     #[test]
     fn optional_fields_may_be_omitted() {
         let json = br#"{"schema":"astra.emu.compatibility.v3","generated_at_unix_ms":1,
-            "entries":[{"vn_id":"v1","release_id":"r2","emulator":"astra.emu.fvp",
+            "entries":[{"vn_id":"v1","release_id":"r2","emulator":"rfvp",
             "status":"completable","platform":"linux","updated_at_unix_ms":3}]}"#;
         let database = parse_compatibility_database(json).unwrap();
         assert_eq!(database.entries[0].notes, None);

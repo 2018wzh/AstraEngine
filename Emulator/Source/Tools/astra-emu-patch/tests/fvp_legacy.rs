@@ -59,7 +59,7 @@ fn fixture(root: &std::path::Path, dat: &[u8]) -> PatchRequest {
         local patched=fvp.warning(ctx,source,{site=4,original_call=20,helper=24,wait_syscall=137,yield_syscall=133})
         local output=ctx.create("public.hcb") output:write(0,patched) output:close()
         fvp.write_table(ctx,"translation.bin",source:sha256(),ctx.hash.sha256(patched),records)
-        return {plugin_id="astra.emu.fvp",configuration={translation_table="translation.bin",script_encoding="shift_jis"}}
+        return {plugin_id="rfvp",configuration={translation_table="translation.bin",script_encoding="shift_jis"}}
     end}"#).unwrap();
     PatchRequest {
         script,

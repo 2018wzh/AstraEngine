@@ -3,7 +3,7 @@ use crate::metadata_cache::tests::{compatibility_json, files, index, sample_cata
 use astra_emu_manager_core::{ExternalIdentityRecord, FamilyProbeReport, INDEPENDENT_FAMILY_ABI_FINGERPRINT};
 
 const MUSICA: &str = "astra.emu.musica";
-const SENA: &str = "sena-native-koikake";
+const SENA: &str = "sena-rs";
 
 fn controller(root: &Path) -> AstraEmuManagerController {
     AstraEmuManagerController::open_library(root.into(), FrameMailbox::new(), Vec::new()).unwrap()
@@ -144,7 +144,7 @@ fn report_url_carries_release_emulator_and_versions() {
     assert_eq!(
         url,
         format!(
-            "https://github.com/2018wzh/AstraEMU-metadata/issues/new?template=compatibility.yml&vid=v17&rid=r1&emulator=sena-native-koikake&platform=windows&emulator_version=0.2.0&manager_version={}",
+            "https://github.com/2018wzh/AstraEMU-metadata/issues/new?template=compatibility.yml&vid=v17&rid=r1&emulator=sena-rs&platform=windows&emulator_version=0.2.0&manager_version={}",
             env!("CARGO_PKG_VERSION")
         )
     );

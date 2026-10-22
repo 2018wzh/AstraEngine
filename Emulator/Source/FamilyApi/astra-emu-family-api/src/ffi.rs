@@ -37,7 +37,7 @@ mod tests {
         FamilyDescriptor {
             configuration: Default::default(),
             family_id: "fvp".into(),
-            plugin_id: "astra.emu.fvp".into(),
+            plugin_id: "rfvp".into(),
             abi_fingerprint: FAMILY_ABI_FINGERPRINT.into(),
             version: "0.1.0".into(),
             capabilities: capabilities.into(),

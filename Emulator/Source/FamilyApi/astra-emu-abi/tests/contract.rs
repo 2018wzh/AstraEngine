@@ -293,7 +293,7 @@ fn descriptor() -> Descriptor {
     Descriptor {
         header: Header::of::<Descriptor>(),
         family_id: Bytes::new(b"astra.emu.sena"),
-        plugin_id: Bytes::new(b"sena-native-koikake"),
+        plugin_id: Bytes::new(b"sena-rs"),
         version: Bytes::new(b"1.0.0"),
         capabilities: RENDER_CAPS,
         formats: std::ptr::null(),

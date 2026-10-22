@@ -24,19 +24,29 @@ pub(super) const SCHEMA_5_TABLES: [&str; 10] = [
     "plugin_installation",
 ];
 
-const FVP_PLUGIN: &str = "astra.emu.fvp";
+/// Emulators now use their upstream repository name as plugin ID.
+const RENAMED_PLUGINS: [(&str, &str); 6] = [
+    ("astra.emu.fvp", "rfvp"),
+    ("astra.emu.siglus", "siglus_rs"),
+    ("astra.emu.artemis", "art3m1s-core"),
+    ("sena-native-koikake", "sena-rs"),
+    ("astra-emu-ethornell", "ethornell-rs"),
+    ("astra-emu-krkr", "kirikiroid2-web"),
+];
+const FVP_PLUGIN: &str = "rfvp";
 const FVP_REMOVED_FIELDS: [&str; 2] = ["surface", "render_scale"];
 /// Emulators whose render size moved from configuration fields to the typed
 /// render preference: `(plugin_id, width field, height field)`.
 const RENDER_FIELD_PLUGINS: [(&str, &str, &str); 2] = [
     ("astra.emu.musica", "render_width", "render_height"),
-    ("sena-native-koikake", "raster_width", "raster_height"),
+    ("sena-rs", "raster_width", "raster_height"),
 ];
 
 pub(super) fn upgrade_schema_5(transaction: &Transaction<'_>) -> Result<(), LibraryError> {
     transaction.execute_batch(STATE_SCHEMA_SQL)?;
     transaction.execute_batch("DROP TABLE plugin_installation;")?;
     migrate_translation_profile(transaction)?;
+    rename_plugins(transaction)?;
     migrate_family_configuration(transaction)?;
     let has_games: bool =
         transaction.query_row("SELECT EXISTS(SELECT 1 FROM library_game)", [], |row| {
@@ -104,6 +114,43 @@ fn migrate_translation_profile(transaction: &Transaction<'_>) -> Result<(), Libr
             transaction.execute("DELETE FROM translation_profile WHERE singleton=1", [])?;
             tracing::warn!(event = "astra.emu.library.translation_profile_reset");
         }
+    }
+    Ok(())
+}
+
+fn rename_plugins(transaction: &Transaction<'_>) -> Result<(), LibraryError> {
+    for (old, new) in RENAMED_PLUGINS {
+        transaction.execute(
+            "UPDATE family_configuration SET plugin_id=?2 WHERE plugin_id=?1",
+            [old, new],
+        )?;
+    }
+    let rows = {
+        let mut statement =
+            transaction.prepare("SELECT game_id, settings_json FROM game_settings")?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        rows
+    };
+    for (game_id, raw) in rows {
+        let Ok(mut settings) = serde_json::from_str::<GameSettings>(&raw) else {
+            continue;
+        };
+        let Some((_, new)) = RENAMED_PLUGINS
+            .iter()
+            .find(|(old, _)| settings.emulator_id.as_deref() == Some(*old))
+        else {
+            continue;
+        };
+        settings.emulator_id = Some((*new).to_owned());
+        let encoded = serde_json::to_string(&settings).map_err(|_| LibraryError::Serialization)?;
+        transaction.execute(
+            "UPDATE game_settings SET settings_json=?2 WHERE game_id=?1",
+            [&game_id, &encoded],
+        )?;
     }
     Ok(())
 }
@@ -402,6 +449,7 @@ CREATE TABLE plugin_installation (
         );
         let settings = GameSettings {
             input_mapping: Some(crate::default_vn_preset()),
+            emulator_id: Some("astra.emu.fvp".into()),
             ..Default::default()
         };
         old.set_game_settings("g", &settings).unwrap();
@@ -416,6 +464,7 @@ CREATE TABLE plugin_installation (
             })
         );
         assert_eq!(migrated.input_mapping, settings.input_mapping);
+        assert_eq!(migrated.emulator_id.as_deref(), Some("rfvp"));
         assert_eq!(
             library.family_overrides("astra.emu.musica", "g").unwrap(),
             [enumerated("script_encoding", "gbk")]
@@ -443,25 +492,19 @@ CREATE TABLE plugin_installation (
         );
         assert_eq!(
             library
-                .app_state::<RenderPreference>("render.default.sena-native-koikake")
+                .app_state::<RenderPreference>("render.default.sena-rs")
                 .unwrap(),
             Some(RenderPreference::Custom {
                 width: 1600,
                 height: 900
             })
         );
-        assert!(library
-            .family_overrides("sena-native-koikake", "")
-            .unwrap()
-            .is_empty());
+        assert!(library.family_overrides("sena-rs", "").unwrap().is_empty());
         assert_eq!(
-            library.family_overrides("astra.emu.fvp", "").unwrap(),
+            library.family_overrides("rfvp", "").unwrap(),
             [enumerated("script_encoding", "gbk")]
         );
-        assert!(library
-            .family_overrides("astra.emu.fvp", "g")
-            .unwrap()
-            .is_empty());
+        assert!(library.family_overrides("rfvp", "g").unwrap().is_empty());
         assert_eq!(user_version(&library), 6);
         assert_eq!(library.user_table_count().unwrap(), REQUIRED_TABLES.len());
         assert_eq!(REQUIRED_TABLES.len(), 13);

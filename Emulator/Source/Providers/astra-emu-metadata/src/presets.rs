@@ -140,14 +140,11 @@ mod tests {
 
     #[test]
     fn round_trips_and_finds_preset() {
-        let database = database(vec![
-            preset("r1", "astra.emu.musica"),
-            preset("r1", "astra.emu.fvp"),
-        ]);
+        let database = database(vec![preset("r1", "astra.emu.musica"), preset("r1", "rfvp")]);
         let parsed = parse_preset_database(&serde_json::to_vec(&database).unwrap()).unwrap();
         assert_eq!(parsed, database);
-        assert!(parsed.preset("r1", "astra.emu.fvp").is_some());
-        assert!(parsed.preset("r2", "astra.emu.fvp").is_none());
+        assert!(parsed.preset("r1", "rfvp").is_some());
+        assert!(parsed.preset("r2", "rfvp").is_none());
     }
 
     #[test]
