@@ -62,7 +62,7 @@ android {
 
     packaging {
         jniLibs {
-            // The family trust chain reads libastra_emu_fvp.so back from
+            // The family trust chain reads libastra_emu_rfvp.so back from
             // nativeLibraryDir to verify its hash before loading, which needs
             // real extracted files instead of an `apk!lib` virtual path.
             useLegacyPackaging = true

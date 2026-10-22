@@ -1,8 +1,4 @@
-use std::{
-    env, fs,
-    path::{Path, PathBuf},
-    process::Command,
-};
+use std::{env, fs, path::PathBuf, process::Command};
 
 use sha2::{Digest, Sha256};
 
@@ -44,16 +40,6 @@ fn main() {
         "cargo:rustc-env=ASTRA_EMU_MANAGER_RUSTC_FINGERPRINT=sha256.{}",
         hex_sha256(identity.as_bytes())
     );
-    let fvp_manifest =
-        Path::new(&env::var("CARGO_MANIFEST_DIR").expect("ASTRA_EMU_MANAGER_MANIFEST_DIR_MISSING"))
-            .join("../../Families/astra-emu-fvp/Cargo.toml");
-    let hosted_fork_revision = hosted_fork_revision(&fvp_manifest);
-    println!("cargo:rerun-if-changed={}", fvp_manifest.display());
-    let features = format!("rfvp={hosted_fork_revision};features=none");
-    println!(
-        "cargo:rustc-env=ASTRA_EMU_FVP_FEATURE_FINGERPRINT=sha256.{}",
-        hex_sha256(features.as_bytes())
-    );
     println!(
         "cargo:rustc-env=ASTRA_EMU_TARGET={}",
         env::var("TARGET").expect("ASTRA_EMU_MANAGER_BUILD_TARGET_MISSING")
@@ -74,31 +60,31 @@ fn main() {
 
 fn configure_static_ios_registration() {
     let output = PathBuf::from(env::var_os("OUT_DIR").expect("ASTRA_EMU_OUT_DIR_MISSING"))
-        .join("astra-emu-fvp-static-manifest.json");
+        .join("astra-emu-rfvp-static-manifest.json");
     if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("ios") {
         fs::write(output, b"{}").expect("ASTRA_EMU_STATIC_MANIFEST_STUB_WRITE_FAILED");
         return;
     }
     let manifest_path =
-        env::var("ASTRA_EMU_FVP_STATIC_MANIFEST").expect("ASTRA_EMU_FVP_STATIC_MANIFEST_MISSING");
+        env::var("ASTRA_EMU_RFVP_STATIC_MANIFEST").expect("ASTRA_EMU_RFVP_STATIC_MANIFEST_MISSING");
     let archive_path =
-        env::var("ASTRA_EMU_FVP_STATIC_ARCHIVE").expect("ASTRA_EMU_FVP_STATIC_ARCHIVE_MISSING");
-    let manifest = fs::read(&manifest_path).expect("ASTRA_EMU_FVP_STATIC_MANIFEST_READ_FAILED");
-    let archive = fs::read(&archive_path).expect("ASTRA_EMU_FVP_STATIC_ARCHIVE_READ_FAILED");
+        env::var("ASTRA_EMU_RFVP_STATIC_ARCHIVE").expect("ASTRA_EMU_RFVP_STATIC_ARCHIVE_MISSING");
+    let manifest = fs::read(&manifest_path).expect("ASTRA_EMU_RFVP_STATIC_MANIFEST_READ_FAILED");
+    let archive = fs::read(&archive_path).expect("ASTRA_EMU_RFVP_STATIC_ARCHIVE_READ_FAILED");
     assert!(
         !manifest.is_empty() && manifest.len() <= 1024 * 1024,
-        "ASTRA_EMU_FVP_STATIC_MANIFEST_BOUNDS"
+        "ASTRA_EMU_RFVP_STATIC_MANIFEST_BOUNDS"
     );
-    assert!(!archive.is_empty(), "ASTRA_EMU_FVP_STATIC_ARCHIVE_EMPTY");
-    fs::write(output, manifest).expect("ASTRA_EMU_FVP_STATIC_MANIFEST_COPY_FAILED");
+    assert!(!archive.is_empty(), "ASTRA_EMU_RFVP_STATIC_ARCHIVE_EMPTY");
+    fs::write(output, manifest).expect("ASTRA_EMU_RFVP_STATIC_MANIFEST_COPY_FAILED");
     println!(
-        "cargo:rustc-env=ASTRA_EMU_FVP_STATIC_BINARY_HASH=sha256:{}",
+        "cargo:rustc-env=ASTRA_EMU_RFVP_STATIC_BINARY_HASH=sha256:{}",
         hex_sha256(&archive)
     );
     println!("cargo:rerun-if-changed={manifest_path}");
     println!("cargo:rerun-if-changed={archive_path}");
-    println!("cargo:rerun-if-env-changed=ASTRA_EMU_FVP_STATIC_MANIFEST");
-    println!("cargo:rerun-if-env-changed=ASTRA_EMU_FVP_STATIC_ARCHIVE");
+    println!("cargo:rerun-if-env-changed=ASTRA_EMU_RFVP_STATIC_MANIFEST");
+    println!("cargo:rerun-if-env-changed=ASTRA_EMU_RFVP_STATIC_ARCHIVE");
 }
 
 fn hex_sha256(bytes: &[u8]) -> String {
@@ -106,21 +92,4 @@ fn hex_sha256(bytes: &[u8]) -> String {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()
-}
-
-fn hosted_fork_revision(manifest_path: &Path) -> String {
-    let manifest =
-        fs::read_to_string(manifest_path).expect("ASTRA_EMU_MANAGER_FVP_MANIFEST_READ_FAILED");
-    let prefix = "hosted_fork_revision = \"";
-    let revision = manifest
-        .lines()
-        .map(str::trim)
-        .find_map(|line| line.strip_prefix(prefix))
-        .and_then(|value| value.strip_suffix('"'))
-        .expect("ASTRA_EMU_MANAGER_HOSTED_FORK_REVISION_MISSING");
-    assert!(
-        revision.len() == 40 && revision.bytes().all(|byte| byte.is_ascii_hexdigit()),
-        "ASTRA_EMU_MANAGER_HOSTED_FORK_REVISION_INVALID"
-    );
-    revision.to_owned()
 }

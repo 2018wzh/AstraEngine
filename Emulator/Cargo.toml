@@ -3,11 +3,8 @@ resolver = "2"
 members = [
     "Source/SDK/astra-emu-sdk",
     "Source/Families/astra-emu-cmvs",
-    "Source/Families/astra-emu-artemis",
     "Source/FamilyApi/astra-emu-family-api",
     "Source/FamilyApi/astra-emu-abi",
-    "Source/Families/astra-emu-fvp",
-    "Source/Families/astra-emu-siglus",
     "Source/Families/astra-emu-musica",
     "Source/Families/astra-emu-musica-keys",
     "Source/Programs/astra-emu-musica-cli",
@@ -19,7 +16,6 @@ members = [
     "Source/Manager/astra-emu-manager",
 ]
 exclude = [
-    "Source/Families/astra-emu-krkr",
     "ThirdParty/art3m1s-core",
     "ThirdParty/rfvp",
     "ThirdParty/siglus_rs",

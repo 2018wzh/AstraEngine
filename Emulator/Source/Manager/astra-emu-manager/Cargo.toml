@@ -55,7 +55,7 @@ gilrs = { workspace = true, features = ["wgi"] }
 rfd.workspace = true
 
 [target.'cfg(target_os = "android")'.dependencies]
-astra-emu-fvp = { path = "../../Families/astra-emu-fvp" }
+astra-emu-rfvp = { path = "../../../ThirdParty/rfvp/crates/astra-emu-rfvp" }
 
 [build-dependencies]
 sha2.workspace = true

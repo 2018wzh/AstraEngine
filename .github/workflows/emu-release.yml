@@ -120,39 +120,40 @@ jobs:
           VCPKG_ROOT: ${{ github.workspace }}\.work\vcpkg-ffmpeg
         run: cargo build --manifest-path Emulator/Cargo.toml --locked --release -p astra-emu-musica --features dynamic-plugin-export,ffmpeg-vcpkg --target-dir .work/target-musica
 
-      - name: Build FVP
-        run: cargo build --manifest-path Emulator/Cargo.toml --locked --release -p astra-emu-fvp --features dynamic-plugin-export --target-dir .work/target-fvp
+      # External cores build from their fork manifests. Short target directories keep
+      # nested native build trees (shaderc, libass) under the Windows MAX_PATH limit.
+      - name: Build rfvp
+        run: cargo build --manifest-path Emulator/ThirdParty/rfvp/Cargo.toml --locked --release -p astra-emu-rfvp --features dynamic-plugin-export --target-dir C:\t\rfvp
 
-      - name: Build Siglus
-        run: cargo build --manifest-path Emulator/Cargo.toml --locked --release -p astra-emu-siglus --features dynamic --target-dir .work/target-siglus
+      - name: Build siglus_rs
+        run: cargo build --manifest-path Emulator/ThirdParty/siglus_rs/astra/astra-emu-siglus_rs/Cargo.toml --locked --release -p astra-emu-siglus_rs --features dynamic --target-dir C:\t\siglus
 
-      - name: Build Artemis
+      - name: Build art3m1s-core
         env:
           VCPKG_ROOT: ${{ github.workspace }}\.work\vcpkg-ffmpeg
-        run: cargo build --manifest-path Emulator/Cargo.toml --locked --release -p astra-emu-artemis --target-dir .work/target-artemis
+        run: cargo build --manifest-path Emulator/ThirdParty/art3m1s-core/Cargo.toml --locked --release -p astra-emu-art3m1s-core --target-dir C:\t\art
 
-      - name: Build Sena
-        run: cargo build --manifest-path Emulator/ThirdParty/sena-rs/Cargo.toml --locked --release -p astra-emu-sena --features diagnostic-bridge --target-dir .work/target-sena
+      - name: Build sena-rs
+        run: cargo build --manifest-path Emulator/ThirdParty/sena-rs/Cargo.toml --locked --release -p astra-emu-sena-rs --features diagnostic-bridge --target-dir C:\t\sena
 
-      - name: Build Ethornell
-        run: cargo build --manifest-path Emulator/ThirdParty/ethornell-rs/Cargo.toml --locked --release -p astra-emu-ethornell --features diagnostic-bridge --target-dir .work/target-ethornell
+      - name: Build ethornell-rs
+        run: cargo build --manifest-path Emulator/ThirdParty/ethornell-rs/Cargo.toml --locked --release -p astra-emu-ethornell-rs --features diagnostic-bridge --target-dir C:\t\bgi
 
-      - name: Build KrKr
+      - name: Build kirikiroid2-web
         env:
           VCPKG_ROOT: ${{ github.workspace }}\.work\vcpkg
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
           $root = (Get-Location).Path
-          $native = "$root/Emulator/Source/Families/astra-emu-krkr/native"
           cmake -S Emulator/ThirdParty/kirikiri2 -B .work/krkr-msvc -G Ninja `
             -DWINDOWS=ON -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTS=OFF -DBUILD_TOOLS=OFF `
-            -DKRKR2_USE_STUB_SPDLOG=OFF -DKRKR2_EMBEDDED_ADAPTER_DIR="$native" `
+            -DKRKR2_USE_STUB_SPDLOG=OFF -DKRKR2_ASTRA_EMU=ON `
             -DCMAKE_C_COMPILER="$env:VCToolsInstallDir/bin/Hostx64/x64/cl.exe" `
             -DCMAKE_CXX_COMPILER="$env:VCToolsInstallDir/bin/Hostx64/x64/cl.exe" `
             -DBISON_EXECUTABLE="$env:BISON_EXECUTABLE" -DVCPKG_TARGET_TRIPLET=x64-windows `
             -DVCPKG_INSTALLED_DIR="$root/.work/krkr-native/vcpkg_installed" `
             "-DVCPKG_INSTALL_OPTIONS=--x-buildtrees-root=$root/.work/krkr-buildtrees;--x-packages-root=$root/.work/krkr-packages;--downloads-root=$root/.work/krkr-downloads"
-          cmake --build .work/krkr-msvc --target astra_krkr_native
+          cmake --build .work/krkr-msvc --target astra_emu_kirikiroid2_web
 
       - name: Stage cores
         run: |
@@ -185,12 +186,12 @@ jobs:
             if ($Resources) { $arguments += @('--resources', $Resources) }
             python Tools/AstraEMU/stage_core.py @arguments
           }
-          Stage-Core fvp .work/target-fvp/release/astra_emu_fvp.dll astra.emu.fvp `
-            Emulator/ThirdParty/rfvp/crates/astra-embedded/Cargo.toml `
-            -Search @('.work/target-fvp/release', "$subtitle/bin") `
+          Stage-Core rfvp C:/t/rfvp/release/astra_emu_rfvp.dll rfvp `
+            Emulator/ThirdParty/rfvp/crates/astra-emu-rfvp/Cargo.toml `
+            -Search @('C:/t/rfvp/release', "$subtitle/bin") `
             -Licenses @('rfvp/LICENSE=Emulator/ThirdParty/rfvp/LICENSE',
-                        'astra-emu-fvp/THIRD_PARTY_NOTICES.md=Emulator/Source/Families/astra-emu-fvp/THIRD_PARTY_NOTICES.md',
-                        'astra-emu-fvp/MODIFICATIONS.md=Emulator/Source/Families/astra-emu-fvp/MODIFICATIONS.md',
+                        'rfvp/THIRD_PARTY_NOTICES.md=Emulator/ThirdParty/rfvp/crates/astra-emu-rfvp/THIRD_PARTY_NOTICES.md',
+                        'rfvp/MODIFICATIONS.md=Emulator/ThirdParty/rfvp/crates/astra-emu-rfvp/MODIFICATIONS.md',
                         "fribidi/copyright=$subtitle/share/fribidi/copyright")
           Stage-Core musica .work/target-musica/release/astra_emu_musica.dll astra.emu.musica `
             Emulator/Source/Families/astra-emu-musica/Cargo.toml `
@@ -198,38 +199,46 @@ jobs:
             -Licenses @('noto/OFL.txt=Examples/NativeVN/Assets/Fonts/OFL-NotoSansJP.txt',
                         "ffmpeg/copyright=$ffmpeg/share/ffmpeg/copyright",
                         "fribidi/copyright=$subtitle/share/fribidi/copyright")
-          Stage-Core siglus .work/target-siglus/release/astra_emu_siglus.dll astra.emu.siglus `
-            Emulator/ThirdParty/siglus_rs/astra/embedded/Cargo.toml `
-            -Search @('.work/target-siglus/release') `
+          Stage-Core siglus_rs C:/t/siglus/release/astra_emu_siglus_rs.dll siglus_rs `
+            Emulator/ThirdParty/siglus_rs/astra/astra-emu-siglus_rs/Cargo.toml `
+            -Search @('C:/t/siglus/release') `
             -Licenses @('siglus_rs/LICENSE-MPL-2.0=Emulator/ThirdParty/siglus_rs/LICENSE-MPL-2.0',
-                        'astra-emu-siglus/THIRD_PARTY_NOTICES.md=Emulator/Source/Families/astra-emu-siglus/THIRD_PARTY_NOTICES.md',
-                        'astra-emu-siglus/MODIFICATIONS.md=Emulator/Source/Families/astra-emu-siglus/MODIFICATIONS.md')
-          Stage-Core artemis .work/target-artemis/release/astra_emu_artemis.dll astra.emu.artemis `
-            Emulator/Source/Families/astra-emu-artemis/Cargo.toml `
-            -Search @('.work/target-artemis/release', "$ffmpeg/bin") `
+                        'siglus_rs/THIRD_PARTY_NOTICES.md=Emulator/ThirdParty/siglus_rs/astra/THIRD_PARTY_NOTICES.md',
+                        'siglus_rs/MODIFICATIONS.md=Emulator/ThirdParty/siglus_rs/astra/MODIFICATIONS.md',
+                        'eluna_rs/LICENSE-MPL-2.0=Emulator/ThirdParty/siglus_rs/vendor/eluna_rs/LICENSE-MPL-2.0',
+                        'kira/LICENSE-MIT=Emulator/ThirdParty/siglus_rs/vendor/kira/LICENSE-MIT',
+                        'kira/LICENSE-APACHE=Emulator/ThirdParty/siglus_rs/vendor/kira/LICENSE-APACHE')
+          Stage-Core art3m1s-core C:/t/art/release/astra_emu_art3m1s_core.dll art3m1s-core `
+            Emulator/ThirdParty/art3m1s-core/crates/astra-emu-art3m1s-core/Cargo.toml `
+            -Search @('C:/t/art/release', "$ffmpeg/bin") `
             -Licenses @('art3m1s-core/LICENSE=Emulator/ThirdParty/art3m1s-core/LICENSE',
-                        'astra-emu-artemis/THIRD_PARTY_NOTICES.md=Emulator/Source/Families/astra-emu-artemis/THIRD_PARTY_NOTICES.md',
-                        'astra-emu-artemis/MODIFICATIONS.md=Emulator/Source/Families/astra-emu-artemis/MODIFICATIONS.md',
+                        'art3m1s-core/THIRD_PARTY_NOTICES.md=Emulator/ThirdParty/art3m1s-core/crates/astra-emu-art3m1s-core/THIRD_PARTY_NOTICES.md',
+                        'art3m1s-core/MODIFICATIONS.md=Emulator/ThirdParty/art3m1s-core/crates/astra-emu-art3m1s-core/MODIFICATIONS.md',
+                        'pf8/LICENSE=Emulator/ThirdParty/art3m1s-core/crates/pf8/LICENSE',
                         "ffmpeg/copyright=$ffmpeg/share/ffmpeg/copyright")
-          Stage-Core sena .work/target-sena/release/astra_emu_sena.dll sena-native-koikake `
-            Emulator/ThirdParty/sena-rs/crates/astra-emu-sena/Cargo.toml `
-            -Search @('.work/target-sena/release') `
+          Stage-Core sena-rs C:/t/sena/release/astra_emu_sena_rs.dll sena-rs `
+            Emulator/ThirdParty/sena-rs/crates/astra-emu-sena-rs/Cargo.toml `
+            -Search @('C:/t/sena/release') `
             -Licenses @('sena-rs/LICENSE-MPL-2.0=Emulator/ThirdParty/sena-rs/LICENSE-MPL-2.0')
-          Stage-Core ethornell .work/target-ethornell/release/astra_emu_ethornell.dll astra-emu-ethornell `
-            Emulator/ThirdParty/ethornell-rs/crates/astra-emu-ethornell/Cargo.toml `
-            -Search @('.work/target-ethornell/release') `
-            -Licenses @('ethornell-rs/LICENSE-MPL-2.0=Emulator/ThirdParty/sena-rs/LICENSE-MPL-2.0',
+          Stage-Core ethornell-rs C:/t/bgi/release/astra_emu_ethornell_rs.dll ethornell-rs `
+            Emulator/ThirdParty/ethornell-rs/crates/astra-emu-ethornell-rs/Cargo.toml `
+            -Search @('C:/t/bgi/release') `
+            -Licenses @('ethornell-rs/LICENSE-MPL-2.0=Emulator/ThirdParty/ethornell-rs/LICENSE-MPL-2.0',
                         'ethornell-rs/MODIFICATIONS.md=Emulator/ThirdParty/ethornell-rs/MODIFICATIONS.md')
-          $krkrLicenses = @('kirikiri2/LICENSE=Emulator/ThirdParty/kirikiri2/LICENSE')
+          $krkr = '.work/krkr-msvc/astra'
+          $krkrLicenses = @('kirikiroid2-web/LICENSE=Emulator/ThirdParty/kirikiri2/LICENSE',
+                            'kirikiroid2-web/README.md=Emulator/ThirdParty/kirikiri2/astra/README.md',
+                            'layerExImage/LICENSE.TXT=Emulator/ThirdParty/kirikiri2/cpp/plugins/layerExImage/LICENSE.TXT',
+                            'DroidSansFallback/LICENSE.txt=Emulator/ThirdParty/kirikiri2/ui/cocos-studio/DroidSansFallback.LICENSE.txt')
           foreach ($copyright in Get-ChildItem "$krkrVcpkg/share/*/copyright" | Sort-Object FullName) {
             $krkrLicenses += "vcpkg/$($copyright.Directory.Name)/copyright=$($copyright.FullName)"
           }
-          $krkrDlls = @((Get-ChildItem .work/krkr-msvc/embedded-adapter -File -Filter *.dll |
-            Where-Object Name -ne 'astra_emu_krkr.dll' | Sort-Object Name).FullName)
-          Stage-Core krkr .work/krkr-msvc/embedded-adapter/astra_emu_krkr.dll astra-emu-krkr `
-            Emulator/Source/Families/astra-emu-krkr/Cargo.toml `
-            -Search @('.work/krkr-msvc/embedded-adapter', "$krkrVcpkg/bin", $openmp.FullName) `
-            -Licenses $krkrLicenses -Resources .work/krkr-msvc/embedded-adapter/Resources -Extra $krkrDlls
+          $krkrDlls = @((Get-ChildItem $krkr -File -Filter *.dll |
+            Where-Object Name -ne 'astra_emu_kirikiroid2_web.dll' | Sort-Object Name).FullName)
+          Stage-Core kirikiroid2-web "$krkr/astra_emu_kirikiroid2_web.dll" kirikiroid2-web `
+            Emulator/ThirdParty/kirikiri2/astra/Cargo.toml `
+            -Search @($krkr, "$krkrVcpkg/bin", $openmp.FullName) `
+            -Licenses $krkrLicenses -Resources "$krkr/Resources" -Extra $krkrDlls
           $cores = Get-ChildItem .work/stage -Directory | ForEach-Object { Get-ChildItem $_.FullName -Directory }
           if ($cores.Count -ne 7) { throw "expected 7 staged cores, found $($cores.Count)" }
           "CORE_DIRS=$(($cores.FullName) -join ';')" >> $env:GITHUB_ENV

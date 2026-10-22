@@ -278,12 +278,6 @@ def package(
                     destination = licenses / family.name
                     destination.mkdir(exist_ok=True)
                     shutil.copy2(source, destination / name)
-        for name in ("LICENSE", "LICENSE-MPL-2.0"):
-            source = REPO / "Emulator/ThirdParty/rfvp" / name
-            if source.is_file() and any("fvp" in stem for stem in core_stems):
-                destination = licenses / "rfvp"
-                destination.mkdir(exist_ok=True)
-                shutil.copy2(source, destination / name)
         if any("musica" in stem for stem in core_stems):
             destination = licenses / "noto"
             destination.mkdir()

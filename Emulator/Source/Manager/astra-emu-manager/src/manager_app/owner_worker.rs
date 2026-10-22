@@ -263,7 +263,7 @@ fn initialize(
     progress: &mut dyn FnMut(usize, usize),
 ) -> Result<BTreeMap<String, String>, String> {
     #[cfg(target_os = "android")]
-    unsafe { registry.register_static(astra_emu_fvp::astra_emu_query) }
+    unsafe { registry.register_static(astra_emu_rfvp::astra_emu_query) }
         .map_err(|error| error.to_string())?;
     let mut errors = BTreeMap::new();
     #[cfg(not(target_os = "android"))]

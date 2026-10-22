@@ -472,7 +472,7 @@ mod tests {
             concat!(
                 r#"{"timestamp":"2024-01-02T03:04:05.000Z","level":"INFO","event":"alpha","fields":{"x":"1"}}"#,
                 "\n",
-                r#"{"timestamp":"2024-01-02T03:04:06.000Z","level":"ERROR","event":"plugin","fields":{"core":"astra_emu_fvp.dll"}}"#,
+                r#"{"timestamp":"2024-01-02T03:04:06.000Z","level":"ERROR","event":"plugin","fields":{"core":"astra_emu_rfvp.dll"}}"#,
                 "\n",
                 r#"{"timestamp":"2024-01-02T03:04:07.000Z","level":"WARN","event":"gamma","fields":{"y":"2"}}"#,
                 "\n",
@@ -485,7 +485,7 @@ mod tests {
             Vec::new(),
         )
         .unwrap();
-        let (_, count) = app.log_text("astra_emu_fvp.dll").unwrap();
+        let (_, count) = app.log_text("astra_emu_rfvp.dll").unwrap();
         assert_eq!(count, 1);
         let (_, count_all) = app.log_text("").unwrap();
         assert_eq!(count_all, 3);
