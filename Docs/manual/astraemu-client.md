@@ -113,7 +113,7 @@ Beta1 使用 Release 优化构建；Manager“关于”及当时 Manager、独�
 
 历史 checkpoint 已构建七核心、Manager 和当时的独立转换 CLI，并组装本机验证目录 `AstraEMU-native-first-checkpoint-20261019`；其 PE 依赖/导出及包内 CLI 公开转换已检查。这些是统一入口迁移前的历史证据，不代表 Beta2 已构建或通过核验。该目录是原生优先的验证组合，尚有七个候选的静态消费者/素材阻塞，实际 Manager 界面和游戏仍待用户手动验收。公开 Release 由下文的发布工作流构建：FriBidi 与两组 FFmpeg 以 DLL 随各自核心目录分发，并附 LGPL-2.1 文本与对应源码包。
 
-下面以 FVP 为例。先初始化主仓固定的完整 submodule；不要换回旧 revision 绕过失败。参与核心保留不同原生 Lua/音频依赖，分别构建，不将 Artemis Lua 5.1 和 Manager Luau 合并进同一次 Cargo 调用。公开 Release 由 `.github/workflows/emu-release.yml` 按同样步骤构建全部七个核心，见下文“发布工作流”。
+下面以 rfvp 为例。先初始化主仓固定的完整 submodule；不要换回旧 revision 绕过失败。外部核心的适配代码在各 fork 的 `astra` 分支，各自在 fork manifest 上独立构建，不进入 Manager 的 Cargo workspace；参与核心保留不同原生 Lua/音频依赖，不合并进同一次 Cargo 调用。公开 Release 由 `.github/workflows/emu-release.yml` 按同样步骤构建全部七个核心，见下文“发布工作流”。
 
 ```sh
 # 替换为数据盘上的专用工作目录；构建、运行包和临时文件放在其中。
@@ -122,19 +122,21 @@ export CARGO_TARGET_DIR="$work_dir/target"
 export TEMP="$work_dir/tmp" TMP="$work_dir/tmp"
 mkdir -p "$TEMP"
 git submodule update --init
-cargo build --manifest-path Emulator/Cargo.toml --locked --release -j 1 \
-  -p astra-emu-manager -p astra-emu-fvp \
-  --features astra-emu-fvp/dynamic-plugin-export
+cargo build --manifest-path Emulator/Cargo.toml --locked --release -j 1 -p astra-emu-manager
+cargo build --manifest-path Emulator/ThirdParty/rfvp/Cargo.toml --locked --release -j 1 \
+  -p astra-emu-rfvp --features dynamic-plugin-export --target-dir "$work_dir/t-rfvp"
 python Tools/Effects/fetch_dxc.py --output "$work_dir/dxc"
 python Tools/AstraEMU/stage_core.py \
-  --library "$CARGO_TARGET_DIR/release/astra_emu_fvp.dll" \
-  --plugin-id astra.emu.fvp --version 0.6.0 \
+  --library "$work_dir/t-rfvp/release/astra_emu_rfvp.dll" \
+  --plugin-id rfvp --version 0.6.0 \
   --dependency "$ASTRA_SUBTITLE_VCPKG_ROOT/installed/x64-windows-static-md-dynbidi/bin/fribidi-0.dll" \
   --license rfvp/LICENSE=Emulator/ThirdParty/rfvp/LICENSE \
-  --output "$work_dir/stage-fvp"
+  --license rfvp/THIRD_PARTY_NOTICES.md=Emulator/ThirdParty/rfvp/crates/astra-emu-rfvp/THIRD_PARTY_NOTICES.md \
+  --license rfvp/MODIFICATIONS.md=Emulator/ThirdParty/rfvp/crates/astra-emu-rfvp/MODIFICATIONS.md \
+  --output "$work_dir/stage-rfvp"
 python Tools/AstraEMU/package_client.py \
   --manager "$CARGO_TARGET_DIR/release/astra-emu-manager.exe" \
-  --core-dir "$work_dir/stage-fvp/astra_emu_fvp" \
+  --core-dir "$work_dir/stage-rfvp/astra_emu_rfvp" \
   --runtime-file "$work_dir/dxc/dxcompiler.dll" \
   --runtime-file "$work_dir/dxc/dxil.dll" \
   --runtime-file "$work_dir/dxc/LICENSE-MS.txt" \
@@ -165,7 +167,8 @@ Python API 为 `package(manager, core_dirs, output, runtime_files, *, metadata_d
 `.github/workflows/emu-release.yml` 在推送 `emu-v*` tag 时构建并发布 GitHub Release；手动 `workflow_dispatch` 只产出 artifact，不建 Release。工作流在 `windows-latest` 上：
 
 - 完整克隆 `microsoft/vcpkg` 并检出固定提交 `664933b8d385dfc01f4e0cdff4c7c74e71f6a740`（即 `astra-subtitle` 的 builtin-baseline，其 FFmpeg 最新版本为 9.0.2#1）；用它安装字幕树（`x64-windows-static-md-dynbidi`）和 `Tools/AstraEMU/vcpkg/ffmpeg/vcpkg.json` 固定的 FFmpeg 9.0.2#1（`x64-windows`，供 Musica 与 Artemis），KrKr 的 CMake 也使用这份检出。
-- 每个核心用独立 `--target-dir .work/target-<name>` 构建（`--locked --release`），Sena 与 Ethornell 在各自工作区构建，KrKr 按上文 KrKr README 的 CMake 流程构建。
+- Manager 与 Musica 在 `Emulator/Cargo.toml` 工作区构建；六个外部核心在各自 fork manifest 上构建（`--locked --release`），每个使用系统盘根下独立的短 `--target-dir`（`t\<name>`），避免 shaderc 等嵌套原生构建超出 Windows MAX_PATH。kirikiroid2-web 按 fork `astra/README.md` 的 CMake 流程以 `-DKRKR2_ASTRA_EMU=ON` 构建目标 `astra_emu_kirikiroid2_web`，产物位于 `.work/krkr-msvc/astra/`。
+- 外部核心的许可文件全部取自 fork：rfvp 为 `LICENSE` 与 `crates/astra-emu-rfvp/` 的 `THIRD_PARTY_NOTICES.md`、`MODIFICATIONS.md`；siglus_rs 为 `LICENSE-MPL-2.0`、`astra/` 下两份说明及嵌套 eluna_rs、Kira 许可；art3m1s-core 为 `LICENSE`、`crates/pf8/LICENSE` 与 `crates/astra-emu-art3m1s-core/` 下两份说明；sena-rs 与 ethornell-rs 为各自 `LICENSE-MPL-2.0`，ethornell-rs 另附 `MODIFICATIONS.md`；kirikiroid2-web 为 `LICENSE`、`astra/README.md`、layerExImage 与 DroidSansFallback 许可。依赖的 vcpkg `copyright` 照旧附上。
 - 用 `check_core_deps.py closure` 收集依赖，`stage_core.py` 整理七个核心目录，`check_core_deps.py check` 核对依赖闭包；核心版本取自核心 crate 的 Cargo 版本（`release_catalog.py crate-version`）。
 - 用 `Emulator/Metadata/tools/build_index.py` 生成元数据快照，`package_client.py` 组装 `AstraEMU-<version>-windows-x86_64.zip`（包根附 VC runtime 与 DXC），`release_catalog.py archive` 为每个核心目录生成 `astra-emu-core-<stem>-<version>-windows-x86_64.zip`（zip 根即核心目录内容），`bundle_sources.py` 生成 FriBidi、FFmpeg 9.0.2、KrKr FFmpeg 3.3.9 的对应源码包（vcpkg 下载的原始归档加 port 目录），并附 `LGPL-2.1.txt` 与 `SHA256SUMS.txt`。
 - tag 触发时 `gh release create` 上传全部资产，发布说明为自动生成的核心版本列表；随后用 secret `ASTRA_METADATA_TOKEN` 向 `2018wzh/AstraEMU-metadata` 提交 `engines/cores/<plugin_id>.json` 并开 PR `cores: <tag>`。secret 缺失时该步失败并提示“需要配置 ASTRA_METADATA_TOKEN”，已上传的 Release 资产保留。核心显示名、引擎名与许可登记在 `Tools/AstraEMU/release-cores.json`。
@@ -178,4 +181,4 @@ git lfs pull --include="Examples/NativeVN/Assets/Fonts/NotoSansJP-Variable.ttf,E
 
 Musica 动态核心须同时启用 `dynamic-plugin-export,ffmpeg-vcpkg`，并配置 FFmpeg vcpkg 环境。构建完成后立即用 `stage_core.py` 把该 DLL 及匹配的 FFmpeg 与 FriBidi DLL 整理到新的核心目录，再交给打包器；之后对同一 target 的 CLI/静态依赖构建可能覆盖未启用导出的同名 DLL。`astra_emu_query` 必须能协商 C ABI v3，不能把普通 rlib 依赖构建产生的 DLL 当作产品核心。
 
-KrKr 核心目录同样用 `stage_core.py` 整理：`--library` 为 CMake 输出的 `astra_emu_krkr.dll`，`--resources` 为同目录的 `Resources/`，`--dependency` 为 `check_core_deps.py closure` 在该输出目录、KrKr vcpkg `installed/x64-windows/bin`（FFmpeg 3.3.9 DLL）和 MSVC OpenMP redist 目录（`vcomp140.dll`）中找到的全部 DLL。不再接收旧 Rust child 产物，该工具不代替商业流程和许可证核验。
+KrKr 核心目录同样用 `stage_core.py` 整理：`--library` 为 CMake 输出的 `astra_emu_kirikiroid2_web.dll`，`--resources` 为同目录的 `Resources/`，`--dependency` 为 `check_core_deps.py closure` 在该输出目录、KrKr vcpkg `installed/x64-windows/bin`（FFmpeg 3.3.9 DLL）和 MSVC OpenMP redist 目录（`vcomp140.dll`）中找到的全部 DLL。不再接收旧 Rust child 产物，该工具不代替商业流程和许可证核验。

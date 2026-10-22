@@ -26,7 +26,7 @@
 | Siglus | 正常提交文本、翻页/标点/数字小键盘沿用原生输入路径，保留错误 cause chain；9 项纯回归通过、Release DLL 已构建；既有长流程见审计 | 旧日志只保留 `ASTRA_EMU_SIGLUS_ARGUMENT`，不能确定当次触发输入；本轮人工 Release 复测、听音及其他平台未完成 |
 | Artemis | 原 Vulkan/FFmpeg 与既有生命周期修复保留；Host 独占光标显隐并在 Slint 分发后同步；18 项核心纯回归通过、Release DLL 已构建 | 光标修复的人工 Release 验收待用户执行；不再自动重开复现旧通用失败 |
 | Musica/SDK | 默认从原生 Title 菜单启动；运行时只读完整 `key.toml`，旧格式转换仅在开发 CLI；既有 key/PAZ 与 CLI 纯回归保留，新的核心 Release 已构建且实际 descriptor 默认值已核对 | 默认 Title 与渲染配置的人工复测待用户执行；OP 后复合图像参数、选择项 Hook 实玩与逻辑尺寸收敛的既有缺口保留，不猜测脚本语义 |
-| SoftPAL / Sena | 引擎标识为 `softpal`，模拟器标识保持 `sena-native-koikake`；既有 Koikake 范围不变；5 项纯回归通过、Release DLL 已构建 | 既有目的地 `0xCDFF8 → 0xCD6E4` 循环及 EV417/MIX 问题保留，不外推完整 SoftPAL 兼容 |
+| SoftPAL / Sena | 引擎标识为 `softpal`，模拟器标识为上游仓库名 `sena-rs`；既有 Koikake 范围不变；5 项纯回归通过、Release DLL 已构建 | 既有目的地 `0xCDFF8 → 0xCD6E4` 循环及 EV417/MIX 问题保留，不外推完整 SoftPAL 兼容 |
 | Ethornell/BGI | 用户明确确认人工验收完毕；原生等价 cursor 策略修复保留，Release DLL 已构建；源码发布于 fork 的 astra 并以 submodule 固定 | 不再重复自动验收；workspace 声明 MPL-2.0，Release 附 MPL-2.0 全文 |
 | KrKr | 原生 C ABI、完整画布 Alpha、首错保留与 WindowEx overlay owner 初始化修复保留 | 自动验收驱动及钩子已移除；清理后 Release 产物供用户人工验收，不把历史开发结果冒充本次人工通过 |
 | CMVS | 独立开发中的原格式/VM/归档与 SDK 接入 | 本批不修改、整合或验收，保留来源成果 |
@@ -192,7 +192,7 @@ BGI 既有用户人工验收结论保持不变，不重复操作用户窗口；�
 
 18 个安装均已确认。14 个样本有 90 个已知原文件哈希基线，当前 90 匹配、0 不匹配、0 缺失；另 4 个样本没有该基线。全部 18 个样本都缺任务开始前的完整目录及逐文件存档基线，因此不能据此声称全部输入/存档未变或最初零写入。原路径曾生成 IDA sidecar，后来移至私有位置；事故后的 EXE 分析改用副本，这不构成事故前的零写入证明。此前子代理 keymap、父线程私有帮助文本检索，以及本轮文档检索中的私有安装路径曾进入工具输出；相关私有路径/正文未写入 Git 或运行包，本文只记录事故类型。
 
-本轮外部核心的已完成原生改动已发布到各自 fork 的 `astra`，主仓以 submodule 固定精确源码（含 Ethornell），嵌入 manifest 统一固定 C ABI v3 提交 `6799938dc33b25bcca4d9a11ddbea1366bf7d93c`。RFVP 内嵌字体按上游原样发布；Ethornell 随 Release 附 MPL-2.0 全文；FriBidi 与两组 FFmpeg 动态链接并随各自核心目录分发，Release 附 LGPL-2.1 文本与对应源码包。转换输出、商业资源/译文、字体、密钥及旧存档不进入 Git 或公开包。操作方式见[客户端本地化说明](../manual/astraemu-client.md#本地化与原生选项)。
+本轮外部核心的已完成原生改动已发布到各自 fork 的 `astra`，每个 fork 是上游基线加一个适配提交，主仓以 submodule 固定精确源码（含 Ethornell），已删除 `Emulator/Source/Families` 下的 FVP、Siglus、Artemis、KrKr 包装。Rust 适配统一以 Git 依赖固定 C ABI v3 提交 `6d9d691dcc8f3d768e40b5be1d6f37366cca62d8`，适配包为 `astra-emu-<上游仓库名>`，各自在 fork manifest 上独立构建；固定 revision 见[第三方源码](../../Emulator/ThirdParty/README.md)。RFVP 内嵌字体按上游原样发布；Ethornell 随 Release 附 MPL-2.0 全文；FriBidi 与两组 FFmpeg 动态链接并随各自核心目录分发，Release 附 LGPL-2.1 文本与对应源码包。转换输出、商业资源/译文、字体、密钥及旧存档不进入 Git 或公开包。操作方式见[客户端本地化说明](../manual/astraemu-client.md#本地化与原生选项)。
 
 
 操作入口：[开发手册](../manual/development.md)、[AstraEMU 客户端](../manual/astraemu-client.md)、[Editor](../../Editor/README.md)、[NativeVN 样例](../../Examples/NativeVN/README.md)、[终之空资料](../samples/tsuinosora-modernization/README.md)。

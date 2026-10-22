@@ -13,7 +13,7 @@
 | [script-execution.md](script-execution.md) | `system.ini` boot、tag 执行、Lua 调用和等待点 |
 | [script-tags-lua.md](script-tags-lua.md) | `lua`、`calllua`、`tag`、`setTagFilter`、`enqueueTag` 的互操作 |
 | [presentation-and-media.md](presentation-and-media.md) | layer、transition、message、BGM/SE/voice/movie 映射 |
-| [MODIFICATIONS](../../../Emulator/Source/Families/astra-emu-artemis/MODIFICATIONS.md) | 当前核心基线、嵌入差异与上游修复 |
+| [MODIFICATIONS](https://github.com/2018wzh/art3m1s-core/blob/5c83084d55573855713feefa949be24f0ae6baee/crates/astra-emu-art3m1s-core/MODIFICATIONS.md) | 当前核心基线、嵌入差异与上游修复（fork `astra` 单提交，适配包 `astra-emu-art3m1s-core`） |
 | [game-observations.md](game-observations.md) | 两个本地样本的本地结构化统计和启动链观察 |
 | [tooling.md](tooling.md) | 现有 probe、PFS 工具和下一步 fixture 边界 |
 | [实施计划](../../status/implementation-plan.md) | 当前整改顺序与验收条件 |

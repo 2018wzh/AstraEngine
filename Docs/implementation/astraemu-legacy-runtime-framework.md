@@ -7,7 +7,7 @@
 | 模块 | 职责 |
 | --- | --- |
 | astra-emu-family-api | 独立 `abi_stable` descriptor、probe、session、输入/窗口事件、借用帧、PCM、异步文本替换 |
-| astra-emu-fvp | RFVP 核心接入、原生文件、媒体、最终帧和原生存档 |
+| astra-emu-rfvp（rfvp fork `astra`） | RFVP 核心接入、原生文件、媒体、最终帧和原生存档 |
 | astra-emu-manager-core | 资料库、新 schema、配置、插件安装与选择、session 管理 |
 | astra-emu-manager-ui-slint | 资料库布局、只读 ViewModel、用户操作回调 |
 | astra-emu-manager | 窗口/event loop、输入、音频设备、wgpu 最终帧与 HLSL 效果链 |

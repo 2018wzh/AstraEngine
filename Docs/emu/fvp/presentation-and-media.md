@@ -1,6 +1,6 @@
 # FVP 呈现与媒体
 
-Family 复用 RFVP 原生资源、执行和绘制；Manager 接收最终 CPU lease 与有界 PCM。接口见 [Family API](../../../Emulator/Source/FamilyApi/astra-emu-family-api/API_CONTRACT.md)，核心差异见 [MODIFICATIONS](../../../Emulator/Source/Families/astra-emu-fvp/MODIFICATIONS.md)。
+Family 复用 RFVP 原生资源、执行和绘制；Manager 接收最终 CPU lease 与有界 PCM。接口见 [Family API](../../../Emulator/Source/FamilyApi/astra-emu-family-api/API_CONTRACT.md)，核心差异见 [MODIFICATIONS](https://github.com/2018wzh/rfvp/blob/95d3ee23548cb32e035aaaaeab2d309fc5d3020e/crates/astra-emu-rfvp/MODIFICATIONS.md)。
 
 ## 图像与文字
 

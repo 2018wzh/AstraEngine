@@ -26,7 +26,20 @@ cargo test --manifest-path Emulator/Cargo.toml -p astra-emu-family-api
 
 CI 对三桌面的 Engine、EMU、Editor 分别执行 `check`，EMU job 检出时递归初始化固定提交的子模块；各 job 拉取 Git LFS 资产。`check` 执行链接检查、格式、clippy、产品构建和完整测试；`fmt` 只处理所选 workspace 的成员，不格式化第三方路径依赖。`test -p` 是普通定向测试，不启动或预构建 Headless。完整产品测试先构建所选产品的程序，供真正的 CLI/宿主测试使用。
 
-EMU 的 `Source/Families` 核心由 xtask 分成独立 Cargo 构建/Clippy/测试单元，避免把 Artemis Lua 5.1 与 Manager Luau 等互斥运行时 feature 合并。动态核心仍在同一 Manager 进程运行；这不是进程隔离。静态组合与后续平台需要另外验证，不能用独立 DLL 的编译结果代替。
+EMU 的 `Source/Families` 成员（Musica、CMVS 等自有核心）由 xtask 分成独立 Cargo 构建/Clippy/测试单元，避免把互斥的运行时 feature 合并进 Manager 的依赖图。动态核心仍在同一 Manager 进程运行；这不是进程隔离。静态组合与后续平台需要另外验证，不能用独立 DLL 的编译结果代替。
+
+外部核心不是 EMU workspace 成员，`cargo xtask check --workspace emu` 不构建也不测试它们。适配代码全部位于各 fork `astra` 分支上的单个提交，主仓只固定 submodule。检查外部核心时在各自 fork manifest 上单独构建，`--target-dir` 指向盘符根下的短目录（发布工作流用 `t\<名称>`），以免嵌套原生构建超出 Windows MAX_PATH；测试把 `build` 换成 `test`，manifest、包名与 feature 不变：
+
+| 核心 | 命令 | 前置环境 | 产物 |
+| --- | --- | --- | --- |
+| rfvp | `cargo build --manifest-path Emulator/ThirdParty/rfvp/Cargo.toml --locked --release -p astra-emu-rfvp --features dynamic-plugin-export` | `ASTRA_SUBTITLE_VCPKG_ROOT` | `astra_emu_rfvp.dll`，另需 `fribidi-0.dll` |
+| siglus_rs | `cargo build --manifest-path Emulator/ThirdParty/siglus_rs/astra/astra-emu-siglus_rs/Cargo.toml --locked --release -p astra-emu-siglus_rs --features dynamic` | 无 | `astra_emu_siglus_rs.dll` |
+| art3m1s-core | `cargo build --manifest-path Emulator/ThirdParty/art3m1s-core/Cargo.toml --locked --release -p astra-emu-art3m1s-core` | `VCPKG_ROOT`（FFmpeg 9）、`LIBCLANG_PATH` | `astra_emu_art3m1s_core.dll`，另需 FFmpeg 9 DLL |
+| sena-rs | `cargo build --manifest-path Emulator/ThirdParty/sena-rs/Cargo.toml --locked --release -p astra-emu-sena-rs --features diagnostic-bridge` | 无 | `astra_emu_sena_rs.dll` |
+| ethornell-rs | `cargo build --manifest-path Emulator/ThirdParty/ethornell-rs/Cargo.toml --locked --release -p astra-emu-ethornell-rs --features diagnostic-bridge` | 无 | `astra_emu_ethornell_rs.dll` |
+| kirikiroid2-web | CMake `-DKRKR2_ASTRA_EMU=ON`，目标 `astra_emu_kirikiroid2_web`；测试 crate 为 `Emulator/ThirdParty/kirikiri2/astra/Cargo.toml`，步骤见 fork 的 `astra/README.md` | MSVC、WinFlexBison、KrKr vcpkg | `<build>/astra/astra_emu_kirikiroid2_web.dll`，另需 FFmpeg 3.3.9 DLL、`Resources/` 与 `vcomp140.dll` |
+
+外部核心的 plugin ID 等于上游仓库名，适配 crate 命名为 `astra-emu-<上游仓库名>`。Rust 适配统一以 Git 依赖固定 AstraEngine `6d9d691dcc8f3d768e40b5be1d6f37366cca62d8` 的 `astra-emu-abi`；EMU workspace 的 `[patch]` 把同一来源映射到本地路径，Android Manager 静态链接的 `astra-emu-rfvp` 也走这条映射。
 
 全量开发测试会产生较大的调试符号和增量缓存。CI 设置以下环境变量以控制空间，本地空间有限时也可使用；它们不改变 Release 配置。需要调试器符号时移除 debug 设置并重建。遇到 rustc/LLVM OOM 时先限制编译并发，不修改生产逻辑或跳过失败用例；GPU/窗口测试也应串行占用设备。
 
@@ -38,7 +51,7 @@ export CARGO_INCREMENTAL=0
 cargo xtask check --workspace engine
 ```
 
-只限制并发、保留已有 Debug 配置时，Engine/Editor 可执行 `cargo build --workspace -j 1`，再执行 `cargo test --workspace -j 1 -- --test-threads=1`；EMU 使用 `cargo xtask build --workspace emu`、`cargo xtask test --workspace emu`，或按核心分开执行 `cargo -p`，不要合并互斥 Lua 后端。完整检查与定向检查不要同时使用同一 target；先等前一项结束，或显式使用本工作树内的独占目录，不清理其他正在使用的构建目录。
+只限制并发、保留已有 Debug 配置时，Engine/Editor 可执行 `cargo build --workspace -j 1`，再执行 `cargo test --workspace -j 1 -- --test-threads=1`；EMU 使用 `cargo xtask build --workspace emu`、`cargo xtask test --workspace emu`，或按核心分开执行 `cargo -p`，不要合并互斥的运行时 feature。完整检查与定向检查不要同时使用同一 target；先等前一项结束，或显式使用本工作树内的独占目录，不清理其他正在使用的构建目录。
 
 ## 按改动选择验证
 
@@ -86,7 +99,7 @@ Native VN 的 GPU Headless 使用 `render_policy: checkpoints` 时，独立资�
 
 ## 核心适配与 Manager 日志
 
-适配优先启用核心现成的 GPU feature 和平台能力，仅修改嵌入入口、Family API 和必要生命周期边界；复用原生渲染、媒体、VM 及存档，不另建竞争路径。差异写入各 Family 的 MODIFICATIONS.md。CPU 最终帧是交付格式，不代表使用 CPU 渲染。
+适配优先启用核心现成的 GPU feature 和平台能力，仅修改嵌入入口、Family API 和必要生命周期边界；复用原生渲染、媒体、VM 及存档，不另建竞争路径。自有核心的差异写入各 Family 的 MODIFICATIONS.md，外部核心的差异写在其 fork `astra` 提交内的说明文件。CPU 最终帧是交付格式，不代表使用 CPU 渲染。
 
 动态核心通过 `astra-emu-abi` 的诊断桥接入 Manager，静态核心复用宿主 subscriber。按各核心说明启用动态导出 feature，将 `astra_emu_`（Unix 为 `libastra_emu_`）动态库及其依赖放入数据目录 `cores/`；Manager 冷启动扫描，按文件保留加载诊断。更新需替换文件并重启，不热加载，也不加载旧 abi_stable 协议。
 
@@ -94,7 +107,7 @@ Native VN 的 GPU Headless 使用 `render_policy: checkpoints` 时，独立资�
 
 ```sh
 RUST_LOG=info,astra_emu::family=debug astra-emu-manager
-cargo build --manifest-path Emulator/Cargo.toml --release -p astra-emu-fvp --features dynamic-plugin-export
+cargo build --manifest-path Emulator/ThirdParty/rfvp/Cargo.toml --locked --release -p astra-emu-rfvp --features dynamic-plugin-export --target-dir "$SHORT_TARGET_ROOT/rfvp"
 ```
 
 `core_target` 保留核心来源，`event` 是稳定事件名；`fields` 为有界结构化字段，超限字段计入 `dropped_fields`。日志桥不做内容脱敏或字符串白名单过滤，但产品日志仍不得主动记录游戏正文、路径或未经审计的整体 Debug 对象；若只看到 `family.unstructured_log`，应在对应核心根因边界增加安全的稳定事件和数值字段。日志桥初始化失败会阻止加载；读取损坏存档仍必须返回错误且保留原文件。

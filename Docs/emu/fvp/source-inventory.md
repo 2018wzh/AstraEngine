@@ -1,6 +1,6 @@
 # FVP Source Inventory
 
-本页索引完整 RFVP submodule 的原生模块与样本 metadata。当前固定提交和差异分类见 [MODIFICATIONS](../../../Emulator/Source/Families/astra-emu-fvp/MODIFICATIONS.md)，实现状态见[性能审计](../../status/performance-upstream-audit-2026-10-12.md)。
+本页索引完整 RFVP submodule 的原生模块与样本 metadata。当前固定提交和差异分类见 [MODIFICATIONS](https://github.com/2018wzh/rfvp/blob/95d3ee23548cb32e035aaaaeab2d309fc5d3020e/crates/astra-emu-rfvp/MODIFICATIONS.md)，实现状态见[性能审计](../../status/performance-upstream-audit-2026-10-12.md)。
 
 ## FVP 参考入口
 

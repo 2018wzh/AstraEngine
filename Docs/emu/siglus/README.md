@@ -15,7 +15,7 @@
 | [script-execution.md](script-execution.md) | VM 栈、调用、命令分发、等待边界 |
 | [presentation-and-media.md](presentation-and-media.md) | G00、OMV、OVK、OWP、NWA、Ogg、MPEG/WMV 的运行时口径 |
 | [gameexe-config.md](gameexe-config.md) | `Gameexe.dat`/`Gameexe.chs` 解析和配置表契约 |
-| [MODIFICATIONS](../../../Emulator/Source/Families/astra-emu-siglus/MODIFICATIONS.md) | 当前核心基线与必要嵌入差异 |
+| [MODIFICATIONS](https://github.com/2018wzh/siglus_rs/blob/04426d0384dd4e048b41fdd5b0508f0b92a77958/astra/MODIFICATIONS.md) | 当前核心基线与必要嵌入差异（fork `astra` 单提交，适配包 `astra-emu-siglus_rs`） |
 | [game-observations.md](game-observations.md) | anemoi 体験版与 Rewrite_PLUS 的本地结构化观测 |
 | [tooling.md](tooling.md) | 现有 probe 工具和安全使用边界 |
 | [实施计划](../../status/implementation-plan.md) | 当前整改顺序与验收条件 |

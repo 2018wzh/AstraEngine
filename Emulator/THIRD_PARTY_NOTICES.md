@@ -59,7 +59,7 @@ freely, subject to the following restrictions:
 
 ## ASS 字幕依赖
 
-`astra-subtitle` 使用 <https://github.com/libass/libass> 的 libass 0.17.4#1（ISC），原生依赖安装在独立 vcpkg 树中，使用 overlay triplet `x64-windows-static-md-dynbidi`（`Engine/Source/Runtime/astra-subtitle/triplets/`）：libass、FreeType、HarfBuzz、Brotli、bzip2、libpng、zlib 静态链接，只有 FriBidi 构建为 DLL。RFVP 原生源码的 manifest 与独立 lockfile 固定共享实现 `2018wzh/AstraEngine@c27ac6e107328170deecac428bba7472d3ce2d6c`；ABI 与 Kira 另行固定。打包时显式指定该实际安装的 `share/`，逐字保留以下 `copyright` 文件到 `licenses/subtitle/<port>/copyright`：
+`astra-subtitle` 使用 <https://github.com/libass/libass> 的 libass 0.17.4#1（ISC），原生依赖安装在独立 vcpkg 树中，使用 overlay triplet `x64-windows-static-md-dynbidi`（`Engine/Source/Runtime/astra-subtitle/triplets/`）：libass、FreeType、HarfBuzz、Brotli、bzip2、libpng、zlib 静态链接，只有 FriBidi 构建为 DLL。RFVP 原生源码的 manifest 与独立 lockfile 固定共享实现 `2018wzh/AstraEngine@6d9d691dcc8f3d768e40b5be1d6f37366cca62d8`；Kira 另行固定。打包时显式指定该实际安装的 `share/`，逐字保留以下 `copyright` 文件到 `licenses/subtitle/<port>/copyright`：
 
 - libass（ISC）、FreeType（本产品选择 FreeType License）、HarfBuzz（Old MIT 及其附带条款）；
 - FriBidi（LGPL-2.1）、Brotli（MIT）、bzip2、libpng、zlib。
@@ -70,32 +70,34 @@ FriBidi 以 `fribidi-0.dll` 动态链接，随使用字幕的 FVP 与 Musica 核
 
 ## AstraEMU C ABI v3
 
-外部核心的嵌入 manifest 与 KrKr 头文件均固定 [`2018wzh/AstraEngine@6799938dc33b25bcca4d9a11ddbea1366bf7d93c`](https://github.com/2018wzh/AstraEngine/commit/6799938dc33b25bcca4d9a11ddbea1366bf7d93c) 的 `astra-emu-abi`（C ABI v3）；Emulator 工作区内的核心经 `[patch]` 使用同一份本地源码。
+外部核心的 Rust 适配与 KrKr 头文件均固定 [`2018wzh/AstraEngine@6d9d691dcc8f3d768e40b5be1d6f37366cca62d8`](https://github.com/2018wzh/AstraEngine/commit/6d9d691dcc8f3d768e40b5be1d6f37366cca62d8) 的 `astra-emu-abi`（C ABI v3）。外部核心在各自 fork 的 manifest 上独立构建；Emulator 工作区只在 Android Manager 静态链接 `astra-emu-rfvp` 时经 `[patch]` 把同一来源映射到本地源码。
 
-## rfvp derivative used by astra-emu-fvp
+外部核心的适配代码全部位于 fork `astra` 分支上的单个提交，主仓不保留适配源码。plugin ID 等于上游仓库名，适配包命名为 `astra-emu-<上游仓库名>`。
+
+## rfvp derivative used by astra-emu-rfvp
 
 - Upstream: <https://github.com/xmoezzz/rfvp>
 - Upstream version: `0.6.0`, revision `af557db750c7833274f22a6d82b0dc33cdea2f85`
 - Native adaptation fork: <https://github.com/2018wzh/rfvp>
 - Native adaptation branch: `astra`
-- 当前 `astra` 与主仓 gitlink：[`1e947a5ccbd2c7a698bd30d48347454ef1b908a9`](https://github.com/2018wzh/rfvp/commit/1e947a5ccbd2c7a698bd30d48347454ef1b908a9)（C ABI v3 移植并删除 D3D12 交付，加 ABI pin），基于上一公开 revision [`ea8b5964fd5b6cde8186eff6a5da1607a3eb6a41`](https://github.com/2018wzh/rfvp/commit/ea8b5964fd5b6cde8186eff6a5da1607a3eb6a41)。历史单适配为 `478448ed9d60778f78d5de911fa5717c48cb201c`，其直接父提交为通用原生修复基线 `3359d8fbea3c53d6d262a9f71b6d4d79888c2368`；旧引用另存 Git bundle，不代表当前构建源码。
+- 当前 `astra` 与主仓 gitlink：[`95d3ee23548cb32e035aaaaeab2d309fc5d3020e`](https://github.com/2018wzh/rfvp/commit/95d3ee23548cb32e035aaaaeab2d309fc5d3020e)，即通用原生修复基线 `3359d8fbea3c53d6d262a9f71b6d4d79888c2368` 上的单个适配提交（`crates/astra-emu-rfvp`，C ABI v3 移植并删除 D3D12 交付，加 ABI pin）。此前的 `1e947a5ccbd2c7a698bd30d48347454ef1b908a9`、`ea8b5964fd5b6cde8186eff6a5da1607a3eb6a41` 与 `478448ed9d60778f78d5de911fa5717c48cb201c` 仅作历史记录，不代表当前构建源码。
 - License: Mozilla Public License 2.0.
 - Derivative source: <https://github.com/2018wzh/rfvp>
-- Astra wrapper source: `Emulator/Source/Families/astra-emu-fvp/`
-- 统一 C ABI 直接使用原生 App、VM、renderer、设备音频与保存。CPU lease 交付与类型化渲染尺寸（C ABI v3 `render_extent`）位于核心薄嵌入层；主仓 Family 不再实现 Hosted Tick、Host PCM 或另一套游戏执行。当前原生 typed 配置支持按原 HCB 偏移索引的 UTF-8 翻译表及 movie/BGM ASS 映射，字幕使用显式字体和原媒体时钟绘入场景，沿暂停、结束、seek/读档与尺寸变化更新。
+- Astra adapter source: fork 内 `crates/astra-emu-rfvp/`
+- 统一 C ABI 直接使用原生 App、VM、renderer、设备音频与保存。CPU lease 交付与类型化渲染尺寸（C ABI v3 `render_extent`）位于核心薄嵌入层；主仓不实现 Hosted Tick、Host PCM 或另一套游戏执行。当前原生 typed 配置支持按原 HCB 偏移索引的 UTF-8 翻译表及 movie/BGM ASS 映射，字幕使用显式字体和原媒体时钟绘入场景，沿暂停、结束、seek/读档与尺寸变化更新。
 
 发布时提供与二进制对应的 MPL-2.0 covered source、修改说明和完整许可证，可随包分发源码或提供有效的 source offer。
 
-完整 fork 以 Git submodule 固定在 `Emulator/ThirdParty/rfvp/`。文件级变化与覆盖范围见该 Family 的 `MODIFICATIONS.md` 与 `THIRD_PARTY_NOTICES.md`。当前原生字体构造嵌入上游四个 MS 命名字体文件，由上游 [`xmoezzz/rfvp@f60d8660`](https://github.com/xmoezzz/rfvp/commit/f60d8660d800fe16a4da485ef50e010e7b1ec2e5) 加入，存在于上游基线 `af557db750c7833274f22a6d82b0dc33cdea2f85`；二进制按上游原样随核心发布。
+完整 fork 以 Git submodule 固定在 `Emulator/ThirdParty/rfvp/`。文件级变化与覆盖范围见 fork 的 `crates/astra-emu-rfvp/MODIFICATIONS.md` 与 `THIRD_PARTY_NOTICES.md`，二者随核心目录发布。当前原生字体构造嵌入上游四个 MS 命名字体文件，由上游 [`xmoezzz/rfvp@f60d8660`](https://github.com/xmoezzz/rfvp/commit/f60d8660d800fe16a4da485ef50e010e7b1ec2e5) 加入，存在于上游基线 `af557db750c7833274f22a6d82b0dc33cdea2f85`；二进制按上游原样随核心发布。
 
 ## KrKr native development bundle
 
 - Upstream: <https://github.com/fenghengzhi/kirikiroid2-web>
 - Fixed upstream revision: `7105b50822097d11b7b1f5894bf541509fd51350`。
-- 固定 fork revision：[`2532a699b260488db32b32739f9648858c00a9a4`](https://github.com/2018wzh/kirikiroid2-web/commit/2532a699b260488db32b32739f9648858c00a9a4)，发布分支 `astra`；其父提交 `5b2eccd0a51b6b47bb845f48acfd12bd2167c477` 为 WindowEx overlay owner 初始化修复。
+- 固定 fork revision：[`e681590a1075cb4be4e9d41d99cffc2cdba01bc3`](https://github.com/2018wzh/kirikiroid2-web/commit/e681590a1075cb4be4e9d41d99cffc2cdba01bc3)，发布分支 `astra`；它是上游基线 `7105b508` 上的单个适配提交，包含 `astra/` 适配（C++ 在 `astra/native`）、`KRKR2_ASTRA_EMU` CMake 选项与 WindowEx overlay owner 初始化修复。此前的 `2532a699b260488db32b32739f9648858c00a9a4` 仅作历史记录。
 - 完整 fork 保留独立的 Windows 构建、可重入生命周期、游戏路径缓存与 WindowEx overlay owner 初始化修复。C++ 嵌入适配直接导出统一 ABI，删除 child/IPC，沿用原生 XP3/PSB/KBAD 与字体路径。Release 的实际游戏流程仍由用户人工验收。
-- 运行包保留完整核心的实际 `LICENSE`、本仓 KrKr 适配说明及构建依赖的 copyright 文件；没有独立许可文本的文件不补造许可证。根许可包含多个组件的实际条款，不用上游 README 的 MIT 概述替代。
-- FFmpeg 3.3.9（LGPL-2.1）改为动态链接：`2532a699` 让 libbpg 经公开的 `avcodec_find_decoder_by_name("hevc")` 取得 HEVC 解码器，取代私有符号 `ff_hevc_decoder`，并删除 Windows port 的静态限制。`avcodec-57.dll` 等 FFmpeg DLL 随 KrKr 核心放在其核心目录，可由用户替换。Release 资产附 LGPL-2.1 文本与 FFmpeg 3.3.9 对应源码包（原始归档与 fork 内 `vcpkg/ports/ffmpeg`）。
+- 运行包保留完整核心的实际 `LICENSE`、fork 的 `astra/README.md` 适配说明、layerExImage 与 DroidSansFallback 许可及构建依赖的 copyright 文件；没有独立许可文本的文件不补造许可证。根许可包含多个组件的实际条款，不用上游 README 的 MIT 概述替代。
+- FFmpeg 3.3.9（LGPL-2.1）改为动态链接：适配提交让 libbpg 经公开的 `avcodec_find_decoder_by_name("hevc")` 取得 HEVC 解码器，取代私有符号 `ff_hevc_decoder`，并删除 Windows port 的静态限制。`avcodec-57.dll` 等 FFmpeg DLL 随 KrKr 核心放在其核心目录，可由用户替换。Release 资产附 LGPL-2.1 文本与 FFmpeg 3.3.9 对应源码包（原始归档与 fork 内 `vcpkg/ports/ffmpeg`）。
 - 包根的 VC runtime 与 KrKr 核心目录内的 OpenMP runtime（`vcomp140.dll`）取自 MSVC redist。
 
 ## Noto 字体
@@ -112,7 +114,7 @@ Musica 编译期嵌入 Noto Sans JP 与 Noto Sans SC，使用 SIL Open Font Lice
 
 ## WMV decoder
 
-FVP 使用完整 RFVP fork 中的原生 `crates/na_wmv_player` 及原 Movie 路径处理 ASF/WMV/WMA，不再直接依赖主仓 `Emulator/Source/Families/na_wmv_player`。原生 decoder 清单没有独立 license 字段，须保留完整 fork 许可与来源，并在分发前核实实际覆盖范围，不能从 FFmpeg 算法名称推断额外授权。主仓旧独立 decoder/工具的来源和许可不明问题仍保留在其 `THIRD_PARTY_NOTICES.md`，不能混称为当前 FVP 的直接依赖。打包复制当前 Family 的说明与完整 RFVP 许可，不再附加旧 decoder 的错误归因。
+FVP 使用完整 RFVP fork 中的原生 `crates/na_wmv_player` 及原 Movie 路径处理 ASF/WMV/WMA，不再直接依赖主仓 `Emulator/Source/Families/na_wmv_player`。原生 decoder 清单没有独立 license 字段，须保留完整 fork 许可与来源，并在分发前核实实际覆盖范围，不能从 FFmpeg 算法名称推断额外授权。主仓旧独立 decoder/工具的来源和许可不明问题仍保留在其 `THIRD_PARTY_NOTICES.md`，不能混称为当前 FVP 的直接依赖。打包复制 fork 内 `crates/astra-emu-rfvp/` 的说明与完整 RFVP 许可，不再附加旧 decoder 的错误归因。
 
 ## Anime4K
 
@@ -133,11 +135,11 @@ FVP 使用完整 RFVP fork 中的原生 `crates/na_wmv_player` 及原 Movie 路�
 
 - CPAL 0.18.2：<https://github.com/RustAudio/cpal/releases/tag/v0.18.2>，Apache-2.0，Musica 的原生设备 owner 使用该版本；Manager 不再拥有核心 PCM 输出。
 - CPAL 0.15.3：`2018wzh/cpal@ecfda841a9140d60bbec1630d47ca91f1a77b8f3`，保留 WASAPI 关闭修复并将 ALSA 依赖对齐到 0.11。完整源码与 Apache-2.0 许可位于 `ThirdParty/cpal`。
-- Kira 保留各核心原版本，独立 fork 修复 decoder/device worker 的显式关闭。Musica/Artemis 使用 0.12.2 `7d8961b20bce2ab8fd43b4bb34150d7e2898785c`；RFVP 使用 0.10.8 `d2f10db15d9c451c7b2fd33043ae7732e75bee5d`；Siglus 嵌套 0.9.6 `a299b42690094a71885f6ed97dc504c4038da9a7`；Sena 使用 0.12.1 `523790dbb7ddea5ca432f375a9f3180923f2ea1e`。来源均为 <https://github.com/2018wzh/kira>，保留 MIT/Apache-2.0 文本和修改说明。
+- Kira 保留各核心原版本，独立 fork 修复 decoder/device worker 的显式关闭。Musica/Artemis 使用 0.12.2 `7d8961b20bce2ab8fd43b4bb34150d7e2898785c`；RFVP 使用 0.10.8 `d2f10db15d9c451c7b2fd33043ae7732e75bee5d`；Siglus 嵌套 0.9.6 `a299b42690094a71885f6ed97dc504c4038da9a7`；Sena 使用 0.12.1 `523790dbb7ddea5ca432f375a9f3180923f2ea1e`；Ethornell 使用 0.8.7 `da8668fcd5e543eec2e9ea9871b310276e09fdc5`。来源均为 <https://github.com/2018wzh/kira>，保留 MIT/Apache-2.0 文本和修改说明。
 
 ## 其他原生核心
 
-- Siglus：当前 `astra` 与主仓 gitlink 为 [`2018wzh/siglus_rs@85c3a389577e61e3ccccde3d1c84de8bc19b7678`](https://github.com/2018wzh/siglus_rs/commit/85c3a389577e61e3ccccde3d1c84de8bc19b7678)（ABI 3 移植加 ABI pin，基于上一公开 revision `23d082a76dfcb071224056858c49abd53f63cbc3`）；历史适配为 `a94565cccd4f6d5e0a341e5732c5d98e9de2c71f`、通用历史基线为 `13b55b47484faf8dfe03deb6ffd56ca0ec4ba3f2`；MPL-2.0，完整源码及嵌套 Kira 位于 `ThirdParty/siglus_rs`。当前原生配置支持 original/chs 成对资源、G01/movie 选择及独立保存根，不执行 wrapper 机器码补丁或补造缺失字体。来源与输入边界改动见 Family 的 `MODIFICATIONS.md`。
-- Artemis：当前公开 `astra` 与主仓 gitlink 为 [`2018wzh/art3m1s-core@be82d5e0bbafcef55a530f69e5b9358094dbd671`](https://github.com/2018wzh/art3m1s-core/commit/be82d5e0bbafcef55a530f69e5b9358094dbd671)，历史适配为 `ae967d8446fe99b97f6e1df93fb1b61d8ada2040`；MPL-2.0，保留原生 Lua 5.1/Vulkan/FFmpeg 与完整来源，见 `ThirdParty/art3m1s-core/LICENSE`。当前 `extra_archive` 直接消费显式额外 PFS，保留基包及原覆盖顺序。
-- Sena：SoftPAL 引擎的模拟器，上游 <https://github.com/xmoezzz/sena-rs>，通用历史基线 `5fd1a8e37600fb917e053f633671560df9ca42a7`、历史单适配 `8465e2818842b95aeb37424104e3ab95feff777d`；当前 `astra` 与主仓 gitlink 为 [`2018wzh/sena-rs@e4e708be94ddecf99741a1177bede5ed296d21f5`](https://github.com/2018wzh/sena-rs/commit/e4e708be94ddecf99741a1177bede5ed296d21f5)（ABI 3 适配加 ABI pin，基于上一公开 revision `277b83a10a7a81e4dce2c1c736b412628028edf1`）。基线包含新会话读档后重新启用保存的修复；当前嵌入配置提供 `text_language=jp/cn/tc`，原生选择多语言记录字段并保留原日文单字段行为，字体由原生游戏字体路径或独立原生配置的显式字体文件提供；光栅尺寸经 C ABI v3 `render_extent` 请求。完整 MPL-2.0 许可位于 `ThirdParty/sena-rs/LICENSE-MPL-2.0`。支持范围仍为原生及 Steam Koikake，未扩大到其他 SoftPAL。
-- Ethornell：上游 <https://github.com/xmoezzz/ethornell-rs>，workspace manifest 声明 `license = "MPL-2.0"`，仓库本身未附许可文本；Release 的 Ethornell 核心目录附 MPL-2.0 全文（`licenses/ethornell-rs/LICENSE-MPL-2.0`）与 fork 的 `MODIFICATIONS.md`。适配源码发布于 [2018wzh/ethornell-rs 的 astra](https://github.com/2018wzh/ethornell-rs/tree/astra)，当前 `astra` 与主仓 gitlink 为 [`44801f7901199af208410131db757204981519ce`](https://github.com/2018wzh/ethornell-rs/commit/44801f7901199af208410131db757204981519ce)（ABI 3 适配加 ABI pin，基于上一公开 revision `1ebd4337af25437560f1ccff16bab2c6427396f3`）；`e8adc0ca57d163cd9718c157d3f9c106aaf4fde0` 与旧 Release 运行代码 `b6991511b57d8031be14f366732c5f1974937c42` 仅作历史记录。当前原生能力包括仅作用于显示文本的 GBK 解码选择和每 runtime 显式字体，不代表未知补丁 handler、字体注册或资源优先级已经闭合。二进制随 Release 发布，源码以 `Emulator/ThirdParty/ethornell-rs` submodule 固定。
+- Siglus：当前 `astra` 与主仓 gitlink 为 [`2018wzh/siglus_rs@04426d0384dd4e048b41fdd5b0508f0b92a77958`](https://github.com/2018wzh/siglus_rs/commit/04426d0384dd4e048b41fdd5b0508f0b92a77958)，即通用基线 `13b55b47484faf8dfe03deb6ffd56ca0ec4ba3f2` 上的单个适配提交（`astra/astra-emu-siglus_rs`，独立 workspace 与 lockfile）；`85c3a389577e61e3ccccde3d1c84de8bc19b7678`、`a94565cccd4f6d5e0a341e5732c5d98e9de2c71f` 仅作历史记录。MPL-2.0，完整源码及嵌套 Kira、eluna_rs 位于 `ThirdParty/siglus_rs`。当前原生配置支持 original/chs 成对资源、G01/movie 选择及独立保存根，不执行 wrapper 机器码补丁或补造缺失字体。来源与输入边界改动见 fork 的 `astra/MODIFICATIONS.md` 与 `astra/THIRD_PARTY_NOTICES.md`。
+- Artemis：当前公开 `astra` 与主仓 gitlink 为 [`2018wzh/art3m1s-core@5c83084d55573855713feefa949be24f0ae6baee`](https://github.com/2018wzh/art3m1s-core/commit/5c83084d55573855713feefa949be24f0ae6baee)，即基线 `ad90a62cb192b119b7cf8589aa7f87a94bd747c8` 上的单个适配提交（`crates/astra-emu-art3m1s-core`，fork 根 workspace 成员）；`be82d5e0bbafcef55a530f69e5b9358094dbd671`、`ae967d8446fe99b97f6e1df93fb1b61d8ada2040` 仅作历史记录。MPL-2.0，保留原生 Lua 5.1/Vulkan/FFmpeg 与完整来源，见 `ThirdParty/art3m1s-core/LICENSE` 与 `crates/pf8/LICENSE`；差异见 fork 的 `crates/astra-emu-art3m1s-core/MODIFICATIONS.md`。当前 `extra_archive` 直接消费显式额外 PFS，保留基包及原覆盖顺序。
+- Sena：SoftPAL 引擎的模拟器，上游 <https://github.com/xmoezzz/sena-rs>；当前 `astra` 与主仓 gitlink 为 [`2018wzh/sena-rs@6693a0d84d6adb0672817c8486111c165279ea46`](https://github.com/2018wzh/sena-rs/commit/6693a0d84d6adb0672817c8486111c165279ea46)，即通用基线 `5fd1a8e37600fb917e053f633671560df9ca42a7` 上的单个适配提交（`crates/astra-emu-sena-rs`）；`e4e708be94ddecf99741a1177bede5ed296d21f5`、`8465e2818842b95aeb37424104e3ab95feff777d` 仅作历史记录。基线包含新会话读档后重新启用保存的修复；当前嵌入配置提供 `text_language=jp/cn/tc`，原生选择多语言记录字段并保留原日文单字段行为，字体由原生游戏字体路径或独立原生配置的显式字体文件提供；光栅尺寸经 C ABI v3 `render_extent` 请求。完整 MPL-2.0 许可位于 `ThirdParty/sena-rs/LICENSE-MPL-2.0`。支持范围仍为原生及 Steam Koikake，未扩大到其他 SoftPAL。
+- Ethornell：上游 <https://github.com/xmoezzz/ethornell-rs>，workspace manifest 声明 `license = "MPL-2.0"`，上游仓库本身未附许可文本，fork 的适配提交在根目录加入 MPL-2.0 全文 `LICENSE-MPL-2.0`；Release 的 Ethornell 核心目录附该全文（`licenses/ethornell-rs/LICENSE-MPL-2.0`）与 fork 的 `MODIFICATIONS.md`。适配源码发布于 [2018wzh/ethornell-rs 的 astra](https://github.com/2018wzh/ethornell-rs/tree/astra)，当前 `astra` 与主仓 gitlink 为 [`e1fd89dbc4d6a2f3b15aa882deea2ade73020e42`](https://github.com/2018wzh/ethornell-rs/commit/e1fd89dbc4d6a2f3b15aa882deea2ade73020e42)，即上游 `6550460beb2012781cdaffdf18da59780de422ef` 上的单个适配提交（`crates/astra-emu-ethornell-rs`）；`44801f7901199af208410131db757204981519ce`、`e8adc0ca57d163cd9718c157d3f9c106aaf4fde0` 与旧 Release 运行代码 `b6991511b57d8031be14f366732c5f1974937c42` 仅作历史记录。当前原生能力包括仅作用于显示文本的 GBK 解码选择和每 runtime 显式字体，不代表未知补丁 handler、字体注册或资源优先级已经闭合。二进制随 Release 发布，源码以 `Emulator/ThirdParty/ethornell-rs` submodule 固定。

@@ -20,7 +20,7 @@ NativeVN 的原生宿主与 Headless 共用物理输入到 UI request/completion
 
 本轮 Windows 验收按用户最新决定缩小为“可玩”，并统一改为 Release 人工手动验收。用户自行进入剧情、连续操作、检查基本菜单与存读档、退出重开；不要求每核心结局或正式性能对照。停止自动操作窗口，移除为本轮自动化验收增加的入口、驱动、截图/输入脚本和测试钩子，保留生产修复及普通逻辑测试。BGI 按用户明确确认记为人工验收通过，不再重复验证；其余核心的 Release 构建不等于人工通过。CMVS 不动。
 
-引擎身份与模拟器身份分离：ABI 的 `family_id` 表示原版引擎，`plugin_id` 表示模拟器实现。同一引擎允许安装多个不同 plugin ID 的模拟器；重复 plugin ID 仍拒绝。Sena 的引擎为 `softpal`，模拟器标识保持 `sena-native-koikake`，不扩大其游戏兼容范围，也不改变原生存档身份。
+引擎身份与模拟器身份分离：ABI 的 `family_id` 表示原版引擎，`plugin_id` 表示模拟器实现。同一引擎允许安装多个不同 plugin ID 的模拟器；重复 plugin ID 仍拒绝。模拟器 plugin ID 使用上游仓库名称：`rfvp`、`siglus_rs`、`art3m1s-core`、`sena-rs`、`ethornell-rs`、`kirikiroid2-web`；Musica 是自有引擎，保持 `astra.emu.musica`。Manager 在 schema 5→6 升级时把旧 ID 的模拟器配置与按游戏的模拟器选择改到新 ID。Sena 的引擎为 `softpal`，改 ID 不扩大其游戏兼容范围，也不改变原生存档身份。
 
 Manager 在每个游戏的设置中持久保存模拟器选择，配置继续按 plugin ID 和游戏/默认范围独立保存。重新扫描或重启保留选择；已选模拟器缺失时要求用户明确替换，不能自动换用其他实现。重置输入映射不清除模拟器选择。资料库 schema 4 升级到 5 时只迁移原 `sena` 引擎标识，保留游戏、元数据、配置及输入设置。
 
@@ -166,7 +166,7 @@ Musica 的原生 stage 以完整资源序列、参考坐标、背景与立绘参
 
 Musica 的高清纹理替换只在私有 `key.toml`（`MusicaKeyFile`）中声明 `texture_overrides` 映射：键是已挂载的 `musica:/` 原资源 URI，值是游戏目录内安全的 PNG 相对路径。启动时先验证原资源、ANI 原点和受支持的帧数，首次使用再解码原资源并按映射读取替换像素；替换像素只改变物理纹理，不改变脚本坐标、裁剪、命中区域、存档或 VM 时间。静态 PNG 和单帧 ANI 可以使用 PNG 替换，多帧 ANI、SQZ 及其他格式明确拒绝，不能只替换动画首帧后继续运行。缺失、越界、路径不安全、帧数不匹配或不支持的格式都返回诊断，不静默回退到原图。原生与替换像素使用同一个 SDK `TextureCache`，以不同身份键区分，随同一缓存的有界淘汰释放；替换素材只存在于 ignored 私有工作区。Family 负责 Musica 归档 URI 和 ANI 规则，SDK 只提供通用纹理帧与逻辑/物理尺寸类型。
 
-外部核心采用 upstream → 通用原生修复基线 → astra → 主仓精确 pin。通用修复与必要嵌入适配分别提交；RFVP、Siglus 等已整理的适配相对其通用基线保持单提交。分支名不代替精确 revision，许可证、MODIFICATIONS、gitlink 与 metadata 保持一致。本次用户明确批准将自有 `astra` 强推覆盖为当前 Release 源码并清理临时分支；操作使用 lease，旧引用先存本地 Git bundle，不改上游或他人分支。
+外部核心采用 upstream → 通用原生修复基线 → astra → 主仓精确 pin。通用修复与必要嵌入适配分别提交；六个外部核心（RFVP、Siglus、Artemis、Sena、Ethornell、KrKr）的全部适配代码都位于 fork `astra` 分支上、相对上游基线的单个提交，包括适配包、构建入口、修改说明与许可补充。适配包命名为 `astra-emu-<上游仓库名>`，与 plugin ID 使用同一上游仓库名。主仓不保留外部核心的适配代码，只固定 submodule，并在发布工作流中从 fork manifest 构建、打包。分支名不代替精确 revision，许可证、MODIFICATIONS、gitlink 与 metadata 保持一致。本次用户明确批准将自有 `astra` 强推覆盖为当前 Release 源码并清理临时分支；操作使用 lease，旧引用先存本地 Git bundle，不改上游或他人分支。
 
 外部核心的 ABI 导出、描述/配置、原生会话包装、Surface 输出、Hook 接线、日志与必要平台桥放在薄嵌入层，复用其 VM、renderer、decoder、调度、音频与存档；Manager 不维护第二套游戏执行实现。帧池、协议包装和通用同步辅助可复用 SDK，但不强迫外部核心采用 SDK 运行层。上游功能缺陷独立归因，适配回归在适配内修复。
 

@@ -14,7 +14,7 @@ R01–R08 已实现并运行相关回归，三个 fork 的 `astra` 分支已发�
 | Siglus 1.0.0 | `5f358ef1360b0439e92aed2b749e8f25d8721954` | `29fb9582751fc8ddfc23b374d428d6eba30bcb40` | 14 文件，+646/−74 |
 | Artemis 0.4.0 | `ad90a62cb192b119b7cf8589aa7f87a94bd747c8` | `ae967d8446fe99b97f6e1df93fb1b61d8ada2040` | 18 文件，+1560/−279 |
 
-规模包含清单、lockfile 与测试，不代表纯性能代码量。详细差异和来源见 [FVP](../../Emulator/Source/Families/astra-emu-fvp/MODIFICATIONS.md)、[Siglus](../../Emulator/Source/Families/astra-emu-siglus/MODIFICATIONS.md)、[Artemis](../../Emulator/Source/Families/astra-emu-artemis/MODIFICATIONS.md)。来源、默认分支及已发布提交保留。
+规模包含清单、lockfile 与测试，不代表纯性能代码量。详细差异和来源见各 fork `astra` 适配提交内的 [FVP](https://github.com/2018wzh/rfvp/blob/95d3ee23548cb32e035aaaaeab2d309fc5d3020e/crates/astra-emu-rfvp/MODIFICATIONS.md)、[Siglus](https://github.com/2018wzh/siglus_rs/blob/04426d0384dd4e048b41fdd5b0508f0b92a77958/astra/MODIFICATIONS.md)、[Artemis](https://github.com/2018wzh/art3m1s-core/blob/5c83084d55573855713feefa949be24f0ae6baee/crates/astra-emu-art3m1s-core/MODIFICATIONS.md)；审计时的主仓包装已删除。来源、默认分支及已发布提交保留。
 
 ## 整改结果
 
