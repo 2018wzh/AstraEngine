@@ -208,6 +208,14 @@ fn exact_text(code: &str) -> Option<(&'static str, &'static str)> {
         "ASTRA_EMU_METADATA_CACHE_INVALID" => {
             ("元数据内容无效", "同步到的数据无法解析，已保留原有数据。")
         }
+        "ASTRA_EMU_METADATA_REQUEST_REJECTED" => (
+            "作品资料服务拒绝了请求",
+            "VNDB 不接受这次查询。请更新 AstraEMU 后重试，仍失败请反馈问题。",
+        ),
+        "ASTRA_EMU_METADATA_RATE_LIMITED" => (
+            "作品资料请求过于频繁",
+            "VNDB 或 Bangumi 暂时限制了请求，请稍后再试。",
+        ),
         "ASTRA_EMU_PRESET_INVALID" => (
             "推荐配置无法套用",
             "其中有当前模拟器不支持的设置项或取值，已恢复原来的设置。",

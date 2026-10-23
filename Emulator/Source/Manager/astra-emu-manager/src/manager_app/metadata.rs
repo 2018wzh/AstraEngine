@@ -261,8 +261,16 @@ impl AstraEmuManagerController {
                 if snapshot.remote_id != identity.remote_id {
                     return Err("ASTRA_EMU_METADATA_SNAPSHOT_IDENTITY_MISMATCH".into());
                 }
-                serde_json::from_str(&snapshot.metadata_json)
-                    .map_err(|_| "ASTRA_EMU_METADATA_SNAPSHOT_INVALID".to_owned())
+                let mut record: MetadataRecord = serde_json::from_str(&snapshot.metadata_json)
+                    .map_err(|_| "ASTRA_EMU_METADATA_SNAPSHOT_INVALID".to_owned())?;
+                // Snapshots fetched before VNDB formatting was converted still
+                // carry raw BBCode; conversion is idempotent for newer ones.
+                if record.provider == MetadataProviderId::Vndb {
+                    record.description = record
+                        .description
+                        .map(|description| plain_description(&description));
+                }
+                Ok(record)
             })
             .transpose()
     }

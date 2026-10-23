@@ -33,7 +33,7 @@ pub use matcher::{match_metadata, normalize_title, MatchInput, MATCHER_VERSION};
 pub use model::*;
 pub use presets::{parse_preset_database, Preset, PresetDatabase, PRESET_DATABASE_SCHEMA_VERSION};
 pub use sync::{MetadataSyncClient, SyncOutcome, DEFAULT_METADATA_BASE_URL};
-pub use vndb::{VndbProvider, VndbProviderConfig};
+pub use vndb::{plain_description, VndbProvider, VndbProviderConfig};
 
 #[allow(async_fn_in_trait)]
 pub trait MetadataProvider: Send + Sync {

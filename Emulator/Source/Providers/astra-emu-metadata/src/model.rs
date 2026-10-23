@@ -164,6 +164,8 @@ pub enum MetadataError {
     RateLimited,
     #[error("ASTRA_EMU_METADATA_UNAUTHORIZED")]
     Unauthorized,
+    #[error("ASTRA_EMU_METADATA_REQUEST_REJECTED: {0}")]
+    RequestRejected(&'static str),
     #[error("ASTRA_EMU_METADATA_SCHEMA_MISMATCH: {0}")]
     SchemaMismatch(&'static str),
     #[error("ASTRA_EMU_METADATA_NETWORK: {0}")]

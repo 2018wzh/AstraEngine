@@ -24,8 +24,8 @@ use astra_emu_manager_ui_slint::{
     AppearanceViewModel, ConfigFieldViewModel, GamepadBindingViewModel, ManagerViewModel,
 };
 use astra_emu_metadata::{
-    BangumiPlayStatus, BangumiPlayUpdate, CompatibilityEntry, CoverAsset, MetadataProviderId,
-    MetadataRecord, MetadataSearchQuery, DEFAULT_METADATA_BASE_URL,
+    plain_description, BangumiPlayStatus, BangumiPlayUpdate, CompatibilityEntry, CoverAsset,
+    MetadataProviderId, MetadataRecord, MetadataSearchQuery, DEFAULT_METADATA_BASE_URL,
 };
 use astra_emu_translation::{
     OpenAiApi, SecretResolver, TranslationProfile, TranslationProvider,
