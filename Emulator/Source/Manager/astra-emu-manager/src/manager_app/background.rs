@@ -92,9 +92,7 @@ impl AstraEmuManagerController {
 
     /// Load cores on first use, then scan every configured root.
     pub(super) fn prepare_library(&mut self) -> Result<ManagerViewModel, String> {
-        if self.active.is_some() {
-            return Err("ASTRA_EMU_FAMILY_SESSION_ALREADY_ACTIVE".into());
-        }
+        self.ensure_owner_idle()?;
         match self.startup_state {
             StartupState::Waiting => {
                 self.refresh_cores()?;

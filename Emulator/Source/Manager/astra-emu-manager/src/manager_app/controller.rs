@@ -163,9 +163,7 @@ impl ManagerController for AstraEmuManagerController {
         self.handle_physical_event(event)
     }
     fn is_game_active(&self) -> bool {
-        self.active
-            .as_ref()
-            .is_some_and(|active| active.closing.is_none())
+        self.session_running()
     }
     fn model(&self) -> Result<ManagerViewModel, String> {
         AstraEmuManagerController::model(self)

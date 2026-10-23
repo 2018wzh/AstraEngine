@@ -3,9 +3,7 @@ use super::*;
 impl AstraEmuManagerController {
     /// Persist the directory as a library root, then import it (loading cores first if needed).
     pub(super) fn add_game_directory(&mut self, path: &Path) -> Result<ManagerViewModel, String> {
-        if self.active.is_some() {
-            return Err("ASTRA_EMU_FAMILY_SESSION_ALREADY_ACTIVE".into());
-        }
+        self.ensure_owner_idle()?;
         if self.startup_busy() {
             return Err("ASTRA_EMU_PREPARE_BUSY".into());
         }
@@ -82,7 +80,7 @@ impl AstraEmuManagerController {
             .as_ref()
             .is_some_and(|active| active.game_id == game_id)
         {
-            return Err("ASTRA_EMU_FAMILY_SESSION_ALREADY_ACTIVE".into());
+            self.ensure_owner_idle()?;
         }
         let game = self.game(game_id)?;
         self.library

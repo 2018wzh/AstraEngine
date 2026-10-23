@@ -5,7 +5,7 @@ const MUSICA_PLUGIN: &str = "astra.emu.musica";
 
 impl AstraEmuManagerController {
     pub(super) fn ensure_no_session(&self) -> Result<(), String> {
-        if self.active.is_some() {
+        if self.session_running() {
             return Err("ASTRA_EMU_FAMILY_SESSION_ALREADY_ACTIVE".into());
         }
         Ok(())

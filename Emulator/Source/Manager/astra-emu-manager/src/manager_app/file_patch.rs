@@ -119,8 +119,10 @@ impl AstraEmuManagerController {
             && self.cores_ready()
             && self.selected_case_id.is_some();
         if view.phase.is_empty() && !view.can_start {
-            view.phase = if self.active.is_some() {
+            view.phase = if self.session_running() {
                 "结束游戏后才能应用文件补丁".into()
+            } else if self.active.is_some() {
+                "游戏正在关闭，请稍候".into()
             } else if self.startup_busy() {
                 "请等待资料库准备完成".into()
             } else if !self.cores_ready() {
@@ -227,9 +229,7 @@ impl AstraEmuManagerController {
         if self.patch_busy() {
             return Err("ASTRA_EMU_PATCH_INVALID_REQUEST: 已有文件补丁任务或导入正在进行".into());
         }
-        if self.active.is_some() {
-            return Err("ASTRA_EMU_FAMILY_SESSION_ALREADY_ACTIVE".into());
-        }
+        self.ensure_owner_idle()?;
         if self.startup_busy() {
             return Err("ASTRA_EMU_FAMILY_INITIALIZING".into());
         }

@@ -16,7 +16,7 @@ impl AstraEmuManagerController {
     }
 
     pub(super) fn select_case(&mut self, case_id: &str) -> Result<ManagerViewModel, String> {
-        if self.active.is_some() {
+        if self.session_running() {
             return Err("ASTRA_EMU_FAMILY_SESSION_ALREADY_ACTIVE".into());
         }
         if case_id.is_empty() {
@@ -52,9 +52,7 @@ impl AstraEmuManagerController {
             );
         }
         tracing::info!(event = "astra.emu.manager.launch.opening");
-        if self.active.is_some() {
-            return Err("ASTRA_EMU_FAMILY_SESSION_ALREADY_ACTIVE".into());
-        }
+        self.ensure_owner_idle()?;
         if self.startup_busy() || !self.cores_ready() {
             return Err("ASTRA_EMU_FAMILY_INITIALIZING".into());
         }

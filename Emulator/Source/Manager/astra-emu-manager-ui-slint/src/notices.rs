@@ -85,6 +85,7 @@ fn exact_text(code: &str) -> Option<(&'static str, &'static str)> {
         "ASTRA_EMU_FAMILY_SESSION_ALREADY_ACTIVE" => {
             ("已有游戏正在运行", "请先返回游戏库结束当前游戏。")
         }
+        "ASTRA_EMU_SESSION_CLOSING" => ("游戏正在关闭，请稍候", "核心释放完成后即可继续操作。"),
         "ASTRA_EMU_FAMILY_PROBE_REQUIRED" => ("这部作品尚未识别", "请重新扫描游戏目录。"),
         "ASTRA_EMU_FAMILY_PROVIDER_SELECTION_REQUIRED" => (
             "需要选择模拟器",

@@ -282,8 +282,8 @@ impl AstraEmuManagerController {
 
     /// Mapping for the gamepad pump: the running game's mapping, else the global one.
     pub(super) fn input_mapping(&self) -> astra_emu_manager_core::InputMapping {
-        match (&self.active, &self.session_mapping) {
-            (Some(_), Some(mapping)) => mapping.clone(),
+        match &self.session_mapping {
+            Some(mapping) if self.session_running() => mapping.clone(),
             _ => self.input_mapping.clone(),
         }
     }
