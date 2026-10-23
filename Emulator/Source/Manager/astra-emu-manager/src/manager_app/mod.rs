@@ -3,7 +3,7 @@ use crate::{
     text_service::TextReplacementBridge,
 };
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     env, fs,
     path::{Path, PathBuf},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -24,8 +24,9 @@ use astra_emu_manager_ui_slint::{
     AppearanceViewModel, ConfigFieldViewModel, GamepadBindingViewModel, ManagerViewModel,
 };
 use astra_emu_metadata::{
-    plain_description, BangumiPlayStatus, BangumiPlayUpdate, CompatibilityEntry, CoverAsset,
-    MetadataProviderId, MetadataRecord, MetadataSearchQuery, DEFAULT_METADATA_BASE_URL,
+    plain_description, unique_exact_match, BangumiPlayStatus, BangumiPlayUpdate,
+    CompatibilityEntry, CoverAsset, MetadataProviderId, MetadataRecord, MetadataSearchQuery,
+    DEFAULT_METADATA_BASE_URL,
 };
 use astra_emu_translation::{
     OpenAiApi, SecretResolver, TranslationProfile, TranslationProvider,
@@ -49,6 +50,9 @@ mod input;
 mod library;
 mod metadata;
 mod metadata_actions;
+mod metadata_auto_link;
+#[cfg(test)]
+mod metadata_auto_link_tests;
 mod metadata_sync;
 #[cfg(test)]
 mod metadata_tests;
@@ -115,6 +119,11 @@ struct AstraEmuManagerController {
     metadata_status: BTreeMap<String, String>,
     pending_metadata: BTreeMap<String, PendingMetadata>,
     match_candidates: BTreeMap<String, (String, MetadataRecord)>,
+    /// Games waiting for an automatic VNDB search, submitted one at a time.
+    auto_link_queue: VecDeque<String>,
+    auto_link: Option<metadata_auto_link::AutoLinkRequest>,
+    /// Games whose automatic search already ran; persisted, never retried.
+    auto_link_attempted: BTreeSet<String>,
     network_allowed: bool,
     metadata_tokens: BTreeMap<String, String>,
     metadata_tokens_loaded: bool,

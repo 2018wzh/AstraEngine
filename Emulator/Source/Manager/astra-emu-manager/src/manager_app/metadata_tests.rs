@@ -206,6 +206,8 @@ fn network_permission_gates_metadata_and_translation_and_persists() {
             .unwrap();
     }
     let mut app = controller(root.path());
+    let (runtime, _commands, _completions) = MetadataRuntime::scripted();
+    app.metadata = runtime;
     assert!(app.translation_enabled);
     assert!(app.launch_translation_profile().unwrap().is_none());
     assert_eq!(

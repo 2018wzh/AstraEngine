@@ -29,7 +29,9 @@ pub use index::{
     MAX_METADATA_TOTAL_BYTES, METADATA_INDEX_FILE, METADATA_INDEX_SCHEMA_VERSION,
 };
 pub use license::{MetadataLicenseManifest, ReleaseUse};
-pub use matcher::{match_metadata, normalize_title, MatchInput, MATCHER_VERSION};
+pub use matcher::{
+    match_metadata, normalize_title, unique_exact_match, MatchInput, MATCHER_VERSION,
+};
 pub use model::*;
 pub use presets::{parse_preset_database, Preset, PresetDatabase, PRESET_DATABASE_SCHEMA_VERSION};
 pub use sync::{MetadataSyncClient, SyncOutcome, DEFAULT_METADATA_BASE_URL};

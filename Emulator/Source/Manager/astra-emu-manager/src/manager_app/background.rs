@@ -205,17 +205,22 @@ impl AstraEmuManagerController {
                         Ok(report) => {
                             self.startup_state = StartupState::Ready;
                             match self.apply_scan_report(kind, report) {
-                                Ok(added) if kind == ScanKind::Full => {
-                                    self.show_snackbar(
-                                        if added > 0 {
-                                            format!("发现 {added} 部新作品")
-                                        } else {
-                                            "资料库已是最新".into()
-                                        },
-                                        None,
-                                    );
+                                Ok(added) => {
+                                    if kind == ScanKind::Full {
+                                        self.show_snackbar(
+                                            if added > 0 {
+                                                format!("发现 {added} 部新作品")
+                                            } else {
+                                                "资料库已是最新".into()
+                                            },
+                                            None,
+                                        );
+                                    }
+                                    if let Err(error) = self.enqueue_auto_link() {
+                                        self.diagnostic = error;
+                                        self.diagnostic_severity = "error";
+                                    }
                                 }
-                                Ok(_) => {}
                                 Err(error) => {
                                     self.background_failed(error.clone());
                                     return Err(error);

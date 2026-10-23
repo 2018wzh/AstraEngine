@@ -31,6 +31,33 @@ pub fn normalize_title(value: &str) -> String {
     normalized.trim().to_owned()
 }
 
+const TITLE_KEY_IGNORED: &str = "-_~～・·:：!！?？'\"“”‘’「」『』()（）[]【】<>《》,，.。&＆";
+
+/// Characters of the exact-match key: NFKC, lowercase, without whitespace or
+/// common (including full-width) punctuation and brackets.
+fn exact_title_key(value: &str) -> impl Iterator<Item = char> + '_ {
+    value
+        .nfkc()
+        .flat_map(char::to_lowercase)
+        .filter(|character| !character.is_whitespace() && !TITLE_KEY_IGNORED.contains(*character))
+}
+
+/// Index of the only record whose title or an alternate title equals `query`
+/// after exact-key normalization; `None` when no record or several match.
+pub fn unique_exact_match(query: &str, records: &[MetadataRecord]) -> Option<usize> {
+    let key = exact_title_key(query).collect::<String>();
+    if key.is_empty() {
+        return None;
+    }
+    let mut matches = records.iter().enumerate().filter(|(_, record)| {
+        std::iter::once(&record.title)
+            .chain(&record.alternate_titles)
+            .any(|title| exact_title_key(title).eq(key.chars()))
+    });
+    let (index, _) = matches.next()?;
+    matches.next().is_none().then_some(index)
+}
+
 pub fn match_metadata(input: &MatchInput, record: &MetadataRecord) -> MatchAssessment {
     let local_titles = std::iter::once(&input.title)
         .chain(input.aliases.iter())
@@ -202,5 +229,24 @@ mod tests {
         );
         assert!(assessment.auto_link_eligible);
         assert!(!assessment.requires_confirmation);
+    }
+
+    #[test]
+    fn unique_exact_match_ignores_width_case_spacing_and_punctuation() {
+        let mut other = record();
+        other.remote_id = "v2".into();
+        other.title = "Air Memories".into();
+        other.alternate_titles = Vec::new();
+        let records = [other.clone(), record()];
+        assert_eq!(unique_exact_match(" air ", &records), Some(1));
+        assert_eq!(
+            unique_exact_match("AIR standard-edition！", &records),
+            Some(1)
+        );
+        assert_eq!(unique_exact_match("「Air」 Memories", &records), Some(0));
+        assert_eq!(unique_exact_match("Air Memory", &records), None);
+        assert_eq!(unique_exact_match("・・", &records), None);
+        other.title = "ＡＩＲ".into();
+        assert_eq!(unique_exact_match("air", &[other, record()]), None);
     }
 }

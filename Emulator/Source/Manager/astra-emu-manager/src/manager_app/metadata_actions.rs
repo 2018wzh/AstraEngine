@@ -69,6 +69,9 @@ impl AstraEmuManagerController {
         self.library
             .remove_external_identity(&game.game_id, provider.as_str())
             .map_err(|error| error.to_string())?;
+        if provider == MetadataProviderId::Vndb {
+            self.mark_auto_link_attempted(&game.game_id)?;
+        }
         self.metadata_status
             .insert(game.game_id, "已解除关联".into());
         self.model()
@@ -103,7 +106,11 @@ impl AstraEmuManagerController {
             .map_err(|error| error.to_string())?;
         let enabling = enabled && !self.network_allowed;
         self.network_allowed = enabled;
+        if !enabled {
+            self.auto_link_queue.clear();
+        }
         if enabling {
+            self.enqueue_auto_link()?;
             return self.sync_metadata();
         }
         self.model()

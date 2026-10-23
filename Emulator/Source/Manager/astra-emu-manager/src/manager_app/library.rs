@@ -88,6 +88,7 @@ impl AstraEmuManagerController {
         self.library
             .exclude_game(game_id)
             .map_err(|error| error.to_string())?;
+        self.auto_link_queue.retain(|id| id != game_id);
         if self.selected_case_id.as_deref() == Some(game_id) {
             self.selected_case_id = None;
         }
@@ -173,6 +174,10 @@ impl AstraEmuManagerController {
             .map_err(|error| error.to_string())?
             .unwrap_or_default();
         let metadata = MetadataRuntime::start()?;
+        let auto_link_attempted = library
+            .app_state::<BTreeSet<String>>(metadata_auto_link::AUTO_LINK_ATTEMPTED_KEY)
+            .map_err(|error| error.to_string())?
+            .unwrap_or_default();
         let appearance = library.appearance_settings().map_err(|e| e.to_string())?;
         let games = library.list_games().map_err(|error| error.to_string())?;
         let mut pinned_releases = BTreeMap::new();
@@ -235,6 +240,9 @@ impl AstraEmuManagerController {
             metadata_status: BTreeMap::new(),
             pending_metadata: BTreeMap::new(),
             match_candidates: BTreeMap::new(),
+            auto_link_queue: VecDeque::new(),
+            auto_link: None,
+            auto_link_attempted,
             network_allowed,
             metadata_tokens: BTreeMap::new(),
             metadata_tokens_loaded: false,

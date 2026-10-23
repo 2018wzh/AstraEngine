@@ -139,6 +139,24 @@ impl MetadataRuntime {
             }
         }
     }
+
+    /// A runtime without a worker: tests read the submitted commands and
+    /// inject completions through the returned channel ends.
+    #[cfg(test)]
+    pub fn scripted() -> (
+        Self,
+        mpsc::Receiver<MetadataCommand>,
+        mpsc::Sender<MetadataCompletion>,
+    ) {
+        let (commands, command_rx) = mpsc::sync_channel(COMMAND_CAPACITY);
+        let (completion_tx, completions) = mpsc::channel();
+        let runtime = Self {
+            commands,
+            completions,
+            wake: Arc::new(Mutex::new(None)),
+        };
+        (runtime, command_rx, completion_tx)
+    }
 }
 
 fn worker(
@@ -153,8 +171,11 @@ fn worker(
         Ok(runtime) => runtime,
         Err(_) => return,
     };
+    // One VNDB client for the worker's lifetime, so its request delay also
+    // spaces consecutive commands, such as an automatic linking batch.
+    let mut vndb = None;
     while let Ok(command) = commands.recv() {
-        let result = runtime.block_on(execute(&command));
+        let result = runtime.block_on(execute(&command, &mut vndb));
         if completions
             .send(MetadataCompletion {
                 request_id: command.request_id,
@@ -172,7 +193,10 @@ fn worker(
     }
 }
 
-async fn execute(command: &MetadataCommand) -> Result<MetadataPayload, String> {
+async fn execute(
+    command: &MetadataCommand,
+    vndb: &mut Option<VndbProvider>,
+) -> Result<MetadataPayload, String> {
     match &command.kind {
         MetadataCommandKind::Sync {
             base_url,
@@ -198,16 +222,21 @@ async fn execute(command: &MetadataCommand) -> Result<MetadataPayload, String> {
     }
     match command.provider {
         MetadataProviderId::Vndb => {
-            let provider = VndbProvider::new(VndbProviderConfig {
-                license: MetadataLicenseManifest {
-                    release_use: ReleaseUse::NonCommercial,
-                    vndb_commercial_license_id: None,
-                },
-                timeout: Duration::from_secs(20),
-                minimum_request_delay: Duration::from_millis(1_000),
-            })
-            .map_err(|error| error.to_string())?;
-            execute_provider(&provider, command).await
+            let provider = match vndb {
+                Some(provider) => provider,
+                slot => slot.insert(
+                    VndbProvider::new(VndbProviderConfig {
+                        license: MetadataLicenseManifest {
+                            release_use: ReleaseUse::NonCommercial,
+                            vndb_commercial_license_id: None,
+                        },
+                        timeout: Duration::from_secs(20),
+                        minimum_request_delay: Duration::from_millis(1_000),
+                    })
+                    .map_err(|error| error.to_string())?,
+                ),
+            };
+            execute_provider(provider, command).await
         }
         MetadataProviderId::Bangumi => {
             #[cfg(target_os = "android")]
