@@ -23,7 +23,7 @@ pub(crate) fn files(compatibility: Vec<u8>, presets: &str) -> Vec<(String, Vec<u
         ),
         (
             PATCH_CATALOG_FILE.into(),
-            br#"[{"id":"musica-eden-cn","title":"eden","script":"musica-eden-cn.luau"}]"#.to_vec(),
+            br#"[{"id":"musica-eden-cn","title":"eden","script":"musica-eden-cn.luau","vn_ids":["v17"],"emulators":["astra.emu.musica"]}]"#.to_vec(),
         ),
         ("patches/musica-eden-cn.luau".into(), b"return {}".to_vec()),
     ]

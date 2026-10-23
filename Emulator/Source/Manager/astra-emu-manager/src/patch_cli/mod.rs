@@ -79,6 +79,8 @@ fn execute(command: Command) -> Result<(), PatchError> {
                     "id": recipe.id,
                     "title": recipe.title,
                     "script": recipe.script,
+                    "vn_ids": recipe.vn_ids,
+                    "emulators": recipe.emulators,
                 });
                 writeln!(stdout, "{record}")?;
             }

@@ -131,6 +131,12 @@ impl ManagerController for AstraEmuManagerController {
     fn data_dir(&self) -> &Path {
         &self.data_dir
     }
+    fn search_patch_games(&mut self, query: &str) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::search_patch_games(self, query)
+    }
+    fn select_patch_game(&mut self, game_id: &str) -> Result<ManagerViewModel, String> {
+        AstraEmuManagerController::select_patch_game(self, game_id)
+    }
     fn select_patch_recipe(&mut self, id: &str) -> Result<ManagerViewModel, String> {
         AstraEmuManagerController::select_patch_recipe(self, id)
     }

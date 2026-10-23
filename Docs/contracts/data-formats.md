@@ -125,7 +125,7 @@ AstraEMU Manager 的作品级数据分两类：公开仓库 `2018wzh/AstraEMU-me
 | `compatibility.json` | `CompatibilityDatabase`（`astra.emu.compatibility.v3`） | `CompatibilityEntry { vn_id, release_id, emulator, status, notes, emulator_version, manager_version, platform, issue, updated_at_unix_ms }`，`(release_id, emulator)` 唯一，重复为 `ASTRA_EMU_COMPATIBILITY_DUPLICATE` |
 | `presets.json` | `PresetDatabase`（`astra.emu.presets.v1`） | `Preset { vn_id, release_id, emulator, summary, configuration, patch }`，`(release_id, emulator)` 唯一 |
 | `cores.json` | `CoreCatalog`（`astra.emu.cores.v1`） | `CoreCatalogEntry`：plugin_id、显示名、版本、ABI、平台、GitHub Releases 资产 URL、sha256、size（≤ 512 MiB）、许可与 release tag |
-| `patches/` | `astra_emu_patch::list_recipes` | `catalog.json` 与 Luau recipe、`common/` 模块 |
+| `patches/` | `astra_emu_patch::list_recipes` | `catalog.json`（每项 `id`、`title`、`script`，以及非空的 VNDB 作品 `vn_ids` 与模拟器 plugin_id `emulators`）与 Luau recipe、`common/` 模块 |
 
 `emulator` 是核心的 plugin_id；`status` 为五级 `perfect`/`completable`/`flawed`/`boot_only`/`unplayable`。兼容性报告经元数据仓库的 issue 表单提交，维护者打上 `compat:accepted` 后由工作流生成条目 PR。
 

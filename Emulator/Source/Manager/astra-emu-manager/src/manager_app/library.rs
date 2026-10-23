@@ -91,6 +91,10 @@ impl AstraEmuManagerController {
         if self.selected_case_id.as_deref() == Some(game_id) {
             self.selected_case_id = None;
         }
+        if self.patch_game_id.as_deref() == Some(game_id) && !self.patch_busy() {
+            self.patch_game_id = None;
+            self.patch_state = Default::default();
+        }
         self.last_excluded = Some(game_id.to_owned());
         self.show_snackbar(
             format!("已从资料库移除《{}》", game.display_title()),
@@ -260,6 +264,8 @@ impl AstraEmuManagerController {
             patch_job: None,
             patch_import: None,
             patch_state: Default::default(),
+            patch_game_id: None,
+            patch_query: String::new(),
             patch_sequence: 0,
             snackbar: snackbar::Snackbar::default(),
             prepare_scan_pending: None,

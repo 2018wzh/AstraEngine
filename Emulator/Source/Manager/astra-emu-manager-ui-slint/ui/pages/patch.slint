@@ -1,0 +1,734 @@
+import {
+    MaterialPalette, MaterialText, MaterialTypography, SmallAppBar, ScrollView, FilledButton, TonalButton,
+    OutlineButton, TextButton, TextField, LinearProgressIndicator, Icon,
+} from "@material";
+import { App, Library, Patch, PatchGame } from "../globals.slint";
+import { Icons } from "../icons.slint";
+import { Theme } from "../theme.slint";
+import { CoverDemand } from "../components/cover-card.slint";
+import { SectionTitle, Panel, Pill, SelectableTile } from "./game-settings/parts.slint";
+
+component StepDot {
+    in property <int> number;
+    in property <string> label;
+    in property <bool> active;
+    in property <bool> done;
+    in property <bool> reachable;
+    callback activate();
+
+    horizontal-stretch: 1;
+    min-width: 40px;
+    height: 56px;
+    accessible-role: tab;
+    accessible-label: "第 " + root.number + " 步：" + root.label;
+    accessible-enabled: root.reachable;
+    accessible-item-selectable: true;
+    accessible-item-selected: root.active;
+    accessible-action-default => { if root.reachable { root.activate(); } }
+    forward-focus: focus;
+
+    focus := FocusScope {
+        x: 0px;
+        width: 0px;
+        enabled: root.reachable;
+        key-pressed(event) => {
+            if event.text == " " || event.text == "\n" {
+                root.activate();
+                return accept;
+            }
+            reject
+        }
+    }
+
+    Rectangle {
+        border-radius: 8px;
+        background: touch.has-hover && root.reachable ? MaterialPalette.on-surface.with-alpha(MaterialPalette.state-layer-opacity-hover)
+            : focus.has-focus ? MaterialPalette.on-surface.with-alpha(MaterialPalette.state-layer-opacity-focus)
+            : transparent;
+    }
+
+    VerticalLayout {
+        alignment: center;
+        spacing: 4px;
+        HorizontalLayout {
+            alignment: center;
+            Rectangle {
+                width: 24px;
+                height: 24px;
+                border-radius: 12px;
+                background: root.active || root.done ? MaterialPalette.primary : transparent;
+                border-width: root.active || root.done ? 0px : 1px;
+                border-color: MaterialPalette.outline;
+
+                if root.done && !root.active : Icon {
+                    width: 16px;
+                    source: Icons.check;
+                    colorize: MaterialPalette.on-primary;
+                }
+                if !root.done || root.active : MaterialText {
+                    text: root.number;
+                    style: MaterialTypography.label-medium;
+                    color: root.active ? MaterialPalette.on-primary : MaterialPalette.on-surface-variant;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+        MaterialText {
+            text: root.label;
+            style: MaterialTypography.label-medium;
+            color: root.active ? MaterialPalette.primary : MaterialPalette.on-surface-variant;
+            horizontal-alignment: center;
+            overflow: elide;
+        }
+    }
+
+    touch := TouchArea {
+        enabled: root.reachable;
+        clicked => {
+            focus.focus();
+            root.activate();
+        }
+    }
+}
+
+component DirectoryPicker {
+    in property <string> label;
+    in property <string> value;
+    in property <string> empty-text;
+    in property <string> hint;
+    callback pick();
+
+    HorizontalLayout {
+        spacing: Theme.space-sm;
+        TextField {
+            horizontal-stretch: 1;
+            label: root.label;
+            text: root.value != "" ? root.value : root.empty-text;
+            read-only: true;
+            supporting-text: root.hint;
+        }
+        VerticalLayout {
+            horizontal-stretch: 0;
+            alignment: start;
+            padding-top: 8px;
+            OutlineButton {
+                text: "选择…";
+                icon: Icons.folder-open;
+                clicked => { root.pick(); }
+            }
+        }
+    }
+}
+
+component CoverThumb {
+    in property <image> cover;
+
+    width: 36px;
+    height: 48px;
+
+    Rectangle {
+        border-radius: 4px;
+        clip: true;
+        background: MaterialPalette.surface-container-highest;
+
+        if root.cover.width > 0 : Image {
+            width: 100%;
+            height: 100%;
+            source: root.cover;
+            image-fit: ImageFit.cover;
+        }
+        if root.cover.width == 0 : Icon {
+            width: 18px;
+            source: Icons.image;
+            colorize: MaterialPalette.on-surface-variant;
+            opacity: 0.6;
+        }
+    }
+}
+
+component LinkPill inherits Pill {
+    in property <bool> linked;
+
+    text: root.linked ? "已关联 VNDB" : "未关联 VNDB";
+    background: root.linked ? MaterialPalette.secondary-container : MaterialPalette.surface-container-highest;
+    foreground: root.linked ? MaterialPalette.on-secondary-container : MaterialPalette.on-surface-variant;
+}
+
+component PatchGameRow {
+    in property <PatchGame> game;
+    in property <bool> selected;
+    in property <bool> cover-needed;
+    in property <bool> narrow;
+    callback activated();
+    callback cover-demand(id: string, needed: bool);
+
+    property <string> link-text: root.game.linked ? "已关联 VNDB" : "未关联 VNDB";
+
+    height: Theme.compact-density ? 56px : 64px;
+    accessible-role: list-item;
+    accessible-label: root.game.title + "，" + root.game.subtitle + "，" + root.link-text;
+    accessible-item-selectable: true;
+    accessible-item-selected: root.selected;
+    accessible-action-default => { root.activated(); }
+    forward-focus: focus;
+
+    CoverDemand {
+        cover-id: root.game.id;
+        cover-needed: root.cover-needed;
+        cover-demand(id, needed) => { root.cover-demand(id, needed); }
+    }
+
+    focus := FocusScope {
+        x: 0px;
+        width: 0px;
+        key-pressed(event) => {
+            if event.text == " " || event.text == "\n" {
+                root.activated();
+                return accept;
+            }
+            reject
+        }
+    }
+
+    Rectangle {
+        border-radius: 12px;
+        background: root.selected ? MaterialPalette.secondary-container
+            : touch.has-hover ? MaterialPalette.on-surface.with-alpha(MaterialPalette.state-layer-opacity-hover)
+            : transparent;
+        border-width: focus.has-focus ? 2px : 0px;
+        border-color: MaterialPalette.primary;
+    }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 12px;
+
+        VerticalLayout {
+            alignment: center;
+            CoverThumb { cover: root.game.cover; }
+        }
+
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            spacing: 2px;
+
+            MaterialText {
+                text: root.game.title;
+                style: MaterialTypography.title-small;
+                color: root.selected ? MaterialPalette.on-secondary-container : MaterialPalette.on-surface;
+            }
+            MaterialText {
+                text: root.narrow ? root.game.subtitle + " · " + root.link-text : root.game.subtitle;
+                style: MaterialTypography.body-small;
+                color: MaterialPalette.on-surface-variant;
+            }
+        }
+
+        if !root.narrow : VerticalLayout {
+            alignment: center;
+            LinkPill { linked: root.game.linked; }
+        }
+    }
+
+    touch := TouchArea {
+        clicked => {
+            focus.focus();
+            root.activated();
+        }
+    }
+}
+
+export component PatchPage {
+    in property <bool> compact;
+
+    property <length> bar-height: 64px;
+    property <length> pad: root.compact ? Theme.space-lg : Theme.space-xl;
+    property <length> column: min(root.width - 2 * root.pad, 760px);
+    property <length> column-x: (root.width - root.column) / 2;
+    property <bool> narrow: root.column < 480px;
+
+    property <bool> locked: Patch.state.running;
+    property <bool> failed: Patch.state.error != "";
+    property <bool> has-game: Patch.game.id != "";
+    property <bool> has-script: Patch.state.script != "";
+    property <bool> has-output: Patch.state.output-directory != "";
+    // The controller owns running (forced to 4) and completion (5 after a started run).
+    property <int> step: root.locked ? 4
+        : !root.has-game ? 1
+        : Patch.step == 4 && Patch.state.step == 5 ? 5
+        : Patch.step;
+    property <bool> determinate: Patch.state.total > 0;
+    property <int> recipe-match: round(match-counter.preferred-height / 1px);
+    property <bool> local-script: root.has-script && root.recipe-match == 0;
+
+    function go(target: int) {
+        if !root.locked && target >= 1 && target <= 4 && (target == 1 || root.has-game) {
+            Patch.step = target;
+        }
+    }
+
+    function choose(id: string) {
+        if !root.locked {
+            Patch.select-game(id);
+            Patch.step = 2;
+        }
+    }
+
+    function clear-search() {
+        debounce.running = false;
+        Patch.query = "";
+        Patch.search("");
+    }
+
+    debounce := Timer {
+        interval: 300ms;
+        running: false;
+        triggered => {
+            self.running = false;
+            Patch.search(Patch.query);
+        }
+    }
+
+    match-counter := VerticalLayout {
+        x: 0px;
+        y: 0px;
+        width: 0px;
+        height: 0px;
+        visible: false;
+        for recipe in Patch.recipes : Rectangle {
+            height: recipe.id == Patch.state.script ? 1px : 0px;
+        }
+    }
+
+    Rectangle {
+        background: MaterialPalette.surface;
+    }
+
+    SmallAppBar {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.bar-height;
+        title: "汉化补丁";
+        leading-button: root.compact ? { icon: Icons.arrow-back, tooltip: "返回游戏库", enabled: true } : { };
+        leading-button-clicked => { App.page = "library"; }
+    }
+
+    header := VerticalLayout {
+        x: root.column-x;
+        y: root.bar-height;
+        width: root.column;
+        height: self.preferred-height;
+        spacing: Theme.space-md;
+        padding-bottom: Theme.space-md;
+
+        Panel {
+            inset: Theme.space-sm;
+            HorizontalLayout {
+                spacing: 0px;
+                StepDot {
+                    number: 1;
+                    label: "选择游戏";
+                    active: root.step == 1;
+                    done: root.has-game && root.step != 1;
+                    reachable: !root.locked;
+                    activate => { root.go(1); }
+                }
+                StepDot {
+                    number: 2;
+                    label: "选择补丁";
+                    active: root.step == 2;
+                    done: root.has-script && root.step != 2;
+                    reachable: !root.locked && root.has-game;
+                    activate => { root.go(2); }
+                }
+                StepDot {
+                    number: 3;
+                    label: "目录";
+                    active: root.step == 3;
+                    done: root.has-output && root.step != 3;
+                    reachable: !root.locked && root.has-game && root.has-script;
+                    activate => { root.go(3); }
+                }
+                StepDot {
+                    number: 4;
+                    label: "执行";
+                    active: root.step == 4;
+                    done: root.step == 5;
+                    reachable: !root.locked && root.has-game && root.has-script && root.has-output;
+                    activate => { root.go(4); }
+                }
+                StepDot {
+                    number: 5;
+                    label: "完成";
+                    active: root.step == 5;
+                    done: false;
+                    reachable: false;
+                }
+            }
+        }
+
+        if root.step == 1 : TextField {
+            label: "搜索游戏";
+            leading-icon: Icons.search;
+            trailing-icon: Patch.query != "" ? Icons.close : @image-url("");
+            text <=> Patch.query;
+            edited(text) => { debounce.restart(); }
+            accepted(text) => {
+                debounce.running = false;
+                Patch.search(Patch.query);
+            }
+            trailing-icon-clicked => { root.clear-search(); }
+        }
+    }
+
+    property <bool> footer-shown: root.step <= 3 || (root.step == 4 && !root.locked);
+    property <length> footer-height: root.footer-shown ? 64px : 0px;
+    property <length> body-y: root.bar-height + header.height;
+    property <length> body-height: root.height - root.body-y - root.footer-height;
+
+    // Step 1: library games.
+    games := ScrollView {
+        x: 0px;
+        y: root.body-y;
+        width: root.width;
+        height: root.body-height;
+        visible: root.step == 1 && Patch.games.length > 0;
+
+        VerticalLayout {
+            x: root.column-x;
+            width: root.column;
+            padding-bottom: Theme.space-lg;
+            spacing: 2px;
+
+            for game[index] in Patch.games : PatchGameRow {
+                game: game;
+                selected: game.id == Patch.game.id;
+                narrow: root.narrow;
+                cover-needed: Library.cover-loading && root.step == 1
+                    && self.y + self.height >= -games.content-y - self.height
+                    && self.y <= -games.content-y + games.visible-height + self.height;
+                cover-demand(id, needed) => { Patch.cover-demand(index, id, needed); }
+                activated => { root.choose(game.id); }
+            }
+        }
+    }
+
+    if root.step == 1 && Patch.games.length == 0 : VerticalLayout {
+        x: root.column-x;
+        y: root.body-y;
+        width: root.column;
+        height: root.body-height;
+        alignment: start;
+        spacing: Theme.space-md;
+        padding-top: Theme.space-lg;
+
+        MaterialText {
+            text: Patch.query != "" ? "没有与“" + Patch.query + "”匹配的游戏。" : "资料库中还没有游戏。先在游戏库添加游戏目录并完成准备。";
+            style: MaterialTypography.body-medium;
+            color: MaterialPalette.on-surface-variant;
+            wrap: word-wrap;
+            overflow: clip;
+        }
+        if Patch.query != "" : HorizontalLayout {
+            alignment: start;
+            TextButton {
+                text: "清除搜索";
+                clicked => { root.clear-search(); }
+            }
+        }
+    }
+
+    // Steps 2–5.
+    if root.step >= 2 : ScrollView {
+        x: 0px;
+        y: root.body-y;
+        width: root.width;
+        height: root.body-height;
+        content-height: steps.preferred-height;
+
+        steps := VerticalLayout {
+            x: root.column-x;
+            y: 0px;
+            width: root.column;
+            height: self.preferred-height;
+            padding-bottom: Theme.space-lg;
+            spacing: Theme.space-lg;
+
+            // Selected game.
+            Panel {
+                inset: Theme.space-md;
+                HorizontalLayout {
+                    spacing: Theme.space-md;
+                    VerticalLayout {
+                        alignment: center;
+                        CoverThumb { cover: Patch.cover; }
+                    }
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        alignment: center;
+                        spacing: 2px;
+                        MaterialText {
+                            text: Patch.game.title;
+                            style: MaterialTypography.title-small;
+                            color: MaterialPalette.on-surface;
+                        }
+                        MaterialText {
+                            text: Patch.game.subtitle;
+                            style: MaterialTypography.body-small;
+                            color: MaterialPalette.on-surface-variant;
+                        }
+                    }
+                    if !root.narrow : VerticalLayout {
+                        alignment: center;
+                        LinkPill { linked: Patch.game.linked; }
+                    }
+                    if !root.locked : VerticalLayout {
+                        alignment: center;
+                        TextButton {
+                            text: "更换";
+                            clicked => { root.go(1); }
+                        }
+                    }
+                }
+            }
+
+            if root.step == 2 : Panel {
+                SectionTitle {
+                    text: "选择补丁";
+                    description: "下面列出补丁目录中适用于这部作品和当前模拟器的补丁；也可以使用本地的 Luau 转换脚本。";
+                }
+                if Patch.recipes.length == 0 : MaterialText {
+                    text: Patch.hint != "" ? Patch.hint : "补丁目录中没有适用于这部作品的补丁。";
+                    style: MaterialTypography.body-medium;
+                    color: MaterialPalette.on-surface-variant;
+                    wrap: word-wrap;
+                    overflow: clip;
+                }
+                if Patch.recipes.length > 0 : VerticalLayout {
+                    spacing: 2px;
+                    for recipe in Patch.recipes : SelectableTile {
+                        text: recipe.title;
+                        selected: recipe.id == Patch.state.script;
+                        clicked => { Patch.select-recipe(recipe.id); }
+                        if recipe.recommended : VerticalLayout {
+                            alignment: center;
+                            Pill { text: "推荐"; }
+                        }
+                    }
+                }
+                if root.local-script : SelectableTile {
+                    text: "本地脚本";
+                    supporting-text: Patch.state.script;
+                    selected: true;
+                }
+                HorizontalLayout {
+                    alignment: start;
+                    TextButton {
+                        text: "选择本地脚本…";
+                        icon: Icons.upload-file;
+                        clicked => { Patch.pick-script(); }
+                    }
+                }
+            }
+
+            if root.step == 3 : Panel {
+                SectionTitle {
+                    text: "目录";
+                    description: "补丁输入目录默认是游戏目录；补丁文件放在别处时改选它。转换结果写入新的输出目录，原游戏目录保持不变，完成后作为一部新作品加入资料库。";
+                }
+                DirectoryPicker {
+                    label: "补丁输入目录";
+                    value: Patch.state.patch-directory;
+                    empty-text: "使用游戏目录";
+                    pick => { Patch.pick-directory("patch"); }
+                }
+                DirectoryPicker {
+                    label: "输出目录";
+                    value: Patch.state.output-directory;
+                    empty-text: "尚未选择";
+                    hint: "必须是不存在或为空的目录";
+                    pick => { Patch.pick-directory("output"); }
+                }
+            }
+
+            if root.step == 4 : Panel {
+                SectionTitle {
+                    text: root.locked ? "正在转换" : root.failed ? "转换失败" : "开始转换";
+                    description: root.locked || root.failed ? "" : "确认下面的设置后开始。转换期间可以随时取消，取消时不会生成输出目录。";
+                }
+
+                if !root.locked : VerticalLayout {
+                    spacing: 4px;
+                    MaterialText {
+                        text: "补丁：" + (root.has-script ? (root.local-script ? Patch.state.script : "已从补丁目录选择") : "未选择");
+                        style: MaterialTypography.body-medium;
+                        color: MaterialPalette.on-surface;
+                        wrap: word-wrap;
+                        overflow: clip;
+                    }
+                    MaterialText {
+                        text: "补丁输入目录：" + (Patch.state.patch-directory != "" ? Patch.state.patch-directory : "游戏目录");
+                        style: MaterialTypography.body-medium;
+                        color: MaterialPalette.on-surface;
+                        wrap: word-wrap;
+                        overflow: clip;
+                    }
+                    MaterialText {
+                        text: "输出目录：" + (root.has-output ? Patch.state.output-directory : "未选择");
+                        style: MaterialTypography.body-medium;
+                        color: MaterialPalette.on-surface;
+                        wrap: word-wrap;
+                        overflow: clip;
+                    }
+                }
+
+                if root.locked : VerticalLayout {
+                    spacing: Theme.space-sm;
+                    LinearProgressIndicator {
+                        progress: root.determinate ? clamp(Patch.state.completed / Patch.state.total, 0, 1) : 0;
+                        indeterminate: !root.determinate;
+                    }
+                    HorizontalLayout {
+                        spacing: Theme.space-md;
+                        MaterialText {
+                            horizontal-stretch: 1;
+                            text: Patch.state.phase;
+                            style: MaterialTypography.body-medium;
+                            color: MaterialPalette.on-surface-variant;
+                            wrap: word-wrap;
+                            overflow: clip;
+                        }
+                        if root.determinate : MaterialText {
+                            horizontal-stretch: 0;
+                            text: round(Patch.state.completed / Patch.state.total * 100) + "%";
+                            style: MaterialTypography.label-large;
+                            color: MaterialPalette.on-surface;
+                        }
+                    }
+                }
+
+                if root.failed && !root.locked : Rectangle {
+                    border-radius: 8px;
+                    background: MaterialPalette.error-container;
+                    min-height: error-body.min-height;
+                    error-body := HorizontalLayout {
+                        padding: Theme.space-md;
+                        spacing: Theme.space-sm;
+                        VerticalLayout {
+                            alignment: start;
+                            Icon {
+                                width: 20px;
+                                source: Icons.error;
+                                colorize: MaterialPalette.on-error-container;
+                            }
+                        }
+                        MaterialText {
+                            horizontal-stretch: 1;
+                            text: Patch.state.error;
+                            style: MaterialTypography.body-medium;
+                            color: MaterialPalette.on-error-container;
+                            wrap: word-wrap;
+                            overflow: clip;
+                        }
+                    }
+                }
+
+                if !root.locked && !Patch.state.can-start && Patch.state.phase != "" : MaterialText {
+                    text: Patch.state.phase;
+                    style: MaterialTypography.body-small;
+                    color: MaterialPalette.on-surface-variant;
+                    wrap: word-wrap;
+                    overflow: clip;
+                }
+
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: Theme.space-sm;
+                    if root.locked : OutlineButton {
+                        text: "取消";
+                        icon: Icons.close;
+                        clicked => { Patch.cancel(); }
+                    }
+                    if !root.locked : FilledButton {
+                        text: root.failed ? "重新开始" : "开始转换";
+                        icon: Icons.play-arrow;
+                        enabled: Patch.state.can-start && root.has-script && root.has-output;
+                        clicked => { Patch.start(); }
+                    }
+                }
+            }
+
+            if root.step == 5 : Panel {
+                HorizontalLayout {
+                    spacing: Theme.space-md;
+                    VerticalLayout {
+                        horizontal-stretch: 0;
+                        alignment: start;
+                        Rectangle {
+                            width: 40px;
+                            height: 40px;
+                            border-radius: 20px;
+                            background: MaterialPalette.primary-container;
+                            Icon {
+                                width: 24px;
+                                source: Icons.check;
+                                colorize: MaterialPalette.on-primary-container;
+                            }
+                        }
+                    }
+                    SectionTitle {
+                        horizontal-stretch: 1;
+                        text: "转换完成";
+                        description: Patch.state.phase != "" ? Patch.state.phase : "新作品已加入资料库。";
+                    }
+                }
+                MaterialText {
+                    text: "输出目录：" + Patch.state.output;
+                    style: MaterialTypography.body-medium;
+                    color: MaterialPalette.on-surface;
+                    wrap: word-wrap;
+                    overflow: clip;
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: Theme.space-sm;
+                    TextButton {
+                        text: "转换其他游戏";
+                        clicked => { root.go(1); }
+                    }
+                    FilledButton {
+                        text: "打开新作品";
+                        icon: Icons.library-books;
+                        clicked => { Patch.open-output(); }
+                    }
+                }
+            }
+        }
+    }
+
+    if root.footer-shown : HorizontalLayout {
+        x: root.column-x;
+        y: root.height - root.footer-height;
+        width: root.column;
+        height: root.footer-height;
+        padding-top: Theme.space-sm;
+        padding-bottom: Theme.space-md;
+        spacing: Theme.space-sm;
+
+        if root.step > 1 : TextButton {
+            text: "上一步";
+            icon: Icons.arrow-back;
+            clicked => { root.go(root.step - 1); }
+        }
+        Rectangle { horizontal-stretch: 1; }
+        if root.step <= 3 : TonalButton {
+            text: "下一步";
+            enabled: root.step == 1 ? root.has-game : root.step == 2 ? root.has-script : root.has-output;
+            clicked => { root.go(root.step + 1); }
+        }
+    }
+}

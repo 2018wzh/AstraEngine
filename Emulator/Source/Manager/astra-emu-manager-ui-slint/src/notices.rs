@@ -78,9 +78,12 @@ fn exact_text(code: &str) -> Option<(&'static str, &'static str)> {
         "ASTRA_EMU_OPEN_PATH_FAILED" => ("无法打开所在目录", "系统文件管理器未能启动。"),
         "ASTRA_EMU_KEY_CAPTURE_INACTIVE" => ("没有正在设置的按键", "请先点选要绑定的手柄按钮。"),
         "ASTRA_EMU_PATCH_RECIPE_UNKNOWN" => (
-            "补丁目录中没有这个补丁",
-            "补丁列表可能已随元数据同步更新，请重新选择。",
+            "这个补丁不适用于所选游戏",
+            "补丁列表可能已随元数据同步或模拟器选择更新，请重新选择。",
         ),
+        "ASTRA_EMU_PATCH_GAME_REQUIRED" => {
+            ("请先选择游戏", "在汉化补丁页的第一步选择要转换的游戏。")
+        }
         "ASTRA_EMU_GAMEPAD_BUTTON_INVALID" => ("无法识别的手柄按钮", "请从按键列表中选择。"),
         "ASTRA_EMU_FAMILY_SESSION_ALREADY_ACTIVE" => {
             ("已有游戏正在运行", "请先返回游戏库结束当前游戏。")

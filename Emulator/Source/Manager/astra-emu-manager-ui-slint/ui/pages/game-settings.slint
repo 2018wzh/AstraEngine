@@ -6,7 +6,6 @@ import { Icons } from "../icons.slint";
 import { Theme } from "../theme.slint";
 import { EmulatorSection } from "./game-settings/emulator-section.slint";
 import { InputSection } from "./game-settings/input-section.slint";
-import { PatchSection } from "./game-settings/patch-section.slint";
 import { MetadataSection } from "./game-settings/metadata-section.slint";
 
 component SectionItem {
@@ -85,9 +84,8 @@ export component GameSettingsPage {
     property <length> tab-height: root.narrow ? 49px : 0px;
     property <length> content-max: 760px;
     property <int> section-index: GameSettings.section == "input" ? 1
-        : GameSettings.section == "patch" ? 2
-        : GameSettings.section == "metadata" ? 3 : 0;
-    property <[string]> section-ids: ["emulator", "input", "patch", "metadata"];
+        : GameSettings.section == "metadata" ? 2 : 0;
+    property <[string]> section-ids: ["emulator", "input", "metadata"];
 
     function select-section(index: int) {
         if root.section-ids[index] != GameSettings.section {
@@ -138,7 +136,6 @@ export component GameSettingsPage {
         items: [
             { icon: Icons.tune, text: "模拟器" },
             { icon: Icons.sports-esports, text: "按键" },
-            { icon: Icons.translate, text: "汉化补丁" },
             { icon: Icons.info, text: "作品资料" },
         ];
         current-index: root.section-index;
@@ -169,16 +166,10 @@ export component GameSettingsPage {
             clicked => { root.select-section(1); }
         }
         SectionItem {
-            text: "汉化补丁";
-            icon: Icons.translate;
-            selected: root.section-index == 2;
-            clicked => { root.select-section(2); }
-        }
-        SectionItem {
             text: "作品资料";
             icon: Icons.info;
-            selected: root.section-index == 3;
-            clicked => { root.select-section(3); }
+            selected: root.section-index == 2;
+            clicked => { root.select-section(2); }
         }
     }
 
@@ -211,8 +202,7 @@ export component GameSettingsPage {
 
             if root.section-index == 0 : EmulatorSection { }
             if root.section-index == 1 : InputSection { }
-            if root.section-index == 2 : PatchSection { }
-            if root.section-index == 3 : MetadataSection {
+            if root.section-index == 2 : MetadataSection {
                 narrow: scroll.column < 480px;
             }
         }

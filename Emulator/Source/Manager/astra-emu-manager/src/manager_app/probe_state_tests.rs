@@ -1010,23 +1010,57 @@ fn onboarding_roots_persist_without_loading_cores() {
 fn patch_selection_keeps_choices_and_reports_steps() {
     let root = tempfile::tempdir().unwrap();
     let mut app = controller(root.path());
+    let script = root.path().join("local.luau");
+    assert_eq!(
+        app.set_patch_script(&script).unwrap_err(),
+        "ASTRA_EMU_PATCH_GAME_REQUIRED"
+    );
+    assert!(!app.patch_state_view().can_start);
+    let location = game(root.path());
+    let location = location.to_str().unwrap();
+    app.library
+        .add_game(&GameRecord {
+            game_id: "source".into(),
+            title: "Source".into(),
+            user_title: None,
+            location: location.into(),
+            family_id: None,
+            content_fingerprint: None,
+            added_at_unix_ms: 1,
+        })
+        .unwrap();
+    let model = app.select_patch_game("source").unwrap();
+    assert_eq!(model.patch.game.id, "source");
+    assert!(!model.patch.game.linked);
+    assert!(model.patch.recipes.is_empty());
+    assert_eq!(model.patch.hint, file_patch::PATCH_VNDB_HINT);
+    assert_eq!(model.patch.state.patch_directory, location);
     assert_eq!(
         app.select_patch_recipe("missing").unwrap_err(),
         "ASTRA_EMU_PATCH_RECIPE_UNKNOWN"
     );
-    let script = root.path().join("local.luau");
     app.set_patch_script(&script).unwrap();
     let model = app
         .set_patch_directory("output", &root.path().join("out"))
         .unwrap();
-    let patch = &model.game_settings.patch;
-    assert_eq!(patch.step, 0);
-    assert_eq!(patch.script, script.to_str().unwrap());
-    assert!(patch.output_directory.ends_with("out"));
+    let state = &model.patch.state;
+    assert_eq!(state.step, 0);
+    assert_eq!(state.script, script.to_str().unwrap());
+    assert!(state.output_directory.ends_with("out"));
     assert!(app.set_patch_directory("elsewhere", root.path()).is_err());
+    let model = app.search_patch_games("no such game").unwrap();
+    assert!(model.patch.games.is_empty());
+    assert_eq!(model.patch.game.id, "source");
+    assert_eq!(app.search_patch_games("sour").unwrap().patch.games.len(), 1);
+    let model = app.select_patch_game("source").unwrap();
+    assert_eq!(model.patch.state.script, script.to_str().unwrap());
     app.patch_state.error = "ASTRA_EMU_PATCH_SCRIPT: failed".into();
-    assert_eq!(app.patch_view().step, 4);
+    assert_eq!(app.patch_state_view().step, 4);
     app.patch_state.error.clear();
     app.patch_import_succeeded();
-    assert_eq!(app.patch_view().step, 5);
+    assert_eq!(app.patch_state_view().step, 5);
+    let model = app.select_patch_game("source").unwrap();
+    assert_eq!(model.patch.state.step, 0);
+    assert!(model.patch.state.script.is_empty());
+    assert!(model.patch.state.output_directory.is_empty());
 }

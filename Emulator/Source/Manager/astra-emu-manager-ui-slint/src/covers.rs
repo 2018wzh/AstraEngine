@@ -10,9 +10,9 @@ use std::{
     time::SystemTime,
 };
 
-use crate::{App, GameCard, Library, ManagerWindow, Selection, Session};
+use crate::{App, GameCard, Library, ManagerWindow, Patch, PatchGame, Selection, Session};
 use parking_lot::{Condvar, Mutex};
-use slint::{ComponentHandle, Model, ModelTracker, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, ModelTracker, SharedString, VecModel};
 
 const IN_FLIGHT: usize = 4;
 const CACHE_SIZE: usize = 64;
@@ -144,10 +144,78 @@ impl Demand {
     }
 }
 
+/// A row with a lazily decoded cover, shown on one page.
+pub(crate) trait CoverRow: Clone + 'static {
+    /// Covers decode only while this page is open.
+    const PAGE: &'static str;
+    fn id(&self) -> &str;
+    fn cover(&self) -> (slint::Image, slint::Color);
+    fn set_cover(&mut self, image: slint::Image, tint: slint::Color);
+    fn model(window: &ManagerWindow) -> ModelRc<Self>;
+    /// Key of the visible-row set reported through `demand`.
+    fn view(window: &ManagerWindow) -> SharedString;
+    /// Row whose cover is always wanted and shown outside the list.
+    fn selected(window: &ManagerWindow) -> SharedString;
+    fn show_selected(window: &ManagerWindow, image: slint::Image, tint: slint::Color);
+}
+
+impl CoverRow for GameCard {
+    const PAGE: &'static str = "library";
+    fn id(&self) -> &str {
+        self.id.as_str()
+    }
+    fn cover(&self) -> (slint::Image, slint::Color) {
+        (self.cover.clone(), self.tint)
+    }
+    fn set_cover(&mut self, image: slint::Image, tint: slint::Color) {
+        self.cover = image;
+        self.tint = tint;
+    }
+    fn model(window: &ManagerWindow) -> ModelRc<Self> {
+        window.global::<Library>().get_games()
+    }
+    fn view(window: &ManagerWindow) -> SharedString {
+        window.global::<App>().get_appearance().view_mode
+    }
+    fn selected(window: &ManagerWindow) -> SharedString {
+        window.global::<Library>().get_selected_id()
+    }
+    fn show_selected(window: &ManagerWindow, image: slint::Image, tint: slint::Color) {
+        window.global::<Selection>().set_cover(image);
+        window.global::<Selection>().set_tint(tint);
+    }
+}
+
+impl CoverRow for PatchGame {
+    const PAGE: &'static str = "patch";
+    fn id(&self) -> &str {
+        self.id.as_str()
+    }
+    fn cover(&self) -> (slint::Image, slint::Color) {
+        (self.cover.clone(), self.tint)
+    }
+    fn set_cover(&mut self, image: slint::Image, tint: slint::Color) {
+        self.cover = image;
+        self.tint = tint;
+    }
+    fn model(window: &ManagerWindow) -> ModelRc<Self> {
+        window.global::<Patch>().get_games()
+    }
+    fn view(_: &ManagerWindow) -> SharedString {
+        "patch".into()
+    }
+    fn selected(window: &ManagerWindow) -> SharedString {
+        window.global::<Patch>().get_game().id
+    }
+    fn show_selected(window: &ManagerWindow, image: slint::Image, _: slint::Color) {
+        window.global::<Patch>().set_cover(image);
+    }
+}
+
 /// Owns the UI-only images and one joined decoder. Model downcasting lets the
 /// event-loop completion reach this owner without sending Rc or Image across threads.
-pub(crate) struct CoverModel {
-    rows: VecModel<GameCard>,
+pub(crate) struct CoverModel<T: CoverRow> {
+    rows: VecModel<T>,
     locators: RefCell<Vec<String>>,
     indices: RefCell<HashMap<String, usize>>,
     demand: RefCell<Demand>,
@@ -155,7 +223,7 @@ pub(crate) struct CoverModel {
     worker: Option<JoinHandle<()>>,
 }
 
-impl CoverModel {
+impl<T: CoverRow> CoverModel<T> {
     pub(crate) fn new(window: slint::Weak<ManagerWindow>) -> Result<Self, slint::PlatformError> {
         let shared = Arc::new(Shared {
             queue: Mutex::new(Queue::default()),
@@ -182,8 +250,8 @@ impl CoverModel {
                 let weak = window.clone();
                 if slint::invoke_from_event_loop(move || {
                     if let Some(window) = weak.upgrade() {
-                        let model = window.global::<Library>().get_games();
-                        if let Some(covers) = model.as_any().downcast_ref::<CoverModel>() {
+                        let model = T::model(&window);
+                        if let Some(covers) = model.as_any().downcast_ref::<CoverModel<T>>() {
                             covers.complete(request, decoded, &window);
                         }
                     }
@@ -203,12 +271,12 @@ impl CoverModel {
         })
     }
 
-    pub(crate) fn replace(&self, cards: Vec<(GameCard, String)>, window: &ManagerWindow) {
+    pub(crate) fn replace(&self, cards: Vec<(T, String)>, window: &ManagerWindow) {
         self.reset();
         *self.indices.borrow_mut() = cards
             .iter()
             .enumerate()
-            .map(|(row, (card, _))| (card.id.to_string(), row))
+            .map(|(row, (card, _))| (card.id().to_owned(), row))
             .collect();
         let (cards, locators): (Vec<_>, Vec<_>) = cards.into_iter().unzip();
         *self.locators.borrow_mut() = locators;
@@ -223,11 +291,14 @@ impl CoverModel {
         self.update_demand(window);
     }
 
+    fn active(window: &ManagerWindow) -> bool {
+        window.global::<Library>().get_cover_loading()
+            && window.global::<App>().get_page() == T::PAGE
+            && !window.global::<Session>().get_active()
+    }
+
     pub(crate) fn refresh(&self, window: &ManagerWindow) {
-        if !window.global::<Library>().get_cover_loading()
-            || window.global::<Session>().get_active()
-            || window.global::<App>().get_page() != "library"
-        {
+        if !Self::active(window) {
             self.update_demand(window);
             return;
         }
@@ -266,18 +337,14 @@ impl CoverModel {
     }
 
     fn update_demand(&self, window: &ManagerWindow) {
-        let enabled = window.global::<Library>().get_cover_loading()
-            && window.global::<App>().get_page() == "library"
-            && !window.global::<Session>().get_active();
         let mut desired = BTreeSet::new();
-        if enabled {
+        if Self::active(window) {
             let demand = self.demand.borrow();
-            let view_mode = window.global::<App>().get_appearance().view_mode;
-            if let Some(visible) = demand.visible.get(view_mode.as_str()) {
+            if let Some(visible) = demand.visible.get(T::view(window).as_str()) {
                 let indices = self.indices.borrow();
                 desired.extend(visible.values().filter_map(|id| indices.get(id).copied()));
             }
-            let selected = window.global::<Library>().get_selected_id();
+            let selected = T::selected(window);
             if !selected.is_empty() {
                 if let Some(row) = self.indices.borrow().get(selected.as_str()) {
                     desired.insert(*row);
@@ -304,8 +371,7 @@ impl CoverModel {
         };
         for row in removed {
             if let Some(mut card) = self.rows.row_data(row) {
-                card.cover = slint::Image::default();
-                card.tint = slint::Color::default();
+                card.set_cover(slint::Image::default(), slint::Color::default());
                 self.rows.set_row_data(row, card);
             }
         }
@@ -338,7 +404,7 @@ impl CoverModel {
             self.shared.push(Request {
                 revision: demand.revision,
                 row,
-                case_id: card.id.to_string(),
+                case_id: card.id().to_owned(),
                 locator,
                 previous,
             });
@@ -361,7 +427,7 @@ impl CoverModel {
                 self.locators
                     .borrow()
                     .get(request.row)
-                    .map(|locator| (card.id.as_str(), locator.as_str())),
+                    .map(|locator| (card.id(), locator.as_str())),
             );
             if !accepted {
                 drop(demand);
@@ -416,8 +482,7 @@ impl CoverModel {
                 }
             }
         };
-        card.cover = image;
-        card.tint = tint;
+        card.set_cover(image, tint);
         self.rows.set_row_data(request.row, card);
         self.update_inspector(window);
         self.pump();
@@ -425,23 +490,23 @@ impl CoverModel {
 
     pub(crate) fn cover_of(&self, id: &str) -> Option<(slint::Image, slint::Color)> {
         let row = *self.indices.borrow().get(id)?;
-        self.rows.row_data(row).map(|card| (card.cover, card.tint))
+        self.rows.row_data(row).map(|card| card.cover())
     }
 
     fn update_inspector(&self, window: &ManagerWindow) {
-        let selected = window.global::<Library>().get_selected_id();
-        let (cover, tint) = self.cover_of(selected.as_str()).unwrap_or_default();
-        window.global::<Selection>().set_cover(cover);
-        window.global::<Selection>().set_tint(tint);
+        let (cover, tint) = self
+            .cover_of(T::selected(window).as_str())
+            .unwrap_or_default();
+        T::show_selected(window, cover, tint);
     }
 }
 
-impl Model for CoverModel {
-    type Data = GameCard;
+impl<T: CoverRow> Model for CoverModel<T> {
+    type Data = T;
     fn row_count(&self) -> usize {
         self.rows.row_count()
     }
-    fn row_data(&self, row: usize) -> Option<GameCard> {
+    fn row_data(&self, row: usize) -> Option<T> {
         self.rows.row_data(row)
     }
     fn model_tracker(&self) -> &dyn ModelTracker {
@@ -452,7 +517,7 @@ impl Model for CoverModel {
     }
 }
 
-impl Drop for CoverModel {
+impl<T: CoverRow> Drop for CoverModel<T> {
     fn drop(&mut self) {
         self.shared.revision.fetch_add(1, Ordering::AcqRel);
         {

@@ -11,7 +11,7 @@ use std::{
 
 pub(super) use astra_emu_manager_ui_slint::{
     describe_error, report_error, App, Cores, Dialogs, Filters, GameSettings, Library, Logs,
-    ManagerViewModel, Network, Notices, Onboarding, Selection, Session, Settings,
+    ManagerViewModel, Network, Notices, Onboarding, Patch, Selection, Session, Settings,
     SlintManagerAdapter,
 };
 use slint::ComponentHandle;
@@ -182,7 +182,10 @@ pub trait ManagerController: 'static {
     fn save_bangumi_token(&mut self, token: &str) -> Result<ManagerViewModel, String>;
     fn clear_bangumi_token(&mut self) -> Result<ManagerViewModel, String>;
     fn add_game_directory(&mut self, path: &std::path::Path) -> Result<ManagerViewModel, String>;
-    /// Patch recipe id from the metadata catalog.
+    fn search_patch_games(&mut self, query: &str) -> Result<ManagerViewModel, String>;
+    /// Source game of the patch page; another game starts the flow over.
+    fn select_patch_game(&mut self, game_id: &str) -> Result<ManagerViewModel, String>;
+    /// Catalog recipe id that applies to the patch game.
     fn select_patch_recipe(&mut self, id: &str) -> Result<ManagerViewModel, String>;
     fn set_patch_script(&mut self, path: &std::path::Path) -> Result<ManagerViewModel, String>;
     /// `kind` is `patch` or `output`.
@@ -191,7 +194,7 @@ pub trait ManagerController: 'static {
         kind: &str,
         path: &std::path::Path,
     ) -> Result<ManagerViewModel, String>;
-    /// Convert the selected game with the chosen script and directories.
+    /// Convert the patch game with the chosen script and directories.
     fn start_patch(&mut self) -> Result<ManagerViewModel, String>;
     fn cancel_file_patch(&mut self) -> Result<ManagerViewModel, String>;
     /// Select the game imported from the finished conversion.
