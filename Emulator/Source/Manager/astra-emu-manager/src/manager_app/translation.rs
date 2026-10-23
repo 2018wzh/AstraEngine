@@ -76,7 +76,7 @@ impl AstraEmuManagerController {
         form: &TranslationFormViewModel,
         secret: &str,
     ) -> Result<ManagerViewModel, String> {
-        if self.active.is_some() {
+        if self.session_running() {
             return Err("ASTRA_EMU_TRANSLATION_CLOSE_GAME_BEFORE_CONFIGURATION".into());
         }
         self.connection_test.take();

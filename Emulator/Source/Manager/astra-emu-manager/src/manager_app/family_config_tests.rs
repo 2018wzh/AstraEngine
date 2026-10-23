@@ -12,7 +12,7 @@ fn configuration_candidate() -> FamilyProbeCandidate {
         report: astra_emu_manager_core::FamilyProbeReport {
             plugin_id: "config-test-plugin".into(),
             family_id: "config-test-family".into(),
-            game_id: "game".into(),
+            game_id: "fixture-game".into(),
             format: "config.test".into(),
             confidence_permyriad: 10_000,
         },
@@ -56,13 +56,15 @@ fn configuration_controller(root: &std::path::Path) -> AstraEmuManagerController
         );
         std::thread::yield_now();
     }
+    let location = root.join("game");
+    std::fs::create_dir_all(&location).unwrap();
     controller
         .library
         .add_game(&GameRecord {
             game_id: "game".into(),
             title: "Configuration test".into(),
             user_title: None,
-            location: "fixtures/config".into(),
+            location: location.to_str().unwrap().into(),
             family_id: Some("config-test-family".into()),
             content_fingerprint: None,
             added_at_unix_ms: 1,
@@ -501,4 +503,148 @@ fn recommended_configuration_with_unknown_field_restores_overrides() {
         "ASTRA_EMU_PRESET_INVALID"
     );
     assert_eq!(overrides(&controller, "game"), before);
+}
+
+fn launch_fixture(controller: &mut AstraEmuManagerController) -> crossbeam_channel::Receiver<()> {
+    let (wake, woken) = crossbeam_channel::unbounded();
+    controller.set_host_wake(std::sync::Arc::new(move || {
+        let _ = wake.send(());
+    }));
+    controller
+        .set_window_state(WindowState {
+            width: 1280,
+            height: 720,
+            scale_factor: 1.0,
+            focused: true,
+            visible: true,
+            suspended: false,
+        })
+        .unwrap();
+    controller.launch("game").unwrap();
+    woken
+}
+
+fn pump_until(
+    controller: &mut AstraEmuManagerController,
+    woken: &crossbeam_channel::Receiver<()>,
+    done: impl Fn(&AstraEmuManagerController) -> bool,
+) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !done(controller) {
+        assert!(Instant::now() < deadline, "session state did not settle");
+        if woken.recv_timeout(Duration::from_millis(8)).is_ok() {
+            controller.poll_platform().unwrap();
+        }
+        if controller.runtime_deadline().is_some() {
+            controller.advance_runtime().unwrap();
+        }
+    }
+}
+
+fn assert_configurable(controller: &mut AstraEmuManagerController, south: &str) {
+    controller
+        .set_game_config("game", "launch_mode", "title")
+        .unwrap();
+    controller.reset_game_config("game", "launch_mode").unwrap();
+    controller
+        .set_game_config("game", "launch_mode", "title")
+        .unwrap();
+    controller.set_game_emulator("game", PLUGIN).unwrap();
+    controller
+        .set_render_preference("game", Some(astra_emu_manager_core::RenderPreference::Adaptive))
+        .unwrap();
+    controller.set_gamepad_binding("south", south).unwrap();
+    controller.select_case("game").unwrap();
+    assert_eq!(overrides(controller, "game").len(), 1);
+    assert_eq!(
+        controller.library.game_settings("game").unwrap().unwrap().render,
+        Some(astra_emu_manager_core::RenderPreference::Adaptive)
+    );
+    assert_eq!(controller.input_mapping().gamepad[&GamepadInput::South], south);
+}
+
+enum Leave {
+    Menu,
+    Window,
+    Opening,
+}
+
+fn configuration_follows_leaving(leave: Leave) {
+    let root = tempfile::tempdir().unwrap();
+    let mut controller = configuration_controller(root.path());
+    controller.set_game_input_override("game", true).unwrap();
+    controller
+        .set_game_gamepad_binding("game", "south", "enter")
+        .unwrap();
+    let woken = launch_fixture(&mut controller);
+    if !matches!(leave, Leave::Opening) {
+        pump_until(&mut controller, &woken, |controller| {
+            controller.active.as_ref().is_some_and(|active| active.opened)
+        });
+        assert_eq!(
+            controller.input_mapping().gamepad[&GamepadInput::South],
+            "enter"
+        );
+        assert_eq!(
+            controller.set_game_config("game", "launch_mode", "title").unwrap_err(),
+            "ASTRA_EMU_FAMILY_SESSION_ALREADY_ACTIVE"
+        );
+    }
+    match leave {
+        Leave::Menu | Leave::Opening => {
+            controller.leave_game().unwrap();
+        }
+        Leave::Window => match astra_emu_manager::close_requested(&mut controller) {
+            astra_emu_manager::CloseDecision::KeepWindow(result) => {
+                result.unwrap();
+            }
+            astra_emu_manager::CloseDecision::HideWindow => panic!("running game must keep window"),
+        },
+    }
+    assert!(controller.active.as_ref().unwrap().closing.is_some());
+    assert_configurable(&mut controller, "space");
+    assert_eq!(
+        controller.launch("game").unwrap_err(),
+        "ASTRA_EMU_SESSION_CLOSING"
+    );
+    assert_eq!(
+        controller.prepare_library().unwrap_err(),
+        "ASTRA_EMU_SESSION_CLOSING"
+    );
+    pump_until(&mut controller, &woken, |controller| controller.active.is_none());
+    assert_configurable(&mut controller, "enter");
+}
+
+#[test]
+fn configuration_is_editable_while_a_game_left_from_the_menu_closes() {
+    configuration_follows_leaving(Leave::Menu);
+}
+
+#[test]
+fn configuration_is_editable_while_a_game_left_by_closing_the_window_closes() {
+    configuration_follows_leaving(Leave::Window);
+}
+
+#[test]
+fn configuration_is_editable_while_a_cancelled_opening_closes() {
+    configuration_follows_leaving(Leave::Opening);
+}
+
+#[test]
+fn a_close_coalesced_with_a_failed_play_record_still_ends_the_session() {
+    let root = tempfile::tempdir().unwrap();
+    let mut controller = configuration_controller(root.path());
+    controller.library.start_play_session("game", 1).unwrap();
+    let woken = launch_fixture(&mut controller);
+    let epoch = controller.active.as_ref().unwrap().epoch;
+    controller.leave_game().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !controller.registry.closed_unconsumed(epoch) {
+        assert!(Instant::now() < deadline, "owner did not close");
+        let _ = woken.recv_timeout(Duration::from_millis(8));
+    }
+    assert!(controller.advance_runtime().is_err());
+    assert!(controller.active.is_none());
+    assert!(controller.runtime_deadline().is_none());
+    controller.ensure_owner_idle().unwrap();
 }

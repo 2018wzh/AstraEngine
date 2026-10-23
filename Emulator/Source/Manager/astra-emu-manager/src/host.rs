@@ -395,6 +395,20 @@ fn fire_host_callback(slot: &HostCallbackSlot) {
     *slot.borrow_mut() = Some(callback);
 }
 
+fn release_session_mapping<C: ManagerController>(
+    controller: &std::cell::RefCell<C>,
+    gamepad: &std::cell::RefCell<GameInputPump>,
+    holds_session: &Cell<bool>,
+    window: &astra_emu_manager_ui_slint::ManagerWindow,
+) {
+    if holds_session.replace(false) {
+        let mapping = controller.borrow().input_mapping();
+        if let Err(error) = gamepad.borrow_mut().set_mapping(mapping) {
+            report_error(window, &error);
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum HostExit {
     Quit,
@@ -501,6 +515,8 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
     let runtime_adapter = std::rc::Rc::downgrade(&adapter);
     let schedule_timer = runtime_timer.clone();
     let runtime_pointer = pointer.clone();
+    let runtime_gamepad = gamepad.clone();
+    let runtime_pad_session = std::rc::Rc::new(Cell::new(false));
     *runtime_schedule.borrow_mut() = Some(Box::new(move || {
         let timer = schedule_timer.clone();
         let slot = runtime_schedule_slot.clone();
@@ -508,8 +524,16 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
         let controller = runtime_controller.clone();
         let adapter = runtime_adapter.clone();
         let pointer = runtime_pointer.clone();
+        let gamepad = runtime_gamepad.clone();
+        let pad_session = runtime_pad_session.clone();
+        if controller.borrow().is_game_active() {
+            pad_session.set(true);
+        }
         let Some(deadline) = controller.borrow().runtime_deadline() else {
             timer.stop();
+            if let Some(window) = weak.upgrade() {
+                release_session_mapping(&controller, &gamepad, &pad_session, &window);
+            }
             return;
         };
         let delay = deadline.saturating_duration_since(Instant::now());
@@ -524,7 +548,11 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                     }
                 }
                 let session = window.global::<Session>();
-                session.set_active(controller.borrow().is_game_active());
+                let running = controller.borrow().is_game_active();
+                session.set_active(running);
+                if !running {
+                    release_session_mapping(&controller, &gamepad, &pad_session, &window);
+                }
                 let title =
                     slint::SharedString::from(controller.borrow().game_title().unwrap_or(""));
                 if session.get_title() != title {

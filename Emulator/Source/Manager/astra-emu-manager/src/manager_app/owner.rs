@@ -373,6 +373,12 @@ impl FamilyOwner {
         })
     }
 
+    #[cfg(test)]
+    pub(super) fn closed_unconsumed(&self, epoch: u64) -> bool {
+        let shared = self.updates.lock();
+        shared.epoch == epoch && shared.closed && shared.dirty
+    }
+
     pub(super) fn take_modal_update(
         &self,
     ) -> Option<astra_emu_manager::modal_service::ModalUiUpdate> {

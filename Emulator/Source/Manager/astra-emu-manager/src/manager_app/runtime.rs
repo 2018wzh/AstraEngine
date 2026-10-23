@@ -1,6 +1,20 @@
 use super::*;
 
 impl AstraEmuManagerController {
+    pub(super) fn session_running(&self) -> bool {
+        self.active
+            .as_ref()
+            .is_some_and(|active| active.closing.is_none())
+    }
+
+    pub(super) fn ensure_owner_idle(&self) -> Result<(), String> {
+        match &self.active {
+            Some(active) if active.closing.is_some() => Err("ASTRA_EMU_SESSION_CLOSING".into()),
+            Some(_) => Err("ASTRA_EMU_FAMILY_SESSION_ALREADY_ACTIVE".into()),
+            None => Ok(()),
+        }
+    }
+
     pub(super) fn close_active(&mut self, reason: PlaySessionEndReason) -> Result<(), String> {
         if let Some(active) = self.active.as_mut() {
             if active.closing.is_none() {
@@ -50,6 +64,7 @@ impl AstraEmuManagerController {
             return Ok(false);
         };
         active.failure = update.failure;
+        let mut start_error = None;
         if update.opened && !active.opened {
             active.opened = true;
             match self
@@ -57,12 +72,9 @@ impl AstraEmuManagerController {
                 .start_play_session(&active.game_id, unix_time_ms()?)
             {
                 Ok(id) => self.active_play_session = Some(id),
-                Err(error) => {
-                    self.close_active(PlaySessionEndReason::Crash)?;
-                    return Err(error.to_string());
-                }
+                Err(error) => start_error = Some(error.to_string()),
             }
-            if let Some(surface) = update.surface {
+            if let (None, Some(surface)) = (&start_error, update.surface) {
                 let game_id = active.game_id.clone();
                 if let Err(error) = self.record_last_surface(&game_id, surface) {
                     self.diagnostic = error;
@@ -70,24 +82,32 @@ impl AstraEmuManagerController {
                 }
             }
         }
-        if update.closed {
-            let active = self.active.take().expect("active view checked above");
-            self.pending_events.clear();
-            self.mailbox.clear(active.epoch)?;
-            let play_error = self
-                .finish_play_session(active.closing.unwrap_or(if update.error.is_some() {
-                    PlaySessionEndReason::Crash
-                } else {
-                    PlaySessionEndReason::Leave
-                }))
-                .err();
-            match (update.error, play_error) {
-                (Some(first), Some(second)) => return Err(format!("{first}; {second}")),
-                (Some(error), None) | (None, Some(error)) => return Err(error),
-                (None, None) => {}
+        if !update.closed {
+            if let Some(error) = start_error {
+                self.close_active(PlaySessionEndReason::Crash)?;
+                return Err(error);
             }
+            return Ok(true);
         }
-        Ok(true)
+        let active = self.active.take().expect("active view checked above");
+        self.pending_events.clear();
+        let clear_error = self.mailbox.clear(active.epoch).err();
+        let play_error = self
+            .finish_play_session(active.closing.unwrap_or(if update.error.is_some() {
+                PlaySessionEndReason::Crash
+            } else {
+                PlaySessionEndReason::Leave
+            }))
+            .err();
+        let errors: Vec<_> = [start_error, update.error, clear_error, play_error]
+            .into_iter()
+            .flatten()
+            .collect();
+        if errors.is_empty() {
+            Ok(true)
+        } else {
+            Err(errors.join("; "))
+        }
     }
 
     pub(super) fn finish_play_session(
