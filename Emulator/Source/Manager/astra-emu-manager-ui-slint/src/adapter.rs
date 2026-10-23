@@ -8,14 +8,16 @@ use crate::{
     CoreInfo, CoreViewModel, Cores, EngineAction, EngineActionViewModel, Excluded,
     ExcludedViewModel, Filters, GameCard, GameCardViewModel, GameSettings, GamepadBinding,
     GamepadBindingViewModel, Library, ManagerViewModel, ManagerWindow, MatchReview, MatchViewModel,
-    Network, Notices, Onboarding, PatchState, PatchViewModel, PlaySession, PlaySessionViewModel,
-    Recipe, RecipeViewModel, RenderState, RenderViewModel, SelectedGame, Selection, Session,
-    Settings, TranslationForm, TranslationFormViewModel,
+    Network, Notices, Onboarding, Patch, PatchGame, PatchGameViewModel, PatchState,
+    PatchStateViewModel, PlaySession, PlaySessionViewModel, Recipe, RecipeViewModel, RenderState,
+    RenderViewModel, SelectedGame, Selection, Session, Settings, TranslationForm,
+    TranslationFormViewModel,
 };
 
 pub struct SlintManagerAdapter {
     window: ManagerWindow,
-    games: Rc<covers::CoverModel>,
+    games: Rc<covers::CoverModel<GameCard>>,
+    patch_games: Rc<covers::CoverModel<PatchGame>>,
     notices: Rc<notices::NoticeModel>,
     emulator_choices: ListModel<ChoiceViewModel, Choice>,
     releases: ListModel<ChoiceViewModel, Choice>,
@@ -38,6 +40,7 @@ pub struct SlintManagerAdapter {
     actions: ListModel<EngineActionViewModel, EngineAction>,
     onboarding_roots: ListModel<String, SharedString>,
     cached_games: RefCell<Vec<GameCardViewModel>>,
+    cached_patch_games: RefCell<Vec<PatchGameViewModel>>,
     cached_game_fields: RefCell<Vec<ConfigFieldViewModel>>,
     cached_default_fields: RefCell<Vec<ConfigFieldViewModel>>,
     cached_filter_fields: RefCell<Vec<ConfigFieldViewModel>>,
@@ -52,6 +55,7 @@ impl SlintManagerAdapter {
         let window = ManagerWindow::new()?;
         let adapter = Self {
             games: Rc::new(covers::CoverModel::new(window.as_weak())?),
+            patch_games: Rc::new(covers::CoverModel::new(window.as_weak())?),
             notices: Rc::new(notices::NoticeModel::new()),
             emulator_choices: ListModel::new(choice),
             releases: ListModel::new(choice),
@@ -74,6 +78,7 @@ impl SlintManagerAdapter {
             actions: ListModel::new(engine_action),
             onboarding_roots: ListModel::strings(),
             cached_games: RefCell::default(),
+            cached_patch_games: RefCell::default(),
             cached_game_fields: RefCell::default(),
             cached_default_fields: RefCell::default(),
             cached_filter_fields: RefCell::default(),
@@ -108,7 +113,10 @@ impl SlintManagerAdapter {
         game_settings.set_render_options(self.render_options.model());
         game_settings.set_fields(ModelRc::from(self.game_fields.clone()));
         game_settings.set_bindings(self.game_bindings.model());
-        game_settings.set_recipes(self.recipes.model());
+
+        let patch = window.global::<Patch>();
+        patch.set_games(ModelRc::from(self.patch_games.clone()));
+        patch.set_recipes(self.recipes.model());
 
         let cores = window.global::<Cores>();
         cores.set_items(self.cores.model());
@@ -137,8 +145,25 @@ impl SlintManagerAdapter {
             .on_cover_demand(move |row, case_id, needed, view| {
                 if let Some(window) = cover_window.upgrade() {
                     let games = window.global::<Library>().get_games();
-                    if let Some(covers) = games.as_any().downcast_ref::<covers::CoverModel>() {
+                    if let Some(covers) = games
+                        .as_any()
+                        .downcast_ref::<covers::CoverModel<GameCard>>()
+                    {
                         covers.demand(row, case_id.as_str(), needed, view.as_str(), &window);
+                    }
+                }
+            });
+        let patch_window = self.window.as_weak();
+        self.window
+            .global::<Patch>()
+            .on_cover_demand(move |row, game_id, needed| {
+                if let Some(window) = patch_window.upgrade() {
+                    let games = window.global::<Patch>().get_games();
+                    if let Some(covers) = games
+                        .as_any()
+                        .downcast_ref::<covers::CoverModel<PatchGame>>()
+                    {
+                        covers.demand(row, game_id.as_str(), needed, "patch", &window);
                     }
                 }
             });
@@ -172,6 +197,7 @@ impl SlintManagerAdapter {
         self.apply_library(model);
         self.apply_selection(model);
         self.apply_game_settings(model);
+        self.apply_patch(model);
         self.apply_cores(model);
         self.apply_notices(model);
         self.apply_settings(model);
@@ -287,8 +313,28 @@ impl SlintManagerAdapter {
         settings.set_recommended_summary(view.recommended_summary.as_str().into());
         settings.set_input_override(view.input_override);
         self.game_bindings.update(&view.bindings);
+    }
+
+    fn apply_patch(&self, model: &ManagerViewModel) {
+        let patch = self.window.global::<Patch>();
+        let view = &model.patch;
+        patch.set_query(view.query.as_str().into());
+        patch.set_game(patch_game(&view.game));
+        if *self.cached_patch_games.borrow() != view.games {
+            let rows = view
+                .games
+                .iter()
+                .map(|game| (patch_game(game), game.cover_uri.clone()))
+                .collect::<Vec<_>>();
+            self.patch_games.replace(rows, &self.window);
+            view.games
+                .clone_into(&mut self.cached_patch_games.borrow_mut());
+        } else {
+            self.patch_games.refresh(&self.window);
+        }
         self.recipes.update(&view.recipes);
-        settings.set_patch(patch_state(&view.patch));
+        patch.set_hint(view.hint.as_str().into());
+        patch.set_state(patch_state(&view.state));
     }
 
     fn apply_cores(&self, model: &ManagerViewModel) {
@@ -460,7 +506,18 @@ fn recipe(value: &RecipeViewModel) -> Recipe {
     }
 }
 
-fn patch_state(value: &PatchViewModel) -> PatchState {
+fn patch_game(value: &PatchGameViewModel) -> PatchGame {
+    PatchGame {
+        id: value.id.as_str().into(),
+        title: value.title.as_str().into(),
+        subtitle: value.subtitle.as_str().into(),
+        linked: value.linked,
+        cover: slint::Image::default(),
+        tint: slint::Color::default(),
+    }
+}
+
+fn patch_state(value: &PatchStateViewModel) -> PatchState {
     PatchState {
         step: value.step,
         running: value.running,

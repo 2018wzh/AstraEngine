@@ -3,14 +3,15 @@ use astra_emu_manager_ui_slint::{
     describe_error, AppViewModel, BangumiViewModel, ChoiceViewModel, CoresViewModel,
     EngineActionViewModel, ExcludedViewModel, FiltersViewModel, GameCardViewModel,
     GameSettingsViewModel, LibraryViewModel, MatchViewModel, NoticeViewModel, NoticesViewModel,
-    OnboardingViewModel, PlaySessionViewModel, SelectedGameViewModel, SelectionViewModel,
-    SessionViewModel, SettingsViewModel,
+    OnboardingViewModel, PatchGameViewModel, PatchViewModel, PlaySessionViewModel,
+    SelectedGameViewModel, SelectionViewModel, SessionViewModel, SettingsViewModel,
 };
 
 impl AstraEmuManagerController {
     pub(super) fn model(&self) -> Result<ManagerViewModel, String> {
         let now_ms = unix_time_ms()?;
         let query = self.search_query.trim().to_ascii_lowercase();
+        let patch_query = self.patch_query.trim().to_ascii_lowercase();
         let astra_emu_manager_core::LibrarySnapshot {
             games,
             play_stats,
@@ -23,6 +24,12 @@ impl AstraEmuManagerController {
         let mut selected = None;
         let mut metadata = None;
         let mut rows = Vec::new();
+        let mut patch_games = Vec::new();
+        let mut patch = PatchViewModel {
+            query: self.patch_query.clone(),
+            state: self.patch_state_view(),
+            ..PatchViewModel::default()
+        };
         for mut game in games {
             let linked = identities
                 .get(&game.game_id)
@@ -39,15 +46,6 @@ impl AstraEmuManagerController {
             } else if let Some(record) = record {
                 game.title = record.title;
             }
-            if !query.is_empty()
-                && !game.display_title().to_ascii_lowercase().contains(&query)
-                && !game.game_id.to_ascii_lowercase().contains(&query)
-            {
-                continue;
-            }
-            let stats = play_stats
-                .get(&game.game_id)
-                .ok_or("ASTRA_EMU_LIBRARY_SNAPSHOT_STATS")?;
             let cover_uri = if has_metadata {
                 self.data_dir
                     .join("covers")
@@ -58,6 +56,35 @@ impl AstraEmuManagerController {
             } else {
                 String::new()
             };
+            let matches = |query: &str| {
+                query.is_empty()
+                    || game.display_title().to_ascii_lowercase().contains(query)
+                    || game.game_id.to_ascii_lowercase().contains(query)
+            };
+            let patch_selected = self.patch_game_id.as_deref() == Some(game.game_id.as_str());
+            let patch_listed = matches(&patch_query);
+            if patch_selected || patch_listed {
+                let row = PatchGameViewModel {
+                    id: game.game_id.clone(),
+                    title: game.display_title().into(),
+                    subtitle: self.engine_and_emulator(&game),
+                    cover_uri: cover_uri.clone(),
+                    linked: Self::vndb_id(linked).is_some(),
+                };
+                if patch_selected {
+                    (patch.recipes, patch.hint) = self.patch_choices(&game.game_id, linked)?;
+                    patch.game = row.clone();
+                }
+                if patch_listed {
+                    patch_games.push(row);
+                }
+            }
+            if !matches(&query) {
+                continue;
+            }
+            let stats = play_stats
+                .get(&game.game_id)
+                .ok_or("ASTRA_EMU_LIBRARY_SNAPSHOT_STATS")?;
             let compatibility_status = self.compatibility_status(&game.game_id, linked);
             if self.compatibility_filter != "all"
                 && (self.compatibility_filter == "unknown" && !compatibility_status.is_empty()
@@ -140,11 +167,15 @@ impl AstraEmuManagerController {
         };
         let game_settings = match &selected {
             Some(game) => self.game_settings_view(game)?,
-            None => GameSettingsViewModel {
-                patch: self.patch_view(),
-                ..GameSettingsViewModel::default()
-            },
+            None => GameSettingsViewModel::default(),
         };
+        patch_games.sort_by(|left, right| {
+            left.title
+                .to_ascii_lowercase()
+                .cmp(&right.title.to_ascii_lowercase())
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        patch.games = patch_games;
         let (prepare_state, prepare_label, prepare_progress, can_cancel_prepare) =
             self.prepare_view();
         let roots: Vec<String> = self
@@ -178,6 +209,7 @@ impl AstraEmuManagerController {
             },
             selection,
             game_settings,
+            patch,
             cores: self.cores_model()?,
             notices: NoticesViewModel {
                 items: self.notice_views(),
@@ -394,8 +426,6 @@ impl AstraEmuManagerController {
                 .as_ref()
                 .map(view_fields::binding_views)
                 .unwrap_or_default(),
-            recipes: self.recipe_views(Some(game_id))?,
-            patch: self.patch_view(),
         })
     }
 

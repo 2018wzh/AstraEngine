@@ -173,10 +173,51 @@ fn recommended_patch_is_marked_in_the_recipe_list() {
     app.metadata_catalog = Some(catalog_with(root.path(), &[], &preset));
     linked_game(&mut app, "game", Some(MUSICA));
     assert_eq!(app.recommended_preset("game").unwrap().unwrap().summary, "推荐");
-    let recipes = app.recipe_views(Some("game")).unwrap();
+    let recipes = app.patch_recipes("game", "v17").unwrap();
     assert_eq!(recipes.len(), 1);
     assert!(recipes[0].recommended);
-    assert!(!app.recipe_views(None).unwrap()[0].recommended);
+}
+
+#[test]
+fn patch_recipes_match_the_vndb_work_and_an_emulator_of_the_game() {
+    let root = tempfile::tempdir().unwrap();
+    let mut app = controller(root.path());
+    let directory = root.path().join("catalog");
+    let mut tree = files(compatibility_json(""), "");
+    tree.retain(|(path, _)| !path.starts_with("patches/"));
+    tree.push((
+        "patches/catalog.json".into(),
+        format!(
+            r#"[{{"id":"musica","title":"Musica","script":"a.luau","vn_ids":["v17","v18"],"emulators":["{MUSICA}"]}},
+            {{"id":"sena","title":"Sena","script":"a.luau","vn_ids":["v17"],"emulators":["{SENA}"]}},
+            {{"id":"other","title":"Other","script":"a.luau","vn_ids":["v99"],"emulators":["{MUSICA}","{SENA}"]}}]"#
+        )
+        .into_bytes(),
+    ));
+    tree.push(("patches/a.luau".into(), b"return {}".to_vec()));
+    crate::metadata_cache::tests::write_tree(&directory, 1, &tree);
+    app.metadata_catalog = Some(MetadataCatalog::load(&directory, MetadataSource::Bundled).unwrap());
+    linked_game(&mut app, "game", Some(MUSICA));
+    let ids = |app: &AstraEmuManagerController| {
+        app.patch_recipes("game", "v17")
+            .unwrap()
+            .into_iter()
+            .map(|recipe| recipe.id)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(ids(&app), ["musica"]);
+    app.candidates.remove("game");
+    app.probe_choices
+        .insert("game".into(), vec![candidate(MUSICA), candidate(SENA)]);
+    assert_eq!(ids(&app), ["musica", "sena"]);
+    app.probe_choices.clear();
+    assert!(ids(&app).is_empty());
+    let (recipes, hint) = app.patch_choices("game", &identities(&app, "game")).unwrap();
+    assert!(recipes.is_empty());
+    assert_eq!(hint, file_patch::PATCH_NO_RECIPE_HINT);
+    let (recipes, hint) = app.patch_choices("game", &[]).unwrap();
+    assert!(recipes.is_empty());
+    assert_eq!(hint, file_patch::PATCH_VNDB_HINT);
 }
 
 #[test]

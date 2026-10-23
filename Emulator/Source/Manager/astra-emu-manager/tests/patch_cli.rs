@@ -242,9 +242,9 @@ fn omitted_patch_uses_source_directory() {
 
 fn write_catalog(root: &Path) -> Vec<Value> {
     let records = vec![
-        json!({"id":"invalid-syntax", "title":"Invalid syntax", "script":"invalid.luau"}),
-        json!({"id":"would-error", "title":"Erroring script", "script":"error.luau"}),
-        json!({"id":"not-installed", "title":"Missing script", "script":"missing.luau"}),
+        json!({"id":"invalid-syntax", "title":"Invalid syntax", "script":"invalid.luau", "vn_ids":["v17"], "emulators":["astra.emu.musica"]}),
+        json!({"id":"would-error", "title":"Erroring script", "script":"error.luau", "vn_ids":["v17", "v18"], "emulators":["rfvp"]}),
+        json!({"id":"not-installed", "title":"Missing script", "script":"missing.luau", "vn_ids":["v19"], "emulators":["rfvp", "astra.emu.musica"]}),
     ];
     fs::write(
         root.join("catalog.json"),
@@ -328,7 +328,7 @@ fn invalid_catalog_relative_paths_are_rejected_before_listing() {
         fs::write(
             root.path().join("catalog.json"),
             serde_json::to_vec(&json!([
-                {"id":"unsafe", "title":"Unsafe path", "script":script},
+                {"id":"unsafe", "title":"Unsafe path", "script":script, "vn_ids":["v17"], "emulators":["rfvp"]},
             ]))
             .unwrap(),
         )

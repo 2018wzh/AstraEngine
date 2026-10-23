@@ -5,13 +5,14 @@ import { Icons } from "./icons.slint";
 import {
     Appearance, Choice, App, Network, GameCard, Library, SelectedGame, CompatInfo, PlaySession,
     MatchReview, BangumiProgress, Selection, ConfigField, GamepadBinding, Recipe, PatchState,
-    RenderState, TranslationForm, Excluded, Settings, GameSettings, CoreInfo, Logs, Cores, Notice,
-    Notices, Dialogs, Filters, EngineAction, Session, Onboarding,
+    PatchGame, Patch, RenderState, TranslationForm, Excluded, Settings, GameSettings, CoreInfo, Logs,
+    Cores, Notice, Notices, Dialogs, Filters, EngineAction, Session, Onboarding,
 } from "./globals.slint";
 import { NoticeStack, SnackbarHost } from "./components/notices.slint";
 import { LogsOverlay, EngineModal, FatalOverlay } from "./components/dialogs.slint";
 import { LibraryPage } from "./pages/library.slint";
 import { GameSettingsPage } from "./pages/game-settings.slint";
+import { PatchPage } from "./pages/patch.slint";
 import { SettingsPage } from "./pages/settings.slint";
 import { OnboardingPage } from "./pages/onboarding.slint";
 import { GameView } from "./pages/game-view.slint";
@@ -20,8 +21,8 @@ export {
     MaterialWindowAdapter,
     Appearance, Choice, App, Network, GameCard, Library, SelectedGame, CompatInfo, PlaySession,
     MatchReview, BangumiProgress, Selection, ConfigField, GamepadBinding, Recipe, PatchState,
-    RenderState, TranslationForm, Excluded, Settings, GameSettings, CoreInfo, Logs, Cores, Notice,
-    Notices, Dialogs, Filters, EngineAction, Session, Onboarding,
+    PatchGame, Patch, RenderState, TranslationForm, Excluded, Settings, GameSettings, CoreInfo, Logs,
+    Cores, Notice, Notices, Dialogs, Filters, EngineAction, Session, Onboarding,
 }
 
 export component ManagerWindow inherits MaterialWindow {
@@ -63,7 +64,7 @@ export component ManagerWindow inherits MaterialWindow {
             Session.menu-open = false;
             Session.menu-page = "main";
         }
-        Library.cover-demand(-1, "", false, "");
+        root.covers-changed();
     }
     property <bool> watch-menu-open: Session.menu-open;
     changed watch-menu-open => { Session.pointer-state-changed(); }
@@ -82,19 +83,28 @@ export component ManagerWindow inherits MaterialWindow {
     property <float> watch-pointer-h: Session.pointer-height;
     changed watch-pointer-h => { Session.pointer-state-changed(); }
 
+    property <int> page-index: App.page == "patch" ? 1 : App.page == "settings" ? 2 : 0;
+
+    function covers-changed() {
+        Library.cover-demand(-1, "", false, "");
+        Patch.cover-demand(-1, "", false);
+    }
+
     property <string> watch-selected: Library.selected-id;
     changed watch-selected => { Library.cover-demand(-1, "", false, ""); }
+    property <string> watch-patch-game: Patch.game.id;
+    changed watch-patch-game => { Patch.cover-demand(-1, "", false); }
     property <string> watch-page: App.page;
     changed watch-page => {
-        rail.current-index = App.page == "settings" ? 1 : 0;
+        rail.current-index = root.page-index;
         Settings.cancel-capture();
         GameSettings.cancel-capture();
-        Library.cover-demand(-1, "", false, "");
+        root.covers-changed();
     }
     property <string> watch-view: App.appearance.view-mode;
     changed watch-view => { Library.cover-demand(-1, "", false, ""); }
     property <bool> watch-cover-loading: Library.cover-loading;
-    changed watch-cover-loading => { Library.cover-demand(-1, "", false, ""); }
+    changed watch-cover-loading => { root.covers-changed(); }
 
     rail := NavigationRail {
         x: root.usable-x;
@@ -103,13 +113,14 @@ export component ManagerWindow inherits MaterialWindow {
         height: root.usable-height;
         visible: root.show-rail;
         alignment: start;
-        current-index: App.page == "settings" ? 1 : 0;
+        current-index: root.page-index;
         items: [
             { icon: Icons.library-books, text: "游戏库" },
+            { icon: Icons.translate, text: "汉化补丁" },
             { icon: Icons.settings, text: "设置" },
         ];
         index-changed(index) => {
-            App.page = index == 1 ? "settings" : "library";
+            App.page = index == 1 ? "patch" : index == 2 ? "settings" : "library";
         }
     }
 
@@ -119,8 +130,11 @@ export component ManagerWindow inherits MaterialWindow {
         width: root.usable-width;
         height: root.bar-height;
         title: "游戏库";
-        trailing-buttons: [{ icon: Icons.settings, tooltip: "设置", enabled: true }];
-        trailing-button-clicked(index) => { App.page = "settings"; }
+        trailing-buttons: [
+            { icon: Icons.translate, tooltip: "汉化补丁", enabled: true },
+            { icon: Icons.settings, tooltip: "设置", enabled: true },
+        ];
+        trailing-button-clicked(index) => { App.page = index == 0 ? "patch" : "settings"; }
     }
 
     pages := Rectangle {
@@ -138,6 +152,13 @@ export component ManagerWindow inherits MaterialWindow {
             compact: root.compact;
         }
         if App.page == "game-settings" : GameSettingsPage {
+            x: 0px;
+            y: 0px;
+            width: pages.width;
+            height: pages.height;
+            compact: root.compact;
+        }
+        if App.page == "patch" : PatchPage {
             x: 0px;
             y: 0px;
             width: pages.width;

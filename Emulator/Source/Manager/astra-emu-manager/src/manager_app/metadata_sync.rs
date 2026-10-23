@@ -1,9 +1,9 @@
 //! AstraEMU-metadata synchronization and the per-game views derived from it:
-//! compatibility matching, recommended configuration and patch marking.
+//! compatibility matching and the recommended configuration (and patch).
 
 use super::*;
 use crate::metadata_cache::{MetadataCatalog, MetadataSource};
-use astra_emu_manager_ui_slint::{CompatViewModel, NetworkViewModel, RecipeViewModel};
+use astra_emu_manager_ui_slint::{CompatViewModel, NetworkViewModel};
 use astra_emu_metadata::{Preset, SyncOutcome};
 use serde::{Deserialize, Serialize};
 
@@ -37,7 +37,9 @@ pub(super) enum CompatibilityMatch<'a> {
 }
 
 impl AstraEmuManagerController {
-    fn vndb_id(identities: &[astra_emu_manager_core::ExternalIdentityRecord]) -> Option<&str> {
+    pub(super) fn vndb_id(
+        identities: &[astra_emu_manager_core::ExternalIdentityRecord],
+    ) -> Option<&str> {
         identities
             .iter()
             .find(|identity| identity.provider == MetadataProviderId::Vndb.as_str())
@@ -194,28 +196,6 @@ impl AstraEmuManagerController {
             .metadata_catalog
             .as_ref()
             .and_then(|catalog| catalog.presets.preset(&release_id, emulator)))
-    }
-
-    /// Patch recipes from the metadata cache, marking the preset's patch.
-    pub(super) fn recipe_views(&self, game_id: Option<&str>) -> Result<Vec<RecipeViewModel>, String> {
-        let Some(catalog) = &self.metadata_catalog else {
-            return Ok(Vec::new());
-        };
-        let recommended = match game_id {
-            Some(game_id) => self
-                .recommended_preset(game_id)?
-                .and_then(|preset| preset.patch.clone()),
-            None => None,
-        };
-        Ok(catalog
-            .recipes
-            .iter()
-            .map(|recipe| RecipeViewModel {
-                id: recipe.id.clone(),
-                title: recipe.title.clone(),
-                recommended: recommended.as_deref() == Some(recipe.id.as_str()),
-            })
-            .collect())
     }
 
     /// Write every preset entry as a game override. Any invalid entry restores

@@ -200,6 +200,38 @@ export struct PatchState {
     output-directory: string,
 }
 
+export struct PatchGame {
+    id: string,
+    title: string,
+    subtitle: string,
+    linked: bool,
+    cover: image,
+    tint: color,
+}
+
+export global Patch {
+    in-out property <[PatchGame]> games;
+    in-out property <string> query;
+    // Empty id when no game is selected.
+    in-out property <PatchGame> game;
+    in-out property <image> cover;
+    in-out property <[Recipe]> recipes;
+    in-out property <string> hint;
+    // Page navigation 1–4; `state` reports running/failed and completion (5).
+    in-out property <int> step: 1;
+    in-out property <PatchState> state;
+    callback search(string);
+    callback select-game(string);
+    callback select-recipe(string);
+    callback pick-script();
+    // "patch" | "output"
+    callback pick-directory(string);
+    callback start();
+    callback cancel();
+    callback open-output();
+    callback cover-demand(int, string, bool);
+}
+
 export struct RenderState {
     supported: bool,
     options: [Choice],
@@ -303,9 +335,6 @@ export global GameSettings {
     in-out property <string> capture-button;
     in-out property <string> capture-hint;
 
-    in-out property <[Recipe]> recipes;
-    in-out property <PatchState> patch;
-
     callback close();
     callback set-emulator(string);
     callback set-render(string, int, int);
@@ -314,13 +343,6 @@ export global GameSettings {
     callback pick-path(string);
     callback apply-recommended();
     callback set-input-override(bool);
-    callback patch-pick-script();
-    callback patch-select-recipe(string);
-    // "patch" | "output"
-    callback patch-pick-directory(string);
-    callback patch-start();
-    callback patch-cancel();
-    callback patch-open-output();
 
     public function begin-capture(button: string) {
         self.capture-button = button;

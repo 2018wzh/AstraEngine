@@ -73,6 +73,7 @@ fn controller(root: &Path) -> (AstraEmuManagerController, PathBuf, String) {
         .end_play_session(&play, 2000, PlaySessionEndReason::Leave)
         .unwrap();
     app.select_case(&id).unwrap();
+    app.select_patch_game(&id).unwrap();
     (app, source, id)
 }
 
@@ -180,7 +181,7 @@ fn running_patch_blocks_launch_scan_and_second_job_but_cancel_joins_and_allows_r
     app.cancel_file_patch().unwrap();
     settle(&mut app, |app| app.patch_job.is_none());
     assert!(!output.exists());
-    assert!(app.patch_view().can_start);
+    assert!(app.patch_state_view().can_start);
     recipe(&script, "", "{launch_mode=\"title\"}");
     app.start_file_patch(&script, Path::new(""), &output)
         .unwrap();

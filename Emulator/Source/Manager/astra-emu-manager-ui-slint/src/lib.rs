@@ -16,6 +16,7 @@ pub struct ManagerViewModel {
     pub library: LibraryViewModel,
     pub selection: SelectionViewModel,
     pub game_settings: GameSettingsViewModel,
+    pub patch: PatchViewModel,
     pub cores: CoresViewModel,
     pub notices: NoticesViewModel,
     pub settings: SettingsViewModel,
@@ -246,8 +247,9 @@ pub struct RecipeViewModel {
     pub recommended: bool,
 }
 
+/// Conversion job state; `step` is 0 before a run, 4 while running or failed, 5 once imported.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct PatchViewModel {
+pub struct PatchStateViewModel {
     pub step: i32,
     pub running: bool,
     pub phase: String,
@@ -259,6 +261,26 @@ pub struct PatchViewModel {
     pub script: String,
     pub patch_directory: String,
     pub output_directory: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PatchGameViewModel {
+    pub id: String,
+    pub title: String,
+    pub subtitle: String,
+    pub cover_uri: String,
+    pub linked: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PatchViewModel {
+    pub games: Vec<PatchGameViewModel>,
+    pub query: String,
+    /// Empty `id` when no game is selected.
+    pub game: PatchGameViewModel,
+    pub recipes: Vec<RecipeViewModel>,
+    pub hint: String,
+    pub state: PatchStateViewModel,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -273,8 +295,6 @@ pub struct GameSettingsViewModel {
     pub recommended_summary: String,
     pub input_override: bool,
     pub bindings: Vec<GamepadBindingViewModel>,
-    pub recipes: Vec<RecipeViewModel>,
-    pub patch: PatchViewModel,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]

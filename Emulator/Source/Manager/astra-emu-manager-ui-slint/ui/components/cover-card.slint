@@ -1,14 +1,23 @@
 import { MaterialPalette, MaterialText, MaterialTypography, Icon, IconButton, FilledIconButton, PopupMenu } from "@material";
-import { App, GameCard, Library, GameSettings } from "../globals.slint";
+import { App, GameCard, Library, GameSettings, Patch } from "../globals.slint";
 import { Icons } from "../icons.slint";
 import { Theme } from "../theme.slint";
 
-// Opens game settings at `section` for `id` (shared by the library and the detail panel).
+// Opens game settings at `section`, or the patch page, for `id` (shared by the library and the detail panel).
 export global GameNav {
     public function open-settings(id: string, section: string) {
         GameSettings.section = section;
         Library.open-game-settings(id);
         App.page = "game-settings";
+    }
+
+    // A running conversion keeps its game; the page then shows its progress.
+    public function open-patch(id: string) {
+        if !Patch.state.running {
+            Patch.select-game(id);
+            Patch.step = 2;
+        }
+        App.page = "patch";
     }
 }
 
@@ -29,7 +38,7 @@ export component GameMenu {
         root.game-id = id;
         root.ready = can-launch;
         root.menu-x = max(8px, min(px, root.bound-width - 208px));
-        root.menu-y = max(8px, min(py, root.bound-height - 248px));
+        root.menu-y = max(8px, min(py, root.bound-height - 304px));
         menu.show();
     }
 
@@ -39,6 +48,7 @@ export component GameMenu {
         items: [
             { icon: Icons.play-arrow, text: "开始游戏", enabled: root.ready },
             { icon: Icons.tune, text: "游戏设置", enabled: true },
+            { icon: Icons.translate, text: "汉化补丁", enabled: true },
             { icon: Icons.folder-open, text: "打开所在目录", enabled: true },
             { icon: Icons.delete, text: "从资料库移除", enabled: true },
         ];
@@ -49,8 +59,10 @@ export component GameMenu {
             } else if index == 1 {
                 GameNav.open-settings(root.game-id, "emulator");
             } else if index == 2 {
-                Library.open-folder(root.game-id);
+                GameNav.open-patch(root.game-id);
             } else if index == 3 {
+                Library.open-folder(root.game-id);
+            } else if index == 4 {
                 if Library.selected-id == root.game-id {
                     Library.detail-open = false;
                 }
@@ -218,8 +230,8 @@ export component GameInteraction {
     }
 }
 
-// Reports cover visibility for one row of the library model (see `CoverModel::demand`).
-component CoverDemand {
+// Reports cover visibility for one row of a cover model (see `CoverModel::demand`).
+export component CoverDemand {
     in property <string> cover-id;
     in property <bool> cover-needed;
     callback cover-demand(id: string, needed: bool);

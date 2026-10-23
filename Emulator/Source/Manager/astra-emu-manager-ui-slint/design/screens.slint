@@ -6,8 +6,8 @@
 // compile in preview mode, so `Platform.uses-mock-data` would stay false here.
 
 import {
-    ManagerWindow, App, Network, Library, Selection, GameSettings, Settings, Cores, Notices, Dialogs,
-    Filters, Session, Onboarding, GameCard, CoreInfo, ConfigField, EngineAction,
+    ManagerWindow, App, Network, Library, Selection, GameSettings, Patch, Settings, Cores, Notices,
+    Dialogs, Filters, Session, Onboarding, GameCard, CoreInfo, ConfigField, EngineAction, PatchGame,
 } from "../ui/main.slint";
 
 global Mock {
@@ -22,6 +22,15 @@ global Mock {
         { id: "g8", title: "灰色的果实", subtitle: "Ethornell / BGI · ethornell-rs", tint: #50a080, ready: true, compat: "perfect" },
         { id: "g9", title: "Rewrite", subtitle: "SiglusEngine · siglus-rs", tint: #40a0c0, ready: true, play-time: "26 小时", last-played: "2 周前", compat: "completable" },
         { id: "g10", title: "サクラノ詩 －櫻の森の上を舞う－", subtitle: "Musica · Astra Musica", tint: #d07090, ready: true, play-time: "54 小时", last-played: "1 个月前", compat: "perfect" },
+    ];
+
+    out property <[PatchGame]> patch-games: [
+        { id: "g1", title: "星之终途", subtitle: "FVP · RFVP", linked: true, cover: @image-url("cover.svg"), tint: #6a4cff },
+        { id: "g2", title: "樱花萌放", subtitle: "FVP · RFVP", linked: true, tint: #c06080 },
+        { id: "g3", title: "Summer Pockets", subtitle: "SiglusEngine", linked: false, tint: #3a8fd0 },
+        { id: "g4", title: "夏空的英仙座", subtitle: "Musica · Astra Musica", linked: true, tint: #d0a040 },
+        { id: "g5", title: "eden*", subtitle: "Musica · Astra Musica", linked: false, tint: #8090b0 },
+        { id: "g6", title: "千恋＊万花", subtitle: "KiriKiri · KiriKiri2", linked: true, tint: #e07060 },
     ];
 
     out property <[CoreInfo]> cores: [
@@ -104,7 +113,13 @@ global Mock {
         GameSettings.recommended-available = true;
         GameSettings.recommended-summary = "简体中文汉化版：GBK 脚本编码，叠加显示翻译。";
         GameSettings.fields = self.game-fields;
-        GameSettings.recipes = [{ id: "r1", title: "サクラノ詩 简体中文补丁 v1.2", recommended: true }, { id: "r2", title: "サクラノ詩 繁體中文補丁", recommended: false }];
+    }
+
+    public function patch(dark: bool) {
+        self.base(dark);
+        App.page = "patch";
+        Library.cover-loading = true;
+        Patch.games = self.patch-games;
     }
 
     public function settings(dark: bool, category: string) {
@@ -221,20 +236,25 @@ export component GameSettingsEmulator inherits ManagerWindow {
     init => { Mock.game-settings(false, "emulator"); }
 }
 
-export component GameSettingsPatch inherits ManagerWindow {
+// ---- Patch ----
+
+export component PatchSelectGame inherits ManagerWindow {
     init => {
-        Mock.game-settings(true, "patch");
-        GameSettings.patch = {
-            step: 4,
-            running: true,
-            phase: "正在转换 data02.paz…",
-            completed: 42,
-            total: 100,
-            output: "D:\\Games\\サクラノ詩-汉化",
-            can-start: true,
-            script: "r1",
-            output-directory: "D:\\Games\\サクラノ詩-汉化",
-        };
+        Mock.patch(false);
+        Patch.game = self.mock-game;
+        Patch.step = 1;
+    }
+    property <PatchGame> mock-game: { id: "g4", title: "夏空的英仙座", subtitle: "Musica · Astra Musica", linked: true };
+}
+
+export component PatchRecipes inherits ManagerWindow {
+    init => {
+        Mock.patch(true);
+        Patch.game = { id: "g4", title: "夏空的英仙座", subtitle: "Musica · Astra Musica", linked: true };
+        Patch.cover = @image-url("cover.svg");
+        Patch.step = 2;
+        Patch.recipes = [{ id: "musica-perseus-cn", title: "夏空的英仙座旧补丁离线转换", recommended: true }, { id: "musica-perseus-alt", title: "夏空的英仙座 繁體中文補丁", recommended: false }];
+        Patch.state = { script: "musica-perseus-cn", patch-directory: "D:\\Games\\夏空のペルセウス", can-start: true };
     }
 }
 

@@ -16,6 +16,24 @@ pub struct RecipeListing {
     pub id: String,
     pub title: String,
     pub script: PathBuf,
+    /// VNDB work ids (`v<digits>`) the recipe converts.
+    pub vn_ids: Vec<String>,
+    /// Emulator plugin ids that consume the converted output.
+    pub emulators: Vec<String>,
+}
+
+fn is_vn_id(value: &str) -> bool {
+    value.strip_prefix('v').is_some_and(|digits| {
+        (1..=12).contains(&digits.len()) && digits.bytes().all(|byte| byte.is_ascii_digit())
+    })
+}
+
+fn unique_nonempty(values: &[String], valid: impl Fn(&str) -> bool) -> bool {
+    let mut seen = std::collections::BTreeSet::new();
+    !values.is_empty()
+        && values
+            .iter()
+            .all(|value| valid(value) && seen.insert(value.as_str()))
 }
 
 /// Read catalog data only. Listing never opens, compiles, or executes a recipe.
@@ -64,6 +82,16 @@ pub fn list_recipes(scripts: &Path) -> Result<Vec<RecipeListing>, PatchError> {
             return Err(PatchError::new(
                 PatchErrorKind::InvalidRequest,
                 "invalid or duplicate catalog identity",
+            ));
+        }
+        if !unique_nonempty(&recipe.vn_ids, is_vn_id)
+            || !unique_nonempty(&recipe.emulators, |id| {
+                !id.trim().is_empty() && !id.contains('\0')
+            })
+        {
+            return Err(PatchError::new(
+                PatchErrorKind::InvalidRequest,
+                "catalog recipe needs unique VNDB work ids and emulator plugin ids",
             ));
         }
         relative(

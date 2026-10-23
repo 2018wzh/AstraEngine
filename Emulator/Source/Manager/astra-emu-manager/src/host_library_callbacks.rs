@@ -7,6 +7,7 @@ pub(super) fn install<C: ManagerController>(wiring: &Wiring<C>) {
     install_library(wiring, &window);
     install_selection(wiring, &window);
     install_game_settings(wiring, &window);
+    install_patch(wiring, &window);
     let w = wiring.clone();
     window.global::<Logs>().on_load(move |core| {
         let Some(window) = w.window.upgrade() else {
@@ -180,8 +181,19 @@ fn install_game_settings<C: ManagerController>(
             w.run_mapping(|c| c.set_game_input_override(game.as_str(), enabled));
         }
     });
+}
+
+fn install_patch<C: ManagerController>(
+    wiring: &Wiring<C>,
+    window: &astra_emu_manager_ui_slint::ManagerWindow,
+) {
+    let patch = window.global::<Patch>();
     let w = wiring.clone();
-    settings.on_patch_pick_script(move || {
+    patch.on_search(move |query| w.run(|c| c.search_patch_games(query.as_str())));
+    let w = wiring.clone();
+    patch.on_select_game(move |game_id| w.run(|c| c.select_patch_game(game_id.as_str())));
+    let w = wiring.clone();
+    patch.on_pick_script(move || {
         if let Some(path) = rfd::FileDialog::new()
             .set_title("选择可信的本地 Luau 补丁脚本")
             .add_filter("Luau 脚本", &["luau"])
@@ -191,9 +203,9 @@ fn install_game_settings<C: ManagerController>(
         }
     });
     let w = wiring.clone();
-    settings.on_patch_select_recipe(move |id| w.run(|c| c.select_patch_recipe(id.as_str())));
+    patch.on_select_recipe(move |id| w.run(|c| c.select_patch_recipe(id.as_str())));
     let w = wiring.clone();
-    settings.on_patch_pick_directory(move |kind| {
+    patch.on_pick_directory(move |kind| {
         let picked = if kind == "output" {
             // A folder picker only returns existing directories; the save dialog names
             // a new one, which the conversion creates.
@@ -211,11 +223,11 @@ fn install_game_settings<C: ManagerController>(
         }
     });
     let w = wiring.clone();
-    settings.on_patch_start(move || w.run(|c| c.start_patch()));
+    patch.on_start(move || w.run(|c| c.start_patch()));
     let w = wiring.clone();
-    settings.on_patch_cancel(move || w.run(|c| c.cancel_file_patch()));
+    patch.on_cancel(move || w.run(|c| c.cancel_file_patch()));
     let w = wiring.clone();
-    settings.on_patch_open_output(move || {
+    patch.on_open_output(move || {
         let result = w.controller.borrow_mut().open_patch_output();
         let opened = result.is_ok();
         w.show(result);
